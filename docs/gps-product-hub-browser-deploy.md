@@ -163,6 +163,8 @@ Laravel still needs normal runtime write permissions for:
 - `storage/`
 - `bootstrap/cache/`
 
+The repository includes `.gitkeep` placeholders for Laravel's required runtime directories, including `storage/framework/cache/data`, `storage/framework/sessions`, `storage/framework/views`, `storage/logs`, and `bootstrap/cache`, so browser ZIP deployments create those paths before Artisan cache commands run.
+
 ## 12. Web server document root
 
 The web server document root should remain Laravel's `public/` directory:
