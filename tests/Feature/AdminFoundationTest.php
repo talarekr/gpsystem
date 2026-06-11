@@ -44,8 +44,45 @@ class AdminFoundationTest extends TestCase
             'woo_sync_preparation',
             'orders',
             'error_center',
-            'settings',
+            'general_settings',
+            'company_shop_identity',
             'users_roles',
+            'product_settings',
+            'product_intake_settings',
+            'categories',
+            'attributes_parameters',
+            'pricing_settings',
+            'stock_warehouse_settings',
+            'internal_logistics_classes',
+            'channel_settings',
+            'woocommerce_settings',
+            'ebay_settings',
+            'ebay_de_settings',
+            'ebay_fr_settings',
+            'allegro_settings',
+            'ovoko_settings',
+            'translation_content_templates',
+            'readiness_rules',
+            'automation_queue_settings',
+            'feature_flags_safety',
+            'audit_log',
         ], array_keys(config('product-hub.admin_navigation')));
+    }
+
+    public function test_internal_logistics_classes_are_separate_from_ebay_shipping_groups(): void
+    {
+        $this->assertSame([
+            'small' => 'Small',
+            'medium' => 'Medium',
+            'large' => 'Large',
+            'oversize' => 'Oversize',
+            'pallet' => 'Pallet',
+        ], config('product-hub.internal_logistics_classes'));
+
+        $this->assertSame([
+            'shipping_30',
+            'shipping_50',
+            'shipping_130',
+        ], config('product-hub.channel_shipping_groups.ebay'));
     }
 }

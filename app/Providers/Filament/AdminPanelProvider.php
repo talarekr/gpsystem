@@ -11,6 +11,26 @@ use App\Filament\Pages\ProductCatalog;
 use App\Filament\Pages\ProductCommandCenter;
 use App\Filament\Pages\Readiness;
 use App\Filament\Pages\Settings;
+use App\Filament\Pages\Settings\AllegroSettings;
+use App\Filament\Pages\Settings\AttributesParameters;
+use App\Filament\Pages\Settings\AuditLog;
+use App\Filament\Pages\Settings\AutomationQueueSettings;
+use App\Filament\Pages\Settings\Categories;
+use App\Filament\Pages\Settings\ChannelSettings;
+use App\Filament\Pages\Settings\CompanyShopIdentity;
+use App\Filament\Pages\Settings\EbayDeSettings;
+use App\Filament\Pages\Settings\EbayFrSettings;
+use App\Filament\Pages\Settings\EbaySettings;
+use App\Filament\Pages\Settings\FeatureFlagsSafety;
+use App\Filament\Pages\Settings\InternalLogisticsClasses;
+use App\Filament\Pages\Settings\OvokoSettings;
+use App\Filament\Pages\Settings\PricingSettings;
+use App\Filament\Pages\Settings\ProductIntakeSettings;
+use App\Filament\Pages\Settings\ProductSettings;
+use App\Filament\Pages\Settings\ReadinessRules;
+use App\Filament\Pages\Settings\StockWarehouseSettings;
+use App\Filament\Pages\Settings\TranslationContentTemplates;
+use App\Filament\Pages\Settings\WooCommerceSettings;
 use App\Filament\Pages\StagingItems;
 use App\Filament\Pages\StockLocations;
 use App\Filament\Pages\UsersRoles;
@@ -66,7 +86,27 @@ class AdminPanelProvider extends PanelProvider
                 Orders::class,
                 ErrorCenter::class,
                 Settings::class,
+                CompanyShopIdentity::class,
                 UsersRoles::class,
+                ProductSettings::class,
+                ProductIntakeSettings::class,
+                Categories::class,
+                AttributesParameters::class,
+                PricingSettings::class,
+                StockWarehouseSettings::class,
+                InternalLogisticsClasses::class,
+                ChannelSettings::class,
+                WooCommerceSettings::class,
+                EbaySettings::class,
+                EbayDeSettings::class,
+                EbayFrSettings::class,
+                AllegroSettings::class,
+                OvokoSettings::class,
+                TranslationContentTemplates::class,
+                ReadinessRules::class,
+                AutomationQueueSettings::class,
+                FeatureFlagsSafety::class,
+                AuditLog::class,
             ])
             ->widgets([])
             ->middleware([

@@ -27,6 +27,22 @@ return [
         'nbp_rates_enabled' => (bool) env('GPS_NBP_RATES_ENABLED', false),
     ],
 
+    'internal_logistics_classes' => [
+        'small' => 'Small',
+        'medium' => 'Medium',
+        'large' => 'Large',
+        'oversize' => 'Oversize',
+        'pallet' => 'Pallet',
+    ],
+
+    'channel_shipping_groups' => [
+        'ebay' => [
+            'shipping_30',
+            'shipping_50',
+            'shipping_130',
+        ],
+    ],
+
     'admin_navigation' => [
         'dashboard' => 'Dashboard',
         'mobile_intake' => 'Mobile Intake',
@@ -39,7 +55,27 @@ return [
         'woo_sync_preparation' => 'Woo Sync Preparation',
         'orders' => 'Orders',
         'error_center' => 'Error Center',
-        'settings' => 'Settings',
-        'users_roles' => 'Users / Roles',
+        'general_settings' => 'General Settings',
+        'company_shop_identity' => 'Company / Shop Identity',
+        'users_roles' => 'Users & Roles',
+        'product_settings' => 'Product Settings',
+        'product_intake_settings' => 'Product Intake Settings',
+        'categories' => 'Categories',
+        'attributes_parameters' => 'Attributes / Parameters',
+        'pricing_settings' => 'Pricing Settings',
+        'stock_warehouse_settings' => 'Stock / Warehouse Settings',
+        'internal_logistics_classes' => 'Internal Logistics Classes',
+        'channel_settings' => 'Channel Settings',
+        'woocommerce_settings' => 'WooCommerce Settings',
+        'ebay_settings' => 'eBay Settings',
+        'ebay_de_settings' => 'eBay DE Settings',
+        'ebay_fr_settings' => 'eBay FR Settings',
+        'allegro_settings' => 'Allegro Settings',
+        'ovoko_settings' => 'Ovoko Settings',
+        'translation_content_templates' => 'Translation / Content Templates',
+        'readiness_rules' => 'Readiness Rules',
+        'automation_queue_settings' => 'Automation / Queue Settings',
+        'feature_flags_safety' => 'Feature Flags / Safety',
+        'audit_log' => 'Audit Log',
     ],
 ];
