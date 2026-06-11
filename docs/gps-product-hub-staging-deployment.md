@@ -248,7 +248,7 @@ The MVP foundation does not add scheduled business automation yet, but this prep
 
 ### 11. Configure file permissions
 
-The web/PHP user must be able to write to:
+Laravel requires runtime directories under `storage/` and `bootstrap/cache/` to exist and be writable. The repository includes `.gitkeep` placeholders for these runtime directories so browser/ZIP deployments create the required paths, but the staging PHP/web-server user must still be able to write to:
 
 ```text
 storage
