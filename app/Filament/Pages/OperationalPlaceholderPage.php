@@ -8,8 +8,6 @@ abstract class OperationalPlaceholderPage extends Page
 {
     protected static string $view = 'filament.pages.operational-placeholder';
 
-    protected static ?string $navigationGroup = 'Operations';
-
     public function getPlaceholderEyebrow(): string
     {
         return 'GPS Product Hub';
@@ -17,7 +15,7 @@ abstract class OperationalPlaceholderPage extends Page
 
     public function getPlaceholderDescription(): string
     {
-        return 'Placeholder for MVP Ticket 1. This navigation item is intentionally present, but the module workflow will be implemented in a later ticket.';
+        return 'To miejsce jest przygotowane pod przyszły moduł operacyjny. Funkcjonalność zostanie wdrożona w osobnym etapie.';
     }
 
     /**
@@ -26,8 +24,8 @@ abstract class OperationalPlaceholderPage extends Page
     public function getPlaceholderDetails(): array
     {
         return [
-            'This page is intentionally a calm, operational placeholder.',
-            'No marketplace publishing, external API writes, risky automation, or production credentials are connected here.',
+            'Ekran jest spokojnym, operacyjnym placeholderem dla zespołu magazynu i administracji.',
+            'Nie uruchamia publikacji marketplace, zapisów do zewnętrznych API, ryzykownej automatyzacji ani danych produkcyjnych.',
         ];
     }
 }

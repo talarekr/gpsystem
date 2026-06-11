@@ -4,13 +4,14 @@ namespace App\Filament\Pages\Settings;
 
 class AuditLog extends SettingsPlaceholderPage
 {
-    protected static ?string $navigationIcon = 'heroicon-o-clipboard-document-check';
-    protected static ?string $navigationLabel = 'Audit Log';
-    protected static ?string $title = 'Audit Log';
-    protected static ?int $navigationSort = 132;
+    protected static bool $shouldRegisterNavigation = true;
+    protected static ?string $navigationIcon = 'heroicon-o-key';
+    protected static ?string $navigationLabel = 'Logowania';
+    protected static ?string $title = 'Logowania';
+    protected static ?int $navigationSort = 120;
 
     public function getPlaceholderDescription(): string
     {
-        return 'Future home for configuration change history, operator audit visibility, and traceability. No audit storage is implemented here.';
+        return 'Miejsce na przyszłą widoczność logowań, zmian konfiguracyjnych i śladów audytowych operatorów. Przechowywanie audytu nie jest jeszcze wdrożone.';
     }
 }

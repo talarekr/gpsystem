@@ -4,8 +4,12 @@ namespace App\Filament\Pages;
 
 class Pricing extends OperationalPlaceholderPage
 {
-    protected static ?string $navigationIcon = 'heroicon-o-currency-euro';
-    protected static ?string $navigationLabel = 'Pricing';
-    protected static ?string $title = 'Pricing';
-    protected static ?int $navigationSort = 50;
+    protected static bool $shouldRegisterNavigation = false;
+    protected static ?string $navigationLabel = 'Cenniki';
+    protected static ?string $title = 'Cenniki';
+
+    public function getPlaceholderDescription(): string
+    {
+        return 'Wcześniejszy placeholder Pricing pozostaje ukrytym ekranem przygotowanym pod przyszłe ustawienia i przeglądy cen. Logika cenowa nie jest wdrożona.';
+    }
 }

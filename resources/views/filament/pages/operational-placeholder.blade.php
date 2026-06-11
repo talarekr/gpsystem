@@ -9,7 +9,7 @@
         </section>
 
         <section class="rounded-xl border border-[#0B1F3A]/10 bg-[#0B1F3A]/[0.03] p-5 text-sm text-gray-800">
-            <h3 class="font-semibold text-[#0B1F3A]">Safe configuration placeholder</h3>
+            <h3 class="font-semibold text-[#0B1F3A]">Bezpieczny placeholder operacyjny</h3>
             <ul class="mt-3 space-y-2 leading-6">
                 @foreach ($this->getPlaceholderDetails() as $detail)
                     <li class="flex gap-2">

@@ -5,12 +5,11 @@ namespace App\Filament\Pages\Settings;
 class WooCommerceSettings extends SettingsPlaceholderPage
 {
     protected static ?string $navigationIcon = 'heroicon-o-shopping-cart';
-    protected static ?string $navigationLabel = 'WooCommerce Settings';
-    protected static ?string $title = 'WooCommerce Settings';
-    protected static ?int $navigationSort = 122;
+    protected static ?string $navigationLabel = 'Ustawienia WooCommerce';
+    protected static ?string $title = 'Ustawienia WooCommerce';
 
     public function getPlaceholderDescription(): string
     {
-        return 'Future home for WooCommerce connection settings, mappings, and sync safety checks. No WooCommerce writes are implemented here.';
+        return 'Miejsce na przyszłe ustawienia połączenia WooCommerce, mapowania i kontrole bezpieczeństwa synchronizacji. Zapisy WooCommerce nie są wdrożone.';
     }
 }

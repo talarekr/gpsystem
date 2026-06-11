@@ -4,13 +4,22 @@ namespace App\Filament\Pages;
 
 class ProductCommandCenter extends OperationalPlaceholderPage
 {
-    protected static ?string $navigationIcon = 'heroicon-o-view-columns';
-    protected static ?string $navigationLabel = 'Product Command Center';
-    protected static ?string $title = 'Product Command Center';
+    protected static ?string $navigationIcon = 'heroicon-o-cube';
+    protected static ?string $navigationLabel = 'Części';
+    protected static ?string $title = 'Części';
     protected static ?int $navigationSort = 40;
 
     public function getPlaceholderDescription(): string
     {
-        return 'Future operational command center for product attention queues, readiness blockers, and fast daily warehouse work.';
+        return 'Przyszłe centrum codziennej pracy z częściami: katalog, kolejki robocze, braki gotowości i szybka obsługa magazynowa. Na tym etapie to wyłącznie placeholder nawigacyjny.';
+    }
+
+    public function getPlaceholderDetails(): array
+    {
+        return [
+            'Mapuje wcześniejsze pozycje: Product Catalog, Product Command Center, Staging Items oraz Mobile Intake.',
+            'Nie dodaje katalogu produktów, workflow stagingu ani workflow przyjęcia mobilnego.',
+            'Nie wykonuje publikacji marketplace, synchronizacji ani zapisów do zewnętrznych API.',
+        ];
     }
 }

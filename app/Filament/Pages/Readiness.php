@@ -4,8 +4,12 @@ namespace App\Filament\Pages;
 
 class Readiness extends OperationalPlaceholderPage
 {
-    protected static ?string $navigationIcon = 'heroicon-o-check-badge';
-    protected static ?string $navigationLabel = 'Readiness';
-    protected static ?string $title = 'Readiness';
-    protected static ?int $navigationSort = 70;
+    protected static bool $shouldRegisterNavigation = false;
+    protected static ?string $navigationLabel = 'Gotowość';
+    protected static ?string $title = 'Gotowość';
+
+    public function getPlaceholderDescription(): string
+    {
+        return 'Wcześniejszy placeholder Readiness został zmapowany do sekcji Zadania. Reguły gotowości nie są wykonywane.';
+    }
 }

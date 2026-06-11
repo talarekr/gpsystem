@@ -2,8 +2,11 @@
 
 namespace App\Providers\Filament;
 
+use App\Filament\Pages\AllegroIntegration;
+use App\Filament\Pages\Analytics;
 use App\Filament\Pages\Dashboard;
 use App\Filament\Pages\ErrorCenter;
+use App\Filament\Pages\Help;
 use App\Filament\Pages\MobileIntake;
 use App\Filament\Pages\Orders;
 use App\Filament\Pages\Pricing;
@@ -11,6 +14,7 @@ use App\Filament\Pages\ProductCatalog;
 use App\Filament\Pages\ProductCommandCenter;
 use App\Filament\Pages\Readiness;
 use App\Filament\Pages\Settings;
+use App\Filament\Pages\Shipments;
 use App\Filament\Pages\Settings\AllegroSettings;
 use App\Filament\Pages\Settings\AttributesParameters;
 use App\Filament\Pages\Settings\AuditLog;
@@ -34,6 +38,7 @@ use App\Filament\Pages\Settings\WooCommerceSettings;
 use App\Filament\Pages\StagingItems;
 use App\Filament\Pages\StockLocations;
 use App\Filament\Pages\UsersRoles;
+use App\Filament\Pages\Vehicles;
 use App\Filament\Pages\WooSyncPreparation;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
@@ -75,6 +80,8 @@ class AdminPanelProvider extends PanelProvider
             ])
             ->pages([
                 Dashboard::class,
+                Analytics::class,
+                Vehicles::class,
                 MobileIntake::class,
                 StagingItems::class,
                 ProductCatalog::class,
@@ -84,7 +91,9 @@ class AdminPanelProvider extends PanelProvider
                 Readiness::class,
                 WooSyncPreparation::class,
                 Orders::class,
+                Shipments::class,
                 ErrorCenter::class,
+                AllegroIntegration::class,
                 Settings::class,
                 CompanyShopIdentity::class,
                 UsersRoles::class,
@@ -107,6 +116,7 @@ class AdminPanelProvider extends PanelProvider
                 AutomationQueueSettings::class,
                 FeatureFlagsSafety::class,
                 AuditLog::class,
+                Help::class,
             ])
             ->widgets([])
             ->middleware([
