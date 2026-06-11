@@ -5,12 +5,11 @@ namespace App\Filament\Pages\Settings;
 class AutomationQueueSettings extends SettingsPlaceholderPage
 {
     protected static ?string $navigationIcon = 'heroicon-o-clock';
-    protected static ?string $navigationLabel = 'Automation / Queue Settings';
-    protected static ?string $title = 'Automation / Queue Settings';
-    protected static ?int $navigationSort = 130;
+    protected static ?string $navigationLabel = 'Automatyzacja i kolejki';
+    protected static ?string $title = 'Automatyzacja i kolejki';
 
     public function getPlaceholderDescription(): string
     {
-        return 'Future home for automation limits, queue controls, retries, and operator safety settings. No automation execution is implemented here.';
+        return 'Miejsce na przyszłe limity automatyzacji, kontrolę kolejek, ponowienia i ustawienia bezpieczeństwa operatora. Automatyzacja nie jest wykonywana.';
     }
 }

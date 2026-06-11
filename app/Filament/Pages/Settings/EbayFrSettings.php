@@ -4,13 +4,15 @@ namespace App\Filament\Pages\Settings;
 
 class EbayFrSettings extends SettingsPlaceholderPage
 {
+    protected static bool $shouldRegisterNavigation = true;
     protected static ?string $navigationIcon = 'heroicon-o-language';
-    protected static ?string $navigationLabel = 'eBay FR Settings';
-    protected static ?string $title = 'eBay FR Settings';
-    protected static ?int $navigationSort = 125;
+    protected static ?string $navigationLabel = 'eBay FR';
+    protected static ?string $navigationGroup = 'Kanały sprzedaży';
+    protected static ?string $title = 'eBay FR';
+    protected static ?int $navigationSort = 40;
 
     public function getPlaceholderDescription(): string
     {
-        return 'Future home for eBay France marketplace rules, translations, mappings, and readiness requirements. No marketplace publishing is implemented here.';
+        return 'Placeholder kanału sprzedaży eBay FR. Tłumaczenia, mapowania i publikowanie marketplace nie są wdrożone.';
     }
 }

@@ -4,13 +4,15 @@ namespace App\Filament\Pages\Settings;
 
 class EbayDeSettings extends SettingsPlaceholderPage
 {
+    protected static bool $shouldRegisterNavigation = true;
     protected static ?string $navigationIcon = 'heroicon-o-language';
-    protected static ?string $navigationLabel = 'eBay DE Settings';
-    protected static ?string $title = 'eBay DE Settings';
-    protected static ?int $navigationSort = 124;
+    protected static ?string $navigationLabel = 'eBay DE';
+    protected static ?string $navigationGroup = 'Kanały sprzedaży';
+    protected static ?string $title = 'eBay DE';
+    protected static ?int $navigationSort = 30;
 
     public function getPlaceholderDescription(): string
     {
-        return 'Future home for eBay Germany marketplace rules, translations, mappings, and readiness requirements. No marketplace publishing is implemented here.';
+        return 'Placeholder kanału sprzedaży eBay DE. Tłumaczenia, mapowania i publikowanie marketplace nie są wdrożone.';
     }
 }

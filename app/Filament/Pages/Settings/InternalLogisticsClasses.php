@@ -5,12 +5,11 @@ namespace App\Filament\Pages\Settings;
 class InternalLogisticsClasses extends SettingsPlaceholderPage
 {
     protected static ?string $navigationIcon = 'heroicon-o-truck';
-    protected static ?string $navigationLabel = 'Internal Logistics Classes';
-    protected static ?string $title = 'Internal Logistics Classes';
-    protected static ?int $navigationSort = 120;
+    protected static ?string $navigationLabel = 'Klasy logistyczne';
+    protected static ?string $title = 'Klasy logistyczne';
 
     public function getPlaceholderDescription(): string
     {
-        return 'Future home for central internal logistics classes such as small, medium, large, oversize, and pallet. This is separate from channel-specific shipping groups.';
+        return 'Miejsce na przyszłe wewnętrzne klasy logistyczne, takie jak małe, średnie, duże, ponadgabarytowe i paletowe. To osobny obszar od grup wysyłki kanałów.';
     }
 }

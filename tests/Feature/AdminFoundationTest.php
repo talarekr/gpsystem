@@ -33,40 +33,38 @@ class AdminFoundationTest extends TestCase
     public function test_admin_navigation_placeholders_are_configured(): void
     {
         $this->assertSame([
-            'dashboard',
-            'mobile_intake',
-            'staging_items',
-            'product_catalog',
-            'product_command_center',
-            'pricing',
-            'stock_locations',
-            'readiness',
-            'woo_sync_preparation',
-            'orders',
-            'error_center',
-            'general_settings',
-            'company_shop_identity',
-            'users_roles',
-            'product_settings',
-            'product_intake_settings',
-            'categories',
-            'attributes_parameters',
-            'pricing_settings',
-            'stock_warehouse_settings',
-            'internal_logistics_classes',
-            'channel_settings',
-            'woocommerce_settings',
-            'ebay_settings',
-            'ebay_de_settings',
-            'ebay_fr_settings',
-            'allegro_settings',
-            'ovoko_settings',
-            'translation_content_templates',
-            'readiness_rules',
-            'automation_queue_settings',
-            'feature_flags_safety',
-            'audit_log',
-        ], array_keys(config('product-hub.admin_navigation')));
+            'dashboard' => 'Strona główna',
+            'analytics' => 'Analityka',
+            'vehicles' => 'Samochody',
+            'product_command_center' => 'Części',
+            'stock_locations' => 'Magazynowanie',
+            'orders' => 'Zamówienia',
+            'shipments' => 'Przesyłki',
+            'error_center' => 'Zadania',
+            'allegro_integration' => 'Integracja Allegro',
+            'users_roles' => 'Pracownicy',
+            'general_settings' => 'Ustawienia',
+            'audit_log' => 'Logowania',
+            'help' => 'Pomoc',
+        ], config('product-hub.admin_navigation'));
+
+        $this->assertSame([
+            'allegro_settings' => 'Allegro',
+            'woo_sync_preparation' => 'WooCommerce',
+            'ebay_de_settings' => 'eBay DE',
+            'ebay_fr_settings' => 'eBay FR',
+            'ovoko_settings' => 'Ovoko',
+        ], config('product-hub.sales_channels_navigation'));
+
+        $this->assertSame([
+            'mobile_intake' => 'Części',
+            'staging_items' => 'Części',
+            'product_catalog' => 'Części',
+            'readiness' => 'Zadania',
+            'automation_queue_settings' => 'Zadania',
+            'woocommerce_settings' => 'Ustawienia',
+            'all_settings_subpages' => 'Ustawienia',
+        ], config('product-hub.admin_navigation_remapped_pages'));
     }
 
     public function test_internal_logistics_classes_are_separate_from_ebay_shipping_groups(): void

@@ -4,13 +4,14 @@ namespace App\Filament\Pages;
 
 class WooSyncPreparation extends OperationalPlaceholderPage
 {
-    protected static ?string $navigationIcon = 'heroicon-o-arrow-path';
-    protected static ?string $navigationLabel = 'Woo Sync Preparation';
-    protected static ?string $title = 'Woo Sync Preparation';
-    protected static ?int $navigationSort = 80;
+    protected static ?string $navigationIcon = 'heroicon-o-shopping-cart';
+    protected static ?string $navigationLabel = 'WooCommerce';
+    protected static ?string $navigationGroup = 'Kanały sprzedaży';
+    protected static ?string $title = 'WooCommerce';
+    protected static ?int $navigationSort = 20;
 
     public function getPlaceholderDescription(): string
     {
-        return 'Placeholder only. Woo write operations are disabled by default and will require explicit approval in a later ticket.';
+        return 'Placeholder kanału sprzedaży WooCommerce. Operacje zapisu i synchronizacji WooCommerce są wyłączone i nie zostały wdrożone w tym etapie.';
     }
 }

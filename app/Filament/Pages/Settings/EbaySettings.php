@@ -5,12 +5,11 @@ namespace App\Filament\Pages\Settings;
 class EbaySettings extends SettingsPlaceholderPage
 {
     protected static ?string $navigationIcon = 'heroicon-o-globe-europe-africa';
-    protected static ?string $navigationLabel = 'eBay Settings';
-    protected static ?string $title = 'eBay Settings';
-    protected static ?int $navigationSort = 123;
+    protected static ?string $navigationLabel = 'Ustawienia eBay';
+    protected static ?string $title = 'Ustawienia eBay';
 
     public function getPlaceholderDescription(): string
     {
-        return 'Future home for global eBay configuration, including channel-specific shipping mapping preparation. No eBay publishing is implemented here.';
+        return 'Miejsce na przyszłą globalną konfigurację eBay, w tym przygotowanie mapowań wysyłki dla kanałów. Publikowanie eBay nie jest wdrożone.';
     }
 }

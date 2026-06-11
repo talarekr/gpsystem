@@ -5,12 +5,11 @@ namespace App\Filament\Pages\Settings;
 class ProductSettings extends SettingsPlaceholderPage
 {
     protected static ?string $navigationIcon = 'heroicon-o-cube';
-    protected static ?string $navigationLabel = 'Product Settings';
-    protected static ?string $title = 'Product Settings';
-    protected static ?int $navigationSort = 114;
+    protected static ?string $navigationLabel = 'Ustawienia części';
+    protected static ?string $title = 'Ustawienia części';
 
     public function getPlaceholderDescription(): string
     {
-        return 'Future home for product defaults, data quality expectations, and catalog-level settings. No catalog workflow is implemented here.';
+        return 'Miejsce na przyszłe domyślne ustawienia części, oczekiwania jakości danych i konfigurację katalogu. Workflow katalogu nie jest wdrożony.';
     }
 }

@@ -5,12 +5,11 @@ namespace App\Filament\Pages\Settings;
 class ReadinessRules extends SettingsPlaceholderPage
 {
     protected static ?string $navigationIcon = 'heroicon-o-check-circle';
-    protected static ?string $navigationLabel = 'Readiness Rules';
-    protected static ?string $title = 'Readiness Rules';
-    protected static ?int $navigationSort = 129;
+    protected static ?string $navigationLabel = 'Reguły gotowości';
+    protected static ?string $title = 'Reguły gotowości';
 
     public function getPlaceholderDescription(): string
     {
-        return 'Future home for readiness rules, blocked/ready/draft/published status definitions, and publication gates. No rule execution is implemented here.';
+        return 'Miejsce na przyszłe reguły gotowości, definicje statusów i bramki publikacji. Wykonywanie reguł nie jest wdrożone.';
     }
 }
