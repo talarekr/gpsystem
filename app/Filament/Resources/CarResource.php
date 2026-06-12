@@ -40,30 +40,6 @@ class CarResource extends Resource
     {
         return $form
             ->schema([
-                Section::make('Zdjęcia')
-                    ->icon('heroicon-o-camera')
-                    ->description('Dodaj zdjęcia samochodu. Pierwsze zdjęcie od lewej jest zdjęciem głównym używanym jako miniatura na liście samochodów.')
-                    ->extraAttributes(['class' => 'gps-car-form-section'])
-                    ->schema([
-                        Forms\Components\FileUpload::make('photo_paths')
-                            ->label('Zdjęcia samochodu')
-                            ->helperText('Możesz dodać wiele zdjęć. Przeciągnij zdjęcia, aby zmienić kolejność — pierwsze od lewej będzie zdjęciem głównym.')
-                            ->image()
-                            ->imageEditor()
-                            ->multiple()
-                            ->reorderable()
-                            ->appendFiles()
-                            ->panelLayout('grid')
-                            ->imagePreviewHeight('96')
-                            ->panelAspectRatio('1:1')
-                            ->extraAttributes(['class' => 'gps-car-photo-upload'])
-                            ->directory('cars/photos')
-                            ->visibility('public')
-                            ->maxSize(8192)
-                            ->formatStateUsing(static fn (?Car $record): array => $record?->orderedImagePaths() ?? [])
-                            ->columnSpanFull(),
-                    ]),
-
                 Section::make('Informacje o samochodzie')
                     ->icon('heroicon-o-truck')
                     ->extraAttributes(['class' => 'gps-car-form-section'])
@@ -209,11 +185,6 @@ class CarResource extends Resource
                     ->searchable()
                     ->weight('bold')
                     ->color('primary'),
-                Tables\Columns\ImageColumn::make('primary_photo_path')
-                    ->label('Zdjęcie')
-                    ->state(static fn (Car $record): ?string => $record->primary_photo_path)
-                    ->square()
-                    ->defaultImageUrl(url('/images/car-placeholder.svg')),
                 Tables\Columns\TextColumn::make('model_summary')
                     ->label('Model samochodu')
                     ->state(static fn (Car $record): string => trim(implode(' ', array_filter([

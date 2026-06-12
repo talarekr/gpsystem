@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96" role="img" aria-label="Brak zdjęcia samochodu">
-  <rect width="96" height="96" rx="14" fill="#f5f7fa"/>
-  <path d="M22 57h52l-5.2-15.6A8 8 0 0 0 61.2 36H34.8a8 8 0 0 0-7.6 5.4L22 57Z" fill="#0B1F3A" opacity="0.9"/>
-  <path d="M28 57h40v11H28z" fill="#0B1F3A"/>
-  <circle cx="34" cy="69" r="6" fill="#354d69"/>
-  <circle cx="62" cy="69" r="6" fill="#354d69"/>
-  <path d="M33 42h30l3 9H30l3-9Z" fill="#ffffff" opacity="0.85"/>
-</svg>
