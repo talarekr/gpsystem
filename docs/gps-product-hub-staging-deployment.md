@@ -2,172 +2,93 @@
 
 ## Purpose
 
-This document describes how to install and run the current GPS Product Hub MVP Ticket 1 foundation on the staging/test domain:
+This document describes how to deploy the GPS Product Hub staging application on the current DirectAdmin/shared-hosting environment:
 
 - Staging domain: `https://gpsystem.thecamels.pl`
 - Expected admin URL: `https://gpsystem.thecamels.pl/admin`
+- Laravel app root: `/home/gpsystem/domains/gpsystem.thecamels.pl/app`
+- Public root: `/home/gpsystem/domains/gpsystem.thecamels.pl/public_html`
+- Browser deploy file: `/home/gpsystem/domains/gpsystem.thecamels.pl/public_html/deploy.php`
 
-This is a staging/test deployment guide only. The current application is still the MVP Ticket 1/1A foundation: Laravel, Filament admin, authentication, roles, placeholder navigation, and disabled-by-default safety flags. It does not include product intake, staging workflows, product catalog data, Woo sync, marketplace publishing, or external API writes.
+This is a staging/test deployment guide only. The application is still the MVP foundation: Laravel, Filament admin, authentication, roles, placeholder navigation, and disabled-by-default safety flags. It does not include product intake workflows, product catalog business logic, Woo sync, marketplace publishing, or external API writes.
 
-## Deployment readiness review
+Production should later move to VPS/SSH, GitHub Actions, Deployer, or another proper CI/CD approach. The browser helper exists to support the current shared-hosting workflow.
 
-### Laravel web root
+## Current shared-hosting constraint
 
-The web server document root should point to the Laravel `public` directory:
-
-```text
-/path/to/gpsystem/public
-```
-
-Do not point the web server document root at the repository root. The repository root contains `.env`, source code, configuration, and other files that must not be served directly.
-
-### Admin URL
-
-The Filament admin panel is configured with:
-
-- Panel path: `/admin`
-- Panel brand: `GPS Product Hub`
-- Login enabled: yes
-
-For the staging domain, the expected admin URL is:
-
-```text
-https://gpsystem.thecamels.pl/admin
-```
-
-### Local-only assumptions
-
-The foundation is suitable for a normal Laravel staging server. It does not intentionally depend on local-only paths or local-only services. The default `.env.example` uses SQLite for local development, but the staging server should normally use MySQL/MariaDB or PostgreSQL.
-
-### Current feature status
-
-The current staging deployment should be treated as an admin foundation only:
-
-- Filament admin shell exists.
-- Placeholder pages exist for future modules.
-- Roles can be seeded.
-- Risky integrations are disabled by default.
-- No external API writes exist.
-- No marketplace publishing exists.
-
-## Composer dependency review
-
-The project intentionally keeps these package requirements:
-
-- `laravel/framework`
-- `filament/filament`
-- `spatie/laravel-permission`
-
-The current Codex environment may be unable to download dependencies from Packagist because the environment proxy returns HTTP 403. Do not remove Laravel, Filament, or Spatie Permission dependencies because of that Codex environment limitation. The real staging server must have normal Composer/Packagist access or an approved Composer mirror/cache.
-
-Recommended install commands:
-
-For temporary staging/debug with dev tools:
+The staging host has `proc_open` disabled. Browser deployment cannot depend on shell commands, including:
 
 ```bash
 composer install
+php artisan migrate
+php artisan filament:assets
 ```
 
-For a more production-like staging setup:
+The repository therefore provides `deploy.example.php`, a one-file browser deployment helper that can be copied to `public_html/deploy.php`. It does not use shell execution, Composer, or `proc_open`.
 
-```bash
-composer install --no-dev --optimize-autoloader
+See the detailed helper documentation in [`docs/gps-product-hub-browser-deploy.md`](gps-product-hub-browser-deploy.md).
+
+## One-file browser deployment flow
+
+For normal code-only staging deployments:
+
+1. Push or merge the desired code to GitHub `main`.
+2. Open:
+
+   ```text
+   https://gpsystem.thecamels.pl/deploy.php?token=MY_FIXED_STAGING_TOKEN
+   ```
+
+3. Watch the browser-readable log.
+4. Verify:
+   - `https://gpsystem.thecamels.pl/`
+   - `https://gpsystem.thecamels.pl/admin`
+
+The helper downloads:
+
+```text
+https://github.com/talarekr/gpsystem/archive/refs/heads/main.zip
 ```
 
-If using the production-like command, run tests in CI or another environment before deployment because PHPUnit and development tools will not be installed on the server.
+Then it extracts the ZIP, syncs repository files to `/app`, handles optional dependency/assets ZIPs, syncs public files to `/public_html`, and runs Laravel migrations through the Console Kernel directly.
 
-## Required server dependencies
+## Initial staging setup
 
-Recommended baseline:
+### 1. Create/confirm DirectAdmin paths
 
-- PHP 8.3 or newer.
-- Composer 2.x.
-- Web server: Nginx or Apache.
-- Database: PostgreSQL or MySQL/MariaDB.
-- Node.js and npm only if frontend assets need to be built on the server.
-- Redis recommended for future queue/cache work, but the MVP foundation can run with database-backed queue/cache if needed.
+Confirm the hosting account has these directories:
 
-Recommended PHP extensions:
-
-- `ctype`
-- `curl`
-- `dom`
-- `fileinfo`
-- `filter`
-- `hash`
-- `mbstring`
-- `openssl`
-- `pdo`
-- `pdo_mysql` for MySQL/MariaDB or `pdo_pgsql` for PostgreSQL
-- `session`
-- `tokenizer`
-- `xml`
-- `zip`
-- `intl` recommended
-- `redis` recommended if using Redis queues/cache
-
-## Deployment steps
-
-### 1. Prepare code on server
-
-Example:
-
-```bash
-cd /var/www
-git clone <repository-url> gpsystem
-cd /var/www/gpsystem
+```text
+/home/gpsystem/domains/gpsystem.thecamels.pl/app
+/home/gpsystem/domains/gpsystem.thecamels.pl/public_html
 ```
 
-Or deploy by your normal release process.
+The Laravel repository code lives in `/app`. The web-accessible document root is `/public_html`.
 
-### 2. Install Composer dependencies
+### 2. Create the public bridge files
 
-Temporary staging/debug:
+`public_html/index.php` and `public_html/.htaccess` should route requests into Laravel in `/app`. These bridge files are server-local for this shared-hosting layout and are preserved by the browser deploy helper.
 
-```bash
-composer install
-```
+The helper also preserves `public_html/deploy.php`, so future repository public syncs do not overwrite the deploy file.
 
-Production-like staging:
+### 3. Create `.env`
 
-```bash
-composer install --no-dev --optimize-autoloader
-```
+Create `/home/gpsystem/domains/gpsystem.thecamels.pl/app/.env` manually from `.env.example` and set staging values.
 
-### 3. Install/build frontend assets if required
+Required values include:
 
-If the deployment process requires local asset builds, run:
+- `APP_ENV=staging` or equivalent staging value
+- `APP_KEY`
+- `APP_URL=https://gpsystem.thecamels.pl`
+- database connection settings
+- cache/session/queue settings suitable for shared hosting
+- mail settings if mail is enabled
 
-```bash
-npm install
-npm run build
-```
+Do not commit real `.env` values. The helper preserves `/app/.env` and never prints it.
 
-The current Ticket 1 foundation does not add custom frontend build assets, but Filament/Laravel deployments commonly include a Node build step once frontend assets are introduced.
+### 4. Configure database
 
-### 4. Create `.env`
-
-```bash
-cp .env.example .env
-php artisan key:generate
-```
-
-Then edit `.env` for staging values. Do not commit real `.env` files.
-
-### 5. Configure database
-
-Create a staging database and database user in PostgreSQL or MySQL/MariaDB, then set the database variables in `.env`.
-
-Example PostgreSQL placeholders:
-
-```dotenv
-DB_CONNECTION=pgsql
-DB_HOST=127.0.0.1
-DB_PORT=5432
-DB_DATABASE=gps_product_hub_staging
-DB_USERNAME=gps_product_hub_user
-DB_PASSWORD=replace_with_staging_secret
-```
+Create a staging database and user in DirectAdmin or the hosting database panel. Then set the database variables in `/app/.env`.
 
 Example MySQL/MariaDB placeholders:
 
@@ -180,284 +101,235 @@ DB_USERNAME=gps_product_hub_user
 DB_PASSWORD=replace_with_staging_secret
 ```
 
-### 6. Run migrations and seed MVP roles
+### 5. Install dependencies without hosting Composer
 
-```bash
-php artisan migrate --force
-php artisan db:seed --class=RoleSeeder --force
-```
+Because Composer cannot run through browser deploy on this host, prepare dependencies locally when needed and upload them as `/app/vendor.zip`.
 
-The role seeder creates the MVP role records:
+Normal code-only deploys do not need this because the helper preserves `/app/vendor`.
 
-- `owner_admin`
-- `manager`
-- `warehouse_product_staff`
-- `pricing_staff`
-- `viewer`
+When dependencies change or vendor is missing:
 
-### 7. Create the storage symlink
+1. Run Composer locally in a compatible PHP environment.
+2. Create `vendor.zip` containing a top-level `vendor/` directory.
+3. Upload it to:
 
-```bash
-php artisan storage:link
-```
+   ```text
+   /home/gpsystem/domains/gpsystem.thecamels.pl/app/vendor.zip
+   ```
 
-### 8. Optimize Laravel caches
+4. Run the normal browser deploy URL.
 
-For staging after `.env` is correct:
+The helper removes the old `/app/vendor`, extracts `vendor.zip` into `/app/vendor`, supports either an archive with top-level `vendor/` or an archive whose root is the vendor directory itself, normalizes Windows ZIP path separators, and deletes `vendor.zip` after successful extraction.
 
-```bash
-php artisan config:cache
-php artisan route:cache
-php artisan view:cache
-```
+### 6. Prepare generated public assets when needed
 
-When changing `.env` or config files, clear and rebuild caches:
+If generated Filament/vendor/public assets changed and cannot be generated on the host:
 
-```bash
-php artisan optimize:clear
-php artisan config:cache
-php artisan route:cache
-php artisan view:cache
-```
+1. Generate them locally.
+2. Package the files that should land in `public_html` as `public-assets.zip`.
+3. Upload it to:
 
-### 9. Configure queue worker
+   ```text
+   /home/gpsystem/domains/gpsystem.thecamels.pl/public_html/public-assets.zip
+   ```
 
-The MVP foundation does not yet process business jobs, but Laravel queue tables are present. For staging, database queue can be used initially:
+4. Run the normal browser deploy URL.
 
-```dotenv
-QUEUE_CONNECTION=database
-```
+If `public-assets.zip` is absent, the helper logs a warning and continues. This is normal for code-only deployments.
 
-A basic worker can be managed by Supervisor/systemd:
+### 7. Install the browser deploy helper
 
-```bash
-php artisan queue:work --sleep=3 --tries=3 --max-time=3600
-```
-
-When Redis/Horizon is introduced later, prefer Horizon for queue monitoring. Horizon is recommended for the long-term architecture but is not required for the current Ticket 1 foundation.
-
-### 10. Configure scheduler cron
-
-Add the standard Laravel scheduler entry for the deploy user:
-
-```cron
-* * * * * cd /var/www/gpsystem && php artisan schedule:run >> /dev/null 2>&1
-```
-
-The MVP foundation does not add scheduled business automation yet, but this prepares the server for future Laravel jobs.
-
-### 11. Configure file permissions
-
-Laravel requires runtime directories under `storage/` and `bootstrap/cache/` to exist and be writable. The repository includes `.gitkeep` placeholders for these runtime directories so browser/ZIP deployments create the required paths, but the staging PHP/web-server user must still be able to write to:
+Copy repository `deploy.example.php` to:
 
 ```text
-storage
+/home/gpsystem/domains/gpsystem.thecamels.pl/public_html/deploy.php
+```
+
+Edit only the staging copy and replace:
+
+```php
+const DEPLOY_TOKEN = 'CHANGE_ME_TO_LONG_RANDOM_TOKEN';
+```
+
+Use one fixed, long, random staging token. Do not commit the real token.
+
+## Runtime directories
+
+The browser helper ensures these Laravel runtime directories exist on every deploy:
+
+```text
+storage/framework/cache/data
+storage/framework/sessions
+storage/framework/views
+storage/logs
 bootstrap/cache
 ```
 
-Example:
+The PHP/web-server user must be able to write to `/app/storage`, `/app/bootstrap/cache`, `/public_html`, and PHP temporary storage.
 
-```bash
-sudo chown -R www-data:www-data storage bootstrap/cache
-sudo find storage bootstrap/cache -type d -exec chmod 775 {} \;
-sudo find storage bootstrap/cache -type f -exec chmod 664 {} \;
-```
+## Public file sync behavior
 
-Adjust user/group names for the actual server.
-
-### 12. Configure web server and HTTPS
-
-Use HTTPS for the staging domain:
+The repository has a normal Laravel `public/` directory under `/app/public` after code sync. The helper copies deployable public files from:
 
 ```text
-https://gpsystem.thecamels.pl
+/home/gpsystem/domains/gpsystem.thecamels.pl/app/public
 ```
 
-The web server should:
+to:
 
-- Serve `gpsystem.thecamels.pl` over SSL/TLS.
-- Point document root to `/var/www/gpsystem/public` or the equivalent release `public` directory.
-- Route missing files to `public/index.php` using standard Laravel Nginx/Apache rules.
-- Deny access to hidden files such as `.env`.
-
-## Recommended staging `.env` values
-
-Use placeholders only. Do not put real secrets in documentation or git.
-
-```dotenv
-APP_NAME="GPS Product Hub"
-APP_ENV=staging
-APP_KEY=base64:generated_by_php_artisan_key_generate
-APP_DEBUG=false
-APP_URL=https://gpsystem.thecamels.pl
-
-APP_LOCALE=en
-APP_FALLBACK_LOCALE=en
-APP_FAKER_LOCALE=en_US
-
-LOG_CHANNEL=stack
-LOG_STACK=single
-LOG_LEVEL=info
-
-DB_CONNECTION=pgsql
-DB_HOST=127.0.0.1
-DB_PORT=5432
-DB_DATABASE=gps_product_hub_staging
-DB_USERNAME=gps_product_hub_user
-DB_PASSWORD=replace_with_staging_secret
-
-SESSION_DRIVER=database
-SESSION_LIFETIME=120
-SESSION_ENCRYPT=false
-SESSION_PATH=/
-SESSION_DOMAIN=null
-
-CACHE_STORE=database
-QUEUE_CONNECTION=database
-
-REDIS_CLIENT=phpredis
-REDIS_HOST=127.0.0.1
-REDIS_PASSWORD=null
-REDIS_PORT=6379
-
-MAIL_MAILER=log
-MAIL_FROM_ADDRESS=no-reply@gpsystem.thecamels.pl
-MAIL_FROM_NAME="GPS Product Hub"
-
-GPS_INTEGRATIONS_ENABLED=false
-GPS_WOO_WRITES_ENABLED=false
-GPS_MARKETPLACE_PUBLISHING_ENABLED=false
-GPS_EXTERNAL_API_WRITES_ENABLED=false
-GPS_EBAY_PUBLISHING_ENABLED=false
-GPS_ALLEGRO_INTEGRATION_ENABLED=false
-GPS_OVOKO_INTEGRATION_ENABLED=false
-GPS_NBP_RATES_ENABLED=false
+```text
+/home/gpsystem/domains/gpsystem.thecamels.pl/public_html
 ```
 
-`APP_DEBUG=false` is recommended for staging. Temporarily set `APP_DEBUG=true` only during initial setup/debug, then turn it back off and rebuild config cache.
+This supports repository-managed files such as:
 
-## Safety flag review
-
-The staging domain can run safely without accidentally publishing because the current foundation has no publishing code and these flags default to `false`:
-
-- `GPS_INTEGRATIONS_ENABLED`
-- `GPS_WOO_WRITES_ENABLED`
-- `GPS_MARKETPLACE_PUBLISHING_ENABLED`
-- `GPS_EXTERNAL_API_WRITES_ENABLED`
-- `GPS_EBAY_PUBLISHING_ENABLED`
-- `GPS_ALLEGRO_INTEGRATION_ENABLED`
-- `GPS_OVOKO_INTEGRATION_ENABLED`
-- `GPS_NBP_RATES_ENABLED`
-
-Current intended behavior:
-
-- Woo writes disabled.
-- eBay publishing disabled.
-- Allegro integration disabled.
-- Ovoko integration disabled.
-- NBP rates disabled unless later configured as read-only.
-- Risky automation disabled.
-- No production credentials present.
-
-## First admin creation method
-
-Do not hardcode a real password in a seeder. For staging, create the first admin via `php artisan tinker` after migrations and role seeding.
-
-```bash
-php artisan tinker
+```text
+public/images/car-placeholder.svg
 ```
 
-Then run the following, replacing the email and password with staging-only values:
+The helper preserves these public-root files:
 
-```php
-use App\Models\User;
-use App\Enums\UserRole;
+- `index.php`
+- `deploy.php`
+- `.htaccess`
+- `deploy.lock`
+- `public-assets.zip`
 
-$user = User::create([
-    'name' => 'GPS Admin',
-    'email' => 'admin@example.com',
-    'password' => 'replace-with-a-strong-staging-password',
-]);
+## Migration behavior
 
-$user->assignRole(UserRole::OwnerAdmin->value);
+When Laravel dependencies are available, the helper runs migrations without shell access:
+
+1. Loads `/app/vendor/autoload.php`.
+2. Boots Laravel from `/app/bootstrap/app.php`.
+3. Resolves `Illuminate\Contracts\Console\Kernel`.
+4. Calls:
+
+   ```php
+   $kernel->call('migrate', ['--force' => true]);
+   ```
+
+5. Optionally calls:
+
+   ```php
+   $kernel->call('db:seed', ['--class' => 'RoleSeeder', '--force' => true]);
+   ```
+
+6. Clears Laravel config/cache/view caches through the same Kernel object.
+
+If Laravel cannot boot because `vendor/autoload.php` is missing, the helper shows a clear warning and skips migrations. Upload `/app/vendor.zip` and rerun deploy.
+
+## Deployment readiness review
+
+### Laravel web root
+
+For this shared-hosting layout, the public web root is:
+
+```text
+/home/gpsystem/domains/gpsystem.thecamels.pl/public_html
 ```
 
-Then exit tinker:
+The Laravel application root is outside the public web root:
 
-```php
-exit
+```text
+/home/gpsystem/domains/gpsystem.thecamels.pl/app
 ```
 
-After login, change credentials according to the team policy. Do not commit the staging email/password anywhere.
+Do not expose `/app` directly as a document root. It contains `.env`, source code, configuration, and other files that must not be served directly.
 
-## Deployment verification checklist
+### Admin URL
 
-After deployment, verify:
+The Filament admin panel is configured with:
 
-- `https://gpsystem.thecamels.pl` responds and redirects or routes to the application.
-- `https://gpsystem.thecamels.pl/admin` loads the Filament login page.
-- The first admin can log in.
-- The dashboard loads.
-- Placeholder navigation appears:
-  - Dashboard
-  - Mobile Intake
-  - Staging Items
-  - Product Catalog
-  - Product Command Center
-  - Pricing
-  - Stock / Locations
-  - Readiness
-  - Woo Sync Preparation
-  - Orders
-  - Error Center
-  - Settings
-  - Users / Roles
-- Migrations ran successfully.
-- Role seeder ran successfully.
-- `storage` and `bootstrap/cache` are writable by PHP.
-- `storage/logs/laravel.log` is writable.
-- `php artisan config:cache` succeeds.
-- `php artisan route:cache` succeeds.
-- Risky feature flags are disabled.
-- No external API credentials are present.
-- No external API writes are possible.
-- No marketplace publishing is possible.
+- Panel path: `/admin`
+- Panel brand: `GPS Product Hub`
+- Login enabled: yes
 
-## Useful verification commands
+Expected staging admin URL:
 
-Run on the staging server from the project root:
-
-```bash
-php artisan about
-php artisan migrate:status
-php artisan route:list --path=admin
-php artisan tinker
+```text
+https://gpsystem.thecamels.pl/admin
 ```
 
-Inside tinker, verify roles and flags:
+### Required PHP extensions
 
-```php
-use Spatie\Permission\Models\Role;
+Recommended baseline:
 
-Role::pluck('name')->all();
-config('product-hub.feature_flags');
+- PHP 8.3 or newer
+- `zip` / `ZipArchive`
+- `curl` or URL-enabled `file_get_contents`
+- database PDO extension matching staging DB (`pdo_mysql` for MySQL/MariaDB)
+
+Laravel/Filament also require standard PHP extensions such as:
+
+- `ctype`
+- `dom`
+- `fileinfo`
+- `filter`
+- `hash`
+- `mbstring`
+- `openssl`
+- `pdo`
+- `session`
+- `tokenizer`
+- `xml`
+- `intl` recommended
+
+## Safety status
+
+The current staging deployment should be treated as an admin foundation only:
+
+- Filament admin shell exists.
+- Placeholder pages exist for future modules.
+- Roles can be seeded.
+- Risky integrations are disabled by default.
+- No external API writes exist.
+- No marketplace publishing exists.
+- No Cars/Samochody business logic is changed by deployment.
+- No Części module is implemented by deployment.
+
+## Post-deploy verification
+
+After a successful browser deploy, verify:
+
+- homepage loads at `https://gpsystem.thecamels.pl/`;
+- `/admin` loads at `https://gpsystem.thecamels.pl/admin`;
+- an admin user can log in;
+- dashboard/navigation appear;
+- feature flags remain disabled unless intentionally enabled;
+- `.env` values were not printed or changed;
+- `storage/` contents, uploaded files, and logs remain present;
+- repository public files needed by the UI are available under `public_html`.
+
+## Troubleshooting summary
+
+### Invalid token
+
+- Check server-side `public_html/deploy.php` contains the real fixed staging token.
+- Check the browser URL uses the exact token.
+- Rotate the token if it may have leaked.
+
+### Missing vendor/autoload.php
+
+- Create and upload `/app/vendor.zip`.
+- Rerun the normal browser deploy URL.
+- Confirm the ZIP contains top-level `vendor/autoload.php` after extraction.
+
+### Generated public asset missing
+
+- Create and upload `/public_html/public-assets.zip`.
+- Rerun the normal browser deploy URL.
+- Confirm repository-managed public files still live under `/app/public` and are not bridge files preserved by the sync.
+
+### Migration failure
+
+- Check database credentials in `/app/.env`.
+- Confirm database connectivity and permissions.
+- Inspect `/app/storage/logs/laravel.log`.
+
+### Stale deploy lock
+
+If no deployment is active, run the deploy URL with manual unlock:
+
+```text
+https://gpsystem.thecamels.pl/deploy.php?token=MY_FIXED_STAGING_TOKEN&unlock=1
 ```
-
-All feature flags should be `false` unless a later ticket explicitly enables a safe read-only capability.
-
-## Current Ticket 1A boundaries
-
-This staging readiness pass does not add:
-
-- Staging items.
-- Mobile intake functionality.
-- Product catalog data model.
-- Photo upload.
-- Duplicate detection.
-- Readiness engine.
-- Woo sync.
-- eBay publishing.
-- Allegro integration.
-- Ovoko integration.
-- NBP integration.
-- External API writes.

@@ -3,53 +3,40 @@
 declare(strict_types=1);
 
 /**
- * Browser-triggered Laravel staging deployment helper.
+ * Browser-triggered Laravel staging deployment helper for DirectAdmin/shared hosting.
  *
- * Copy this file to the server as deploy.php, keep it in the Laravel project
- * root (the directory that contains artisan), and replace the placeholder
- * below with one fixed permanent staging token on the server only. Do not
- * commit a real token.
+ * Copy this file to:
+ * /home/gpsystem/domains/gpsystem.thecamels.pl/public_html/deploy.php
  *
- * Security notes:
- * - This helper is intended for staging/test deployments only, not final
- *   production CI/CD.
- * - Use one fixed permanent staging token that is long, random, and private.
- * - Consider IP-restricting this script at the web server level.
- * - Remove, rename, or IP-restrict deploy.php later if more security is needed.
- * - Never print secrets or .env contents in deployment output.
+ * Then replace DEPLOY_TOKEN on the server only with one fixed, long, random
+ * staging token. Do not commit the real token.
+ *
+ * This helper intentionally does not use proc_open, shell_exec, exec, Composer,
+ * or shell-based Artisan calls. It is staging-only glue for the current shared
+ * hosting workflow; production should later move to VPS/SSH/CI/CD.
  */
 
 const DEPLOY_TOKEN = 'CHANGE_ME_TO_LONG_RANDOM_TOKEN';
 const GITHUB_ZIP_URL = 'https://github.com/talarekr/gpsystem/archive/refs/heads/main.zip';
+const STAGING_URL = 'https://gpsystem.thecamels.pl';
 const EXPECTED_ADMIN_URL = 'https://gpsystem.thecamels.pl/admin';
 
 $config = [
-    // The script should live in the Laravel project root. Override this only if
-    // you place deploy.php elsewhere.
-    'target_dir' => __DIR__,
-
-    // Preserve vendor by default so a temporary Composer/network failure is less
-    // likely to remove the currently working dependencies. Composer install still
-    // runs after copying when composer is available.
-    'preserve_vendor' => true,
-
-    // Commands can be disabled on constrained shared hosting, but the default is
-    // to run the expected Laravel post-deploy steps.
-    'run_composer' => true,
-    'run_artisan' => true,
-
-    // Adjust paths if the hosting provider uses non-standard binaries.
-    'php_binary' => 'php',
-    'composer_binary' => 'composer',
+    'app_dir' => '/home/gpsystem/domains/gpsystem.thecamels.pl/app',
+    'public_dir' => '/home/gpsystem/domains/gpsystem.thecamels.pl/public_html',
+    'seed_roles' => true,
+    'stale_lock_seconds' => 1800,
 ];
 
 header('Content-Type: text/html; charset=utf-8');
+@ini_set('display_errors', '0');
+@set_time_limit(600);
 
 $startedAt = microtime(true);
-$targetDir = realpath($config['target_dir']) ?: $config['target_dir'];
-$lockHandle = null;
 $tempZip = null;
 $tempDir = null;
+$lockHandle = null;
+$lockPath = rtrim($config['public_dir'], DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'deploy.lock';
 
 function h(string $value): string
 {
@@ -70,6 +57,7 @@ function logLine(string $message, string $level = 'info'): void
     if (function_exists('ob_flush')) {
         @ob_flush();
     }
+
     flush();
 }
 
@@ -83,6 +71,26 @@ function failDeploy(string $message, int $httpStatus = 500): never
     throw new RuntimeException($message);
 }
 
+function normalizeRelativePath(string $path): string
+{
+    $path = str_replace('\\', '/', $path);
+    $parts = [];
+
+    foreach (explode('/', $path) as $part) {
+        if ($part === '' || $part === '.') {
+            continue;
+        }
+
+        if ($part === '..') {
+            throw new RuntimeException('Unsafe relative path contains ..: ' . $path);
+        }
+
+        $parts[] = $part;
+    }
+
+    return implode('/', $parts);
+}
+
 function removePath(string $path): void
 {
     if (!file_exists($path) && !is_link($path)) {
@@ -90,7 +98,9 @@ function removePath(string $path): void
     }
 
     if (is_file($path) || is_link($path)) {
-        @unlink($path);
+        if (!@unlink($path) && file_exists($path)) {
+            throw new RuntimeException('Unable to remove file: ' . $path);
+        }
         return;
     }
 
@@ -100,85 +110,27 @@ function removePath(string $path): void
     );
 
     foreach ($iterator as $item) {
+        $itemPath = $item->getPathname();
         if ($item->isDir() && !$item->isLink()) {
-            @rmdir($item->getPathname());
+            @rmdir($itemPath);
         } else {
-            @unlink($item->getPathname());
+            @unlink($itemPath);
         }
     }
 
     @rmdir($path);
 }
 
-function isExcludedPath(string $relativePath, bool $preserveVendor): bool
+function ensureDirectory(string $path): void
 {
-    $relativePath = trim(str_replace('\\', '/', $relativePath), '/');
-    $segments = $relativePath === '' ? [] : explode('/', $relativePath);
-    $basename = basename($relativePath);
-
-    if ($relativePath === '') {
-        return false;
+    if (!is_dir($path) && !mkdir($path, 0755, true) && !is_dir($path)) {
+        throw new RuntimeException('Unable to create directory: ' . $path);
     }
-
-    $alwaysPreserve = [
-        '.env',
-        'storage',
-        'deploy.php',
-        'deploy.lock',
-    ];
-
-    if ($preserveVendor) {
-        $alwaysPreserve[] = 'vendor';
-    }
-
-    if (in_array($relativePath, $alwaysPreserve, true) || in_array($segments[0] ?? '', $alwaysPreserve, true)) {
-        return true;
-    }
-
-    $excludedNames = [
-        '.git',
-        'node_modules',
-        '.DS_Store',
-        '.idea',
-        '.vscode',
-        '.phpunit.result.cache',
-        '.phpunit.cache',
-        '.parcel-cache',
-        '.vite',
-        'npm-debug.log',
-        'yarn-error.log',
-        'pnpm-debug.log',
-    ];
-
-    if (in_array($basename, $excludedNames, true)) {
-        return true;
-    }
-
-    foreach ($segments as $segment) {
-        if (in_array($segment, ['.git', 'node_modules'], true)) {
-            return true;
-        }
-    }
-
-    if (preg_match('/(^|\\/)\.deploy-/u', $relativePath) === 1) {
-        return true;
-    }
-
-    // Preserve/remove logs outside storage by excluding them from copy and delete.
-    if (str_ends_with($basename, '.log')) {
-        return true;
-    }
-
-    return false;
 }
 
 function copyFileWithDirectory(string $source, string $destination): void
 {
-    $destinationDir = dirname($destination);
-
-    if (!is_dir($destinationDir) && !mkdir($destinationDir, 0755, true) && !is_dir($destinationDir)) {
-        throw new RuntimeException('Unable to create directory: ' . $destinationDir);
-    }
+    ensureDirectory(dirname($destination));
 
     if (!copy($source, $destination)) {
         throw new RuntimeException('Unable to copy file to: ' . $destination);
@@ -187,11 +139,72 @@ function copyFileWithDirectory(string $source, string $destination): void
     @chmod($destination, fileperms($source) & 0777);
 }
 
-function syncDirectory(string $sourceDir, string $targetDir, bool $preserveVendor): array
+function appPathIsPreserved(string $relativePath): bool
+{
+    $relativePath = normalizeRelativePath($relativePath);
+    $segments = $relativePath === '' ? [] : explode('/', $relativePath);
+    $first = $segments[0] ?? '';
+    $basename = basename($relativePath);
+
+    if ($relativePath === '') {
+        return false;
+    }
+
+    if (in_array($first, ['.env', 'storage', 'vendor'], true) || $relativePath === 'vendor.zip') {
+        return true;
+    }
+
+    if (in_array($basename, ['.git', '.DS_Store'], true)) {
+        return true;
+    }
+
+    if (in_array($first, ['.git', 'node_modules'], true) || in_array('node_modules', $segments, true)) {
+        return true;
+    }
+
+    if (in_array($basename, ['.phpunit.result.cache', 'npm-debug.log', 'yarn-error.log', 'pnpm-debug.log'], true)) {
+        return true;
+    }
+
+    if (str_ends_with($basename, '.log')) {
+        return true;
+    }
+
+    return preg_match('/(^|\/)\.deploy-/u', $relativePath) === 1;
+}
+
+function publicPathIsPreserved(string $relativePath): bool
+{
+    $relativePath = normalizeRelativePath($relativePath);
+    $segments = $relativePath === '' ? [] : explode('/', $relativePath);
+    $basename = basename($relativePath);
+
+    if ($relativePath === '') {
+        return false;
+    }
+
+    if (in_array($relativePath, ['index.php', 'deploy.php', '.htaccess', 'deploy.lock', 'public-assets.zip'], true)) {
+        return true;
+    }
+
+    if (in_array($basename, ['.DS_Store'], true)) {
+        return true;
+    }
+
+    if (in_array($segments[0] ?? '', ['.git', 'node_modules'], true)) {
+        return true;
+    }
+
+    return false;
+}
+
+function syncDirectory(string $sourceDir, string $targetDir, callable $isPreserved, bool $deleteStale = true): array
 {
     $copied = 0;
-    $deleted = 0;
     $createdDirs = 0;
+    $deleted = 0;
+
+    ensureDirectory($targetDir);
 
     $sourceIterator = new RecursiveIteratorIterator(
         new RecursiveDirectoryIterator($sourceDir, FilesystemIterator::SKIP_DOTS),
@@ -199,19 +212,16 @@ function syncDirectory(string $sourceDir, string $targetDir, bool $preserveVendo
     );
 
     foreach ($sourceIterator as $sourceItem) {
-        $relativePath = substr($sourceItem->getPathname(), strlen($sourceDir) + 1);
-        $relativePath = str_replace('\\', '/', $relativePath);
+        $relativePath = normalizeRelativePath(substr($sourceItem->getPathname(), strlen($sourceDir) + 1));
 
-        if (isExcludedPath($relativePath, $preserveVendor)) {
+        if ($isPreserved($relativePath)) {
             continue;
         }
 
-        $targetPath = $targetDir . DIRECTORY_SEPARATOR . $relativePath;
+        $targetPath = $targetDir . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relativePath);
 
         if ($sourceItem->isDir() && !$sourceItem->isLink()) {
-            if (!is_dir($targetPath) && !mkdir($targetPath, 0755, true) && !is_dir($targetPath)) {
-                throw new RuntimeException('Unable to create directory: ' . $targetPath);
-            }
+            ensureDirectory($targetPath);
             $createdDirs++;
             continue;
         }
@@ -220,22 +230,23 @@ function syncDirectory(string $sourceDir, string $targetDir, bool $preserveVendo
         $copied++;
     }
 
-    // Remove target files/directories that are no longer present in the source,
-    // while preserving server-local runtime state and excluded paths.
+    if (!$deleteStale) {
+        return [$copied, $createdDirs, $deleted];
+    }
+
     $targetIterator = new RecursiveIteratorIterator(
         new RecursiveDirectoryIterator($targetDir, FilesystemIterator::SKIP_DOTS),
         RecursiveIteratorIterator::CHILD_FIRST
     );
 
     foreach ($targetIterator as $targetItem) {
-        $relativePath = substr($targetItem->getPathname(), strlen($targetDir) + 1);
-        $relativePath = str_replace('\\', '/', $relativePath);
+        $relativePath = normalizeRelativePath(substr($targetItem->getPathname(), strlen($targetDir) + 1));
 
-        if (isExcludedPath($relativePath, $preserveVendor)) {
+        if ($isPreserved($relativePath)) {
             continue;
         }
 
-        $sourcePath = $sourceDir . DIRECTORY_SEPARATOR . $relativePath;
+        $sourcePath = $sourceDir . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relativePath);
 
         if (file_exists($sourcePath) || is_link($sourcePath)) {
             continue;
@@ -267,7 +278,7 @@ function downloadZip(string $url, string $destination): void
             CURLOPT_FAILONERROR => true,
             CURLOPT_TIMEOUT => 300,
             CURLOPT_CONNECTTIMEOUT => 30,
-            CURLOPT_USERAGENT => 'gpsystem-browser-deploy/1.0',
+            CURLOPT_USERAGENT => 'gpsystem-browser-deploy/2.0',
         ]);
 
         $success = curl_exec($curl);
@@ -287,7 +298,7 @@ function downloadZip(string $url, string $destination): void
         'http' => [
             'follow_location' => 1,
             'timeout' => 300,
-            'header' => "User-Agent: gpsystem-browser-deploy/1.0\r\n",
+            'header' => "User-Agent: gpsystem-browser-deploy/2.0\r\n",
         ],
     ]);
 
@@ -300,6 +311,65 @@ function downloadZip(string $url, string $destination): void
     if (file_put_contents($destination, $data) === false) {
         throw new RuntimeException('Unable to save downloaded ZIP.');
     }
+}
+
+function safeExtractZip(string $zipPath, string $destinationDir): array
+{
+    ensureDirectory($destinationDir);
+
+    $zip = new ZipArchive();
+    $opened = $zip->open($zipPath);
+
+    if ($opened !== true) {
+        throw new RuntimeException('ZIP open failed for ' . basename($zipPath) . '; ZipArchive code: ' . $opened);
+    }
+
+    $files = 0;
+    $dirs = 0;
+
+    for ($i = 0; $i < $zip->numFiles; $i++) {
+        $name = $zip->getNameIndex($i);
+
+        if (!is_string($name) || $name === '') {
+            continue;
+        }
+
+        $relativePath = normalizeRelativePath($name);
+        if ($relativePath === '') {
+            continue;
+        }
+
+        $targetPath = $destinationDir . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relativePath);
+
+        if (str_ends_with($name, '/') || str_ends_with($name, '\\')) {
+            ensureDirectory($targetPath);
+            $dirs++;
+            continue;
+        }
+
+        ensureDirectory(dirname($targetPath));
+        $stream = $zip->getStream($name);
+        if ($stream === false) {
+            $zip->close();
+            throw new RuntimeException('Unable to read ZIP entry: ' . $relativePath);
+        }
+
+        $output = fopen($targetPath, 'wb');
+        if ($output === false) {
+            fclose($stream);
+            $zip->close();
+            throw new RuntimeException('Unable to write extracted file: ' . $targetPath);
+        }
+
+        stream_copy_to_stream($stream, $output);
+        fclose($stream);
+        fclose($output);
+        $files++;
+    }
+
+    $zip->close();
+
+    return [$files, $dirs];
 }
 
 function findExtractedRepository(string $extractDir): string
@@ -316,61 +386,179 @@ function findExtractedRepository(string $extractDir): string
     throw new RuntimeException('Could not find extracted Laravel repository directory.');
 }
 
-function runCommand(string $command, string $cwd, bool $critical = true): void
+function ensureRuntimeDirectories(string $appDir): void
 {
-    logLine('Running: ' . $command);
+    foreach ([
+        'storage/framework/cache/data',
+        'storage/framework/sessions',
+        'storage/framework/views',
+        'storage/logs',
+        'bootstrap/cache',
+    ] as $relativePath) {
+        ensureDirectory($appDir . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relativePath));
+        logLine('Ensured runtime directory: ' . $relativePath, 'ok');
+    }
+}
 
-    if (!function_exists('proc_open')) {
-        $message = 'proc_open is disabled; cannot run command: ' . $command;
-        if ($critical) {
-            throw new RuntimeException($message);
-        }
-        logLine($message, 'warn');
+function extractOptionalArchive(string $zipPath, string $destinationDir, string $label): void
+{
+    if (!file_exists($zipPath)) {
+        logLine($label . ' not found; skipping optional archive extraction.', 'warn');
         return;
     }
 
-    $descriptorSpec = [
-        0 => ['pipe', 'r'],
-        1 => ['pipe', 'w'],
-        2 => ['pipe', 'w'],
-    ];
+    logLine('Found ' . $label . ': ' . $zipPath);
+    [$files, $dirs] = safeExtractZip($zipPath, $destinationDir);
 
-    $process = proc_open($command, $descriptorSpec, $pipes, $cwd);
-
-    if (!is_resource($process)) {
-        throw new RuntimeException('Unable to start command: ' . $command);
+    if (!@unlink($zipPath)) {
+        throw new RuntimeException('Extracted ' . $label . ' but could not delete archive: ' . $zipPath);
     }
 
-    fclose($pipes[0]);
-    $output = stream_get_contents($pipes[1]);
-    $errorOutput = stream_get_contents($pipes[2]);
-    fclose($pipes[1]);
-    fclose($pipes[2]);
+    logLine($label . ' extracted into ' . $destinationDir . '. Files: ' . $files . '; directories: ' . $dirs . '. Archive deleted.', 'ok');
+}
 
-    $exitCode = proc_close($process);
-    $combinedOutput = trim($output . "\n" . $errorOutput);
-
-    if ($combinedOutput !== '') {
-        $sanitized = preg_replace('/APP_KEY=base64:[A-Za-z0-9+\\/=]+/u', 'APP_KEY=[hidden]', $combinedOutput) ?? $combinedOutput;
-        echo h($sanitized) . "\n";
-    }
-
-    if ($exitCode !== 0) {
-        $message = 'Command failed with exit code ' . $exitCode . ': ' . $command;
-        if ($critical) {
-            throw new RuntimeException($message);
-        }
-        logLine($message, 'warn');
+function extractVendorArchive(string $zipPath, string $appDir): void
+{
+    if (!file_exists($zipPath)) {
+        logLine('vendor.zip not found; preserving existing /app/vendor.', 'warn');
         return;
     }
 
-    logLine('Command completed: ' . $command, 'ok');
+    $vendorDir = $appDir . DIRECTORY_SEPARATOR . 'vendor';
+    $tempVendorDir = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'gpsystem-vendor-' . date('Ymd-His') . '-' . bin2hex(random_bytes(4));
+
+    try {
+        logLine('Found vendor.zip: ' . $zipPath);
+        [$files, $dirs] = safeExtractZip($zipPath, $tempVendorDir);
+
+        if (file_exists($tempVendorDir . DIRECTORY_SEPARATOR . 'vendor' . DIRECTORY_SEPARATOR . 'autoload.php')) {
+            $preparedVendorDir = $tempVendorDir . DIRECTORY_SEPARATOR . 'vendor';
+        } elseif (file_exists($tempVendorDir . DIRECTORY_SEPARATOR . 'autoload.php')) {
+            $preparedVendorDir = $tempVendorDir;
+        } else {
+            throw new RuntimeException('vendor.zip must contain vendor/autoload.php or autoload.php at the archive root.');
+        }
+
+        removePath($vendorDir);
+        ensureDirectory(dirname($vendorDir));
+
+        if (!@rename($preparedVendorDir, $vendorDir)) {
+            [$copied] = syncDirectory($preparedVendorDir, $vendorDir, static fn (): bool => false, false);
+            logLine('vendor.zip fallback copied vendor files: ' . $copied, 'warn');
+        }
+
+        if (!@unlink($zipPath)) {
+            throw new RuntimeException('Extracted vendor.zip but could not delete archive: ' . $zipPath);
+        }
+
+        logLine('vendor.zip extracted into /app/vendor. Files: ' . $files . '; directories: ' . $dirs . '. Archive deleted.', 'ok');
+    } finally {
+        removePath($tempVendorDir);
+    }
+}
+
+function callArtisan(object $kernel, string $command, array $parameters = [], bool $critical = true): int
+{
+    logLine('Running Laravel Console Kernel: ' . $command . ' ' . trim(json_encode($parameters, JSON_UNESCAPED_SLASHES) ?: ''));
+
+    try {
+        $exitCode = (int) $kernel->call($command, $parameters);
+        $output = method_exists($kernel, 'output') ? trim((string) $kernel->output()) : '';
+
+        if ($output !== '') {
+            echo h($output) . "\n";
+        }
+
+        if ($exitCode !== 0) {
+            $message = 'Laravel Console Kernel command failed with exit code ' . $exitCode . ': ' . $command;
+            if ($critical) {
+                throw new RuntimeException($message);
+            }
+            logLine($message, 'warn');
+        } else {
+            logLine('Laravel Console Kernel command completed: ' . $command, 'ok');
+        }
+
+        return $exitCode;
+    } catch (Throwable $exception) {
+        if ($critical) {
+            throw $exception;
+        }
+
+        logLine('Optional Laravel Console Kernel command failed: ' . $command . '. ' . $exception->getMessage(), 'warn');
+        return 1;
+    }
+}
+
+function runLaravelMaintenance(string $appDir, bool $seedRoles): void
+{
+    $autoloadPath = $appDir . DIRECTORY_SEPARATOR . 'vendor' . DIRECTORY_SEPARATOR . 'autoload.php';
+    $bootstrapPath = $appDir . DIRECTORY_SEPARATOR . 'bootstrap' . DIRECTORY_SEPARATOR . 'app.php';
+
+    if (!file_exists($autoloadPath)) {
+        logLine('Laravel vendor/autoload.php is missing; migrations skipped. Upload /app/vendor.zip when dependencies changed or vendor is missing.', 'warn');
+        return;
+    }
+
+    if (!file_exists($bootstrapPath)) {
+        throw new RuntimeException('Laravel bootstrap/app.php is missing; cannot run migrations.');
+    }
+
+    require_once $autoloadPath;
+    $app = require $bootstrapPath;
+
+    if (!is_object($app) || !method_exists($app, 'make')) {
+        throw new RuntimeException('Laravel bootstrap did not return an application container.');
+    }
+
+    $kernel = $app->make(Illuminate\Contracts\Console\Kernel::class);
+    $kernel->bootstrap();
+
+    callArtisan($kernel, 'migrate', ['--force' => true], true);
+
+    if ($seedRoles) {
+        callArtisan($kernel, 'db:seed', ['--class' => 'RoleSeeder', '--force' => true], false);
+    }
+
+    callArtisan($kernel, 'config:clear', [], false);
+    callArtisan($kernel, 'cache:clear', [], false);
+    callArtisan($kernel, 'view:clear', [], false);
+}
+
+function acquireDeployLock(string $lockPath, int $staleSeconds): mixed
+{
+    if (isset($_GET['unlock']) && $_GET['unlock'] === '1') {
+        if (file_exists($lockPath)) {
+            @unlink($lockPath);
+        }
+        logLine('Manual unlock requested; removed deploy lock if it existed.', 'warn');
+    }
+
+    if (file_exists($lockPath) && (time() - filemtime($lockPath)) > $staleSeconds) {
+        @unlink($lockPath);
+        logLine('Removed stale deploy lock older than ' . $staleSeconds . ' seconds.', 'warn');
+    }
+
+    $handle = fopen($lockPath, 'c');
+    if ($handle === false) {
+        throw new RuntimeException('Unable to create deployment lock file: ' . $lockPath);
+    }
+
+    if (!flock($handle, LOCK_EX | LOCK_NB)) {
+        fclose($handle);
+        throw new RuntimeException('Another deployment is already running. If this is stale, retry with &unlock=1 after confirming no deploy is active.');
+    }
+
+    ftruncate($handle, 0);
+    fwrite($handle, 'Started at ' . date(DATE_ATOM) . PHP_EOL);
+
+    return $handle;
 }
 
 try {
-    echo '<!doctype html><html><head><meta charset="utf-8"><title>GPS browser deploy</title>';
+    echo '<!doctype html><html><head><meta charset="utf-8"><title>GPS staging browser deploy</title>';
     echo '<style>body{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:#0f172a;color:#e2e8f0;padding:24px;line-height:1.5}pre{white-space:pre-wrap}.ok{color:#86efac}</style>';
-    echo '</head><body><h1>GPS browser deploy</h1><pre>';
+    echo '</head><body><h1>GPS staging browser deploy</h1><pre>';
 
     $providedToken = (string) ($_GET['token'] ?? '');
 
@@ -386,82 +574,67 @@ try {
         failDeploy('PHP ZipArchive extension is required.');
     }
 
-    if (!is_dir($targetDir) || !is_writable($targetDir)) {
-        failDeploy('Target directory is not writable: ' . $targetDir);
+    $appDir = rtrim((string) $config['app_dir'], DIRECTORY_SEPARATOR);
+    $publicDir = rtrim((string) $config['public_dir'], DIRECTORY_SEPARATOR);
+
+    if (!is_dir($appDir) || !is_writable($appDir)) {
+        failDeploy('Laravel app directory is not writable: ' . $appDir);
+    }
+
+    if (!is_dir($publicDir) || !is_writable($publicDir)) {
+        failDeploy('Public directory is not writable: ' . $publicDir);
     }
 
     logLine('Token accepted.', 'ok');
-    logLine('Target directory: ' . $targetDir);
-    logLine('Expected admin URL after deploy: ' . EXPECTED_ADMIN_URL);
+    logLine('App directory: ' . $appDir);
+    logLine('Public directory: ' . $publicDir);
+    logLine('No Composer, shell, proc_open, external API writes, or marketplace publishing will be used.', 'ok');
+    logLine('Expected URLs after deploy: ' . STAGING_URL . ' and ' . EXPECTED_ADMIN_URL);
 
-    $lockPath = $targetDir . DIRECTORY_SEPARATOR . 'deploy.lock';
-    $lockHandle = fopen($lockPath, 'c');
-
-    if ($lockHandle === false) {
-        failDeploy('Unable to create deployment lock file.');
-    }
-
-    if (!flock($lockHandle, LOCK_EX | LOCK_NB)) {
-        failDeploy('Another deployment is already running.', 423);
-    }
-
-    fwrite($lockHandle, 'Started at ' . date(DATE_ATOM) . PHP_EOL);
+    $lockHandle = acquireDeployLock($lockPath, (int) $config['stale_lock_seconds']);
     logLine('Deployment lock acquired.', 'ok');
 
     $tempBase = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR);
     $uniqueId = 'gpsystem-deploy-' . date('Ymd-His') . '-' . bin2hex(random_bytes(4));
     $tempZip = $tempBase . DIRECTORY_SEPARATOR . $uniqueId . '.zip';
     $tempDir = $tempBase . DIRECTORY_SEPARATOR . $uniqueId;
-
-    if (!mkdir($tempDir, 0755, true) && !is_dir($tempDir)) {
-        failDeploy('Unable to create temporary extraction directory.');
-    }
+    ensureDirectory($tempDir);
 
     logLine('Downloading GitHub ZIP: ' . GITHUB_ZIP_URL);
     downloadZip(GITHUB_ZIP_URL, $tempZip);
-    logLine('ZIP downloaded to temporary storage.', 'ok');
+    logLine('GitHub ZIP downloaded to temporary storage.', 'ok');
 
-    $zip = new ZipArchive();
-    $opened = $zip->open($tempZip);
-
-    if ($opened !== true) {
-        failDeploy('ZIP extract failed; ZipArchive open code: ' . $opened);
-    }
-
-    if (!$zip->extractTo($tempDir)) {
-        $zip->close();
-        failDeploy('ZIP extract failed while extracting files.');
-    }
-
-    $zip->close();
-    logLine('ZIP extracted to temporary directory.', 'ok');
+    safeExtractZip($tempZip, $tempDir);
+    logLine('GitHub ZIP extracted to temporary directory.', 'ok');
 
     $sourceDir = findExtractedRepository($tempDir);
     logLine('Found extracted repository package: ' . $sourceDir, 'ok');
 
-    logLine('Copying repository package to target while preserving .env, storage, runtime data, logs inside storage, and configured local paths.');
-    [$copied, $createdDirs, $deleted] = syncDirectory($sourceDir, $targetDir, (bool) $config['preserve_vendor']);
-    logLine('Copy complete. Files copied: ' . $copied . '; directories ensured: ' . $createdDirs . '; stale paths removed: ' . $deleted . '.', 'ok');
+    logLine('Copying repository package to /app while preserving .env, storage, and vendor.');
+    [$copied, $createdDirs, $deleted] = syncDirectory($sourceDir, $appDir, 'appPathIsPreserved');
+    logLine('App sync complete. Files copied: ' . $copied . '; directories ensured: ' . $createdDirs . '; stale paths removed: ' . $deleted . '.', 'ok');
 
-    if ($config['run_composer'] && file_exists($targetDir . DIRECTORY_SEPARATOR . 'composer.json')) {
-        runCommand($config['composer_binary'] . ' install --no-dev --optimize-autoloader', $targetDir, true);
+    ensureRuntimeDirectories($appDir);
+
+    extractVendorArchive($appDir . DIRECTORY_SEPARATOR . 'vendor.zip', $appDir);
+
+    $repoPublicDir = $appDir . DIRECTORY_SEPARATOR . 'public';
+    if (is_dir($repoPublicDir)) {
+        logLine('Syncing deployable repository public files from /app/public to /public_html while preserving index.php, deploy.php, and .htaccess.');
+        [$publicCopied, $publicCreatedDirs, $publicDeleted] = syncDirectory($repoPublicDir, $publicDir, 'publicPathIsPreserved', false);
+        logLine('Public sync complete. Files copied: ' . $publicCopied . '; directories ensured: ' . $publicCreatedDirs . '; stale paths removed: ' . $publicDeleted . ' (disabled for public assets).', 'ok');
     } else {
-        logLine('Composer install skipped by configuration or missing composer.json.', 'warn');
+        logLine('/app/public is missing; public file sync skipped.', 'warn');
     }
 
-    if ($config['run_artisan'] && file_exists($targetDir . DIRECTORY_SEPARATOR . 'artisan')) {
-        $php = $config['php_binary'];
-        runCommand($php . ' artisan migrate --force', $targetDir, true);
-        runCommand($php . ' artisan storage:link', $targetDir, false);
-        runCommand($php . ' artisan config:clear', $targetDir, true);
-        runCommand($php . ' artisan cache:clear', $targetDir, true);
-        runCommand($php . ' artisan config:cache', $targetDir, true);
-        runCommand($php . ' artisan route:cache', $targetDir, true);
-        runCommand($php . ' artisan view:cache', $targetDir, true);
-        runCommand($php . ' artisan queue:restart', $targetDir, false);
-    } else {
-        logLine('Artisan commands skipped by configuration or missing artisan.', 'warn');
-    }
+    extractOptionalArchive(
+        $publicDir . DIRECTORY_SEPARATOR . 'public-assets.zip',
+        $publicDir,
+        'public-assets.zip'
+    );
+
+    logLine('Running migrations through Laravel Console Kernel without shell/proc_open.');
+    runLaravelMaintenance($appDir, (bool) $config['seed_roles']);
 
     logLine('Cleaning up temporary files.');
     removePath($tempZip);
@@ -471,19 +644,30 @@ try {
 
     $duration = number_format(microtime(true) - $startedAt, 2);
     logLine('Deployment completed in ' . $duration . ' seconds.', 'ok');
-    echo "\nNext checks:\n- Open https://gpsystem.thecamels.pl/\n- Open " . h(EXPECTED_ADMIN_URL) . "\n";
+    echo "\nNext checks:\n- Open " . h(STAGING_URL) . "\n- Open " . h(EXPECTED_ADMIN_URL) . "\n";
 } catch (Throwable $exception) {
     logLine('Deployment stopped: ' . $exception->getMessage(), 'error');
 } finally {
     if (is_string($tempZip)) {
-        removePath($tempZip);
+        try {
+            removePath($tempZip);
+        } catch (Throwable) {
+            // Nothing useful can be done here in a browser helper.
+        }
     }
+
     if (is_string($tempDir)) {
-        removePath($tempDir);
+        try {
+            removePath($tempDir);
+        } catch (Throwable) {
+            // Nothing useful can be done here in a browser helper.
+        }
     }
+
     if (is_resource($lockHandle)) {
         flock($lockHandle, LOCK_UN);
         fclose($lockHandle);
+        @unlink($lockPath);
     }
 
     echo '</pre></body></html>';
