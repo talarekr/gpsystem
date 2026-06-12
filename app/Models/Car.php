@@ -5,6 +5,8 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 
@@ -145,6 +147,37 @@ class Car extends Model
             'sprzedany' => 'sprzedany',
             'archiwalny' => 'archiwalny',
         ];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function orderedImagePaths(): array
+    {
+        $paths = $this->images()
+            ->pluck('path')
+            ->all();
+
+        if ($paths === [] && filled($this->main_photo_path)) {
+            return [$this->main_photo_path];
+        }
+
+        return $paths;
+    }
+
+    public function getPrimaryPhotoPathAttribute(): ?string
+    {
+        return $this->primaryImage?->path ?? $this->main_photo_path;
+    }
+
+    public function images(): HasMany
+    {
+        return $this->hasMany(CarImage::class)->orderBy('sort_order')->orderBy('id');
+    }
+
+    public function primaryImage(): HasOne
+    {
+        return $this->hasOne(CarImage::class)->where('is_primary', true)->orderBy('sort_order')->orderBy('id');
     }
 
     public function createdBy(): BelongsTo

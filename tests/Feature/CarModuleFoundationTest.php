@@ -5,10 +5,13 @@ namespace Tests\Feature;
 use App\Enums\UserRole;
 use App\Filament\Resources\CarResource;
 use App\Models\Car;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 class CarModuleFoundationTest extends TestCase
 {
+    use RefreshDatabase;
+
     public function test_car_dictionary_options_match_foundation_requirements(): void
     {
         $this->assertSame([
@@ -45,6 +48,33 @@ class CarModuleFoundationTest extends TestCase
             'sprzedany' => 'sprzedany',
             'archiwalny' => 'archiwalny',
         ], Car::statusOptions());
+    }
+
+    public function test_car_images_keep_first_ordered_image_as_primary_thumbnail(): void
+    {
+        $car = Car::query()->create([
+            'make' => 'BMW',
+            'model' => '3',
+        ]);
+
+        $car->images()->createMany([
+            [
+                'path' => 'cars/photos/front.jpg',
+                'sort_order' => 0,
+                'is_primary' => true,
+            ],
+            [
+                'path' => 'cars/photos/interior.jpg',
+                'sort_order' => 1,
+                'is_primary' => false,
+            ],
+        ]);
+
+        $this->assertSame([
+            'cars/photos/front.jpg',
+            'cars/photos/interior.jpg',
+        ], $car->fresh()->orderedImagePaths());
+        $this->assertSame('cars/photos/front.jpg', $car->fresh()->primary_photo_path);
     }
 
     public function test_car_resource_permissions_are_simple_and_safe(): void

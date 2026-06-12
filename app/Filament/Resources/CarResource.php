@@ -40,19 +40,29 @@ class CarResource extends Resource
         return $form
             ->schema([
                 Section::make('Zdjęcia')
-                    ->description('Dodaj główne zdjęcie samochodu. Galeria wielu zdjęć zostanie rozszerzona w kolejnym etapie, jeżeli będzie potrzebna.')
+                    ->icon('heroicon-o-camera')
+                    ->description('Dodaj zdjęcia samochodu. Pierwsze zdjęcie od lewej jest zdjęciem głównym używanym jako miniatura na liście samochodów.')
+                    ->extraAttributes(['class' => 'gps-car-form-section'])
                     ->schema([
-                        Forms\Components\FileUpload::make('main_photo_path')
-                            ->label('Główne zdjęcie')
+                        Forms\Components\FileUpload::make('photo_paths')
+                            ->label('Zdjęcia samochodu')
+                            ->helperText('Możesz dodać wiele zdjęć. Przeciągnij zdjęcia, aby zmienić kolejność — pierwsze od lewej będzie zdjęciem głównym.')
                             ->image()
                             ->imageEditor()
-                            ->directory('cars/main-photos')
+                            ->multiple()
+                            ->reorderable()
+                            ->appendFiles()
+                            ->panelLayout('grid')
+                            ->directory('cars/photos')
                             ->visibility('public')
                             ->maxSize(8192)
+                            ->formatStateUsing(static fn (?Car $record): array => $record?->orderedImagePaths() ?? [])
                             ->columnSpanFull(),
                     ]),
 
                 Section::make('VIN')
+                    ->icon('heroicon-o-identification')
+                    ->extraAttributes(['class' => 'gps-car-form-section'])
                     ->description('Pole przygotowane pod przyszłe uzupełnianie danych po VIN. Zewnętrzne API VIN nie jest jeszcze podłączone.')
                     ->schema([
                         Forms\Components\TextInput::make('vin')
@@ -64,6 +74,8 @@ class CarResource extends Resource
                     ]),
 
                 Section::make('Informacje o samochodzie')
+                    ->icon('heroicon-o-truck')
+                    ->extraAttributes(['class' => 'gps-car-form-section'])
                     ->columns(4)
                     ->schema([
                         Forms\Components\TextInput::make('make')
@@ -163,6 +175,8 @@ class CarResource extends Resource
                     ]),
 
                 Section::make('Dane sprzedawcy i zakupu')
+                    ->icon('heroicon-o-clipboard-document-list')
+                    ->extraAttributes(['class' => 'gps-car-form-section'])
                     ->columns(3)
                     ->schema([
                         Forms\Components\TextInput::make('seller_name')
@@ -204,8 +218,9 @@ class CarResource extends Resource
                     ->searchable()
                     ->weight('bold')
                     ->color('primary'),
-                Tables\Columns\ImageColumn::make('main_photo_path')
+                Tables\Columns\ImageColumn::make('primary_photo_path')
                     ->label('Zdjęcie')
+                    ->state(static fn (Car $record): ?string => $record->primary_photo_path)
                     ->square()
                     ->defaultImageUrl(url('/images/car-placeholder.svg')),
                 Tables\Columns\TextColumn::make('model_summary')
