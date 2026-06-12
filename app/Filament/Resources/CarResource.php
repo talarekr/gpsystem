@@ -290,7 +290,6 @@ class CarResource extends Resource
         if (static::canCreate()) {
             $items[] = NavigationItem::make('Dodaj samochód')
                 ->group(static::getNavigationGroup())
-                ->icon(static::getNavigationIcon())
                 ->sort(static::getNavigationSort())
                 ->url(static::getUrl('create'))
                 ->isActiveWhen(static fn (): bool => request()->routeIs('filament.admin.resources.cars.create'));
@@ -298,7 +297,6 @@ class CarResource extends Resource
 
         $items[] = NavigationItem::make('Wszystkie samochody')
             ->group(static::getNavigationGroup())
-            ->icon('heroicon-o-list-bullet')
             ->sort((static::getNavigationSort() ?? 30) + 1)
             ->url(static::getUrl('index'))
             ->isActiveWhen(static fn (): bool => request()->routeIs('filament.admin.resources.cars.index'));
