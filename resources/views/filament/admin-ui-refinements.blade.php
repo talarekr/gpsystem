@@ -122,4 +122,98 @@
         color: var(--gps-admin-navy);
     }
 
+
+    .gps-car-photo-upload .filepond--root {
+        margin-bottom: 0;
+        min-height: 7.75rem;
+        max-height: 9rem;
+    }
+
+    .gps-car-photo-upload .filepond--drop-label {
+        min-height: 7rem;
+        border: 1px dashed #cbd5e1;
+        border-radius: 0.75rem;
+        background: #ffffff;
+        color: #475569;
+    }
+
+    .gps-car-photo-upload .filepond--drop-label label {
+        padding: 0.875rem;
+        font-size: 0.875rem;
+        line-height: 1.25rem;
+    }
+
+    .gps-car-photo-upload .filepond--list-scroller {
+        margin-top: 0.5rem;
+    }
+
+    .gps-car-photo-upload .filepond--item {
+        width: 6rem !important;
+        min-width: 6rem !important;
+        height: 6rem !important;
+        overflow: hidden;
+        border: 1px solid #dbe3ee;
+        border-radius: 0.75rem;
+        background: #ffffff;
+        box-shadow: 0 1px 2px rgba(11, 31, 58, 0.08);
+    }
+
+    .gps-car-photo-upload .filepond--item:first-child {
+        border-color: var(--gps-admin-navy);
+        box-shadow: 0 0 0 1px rgba(11, 31, 58, 0.25), 0 8px 18px rgba(11, 31, 58, 0.08);
+    }
+
+    .gps-car-photo-upload .filepond--item:first-child::after {
+        position: absolute;
+        top: 0.375rem;
+        left: 0.375rem;
+        z-index: 8;
+        padding: 0.125rem 0.45rem;
+        border-radius: 999px;
+        background: var(--gps-admin-navy);
+        color: #ffffff;
+        content: 'Główny';
+        font-size: 0.625rem;
+        font-weight: 700;
+        line-height: 1rem;
+        letter-spacing: 0.01em;
+        pointer-events: none;
+    }
+
+    .gps-car-photo-upload .filepond--panel-root {
+        border-radius: 0.75rem;
+        background: #ffffff;
+    }
+
+    .gps-car-photo-upload .filepond--image-preview-wrapper,
+    .gps-car-photo-upload .filepond--image-preview,
+    .gps-car-photo-upload .filepond--image-bitmap,
+    .gps-car-photo-upload .filepond--image-bitmap canvas {
+        height: 6rem !important;
+        min-height: 6rem !important;
+        border-radius: 0.75rem;
+    }
+
+    .gps-car-photo-upload .filepond--file {
+        min-height: 6rem;
+    }
+
+    .gps-car-photo-upload .filepond--file-action-button,
+    .gps-car-photo-upload .filepond--file-action-button:hover,
+    .gps-car-photo-upload .filepond--file-action-button:focus {
+        background: var(--gps-admin-navy);
+        color: #ffffff;
+        box-shadow: 0 1px 2px rgba(11, 31, 58, 0.18);
+    }
+
+    .gps-car-photo-upload .filepond--file-action-button svg,
+    .gps-car-photo-upload .filepond--file-action-button svg [stroke] {
+        stroke: #ffffff !important;
+    }
+
+    .gps-car-photo-upload .filepond--drip,
+    .gps-car-photo-upload .filepond--credits {
+        display: none;
+    }
+
 </style>
