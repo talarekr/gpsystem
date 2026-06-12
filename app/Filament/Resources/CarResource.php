@@ -11,6 +11,7 @@ use Filament\Forms\Components\Section;
 use Filament\Forms\Form;
 use Filament\Navigation\NavigationItem;
 use Filament\Resources\Resource;
+use Illuminate\Support\HtmlString;
 use Filament\Tables;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
@@ -61,19 +62,6 @@ class CarResource extends Resource
                             ->maxSize(8192)
                             ->formatStateUsing(static fn (?Car $record): array => $record?->orderedImagePaths() ?? [])
                             ->columnSpanFull(),
-                    ]),
-
-                Section::make('VIN')
-                    ->icon('heroicon-o-identification')
-                    ->extraAttributes(['class' => 'gps-car-form-section'])
-                    ->description('Pole przygotowane pod przyszłe uzupełnianie danych po VIN. Zewnętrzne API VIN nie jest jeszcze podłączone.')
-                    ->schema([
-                        Forms\Components\TextInput::make('vin')
-                            ->label('VIN')
-                            ->placeholder('Wpisz VIN — automatyczne uzupełnianie zostanie dodane później')
-                            ->maxLength(32)
-                            ->alphaDash()
-                            ->dehydrateStateUsing(static fn (?string $state): ?string => filled($state) ? strtoupper($state) : null),
                     ]),
 
                 Section::make('Informacje o samochodzie')
@@ -237,17 +225,21 @@ class CarResource extends Resource
                         return $query->where('make', 'like', "%{$search}%")
                             ->orWhere('model', 'like', "%{$search}%")
                             ->orWhere('model_variant', 'like', "%{$search}%")
-                            ->orWhere('vin', 'like', "%{$search}%")
-                            ->orWhere('registration_number', 'like', "%{$search}%");
+                            ->orWhere('registration_number', 'like', "%{$search}%")
+                            ->orWhere('engine_code', 'like', "%{$search}%")
+                            ->orWhere('gearbox_code', 'like', "%{$search}%")
+                            ->orWhere('color', 'like', "%{$search}%");
                     }),
                 Tables\Columns\TextColumn::make('parts_placeholder')
                     ->label('Części')
-                    ->state(static fn (): string => 'Pozostały: 0 / Sprzedany: 0'),
+                    ->state(static fn (): HtmlString => new HtmlString('<div class="gps-car-parts-stack"><span>Pozostały: 0</span><span>Sprzedany: 0</span></div>'))
+                    ->html(),
                 Tables\Columns\TextColumn::make('fuel_type')
                     ->label('Paliwo')
                     ->badge(),
                 Tables\Columns\TextColumn::make('gearbox_type')
-                    ->label('Skrzynia'),
+                    ->label('Skrzynia')
+                    ->searchable(),
                 Tables\Columns\TextColumn::make('steering_side')
                     ->label('Strona'),
                 Tables\Columns\TextColumn::make('engine_capacity_cm3')
@@ -255,9 +247,11 @@ class CarResource extends Resource
                     ->suffix(' cm3')
                     ->sortable(),
                 Tables\Columns\TextColumn::make('color')
-                    ->label('Kolor'),
+                    ->label('Kolor')
+                    ->searchable(),
                 Tables\Columns\TextColumn::make('body_type')
-                    ->label('Rodzaj / typ nadwozia'),
+                    ->label('Rodzaj / typ nadwozia')
+                    ->searchable(),
                 Tables\Columns\TextColumn::make('purchase_date')
                     ->label('Data zakupu')
                     ->date('Y-m-d')
@@ -272,16 +266,123 @@ class CarResource extends Resource
                     ->sortable(),
                 Tables\Columns\TextColumn::make('createdBy.name')
                     ->label('Utworzone przez')
-                    ->placeholder('—'),
+                    ->placeholder('—')
+                    ->searchable(),
             ])
             ->filters([
-                Tables\Filters\SelectFilter::make('status')
-                    ->label('Status')
-                    ->options(Car::statusOptions()),
+                Tables\Filters\Filter::make('make')
+                    ->label('Marka')
+                    ->form([
+                        Forms\Components\TextInput::make('value')
+                            ->label('Marka')
+                            ->placeholder('np. BMW'),
+                    ])
+                    ->query(static fn (Builder $query, array $data): Builder => filled($data['value'] ?? null)
+                        ? $query->where('make', 'like', '%' . $data['value'] . '%')
+                        : $query),
+                Tables\Filters\Filter::make('model')
+                    ->label('Model samochodu')
+                    ->form([
+                        Forms\Components\TextInput::make('value')
+                            ->label('Model samochodu')
+                            ->placeholder('np. A4'),
+                    ])
+                    ->query(static fn (Builder $query, array $data): Builder => filled($data['value'] ?? null)
+                        ? $query->where('model', 'like', '%' . $data['value'] . '%')
+                        : $query),
                 Tables\Filters\SelectFilter::make('fuel_type')
                     ->label('Paliwo')
                     ->options(Car::fuelTypeOptions()),
+                Tables\Filters\SelectFilter::make('gearbox_type')
+                    ->label('Skrzynia')
+                    ->options(Car::gearboxTypeOptions()),
+                Tables\Filters\SelectFilter::make('steering_side')
+                    ->label('Strona kierownicy')
+                    ->options(Car::steeringSideOptions()),
+                Tables\Filters\Filter::make('engine_capacity_cm3')
+                    ->label('Pojemność silnika')
+                    ->form([
+                        Grid::make(2)->schema([
+                            Forms\Components\TextInput::make('from')
+                                ->label('Od cm3')
+                                ->numeric(),
+                            Forms\Components\TextInput::make('until')
+                                ->label('Do cm3')
+                                ->numeric(),
+                        ]),
+                    ])
+                    ->query(static function (Builder $query, array $data): Builder {
+                        return $query
+                            ->when(filled($data['from'] ?? null), static fn (Builder $query): Builder => $query->where('engine_capacity_cm3', '>=', $data['from']))
+                            ->when(filled($data['until'] ?? null), static fn (Builder $query): Builder => $query->where('engine_capacity_cm3', '<=', $data['until']));
+                    }),
+                Tables\Filters\Filter::make('color')
+                    ->label('Kolor')
+                    ->form([
+                        Forms\Components\TextInput::make('value')
+                            ->label('Kolor')
+                            ->placeholder('np. czarny'),
+                    ])
+                    ->query(static fn (Builder $query, array $data): Builder => filled($data['value'] ?? null)
+                        ? $query->where('color', 'like', '%' . $data['value'] . '%')
+                        : $query),
+                Tables\Filters\Filter::make('body_type')
+                    ->label('Typ nadwozia / rodzaj')
+                    ->form([
+                        Forms\Components\TextInput::make('value')
+                            ->label('Typ nadwozia / rodzaj')
+                            ->placeholder('np. kombi'),
+                    ])
+                    ->query(static fn (Builder $query, array $data): Builder => filled($data['value'] ?? null)
+                        ? $query->where('body_type', 'like', '%' . $data['value'] . '%')
+                        : $query),
+                Tables\Filters\SelectFilter::make('status')
+                    ->label('Status')
+                    ->options(Car::statusOptions()),
+                Tables\Filters\Filter::make('purchase_date')
+                    ->label('Data zakupu')
+                    ->form([
+                        Grid::make(2)->schema([
+                            Forms\Components\DatePicker::make('from')
+                                ->label('Od'),
+                            Forms\Components\DatePicker::make('until')
+                                ->label('Do'),
+                        ]),
+                    ])
+                    ->query(static function (Builder $query, array $data): Builder {
+                        return $query
+                            ->when(filled($data['from'] ?? null), static fn (Builder $query): Builder => $query->whereDate('purchase_date', '>=', $data['from']))
+                            ->when(filled($data['until'] ?? null), static fn (Builder $query): Builder => $query->whereDate('purchase_date', '<=', $data['until']));
+                    }),
+                Tables\Filters\Filter::make('dismantled_at')
+                    ->label('Data demontażu')
+                    ->form([
+                        Grid::make(2)->schema([
+                            Forms\Components\DatePicker::make('from')
+                                ->label('Od'),
+                            Forms\Components\DatePicker::make('until')
+                                ->label('Do'),
+                        ]),
+                    ])
+                    ->query(static function (Builder $query, array $data): Builder {
+                        return $query
+                            ->when(filled($data['from'] ?? null), static fn (Builder $query): Builder => $query->whereDate('dismantled_at', '>=', $data['from']))
+                            ->when(filled($data['until'] ?? null), static fn (Builder $query): Builder => $query->whereDate('dismantled_at', '<=', $data['until']));
+                    }),
+                Tables\Filters\Filter::make('created_by')
+                    ->label('Utworzone przez')
+                    ->form([
+                        Forms\Components\TextInput::make('value')
+                            ->label('Utworzone przez')
+                            ->placeholder('Imię, nazwisko lub e-mail'),
+                    ])
+                    ->query(static fn (Builder $query, array $data): Builder => filled($data['value'] ?? null)
+                        ? $query->whereHas('createdBy', static fn (Builder $query): Builder => $query
+                            ->where('name', 'like', '%' . $data['value'] . '%')
+                            ->orWhere('email', 'like', '%' . $data['value'] . '%'))
+                        : $query),
             ])
+            ->filtersFormColumns(3)
             ->actions([
                 Tables\Actions\EditAction::make()
                     ->label('Edytuj'),
