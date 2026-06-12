@@ -24,7 +24,8 @@ class CarResource extends Resource
 
     protected static ?string $navigationGroup = 'Samochody';
 
-    protected static ?string $navigationIcon = 'heroicon-o-truck';
+    // The Samochody navigation group owns the sidebar icon; child resource items must stay iconless.
+    protected static ?string $navigationIcon = null;
 
     protected static ?string $navigationLabel = 'Wszystkie samochody';
 

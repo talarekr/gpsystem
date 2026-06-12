@@ -5,7 +5,7 @@ namespace App\Filament\Pages\Settings;
 class AllegroSettings extends SettingsPlaceholderPage
 {
     protected static bool $shouldRegisterNavigation = true;
-    protected static ?string $navigationIcon = 'heroicon-o-building-storefront';
+    protected static ?string $navigationIcon = null;
     protected static ?string $navigationLabel = 'Allegro';
     protected static ?string $navigationGroup = 'Kanały sprzedaży';
     protected static ?string $title = 'Allegro';
