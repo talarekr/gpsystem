@@ -38,7 +38,7 @@ use App\Filament\Pages\Settings\WooCommerceSettings;
 use App\Filament\Pages\StagingItems;
 use App\Filament\Pages\StockLocations;
 use App\Filament\Pages\UsersRoles;
-use App\Filament\Pages\Vehicles;
+use App\Filament\Resources\CarResource;
 use App\Filament\Pages\WooSyncPreparation;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
@@ -83,10 +83,12 @@ class AdminPanelProvider extends PanelProvider
                     950 => '#050f1d',
                 ],
             ])
+            ->resources([
+                CarResource::class,
+            ])
             ->pages([
                 Dashboard::class,
                 Analytics::class,
-                Vehicles::class,
                 MobileIntake::class,
                 StagingItems::class,
                 ProductCatalog::class,
