@@ -2,6 +2,8 @@
     :root {
         --gps-admin-navy: #0B1F3A;
         --gps-admin-border: #e5e7eb;
+        --gps-admin-sidebar-active-bg: #f4f7fb;
+        --gps-admin-sidebar-active-accent: rgba(11, 31, 58, 0.32);
         --sidebar-width: 14.5rem;
     }
 
@@ -40,6 +42,18 @@
     .fi-sidebar-item-button {
         column-gap: 0.625rem;
         padding-inline: 0.75rem !important;
+    }
+
+    .fi-sidebar-item-active > .fi-sidebar-item-button {
+        position: relative;
+        background-color: var(--gps-admin-sidebar-active-bg) !important;
+        box-shadow: inset 2px 0 0 var(--gps-admin-sidebar-active-accent);
+        color: var(--gps-admin-navy) !important;
+    }
+
+    .fi-sidebar-item-active .fi-sidebar-item-label,
+    .fi-sidebar-item-active .fi-sidebar-item-button span {
+        color: var(--gps-admin-navy) !important;
     }
 
     .fi-sidebar-item-icon,
@@ -81,6 +95,7 @@
     .fi-sidebar-item-active .fi-sidebar-item-icon,
     .fi-sidebar-item-active .fi-sidebar-item-button .fi-icon,
     .fi-sidebar-item-active .fi-sidebar-item-button svg,
+    .fi-sidebar-item-active .fi-sidebar-item-button svg [stroke],
     .fi-sidebar-item-button:hover .fi-sidebar-item-icon,
     .fi-sidebar-item-button:hover .fi-icon,
     .fi-sidebar-item-button:hover svg,
