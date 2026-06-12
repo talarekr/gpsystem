@@ -100,4 +100,26 @@
         background-color: #ffffff;
         border-color: var(--gps-admin-border);
     }
+    .gps-car-form-section.fi-section {
+        border: 1px solid #cbd5e1 !important;
+        box-shadow: 0 1px 2px rgba(11, 31, 58, 0.04), 0 0 0 1px rgba(11, 31, 58, 0.025);
+    }
+
+    .gps-car-form-section.fi-section .fi-section-header {
+        border-bottom: 1px solid #e2e8f0;
+        background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    }
+
+    .gps-car-form-section.fi-section .fi-section-header-icon,
+    .gps-car-form-section.fi-section .fi-section-header-icon svg,
+    .gps-car-form-section.fi-section .fi-section-header .fi-icon,
+    .gps-car-form-section.fi-section .fi-section-header svg {
+        color: var(--gps-admin-navy) !important;
+        stroke: var(--gps-admin-navy) !important;
+    }
+
+    .gps-car-form-section.fi-section .fi-section-header-heading {
+        color: var(--gps-admin-navy);
+    }
+
 </style>
