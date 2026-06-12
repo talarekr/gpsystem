@@ -20,6 +20,8 @@ class CarResource extends Resource
 {
     protected static ?string $model = Car::class;
 
+    protected static bool $shouldRegisterNavigation = true;
+
     protected static ?string $navigationGroup = 'Samochody';
 
     protected static ?string $navigationIcon = 'heroicon-o-truck';

@@ -38,12 +38,12 @@ use App\Filament\Pages\Settings\WooCommerceSettings;
 use App\Filament\Pages\StagingItems;
 use App\Filament\Pages\StockLocations;
 use App\Filament\Pages\UsersRoles;
-use App\Filament\Resources\CarResource;
 use App\Filament\Pages\WooSyncPreparation;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
+use Filament\Navigation\NavigationGroup;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
@@ -83,8 +83,13 @@ class AdminPanelProvider extends PanelProvider
                     950 => '#050f1d',
                 ],
             ])
-            ->resources([
-                CarResource::class,
+            ->discoverResources(in: app_path('Filament/Resources'), for: 'App\\Filament\\Resources')
+            ->navigationGroups([
+                NavigationGroup::make('Samochody')
+                    ->icon('heroicon-o-truck')
+                    ->collapsible(false),
+                NavigationGroup::make('Kanały sprzedaży')
+                    ->icon('heroicon-o-building-storefront'),
             ])
             ->pages([
                 Dashboard::class,
