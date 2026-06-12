@@ -48,6 +48,7 @@ use Filament\Panel;
 use Filament\PanelProvider;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
+use Illuminate\Support\Facades\Blade;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Session\Middleware\StartSession;
@@ -63,6 +64,10 @@ class AdminPanelProvider extends PanelProvider
             ->path('admin')
             ->login()
             ->brandName('GPS Product Hub')
+            ->renderHook(
+                'panels::head.end',
+                fn (): string => Blade::render('@include(\'filament.admin-ui-refinements\')'),
+            )
             ->colors([
                 'primary' => [
                     50 => '#f5f7fa',
