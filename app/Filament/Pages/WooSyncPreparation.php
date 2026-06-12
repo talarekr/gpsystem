@@ -4,7 +4,7 @@ namespace App\Filament\Pages;
 
 class WooSyncPreparation extends OperationalPlaceholderPage
 {
-    protected static ?string $navigationIcon = 'heroicon-o-shopping-cart';
+    protected static ?string $navigationIcon = null;
     protected static ?string $navigationLabel = 'WooCommerce';
     protected static ?string $navigationGroup = 'Kanały sprzedaży';
     protected static ?string $title = 'WooCommerce';

@@ -85,6 +85,7 @@ class AdminPanelProvider extends PanelProvider
             ])
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\\Filament\\Resources')
             ->navigationGroups([
+                // GPS Product Hub convention: icon-enabled groups own the icon; child pages/resources stay iconless.
                 NavigationGroup::make('Samochody')
                     ->icon('heroicon-o-truck')
                     ->collapsible(false),
