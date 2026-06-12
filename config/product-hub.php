@@ -47,6 +47,8 @@ return [
         'dashboard' => 'Strona główna',
         'analytics' => 'Analityka',
         'vehicles' => 'Samochody',
+        'cars_create' => 'Dodaj samochód',
+        'cars_index' => 'Wszystkie samochody',
         'product_command_center' => 'Części',
         'stock_locations' => 'Magazynowanie',
         'orders' => 'Zamówienia',
