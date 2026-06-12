@@ -4,6 +4,8 @@ namespace App\Filament\Pages;
 
 class StockLocations extends OperationalPlaceholderPage
 {
+    protected static bool $shouldRegisterNavigation = false;
+
     protected static ?string $navigationIcon = 'heroicon-o-building-office-2';
     protected static ?string $navigationLabel = 'Magazynowanie';
     protected static ?string $title = 'Magazynowanie';

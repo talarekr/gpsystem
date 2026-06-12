@@ -51,6 +51,7 @@ return [
         'cars_index' => 'Wszystkie samochody',
         'product_command_center' => 'Części',
         'stock_locations' => 'Magazynowanie',
+        'storage_locations' => 'Miejsca składowania',
         'orders' => 'Zamówienia',
         'shipments' => 'Przesyłki',
         'error_center' => 'Zadania',

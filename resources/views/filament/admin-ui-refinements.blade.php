@@ -180,4 +180,13 @@
     }
 
 
+    .gps-storage-parts-placeholder {
+        border: 1px dashed #cbd5e1;
+        border-radius: 0.75rem;
+        background: #f8fafc;
+        color: #0f172a;
+        padding: 1rem;
+        font-weight: 600;
+    }
+
 </style>
