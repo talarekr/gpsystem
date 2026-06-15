@@ -15,6 +15,13 @@ class WooProductImportPage extends Page implements HasForms
 {
     use InteractsWithForms;
 
+    private const PRODUCTS_MAX_SIZE_KB = 102400;
+    private const IMAGES_MAX_SIZE_KB = 102400;
+    private const CATEGORIES_MAX_SIZE_KB = 51200;
+    private const META_MAX_SIZE_KB = 102400;
+    private const ATTRIBUTES_MAX_SIZE_KB = 51200;
+    private const SUMMARY_MAX_SIZE_KB = 5120;
+
     protected static ?string $slug = 'import-migracyjny/produkty-woo';
     protected static ?string $navigationGroup = 'Ustawienia i integracje';
     protected static ?string $navigationLabel = 'Import produktów Woo';
@@ -34,10 +41,12 @@ class WooProductImportPage extends Page implements HasForms
 
     public function form(Forms\Form $form): Forms\Form
     {
-        $file = fn (string $name, string $label, bool $required = false) => Forms\Components\FileUpload::make($name)
+        $file = fn (string $name, string $label, int $maxSizeKb, string $helperText, bool $required = false) => Forms\Components\FileUpload::make($name)
             ->label($label)
             ->disk('local')
             ->directory('migration-imports/woo')
+            ->maxSize($maxSizeKb)
+            ->helperText($helperText)
             ->required($required);
 
         return $form
@@ -45,12 +54,12 @@ class WooProductImportPage extends Page implements HasForms
                 Forms\Components\Section::make('Import migracyjny')
                     ->description('Tymczasowe narzędzie izolowane od codziennego workflow Części. Nie łączy się z Woo API.')
                     ->schema([
-                        $file('products', 'products.csv', true),
-                        $file('images', 'product_images.csv'),
-                        $file('categories', 'product_categories.csv'),
-                        $file('meta', 'product_meta.csv'),
-                        $file('attributes', 'product_attributes.csv'),
-                        $file('summary', 'export_summary.json'),
+                        $file('products', 'products.csv', self::PRODUCTS_MAX_SIZE_KB, 'products.csv może mieć do 100 MB. Duże pliki CSV są dozwolone tylko w tymczasowym imporcie Woo.', true),
+                        $file('images', 'product_images.csv', self::IMAGES_MAX_SIZE_KB, 'product_images.csv może mieć do 100 MB. Duże pliki CSV są dozwolone tylko w tymczasowym imporcie Woo.'),
+                        $file('categories', 'product_categories.csv', self::CATEGORIES_MAX_SIZE_KB, 'product_categories.csv może mieć do 50 MB. Duże pliki CSV są dozwolone tylko w tymczasowym imporcie Woo.'),
+                        $file('meta', 'product_meta.csv', self::META_MAX_SIZE_KB, 'product_meta.csv może mieć do 100 MB. Duże pliki CSV są dozwolone tylko w tymczasowym imporcie Woo.'),
+                        $file('attributes', 'product_attributes.csv', self::ATTRIBUTES_MAX_SIZE_KB, 'product_attributes.csv może mieć do 50 MB. Duże pliki CSV są dozwolone tylko w tymczasowym imporcie Woo.'),
+                        $file('summary', 'export_summary.json', self::SUMMARY_MAX_SIZE_KB, 'export_summary.json może mieć do 5 MB.'),
                         Forms\Components\Select::make('mode')
                             ->label('Tryb importu')
                             ->options([
