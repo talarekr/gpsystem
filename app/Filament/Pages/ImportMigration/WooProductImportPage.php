@@ -8,6 +8,7 @@ use Filament\Forms; use Filament\Forms\Concerns\InteractsWithForms; use Filament
 class WooProductImportPage extends Page implements HasForms
 {
     use InteractsWithForms;
+    protected static ?string $slug = 'import-migracyjny/produkty-woo';
     protected static ?string $navigationGroup='Ustawienia i integracje'; protected static ?string $navigationLabel='Import produktów Woo'; protected static ?string $title='Import migracyjny — produkty Woo'; protected static ?string $navigationIcon='heroicon-o-arrow-up-tray'; protected static ?int $navigationSort=121;
     protected static string $view='filament.pages.import-migration.woo-product-import';
     public ?array $data=[]; public ?array $report=null;

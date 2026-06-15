@@ -7,6 +7,8 @@ use App\Filament\Pages\Analytics;
 use App\Filament\Pages\Dashboard;
 use App\Filament\Pages\ErrorCenter;
 use App\Filament\Pages\Help;
+use App\Filament\Pages\ImportMigration\OvokoDonorCarImportPage;
+use App\Filament\Pages\ImportMigration\WooProductImportPage;
 use App\Filament\Pages\MobileIntake;
 use App\Filament\Pages\Orders;
 use App\Filament\Pages\Pricing;
@@ -97,6 +99,9 @@ class AdminPanelProvider extends PanelProvider
                     ->collapsible(false),
                 NavigationGroup::make('Kanały sprzedaży')
                     ->icon('heroicon-o-building-storefront'),
+                NavigationGroup::make('Ustawienia i integracje')
+                    ->icon('heroicon-o-arrow-up-tray')
+                    ->collapsible(false),
             ])
             ->pages([
                 Dashboard::class,
@@ -130,6 +135,8 @@ class AdminPanelProvider extends PanelProvider
                 EbayFrSettings::class,
                 AllegroSettings::class,
                 OvokoSettings::class,
+                OvokoDonorCarImportPage::class,
+                WooProductImportPage::class,
                 TranslationContentTemplates::class,
                 ReadinessRules::class,
                 AutomationQueueSettings::class,
