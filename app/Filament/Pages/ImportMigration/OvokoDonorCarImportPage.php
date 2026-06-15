@@ -26,6 +26,7 @@ class OvokoDonorCarImportPage extends Page implements HasForms
     public ?array $data = [];
     public ?array $report = null;
     public ?string $importError = null;
+    public ?array $cleanupReport = null;
 
     public function mount(): void
     {
@@ -61,10 +62,44 @@ class OvokoDonorCarImportPage extends Page implements HasForms
                             Forms\Components\Actions\Action::make('run')
                                 ->label('Uruchom import')
                                 ->submit('runImport'),
+                            Forms\Components\Actions\Action::make('cleanupBadImport')
+                                ->label('Usuń błędny import samochodów Ovoko')
+                                ->color('danger')
+                                ->requiresConfirmation()
+                                ->modalHeading('Usunąć błędny import samochodów Ovoko?')
+                                ->modalDescription('Usunięte zostaną wyłącznie samochody z source_system = ovoko. Jeżeli są do nich przypięte części, cleanup zostanie zablokowany.')
+                                ->action('cleanupBadImport'),
                         ]),
                     ]),
             ])
             ->statePath('data');
+    }
+
+    public function cleanupBadImport(OvokoDonorCarImport $import): void
+    {
+        $this->importError = null;
+        $this->cleanupReport = null;
+
+        try {
+            $this->cleanupReport = $import->cleanupBadImport()->toArray();
+
+            $deleted = $this->cleanupReport['counters']['deleted'] ?? 0;
+
+            Notification::make()
+                ->title('Cleanup importu Ovoko zakończony')
+                ->body("Usunięto samochody Ovoko: {$deleted}.")
+                ->success()
+                ->send();
+        } catch (Throwable $exception) {
+            report($exception);
+            $this->importError = $exception->getMessage();
+
+            Notification::make()
+                ->title('Nie udało się wykonać cleanup importu Ovoko')
+                ->body($this->importError)
+                ->danger()
+                ->send();
+        }
     }
 
     public function runImport(OvokoDonorCarImport $import): void
