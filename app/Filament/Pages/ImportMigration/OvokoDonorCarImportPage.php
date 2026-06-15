@@ -8,6 +8,7 @@ use Filament\Forms; use Filament\Forms\Concerns\InteractsWithForms; use Filament
 class OvokoDonorCarImportPage extends Page implements HasForms
 {
     use InteractsWithForms;
+    protected static ?string $slug = 'import-migracyjny/samochody-ovoko';
     protected static ?string $navigationGroup='Ustawienia i integracje'; protected static ?string $navigationLabel='Import samochodów Ovoko'; protected static ?string $title='Import migracyjny — samochody Ovoko'; protected static ?string $navigationIcon='heroicon-o-arrow-up-tray'; protected static ?int $navigationSort=120;
     protected static string $view='filament.pages.import-migration.ovoko-donor-car-import';
     public ?array $data=[]; public ?array $report=null;
