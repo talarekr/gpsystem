@@ -13,6 +13,9 @@ class Car extends Model
     use HasFactory;
 
     protected $fillable = [
+        'source_system',
+        'external_id',
+        'legacy_payload',
         'vin',
         'make',
         'model',
@@ -63,6 +66,7 @@ class Car extends Model
             'includes_vat' => 'boolean',
             'purchase_date' => 'date',
             'dismantled_at' => 'date',
+            'legacy_payload' => 'array',
         ];
     }
 

@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class PartImage extends Model
 {
-    protected $fillable = ['part_id', 'path', 'sort_order', 'is_primary'];
+    protected $fillable = ['source_system', 'external_id', 'part_id', 'path', 'alt_text', 'sort_order', 'is_primary'];
 
     protected function casts(): array
     {
