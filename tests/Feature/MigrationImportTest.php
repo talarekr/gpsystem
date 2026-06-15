@@ -27,6 +27,11 @@ class MigrationImportTest extends TestCase
         $this->assertSame('495', $car->external_id);
         $this->assertSame('Ovoko pojazd 495', $car->model);
         $this->assertSame(1, $report->counters['created']);
+        $this->assertSame(1, $report->counters['diagnostic_total_imported_ovoko_cars']);
+        $this->assertSame(495, $report->counters['diagnostic_max_local_car_id']);
+        $this->assertSame(495, $report->counters['diagnostic_max_external_id']);
+        $this->assertSame(1, $report->counters['diagnostic_ovoko_source_count']);
+        $this->assertSame(0, $report->counters['diagnostic_id_mismatch_count']);
 
         $again = app(OvokoDonorCarImport::class)->import($csv, OvokoDonorCarImport::MODE_CREATE_ONLY);
         $this->assertSame(1, Car::query()->count());
@@ -34,6 +39,39 @@ class MigrationImportTest extends TestCase
 
         $manual = Car::query()->create(['make' => 'Manual']);
         $this->assertGreaterThan(495, $manual->id);
+    }
+
+
+    public function test_ovoko_cleanup_deletes_only_unlinked_ovoko_cars_and_reports_mismatches(): void
+    {
+        Car::query()->forceCreate(['id' => 1478, 'uuid' => (string) \Illuminate\Support\Str::uuid(), 'source_system' => 'ovoko', 'external_id' => '495', 'model' => 'Wrong import']);
+        Car::query()->forceCreate(['id' => 2000, 'uuid' => (string) \Illuminate\Support\Str::uuid(), 'source_system' => 'manual', 'external_id' => '495', 'model' => 'Manual']);
+
+        $dryRunReport = app(OvokoDonorCarImport::class)->import(
+            $this->tmp('ovoko-diagnostics.csv', "ovoko_car_id,vehicle_make,vehicle_model\n495,,\n"),
+            OvokoDonorCarImport::MODE_DRY_RUN,
+        );
+
+        $this->assertSame(1, $dryRunReport->counters['diagnostic_id_mismatch_count']);
+        $this->assertStringContainsString('Import nie zachował zgodności ID', $dryRunReport->warnings[0]);
+
+        $cleanup = app(OvokoDonorCarImport::class)->cleanupBadImport();
+
+        $this->assertSame(1, $cleanup->counters['deleted']);
+        $this->assertNull(Car::query()->find(1478));
+        $this->assertNotNull(Car::query()->find(2000));
+    }
+
+    public function test_ovoko_cleanup_is_blocked_when_parts_are_linked(): void
+    {
+        $car = Car::query()->forceCreate(['id' => 1478, 'uuid' => (string) \Illuminate\Support\Str::uuid(), 'source_system' => 'ovoko', 'external_id' => '495', 'model' => 'Wrong import']);
+        Part::query()->create(['name' => 'Linked part', 'car_id' => $car->id]);
+
+        $cleanup = app(OvokoDonorCarImport::class)->cleanupBadImport();
+
+        $this->assertSame(0, $cleanup->counters['deleted']);
+        $this->assertStringContainsString('części jest przypiętych', $cleanup->warnings[0]);
+        $this->assertNotNull(Car::query()->find(1478));
     }
 
     public function test_woo_import_reads_package_links_car_images_categories_and_prevents_duplicates(): void

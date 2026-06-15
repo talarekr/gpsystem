@@ -3,6 +3,7 @@
 namespace App\Services\ImportMigration;
 
 use App\Models\Car;
+use App\Models\Part;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -34,11 +35,68 @@ class OvokoDonorCarImport
                 else { $report->inc('skipped_existing'); }
                 continue;
             }
-            $payload['id'] = $id; $payload['uuid'] = (string) Str::uuid();
-            Car::query()->create($payload); $report->inc('created');
+            $this->createCarWithOvokoPrimaryKey($id, $payload); $report->inc('created');
         }
-        if ($mode !== self::MODE_DRY_RUN) $this->repairAutoIncrement('cars', (int) $report->counters['max_imported_ovoko_id']);
+        if ($mode !== self::MODE_DRY_RUN) {
+            $this->repairAutoIncrement('cars', (int) $report->counters['max_imported_ovoko_id']);
+        }
+
+        $this->addDiagnostics($report);
+
         return $report;
+    }
+
+    public function cleanupBadImport(): ImportReport
+    {
+        $report = new ImportReport(['deleted'=>0]);
+        $ids = Car::query()->where('source_system', 'ovoko')->pluck('id');
+
+        if ($ids->isEmpty()) {
+            $this->addDiagnostics($report);
+            return $report;
+        }
+
+        $linkedParts = Part::query()->whereIn('car_id', $ids)->count();
+
+        if ($linkedParts > 0) {
+            $report->warning("Nie usunięto importu Ovoko: {$linkedParts} części jest przypiętych do samochodów Ovoko.");
+            $this->addDiagnostics($report);
+            return $report;
+        }
+
+        $report->counters['deleted'] = Car::query()->whereIn('id', $ids)->delete();
+        $this->repairAutoIncrement('cars', (int) Car::query()->max('id'));
+        $this->addDiagnostics($report);
+
+        return $report;
+    }
+
+    private function createCarWithOvokoPrimaryKey(int $id, array $payload): Car
+    {
+        $car = new Car();
+        $car->forceFill($payload);
+        $car->id = $id;
+        $car->uuid = (string) Str::uuid();
+        $car->save();
+
+        return $car;
+    }
+
+    private function addDiagnostics(ImportReport $report): void
+    {
+        $ovokoCars = Car::query()->where('source_system', 'ovoko')->get(['id', 'external_id']);
+        $mismatches = $ovokoCars->filter(fn (Car $car): bool => (int) $car->external_id !== (int) $car->id);
+
+        $report->counters['diagnostic_total_imported_ovoko_cars'] = $ovokoCars->count();
+        $report->counters['diagnostic_max_local_car_id'] = (int) Car::query()->max('id');
+        $report->counters['diagnostic_max_external_id'] = (int) $ovokoCars->max(fn (Car $car): int => (int) $car->external_id);
+        $report->counters['diagnostic_ovoko_source_count'] = $ovokoCars->count();
+        $report->counters['diagnostic_id_mismatch_count'] = $mismatches->count();
+
+        if ($report->counters['diagnostic_id_mismatch_count'] > 0) {
+            $sample = $mismatches->take(5)->map(fn (Car $car): string => "local {$car->id} / ovoko {$car->external_id}")->implode(', ');
+            $report->warning('Import nie zachował zgodności ID: cars.id musi być równe ovoko_car_id. Przykłady: '.$sample);
+        }
     }
 
     private function map(int $id, array $row): array
