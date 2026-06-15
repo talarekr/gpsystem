@@ -89,6 +89,9 @@ class AdminPanelProvider extends PanelProvider
                 NavigationGroup::make('Samochody')
                     ->icon('heroicon-o-truck')
                     ->collapsible(false),
+                NavigationGroup::make('Części')
+                    ->icon('heroicon-o-cog-6-tooth')
+                    ->collapsible(false),
                 NavigationGroup::make('Magazynowanie')
                     ->icon('heroicon-o-building-office-2')
                     ->collapsible(false),
