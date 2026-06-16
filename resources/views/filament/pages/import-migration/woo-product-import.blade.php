@@ -164,6 +164,40 @@
                 <p class="mt-2 text-sm text-gray-600 dark:text-gray-300">
                     Import zatrzymano. Dotychczasowy raport i diagnostyka są widoczne poniżej, jeśli przetworzono już część pliku.
                 </p>
+
+                @if (! empty($importDebug))
+                    <div class="mt-4 rounded-lg border border-danger-200 bg-danger-50 p-3 text-xs text-danger-900 dark:border-danger-800 dark:bg-danger-950 dark:text-danger-100">
+                        <div class="font-semibold">Bezpieczne szczegóły diagnostyczne</div>
+                        <dl class="mt-3 grid gap-2 md:grid-cols-2">
+                            <div>
+                                <dt class="font-medium">Klasa wyjątku</dt>
+                                <dd class="break-words">{{ $importDebug['exception_class'] ?? '—' }}</dd>
+                            </div>
+                            <div>
+                                <dt class="font-medium">Komunikat wyjątku</dt>
+                                <dd class="break-words">{{ $importDebug['exception_message'] ?? '—' }}</dd>
+                            </div>
+                            <div>
+                                <dt class="font-medium">Oczekiwany folder</dt>
+                                <dd class="break-words">{{ $importDebug['expected_folder_path'] ?? '—' }}</dd>
+                            </div>
+                            <div>
+                                <dt class="font-medium">Plik diagnostyczny</dt>
+                                <dd class="break-words">{{ $importDebug['diagnostic_file'] ?? '—' }}</dd>
+                            </div>
+                        </dl>
+
+                        <div class="mt-3 font-medium">Przesłane nazwy plików</div>
+                        <dl class="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+                            @foreach (($importDebug['submitted_fields'] ?? []) as $key => $value)
+                                <div>
+                                    <dt class="font-medium">{{ $key }}</dt>
+                                    <dd class="break-words">{{ filled($value) ? $value : '—' }}</dd>
+                                </div>
+                            @endforeach
+                        </dl>
+                    </div>
+                @endif
             </x-filament::section>
         @endif
 
