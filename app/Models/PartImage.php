@@ -4,6 +4,8 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 class PartImage extends Model
 {
@@ -21,6 +23,29 @@ class PartImage extends Model
                 $image->is_primary = true;
             }
         });
+    }
+
+    public function publicUrl(): ?string
+    {
+        $path = trim((string) $this->path);
+
+        if ($path === '') {
+            return null;
+        }
+
+        if (Str::startsWith($path, ['http://', 'https://', '//'])) {
+            return $path;
+        }
+
+        if (Str::startsWith($path, '/storage/')) {
+            return $path;
+        }
+
+        if (Str::startsWith($path, 'storage/')) {
+            return '/'.ltrim($path, '/');
+        }
+
+        return Storage::disk('public')->url(ltrim($path, '/'));
     }
 
     public function part(): BelongsTo
