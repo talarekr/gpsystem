@@ -8,6 +8,7 @@ use App\Filament\Resources\CarResource;
 use App\Filament\Resources\PartResource;
 use App\Models\Car;
 use App\Models\Part;
+use App\Models\PartCategory;
 use App\Services\ImportMigration\OvokoDonorCarImport;
 use App\Services\ImportMigration\WooProductImport;
 use App\Support\ImportMigration\ManualImportFileResolver;
@@ -106,6 +107,97 @@ class MigrationImportTest extends TestCase
         $this->assertNull(Part::query()->where('external_id','102')->first());
     }
 
+
+
+    public function test_woo_category_duplicate_name_uses_fallback_and_logs_warning(): void
+    {
+        $warningLog = storage_path('app/imports/manual/woo/category_warning.log');
+        if (is_file($warningLog)) {
+            unlink($warningLog);
+        }
+
+        $existing = PartCategory::query()->create([
+            'name' => 'Zamek drzwi przednich',
+            'slug' => 'zamek-drzwi-przednich',
+        ]);
+
+        $products = $this->tmp('products-category-conflict.csv', "woo_product_id,sku,name,status,published\n516500,LOCK1,Produkt z konfliktem,publish,1\n");
+        $cats = $this->tmp('cats-category-conflict.csv', "woo_product_id,category_id,category_path,category_name,slug\n516500,5165,Drzwi i inne elementy > Drzwi przednie / 4-drzwiowy / Kombi > Zamek drzwi przednich,Zamek drzwi przednich,zamek-drzwi-przednich-drzwi-przednie-4-drzwiowy-kombi\n");
+
+        $report = app(WooProductImport::class)->import($products, ['categories' => $cats], WooProductImport::MODE_CREATE_ONLY);
+
+        $part = Part::query()->where('external_id', '516500')->firstOrFail();
+        $this->assertSame($existing->id, $part->category_id);
+        $this->assertSame(1, PartCategory::query()->where('name', 'Zamek drzwi przednich')->count());
+        $this->assertSame(1, $report->counters['category_warning_count']);
+        $this->assertFileExists($warningLog);
+        $this->assertStringContainsString('fallback_existing_name_before_insert', file_get_contents($warningLog));
+    }
+
+    public function test_woo_category_duplicate_name_dry_run_reports_fallback_without_creating_product(): void
+    {
+        PartCategory::query()->create([
+            'name' => 'Zamek drzwi przednich',
+            'slug' => 'zamek-drzwi-przednich',
+        ]);
+
+        $products = $this->tmp('products-category-conflict-dry.csv', "woo_product_id,sku,name,status,published\n516501,LOCK2,Produkt dry,publish,1\n");
+        $cats = $this->tmp('cats-category-conflict-dry.csv', "woo_product_id,category_id,category_path,category_name,slug\n516501,5166,Drzwi i inne elementy > Inna gałąź > Zamek drzwi przednich,Zamek drzwi przednich,zamek-drzwi-przednich-inna-galaz\n");
+
+        $report = app(WooProductImport::class)->import($products, ['categories' => $cats], WooProductImport::MODE_DRY_RUN);
+
+        $this->assertNull(Part::query()->where('external_id', '516501')->first());
+        $this->assertSame(1, $report->counters['category_warning_count']);
+        $this->assertStringContainsString('matched_existing_name', implode("\n", $report->warnings));
+    }
+
+
+    public function test_woo_import_logs_skipped_existing_products_with_run_id(): void
+    {
+        $directory = storage_path('app/imports/manual/woo');
+        if (! is_dir($directory)) mkdir($directory, 0777, true);
+        $skippedLog = $directory.'/skipped_products.log';
+        if (is_file($skippedLog)) {
+            unlink($skippedLog);
+        }
+
+        Part::query()->create([
+            'source_system' => 'woo',
+            'external_id' => '777',
+            'sku' => 'EXIST777',
+            'name' => 'Już zaimportowany',
+            'status' => 'ready',
+        ]);
+        file_put_contents($directory.'/products-skipped.csv', "woo_product_id,sku,name,status,published,quantity,price\n777,EXIST777,Już zaimportowany,publish,1,2,199.99\n");
+
+        $runs = app(WooProductImportRunRepository::class);
+        $import = app(WooProductImport::class);
+        $run = $runs->start([
+            'products_filename' => 'products-skipped.csv',
+            'categories_filename' => '',
+            'meta_filename' => '',
+            'attributes_filename' => '',
+            'summary_filename' => '',
+            'images_filename' => '',
+            'mode' => WooProductImport::MODE_CREATE_ONLY,
+        ], $import, app(ManualImportFileResolver::class));
+
+        $processed = $runs->processNextBatch($run['id'], $import);
+        $this->assertSame(1, $processed['skipped_count']);
+
+        $this->assertFileExists($skippedLog);
+        $entry = json_decode(trim((string) file_get_contents($skippedLog)), true);
+        $this->assertSame($run['id'], $entry['run_id']);
+        $this->assertSame(2, $entry['csv_row_number']);
+        $this->assertSame('777', $entry['woo_product_id']);
+        $this->assertSame('EXIST777', $entry['sku']);
+        $this->assertSame('Już zaimportowany', $entry['name']);
+        $this->assertSame('already_exists', $entry['reason']);
+        $this->assertSame('publish', $entry['diagnostics']['woo_status']);
+        $this->assertSame('2', $entry['diagnostics']['quantity']);
+        $this->assertSame('199.99', $entry['diagnostics']['price']);
+        $this->assertNotEmpty($entry['diagnostics']['existing_part_id']);
+    }
 
     public function test_woo_import_route_repository_processes_large_files_in_batches(): void
     {
