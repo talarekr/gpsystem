@@ -50,6 +50,7 @@ class WooProductImportRunRepository
             'updated_count' => 0,
             'skipped_count' => 0,
             'error_count' => 0,
+            'quantity_warning_count' => 0,
             'status' => 'pending',
             'last_error' => null,
             'created_at' => $now,
@@ -112,6 +113,7 @@ class WooProductImportRunRepository
             $run['updated_count'] = (int) ($run['report']['counters']['updated'] ?? 0);
             $run['skipped_count'] = (int) (($run['report']['counters']['skipped_existing'] ?? 0) + ($run['report']['counters']['skipped_duplicates'] ?? 0) + ($run['report']['counters']['skipped'] ?? 0));
             $run['error_count'] = (int) ($run['report']['counters']['failed_rows'] ?? 0);
+            $run['quantity_warning_count'] = (int) ($run['report']['counters']['quantity_warning_count'] ?? 0);
             $run['status'] = ($result['end_of_file'] || $run['lastBatchProcessed'] === 0) ? 'finished' : 'pending';
             $run['last_error'] = null;
             $run['lastBatchFinishedAt'] = now()->toDateTimeString();
