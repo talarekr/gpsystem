@@ -19,7 +19,7 @@ class PartImagePresentationController extends Controller
                 continue;
             }
 
-            $image->legacy_payload = $service->process($image);
+            $image->legacy_payload = $service->process($image, true);
             $image->saveQuietly();
             $processed++;
         }

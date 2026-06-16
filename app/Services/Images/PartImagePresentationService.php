@@ -8,10 +8,15 @@ use Throwable;
 
 class PartImagePresentationService
 {
-    private const WHITE_THRESHOLD = 245;
-    private const TARGET_FILL = 0.90;
+    private const PRESENTATION_VERSION = '2026-06-tight-fill-v1';
+    private const LISTING_TARGET_FILL = 0.95;
+    private const PRODUCT_TARGET_FILL = 0.94;
+    private const LISTING_MARGIN_RATIO = 0.025;
+    private const PRODUCT_MARGIN_RATIO = 0.035;
+    private const LISTING_MAX_MARGIN = 12;
+    private const PRODUCT_MAX_MARGIN = 30;
 
-    public function process(PartImage $partImage): array
+    public function process(PartImage $partImage, bool $force = false): array
     {
         $warnings = [];
         $payload = $partImage->legacy_payload ?? [];
@@ -62,12 +67,13 @@ class PartImagePresentationService
                 $box = ['x' => 0, 'y' => 0, 'width' => imagesx($source), 'height' => imagesy($source)];
             }
 
-            $baseName = $this->variantBaseName($partImage, $sourcePath);
+            $baseName = $this->variantBaseName($partImage, $sourcePath, $force);
             $listingPath = 'parts/photos/presentation/listing/'.$baseName.'.jpg';
             $productPath = 'parts/photos/presentation/product/'.$baseName.'.jpg';
 
-            $this->renderVariant($source, $box, 522, 336, $listingPath);
-            $this->renderVariant($source, $box, 900, 675, $productPath);
+            $originalMetrics = ['width' => imagesx($source), 'height' => imagesy($source)];
+            $listingMetrics = $this->renderVariant($source, $box, 522, 336, $listingPath, self::LISTING_TARGET_FILL, self::LISTING_MARGIN_RATIO, self::LISTING_MAX_MARGIN);
+            $productMetrics = $this->renderVariant($source, $box, 900, 675, $productPath, self::PRODUCT_TARGET_FILL, self::PRODUCT_MARGIN_RATIO, self::PRODUCT_MAX_MARGIN);
             imagedestroy($source);
 
             $presentation = [
@@ -77,6 +83,13 @@ class PartImagePresentationService
                 'processed_at' => now()->toISOString(),
                 'processor' => 'gd',
                 'bounding_box' => $box,
+                'metrics' => [
+                    'original' => $originalMetrics,
+                    'listing' => $listingMetrics,
+                    'product' => $productMetrics,
+                ],
+                'presentation_version' => self::PRESENTATION_VERSION,
+                'forced' => $force,
             ];
 
             if ($warnings) {
@@ -125,18 +138,58 @@ class PartImagePresentationService
 
     private function detectObjectBox(mixed $image): ?array
     {
-        $width = imagesx($image); $height = imagesy($image);
-        $minX = $width; $minY = $height; $maxX = -1; $maxY = -1;
+        $width = imagesx($image);
+        $height = imagesy($image);
+
+        $box = $this->scanObjectBox($image, false);
+
+        if (! $box) {
+            $box = $this->scanObjectBox($image, true);
+        }
+
+        if (! $box) {
+            return null;
+        }
+
+        $areaRatio = ($box['width'] * $box['height']) / max(1, $width * $height);
+
+        if ($areaRatio > 0.82) {
+            $aggressiveBox = $this->scanObjectBox($image, true);
+
+            if ($aggressiveBox) {
+                $aggressiveAreaRatio = ($aggressiveBox['width'] * $aggressiveBox['height']) / max(1, $width * $height);
+
+                if ($aggressiveAreaRatio < $areaRatio) {
+                    $box = $aggressiveBox;
+                    $areaRatio = $aggressiveAreaRatio;
+                }
+            }
+        }
+
+        return $box + ['area_ratio' => round($areaRatio, 4)];
+    }
+
+    private function scanObjectBox(mixed $image, bool $aggressive): ?array
+    {
+        $width = imagesx($image);
+        $height = imagesy($image);
+        $minX = $width;
+        $minY = $height;
+        $maxX = -1;
+        $maxY = -1;
 
         for ($y = 0; $y < $height; $y++) {
             for ($x = 0; $x < $width; $x++) {
                 $rgba = imagecolorat($image, $x, $y);
-                $a = ($rgba & 0x7F000000) >> 24;
-                $r = ($rgba >> 16) & 0xFF; $g = ($rgba >> 8) & 0xFF; $b = $rgba & 0xFF;
-                if ($a >= 127 || ($r > self::WHITE_THRESHOLD && $g > self::WHITE_THRESHOLD && $b > self::WHITE_THRESHOLD)) {
+
+                if ($this->isBackgroundPixel($rgba, $aggressive)) {
                     continue;
                 }
-                $minX = min($minX, $x); $minY = min($minY, $y); $maxX = max($maxX, $x); $maxY = max($maxY, $y);
+
+                $minX = min($minX, $x);
+                $minY = min($minY, $y);
+                $maxX = max($maxX, $x);
+                $maxY = max($maxY, $y);
             }
         }
 
@@ -144,36 +197,90 @@ class PartImagePresentationService
             return null;
         }
 
-        $boxWidth = $maxX - $minX + 1; $boxHeight = $maxY - $minY + 1;
-        $marginX = (int) ceil($boxWidth * 0.06); $marginY = (int) ceil($boxHeight * 0.06);
-
-        $x = max(0, $minX - $marginX); $y = max(0, $minY - $marginY);
-        $right = min($width - 1, $maxX + $marginX); $bottom = min($height - 1, $maxY + $marginY);
-
-        return ['x' => $x, 'y' => $y, 'width' => $right - $x + 1, 'height' => $bottom - $y + 1];
+        return ['x' => $minX, 'y' => $minY, 'width' => $maxX - $minX + 1, 'height' => $maxY - $minY + 1];
     }
 
-    private function renderVariant(mixed $source, array $box, int $canvasWidth, int $canvasHeight, string $targetPath): void
+    private function isBackgroundPixel(int $rgba, bool $aggressive): bool
     {
+        $a = ($rgba & 0x7F000000) >> 24;
+
+        if ($a >= 127) {
+            return true;
+        }
+
+        $r = ($rgba >> 16) & 0xFF;
+        $g = ($rgba >> 8) & 0xFF;
+        $b = $rgba & 0xFF;
+        $max = max($r, $g, $b);
+        $min = min($r, $g, $b);
+        $chroma = $max - $min;
+        $brightness = ($r + $g + $b) / 3;
+        $saturation = $max === 0 ? 0 : $chroma / $max;
+
+        if ($r > 238 && $g > 238 && $b > 238 && $chroma < 18) {
+            return true;
+        }
+
+        if ($brightness > 242 && $chroma < 22) {
+            return true;
+        }
+
+        if ($brightness > 228 && $saturation < 0.055) {
+            return true;
+        }
+
+        return $aggressive && $brightness > 215 && $saturation < 0.08 && $chroma < 24;
+    }
+
+    private function renderVariant(mixed $source, array $box, int $canvasWidth, int $canvasHeight, string $targetPath, float $targetFill, float $marginRatio, int $maxMargin): array
+    {
+        $sourceWidth = imagesx($source);
+        $sourceHeight = imagesy($source);
+        $marginX = min($maxMargin, (int) ceil($box['width'] * $marginRatio));
+        $marginY = min($maxMargin, (int) ceil($box['height'] * $marginRatio));
+        $cropX = max(0, $box['x'] - $marginX);
+        $cropY = max(0, $box['y'] - $marginY);
+        $cropRight = min($sourceWidth - 1, $box['x'] + $box['width'] - 1 + $marginX);
+        $cropBottom = min($sourceHeight - 1, $box['y'] + $box['height'] - 1 + $marginY);
+        $cropWidth = $cropRight - $cropX + 1;
+        $cropHeight = $cropBottom - $cropY + 1;
+
         $canvas = imagecreatetruecolor($canvasWidth, $canvasHeight);
         $white = imagecolorallocate($canvas, 255, 255, 255);
         imagefill($canvas, 0, 0, $white);
 
-        $scale = min(($canvasWidth * self::TARGET_FILL) / $box['width'], ($canvasHeight * self::TARGET_FILL) / $box['height']);
-        $targetWidth = max(1, (int) floor($box['width'] * $scale));
-        $targetHeight = max(1, (int) floor($box['height'] * $scale));
+        $scale = min(($canvasWidth * $targetFill) / $cropWidth, ($canvasHeight * $targetFill) / $cropHeight);
+        $scale = min($scale, $canvasWidth / $cropWidth, $canvasHeight / $cropHeight);
+        $targetWidth = max(1, (int) floor($cropWidth * $scale));
+        $targetHeight = max(1, (int) floor($cropHeight * $scale));
         $dstX = (int) floor(($canvasWidth - $targetWidth) / 2);
         $dstY = (int) floor(($canvasHeight - $targetHeight) / 2);
 
-        imagecopyresampled($canvas, $source, $dstX, $dstY, $box['x'], $box['y'], $targetWidth, $targetHeight, $box['width'], $box['height']);
+        imagecopyresampled($canvas, $source, $dstX, $dstY, $cropX, $cropY, $targetWidth, $targetHeight, $cropWidth, $cropHeight);
         Storage::disk('public')->makeDirectory(dirname($targetPath));
         imagejpeg($canvas, Storage::disk('public')->path($targetPath), 88);
         imagedestroy($canvas);
+
+        return [
+            'canvas' => ['width' => $canvasWidth, 'height' => $canvasHeight],
+            'crop_box' => ['x' => $cropX, 'y' => $cropY, 'width' => $cropWidth, 'height' => $cropHeight],
+            'bounding_box' => ['width' => $box['width'], 'height' => $box['height'], 'area_ratio' => $box['area_ratio'] ?? null],
+            'margin_px' => ['x' => $marginX, 'y' => $marginY],
+            'final_scale' => round($scale, 4),
+            'final_object' => ['width' => $targetWidth, 'height' => $targetHeight],
+            'final_fill_ratio' => round(max($targetWidth / $canvasWidth, $targetHeight / $canvasHeight), 4),
+        ];
     }
 
-    private function variantBaseName(PartImage $partImage, string $sourcePath): string
+    private function variantBaseName(PartImage $partImage, string $sourcePath, bool $force): string
     {
-        return $partImage->id.'-'.substr(sha1($sourcePath.'|'.$partImage->updated_at?->timestamp), 0, 12);
+        $seed = $sourcePath.'|'.$partImage->updated_at?->timestamp.'|'.self::PRESENTATION_VERSION;
+
+        if ($force) {
+            $seed .= '|forced|'.now()->format('Uu');
+        }
+
+        return $partImage->id.'-'.substr(sha1($seed), 0, 12);
     }
 
     private function writeLog(PartImage $partImage, array $presentation, array $warnings = []): void
@@ -188,6 +295,9 @@ class PartImagePresentationService
             'listing_path' => $presentation['listing_path'] ?? null,
             'product_path' => $presentation['product_path'] ?? null,
             'bounding_box' => $presentation['bounding_box'] ?? null,
+            'metrics' => $presentation['metrics'] ?? null,
+            'presentation_version' => $presentation['presentation_version'] ?? null,
+            'forced' => $presentation['forced'] ?? null,
             'processor' => $presentation['processor'] ?? null,
             'warnings' => $warnings,
         ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE).PHP_EOL, FILE_APPEND | LOCK_EX);

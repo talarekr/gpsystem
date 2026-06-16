@@ -26,7 +26,7 @@ class EditPart extends EditRecord
                             continue;
                         }
 
-                        $image->legacy_payload = app(PartImagePresentationService::class)->process($image);
+                        $image->legacy_payload = app(PartImagePresentationService::class)->process($image, true);
                         $image->saveQuietly();
                         $processed++;
                     }
