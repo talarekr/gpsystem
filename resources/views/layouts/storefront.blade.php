@@ -15,5 +15,6 @@
 @include('storefront.partials.header')
 <main>@yield('content')</main>
 @include('storefront.partials.footer')
+<script src="{{ asset('js/storefront-category-menu.js') }}" defer></script>
 </body>
 </html>
