@@ -128,3 +128,4 @@
 .sf-details-label{font-weight:800;color:var(--navy)}
 .sf-details-value{color:#243044}
 @media(max-width:767px){.sf-details-row{grid-template-columns:1fr}.sf-details-label{padding-bottom:4px}.sf-details-value{padding-top:4px}}
+.sf-details-description{max-width:960px;margin:0 auto 22px;color:#243044;font-size:15px;line-height:1.7}
