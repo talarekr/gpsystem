@@ -2,9 +2,9 @@
 
 namespace App\Filament\Pages;
 
-use App\Filament\Pages\Orders;
 use App\Filament\Resources\PartResource;
 use App\Models\ShopEvent;
+use App\Services\Admin\OperationsDashboardService;
 use App\Services\Admin\SalesAnalyticsService;
 use Filament\Pages\Dashboard as BaseDashboard;
 use Illuminate\Contracts\Support\Htmlable;
@@ -32,7 +32,31 @@ class Dashboard extends BaseDashboard
 
     public function ordersUrl(): string
     {
-        return class_exists(Orders::class) ? Orders::getUrl() : '#';
+        return app(OperationsDashboardService::class)->ordersUrl();
+    }
+
+    public function returnsUrl(): string
+    {
+        return app(OperationsDashboardService::class)->returnsUrl();
+    }
+
+    /**
+     * @return array{orders: array{unhandled: int, url: string}, returns: array{unhandled: int, url: string}}
+     */
+    public function operationsDashboard(): array
+    {
+        $operations = app(OperationsDashboardService::class);
+
+        return [
+            'orders' => [
+                'unhandled' => $operations->unhandledOrdersCount(),
+                'url' => $operations->ordersUrl(),
+            ],
+            'returns' => [
+                'unhandled' => $operations->unhandledReturnsCount(),
+                'url' => $operations->returnsUrl(),
+            ],
+        ];
     }
 
     /**
