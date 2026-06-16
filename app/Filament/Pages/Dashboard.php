@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Models\ShopEvent;
 use Filament\Pages\Dashboard as BaseDashboard;
+use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Collection;
 
 class Dashboard extends BaseDashboard
@@ -11,8 +12,13 @@ class Dashboard extends BaseDashboard
     protected static string $view = 'filament.pages.dashboard';
     protected static ?string $navigationIcon = 'heroicon-o-home';
     protected static ?string $navigationLabel = 'Strona główna';
-    protected static ?string $title = 'Strona główna';
+    protected static ?string $title = '';
     protected static ?int $navigationSort = 10;
+
+    public function getHeading(): string|Htmlable
+    {
+        return '';
+    }
 
     /**
      * @return array<string, string>
