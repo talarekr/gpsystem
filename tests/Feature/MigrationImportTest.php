@@ -150,6 +150,22 @@ class MigrationImportTest extends TestCase
 
         $this->assertStringContainsString('<form method="POST" action="{{ route(', $view);
         $this->assertStringContainsString('admin.import-migration.woo-products.start', $view);
+        foreach ([
+            'products_filename',
+            'categories_filename',
+            'meta_filename',
+            'attributes_filename',
+            'summary_filename',
+            'images_filename',
+        ] as $fieldName) {
+            $this->assertStringContainsString("'{$fieldName}'", $view);
+        }
+        $this->assertStringContainsString('name="{{ $name }}"', $view);
+        $this->assertStringContainsString('name="mode"', $view);
+        $this->assertStringContainsString("'products_filename' => 'products.csv'", $page);
+        $this->assertStringContainsString("'images_filename' => ''", $page);
+        $this->assertStringNotContainsString('{{ $this->form }}', $view);
+        $this->assertStringNotContainsString("request->input('data'", file_get_contents(app_path('Http/Controllers/Admin/ImportMigration/WooProductImportRunController.php')));
         $this->assertStringNotContainsString('wire:submit', $view);
         $this->assertStringNotContainsString('wire:poll', $view);
         $this->assertSame(1, substr_count($view, 'Uruchom import'));

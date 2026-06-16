@@ -2,7 +2,63 @@
     <div class="space-y-6">
         <form method="POST" action="{{ route('admin.import-migration.woo-products.start') }}" class="space-y-6">
             @csrf
-            {{ $this->form }}
+
+            <x-filament::section heading="Import migracyjny" description="Tymczasowe narzędzie izolowane od codziennego workflow Części. Nie łączy się z Woo API.">
+                <div class="space-y-6">
+                    <div>
+                        <h3 class="text-sm font-medium text-gray-950 dark:text-white">Instrukcja wgrywania plików</h3>
+                        <p class="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                            Wgraj pliki CSV/JSON przez DirectAdmin lub File Manager do folderu storage/app/imports/manual/woo/, a następnie wpisz albo wybierz poniżej same nazwy plików. products.csv jest wymagany. Pola opcjonalne możesz wyczyścić, jeśli nie chcesz używać danego pliku. Oczekiwany folder na serwerze: {{ app(\App\Support\ImportMigration\ManualImportFileResolver::class)->wooDirectoryPath() }}
+                        </p>
+                    </div>
+
+                    @foreach ([
+                        ['products_filename', 'products.csv', 'csv', 'Wymagany plik produktów. Musi już istnieć na serwerze w storage/app/imports/manual/woo/.', true],
+                        ['categories_filename', 'product_categories.csv', 'csv', 'Opcjonalny plik kategorii z folderu storage/app/imports/manual/woo/.', false],
+                        ['meta_filename', 'product_meta.csv', 'csv', 'Opcjonalny plik metadanych z folderu storage/app/imports/manual/woo/.', false],
+                        ['attributes_filename', 'product_attributes.csv', 'csv', 'Opcjonalny plik atrybutów z folderu storage/app/imports/manual/woo/.', false],
+                        ['summary_filename', 'export_summary.json', 'json', 'Opcjonalny plik podsumowania z folderu storage/app/imports/manual/woo/.', false],
+                        ['images_filename', 'product_images.csv', 'csv', 'Opcjonalny plik obrazów z folderu storage/app/imports/manual/woo/.', false],
+                    ] as [$name, $label, $extension, $helperText, $required])
+                        <div>
+                            <label for="{{ $name }}" class="block text-sm font-medium text-gray-950 dark:text-white">{{ $label }}</label>
+                            <input
+                                id="{{ $name }}"
+                                name="{{ $name }}"
+                                type="text"
+                                value="{{ $this->fieldValue($name) }}"
+                                placeholder="{{ $label }}"
+                                list="{{ $this->datalistId($extension) }}"
+                                @if ($required) required @endif
+                                maxlength="255"
+                                class="mt-1 block w-full rounded-lg border-gray-300 text-sm shadow-sm transition duration-75 focus:border-primary-500 focus:ring-1 focus:ring-primary-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-primary-500"
+                            >
+                            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ $helperText }}</p>
+                        </div>
+                    @endforeach
+
+                    @foreach (['csv', 'json'] as $extension)
+                        <datalist id="{{ $this->datalistId($extension) }}">
+                            @foreach ($this->availableFilesForExtension($extension) as $filename)
+                                <option value="{{ $filename }}"></option>
+                            @endforeach
+                        </datalist>
+                    @endforeach
+
+                    <div>
+                        <label for="mode" class="block text-sm font-medium text-gray-950 dark:text-white">Tryb importu</label>
+                        <select id="mode" name="mode" required class="mt-1 block w-full rounded-lg border-gray-300 text-sm shadow-sm transition duration-75 focus:border-primary-500 focus:ring-1 focus:ring-primary-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-primary-500">
+                            @foreach ([
+                                \App\Services\ImportMigration\WooProductImport::MODE_DRY_RUN => 'Dry run — tylko raport',
+                                \App\Services\ImportMigration\WooProductImport::MODE_CREATE_ONLY => 'Utwórz tylko brakujące',
+                                \App\Services\ImportMigration\WooProductImport::MODE_UPDATE_EXISTING => 'Aktualizuj istniejące bezpieczne pola',
+                            ] as $value => $label)
+                                <option value="{{ $value }}" @selected($this->modeValue() === $value)>{{ $label }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+                </div>
+            </x-filament::section>
 
             <div class="flex items-center gap-3">
                 <button
@@ -77,6 +133,27 @@
                     </dl>
                 </details>
             </div>
+        @endif
+
+        @if (! empty($submittedValues))
+            <x-filament::section heading="Ostatnio odebrane wartości POST Woo">
+                <dl class="grid gap-2 text-sm md:grid-cols-2 xl:grid-cols-4">
+                    @foreach ([
+                        'products_filename',
+                        'categories_filename',
+                        'meta_filename',
+                        'attributes_filename',
+                        'summary_filename',
+                        'images_filename',
+                        'mode',
+                    ] as $key)
+                        <div>
+                            <dt class="font-medium">submitted {{ $key }}</dt>
+                            <dd class="break-words">{{ ($submittedValues[$key] ?? '') !== '' ? $submittedValues[$key] : '—' }}</dd>
+                        </div>
+                    @endforeach
+                </dl>
+            </x-filament::section>
         @endif
 
         @if ($importError)
