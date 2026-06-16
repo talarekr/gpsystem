@@ -10,6 +10,30 @@
     --sidebar-width: 14.5rem;
 }
 
+
+body.fi-body {
+    font-size: 0.9375rem;
+}
+
+body.fi-body :where(
+    .fi-sidebar,
+    .fi-topbar,
+    .fi-btn,
+    .fi-badge,
+    .fi-input,
+    .fi-select-input,
+    .fi-textarea,
+    .fi-section,
+    .fi-ta,
+    .fi-dropdown-panel,
+    .fi-modal-window,
+    .fi-tabs,
+    .fi-pagination,
+    .gps-admin-topbar
+) {
+    font-size: 0.9375rem;
+}
+
 html,
 body,
 .fi-body,
