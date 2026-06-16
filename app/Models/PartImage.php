@@ -51,6 +51,10 @@ class PartImage extends Model
 
         $relativePath = ltrim($path, '/');
 
+        if (Str::startsWith($relativePath, 'parts/photos/') && Storage::disk('public')->exists($relativePath)) {
+            return '/storage/'.$relativePath;
+        }
+
         if (Storage::disk('public')->exists($relativePath)) {
             return Storage::disk('public')->url($relativePath);
         }
