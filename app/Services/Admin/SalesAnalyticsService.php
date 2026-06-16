@@ -26,7 +26,7 @@ class SalesAnalyticsService
     /**
      * @return array{
      *     range: array{key: string, label: string, starts_at: CarbonInterface, ends_at: CarbonInterface},
-     *     summary: array{online_revenue_pln: float, online_orders_count: int, local_sales_pln: float, local_sales_count: int},
+     *     summary: array{online_revenue_pln: float, online_orders_count: int, local_sales_pln: float, local_sales_count: int, total_sales_pln: float},
      *     channels: array<int, array{key: string, label: string, badge: string, orders_count: int, sales_pln: float, sales_eur?: float, exchange_rate?: float|null, note?: string}>
      * }
      */
@@ -36,13 +36,16 @@ class SalesAnalyticsService
         $channels = $this->onlineChannels($range['starts_at'], $range['ends_at']);
         $localSales = $this->localSales($range['starts_at'], $range['ends_at']);
 
+        $onlineRevenuePln = array_sum(array_column($channels, 'sales_pln'));
+
         return [
             'range' => $range,
             'summary' => [
-                'online_revenue_pln' => array_sum(array_column($channels, 'sales_pln')),
+                'online_revenue_pln' => $onlineRevenuePln,
                 'online_orders_count' => array_sum(array_column($channels, 'orders_count')),
                 'local_sales_pln' => $localSales['sales_pln'],
                 'local_sales_count' => $localSales['orders_count'],
+                'total_sales_pln' => $onlineRevenuePln + $localSales['sales_pln'],
             ],
             'channels' => $channels,
         ];
