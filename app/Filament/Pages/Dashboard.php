@@ -2,12 +2,58 @@
 
 namespace App\Filament\Pages;
 
+use App\Models\ShopEvent;
 use Filament\Pages\Dashboard as BaseDashboard;
+use Illuminate\Database\Eloquent\Collection;
 
 class Dashboard extends BaseDashboard
 {
+    protected static string $view = 'filament.pages.dashboard';
     protected static ?string $navigationIcon = 'heroicon-o-home';
     protected static ?string $navigationLabel = 'Strona główna';
     protected static ?string $title = 'Strona główna';
     protected static ?int $navigationSort = 10;
+
+    /**
+     * @return array<string, string>
+     */
+    public function shopEventTabs(): array
+    {
+        return [
+            'all' => 'Wszystkie',
+            'requires_action' => 'Wymaga reakcji',
+            'orders' => 'Zamówienia',
+            'messages' => 'Wiadomości',
+            'returns_complaints' => 'Zwroty/Reklamacje',
+        ];
+    }
+
+    public function activeShopEventTab(): string
+    {
+        $tab = request()->query('shop_event_tab', 'all');
+
+        return array_key_exists($tab, $this->shopEventTabs()) ? $tab : 'all';
+    }
+
+    /**
+     * @return Collection<int, ShopEvent>
+     */
+    public function shopEvents(): Collection
+    {
+        $query = ShopEvent::query();
+
+        match ($this->activeShopEventTab()) {
+            'requires_action' => $query->where('requires_action', true),
+            'orders' => $query->whereIn('event_type', ['order', 'payment']),
+            'messages' => $query->whereIn('event_type', ['customer_message', 'product_question']),
+            'returns_complaints' => $query->whereIn('event_type', ['return', 'complaint']),
+            default => null,
+        };
+
+        // TODO: Techniczne zdarzenia typu import/API/stock sync będą później osobnym modułem Administrator / Dziennik techniczny.
+        return $query
+            ->orderByRaw('COALESCE(occurred_at, created_at) DESC')
+            ->limit(15)
+            ->get();
+    }
 }
