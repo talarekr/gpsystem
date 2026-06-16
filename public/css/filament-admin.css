@@ -468,7 +468,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 }
 
 .gps-quick-actions {
-    margin-top: 1rem;
+    margin-top: .45rem;
     padding: .55rem;
     border: 1px solid #dbe3ee;
     border-radius: .95rem;
@@ -590,4 +590,196 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     .gps-local-sale-result { grid-template-columns: 3rem 1fr; }
     .gps-local-sale-result__meta { grid-column: 2; text-align: left; }
     .gps-local-sale-modal__footer { flex-direction: column-reverse; align-items: stretch; }
+}
+
+.gps-sales-analytics {
+    margin-top: 1.15rem;
+    border: 1px solid var(--gps-admin-border);
+    border-radius: 1.1rem;
+    background: #fff;
+    box-shadow: var(--gps-admin-soft-shadow);
+    padding: clamp(1rem, 2vw, 1.35rem);
+}
+
+.gps-sales-analytics__header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    border-bottom: 1px solid #e2e8f0;
+    padding-bottom: 1rem;
+}
+
+.gps-sales-analytics__eyebrow {
+    display: inline-flex;
+    margin-bottom: 0.25rem;
+    color: #405f82;
+    font-size: 0.76rem;
+    font-weight: 850;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
+.gps-sales-analytics h2 {
+    margin: 0;
+    color: #0f172a;
+    font-size: 1.25rem;
+    font-weight: 850;
+}
+
+.gps-sales-analytics__header p {
+    margin: 0.25rem 0 0;
+    color: #64748b;
+    font-size: 0.92rem;
+}
+
+.gps-sales-analytics__ranges {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.45rem;
+    max-width: 34rem;
+}
+
+.gps-sales-analytics__range {
+    border: 1px solid #dbe3ee;
+    border-radius: 999px;
+    background: #f8fafc;
+    color: #334155;
+    padding: 0.42rem 0.68rem;
+    font-size: 0.82rem;
+    font-weight: 800;
+    text-decoration: none;
+}
+
+.gps-sales-analytics__range:hover,
+.gps-sales-analytics__range.is-active {
+    border-color: #405f82;
+    background: #edf3f8;
+    color: var(--gps-admin-navy);
+}
+
+.gps-sales-analytics__grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.65fr) minmax(18rem, 0.85fr);
+    gap: 0.9rem;
+    margin-top: 1rem;
+}
+
+.gps-sales-card {
+    border: 1px solid #e2e8f0;
+    border-radius: 0.95rem;
+    background: #fff;
+    padding: 1rem;
+    box-shadow: 0 1px 2px rgba(11, 31, 58, 0.035);
+}
+
+.gps-sales-card__heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    color: #0f172a;
+    font-weight: 850;
+}
+
+.gps-sales-card__heading small {
+    color: #64748b;
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+.gps-sales-metrics {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin-top: 0.85rem;
+}
+
+.gps-sales-metric {
+    min-height: 8rem;
+    border: 1px solid #e8eef5;
+    border-radius: 0.85rem;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    padding: 0.9rem;
+}
+
+.gps-sales-metric span,
+.gps-sales-metric small {
+    display: block;
+    color: #64748b;
+    font-size: 0.82rem;
+    font-weight: 750;
+}
+
+.gps-sales-metric strong {
+    display: block;
+    margin: 0.55rem 0 0.25rem;
+    color: var(--gps-admin-navy);
+    font-size: clamp(1.35rem, 2.2vw, 1.9rem);
+    font-weight: 900;
+    line-height: 1.05;
+}
+
+.gps-sales-channels {
+    display: grid;
+    gap: 0.65rem;
+    margin-top: 0.85rem;
+}
+
+.gps-sales-channel {
+    display: grid;
+    grid-template-columns: 2.45rem minmax(0, 1fr);
+    gap: 0.7rem;
+    align-items: center;
+    border: 1px solid #e8eef5;
+    border-radius: 0.85rem;
+    background: #fbfdff;
+    padding: 0.72rem;
+}
+
+.gps-sales-channel__badge {
+    display: inline-flex;
+    width: 2.45rem;
+    height: 2.45rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.75rem;
+    background: #edf3f8;
+    color: var(--gps-admin-navy);
+    font-size: 0.82rem;
+    font-weight: 900;
+}
+
+.gps-sales-channel__topline {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.6rem;
+}
+
+.gps-sales-channel__topline strong {
+    color: #0f172a;
+    font-weight: 850;
+}
+
+.gps-sales-channel__topline span,
+.gps-sales-channel small {
+    color: #64748b;
+    font-size: 0.78rem;
+    font-weight: 750;
+}
+
+.gps-sales-channel p {
+    margin: 0.2rem 0 0;
+    color: var(--gps-admin-navy);
+    font-size: 1rem;
+    font-weight: 900;
+}
+
+@media (max-width: 980px) {
+    .gps-sales-analytics__header { flex-direction: column; }
+    .gps-sales-analytics__ranges { justify-content: flex-start; max-width: none; }
+    .gps-sales-analytics__grid,
+    .gps-sales-metrics { grid-template-columns: 1fr; }
 }

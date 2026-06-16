@@ -92,6 +92,84 @@
         </div>
     </section>
 
+    @php($salesAnalytics = $this->salesAnalytics())
+
+    <section class="gps-sales-analytics" aria-labelledby="gps-sales-analytics-title">
+        <div class="gps-sales-analytics__header">
+            <div>
+                <span class="gps-sales-analytics__eyebrow">Pulpit sprzedaży</span>
+                <h2 id="gps-sales-analytics-title">Analityka sprzedaży</h2>
+                <p>Liczbowe podsumowanie sprzedaży online i lokalnej dla wybranego okresu.</p>
+            </div>
+
+            <nav class="gps-sales-analytics__ranges" aria-label="Zakres analityki sprzedaży">
+                @foreach ($this->salesRangeTabs() as $rangeKey => $rangeLabel)
+                    <a
+                        href="{{ request()->fullUrlWithQuery(['sales_range' => $rangeKey]) }}"
+                        @class(['gps-sales-analytics__range', 'is-active' => $salesAnalytics['range']['key'] === $rangeKey])
+                    >
+                        {{ $rangeLabel }}
+                    </a>
+                @endforeach
+            </nav>
+        </div>
+
+        <div class="gps-sales-analytics__grid">
+            <article class="gps-sales-card gps-sales-card--summary">
+                <div class="gps-sales-card__heading">
+                    <span>Podsumowanie</span>
+                    <small>{{ $salesAnalytics['range']['starts_at']->format('d.m.Y') }}–{{ $salesAnalytics['range']['ends_at']->format('d.m.Y') }}</small>
+                </div>
+
+                <div class="gps-sales-metrics">
+                    <div class="gps-sales-metric">
+                        <span>Przychód ze sprzedaży online</span>
+                        <strong>{{ $this->formatPln($salesAnalytics['summary']['online_revenue_pln']) }}</strong>
+                        <small>Sklep + Ovoko + Allegro + eBay</small>
+                    </div>
+                    <div class="gps-sales-metric">
+                        <span>Liczba zamówień</span>
+                        <strong>{{ $salesAnalytics['summary']['online_orders_count'] }}</strong>
+                        <small>Łącznie z kanałów online</small>
+                    </div>
+                    <div class="gps-sales-metric">
+                        <span>Sprzedaż lokalna</span>
+                        <strong>{{ $this->formatPln($salesAnalytics['summary']['local_sales_pln']) }}</strong>
+                        <small>{{ $salesAnalytics['summary']['local_sales_count'] }} zapisów w local_sales</small>
+                    </div>
+                </div>
+            </article>
+
+            <aside class="gps-sales-card gps-sales-card--channels" aria-label="Sprzedaż per kanał">
+                <div class="gps-sales-card__heading">
+                    <span>Kanały</span>
+                    <small>zamówienia / wartość</small>
+                </div>
+
+                <div class="gps-sales-channels">
+                    @foreach ($salesAnalytics['channels'] as $channel)
+                        <article class="gps-sales-channel gps-sales-channel--{{ $channel['key'] }}">
+                            <div class="gps-sales-channel__badge" aria-hidden="true">{{ $channel['badge'] }}</div>
+                            <div class="gps-sales-channel__body">
+                                <div class="gps-sales-channel__topline">
+                                    <strong>{{ $channel['label'] }}</strong>
+                                    <span>{{ $channel['orders_count'] }} zam.</span>
+                                </div>
+                                @if ($channel['key'] === 'ebay')
+                                    <p>{{ $this->formatEur($channel['sales_eur'] ?? 0) }}</p>
+                                    <small>{{ $this->formatPln($channel['sales_pln']) }} @if (($channel['exchange_rate'] ?? null) === null) · kurs do podłączenia @endif</small>
+                                @else
+                                    <p>{{ $this->formatPln($channel['sales_pln']) }}</p>
+                                @endif
+                            </div>
+                        </article>
+                    @endforeach
+                </div>
+            </aside>
+        </div>
+    </section>
+
+
     <div class="gps-local-sale-modal" data-gps-local-sale-modal hidden>
         <div class="gps-local-sale-modal__backdrop" data-gps-local-sale-close></div>
         <div class="gps-local-sale-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="gps-local-sale-title">
