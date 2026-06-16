@@ -4,7 +4,7 @@
     <a class="sf-logo" href="{{ route('storefront.home') }}"><span>GP</span>Swiss</a>
     @include('storefront.partials.search-bar')
     <details class="sf-profile"><summary>Moje konto</summary><div><a href="#">Logowanie</a><a href="#">Zamówienia</a></div></details>
-    <a class="sf-cart" href="#">Koszyk <b>0</b></a>
+    <a class="sf-cart" href="{{ route('storefront.cart.index') }}">Koszyk <b>{{ $storefrontCartCount ?? 0 }}</b></a>
 </div>
 <nav class="sf-nav"><div class="sf-container sf-nav__inner">
     @include('storefront.partials.category-menu')
