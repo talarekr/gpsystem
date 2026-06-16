@@ -18,6 +18,48 @@ class WooStoragePublicController extends Controller
         return $this->html('Diagnostyka public storage', $this->diagnosticsHtml($info, $sampleFiles));
     }
 
+    public function forceCopy(): Response
+    {
+        $info = $this->storageInfo();
+        $warnings = [];
+        $errors = [];
+        $symlinkRemoved = false;
+        $fallbackCopyUsed = false;
+        $filesCopied = 0;
+        $directoriesEnsured = 0;
+
+        if (! is_dir($info['source'])) {
+            $errors[] = 'Source storage does not exist or is not a directory.';
+        } else {
+            if (is_link($info['target'])) {
+                if (@unlink($info['target'])) {
+                    $symlinkRemoved = true;
+                } else {
+                    $errors[] = 'Target is a symlink, but unlink() failed. No files were deleted.';
+                }
+            } elseif (file_exists($info['target']) && ! is_dir($info['target'])) {
+                $errors[] = 'Target exists as a regular file. Nothing was deleted.';
+            }
+
+            if ($errors === []) {
+                $fallbackCopyUsed = true;
+
+                try {
+                    [$filesCopied, $directoriesEnsured] = $this->copyDirectoryWithoutDeleting($info['source'], $info['target']);
+                } catch (Throwable $exception) {
+                    $errors[] = 'Force fallback copy exception: '.$exception->getMessage();
+                }
+            }
+        }
+
+        $sampleFile = $this->samplePhotoFiles($info['source_parts_photos_path'])[0] ?? null;
+        $testUrl = $sampleFile ? url('/storage/parts/photos/'.basename($sampleFile)) : null;
+
+        $this->writeForceCopyLog($info, $symlinkRemoved, $fallbackCopyUsed, $filesCopied, $directoriesEnsured, $warnings, $errors);
+
+        return $this->html('Force fallback copy public storage', $this->forceCopyHtml($info, $symlinkRemoved, $fallbackCopyUsed, $filesCopied, $directoriesEnsured, $warnings, $errors, $testUrl));
+    }
+
     public function ensure(): Response
     {
         $info = $this->storageInfo();
@@ -163,8 +205,11 @@ class WooStoragePublicController extends Controller
                 $directoriesEnsured++;
             }
 
-            if (! is_file($destination) || filesize($destination) !== $item->getSize()) {
-                copy($item->getPathname(), $destination);
+            if (! is_file($destination) || filesize($destination) !== $item->getSize() || filemtime($item->getPathname()) > filemtime($destination)) {
+                if (! copy($item->getPathname(), $destination)) {
+                    throw new \RuntimeException('Could not copy file: '.$item->getPathname());
+                }
+
                 $filesCopied++;
             }
         }
@@ -181,12 +226,15 @@ class WooStoragePublicController extends Controller
         }
         $files = $sampleFiles ? '<ol><li>'.implode('</li><li>', array_map(fn ($file) => $this->e($file), $sampleFiles)).'</li></ol>' : '<p>Brak przykładowych plików.</p>';
         $ensureUrl = route('admin.import-migration.woo-products.storage-public.ensure');
+        $forceCopyUrl = route('admin.import-migration.woo-products.storage-public.force-copy');
         $csrf = csrf_field();
 
         return <<<HTML
 <table border="1" cellpadding="6" cellspacing="0">{$rows}</table>
+<p><strong>Hint operatora:</strong> Jeśli URL /storage/... zwraca Forbidden, użyj trybu fallback copy.</p>
 <h2>Przykładowe pliki source/parts/photos</h2>{$files}
 <form method="POST" action="{$ensureUrl}" style="margin-top: 20px;">{$csrf}<button type="submit">Napraw public storage</button></form>
+<form method="POST" action="{$forceCopyUrl}" style="margin-top: 20px;">{$csrf}<p><strong>Ostrzeżenie:</strong> Użyj, jeśli symlink został utworzony, ale URL /storage/... zwraca Forbidden.</p><button type="submit">Wymuś fallback copy</button></form>
 HTML;
     }
 
@@ -209,6 +257,25 @@ HTML;
             .'</dl><h2>Warnings</h2>'.$warningsHtml.'<h2>Errors</h2>'.$errorsHtml;
     }
 
+    private function forceCopyHtml(array $info, bool $symlinkRemoved, bool $fallbackCopyUsed, int $filesCopied, int $directoriesEnsured, array $warnings, array $errors, ?string $testUrl): string
+    {
+        $warningsHtml = $warnings ? '<ul><li>'.implode('</li><li>', array_map(fn ($w) => $this->e($w), $warnings)).'</li></ul>' : '<p>Brak.</p>';
+        $errorsHtml = $errors ? '<ul><li>'.implode('</li><li>', array_map(fn ($e) => $this->e($e), $errors)).'</li></ul>' : '<p>Brak.</p>';
+        $testUrlHtml = $testUrl ? '<a href="'.$this->e($testUrl).'" target="_blank" rel="noopener">'.$this->e($testUrl).'</a>' : 'Brak przykładowego zdjęcia.';
+        $logPath = storage_path('app/imports/manual/woo/storage_public_ensure.log');
+
+        return '<dl>'
+            .'<dt>source</dt><dd>'.$this->e($info['source']).'</dd>'
+            .'<dt>target</dt><dd>'.$this->e($info['target']).'</dd>'
+            .'<dt>symlink_removed</dt><dd>'.($symlinkRemoved ? 'yes' : 'no').'</dd>'
+            .'<dt>fallback copy used</dt><dd>'.($fallbackCopyUsed ? 'yes' : 'no').'</dd>'
+            .'<dt>files copied count</dt><dd>'.$filesCopied.'</dd>'
+            .'<dt>directories ensured count</dt><dd>'.$directoriesEnsured.'</dd>'
+            .'<dt>test URL</dt><dd>'.$testUrlHtml.'</dd>'
+            .'<dt>log</dt><dd>'.$this->e($logPath).'</dd>'
+            .'</dl><h2>Warnings</h2>'.$warningsHtml.'<h2>Errors</h2>'.$errorsHtml;
+    }
+
     private function writeEnsureLog(array $info, string $action, bool $symlinkCreated, bool $fallbackCopyUsed, int $filesCopied, int $directoriesEnsured, array $warnings, array $errors): void
     {
         $directory = storage_path('app/imports/manual/woo');
@@ -223,6 +290,27 @@ HTML;
             'action' => $action,
             'symlink_result' => $symlinkCreated,
             'fallback_result' => $fallbackCopyUsed,
+            'files_copied' => $filesCopied,
+            'dirs_ensured' => $directoriesEnsured,
+            'warnings' => $warnings,
+            'errors' => $errors,
+        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE).PHP_EOL, FILE_APPEND | LOCK_EX);
+    }
+
+    private function writeForceCopyLog(array $info, bool $symlinkRemoved, bool $fallbackCopyUsed, int $filesCopied, int $directoriesEnsured, array $warnings, array $errors): void
+    {
+        $directory = storage_path('app/imports/manual/woo');
+        if (! is_dir($directory)) {
+            mkdir($directory, 0755, true);
+        }
+
+        file_put_contents($directory.DIRECTORY_SEPARATOR.'storage_public_ensure.log', json_encode([
+            'timestamp' => date(DATE_ATOM),
+            'source' => $info['source'],
+            'target' => $info['target'],
+            'event' => 'force_copy',
+            'symlink_removed' => $symlinkRemoved,
+            'fallback_copy_used' => $fallbackCopyUsed,
             'files_copied' => $filesCopied,
             'dirs_ensured' => $directoriesEnsured,
             'warnings' => $warnings,
