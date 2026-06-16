@@ -47,3 +47,147 @@
         initShopEventSoundToggle();
     }
 })();
+
+(function () {
+    function initLocalSaleModal() {
+        const modal = document.querySelector('[data-gps-local-sale-modal]');
+        const form = document.querySelector('[data-gps-local-sale-form]');
+        if (!modal || !form) return;
+
+        const search = form.querySelector('[data-gps-local-sale-search]');
+        const results = form.querySelector('[data-gps-local-sale-results]');
+        const selected = form.querySelector('[data-gps-local-sale-selected]');
+        const partId = form.querySelector('[data-gps-local-sale-part-id]');
+        const amount = form.querySelector('[data-gps-local-sale-amount]');
+        const alertBox = form.querySelector('[data-gps-local-sale-alert]');
+        let timer = null;
+
+        function csrf() {
+            return form.querySelector('input[name="_token"]')?.value || document.querySelector('meta[name="csrf-token"]')?.content || '';
+        }
+
+        function showAlert(message, type) {
+            alertBox.textContent = message;
+            alertBox.className = 'gps-local-sale-alert gps-local-sale-alert--' + (type || 'error');
+            alertBox.hidden = false;
+        }
+
+        function clearAlert() {
+            alertBox.hidden = true;
+            alertBox.textContent = '';
+        }
+
+        function resetForm() {
+            form.reset();
+            partId.value = '';
+            results.hidden = true;
+            results.innerHTML = '';
+            selected.hidden = true;
+            selected.innerHTML = '';
+            clearAlert();
+        }
+
+        function openModal() {
+            resetForm();
+            modal.hidden = false;
+            document.body.classList.add('gps-local-sale-open');
+            setTimeout(() => search.focus(), 50);
+        }
+
+        function closeModal() {
+            modal.hidden = true;
+            document.body.classList.remove('gps-local-sale-open');
+        }
+
+        function renderPart(part) {
+            const img = part.image || part.thumbnail;
+            const unavailable = ['sold', 'archived'].includes(part.status_value) || Number(part.quantity) <= 0;
+            return '<button type="button" class="gps-local-sale-result" data-part-id="' + part.id + '"' + (unavailable ? ' data-unavailable="1"' : '') + '>' +
+                (img ? '<img src="' + img + '" alt="">' : '<span class="gps-local-sale-result__placeholder">GPS</span>') +
+                '<span class="gps-local-sale-result__main"><strong>' + (part.name || 'Bez nazwy') + '</strong>' +
+                '<small>SKU: ' + (part.sku || '—') + ' / nr: ' + (part.part_number || '—') + '</small></span>' +
+                '<span class="gps-local-sale-result__meta"><b>' + (part.price || 'brak ceny') + '</b><small>Status: ' + (part.status || '—') + '</small><small>Ilość: ' + (part.quantity ?? '—') + '</small></span>' +
+                '</button>';
+        }
+
+        function selectPart(part) {
+            if (['sold', 'archived'].includes(part.status_value) || Number(part.quantity) <= 0) {
+                showAlert('Ta część nie jest dostępna do sprzedaży.', 'error');
+                return;
+            }
+            partId.value = part.id;
+            if (part.price_value !== null && part.price_value !== undefined) {
+                amount.value = Number(part.price_value).toFixed(2);
+            }
+            selected.innerHTML = '<strong>Wybrano:</strong> ' + (part.name || 'Bez nazwy') + ' <span>SKU: ' + (part.sku || '—') + ', ilość: ' + (part.quantity ?? '—') + '</span>';
+            selected.hidden = false;
+            results.hidden = true;
+            clearAlert();
+        }
+
+        function doSearch() {
+            const q = search.value.trim();
+            partId.value = '';
+            selected.hidden = true;
+            if (q.length < 3) {
+                results.hidden = true;
+                results.innerHTML = '';
+                return;
+            }
+            fetch('/admin/search/parts?q=' + encodeURIComponent(q), {headers: {'Accept': 'application/json'}})
+                .then((r) => r.json())
+                .then((json) => {
+                    const parts = json.data || [];
+                    results.innerHTML = parts.length ? parts.map(renderPart).join('') : '<div class="gps-local-sale-results__empty">Brak wyników.</div>';
+                    results.hidden = false;
+                    parts.forEach((part) => {
+                        const button = results.querySelector('[data-part-id="' + part.id + '"]');
+                        if (button) button.addEventListener('click', () => selectPart(part));
+                    });
+                });
+        }
+
+        document.querySelectorAll('[data-gps-local-sale-open]').forEach((button) => button.addEventListener('click', openModal));
+        modal.querySelectorAll('[data-gps-local-sale-close]').forEach((button) => button.addEventListener('click', closeModal));
+        search.addEventListener('input', function () {
+            clearTimeout(timer);
+            timer = setTimeout(doSearch, 300);
+        });
+        form.addEventListener('submit', function (event) {
+            event.preventDefault();
+            clearAlert();
+            if (!partId.value) {
+                showAlert('Wybierz część z listy wyników.', 'error');
+                return;
+            }
+            const submit = form.querySelector('button[type="submit"]');
+            submit.disabled = true;
+            fetch(form.action, {
+                method: 'POST',
+                headers: {'Accept': 'application/json', 'X-CSRF-TOKEN': csrf()},
+                body: new FormData(form),
+            }).then(async (response) => {
+                const json = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    const firstError = json.errors ? Object.values(json.errors).flat()[0] : null;
+                    throw new Error(firstError || json.message || 'Nie udało się zapisać sprzedaży lokalnej.');
+                }
+                showAlert(json.message || 'Sprzedaż lokalna została zapisana, a część zdjęta ze stanu.', 'success');
+                setTimeout(() => window.location.reload(), 900);
+            }).catch((error) => {
+                showAlert(error.message || 'Nie udało się zapisać sprzedaży lokalnej.', 'error');
+            }).finally(() => {
+                submit.disabled = false;
+            });
+        });
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && !modal.hidden) closeModal();
+        });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initLocalSaleModal);
+    } else {
+        initLocalSaleModal();
+    }
+})();
