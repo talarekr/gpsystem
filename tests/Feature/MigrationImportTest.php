@@ -151,6 +151,44 @@ class MigrationImportTest extends TestCase
         $this->assertStringContainsString('matched_existing_name', implode("\n", $report->warnings));
     }
 
+    public function test_woo_import_normalizes_invalid_quantities_and_logs_warnings(): void
+    {
+        $directory = storage_path('app/imports/manual/woo');
+        if (! is_dir($directory)) mkdir($directory, 0777, true);
+        $quantityLog = $directory.'/quantity_warning.log';
+        if (is_file($quantityLog)) {
+            unlink($quantityLog);
+        }
+
+        $products = $this->tmp('products-quantity.csv', "woo_product_id,sku,name,quantity,stock_status,manage_stock,status,published,price\n3951,QNEG,AUDI A4 B6 B7 RAMIONA WYCIERACZEK PRZÓD KOMPLET 8E1955408C 8E1955407C,-1,outofstock,yes,publish,1,120\n3952,QBAD,Nieliczbowa,abc,instock,yes,publish,1,130\n3953,QMISS,Brak ilości,,instock,no,publish,1,140\n");
+
+        $report = app(WooProductImport::class)->import($products, [], WooProductImport::MODE_CREATE_ONLY);
+
+        $this->assertSame(3, $report->counters['created']);
+        $this->assertSame(3, $report->counters['quantity_warning_count']);
+        $this->assertSame(0, Part::query()->where('external_id', '3951')->value('quantity'));
+        $this->assertSame(1, Part::query()->where('external_id', '3952')->value('quantity'));
+        $this->assertSame(1, Part::query()->where('external_id', '3953')->value('quantity'));
+        $this->assertFileExists($quantityLog);
+        $log = file_get_contents($quantityLog);
+        $this->assertStringContainsString('outofstock_forced_zero', $log);
+        $this->assertStringContainsString('invalid_quantity_defaulted', $log);
+        $this->assertStringContainsString('missing_quantity_defaulted', $log);
+    }
+
+    public function test_woo_dry_run_reports_normalized_quantity_without_failing(): void
+    {
+        $products = $this->tmp('products-quantity-dry.csv', "woo_product_id,sku,name,quantity,stock_status,manage_stock,status,published,price\n4951,QDRY,Dry quantity,-1,outofstock,yes,publish,1,120\n");
+
+        $report = app(WooProductImport::class)->import($products, [], WooProductImport::MODE_DRY_RUN);
+
+        $this->assertSame(1, $report->counters['quantity_warning_count']);
+        $this->assertSame(1, $report->counters['would_create']);
+        $this->assertNull(Part::query()->where('external_id', '4951')->first());
+        $this->assertStringContainsString('normalized_quantity=0', implode("\n", $report->warnings));
+        $this->assertStringContainsString('quantity_warning=outofstock_forced_zero', implode("\n", $report->warnings));
+    }
+
 
     public function test_woo_import_logs_skipped_existing_products_with_run_id(): void
     {

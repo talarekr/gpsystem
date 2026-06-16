@@ -52,6 +52,7 @@ class WooProductImport
             'processed_rows' => 0,
             'failed_rows' => 0,
             'category_warning_count' => 0,
+            'quantity_warning_count' => 0,
         ]);
     }
 
@@ -164,9 +165,14 @@ class WooProductImport
             return;
         }
 
+        $quantityNormalization = $this->normalizeQuantity($row);
+        if ($quantityNormalization['reason'] !== null) {
+            $this->recordQuantityWarning($report, $runId, $line, $row, $quantityNormalization);
+        }
+
         $category = $this->category($cats[$woo][0] ?? null, $report, $mode, $woo);
         $carId = $this->carId($row, $report, $line);
-        $payload = $this->map($row, $meta[$woo] ?? [], $attrs[$woo] ?? [], $category?->id, $carId);
+        $payload = $this->map($row, $meta[$woo] ?? [], $attrs[$woo] ?? [], $category?->id, $carId, $quantityNormalization['quantity']);
 
         if ($mode === self::MODE_DRY_RUN) {
             $status = $existing ? 'would_update' : 'would_create';
@@ -186,7 +192,7 @@ class WooProductImport
                 ]);
             }
             $report->warnings[] = sprintf(
-                'Dry run wiersz %d: external_id=%s, existing_part=%s, ovoko_car_id=%s, found_car_id=%s, has_name=%s, has_part_number_or_oem=%s, status=%s.',
+                'Dry run wiersz %d: external_id=%s, existing_part=%s, ovoko_car_id=%s, found_car_id=%s, has_name=%s, has_part_number_or_oem=%s, normalized_quantity=%d, quantity_warning=%s, status=%s.',
                 $line,
                 $woo,
                 $existing ? 'yes' : 'no',
@@ -194,6 +200,8 @@ class WooProductImport
                 $carId !== null ? 'yes' : 'no',
                 $hasName ? 'yes' : 'no',
                 ($partNumber !== '' || $oemNumber !== '') ? 'yes' : 'no',
+                $quantityNormalization['quantity'],
+                $quantityNormalization['reason'] ?? 'none',
                 $status,
             );
 
@@ -238,14 +246,69 @@ class WooProductImport
 
     private function group(?string $path, string $key): array { return $this->groupForIds($path, $key, []); }
     private function groupForIds(?string $path, string $key, array $ids): array { $out=[]; if(!$path||!is_file($path)) return $out; $filter = array_fill_keys($ids, true); foreach($this->csvReader->rows($path) as $r) { $id=(string)($r[$key]??''); if($ids !== [] && !isset($filter[$id])) continue; $out[$id][]=$r; } return $out; }
-    private function map(array $r,array $meta,array $attrs,?int $categoryId,?int $carId): array {
+    private function map(array $r,array $meta,array $attrs,?int $categoryId,?int $carId,int $quantity): array {
         $legacyJson=null; if (filled($r['legacy_payload_json']??null)) { try { $legacyJson=json_decode($r['legacy_payload_json'], true, 512, JSON_THROW_ON_ERROR); } catch (\Throwable) { $legacyJson=['legacy_payload_json_malformed'=>true]; } }
         $metaMap=[]; foreach($meta as $m) $metaMap[$m['meta_key']??'']=$m['meta_value']??null;
-        return ['source_system'=>'woo','external_id'=>(string)$r['woo_product_id'],'sku'=>blank($r['sku']??null)?null:$r['sku'],'name'=>$r['name'] ?: ('Woo produkt '.$r['woo_product_id']),'slug'=>blank($r['slug']??null)?null:Str::limit($r['slug'],255,''),'legacy_slug'=>$r['slug']??null,'legacy_url'=>$r['permalink']??null,'short_description'=>$r['short_description']??null,'description'=>$r['description']??null,'price'=>(float)($r['price']?:0)?:null,'currency'=>$r['currency']?:'PLN','quantity'=>(int)($r['quantity']?:1),'status'=>$this->status($r),'part_number'=>$r['part_number'] ?: ($metaMap['_part_number']??null),'oem_number'=>$r['oem_number'] ?: ($metaMap['_oem_number']??null),'manufacturer_code'=>$r['manufacturer_code']??null,'condition_notes'=>$r['condition']??null,'category_id'=>$categoryId,'car_id'=>$carId,'storage_location_id'=>$this->locationId($r['storage_location_name']??null),'is_visible_storefront'=>false,'legacy_payload'=>['woo_product'=>$r,'legacy_payload_json'=>$legacyJson,'meta'=>$meta,'attributes'=>$attrs,'brand'=>$r['brand']??null,'manufacturer'=>$r['manufacturer']??null,'donor_car_id'=>$r['donor_car_id']??null,'source_car_id'=>$r['car_id']??null,'vehicle_id'=>$r['vehicle_id']??null]];
+        return ['source_system'=>'woo','external_id'=>(string)$r['woo_product_id'],'sku'=>blank($r['sku']??null)?null:$r['sku'],'name'=>$r['name'] ?: ('Woo produkt '.$r['woo_product_id']),'slug'=>blank($r['slug']??null)?null:Str::limit($r['slug'],255,''),'legacy_slug'=>$r['slug']??null,'legacy_url'=>$r['permalink']??null,'short_description'=>$r['short_description']??null,'description'=>$r['description']??null,'price'=>(float)($r['price']?:0)?:null,'currency'=>$r['currency']?:'PLN','quantity'=>$quantity,'status'=>$this->status($r),'part_number'=>$r['part_number'] ?: ($metaMap['_part_number']??null),'oem_number'=>$r['oem_number'] ?: ($metaMap['_oem_number']??null),'manufacturer_code'=>$r['manufacturer_code']??null,'condition_notes'=>$r['condition']??null,'category_id'=>$categoryId,'car_id'=>$carId,'storage_location_id'=>$this->locationId($r['storage_location_name']??null),'is_visible_storefront'=>false,'legacy_payload'=>['woo_product'=>$r,'legacy_payload_json'=>$legacyJson,'meta'=>$meta,'attributes'=>$attrs,'brand'=>$r['brand']??null,'manufacturer'=>$r['manufacturer']??null,'donor_car_id'=>$r['donor_car_id']??null,'source_car_id'=>$r['car_id']??null,'vehicle_id'=>$r['vehicle_id']??null]];
     }
     private function status(array $r): string { $s=strtolower((string)($r['status']??'')); $p=(string)($r['published']??''); return $s==='trash'?'archived':(($s==='publish'||$p==='1')?'ready':'draft'); }
     private function carId(array $r,ImportReport $report,int $line): ?int { $id=(int)($r['ovoko_car_id']??0); if($id<=0){$report->inc('products_without_ovoko_car_id'); return null;} $report->inc('products_with_ovoko_car_id'); if(Car::query()->whereKey($id)->exists()){ $report->inc('products_linked_to_imported_car'); return $id;} $report->inc('products_with_missing_car_reference'); $report->warning("Wiersz {$line}: brak lokalnego samochodu dla ovoko_car_id {$id}."); return null; }
     private function locationId(?string $name): ?int { return filled($name) ? StorageLocation::query()->where('name',$name)->value('id') : null; }
+
+    /** @return array{quantity: int, reason: ?string} */
+    private function normalizeQuantity(array $row): array
+    {
+        $stockStatus = strtolower(trim((string) ($row['stock_status'] ?? '')));
+        $rawQuantity = $row['quantity'] ?? null;
+        $rawQuantityText = is_string($rawQuantity) ? trim($rawQuantity) : $rawQuantity;
+        $isOutOfStock = $stockStatus === 'outofstock';
+
+        if ($isOutOfStock) {
+            return ['quantity' => 0, 'reason' => 'outofstock_forced_zero'];
+        }
+
+        if ($rawQuantityText === null || $rawQuantityText === '') {
+            return ['quantity' => 1, 'reason' => 'missing_quantity_defaulted'];
+        }
+
+        if (! is_numeric($rawQuantityText)) {
+            return ['quantity' => 1, 'reason' => 'invalid_quantity_defaulted'];
+        }
+
+        $quantity = (int) floor((float) $rawQuantityText);
+
+        if ($quantity < 0) {
+            return ['quantity' => 0, 'reason' => 'negative_quantity_clamped_to_zero'];
+        }
+
+        return ['quantity' => $quantity, 'reason' => null];
+    }
+
+    /** @param array{quantity: int, reason: ?string} $normalization */
+    private function recordQuantityWarning(ImportReport $report, ?string $runId, int $line, array $row, array $normalization): void
+    {
+        $report->inc('quantity_warning_count');
+
+        $directory = storage_path('app/imports/manual/woo');
+        if (! is_dir($directory)) {
+            mkdir($directory, 0755, true);
+        }
+
+        $payload = [
+            'timestamp' => now()->toIso8601String(),
+            'run_id' => $runId,
+            'csv_row_number' => $line,
+            'woo_product_id' => trim((string) ($row['woo_product_id'] ?? '')) ?: null,
+            'name' => $row['name'] ?? null,
+            'raw_quantity' => $row['quantity'] ?? null,
+            'stock_status' => $row['stock_status'] ?? null,
+            'manage_stock' => $row['manage_stock'] ?? null,
+            'normalized_quantity' => $normalization['quantity'],
+            'reason' => $normalization['reason'],
+        ];
+
+        file_put_contents($directory.'/quantity_warning.log', json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE).PHP_EOL, FILE_APPEND | LOCK_EX);
+    }
 
     private function recordSkippedProduct(?string $runId, int $line, array $row, string $reason, array $diagnostics = []): void
     {
