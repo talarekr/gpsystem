@@ -1,7 +1,7 @@
 @php
     $productUrl = route('storefront.product', $part->slug ?: $part->id);
     $image = $part->primaryImage();
-    $src = $image?->publicUrl();
+    $src = $image?->listingUrl();
 @endphp
 <article class="sf-product-card">
     <a class="sf-product-card__image" href="{{ $productUrl }}">

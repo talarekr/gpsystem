@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Admin\ImportMigration\PartImagePresentationController;
 use App\Http\Controllers\Admin\ImportMigration\WooCategoryTreeController;
 use App\Http\Controllers\Admin\ImportMigration\WooProductImportRunController;
 use App\Http\Controllers\Admin\ImportMigration\WooStoragePublicController;
@@ -28,6 +29,7 @@ Route::middleware(Authenticate::class)->prefix('admin/import-migracyjny/produkty
     Route::get('/storage-public/diagnostyka', [WooStoragePublicController::class, 'diagnostics'])->name('storage-public.diagnostics');
     Route::post('/storage-public/ensure', [WooStoragePublicController::class, 'ensure'])->name('storage-public.ensure');
     Route::post('/storage-public/force-copy', [WooStoragePublicController::class, 'forceCopy'])->name('storage-public.force-copy');
+    Route::post('/part-images/{part}/process', [PartImagePresentationController::class, 'process'])->name('part-images.process');
 
     Route::post('/start', function (Request $request) {
         $lastDiagnosticStep = 'step_00_route_entered';
