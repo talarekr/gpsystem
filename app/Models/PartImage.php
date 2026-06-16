@@ -37,19 +37,29 @@ class PartImage extends Model
             return $path;
         }
 
-        if (Str::startsWith($path, '/')) {
+        if (Str::startsWith($path, '/storage/')) {
             return $path;
-        }
-
-        if (Str::startsWith($path, 'parts/photos/')) {
-            return asset($path);
         }
 
         if (Str::startsWith($path, 'storage/')) {
             return '/'.ltrim($path, '/');
         }
 
-        return Storage::disk('public')->url(ltrim($path, '/'));
+        if (Str::startsWith($path, '/')) {
+            return $path;
+        }
+
+        $relativePath = ltrim($path, '/');
+
+        if (Storage::disk('public')->exists($relativePath)) {
+            return Storage::disk('public')->url($relativePath);
+        }
+
+        if (is_file(public_path($relativePath))) {
+            return asset($relativePath);
+        }
+
+        return Storage::disk('public')->url($relativePath);
     }
 
     public function part(): BelongsTo
