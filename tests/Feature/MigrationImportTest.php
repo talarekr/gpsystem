@@ -10,8 +10,9 @@ use App\Models\Car;
 use App\Models\Part;
 use App\Services\ImportMigration\OvokoDonorCarImport;
 use App\Services\ImportMigration\WooProductImport;
+use App\Support\ImportMigration\ManualImportFileResolver;
+use App\Support\ImportMigration\WooProductImportRunRepository;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Livewire\Livewire;
 use Tests\TestCase;
 
 class MigrationImportTest extends TestCase
@@ -106,7 +107,7 @@ class MigrationImportTest extends TestCase
     }
 
 
-    public function test_woo_import_page_processes_first_batch_immediately_and_polling_processes_next_batch(): void
+    public function test_woo_import_route_repository_processes_large_files_in_batches(): void
     {
         $directory = storage_path('app/imports/manual/woo');
         if (! is_dir($directory)) mkdir($directory, 0777, true);
@@ -117,30 +118,29 @@ class MigrationImportTest extends TestCase
         }
         file_put_contents($directory.'/products.csv', implode("\n", $rows)."\n");
 
-        Livewire::test(WooProductImportPage::class)
-            ->set('data.products_filename', 'products.csv')
-            ->set('data.categories_filename', '')
-            ->set('data.meta_filename', '')
-            ->set('data.attributes_filename', '')
-            ->set('data.summary_filename', '')
-            ->set('data.images_filename', '')
-            ->set('data.mode', WooProductImport::MODE_DRY_RUN)
-            ->call('runImport')
-            ->assertSet('isImportRunning', true)
-            ->assertSet('totalRows', 260)
-            ->assertSet('processedRows', 250)
-            ->assertSet('currentOffset', 250)
-            ->assertSet('lastBatchProcessed', 250)
-            ->assertSet('lastError', null)
-            ->assertSee('runImport started at:')
-            ->assertSee('first batch started at:')
-            ->assertSee('last error:')
-            ->call('processNextBatch')
-            ->assertSet('isImportRunning', false)
-            ->assertSet('processedRows', 260)
-            ->assertSet('currentOffset', 260)
-            ->assertSet('lastBatchProcessed', 10)
-            ->assertSet('pollTickCount', 1);
+        $runs = app(WooProductImportRunRepository::class);
+        $import = app(WooProductImport::class);
+        $run = $runs->start([
+            'products_filename' => 'products.csv',
+            'categories_filename' => '',
+            'meta_filename' => '',
+            'attributes_filename' => '',
+            'summary_filename' => '',
+            'images_filename' => '',
+            'mode' => WooProductImport::MODE_DRY_RUN,
+        ], $import, app(ManualImportFileResolver::class));
+
+        $run = $runs->processNextBatch($run['id'], $import);
+        $this->assertTrue($run['isRunning']);
+        $this->assertSame(260, $run['totalRows']);
+        $this->assertSame(250, $run['currentOffset']);
+        $this->assertSame(250, $run['lastBatchProcessed']);
+        $this->assertNull($run['lastError']);
+
+        $run = $runs->processNextBatch($run['id'], $import);
+        $this->assertFalse($run['isRunning']);
+        $this->assertSame(260, $run['currentOffset']);
+        $this->assertSame(10, $run['lastBatchProcessed']);
     }
 
     public function test_woo_import_page_uses_plain_inline_submit_without_filament_action_modal(): void
@@ -148,13 +148,18 @@ class MigrationImportTest extends TestCase
         $view = file_get_contents(resource_path('views/filament/pages/import-migration/woo-product-import.blade.php'));
         $page = file_get_contents(app_path('Filament/Pages/ImportMigration/WooProductImportPage.php'));
 
-        $this->assertStringContainsString('<form wire:submit.prevent="runImport"', $view);
+        $this->assertStringContainsString('<form method="POST" action="{{ route(', $view);
+        $this->assertStringContainsString('admin.import-migration.woo-products.start', $view);
+        $this->assertStringNotContainsString('wire:submit', $view);
+        $this->assertStringNotContainsString('wire:poll', $view);
         $this->assertSame(1, substr_count($view, 'Uruchom import'));
         $this->assertStringNotContainsString('<x-filament-panels::form', $view);
         $this->assertStringNotContainsString('<x-filament-actions::modals', $view);
         $this->assertStringNotContainsString('Actions\\Action::make', $page);
         $this->assertStringNotContainsString("->submit('runImport')", $page);
         $this->assertStringNotContainsString('getFormActions', $page);
+        $this->assertStringNotContainsString('runImport(', $page);
+        $this->assertStringNotContainsString('processNextBatch(', $page);
         $this->assertStringNotContainsString('requiresConfirmation', $page);
         $this->assertStringNotContainsString('modal', $page);
     }

@@ -2,15 +2,13 @@
 
 namespace App\Filament\Pages\ImportMigration;
 
-use App\Services\ImportMigration\ImportReport;
 use App\Services\ImportMigration\WooProductImport;
 use App\Support\ImportMigration\ManualImportFileResolver;
+use App\Support\ImportMigration\WooProductImportRunRepository;
 use Filament\Forms;
 use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Forms\Contracts\HasForms;
-use Filament\Notifications\Notification;
 use Filament\Pages\Page;
-use Throwable;
 
 class WooProductImportPage extends Page implements HasForms
 {
@@ -45,15 +43,19 @@ class WooProductImportPage extends Page implements HasForms
     {
         app(ManualImportFileResolver::class)->ensureWooDirectoryExists();
 
-        $this->form->fill([
+        $defaults = [
             'products_filename' => 'products.csv',
             'categories_filename' => 'product_categories.csv',
             'meta_filename' => 'product_meta.csv',
             'attributes_filename' => 'product_attributes.csv',
             'summary_filename' => 'export_summary.json',
             'mode' => WooProductImport::MODE_DRY_RUN,
-        ]);
+        ];
+
+        $this->form->fill(old('data', $defaults));
+        $this->hydrateRouteRun();
     }
+
 
     public function form(Forms\Form $form): Forms\Form
     {
@@ -97,152 +99,29 @@ class WooProductImportPage extends Page implements HasForms
             ->statePath('data');
     }
 
-    public function runImport(WooProductImport $import, ManualImportFileResolver $fileResolver): void
+    private function hydrateRouteRun(): void
     {
-        $this->importError = null;
-        $this->report = $import->makeReport()->toArray();
-        $this->isImportRunning = false;
-        $this->totalRows = 0;
-        $this->processedRows = 0;
-        $this->currentOffset = 0;
-        $this->lastBatchProcessed = 0;
-        $this->lastBatchStartedAt = null;
-        $this->lastBatchFinishedAt = null;
-        $this->lastError = null;
-        $this->runImportStartedAt = now()->toDateTimeString();
-        $this->firstBatchStartedAt = null;
-        $this->pollTickCount = 0;
-        $this->importRun = null;
+        $this->importError = session('errors')?->first('woo_import');
+        $run = app(WooProductImportRunRepository::class)->find(request()->query('run_id'));
 
-        try {
-            $state = $this->form->getState();
-            $path = fn (string $key, string $label, string $extension = 'csv') => $fileResolver->resolveOptionalWooFile($state[$key] ?? null, $label, $extension);
-            $productsPath = $fileResolver->resolveRequiredWooFile($state['products_filename'] ?? null, 'products.csv', 'csv');
-
-            $this->totalRows = $import->countProductRows($productsPath);
-            $this->importRun = [
-                'productsPath' => $productsPath,
-                'paths' => [
-                    'images' => $path('images_filename', 'product_images.csv'),
-                    'categories' => $path('categories_filename', 'product_categories.csv'),
-                    'meta' => $path('meta_filename', 'product_meta.csv'),
-                    'attributes' => $path('attributes_filename', 'product_attributes.csv'),
-                    'summary' => $path('summary_filename', 'export_summary.json', 'json'),
-                ],
-                'mode' => $state['mode'],
-                'startedAt' => microtime(true),
-                'currentOffset' => 0,
-                'totalRows' => $this->totalRows,
-                'report' => $this->report,
-            ];
-            $this->isImportRunning = true;
-
-            if ($this->totalRows === 0) {
-                $this->isImportRunning = false;
-                $this->importError = 'Plik products.csv nie zawiera wierszy produktów.';
-                $this->lastError = $this->importError;
-
-                return;
-            }
-
-            $this->processNextBatch($import, false);
-        } catch (Throwable $exception) {
-            $this->failImport($exception);
-        }
-    }
-
-    public function processNextBatch(WooProductImport $import, bool $fromPoll = true): void
-    {
-        if ($fromPoll) {
-            $this->pollTickCount++;
-        }
-
-        if (! $this->isImportRunning || ! $this->importRun) {
+        if (! $run) {
             return;
         }
 
-        try {
-            $this->assertImportRunIsUsable();
-            $this->lastBatchStartedAt = now()->toDateTimeString();
-            $this->firstBatchStartedAt ??= $this->lastBatchStartedAt;
-            $this->lastBatchFinishedAt = null;
-            $this->lastBatchProcessed = 0;
-            $report = new ImportReport(
-                $this->report['counters'] ?? []
-            );
-            $report->warnings = $this->report['warnings'] ?? [];
-            $report->errors = $this->report['errors'] ?? [];
-
-            $report = $import->importBatch(
-                $this->importRun['productsPath'],
-                $this->importRun['paths'],
-                $this->importRun['mode'],
-                $this->currentOffset,
-                $this->batchSize,
-                $report,
-                $this->importRun['startedAt'],
-            );
-
-            $this->report = $report->toArray();
-            $this->lastBatchProcessed = (int) ($this->report['counters']['last_batch_rows'] ?? 0);
-            $this->currentOffset += $this->lastBatchProcessed;
-            $this->processedRows = $this->currentOffset;
-            $this->lastBatchFinishedAt = now()->toDateTimeString();
-            $this->lastError = null;
-            $this->importRun['currentOffset'] = $this->currentOffset;
-            $this->importRun['totalRows'] = $this->totalRows;
-            $this->importRun['report'] = $this->report;
-
-            if ($this->lastBatchProcessed === 0 || $this->processedRows >= $this->totalRows) {
-                $this->isImportRunning = false;
-
-                Notification::make()
-                    ->title('Import Woo zakończony')
-                    ->body('Raport importu jest dostępny poniżej formularza.')
-                    ->success()
-                    ->send();
-            }
-        } catch (Throwable $exception) {
-            $this->failImport($exception);
-        }
-    }
-
-    private function assertImportRunIsUsable(): void
-    {
-        $productsPath = $this->importRun['productsPath'] ?? null;
-
-        if (! is_string($productsPath) || ! is_file($productsPath)) {
-            throw new \RuntimeException('Nie można kontynuować importu Woo: products.csv nie jest dostępny między partiami.');
-        }
-
-        foreach (($this->importRun['paths'] ?? []) as $label => $path) {
-            if ($path !== null && (! is_string($path) || ! is_file($path))) {
-                throw new \RuntimeException("Nie można kontynuować importu Woo: plik {$label} nie jest dostępny między partiami.");
-            }
-        }
-
-        if (($this->importRun['mode'] ?? null) === null) {
-            throw new \RuntimeException('Nie można kontynuować importu Woo: utracono tryb importu między partiami.');
-        }
-    }
-
-    private function failImport(Throwable $exception): void
-    {
-        report($exception);
-
-        $this->isImportRunning = false;
-        $this->importError = $exception->getMessage();
-        $this->lastError = $this->importError;
-        $this->lastBatchFinishedAt = now()->toDateTimeString();
-        $this->report ??= ['counters' => [], 'warnings' => [], 'errors' => []];
-        $this->report['errors'][] = $this->importError;
-        $this->report['counters']['failed_rows'] = ($this->report['counters']['failed_rows'] ?? 0) + 1;
-
-        Notification::make()
-            ->title('Nie udało się uruchomić importu Woo')
-            ->body($this->importError)
-            ->danger()
-            ->send();
+        $this->importRun = $run;
+        $this->report = $run['report'] ?? null;
+        $this->isImportRunning = (bool) ($run['isRunning'] ?? false);
+        $this->totalRows = (int) ($run['totalRows'] ?? 0);
+        $this->processedRows = (int) ($run['currentOffset'] ?? 0);
+        $this->currentOffset = $this->processedRows;
+        $this->batchSize = (int) ($run['batchSize'] ?? WooProductImportRunRepository::BATCH_SIZE);
+        $this->lastBatchProcessed = (int) ($run['lastBatchProcessed'] ?? 0);
+        $this->lastBatchStartedAt = $run['lastBatchStartedAt'] ?? null;
+        $this->lastBatchFinishedAt = $run['lastBatchFinishedAt'] ?? null;
+        $this->lastError = $run['lastError'] ?? null;
+        $this->runImportStartedAt = $run['startedAtText'] ?? null;
+        $this->firstBatchStartedAt = $this->lastBatchStartedAt;
+        $this->importError ??= $this->lastError;
     }
 
 }
