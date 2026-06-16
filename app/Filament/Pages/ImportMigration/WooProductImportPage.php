@@ -62,7 +62,7 @@ class WooProductImportPage extends Page implements HasForms
                     ->schema([
                         Forms\Components\Placeholder::make('manual_upload_instructions')
                             ->label('Instrukcja wgrywania plików')
-                            ->content('Wgraj pliki CSV/JSON przez DirectAdmin lub File Manager do folderu storage/app/imports/manual/woo/, a następnie wpisz albo wybierz poniżej same nazwy plików. products.csv jest wymagany. Pola opcjonalne możesz wyczyścić, jeśli nie chcesz używać danego pliku.'),
+                            ->content(fn (): string => 'Wgraj pliki CSV/JSON przez DirectAdmin lub File Manager do folderu storage/app/imports/manual/woo/, a następnie wpisz albo wybierz poniżej same nazwy plików. products.csv jest wymagany. Pola opcjonalne możesz wyczyścić, jeśli nie chcesz używać danego pliku. Oczekiwany folder na serwerze: '.app(ManualImportFileResolver::class)->wooDirectoryPath()),
                         $filenameField('products_filename', 'products.csv', 'csv', 'Wymagany plik produktów. Musi już istnieć na serwerze w storage/app/imports/manual/woo/.', true),
                         $filenameField('categories_filename', 'product_categories.csv', 'csv', 'Opcjonalny plik kategorii z folderu storage/app/imports/manual/woo/.'),
                         $filenameField('meta_filename', 'product_meta.csv', 'csv', 'Opcjonalny plik metadanych z folderu storage/app/imports/manual/woo/.'),

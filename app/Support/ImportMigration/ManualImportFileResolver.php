@@ -2,7 +2,6 @@
 
 namespace App\Support\ImportMigration;
 
-use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 
 class ManualImportFileResolver
@@ -11,7 +10,16 @@ class ManualImportFileResolver
 
     public function ensureWooDirectoryExists(): void
     {
-        Storage::disk('local')->makeDirectory(self::WOO_DIRECTORY);
+        $directoryPath = $this->wooDirectoryPath();
+
+        if (! is_dir($directoryPath)) {
+            mkdir($directoryPath, 0755, true);
+        }
+    }
+
+    public function wooDirectoryPath(): string
+    {
+        return storage_path('app/'.self::WOO_DIRECTORY);
     }
 
     /** @return array<string, string> */
@@ -19,9 +27,11 @@ class ManualImportFileResolver
     {
         $this->ensureWooDirectoryExists();
 
-        $files = collect(Storage::disk('local')->files(self::WOO_DIRECTORY))
-            ->map(fn (string $path): string => basename($path))
+        $directoryPath = $this->wooDirectoryPath();
+        $files = collect(scandir($directoryPath) ?: [])
+            ->filter(fn (string $filename): bool => $filename !== '.' && $filename !== '..')
             ->filter(fn (string $filename): bool => $filename !== '.gitignore')
+            ->filter(fn (string $filename): bool => is_file($directoryPath.DIRECTORY_SEPARATOR.$filename))
             ->sort(SORT_NATURAL | SORT_FLAG_CASE)
             ->values();
 
@@ -31,7 +41,7 @@ class ManualImportFileResolver
     public function resolveRequiredWooFile(mixed $filename, string $label, string $extension): string
     {
         if (blank($filename)) {
-            throw new RuntimeException("Podaj nazwę pliku {$label} z folderu storage/app/".self::WOO_DIRECTORY.'.');
+            throw new RuntimeException("Podaj nazwę pliku {$label} z folderu {$this->wooDirectoryPath()}.");
         }
 
         return $this->resolveWooFile((string) $filename, $label, $extension);
@@ -61,23 +71,23 @@ class ManualImportFileResolver
             throw new RuntimeException("Plik {$label} musi mieć rozszerzenie .{$extension}.");
         }
 
-        $directoryPath = Storage::disk('local')->path(self::WOO_DIRECTORY);
-        $filePath = Storage::disk('local')->path(self::WOO_DIRECTORY.'/'.$filename);
+        $directoryPath = $this->wooDirectoryPath();
+        $filePath = $directoryPath.DIRECTORY_SEPARATOR.$filename;
         $directoryRealPath = realpath($directoryPath);
         $fileRealPath = realpath($filePath);
 
         if ($directoryRealPath === false || $fileRealPath === false) {
-            throw new RuntimeException("Brak pliku {$label}: storage/app/".self::WOO_DIRECTORY."/{$filename}.");
+            throw new RuntimeException("Brak pliku {$label}. Oczekiwany plik: {$filename}. Sprawdzona ścieżka: {$filePath}.");
         }
 
         $directoryRealPath = rtrim($directoryRealPath, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR;
 
         if (! str_starts_with($fileRealPath, $directoryRealPath)) {
-            throw new RuntimeException("Nieprawidłowa ścieżka pliku {$label}. Plik musi znajdować się w storage/app/".self::WOO_DIRECTORY.'.');
+            throw new RuntimeException("Nieprawidłowa ścieżka pliku {$label}. Plik musi znajdować się w {$directoryPath}.");
         }
 
         if (! is_file($fileRealPath) || ! is_readable($fileRealPath)) {
-            throw new RuntimeException("Nie można odczytać pliku {$label}: storage/app/".self::WOO_DIRECTORY."/{$filename}.");
+            throw new RuntimeException("Nie można odczytać pliku {$label}. Oczekiwany plik: {$filename}. Sprawdzona ścieżka: {$filePath}.");
         }
 
         return $fileRealPath;
