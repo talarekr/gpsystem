@@ -109,7 +109,11 @@ HTML, 500)->header('Content-Type', 'text/html; charset=UTF-8');
         ]);
     })->name('diagnostics');
 
+    Route::get('/runs/{runId}/autorun', [WooProductImportRunController::class, 'autorun'])->name('autorun');
+    Route::get('/runs/{runId}/status', [WooProductImportRunController::class, 'status'])->name('status');
     Route::post('/runs/{runId}/next', [WooProductImportRunController::class, 'next'])->name('next');
+    Route::post('/runs/{runId}/next-many', [WooProductImportRunController::class, 'nextMany'])->name('next-many');
+    Route::post('/runs/{runId}/autorun-log', [WooProductImportRunController::class, 'autorunnerLog'])->name('autorun-log');
 });
 
 
