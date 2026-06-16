@@ -100,6 +100,8 @@ class WooProductImportRunRepository
                 $beforeRow,
                 $batchSize,
                 $report,
+                null,
+                (string) ($run['id'] ?? $runId),
             );
 
             $run['report'] = $result['report']->toArray();
