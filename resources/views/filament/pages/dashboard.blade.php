@@ -96,10 +96,8 @@
 
     <section class="gps-sales-analytics" aria-labelledby="gps-sales-analytics-title">
         <div class="gps-sales-analytics__header">
-            <div>
-                <span class="gps-sales-analytics__eyebrow">Pulpit sprzedaży</span>
+            <div class="gps-sales-analytics__title">
                 <h2 id="gps-sales-analytics-title">Analityka sprzedaży</h2>
-                <p>Liczbowe podsumowanie sprzedaży online i lokalnej dla wybranego okresu.</p>
             </div>
 
             <nav class="gps-sales-analytics__ranges" aria-label="Zakres analityki sprzedaży">
@@ -123,19 +121,19 @@
 
                 <div class="gps-sales-metrics">
                     <div class="gps-sales-metric">
-                        <span>Przychód ze sprzedaży online</span>
+                        <span>Online</span>
                         <strong>{{ $this->formatPln($salesAnalytics['summary']['online_revenue_pln']) }}</strong>
-                        <small>Sklep + Ovoko + Allegro + eBay</small>
+                        <small>Sklep, Ovoko, Allegro, eBay</small>
                     </div>
                     <div class="gps-sales-metric">
-                        <span>Liczba zamówień</span>
+                        <span>Zamówienia</span>
                         <strong>{{ $salesAnalytics['summary']['online_orders_count'] }}</strong>
-                        <small>Łącznie z kanałów online</small>
+                        <small>Kanały online</small>
                     </div>
                     <div class="gps-sales-metric">
-                        <span>Sprzedaż lokalna</span>
+                        <span>Lokalna</span>
                         <strong>{{ $this->formatPln($salesAnalytics['summary']['local_sales_pln']) }}</strong>
-                        <small>{{ $salesAnalytics['summary']['local_sales_count'] }} zapisów w local_sales</small>
+                        <small>{{ $salesAnalytics['summary']['local_sales_count'] }} zapisów</small>
                     </div>
                 </div>
             </article>
