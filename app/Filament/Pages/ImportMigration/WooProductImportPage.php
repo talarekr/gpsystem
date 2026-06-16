@@ -3,7 +3,7 @@
 namespace App\Filament\Pages\ImportMigration;
 
 use App\Services\ImportMigration\WooProductImport;
-use App\Support\ImportMigration\UploadedImportFileResolver;
+use App\Support\ImportMigration\ManualImportFileResolver;
 use Filament\Forms;
 use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Forms\Contracts\HasForms;
@@ -14,13 +14,6 @@ use Throwable;
 class WooProductImportPage extends Page implements HasForms
 {
     use InteractsWithForms;
-
-    private const PRODUCTS_MAX_SIZE_KB = 102400;
-    private const IMAGES_MAX_SIZE_KB = 102400;
-    private const CATEGORIES_MAX_SIZE_KB = 51200;
-    private const META_MAX_SIZE_KB = 102400;
-    private const ATTRIBUTES_MAX_SIZE_KB = 51200;
-    private const SUMMARY_MAX_SIZE_KB = 5120;
 
     protected static ?string $slug = 'import-migracyjny/produkty-woo';
     protected static ?string $navigationGroup = 'Ustawienia i integracje';
@@ -36,30 +29,46 @@ class WooProductImportPage extends Page implements HasForms
 
     public function mount(): void
     {
-        $this->form->fill(['mode' => WooProductImport::MODE_DRY_RUN]);
+        app(ManualImportFileResolver::class)->ensureWooDirectoryExists();
+
+        $this->form->fill([
+            'products_filename' => 'products.csv',
+            'categories_filename' => 'product_categories.csv',
+            'meta_filename' => 'product_meta.csv',
+            'attributes_filename' => 'product_attributes.csv',
+            'summary_filename' => 'export_summary.json',
+            'mode' => WooProductImport::MODE_DRY_RUN,
+        ]);
     }
 
     public function form(Forms\Form $form): Forms\Form
     {
-        $file = fn (string $name, string $label, int $maxSizeKb, string $helperText, bool $required = false) => Forms\Components\FileUpload::make($name)
+        $filenameField = fn (string $name, string $label, string $extension, string $helperText, bool $required = false) => Forms\Components\TextInput::make($name)
             ->label($label)
-            ->disk('local')
-            ->directory('migration-imports/woo')
-            ->maxSize($maxSizeKb)
+            ->placeholder($label)
             ->helperText($helperText)
-            ->required($required);
+            ->datalist(fn (): array => collect(app(ManualImportFileResolver::class)->availableWooFiles())
+                ->keys()
+                ->filter(fn (string $filename): bool => strtolower(pathinfo($filename, PATHINFO_EXTENSION)) === ltrim(strtolower($extension), '.'))
+                ->values()
+                ->all())
+            ->required($required)
+            ->maxLength(255);
 
         return $form
             ->schema([
                 Forms\Components\Section::make('Import migracyjny')
                     ->description('Tymczasowe narzędzie izolowane od codziennego workflow Części. Nie łączy się z Woo API.')
                     ->schema([
-                        $file('products', 'products.csv', self::PRODUCTS_MAX_SIZE_KB, 'products.csv może mieć do 100 MB. Duże pliki CSV są dozwolone tylko w tymczasowym imporcie Woo.', true),
-                        $file('images', 'product_images.csv', self::IMAGES_MAX_SIZE_KB, 'product_images.csv może mieć do 100 MB. Duże pliki CSV są dozwolone tylko w tymczasowym imporcie Woo.'),
-                        $file('categories', 'product_categories.csv', self::CATEGORIES_MAX_SIZE_KB, 'product_categories.csv może mieć do 50 MB. Duże pliki CSV są dozwolone tylko w tymczasowym imporcie Woo.'),
-                        $file('meta', 'product_meta.csv', self::META_MAX_SIZE_KB, 'product_meta.csv może mieć do 100 MB. Duże pliki CSV są dozwolone tylko w tymczasowym imporcie Woo.'),
-                        $file('attributes', 'product_attributes.csv', self::ATTRIBUTES_MAX_SIZE_KB, 'product_attributes.csv może mieć do 50 MB. Duże pliki CSV są dozwolone tylko w tymczasowym imporcie Woo.'),
-                        $file('summary', 'export_summary.json', self::SUMMARY_MAX_SIZE_KB, 'export_summary.json może mieć do 5 MB.'),
+                        Forms\Components\Placeholder::make('manual_upload_instructions')
+                            ->label('Instrukcja wgrywania plików')
+                            ->content('Wgraj pliki CSV/JSON przez DirectAdmin lub File Manager do folderu storage/app/imports/manual/woo/, a następnie wpisz albo wybierz poniżej same nazwy plików. products.csv jest wymagany. Pola opcjonalne możesz wyczyścić, jeśli nie chcesz używać danego pliku.'),
+                        $filenameField('products_filename', 'products.csv', 'csv', 'Wymagany plik produktów. Musi już istnieć na serwerze w storage/app/imports/manual/woo/.', true),
+                        $filenameField('categories_filename', 'product_categories.csv', 'csv', 'Opcjonalny plik kategorii z folderu storage/app/imports/manual/woo/.'),
+                        $filenameField('meta_filename', 'product_meta.csv', 'csv', 'Opcjonalny plik metadanych z folderu storage/app/imports/manual/woo/.'),
+                        $filenameField('attributes_filename', 'product_attributes.csv', 'csv', 'Opcjonalny plik atrybutów z folderu storage/app/imports/manual/woo/.'),
+                        $filenameField('summary_filename', 'export_summary.json', 'json', 'Opcjonalny plik podsumowania z folderu storage/app/imports/manual/woo/.'),
+                        $filenameField('images_filename', 'product_images.csv', 'csv', 'Opcjonalny plik obrazów z folderu storage/app/imports/manual/woo/.'),
                         Forms\Components\Select::make('mode')
                             ->label('Tryb importu')
                             ->options([
@@ -79,24 +88,23 @@ class WooProductImportPage extends Page implements HasForms
             ->statePath('data');
     }
 
-    public function runImport(WooProductImport $import, UploadedImportFileResolver $fileResolver): void
+    public function runImport(WooProductImport $import, ManualImportFileResolver $fileResolver): void
     {
         $this->importError = null;
         $this->report = null;
 
         try {
             $state = $this->form->getState();
-            $batchDirectory = now()->format('Ymd-His').'-'.str()->random(8);
-            $path = fn (string $key, string $label) => $fileResolver->resolveOptional($state[$key] ?? null, $label, 'woo', $batchDirectory);
-            $productsPath = $fileResolver->resolveRequired($state['products'] ?? null, 'products.csv', 'woo', $batchDirectory);
+            $path = fn (string $key, string $label, string $extension = 'csv') => $fileResolver->resolveOptionalWooFile($state[$key] ?? null, $label, $extension);
+            $productsPath = $fileResolver->resolveRequiredWooFile($state['products_filename'] ?? null, 'products.csv', 'csv');
 
             $this->report = $import
                 ->import($productsPath, [
-                    'images' => $path('images', 'product_images.csv'),
-                    'categories' => $path('categories', 'product_categories.csv'),
-                    'meta' => $path('meta', 'product_meta.csv'),
-                    'attributes' => $path('attributes', 'product_attributes.csv'),
-                    'summary' => $path('summary', 'export_summary.json'),
+                    'images' => $path('images_filename', 'product_images.csv'),
+                    'categories' => $path('categories_filename', 'product_categories.csv'),
+                    'meta' => $path('meta_filename', 'product_meta.csv'),
+                    'attributes' => $path('attributes_filename', 'product_attributes.csv'),
+                    'summary' => $path('summary_filename', 'export_summary.json', 'json'),
                 ], $state['mode'])
                 ->toArray();
 
