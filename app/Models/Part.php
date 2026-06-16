@@ -209,11 +209,30 @@ class Part extends Model
         }
 
         return match ($key) {
-            'engine_capacity_cm3' => is_numeric($value) ? number_format((int) $value / 1000, 1, ',', ' ').' l' : $value,
+            'engine_capacity_cm3' => $this->formatEngineCapacity($value),
             'engine_power_kw' => is_numeric($value) ? ((int) $value).' kW / '.round((int) $value * 1.35962).' KM' : $value,
             'mileage_km' => is_numeric($value) ? number_format((int) $value, 0, ',', ' ').' km' : $value,
             default => $value,
         };
+    }
+
+    private function formatEngineCapacity(mixed $value): mixed
+    {
+        $raw = trim((string) $value);
+
+        if ($raw === '') {
+            return $value;
+        }
+
+        if (preg_match('/^\d+$/', $raw) === 1) {
+            return ((int) $raw).' cm³';
+        }
+
+        if (preg_match('/^(\d+)\s*(?:c\.?m\.?\s*(?:3|³)|cc|ccm|cm\s*sześc(?:ienne|iennych)?)$/iu', $raw, $matches) === 1) {
+            return ((int) $matches[1]).' cm³';
+        }
+
+        return $value;
     }
 
     private function cleanStorefrontValue(mixed $value): ?string
