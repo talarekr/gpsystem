@@ -70,6 +70,181 @@ class Part extends Model
         ] : null;
     }
 
+
+    public function storefrontDescription(): string
+    {
+        return $this->cleanStorefrontValue($this->description)
+            ?: $this->cleanStorefrontValue($this->short_description)
+            ?: 'Opis produktu zostanie uzupełniony.';
+    }
+
+    /**
+     * @return array<int, array{label: string, value: string}>
+     */
+    public function storefrontDetails(): array
+    {
+        $details = [];
+
+        $this->addStorefrontDetail($details, 'Numer części', $this->part_number);
+        $this->addStorefrontDetail($details, 'OEM', $this->oem_number);
+        $this->addStorefrontDetail($details, 'Kod producenta', $this->manufacturer_code);
+
+        if ($this->isMeaningfulStorefrontValue($this->sku)
+            && ! in_array($this->normalizeStorefrontValue($this->sku), array_filter([
+                $this->normalizeStorefrontValue($this->part_number),
+                $this->normalizeStorefrontValue($this->oem_number),
+                $this->normalizeStorefrontValue($this->manufacturer_code),
+            ]), true)) {
+            $this->addStorefrontDetail($details, 'SKU', $this->sku);
+        }
+
+        $this->addStorefrontDetail($details, 'Stan', $this->condition_notes ?: 'Używany / sprawdzony');
+
+        $vehicle = $this->storefrontVehicleData();
+
+        foreach ([
+            'make' => 'Producent / marka',
+            'model' => 'Model',
+            'model_variant' => 'Modyfikacja / wersja',
+            'production_year' => 'Rok produkcji samochodu',
+            'production_period' => 'Okres produkcji',
+            'engine_capacity_cm3' => 'Pojemność silnika',
+            'engine_code' => 'Kod silnika',
+            'visible_code' => 'Kod widoczny',
+            'engine_power_kw' => 'Moc silnika',
+            'fuel_type' => 'Typ paliwa',
+            'gearbox_type' => 'Typ skrzyni biegów',
+            'drivetrain' => 'Koła napędowe / napęd',
+            'steering_side' => 'Pozycja kierownicy / strona',
+            'body_type' => 'Typ sylwetki / nadwozie',
+            'color' => 'Kolor',
+            'color_code' => 'Kod koloru',
+            'mileage_km' => 'Przebieg',
+        ] as $key => $label) {
+            $this->addStorefrontDetail($details, $label, $this->formatStorefrontDetailValue($key, $vehicle[$key] ?? null));
+        }
+
+        return $details;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function storefrontVehicleData(): array
+    {
+        $data = [];
+        $car = $this->relationLoaded('car') ? $this->car : null;
+
+        if ($car) {
+            $data = $car->only([
+                'make', 'model', 'model_variant', 'production_year', 'first_registration_year', 'steering_side',
+                'mileage_km', 'fuel_type', 'engine_power_kw', 'engine_capacity_cm3', 'engine_code', 'drivetrain',
+                'gearbox_type', 'gearbox_code', 'body_type', 'color_code', 'color',
+            ]);
+        }
+
+        $fallbacks = array_replace(
+            $this->legacyVehiclePayload(),
+            is_array($this->vehicle_snapshot) ? $this->vehicle_snapshot : []
+        );
+
+        foreach ($fallbacks as $key => $value) {
+            if (! array_key_exists($key, $data) || ! $this->isMeaningfulStorefrontValue($data[$key] ?? null)) {
+                $data[$key] = $value;
+            }
+        }
+
+        return $data;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function legacyVehiclePayload(): array
+    {
+        $payload = is_array($this->legacy_payload) ? $this->legacy_payload : [];
+        $legacy = [];
+
+        foreach (['woo_product', 'meta', 'attributes'] as $section) {
+            if (isset($payload[$section]) && is_array($payload[$section])) {
+                $legacy = array_replace($legacy, $payload[$section]);
+            }
+        }
+
+        $map = [
+            'vehicle_make' => 'make', 'make' => 'make', 'brand' => 'make',
+            'vehicle_model' => 'model', 'model' => 'model',
+            'vehicle_generation' => 'model_variant', 'vehicle_engine_marketing' => 'model_variant', 'model_variant' => 'model_variant',
+            'vehicle_year' => 'production_year', 'car_years' => 'production_period', 'production_year' => 'production_year',
+            'engine_capacity_cm3' => 'engine_capacity_cm3', 'engine_capacity' => 'engine_capacity_cm3',
+            'engine_code' => 'engine_code', 'engine_power_kw' => 'engine_power_kw', 'fuel_type' => 'fuel_type',
+            'gearbox_type' => 'gearbox_type', 'drivetrain' => 'drivetrain', 'steering_side' => 'steering_side',
+            'body_type' => 'body_type', 'color' => 'color', 'color_code' => 'color_code', 'mileage_km' => 'mileage_km',
+            'visible_code' => 'visible_code',
+        ];
+
+        $result = [];
+        foreach ($map as $legacyKey => $targetKey) {
+            if (array_key_exists($legacyKey, $legacy) && $this->isMeaningfulStorefrontValue($legacy[$legacyKey])) {
+                $result[$targetKey] = $legacy[$legacyKey];
+            }
+        }
+
+        return $result;
+    }
+
+    private function addStorefrontDetail(array &$details, string $label, mixed $value): void
+    {
+        $value = $this->cleanStorefrontValue($value);
+
+        if ($value !== null) {
+            $details[] = ['label' => $label, 'value' => $value];
+        }
+    }
+
+    private function formatStorefrontDetailValue(string $key, mixed $value): mixed
+    {
+        if (! $this->isMeaningfulStorefrontValue($value)) {
+            return null;
+        }
+
+        return match ($key) {
+            'engine_capacity_cm3' => is_numeric($value) ? number_format((int) $value / 1000, 1, ',', ' ').' l' : $value,
+            'engine_power_kw' => is_numeric($value) ? ((int) $value).' kW / '.round((int) $value * 1.35962).' KM' : $value,
+            'mileage_km' => is_numeric($value) ? number_format((int) $value, 0, ',', ' ').' km' : $value,
+            default => $value,
+        };
+    }
+
+    private function cleanStorefrontValue(mixed $value): ?string
+    {
+        if (! $this->isMeaningfulStorefrontValue($value)) {
+            return null;
+        }
+
+        return trim(preg_replace('/\s+/u', ' ', strip_tags((string) $value)) ?: '');
+    }
+
+    private function isMeaningfulStorefrontValue(mixed $value): bool
+    {
+        if (is_array($value) || is_object($value) || $value === null) {
+            return false;
+        }
+
+        $value = trim(strip_tags((string) $value));
+
+        return $value !== '' && ! in_array(mb_strtolower($value), ['-', '—', '?', '0', 'null', 'n/a', 'brak'], true);
+    }
+
+    private function normalizeStorefrontValue(mixed $value): ?string
+    {
+        if (! $this->isMeaningfulStorefrontValue($value)) {
+            return null;
+        }
+
+        return mb_strtoupper(str_replace([' ', '-', '_'], '', (string) $value));
+    }
+
     public function primaryImage(): ?PartImage
     {
         if ($this->relationLoaded('images')) {
