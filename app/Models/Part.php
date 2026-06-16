@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Services\PartCategorySuggestionService;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -77,6 +78,79 @@ class Part extends Model
     public function getPrimaryImagePathAttribute(): ?string
     {
         return $this->primaryImage()?->path;
+    }
+
+
+    public function scopeInStock(Builder $query): Builder
+    {
+        return $query->where('quantity', '>', 0);
+    }
+
+    public function scopeNotSold(Builder $query): Builder
+    {
+        return $query->whereNotIn('status', ['sold', 'archived']);
+    }
+
+    public function scopeStorefrontVisible(Builder $query): Builder
+    {
+        // Temporary for staging/dev: imported Woo products may remain draft before final publishing workflow is enabled.
+        return $query->inStock()->notSold()->whereIn('status', ['draft', 'needs_review', 'ready', 'published'])->where(function (Builder $query): void {
+            $query->where('is_visible_storefront', true)->orWhereIn('status', ['draft', 'needs_review', 'ready', 'published']);
+        });
+    }
+
+    public function scopeSearchStorefront(Builder $query, ?string $value): Builder
+    {
+        $value = trim((string) $value);
+
+        if ($value === '') {
+            return $query;
+        }
+
+        return $query->where(function (Builder $query) use ($value): void {
+            foreach (['name', 'sku', 'part_number', 'oem_number', 'manufacturer_code', 'short_description', 'description'] as $column) {
+                $query->orWhere($column, 'like', '%'.$value.'%');
+            }
+        });
+    }
+
+    public function scopePartNumberSearch(Builder $query, ?string $value): Builder
+    {
+        $value = trim((string) $value);
+
+        if ($value === '') {
+            return $query;
+        }
+
+        $normalized = str_replace([' ', '-'], '', mb_strtoupper($value));
+
+        return $query->where(function (Builder $query) use ($value, $normalized): void {
+            foreach (['part_number', 'oem_number', 'manufacturer_code', 'sku'] as $column) {
+                $query->orWhere($column, 'like', '%'.$value.'%')
+                    ->orWhereRaw("UPPER(REPLACE(REPLACE(COALESCE($column, ''), ' ', ''), '-', '')) LIKE ?", ['%'.$normalized.'%']);
+            }
+        });
+    }
+
+    public function scopePriceBetween(Builder $query, mixed $min, mixed $max): Builder
+    {
+        return $query
+            ->when(is_numeric($min), fn (Builder $query) => $query->where('price', '>=', (float) $min))
+            ->when(is_numeric($max), fn (Builder $query) => $query->where('price', '<=', (float) $max));
+    }
+
+    public function scopeForCategory(Builder $query, PartCategory|int|null $category): Builder
+    {
+        $categoryId = $category instanceof PartCategory ? $category->id : $category;
+
+        return $categoryId ? $query->where('category_id', $categoryId) : $query;
+    }
+
+    public function scopeForCar(Builder $query, Car|int|null $car): Builder
+    {
+        $carId = $car instanceof Car ? $car->id : $car;
+
+        return $carId ? $query->where('car_id', $carId) : $query;
     }
 
     public function images(): HasMany { return $this->hasMany(PartImage::class)->orderBy('sort_order'); }

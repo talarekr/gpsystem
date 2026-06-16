@@ -1,6 +1,11 @@
 <?php
 
 use App\Http\Controllers\Admin\ImportMigration\WooProductImportRunController;
+use App\Http\Controllers\Storefront\CatalogController;
+use App\Http\Controllers\Storefront\CategoryController;
+use App\Http\Controllers\Storefront\HomeController;
+use App\Http\Controllers\Storefront\PartController;
+use App\Http\Controllers\Storefront\SearchController;
 use App\Services\ImportMigration\WooProductImport;
 use App\Support\ImportMigration\ManualImportFileResolver;
 use App\Support\ImportMigration\WooProductImportRunRepository;
@@ -8,7 +13,12 @@ use Filament\Http\Middleware\Authenticate;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
-Route::redirect('/', '/admin');
+Route::get('/', [HomeController::class, 'index'])->name('storefront.home');
+Route::get('/sklep', [CatalogController::class, 'index'])->name('storefront.catalog');
+Route::get('/czesci', [CatalogController::class, 'index'])->name('storefront.parts.alias');
+Route::get('/szukaj', [SearchController::class, 'index'])->name('storefront.search');
+Route::get('/produkt/{slug}', [PartController::class, 'show'])->name('storefront.product');
+Route::get('/kategoria-produktu/{path}', [CategoryController::class, 'show'])->where('path', '.*')->name('storefront.category');
 
 Route::middleware(Authenticate::class)->prefix('admin/import-migracyjny/produkty-woo')->name('admin.import-migration.woo-products.')->group(function (): void {
     Route::post('/start', function (Request $request) {

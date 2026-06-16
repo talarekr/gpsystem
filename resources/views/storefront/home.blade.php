@@ -1,0 +1,9 @@
+@extends('layouts.storefront')
+@section('content')
+<section class="sf-hero"><div class="sf-container sf-hero__grid"><div><p class="sf-eyebrow">Używane części samochodowe</p><h1>GP SWISS - największy wybór części używanych w Polsce</h1><p>Oryginalne silniki, skrzynie biegów, DPF, elementy zawieszenia i wyposażenia z realnych danych magazynowych.</p><a class="sf-btn sf-btn--light" href="{{ route('storefront.catalog') }}">Przejdź do katalogu</a></div><form class="sf-part-search" action="{{ route('storefront.search') }}" method="get"><label>Numer części</label><input name="part_number" placeholder="8E0 953 521D"><button type="submit">Szukaj po numerze</button></form></div></section>
+<div class="sf-container">
+@foreach($sections as $title => $parts)<section class="sf-section"><div class="sf-section__head"><h2>{{ $title }}</h2><a href="{{ route('storefront.catalog', ['q' => $title]) }}">Pokaż wszystkie</a></div><div class="sf-grid sf-grid--4">@forelse($parts as $part) @include('storefront.partials.product-card', ['part'=>$part]) @empty <div class="sf-empty">Produkty pojawią się po imporcie danych dla tej sekcji.</div> @endforelse</div></section>@endforeach
+<section class="sf-section"><div class="sf-section__head"><h2>Kategorie części</h2><a href="{{ route('storefront.catalog') }}">Pokaż wszystkie</a></div><div class="sf-category-tiles">@foreach(['Silniki i osprzęt','Skrzynie biegów i napędy','Felgi i opony','Układ kierowniczy','Układ hamulcowy','Oświetlenie','Zawieszenie','Elektronika','Wnętrze / kokpit','Karoseria','Chłodzenie','Akcesoria'] as $cat)<a href="{{ route('storefront.catalog', ['category'=>$cat]) }}">⚙️ {{ $cat }}</a>@endforeach</div></section>
+<section class="sf-section"><div class="sf-section__head"><h2>Nasze marki</h2></div><div class="sf-brands">@foreach(['BMW','AUDI','Volkswagen','Skoda'] as $brand)<a href="{{ route('storefront.catalog', ['vehicle_model'=>$brand]) }}">{{ $brand }}</a>@endforeach</div></section>
+</div>
+@endsection
