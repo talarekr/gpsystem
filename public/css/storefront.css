@@ -129,3 +129,11 @@
 .sf-details-value{color:#243044}
 @media(max-width:767px){.sf-details-row{grid-template-columns:1fr}.sf-details-label{padding-bottom:4px}.sf-details-value{padding-top:4px}}
 .sf-details-description{max-width:960px;margin:0 auto 22px;color:#243044;font-size:15px;line-height:1.7}
+
+/* Storefront product details card with description strip */
+.sf-tabs .sf-details-section{padding:0;overflow:hidden}
+.sf-details-description{max-width:none;margin:0;padding:22px 28px;background:#f8faff;border-bottom:1px solid #e1e8f5;border-radius:12px 12px 0 0;color:#243044;text-align:center;font-size:15px;font-weight:400;line-height:1.65}
+.sf-details-section h2{position:relative;margin:0;padding:24px 18px 18px;text-align:center;color:var(--navy);font-size:22px;font-weight:800}
+.sf-details-section h2::after{content:"";display:block;width:76px;height:3px;margin:12px auto 0;border-radius:999px;background:linear-gradient(90deg,var(--navy),#d9e2f3,var(--navy))}
+.sf-details-table{max-width:960px;margin:0 auto 24px}
+@media(max-width:767px){.sf-details-description{padding:18px 16px}.sf-details-section h2{padding-top:20px}.sf-details-table{margin-bottom:18px}}
