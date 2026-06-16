@@ -75,35 +75,19 @@
             </div>
         @endif
     </section>
-    <section class="gps-quick-actions" aria-labelledby="gps-quick-actions-title">
-        <div class="gps-quick-actions__header">
-            <div>
-                <h2 id="gps-quick-actions-title">Szybkie akcje obsługi</h2>
-                <p>Operacyjne skróty do najczęstszych zadań sklepu.</p>
-            </div>
-        </div>
-
+    <section class="gps-quick-actions" aria-label="Szybkie akcje obsługi">
         <div class="gps-quick-actions__grid">
             <button type="button" class="gps-quick-action" data-gps-local-sale-open>
                 <span class="gps-quick-action__icon">↘</span>
-                <span>
-                    <strong>Sprzedaż lokalna</strong>
-                    <small>Zdejmij część ze stanu</small>
-                </span>
+                <strong>Sprzedaż lokalna</strong>
             </button>
             <a class="gps-quick-action" href="{{ $this->addPartUrl() }}">
                 <span class="gps-quick-action__icon">＋</span>
-                <span>
-                    <strong>Dodaj część</strong>
-                    <small>Nowy rekord części</small>
-                </span>
+                <strong>Dodaj część</strong>
             </a>
             <a class="gps-quick-action" href="{{ $this->ordersUrl() }}">
                 <span class="gps-quick-action__icon">☷</span>
-                <span>
-                    <strong>Zamówienia</strong>
-                    <small>Przejdź do modułu</small>
-                </span>
+                <strong>Zamówienia</strong>
             </a>
         </div>
     </section>
