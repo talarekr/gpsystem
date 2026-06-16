@@ -33,12 +33,16 @@ class PartImage extends Model
             return null;
         }
 
-        if (Str::startsWith($path, ['http://', 'https://', '//'])) {
+        if (Str::startsWith($path, ['http://', 'https://'])) {
             return $path;
         }
 
-        if (Str::startsWith($path, '/storage/')) {
+        if (Str::startsWith($path, '/')) {
             return $path;
+        }
+
+        if (Str::startsWith($path, 'parts/photos/')) {
+            return asset($path);
         }
 
         if (Str::startsWith($path, 'storage/')) {

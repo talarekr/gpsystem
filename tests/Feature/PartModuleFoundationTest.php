@@ -69,6 +69,15 @@ class PartModuleFoundationTest extends TestCase
         $this->assertSame('parts/photos/front.jpg', $part->fresh()->primary_image_path);
     }
 
+    public function test_part_photo_public_url_uses_public_parts_photos_path(): void
+    {
+        $image = new PartImage(['path' => 'parts/photos/example.jpg']);
+
+        $this->assertSame(asset('parts/photos/example.jpg'), $image->publicUrl());
+        $this->assertStringEndsWith('/parts/photos/example.jpg', $image->publicUrl());
+        $this->assertStringNotContainsString('/storage/parts/photos/example.jpg', $image->publicUrl());
+    }
+
     public function test_internal_category_suggestion_marks_uncertain_or_assigns_known_mapping(): void
     {
         $known = Part::query()->create(['name' => 'Alternator kompletny', 'oem_number' => 'ALT-001']);
