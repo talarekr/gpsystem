@@ -794,3 +794,100 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     .gps-sales-analytics__grid,
     .gps-sales-metrics { grid-template-columns: 1fr; }
 }
+
+/* Compact Ovoko-style part form in the Filament admin. */
+.gps-part-form {
+    width: min(100%, 54rem);
+    margin-inline: auto;
+}
+
+.gps-part-form .gps-part-form-section.fi-section {
+    border: 1px solid #cbd5e1 !important;
+    border-radius: 0.7rem !important;
+    box-shadow: 0 1px 2px rgba(11, 31, 58, 0.04) !important;
+    overflow: hidden;
+}
+
+.gps-part-form .gps-part-form-section.fi-section + .gps-part-form-section.fi-section {
+    margin-top: 0.75rem;
+}
+
+.gps-part-form .gps-part-form-section .fi-section-header {
+    min-height: 2.75rem;
+    padding: 0.65rem 0.85rem !important;
+    border-bottom: 1px solid #e2e8f0;
+    background: #fff !important;
+}
+
+.gps-part-form .gps-part-form-section .fi-section-content {
+    padding: 0.8rem !important;
+}
+
+.gps-part-form .fi-section-header-heading,
+.gps-part-form .fi-fo-field-wrp-label span {
+    color: #0f172a;
+    font-weight: 750;
+}
+
+.gps-part-form :where(.fi-input-wrp, .fi-fo-file-upload, .fi-fo-rich-editor, .fi-fo-markdown-editor) {
+    border-color: #94a3b8 !important;
+    box-shadow: none !important;
+}
+
+.gps-part-form :where(.fi-input-wrp:hover, .fi-fo-file-upload:hover, .fi-fo-rich-editor:hover, .fi-fo-markdown-editor:hover) {
+    border-color: #64748b !important;
+}
+
+.gps-part-form :where(.fi-input-wrp:focus-within, .fi-fo-file-upload:focus-within, .fi-fo-rich-editor:focus-within, .fi-fo-markdown-editor:focus-within) {
+    border-color: #122a66 !important;
+    box-shadow: 0 0 0 2px rgba(18, 42, 102, 0.12) !important;
+}
+
+.gps-part-form :where(.fi-input, .fi-select-input, .fi-textarea) {
+    min-height: 2.25rem;
+}
+
+.gps-part-form .fi-textarea {
+    padding-block: 0.45rem !important;
+}
+
+.gps-part-upload-placeholder {
+    display: inline-flex;
+    width: 7rem;
+    min-height: 5rem;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem;
+    border: 1px solid #94a3b8;
+    border-radius: 0.4rem;
+    background: #fff;
+    color: #475569;
+    text-align: center;
+    padding: 0.65rem;
+}
+
+.gps-part-upload-placeholder span {
+    color: #122a66;
+    font-size: 1.3rem;
+    line-height: 1;
+}
+
+.gps-part-upload-placeholder strong {
+    color: #475569;
+    font-size: 0.72rem;
+    font-weight: 700;
+    line-height: 1.15;
+}
+
+.gps-part-upload-placeholder small {
+    color: #64748b;
+    font-size: 0.62rem;
+    line-height: 1.15;
+}
+
+@media (max-width: 900px) {
+    .gps-part-form {
+        width: 100%;
+    }
+}
