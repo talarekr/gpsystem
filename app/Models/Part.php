@@ -72,7 +72,22 @@ class Part extends Model
 
     public function primaryImage(): ?PartImage
     {
-        return $this->images()->orderByDesc('is_primary')->orderBy('sort_order')->first();
+        if ($this->relationLoaded('images')) {
+            return $this->images
+                ->sortBy([
+                    ['is_primary', 'desc'],
+                    ['sort_order', 'asc'],
+                    ['id', 'asc'],
+                ])
+                ->first();
+        }
+
+        return $this->images()->orderByDesc('is_primary')->orderBy('sort_order')->orderBy('id')->first();
+    }
+
+    public function primaryImageUrl(): ?string
+    {
+        return $this->primaryImage()?->publicUrl();
     }
 
     public function getPrimaryImagePathAttribute(): ?string
