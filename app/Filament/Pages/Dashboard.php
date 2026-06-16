@@ -2,6 +2,8 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Pages\Orders;
+use App\Filament\Resources\PartResource;
 use App\Models\ShopEvent;
 use Filament\Pages\Dashboard as BaseDashboard;
 use Illuminate\Contracts\Support\Htmlable;
@@ -18,6 +20,17 @@ class Dashboard extends BaseDashboard
     public function getHeading(): string|Htmlable
     {
         return '';
+    }
+
+
+    public function addPartUrl(): string
+    {
+        return PartResource::getUrl('create');
+    }
+
+    public function ordersUrl(): string
+    {
+        return class_exists(Orders::class) ? Orders::getUrl() : '#';
     }
 
     /**

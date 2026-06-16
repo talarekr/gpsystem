@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Admin\ImportMigration\PartImagePresentationController;
+use App\Http\Controllers\Admin\LocalSaleController;
 use App\Http\Controllers\Admin\PartSearchController;
 use App\Http\Controllers\Admin\ImportMigration\WooCategoryTreeController;
 use App\Http\Controllers\Admin\ImportMigration\WooProductImportRunController;
@@ -33,6 +34,7 @@ Route::get('/kategoria-produktu/{path}', [CategoryController::class, 'show'])->w
 
 Route::middleware(Authenticate::class)->prefix('admin')->name('admin.')->group(function (): void {
     Route::get('/search/parts', PartSearchController::class)->name('search.parts');
+    Route::post('/local-sales', [LocalSaleController::class, 'store'])->name('local-sales.store');
 });
 
 Route::middleware(Authenticate::class)->prefix('admin/import-migracyjny/produkty-woo')->name('admin.import-migration.woo-products.')->group(function (): void {
