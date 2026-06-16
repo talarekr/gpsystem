@@ -97,6 +97,60 @@ class PartModuleFoundationTest extends TestCase
         }
     }
 
+    public function test_listing_score_penalizes_narrow_images_and_prefers_wide_fill(): void
+    {
+        $narrow = PartImage::calculateListingScore(0.318, 1.0, 1.0);
+        $wide = PartImage::calculateListingScore(1.0, 0.875, 1.0);
+
+        $this->assertGreaterThan($narrow, $wide);
+    }
+
+    public function test_part_listing_image_uses_best_presentation_metrics_when_images_are_eager_loaded(): void
+    {
+        $part = Part::query()->create(['name' => 'SEAT EXEO zwrotnica', 'status' => 'ready']);
+
+        $primaryNarrow = PartImage::query()->create(['part_id' => $part->id, 'sort_order' => 0, 'is_primary' => true]);
+        $primaryNarrow->forceFill([
+            'path' => 'parts/photos/vertical.jpg',
+            'legacy_payload' => ['presentation' => [
+                'listing_path' => 'parts/photos/presentation/listing/vertical.jpg',
+                'listing_fill_width_ratio' => 0.318,
+                'listing_fill_height_ratio' => 1.0,
+                'listing_dominant_ratio' => 1.0,
+            ]],
+        ])->saveQuietly();
+
+        $wide = PartImage::query()->create(['part_id' => $part->id, 'sort_order' => 1, 'is_primary' => false]);
+        $wide->forceFill([
+            'path' => 'parts/photos/wide.jpg',
+            'legacy_payload' => ['presentation' => [
+                'listing_path' => 'parts/photos/presentation/listing/wide.jpg',
+                'listing_fill_width_ratio' => 1.0,
+                'listing_fill_height_ratio' => 0.875,
+                'listing_dominant_ratio' => 1.0,
+            ]],
+        ])->saveQuietly();
+
+        $part = Part::query()->with('images')->findOrFail($part->id);
+
+        $this->assertTrue($part->primaryImage()->is($primaryNarrow));
+        $this->assertTrue($part->listingImage()->is($wide));
+    }
+
+    public function test_part_listing_image_falls_back_to_primary_sort_order_when_metrics_are_missing(): void
+    {
+        $part = Part::query()->create(['name' => 'Brak metryk']);
+
+        $fallback = PartImage::query()->create(['part_id' => $part->id, 'sort_order' => 5, 'is_primary' => true]);
+        $fallback->forceFill(['path' => 'parts/photos/primary.jpg'])->saveQuietly();
+        $secondary = PartImage::query()->create(['part_id' => $part->id, 'sort_order' => 0, 'is_primary' => false]);
+        $secondary->forceFill(['path' => 'parts/photos/secondary.jpg'])->saveQuietly();
+
+        $part = Part::query()->with('images')->findOrFail($part->id);
+
+        $this->assertTrue($part->listingImage()->is($fallback));
+    }
+
     public function test_internal_category_suggestion_marks_uncertain_or_assigns_known_mapping(): void
     {
         $known = Part::query()->create(['name' => 'Alternator kompletny', 'oem_number' => 'ALT-001']);
