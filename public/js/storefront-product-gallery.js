@@ -7,8 +7,8 @@
         var thumbs = Array.prototype.slice.call(gallery.querySelectorAll('[data-gallery-thumb]'));
         var lightbox = gallery.querySelector('[data-gallery-lightbox]');
         var lightboxImage = gallery.querySelector('[data-gallery-lightbox-image]');
-        var prevButton = gallery.querySelector('[data-gallery-prev]');
-        var nextButton = gallery.querySelector('[data-gallery-next]');
+        var prevButtons = Array.prototype.slice.call(gallery.querySelectorAll('[data-gallery-prev], [data-gallery-main-prev]'));
+        var nextButtons = Array.prototype.slice.call(gallery.querySelectorAll('[data-gallery-next], [data-gallery-main-next]'));
         var closeButtons = Array.prototype.slice.call(gallery.querySelectorAll('[data-gallery-close]'));
         var currentIndex = 0;
 
@@ -78,13 +78,21 @@
             button.addEventListener('click', closeLightbox);
         });
 
-        if (prevButton) {
-            prevButton.addEventListener('click', function () { showOffset(-1); });
-        }
+        prevButtons.forEach(function (button) {
+            button.addEventListener('click', function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                showOffset(-1);
+            });
+        });
 
-        if (nextButton) {
-            nextButton.addEventListener('click', function () { showOffset(1); });
-        }
+        nextButtons.forEach(function (button) {
+            button.addEventListener('click', function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                showOffset(1);
+            });
+        });
 
         document.addEventListener('keydown', function (event) {
             if (lightbox.hidden) {
