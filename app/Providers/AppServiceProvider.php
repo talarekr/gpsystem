@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Services\Storefront\CategoryTreeService;
+use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -13,6 +15,14 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        // Keep Ticket 1 intentionally light: no integration bootstrapping or automation.
+        View::composer('storefront.partials.header', function ($view): void {
+            $categoryTree = app(CategoryTreeService::class);
+
+            $view->with([
+                'storefrontCategoryRoots' => $categoryTree->roots(),
+                'storefrontCategoryShortcuts' => $categoryTree->shortcuts(),
+                'categoryTreeService' => $categoryTree,
+            ]);
+        });
     }
 }
