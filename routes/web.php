@@ -12,26 +12,54 @@ Route::redirect('/', '/admin');
 
 Route::middleware(Authenticate::class)->prefix('admin/import-migracyjny/produkty-woo')->name('admin.import-migration.woo-products.')->group(function (): void {
     Route::post('/start', function (Request $request) {
+        $lastDiagnosticStep = 'step_00_route_entered';
+
+        $diagnosticStep = static function (string $step) use ($request, &$lastDiagnosticStep): void {
+            $lastDiagnosticStep = $step;
+            woo_import_append_start_ping_step($step);
+        };
+
+        register_shutdown_function(static function () use ($request, &$lastDiagnosticStep): void {
+            woo_import_write_fatal_error_diagnostic($request, $lastDiagnosticStep);
+        });
+
+        ini_set('memory_limit', '256M');
+        ini_set('max_execution_time', '300');
+
         woo_import_write_start_ping($request, 'step_01_route_reached');
+        woo_import_append_start_ping_context([
+            'step' => 'step_01_ini_values_after_set_attempt',
+            'php_memory_limit' => ini_get('memory_limit'),
+            'php_max_execution_time' => ini_get('max_execution_time'),
+        ]);
 
         try {
-            woo_import_append_start_ping_step('step_02_before_controller');
+            $diagnosticStep('step_02_before_controller');
             $controller = app(WooProductImportRunController::class);
-            woo_import_append_start_ping_step('step_03_after_controller_resolved');
-            woo_import_append_start_ping_step('step_04_before_start_call');
+            $diagnosticStep('step_03_after_controller_resolved');
+            $diagnosticStep('step_04_before_start_call');
             $response = $controller->start($request);
-            woo_import_append_start_ping_step('step_05_after_start_call');
+            $diagnosticStep('step_05_after_start_call');
 
             return $response;
         } catch (Throwable $exception) {
-            $debug = woo_import_write_route_emergency_diagnostic($exception, $request, 'start');
+            woo_import_write_route_emergency_diagnostic($exception, $request, 'start', $lastDiagnosticStep);
 
-            return redirect()
-                ->to('/admin/import-migracyjny/produkty-woo')
-                ->withInput($request->only(woo_import_request_fields()))
-                ->with('woo_import_submitted', $request->only(woo_import_request_fields()))
-                ->with('woo_import_debug', $debug)
-                ->withErrors(['woo_import' => 'Nie udało się uruchomić importu Woo przed wejściem do kontrolera. Szczegóły zapisano w pliku diagnostycznym last_error.log.']);
+            $message = htmlspecialchars($exception->getMessage(), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+            $path = htmlspecialchars(storage_path('app/imports/manual/woo/last_error.log'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+
+            return response(<<<HTML
+<!doctype html>
+<html lang="pl">
+<head><meta charset="utf-8"><title>Import Woo nie wystartował</title></head>
+<body>
+    <h1>Import Woo nie wystartował</h1>
+    <p>Podczas uruchamiania importu wystąpił wyjątek.</p>
+    <p><strong>Komunikat:</strong> {$message}</p>
+    <p>Szczegóły zapisano w pliku: <code>{$path}</code></p>
+</body>
+</html>
+HTML, 500)->header('Content-Type', 'text/html; charset=UTF-8');
         }
     })->name('start');
 
@@ -64,6 +92,7 @@ Route::middleware(Authenticate::class)->prefix('admin/import-migracyjny/produkty
             'products_csv_exists' => is_file($productsPath),
             'products_csv_readable' => is_file($productsPath) && is_readable($productsPath),
             'last_error_log_path' => $directory.DIRECTORY_SEPARATOR.'last_error.log',
+            'fatal_error_log_path' => $directory.DIRECTORY_SEPARATOR.'fatal_error.log',
             'start_ping_log_path' => $directory.DIRECTORY_SEPARATOR.'start_ping.log',
             'get_ping_log_path' => $directory.DIRECTORY_SEPARATOR.'get_ping.log',
             'post_ping_log_path' => $directory.DIRECTORY_SEPARATOR.'post_ping.log',
@@ -102,6 +131,9 @@ if (! function_exists('woo_import_write_start_ping')) {
                 'content_length: '.($_SERVER['CONTENT_LENGTH'] ?? '0'),
                 'submitted_keys: '.json_encode($keys, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
                 'php_memory_limit: '.ini_get('memory_limit'),
+                'php_max_execution_time: '.ini_get('max_execution_time'),
+                'memory_usage: '.memory_get_usage(true),
+                'memory_peak_usage: '.memory_get_peak_usage(true),
                 'cwd: '.getcwd(),
                 '---',
             ]).PHP_EOL;
@@ -152,6 +184,9 @@ if (! function_exists('woo_import_write_minimal_ping')) {
                 'content_length: '.($_SERVER['CONTENT_LENGTH'] ?? '0'),
                 'submitted_keys: '.json_encode(array_keys($request->all()), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
                 'php_memory_limit: '.ini_get('memory_limit'),
+                'php_max_execution_time: '.ini_get('max_execution_time'),
+                'memory_usage: '.memory_get_usage(true),
+                'memory_peak_usage: '.memory_get_peak_usage(true),
                 'cwd: '.getcwd(),
                 '---',
             ]).PHP_EOL;
@@ -179,7 +214,7 @@ if (! function_exists('woo_import_request_fields')) {
 }
 
 if (! function_exists('woo_import_write_route_emergency_diagnostic')) {
-    function woo_import_write_route_emergency_diagnostic(Throwable $exception, Request $request, string $action): array
+    function woo_import_write_route_emergency_diagnostic(Throwable $exception, Request $request, string $action, string $lastDiagnosticStep = ''): array
     {
         $directory = storage_path('app/imports/manual/woo');
         $diagnosticPath = $directory.DIRECTORY_SEPARATOR.'last_error.log';
@@ -191,7 +226,8 @@ if (! function_exists('woo_import_write_route_emergency_diagnostic')) {
         $diagnostic = [
             'timestamp' => date(DATE_ATOM),
             'action' => $action,
-            'diagnostic_scope' => 'route_closure_before_controller',
+            'diagnostic_scope' => 'route_closure_start_endpoint',
+            'last_diagnostic_step' => $lastDiagnosticStep,
             'route_name' => optional($request->route())->getName(),
             'url' => $request->fullUrl(),
             'exception' => [
@@ -199,14 +235,17 @@ if (! function_exists('woo_import_write_route_emergency_diagnostic')) {
                 'message' => $exception->getMessage(),
                 'file' => $exception->getFile(),
                 'line' => $exception->getLine(),
-                'trace' => array_slice(array_map(static fn (array $frame): array => [
-                    'file' => $frame['file'] ?? null,
-                    'line' => $frame['line'] ?? null,
-                    'function' => $frame['function'] ?? null,
-                    'class' => $frame['class'] ?? null,
-                ], $exception->getTrace()), 0, 12),
+                'trace' => $exception->getTraceAsString(),
             ],
             'submitted_fields' => $request->only(woo_import_request_fields()),
+            'submitted_keys' => woo_import_safe_request_keys($request),
+            'request_uri' => $_SERVER['REQUEST_URI'] ?? '',
+            'memory_usage' => memory_get_usage(true),
+            'memory_peak_usage' => memory_get_peak_usage(true),
+            'php' => [
+                'memory_limit' => ini_get('memory_limit'),
+                'max_execution_time' => ini_get('max_execution_time'),
+            ],
             'expected_folder_path' => $directory,
             'diagnostic_file' => $diagnosticPath,
             'classes' => [
@@ -227,7 +266,95 @@ if (! function_exists('woo_import_write_route_emergency_diagnostic')) {
             'submitted_fields' => $diagnostic['submitted_fields'],
             'diagnostic_file' => $diagnostic['diagnostic_file'],
             'diagnostic_scope' => $diagnostic['diagnostic_scope'],
+            'last_diagnostic_step' => $diagnostic['last_diagnostic_step'],
             'classes' => $diagnostic['classes'],
         ];
+    }
+}
+
+if (! function_exists('woo_import_append_start_ping_context')) {
+    /** @param array<string, mixed> $context */
+    function woo_import_append_start_ping_context(array $context): void
+    {
+        try {
+            $directory = storage_path('app/imports/manual/woo');
+
+            if (! is_dir($directory)) {
+                mkdir($directory, 0755, true);
+            }
+
+            $lines = ['timestamp: '.date(DATE_ATOM)];
+
+            foreach ($context as $key => $value) {
+                $lines[] = $key.': '.(is_scalar($value) || $value === null
+                    ? (string) $value
+                    : json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+            }
+
+            $lines[] = '---';
+
+            file_put_contents(
+                $directory.DIRECTORY_SEPARATOR.'start_ping.log',
+                implode(PHP_EOL, $lines).PHP_EOL,
+                FILE_APPEND | LOCK_EX,
+            );
+        } catch (Throwable) {
+            // Context logging is diagnostic-only.
+        }
+    }
+}
+
+if (! function_exists('woo_import_safe_request_keys')) {
+    /** @return array<int|string, string> */
+    function woo_import_safe_request_keys(Request $request): array
+    {
+        try {
+            return array_keys($request->all());
+        } catch (Throwable $exception) {
+            return ['__unavailable__' => $exception->getMessage()];
+        }
+    }
+}
+
+if (! function_exists('woo_import_write_fatal_error_diagnostic')) {
+    function woo_import_write_fatal_error_diagnostic(Request $request, string $lastDiagnosticStep): void
+    {
+        $lastError = error_get_last();
+        $fatalTypes = [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR, E_RECOVERABLE_ERROR];
+
+        if ($lastError === null || ! in_array($lastError['type'] ?? null, $fatalTypes, true)) {
+            return;
+        }
+
+        try {
+            $directory = storage_path('app/imports/manual/woo');
+
+            if (! is_dir($directory)) {
+                mkdir($directory, 0755, true);
+            }
+
+            $diagnostic = [
+                'timestamp' => date(DATE_ATOM),
+                'error_get_last' => $lastError,
+                'memory_usage' => memory_get_usage(true),
+                'memory_peak_usage' => memory_get_peak_usage(true),
+                'php' => [
+                    'memory_limit' => ini_get('memory_limit'),
+                    'max_execution_time' => ini_get('max_execution_time'),
+                ],
+                'request_uri' => $_SERVER['REQUEST_URI'] ?? '',
+                'submitted_keys' => woo_import_safe_request_keys($request),
+                'last_diagnostic_step' => $lastDiagnosticStep,
+            ];
+
+            $content = json_encode($diagnostic, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            file_put_contents(
+                $directory.DIRECTORY_SEPARATOR.'fatal_error.log',
+                ($content === false ? var_export($diagnostic, true) : $content).PHP_EOL,
+                LOCK_EX,
+            );
+        } catch (Throwable) {
+            // Shutdown diagnostics must never raise another fatal path.
+        }
     }
 }
