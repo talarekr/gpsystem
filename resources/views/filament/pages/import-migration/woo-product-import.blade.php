@@ -1,20 +1,19 @@
 <x-filament-panels::page>
     <div class="space-y-6">
-        <form wire:submit.prevent="runImport" class="space-y-6">
+        <form method="POST" action="{{ route('admin.import-migration.woo-products.start') }}" class="space-y-6">
+            @csrf
             {{ $this->form }}
 
             <div class="flex items-center gap-3">
                 <button
                     type="submit"
-                    wire:loading.attr="disabled"
-                    wire:target="runImport,processNextBatch"
                     class="fi-btn fi-color-primary fi-btn-color-primary fi-size-md inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-primary-500 focus-visible:ring-2 focus-visible:ring-primary-600 disabled:pointer-events-none disabled:opacity-70 dark:bg-primary-500 dark:hover:bg-primary-400 dark:focus-visible:ring-primary-500"
                 >
                     Uruchom import
                 </button>
 
                 @if ($isImportRunning)
-                    <span class="text-sm text-gray-600 dark:text-gray-300">Import trwa — kolejne partie uruchamiają się automatycznie.</span>
+                    <span class="text-sm text-gray-600 dark:text-gray-300">Import trwa — kolejną partię uruchamia zwykły endpoint HTTP poniżej.</span>
                 @endif
             </div>
         </form>
@@ -28,10 +27,10 @@
         @endif
 
         @if ($isImportRunning)
-            <div wire:poll.750ms="processNextBatch" class="rounded-xl border border-primary-200 bg-primary-50 p-4 text-sm text-primary-800 dark:border-primary-800 dark:bg-primary-950 dark:text-primary-200">
+            <div class="rounded-xl border border-primary-200 bg-primary-50 p-4 text-sm text-primary-800 dark:border-primary-800 dark:bg-primary-950 dark:text-primary-200">
                 <div class="flex items-center gap-3 font-medium">
                     <x-filament::loading-indicator class="h-5 w-5" />
-                    <span>Import trwa… przetwarzanie w partiach po {{ $batchSize }} produktów.</span>
+                    <span>Import trwa… przetwarzanie w partiach po {{ $batchSize }} produktów przez zwykłą trasę Laravel.</span>
                 </div>
 
                 <div class="mt-4 h-3 overflow-hidden rounded-full bg-white dark:bg-gray-800">
@@ -41,6 +40,19 @@
                 <div class="mt-2 text-xs">
                     Przetworzono {{ $processedRows }} z {{ $totalRows }} wierszy ({{ $totalRows > 0 ? min(100, round(($processedRows / $totalRows) * 100, 1)) : 0 }}%).
                 </div>
+
+
+                @if (! empty($importRun['id']))
+                    <form method="POST" action="{{ route('admin.import-migration.woo-products.next', ['runId' => $importRun['id']]) }}" class="mt-4">
+                        @csrf
+                        <button
+                            type="submit"
+                            class="fi-btn fi-color-primary fi-btn-color-primary fi-size-md inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-primary-500 focus-visible:ring-2 focus-visible:ring-primary-600 dark:bg-primary-500 dark:hover:bg-primary-400 dark:focus-visible:ring-primary-500"
+                        >
+                            Przetwórz następną partię
+                        </button>
+                    </form>
+                @endif
 
                 <details class="mt-4 rounded-lg border border-primary-200 bg-white/70 p-3 text-xs dark:border-primary-800 dark:bg-gray-900/60" open>
                     <summary class="cursor-pointer font-semibold">Diagnostyka batch importu Woo</summary>
