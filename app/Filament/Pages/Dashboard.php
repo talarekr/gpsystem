@@ -4,11 +4,13 @@ namespace App\Filament\Pages;
 
 use App\Filament\Resources\PartResource;
 use App\Models\ShopEvent;
-use App\Services\Admin\OperationsDashboardService;
 use App\Services\Admin\SalesAnalyticsService;
 use Filament\Pages\Dashboard as BaseDashboard;
 use Illuminate\Contracts\Support\Htmlable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\Schema;
 use NumberFormatter;
 
 class Dashboard extends BaseDashboard
@@ -32,31 +34,7 @@ class Dashboard extends BaseDashboard
 
     public function ordersUrl(): string
     {
-        return app(OperationsDashboardService::class)->ordersUrl();
-    }
-
-    public function returnsUrl(): string
-    {
-        return app(OperationsDashboardService::class)->returnsUrl();
-    }
-
-    /**
-     * @return array{orders: array{unhandled: int, url: string}, returns: array{unhandled: int, url: string}}
-     */
-    public function operationsDashboard(): array
-    {
-        $operations = app(OperationsDashboardService::class);
-
-        return [
-            'orders' => [
-                'unhandled' => $operations->unhandledOrdersCount(),
-                'url' => $operations->ordersUrl(),
-            ],
-            'returns' => [
-                'unhandled' => $operations->unhandledReturnsCount(),
-                'url' => $operations->returnsUrl(),
-            ],
-        ];
+        return Orders::getUrl();
     }
 
     /**
@@ -117,6 +95,24 @@ class Dashboard extends BaseDashboard
         ];
     }
 
+    /**
+     * @return array<string, int>
+     */
+    public function shopEventTabCounts(): array
+    {
+        if (! Schema::hasTable('shop_events')) {
+            return array_fill_keys(array_keys($this->shopEventTabs()), 0);
+        }
+
+        try {
+            return collect(array_keys($this->shopEventTabs()))
+                ->mapWithKeys(fn (string $tab): array => [$tab => (int) $this->shopEventQuery($tab)->count()])
+                ->all();
+        } catch (QueryException) {
+            return array_fill_keys(array_keys($this->shopEventTabs()), 0);
+        }
+    }
+
     public function activeShopEventTab(): string
     {
         $tab = request()->query('shop_event_tab', 'all');
@@ -129,20 +125,60 @@ class Dashboard extends BaseDashboard
      */
     public function shopEvents(): Collection
     {
-        $query = ShopEvent::query();
-
-        match ($this->activeShopEventTab()) {
-            'requires_action' => $query->where('requires_action', true),
-            'orders' => $query->whereIn('event_type', ['order', 'payment']),
-            'messages' => $query->whereIn('event_type', ['customer_message', 'product_question']),
-            'returns_complaints' => $query->whereIn('event_type', ['return', 'complaint']),
-            default => null,
-        };
-
-        // TODO: Techniczne zdarzenia typu import/API/stock sync będą później osobnym modułem Administrator / Dziennik techniczny.
-        return $query
+        return $this->shopEventQuery($this->activeShopEventTab())
             ->orderByRaw('COALESCE(occurred_at, created_at) DESC')
             ->limit(15)
             ->get();
+    }
+
+    private function shopEventQuery(string $tab): Builder
+    {
+        $query = ShopEvent::query()->whereIn('event_type', $this->supportShopEventTypes());
+
+        match ($tab) {
+            'requires_action' => $query->where('requires_action', true),
+            'orders' => $query->whereIn('event_type', $this->orderShopEventTypes()),
+            'messages' => $query->whereIn('event_type', $this->messageShopEventTypes()),
+            'returns_complaints' => $query->whereIn('event_type', $this->returnComplaintShopEventTypes()),
+            default => null,
+        };
+
+        return $query;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function supportShopEventTypes(): array
+    {
+        return array_merge(
+            $this->orderShopEventTypes(),
+            $this->messageShopEventTypes(),
+            $this->returnComplaintShopEventTypes(),
+        );
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function orderShopEventTypes(): array
+    {
+        return ['order', 'payment'];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function messageShopEventTypes(): array
+    {
+        return ['customer_message', 'product_question'];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function returnComplaintShopEventTypes(): array
+    {
+        return ['return', 'complaint'];
     }
 }
