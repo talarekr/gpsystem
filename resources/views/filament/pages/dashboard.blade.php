@@ -75,6 +75,33 @@
             </div>
         @endif
     </section>
+    @php($operationsDashboard = $this->operationsDashboard())
+
+    <section class="gps-operations" aria-label="Zamówienia i zwroty">
+        <a class="gps-operations-module" href="{{ $operationsDashboard['orders']['url'] }}">
+            <div class="gps-operations-module__header">
+                <span class="gps-operations-module__icon" aria-hidden="true">☷</span>
+                <h2>Zamówienia</h2>
+            </div>
+            <div class="gps-operations-stat">
+                <span>Nieobsłużone</span>
+                <strong>{{ $operationsDashboard['orders']['unhandled'] }}</strong>
+                <small>Wymagają reakcji obsługi</small>
+            </div>
+        </a>
+
+        <a class="gps-operations-module" href="{{ $operationsDashboard['returns']['url'] }}">
+            <div class="gps-operations-module__header">
+                <span class="gps-operations-module__icon" aria-hidden="true">↩</span>
+                <h2>Zwroty</h2>
+            </div>
+            <div class="gps-operations-stat">
+                <span>Nieobsłużone</span>
+                <strong>{{ $operationsDashboard['returns']['unhandled'] }}</strong>
+                <small>Zwroty i reklamacje do obsługi</small>
+            </div>
+        </a>
+    </section>
     <section class="gps-quick-actions" aria-label="Szybkie akcje obsługi">
         <div class="gps-quick-actions__grid">
             <button type="button" class="gps-quick-action" data-gps-local-sale-open>
