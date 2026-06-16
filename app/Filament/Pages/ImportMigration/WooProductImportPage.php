@@ -36,6 +36,8 @@ class WooProductImportPage extends Page implements HasForms
     public ?string $lastBatchStartedAt = null;
     public ?string $lastBatchFinishedAt = null;
     public ?string $lastError = null;
+    public ?string $runImportStartedAt = null;
+    public ?string $firstBatchStartedAt = null;
     public int $pollTickCount = 0;
     public ?array $importRun = null;
 
@@ -107,6 +109,8 @@ class WooProductImportPage extends Page implements HasForms
         $this->lastBatchStartedAt = null;
         $this->lastBatchFinishedAt = null;
         $this->lastError = null;
+        $this->runImportStartedAt = now()->toDateTimeString();
+        $this->firstBatchStartedAt = null;
         $this->pollTickCount = 0;
         $this->importRun = null;
 
@@ -160,6 +164,7 @@ class WooProductImportPage extends Page implements HasForms
         try {
             $this->assertImportRunIsUsable();
             $this->lastBatchStartedAt = now()->toDateTimeString();
+            $this->firstBatchStartedAt ??= $this->lastBatchStartedAt;
             $this->lastBatchFinishedAt = null;
             $this->lastBatchProcessed = 0;
             $report = new ImportReport(
