@@ -17,3 +17,13 @@
     src="{{ asset($gpsAdminScript) }}@if (file_exists($gpsAdminScriptPath))?v={{ filemtime($gpsAdminScriptPath) }}@endif"
     defer
 ></script>
+
+@php
+    $gpsAdminDashboardScript = 'js/filament-admin-dashboard.js';
+    $gpsAdminDashboardScriptPath = public_path($gpsAdminDashboardScript);
+@endphp
+
+<script
+    src="{{ asset($gpsAdminDashboardScript) }}@if (file_exists($gpsAdminDashboardScriptPath))?v={{ filemtime($gpsAdminDashboardScriptPath) }}@endif"
+    defer
+></script>
