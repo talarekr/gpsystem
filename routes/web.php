@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Admin\ImportMigration\WooCategoryTreeController;
 use App\Http\Controllers\Admin\ImportMigration\WooProductImportRunController;
 use App\Http\Controllers\Storefront\CatalogController;
 use App\Http\Controllers\Storefront\CategoryController;
@@ -21,6 +22,9 @@ Route::get('/produkt/{slug}', [PartController::class, 'show'])->name('storefront
 Route::get('/kategoria-produktu/{path}', [CategoryController::class, 'show'])->where('path', '.*')->name('storefront.category');
 
 Route::middleware(Authenticate::class)->prefix('admin/import-migracyjny/produkty-woo')->name('admin.import-migration.woo-products.')->group(function (): void {
+    Route::get('/category-tree/audit', [WooCategoryTreeController::class, 'audit'])->name('category-tree.audit');
+    Route::post('/category-tree/import', [WooCategoryTreeController::class, 'import'])->name('category-tree.import');
+
     Route::post('/start', function (Request $request) {
         $lastDiagnosticStep = 'step_00_route_entered';
 
