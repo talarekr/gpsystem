@@ -131,6 +131,8 @@ class WooProductImportPage extends Page
             'route_exists' => true,
             'start_route' => route('admin.import-migration.woo-products.start'),
             'diagnostics_route' => route('admin.import-migration.woo-products.diagnostics'),
+            'start_ping_route' => route('admin.import-migration.woo-products.start-ping'),
+            'post_ping_route' => route('admin.import-migration.woo-products.post-ping'),
             'controller_class_exists' => class_exists(\App\Http\Controllers\Admin\ImportMigration\WooProductImportRunController::class),
             'manual_folder_path' => $directory,
             'manual_folder_exists' => is_dir($directory),
@@ -139,6 +141,9 @@ class WooProductImportPage extends Page
             'products_csv_exists' => is_file($productsPath),
             'products_csv_readable' => is_file($productsPath) && is_readable($productsPath),
             'last_error_log_path' => $directory.DIRECTORY_SEPARATOR.'last_error.log',
+            'start_ping_log_path' => $directory.DIRECTORY_SEPARATOR.'start_ping.log',
+            'get_ping_log_path' => $directory.DIRECTORY_SEPARATOR.'get_ping.log',
+            'post_ping_log_path' => $directory.DIRECTORY_SEPARATOR.'post_ping.log',
         ];
     }
 
@@ -151,6 +156,8 @@ class WooProductImportPage extends Page
             'route_exists' => false,
             'start_route' => '/admin/import-migracyjny/produkty-woo/start',
             'diagnostics_route' => '/admin/import-migracyjny/produkty-woo/diagnostyka',
+            'start_ping_route' => '/admin/import-migracyjny/produkty-woo/start-ping',
+            'post_ping_route' => '/admin/import-migracyjny/produkty-woo/post-ping',
             'controller_class_exists' => class_exists(\App\Http\Controllers\Admin\ImportMigration\WooProductImportRunController::class),
             'manual_folder_path' => $directory,
             'manual_folder_exists' => is_dir($directory),
@@ -159,6 +166,9 @@ class WooProductImportPage extends Page
             'products_csv_exists' => is_file($productsPath),
             'products_csv_readable' => is_file($productsPath) && is_readable($productsPath),
             'last_error_log_path' => $directory.DIRECTORY_SEPARATOR.'last_error.log',
+            'start_ping_log_path' => $directory.DIRECTORY_SEPARATOR.'start_ping.log',
+            'get_ping_log_path' => $directory.DIRECTORY_SEPARATOR.'get_ping.log',
+            'post_ping_log_path' => $directory.DIRECTORY_SEPARATOR.'post_ping.log',
         ];
     }
 
