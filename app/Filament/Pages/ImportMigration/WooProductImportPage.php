@@ -30,7 +30,13 @@ class WooProductImportPage extends Page implements HasForms
     public bool $isImportRunning = false;
     public int $totalRows = 0;
     public int $processedRows = 0;
+    public int $currentOffset = 0;
     public int $batchSize = 250;
+    public int $lastBatchProcessed = 0;
+    public ?string $lastBatchStartedAt = null;
+    public ?string $lastBatchFinishedAt = null;
+    public ?string $lastError = null;
+    public int $pollTickCount = 0;
     public ?array $importRun = null;
 
     public function mount(): void
@@ -96,6 +102,12 @@ class WooProductImportPage extends Page implements HasForms
         $this->isImportRunning = false;
         $this->totalRows = 0;
         $this->processedRows = 0;
+        $this->currentOffset = 0;
+        $this->lastBatchProcessed = 0;
+        $this->lastBatchStartedAt = null;
+        $this->lastBatchFinishedAt = null;
+        $this->lastError = null;
+        $this->pollTickCount = 0;
         $this->importRun = null;
 
         try {
@@ -115,25 +127,41 @@ class WooProductImportPage extends Page implements HasForms
                 ],
                 'mode' => $state['mode'],
                 'startedAt' => microtime(true),
+                'currentOffset' => 0,
+                'totalRows' => $this->totalRows,
+                'report' => $this->report,
             ];
             $this->isImportRunning = true;
 
             if ($this->totalRows === 0) {
                 $this->isImportRunning = false;
                 $this->importError = 'Plik products.csv nie zawiera wierszy produktów.';
+                $this->lastError = $this->importError;
+
+                return;
             }
+
+            $this->processNextBatch($import, false);
         } catch (Throwable $exception) {
             $this->failImport($exception);
         }
     }
 
-    public function processNextBatch(WooProductImport $import): void
+    public function processNextBatch(WooProductImport $import, bool $fromPoll = true): void
     {
+        if ($fromPoll) {
+            $this->pollTickCount++;
+        }
+
         if (! $this->isImportRunning || ! $this->importRun) {
             return;
         }
 
         try {
+            $this->assertImportRunIsUsable();
+            $this->lastBatchStartedAt = now()->toDateTimeString();
+            $this->lastBatchFinishedAt = null;
+            $this->lastBatchProcessed = 0;
             $report = new ImportReport(
                 $this->report['counters'] ?? []
             );
@@ -144,16 +172,23 @@ class WooProductImportPage extends Page implements HasForms
                 $this->importRun['productsPath'],
                 $this->importRun['paths'],
                 $this->importRun['mode'],
-                $this->processedRows,
+                $this->currentOffset,
                 $this->batchSize,
                 $report,
                 $this->importRun['startedAt'],
             );
 
             $this->report = $report->toArray();
-            $this->processedRows += (int) ($this->report['counters']['last_batch_rows'] ?? 0);
+            $this->lastBatchProcessed = (int) ($this->report['counters']['last_batch_rows'] ?? 0);
+            $this->currentOffset += $this->lastBatchProcessed;
+            $this->processedRows = $this->currentOffset;
+            $this->lastBatchFinishedAt = now()->toDateTimeString();
+            $this->lastError = null;
+            $this->importRun['currentOffset'] = $this->currentOffset;
+            $this->importRun['totalRows'] = $this->totalRows;
+            $this->importRun['report'] = $this->report;
 
-            if (($this->report['counters']['last_batch_rows'] ?? 0) === 0 || $this->processedRows >= $this->totalRows) {
+            if ($this->lastBatchProcessed === 0 || $this->processedRows >= $this->totalRows) {
                 $this->isImportRunning = false;
 
                 Notification::make()
@@ -167,12 +202,34 @@ class WooProductImportPage extends Page implements HasForms
         }
     }
 
+    private function assertImportRunIsUsable(): void
+    {
+        $productsPath = $this->importRun['productsPath'] ?? null;
+
+        if (! is_string($productsPath) || ! is_file($productsPath)) {
+            throw new \RuntimeException('Nie można kontynuować importu Woo: products.csv nie jest dostępny między partiami.');
+        }
+
+        foreach (($this->importRun['paths'] ?? []) as $label => $path) {
+            if ($path !== null && (! is_string($path) || ! is_file($path))) {
+                throw new \RuntimeException("Nie można kontynuować importu Woo: plik {$label} nie jest dostępny między partiami.");
+            }
+        }
+
+        if (($this->importRun['mode'] ?? null) === null) {
+            throw new \RuntimeException('Nie można kontynuować importu Woo: utracono tryb importu między partiami.');
+        }
+    }
+
     private function failImport(Throwable $exception): void
     {
         report($exception);
 
         $this->isImportRunning = false;
         $this->importError = $exception->getMessage();
+        $this->lastError = $this->importError;
+        $this->lastBatchFinishedAt = now()->toDateTimeString();
+        $this->report ??= ['counters' => [], 'warnings' => [], 'errors' => []];
         $this->report['errors'][] = $this->importError;
         $this->report['counters']['failed_rows'] = ($this->report['counters']['failed_rows'] ?? 0) + 1;
 

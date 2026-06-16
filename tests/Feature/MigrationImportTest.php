@@ -11,6 +11,7 @@ use App\Models\Part;
 use App\Services\ImportMigration\OvokoDonorCarImport;
 use App\Services\ImportMigration\WooProductImport;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Livewire\Livewire;
 use Tests\TestCase;
 
 class MigrationImportTest extends TestCase
@@ -102,6 +103,40 @@ class MigrationImportTest extends TestCase
         $conflictReport = app(WooProductImport::class)->import($conflict, [], WooProductImport::MODE_CREATE_ONLY);
         $this->assertSame(1, $conflictReport->counters['skipped_duplicates']);
         $this->assertNull(Part::query()->where('external_id','102')->first());
+    }
+
+
+    public function test_woo_import_page_processes_first_batch_immediately_and_polling_processes_next_batch(): void
+    {
+        $directory = storage_path('app/imports/manual/woo');
+        if (! is_dir($directory)) mkdir($directory, 0777, true);
+
+        $rows = ["woo_product_id,sku,name,status,published"];
+        for ($i = 1; $i <= 260; $i++) {
+            $rows[] = "{$i},SKU{$i},Produkt {$i},publish,1";
+        }
+        file_put_contents($directory.'/products.csv', implode("\n", $rows)."\n");
+
+        Livewire::test(WooProductImportPage::class)
+            ->set('data.products_filename', 'products.csv')
+            ->set('data.categories_filename', '')
+            ->set('data.meta_filename', '')
+            ->set('data.attributes_filename', '')
+            ->set('data.summary_filename', '')
+            ->set('data.images_filename', '')
+            ->set('data.mode', WooProductImport::MODE_DRY_RUN)
+            ->call('runImport')
+            ->assertSet('isImportRunning', true)
+            ->assertSet('totalRows', 260)
+            ->assertSet('processedRows', 250)
+            ->assertSet('currentOffset', 250)
+            ->assertSet('lastBatchProcessed', 250)
+            ->call('processNextBatch')
+            ->assertSet('isImportRunning', false)
+            ->assertSet('processedRows', 260)
+            ->assertSet('currentOffset', 260)
+            ->assertSet('lastBatchProcessed', 10)
+            ->assertSet('pollTickCount', 1);
     }
 
     public function test_import_navigation_is_isolated_and_daily_resources_remain_clean(): void

@@ -28,6 +28,27 @@
                 <div class="mt-2 text-xs">
                     Przetworzono {{ $processedRows }} z {{ $totalRows }} wierszy ({{ $totalRows > 0 ? min(100, round(($processedRows / $totalRows) * 100, 1)) : 0 }}%).
                 </div>
+
+                <details class="mt-4 rounded-lg border border-primary-200 bg-white/70 p-3 text-xs dark:border-primary-800 dark:bg-gray-900/60" open>
+                    <summary class="cursor-pointer font-semibold">Diagnostyka batch importu Woo</summary>
+                    <dl class="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+                        @foreach ([
+                            'isImportRunning' => $isImportRunning ? 'true' : 'false',
+                            'currentOffset' => $currentOffset,
+                            'totalRows' => $totalRows,
+                            'lastBatchProcessed' => $lastBatchProcessed,
+                            'lastBatchStartedAt' => $lastBatchStartedAt ?: '—',
+                            'lastBatchFinishedAt' => $lastBatchFinishedAt ?: '—',
+                            'lastError' => $lastError ?: '—',
+                            'pollTickCount' => $pollTickCount,
+                        ] as $label => $value)
+                            <div>
+                                <dt class="font-medium">{{ $label }}</dt>
+                                <dd class="break-words">{{ $value }}</dd>
+                            </div>
+                        @endforeach
+                    </dl>
+                </details>
             </div>
         @endif
 
