@@ -8,13 +8,17 @@ use Throwable;
 
 class PartImagePresentationService
 {
-    private const PRESENTATION_VERSION = '2026-06-tight-fill-v1';
-    private const LISTING_TARGET_FILL = 0.95;
+    private const PRESENTATION_VERSION = '2026-06-auto-crop-v2';
+    private const LISTING_CANVAS = ['width' => 522, 'height' => 336];
+    private const PRODUCT_CANVAS = ['width' => 900, 'height' => 675];
+    private const LISTING_TARGET_FILL = 1.0;
     private const PRODUCT_TARGET_FILL = 0.94;
-    private const LISTING_MARGIN_RATIO = 0.025;
-    private const PRODUCT_MARGIN_RATIO = 0.035;
-    private const LISTING_MAX_MARGIN = 12;
-    private const PRODUCT_MAX_MARGIN = 30;
+    private const LISTING_MAX_OVERFLOW = 0.05;
+    private const PRODUCT_MAX_OVERFLOW = 0.0;
+    private const LISTING_MARGIN_RATIO = 0.006;
+    private const PRODUCT_MARGIN_RATIO = 0.026;
+    private const LISTING_MAX_MARGIN = 5;
+    private const PRODUCT_MAX_MARGIN = 24;
 
     public function process(PartImage $partImage, bool $force = false): array
     {
@@ -60,20 +64,32 @@ class PartImagePresentationService
                 return $this->mergePresentation($partImage, $presentation);
             }
 
-            $box = $this->detectObjectBox($source);
+            $candidates = $this->detectObjectCandidates($source);
 
-            if (! $box) {
+            if ($candidates === []) {
                 $warnings[] = 'Object bounding box was not detected; using contain fallback on the full image.';
-                $box = ['x' => 0, 'y' => 0, 'width' => imagesx($source), 'height' => imagesy($source)];
+                $candidates[] = $this->buildCandidate('fallback_full_image', ['x' => 0, 'y' => 0, 'width' => imagesx($source), 'height' => imagesy($source)], imagesx($source), imagesy($source));
             }
+
+            $listingCandidate = $this->selectListingCandidate($candidates);
+            $productCandidate = $this->selectProductCandidate($candidates);
 
             $baseName = $this->variantBaseName($partImage, $sourcePath, $force);
             $listingPath = 'parts/photos/presentation/listing/'.$baseName.'.jpg';
             $productPath = 'parts/photos/presentation/product/'.$baseName.'.jpg';
 
             $originalMetrics = ['width' => imagesx($source), 'height' => imagesy($source)];
-            $listingMetrics = $this->renderVariant($source, $box, 522, 336, $listingPath, self::LISTING_TARGET_FILL, self::LISTING_MARGIN_RATIO, self::LISTING_MAX_MARGIN);
-            $productMetrics = $this->renderVariant($source, $box, 900, 675, $productPath, self::PRODUCT_TARGET_FILL, self::PRODUCT_MARGIN_RATIO, self::PRODUCT_MAX_MARGIN);
+            $listingMetrics = $this->renderVariant($source, $listingCandidate, self::LISTING_CANVAS['width'], self::LISTING_CANVAS['height'], $listingPath, self::LISTING_TARGET_FILL, self::LISTING_MARGIN_RATIO, self::LISTING_MAX_MARGIN, self::LISTING_MAX_OVERFLOW);
+            $productMetrics = $this->renderVariant($source, $productCandidate, self::PRODUCT_CANVAS['width'], self::PRODUCT_CANVAS['height'], $productPath, self::PRODUCT_TARGET_FILL, self::PRODUCT_MARGIN_RATIO, self::PRODUCT_MAX_MARGIN, self::PRODUCT_MAX_OVERFLOW);
+
+            foreach ($listingMetrics['warnings'] as $warning) {
+                $warnings[] = 'Listing image: '.$warning;
+            }
+
+            foreach ($productMetrics['warnings'] as $warning) {
+                $warnings[] = 'Product image: '.$warning;
+            }
+
             imagedestroy($source);
 
             $presentation = [
@@ -82,7 +98,12 @@ class PartImagePresentationService
                 'source_path' => $sourcePath,
                 'processed_at' => now()->toISOString(),
                 'processor' => 'gd',
-                'bounding_box' => $box,
+                'bounding_box' => $productCandidate['box'],
+                'crop_candidates' => $candidates,
+                'selected_crops' => [
+                    'listing' => $listingCandidate,
+                    'product' => $productCandidate,
+                ],
                 'metrics' => [
                     'original' => $originalMetrics,
                     'listing' => $listingMetrics,
@@ -136,40 +157,108 @@ class PartImagePresentationService
         };
     }
 
-    private function detectObjectBox(mixed $image): ?array
+    private function detectObjectCandidates(mixed $image): array
     {
         $width = imagesx($image);
         $height = imagesy($image);
+        $passes = [
+            'normal' => ['level' => 0],
+            'aggressive' => ['level' => 1],
+            'very_aggressive' => ['level' => 2],
+        ];
+        $candidates = [];
+        $seen = [];
 
-        $box = $this->scanObjectBox($image, false);
+        foreach ($passes as $name => $options) {
+            $box = $this->scanObjectBox($image, $options['level']);
 
-        if (! $box) {
-            $box = $this->scanObjectBox($image, true);
-        }
-
-        if (! $box) {
-            return null;
-        }
-
-        $areaRatio = ($box['width'] * $box['height']) / max(1, $width * $height);
-
-        if ($areaRatio > 0.82) {
-            $aggressiveBox = $this->scanObjectBox($image, true);
-
-            if ($aggressiveBox) {
-                $aggressiveAreaRatio = ($aggressiveBox['width'] * $aggressiveBox['height']) / max(1, $width * $height);
-
-                if ($aggressiveAreaRatio < $areaRatio) {
-                    $box = $aggressiveBox;
-                    $areaRatio = $aggressiveAreaRatio;
-                }
+            if (! $box) {
+                continue;
             }
+
+            $candidate = $this->buildCandidate($name, $box, $width, $height);
+            $key = implode(':', [$box['x'], $box['y'], $box['width'], $box['height']]);
+
+            if (isset($seen[$key])) {
+                continue;
+            }
+
+            $seen[$key] = true;
+            $candidates[] = $candidate;
         }
 
-        return $box + ['area_ratio' => round($areaRatio, 4)];
+        return $candidates;
     }
 
-    private function scanObjectBox(mixed $image, bool $aggressive): ?array
+    private function buildCandidate(string $pass, array $box, int $imageWidth, int $imageHeight): array
+    {
+        $areaRatio = ($box['width'] * $box['height']) / max(1, $imageWidth * $imageHeight);
+        $aspectRatio = $box['width'] / max(1, $box['height']);
+        $listingFill = $this->predictFill($box, self::LISTING_CANVAS['width'], self::LISTING_CANVAS['height'], self::LISTING_TARGET_FILL, self::LISTING_MAX_OVERFLOW);
+        $productFill = $this->predictFill($box, self::PRODUCT_CANVAS['width'], self::PRODUCT_CANVAS['height'], self::PRODUCT_TARGET_FILL, self::PRODUCT_MAX_OVERFLOW);
+        $suspiciouslySmall = $areaRatio < 0.015 || $box['width'] < 24 || $box['height'] < 24;
+        $cutsTooMuch = ($pass === 'very_aggressive' && $areaRatio < 0.045) || ($pass !== 'normal' && $areaRatio < 0.35 && ($box['x'] <= 1 || $box['y'] <= 1 || $box['x'] + $box['width'] >= $imageWidth - 1 || $box['y'] + $box['height'] >= $imageHeight - 1));
+
+        return [
+            'pass' => $pass,
+            'box' => $box + ['area_ratio' => round($areaRatio, 4)],
+            'crop_area_ratio' => round($areaRatio, 4),
+            'object_aspect_ratio' => round($aspectRatio, 4),
+            'predicted_listing_fill_ratio' => $listingFill,
+            'predicted_product_fill_ratio' => $productFill,
+            'suspiciously_small' => $suspiciouslySmall,
+            'cuts_too_much' => $cutsTooMuch,
+        ];
+    }
+
+    private function predictFill(array $box, int $canvasWidth, int $canvasHeight, float $targetFill, float $maxOverflow): array
+    {
+        $dominant = $box['width'] >= $box['height'] ? 'width' : 'height';
+        $limit = 1 + $maxOverflow;
+        $dominantScale = ($dominant === 'width' ? $canvasWidth : $canvasHeight) * $targetFill / max(1, $dominant === 'width' ? $box['width'] : $box['height']);
+        $containScale = min(($canvasWidth * $limit) / max(1, $box['width']), ($canvasHeight * $limit) / max(1, $box['height']));
+        $scale = min($dominantScale, $containScale);
+        $widthRatio = ($box['width'] * $scale) / max(1, $canvasWidth);
+        $heightRatio = ($box['height'] * $scale) / max(1, $canvasHeight);
+
+        return [
+            'width_ratio' => round($widthRatio, 4),
+            'height_ratio' => round($heightRatio, 4),
+            'dominant_ratio' => round(max($widthRatio, $heightRatio), 4),
+            'dominant_axis' => $dominant,
+            'allowed_overflow' => $maxOverflow > 0,
+        ];
+    }
+
+    private function selectListingCandidate(array $candidates): array
+    {
+        $usable = array_values(array_filter($candidates, fn (array $candidate): bool => ! $candidate['suspiciously_small'] && ! $candidate['cuts_too_much']));
+        $usable = $usable ?: $candidates;
+        usort($usable, fn (array $a, array $b): int => [$b['predicted_listing_fill_ratio']['dominant_ratio'], $this->passAggression($b['pass'])] <=> [$a['predicted_listing_fill_ratio']['dominant_ratio'], $this->passAggression($a['pass'])]);
+
+        return $usable[0];
+    }
+
+    private function selectProductCandidate(array $candidates): array
+    {
+        $usable = array_values(array_filter($candidates, fn (array $candidate): bool => ! $candidate['suspiciously_small'] && ! $candidate['cuts_too_much']));
+        $usable = $usable ?: $candidates;
+        usort($usable, fn (array $a, array $b): int => [$this->passSafety($b['pass']), $b['predicted_product_fill_ratio']['dominant_ratio']] <=> [$this->passSafety($a['pass']), $a['predicted_product_fill_ratio']['dominant_ratio']]);
+
+        return $usable[0];
+    }
+
+    private function passAggression(string $pass): int
+    {
+        return ['normal' => 0, 'aggressive' => 1, 'very_aggressive' => 2][$pass] ?? 0;
+    }
+
+    private function passSafety(string $pass): int
+    {
+        return ['normal' => 3, 'aggressive' => 2, 'very_aggressive' => 1][$pass] ?? 0;
+    }
+
+    private function scanObjectBox(mixed $image, int $aggression): ?array
     {
         $width = imagesx($image);
         $height = imagesy($image);
@@ -182,7 +271,7 @@ class PartImagePresentationService
             for ($x = 0; $x < $width; $x++) {
                 $rgba = imagecolorat($image, $x, $y);
 
-                if ($this->isBackgroundPixel($rgba, $aggressive)) {
+                if ($this->isBackgroundPixel($rgba, $aggression)) {
                     continue;
                 }
 
@@ -200,7 +289,7 @@ class PartImagePresentationService
         return ['x' => $minX, 'y' => $minY, 'width' => $maxX - $minX + 1, 'height' => $maxY - $minY + 1];
     }
 
-    private function isBackgroundPixel(int $rgba, bool $aggressive): bool
+    private function isBackgroundPixel(int $rgba, int $aggression): bool
     {
         $a = ($rgba & 0x7F000000) >> 24;
 
@@ -225,15 +314,20 @@ class PartImagePresentationService
             return true;
         }
 
-        if ($brightness > 228 && $saturation < 0.055) {
+        if ($brightness > 225 && $saturation < 0.055) {
             return true;
         }
 
-        return $aggressive && $brightness > 215 && $saturation < 0.08 && $chroma < 24;
+        if ($aggression >= 1 && $brightness > 218 && $saturation < 0.08 && $chroma < 24) {
+            return true;
+        }
+
+        return $aggression >= 2 && $brightness > 210 && $saturation < 0.105 && $chroma < 30;
     }
 
-    private function renderVariant(mixed $source, array $box, int $canvasWidth, int $canvasHeight, string $targetPath, float $targetFill, float $marginRatio, int $maxMargin): array
+    private function renderVariant(mixed $source, array $candidate, int $canvasWidth, int $canvasHeight, string $targetPath, float $targetFill, float $marginRatio, int $maxMargin, float $maxOverflow): array
     {
+        $box = $candidate['box'];
         $sourceWidth = imagesx($source);
         $sourceHeight = imagesy($source);
         $marginX = min($maxMargin, (int) ceil($box['width'] * $marginRatio));
@@ -244,15 +338,18 @@ class PartImagePresentationService
         $cropBottom = min($sourceHeight - 1, $box['y'] + $box['height'] - 1 + $marginY);
         $cropWidth = $cropRight - $cropX + 1;
         $cropHeight = $cropBottom - $cropY + 1;
+        $dominant = $cropWidth >= $cropHeight ? 'width' : 'height';
 
         $canvas = imagecreatetruecolor($canvasWidth, $canvasHeight);
         $white = imagecolorallocate($canvas, 255, 255, 255);
         imagefill($canvas, 0, 0, $white);
 
-        $scale = min(($canvasWidth * $targetFill) / $cropWidth, ($canvasHeight * $targetFill) / $cropHeight);
-        $scale = min($scale, $canvasWidth / $cropWidth, $canvasHeight / $cropHeight);
-        $targetWidth = max(1, (int) floor($cropWidth * $scale));
-        $targetHeight = max(1, (int) floor($cropHeight * $scale));
+        $limit = 1 + $maxOverflow;
+        $dominantScale = ($dominant === 'width' ? $canvasWidth : $canvasHeight) * $targetFill / max(1, $dominant === 'width' ? $cropWidth : $cropHeight);
+        $containScale = min(($canvasWidth * $limit) / $cropWidth, ($canvasHeight * $limit) / $cropHeight);
+        $scale = min($dominantScale, $containScale);
+        $targetWidth = max(1, (int) round($cropWidth * $scale));
+        $targetHeight = max(1, (int) round($cropHeight * $scale));
         $dstX = (int) floor(($canvasWidth - $targetWidth) / 2);
         $dstY = (int) floor(($canvasHeight - $targetHeight) / 2);
 
@@ -261,14 +358,33 @@ class PartImagePresentationService
         imagejpeg($canvas, Storage::disk('public')->path($targetPath), 88);
         imagedestroy($canvas);
 
+        $widthRatio = $targetWidth / $canvasWidth;
+        $heightRatio = $targetHeight / $canvasHeight;
+        $dominantRatio = max($widthRatio, $heightRatio);
+        $variantWarnings = [];
+
+        if ($dominantRatio < 0.85) {
+            $variantWarnings[] = 'dominant fill ratio below 0.85';
+        }
+
         return [
             'canvas' => ['width' => $canvasWidth, 'height' => $canvasHeight],
+            'candidate_pass' => $candidate['pass'],
             'crop_box' => ['x' => $cropX, 'y' => $cropY, 'width' => $cropWidth, 'height' => $cropHeight],
             'bounding_box' => ['width' => $box['width'], 'height' => $box['height'], 'area_ratio' => $box['area_ratio'] ?? null],
             'margin_px' => ['x' => $marginX, 'y' => $marginY],
             'final_scale' => round($scale, 4),
             'final_object' => ['width' => $targetWidth, 'height' => $targetHeight],
-            'final_fill_ratio' => round(max($targetWidth / $canvasWidth, $targetHeight / $canvasHeight), 4),
+            'fill_ratio' => [
+                'width_ratio' => round($widthRatio, 4),
+                'height_ratio' => round($heightRatio, 4),
+                'dominant_ratio' => round($dominantRatio, 4),
+                'dominant_axis' => $dominant,
+                'aggressive_crop' => $candidate['pass'] !== 'normal',
+                'allowed_overflow' => $maxOverflow > 0,
+            ],
+            'final_fill_ratio' => round($dominantRatio, 4),
+            'warnings' => $variantWarnings,
         ];
     }
 
@@ -294,6 +410,9 @@ class PartImagePresentationService
             'source_path' => $presentation['source_path'] ?? $partImage->path,
             'listing_path' => $presentation['listing_path'] ?? null,
             'product_path' => $presentation['product_path'] ?? null,
+            'original' => $presentation['metrics']['original'] ?? null,
+            'crop_candidates' => $presentation['crop_candidates'] ?? null,
+            'selected_crops' => $presentation['selected_crops'] ?? null,
             'bounding_box' => $presentation['bounding_box'] ?? null,
             'metrics' => $presentation['metrics'] ?? null,
             'presentation_version' => $presentation['presentation_version'] ?? null,
