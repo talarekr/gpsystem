@@ -27,6 +27,7 @@ Route::middleware(Authenticate::class)->prefix('admin/import-migracyjny/produkty
     Route::post('/category-tree/import', [WooCategoryTreeController::class, 'import'])->name('category-tree.import');
     Route::get('/storage-public/diagnostyka', [WooStoragePublicController::class, 'diagnostics'])->name('storage-public.diagnostics');
     Route::post('/storage-public/ensure', [WooStoragePublicController::class, 'ensure'])->name('storage-public.ensure');
+    Route::post('/storage-public/force-copy', [WooStoragePublicController::class, 'forceCopy'])->name('storage-public.force-copy');
 
     Route::post('/start', function (Request $request) {
         $lastDiagnosticStep = 'step_00_route_entered';
