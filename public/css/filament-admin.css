@@ -910,3 +910,115 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
         width: 100%;
     }
 }
+
+/* Visible non-focused fields for the compact part form (Ovoko-style). */
+.gps-part-form {
+    --gps-part-field-border: #94a3b8;
+    --gps-part-field-border-hover: #64748b;
+    --gps-part-field-border-focus: #122a66;
+    --gps-part-field-bg: #ffffff;
+    --gps-part-field-bg-subtle: #fbfdff;
+    --gps-part-field-placeholder: #6b7280;
+    --gps-part-section-border: #cbd5e1;
+    --border-color: var(--gps-part-field-border);
+    --ring-color: rgba(18, 42, 102, 0.14);
+}
+
+.gps-part-form .gps-part-form-section.fi-section,
+.gps-part-form :where(.fi-fo-repeater, .fi-fo-repeater-item, .fi-in-repeatable-item, .fi-fo-builder-item) {
+    border: 1px solid var(--gps-part-section-border) !important;
+    background: #ffffff !important;
+}
+
+.gps-part-form .gps-part-form-section .fi-section-header {
+    border-bottom: 1px solid var(--gps-part-section-border) !important;
+}
+
+.gps-part-form .gps-part-form-section.fi-section:has(.fi-section-header):not(:has(.fi-section-content)),
+.gps-part-form .gps-part-form-section.fi-section:has(.fi-section-header):has(.fi-section-content[style*="display: none"]) {
+    border-color: #b8c2cc !important;
+}
+
+.gps-part-form :where(
+    .fi-input-wrp,
+    .fi-fo-text-input .fi-input-wrp,
+    .fi-fo-textarea .fi-input-wrp,
+    .fi-fo-select .fi-input-wrp,
+    .fi-fo-select .choices,
+    .choices__inner,
+    .fi-fo-file-upload,
+    .fi-fo-rich-editor,
+    .fi-fo-markdown-editor,
+    .fi-fo-tags-input
+) {
+    border: 1px solid var(--gps-part-field-border) !important;
+    background: var(--gps-part-field-bg) !important;
+    box-shadow: none !important;
+}
+
+.gps-part-form :where(
+    .fi-input,
+    .fi-select-input,
+    .fi-textarea,
+    .choices__input,
+    .choices__list--single,
+    .fi-fo-date-time-picker input,
+    .fi-fo-color-picker input
+) {
+    border-color: transparent !important;
+    background: var(--gps-part-field-bg) !important;
+    color: #0f172a !important;
+    box-shadow: none !important;
+}
+
+.gps-part-form :where(.fi-input-wrp-prefix, .fi-input-wrp-suffix) {
+    border-color: #cbd5e1 !important;
+    background: var(--gps-part-field-bg-subtle) !important;
+    color: #475569 !important;
+}
+
+.gps-part-form :where(
+    .fi-input-wrp:hover,
+    .fi-fo-text-input .fi-input-wrp:hover,
+    .fi-fo-textarea .fi-input-wrp:hover,
+    .fi-fo-select .fi-input-wrp:hover,
+    .fi-fo-select .choices:hover,
+    .choices__inner:hover,
+    .fi-fo-file-upload:hover,
+    .fi-fo-rich-editor:hover,
+    .fi-fo-markdown-editor:hover,
+    .fi-fo-tags-input:hover
+) {
+    border-color: var(--gps-part-field-border-hover) !important;
+}
+
+.gps-part-form :where(
+    .fi-input-wrp:focus-within,
+    .fi-fo-text-input .fi-input-wrp:focus-within,
+    .fi-fo-textarea .fi-input-wrp:focus-within,
+    .fi-fo-select .fi-input-wrp:focus-within,
+    .fi-fo-select .choices:focus-within,
+    .choices__inner:focus-within,
+    .fi-fo-file-upload:focus-within,
+    .fi-fo-rich-editor:focus-within,
+    .fi-fo-markdown-editor:focus-within,
+    .fi-fo-tags-input:focus-within
+) {
+    border-color: var(--gps-part-field-border-focus) !important;
+    box-shadow: 0 0 0 3px rgba(18, 42, 102, 0.14) !important;
+    outline: none !important;
+}
+
+.gps-part-form :where(.fi-input::placeholder, .fi-textarea::placeholder, .choices__input::placeholder) {
+    color: var(--gps-part-field-placeholder) !important;
+    opacity: 1 !important;
+}
+
+.gps-part-form :where(.fi-fo-field-wrp, [wire\:key] .fi-fo-field-wrp) {
+    min-width: 0;
+}
+
+.gps-part-form :where(.fi-fo-repeater, .fi-fo-repeater-item, .fi-in-repeatable-item) :where(.fi-input-wrp, .fi-fo-file-upload, .choices__inner) {
+    border-color: var(--gps-part-field-border) !important;
+    background: var(--gps-part-field-bg) !important;
+}
