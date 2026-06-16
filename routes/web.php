@@ -12,8 +12,17 @@ Route::redirect('/', '/admin');
 
 Route::middleware(Authenticate::class)->prefix('admin/import-migracyjny/produkty-woo')->name('admin.import-migration.woo-products.')->group(function (): void {
     Route::post('/start', function (Request $request) {
+        woo_import_write_start_ping($request, 'step_01_route_reached');
+
         try {
-            return app(WooProductImportRunController::class)->start($request);
+            woo_import_append_start_ping_step('step_02_before_controller');
+            $controller = app(WooProductImportRunController::class);
+            woo_import_append_start_ping_step('step_03_after_controller_resolved');
+            woo_import_append_start_ping_step('step_04_before_start_call');
+            $response = $controller->start($request);
+            woo_import_append_start_ping_step('step_05_after_start_call');
+
+            return $response;
         } catch (Throwable $exception) {
             $debug = woo_import_write_route_emergency_diagnostic($exception, $request, 'start');
 
@@ -25,6 +34,18 @@ Route::middleware(Authenticate::class)->prefix('admin/import-migracyjny/produkty
                 ->withErrors(['woo_import' => 'Nie udało się uruchomić importu Woo przed wejściem do kontrolera. Szczegóły zapisano w pliku diagnostycznym last_error.log.']);
         }
     })->name('start');
+
+    Route::get('/start-ping', function (Request $request) {
+        woo_import_write_minimal_ping($request, 'get_ping.log', 'GET reached start ping route');
+
+        return response('OK', 200)->header('Content-Type', 'text/plain');
+    })->name('start-ping');
+
+    Route::post('/post-ping', function (Request $request) {
+        woo_import_write_minimal_ping($request, 'post_ping.log', 'POST reached post ping route');
+
+        return response('OK', 200)->header('Content-Type', 'text/plain');
+    })->name('post-ping');
 
     Route::get('/diagnostyka', function () {
         $directory = storage_path('app/imports/manual/woo');
@@ -43,11 +64,104 @@ Route::middleware(Authenticate::class)->prefix('admin/import-migracyjny/produkty
             'products_csv_exists' => is_file($productsPath),
             'products_csv_readable' => is_file($productsPath) && is_readable($productsPath),
             'last_error_log_path' => $directory.DIRECTORY_SEPARATOR.'last_error.log',
+            'start_ping_log_path' => $directory.DIRECTORY_SEPARATOR.'start_ping.log',
+            'get_ping_log_path' => $directory.DIRECTORY_SEPARATOR.'get_ping.log',
+            'post_ping_log_path' => $directory.DIRECTORY_SEPARATOR.'post_ping.log',
         ]);
     })->name('diagnostics');
 
     Route::post('/runs/{runId}/next', [WooProductImportRunController::class, 'next'])->name('next');
 });
+
+
+if (! function_exists('woo_import_write_start_ping')) {
+    function woo_import_write_start_ping(Request $request, string $step): void
+    {
+        try {
+            $directory = storage_path('app/imports/manual/woo');
+
+            if (! is_dir($directory)) {
+                mkdir($directory, 0755, true);
+            }
+
+            $path = $directory.DIRECTORY_SEPARATOR.'start_ping.log';
+            $keys = [];
+
+            try {
+                $keys = array_keys($request->all());
+            } catch (Throwable $exception) {
+                $keys = ['__unavailable__' => $exception->getMessage()];
+            }
+
+            $content = implode(PHP_EOL, [
+                'timestamp: '.date(DATE_ATOM),
+                'message: POST reached start route',
+                'step: '.$step,
+                'method: '.$request->getMethod(),
+                'request_uri: '.($_SERVER['REQUEST_URI'] ?? ''),
+                'content_length: '.($_SERVER['CONTENT_LENGTH'] ?? '0'),
+                'submitted_keys: '.json_encode($keys, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                'php_memory_limit: '.ini_get('memory_limit'),
+                'cwd: '.getcwd(),
+                '---',
+            ]).PHP_EOL;
+
+            file_put_contents($path, $content, FILE_APPEND | LOCK_EX);
+        } catch (Throwable) {
+            // This ping must never replace the original route behavior.
+        }
+    }
+}
+
+if (! function_exists('woo_import_append_start_ping_step')) {
+    function woo_import_append_start_ping_step(string $step): void
+    {
+        try {
+            $directory = storage_path('app/imports/manual/woo');
+
+            if (! is_dir($directory)) {
+                mkdir($directory, 0755, true);
+            }
+
+            file_put_contents(
+                $directory.DIRECTORY_SEPARATOR.'start_ping.log',
+                'timestamp: '.date(DATE_ATOM).PHP_EOL.'step: '.$step.PHP_EOL.'---'.PHP_EOL,
+                FILE_APPEND | LOCK_EX,
+            );
+        } catch (Throwable) {
+            // Step logging is diagnostic-only.
+        }
+    }
+}
+
+if (! function_exists('woo_import_write_minimal_ping')) {
+    function woo_import_write_minimal_ping(Request $request, string $filename, string $message): void
+    {
+        try {
+            $directory = storage_path('app/imports/manual/woo');
+
+            if (! is_dir($directory)) {
+                mkdir($directory, 0755, true);
+            }
+
+            $content = implode(PHP_EOL, [
+                'timestamp: '.date(DATE_ATOM),
+                'message: '.$message,
+                'method: '.$request->getMethod(),
+                'request_uri: '.($_SERVER['REQUEST_URI'] ?? ''),
+                'content_length: '.($_SERVER['CONTENT_LENGTH'] ?? '0'),
+                'submitted_keys: '.json_encode(array_keys($request->all()), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                'php_memory_limit: '.ini_get('memory_limit'),
+                'cwd: '.getcwd(),
+                '---',
+            ]).PHP_EOL;
+
+            file_put_contents($directory.DIRECTORY_SEPARATOR.$filename, $content, FILE_APPEND | LOCK_EX);
+        } catch (Throwable) {
+            // Ping routes are diagnostic-only.
+        }
+    }
+}
 
 if (! function_exists('woo_import_request_fields')) {
     function woo_import_request_fields(): array

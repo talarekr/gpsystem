@@ -74,6 +74,17 @@
             </div>
         </form>
 
+        <form method="POST" action="{{ route('admin.import-migration.woo-products.post-ping') }}" class="flex items-center gap-3">
+            @csrf
+            <button
+                type="submit"
+                class="fi-btn fi-color-gray fi-btn-color-gray fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-gray-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-gray-500 focus-visible:ring-2 focus-visible:ring-gray-600 disabled:pointer-events-none disabled:opacity-70 dark:bg-gray-500 dark:hover:bg-gray-400 dark:focus-visible:ring-gray-500"
+            >
+                Test POST
+            </button>
+            <span class="text-xs text-gray-600 dark:text-gray-300">Zapisuje post_ping.log bez uruchamiania importu.</span>
+        </form>
+
         <x-filament::section heading="Szybka diagnostyka trasy Woo">
             <dl class="grid gap-2 text-xs md:grid-cols-2 xl:grid-cols-4">
                 @foreach ([
@@ -98,12 +109,32 @@
                     <dd class="break-words">{{ $routeDiagnostics['diagnostics_route'] ?? '/admin/import-migracyjny/produkty-woo/diagnostyka' }}</dd>
                 </div>
                 <div>
+                    <dt class="font-medium">Endpoint GET ping</dt>
+                    <dd class="break-words">{{ $routeDiagnostics['start_ping_route'] ?? '/admin/import-migracyjny/produkty-woo/start-ping' }}</dd>
+                </div>
+                <div>
+                    <dt class="font-medium">Endpoint POST ping</dt>
+                    <dd class="break-words">{{ $routeDiagnostics['post_ping_route'] ?? '/admin/import-migracyjny/produkty-woo/post-ping' }}</dd>
+                </div>
+                <div>
                     <dt class="font-medium">Folder manualny</dt>
                     <dd class="break-words">{{ $routeDiagnostics['manual_folder_path'] ?? '—' }}</dd>
                 </div>
                 <div>
                     <dt class="font-medium">Plik awaryjny</dt>
                     <dd class="break-words">{{ $routeDiagnostics['last_error_log_path'] ?? '—' }}</dd>
+                </div>
+                <div>
+                    <dt class="font-medium">Plik start ping</dt>
+                    <dd class="break-words">{{ $routeDiagnostics['start_ping_log_path'] ?? '—' }}</dd>
+                </div>
+                <div>
+                    <dt class="font-medium">Plik GET ping</dt>
+                    <dd class="break-words">{{ $routeDiagnostics['get_ping_log_path'] ?? '—' }}</dd>
+                </div>
+                <div>
+                    <dt class="font-medium">Plik POST ping</dt>
+                    <dd class="break-words">{{ $routeDiagnostics['post_ping_log_path'] ?? '—' }}</dd>
                 </div>
             </dl>
         </x-filament::section>
