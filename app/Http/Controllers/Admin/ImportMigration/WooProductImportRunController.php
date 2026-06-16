@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin\ImportMigration;
 use App\Services\ImportMigration\WooProductImport;
 use App\Support\ImportMigration\ManualImportFileResolver;
 use App\Support\ImportMigration\WooProductImportRunRepository;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Response;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -48,6 +49,138 @@ class WooProductImportRunController
         }
     }
 
+
+    public function autorun(string $runId): Response
+    {
+        $runs = app(WooProductImportRunRepository::class);
+        $run = $runs->find($runId);
+
+        if (! $run) {
+            return $this->renderErrorPage('Autorunner importu Woo nie został uruchomiony', 'Nie znaleziono uruchomienia importu Woo.', [
+                'run_id' => $runId,
+            ]);
+        }
+
+        $this->appendAutorunnerDebug('opened', $run, 'Strona autorunnera została otwarta.');
+
+        return response()->view('admin.import-migration.woo-product-autorun', [
+            'run' => $this->safeRunPayload($run),
+            'statusUrl' => route('admin.import-migration.woo-products.status', ['runId' => $runId]),
+            'nextManyUrl' => route('admin.import-migration.woo-products.next-many', ['runId' => $runId]),
+            'logUrl' => route('admin.import-migration.woo-products.autorun-log', ['runId' => $runId]),
+            'importUrl' => self::WOO_IMPORT_URL.'?run_id='.rawurlencode($runId),
+        ])->header('Content-Type', 'text/html; charset=UTF-8');
+    }
+
+    public function status(string $runId): JsonResponse
+    {
+        $run = app(WooProductImportRunRepository::class)->find($runId);
+
+        if (! $run) {
+            return response()->json([
+                'ok' => false,
+                'run_id' => $runId,
+                'message' => 'Nie znaleziono uruchomienia importu Woo.',
+            ], 404);
+        }
+
+        return response()->json($this->runJsonPayload($run, [
+            'ok' => true,
+            'message' => 'Odczytano aktualny stan runa.',
+        ]));
+    }
+
+    public function nextMany(string $runId, Request $request): Response|JsonResponse
+    {
+        $fileResolver = app(ManualImportFileResolver::class);
+        $wantsJson = $request->expectsJson() || $request->boolean('json');
+        $completedBatches = 0;
+        $processedRowsInRequest = 0;
+        $stopReason = null;
+        $run = null;
+
+        try {
+            $import = app(WooProductImport::class);
+            $runs = app(WooProductImportRunRepository::class);
+            $this->ensureDiagnosticDirectoriesExist($fileResolver);
+            $maxBatches = max(1, min(25, (int) $request->input('batches', 10)));
+            $run = $runs->find($runId);
+
+            if (! $run) {
+                throw new \RuntimeException('Nie znaleziono uruchomienia importu Woo.');
+            }
+
+            for ($i = 0; $i < $maxBatches; $i++) {
+                if (in_array($run['status'] ?? null, ['finished', 'failed'], true)) {
+                    $stopReason = (string) $run['status'];
+                    break;
+                }
+
+                $run = $runs->processNextBatch($runId, $import);
+                $completedBatches++;
+                $processedRowsInRequest += (int) ($run['lastBatchProcessed'] ?? 0);
+
+                if (in_array($run['status'] ?? null, ['finished', 'failed'], true)) {
+                    $stopReason = (string) $run['status'];
+                    break;
+                }
+
+                if ((int) ($run['lastBatchProcessed'] ?? 0) === 0) {
+                    $stopReason = 'empty_batch';
+                    break;
+                }
+            }
+
+            $stopReason ??= $completedBatches >= $maxBatches ? 'batch_limit' : 'unknown';
+            $this->appendBatchManyDebug($run, $completedBatches, $processedRowsInRequest, $stopReason);
+
+            $payload = $this->runJsonPayload($run, [
+                'ok' => true,
+                'completed_batches' => $completedBatches,
+                'processed_rows_in_request' => $processedRowsInRequest,
+                'stop_reason' => $stopReason,
+                'message' => $stopReason === 'finished' ? 'Import został zakończony.' : 'Przetworzono paczki next-many.',
+            ]);
+
+            if ($wantsJson) {
+                return response()->json($payload);
+            }
+
+            return $this->renderRunPage($run, "Przetworzono {$completedBatches} paczek przez next-many.");
+        } catch (Throwable $exception) {
+            $submitted = $this->safeSubmittedFields($request);
+            $debug = $this->handleImportException($exception, $request, $fileResolver, $submitted, 'next-many');
+            $run ??= app(WooProductImportRunRepository::class)->find($runId) ?: ['id' => $runId, 'status' => 'failed', 'last_error' => $exception->getMessage()];
+            $this->appendBatchManyDebug($run, $completedBatches, $processedRowsInRequest, 'exception', $exception);
+            $this->appendAutorunnerDebug('failed', $run, $exception->getMessage());
+
+            if ($wantsJson) {
+                return response()->json($this->runJsonPayload($run, [
+                    'ok' => false,
+                    'completed_batches' => $completedBatches,
+                    'processed_rows_in_request' => $processedRowsInRequest,
+                    'stop_reason' => 'exception',
+                    'message' => $exception->getMessage(),
+                ]), 500);
+            }
+
+            return $this->renderErrorPage('Batch importu Woo next-many nie został ukończony', $exception->getMessage(), $debug);
+        }
+    }
+
+    public function autorunnerLog(string $runId, Request $request): JsonResponse
+    {
+        $run = app(WooProductImportRunRepository::class)->find($runId) ?: ['id' => $runId];
+        $event = (string) $request->input('event', 'unknown');
+        if (! in_array($event, ['opened', 'start', 'pause', 'step', 'completed', 'failed', 'request_error'], true)) {
+            $event = 'unknown';
+        }
+
+        $this->appendAutorunnerDebug($event, $run, (string) $request->input('message', ''));
+
+        return response()->json(['ok' => true]);
+    }
+
     public function next(string $runId, Request $request): Response
     {
         $fileResolver = app(ManualImportFileResolver::class);
@@ -68,9 +201,110 @@ class WooProductImportRunController
     }
 
 
+
+    /** @param array<string, mixed> $run */
+    private function safeRunPayload(array $run): array
+    {
+        return [
+            'run_id' => (string) ($run['id'] ?? ''),
+            'mode' => (string) ($run['mode'] ?? ''),
+            'status' => (string) ($run['status'] ?? 'unknown'),
+            'batch_size' => (int) ($run['batch_size'] ?? $run['batchSize'] ?? WooProductImportRunRepository::BATCH_SIZE),
+            'total_processed_rows' => (int) ($run['processed_rows'] ?? 0),
+            'current_row' => (int) ($run['current_row'] ?? 2),
+            'created_count' => (int) ($run['created_count'] ?? 0),
+            'updated_count' => (int) ($run['updated_count'] ?? 0),
+            'skipped_count' => (int) ($run['skipped_count'] ?? 0),
+            'error_count' => (int) ($run['error_count'] ?? 0),
+            'last_error' => (string) ($run['last_error'] ?? ''),
+        ];
+    }
+
+    /** @param array<string, mixed> $run @param array<string, mixed> $extra */
+    private function runJsonPayload(array $run, array $extra = []): array
+    {
+        return array_merge([
+            'ok' => true,
+            'run_id' => (string) ($run['id'] ?? ''),
+            'mode' => (string) ($run['mode'] ?? ''),
+            'status' => (string) ($run['status'] ?? 'unknown'),
+            'batch_size' => (int) ($run['batch_size'] ?? $run['batchSize'] ?? WooProductImportRunRepository::BATCH_SIZE),
+            'completed_batches' => 0,
+            'processed_rows_in_request' => 0,
+            'total_processed_rows' => (int) ($run['processed_rows'] ?? 0),
+            'current_row' => (int) ($run['current_row'] ?? 2),
+            'created_count' => (int) ($run['created_count'] ?? 0),
+            'updated_count' => (int) ($run['updated_count'] ?? 0),
+            'skipped_count' => (int) ($run['skipped_count'] ?? 0),
+            'error_count' => (int) ($run['error_count'] ?? 0),
+            'stop_reason' => null,
+            'memory_usage' => memory_get_usage(true),
+            'memory_peak_usage' => memory_get_peak_usage(true),
+            'message' => (string) ($run['last_error'] ?? ''),
+        ], $extra);
+    }
+
+
+    /** @param array<string, mixed> $run */
+    private function appendBatchManyDebug(array $run, int $completedBatches, int $processedRowsInRequest, ?string $stopReason, ?Throwable $exception = null): void
+    {
+        $directory = storage_path('app/imports/manual/woo');
+        if (! is_dir($directory)) {
+            mkdir($directory, 0755, true);
+        }
+
+        $line = json_encode([
+            'timestamp' => now()->toIso8601String(),
+            'run_id' => $run['id'] ?? null,
+            'mode' => $run['mode'] ?? null,
+            'status' => $run['status'] ?? null,
+            'completed_batches' => $completedBatches,
+            'processed_rows_in_request' => $processedRowsInRequest,
+            'total_processed_rows' => (int) ($run['processed_rows'] ?? 0),
+            'current_row' => (int) ($run['current_row'] ?? 2),
+            'created_count' => (int) ($run['created_count'] ?? 0),
+            'updated_count' => (int) ($run['updated_count'] ?? 0),
+            'skipped_count' => (int) ($run['skipped_count'] ?? 0),
+            'error_count' => (int) ($run['error_count'] ?? 0),
+            'stop_reason' => $stopReason,
+            'memory_usage' => memory_get_usage(true),
+            'memory_peak_usage' => memory_get_peak_usage(true),
+            'exception' => $exception?->getMessage(),
+        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+
+        file_put_contents($directory.DIRECTORY_SEPARATOR.'batch_many_debug.log', $line.PHP_EOL, FILE_APPEND | LOCK_EX);
+    }
+
+    /** @param array<string, mixed> $run */
+    private function appendAutorunnerDebug(string $event, array $run, string $message = ''): void
+    {
+        $directory = storage_path('app/imports/manual/woo');
+        if (! is_dir($directory)) {
+            mkdir($directory, 0755, true);
+        }
+
+        $line = json_encode([
+            'timestamp' => now()->toIso8601String(),
+            'run_id' => $run['id'] ?? null,
+            'event' => $event,
+            'status' => $run['status'] ?? null,
+            'processed_rows' => (int) ($run['processed_rows'] ?? 0),
+            'current_row' => (int) ($run['current_row'] ?? 2),
+            'created_count' => (int) ($run['created_count'] ?? 0),
+            'updated_count' => (int) ($run['updated_count'] ?? 0),
+            'skipped_count' => (int) ($run['skipped_count'] ?? 0),
+            'error_count' => (int) ($run['error_count'] ?? 0),
+            'message' => $message !== '' ? $message : (string) ($run['last_error'] ?? ''),
+        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+
+        file_put_contents($directory.DIRECTORY_SEPARATOR.'autorunner_debug.log', $line.PHP_EOL, FILE_APPEND | LOCK_EX);
+    }
+
     private function renderRunPage(array $run, string $message): Response
     {
         $action = route('admin.import-migration.woo-products.next', ['runId' => $run['id']]);
+        $nextManyAction = route('admin.import-migration.woo-products.next-many', ['runId' => $run['id']]);
+        $autorunUrl = route('admin.import-migration.woo-products.autorun', ['runId' => $run['id']]);
         $csrf = csrf_field();
         $status = htmlspecialchars((string) ($run['status'] ?? 'pending'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
         $mode = htmlspecialchars((string) ($run['mode'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
@@ -84,6 +318,10 @@ class WooProductImportRunController
         <form method="POST" action="{$action}">
             {$csrf}
             <button type="submit">Przetwórz kolejną paczkę</button>
+        </form>
+        <form method="POST" action="{$nextManyAction}" style="margin-top: .5rem;">
+            {$csrf}
+            <button type="submit">Przetwórz 10 paczek</button>
         </form>
 HTML;
 
@@ -105,6 +343,7 @@ HTML;
         <dt>Last error</dt><dd>{$lastError}</dd>
     </dl>
     {$button}
+    <p><a href="{$autorunUrl}">Uruchom autorunner</a></p>
     <p><a href="/admin/import-migracyjny/produkty-woo?run_id={$id}">Wróć do strony importu</a></p>
 </body>
 </html>
