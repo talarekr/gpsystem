@@ -1,18 +1,31 @@
 <x-filament-panels::page>
     <div class="space-y-6">
-        <x-filament-panels::form wire:submit.prevent="runImport">
+        <form wire:submit.prevent="runImport" class="space-y-6">
             {{ $this->form }}
 
             <div class="flex items-center gap-3">
-                <x-filament::button type="submit" wire:loading.attr="disabled" wire:target="runImport,processNextBatch">
+                <button
+                    type="submit"
+                    wire:loading.attr="disabled"
+                    wire:target="runImport,processNextBatch"
+                    class="fi-btn fi-color-primary fi-btn-color-primary fi-size-md inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-primary-500 focus-visible:ring-2 focus-visible:ring-primary-600 disabled:pointer-events-none disabled:opacity-70 dark:bg-primary-500 dark:hover:bg-primary-400 dark:focus-visible:ring-primary-500"
+                >
                     Uruchom import
-                </x-filament::button>
+                </button>
 
                 @if ($isImportRunning)
                     <span class="text-sm text-gray-600 dark:text-gray-300">Import trwa — kolejne partie uruchamiają się automatycznie.</span>
                 @endif
             </div>
-        </x-filament-panels::form>
+        </form>
+
+        @if ($runImportStartedAt || $firstBatchStartedAt || $lastError)
+            <div class="rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300">
+                <div>runImport started at: {{ $runImportStartedAt ?: '—' }}</div>
+                <div>first batch started at: {{ $firstBatchStartedAt ?: '—' }}</div>
+                <div>last error: {{ $lastError ?: '—' }}</div>
+            </div>
+        @endif
 
         @if ($isImportRunning)
             <div wire:poll.750ms="processNextBatch" class="rounded-xl border border-primary-200 bg-primary-50 p-4 text-sm text-primary-800 dark:border-primary-800 dark:bg-primary-950 dark:text-primary-200">
@@ -39,6 +52,8 @@
                             'lastBatchProcessed' => $lastBatchProcessed,
                             'lastBatchStartedAt' => $lastBatchStartedAt ?: '—',
                             'lastBatchFinishedAt' => $lastBatchFinishedAt ?: '—',
+                            'runImportStartedAt' => $runImportStartedAt ?: '—',
+                            'firstBatchStartedAt' => $firstBatchStartedAt ?: '—',
                             'lastError' => $lastError ?: '—',
                             'pollTickCount' => $pollTickCount,
                         ] as $label => $value)

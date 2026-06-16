@@ -131,12 +131,32 @@ class MigrationImportTest extends TestCase
             ->assertSet('processedRows', 250)
             ->assertSet('currentOffset', 250)
             ->assertSet('lastBatchProcessed', 250)
+            ->assertSet('lastError', null)
+            ->assertSee('runImport started at:')
+            ->assertSee('first batch started at:')
+            ->assertSee('last error:')
             ->call('processNextBatch')
             ->assertSet('isImportRunning', false)
             ->assertSet('processedRows', 260)
             ->assertSet('currentOffset', 260)
             ->assertSet('lastBatchProcessed', 10)
             ->assertSet('pollTickCount', 1);
+    }
+
+    public function test_woo_import_page_uses_plain_inline_submit_without_filament_action_modal(): void
+    {
+        $view = file_get_contents(resource_path('views/filament/pages/import-migration/woo-product-import.blade.php'));
+        $page = file_get_contents(app_path('Filament/Pages/ImportMigration/WooProductImportPage.php'));
+
+        $this->assertStringContainsString('<form wire:submit.prevent="runImport"', $view);
+        $this->assertSame(1, substr_count($view, 'Uruchom import'));
+        $this->assertStringNotContainsString('<x-filament-panels::form', $view);
+        $this->assertStringNotContainsString('<x-filament-actions::modals', $view);
+        $this->assertStringNotContainsString('Actions\\Action::make', $page);
+        $this->assertStringNotContainsString("->submit('runImport')", $page);
+        $this->assertStringNotContainsString('getFormActions', $page);
+        $this->assertStringNotContainsString('requiresConfirmation', $page);
+        $this->assertStringNotContainsString('modal', $page);
     }
 
     public function test_import_navigation_is_isolated_and_daily_resources_remain_clean(): void
