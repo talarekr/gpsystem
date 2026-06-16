@@ -38,6 +38,10 @@
                 var isActive = thumbIndex === index;
                 thumb.classList.toggle('is-active', isActive);
                 thumb.setAttribute('aria-current', isActive ? 'true' : 'false');
+
+                if (isActive && typeof thumb.scrollIntoView === 'function') {
+                    thumb.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+                }
             });
         }
 

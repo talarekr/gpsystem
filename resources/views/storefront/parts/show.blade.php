@@ -32,28 +32,30 @@
     @include('storefront.partials.breadcrumbs')
     <div class="sf-product-detail">
         <section class="sf-gallery" data-product-gallery>
-            <div class="sf-gallery__main">
-                @if($mainSrc)
-                    <button class="sf-gallery__main-button" type="button" data-gallery-open aria-label="Powiększ zdjęcie produktu">
-                        <img src="{{ $mainSrc }}" alt="{{ $mainImage->alt_text ?: $part->name }}" data-gallery-main>
-                    </button>
-                    @if($galleryImages->count() > 1)
-                        <button class="sf-gallery__nav sf-gallery__nav--prev" type="button" data-gallery-main-prev aria-label="Poprzednie zdjęcie">‹</button>
-                        <button class="sf-gallery__nav sf-gallery__nav--next" type="button" data-gallery-main-next aria-label="Następne zdjęcie">›</button>
-                    @endif
-                @else
-                    <span>GPSwiss<br>brak zdjęcia</span>
+            <div class="sf-gallery__layout">
+                @if($galleryImages->count() > 1)
+                    <div class="sf-thumbs" aria-label="Miniatury zdjęć produktu">
+                        @foreach($galleryImages as $index => $image)
+                            <button class="sf-thumbs__item{{ $index === 0 ? ' is-active' : '' }}" type="button" data-gallery-thumb data-index="{{ $index }}" data-product-src="{{ $image['product'] }}" data-thumb-src="{{ $image['thumb'] }}" data-alt="{{ $image['alt'] }}" aria-label="Pokaż zdjęcie {{ $index + 1 }}" aria-current="{{ $index === 0 ? 'true' : 'false' }}">
+                                <img src="{{ $image['thumb'] }}" alt="{{ $image['alt'] }}" loading="lazy">
+                            </button>
+                        @endforeach
+                    </div>
                 @endif
-            </div>
-            @if($galleryImages->count() > 1)
-                <div class="sf-thumbs" aria-label="Miniatury zdjęć produktu">
-                    @foreach($galleryImages as $index => $image)
-                        <button class="sf-thumbs__item{{ $index === 0 ? ' is-active' : '' }}" type="button" data-gallery-thumb data-index="{{ $index }}" data-product-src="{{ $image['product'] }}" data-thumb-src="{{ $image['thumb'] }}" data-alt="{{ $image['alt'] }}" aria-label="Pokaż zdjęcie {{ $index + 1 }}" aria-current="{{ $index === 0 ? 'true' : 'false' }}">
-                            <img src="{{ $image['thumb'] }}" alt="{{ $image['alt'] }}" loading="lazy">
+                <div class="sf-gallery__main">
+                    @if($mainSrc)
+                        <button class="sf-gallery__main-button" type="button" data-gallery-open aria-label="Powiększ zdjęcie produktu">
+                            <img src="{{ $mainSrc }}" alt="{{ $mainImage->alt_text ?: $part->name }}" data-gallery-main>
                         </button>
-                    @endforeach
+                        @if($galleryImages->count() > 1)
+                            <button class="sf-gallery__nav sf-gallery__nav--prev" type="button" data-gallery-main-prev aria-label="Poprzednie zdjęcie">‹</button>
+                            <button class="sf-gallery__nav sf-gallery__nav--next" type="button" data-gallery-main-next aria-label="Następne zdjęcie">›</button>
+                        @endif
+                    @else
+                        <span>GPSwiss<br>brak zdjęcia</span>
+                    @endif
                 </div>
-            @endif
+            </div>
             @if($galleryImages->isNotEmpty())
                 <div class="sf-lightbox" data-gallery-lightbox hidden aria-hidden="true">
                     <div class="sf-lightbox__backdrop" data-gallery-close></div>
