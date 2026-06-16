@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Services\Storefront\CartService;
 use App\Services\Storefront\CategoryTreeService;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
@@ -22,6 +23,7 @@ class AppServiceProvider extends ServiceProvider
                 'storefrontCategoryRoots' => $categoryTree->roots(),
                 'storefrontCategoryShortcuts' => $categoryTree->shortcuts(),
                 'categoryTreeService' => $categoryTree,
+                'storefrontCartCount' => app(CartService::class)->count(),
             ]);
         });
     }

@@ -13,7 +13,10 @@
 </head>
 <body>
 @include('storefront.partials.header')
-<main>@yield('content')</main>
+<main>
+    @include('storefront.partials.flash')
+    @yield('content')
+</main>
 @include('storefront.partials.footer')
 <script src="{{ asset('js/storefront-category-menu.js') }}" defer></script>
 <script src="{{ asset('js/storefront-product-gallery.js') }}" defer></script>
