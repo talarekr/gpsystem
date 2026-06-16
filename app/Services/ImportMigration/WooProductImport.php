@@ -2,30 +2,162 @@
 
 namespace App\Services\ImportMigration;
 
-use App\Models\Car; use App\Models\Part; use App\Models\PartCategory; use App\Models\PartImage; use App\Models\StorageLocation; use Illuminate\Support\Str;
+use App\Models\Car;
+use App\Models\Part;
+use App\Models\PartCategory;
+use App\Models\PartImage;
+use App\Models\StorageLocation;
+use Illuminate\Support\Str;
 
 class WooProductImport
 {
-    public const MODE_DRY_RUN='dry_run'; public const MODE_CREATE_ONLY='create_only'; public const MODE_UPDATE_EXISTING='update_existing';
+    public const MODE_DRY_RUN = 'dry_run';
+    public const MODE_CREATE_ONLY = 'create_only';
+    public const MODE_UPDATE_EXISTING = 'update_existing';
+
     public function __construct(private CsvReader $csvReader) {}
+
     public function import(string $productsPath, array $paths = [], string $mode = self::MODE_DRY_RUN): ImportReport
     {
-        $report = new ImportReport(['created'=>0,'updated'=>0,'skipped_existing'=>0,'skipped_duplicates'=>0,'images_linked'=>0,'categories_created'=>0,'categories_matched'=>0]);
-        $images=$this->group($paths['images']??null,'woo_product_id'); $cats=$this->group($paths['categories']??null,'woo_product_id'); $meta=$this->group($paths['meta']??null,'woo_product_id'); $attrs=$this->group($paths['attributes']??null,'woo_product_id');
-        foreach ($this->csvReader->rows($productsPath) as $line=>$row) {
-            $report->inc('total_rows'); $woo=(string)($row['woo_product_id']??''); if ($woo==='') { $report->error("Wiersz {$line}: brak woo_product_id."); continue; }
-            $existing=Part::query()->where('source_system','woo')->where('external_id',$woo)->first();
-            $sku=trim((string)($row['sku']??'')); $skuConflict=$sku!=='' ? Part::query()->where('sku',$sku)->where(function($q)use($woo){$q->where('source_system','!=','woo')->orWhere('external_id','!=',$woo)->orWhereNull('external_id');})->first() : null;
-            if ($skuConflict && ! $existing) { $report->inc('skipped_duplicates'); $report->warning("Wiersz {$line}: SKU {$sku} istnieje przy innej części; pominięto produkt Woo {$woo}."); continue; }
-            $category=$this->category($cats[$woo][0]??null,$report,$mode); $carId=$this->carId($row,$report,$line); $payload=$this->map($row,$meta[$woo]??[],$attrs[$woo]??[],$category?->id,$carId);
-            if ($mode===self::MODE_DRY_RUN) { $existing ? $report->inc('skipped_existing') : $report->inc('created'); continue; }
-            if ($existing) { if ($mode===self::MODE_UPDATE_EXISTING) { $existing->fill($payload)->save(); $part=$existing; $report->inc('updated'); } else { $part=$existing; $report->inc('skipped_existing'); } }
-            else { $part=Part::query()->create($payload); $report->inc('created'); }
-            $this->images($part,$images[$woo]??[],$report); if (empty($images[$woo])) $report->inc('products_missing_images'); if (empty($cats[$woo])) $report->inc('products_missing_categories');
+        $report = $this->makeReport();
+        $startedAt = microtime(true);
+
+        return $this->importBatch($productsPath, $paths, $mode, 0, null, $report, $startedAt);
+    }
+
+    public function countProductRows(string $productsPath): int
+    {
+        $count = 0;
+
+        foreach ($this->csvReader->rows($productsPath) as $_row) {
+            $count++;
         }
+
+        return $count;
+    }
+
+    public function makeReport(): ImportReport
+    {
+        return new ImportReport([
+            'created' => 0,
+            'updated' => 0,
+            'skipped_existing' => 0,
+            'skipped_duplicates' => 0,
+            'images_linked' => 0,
+            'categories_created' => 0,
+            'categories_matched' => 0,
+            'processed_rows' => 0,
+        ]);
+    }
+
+    public function importBatch(
+        string $productsPath,
+        array $paths = [],
+        string $mode = self::MODE_DRY_RUN,
+        int $offset = 0,
+        ?int $limit = null,
+        ?ImportReport $report = null,
+        ?float $startedAt = null,
+    ): ImportReport {
+        $report ??= $this->makeReport();
+        $startedAt ??= microtime(true);
+        $batchStartedAt = microtime(true);
+        $images = $this->group($paths['images'] ?? null, 'woo_product_id');
+        $cats = $this->group($paths['categories'] ?? null, 'woo_product_id');
+        $meta = $this->group($paths['meta'] ?? null, 'woo_product_id');
+        $attrs = $this->group($paths['attributes'] ?? null, 'woo_product_id');
+        $processedInBatch = 0;
+
+        foreach ($this->csvReader->rows($productsPath) as $line => $row) {
+            if (($line - 2) < $offset) {
+                continue;
+            }
+
+            if ($limit !== null && $processedInBatch >= $limit) {
+                break;
+            }
+
+            $processedInBatch++;
+            $this->importRow($row, $line, $images, $cats, $meta, $attrs, $mode, $report);
+        }
+
+        $report->counters['last_batch_rows'] = $processedInBatch;
+        $report->counters['last_batch_seconds'] = round(microtime(true) - $batchStartedAt, 3);
+        $this->addDiagnostics($report, $startedAt);
+
         return $report;
     }
-    private function group(?string $path,string $key): array { $out=[]; if(!$path||!is_file($path)) return $out; foreach($this->csvReader->rows($path) as $r) $out[(string)($r[$key]??'')][]=$r; return $out; }
+
+    private function importRow(array $row, int $line, array $images, array $cats, array $meta, array $attrs, string $mode, ImportReport $report): void
+    {
+        $report->inc('total_rows');
+        $report->inc('processed_rows');
+        $woo = (string) ($row['woo_product_id'] ?? '');
+
+        if ($woo === '') {
+            $report->error("Wiersz {$line}: brak woo_product_id.");
+
+            return;
+        }
+
+        $existing = Part::query()->where('source_system', 'woo')->where('external_id', $woo)->first();
+        $sku = trim((string) ($row['sku'] ?? ''));
+        $skuConflict = $sku !== ''
+            ? Part::query()->where('sku', $sku)->where(function ($query) use ($woo) {
+                $query->where('source_system', '!=', 'woo')->orWhere('external_id', '!=', $woo)->orWhereNull('external_id');
+            })->first()
+            : null;
+
+        if ($skuConflict && ! $existing) {
+            $report->inc('skipped_duplicates');
+            $report->warning("Wiersz {$line}: SKU {$sku} istnieje przy innej części; pominięto produkt Woo {$woo}.");
+
+            return;
+        }
+
+        $category = $this->category($cats[$woo][0] ?? null, $report, $mode);
+        $carId = $this->carId($row, $report, $line);
+        $payload = $this->map($row, $meta[$woo] ?? [], $attrs[$woo] ?? [], $category?->id, $carId);
+
+        if ($mode === self::MODE_DRY_RUN) {
+            $existing ? $report->inc('skipped_existing') : $report->inc('created');
+
+            return;
+        }
+
+        if ($existing) {
+            if ($mode === self::MODE_UPDATE_EXISTING) {
+                $existing->fill($payload)->save();
+                $part = $existing;
+                $report->inc('updated');
+            } else {
+                $part = $existing;
+                $report->inc('skipped_existing');
+            }
+        } else {
+            $part = Part::query()->create($payload);
+            $report->inc('created');
+        }
+
+        $this->images($part, $images[$woo] ?? [], $report);
+
+        if (empty($images[$woo])) {
+            $report->inc('products_missing_images');
+        }
+
+        if (empty($cats[$woo])) {
+            $report->inc('products_missing_categories');
+        }
+    }
+
+    private function addDiagnostics(ImportReport $report, float $startedAt): void
+    {
+        $report->counters['elapsed_seconds'] = round(microtime(true) - $startedAt, 3);
+        $report->counters['memory_peak_mb'] = round(memory_get_peak_usage(true) / 1024 / 1024, 2);
+        $report->counters['memory_current_mb'] = round(memory_get_usage(true) / 1024 / 1024, 2);
+    }
+
+    private function group(?string $path, string $key): array { $out=[]; if(!$path||!is_file($path)) return $out; foreach($this->csvReader->rows($path) as $r) $out[(string)($r[$key]??'')][]=$r; return $out; }
     private function map(array $r,array $meta,array $attrs,?int $categoryId,?int $carId): array {
         $legacyJson=null; if (filled($r['legacy_payload_json']??null)) { try { $legacyJson=json_decode($r['legacy_payload_json'], true, 512, JSON_THROW_ON_ERROR); } catch (\Throwable) { $legacyJson=['legacy_payload_json_malformed'=>true]; } }
         $metaMap=[]; foreach($meta as $m) $metaMap[$m['meta_key']??'']=$m['meta_value']??null;
