@@ -35,6 +35,10 @@
                     <button class="sf-gallery__main-button" type="button" data-gallery-open aria-label="Powiększ zdjęcie produktu">
                         <img src="{{ $mainSrc }}" alt="{{ $mainImage->alt_text ?: $part->name }}" data-gallery-main>
                     </button>
+                    @if($galleryImages->count() > 1)
+                        <button class="sf-gallery__nav sf-gallery__nav--prev" type="button" data-gallery-main-prev aria-label="Poprzednie zdjęcie">‹</button>
+                        <button class="sf-gallery__nav sf-gallery__nav--next" type="button" data-gallery-main-next aria-label="Następne zdjęcie">›</button>
+                    @endif
                 @else
                     <span>GPSwiss<br>brak zdjęcia</span>
                 @endif
