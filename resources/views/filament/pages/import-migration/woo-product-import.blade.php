@@ -1,19 +1,44 @@
 <x-filament-panels::page>
     <div class="space-y-6">
-        <x-filament-panels::form wire:submit="runImport">
+        <x-filament-panels::form wire:submit.prevent="runImport">
             {{ $this->form }}
+
+            <div class="flex items-center gap-3">
+                <x-filament::button type="submit" wire:loading.attr="disabled" wire:target="runImport,processNextBatch">
+                    Uruchom import
+                </x-filament::button>
+
+                @if ($isImportRunning)
+                    <span class="text-sm text-gray-600 dark:text-gray-300">Import trwa — kolejne partie uruchamiają się automatycznie.</span>
+                @endif
+            </div>
         </x-filament-panels::form>
 
-        <div wire:loading.flex wire:target="runImport" class="items-center gap-3 rounded-xl border border-primary-200 bg-primary-50 p-4 text-sm font-medium text-primary-700 dark:border-primary-800 dark:bg-primary-950 dark:text-primary-300">
-            <x-filament::loading-indicator class="h-5 w-5" />
-            <span>Przetwarzanie importu Woo…</span>
-        </div>
+        @if ($isImportRunning)
+            <div wire:poll.750ms="processNextBatch" class="rounded-xl border border-primary-200 bg-primary-50 p-4 text-sm text-primary-800 dark:border-primary-800 dark:bg-primary-950 dark:text-primary-200">
+                <div class="flex items-center gap-3 font-medium">
+                    <x-filament::loading-indicator class="h-5 w-5" />
+                    <span>Import trwa… przetwarzanie w partiach po {{ $batchSize }} produktów.</span>
+                </div>
+
+                <div class="mt-4 h-3 overflow-hidden rounded-full bg-white dark:bg-gray-800">
+                    <div class="h-3 rounded-full bg-primary-600 transition-all" style="width: {{ $totalRows > 0 ? min(100, round(($processedRows / $totalRows) * 100, 2)) : 0 }}%"></div>
+                </div>
+
+                <div class="mt-2 text-xs">
+                    Przetworzono {{ $processedRows }} z {{ $totalRows }} wierszy ({{ $totalRows > 0 ? min(100, round(($processedRows / $totalRows) * 100, 1)) : 0 }}%).
+                </div>
+            </div>
+        @endif
 
         @if ($importError)
-            <x-filament::section heading="Import Woo nie został uruchomiony">
+            <x-filament::section heading="Import Woo nie został ukończony">
                 <div class="text-sm font-medium text-danger-600 dark:text-danger-400">
                     {{ $importError }}
                 </div>
+                <p class="mt-2 text-sm text-gray-600 dark:text-gray-300">
+                    Import zatrzymano. Dotychczasowy raport i diagnostyka są widoczne poniżej, jeśli przetworzono już część pliku.
+                </p>
             </x-filament::section>
         @endif
 
@@ -22,18 +47,24 @@
             <x-filament::section heading="Raport importu Woo">
                 <dl class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                     @foreach ([
-                        'total_rows' => 'Łącznie wierszy',
-                        'created' => 'Do utworzenia',
-                        'updated' => 'Do aktualizacji',
-                        'skipped_existing' => 'Pominięte',
+                        'processed_rows' => 'Przetworzone wiersze',
+                        'total_rows' => 'Wiersze w raporcie',
+                        'created' => 'Do utworzenia / utworzone',
+                        'updated' => 'Zaktualizowane',
+                        'skipped_existing' => 'Pominięte istniejące',
                         'skipped_duplicates' => 'Pominięte duplikaty',
                         'failed_rows' => 'Błędy',
                         'warnings' => 'Ostrzeżenia',
                         'images_linked' => 'Obrazy połączone',
-                        'categories_created' => 'Kategorie do utworzenia',
+                        'categories_created' => 'Kategorie do utworzenia / utworzone',
                         'categories_matched' => 'Kategorie dopasowane',
                         'products_without_ovoko_car_id' => 'Bez Ovoko car ID',
                         'products_with_missing_car_reference' => 'Brak samochodu lokalnego',
+                        'last_batch_rows' => 'Ostatnia partia',
+                        'last_batch_seconds' => 'Sekundy ostatniej partii',
+                        'elapsed_seconds' => 'Sekundy łącznie',
+                        'memory_peak_mb' => 'Szczyt pamięci MB',
+                        'memory_current_mb' => 'Pamięć bieżąca MB',
                     ] as $key => $label)
                         <div class="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
                             <dt class="text-sm text-gray-500 dark:text-gray-400">{{ $label }}</dt>

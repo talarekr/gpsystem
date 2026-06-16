@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages\ImportMigration;
 
+use App\Services\ImportMigration\ImportReport;
 use App\Services\ImportMigration\WooProductImport;
 use App\Support\ImportMigration\ManualImportFileResolver;
 use Filament\Forms;
@@ -26,6 +27,11 @@ class WooProductImportPage extends Page implements HasForms
     public ?array $data = [];
     public ?array $report = null;
     public ?string $importError = null;
+    public bool $isImportRunning = false;
+    public int $totalRows = 0;
+    public int $processedRows = 0;
+    public int $batchSize = 250;
+    public ?array $importRun = null;
 
     public function mount(): void
     {
@@ -78,11 +84,6 @@ class WooProductImportPage extends Page implements HasForms
                             ])
                             ->required()
                             ->native(false),
-                        Forms\Components\Actions::make([
-                            Forms\Components\Actions\Action::make('run')
-                                ->label('Uruchom import')
-                                ->submit('runImport'),
-                        ]),
                     ]),
             ])
             ->statePath('data');
@@ -91,38 +92,95 @@ class WooProductImportPage extends Page implements HasForms
     public function runImport(WooProductImport $import, ManualImportFileResolver $fileResolver): void
     {
         $this->importError = null;
-        $this->report = null;
+        $this->report = $import->makeReport()->toArray();
+        $this->isImportRunning = false;
+        $this->totalRows = 0;
+        $this->processedRows = 0;
+        $this->importRun = null;
 
         try {
             $state = $this->form->getState();
             $path = fn (string $key, string $label, string $extension = 'csv') => $fileResolver->resolveOptionalWooFile($state[$key] ?? null, $label, $extension);
             $productsPath = $fileResolver->resolveRequiredWooFile($state['products_filename'] ?? null, 'products.csv', 'csv');
 
-            $this->report = $import
-                ->import($productsPath, [
+            $this->totalRows = $import->countProductRows($productsPath);
+            $this->importRun = [
+                'productsPath' => $productsPath,
+                'paths' => [
                     'images' => $path('images_filename', 'product_images.csv'),
                     'categories' => $path('categories_filename', 'product_categories.csv'),
                     'meta' => $path('meta_filename', 'product_meta.csv'),
                     'attributes' => $path('attributes_filename', 'product_attributes.csv'),
                     'summary' => $path('summary_filename', 'export_summary.json', 'json'),
-                ], $state['mode'])
-                ->toArray();
+                ],
+                'mode' => $state['mode'],
+                'startedAt' => microtime(true),
+            ];
+            $this->isImportRunning = true;
 
-            Notification::make()
-                ->title('Import Woo zakończony')
-                ->body('Raport importu jest dostępny poniżej formularza.')
-                ->success()
-                ->send();
+            if ($this->totalRows === 0) {
+                $this->isImportRunning = false;
+                $this->importError = 'Plik products.csv nie zawiera wierszy produktów.';
+            }
         } catch (Throwable $exception) {
-            report($exception);
-            $this->importError = $exception->getMessage();
-
-            Notification::make()
-                ->title('Nie udało się uruchomić importu Woo')
-                ->body($this->importError)
-                ->danger()
-                ->send();
+            $this->failImport($exception);
         }
+    }
+
+    public function processNextBatch(WooProductImport $import): void
+    {
+        if (! $this->isImportRunning || ! $this->importRun) {
+            return;
+        }
+
+        try {
+            $report = new ImportReport(
+                $this->report['counters'] ?? []
+            );
+            $report->warnings = $this->report['warnings'] ?? [];
+            $report->errors = $this->report['errors'] ?? [];
+
+            $report = $import->importBatch(
+                $this->importRun['productsPath'],
+                $this->importRun['paths'],
+                $this->importRun['mode'],
+                $this->processedRows,
+                $this->batchSize,
+                $report,
+                $this->importRun['startedAt'],
+            );
+
+            $this->report = $report->toArray();
+            $this->processedRows += (int) ($this->report['counters']['last_batch_rows'] ?? 0);
+
+            if (($this->report['counters']['last_batch_rows'] ?? 0) === 0 || $this->processedRows >= $this->totalRows) {
+                $this->isImportRunning = false;
+
+                Notification::make()
+                    ->title('Import Woo zakończony')
+                    ->body('Raport importu jest dostępny poniżej formularza.')
+                    ->success()
+                    ->send();
+            }
+        } catch (Throwable $exception) {
+            $this->failImport($exception);
+        }
+    }
+
+    private function failImport(Throwable $exception): void
+    {
+        report($exception);
+
+        $this->isImportRunning = false;
+        $this->importError = $exception->getMessage();
+        $this->report['errors'][] = $this->importError;
+        $this->report['counters']['failed_rows'] = ($this->report['counters']['failed_rows'] ?? 0) + 1;
+
+        Notification::make()
+            ->title('Nie udało się uruchomić importu Woo')
+            ->body($this->importError)
+            ->danger()
+            ->send();
     }
 
 }
