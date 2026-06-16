@@ -31,6 +31,7 @@ class WooProductImportPage extends Page
     public array $availableWooFiles = [];
     public ?array $report = null;
     public ?string $importError = null;
+    public array $importDebug = [];
     public bool $isImportRunning = false;
     public int $totalRows = 0;
     public int $processedRows = 0;
@@ -48,10 +49,17 @@ class WooProductImportPage extends Page
     public function mount(): void
     {
         $fileResolver = app(ManualImportFileResolver::class);
-        $fileResolver->ensureWooDirectoryExists();
 
-        $this->availableWooFiles = $fileResolver->availableWooFiles();
+        try {
+            $fileResolver->ensureWooDirectoryExists();
+            $this->availableWooFiles = $fileResolver->availableWooFiles();
+        } catch (\Throwable $exception) {
+            $this->availableWooFiles = [];
+            $this->importError = 'Nie udało się przygotować folderu importu Woo: '.$exception->getMessage();
+        }
+
         $this->submittedValues = session('woo_import_submitted', []);
+        $this->importDebug = session('woo_import_debug', []);
         $this->hydrateRouteRun();
     }
 
