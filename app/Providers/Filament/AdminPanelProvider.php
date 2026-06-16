@@ -70,6 +70,10 @@ class AdminPanelProvider extends PanelProvider
                 'panels::head.end',
                 fn (): string => Blade::render('@include(\'filament.admin-ui-refinements\')'),
             )
+            ->renderHook(
+                'panels::body.start',
+                fn (): string => Blade::render('@include(\'filament.admin-topbar\')'),
+            )
             ->colors([
                 'primary' => [
                     50 => '#f5f7fa',

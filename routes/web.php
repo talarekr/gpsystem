@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Admin\ImportMigration\PartImagePresentationController;
+use App\Http\Controllers\Admin\PartSearchController;
 use App\Http\Controllers\Admin\ImportMigration\WooCategoryTreeController;
 use App\Http\Controllers\Admin\ImportMigration\WooProductImportRunController;
 use App\Http\Controllers\Admin\ImportMigration\WooStoragePublicController;
@@ -28,6 +29,11 @@ Route::post('/koszyk/usun/{part}', [CartController::class, 'remove'])->name('sto
 Route::post('/koszyk/wyczysc', [CartController::class, 'clear'])->name('storefront.cart.clear');
 Route::get('/produkt/{slug}', [PartController::class, 'show'])->name('storefront.product');
 Route::get('/kategoria-produktu/{path}', [CategoryController::class, 'show'])->where('path', '.*')->name('storefront.category');
+
+
+Route::middleware(Authenticate::class)->prefix('admin')->name('admin.')->group(function (): void {
+    Route::get('/search/parts', PartSearchController::class)->name('search.parts');
+});
 
 Route::middleware(Authenticate::class)->prefix('admin/import-migracyjny/produkty-woo')->name('admin.import-migration.woo-products.')->group(function (): void {
     Route::get('/category-tree/audit', [WooCategoryTreeController::class, 'audit'])->name('category-tree.audit');
