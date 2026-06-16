@@ -26,6 +26,7 @@ class WooProductImportPage extends Page
         'summary_filename' => 'export_summary.json',
         'images_filename' => '',
         'mode' => WooProductImport::MODE_DRY_RUN,
+        'batch_size' => WooProductImportRunRepository::BATCH_SIZE,
     ];
     public array $submittedValues = [];
     public array $availableWooFiles = [];
@@ -36,7 +37,7 @@ class WooProductImportPage extends Page
     public int $totalRows = 0;
     public int $processedRows = 0;
     public int $currentOffset = 0;
-    public int $batchSize = 250;
+    public int $batchSize = 25;
     public int $lastBatchProcessed = 0;
     public ?string $lastBatchStartedAt = null;
     public ?string $lastBatchFinishedAt = null;
@@ -108,15 +109,15 @@ class WooProductImportPage extends Page
 
         $this->importRun = $run;
         $this->report = $run['report'] ?? null;
-        $this->isImportRunning = (bool) ($run['isRunning'] ?? false);
+        $this->isImportRunning = in_array(($run['status'] ?? 'pending'), ['pending', 'running'], true);
         $this->totalRows = (int) ($run['totalRows'] ?? 0);
-        $this->processedRows = (int) ($run['currentOffset'] ?? 0);
-        $this->currentOffset = $this->processedRows;
-        $this->batchSize = (int) ($run['batchSize'] ?? WooProductImportRunRepository::BATCH_SIZE);
+        $this->processedRows = (int) ($run['processed_rows'] ?? $run['currentOffset'] ?? 0);
+        $this->currentOffset = (int) ($run['current_row'] ?? $this->processedRows);
+        $this->batchSize = (int) ($run['batch_size'] ?? $run['batchSize'] ?? WooProductImportRunRepository::BATCH_SIZE);
         $this->lastBatchProcessed = (int) ($run['lastBatchProcessed'] ?? 0);
         $this->lastBatchStartedAt = $run['lastBatchStartedAt'] ?? null;
         $this->lastBatchFinishedAt = $run['lastBatchFinishedAt'] ?? null;
-        $this->lastError = $run['lastError'] ?? null;
+        $this->lastError = $run['last_error'] ?? $run['lastError'] ?? null;
         $this->runImportStartedAt = $run['startedAtText'] ?? null;
         $this->firstBatchStartedAt = $this->lastBatchStartedAt;
         $this->importError ??= $this->lastError;

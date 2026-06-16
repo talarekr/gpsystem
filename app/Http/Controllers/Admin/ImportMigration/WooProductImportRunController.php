@@ -5,7 +5,7 @@ namespace App\Http\Controllers\Admin\ImportMigration;
 use App\Services\ImportMigration\WooProductImport;
 use App\Support\ImportMigration\ManualImportFileResolver;
 use App\Support\ImportMigration\WooProductImportRunRepository;
-use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Response;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -23,9 +23,10 @@ class WooProductImportRunController
         'summary_filename',
         'images_filename',
         'mode',
+        'batch_size',
     ];
 
-    public function start(Request $request): RedirectResponse
+    public function start(Request $request): Response
     {
         $submitted = [];
         $fileResolver = app(ManualImportFileResolver::class);
@@ -37,23 +38,17 @@ class WooProductImportRunController
             $submitted = $request->only(self::REQUEST_FIELDS);
 
             $run = $runs->start($submitted, $import, $fileResolver);
-            $run = $runs->processNextBatch($run['id'], $import);
 
-            return redirect()->to(self::WOO_IMPORT_URL.'?run_id='.$run['id']);
+            return $this->renderRunPage($run, 'Import Woo został przygotowany. Start nie przetworzył żadnego produktu.');
         } catch (Throwable $exception) {
             $submitted = $submitted ?: $this->safeSubmittedFields($request);
             $debug = $this->handleImportException($exception, $request, $fileResolver, $submitted, 'start');
 
-            return redirect()
-                ->to(self::WOO_IMPORT_URL)
-                ->withInput($submitted)
-                ->with('woo_import_submitted', $submitted)
-                ->with('woo_import_debug', $debug)
-                ->withErrors(['woo_import' => 'Nie udało się uruchomić importu Woo. Szczegóły zapisano w pliku diagnostycznym '.self::DIAGNOSTIC_FILENAME.'.']);
+            return $this->renderErrorPage('Import Woo nie wystartował', $exception->getMessage(), $debug);
         }
     }
 
-    public function next(string $runId, Request $request): RedirectResponse
+    public function next(string $runId, Request $request): Response
     {
         $fileResolver = app(ManualImportFileResolver::class);
 
@@ -61,20 +56,72 @@ class WooProductImportRunController
             $import = app(WooProductImport::class);
             $runs = app(WooProductImportRunRepository::class);
             $this->ensureDiagnosticDirectoriesExist($fileResolver);
-            $runs->processNextBatch($runId, $import);
+            $run = $runs->processNextBatch($runId, $import);
 
-            return redirect()->to(self::WOO_IMPORT_URL.'?run_id='.$runId);
+            return $this->renderRunPage($run, 'Przetworzono kolejną paczkę.');
         } catch (Throwable $exception) {
             $submitted = $this->safeSubmittedFields($request);
             $debug = $this->handleImportException($exception, $request, $fileResolver, $submitted, 'next');
 
-            return redirect()
-                ->to(self::WOO_IMPORT_URL.'?run_id='.$runId)
-                ->withInput($submitted)
-                ->with('woo_import_submitted', $submitted)
-                ->with('woo_import_debug', $debug)
-                ->withErrors(['woo_import' => 'Nie udało się uruchomić importu Woo. Szczegóły zapisano w pliku diagnostycznym '.self::DIAGNOSTIC_FILENAME.'.']);
+            return $this->renderErrorPage('Batch importu Woo nie został ukończony', $exception->getMessage(), $debug);
         }
+    }
+
+
+    private function renderRunPage(array $run, string $message): Response
+    {
+        $action = route('admin.import-migration.woo-products.next', ['runId' => $run['id']]);
+        $csrf = csrf_field();
+        $status = htmlspecialchars((string) ($run['status'] ?? 'pending'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $mode = htmlspecialchars((string) ($run['mode'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $id = htmlspecialchars((string) ($run['id'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $lastError = htmlspecialchars((string) ($run['last_error'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $processed = (int) ($run['processed_rows'] ?? 0);
+        $batchSize = (int) ($run['batch_size'] ?? $run['batchSize'] ?? WooProductImportRunRepository::BATCH_SIZE);
+        $currentRow = (int) ($run['current_row'] ?? 2);
+        $lastBatch = (int) ($run['lastBatchProcessed'] ?? 0);
+        $button = in_array($run['status'] ?? null, ['finished', 'failed'], true) ? '' : <<<HTML
+        <form method="POST" action="{$action}">
+            {$csrf}
+            <button type="submit">Przetwórz kolejną paczkę</button>
+        </form>
+HTML;
+
+        return response(<<<HTML
+<!doctype html>
+<html lang="pl">
+<head><meta charset="utf-8"><title>Batch import Woo</title></head>
+<body>
+    <h1>Batch import Woo</h1>
+    <p>{$message}</p>
+    <dl>
+        <dt>Import run ID</dt><dd><code>{$id}</code></dd>
+        <dt>Mode</dt><dd>{$mode}</dd>
+        <dt>Batch size</dt><dd>{$batchSize}</dd>
+        <dt>Processed rows</dt><dd>{$processed}</dd>
+        <dt>Current CSV row</dt><dd>{$currentRow}</dd>
+        <dt>Last batch processed</dt><dd>{$lastBatch}</dd>
+        <dt>Status</dt><dd>{$status}</dd>
+        <dt>Last error</dt><dd>{$lastError}</dd>
+    </dl>
+    {$button}
+    <p><a href="/admin/import-migracyjny/produkty-woo?run_id={$id}">Wróć do strony importu</a></p>
+</body>
+</html>
+HTML, 200)->header('Content-Type', 'text/html; charset=UTF-8');
+    }
+
+    private function renderErrorPage(string $title, string $message, array $debug): Response
+    {
+        $safeTitle = htmlspecialchars($title, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $safeMessage = htmlspecialchars($message, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $debugJson = htmlspecialchars(json_encode($debug, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+
+        return response(<<<HTML
+<!doctype html>
+<html lang="pl"><head><meta charset="utf-8"><title>{$safeTitle}</title></head>
+<body><h1>{$safeTitle}</h1><p>{$safeMessage}</p><pre>{$debugJson}</pre></body></html>
+HTML, 500)->header('Content-Type', 'text/html; charset=UTF-8');
     }
 
     /** @param array<string, mixed> $submitted */

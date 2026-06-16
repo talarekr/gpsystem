@@ -43,10 +43,12 @@ class WooProductImport
             'updated' => 0,
             'skipped_existing' => 0,
             'skipped_duplicates' => 0,
+            'skipped' => 0,
             'images_linked' => 0,
             'categories_created' => 0,
             'categories_matched' => 0,
             'processed_rows' => 0,
+            'failed_rows' => 0,
         ]);
     }
 
@@ -59,33 +61,66 @@ class WooProductImport
         ?ImportReport $report = null,
         ?float $startedAt = null,
     ): ImportReport {
+        $result = $this->importBatchFromRow($productsPath, $paths, $mode, $offset + 2, $limit ?? PHP_INT_MAX, $report, $startedAt);
+
+        return $result['report'];
+    }
+
+    /** @return array{report: ImportReport, processed: int, next_row: int, end_of_file: bool} */
+    public function importBatchFromRow(
+        string $productsPath,
+        array $paths = [],
+        string $mode = self::MODE_DRY_RUN,
+        int $currentRow = 2,
+        int $limit = 25,
+        ?ImportReport $report = null,
+        ?float $startedAt = null,
+    ): array {
         $report ??= $this->makeReport();
         $startedAt ??= microtime(true);
         $batchStartedAt = microtime(true);
-        $images = $this->group($paths['images'] ?? null, 'woo_product_id');
-        $cats = $this->group($paths['categories'] ?? null, 'woo_product_id');
-        $meta = $this->group($paths['meta'] ?? null, 'woo_product_id');
-        $attrs = $this->group($paths['attributes'] ?? null, 'woo_product_id');
-        $processedInBatch = 0;
+        $rows = [];
+        $wooIds = [];
+        $lastRowNumber = max(1, $currentRow - 1);
+        $endOfFile = true;
 
-        foreach ($this->csvReader->rows($productsPath) as $line => $row) {
-            if (($line - 2) < $offset) {
-                continue;
-            }
-
-            if ($limit !== null && $processedInBatch >= $limit) {
+        foreach ($this->csvReader->rowsFromLine($productsPath, $currentRow) as $line => $row) {
+            if (count($rows) >= $limit) {
+                $endOfFile = false;
                 break;
             }
 
+            $rows[$line] = $row;
+            $lastRowNumber = $line;
+            $woo = (string) ($row['woo_product_id'] ?? '');
+            if ($woo !== '') {
+                $wooIds[$woo] = true;
+            }
+        }
+
+        $ids = array_keys($wooIds);
+        $cats = $this->groupForIds($paths['categories'] ?? null, 'woo_product_id', $ids);
+        $meta = $this->groupForIds($paths['meta'] ?? null, 'woo_product_id', $ids);
+        $attrs = $this->groupForIds($paths['attributes'] ?? null, 'woo_product_id', $ids);
+        $processedInBatch = 0;
+
+        foreach ($rows as $line => $row) {
             $processedInBatch++;
-            $this->importRow($row, $line, $images, $cats, $meta, $attrs, $mode, $report);
+            $this->importRow($row, $line, [], $cats, $meta, $attrs, $mode, $report);
         }
 
         $report->counters['last_batch_rows'] = $processedInBatch;
         $report->counters['last_batch_seconds'] = round(microtime(true) - $batchStartedAt, 3);
+        $report->counters['last_batch_first_row'] = $currentRow;
+        $report->counters['last_batch_last_row'] = $lastRowNumber;
         $this->addDiagnostics($report, $startedAt);
 
-        return $report;
+        return [
+            'report' => $report,
+            'processed' => $processedInBatch,
+            'next_row' => $processedInBatch > 0 ? $lastRowNumber + 1 : $currentRow,
+            'end_of_file' => $endOfFile,
+        ];
     }
 
     private function importRow(array $row, int $line, array $images, array $cats, array $meta, array $attrs, string $mode, ImportReport $report): void
@@ -120,7 +155,27 @@ class WooProductImport
         $payload = $this->map($row, $meta[$woo] ?? [], $attrs[$woo] ?? [], $category?->id, $carId);
 
         if ($mode === self::MODE_DRY_RUN) {
+            $status = $existing ? 'would_update' : 'would_create';
+            $existing ? $report->inc('would_update') : $report->inc('would_create');
             $existing ? $report->inc('skipped_existing') : $report->inc('created');
+            $partNumber = trim((string) ($payload['part_number'] ?? ''));
+            $oemNumber = trim((string) ($payload['oem_number'] ?? ''));
+            $hasName = trim((string) ($row['name'] ?? '')) !== '';
+            if (! $hasName || ($partNumber === '' && $oemNumber === '')) {
+                $status = 'skipped';
+                $report->inc('skipped');
+            }
+            $report->warnings[] = sprintf(
+                'Dry run wiersz %d: external_id=%s, existing_part=%s, ovoko_car_id=%s, found_car_id=%s, has_name=%s, has_part_number_or_oem=%s, status=%s.',
+                $line,
+                $woo,
+                $existing ? 'yes' : 'no',
+                trim((string) ($row['ovoko_car_id'] ?? '')) !== '' ? 'yes' : 'no',
+                $carId !== null ? 'yes' : 'no',
+                $hasName ? 'yes' : 'no',
+                ($partNumber !== '' || $oemNumber !== '') ? 'yes' : 'no',
+                $status,
+            );
 
             return;
         }
@@ -157,7 +212,8 @@ class WooProductImport
         $report->counters['memory_current_mb'] = round(memory_get_usage(true) / 1024 / 1024, 2);
     }
 
-    private function group(?string $path, string $key): array { $out=[]; if(!$path||!is_file($path)) return $out; foreach($this->csvReader->rows($path) as $r) $out[(string)($r[$key]??'')][]=$r; return $out; }
+    private function group(?string $path, string $key): array { return $this->groupForIds($path, $key, []); }
+    private function groupForIds(?string $path, string $key, array $ids): array { $out=[]; if(!$path||!is_file($path)) return $out; $filter = array_fill_keys($ids, true); foreach($this->csvReader->rows($path) as $r) { $id=(string)($r[$key]??''); if($ids !== [] && !isset($filter[$id])) continue; $out[$id][]=$r; } return $out; }
     private function map(array $r,array $meta,array $attrs,?int $categoryId,?int $carId): array {
         $legacyJson=null; if (filled($r['legacy_payload_json']??null)) { try { $legacyJson=json_decode($r['legacy_payload_json'], true, 512, JSON_THROW_ON_ERROR); } catch (\Throwable) { $legacyJson=['legacy_payload_json_malformed'=>true]; } }
         $metaMap=[]; foreach($meta as $m) $metaMap[$m['meta_key']??'']=$m['meta_value']??null;

@@ -45,6 +45,13 @@
                         </datalist>
                     @endforeach
 
+
+                    <div>
+                        <label for="batch_size" class="block text-sm font-medium text-gray-950 dark:text-white">Batch size</label>
+                        <input id="batch_size" name="batch_size" type="number" min="1" max="250" value="{{ old('batch_size', $this->defaults['batch_size'] ?? 25) }}" class="mt-1 block w-full rounded-lg border-gray-300 text-sm shadow-sm transition duration-75 focus:border-primary-500 focus:ring-1 focus:ring-primary-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-primary-500">
+                        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Domyślnie 25 produktów na request. Start zapisuje tylko run, bez przetwarzania produktów.</p>
+                    </div>
+
                     <div>
                         <label for="mode" class="block text-sm font-medium text-gray-950 dark:text-white">Tryb importu</label>
                         <select id="mode" name="mode" required class="mt-1 block w-full rounded-lg border-gray-300 text-sm shadow-sm transition duration-75 focus:border-primary-500 focus:ring-1 focus:ring-primary-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-primary-500">
@@ -170,7 +177,7 @@
                             type="submit"
                             class="fi-btn fi-color-primary fi-btn-color-primary fi-size-md inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-primary-500 focus-visible:ring-2 focus-visible:ring-primary-600 dark:bg-primary-500 dark:hover:bg-primary-400 dark:focus-visible:ring-primary-500"
                         >
-                            Przetwórz następną partię
+                            Przetwórz kolejną paczkę
                         </button>
                     </form>
                 @endif
@@ -211,6 +218,7 @@
                         'summary_filename',
                         'images_filename',
                         'mode',
+                        'batch_size',
                     ] as $key)
                         <div>
                             <dt class="font-medium">submitted {{ $key }}</dt>
