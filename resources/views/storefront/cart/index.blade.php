@@ -16,9 +16,9 @@
             <a class="sf-btn" href="{{ route('storefront.catalog') }}">Przejdź do sklepu</a>
         </section>
     @else
-        <form method="post" action="{{ route('storefront.cart.update') }}" class="sf-cart-layout">
-            @csrf
-            <section class="sf-cart-items" aria-label="Pozycje koszyka">
+        <div class="sf-cart-layout">
+            <form method="post" action="{{ route('storefront.cart.update') }}" class="sf-cart-items" aria-label="Pozycje koszyka">
+                @csrf
                 @foreach($items as $item)
                     @php
                         $part = $item['current_part'];
@@ -48,25 +48,24 @@
                     </article>
                 @endforeach
                 <button class="sf-btn" type="submit">Aktualizuj koszyk</button>
-            </section>
-        </form>
+            </form>
+
+            <aside class="sf-cart-summary">
+                <h2>Podsumowanie</h2>
+                <div><span>Subtotal</span><strong>{{ number_format((float) $subtotal, 2, ',', ' ') }} {{ $items->first()['currency'] ?? 'PLN' }}</strong></div>
+                <a class="sf-btn sf-btn--disabled" aria-disabled="true" href="#">Przejdź do zamówienia</a>
+                <form method="post" action="{{ route('storefront.cart.clear') }}">
+                    @csrf
+                    <button class="sf-btn sf-btn--outline" type="submit">Wyczyść koszyk</button>
+                </form>
+            </aside>
+        </div>
 
         @foreach($items as $item)
             <form id="remove-cart-item-{{ $item['part_id'] }}" method="post" action="{{ route('storefront.cart.remove', $item['part_id']) }}">
                 @csrf
             </form>
         @endforeach
-
-        <aside class="sf-cart-summary">
-            <h2>Podsumowanie</h2>
-            <div><span>Subtotal</span><strong>{{ number_format((float) $subtotal, 2, ',', ' ') }} {{ $items->first()['currency'] ?? 'PLN' }}</strong></div>
-            <a class="sf-btn sf-btn--disabled" aria-disabled="true" href="#">Przejdź do zamówienia</a>
-            <form method="post" action="{{ route('storefront.cart.clear') }}">
-                @csrf
-                <button class="sf-btn sf-btn--outline" type="submit">Wyczyść koszyk</button>
-            </form>
-            <a class="sf-btn sf-btn--outline" href="{{ route('storefront.catalog') }}">Kontynuuj zakupy</a>
-        </aside>
     @endif
 </div>
 @endsection
