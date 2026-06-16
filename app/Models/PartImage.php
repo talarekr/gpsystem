@@ -81,6 +81,54 @@ class PartImage extends Model
         return $this->presentationUrl('listing_path') ?? $this->publicUrl();
     }
 
+    public function listingScore(): ?float
+    {
+        $presentation = $this->legacy_payload['presentation'] ?? null;
+
+        if (! is_array($presentation)) {
+            return null;
+        }
+
+        $storedScore = $presentation['listing_score'] ?? null;
+
+        if (is_numeric($storedScore)) {
+            return (float) $storedScore;
+        }
+
+        return self::calculateListingScore(
+            $presentation['listing_fill_width_ratio'] ?? data_get($presentation, 'metrics.listing.fill_ratio.width_ratio'),
+            $presentation['listing_fill_height_ratio'] ?? data_get($presentation, 'metrics.listing.fill_ratio.height_ratio'),
+            $presentation['listing_dominant_ratio'] ?? data_get($presentation, 'metrics.listing.fill_ratio.dominant_ratio')
+        );
+    }
+
+    public static function calculateListingScore(mixed $widthRatio, mixed $heightRatio, mixed $dominantRatio): ?float
+    {
+        if (! is_numeric($widthRatio) || ! is_numeric($heightRatio) || ! is_numeric($dominantRatio)) {
+            return null;
+        }
+
+        $widthRatio = max(0.0, min(1.2, (float) $widthRatio));
+        $heightRatio = max(0.0, min(1.2, (float) $heightRatio));
+        $dominantRatio = max(0.0, min(1.2, (float) $dominantRatio));
+
+        $score = ($widthRatio * 58) + ($heightRatio * 28) + ($dominantRatio * 14);
+
+        if ($widthRatio >= 0.65 && $heightRatio >= 0.55 && $dominantRatio >= 0.85) {
+            $score += 18;
+        }
+
+        if ($widthRatio < 0.45) {
+            $score -= (0.45 - $widthRatio) * 120;
+        }
+
+        if ($heightRatio < 0.45) {
+            $score -= (0.45 - $heightRatio) * 70;
+        }
+
+        return round($score, 4);
+    }
+
     public function productUrl(): ?string
     {
         return $this->presentationUrl('product_path') ?? $this->publicUrl();
