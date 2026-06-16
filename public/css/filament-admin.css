@@ -1022,3 +1022,72 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     border-color: var(--gps-part-field-border) !important;
     background: var(--gps-part-field-bg) !important;
 }
+
+.gps-part-form {
+    --gps-part-inline-label-color: #354d69;
+    --gps-part-inline-label-font: inherit;
+}
+
+.gps-part-form .gps-part-form-section.fi-section {
+    border-color: #cbd5e1 !important;
+    box-shadow: 0 1px 2px rgba(11, 31, 58, 0.04), 0 8px 20px rgba(11, 31, 58, 0.035);
+}
+
+.gps-part-form .gps-part-form-section.fi-section .fi-section-header {
+    border-bottom-color: #e2e8f0 !important;
+}
+
+.gps-part-form .fi-input-wrp,
+.gps-part-form .fi-select-input,
+.gps-part-form .fi-textarea,
+.gps-part-form .fi-fo-rich-editor {
+    border-radius: 0.7rem;
+}
+
+.gps-part-form .fi-input,
+.gps-part-form .fi-select-input,
+.gps-part-form .fi-textarea,
+.gps-part-form .fi-fo-rich-editor .ProseMirror {
+    color: var(--gps-admin-navy);
+    font-family: var(--gps-part-inline-label-font);
+    font-size: 0.91rem;
+    font-weight: 500;
+}
+
+.gps-part-form .fi-input::placeholder,
+.gps-part-form .fi-textarea::placeholder,
+.gps-part-form .fi-fo-rich-editor .ProseMirror[data-placeholder]::before {
+    color: var(--gps-part-inline-label-color) !important;
+    font-family: var(--gps-part-inline-label-font);
+    font-size: 0.9rem;
+    font-weight: 500;
+    opacity: 0.92;
+}
+
+.gps-part-form .fi-select-input,
+.gps-part-form .fi-select-input option,
+.gps-part-form .choices__inner,
+.gps-part-form .choices__placeholder,
+.gps-part-form .choices__item--choice,
+.gps-part-form .choices__item--selectable,
+.gps-part-form .choices__input {
+    color: var(--gps-part-inline-label-color) !important;
+    font-family: var(--gps-part-inline-label-font);
+    font-size: 0.9rem;
+    font-weight: 500;
+    opacity: 1;
+}
+
+.gps-part-form .fi-fo-toggle label,
+.gps-part-form .fi-fo-toggle .fi-fo-field-wrp-label,
+.gps-part-form .fi-fo-toggle .fi-fo-field-wrp-label span {
+    color: var(--gps-part-inline-label-color);
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+.gps-part-form .fi-fo-field-wrp-helper-text,
+.gps-part-form .fi-fo-placeholder {
+    color: #64748b;
+    font-size: 0.86rem;
+}

@@ -79,17 +79,17 @@ class PartResource extends Resource
                     ->columns(4)
                     ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--part-info'])
                     ->schema([
-                        Forms\Components\TextInput::make('sku')->label('Główny kod części / SKU')->unique(ignoreRecord: true)->maxLength(255)->columnSpan(2),
-                        Forms\Components\TextInput::make('part_number')->label('Numer części')->maxLength(255),
-                        Forms\Components\TextInput::make('manufacturer_code')->label('Kod producenta')->maxLength(255),
-                        Forms\Components\TextInput::make('name')->label('Nazwa części')->required()->maxLength(255)->columnSpan(2),
-                        Forms\Components\TextInput::make('oem_number')->label('Numer OEM')->maxLength(255),
-                        Forms\Components\Select::make('category_id')->label('Kategoria')->relationship('category', 'name')->searchable()->preload()->native(false),
-                        Forms\Components\Select::make('suggested_category_id')->label('Sugerowana kategoria')->relationship('suggestedCategory', 'name')->searchable()->preload()->native(false)->columnSpan(2),
-                        Forms\Components\TextInput::make('category_confidence')->label('Pewność sugestii')->numeric()->suffix('%'),
+                        Forms\Components\TextInput::make('sku')->label('Główny kod części / SKU')->hiddenLabel()->placeholder('Główny kod części / SKU')->unique(ignoreRecord: true)->maxLength(255)->columnSpan(2),
+                        Forms\Components\TextInput::make('part_number')->label('Numer części')->hiddenLabel()->placeholder('Numer części')->maxLength(255),
+                        Forms\Components\TextInput::make('manufacturer_code')->label('Kod producenta')->hiddenLabel()->placeholder('Kod producenta')->maxLength(255),
+                        Forms\Components\TextInput::make('name')->label('Nazwa części')->hiddenLabel()->placeholder('Nazwa części')->required()->maxLength(255)->columnSpan(2),
+                        Forms\Components\TextInput::make('oem_number')->label('Numer OEM')->hiddenLabel()->placeholder('Numer OEM')->maxLength(255),
+                        Forms\Components\Select::make('category_id')->label('Kategoria')->hiddenLabel()->placeholder('Kategoria')->relationship('category', 'name')->searchable()->preload()->native(false),
+                        Forms\Components\Select::make('suggested_category_id')->label('Sugerowana kategoria')->hiddenLabel()->placeholder('Sugerowana kategoria')->relationship('suggestedCategory', 'name')->searchable()->preload()->native(false)->columnSpan(2),
+                        Forms\Components\TextInput::make('category_confidence')->label('Pewność sugestii')->hiddenLabel()->placeholder('Pewność sugestii')->numeric()->suffix('%'),
                         Forms\Components\Toggle::make('category_needs_review')->label('Wymaga sprawdzenia')->inline(false),
-                        Forms\Components\Textarea::make('category_suggestion_reason')->label('Powód sugestii')->rows(2)->columnSpanFull(),
-                        Forms\Components\Textarea::make('condition_notes')->label('Uwagi na etykiecie / stan')->rows(2)->columnSpanFull(),
+                        Forms\Components\Textarea::make('category_suggestion_reason')->label('Powód sugestii')->hiddenLabel()->placeholder('Powód sugestii')->rows(2)->columnSpanFull(),
+                        Forms\Components\Textarea::make('condition_notes')->label('Uwagi na etykiecie / stan')->hiddenLabel()->placeholder('Uwagi na etykiecie / stan')->rows(2)->columnSpanFull(),
                     ]),
 
                 Section::make('Informacje o samochodzie')
@@ -98,7 +98,7 @@ class PartResource extends Resource
                     ->columns(3)
                     ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--vehicle'])
                     ->schema([
-                        Forms\Components\Select::make('car_id')->label('Auto dawca')->options(fn () => Car::query()->orderByDesc('id')->get()->mapWithKeys(fn (Car $car) => [$car->id => self::carLabel($car)])->all())->searchable()->live()->native(false)->columnSpanFull(),
+                        Forms\Components\Select::make('car_id')->label('Auto dawca')->hiddenLabel()->placeholder('Auto dawca')->options(fn () => Car::query()->orderByDesc('id')->get()->mapWithKeys(fn (Car $car) => [$car->id => self::carLabel($car)])->all())->searchable()->live()->native(false)->columnSpanFull(),
                         Forms\Components\Placeholder::make('vehicle_context')->label('Dane pojazdu')->content(fn (?Part $record, Forms\Get $get): HtmlString => new HtmlString(self::vehicleContextHtml($record, $get('car_id'))))->columnSpanFull(),
                     ]),
 
@@ -107,9 +107,9 @@ class PartResource extends Resource
                     ->columns(4)
                     ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--stock'])
                     ->schema([
-                        Forms\Components\Select::make('storage_location_id')->label('Miejsce składowania')->options(fn () => StorageLocation::query()->orderBy('name')->get()->mapWithKeys(fn (StorageLocation $location) => [$location->id => trim($location->name.' — '.($location->description ?? ''))])->all())->searchable()->native(false)->columnSpan(2),
-                        Forms\Components\TextInput::make('quantity')->label('Ilość')->numeric()->default(1)->minValue(0),
-                        Forms\Components\Select::make('status')->label('Status')->options(Part::statusOptions())->default('draft')->native(false),
+                        Forms\Components\Select::make('storage_location_id')->label('Miejsce składowania')->hiddenLabel()->placeholder('Miejsce składowania')->options(fn () => StorageLocation::query()->orderBy('name')->get()->mapWithKeys(fn (StorageLocation $location) => [$location->id => trim($location->name.' — '.($location->description ?? ''))])->all())->searchable()->native(false)->columnSpan(2),
+                        Forms\Components\TextInput::make('quantity')->label('Ilość')->hiddenLabel()->placeholder('Ilość')->numeric()->default(1)->minValue(0),
+                        Forms\Components\Select::make('status')->label('Status')->hiddenLabel()->placeholder('Status')->options(Part::statusOptions())->default('draft')->native(false),
                         Forms\Components\Toggle::make('is_visible_storefront')->label('Widoczna w sklepie')->default(false)->inline(false),
                     ]),
 
@@ -118,9 +118,9 @@ class PartResource extends Resource
                     ->columns(4)
                     ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--prices'])
                     ->schema([
-                        Forms\Components\TextInput::make('price')->label('Cena')->numeric()->prefix('PLN')->minValue(0),
-                        Forms\Components\TextInput::make('currency')->label('Waluta')->default('PLN')->maxLength(3),
-                        Forms\Components\TextInput::make('ebay_price')->label('Cena eBay')->numeric()->prefix('PLN')->minValue(0),
+                        Forms\Components\TextInput::make('price')->label('Cena')->hiddenLabel()->placeholder('Cena')->numeric()->prefix('PLN')->minValue(0),
+                        Forms\Components\TextInput::make('currency')->label('Waluta')->hiddenLabel()->placeholder('Waluta')->default('PLN')->maxLength(3),
+                        Forms\Components\TextInput::make('ebay_price')->label('Cena eBay')->hiddenLabel()->placeholder('Cena eBay')->numeric()->prefix('PLN')->minValue(0),
                         Forms\Components\Placeholder::make('marketplace_price_note')->hiddenLabel()->content('Cena Allegro istnieje w bazie, ale sekcja Allegro i wystawianie są celowo ukryte na tym etapie.'),
                     ]),
 
@@ -130,7 +130,7 @@ class PartResource extends Resource
                     ->columns(2)
                     ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--store'])
                     ->schema([
-                        Forms\Components\TextInput::make('slug')->label('Slug')->unique(ignoreRecord: true)->maxLength(255),
+                        Forms\Components\TextInput::make('slug')->label('Slug')->hiddenLabel()->placeholder('Slug')->unique(ignoreRecord: true)->maxLength(255),
                         Forms\Components\Placeholder::make('store_visibility_note')->label('Widoczność')->content('Widoczność w sklepie ustawisz w sekcji Magazyn.'),
                     ]),
 
@@ -139,8 +139,8 @@ class PartResource extends Resource
                     ->collapsed()
                     ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--descriptions'])
                     ->schema([
-                        Forms\Components\Textarea::make('short_description')->label('Krótki opis')->rows(2),
-                        Forms\Components\RichEditor::make('description')->label('Opis')->columnSpanFull(),
+                        Forms\Components\Textarea::make('short_description')->label('Krótki opis')->hiddenLabel()->placeholder('Krótki opis')->rows(2),
+                        Forms\Components\RichEditor::make('description')->label('Opis')->hiddenLabel()->placeholder('Opis')->columnSpanFull(),
                     ]),
             ]);
     }
