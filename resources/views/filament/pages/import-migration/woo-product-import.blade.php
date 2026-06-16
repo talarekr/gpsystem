@@ -92,6 +92,15 @@
             <span class="text-xs text-gray-600 dark:text-gray-300">Zapisuje post_ping.log bez uruchamiania importu.</span>
         </form>
 
+        <x-filament::section heading="Drzewo kategorii Woo" description="Audytuje pliki woo_category_tree.* i pozwala bezpiecznie uruchomić import kategorii przed importem produktów.">
+            <a
+                href="{{ $routeDiagnostics['category_tree_audit_route'] ?? '/admin/import-migracyjny/produkty-woo/category-tree/audit' }}"
+                class="fi-btn fi-color-primary fi-btn-color-primary fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-primary-500 focus-visible:ring-2 focus-visible:ring-primary-600 dark:bg-primary-500 dark:hover:bg-primary-400 dark:focus-visible:ring-primary-500"
+            >
+                Otwórz audyt drzewa kategorii Woo
+            </a>
+        </x-filament::section>
+
         <x-filament::section heading="Szybka diagnostyka trasy Woo">
             <dl class="grid gap-2 text-xs md:grid-cols-2 xl:grid-cols-4">
                 @foreach ([
