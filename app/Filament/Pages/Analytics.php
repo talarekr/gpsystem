@@ -8,6 +8,7 @@ class Analytics extends OperationalPlaceholderPage
     protected static ?string $navigationLabel = 'Analityka';
     protected static ?string $title = 'Analityka';
     protected static ?int $navigationSort = 20;
+    protected static bool $shouldRegisterNavigation = false;
 
     public function getPlaceholderDescription(): string
     {
