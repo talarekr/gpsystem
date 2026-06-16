@@ -263,6 +263,98 @@ function syncDirectory(string $sourceDir, string $targetDir, callable $isPreserv
     return [$copied, $createdDirs, $deleted];
 }
 
+
+function copyPublicStorageFallback(string $sourceDir, string $targetDir): array
+{
+    $copied = 0;
+    $createdDirs = 0;
+    $warnings = [];
+
+    ensureDirectory($targetDir);
+
+    $sourceIterator = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($sourceDir, FilesystemIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::SELF_FIRST
+    );
+
+    foreach ($sourceIterator as $sourceItem) {
+        if ($sourceItem->isLink()) {
+            $warnings[] = 'Skipped symlink inside storage public fallback: ' . $sourceItem->getPathname();
+            continue;
+        }
+
+        $relativePath = normalizeRelativePath(substr($sourceItem->getPathname(), strlen($sourceDir) + 1));
+        $targetPath = $targetDir . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relativePath);
+
+        if ($sourceItem->isDir()) {
+            if (!is_dir($targetPath)) {
+                ensureDirectory($targetPath);
+                $createdDirs++;
+            }
+            continue;
+        }
+
+        copyFileWithDirectory($sourceItem->getPathname(), $targetPath);
+        $copied++;
+    }
+
+    return [$copied, $createdDirs, $warnings];
+}
+
+function ensurePublicStorageAccess(string $appDir, string $publicDir): void
+{
+    $appStoragePublicPath = rtrim($appDir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'app' . DIRECTORY_SEPARATOR . 'public';
+    $publicStoragePath = rtrim($publicDir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'storage';
+
+    logLine('Checking public storage target: ' . $publicStoragePath);
+    logLine('Public storage source: ' . $appStoragePublicPath);
+    logLine('public_html/storage exists: ' . ((file_exists($publicStoragePath) || is_link($publicStoragePath)) ? 'yes' : 'no'));
+    logLine('public_html/storage is symlink: ' . (is_link($publicStoragePath) ? 'yes' : 'no'));
+
+    if (!is_dir($appStoragePublicPath)) {
+        logLine('Public storage source is missing; skipped symlink/fallback setup.', 'warn');
+        return;
+    }
+
+    if (is_link($publicStoragePath)) {
+        $linkTarget = readlink($publicStoragePath);
+        if ($linkTarget !== false && realpath($publicStoragePath) === realpath($appStoragePublicPath)) {
+            logLine('public_html/storage already points to app/storage/app/public; no action needed.', 'ok');
+            return;
+        }
+
+        logLine('public_html/storage is a symlink but does not point to app/storage/app/public (target: ' . (string) $linkTarget . '). Fallback copy will not overwrite this symlink.', 'warn');
+        return;
+    }
+
+    if (file_exists($publicStoragePath)) {
+        if (is_dir($publicStoragePath)) {
+            logLine('public_html/storage already exists as a regular directory; it will not be removed. Using safe fallback copy into the existing directory.', 'warn');
+            [$copied, $createdDirs, $warnings] = copyPublicStorageFallback($appStoragePublicPath, $publicStoragePath);
+            foreach ($warnings as $warning) {
+                logLine($warning, 'warn');
+            }
+            logLine('Public storage fallback copy complete. Files copied: ' . $copied . '; directories ensured: ' . $createdDirs . '.', 'ok');
+            return;
+        }
+
+        logLine('public_html/storage exists but is neither a directory nor a symlink; cannot safely replace it.', 'warn');
+        return;
+    }
+
+    if (function_exists('symlink') && @symlink($appStoragePublicPath, $publicStoragePath)) {
+        logLine('Created public_html/storage symlink to app/storage/app/public.', 'ok');
+        return;
+    }
+
+    logLine('Could not create public_html/storage symlink; using fallback copy.', 'warn');
+    [$copied, $createdDirs, $warnings] = copyPublicStorageFallback($appStoragePublicPath, $publicStoragePath);
+    foreach ($warnings as $warning) {
+        logLine($warning, 'warn');
+    }
+    logLine('Public storage fallback copy complete. Files copied: ' . $copied . '; directories ensured: ' . $createdDirs . '.', 'ok');
+}
+
 function downloadZip(string $url, string $destination): void
 {
     if (function_exists('curl_init')) {
@@ -626,6 +718,8 @@ try {
     } else {
         logLine('/app/public is missing; public file sync skipped.', 'warn');
     }
+
+    ensurePublicStorageAccess($appDir, $publicDir);
 
     extractOptionalArchive(
         $publicDir . DIRECTORY_SEPARATOR . 'public-assets.zip',

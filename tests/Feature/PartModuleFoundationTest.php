@@ -69,13 +69,32 @@ class PartModuleFoundationTest extends TestCase
         $this->assertSame('parts/photos/front.jpg', $part->fresh()->primary_image_path);
     }
 
-    public function test_part_photo_public_url_uses_public_parts_photos_path(): void
+    public function test_part_photo_public_url_uses_storage_url_for_public_disk_file(): void
     {
+        Storage::disk('public')->put('parts/photos/example.jpg', 'fake image');
         $image = new PartImage(['path' => 'parts/photos/example.jpg']);
 
-        $this->assertSame(asset('parts/photos/example.jpg'), $image->publicUrl());
-        $this->assertStringEndsWith('/parts/photos/example.jpg', $image->publicUrl());
-        $this->assertStringNotContainsString('/storage/parts/photos/example.jpg', $image->publicUrl());
+        $this->assertSame(Storage::disk('public')->url('parts/photos/example.jpg'), $image->publicUrl());
+        $this->assertStringEndsWith('/storage/parts/photos/example.jpg', $image->publicUrl());
+    }
+
+    public function test_part_photo_public_url_uses_public_path_when_file_exists_in_public_directory(): void
+    {
+        $publicFile = public_path('legacy-parts/example.jpg');
+        if (! is_dir(dirname($publicFile))) {
+            mkdir(dirname($publicFile), 0755, true);
+        }
+        file_put_contents($publicFile, 'fake image');
+
+        try {
+            $image = new PartImage(['path' => 'legacy-parts/example.jpg']);
+
+            $this->assertSame(asset('legacy-parts/example.jpg'), $image->publicUrl());
+            $this->assertStringEndsWith('/legacy-parts/example.jpg', $image->publicUrl());
+        } finally {
+            @unlink($publicFile);
+            @rmdir(dirname($publicFile));
+        }
     }
 
     public function test_internal_category_suggestion_marks_uncertain_or_assigns_known_mapping(): void
