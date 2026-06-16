@@ -1,0 +1,276 @@
+:root {
+    --gps-admin-navy: #0b1f3a;
+    --gps-admin-canvas: #f5f1e8;
+    --gps-admin-canvas-muted: #f3efe6;
+    --gps-admin-surface: #ffffff;
+    --gps-admin-border: #e5ded2;
+    --gps-admin-border-strong: #d8cec0;
+    --gps-admin-soft-shadow: 0 1px 2px rgba(71, 54, 33, 0.05), 0 10px 28px rgba(71, 54, 33, 0.055);
+    --gps-admin-card-shadow: 0 1px 2px rgba(71, 54, 33, 0.045), 0 8px 20px rgba(71, 54, 33, 0.04);
+    --sidebar-width: 14.5rem;
+}
+
+html,
+body,
+.fi-body,
+.fi-layout,
+.fi-main-ctn,
+.fi-main,
+.fi-page {
+    background-color: var(--gps-admin-canvas) !important;
+}
+
+.fi-main {
+    background:
+        radial-gradient(circle at top right, rgba(255, 255, 255, 0.52), transparent 28rem),
+        linear-gradient(180deg, var(--gps-admin-canvas-muted) 0%, var(--gps-admin-canvas) 18rem) !important;
+}
+
+.fi-topbar,
+.fi-topbar nav,
+.fi-sidebar,
+.fi-sidebar-header,
+.fi-sidebar-nav,
+.fi-sidebar-nav-groups,
+.fi-sidebar-group,
+.fi-sidebar-group-items {
+    background-color: var(--gps-admin-surface) !important;
+}
+
+.fi-topbar {
+    border-bottom: 1px solid rgba(229, 222, 210, 0.78);
+    box-shadow: 0 1px 2px rgba(71, 54, 33, 0.035);
+}
+
+.fi-sidebar {
+    width: var(--sidebar-width) !important;
+    max-width: var(--sidebar-width) !important;
+    border-right: 1px solid var(--gps-admin-border);
+}
+
+.fi-sidebar-header {
+    padding-inline: 0.875rem !important;
+}
+
+.fi-sidebar-nav {
+    padding-inline: 0.5rem !important;
+}
+
+.fi-sidebar-item-button {
+    column-gap: 0.625rem;
+    padding-inline: 0.75rem !important;
+}
+
+.fi-sidebar-item-icon,
+.fi-sidebar-item-button .fi-icon,
+.fi-sidebar-item-button svg,
+.fi-sidebar-group-button-icon,
+.fi-sidebar-group-button .fi-icon,
+.fi-sidebar-group-button svg,
+.fi-sidebar-collapse-button,
+.fi-sidebar-collapse-button svg,
+.fi-sidebar-close-overlay-button,
+.fi-sidebar-close-overlay-button svg,
+.fi-sidebar-open-button,
+.fi-sidebar-open-button svg {
+    color: var(--gps-admin-navy) !important;
+    stroke: var(--gps-admin-navy) !important;
+}
+
+.fi-sidebar-item-icon [stroke],
+.fi-sidebar-item-button svg [stroke],
+.fi-sidebar-group-button-icon [stroke],
+.fi-sidebar-group-button svg [stroke],
+.fi-sidebar-collapse-button svg [stroke],
+.fi-sidebar-close-overlay-button svg [stroke],
+.fi-sidebar-open-button svg [stroke] {
+    stroke: var(--gps-admin-navy) !important;
+}
+
+.fi-sidebar-item-icon [fill]:not([fill="none"]),
+.fi-sidebar-item-button svg [fill]:not([fill="none"]),
+.fi-sidebar-group-button-icon [fill]:not([fill="none"]),
+.fi-sidebar-group-button svg [fill]:not([fill="none"]),
+.fi-sidebar-collapse-button svg [fill]:not([fill="none"]),
+.fi-sidebar-close-overlay-button svg [fill]:not([fill="none"]),
+.fi-sidebar-open-button svg [fill]:not([fill="none"]) {
+    fill: var(--gps-admin-navy) !important;
+}
+
+.fi-sidebar-item-active .fi-sidebar-item-icon,
+.fi-sidebar-item-active .fi-sidebar-item-button .fi-icon,
+.fi-sidebar-item-active .fi-sidebar-item-button svg,
+.fi-sidebar-item-button:hover .fi-sidebar-item-icon,
+.fi-sidebar-item-button:hover .fi-icon,
+.fi-sidebar-item-button:hover svg,
+.fi-sidebar-group-button:hover .fi-sidebar-group-button-icon,
+.fi-sidebar-group-button:hover .fi-icon,
+.fi-sidebar-group-button:hover svg {
+    color: var(--gps-admin-navy) !important;
+    stroke: var(--gps-admin-navy) !important;
+}
+
+.fi-section,
+.fi-fo-fieldset,
+.fi-ta-ctn,
+.fi-card,
+.fi-wi-widget,
+.fi-dropdown-panel,
+.fi-modal-window,
+.fi-modal-slide-over-window,
+.fi-in-repeatable-item,
+.fi-fo-repeater-item,
+.fi-fo-builder-item {
+    background-color: var(--gps-admin-surface) !important;
+    border-color: var(--gps-admin-border) !important;
+    box-shadow: var(--gps-admin-card-shadow);
+}
+
+.fi-section,
+.fi-fo-fieldset,
+.fi-ta-ctn,
+.fi-card,
+.fi-wi-widget {
+    border-width: 1px;
+    border-style: solid;
+}
+
+.fi-section-header,
+.fi-ta-header,
+.fi-modal-header,
+.fi-modal-footer {
+    background: linear-gradient(180deg, #ffffff 0%, #fbfaf7 100%);
+    border-color: var(--gps-admin-border) !important;
+}
+
+.fi-ta-table,
+.fi-ta-content,
+.fi-ta-header-cell,
+.fi-ta-row,
+.fi-ta-cell,
+.fi-ta-summary-row,
+.fi-ta-filters,
+.fi-pagination,
+.fi-fo-tabs-tab,
+.fi-tabs,
+.fi-tabs-item {
+    background-color: var(--gps-admin-surface) !important;
+    border-color: var(--gps-admin-border) !important;
+}
+
+.fi-input-wrp,
+.fi-input,
+.fi-select-input,
+.fi-textarea,
+.fi-fo-markdown-editor,
+.fi-fo-rich-editor,
+.fi-fo-tags-input,
+.fi-fo-checkbox-list,
+.fi-fo-radio,
+.fi-fo-date-time-picker input,
+.fi-fo-file-upload,
+.fi-fo-color-picker input {
+    background-color: var(--gps-admin-surface) !important;
+}
+
+.fi-input-wrp,
+.fi-fo-markdown-editor,
+.fi-fo-rich-editor,
+.fi-fo-tags-input,
+.fi-fo-file-upload {
+    border-color: var(--gps-admin-border-strong) !important;
+    box-shadow: 0 1px 1px rgba(71, 54, 33, 0.035);
+}
+
+.fi-input-wrp:focus-within,
+.fi-fo-markdown-editor:focus-within,
+.fi-fo-rich-editor:focus-within,
+.fi-fo-tags-input:focus-within {
+    border-color: #c9bda9 !important;
+    box-shadow: 0 0 0 3px rgba(229, 222, 210, 0.7) !important;
+}
+
+.fi-main:has(.fi-ta),
+.fi-main:has(.fi-ta) > .mx-auto,
+.fi-main:has(.fi-ta) .fi-page,
+.fi-main:has(.fi-ta) .fi-page > .mx-auto {
+    width: 100% !important;
+    max-width: none !important;
+}
+
+.fi-main:has(.fi-ta) {
+    padding-inline: clamp(1rem, 2vw, 2rem) !important;
+}
+
+.fi-main:has(.fi-ta) .fi-ta-ctn {
+    overflow-x: auto;
+    box-shadow: var(--gps-admin-soft-shadow);
+}
+
+.fi-main:has(.fi-ta) .fi-ta-table {
+    min-width: 78rem;
+}
+
+.fi-main:has(.fi-ta) .fi-ta-row,
+.fi-main:has(.fi-ta) .fi-ta-cell {
+    line-height: 1.25rem;
+}
+
+.gps-car-parts-stack {
+    display: inline-flex;
+    min-width: 7.5rem;
+    flex-direction: column;
+    gap: 0.25rem;
+    white-space: nowrap;
+}
+
+.gps-car-parts-stack span {
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;
+    border: 1px solid #dbe3ee;
+    border-radius: 999px;
+    background: #f8fafc;
+    color: #0f172a;
+    padding: 0.125rem 0.55rem;
+    font-size: 0.75rem;
+    font-weight: 650;
+    line-height: 1rem;
+}
+
+.gps-car-parts-stack span:first-child {
+    border-color: #cbd5e1;
+    background: #f1f5f9;
+    color: var(--gps-admin-navy);
+}
+
+.gps-car-form-section.fi-section {
+    border: 1px solid #cbd5e1 !important;
+    box-shadow: 0 1px 2px rgba(11, 31, 58, 0.04), 0 0 0 1px rgba(11, 31, 58, 0.025);
+}
+
+.gps-car-form-section.fi-section .fi-section-header {
+    border-bottom: 1px solid #e2e8f0;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+}
+
+.gps-car-form-section.fi-section .fi-section-header-icon,
+.gps-car-form-section.fi-section .fi-section-header-icon svg,
+.gps-car-form-section.fi-section .fi-section-header .fi-icon,
+.gps-car-form-section.fi-section .fi-section-header svg {
+    color: var(--gps-admin-navy) !important;
+    stroke: var(--gps-admin-navy) !important;
+}
+
+.gps-car-form-section.fi-section .fi-section-header-heading {
+    color: var(--gps-admin-navy);
+}
+
+.gps-storage-parts-placeholder {
+    border: 1px dashed #cbd5e1;
+    border-radius: 0.75rem;
+    background: #f8fafc;
+    color: #0f172a;
+    padding: 1rem;
+    font-weight: 600;
+}
