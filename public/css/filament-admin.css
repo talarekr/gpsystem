@@ -717,6 +717,17 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     line-height: 1.08;
 }
 
+.gps-sales-metric--total {
+    grid-column: 1 / -1;
+    background: #f8fbff;
+    border-color: #d8e4f0;
+    padding: 0.8rem 0.85rem;
+}
+
+.gps-sales-metric--total strong {
+    font-size: clamp(1.12rem, 1.45vw, 1.42rem);
+}
+
 .gps-sales-channels {
     display: grid;
     gap: 0.5rem;

@@ -121,7 +121,7 @@
 
                 <div class="gps-sales-metrics">
                     <div class="gps-sales-metric">
-                        <span>Online</span>
+                        <span>Sprzedaż online</span>
                         <strong>{{ $this->formatPln($salesAnalytics['summary']['online_revenue_pln']) }}</strong>
                         <small>Sklep, Ovoko, Allegro, eBay</small>
                     </div>
@@ -131,9 +131,14 @@
                         <small>Kanały online</small>
                     </div>
                     <div class="gps-sales-metric">
-                        <span>Lokalna</span>
+                        <span>Sprzedaż lokalna</span>
                         <strong>{{ $this->formatPln($salesAnalytics['summary']['local_sales_pln']) }}</strong>
                         <small>{{ $salesAnalytics['summary']['local_sales_count'] }} zapisów</small>
+                    </div>
+                    <div class="gps-sales-metric gps-sales-metric--total">
+                        <span>Sprzedaż łącznie</span>
+                        <strong>{{ $this->formatPln($salesAnalytics['summary']['total_sales_pln']) }}</strong>
+                        <small>Online + lokalnie</small>
                     </div>
                 </div>
             </article>
