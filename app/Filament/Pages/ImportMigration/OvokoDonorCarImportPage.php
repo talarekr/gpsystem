@@ -3,12 +3,12 @@
 namespace App\Filament\Pages\ImportMigration;
 
 use App\Services\ImportMigration\OvokoDonorCarImport;
+use App\Support\ImportMigration\UploadedImportFileResolver;
 use Filament\Forms;
 use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Forms\Contracts\HasForms;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
-use Illuminate\Support\Facades\Storage;
 use Throwable;
 
 class OvokoDonorCarImportPage extends Page implements HasForms
@@ -102,15 +102,16 @@ class OvokoDonorCarImportPage extends Page implements HasForms
         }
     }
 
-    public function runImport(OvokoDonorCarImport $import): void
+    public function runImport(OvokoDonorCarImport $import, UploadedImportFileResolver $fileResolver): void
     {
         $this->importError = null;
         $this->report = null;
 
         try {
             $state = $this->form->getState();
-            $csvPath = $this->localPath($state['csv'] ?? null, 'ovoko_donor_cars.csv');
-            $summaryPath = $this->optionalLocalPath($state['summary'] ?? null);
+            $batchDirectory = now()->format('Ymd-His').'-'.str()->random(8);
+            $csvPath = $fileResolver->resolveRequired($state['csv'] ?? null, 'ovoko_donor_cars.csv', 'ovoko', $batchDirectory);
+            $summaryPath = $fileResolver->resolveOptional($state['summary'] ?? null, 'ovoko_donor_cars_summary.json', 'ovoko', $batchDirectory);
 
             $this->report = $import
                 ->import($csvPath, $state['mode'], $summaryPath)
@@ -133,29 +134,4 @@ class OvokoDonorCarImportPage extends Page implements HasForms
         }
     }
 
-    private function optionalLocalPath(mixed $value): ?string
-    {
-        if (blank($value)) {
-            return null;
-        }
-
-        return $this->localPath($value, 'plik opcjonalny');
-    }
-
-    private function localPath(mixed $value, string $label): string
-    {
-        $path = is_array($value) ? reset($value) : $value;
-
-        if (blank($path) || ! is_string($path)) {
-            throw new \RuntimeException("Wymagany plik {$label} nie został przesłany.");
-        }
-
-        $fullPath = Storage::disk('local')->path($path);
-
-        if (! is_file($fullPath)) {
-            throw new \RuntimeException("Nie znaleziono przesłanego pliku {$label}.");
-        }
-
-        return $fullPath;
-    }
 }

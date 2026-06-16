@@ -3,12 +3,12 @@
 namespace App\Filament\Pages\ImportMigration;
 
 use App\Services\ImportMigration\WooProductImport;
+use App\Support\ImportMigration\UploadedImportFileResolver;
 use Filament\Forms;
 use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Forms\Contracts\HasForms;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
-use Illuminate\Support\Facades\Storage;
 use Throwable;
 
 class WooProductImportPage extends Page implements HasForms
@@ -79,23 +79,24 @@ class WooProductImportPage extends Page implements HasForms
             ->statePath('data');
     }
 
-    public function runImport(WooProductImport $import): void
+    public function runImport(WooProductImport $import, UploadedImportFileResolver $fileResolver): void
     {
         $this->importError = null;
         $this->report = null;
 
         try {
             $state = $this->form->getState();
-            $path = fn (string $key) => $this->optionalLocalPath($state[$key] ?? null);
-            $productsPath = $this->localPath($state['products'] ?? null, 'products.csv');
+            $batchDirectory = now()->format('Ymd-His').'-'.str()->random(8);
+            $path = fn (string $key, string $label) => $fileResolver->resolveOptional($state[$key] ?? null, $label, 'woo', $batchDirectory);
+            $productsPath = $fileResolver->resolveRequired($state['products'] ?? null, 'products.csv', 'woo', $batchDirectory);
 
             $this->report = $import
                 ->import($productsPath, [
-                    'images' => $path('images'),
-                    'categories' => $path('categories'),
-                    'meta' => $path('meta'),
-                    'attributes' => $path('attributes'),
-                    'summary' => $path('summary'),
+                    'images' => $path('images', 'product_images.csv'),
+                    'categories' => $path('categories', 'product_categories.csv'),
+                    'meta' => $path('meta', 'product_meta.csv'),
+                    'attributes' => $path('attributes', 'product_attributes.csv'),
+                    'summary' => $path('summary', 'export_summary.json'),
                 ], $state['mode'])
                 ->toArray();
 
@@ -116,29 +117,4 @@ class WooProductImportPage extends Page implements HasForms
         }
     }
 
-    private function optionalLocalPath(mixed $value): ?string
-    {
-        if (blank($value)) {
-            return null;
-        }
-
-        return $this->localPath($value, 'plik opcjonalny');
-    }
-
-    private function localPath(mixed $value, string $label): string
-    {
-        $path = is_array($value) ? reset($value) : $value;
-
-        if (blank($path) || ! is_string($path)) {
-            throw new \RuntimeException("Wymagany plik {$label} nie został przesłany.");
-        }
-
-        $fullPath = Storage::disk('local')->path($path);
-
-        if (! is_file($fullPath)) {
-            throw new \RuntimeException("Nie znaleziono przesłanego pliku {$label}.");
-        }
-
-        return $fullPath;
-    }
 }
