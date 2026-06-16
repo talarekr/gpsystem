@@ -3,10 +3,12 @@
     --gps-admin-canvas: #f2f6f7;
     --gps-admin-canvas-muted: #f2f6f7;
     --gps-admin-surface: #ffffff;
-    --gps-admin-border: #e5ded2;
-    --gps-admin-border-strong: #d8cec0;
-    --gps-admin-soft-shadow: 0 1px 2px rgba(71, 54, 33, 0.05), 0 10px 28px rgba(71, 54, 33, 0.055);
-    --gps-admin-card-shadow: 0 1px 2px rgba(71, 54, 33, 0.045), 0 8px 20px rgba(71, 54, 33, 0.04);
+    --gps-admin-border: #cbd5e1;
+    --gps-admin-border-strong: #94a3b8;
+    --gps-admin-border-hover: #64748b;
+    --gps-admin-border-focus: #122a66;
+    --gps-admin-soft-shadow: 0 1px 2px rgba(11, 31, 58, 0.05), 0 10px 28px rgba(11, 31, 58, 0.055);
+    --gps-admin-card-shadow: 0 1px 2px rgba(11, 31, 58, 0.045), 0 8px 20px rgba(11, 31, 58, 0.04);
     --sidebar-width: 14.5rem;
 }
 
@@ -62,8 +64,8 @@ body,
 }
 
 .fi-topbar {
-    border-bottom: 1px solid rgba(229, 222, 210, 0.78);
-    box-shadow: 0 1px 2px rgba(71, 54, 33, 0.035);
+    border-bottom: 1px solid rgba(203, 213, 225, 0.9);
+    box-shadow: 0 1px 2px rgba(11, 31, 58, 0.04);
 }
 
 .fi-sidebar {
@@ -163,7 +165,7 @@ body,
 .fi-ta-header,
 .fi-modal-header,
 .fi-modal-footer {
-    background: linear-gradient(180deg, #ffffff 0%, #fbfaf7 100%);
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
     border-color: var(--gps-admin-border) !important;
 }
 
@@ -201,17 +203,29 @@ body,
 .fi-fo-markdown-editor,
 .fi-fo-rich-editor,
 .fi-fo-tags-input,
-.fi-fo-file-upload {
+.fi-fo-file-upload,
+.fi-fo-repeater-item,
+.fi-fo-builder-item,
+.fi-fo-fieldset {
     border-color: var(--gps-admin-border-strong) !important;
-    box-shadow: 0 1px 1px rgba(71, 54, 33, 0.035);
+    box-shadow: 0 1px 1px rgba(11, 31, 58, 0.04);
+}
+
+.fi-input-wrp:hover,
+.fi-fo-markdown-editor:hover,
+.fi-fo-rich-editor:hover,
+.fi-fo-tags-input:hover,
+.fi-fo-file-upload:hover {
+    border-color: var(--gps-admin-border-hover) !important;
 }
 
 .fi-input-wrp:focus-within,
 .fi-fo-markdown-editor:focus-within,
 .fi-fo-rich-editor:focus-within,
-.fi-fo-tags-input:focus-within {
-    border-color: #c9bda9 !important;
-    box-shadow: 0 0 0 3px rgba(229, 222, 210, 0.7) !important;
+.fi-fo-tags-input:focus-within,
+.fi-fo-file-upload:focus-within {
+    border-color: var(--gps-admin-border-focus) !important;
+    box-shadow: 0 0 0 3px rgba(18, 42, 102, 0.14) !important;
 }
 
 .fi-main:has(.fi-ta),
@@ -314,7 +328,7 @@ body,
     gap: 1rem;
     min-height: var(--gps-admin-topbar-height);
     padding: 0.625rem clamp(0.875rem, 2vw, 1.5rem);
-    border-bottom: 1px solid rgba(216, 206, 192, 0.82);
+    border-bottom: 1px solid var(--gps-admin-border);
     background: #fff;
     box-shadow: 0 1px 2px rgba(11, 31, 58, 0.05), 0 8px 22px rgba(11, 31, 58, 0.04);
 }
@@ -802,7 +816,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 }
 
 .gps-part-form .gps-part-form-section.fi-section {
-    border: 1px solid #cbd5e1 !important;
+    border: 1px solid var(--gps-admin-border) !important;
     border-radius: 0.7rem !important;
     box-shadow: 0 1px 2px rgba(11, 31, 58, 0.04) !important;
     overflow: hidden;
@@ -815,8 +829,13 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 .gps-part-form .gps-part-form-section .fi-section-header {
     min-height: 2.75rem;
     padding: 0.65rem 0.85rem !important;
-    border-bottom: 1px solid #e2e8f0;
+    border-bottom: 1px solid var(--gps-admin-border);
     background: #fff !important;
+}
+
+.gps-part-form .gps-part-form-section.fi-section:has(.fi-section-header):not(:has(.fi-section-content)),
+.gps-part-form .gps-part-form-section.fi-section:has(.fi-section-header):has(.fi-section-content[style*="display: none"]) {
+    border-color: var(--gps-admin-border) !important;
 }
 
 .gps-part-form .gps-part-form-section .fi-section-content {
@@ -830,16 +849,16 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 }
 
 .gps-part-form :where(.fi-input-wrp, .fi-fo-file-upload, .fi-fo-rich-editor, .fi-fo-markdown-editor) {
-    border-color: #94a3b8 !important;
+    border-color: var(--gps-admin-border-strong) !important;
     box-shadow: none !important;
 }
 
 .gps-part-form :where(.fi-input-wrp:hover, .fi-fo-file-upload:hover, .fi-fo-rich-editor:hover, .fi-fo-markdown-editor:hover) {
-    border-color: #64748b !important;
+    border-color: var(--gps-admin-border-hover) !important;
 }
 
 .gps-part-form :where(.fi-input-wrp:focus-within, .fi-fo-file-upload:focus-within, .fi-fo-rich-editor:focus-within, .fi-fo-markdown-editor:focus-within) {
-    border-color: #122a66 !important;
+    border-color: var(--gps-admin-border-focus) !important;
     box-shadow: 0 0 0 2px rgba(18, 42, 102, 0.12) !important;
 }
 
