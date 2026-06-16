@@ -18,7 +18,17 @@ class WooProductImportRunController
         WooProductImportRunRepository $runs,
     ): RedirectResponse {
         try {
-            $run = $runs->start((array) $request->input('data', []), $import, $fileResolver);
+            $submitted = $request->only([
+                'products_filename',
+                'categories_filename',
+                'meta_filename',
+                'attributes_filename',
+                'summary_filename',
+                'images_filename',
+                'mode',
+            ]);
+
+            $run = $runs->start($submitted, $import, $fileResolver);
             $run = $runs->processNextBatch($run['id'], $import);
 
             return redirect()->to('/admin/import-migracyjny/produkty-woo?run_id='.$run['id']);
@@ -28,6 +38,15 @@ class WooProductImportRunController
             return redirect()
                 ->to('/admin/import-migracyjny/produkty-woo')
                 ->withInput()
+                ->with('woo_import_submitted', $request->only([
+                    'products_filename',
+                    'categories_filename',
+                    'meta_filename',
+                    'attributes_filename',
+                    'summary_filename',
+                    'images_filename',
+                    'mode',
+                ]))
                 ->withErrors(['woo_import' => $exception->getMessage()]);
         }
     }
