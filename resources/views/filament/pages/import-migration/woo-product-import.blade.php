@@ -8,7 +8,7 @@
                     <div>
                         <h3 class="text-sm font-medium text-gray-950 dark:text-white">Instrukcja wgrywania plików</h3>
                         <p class="mt-1 text-sm text-gray-600 dark:text-gray-300">
-                            Wgraj pliki CSV/JSON przez DirectAdmin lub File Manager do folderu storage/app/imports/manual/woo/, a następnie wpisz albo wybierz poniżej same nazwy plików. products.csv jest wymagany. Pola opcjonalne możesz wyczyścić, jeśli nie chcesz używać danego pliku. Oczekiwany folder na serwerze: {{ app(\App\Support\ImportMigration\ManualImportFileResolver::class)->wooDirectoryPath() }}
+                            Wgraj pliki CSV/JSON przez DirectAdmin lub File Manager do folderu storage/app/imports/manual/woo/, a następnie wpisz albo wybierz poniżej same nazwy plików. products.csv jest wymagany. Pola opcjonalne możesz wyczyścić, jeśli nie chcesz używać danego pliku. Oczekiwany folder na serwerze: {{ $routeDiagnostics['manual_folder_path'] ?? storage_path('app/imports/manual/woo') }}
                         </p>
                     </div>
 
@@ -73,6 +73,40 @@
                 @endif
             </div>
         </form>
+
+        <x-filament::section heading="Szybka diagnostyka trasy Woo">
+            <dl class="grid gap-2 text-xs md:grid-cols-2 xl:grid-cols-4">
+                @foreach ([
+                    'route_exists' => 'Trasa strony istnieje',
+                    'controller_class_exists' => 'Kontroler importu istnieje',
+                    'manual_folder_exists' => 'Folder manualny istnieje',
+                    'manual_folder_writable' => 'Folder manualny jest zapisywalny',
+                    'products_csv_exists' => 'products.csv istnieje',
+                    'products_csv_readable' => 'products.csv jest czytelny',
+                ] as $key => $label)
+                    <div>
+                        <dt class="font-medium">{{ $label }}</dt>
+                        <dd class="break-words">{{ ($routeDiagnostics[$key] ?? false) ? 'tak' : 'nie' }}</dd>
+                    </div>
+                @endforeach
+                <div>
+                    <dt class="font-medium">Endpoint start</dt>
+                    <dd class="break-words">{{ $routeDiagnostics['start_route'] ?? '/admin/import-migracyjny/produkty-woo/start' }}</dd>
+                </div>
+                <div>
+                    <dt class="font-medium">Endpoint diagnostyki</dt>
+                    <dd class="break-words">{{ $routeDiagnostics['diagnostics_route'] ?? '/admin/import-migracyjny/produkty-woo/diagnostyka' }}</dd>
+                </div>
+                <div>
+                    <dt class="font-medium">Folder manualny</dt>
+                    <dd class="break-words">{{ $routeDiagnostics['manual_folder_path'] ?? '—' }}</dd>
+                </div>
+                <div>
+                    <dt class="font-medium">Plik awaryjny</dt>
+                    <dd class="break-words">{{ $routeDiagnostics['last_error_log_path'] ?? '—' }}</dd>
+                </div>
+            </dl>
+        </x-filament::section>
 
         @if ($runImportStartedAt || $firstBatchStartedAt || $lastError)
             <div class="rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300">

@@ -45,6 +45,7 @@ class WooProductImportPage extends Page
     public ?string $firstBatchStartedAt = null;
     public int $pollTickCount = 0;
     public ?array $importRun = null;
+    public array $routeDiagnostics = [];
 
     public function mount(): void
     {
@@ -53,8 +54,10 @@ class WooProductImportPage extends Page
         try {
             $fileResolver->ensureWooDirectoryExists();
             $this->availableWooFiles = $fileResolver->availableWooFiles();
+            $this->routeDiagnostics = $this->buildRouteDiagnostics($fileResolver);
         } catch (\Throwable $exception) {
             $this->availableWooFiles = [];
+            $this->routeDiagnostics = $this->buildFallbackRouteDiagnostics();
             $this->importError = 'Nie udało się przygotować folderu importu Woo: '.$exception->getMessage();
         }
 
@@ -90,7 +93,14 @@ class WooProductImportPage extends Page
     private function hydrateRouteRun(): void
     {
         $this->importError = session('errors')?->first('woo_import');
-        $run = app(WooProductImportRunRepository::class)->find(request()->query('run_id'));
+
+        try {
+            $run = app(WooProductImportRunRepository::class)->find(request()->query('run_id'));
+        } catch (\Throwable $exception) {
+            $this->importError = trim(($this->importError ? $this->importError.' ' : '').'Nie udało się odczytać stanu uruchomienia importu Woo: '.$exception->getMessage());
+
+            return;
+        }
 
         if (! $run) {
             return;
@@ -110,6 +120,46 @@ class WooProductImportPage extends Page
         $this->runImportStartedAt = $run['startedAtText'] ?? null;
         $this->firstBatchStartedAt = $this->lastBatchStartedAt;
         $this->importError ??= $this->lastError;
+    }
+
+    private function buildRouteDiagnostics(ManualImportFileResolver $fileResolver): array
+    {
+        $directory = $fileResolver->wooDirectoryPath();
+        $productsPath = $directory.DIRECTORY_SEPARATOR.'products.csv';
+
+        return [
+            'route_exists' => true,
+            'start_route' => route('admin.import-migration.woo-products.start'),
+            'diagnostics_route' => route('admin.import-migration.woo-products.diagnostics'),
+            'controller_class_exists' => class_exists(\App\Http\Controllers\Admin\ImportMigration\WooProductImportRunController::class),
+            'manual_folder_path' => $directory,
+            'manual_folder_exists' => is_dir($directory),
+            'manual_folder_writable' => is_writable($directory),
+            'products_csv_path' => $productsPath,
+            'products_csv_exists' => is_file($productsPath),
+            'products_csv_readable' => is_file($productsPath) && is_readable($productsPath),
+            'last_error_log_path' => $directory.DIRECTORY_SEPARATOR.'last_error.log',
+        ];
+    }
+
+    private function buildFallbackRouteDiagnostics(): array
+    {
+        $directory = storage_path('app/imports/manual/woo');
+        $productsPath = $directory.DIRECTORY_SEPARATOR.'products.csv';
+
+        return [
+            'route_exists' => false,
+            'start_route' => '/admin/import-migracyjny/produkty-woo/start',
+            'diagnostics_route' => '/admin/import-migracyjny/produkty-woo/diagnostyka',
+            'controller_class_exists' => class_exists(\App\Http\Controllers\Admin\ImportMigration\WooProductImportRunController::class),
+            'manual_folder_path' => $directory,
+            'manual_folder_exists' => is_dir($directory),
+            'manual_folder_writable' => is_dir($directory) && is_writable($directory),
+            'products_csv_path' => $productsPath,
+            'products_csv_exists' => is_file($productsPath),
+            'products_csv_readable' => is_file($productsPath) && is_readable($productsPath),
+            'last_error_log_path' => $directory.DIRECTORY_SEPARATOR.'last_error.log',
+        ];
     }
 
 }
