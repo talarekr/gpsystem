@@ -1100,11 +1100,13 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 
 .gps-part-form .gps-part-form-section--part-info .fi-fo-field-wrp-label {
     position: absolute;
-    top: 0;
-    left: 0.72rem;
+    top: -0.08rem;
+    left: 0.75rem;
     z-index: 3;
+    width: max-content;
+    max-width: calc(100% - 1.5rem);
     margin: 0 !important;
-    padding-inline: 0.28rem;
+    padding-inline: 0.25rem;
     background: #ffffff;
     line-height: 1;
     pointer-events: none;
@@ -1112,7 +1114,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 
 .gps-part-form .gps-part-form-section--part-info .fi-fo-field-wrp-label span {
     color: var(--gps-part-field-label) !important;
-    font-size: 0.68rem !important;
+    font-size: 0.75rem !important;
     font-weight: 500 !important;
     letter-spacing: 0.01em;
     line-height: 1;
