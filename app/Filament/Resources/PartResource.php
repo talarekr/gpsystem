@@ -41,7 +41,7 @@ class PartResource extends Resource
                     ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--code-photo'])
                     ->schema([
                         Forms\Components\FileUpload::make('code_photo_path')
-                            ->label('Prześlij zdjęcie kodu części')
+                            ->label('Zdjęcie kodu części')
                             ->hiddenLabel()
                             ->image()
                             ->acceptedFileTypes(['image/*'])
@@ -51,8 +51,7 @@ class PartResource extends Resource
                             ->visibility('public')
                             ->imagePreviewHeight('90')
                             ->panelLayout('compact')
-                            ->placeholder('Prześlij zdjęcie kodu części')
-                            ->extraAttributes(['class' => 'gps-code-photo-upload'])
+                            ->placeholder('Przeciągnij i upuść lub wybierz pliki')
                             ->columnSpanFull(),
                     ]),
 
