@@ -38,12 +38,11 @@ class PartResource extends Resource
             ->schema([
                 Section::make('Zdjęcie kodu części')
                     ->collapsible()
-                    ->collapsed()
                     ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--code-photo'])
                     ->schema([
                         Forms\Components\Placeholder::make('part_code_photo_placeholder')
                             ->hiddenLabel()
-                            ->content(new HtmlString('<div class="gps-part-upload-placeholder"><span>+</span><strong>Prześlij zdjęcie kodu części</strong><small>Placeholder — brak osobnego pola w modelu Part.</small></div>')),
+                            ->content(new HtmlString('<div class="gps-part-upload-placeholder" data-max-files="1" aria-label="Prześlij zdjęcie kodu części, maksymalnie jedno zdjęcie"><span>+</span><strong>Prześlij zdjęcie kodu części</strong></div>')),
                     ]),
 
                 Section::make('Zdjęcia części')

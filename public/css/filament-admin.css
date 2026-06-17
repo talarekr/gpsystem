@@ -899,11 +899,6 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     line-height: 1.15;
 }
 
-.gps-part-upload-placeholder small {
-    color: #64748b;
-    font-size: 0.62rem;
-    line-height: 1.15;
-}
 
 @media (max-width: 900px) {
     .gps-part-form {
