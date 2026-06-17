@@ -1060,10 +1060,11 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 
 /* Single-border compact fields with small in-frame labels for the part info section. */
 .gps-part-form .gps-part-form-section--part-info {
-    --gps-part-field-border: #94a3b8;
-    --gps-part-field-border-hover: #64748b;
+    --gps-part-field-border: #a8b0bb;
+    --gps-part-field-border-hover: #a8b0bb;
     --gps-part-field-border-focus: #122a66;
-    --gps-part-field-focus-ring: rgba(18, 42, 102, 0.12);
+    --gps-part-field-focus-ring: rgba(18, 42, 102, 0.10);
+    --gps-part-field-radius: 5px;
     --gps-part-field-label: #64748b;
     --gps-part-field-placeholder: #64748b;
 }
@@ -1106,24 +1107,36 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     .fi-fo-textarea .fi-input-wrp,
     .fi-fo-select .fi-input-wrp,
     .choices__inner,
+    .fi-rich-editor,
     .fi-fo-rich-editor,
     .fi-fo-markdown-editor,
     .fi-fo-tags-input
 ) {
     border: 1px solid var(--gps-part-field-border) !important;
-    border-radius: 0.125rem !important;
+    border-radius: var(--gps-part-field-radius) !important;
     background: #ffffff !important;
     box-shadow: none !important;
     outline: none !important;
     --tw-ring-offset-shadow: 0 0 #0000 !important;
     --tw-ring-shadow: 0 0 #0000 !important;
+    --tw-ring-color: transparent !important;
+}
+
+.gps-part-form .gps-part-form-section--part-info :where(.fi-fo-field-wrp) {
+    border: 0 !important;
+    box-shadow: none !important;
+    outline: none !important;
 }
 
 .gps-part-form .gps-part-form-section--part-info :where(.fi-fo-select .choices) {
     border: 0 !important;
+    border-radius: var(--gps-part-field-radius) !important;
     background: transparent !important;
     box-shadow: none !important;
     outline: none !important;
+    --tw-ring-offset-shadow: 0 0 #0000 !important;
+    --tw-ring-shadow: 0 0 #0000 !important;
+    --tw-ring-color: transparent !important;
 }
 
 .gps-part-form .gps-part-form-section--part-info :where(
@@ -1132,6 +1145,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     .fi-textarea,
     .choices__input,
     .choices__list--single,
+    .fi-rich-editor .ProseMirror,
     .fi-fo-rich-editor .ProseMirror,
     .fi-fo-markdown-editor textarea
 ) {
@@ -1142,9 +1156,10 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     color: #0f172a !important;
     font-size: 0.9rem;
     font-weight: 500;
-    border-radius: 0.125rem !important;
+    border-radius: var(--gps-part-field-radius) !important;
     --tw-ring-offset-shadow: 0 0 #0000 !important;
     --tw-ring-shadow: 0 0 #0000 !important;
+    --tw-ring-color: transparent !important;
 }
 
 .gps-part-form .gps-part-form-section--part-info :where(.fi-input-wrp-prefix, .fi-input-wrp-suffix) {
@@ -1160,6 +1175,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     .fi-fo-textarea .fi-input-wrp:hover,
     .fi-fo-select .fi-input-wrp:hover,
     .choices__inner:hover,
+    .fi-rich-editor:hover,
     .fi-fo-rich-editor:hover,
     .fi-fo-markdown-editor:hover,
     .fi-fo-tags-input:hover
@@ -1173,13 +1189,17 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     .fi-fo-textarea .fi-input-wrp:focus-within,
     .fi-fo-select .fi-input-wrp:focus-within,
     .choices__inner:focus-within,
+    .fi-rich-editor:focus-within,
     .fi-fo-rich-editor:focus-within,
     .fi-fo-markdown-editor:focus-within,
     .fi-fo-tags-input:focus-within
 ) {
     border-color: var(--gps-part-field-border-focus) !important;
-    box-shadow: 0 0 0 2px var(--gps-part-field-focus-ring) !important;
+    box-shadow: 0 0 0 1px var(--gps-part-field-focus-ring) !important;
     outline: none !important;
+    --tw-ring-offset-shadow: 0 0 #0000 !important;
+    --tw-ring-shadow: 0 0 #0000 !important;
+    --tw-ring-color: transparent !important;
 }
 
 .gps-part-form .gps-part-form-section--part-info :where(.fi-input::placeholder, .fi-textarea::placeholder, .choices__input::placeholder),
