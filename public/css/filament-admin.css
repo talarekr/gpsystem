@@ -1196,3 +1196,96 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 .gps-part-form .gps-part-form-section--photos .gps-part-photos-upload :where(.filepond--file-info-sub, .filepond--file-status) {
     display: none !important;
 }
+
+/* Compact inline layout for the native part-photo FileUpload. Keep behavior intact:
+   only override FilePond presentation so the dropzone and thumbnails share one row. */
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload :where(.filepond--root) {
+    display: flex !important;
+    flex-flow: row wrap !important;
+    align-items: flex-start !important;
+    gap: 0.5rem !important;
+    contain: layout paint !important;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload :where(.filepond--drop-label) {
+    position: relative !important;
+    flex: 0 0 var(--gps-part-photo-tile-width) !important;
+    order: 0 !important;
+    transform: none !important;
+    z-index: 1 !important;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload :where(.filepond--list-scroller) {
+    position: static !important;
+    flex: 1 1 calc(100% - var(--gps-part-photo-tile-width) - 0.5rem) !important;
+    min-width: min(100%, var(--gps-part-photo-tile-width)) !important;
+    margin: 0 !important;
+    transform: none !important;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload :where(.filepond--list) {
+    position: static !important;
+    transform: none !important;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload :where(.filepond--item) {
+    position: relative !important;
+    inset: auto !important;
+    transform: none !important;
+    flex: 0 0 var(--gps-part-photo-tile-width) !important;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06) !important;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload :where(
+    .filepond--item-panel,
+    .filepond--panel,
+    .filepond--panel-root,
+    .filepond--file,
+    .filepond--image-preview,
+    .filepond--image-preview-wrapper,
+    .filepond--image-canvas-wrapper,
+    .filepond--image-bitmap,
+    .filepond--image-bitmap canvas
+) {
+    background: #ffffff !important;
+    filter: none !important;
+    opacity: 1 !important;
+    box-shadow: none !important;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload :where(
+    .filepond--image-preview-overlay,
+    .filepond--image-preview-overlay-idle,
+    .filepond--image-preview-overlay-success,
+    .filepond--image-preview-overlay-failure,
+    .filepond--progress-indicator,
+    .filepond--file-action-button.filepond--action-process-item,
+    .filepond--file-action-button.filepond--action-retry-item-processing,
+    .filepond--processing-complete-indicator,
+    .filepond--load-indicator,
+    .filepond--file-status
+) {
+    display: none !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload :where(.filepond--image-preview) {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload :where(.filepond--image-bitmap) {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload :where(.filepond--image-bitmap img, .filepond--image-bitmap canvas) {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: contain !important;
+    filter: none !important;
+    opacity: 1 !important;
+}
