@@ -40,9 +40,20 @@ class PartResource extends Resource
                     ->collapsible()
                     ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--code-photo'])
                     ->schema([
-                        Forms\Components\Placeholder::make('part_code_photo_placeholder')
+                        Forms\Components\FileUpload::make('code_photo_path')
+                            ->label('Prześlij zdjęcie kodu części')
                             ->hiddenLabel()
-                            ->content(new HtmlString('<div class="gps-part-upload-placeholder" data-max-files="1" aria-label="Prześlij zdjęcie kodu części, maksymalnie jedno zdjęcie"><span>+</span><strong>Prześlij zdjęcie kodu części</strong></div>')),
+                            ->image()
+                            ->acceptedFileTypes(['image/*'])
+                            ->maxFiles(1)
+                            ->disk('public')
+                            ->directory('parts/code-photos')
+                            ->visibility('public')
+                            ->imagePreviewHeight('90')
+                            ->panelLayout('compact')
+                            ->placeholder('Prześlij zdjęcie kodu części')
+                            ->extraAttributes(['class' => 'gps-code-photo-upload'])
+                            ->columnSpanFull(),
                     ]),
 
                 Section::make('Zdjęcia części')
