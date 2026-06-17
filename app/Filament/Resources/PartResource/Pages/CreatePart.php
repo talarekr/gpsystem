@@ -9,19 +9,9 @@ class CreatePart extends CreateRecord
 {
     protected static string $resource = PartResource::class;
 
-    protected array $partPhotoPaths = [];
-
-    protected function mutateFormDataBeforeCreate(array $data): array
-    {
-        $this->partPhotoPaths = $data['part_photo_paths'] ?? [];
-        unset($data['part_photo_paths']);
-
-        return $data;
-    }
-
     protected function afterCreate(): void
     {
-        PartResource::syncPartImages($this->record, $this->partPhotoPaths);
+        PartResource::normalizePartImages($this->record);
     }
 
     protected function getCreateFormAction(): \Filament\Actions\Action

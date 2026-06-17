@@ -61,23 +61,36 @@ class PartResource extends Resource
                     ->collapsible()
                     ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--photos'])
                     ->schema([
-                        Forms\Components\FileUpload::make('part_photo_paths')
+                        Forms\Components\Repeater::make('images')
                             ->label('Zdjęcia części')
                             ->hiddenLabel()
-                            ->dehydrated()
-                            ->image()
-                            ->acceptedFileTypes(['image/*'])
-                            ->multiple()
-                            ->maxFiles(20)
+                            ->relationship('images')
+                            ->orderColumn('sort_order')
                             ->reorderable()
-                            ->storeFiles()
-                            ->disk('public')
-                            ->directory('parts/photos')
-                            ->visibility('public')
-                            ->imagePreviewHeight('96')
-                            ->panelLayout('compact')
-                            ->placeholder('＋ Prześlij zdjęcia')
-                            ->extraAttributes(['class' => 'gps-part-photos-upload'])
+                            ->reorderableWithDragAndDrop()
+                            ->addActionLabel('Dodaj zdjęcie')
+                            ->itemLabel(fn (array $state): string => filled($state['path'] ?? null) ? 'Zdjęcie części' : 'Nowe zdjęcie')
+                            ->defaultItems(0)
+                            ->grid(['default' => 2, 'md' => 3, 'xl' => 4])
+                            ->extraAttributes(['class' => 'gps-part-photos-repeater'])
+                            ->schema([
+                                Forms\Components\FileUpload::make('path')
+                                    ->label('Zdjęcie')
+                                    ->hiddenLabel()
+                                    ->image()
+                                    ->acceptedFileTypes(['image/*'])
+                                    ->maxFiles(1)
+                                    ->disk('public')
+                                    ->directory('parts/photos')
+                                    ->visibility('public')
+                                    ->imagePreviewHeight('90')
+                                    ->panelLayout('compact')
+                                    ->placeholder('＋ Wybierz zdjęcie')
+                                    ->extraAttributes(['class' => 'gps-part-photo-tile-upload'])
+                                    ->columnSpanFull(),
+                            ])
+                            ->mutateRelationshipDataBeforeCreateUsing(fn (array $data): array => array_merge($data, ['is_primary' => false]))
+                            ->mutateRelationshipDataBeforeSaveUsing(fn (array $data): array => array_merge($data, ['is_primary' => false]))
                             ->columnSpanFull(),
                     ]),
 
@@ -152,6 +165,21 @@ class PartResource extends Resource
             ]);
     }
 
+
+    public static function normalizePartImages(Part $part): void
+    {
+        $images = $part->images()
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->get();
+
+        foreach ($images as $index => $image) {
+            $image->forceFill([
+                'sort_order' => $index,
+                'is_primary' => $index === 0,
+            ])->saveQuietly();
+        }
+    }
 
     public static function syncPartImages(Part $part, mixed $paths): void
     {
