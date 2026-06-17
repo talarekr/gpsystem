@@ -1164,9 +1164,9 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 .gps-part-form-section--photos .filepond--root {
     height: auto !important;
     min-height: 6rem !important;
-    max-height: 8.75rem !important;
+    max-height: none !important;
     margin-bottom: 0;
-    overflow-y: auto;
+    overflow: visible !important;
     font-size: 0.875rem;
 }
 
@@ -1190,11 +1190,52 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 .gps-part-form-section--photos .gps-part-photos-upload .filepond--drop-label {
     height: 6rem !important;
     min-height: 6rem !important;
-    max-height: 7.5rem !important;
+    max-height: none !important;
     padding: 0.75rem !important;
 }
 
 .gps-part-form-section--photos .gps-part-photos-upload .filepond--list-scroller {
-    max-height: 7.75rem !important;
-    overflow-y: auto !important;
+    position: static !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    margin: 0.75rem !important;
+    overflow: visible !important;
+    transform: none !important;
+}
+
+.gps-part-form-section--photos .gps-part-photos-upload .filepond--list {
+    position: static !important;
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
+    gap: 0.6rem !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+    transform: none !important;
+}
+
+.gps-part-form-section--photos .gps-part-photos-upload .filepond--item {
+    position: relative !important;
+    inset: auto !important;
+    width: 8rem !important;
+    height: 5.75rem !important;
+    margin: 0 !important;
+    overflow: hidden !important;
+    transform: none !important;
+}
+
+.gps-part-form-section--photos .gps-part-photos-upload :where(.filepond--file, .filepond--image-preview-wrapper, .filepond--image-preview) {
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: hidden !important;
+    border-radius: 0.6rem !important;
+}
+
+.gps-part-form-section--photos .gps-part-photos-upload :where(.filepond--image-preview, .filepond--image-preview-overlay, .filepond--image-bitmap, .filepond--image-bitmap canvas, .filepond--image-bitmap img) {
+    object-fit: contain !important;
 }
