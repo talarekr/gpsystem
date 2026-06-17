@@ -1367,6 +1367,17 @@ body.fi-body :where(
     align-items: center !important;
 }
 
+.gps-part-form .gps-part-form-section--part-info .fi-fo-select .choices__inner,
+.gps-part-form .gps-part-form-section--part-info .fi-fo-select .choices__list--single,
+.gps-part-form .gps-part-form-section--part-info .fi-fo-select .choices__item,
+.gps-part-form .gps-part-form-section--part-info .fi-fo-select .choices__item--selectable {
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    outline: none !important;
+    border-radius: 0 !important;
+}
+
 .gps-part-form .gps-part-form-section--part-info .fi-fo-select :where(
     .choices__inner,
     .choices__list--single,
@@ -1375,11 +1386,6 @@ body.fi-body :where(
     .choices__item--selectable,
     .fi-select-input
 ) {
-    border: 0 !important;
-    background: transparent !important;
-    box-shadow: none !important;
-    outline: none !important;
-    border-radius: 0 !important;
     padding-top: 0 !important;
     padding-bottom: 0 !important;
     --tw-ring-offset-shadow: 0 0 #0000 !important;
