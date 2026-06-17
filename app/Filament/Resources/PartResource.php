@@ -106,11 +106,20 @@ class PartResource extends Resource
                 Section::make('Informacje o samochodzie')
                     ->collapsible()
                     ->collapsed()
-                    ->columns(3)
+                    ->columns(2)
                     ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--vehicle'])
                     ->schema([
-                        Forms\Components\Select::make('car_id')->label('Auto dawca')->hiddenLabel()->placeholder('Auto dawca')->options(fn () => Car::query()->orderByDesc('id')->get()->mapWithKeys(fn (Car $car) => [$car->id => self::carLabel($car)])->all())->searchable()->live()->native(false)->columnSpanFull(),
-                        Forms\Components\Placeholder::make('vehicle_context')->label('Dane pojazdu')->content(fn (?Part $record, Forms\Get $get): HtmlString => new HtmlString(self::vehicleContextHtml($record, $get('car_id'))))->columnSpanFull(),
+                        Forms\Components\Hidden::make('car_id')->live(),
+                        Forms\Components\Actions::make([
+                            self::chooseCarAction(),
+                            self::createCarAction(),
+                        ])
+                            ->extraAttributes(['class' => 'gps-vehicle-actions'])
+                            ->columnSpanFull(),
+                        Forms\Components\Placeholder::make('vehicle_context')
+                            ->hiddenLabel()
+                            ->content(fn (?Part $record, Forms\Get $get): HtmlString => new HtmlString(self::vehicleContextHtml($record, $get('car_id'))))
+                            ->columnSpanFull(),
                     ]),
 
                 Section::make('Magazyn')
@@ -214,6 +223,120 @@ class PartResource extends Resource
         }
 
         return null;
+    }
+
+
+    public static function chooseCarAction(): Action
+    {
+        return Action::make('chooseCar')
+            ->label(fn (): string => 'Moje samochody ('.Car::query()->count().')')
+            ->icon('heroicon-o-truck')
+            ->color('gray')
+            ->modalHeading('Moje samochody')
+            ->modalSubmitActionLabel('Wybierz samochód')
+            ->modalCancelActionLabel('Zamknij')
+            ->extraModalWindowAttributes(['class' => 'gps-vehicle-picker-modal'])
+            ->slideOver()
+            ->fillForm(fn (Forms\Get $get): array => ['selected_car_id' => $get('car_id')])
+            ->form([
+                Forms\Components\Select::make('selected_car_id')
+                    ->label('Wyszukaj samochód')
+                    ->placeholder('Wyszukaj samochód')
+                    ->searchable()
+                    ->preload()
+                    ->native(false)
+                    ->allowHtml()
+                    ->options(fn (): array => self::carPickerOptions())
+                    ->getSearchResultsUsing(fn (string $search): array => self::carPickerOptions($search))
+                    ->getOptionLabelUsing(fn ($value): ?string => self::carPickerOptionLabel($value))
+                    ->helperText('Wyniki są ograniczone do 30 samochodów.')
+                    ->columnSpanFull(),
+            ])
+            ->action(function (array $data, Forms\Set $set): void {
+                if (! empty($data['selected_car_id'])) {
+                    $set('car_id', (int) $data['selected_car_id']);
+                }
+            });
+    }
+
+    public static function createCarAction(): Action
+    {
+        return Action::make('createCar')
+            ->label('Nowy samochód')
+            ->icon('heroicon-o-plus')
+            ->color('primary')
+            ->modalHeading('Nowy samochód')
+            ->modalSubmitActionLabel('Zapisz samochód')
+            ->modalCancelActionLabel('Zamknij')
+            ->extraModalWindowAttributes(['class' => 'gps-vehicle-picker-modal'])
+            ->slideOver()
+            ->form(self::quickCarFormSchema())
+            ->action(function (array $data, Forms\Set $set): void {
+                $car = Car::query()->create($data);
+                $set('car_id', $car->id);
+            });
+    }
+
+    /**
+     * @return array<int, \Filament\Forms\Components\Component>
+     */
+    public static function quickCarFormSchema(): array
+    {
+        return [
+            Grid::make(2)->schema([
+                Forms\Components\TextInput::make('make')->label('Marka')->maxLength(255)->required(),
+                Forms\Components\TextInput::make('model')->label('Model samochodu')->maxLength(255)->required(),
+                Forms\Components\TextInput::make('model_variant')->label('Generacja / wersja')->maxLength(255),
+                Forms\Components\TextInput::make('production_year')->label('Rok')->numeric()->minValue(1900)->maxValue((int) date('Y') + 1),
+                Forms\Components\TextInput::make('body_type')->label('Nadwozie')->maxLength(255),
+                Forms\Components\Select::make('fuel_type')->label('Paliwo')->options(Car::fuelTypeOptions())->native(false),
+                Forms\Components\TextInput::make('engine_power_kw')->label('Moc kW')->numeric()->minValue(0),
+                Forms\Components\TextInput::make('engine_capacity_cm3')->label('Pojemność cm3')->numeric()->minValue(0),
+                Forms\Components\TextInput::make('color')->label('Kolor')->maxLength(255),
+                Forms\Components\Select::make('drivetrain')->label('Napęd')->options(Car::drivetrainOptions())->native(false),
+                Forms\Components\Select::make('steering_side')->label('Strona kierownicy')->options(Car::steeringSideOptions())->native(false),
+                Forms\Components\Select::make('gearbox_type')->label('Skrzynia')->options(Car::gearboxTypeOptions())->native(false),
+                Forms\Components\TextInput::make('vin')->label('VIN')->maxLength(255)->columnSpanFull(),
+                Forms\Components\Select::make('status')->label('Status')->options(Car::statusOptions())->default('kupiony')->native(false)->columnSpanFull(),
+            ]),
+        ];
+    }
+
+    public static function carPickerOptions(?string $search = null): array
+    {
+        $search = trim((string) $search);
+
+        return Car::query()
+            ->when($search !== '', function (Builder $query) use ($search): Builder {
+                return $query->where(function (Builder $query) use ($search): void {
+                    foreach (['make', 'model', 'model_variant', 'production_year', 'first_registration_year', 'fuel_type', 'body_type', 'color', 'drivetrain', 'steering_side', 'gearbox_type', 'engine_code', 'vin', 'registration_number'] as $field) {
+                        $query->orWhere($field, 'like', '%'.$search.'%');
+                    }
+                });
+            })
+            ->orderByDesc('id')
+            ->limit(30)
+            ->get()
+            ->mapWithKeys(fn (Car $car): array => [$car->id => self::carPickerOptionHtml($car)])
+            ->all();
+    }
+
+    public static function carPickerOptionLabel($value): ?string
+    {
+        if (blank($value)) {
+            return null;
+        }
+
+        $car = Car::query()->find($value);
+
+        return $car ? self::carPickerOptionHtml($car) : null;
+    }
+
+    public static function carPickerOptionHtml(Car $car): string
+    {
+        $details = self::carDetails($car);
+
+        return '<div class="gps-vehicle-option"><span class="gps-vehicle-option__icon">🚗</span><span><strong>'.e(self::carLabel($car)).'</strong>'.($details ? '<small>'.e(implode(' · ', $details)).'</small>' : '').'</span></div>';
     }
 
     public static function categoryTreeAction(): Action
@@ -357,16 +480,45 @@ class PartResource extends Resource
 
     public static function carLabel(Car $car): string
     {
-        return '#'.$car->id.' — '.trim(implode(' ', array_filter([$car->make, $car->model, $car->production_year]))) ?: '#'.$car->id;
+        $name = trim(implode(' ', array_filter([$car->make, $car->model, $car->model_variant])));
+        $year = $car->production_year ?: $car->first_registration_year;
+
+        return trim($name.($year ? ' ('.$year.')' : '')) ?: '#'.$car->id;
+    }
+
+    public static function carDetails(Car $car): array
+    {
+        return array_values(array_filter([
+            $car->production_year ? 'rok '.$car->production_year : null,
+            $car->body_type,
+            $car->fuel_type,
+            $car->engine_power_kw ? $car->engine_power_kw.' kW' : null,
+            $car->engine_capacity_cm3 ? $car->engine_capacity_cm3.' cm³' : null,
+            $car->color,
+            $car->drivetrain,
+            $car->steering_side,
+            $car->gearbox_type,
+        ]));
     }
 
     public static function vehicleContextHtml(?Part $record, mixed $carId): string
     {
-        $snapshot = $carId ? Car::query()->find($carId)?->only(['make','model','model_variant','production_year','fuel_type','gearbox_type','engine_capacity_cm3','engine_code','color','steering_side']) : ($record?->vehicle_snapshot ?? []);
-        if (! $snapshot) { return '<span>Wybierz samochód, aby zobaczyć kontekst pojazdu.</span>'; }
-        $labels = ['make'=>'Marka','model'=>'Model','model_variant'=>'Modyfikacja / wersja','production_year'=>'Rok produkcji','fuel_type'=>'Paliwo','gearbox_type'=>'Skrzynia','engine_capacity_cm3'=>'Pojemność silnika','engine_code'=>'Kod silnika','color'=>'Kolor','steering_side'=>'Strona kierownicy'];
-        $rows = collect($labels)->map(fn ($label, $key) => '<div><strong>'.$label.':</strong> '.e($snapshot[$key] ?? '—').'</div>')->implode('');
-        return '<div class="grid gap-1 text-sm md:grid-cols-3">'.$rows.'</div>';
+        $car = $carId ? Car::query()->find($carId) : null;
+
+        if ($car) {
+            $details = self::carDetails($car);
+
+            return '<div class="gps-selected-vehicle"><strong>Wybrano: '.e(self::carLabel($car)).'</strong>'.($details ? '<span>'.e(implode(' · ', $details)).'</span>' : '').'</div>';
+        }
+
+        if ($record?->vehicle_snapshot) {
+            $snapshot = $record->vehicle_snapshot;
+            $name = trim(implode(' ', array_filter([$snapshot['make'] ?? null, $snapshot['model'] ?? null, $snapshot['model_variant'] ?? null])));
+
+            return '<div class="gps-selected-vehicle"><span>Wybrano: '.e($name ?: 'samochód z zapisanej migawki').'</span></div>';
+        }
+
+        return '<span class="gps-selected-vehicle gps-selected-vehicle--empty">Nie wybrano samochodu.</span>';
     }
 
     public static function getNavigationItems(): array
