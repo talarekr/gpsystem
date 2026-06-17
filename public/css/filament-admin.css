@@ -870,33 +870,46 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     padding-block: 0.45rem !important;
 }
 
-.gps-part-upload-placeholder {
-    display: inline-flex;
-    width: 7rem;
-    min-height: 5rem;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 0.25rem;
-    border: 1px solid #94a3b8;
-    border-radius: 0.4rem;
-    background: #fff;
-    color: #475569;
-    text-align: center;
-    padding: 0.65rem;
+.gps-part-form-section--code-photo .gps-code-photo-upload {
+    max-width: 8rem;
 }
 
-.gps-part-upload-placeholder span {
+.gps-part-form-section--code-photo .gps-code-photo-upload .fi-fo-file-upload,
+.gps-part-form-section--code-photo .gps-code-photo-upload .filepond--root,
+.gps-part-form-section--code-photo .gps-code-photo-upload .filepond--drop-label {
+    min-height: 5.625rem !important;
+}
+
+.gps-part-form-section--code-photo .gps-code-photo-upload .filepond--panel-root {
+    border: 1px solid #94a3b8 !important;
+    border-radius: 0.4rem !important;
+    background: #fff !important;
+}
+
+.gps-part-form-section--code-photo .gps-code-photo-upload .filepond--drop-label {
+    align-items: center;
+    color: #475569 !important;
+    font-size: 0.72rem !important;
+    font-weight: 400 !important;
+    line-height: 1.15 !important;
+    text-align: center;
+}
+
+.gps-part-form-section--code-photo .gps-code-photo-upload .filepond--drop-label::before {
+    display: block;
+    margin-bottom: 0.25rem;
     color: #122a66;
+    content: '+';
     font-size: 1.3rem;
+    font-weight: 600;
     line-height: 1;
 }
 
-.gps-part-upload-placeholder strong {
-    color: #475569;
-    font-size: 0.72rem;
-    font-weight: 700;
-    line-height: 1.15;
+.gps-part-form-section--code-photo .gps-code-photo-upload .filepond--label-action,
+.gps-part-form-section--code-photo .gps-code-photo-upload .filepond--drop-label label {
+    color: #475569 !important;
+    font-weight: 400 !important;
+    text-decoration: none !important;
 }
 
 

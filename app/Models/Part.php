@@ -15,7 +15,7 @@ class Part extends Model
     use HasFactory;
 
     protected $fillable = [
-        'source_system','external_id','sku','name','slug','legacy_url','legacy_slug','part_number','oem_number','manufacturer_code','short_description','description','condition_notes',
+        'source_system','external_id','sku','name','slug','legacy_url','legacy_slug','part_number','oem_number','manufacturer_code','short_description','description','condition_notes','code_photo_path',
         'category_id','suggested_category_id','category_confidence','category_suggestion_reason','category_needs_review',
         'car_id','vehicle_snapshot','legacy_payload','storage_location_id','price','currency','allegro_price','ebay_price','quantity','status',
         'is_visible_storefront','created_by',
