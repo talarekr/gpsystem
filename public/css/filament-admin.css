@@ -871,6 +871,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 }
 
 .gps-part-form-section--code-photo .gps-code-photo-upload {
+    --gps-code-photo-upload-radius: 0.7rem;
     max-width: 8rem;
 }
 
@@ -882,7 +883,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 
 .gps-part-form-section--code-photo .gps-code-photo-upload .filepond--panel-root {
     border: 0 !important;
-    border-radius: 0.7rem !important;
+    border-radius: var(--gps-code-photo-upload-radius) !important;
     background: transparent !important;
     box-shadow: none !important;
 }
@@ -1022,7 +1023,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 .gps-part-form .gps-part-form-section--code-photo .gps-code-photo-upload .fi-fo-file-upload {
     overflow: hidden;
     border: 1px solid var(--gps-part-section-border) !important;
-    border-radius: 0.7rem !important;
+    border-radius: var(--gps-code-photo-upload-radius) !important;
     background: #ffffff !important;
     box-shadow: none !important;
     outline: none !important;
@@ -1038,10 +1039,35 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     outline: none !important;
 }
 
-.gps-part-form .gps-part-form-section--code-photo .gps-code-photo-upload :where(.filepond--root, .filepond--browser, .filepond--drop-label, .filepond--panel, .filepond--panel-root) {
-    border-radius: 0.7rem !important;
+.gps-part-form .gps-part-form-section--code-photo .gps-code-photo-upload :where(
+    .fi-fo-field-wrp,
+    .fi-fo-field-wrp > div,
+    .fi-fo-file-upload,
+    .fi-fo-file-upload > div,
+    .filepond--root,
+    .filepond--browser,
+    .filepond--drop-label,
+    .filepond--panel,
+    .filepond--panel-root
+) {
+    border-radius: var(--gps-code-photo-upload-radius) !important;
     box-shadow: none !important;
     outline: none !important;
+}
+
+.gps-part-form .gps-part-form-section--code-photo .gps-code-photo-upload :where(
+    .fi-fo-file-upload,
+    .fi-fo-file-upload > div,
+    .filepond--root,
+    .filepond--drop-label,
+    .filepond--panel,
+    .filepond--panel-root
+) {
+    overflow: hidden !important;
+}
+
+.gps-part-form .gps-part-form-section--code-photo .gps-code-photo-upload :where(.filepond--panel, .filepond--panel-root) {
+    border: 0 !important;
 }
 
 .gps-part-form :where(.fi-input::placeholder, .fi-textarea::placeholder, .choices__input::placeholder) {
