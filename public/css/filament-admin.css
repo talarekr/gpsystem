@@ -882,7 +882,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 
 .gps-part-form-section--code-photo .gps-code-photo-upload .filepond--panel-root {
     border: 0 !important;
-    border-radius: 0.65rem !important;
+    border-radius: 0.7rem !important;
     background: transparent !important;
     box-shadow: none !important;
 }
@@ -899,7 +899,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 .gps-part-form-section--code-photo .gps-code-photo-upload .filepond--drop-label::before {
     display: block;
     margin-bottom: 0.25rem;
-    color: #475569;
+    color: var(--gps-admin-border-focus);
     content: '+';
     font-size: 1.3rem;
     font-weight: 600;
@@ -1020,6 +1020,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 
 
 .gps-part-form .gps-part-form-section--code-photo .gps-code-photo-upload .fi-fo-file-upload {
+    overflow: hidden;
     border: 1px solid var(--gps-part-section-border) !important;
     border-radius: 0.7rem !important;
     background: #ffffff !important;
@@ -1038,6 +1039,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 }
 
 .gps-part-form .gps-part-form-section--code-photo .gps-code-photo-upload :where(.filepond--root, .filepond--browser, .filepond--drop-label, .filepond--panel, .filepond--panel-root) {
+    border-radius: 0.7rem !important;
     box-shadow: none !important;
     outline: none !important;
 }
