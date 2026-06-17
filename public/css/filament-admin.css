@@ -1296,19 +1296,38 @@ body.fi-body :where(
 
 /* Keep searchable select internals in the part-info fields borderless; the outer
    Filament input wrapper carries the same single border as text inputs. */
-.gps-part-form .gps-part-form-section--part-info :where(
-    .fi-fo-select .choices,
-    .fi-fo-select .choices__inner,
-    .fi-fo-select .choices__list--single,
-    .fi-fo-select .choices__list--multiple,
-    .fi-fo-select .choices__input,
-    .fi-fo-select .choices__button,
-    .fi-fo-select .choices[data-type*=select-one]::after,
-    .fi-fo-select .fi-select-input,
-    .fi-fo-select .fi-input-wrp-prefix,
-    .fi-fo-select .fi-input-wrp-suffix,
-    .fi-fo-select .fi-input-wrp-suffix button,
-    .fi-fo-select .fi-input-wrp-suffix .fi-icon-btn
+.gps-part-form .gps-part-form-section--part-info .fi-fo-select .fi-input-wrp {
+    border: 1px solid var(--gps-part-field-border) !important;
+    border-radius: var(--gps-part-field-radius) !important;
+    background: #ffffff !important;
+    box-shadow: none !important;
+    outline: none !important;
+    --tw-ring-offset-shadow: 0 0 #0000 !important;
+    --tw-ring-shadow: 0 0 #0000 !important;
+    --tw-ring-color: transparent !important;
+}
+
+.gps-part-form .gps-part-form-section--part-info .fi-fo-select .fi-input-wrp:focus-within {
+    border-color: var(--gps-part-field-border-focus) !important;
+    box-shadow: 0 0 0 1px var(--gps-part-field-focus-ring) !important;
+    outline: none !important;
+    --tw-ring-offset-shadow: 0 0 #0000 !important;
+    --tw-ring-shadow: 0 0 #0000 !important;
+    --tw-ring-color: transparent !important;
+}
+
+.gps-part-form .gps-part-form-section--part-info .fi-fo-select :where(
+    .choices,
+    .choices__inner,
+    .choices__list--single,
+    .choices__list--multiple,
+    .choices__input,
+    .choices__button,
+    .fi-select-input,
+    .fi-input-wrp-prefix,
+    .fi-input-wrp-suffix,
+    .fi-input-wrp-suffix button,
+    .fi-input-wrp-suffix .fi-icon-btn
 ) {
     border: 0 !important;
     background: transparent !important;
@@ -1319,9 +1338,10 @@ body.fi-body :where(
     --tw-ring-color: transparent !important;
 }
 
-.gps-part-form .gps-part-form-section--part-info :where(.fi-fo-select .choices__inner) {
-    min-height: 2.5rem !important;
+.gps-part-form .gps-part-form-section--part-info .fi-fo-select .choices__inner {
+    min-height: 2.25rem !important;
     padding-block: 0 !important;
+    border-radius: var(--gps-part-field-radius) !important;
 }
 
 
