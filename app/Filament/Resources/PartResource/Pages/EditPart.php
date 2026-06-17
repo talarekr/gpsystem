@@ -12,32 +12,9 @@ class EditPart extends EditRecord
 {
     protected static string $resource = PartResource::class;
 
-    protected array $partPhotoPaths = [];
-
-    protected function mutateFormDataBeforeFill(array $data): array
-    {
-        $data['part_photo_paths'] = $this->record->images()
-            ->orderBy('sort_order')
-            ->orderBy('id')
-            ->pluck('path')
-            ->filter()
-            ->values()
-            ->all();
-
-        return $data;
-    }
-
-    protected function mutateFormDataBeforeSave(array $data): array
-    {
-        $this->partPhotoPaths = $data['part_photo_paths'] ?? [];
-        unset($data['part_photo_paths']);
-
-        return $data;
-    }
-
     protected function afterSave(): void
     {
-        PartResource::syncPartImages($this->record, $this->partPhotoPaths);
+        PartResource::normalizePartImages($this->record);
     }
 
     protected function getHeaderActions(): array
