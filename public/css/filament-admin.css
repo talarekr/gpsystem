@@ -1152,3 +1152,71 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     color: #64748b;
     font-size: 0.86rem;
 }
+
+/* Compact photo uploader matching the part-code upload box. */
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload.fi-fo-repeater {
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload > .fi-fo-field-wrp-label,
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload .fi-fo-field-wrp-label:empty {
+    display: none !important;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload .fi-fo-repeater-item {
+    border-color: var(--gps-part-section-border) !important;
+    box-shadow: none !important;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload .fi-fo-repeater-add-item-btn {
+    min-height: 5.625rem !important;
+    width: 8rem;
+    max-width: 100%;
+    justify-content: center;
+    border: 1px solid var(--gps-part-section-border) !important;
+    border-radius: 0.7rem !important;
+    background: #ffffff !important;
+    color: #475569 !important;
+    box-shadow: none !important;
+    font-size: 0.72rem !important;
+    font-weight: 400 !important;
+    line-height: 1.15 !important;
+    text-align: center;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload .fi-fo-repeater-add-item-btn:hover {
+    border-color: var(--gps-part-field-border-hover) !important;
+    background: #ffffff !important;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload .fi-fo-repeater-add-item-btn::before {
+    display: block;
+    margin-bottom: 0.25rem;
+    color: var(--gps-admin-navy, #122a66);
+    content: '+';
+    font-size: 1.3rem;
+    font-weight: 600;
+    line-height: 1;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload .fi-fo-repeater-add-item-btn .fi-btn-label {
+    color: #475569 !important;
+    font-weight: 400 !important;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload .fi-fo-repeater-add-item-btn svg {
+    display: none !important;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload .fi-fo-file-upload {
+    border-color: var(--gps-part-section-border) !important;
+    border-radius: 0.7rem !important;
+    box-shadow: none !important;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload :where(.filepond--panel, .filepond--panel-root) {
+    border: 0 !important;
+    box-shadow: none !important;
+}
