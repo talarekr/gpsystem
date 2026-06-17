@@ -1100,3 +1100,100 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     border: 0 !important;
     box-shadow: none !important;
 }
+
+/* Part-photo FilePond thumbnails: scoped only to the native "Zdjęcia części" uploader. */
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload {
+    --gps-part-photo-tile-width: 8rem;
+    --gps-part-photo-tile-height: 6rem;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload :where(.filepond--root) {
+    width: 100% !important;
+    min-height: var(--gps-part-photo-tile-height) !important;
+    contain: layout style;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload :where(.filepond--drop-label) {
+    width: var(--gps-part-photo-tile-width) !important;
+    min-height: var(--gps-part-photo-tile-height) !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    border: 1px dashed var(--gps-admin-border-strong) !important;
+    border-radius: 0.75rem !important;
+    background: #ffffff !important;
+    color: #334155 !important;
+    cursor: pointer;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload :where(.filepond--drop-label label) {
+    padding: 0.75rem !important;
+    font-size: 0.78rem !important;
+    font-weight: 600 !important;
+    line-height: 1.15 !important;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload :where(.filepond--list-scroller) {
+    position: static !important;
+    margin-top: 0.5rem !important;
+    transform: none !important;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload :where(.filepond--list) {
+    position: static !important;
+    display: flex !important;
+    flex-flow: row wrap !important;
+    align-items: flex-start !important;
+    gap: 0.5rem !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    transform: none !important;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload :where(.filepond--item) {
+    position: relative !important;
+    width: var(--gps-part-photo-tile-width) !important;
+    height: var(--gps-part-photo-tile-height) !important;
+    margin: 0 !important;
+    transform: none !important;
+    overflow: hidden !important;
+    border: 1px solid var(--gps-admin-border) !important;
+    border-radius: 0.75rem !important;
+    background: #ffffff !important;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08) !important;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload :where(.filepond--file) {
+    height: 100% !important;
+    min-height: 0 !important;
+    border-radius: 0.75rem !important;
+    background: transparent !important;
+    color: #0f172a !important;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload :where(.filepond--item-panel) {
+    border-radius: 0.75rem !important;
+    background: #ffffff !important;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload :where(.filepond--image-preview-wrapper, .filepond--image-preview, .filepond--image-bitmap, .filepond--image-bitmap canvas) {
+    width: 100% !important;
+    height: 100% !important;
+    max-height: var(--gps-part-photo-tile-height) !important;
+    border-radius: 0.75rem !important;
+    background: #ffffff !important;
+    object-fit: contain !important;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload :where(.filepond--file-info) {
+    left: 0.35rem !important;
+    right: 0.35rem !important;
+    bottom: 0.25rem !important;
+    max-width: calc(100% - 0.7rem) !important;
+    color: #334155 !important;
+    font-size: 0.68rem !important;
+    text-shadow: 0 1px 2px rgba(255, 255, 255, 0.85) !important;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload :where(.filepond--file-info-sub, .filepond--file-status) {
+    display: none !important;
+}
