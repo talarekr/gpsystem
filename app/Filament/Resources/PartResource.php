@@ -21,6 +21,7 @@ use Filament\Tables;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\HtmlString;
 
 class PartResource extends Resource
@@ -93,6 +94,8 @@ class PartResource extends Resource
                         Forms\Components\Select::make('category_id')->label('Kategoria')->hiddenLabel()->placeholder('Kategoria')->relationship('category', 'name')->searchable()->preload()->native(false)->suffixAction(self::categoryTreeAction())->columnSpanFull(),
                         Forms\Components\Select::make('condition_notes')->label('Jakość')->hiddenLabel()->placeholder('Jakość')->options(['Używany' => 'Używany', 'Nowy' => 'Nowy', 'Uszkodzony' => 'Uszkodzony', 'Regenerowany' => 'Regenerowany'])->default('Używany')->native(false)->columnSpan(6),
                         Forms\Components\Select::make('part_position')->label('Pozycja części (strona zabudowy)')->hiddenLabel()->placeholder('Wybierz')->options(['Wszystkie' => 'Wszystkie', 'Lewa strona' => 'Lewa strona', 'Środek' => 'Środek', 'Prawa strona' => 'Prawa strona', 'Komplet' => 'Komplet', 'Tył strona lewa' => 'Tył strona lewa', 'Tył strona prawa' => 'Tył strona prawa', 'Przód strona lewa' => 'Przód strona lewa', 'Przód strona prawa' => 'Przód strona prawa', 'Przód' => 'Przód', 'Tył' => 'Tył'])->default(null)->native(false)->dehydrated(false)->columnSpan(6),
+                        Forms\Components\Select::make('steering_side')->label('Kierownica po stronie')->hiddenLabel()->placeholder('Kierownica po stronie')->options(['Lewej' => 'Lewej', 'Prawej' => 'Prawej'])->default('Lewej')->native(false)->dehydrated(false)->columnSpan(6),
+                        Forms\Components\Select::make('storage_location_id')->label('Magazyn')->hiddenLabel()->placeholder('Wpisz min. 2 znaki')->searchable()->searchDebounce(400)->getSearchResultsUsing(fn (string $search): array => self::storageLocationSearchResults($search))->getOptionLabelUsing(fn ($value): ?string => self::storageLocationOptionLabel($value))->native(false)->columnSpan(6),
                         Forms\Components\TextInput::make('part_number')->label('Numer części')->hiddenLabel()->placeholder('Numer części')->maxLength(255)->live(onBlur: true)->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))->columnSpan(4),
                         Forms\Components\TextInput::make('manufacturer_code')->label('Kod producenta')->hiddenLabel()->placeholder('Kod producenta')->maxLength(255)->live(onBlur: true)->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))->columnSpan(4),
                         Forms\Components\TextInput::make('oem_number')->label('Numer OEM')->hiddenLabel()->placeholder('Numer OEM')->maxLength(255)->live(onBlur: true)->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))->columnSpan(4),
@@ -117,7 +120,6 @@ class PartResource extends Resource
                     ->columns(4)
                     ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--stock'])
                     ->schema([
-                        Forms\Components\Select::make('storage_location_id')->label('Miejsce składowania')->hiddenLabel()->placeholder('Miejsce składowania')->options(fn () => StorageLocation::query()->orderBy('name')->get()->mapWithKeys(fn (StorageLocation $location) => [$location->id => trim($location->name.' — '.($location->description ?? ''))])->all())->searchable()->native(false)->columnSpan(2),
                         Forms\Components\TextInput::make('quantity')->label('Ilość')->hiddenLabel()->placeholder('Ilość')->numeric()->default(1)->minValue(0),
                         Forms\Components\Select::make('status')->label('Status')->hiddenLabel()->placeholder('Status')->options(Part::statusOptions())->default('draft')->native(false),
                         Forms\Components\Toggle::make('is_visible_storefront')->label('Widoczna w sklepie')->default(false)->inline(false),
@@ -155,6 +157,47 @@ class PartResource extends Resource
             ]);
     }
 
+
+
+    private static function storageLocationSearchResults(string $search): array
+    {
+        if (mb_strlen(trim($search)) < 2) {
+            return [];
+        }
+
+        return self::activeStorageLocationQuery()
+            ->where('name', 'like', '%'.trim($search).'%')
+            ->orderBy('name')
+            ->limit(20)
+            ->get()
+            ->mapWithKeys(fn (StorageLocation $location) => [$location->id => self::storageLocationLabel($location)])
+            ->all();
+    }
+
+    private static function storageLocationOptionLabel($value): ?string
+    {
+        if (blank($value)) {
+            return null;
+        }
+
+        $location = self::activeStorageLocationQuery()->find($value);
+
+        return $location ? self::storageLocationLabel($location) : null;
+    }
+
+    private static function activeStorageLocationQuery(): Builder
+    {
+        return StorageLocation::query()
+            ->when(
+                Schema::hasColumn('storage_locations', 'is_active'),
+                fn (Builder $query): Builder => $query->where('is_active', true),
+            );
+    }
+
+    private static function storageLocationLabel(StorageLocation $location): string
+    {
+        return trim($location->name.' — '.($location->description ?? ''), ' —');
+    }
 
 
     public static function refreshCategorySuggestion(Forms\Get $get, Forms\Set $set, ?Part $record = null): null
