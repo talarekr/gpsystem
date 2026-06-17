@@ -1216,8 +1216,7 @@ body.fi-body :where(
     .fi-fo-date-time-picker .fi-input-wrp,
     .fi-fo-tags-input,
     .fi-fo-rich-editor,
-    .fi-fo-markdown-editor,
-    .choices__inner
+    .fi-fo-markdown-editor
 ):not(.fi-fo-file-upload):not(.filepond--root):not(.filepond--item) {
     border: 1px solid var(--gps-admin-field-border) !important;
     border-radius: var(--gps-admin-field-radius) !important;
