@@ -1162,10 +1162,39 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 }
 
 .gps-part-form-section--photos .filepond--root {
+    height: auto !important;
+    min-height: 6rem !important;
+    max-height: 8.75rem !important;
     margin-bottom: 0;
+    overflow-y: auto;
     font-size: 0.875rem;
 }
 
 .gps-part-form-section--photos .filepond--panel-root {
     background-color: #f8fafc;
+}
+
+.gps-part-form-section--photos .gps-part-photos-upload,
+.gps-part-form-section--photos .gps-part-photos-upload .fi-fo-file-upload,
+.gps-part-form-section--photos .gps-part-photos-upload .filepond--wrapper,
+.gps-part-form-section--photos .gps-part-photos-upload .filepond--browser,
+.gps-part-form-section--photos .gps-part-photos-upload .filepond--panel,
+.gps-part-form-section--photos .gps-part-photos-upload .filepond--panel-root {
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none;
+    flex: initial !important;
+    align-self: auto !important;
+}
+
+.gps-part-form-section--photos .gps-part-photos-upload .filepond--drop-label {
+    height: 6rem !important;
+    min-height: 6rem !important;
+    max-height: 7.5rem !important;
+    padding: 0.75rem !important;
+}
+
+.gps-part-form-section--photos .gps-part-photos-upload .filepond--list-scroller {
+    max-height: 7.75rem !important;
+    overflow-y: auto !important;
 }
