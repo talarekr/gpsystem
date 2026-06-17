@@ -1041,6 +1041,32 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     opacity: 1;
 }
 
+.gps-part-form .gps-part-form-section--part-info :where(
+    .fi-input,
+    .fi-select-input,
+    .fi-textarea,
+    .choices__input,
+    .choices__list--single,
+    .choices__item,
+    .choices__item--selectable,
+    .choices__placeholder,
+    .fi-fo-rich-editor .ProseMirror
+) {
+    color: var(--gps-part-field-placeholder) !important;
+    font-weight: 400 !important;
+}
+
+.gps-part-form .gps-part-form-section--part-info :where(
+    .fi-input:focus,
+    .fi-textarea:focus,
+    .choices.is-focused .choices__item,
+    .choices.is-open .choices__item,
+    .fi-fo-rich-editor:focus-within .ProseMirror
+) {
+    color: #0f172a !important;
+    font-weight: 400 !important;
+}
+
 .gps-part-form .fi-fo-toggle label,
 .gps-part-form .fi-fo-toggle .fi-fo-field-wrp-label,
 .gps-part-form .fi-fo-toggle .fi-fo-field-wrp-label span {
