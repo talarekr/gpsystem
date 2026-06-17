@@ -189,55 +189,60 @@ class PartResource extends Resource
             ->label('')
             ->icon('heroicon-m-bars-3')
             ->tooltip('Wybierz kategorię z drzewa')
-            ->modalHeading('Wybierz kategorię')
+            ->modalHeading('Kategorie')
             ->modalSubmitActionLabel('Ustaw kategorię')
+            ->modalCancelActionLabel('Zamknij')
+            ->extraModalWindowAttributes(['class' => 'gps-category-picker-modal'])
             ->slideOver()
             ->form([
-                Forms\Components\Select::make('search_category_id')
-                    ->label('Szukaj kategorii')
+                Forms\Components\Hidden::make('selected_category_id'),
+                Forms\Components\ViewField::make('category_picker')
                     ->hiddenLabel()
-                    ->placeholder('Szukaj kategorii')
-                    ->options(fn (): array => self::categoryOptions())
-                    ->searchable()
-                    ->native(false),
-                Forms\Components\Select::make('level_1')
-                    ->label('Poziom 1')
-                    ->hiddenLabel()
-                    ->placeholder('Poziom 1')
-                    ->options(fn (): array => self::categoryOptions(null))
-                    ->live()
-                    ->native(false),
-                Forms\Components\Select::make('level_2')
-                    ->label('Poziom 2')
-                    ->hiddenLabel()
-                    ->placeholder('Poziom 2')
-                    ->options(fn (Forms\Get $get): array => self::categoryOptions($get('level_1')))
-                    ->visible(fn (Forms\Get $get): bool => filled($get('level_1')))
-                    ->live()
-                    ->native(false),
-                Forms\Components\Select::make('level_3')
-                    ->label('Poziom 3')
-                    ->hiddenLabel()
-                    ->placeholder('Poziom 3')
-                    ->options(fn (Forms\Get $get): array => self::categoryOptions($get('level_2')))
-                    ->visible(fn (Forms\Get $get): bool => filled($get('level_2')) && self::categoryOptions($get('level_2')) !== [])
-                    ->live()
-                    ->native(false),
-                Forms\Components\Select::make('level_4')
-                    ->label('Poziom 4')
-                    ->hiddenLabel()
-                    ->placeholder('Poziom 4')
-                    ->options(fn (Forms\Get $get): array => self::categoryOptions($get('level_3')))
-                    ->visible(fn (Forms\Get $get): bool => filled($get('level_3')) && self::categoryOptions($get('level_3')) !== [])
-                    ->native(false),
+                    ->dehydrated(false)
+                    ->view('filament.forms.category-picker')
+                    ->viewData(fn (): array => ['categories' => self::categoryPickerCategories()]),
             ])
             ->action(function (array $data, Forms\Set $set): void {
-                $categoryId = ($data['search_category_id'] ?? null) ?: (($data['level_4'] ?? null) ?: (($data['level_3'] ?? null) ?: (($data['level_2'] ?? null) ?: ($data['level_1'] ?? null))));
-
-                if ($categoryId) {
-                    $set('category_id', $categoryId);
+                if (! empty($data['selected_category_id'])) {
+                    $set('category_id', $data['selected_category_id']);
                 }
             });
+    }
+
+    public static function categoryPickerCategories(): array
+    {
+        $categories = PartCategory::query()
+            ->select(['id', 'parent_id', 'name', 'full_slug_path', 'sort_order', 'woo_product_count'])
+            ->ordered()
+            ->get();
+
+        $childrenByParent = $categories->groupBy('parent_id');
+        $categoriesById = $categories->keyBy('id');
+
+        $pathFor = function (PartCategory $category) use (&$pathFor, $categoriesById): string {
+            $names = [$category->name];
+            $parentId = $category->parent_id;
+
+            while ($parentId && $parent = $categoriesById->get($parentId)) {
+                array_unshift($names, $parent->name);
+                $parentId = $parent->parent_id;
+            }
+
+            return implode(' / ', $names);
+        };
+
+        return $categories
+            ->map(fn (PartCategory $category): array => [
+                'id' => $category->id,
+                'parent_id' => $category->parent_id,
+                'name' => $category->name,
+                'path' => $pathFor($category),
+                'full_slug_path' => $category->full_slug_path,
+                'woo_product_count' => $category->woo_product_count,
+                'has_children' => ($childrenByParent->get($category->id)?->isNotEmpty()) ?? false,
+            ])
+            ->values()
+            ->all();
     }
 
     public static function categoryOptions(mixed $parentId = 'all'): array
