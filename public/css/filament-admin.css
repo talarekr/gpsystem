@@ -7,6 +7,10 @@
     --gps-admin-border-strong: #94a3b8;
     --gps-admin-border-hover: #64748b;
     --gps-admin-border-focus: #122a66;
+    --gps-admin-field-border: #a8b0bb;
+    --gps-admin-field-border-hover: #a8b0bb;
+    --gps-admin-field-focus-ring: rgba(18, 42, 102, 0.10);
+    --gps-admin-field-radius: 5px;
     --gps-admin-soft-shadow: 0 1px 2px rgba(11, 31, 58, 0.05), 0 10px 28px rgba(11, 31, 58, 0.055);
     --gps-admin-card-shadow: 0 1px 2px rgba(11, 31, 58, 0.045), 0 8px 20px rgba(11, 31, 58, 0.04);
     --sidebar-width: 14.5rem;
@@ -194,7 +198,6 @@ body,
 .fi-fo-checkbox-list,
 .fi-fo-radio,
 .fi-fo-date-time-picker input,
-.fi-fo-file-upload,
 .fi-fo-color-picker input {
     background-color: var(--gps-admin-surface) !important;
 }
@@ -203,7 +206,6 @@ body,
 .fi-fo-markdown-editor,
 .fi-fo-rich-editor,
 .fi-fo-tags-input,
-.fi-fo-file-upload,
 .fi-fo-repeater-item,
 .fi-fo-builder-item,
 .fi-fo-fieldset {
@@ -214,16 +216,14 @@ body,
 .fi-input-wrp:hover,
 .fi-fo-markdown-editor:hover,
 .fi-fo-rich-editor:hover,
-.fi-fo-tags-input:hover,
-.fi-fo-file-upload:hover {
+.fi-fo-tags-input:hover {
     border-color: var(--gps-admin-border-hover) !important;
 }
 
 .fi-input-wrp:focus-within,
 .fi-fo-markdown-editor:focus-within,
 .fi-fo-rich-editor:focus-within,
-.fi-fo-tags-input:focus-within,
-.fi-fo-file-upload:focus-within {
+.fi-fo-tags-input:focus-within {
     border-color: var(--gps-admin-border-focus) !important;
     box-shadow: 0 0 0 3px rgba(18, 42, 102, 0.14) !important;
 }
@@ -848,16 +848,16 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     font-weight: 750;
 }
 
-.gps-part-form :where(.fi-input-wrp, .fi-fo-file-upload, .fi-fo-rich-editor, .fi-fo-markdown-editor) {
+.gps-part-form :where(.fi-input-wrp, .fi-fo-rich-editor, .fi-fo-markdown-editor) {
     border-color: var(--gps-admin-border-strong) !important;
     box-shadow: none !important;
 }
 
-.gps-part-form :where(.fi-input-wrp:hover, .fi-fo-file-upload:hover, .fi-fo-rich-editor:hover, .fi-fo-markdown-editor:hover) {
+.gps-part-form :where(.fi-input-wrp:hover, .fi-fo-rich-editor:hover, .fi-fo-markdown-editor:hover) {
     border-color: var(--gps-admin-border-hover) !important;
 }
 
-.gps-part-form :where(.fi-input-wrp:focus-within, .fi-fo-file-upload:focus-within, .fi-fo-rich-editor:focus-within, .fi-fo-markdown-editor:focus-within) {
+.gps-part-form :where(.fi-input-wrp:focus-within, .fi-fo-rich-editor:focus-within, .fi-fo-markdown-editor:focus-within) {
     border-color: var(--gps-admin-border-strong) !important;
     box-shadow: none !important;
 }
@@ -878,15 +878,15 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 
 /* Visible non-focused fields for the compact part form (Ovoko-style). */
 .gps-part-form {
-    --gps-part-field-border: var(--gps-admin-border);
-    --gps-part-field-border-hover: var(--gps-admin-border-strong);
-    --gps-part-field-border-focus: var(--gps-admin-border-strong);
+    --gps-part-field-border: var(--gps-admin-field-border);
+    --gps-part-field-border-hover: var(--gps-admin-field-border-hover);
+    --gps-part-field-border-focus: var(--gps-admin-border-focus);
     --gps-part-field-bg: #ffffff;
     --gps-part-field-bg-subtle: #fbfdff;
     --gps-part-field-placeholder: #6b7280;
     --gps-part-section-border: #cbd5e1;
     --border-color: var(--gps-part-field-border);
-    --ring-color: rgba(148, 163, 184, 0.16);
+    --ring-color: var(--gps-admin-field-focus-ring);
 }
 
 .gps-part-form .gps-part-form-section.fi-section,
@@ -911,7 +911,6 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     .fi-fo-select .fi-input-wrp,
     .fi-fo-select .choices,
     .choices__inner,
-    .fi-fo-file-upload,
     .fi-fo-rich-editor,
     .fi-fo-markdown-editor,
     .fi-fo-tags-input
@@ -949,7 +948,6 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     .fi-fo-select .fi-input-wrp:hover,
     .fi-fo-select .choices:hover,
     .choices__inner:hover,
-    .fi-fo-file-upload:hover,
     .fi-fo-rich-editor:hover,
     .fi-fo-markdown-editor:hover,
     .fi-fo-tags-input:hover
@@ -964,13 +962,12 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     .fi-fo-select .fi-input-wrp:focus-within,
     .fi-fo-select .choices:focus-within,
     .choices__inner:focus-within,
-    .fi-fo-file-upload:focus-within,
     .fi-fo-rich-editor:focus-within,
     .fi-fo-markdown-editor:focus-within,
     .fi-fo-tags-input:focus-within
 ) {
     border-color: var(--gps-part-field-border-focus) !important;
-    box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.16) !important;
+    box-shadow: 0 0 0 1px var(--gps-admin-field-focus-ring) !important;
     outline: none !important;
 }
 
@@ -984,7 +981,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     min-width: 0;
 }
 
-.gps-part-form :where(.fi-fo-repeater, .fi-fo-repeater-item, .fi-in-repeatable-item) :where(.fi-input-wrp, .fi-fo-file-upload, .choices__inner) {
+.gps-part-form :where(.fi-fo-repeater, .fi-fo-repeater-item, .fi-in-repeatable-item) :where(.fi-input-wrp, .choices__inner) {
     border-color: var(--gps-part-field-border) !important;
     background: var(--gps-part-field-bg) !important;
 }
@@ -1208,6 +1205,95 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     opacity: 0.82 !important;
     font-size: 0.9rem;
     font-weight: 500;
+}
+
+
+/* Unified single-border styling for standard Filament admin form fields.
+   FileUpload/FilePond surfaces are intentionally excluded and handled by their own rules below. */
+body.fi-body :where(
+    .fi-input-wrp,
+    .fi-fo-text-input .fi-input-wrp,
+    .fi-fo-textarea .fi-input-wrp,
+    .fi-fo-select .fi-input-wrp,
+    .fi-fo-date-time-picker .fi-input-wrp,
+    .fi-fo-tags-input,
+    .fi-fo-rich-editor,
+    .fi-fo-markdown-editor,
+    .choices__inner
+):not(.fi-fo-file-upload):not(.filepond--root):not(.filepond--item) {
+    border: 1px solid var(--gps-admin-field-border) !important;
+    border-radius: var(--gps-admin-field-radius) !important;
+    background: #ffffff !important;
+    box-shadow: none !important;
+    outline: none !important;
+    --tw-ring-offset-shadow: 0 0 #0000 !important;
+    --tw-ring-shadow: 0 0 #0000 !important;
+    --tw-ring-color: transparent !important;
+}
+
+body.fi-body :where(
+    .fi-input,
+    .fi-select-input,
+    .fi-textarea,
+    .choices__input,
+    .choices__list--single,
+    .fi-fo-date-time-picker input,
+    .fi-fo-color-picker input,
+    .fi-fo-rich-editor .ProseMirror,
+    .fi-fo-markdown-editor textarea
+) {
+    border: 0 !important;
+    border-radius: var(--gps-admin-field-radius) !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    outline: none !important;
+    --tw-ring-offset-shadow: 0 0 #0000 !important;
+    --tw-ring-shadow: 0 0 #0000 !important;
+    --tw-ring-color: transparent !important;
+}
+
+body.fi-body :where(.fi-fo-select .choices) {
+    border: 0 !important;
+    border-radius: var(--gps-admin-field-radius) !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    outline: none !important;
+}
+
+body.fi-body :where(.fi-input-wrp-prefix, .fi-input-wrp-suffix) {
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+body.fi-body :where(
+    .fi-input-wrp:hover,
+    .fi-fo-text-input .fi-input-wrp:hover,
+    .fi-fo-textarea .fi-input-wrp:hover,
+    .fi-fo-select .fi-input-wrp:hover,
+    .fi-fo-date-time-picker .fi-input-wrp:hover,
+    .fi-fo-tags-input:hover,
+    .fi-fo-rich-editor:hover,
+    .fi-fo-markdown-editor:hover,
+    .choices__inner:hover
+):not(.fi-fo-file-upload):not(.filepond--root):not(.filepond--item) {
+    border-color: var(--gps-admin-field-border-hover) !important;
+}
+
+body.fi-body :where(
+    .fi-input-wrp:focus-within,
+    .fi-fo-text-input .fi-input-wrp:focus-within,
+    .fi-fo-textarea .fi-input-wrp:focus-within,
+    .fi-fo-select .fi-input-wrp:focus-within,
+    .fi-fo-date-time-picker .fi-input-wrp:focus-within,
+    .fi-fo-tags-input:focus-within,
+    .fi-fo-rich-editor:focus-within,
+    .fi-fo-markdown-editor:focus-within,
+    .choices__inner:focus-within
+):not(.fi-fo-file-upload):not(.filepond--root):not(.filepond--item) {
+    border-color: var(--gps-admin-border-focus) !important;
+    box-shadow: 0 0 0 1px var(--gps-admin-field-focus-ring) !important;
+    outline: none !important;
 }
 
 
