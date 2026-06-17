@@ -1154,3 +1154,18 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     border: 0 !important;
     box-shadow: none !important;
 }
+
+.gps-part-form-section--photos .fi-fo-file-upload {
+    border: 1px dashed var(--gps-admin-border-strong) !important;
+    border-radius: 0.75rem;
+    background: #f8fafc !important;
+}
+
+.gps-part-form-section--photos .filepond--root {
+    margin-bottom: 0;
+    font-size: 0.875rem;
+}
+
+.gps-part-form-section--photos .filepond--panel-root {
+    background-color: #f8fafc;
+}
