@@ -1160,6 +1160,11 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     border-radius: 0.75rem !important;
     background: #ffffff !important;
     box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08) !important;
+    cursor: grab;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload :where(.filepond--item.is-dragging) {
+    cursor: grabbing;
 }
 
 .gps-part-form .gps-part-form-section--photos .gps-part-photos-upload :where(.filepond--file) {
