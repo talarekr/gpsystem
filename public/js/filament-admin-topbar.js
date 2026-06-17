@@ -21,6 +21,34 @@
     applySidebarState(collapsed);
   });
 
+  document.addEventListener('click', (event) => {
+    const removeButton = event.target.closest?.('.gps-part-photos-upload .filepond--action-remove-item');
+
+    if (!removeButton) return;
+
+    event.stopPropagation();
+
+    window.setTimeout(() => {
+      const item = removeButton.closest('.filepond--item');
+
+      if (!item || !document.body.contains(item)) return;
+
+      const upload = item.closest('.gps-part-photos-upload');
+      const input = upload?.querySelector('input[type="file"]');
+      const pond = input && window.FilePond?.find?.(input);
+
+      if (!pond) return;
+
+      const items = Array.from(upload.querySelectorAll('.filepond--item'));
+      const index = items.indexOf(item);
+      const file = pond.getFiles?.()[index];
+
+      if (!file) return;
+
+      pond.removeFile(file.id, { revert: true });
+    }, 0);
+  });
+
   const root = document.querySelector('[data-gps-part-search]');
   if (!root) return;
 
