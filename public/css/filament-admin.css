@@ -1103,7 +1103,6 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     .fi-fo-text-input .fi-input-wrp,
     .fi-fo-textarea .fi-input-wrp,
     .fi-fo-select .fi-input-wrp,
-    .choices__inner,
     .fi-rich-editor,
     .fi-fo-rich-editor,
     .fi-fo-markdown-editor,
@@ -1159,6 +1158,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     --tw-ring-color: transparent !important;
 }
 
+
 .gps-part-form .gps-part-form-section--part-info :where(.fi-input-wrp-prefix, .fi-input-wrp-suffix) {
     border: 0 !important;
     background: transparent !important;
@@ -1171,7 +1171,6 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     .fi-fo-text-input .fi-input-wrp:hover,
     .fi-fo-textarea .fi-input-wrp:hover,
     .fi-fo-select .fi-input-wrp:hover,
-    .choices__inner:hover,
     .fi-rich-editor:hover,
     .fi-fo-rich-editor:hover,
     .fi-fo-markdown-editor:hover,
@@ -1185,7 +1184,6 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     .fi-fo-text-input .fi-input-wrp:focus-within,
     .fi-fo-textarea .fi-input-wrp:focus-within,
     .fi-fo-select .fi-input-wrp:focus-within,
-    .choices__inner:focus-within,
     .fi-rich-editor:focus-within,
     .fi-fo-rich-editor:focus-within,
     .fi-fo-markdown-editor:focus-within,
@@ -1294,6 +1292,36 @@ body.fi-body :where(
     border-color: var(--gps-admin-border-focus) !important;
     box-shadow: 0 0 0 1px var(--gps-admin-field-focus-ring) !important;
     outline: none !important;
+}
+
+/* Keep searchable select internals in the part-info fields borderless; the outer
+   Filament input wrapper carries the same single border as text inputs. */
+.gps-part-form .gps-part-form-section--part-info :where(
+    .fi-fo-select .choices,
+    .fi-fo-select .choices__inner,
+    .fi-fo-select .choices__list--single,
+    .fi-fo-select .choices__list--multiple,
+    .fi-fo-select .choices__input,
+    .fi-fo-select .choices__button,
+    .fi-fo-select .choices[data-type*=select-one]::after,
+    .fi-fo-select .fi-select-input,
+    .fi-fo-select .fi-input-wrp-prefix,
+    .fi-fo-select .fi-input-wrp-suffix,
+    .fi-fo-select .fi-input-wrp-suffix button,
+    .fi-fo-select .fi-input-wrp-suffix .fi-icon-btn
+) {
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    outline: none !important;
+    --tw-ring-offset-shadow: 0 0 #0000 !important;
+    --tw-ring-shadow: 0 0 #0000 !important;
+    --tw-ring-color: transparent !important;
+}
+
+.gps-part-form .gps-part-form-section--part-info :where(.fi-fo-select .choices__inner) {
+    min-height: 2.5rem !important;
+    padding-block: 0 !important;
 }
 
 
