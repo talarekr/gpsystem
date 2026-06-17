@@ -1177,7 +1177,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     background: transparent !important;
     box-shadow: none !important;
     outline: none !important;
-    color: var(--gps-part-field-placeholder) !important;
+    color: #0f172a !important;
     font-size: 0.9rem;
     font-weight: 400;
     border-radius: var(--gps-part-field-radius) !important;
@@ -1256,20 +1256,18 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     .choices__inner,
     .choices__item,
     .choices__item--selectable,
-    .choices__placeholder,
     .choices__input,
     .choices__list--single
 ) {
-    color: var(--gps-part-field-placeholder) !important;
+    color: #0f172a !important;
     font-weight: 400 !important;
 }
 
 .gps-part-form .gps-part-form-section--part-info :where(
-    .fi-select-input:focus,
-    .choices.is-focused .choices__item--selectable,
-    .choices.is-open .choices__item--selectable
+    .choices__placeholder,
+    .choices__input::placeholder
 ) {
-    color: #0f172a !important;
+    color: #a8b0bb !important;
     font-weight: 400 !important;
 }
 
@@ -1790,23 +1788,17 @@ body.fi-body :where(
     .choices__list--single,
     .choices__item,
     .choices__item--selectable,
-    .choices__placeholder,
     .fi-fo-rich-editor .ProseMirror,
     .fi-fo-markdown-editor textarea
 ) {
-    color: #a8b0bb !important;
+    color: #0f172a !important;
     font-weight: 400 !important;
 }
 
 .gps-part-form .gps-part-form-section--part-info :where(
-    .fi-input:focus,
-    .fi-select-input:focus,
-    .fi-textarea:focus,
-    .choices.is-focused .choices__item,
-    .choices.is-open .choices__item,
-    .fi-fo-rich-editor:focus-within .ProseMirror,
-    .fi-fo-markdown-editor textarea:focus
+    .choices__placeholder,
+    .choices__input::placeholder
 ) {
-    color: #0f172a !important;
+    color: #a8b0bb !important;
     font-weight: 400 !important;
 }
