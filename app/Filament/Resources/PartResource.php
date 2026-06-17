@@ -65,6 +65,7 @@ class PartResource extends Resource
                             ->label('Zdjęcia części')
                             ->hiddenLabel()
                             ->multiple()
+                            ->reorderable()
                             ->maxFiles(20)
                             ->image()
                             ->acceptedFileTypes(['image/*'])
