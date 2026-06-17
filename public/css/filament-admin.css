@@ -1138,10 +1138,13 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     width: var(--gps-part-photo-tile-width) !important;
     height: var(--gps-part-photo-tile-height) !important;
     transform: none !important;
+    z-index: 1 !important;
+    pointer-events: none !important;
 }
 
 .gps-part-form .gps-part-form-section--photos .gps-part-photos-upload :where(.filepond--list-scroller) {
     position: relative !important;
+    z-index: 3 !important;
     inset: auto !important;
     order: 1 !important;
     flex: 1 1 auto !important;
@@ -1182,6 +1185,8 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 }
 
 .gps-part-form .gps-part-form-section--photos .gps-part-photos-upload :where(.filepond--file) {
+    position: relative !important;
+    z-index: 3 !important;
     height: var(--gps-part-photo-tile-height) !important;
     min-height: var(--gps-part-photo-tile-height) !important;
     overflow: hidden !important;
@@ -1237,7 +1242,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 }
 
 .gps-part-form .gps-part-form-section--photos .gps-part-photos-upload :where(.filepond--file-action-button) {
-    z-index: 8 !important;
+    z-index: 20 !important;
 }
 
 .gps-part-form .gps-part-form-section--photos .gps-part-photos-upload :where(.filepond--action-remove-item) {
@@ -1258,6 +1263,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     pointer-events: auto !important;
     transform: none !important;
     cursor: pointer !important;
+    z-index: 30 !important;
 }
 
 .gps-part-form .gps-part-form-section--photos .gps-part-photos-upload :where(.filepond--action-remove-item:hover) {
