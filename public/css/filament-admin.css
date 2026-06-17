@@ -1125,3 +1125,32 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     border: 0 !important;
     box-shadow: none !important;
 }
+
+/* Keep the part-code FileUpload visually aligned with the wide part-photo uploader. */
+.gps-part-form .gps-part-form-section--code-photo .gps-part-code-photo-upload {
+    width: 100% !important;
+    max-width: none !important;
+}
+
+.gps-part-form .gps-part-form-section--code-photo .gps-part-code-photo-upload .fi-fo-file-upload {
+    width: 100% !important;
+    max-width: none !important;
+    border-color: var(--gps-part-section-border) !important;
+    border-radius: 0.7rem !important;
+    box-shadow: none !important;
+}
+
+.gps-part-form .gps-part-form-section--code-photo .gps-part-code-photo-upload :where(.filepond--root) {
+    width: 100% !important;
+    max-width: none !important;
+    min-height: 6rem !important;
+}
+
+.gps-part-form .gps-part-form-section--code-photo .gps-part-code-photo-upload :where(.filepond--drop-label) {
+    min-height: 6rem !important;
+}
+
+.gps-part-form .gps-part-form-section--code-photo .gps-part-code-photo-upload :where(.filepond--panel, .filepond--panel-root) {
+    border: 0 !important;
+    box-shadow: none !important;
+}
