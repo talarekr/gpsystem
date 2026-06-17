@@ -9,9 +9,11 @@ use App\Models\Part;
 use App\Models\PartCategory;
 use App\Models\PartImage;
 use App\Models\StorageLocation;
+use App\Services\PartCategorySuggestionService;
 use Filament\Forms;
 use Filament\Forms\Components\Grid;
 use Filament\Forms\Components\Section;
+use Filament\Forms\Components\Actions\Action;
 use Filament\Forms\Form;
 use Filament\Navigation\NavigationItem;
 use Filament\Resources\Resource;
@@ -83,20 +85,21 @@ class PartResource extends Resource
 
                 Section::make('Informacje o części')
                     ->collapsible()
-                    ->columns(4)
+                    ->columns(12)
                     ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--part-info'])
                     ->schema([
-                        Forms\Components\TextInput::make('sku')->label('Główny kod części / SKU')->hiddenLabel()->placeholder('Główny kod części / SKU')->unique(ignoreRecord: true)->maxLength(255)->columnSpan(2),
-                        Forms\Components\TextInput::make('part_number')->label('Numer części')->hiddenLabel()->placeholder('Numer części')->maxLength(255),
-                        Forms\Components\TextInput::make('manufacturer_code')->label('Kod producenta')->hiddenLabel()->placeholder('Kod producenta')->maxLength(255),
-                        Forms\Components\TextInput::make('name')->label('Nazwa części')->hiddenLabel()->placeholder('Nazwa części')->required()->maxLength(255)->columnSpan(2),
-                        Forms\Components\TextInput::make('oem_number')->label('Numer OEM')->hiddenLabel()->placeholder('Numer OEM')->maxLength(255),
-                        Forms\Components\Select::make('category_id')->label('Kategoria')->hiddenLabel()->placeholder('Kategoria')->relationship('category', 'name')->searchable()->preload()->native(false),
-                        Forms\Components\Select::make('suggested_category_id')->label('Sugerowana kategoria')->hiddenLabel()->placeholder('Sugerowana kategoria')->relationship('suggestedCategory', 'name')->searchable()->preload()->native(false)->columnSpan(2),
-                        Forms\Components\TextInput::make('category_confidence')->label('Pewność sugestii')->hiddenLabel()->placeholder('Pewność sugestii')->numeric()->suffix('%'),
-                        Forms\Components\Toggle::make('category_needs_review')->label('Wymaga sprawdzenia')->inline(false),
+                        Forms\Components\TextInput::make('name')->label('Tytuł produktu')->hiddenLabel()->placeholder('Tytuł produktu')->required()->maxLength(255)->live(onBlur: true)->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))->columnSpanFull(),
+                        Forms\Components\TextInput::make('sku')->label('Główny kod części')->hiddenLabel()->placeholder('Główny kod części')->unique(ignoreRecord: true)->maxLength(255)->live(onBlur: true)->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))->columnSpanFull(),
+                        Forms\Components\Select::make('category_id')->label('Kategoria')->hiddenLabel()->placeholder('Kategoria')->relationship('category', 'name')->searchable()->preload()->native(false)->suffixAction(self::categoryTreeAction())->columnSpanFull(),
+                        Forms\Components\Textarea::make('condition_notes')->label('Jakość')->hiddenLabel()->placeholder('Jakość')->rows(1)->columnSpan(6),
+                        Forms\Components\TextInput::make('part_position')->label('Pozycja części (strona zabudowy)')->hiddenLabel()->placeholder('Pozycja części (strona zabudowy)')->dehydrated(false)->columnSpan(6),
+                        Forms\Components\TextInput::make('part_number')->label('Numer części')->hiddenLabel()->placeholder('Numer części')->maxLength(255)->live(onBlur: true)->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))->columnSpan(4),
+                        Forms\Components\TextInput::make('manufacturer_code')->label('Kod producenta')->hiddenLabel()->placeholder('Kod producenta')->maxLength(255)->live(onBlur: true)->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))->columnSpan(4),
+                        Forms\Components\TextInput::make('oem_number')->label('Numer OEM')->hiddenLabel()->placeholder('Numer OEM')->maxLength(255)->live(onBlur: true)->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))->columnSpan(4),
+                        Forms\Components\Select::make('suggested_category_id')->label('Sugerowana kategoria')->hiddenLabel()->placeholder('Sugerowana kategoria')->relationship('suggestedCategory', 'name')->searchable()->preload()->native(false)->columnSpan(6),
+                        Forms\Components\TextInput::make('category_confidence')->label('Pewność sugestii')->hiddenLabel()->placeholder('Pewność sugestii')->numeric()->suffix('%')->columnSpan(3),
+                        Forms\Components\Toggle::make('category_needs_review')->label('Wymaga sprawdzenia')->inline(false)->columnSpan(3),
                         Forms\Components\Textarea::make('category_suggestion_reason')->label('Powód sugestii')->hiddenLabel()->placeholder('Powód sugestii')->rows(2)->columnSpanFull(),
-                        Forms\Components\Textarea::make('condition_notes')->label('Uwagi na etykiecie / stan')->hiddenLabel()->placeholder('Uwagi na etykiecie / stan')->rows(2)->columnSpanFull(),
                     ]),
 
                 Section::make('Informacje o samochodzie')
@@ -152,6 +155,101 @@ class PartResource extends Resource
             ]);
     }
 
+
+
+    public static function refreshCategorySuggestion(Forms\Get $get, Forms\Set $set, ?Part $record = null): null
+    {
+        $suggestion = app(PartCategorySuggestionService::class)->suggestionForInput([
+            'name' => $get('name'),
+            'sku' => $get('sku'),
+            'part_number' => $get('part_number'),
+            'oem_number' => $get('oem_number'),
+            'manufacturer_code' => $get('manufacturer_code'),
+        ], $record?->id);
+
+        if (! $suggestion['category_id']) {
+            return null;
+        }
+
+        $set('suggested_category_id', $suggestion['category_id']);
+        $set('category_confidence', $suggestion['confidence']);
+        $set('category_suggestion_reason', $suggestion['reason']);
+        $set('category_needs_review', ! $suggestion['auto_fill']);
+
+        if (! $get('category_id') && $suggestion['auto_fill']) {
+            $set('category_id', $suggestion['category_id']);
+        }
+
+        return null;
+    }
+
+    public static function categoryTreeAction(): Action
+    {
+        return Action::make('chooseCategoryFromTree')
+            ->label('')
+            ->icon('heroicon-m-bars-3')
+            ->tooltip('Wybierz kategorię z drzewa')
+            ->modalHeading('Wybierz kategorię')
+            ->modalSubmitActionLabel('Ustaw kategorię')
+            ->slideOver()
+            ->form([
+                Forms\Components\Select::make('search_category_id')
+                    ->label('Szukaj kategorii')
+                    ->hiddenLabel()
+                    ->placeholder('Szukaj kategorii')
+                    ->options(fn (): array => self::categoryOptions())
+                    ->searchable()
+                    ->native(false),
+                Forms\Components\Select::make('level_1')
+                    ->label('Poziom 1')
+                    ->hiddenLabel()
+                    ->placeholder('Poziom 1')
+                    ->options(fn (): array => self::categoryOptions(null))
+                    ->live()
+                    ->native(false),
+                Forms\Components\Select::make('level_2')
+                    ->label('Poziom 2')
+                    ->hiddenLabel()
+                    ->placeholder('Poziom 2')
+                    ->options(fn (Forms\Get $get): array => self::categoryOptions($get('level_1')))
+                    ->visible(fn (Forms\Get $get): bool => filled($get('level_1')))
+                    ->live()
+                    ->native(false),
+                Forms\Components\Select::make('level_3')
+                    ->label('Poziom 3')
+                    ->hiddenLabel()
+                    ->placeholder('Poziom 3')
+                    ->options(fn (Forms\Get $get): array => self::categoryOptions($get('level_2')))
+                    ->visible(fn (Forms\Get $get): bool => filled($get('level_2')) && self::categoryOptions($get('level_2')) !== [])
+                    ->live()
+                    ->native(false),
+                Forms\Components\Select::make('level_4')
+                    ->label('Poziom 4')
+                    ->hiddenLabel()
+                    ->placeholder('Poziom 4')
+                    ->options(fn (Forms\Get $get): array => self::categoryOptions($get('level_3')))
+                    ->visible(fn (Forms\Get $get): bool => filled($get('level_3')) && self::categoryOptions($get('level_3')) !== [])
+                    ->native(false),
+            ])
+            ->action(function (array $data, Forms\Set $set): void {
+                $categoryId = ($data['search_category_id'] ?? null) ?: (($data['level_4'] ?? null) ?: (($data['level_3'] ?? null) ?: (($data['level_2'] ?? null) ?: ($data['level_1'] ?? null))));
+
+                if ($categoryId) {
+                    $set('category_id', $categoryId);
+                }
+            });
+    }
+
+    public static function categoryOptions(mixed $parentId = 'all'): array
+    {
+        return PartCategory::query()
+            ->when($parentId === 'all', fn (Builder $query) => $query, fn (Builder $query) => filled($parentId) ? $query->where('parent_id', $parentId) : $query->whereNull('parent_id'))
+            ->ordered()
+            ->limit(100)
+            ->get()
+            ->mapWithKeys(fn (PartCategory $category): array => [$category->id => trim($category->name.' '.($category->full_slug_path ? '('.$category->full_slug_path.')' : ''))])
+            ->all();
+    }
 
     public static function syncPartImages(Part $part, mixed $paths): void
     {
