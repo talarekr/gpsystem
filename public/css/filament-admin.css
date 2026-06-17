@@ -1063,7 +1063,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     --gps-part-field-focus-ring: rgba(18, 42, 102, 0.10);
     --gps-part-field-radius: 5px;
     --gps-part-field-label: #64748b;
-    --gps-part-field-placeholder: #64748b;
+    --gps-part-field-placeholder: #a8b0bb;
 }
 
 .gps-part-form .gps-part-form-section--part-info .fi-fo-field-wrp {
@@ -1087,7 +1087,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 .gps-part-form .gps-part-form-section--part-info .fi-fo-field-wrp-label span {
     color: var(--gps-part-field-label) !important;
     font-size: 0.68rem !important;
-    font-weight: 650 !important;
+    font-weight: 500 !important;
     letter-spacing: 0.01em;
     line-height: 1;
 }
@@ -1149,9 +1149,9 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     background: transparent !important;
     box-shadow: none !important;
     outline: none !important;
-    color: #0f172a !important;
+    color: var(--gps-part-field-placeholder) !important;
     font-size: 0.9rem;
-    font-weight: 500;
+    font-weight: 400;
     border-radius: var(--gps-part-field-radius) !important;
     --tw-ring-offset-shadow: 0 0 #0000 !important;
     --tw-ring-shadow: 0 0 #0000 !important;
@@ -1200,9 +1200,49 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 .gps-part-form .gps-part-form-section--part-info :where(.fi-input::placeholder, .fi-textarea::placeholder, .choices__input::placeholder),
 .gps-part-form .gps-part-form-section--part-info .fi-fo-rich-editor .ProseMirror[data-placeholder]::before {
     color: var(--gps-part-field-placeholder) !important;
-    opacity: 0.82 !important;
+    opacity: 1 !important;
     font-size: 0.9rem;
-    font-weight: 500;
+    font-weight: 400;
+}
+
+.gps-part-form .gps-part-form-section--part-info :where(
+    .fi-input:focus,
+    .fi-input:not(:placeholder-shown),
+    .fi-textarea:focus,
+    .fi-textarea:not(:placeholder-shown),
+    .choices__input:focus,
+    .choices__input:not(:placeholder-shown),
+    .fi-rich-editor .ProseMirror:focus,
+    .fi-fo-rich-editor .ProseMirror:focus,
+    .fi-fo-rich-editor .ProseMirror:not(:empty),
+    .fi-fo-markdown-editor textarea:focus,
+    .fi-fo-markdown-editor textarea:not(:placeholder-shown)
+) {
+    color: #0f172a !important;
+    font-weight: 400;
+}
+
+.gps-part-form .gps-part-form-section--part-info :where(
+    .fi-select-input,
+    .fi-select-input option,
+    .choices__inner,
+    .choices__item,
+    .choices__item--selectable,
+    .choices__placeholder,
+    .choices__input,
+    .choices__list--single
+) {
+    color: var(--gps-part-field-placeholder) !important;
+    font-weight: 400 !important;
+}
+
+.gps-part-form .gps-part-form-section--part-info :where(
+    .fi-select-input:focus,
+    .choices.is-focused .choices__item--selectable,
+    .choices.is-open .choices__item--selectable
+) {
+    color: #0f172a !important;
+    font-weight: 400 !important;
 }
 
 
