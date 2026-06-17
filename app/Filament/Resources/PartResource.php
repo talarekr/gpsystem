@@ -96,13 +96,11 @@ class PartResource extends Resource
                         Forms\Components\Select::make('part_position')->label('Pozycja części (strona zabudowy)')->hiddenLabel()->placeholder('Wybierz')->options(['Wszystkie' => 'Wszystkie', 'Lewa strona' => 'Lewa strona', 'Środek' => 'Środek', 'Prawa strona' => 'Prawa strona', 'Komplet' => 'Komplet', 'Tył strona lewa' => 'Tył strona lewa', 'Tył strona prawa' => 'Tył strona prawa', 'Przód strona lewa' => 'Przód strona lewa', 'Przód strona prawa' => 'Przód strona prawa', 'Przód' => 'Przód', 'Tył' => 'Tył'])->default(null)->native(false)->dehydrated(false)->columnSpan(6),
                         Forms\Components\Select::make('steering_side')->label('Kierownica po stronie')->hiddenLabel()->placeholder('Kierownica po stronie')->options(['Lewej' => 'Lewej', 'Prawej' => 'Prawej'])->default('Lewej')->native(false)->dehydrated(false)->columnSpan(6),
                         Forms\Components\Select::make('storage_location_id')->label('Magazyn')->hiddenLabel()->placeholder('Wpisz min. 2 znaki')->searchable()->searchDebounce(400)->getSearchResultsUsing(fn (string $search): array => self::storageLocationSearchResults($search))->getOptionLabelUsing(fn ($value): ?string => self::storageLocationOptionLabel($value))->native(false)->columnSpan(6),
-                        Forms\Components\TextInput::make('part_number')->label('Numer części')->hiddenLabel()->placeholder('Numer części')->maxLength(255)->live(onBlur: true)->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))->columnSpan(4),
-                        Forms\Components\TextInput::make('manufacturer_code')->label('Kod producenta')->hiddenLabel()->placeholder('Kod producenta')->maxLength(255)->live(onBlur: true)->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))->columnSpan(4),
-                        Forms\Components\TextInput::make('oem_number')->label('Numer OEM')->hiddenLabel()->placeholder('Numer OEM')->maxLength(255)->live(onBlur: true)->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))->columnSpan(4),
-                        Forms\Components\Select::make('suggested_category_id')->label('Sugerowana kategoria')->hiddenLabel()->placeholder('Sugerowana kategoria')->relationship('suggestedCategory', 'name')->searchable()->preload()->native(false)->columnSpan(6),
-                        Forms\Components\TextInput::make('category_confidence')->label('Pewność sugestii')->hiddenLabel()->placeholder('Pewność sugestii')->numeric()->suffix('%')->columnSpan(3),
-                        Forms\Components\Toggle::make('category_needs_review')->label('Wymaga sprawdzenia')->inline(false)->columnSpan(3),
-                        Forms\Components\Textarea::make('category_suggestion_reason')->label('Powód sugestii')->hiddenLabel()->placeholder('Powód sugestii')->rows(2)->columnSpanFull(),
+                        Forms\Components\RichEditor::make('description')->label('Opis')->hiddenLabel()->placeholder('Opis')->columnSpanFull(),
+                        Forms\Components\Hidden::make('suggested_category_id'),
+                        Forms\Components\Hidden::make('category_confidence'),
+                        Forms\Components\Hidden::make('category_suggestion_reason'),
+                        Forms\Components\Hidden::make('category_needs_review'),
                     ]),
 
                 Section::make('Informacje o samochodzie')
@@ -146,14 +144,6 @@ class PartResource extends Resource
                         Forms\Components\Placeholder::make('store_visibility_note')->label('Widoczność')->content('Widoczność w sklepie ustawisz w sekcji Magazyn.'),
                     ]),
 
-                Section::make('Opisy')
-                    ->collapsible()
-                    ->collapsed()
-                    ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--descriptions'])
-                    ->schema([
-                        Forms\Components\Textarea::make('short_description')->label('Krótki opis')->hiddenLabel()->placeholder('Krótki opis')->rows(2),
-                        Forms\Components\RichEditor::make('description')->label('Opis')->hiddenLabel()->placeholder('Opis')->columnSpanFull(),
-                    ]),
             ]);
     }
 
