@@ -1689,27 +1689,27 @@ body.fi-body :where(
     box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);
 }
 
-/* Subtle dropdown indicators for select/searchable-select fields in the part-info section.
-   Category keeps its suffix-action hamburger unchanged, so selects with suffix buttons are excluded. */
-.gps-part-form .gps-part-form-section--part-info .fi-fo-select .fi-input-wrp:not(:has(.fi-input-wrp-suffix button, .fi-input-wrp-suffix .fi-icon-btn)) :where(.choices__list--single, .fi-select-input) {
-    padding-right: 2rem !important;
+/* Stable chevrons for explicitly marked part-info select fields. The previous
+   Choices pseudo-element is unreliable here because Filament/Choices can hide
+   or replace that internal node; placing the marker on the input wrapper keeps
+   it inside the visible field without changing borders, focus, or layout. */
+.gps-part-form .gps-part-form-section--part-info .gps-part-select-with-chevron .fi-input-wrp {
+    position: relative;
 }
 
-.gps-part-form .gps-part-form-section--part-info .fi-fo-select .fi-input-wrp:not(:has(.fi-input-wrp-suffix button, .fi-input-wrp-suffix .fi-icon-btn)) .choices[data-type*="select-one"]::after {
-    right: 0.8rem !important;
-    top: 50% !important;
-    width: 0.42rem !important;
-    height: 0.42rem !important;
-    margin-top: -0.26rem !important;
-    border: 0 !important;
-    border-right: 1.5px solid #64748b !important;
-    border-bottom: 1.5px solid #64748b !important;
-    transform: rotate(45deg) !important;
-    opacity: 0.9;
+.gps-part-form .gps-part-form-section--part-info .gps-part-select-with-chevron .fi-input-wrp::after {
+    content: "";
+    position: absolute;
+    right: 0.75rem;
+    top: 50%;
+    width: 0.42rem;
+    height: 0.42rem;
+    border-right: 1.5px solid #64748b;
+    border-bottom: 1.5px solid #64748b;
+    transform: translateY(-50%) rotate(45deg);
     pointer-events: none;
 }
 
-.gps-part-form .gps-part-form-section--part-info .fi-fo-select .fi-input-wrp:not(:has(.fi-input-wrp-suffix button, .fi-input-wrp-suffix .fi-icon-btn)) .choices[data-type*="select-one"].is-open::after {
-    margin-top: -0.1rem !important;
-    transform: rotate(225deg) !important;
+.gps-part-form .gps-part-form-section--part-info .gps-part-select-with-chevron :where(.choices__list--single, .fi-select-input) {
+    padding-right: 2rem !important;
 }
