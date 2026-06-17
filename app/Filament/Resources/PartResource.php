@@ -64,11 +64,13 @@ class PartResource extends Resource
                         Forms\Components\FileUpload::make('part_photo_paths')
                             ->label('Zdjęcia części')
                             ->hiddenLabel()
+                            ->dehydrated()
                             ->image()
                             ->acceptedFileTypes(['image/*'])
                             ->multiple()
                             ->maxFiles(20)
                             ->reorderable()
+                            ->storeFiles()
                             ->disk('public')
                             ->directory('parts/photos')
                             ->visibility('public')
@@ -154,7 +156,7 @@ class PartResource extends Resource
     public static function syncPartImages(Part $part, mixed $paths): void
     {
         $paths = collect($paths ?? [])
-            ->map(fn (mixed $path): string => trim((string) $path))
+            ->map(fn (mixed $path): string => trim((string) (is_array($path) ? ($path['path'] ?? $path['file'] ?? '') : $path)))
             ->filter()
             ->unique()
             ->values();
