@@ -1344,6 +1344,56 @@ body.fi-body :where(
     border-radius: var(--gps-part-field-radius) !important;
 }
 
+.gps-part-form .gps-part-form-section--part-info .fi-fo-select :where(
+    .fi-input-wrp,
+    .choices,
+    .choices__inner,
+    .choices__list--single,
+    .choices__item,
+    .fi-select-input
+) {
+    min-height: 2.25rem !important;
+    height: 2.25rem !important;
+    line-height: 1.25rem !important;
+}
+
+.gps-part-form .gps-part-form-section--part-info .fi-fo-select :where(
+    .fi-input-wrp,
+    .choices,
+    .choices__inner,
+    .choices__list--single
+) {
+    display: flex !important;
+    align-items: center !important;
+}
+
+.gps-part-form .gps-part-form-section--part-info .fi-fo-select :where(
+    .choices__inner,
+    .choices__list--single,
+    .choices__item,
+    .fi-select-input
+) {
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+}
+
+.gps-part-form .gps-part-form-section--part-info .fi-fo-select :where(
+    .choices__list--single,
+    .choices__item,
+    .fi-select-input
+) {
+    display: flex !important;
+    align-items: center !important;
+}
+
+.gps-part-form .gps-part-form-section--part-info .fi-fo-select :where(.choices__list--single, .fi-select-input) {
+    width: 100% !important;
+}
+
+.gps-part-form .gps-part-form-section--part-info .fi-fo-select .choices__item {
+    max-width: 100%;
+}
+
 
 /* Native part-photo FileUpload styling: keep FilePond internals untouched so
    Filament/FilePond handles upload previews and remove actions without custom JS. */
