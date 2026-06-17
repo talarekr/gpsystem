@@ -1058,8 +1058,141 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     font-size: 0.86rem;
 }
 
+/* Single-border compact fields with small in-frame labels for the part info section. */
+.gps-part-form .gps-part-form-section--part-info {
+    --gps-part-field-border: #94a3b8;
+    --gps-part-field-border-hover: #64748b;
+    --gps-part-field-border-focus: #475569;
+    --gps-part-field-focus-ring: rgba(71, 85, 105, 0.12);
+    --gps-part-field-label: #64748b;
+    --gps-part-field-placeholder: #64748b;
+}
+
+.gps-part-form .gps-part-form-section--part-info .fi-fo-field-wrp {
+    position: relative;
+    min-width: 0;
+    padding-top: 0.36rem;
+}
+
+.gps-part-form .gps-part-form-section--part-info .fi-fo-field-wrp-label {
+    position: absolute;
+    top: 0;
+    left: 0.72rem;
+    z-index: 3;
+    margin: 0 !important;
+    padding-inline: 0.28rem;
+    background: #ffffff;
+    line-height: 1;
+    pointer-events: none;
+}
+
+.gps-part-form .gps-part-form-section--part-info .fi-fo-field-wrp-label span {
+    color: var(--gps-part-field-label) !important;
+    font-size: 0.68rem !important;
+    font-weight: 650 !important;
+    letter-spacing: 0.01em;
+    line-height: 1;
+}
+
+.gps-part-form .gps-part-form-section--part-info .fi-fo-field-wrp-label sup,
+.gps-part-form .gps-part-form-section--part-info .fi-fo-field-wrp-label .fi-fo-field-wrp-label-required-mark {
+    color: #94a3b8 !important;
+    font-size: 0.62rem !important;
+}
+
+.gps-part-form .gps-part-form-section--part-info :where(
+    .fi-input-wrp,
+    .fi-fo-text-input .fi-input-wrp,
+    .fi-fo-textarea .fi-input-wrp,
+    .fi-fo-select .fi-input-wrp,
+    .choices__inner,
+    .fi-fo-rich-editor,
+    .fi-fo-markdown-editor,
+    .fi-fo-tags-input
+) {
+    border: 1px solid var(--gps-part-field-border) !important;
+    border-radius: 0.62rem !important;
+    background: #ffffff !important;
+    box-shadow: none !important;
+    outline: none !important;
+    --tw-ring-offset-shadow: 0 0 #0000 !important;
+    --tw-ring-shadow: 0 0 #0000 !important;
+}
+
+.gps-part-form .gps-part-form-section--part-info :where(.fi-fo-select .choices) {
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    outline: none !important;
+}
+
+.gps-part-form .gps-part-form-section--part-info :where(
+    .fi-input,
+    .fi-select-input,
+    .fi-textarea,
+    .choices__input,
+    .choices__list--single,
+    .fi-fo-rich-editor .ProseMirror,
+    .fi-fo-markdown-editor textarea
+) {
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    outline: none !important;
+    color: #0f172a !important;
+    font-size: 0.9rem;
+    font-weight: 500;
+    --tw-ring-offset-shadow: 0 0 #0000 !important;
+    --tw-ring-shadow: 0 0 #0000 !important;
+}
+
+.gps-part-form .gps-part-form-section--part-info :where(.fi-input-wrp-prefix, .fi-input-wrp-suffix) {
+    border: 0 !important;
+    background: transparent !important;
+    color: #64748b !important;
+    box-shadow: none !important;
+}
+
+.gps-part-form .gps-part-form-section--part-info :where(
+    .fi-input-wrp:hover,
+    .fi-fo-text-input .fi-input-wrp:hover,
+    .fi-fo-textarea .fi-input-wrp:hover,
+    .fi-fo-select .fi-input-wrp:hover,
+    .choices__inner:hover,
+    .fi-fo-rich-editor:hover,
+    .fi-fo-markdown-editor:hover,
+    .fi-fo-tags-input:hover
+) {
+    border-color: var(--gps-part-field-border-hover) !important;
+}
+
+.gps-part-form .gps-part-form-section--part-info :where(
+    .fi-input-wrp:focus-within,
+    .fi-fo-text-input .fi-input-wrp:focus-within,
+    .fi-fo-textarea .fi-input-wrp:focus-within,
+    .fi-fo-select .fi-input-wrp:focus-within,
+    .choices__inner:focus-within,
+    .fi-fo-rich-editor:focus-within,
+    .fi-fo-markdown-editor:focus-within,
+    .fi-fo-tags-input:focus-within
+) {
+    border-color: var(--gps-part-field-border-focus) !important;
+    box-shadow: 0 0 0 2px var(--gps-part-field-focus-ring) !important;
+    outline: none !important;
+}
+
+.gps-part-form .gps-part-form-section--part-info :where(.fi-input::placeholder, .fi-textarea::placeholder, .choices__input::placeholder),
+.gps-part-form .gps-part-form-section--part-info .fi-fo-rich-editor .ProseMirror[data-placeholder]::before {
+    color: var(--gps-part-field-placeholder) !important;
+    opacity: 0.82 !important;
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+
 /* Native part-photo FileUpload styling: keep FilePond internals untouched so
    Filament/FilePond handles upload previews and remove actions without custom JS. */
+
 .gps-part-form .gps-part-form-section--photos .gps-part-photos-upload,
 .gps-part-form .gps-part-form-section--photos .gps-part-photos-upload .fi-fo-file-upload {
     width: 100% !important;
