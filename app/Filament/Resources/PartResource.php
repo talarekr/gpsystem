@@ -66,6 +66,7 @@ class PartResource extends Resource
                             ->hiddenLabel()
                             ->multiple()
                             ->reorderable()
+                            ->appendFiles()
                             ->maxFiles(20)
                             ->image()
                             ->acceptedFileTypes(['image/*'])
