@@ -7,6 +7,7 @@ use App\Filament\Resources\PartResource\Pages;
 use App\Models\Car;
 use App\Models\Part;
 use App\Models\PartCategory;
+use App\Models\PartImage;
 use App\Models\StorageLocation;
 use Filament\Forms;
 use Filament\Forms\Components\Grid;
@@ -60,31 +61,21 @@ class PartResource extends Resource
                     ->collapsible()
                     ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--photos'])
                     ->schema([
-                        Forms\Components\Repeater::make('images')
-                            ->relationship()
+                        Forms\Components\FileUpload::make('part_photo_paths')
                             ->label('Zdjęcia części')
                             ->hiddenLabel()
-                            ->reorderable('sort_order')
-                            ->orderColumn('sort_order')
-                            ->collapsible()
-                            ->defaultItems(0)
-                            ->addActionLabel('Prześlij zdjęcia części')
-                            ->extraAttributes(['class' => 'gps-part-photos-upload'])
-                            ->schema([
-                                Forms\Components\FileUpload::make('path')
-                                    ->label('Zdjęcie')
-                                    ->hiddenLabel()
-                                    ->image()
-                                    ->directory('parts/photos')
-                                    ->imagePreviewHeight('96')
-                                    ->panelLayout('compact')
-                                    ->extraAttributes(['class' => 'gps-part-upload-dropzone'])
-                                    ->required(),
-                                Forms\Components\Toggle::make('is_primary')
-                                    ->label('Zdjęcie główne')
-                                    ->helperText('Pierwsze zdjęcie lub zaznaczone zdjęcie będzie traktowane jako miniatura główna.'),
-                            ])
-                            ->columns(2)
+                            ->image()
+                            ->acceptedFileTypes(['image/*'])
+                            ->multiple()
+                            ->maxFiles(20)
+                            ->reorderable()
+                            ->disk('public')
+                            ->directory('parts/photos')
+                            ->visibility('public')
+                            ->imagePreviewHeight('96')
+                            ->panelLayout('integrated')
+                            ->placeholder('Przeciągnij i upuść lub wybierz pliki')
+                            ->extraAttributes(['class' => 'gps-part-photos-upload gps-part-upload-dropzone'])
                             ->columnSpanFull(),
                     ]),
 
@@ -157,6 +148,31 @@ class PartResource extends Resource
                         Forms\Components\RichEditor::make('description')->label('Opis')->hiddenLabel()->placeholder('Opis')->columnSpanFull(),
                     ]),
             ]);
+    }
+
+
+    public static function syncPartImages(Part $part, mixed $paths): void
+    {
+        $paths = collect($paths ?? [])
+            ->map(fn (mixed $path): string => trim((string) $path))
+            ->filter()
+            ->unique()
+            ->values();
+
+        $existingImages = $part->images()->get()->keyBy('path');
+        $keptPaths = $paths->all();
+
+        foreach ($paths as $index => $path) {
+            $image = $existingImages->get($path) ?? new PartImage(['path' => $path]);
+            $image->part_id = $part->id;
+            $image->sort_order = $index;
+            $image->is_primary = $index === 0;
+            $image->save();
+        }
+
+        $part->images()
+            ->whereNotIn('path', $keptPaths ?: ['__gps_no_part_photo_paths__'])
+            ->delete();
     }
 
     public static function table(Table $table): Table
