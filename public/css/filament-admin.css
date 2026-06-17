@@ -1100,7 +1100,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 
 .gps-part-form .gps-part-form-section--part-info .fi-fo-field-wrp-label {
     position: absolute;
-    top: 0.18rem;
+    top: 0.24rem;
     left: 0.75rem;
     z-index: 3;
     width: max-content;
