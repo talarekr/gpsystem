@@ -1062,8 +1062,8 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 .gps-part-form .gps-part-form-section--part-info {
     --gps-part-field-border: #94a3b8;
     --gps-part-field-border-hover: #64748b;
-    --gps-part-field-border-focus: #475569;
-    --gps-part-field-focus-ring: rgba(71, 85, 105, 0.12);
+    --gps-part-field-border-focus: #122a66;
+    --gps-part-field-focus-ring: rgba(18, 42, 102, 0.12);
     --gps-part-field-label: #64748b;
     --gps-part-field-placeholder: #64748b;
 }
@@ -1111,7 +1111,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     .fi-fo-tags-input
 ) {
     border: 1px solid var(--gps-part-field-border) !important;
-    border-radius: 0.62rem !important;
+    border-radius: 0.125rem !important;
     background: #ffffff !important;
     box-shadow: none !important;
     outline: none !important;
@@ -1142,6 +1142,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     color: #0f172a !important;
     font-size: 0.9rem;
     font-weight: 500;
+    border-radius: 0.125rem !important;
     --tw-ring-offset-shadow: 0 0 #0000 !important;
     --tw-ring-shadow: 0 0 #0000 !important;
 }
