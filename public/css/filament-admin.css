@@ -858,8 +858,8 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 }
 
 .gps-part-form :where(.fi-input-wrp:focus-within, .fi-fo-file-upload:focus-within, .fi-fo-rich-editor:focus-within, .fi-fo-markdown-editor:focus-within) {
-    border-color: var(--gps-admin-border-focus) !important;
-    box-shadow: 0 0 0 2px rgba(18, 42, 102, 0.12) !important;
+    border-color: var(--gps-admin-border-strong) !important;
+    box-shadow: none !important;
 }
 
 .gps-part-form :where(.fi-input, .fi-select-input, .fi-textarea) {
@@ -881,9 +881,10 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 }
 
 .gps-part-form-section--code-photo .gps-code-photo-upload .filepond--panel-root {
-    border: 1px solid #94a3b8 !important;
-    border-radius: 0.4rem !important;
-    background: #fff !important;
+    border: 0 !important;
+    border-radius: 0.65rem !important;
+    background: transparent !important;
+    box-shadow: none !important;
 }
 
 .gps-part-form-section--code-photo .gps-code-photo-upload .filepond--drop-label {
@@ -898,7 +899,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 .gps-part-form-section--code-photo .gps-code-photo-upload .filepond--drop-label::before {
     display: block;
     margin-bottom: 0.25rem;
-    color: #122a66;
+    color: #475569;
     content: '+';
     font-size: 1.3rem;
     font-weight: 600;
@@ -921,15 +922,15 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 
 /* Visible non-focused fields for the compact part form (Ovoko-style). */
 .gps-part-form {
-    --gps-part-field-border: #94a3b8;
-    --gps-part-field-border-hover: #64748b;
-    --gps-part-field-border-focus: #122a66;
+    --gps-part-field-border: var(--gps-admin-border);
+    --gps-part-field-border-hover: var(--gps-admin-border-strong);
+    --gps-part-field-border-focus: var(--gps-admin-border-strong);
     --gps-part-field-bg: #ffffff;
     --gps-part-field-bg-subtle: #fbfdff;
     --gps-part-field-placeholder: #6b7280;
     --gps-part-section-border: #cbd5e1;
     --border-color: var(--gps-part-field-border);
-    --ring-color: rgba(18, 42, 102, 0.14);
+    --ring-color: rgba(148, 163, 184, 0.16);
 }
 
 .gps-part-form .gps-part-form-section.fi-section,
@@ -1013,7 +1014,31 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     .fi-fo-tags-input:focus-within
 ) {
     border-color: var(--gps-part-field-border-focus) !important;
-    box-shadow: 0 0 0 3px rgba(18, 42, 102, 0.14) !important;
+    box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.16) !important;
+    outline: none !important;
+}
+
+
+.gps-part-form .gps-part-form-section--code-photo .gps-code-photo-upload .fi-fo-file-upload {
+    border: 1px solid var(--gps-part-section-border) !important;
+    border-radius: 0.7rem !important;
+    background: #ffffff !important;
+    box-shadow: none !important;
+    outline: none !important;
+}
+
+.gps-part-form .gps-part-form-section--code-photo .gps-code-photo-upload .fi-fo-file-upload:hover {
+    border-color: var(--gps-part-field-border-hover) !important;
+}
+
+.gps-part-form .gps-part-form-section--code-photo .gps-code-photo-upload .fi-fo-file-upload:focus-within {
+    border-color: var(--gps-part-section-border) !important;
+    box-shadow: none !important;
+    outline: none !important;
+}
+
+.gps-part-form .gps-part-form-section--code-photo .gps-code-photo-upload :where(.filepond--root, .filepond--browser, .filepond--drop-label, .filepond--panel, .filepond--panel-root) {
+    box-shadow: none !important;
     outline: none !important;
 }
 
