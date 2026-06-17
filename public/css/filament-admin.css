@@ -1779,3 +1779,32 @@ body.fi-body :where(
 .gps-part-form .gps-part-form-section--part-info .gps-part-select-with-chevron :where(.choices__list--single, .fi-select-input) {
     padding-right: 2rem !important;
 }
+
+.gps-part-form .gps-part-form-section--part-info :where(
+    .fi-input,
+    .fi-select-input,
+    .fi-textarea,
+    .choices__input,
+    .choices__list--single,
+    .choices__item,
+    .choices__item--selectable,
+    .choices__placeholder,
+    .fi-fo-rich-editor .ProseMirror,
+    .fi-fo-markdown-editor textarea
+) {
+    color: #a8b0bb !important;
+    font-weight: 400 !important;
+}
+
+.gps-part-form .gps-part-form-section--part-info :where(
+    .fi-input:focus,
+    .fi-select-input:focus,
+    .fi-textarea:focus,
+    .choices.is-focused .choices__item,
+    .choices.is-open .choices__item,
+    .fi-fo-rich-editor:focus-within .ProseMirror,
+    .fi-fo-markdown-editor textarea:focus
+) {
+    color: #0f172a !important;
+    font-weight: 400 !important;
+}
