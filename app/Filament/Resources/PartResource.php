@@ -73,9 +73,9 @@ class PartResource extends Resource
                             ->directory('parts/photos')
                             ->visibility('public')
                             ->imagePreviewHeight('96')
-                            ->panelLayout('integrated')
-                            ->placeholder('Przeciągnij i upuść lub wybierz pliki')
-                            ->extraAttributes(['class' => 'gps-part-photos-upload gps-part-upload-dropzone'])
+                            ->panelLayout('compact')
+                            ->placeholder('＋ Prześlij zdjęcia')
+                            ->extraAttributes(['class' => 'gps-part-photos-upload'])
                             ->columnSpanFull(),
                     ]),
 
