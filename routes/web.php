@@ -12,6 +12,7 @@ use App\Http\Controllers\Storefront\CategoryController;
 use App\Http\Controllers\Storefront\HomeController;
 use App\Http\Controllers\Storefront\PartController;
 use App\Http\Controllers\Storefront\SearchController;
+use App\Http\Controllers\Tools\ProductImagesDryRunController;
 use App\Services\ImportMigration\WooProductImport;
 use App\Support\ImportMigration\ManualImportFileResolver;
 use App\Support\ImportMigration\WooProductImportRunRepository;
@@ -30,6 +31,7 @@ Route::post('/koszyk/usun/{part}', [CartController::class, 'remove'])->name('sto
 Route::post('/koszyk/wyczysc', [CartController::class, 'clear'])->name('storefront.cart.clear');
 Route::get('/produkt/{slug}', [PartController::class, 'show'])->name('storefront.product');
 Route::get('/kategoria-produktu/{path}', [CategoryController::class, 'show'])->where('path', '.*')->name('storefront.category');
+Route::get('/product-images-dry-run', ProductImagesDryRunController::class)->name('tools.product-images-dry-run');
 
 
 Route::middleware(Authenticate::class)->prefix('admin')->name('admin.')->group(function (): void {
