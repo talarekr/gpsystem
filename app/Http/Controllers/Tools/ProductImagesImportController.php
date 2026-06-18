@@ -59,8 +59,11 @@ class ProductImagesImportController extends Controller
             '--limit' => (int) $request->query('limit'),
             '--source-root' => (string) $request->query('source_root'),
             '--copy-files' => true,
-            '--skip-existing' => true,
         ];
+
+        if ($request->boolean('skip_existing')) {
+            $arguments['--skip-existing'] = true;
+        }
 
         if ($request->filled('product_id')) {
             $arguments['--product-id'] = (string) $request->query('product_id');
@@ -94,7 +97,7 @@ class ProductImagesImportController extends Controller
 <body>
     <h1>Realny import zdjęć produktów</h1>
     <p><strong>Tryb:</strong> realny import. Endpoint nie dodaje <code>--dry-run</code>.</p>
-    <p><strong>Bezpieczeństwo:</strong> wymagane są <code>limit</code> maks. 500, <code>source_root</code> oraz jawne <code>copy_files=1</code>. Endpoint zawsze dodaje <code>--skip-existing</code>.</p>
+    <p><strong>Bezpieczeństwo:</strong> wymagane są <code>limit</code> maks. 500, <code>source_root</code> oraz jawne <code>copy_files=1</code>. Parametr <code>skip_existing=1</code> jest opcjonalny i domyślnie wyłączony; import standardowo tylko dokłada brakujące zdjęcia.</p>
     <p><strong>Ścieżka CSV:</strong> <code>{$escapedCsvPath}</code></p>
     <p><strong>Kod wyjścia komendy:</strong> <code>{$escapedExitCode}</code></p>
     <h2>Parametry</h2>
@@ -111,7 +114,7 @@ HTML;
         return [
             'limit' => $request->query('limit'),
             'product_id' => $request->query('product_id'),
-            'skip_existing_wymuszony' => true,
+            'skip_existing' => $request->boolean('skip_existing'),
             'source_root' => $request->query('source_root'),
             'copy_files' => $request->query('copy_files') === '1',
             'dry_run_wymuszony' => false,

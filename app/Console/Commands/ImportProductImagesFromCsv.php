@@ -244,7 +244,7 @@ class ImportProductImagesFromCsv extends Command
             $externalId = $this->normalizeKey($row['image_id'] ?? null) ?: md5($url);
             $relativePath = $this->destinationPath($url, $wooProductId);
 
-            if ($this->partImageExists($part, $externalId, $relativePath)) {
+            if ($this->partImageExists($externalId, $relativePath)) {
                 continue;
             }
 
@@ -301,10 +301,9 @@ class ImportProductImagesFromCsv extends Command
         }
     }
 
-    private function partImageExists(Part $part, string $externalId, string $relativePath): bool
+    private function partImageExists(string $externalId, string $relativePath): bool
     {
         return PartImage::query()
-            ->where('part_id', $part->id)
             ->where(static function ($query) use ($externalId, $relativePath): void {
                 $query->where(static function ($query) use ($externalId): void {
                     $query->where('source_system', 'woo')->where('external_id', $externalId);
