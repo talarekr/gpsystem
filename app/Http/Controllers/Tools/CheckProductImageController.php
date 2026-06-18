@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Tools;
 use App\Models\Part;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
-use Illuminate\Support\Facades\Storage;
 
 class CheckProductImageController extends Controller
 {
@@ -27,14 +26,20 @@ class CheckProductImageController extends Controller
             ->values()
             ->map(function ($image) {
                 $path = ltrim((string) $image->path, '/');
+                $storageAppPublicPath = $path === '' ? null : storage_path('app/public/'.$path);
+                $publicStoragePhysicalPath = $path === '' ? null : public_path('storage/'.$path);
 
                 return [
                     'id' => $image->id,
                     'path' => $image->path,
                     'sort_order' => $image->sort_order,
                     'is_primary' => (bool) $image->is_primary,
-                    'storage_app_public_exists' => $path !== '' && Storage::disk('public')->exists($path),
-                    'storage_app_public_path' => $path === '' ? null : Storage::disk('public')->path($path),
+                    'storage_app_public_exists' => $storageAppPublicPath !== null && is_file($storageAppPublicPath),
+                    'storage_app_public_path' => $storageAppPublicPath,
+                    'storage_app_public_perms' => $this->permissions($storageAppPublicPath),
+                    'public_storage_physical_exists' => $publicStoragePhysicalPath !== null && is_file($publicStoragePhysicalPath),
+                    'public_storage_physical_path' => $publicStoragePhysicalPath,
+                    'public_storage_physical_perms' => $this->permissions($publicStoragePhysicalPath),
                     'public_url' => $image->relativePublicUrl(),
                     'absolute_public_url' => $image->absolutePublicUrl(),
                     'expected_url' => $path === '' ? null : '/storage/'.$path,
@@ -64,5 +69,14 @@ class CheckProductImageController extends Controller
             ],
             'url_rule' => 'Imported paths are stored as parts/photos/imported/{woo_product_id}/filename.jpg and should be served as absolute /storage URL in rendered <img src> attributes.',
         ], 200, [], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    }
+
+    private function permissions(?string $path): ?string
+    {
+        if ($path === null || ! file_exists($path)) {
+            return null;
+        }
+
+        return substr(sprintf('%o', fileperms($path)), -4);
     }
 }

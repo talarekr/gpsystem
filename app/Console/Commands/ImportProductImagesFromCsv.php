@@ -245,6 +245,9 @@ class ImportProductImagesFromCsv extends Command
             $relativePath = $this->destinationPath($url, $wooProductId);
 
             if ($this->partImageExists($externalId, $relativePath)) {
+                if (! $dryRun) {
+                    $this->syncImportedImageToPublicStorage($relativePath);
+                }
                 continue;
             }
 
@@ -360,19 +363,54 @@ class ImportProductImagesFromCsv extends Command
 
     private function copyLocalImage(string $localPath, string $relativePath): bool
     {
-        $destination = storage_path('app/public/'.$relativePath);
-        if (is_file($destination)) {
-            return false;
+        $storageDestination = storage_path('app/public/'.$relativePath);
+        $publicDestination = public_path('storage/'.$relativePath);
+        $copied = false;
+
+        if (! is_file($storageDestination)) {
+            $this->ensureDirectory(dirname($storageDestination));
+            copy($localPath, $storageDestination);
+            chmod($storageDestination, 0644);
+            $copied = true;
         }
 
-        $directory = dirname($destination);
+        if (! is_file($publicDestination)) {
+            $this->ensureDirectory(dirname($publicDestination));
+            copy(is_file($storageDestination) ? $storageDestination : $localPath, $publicDestination);
+            chmod($publicDestination, 0644);
+            $copied = true;
+        } else {
+            chmod($publicDestination, 0644);
+        }
+
+        return $copied;
+    }
+
+    private function syncImportedImageToPublicStorage(string $relativePath): void
+    {
+        if (! Str::startsWith($relativePath, 'parts/photos/imported/')) {
+            return;
+        }
+
+        $source = storage_path('app/public/'.$relativePath);
+        $target = public_path('storage/'.$relativePath);
+
+        if (! is_file($source) || is_file($target)) {
+            return;
+        }
+
+        $this->ensureDirectory(dirname($target));
+        copy($source, $target);
+        chmod($target, 0644);
+    }
+
+    private function ensureDirectory(string $directory): void
+    {
         if (! is_dir($directory)) {
             mkdir($directory, 0755, true);
         }
 
-        copy($localPath, $destination);
-
-        return true;
+        chmod($directory, 0755);
     }
 
     private function printSummary(array $rows, array $groups, array $matches, array $unmatched, array $ambiguous, int $matchedImageCount, int $skippedExistingProducts, bool $dryRun, array $matchColumns, array $report): void
