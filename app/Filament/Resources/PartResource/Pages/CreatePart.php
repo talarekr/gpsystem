@@ -16,6 +16,8 @@ class CreatePart extends CreateRecord
         $this->partPhotoPaths = $data['part_photo_paths'] ?? [];
         unset($data['part_photo_paths']);
 
+        $data['quantity'] = 1;
+
         return $data;
     }
 
