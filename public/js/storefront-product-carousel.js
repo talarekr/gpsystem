@@ -4,6 +4,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const previous = carousel.querySelector('[data-carousel-prev]');
         const next = carousel.querySelector('[data-carousel-next]');
         const pagination = carousel.querySelector('[data-carousel-pagination]');
+        const controls = carousel.querySelector('.sf-product-carousel__controls');
 
         if (!track || !previous || !next || !pagination) {
             return;
@@ -17,14 +18,19 @@ document.addEventListener('DOMContentLoaded', () => {
         const getCurrentPage = () => Math.min(pageCount - 1, Math.round(track.scrollLeft / track.clientWidth));
 
         const scrollToPage = (page) => {
+            const targetPage = Math.max(0, Math.min(pageCount - 1, page));
+
             track.scrollTo({
-                left: page * track.clientWidth,
+                left: targetPage * track.clientWidth,
                 behavior: 'smooth',
             });
         };
 
         const updateActiveDot = () => {
             const currentPage = getCurrentPage();
+
+            previous.disabled = currentPage <= 0;
+            next.disabled = currentPage >= pageCount - 1;
 
             dots.forEach((dot, index) => {
                 const isActive = index === currentPage;
@@ -41,10 +47,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (pageCount <= 1) {
                 pagination.hidden = true;
+
+                if (controls) {
+                    controls.hidden = true;
+                }
+
                 return;
             }
 
             pagination.hidden = false;
+
+            if (controls) {
+                controls.hidden = false;
+            }
 
             for (let index = 0; index < pageCount; index += 1) {
                 const dot = document.createElement('button');
