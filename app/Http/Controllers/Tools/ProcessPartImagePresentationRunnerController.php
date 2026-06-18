@@ -78,7 +78,7 @@ class ProcessPartImagePresentationRunnerController extends Controller
 
         return '<!doctype html><html lang="pl"><head><meta charset="utf-8"><title>Runner presentation zdjęć produktów</title></head><body>'
             .'<h1>Runner presentation zdjęć produktów</h1>'
-            .'<p><strong>Tryb docelowy:</strong> ALL PRODUCTS / ALL IMPORTED. Runner używa <code>only_imported=1</code>, <code>missing_only=0</code>, <code>force=1</code>, <code>dry_run=0</code> i <code>limit=50</code>.</p>'
+            .'<p><strong>Tryb docelowy:</strong> ALL IMPORTED. Runner używa <code>only_imported=1</code>, <code>missing_only=0</code>, <code>force=1</code>, <code>dry_run=0</code> i <code>limit=50</code>.</p>'
             .'<p>Ten adres bez <code>auto=1</code> niczego nie uruchamia. Auto-runner startuje dopiero po wejściu w URL z <code>auto=1</code>.</p>'
             .'<p>Runner odpala istniejący endpoint <code>/tools/process-part-image-presentation</code> batch po batchu. Nie usuwa oryginałów, nie usuwa <code>gpswiss-uploads</code> i nie zmienia ścieżek zdjęć w bazie.</p>'
             .'<p><a href="'.e($startUrl).'">Uruchom auto-runner od offset=0</a></p>'
@@ -109,7 +109,7 @@ body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;margin:24px;line-he
 </head>
 <body>
 <h1>Auto-runner presentation zdjęć produktów</h1>
-<div class="banner"><strong>TRYB: ALL PRODUCTS / ALL IMPORTED</strong><br>Runner działa z <code>only_imported=1</code> i <code>missing_only=0</code>, więc przetwarza wszystkie importowane zdjęcia, nie tylko brakujące presentation.</div>
+<div class="banner"><strong>TRYB: ALL IMPORTED</strong><br>Runner działa z <code>only_imported=1</code> i <code>missing_only=0</code>, więc przetwarza wszystkie importowane zdjęcia, nie tylko brakujące presentation.</div>
 <p>Ta strona uruchamia istniejący endpoint <code>/tools/process-part-image-presentation</code> batch po batchu dopiero po załadowaniu URL z <code>auto=1</code>.</p>
 <dl>
 <dt>Status</dt><dd class="status" id="status">READY</dd>
