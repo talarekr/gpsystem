@@ -14,6 +14,7 @@ use App\Http\Controllers\Storefront\PartController;
 use App\Http\Controllers\Storefront\SearchController;
 use App\Http\Controllers\Tools\ProductImagesDryRunController;
 use App\Http\Controllers\Tools\ProductImagesImportController;
+use App\Http\Controllers\Tools\ProductImagesImportRunnerController;
 use App\Services\ImportMigration\WooProductImport;
 use App\Support\ImportMigration\ManualImportFileResolver;
 use App\Support\ImportMigration\WooProductImportRunRepository;
@@ -34,6 +35,7 @@ Route::get('/produkt/{slug}', [PartController::class, 'show'])->name('storefront
 Route::get('/kategoria-produktu/{path}', [CategoryController::class, 'show'])->where('path', '.*')->name('storefront.category');
 Route::get('/product-images-dry-run', ProductImagesDryRunController::class)->name('tools.product-images-dry-run');
 Route::get('/product-images-import', ProductImagesImportController::class)->name('tools.product-images-import');
+Route::get('/product-images-import-runner', ProductImagesImportRunnerController::class)->name('tools.product-images-import-runner');
 
 
 Route::middleware(Authenticate::class)->prefix('admin')->name('admin.')->group(function (): void {

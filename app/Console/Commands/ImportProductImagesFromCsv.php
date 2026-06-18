@@ -12,7 +12,7 @@ use Throwable;
 
 class ImportProductImagesFromCsv extends Command
 {
-    protected $signature = 'gps:import-product-images-from-csv {csvPath} {--dry-run} {--limit=} {--product-id=} {--skip-existing} {--source-root=} {--copy-files}';
+    protected $signature = 'gps:import-product-images-from-csv {csvPath} {--dry-run} {--limit=} {--offset=} {--product-id=} {--skip-existing} {--source-root=} {--copy-files}';
 
     protected $description = 'Analyze and safely import WooCommerce product images from a CSV file.';
 
@@ -25,6 +25,7 @@ class ImportProductImagesFromCsv extends Command
         $dryRun = (bool) $this->option('dry-run');
         $productId = $this->filledOption('product-id');
         $limit = $this->positiveIntOption('limit');
+        $offset = $this->nonNegativeIntOption('offset') ?? 0;
         $skipExisting = (bool) $this->option('skip-existing');
         $sourceRoot = $this->sourceRootOption();
         $copyFiles = (bool) $this->option('copy-files');
@@ -47,8 +48,8 @@ class ImportProductImagesFromCsv extends Command
 
         $groups = $this->groupRowsByWooProduct($rows);
 
-        if ($limit !== null) {
-            $groups = array_slice($groups, 0, $limit, true);
+        if ($offset > 0 || $limit !== null) {
+            $groups = array_slice($groups, $offset, $limit, true);
         }
 
         $partColumns = $this->partColumns();
@@ -454,5 +455,15 @@ class ImportProductImagesFromCsv extends Command
         }
 
         return max(1, (int) $value);
+    }
+
+    private function nonNegativeIntOption(string $name): ?int
+    {
+        $value = $this->option($name);
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        return max(0, (int) $value);
     }
 }
