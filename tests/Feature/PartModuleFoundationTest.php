@@ -79,7 +79,7 @@ class PartModuleFoundationTest extends TestCase
         $this->assertStringEndsWith('/storage/parts/photos/example.jpg', $image->publicUrl());
     }
 
-    public function test_imported_part_photo_storefront_urls_use_original_file_instead_of_presentation_variants(): void
+    public function test_imported_part_photo_storefront_urls_use_existing_presentation_variants(): void
     {
         Storage::disk('public')->put('parts/photos/imported/2083/example.jpg', 'fake image');
         Storage::disk('public')->put('parts/photos/presentation/listing/example.jpg', 'fake listing variant');
@@ -94,8 +94,21 @@ class PartModuleFoundationTest extends TestCase
         ]);
 
         $this->assertTrue($image->isImportedPhoto());
-        $this->assertStringEndsWith('/storage/parts/photos/imported/2083/example.jpg', $image->listingUrl());
-        $this->assertStringEndsWith('/storage/parts/photos/imported/2083/example.jpg', $image->productUrl());
+        $this->assertStringEndsWith('/storage/parts/photos/presentation/listing/example.jpg', $image->listingUrl());
+        $this->assertStringEndsWith('/storage/parts/photos/presentation/product/example.jpg', $image->productUrl());
+    }
+
+    public function test_imported_part_photo_storefront_urls_fall_back_to_original_without_presentation_variants(): void
+    {
+        Storage::disk('public')->put('parts/photos/imported/2083/fallback.jpg', 'fake image');
+
+        $image = new PartImage([
+            'path' => 'parts/photos/imported/2083/fallback.jpg',
+        ]);
+
+        $this->assertTrue($image->isImportedPhoto());
+        $this->assertStringEndsWith('/storage/parts/photos/imported/2083/fallback.jpg', $image->listingUrl());
+        $this->assertStringEndsWith('/storage/parts/photos/imported/2083/fallback.jpg', $image->productUrl());
     }
 
     public function test_manual_part_photo_storefront_urls_still_use_existing_presentation_variants(): void

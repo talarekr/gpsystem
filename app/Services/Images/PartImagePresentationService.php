@@ -149,9 +149,25 @@ class PartImagePresentationService
         }
 
         $relative = ltrim(str_replace('/storage/', '', $path), '/');
-        $publicPath = Storage::disk('public')->path($relative);
+        $candidates = [
+            Storage::disk('public')->path($relative),
+            public_path('storage/'.$relative),
+            dirname(base_path()).'/public_html/storage/'.$relative,
+        ];
 
-        return is_file($publicPath) ? $publicPath : (is_file(public_path($relative)) ? public_path($relative) : null);
+        $documentRoot = $_SERVER['DOCUMENT_ROOT'] ?? null;
+
+        if (is_string($documentRoot) && trim($documentRoot) !== '') {
+            $candidates[] = rtrim($documentRoot, '/').'/storage/'.$relative;
+        }
+
+        foreach ($candidates as $candidate) {
+            if (is_readable($candidate)) {
+                return $candidate;
+            }
+        }
+
+        return null;
     }
 
     private function loadImage(string $path): mixed

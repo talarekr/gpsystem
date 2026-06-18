@@ -94,10 +94,6 @@ class PartImage extends Model
 
     public function listingUrl(): ?string
     {
-        if ($this->isImportedPhoto()) {
-            return $this->absolutePublicUrl();
-        }
-
         return $this->presentationUrl('listing_path') ?? $this->absolutePublicUrl();
     }
 
@@ -151,10 +147,6 @@ class PartImage extends Model
 
     public function productUrl(): ?string
     {
-        if ($this->isImportedPhoto()) {
-            return $this->absolutePublicUrl();
-        }
-
         return $this->presentationUrl('product_path') ?? $this->absolutePublicUrl();
     }
 
