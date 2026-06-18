@@ -20,5 +20,6 @@
 @include('storefront.partials.footer')
 <script src="{{ asset('js/storefront-category-menu.js') }}" defer></script>
 <script src="{{ asset('js/storefront-product-gallery.js') }}" defer></script>
+<script src="{{ asset('js/storefront-product-carousel.js') }}" defer></script>
 </body>
 </html>
