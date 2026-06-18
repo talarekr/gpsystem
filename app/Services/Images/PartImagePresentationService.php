@@ -100,7 +100,6 @@ class PartImagePresentationService
                 'listing_fill_width_ratio' => $listingFillRatio['width_ratio'],
                 'listing_fill_height_ratio' => $listingFillRatio['height_ratio'],
                 'listing_dominant_ratio' => $listingFillRatio['dominant_ratio'],
-                'listing_score' => PartImage::calculateListingScore($listingFillRatio['width_ratio'], $listingFillRatio['height_ratio'], $listingFillRatio['dominant_ratio']),
                 'object_aspect_ratio' => $listingCandidate['object_aspect_ratio'],
                 'selected_crop_pass' => $listingCandidate['pass'],
                 'source_path' => $sourcePath,
@@ -120,6 +119,8 @@ class PartImagePresentationService
                 'presentation_version' => self::PRESENTATION_VERSION,
                 'forced' => $force,
             ];
+
+            $presentation['listing_score'] = PartImage::calculateProposedListingScore($presentation);
 
             if ($warnings) {
                 $presentation['warnings'] = $warnings;
