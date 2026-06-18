@@ -13,6 +13,7 @@ use App\Http\Controllers\Storefront\HomeController;
 use App\Http\Controllers\Storefront\PartController;
 use App\Http\Controllers\Storefront\SearchController;
 use App\Http\Controllers\Tools\CheckProductImageController;
+use App\Http\Controllers\Tools\FixImportedImagesPublicFilesController;
 use App\Http\Controllers\Tools\ProductImagesDryRunController;
 use App\Http\Controllers\Tools\ProductImagesImportController;
 use App\Http\Controllers\Tools\ProductImagesImportRunnerController;
@@ -38,6 +39,7 @@ Route::get('/product-images-dry-run', ProductImagesDryRunController::class)->nam
 Route::get('/product-images-import', ProductImagesImportController::class)->name('tools.product-images-import');
 Route::get('/product-images-import-runner', ProductImagesImportRunnerController::class)->name('tools.product-images-import-runner');
 Route::get('/tools/check-product-image', CheckProductImageController::class)->name('tools.check-product-image');
+Route::get('/tools/fix-imported-images-public-files', FixImportedImagesPublicFilesController::class)->name('tools.fix-imported-images-public-files');
 
 
 Route::middleware(Authenticate::class)->prefix('admin')->name('admin.')->group(function (): void {
