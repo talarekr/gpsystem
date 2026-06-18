@@ -24,9 +24,7 @@ class FixImportedImagesPublicFilesController extends Controller
         $summary = [
             'total_imported_images' => 0,
             'source_exists' => 0,
-            'app_public_copied' => 0,
-            'public_html_copied' => 0,
-            'document_root_copied' => 0,
+            'public_target_copied' => 0,
             'already_exists' => 0,
             'missing_source' => 0,
             'errors' => 0,
@@ -55,26 +53,25 @@ class FixImportedImagesPublicFilesController extends Controller
 
                     $summary['source_exists']++;
 
-                    foreach ($this->publicTargets($path) as $targetName => $target) {
-                        if (count($summary['target_examples']) < 20) {
-                            $summary['target_examples'][] = [
-                                'target_type' => $targetName,
-                                'target' => $target,
-                            ];
-                        }
-
-                        if (is_file($target)) {
-                            chmod($target, 0644);
-                            $this->chmodDirectory(dirname($target));
-                            $summary['already_exists']++;
-                            continue;
-                        }
-
-                        $this->ensureDirectory(dirname($target));
-                        copy($source, $target);
-                        chmod($target, 0644);
-                        $summary[$targetName.'_copied']++;
+                    $target = $this->publicTarget($path);
+                    if (count($summary['target_examples']) < 20) {
+                        $summary['target_examples'][] = [
+                            'target_type' => 'public_target',
+                            'target' => $target,
+                        ];
                     }
+
+                    if (is_file($target)) {
+                        chmod($target, 0644);
+                        $this->chmodDirectory(dirname($target));
+                        $summary['already_exists']++;
+                        return;
+                    }
+
+                    $this->ensureDirectory(dirname($target));
+                    copy($source, $target);
+                    chmod($target, 0644);
+                    $summary['public_target_copied']++;
                 } catch (Throwable $exception) {
                     $summary['errors']++;
                     if (count($summary['error_examples']) < 20) {
@@ -91,20 +88,26 @@ class FixImportedImagesPublicFilesController extends Controller
         return response()->json($summary, 200, [], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     }
 
-    /** @return array{app_public: string, public_html: string, document_root?: string} */
-    private function publicTargets(string $relativePath): array
+    private function publicTarget(string $relativePath): string
     {
-        $targets = [
-            'app_public' => public_path('storage/'.$relativePath),
-            'public_html' => dirname(base_path()).'/public_html/storage/'.$relativePath,
-        ];
+        $storageRoot = $this->publicStorageRoot();
 
+        return $storageRoot.DIRECTORY_SEPARATOR.str_replace('/', DIRECTORY_SEPARATOR, $relativePath);
+    }
+
+    private function publicStorageRoot(): string
+    {
         $documentRoot = rtrim((string) ($_SERVER['DOCUMENT_ROOT'] ?? ''), DIRECTORY_SEPARATOR);
         if ($documentRoot !== '') {
-            $targets['document_root'] = $documentRoot.'/storage/'.$relativePath;
+            return $documentRoot.DIRECTORY_SEPARATOR.'storage';
         }
 
-        return $targets;
+        $siblingPublicHtml = dirname(base_path()).DIRECTORY_SEPARATOR.'public_html';
+        if (is_dir($siblingPublicHtml)) {
+            return $siblingPublicHtml.DIRECTORY_SEPARATOR.'storage';
+        }
+
+        return public_path('storage');
     }
 
     private function ensureDirectory(string $directory): void

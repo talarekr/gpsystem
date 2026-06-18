@@ -363,32 +363,20 @@ class ImportProductImagesFromCsv extends Command
 
     private function copyLocalImage(string $localPath, string $relativePath): bool
     {
-        $storageDestination = storage_path('app/public/'.$relativePath);
-        $copied = false;
+        $publicDestination = $this->publicImageTarget($relativePath);
 
-        if (! is_file($storageDestination)) {
-            $this->ensureDirectory(dirname($storageDestination));
-            copy($localPath, $storageDestination);
-            chmod($storageDestination, 0644);
-            $copied = true;
-        } else {
-            chmod($storageDestination, 0644);
-        }
-
-        foreach ($this->publicImageTargets($relativePath) as $publicDestination) {
-            if (is_file($publicDestination)) {
-                chmod($publicDestination, 0644);
-                $this->chmodDirectory(dirname($publicDestination));
-                continue;
-            }
-
-            $this->ensureDirectory(dirname($publicDestination));
-            copy(is_file($storageDestination) ? $storageDestination : $localPath, $publicDestination);
+        if (is_file($publicDestination)) {
             chmod($publicDestination, 0644);
-            $copied = true;
+            $this->chmodDirectory(dirname($publicDestination));
+
+            return false;
         }
 
-        return $copied;
+        $this->ensureDirectory(dirname($publicDestination));
+        copy($localPath, $publicDestination);
+        chmod($publicDestination, 0644);
+
+        return true;
     }
 
     private function syncImportedImageToPublicStorage(string $relativePath): void
@@ -402,33 +390,39 @@ class ImportProductImagesFromCsv extends Command
             return;
         }
 
-        foreach ($this->publicImageTargets($relativePath) as $target) {
-            if (is_file($target)) {
-                chmod($target, 0644);
-                $this->chmodDirectory(dirname($target));
-                continue;
-            }
-
-            $this->ensureDirectory(dirname($target));
-            copy($source, $target);
+        $target = $this->publicImageTarget($relativePath);
+        if (is_file($target)) {
             chmod($target, 0644);
+            $this->chmodDirectory(dirname($target));
+
+            return;
         }
+
+        $this->ensureDirectory(dirname($target));
+        copy($source, $target);
+        chmod($target, 0644);
     }
 
-    /** @return array<int, string> */
-    private function publicImageTargets(string $relativePath): array
+    private function publicImageTarget(string $relativePath): string
     {
-        $targets = [
-            public_path('storage/'.$relativePath),
-            dirname(base_path()).'/public_html/storage/'.$relativePath,
-        ];
+        $storageRoot = $this->publicStorageRoot();
 
+        return $storageRoot.DIRECTORY_SEPARATOR.str_replace('/', DIRECTORY_SEPARATOR, $relativePath);
+    }
+
+    private function publicStorageRoot(): string
+    {
         $documentRoot = rtrim((string) ($_SERVER['DOCUMENT_ROOT'] ?? ''), DIRECTORY_SEPARATOR);
         if ($documentRoot !== '') {
-            $targets[] = $documentRoot.'/storage/'.$relativePath;
+            return $documentRoot.DIRECTORY_SEPARATOR.'storage';
         }
 
-        return array_values(array_unique($targets));
+        $siblingPublicHtml = dirname(base_path()).DIRECTORY_SEPARATOR.'public_html';
+        if (is_dir($siblingPublicHtml)) {
+            return $siblingPublicHtml.DIRECTORY_SEPARATOR.'storage';
+        }
+
+        return public_path('storage');
     }
 
     private function ensureDirectory(string $directory): void
