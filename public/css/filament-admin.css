@@ -1637,13 +1637,55 @@ body.fi-body :where(
 .fi-modal:has(.gps-vehicle-picker-modal) {
     position: fixed !important;
     inset: 0 !important;
+    top: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    margin: 0 !important;
+    padding: 0 !important;
     z-index: 90 !important;
+}
+
+.fi-modal:has(.gps-category-picker-modal) .fi-modal-wrapper,
+.fi-modal:has(.gps-vehicle-picker-modal) .fi-modal-wrapper,
+.fi-modal:has(.gps-category-picker-modal) .fi-modal-window-ctn,
+.fi-modal:has(.gps-vehicle-picker-modal) .fi-modal-window-ctn {
+    position: fixed !important;
+    inset: 0 !important;
+    top: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+.fi-modal:has(.gps-category-picker-modal) .fi-modal-window-ctn,
+.fi-modal:has(.gps-vehicle-picker-modal) .fi-modal-window-ctn {
+    display: flex !important;
+    align-items: stretch !important;
+    justify-content: flex-end !important;
 }
 
 .fi-modal:has(.gps-category-picker-modal) .fi-modal-close-overlay,
 .fi-modal:has(.gps-vehicle-picker-modal) .fi-modal-close-overlay {
     position: fixed !important;
     inset: 0 !important;
+    top: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    margin: 0 !important;
+    padding: 0 !important;
 }
 
 .fi-modal-window.gps-category-picker-modal,
@@ -1651,9 +1693,11 @@ body.fi-body :where(
 .fi-modal-window.gps-vehicle-picker-modal,
 .gps-vehicle-picker-modal.fi-modal-window {
     position: fixed !important;
+    inset-block: 0 !important;
     top: 0 !important;
     right: 0 !important;
     bottom: 0 !important;
+    margin: 0 !important;
     height: 100vh !important;
     max-height: 100vh !important;
     display: flex !important;
