@@ -140,7 +140,10 @@ class PartImagePresentationService
 
     private function mergePresentation(PartImage $partImage, array $presentation): array
     {
-        return array_replace_recursive($partImage->legacy_payload ?? [], ['presentation' => $presentation]);
+        $payload = $partImage->legacy_payload ?? [];
+        $payload['presentation'] = $presentation;
+
+        return $payload;
     }
 
     public function absoluteSourcePath(string $path): ?string
@@ -399,8 +402,11 @@ class PartImagePresentationService
 
         imagecopyresampled($canvas, $source, $dstX, $dstY, $cropX, $cropY, $targetWidth, $targetHeight, $cropWidth, $cropHeight);
         Storage::disk('public')->makeDirectory(dirname($targetPath));
-        imagejpeg($canvas, Storage::disk('public')->path($targetPath), 88);
+        $storagePath = Storage::disk('public')->path($targetPath);
+        imagejpeg($canvas, $storagePath, 88);
         imagedestroy($canvas);
+
+        $mirrorWarning = $this->mirrorPresentationVariantToPublicHtml($storagePath, $targetPath);
 
         $widthRatio = $targetWidth / $canvasWidth;
         $heightRatio = $targetHeight / $canvasHeight;
@@ -409,6 +415,10 @@ class PartImagePresentationService
 
         if ($dominantRatio < 0.85) {
             $variantWarnings[] = 'dominant fill ratio below 0.85';
+        }
+
+        if ($mirrorWarning !== null) {
+            $variantWarnings[] = $mirrorWarning;
         }
 
         return [
@@ -430,6 +440,27 @@ class PartImagePresentationService
             'final_fill_ratio' => round($dominantRatio, 4),
             'warnings' => $variantWarnings,
         ];
+    }
+
+    private function mirrorPresentationVariantToPublicHtml(string $storagePath, string $targetPath): ?string
+    {
+        $publicHtmlPath = dirname(base_path()).'/public_html/storage/'.ltrim($targetPath, '/');
+
+        if ($publicHtmlPath === $storagePath) {
+            return null;
+        }
+
+        $publicHtmlDir = dirname($publicHtmlPath);
+
+        if (! is_dir($publicHtmlDir) && ! mkdir($publicHtmlDir, 0755, true) && ! is_dir($publicHtmlDir)) {
+            return 'Presentation file could not be mirrored to public_html storage.';
+        }
+
+        if (! copy($storagePath, $publicHtmlPath)) {
+            return 'Presentation file could not be mirrored to public_html storage.';
+        }
+
+        return null;
     }
 
     private function variantBaseName(PartImage $partImage, string $sourcePath, bool $force): string
