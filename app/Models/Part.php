@@ -281,7 +281,12 @@ class Part extends Model
 
     public function primaryImageUrl(): ?string
     {
-        return $this->primaryImage()?->publicUrl();
+        return $this->primaryImage()?->absolutePublicUrl();
+    }
+
+    public function primaryImageRelativeUrl(): ?string
+    {
+        return $this->primaryImage()?->relativePublicUrl();
     }
 
     public function listingImage(): ?PartImage
@@ -330,7 +335,12 @@ class Part extends Model
 
     public function getPrimaryImageUrlAttribute(): ?string
     {
-        return $this->primaryImage()?->publicUrl();
+        return $this->primaryImage()?->absolutePublicUrl();
+    }
+
+    public function getPrimaryImageRelativeUrlAttribute(): ?string
+    {
+        return $this->primaryImage()?->relativePublicUrl();
     }
 
 

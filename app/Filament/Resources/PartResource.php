@@ -64,8 +64,17 @@ class PartResource extends Resource
                     ->collapsible()
                     ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--photos'])
                     ->schema([
+                        Forms\Components\ViewField::make('part_images_gallery')
+                            ->label('Zdjęcia części')
+                            ->hiddenLabel()
+                            ->dehydrated(false)
+                            ->visibleOn('view')
+                            ->view('filament.resources.parts.part-images-gallery')
+                            ->viewData(fn (?Part $record): array => ['part' => $record])
+                            ->columnSpanFull(),
                         Forms\Components\FileUpload::make('part_photo_paths')
                             ->label('Zdjęcia części')
+                            ->hiddenOn('view')
                             ->hiddenLabel()
                             ->multiple()
                             ->reorderable()
@@ -414,7 +423,7 @@ class PartResource extends Resource
     {
         return $table->columns([
             Tables\Columns\TextColumn::make('id')->label('ID')->sortable()->searchable()->weight('bold')->color('primary'),
-            Tables\Columns\ImageColumn::make('primary_image_url')->label('Zdjęcie')->height(44)->width(44)->square(),
+            Tables\Columns\ImageColumn::make('primary_image_url')->label('Zdjęcie')->getStateUsing(fn (Part $record): ?string => $record->primary_image_url)->height(44)->width(44)->square(),
             Tables\Columns\TextColumn::make('sku')->label('SKU')->searchable(),
             Tables\Columns\TextColumn::make('name')->label('Nazwa')->searchable()->limit(32),
             Tables\Columns\TextColumn::make('part_number')->label('Numer części')->searchable(),

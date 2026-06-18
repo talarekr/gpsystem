@@ -37,6 +37,11 @@ class PartImage extends Model
 
     public function publicUrl(): ?string
     {
+        return $this->absolutePublicUrl();
+    }
+
+    public function relativePublicUrl(): ?string
+    {
         $path = trim((string) $this->path);
 
         if ($path === '') {
@@ -76,9 +81,20 @@ class PartImage extends Model
         return Storage::disk('public')->url($relativePath);
     }
 
+    public function absolutePublicUrl(): ?string
+    {
+        $url = $this->relativePublicUrl();
+
+        if ($url === null || Str::startsWith($url, ['http://', 'https://'])) {
+            return $url;
+        }
+
+        return url($url);
+    }
+
     public function listingUrl(): ?string
     {
-        return $this->presentationUrl('listing_path') ?? $this->publicUrl();
+        return $this->presentationUrl('listing_path') ?? $this->absolutePublicUrl();
     }
 
     public function listingScore(): ?float
@@ -131,7 +147,7 @@ class PartImage extends Model
 
     public function productUrl(): ?string
     {
-        return $this->presentationUrl('product_path') ?? $this->publicUrl();
+        return $this->presentationUrl('product_path') ?? $this->absolutePublicUrl();
     }
 
     private function presentationUrl(string $key): ?string
@@ -148,7 +164,7 @@ class PartImage extends Model
             return null;
         }
 
-        return '/storage/'.$path;
+        return url('/storage/'.$path);
     }
 
     public function part(): BelongsTo
