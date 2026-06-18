@@ -400,8 +400,6 @@ class PartResource extends Resource
             ->values();
 
         $existingImages = $part->images()->get()->keyBy('path');
-        $keptPaths = $paths->all();
-
         foreach ($paths as $index => $path) {
             $image = $existingImages->get($path) ?? new PartImage(['path' => $path]);
             $image->part_id = $part->id;
@@ -410,16 +408,13 @@ class PartResource extends Resource
             $image->save();
         }
 
-        $part->images()
-            ->whereNotIn('path', $keptPaths ?: ['__gps_no_part_photo_paths__'])
-            ->delete();
     }
 
     public static function table(Table $table): Table
     {
         return $table->columns([
             Tables\Columns\TextColumn::make('id')->label('ID')->sortable()->searchable()->weight('bold')->color('primary'),
-            Tables\Columns\ImageColumn::make('primary_image_path')->label('Zdjęcie')->disk('public')->height(44)->width(44)->square(),
+            Tables\Columns\ImageColumn::make('primary_image_url')->label('Zdjęcie')->height(44)->width(44)->square(),
             Tables\Columns\TextColumn::make('sku')->label('SKU')->searchable(),
             Tables\Columns\TextColumn::make('name')->label('Nazwa')->searchable()->limit(32),
             Tables\Columns\TextColumn::make('part_number')->label('Numer części')->searchable(),
