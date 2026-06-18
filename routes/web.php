@@ -14,6 +14,7 @@ use App\Http\Controllers\Storefront\PartController;
 use App\Http\Controllers\Storefront\SearchController;
 use App\Http\Controllers\Tools\CheckProductImageController;
 use App\Http\Controllers\Tools\FixImportedImagesPublicFilesController;
+use App\Http\Controllers\Tools\ImportedImagesStorageReportController;
 use App\Http\Controllers\Tools\ProductImagesDryRunController;
 use App\Http\Controllers\Tools\ProductImagesImportController;
 use App\Http\Controllers\Tools\ProductImagesImportRunnerController;
@@ -40,6 +41,7 @@ Route::get('/product-images-import', ProductImagesImportController::class)->name
 Route::get('/product-images-import-runner', ProductImagesImportRunnerController::class)->name('tools.product-images-import-runner');
 Route::get('/tools/check-product-image', CheckProductImageController::class)->name('tools.check-product-image');
 Route::get('/tools/fix-imported-images-public-files', FixImportedImagesPublicFilesController::class)->name('tools.fix-imported-images-public-files');
+Route::get('/tools/imported-images-storage-report', ImportedImagesStorageReportController::class)->name('tools.imported-images-storage-report');
 
 
 Route::middleware(Authenticate::class)->prefix('admin')->name('admin.')->group(function (): void {
