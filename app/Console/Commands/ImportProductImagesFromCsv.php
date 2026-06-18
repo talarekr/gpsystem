@@ -5,16 +5,14 @@ namespace App\Console\Commands;
 use App\Models\Part;
 use App\Models\PartImage;
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use SplFileObject;
 use Throwable;
 
 class ImportProductImagesFromCsv extends Command
 {
-    protected $signature = 'gps:import-product-images-from-csv {csvPath} {--dry-run} {--limit=} {--product-id=} {--skip-existing}';
+    protected $signature = 'gps:import-product-images-from-csv {csvPath} {--dry-run} {--limit=} {--product-id=} {--skip-existing} {--source-root=} {--copy-files}';
 
     protected $description = 'Analyze and safely import WooCommerce product images from a CSV file.';
 
@@ -28,6 +26,8 @@ class ImportProductImagesFromCsv extends Command
         $productId = $this->filledOption('product-id');
         $limit = $this->positiveIntOption('limit');
         $skipExisting = (bool) $this->option('skip-existing');
+        $sourceRoot = $this->sourceRootOption();
+        $copyFiles = (bool) $this->option('copy-files');
 
         $report = $this->emptyReport();
 
@@ -84,8 +84,8 @@ class ImportProductImagesFromCsv extends Command
                 ];
                 $matchedImageCount += count($productRows);
 
-                if (! $dryRun && ! ($skipExisting && $hasExistingImages)) {
-                    $this->importProductImages($part, $wooProductId, $productRows, $report);
+                if (! ($skipExisting && $hasExistingImages)) {
+                    $this->importProductImages($part, $wooProductId, $productRows, $report, $dryRun, $sourceRoot, $copyFiles);
                 }
 
                 continue;
@@ -231,7 +231,7 @@ class ImportProductImagesFromCsv extends Command
     }
 
     /** @param array<int, array<string, string|null>> $rows */
-    private function importProductImages(Part $part, string $wooProductId, array $rows, array &$report): void
+    private function importProductImages(Part $part, string $wooProductId, array $rows, array &$report, bool $dryRun, ?string $sourceRoot, bool $copyFiles): void
     {
         foreach ($rows as $row) {
             $url = trim((string) ($row['image_url'] ?? ''));
@@ -241,23 +241,49 @@ class ImportProductImagesFromCsv extends Command
             }
 
             $externalId = $this->normalizeKey($row['image_id'] ?? null) ?: md5($url);
+            $relativePath = $this->destinationPath($url, $wooProductId);
 
-            if (PartImage::query()
-                ->where('part_id', $part->id)
-                ->where('source_system', 'woo')
-                ->where('external_id', $externalId)
-                ->exists()) {
+            if ($this->partImageExists($part, $externalId, $relativePath)) {
                 continue;
             }
 
-            try {
-                $relativePath = $this->downloadImage($url, $wooProductId, $row);
-            } catch (Throwable) {
-                $report['download_error']++;
+            $localPath = $sourceRoot === null ? null : $this->localSourcePath($url, $sourceRoot);
+            $localFileExists = $localPath !== null && is_file($localPath) && is_readable($localPath);
+
+            if ($sourceRoot !== null) {
+                if ($localFileExists) {
+                    $report['local_files_found']++;
+                } else {
+                    $report['local_files_missing']++;
+                    if (count($report['missing_local_file_examples']) < 20) {
+                        $report['missing_local_file_examples'][] = $localPath ?? $this->unresolvedLocalPathLabel($url, $sourceRoot);
+                    }
+                    continue;
+                }
+            }
+
+            if (! $dryRun && ! $copyFiles) {
                 continue;
             }
 
-            if (PartImage::query()->where('part_id', $part->id)->where('path', $relativePath)->exists()) {
+            if ($copyFiles) {
+                if ($sourceRoot === null || $localPath === null || ! $localFileExists) {
+                    $report['local_files_missing']++;
+                    if (count($report['missing_local_file_examples']) < 20) {
+                        $report['missing_local_file_examples'][] = $localPath ?? $this->unresolvedLocalPathLabel($url, $sourceRoot);
+                    }
+                    continue;
+                }
+
+                if ($dryRun) {
+                    $report['files_would_copy']++;
+                } elseif ($this->copyLocalImage($localPath, $relativePath)) {
+                    $report['files_copied']++;
+                }
+            }
+
+            if ($dryRun) {
+                $report['part_images_would_create']++;
                 continue;
             }
 
@@ -270,28 +296,83 @@ class ImportProductImagesFromCsv extends Command
                 'sort_order' => (int) ($row['position'] ?? 0),
                 'is_primary' => $this->truthy($row['is_primary'] ?? null),
             ]);
-            $report['images_imported']++;
+            $report['part_images_created']++;
         }
     }
 
-    /** @param array<string, string|null> $row */
-    private function downloadImage(string $url, string $wooProductId, array $row): string
+    private function partImageExists(Part $part, string $externalId, string $relativePath): bool
     {
-        $extension = pathinfo((string) parse_url($url, PHP_URL_PATH), PATHINFO_EXTENSION) ?: 'jpg';
-        $baseName = Str::slug(pathinfo((string) parse_url($url, PHP_URL_PATH), PATHINFO_FILENAME) ?: 'image');
-        $imageId = $this->normalizeKey($row['image_id'] ?? null);
-        $filename = ($imageId ? $imageId.'-' : '').$baseName.'.'.$extension;
-        $relativePath = 'parts/photos/imported/'.$wooProductId.'/'.$filename;
+        return PartImage::query()
+            ->where('part_id', $part->id)
+            ->where(static function ($query) use ($externalId, $relativePath): void {
+                $query->where(static function ($query) use ($externalId): void {
+                    $query->where('source_system', 'woo')->where('external_id', $externalId);
+                })->orWhere('path', $relativePath);
+            })
+            ->exists();
+    }
 
-        if (Storage::disk('public')->exists($relativePath)) {
-            return $relativePath;
+    private function destinationPath(string $url, string $wooProductId): string
+    {
+        return 'parts/photos/imported/'.$wooProductId.'/'.$this->filenameFromUrl($url);
+    }
+
+    private function filenameFromUrl(string $url): string
+    {
+        $path = (string) parse_url($this->urlWithScheme($url), PHP_URL_PATH);
+        $filename = rawurldecode(basename($path));
+
+        if ($filename === '' || $filename === '.' || $filename === '/' || ! str_contains($filename, '.')) {
+            $extension = pathinfo($path, PATHINFO_EXTENSION) ?: 'jpg';
+            $filename = (Str::slug(pathinfo($path, PATHINFO_FILENAME) ?: 'image') ?: 'image').'.'.$extension;
         }
 
-        $response = Http::timeout(20)->retry(2, 500)->get($url);
-        $response->throw();
-        Storage::disk('public')->put($relativePath, $response->body());
+        return preg_replace('/[^A-Za-z0-9._-]+/', '-', $filename) ?: 'image.jpg';
+    }
 
-        return $relativePath;
+    private function localSourcePath(string $url, string $sourceRoot): ?string
+    {
+        $path = (string) parse_url($this->urlWithScheme($url), PHP_URL_PATH);
+        $marker = '/wp-content/uploads/';
+        $position = strpos($path, $marker);
+
+        if ($position === false) {
+            return null;
+        }
+
+        $relative = ltrim(rawurldecode(substr($path, $position + strlen($marker))), '/');
+        if ($relative === '' || str_contains($relative, '..')) {
+            return null;
+        }
+
+        return rtrim($sourceRoot, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR.str_replace('/', DIRECTORY_SEPARATOR, $relative);
+    }
+
+    private function unresolvedLocalPathLabel(string $url, ?string $sourceRoot): string
+    {
+        return ($sourceRoot ?? '(brak --source-root)').DIRECTORY_SEPARATOR.'(nie można wyliczyć ścieżki z URL: '.$url.')';
+    }
+
+    private function urlWithScheme(string $url): string
+    {
+        return str_starts_with($url, '//') ? 'https:'.$url : $url;
+    }
+
+    private function copyLocalImage(string $localPath, string $relativePath): bool
+    {
+        $destination = storage_path('app/public/'.$relativePath);
+        if (is_file($destination)) {
+            return false;
+        }
+
+        $directory = dirname($destination);
+        if (! is_dir($directory)) {
+            mkdir($directory, 0755, true);
+        }
+
+        copy($localPath, $destination);
+
+        return true;
     }
 
     private function printSummary(array $rows, array $groups, array $matches, array $unmatched, array $ambiguous, int $matchedImageCount, int $skippedExistingProducts, bool $dryRun, array $matchColumns, array $report): void
@@ -310,13 +391,32 @@ class ImportProductImagesFromCsv extends Command
 
         $this->table(['woo_product_id', 'sku', 'part_id', 'matched_by', 'images', 'skip_existing'], array_slice($matches, 0, 10));
         $this->table(['woo_product_id', 'sku', 'reason', 'images'], array_slice(array_merge($unmatched, $ambiguous), 0, 10));
-        $this->table(['typ błędu', 'liczba'], collect($report)->map(fn (int $count, string $key): array => [$key, $count])->values()->all());
+        $this->table(['typ błędu', 'liczba'], collect($report)->except('missing_local_file_examples')->map(fn (int $count, string $key): array => [$key, $count])->values()->all());
+
+        if ($report['missing_local_file_examples'] !== []) {
+            $this->line('Przykładowe brakujące pliki lokalne (maks. 20):');
+            foreach ($report['missing_local_file_examples'] as $missingLocalFile) {
+                $this->line('- '.$missingLocalFile);
+            }
+        }
     }
 
-    /** @return array<string, int> */
+    /** @return array<string, mixed> */
     private function emptyReport(): array
     {
-        return ['missing_match' => 0, 'ambiguous_sku' => 0, 'download_error' => 0, 'missing_url' => 0, 'invalid_csv' => 0, 'images_imported' => 0];
+        return [
+            'missing_match' => 0,
+            'ambiguous_sku' => 0,
+            'missing_url' => 0,
+            'invalid_csv' => 0,
+            'local_files_found' => 0,
+            'local_files_missing' => 0,
+            'files_copied' => 0,
+            'files_would_copy' => 0,
+            'part_images_created' => 0,
+            'part_images_would_create' => 0,
+            'missing_local_file_examples' => [],
+        ];
     }
 
     private function normalizeKey(mixed $value): ?string
@@ -328,6 +428,16 @@ class ImportProductImagesFromCsv extends Command
     private function truthy(mixed $value): bool
     {
         return in_array(Str::lower(trim((string) $value)), ['1', 'true', 'yes', 'tak'], true);
+    }
+
+    private function sourceRootOption(): ?string
+    {
+        $sourceRoot = $this->filledOption('source-root');
+        if ($sourceRoot === null) {
+            return null;
+        }
+
+        return str_starts_with($sourceRoot, DIRECTORY_SEPARATOR) ? $sourceRoot : base_path($sourceRoot);
     }
 
     private function filledOption(string $name): ?string

@@ -24,6 +24,8 @@ class ProductImagesDryRunController extends Controller
             'limit' => ['nullable', 'integer', 'min:1', 'max:500'],
             'product_id' => ['nullable', 'string', 'max:100', 'regex:/^[A-Za-z0-9._:-]+$/'],
             'skip_existing' => ['nullable', Rule::in(['1', '0', 1, 0, true, false, 'true', 'false'])],
+            'source_root' => ['nullable', 'string', 'max:500'],
+            'copy_files' => ['nullable', Rule::in(['1', '0', 1, 0, true, false, 'true', 'false'])],
         ]);
 
         if ($validator->fails()) {
@@ -61,6 +63,14 @@ class ProductImagesDryRunController extends Controller
 
         if ($request->boolean('skip_existing')) {
             $arguments['--skip-existing'] = true;
+        }
+
+        if ($request->filled('source_root')) {
+            $arguments['--source-root'] = (string) $request->query('source_root');
+        }
+
+        if ($request->boolean('copy_files')) {
+            $arguments['--copy-files'] = true;
         }
 
         $exitCode = Artisan::call('gps:import-product-images-from-csv', $arguments);
@@ -109,6 +119,8 @@ HTML;
             'limit' => $request->query('limit'),
             'product_id' => $request->query('product_id'),
             'skip_existing' => $request->boolean('skip_existing'),
+            'source_root' => $request->query('source_root'),
+            'copy_files' => $request->boolean('copy_files'),
             'dry_run_wymuszony' => true,
         ];
     }
