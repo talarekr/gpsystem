@@ -12,6 +12,7 @@ use App\Http\Controllers\Storefront\CategoryController;
 use App\Http\Controllers\Storefront\HomeController;
 use App\Http\Controllers\Storefront\PartController;
 use App\Http\Controllers\Storefront\SearchController;
+use App\Http\Controllers\Tools\CheckPartImagePresentationController;
 use App\Http\Controllers\Tools\CheckProductImageController;
 use App\Http\Controllers\Tools\FixImportedImagesPublicFilesController;
 use App\Http\Controllers\Tools\ImportedImagesStorageReportController;
@@ -40,6 +41,7 @@ Route::get('/product-images-dry-run', ProductImagesDryRunController::class)->nam
 Route::get('/product-images-import', ProductImagesImportController::class)->name('tools.product-images-import');
 Route::get('/product-images-import-runner', ProductImagesImportRunnerController::class)->name('tools.product-images-import-runner');
 Route::get('/tools/check-product-image', CheckProductImageController::class)->name('tools.check-product-image');
+Route::get('/tools/check-part-image-presentation', CheckPartImagePresentationController::class)->name('tools.check-part-image-presentation');
 Route::get('/tools/fix-imported-images-public-files', FixImportedImagesPublicFilesController::class)->name('tools.fix-imported-images-public-files');
 Route::get('/tools/imported-images-storage-report', ImportedImagesStorageReportController::class)->name('tools.imported-images-storage-report');
 
