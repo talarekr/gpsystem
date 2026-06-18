@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Tools;
 
 use App\Models\Part;
 use App\Models\PartImage;
+use App\Services\Images\PartImagePresentationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
@@ -11,6 +12,10 @@ use Illuminate\Support\Facades\Storage;
 
 class CheckPartImagePresentationController extends Controller
 {
+    public function __construct(private readonly PartImagePresentationService $presentationService)
+    {
+    }
+
     public function __invoke(Request $request): JsonResponse
     {
         $configuredToken = (string) env('PRODUCT_IMAGES_IMPORT_TOKEN', '');
@@ -117,10 +122,49 @@ class CheckPartImagePresentationController extends Controller
                 'warnings' => $presentationExists ? ($presentation['warnings'] ?? null) : null,
                 'listing_path_exists' => $this->pathExistenceDiagnostics($listingPath),
                 'product_path_exists' => $this->pathExistenceDiagnostics($productPath),
+                'source_file_lookup' => $this->sourceFileLookupDiagnostics($image->path),
             ],
         ];
     }
 
+    /** @return array<string, mixed> */
+    private function sourceFileLookupDiagnostics(?string $path): array
+    {
+        $sourcePath = is_string($path) ? $path : '';
+        $relativePath = $this->presentationService->relativeSourcePath($sourcePath);
+        $storageDiskPath = $relativePath === '' ? null : Storage::disk('public')->path($relativePath);
+        $publicPath = $relativePath === '' ? null : public_path('storage/'.$relativePath);
+        $publicHtmlPath = $relativePath === '' ? null : dirname(base_path()).'/public_html/storage/'.$relativePath;
+        $documentRoot = $_SERVER['DOCUMENT_ROOT'] ?? null;
+        $documentRootPath = $relativePath === '' || ! is_string($documentRoot) || trim($documentRoot) === ''
+            ? null
+            : rtrim($documentRoot, '/').'/storage/'.$relativePath;
+
+        return [
+            'relative_path' => $relativePath,
+            'storage_disk_public' => [
+                'path' => $storageDiskPath,
+                'exists' => $relativePath !== '' && Storage::disk('public')->exists($relativePath),
+                'is_readable' => $storageDiskPath !== null && is_readable($storageDiskPath),
+            ],
+            'public_path_storage' => [
+                'path' => $publicPath,
+                'file_exists' => $publicPath !== null && file_exists($publicPath),
+                'is_readable' => $publicPath !== null && is_readable($publicPath),
+            ],
+            'public_html_storage' => [
+                'path' => $publicHtmlPath,
+                'file_exists' => $publicHtmlPath !== null && file_exists($publicHtmlPath),
+                'is_readable' => $publicHtmlPath !== null && is_readable($publicHtmlPath),
+            ],
+            'document_root_storage' => [
+                'path' => $documentRootPath,
+                'file_exists' => $documentRootPath !== null && file_exists($documentRootPath),
+                'is_readable' => $documentRootPath !== null && is_readable($documentRootPath),
+            ],
+            'resolved_source_path' => $this->presentationService->absoluteSourcePath($sourcePath),
+        ];
+    }
 
     private function proposedScore(PartImage $image): ?float
     {

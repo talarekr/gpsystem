@@ -143,13 +143,30 @@ class PartImagePresentationService
         return array_replace_recursive($partImage->legacy_payload ?? [], ['presentation' => $presentation]);
     }
 
-    private function absoluteSourcePath(string $path): ?string
+    public function absoluteSourcePath(string $path): ?string
     {
-        if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
-            return null;
+        foreach ($this->sourcePathCandidates($path) as $candidate) {
+            if (is_readable($candidate)) {
+                return $candidate;
+            }
         }
 
-        $relative = ltrim(str_replace('/storage/', '', $path), '/');
+        return null;
+    }
+
+    /** @return array<int, string> */
+    public function sourcePathCandidates(string $path): array
+    {
+        if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+            return [];
+        }
+
+        $relative = $this->relativeSourcePath($path);
+
+        if ($relative === '') {
+            return [];
+        }
+
         $candidates = [
             Storage::disk('public')->path($relative),
             public_path('storage/'.$relative),
@@ -162,13 +179,15 @@ class PartImagePresentationService
             $candidates[] = rtrim($documentRoot, '/').'/storage/'.$relative;
         }
 
-        foreach ($candidates as $candidate) {
-            if (is_readable($candidate)) {
-                return $candidate;
-            }
-        }
+        return array_values(array_unique($candidates));
+    }
 
-        return null;
+    public function relativeSourcePath(string $path): string
+    {
+        $relative = trim($path);
+        $relative = preg_replace('#^/?storage/#', '', $relative) ?? $relative;
+
+        return ltrim($relative, '/');
     }
 
     private function loadImage(string $path): mixed
