@@ -265,16 +265,187 @@ class ProductImagesImportRunnerController extends Controller
 
     private function renderAutoRunner(array $config): string
     {
-        $json = e(json_encode($config, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+        $json = json_encode($config, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?: '{}';
+
         return <<<HTML
-<!doctype html><html lang="pl"><head><meta charset="utf-8"><title>Auto runner importu zdjęć produktów</title><style>body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;margin:24px;line-height:1.4}button{margin-right:8px;padding:8px 14px}dl{display:grid;grid-template-columns:220px 1fr;gap:6px 14px;max-width:780px}dt{font-weight:700}dd{margin:0}pre{background:#111;color:#eee;padding:16px;overflow:auto;white-space:pre-wrap;border-radius:6px}.status{font-size:20px;font-weight:700}</style></head><body>
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<title>Auto runner importu zdjęć produktów</title>
+<style>
+body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;margin:24px;line-height:1.4}button{margin-right:8px;padding:8px 14px}dl{display:grid;grid-template-columns:220px 1fr;gap:6px 14px;max-width:980px}dt{font-weight:700}dd{margin:0}pre{background:#111;color:#eee;padding:16px;overflow:auto;white-space:pre-wrap;border-radius:6px}.status{font-size:20px;font-weight:700}.diagnostics{background:#f6f8fa;border:1px solid #d0d7de;border-radius:6px;padding:12px;max-width:980px}.diagnostics code{overflow-wrap:anywhere}
+</style>
+</head>
+<body>
 <h1>Auto runner importu zdjęć produktów</h1>
 <p>Tryb wymusza <code>--copy-files</code>, nie przekazuje <code>--skip-existing</code> ani <code>--dry-run</code>.</p>
 <p><strong>Możesz uruchomić auto-runner od <code>start_offset=0</code>, aby przejść cały import od początku.</strong> Importer jest idempotentny: istniejące rekordy <code>PartImage</code> są pomijane po <code>source_system + external_id</code> albo po <code>path</code>, niczego nie usuwa i dokłada tylko brakujące zdjęcia.</p>
-<div><button id="start">Start</button><button id="pause">Pause</button><button id="resume">Resume</button><button id="stop">Stop</button></div>
+<div><button id="startBtn" type="button">Start</button><button id="pauseBtn" type="button">Pause</button><button id="resumeBtn" type="button">Resume</button><button id="stopBtn" type="button">Stop</button></div>
 <dl><dt>Status</dt><dd class="status" id="status">READY</dd><dt>Current offset</dt><dd id="currentOffset"></dd><dt>Next offset</dt><dd id="nextOffset"></dd><dt>Batch number</dt><dd id="batchNumber">0</dd><dt>Total files_copied</dt><dd id="totalFilesCopied">0</dd><dt>Total part_images_created</dt><dd id="totalPartImagesCreated">0</dd><dt>Total local_files_missing</dt><dd id="totalLocalFilesMissing">0</dd><dt>Total errors</dt><dd id="totalErrors">0</dd></dl>
+<h2>Diagnostyka</h2>
+<dl class="diagnostics"><dt>Initial start offset</dt><dd id="initialStartOffset"></dd><dt>Batch size</dt><dd id="diagnosticBatchSize"></dd><dt>Sleep seconds</dt><dd id="diagnosticSleep"></dd><dt>Batch endpoint preview / last fetch URL</dt><dd><code id="batchEndpointPreview"></code></dd></dl>
 <h2>Ostatnie summary</h2><pre id="summary">{}</pre><h2>Pełny log JSON</h2><pre id="log"></pre>
-<script>const config=JSON.parse('$json');let running=false,paused=false,stopped=false,inFlight=false,nextOffset=Number(config.startOffset),currentOffsetDisplay=Number(config.startOffset),nextOffsetDisplay=Number(config.startOffset),batchNumber=0,totals={files_copied:0,part_images_created:0,local_files_missing:0,errors:0};const el=id=>document.getElementById(id);function render(status){if(status)el('status').textContent=status;el('currentOffset').textContent=currentOffsetDisplay;el('nextOffset').textContent=nextOffsetDisplay===null?'':nextOffsetDisplay;el('batchNumber').textContent=batchNumber;el('totalFilesCopied').textContent=totals.files_copied;el('totalPartImagesCreated').textContent=totals.part_images_created;el('totalLocalFilesMissing').textContent=totals.local_files_missing;el('totalErrors').textContent=totals.errors;}function sleep(ms){return new Promise(r=>setTimeout(r,ms));}function batchUrl(){const u=new URL(window.location.pathname,window.location.origin);u.searchParams.set('token',config.token);u.searchParams.set('mode','batch');u.searchParams.set('offset',nextOffset);u.searchParams.set('batch_size',config.batchSize);u.searchParams.set('source_root',config.sourceRoot);u.searchParams.set('copy_files','1');return u;}async function loop(){if(running||stopped)return;running=true;paused=false;render('RUNNING');while(!paused&&!stopped){if(config.maxBatches&&batchNumber>=Number(config.maxBatches)){stopped=true;render('STOPPED_MAX_BATCHES');break;}inFlight=true;let data;try{const response=await fetch(batchUrl(),{headers:{Accept:'application/json'}});data=await response.json();if(!response.ok)throw new Error(JSON.stringify(data));}catch(e){totals.errors++;el('summary').textContent=String(e);render('STOPPED_ERRORS');stopped=true;break;}finally{inFlight=false;}batchNumber++;totals.files_copied+=Number(data.files_copied||0);totals.part_images_created+=Number(data.part_images_created||0);totals.local_files_missing+=Number(data.local_files_missing||0);totals.errors+=Number(data.errors||0);el('summary').textContent=JSON.stringify(data.summary||data,null,2);el('log').textContent+=JSON.stringify(data,null,2)+'\n\n';currentOffsetDisplay=data.current_offset;nextOffsetDisplay=data.next_offset;render('RUNNING');if(data.completed){render('COMPLETED');stopped=true;break;}if(config.stopOnMissing&&Number(data.local_files_missing||0)>0){render('STOPPED_MISSING_FILES');stopped=true;break;}if(config.stopOnErrors&&Number(data.errors||0)>0){render('STOPPED_ERRORS');stopped=true;break;}nextOffset=Number(data.next_offset);await sleep(Number(config.sleep)*1000);}running=false;if(paused&&!stopped)render('PAUSED');}el('start').onclick=()=>{stopped=false;nextOffset=Number(config.startOffset);currentOffsetDisplay=nextOffset;nextOffsetDisplay=nextOffset;batchNumber=0;totals={files_copied:0,part_images_created:0,local_files_missing:0,errors:0};el('log').textContent='';loop();};el('pause').onclick=()=>{paused=true;if(!inFlight)render('PAUSED');};el('resume').onclick=()=>{if(!stopped){paused=false;loop();}};el('stop').onclick=()=>{stopped=true;paused=false;render('STOPPED');};render();</script></body></html>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const config = $json;
+    let running = false;
+    let paused = false;
+    let stopped = false;
+    let currentOffset = Number(config.startOffset || 0);
+    let nextOffset = currentOffset;
+    let batchNumber = 0;
+    let totals = {files_copied: 0, part_images_created: 0, local_files_missing: 0, errors: 0};
+    let lastFetchUrl = '';
+    const el = (id) => document.getElementById(id);
+
+    function buildBatchUrl(offset) {
+        const params = new URLSearchParams();
+        params.set('token', config.token || '');
+        params.set('mode', 'batch');
+        params.set('offset', String(offset));
+        params.set('batch_size', String(config.batchSize || 20));
+        params.set('source_root', config.sourceRoot || '');
+        params.set('copy_files', '1');
+        return `${window.location.pathname}?${params.toString()}`;
+    }
+
+    function render(status) {
+        if (status) {
+            el('status').textContent = status;
+        }
+        el('currentOffset').textContent = String(currentOffset);
+        el('nextOffset').textContent = nextOffset === null ? '' : String(nextOffset);
+        el('batchNumber').textContent = String(batchNumber);
+        el('totalFilesCopied').textContent = String(totals.files_copied);
+        el('totalPartImagesCreated').textContent = String(totals.part_images_created);
+        el('totalLocalFilesMissing').textContent = String(totals.local_files_missing);
+        el('totalErrors').textContent = String(totals.errors);
+        el('initialStartOffset').textContent = String(config.startOffset || 0);
+        el('diagnosticBatchSize').textContent = String(config.batchSize || 20);
+        el('diagnosticSleep').textContent = String(config.sleep || 5);
+        el('batchEndpointPreview').textContent = lastFetchUrl || buildBatchUrl(currentOffset);
+    }
+
+    function appendLog(message) {
+        el('log').textContent += message + '\n\n';
+    }
+
+    function sleep(ms) {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    async function runNextBatch() {
+        if (!running || stopped) {
+            return;
+        }
+        if (paused) {
+            running = false;
+            render('PAUSED');
+            return;
+        }
+        if (config.maxBatches && batchNumber >= Number(config.maxBatches)) {
+            stopped = true;
+            running = false;
+            render('STOPPED_MAX_BATCHES');
+            return;
+        }
+
+        lastFetchUrl = buildBatchUrl(currentOffset);
+        render('RUNNING');
+
+        try {
+            const response = await fetch(lastFetchUrl, {headers: {Accept: 'application/json'}});
+            const json = await response.json();
+            appendLog(JSON.stringify(json, null, 2));
+
+            if (!response.ok) {
+                throw new Error(JSON.stringify(json));
+            }
+
+            batchNumber += 1;
+            totals.files_copied += Number(json.files_copied || 0);
+            totals.part_images_created += Number(json.part_images_created || 0);
+            totals.local_files_missing += Number(json.local_files_missing || 0);
+            totals.errors += Number(json.errors || 0);
+            nextOffset = json.next_offset;
+            el('summary').textContent = JSON.stringify(json.summary || json, null, 2);
+            render('RUNNING');
+
+            if (Number(json.errors || 0) > 0 && config.stopOnErrors) {
+                stopped = true;
+                running = false;
+                render('STOPPED_ERRORS');
+                return;
+            }
+            if (Number(json.local_files_missing || 0) > 0 && config.stopOnMissing) {
+                stopped = true;
+                running = false;
+                render('STOPPED_MISSING_FILES');
+                return;
+            }
+            if (json.completed === true) {
+                stopped = true;
+                running = false;
+                render('COMPLETED');
+                return;
+            }
+
+            currentOffset = Number(json.next_offset);
+            nextOffset = currentOffset;
+            render('RUNNING');
+            await sleep(Number(config.sleep || 5) * 1000);
+            runNextBatch();
+        } catch (error) {
+            stopped = true;
+            running = false;
+            totals.errors += 1;
+            appendLog(error && error.message ? error.message : String(error));
+            console.error(error);
+            render('JS_ERROR');
+        }
+    }
+
+    el('startBtn').addEventListener('click', () => {
+        running = true;
+        paused = false;
+        stopped = false;
+        currentOffset = Number(config.startOffset || 0);
+        nextOffset = currentOffset;
+        batchNumber = 0;
+        totals = {files_copied: 0, part_images_created: 0, local_files_missing: 0, errors: 0};
+        el('summary').textContent = '{}';
+        el('log').textContent = 'Starting auto-runner...\n\n';
+        render('RUNNING');
+        runNextBatch();
+    });
+
+    el('pauseBtn').addEventListener('click', () => {
+        paused = true;
+        render('PAUSED');
+    });
+
+    el('resumeBtn').addEventListener('click', () => {
+        if (!stopped) {
+            paused = false;
+            render('RUNNING');
+            if (!running) {
+                running = true;
+                runNextBatch();
+            }
+        }
+    });
+
+    el('stopBtn').addEventListener('click', () => {
+        stopped = true;
+        paused = false;
+        running = false;
+        render('STOPPED');
+    });
+
+    render('READY');
+});
+</script></body></html>
 HTML;
     }
 
