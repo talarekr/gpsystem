@@ -364,7 +364,6 @@ class ImportProductImagesFromCsv extends Command
     private function copyLocalImage(string $localPath, string $relativePath): bool
     {
         $storageDestination = storage_path('app/public/'.$relativePath);
-        $publicDestination = public_path('storage/'.$relativePath);
         $copied = false;
 
         if (! is_file($storageDestination)) {
@@ -372,15 +371,21 @@ class ImportProductImagesFromCsv extends Command
             copy($localPath, $storageDestination);
             chmod($storageDestination, 0644);
             $copied = true;
+        } else {
+            chmod($storageDestination, 0644);
         }
 
-        if (! is_file($publicDestination)) {
+        foreach ($this->publicImageTargets($relativePath) as $publicDestination) {
+            if (is_file($publicDestination)) {
+                chmod($publicDestination, 0644);
+                $this->chmodDirectory(dirname($publicDestination));
+                continue;
+            }
+
             $this->ensureDirectory(dirname($publicDestination));
             copy(is_file($storageDestination) ? $storageDestination : $localPath, $publicDestination);
             chmod($publicDestination, 0644);
             $copied = true;
-        } else {
-            chmod($publicDestination, 0644);
         }
 
         return $copied;
@@ -393,15 +398,37 @@ class ImportProductImagesFromCsv extends Command
         }
 
         $source = storage_path('app/public/'.$relativePath);
-        $target = public_path('storage/'.$relativePath);
-
-        if (! is_file($source) || is_file($target)) {
+        if (! is_file($source)) {
             return;
         }
 
-        $this->ensureDirectory(dirname($target));
-        copy($source, $target);
-        chmod($target, 0644);
+        foreach ($this->publicImageTargets($relativePath) as $target) {
+            if (is_file($target)) {
+                chmod($target, 0644);
+                $this->chmodDirectory(dirname($target));
+                continue;
+            }
+
+            $this->ensureDirectory(dirname($target));
+            copy($source, $target);
+            chmod($target, 0644);
+        }
+    }
+
+    /** @return array<int, string> */
+    private function publicImageTargets(string $relativePath): array
+    {
+        $targets = [
+            public_path('storage/'.$relativePath),
+            dirname(base_path()).'/public_html/storage/'.$relativePath,
+        ];
+
+        $documentRoot = rtrim((string) ($_SERVER['DOCUMENT_ROOT'] ?? ''), DIRECTORY_SEPARATOR);
+        if ($documentRoot !== '') {
+            $targets[] = $documentRoot.'/storage/'.$relativePath;
+        }
+
+        return array_values(array_unique($targets));
     }
 
     private function ensureDirectory(string $directory): void
@@ -410,7 +437,14 @@ class ImportProductImagesFromCsv extends Command
             mkdir($directory, 0755, true);
         }
 
-        chmod($directory, 0755);
+        $this->chmodDirectory($directory);
+    }
+
+    private function chmodDirectory(string $directory): void
+    {
+        if (is_dir($directory)) {
+            chmod($directory, 0755);
+        }
     }
 
     private function printSummary(array $rows, array $groups, array $matches, array $unmatched, array $ambiguous, int $matchedImageCount, int $skippedExistingProducts, bool $dryRun, array $matchColumns, array $report): void
