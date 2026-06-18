@@ -267,7 +267,7 @@ class ProductImagesImportRunnerController extends Controller
     {
         $json = json_encode($config, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?: '{}';
 
-        return <<<HTML
+        return str_replace('__AUTO_RUNNER_CONFIG__', $json, <<<'HTML'
 <!doctype html>
 <html lang="pl">
 <head>
@@ -288,7 +288,7 @@ body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;margin:24px;line-he
 <h2>Ostatnie summary</h2><pre id="summary">{}</pre><h2>Pełny log JSON</h2><pre id="log"></pre>
 <script>
 document.addEventListener('DOMContentLoaded', () => {
-    const config = $json;
+    const config = __AUTO_RUNNER_CONFIG__;
     let running = false;
     let paused = false;
     let stopped = false;
@@ -307,7 +307,7 @@ document.addEventListener('DOMContentLoaded', () => {
         params.set('batch_size', String(config.batchSize || 20));
         params.set('source_root', config.sourceRoot || '');
         params.set('copy_files', '1');
-        return `${window.location.pathname}?${params.toString()}`;
+        return window.location.pathname + '?' + params.toString();
     }
 
     function render(status) {
@@ -415,7 +415,7 @@ document.addEventListener('DOMContentLoaded', () => {
         batchNumber = 0;
         totals = {files_copied: 0, part_images_created: 0, local_files_missing: 0, errors: 0};
         el('summary').textContent = '{}';
-        el('log').textContent = 'Starting auto-runner...\n\n';
+        el('log').textContent = 'START clicked\n\n';
         render('RUNNING');
         runNextBatch();
     });
@@ -446,7 +446,7 @@ document.addEventListener('DOMContentLoaded', () => {
     render('READY');
 });
 </script></body></html>
-HTML;
+HTML);
     }
 
     private function renderBatch(int $batch, int $offset, int $limit, int $exitCode, string $output): string
