@@ -1715,10 +1715,17 @@ body.fi-body :where(
 
 .fi-modal-window.gps-category-picker-modal .fi-modal-header,
 .gps-category-picker-modal.fi-modal-window .fi-modal-header,
+.fi-modal-window.gps-vehicle-picker-modal .fi-modal-header,
+.gps-vehicle-picker-modal.fi-modal-window .fi-modal-header {
+    flex: 0 0 auto !important;
+    min-height: 3rem !important;
+    padding-top: 0.75rem !important;
+    padding-bottom: 0.75rem !important;
+    align-items: center !important;
+}
+
 .fi-modal-window.gps-category-picker-modal .fi-modal-footer,
 .gps-category-picker-modal.fi-modal-window .fi-modal-footer,
-.fi-modal-window.gps-vehicle-picker-modal .fi-modal-header,
-.gps-vehicle-picker-modal.fi-modal-window .fi-modal-header,
 .fi-modal-window.gps-vehicle-picker-modal .fi-modal-footer,
 .gps-vehicle-picker-modal.fi-modal-window .fi-modal-footer {
     flex: 0 0 auto !important;
