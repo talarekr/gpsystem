@@ -122,16 +122,6 @@ class PartResource extends Resource
                             ->columnSpanFull(),
                     ]),
 
-                Section::make('Magazyn')
-                    ->collapsible()
-                    ->columns(4)
-                    ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--stock'])
-                    ->schema([
-                        Forms\Components\TextInput::make('quantity')->label('Ilość')->hiddenLabel()->placeholder('Ilość')->numeric()->default(1)->minValue(0),
-                        Forms\Components\Select::make('status')->label('Status')->hiddenLabel()->placeholder('Status')->options(Part::statusOptions())->default('draft')->native(false),
-                        Forms\Components\Toggle::make('is_visible_storefront')->label('Widoczna w sklepie')->default(false)->inline(false),
-                    ]),
-
                 Section::make('Ceny')
                     ->collapsible()
                     ->columns(4)
@@ -141,16 +131,6 @@ class PartResource extends Resource
                         Forms\Components\TextInput::make('currency')->label('Waluta')->hiddenLabel()->placeholder('Waluta')->default('PLN')->maxLength(3),
                         Forms\Components\TextInput::make('ebay_price')->label('Cena eBay')->hiddenLabel()->placeholder('Cena eBay')->numeric()->prefix('PLN')->minValue(0),
                         Forms\Components\Placeholder::make('marketplace_price_note')->hiddenLabel()->content('Cena Allegro istnieje w bazie, ale sekcja Allegro i wystawianie są celowo ukryte na tym etapie.'),
-                    ]),
-
-                Section::make('Sklep')
-                    ->collapsible()
-                    ->collapsed()
-                    ->columns(2)
-                    ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--store'])
-                    ->schema([
-                        Forms\Components\TextInput::make('slug')->label('Slug')->hiddenLabel()->placeholder('Slug')->unique(ignoreRecord: true)->maxLength(255),
-                        Forms\Components\Placeholder::make('store_visibility_note')->label('Widoczność')->content('Widoczność w sklepie ustawisz w sekcji Magazyn.'),
                     ]),
 
             ]);
