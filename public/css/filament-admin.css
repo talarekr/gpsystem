@@ -1711,6 +1711,7 @@ body.fi-body :where(
     flex: 1 1 auto !important;
     min-height: 0 !important;
     overflow-y: auto !important;
+    padding-top: 0.75rem !important;
 }
 
 .fi-modal-window.gps-category-picker-modal .fi-modal-header,
@@ -1718,10 +1719,30 @@ body.fi-body :where(
 .fi-modal-window.gps-vehicle-picker-modal .fi-modal-header,
 .gps-vehicle-picker-modal.fi-modal-window .fi-modal-header {
     flex: 0 0 auto !important;
-    min-height: 3rem !important;
-    padding-top: 0.75rem !important;
-    padding-bottom: 0.75rem !important;
+    display: flex !important;
     align-items: center !important;
+    min-height: 2.5rem !important;
+    padding-top: 0.5rem !important;
+    padding-bottom: 0.5rem !important;
+}
+
+.fi-modal-window.gps-category-picker-modal .fi-modal-header :where(.fi-modal-heading, h1, h2, h3),
+.gps-category-picker-modal.fi-modal-window .fi-modal-header :where(.fi-modal-heading, h1, h2, h3),
+.fi-modal-window.gps-vehicle-picker-modal .fi-modal-header :where(.fi-modal-heading, h1, h2, h3),
+.gps-vehicle-picker-modal.fi-modal-window .fi-modal-header :where(.fi-modal-heading, h1, h2, h3) {
+    margin-bottom: 0 !important;
+    padding-top: 0 !important;
+    line-height: 1.2 !important;
+}
+
+.fi-modal-window.gps-category-picker-modal .fi-modal-header :where(.fi-modal-close-btn, .fi-modal-close-button, [aria-label="Close"], [aria-label="Zamknij"]),
+.gps-category-picker-modal.fi-modal-window .fi-modal-header :where(.fi-modal-close-btn, .fi-modal-close-button, [aria-label="Close"], [aria-label="Zamknij"]),
+.fi-modal-window.gps-vehicle-picker-modal .fi-modal-header :where(.fi-modal-close-btn, .fi-modal-close-button, [aria-label="Close"], [aria-label="Zamknij"]),
+.gps-vehicle-picker-modal.fi-modal-window .fi-modal-header :where(.fi-modal-close-btn, .fi-modal-close-button, [aria-label="Close"], [aria-label="Zamknij"]) {
+    align-self: center !important;
+    margin-top: 0 !important;
+    top: auto !important;
+    transform: none !important;
 }
 
 .fi-modal-window.gps-category-picker-modal .fi-modal-footer,
