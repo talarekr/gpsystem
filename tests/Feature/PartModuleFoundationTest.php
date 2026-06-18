@@ -10,6 +10,7 @@ use App\Models\PartImage;
 use App\Models\StorageLocation;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class PartModuleFoundationTest extends TestCase
@@ -76,6 +77,44 @@ class PartModuleFoundationTest extends TestCase
 
         $this->assertSame(Storage::disk('public')->url('parts/photos/example.jpg'), $image->publicUrl());
         $this->assertStringEndsWith('/storage/parts/photos/example.jpg', $image->publicUrl());
+    }
+
+    public function test_imported_part_photo_storefront_urls_use_original_file_instead_of_presentation_variants(): void
+    {
+        Storage::disk('public')->put('parts/photos/imported/2083/example.jpg', 'fake image');
+        Storage::disk('public')->put('parts/photos/presentation/listing/example.jpg', 'fake listing variant');
+        Storage::disk('public')->put('parts/photos/presentation/product/example.jpg', 'fake product variant');
+
+        $image = new PartImage([
+            'path' => 'parts/photos/imported/2083/example.jpg',
+            'legacy_payload' => ['presentation' => [
+                'listing_path' => 'parts/photos/presentation/listing/example.jpg',
+                'product_path' => 'parts/photos/presentation/product/example.jpg',
+            ]],
+        ]);
+
+        $this->assertTrue($image->isImportedPhoto());
+        $this->assertStringEndsWith('/storage/parts/photos/imported/2083/example.jpg', $image->listingUrl());
+        $this->assertStringEndsWith('/storage/parts/photos/imported/2083/example.jpg', $image->productUrl());
+    }
+
+    public function test_manual_part_photo_storefront_urls_still_use_existing_presentation_variants(): void
+    {
+        Storage::disk('public')->put('parts/photos/manual/example.jpg', 'fake image');
+        Storage::disk('public')->put('parts/photos/presentation/listing/manual-example.jpg', 'fake listing variant');
+        Storage::disk('public')->put('parts/photos/presentation/product/manual-example.jpg', 'fake product variant');
+
+        $image = new PartImage([
+            'path' => 'parts/photos/manual/example.jpg',
+            'legacy_payload' => ['presentation' => [
+                'listing_path' => 'parts/photos/presentation/listing/manual-example.jpg',
+                'product_path' => 'parts/photos/presentation/product/manual-example.jpg',
+            ]],
+        ]);
+
+        $this->assertFalse($image->isImportedPhoto());
+        $this->assertStringEndsWith('/storage/parts/photos/presentation/listing/manual-example.jpg', $image->listingUrl());
+        $this->assertStringEndsWith('/storage/parts/photos/presentation/product/manual-example.jpg', $image->productUrl());
     }
 
     public function test_part_photo_public_url_uses_public_path_when_file_exists_in_public_directory(): void
