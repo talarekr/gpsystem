@@ -76,7 +76,6 @@ class ProductImagesImportRunnerController extends Controller
 
                 $arguments = [
                     'csvPath' => $csvPath,
-                    '--skip-existing' => true,
                     '--copy-files' => true,
                     '--source-root' => $sourceRoot,
                     '--limit' => $batchSize,
@@ -124,7 +123,7 @@ class ProductImagesImportRunnerController extends Controller
     {
         return '<!doctype html><html lang="pl"><head><meta charset="utf-8"><title>Realny import zdjęć produktów — runner</title></head><body>'
             .'<h1>Realny import zdjęć produktów — runner</h1>'
-            .'<p><strong>Tryb:</strong> realny import batchami; runner wymusza <code>--skip-existing</code> i <code>--copy-files</code>, bez <code>--dry-run</code>.</p>'
+            .'<p><strong>Tryb:</strong> realny import batchami; runner wymusza <code>--copy-files</code>, nie przekazuje <code>--skip-existing</code>, bez <code>--dry-run</code>.</p>'
             .'<p><strong>Ścieżka CSV:</strong> <code>'.e($csvPath).'</code></p>'
             .'<h2>Parametry runnera</h2><pre>'.e(json_encode($this->displayParameters($request) + [
                 'batch_size_effective' => $batchSize,
@@ -174,7 +173,7 @@ class ProductImagesImportRunnerController extends Controller
             'source_root' => $request->query('source_root'),
             'copy_files' => $request->query('copy_files') === '1',
             'sleep' => $request->query('sleep', 2),
-            'skip_existing_wymuszony' => true,
+            'skip_existing_wymuszony' => false,
             'dry_run_wymuszony' => false,
         ];
     }
