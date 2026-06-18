@@ -1632,6 +1632,54 @@ body.fi-body :where(
     max-width: 440px !important;
 }
 
+/* Full-height part form slide-overs must sit above the custom admin topbar. */
+.fi-modal:has(.gps-category-picker-modal),
+.fi-modal:has(.gps-vehicle-picker-modal) {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 90 !important;
+}
+
+.fi-modal:has(.gps-category-picker-modal) .fi-modal-close-overlay,
+.fi-modal:has(.gps-vehicle-picker-modal) .fi-modal-close-overlay {
+    position: fixed !important;
+    inset: 0 !important;
+}
+
+.fi-modal-window.gps-category-picker-modal,
+.gps-category-picker-modal.fi-modal-window,
+.fi-modal-window.gps-vehicle-picker-modal,
+.gps-vehicle-picker-modal.fi-modal-window {
+    position: fixed !important;
+    top: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    display: flex !important;
+    flex-direction: column !important;
+}
+
+.fi-modal-window.gps-category-picker-modal .fi-modal-content,
+.gps-category-picker-modal.fi-modal-window .fi-modal-content,
+.fi-modal-window.gps-vehicle-picker-modal .fi-modal-content,
+.gps-vehicle-picker-modal.fi-modal-window .fi-modal-content {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+}
+
+.fi-modal-window.gps-category-picker-modal .fi-modal-header,
+.gps-category-picker-modal.fi-modal-window .fi-modal-header,
+.fi-modal-window.gps-category-picker-modal .fi-modal-footer,
+.gps-category-picker-modal.fi-modal-window .fi-modal-footer,
+.fi-modal-window.gps-vehicle-picker-modal .fi-modal-header,
+.gps-vehicle-picker-modal.fi-modal-window .fi-modal-header,
+.fi-modal-window.gps-vehicle-picker-modal .fi-modal-footer,
+.gps-vehicle-picker-modal.fi-modal-window .fi-modal-footer {
+    flex: 0 0 auto !important;
+}
+
 .gps-category-picker {
     display: flex;
     flex-direction: column;
