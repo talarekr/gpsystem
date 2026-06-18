@@ -109,7 +109,7 @@ class ProductImagesImportRunnerController extends Controller
 
             echo $this->renderSummary($request, $completedBatches, $nextOffset, $totals, $failed);
             $this->flushOutput();
-        })->header('Content-Type', 'text/html; charset=UTF-8');
+        }, 200, ['Content-Type' => 'text/html; charset=UTF-8']);
     }
 
     private function renderValidationPage(string $csvPath, Request $request, string $message): string
