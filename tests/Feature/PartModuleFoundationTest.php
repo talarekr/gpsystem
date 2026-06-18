@@ -157,6 +157,28 @@ class PartModuleFoundationTest extends TestCase
         $this->assertGreaterThan($narrow, $wide);
     }
 
+    public function test_proposed_listing_score_penalizes_edge_touching_closeups(): void
+    {
+        $closeup = PartImage::calculateProposedListingScore([
+            'listing_fill_width_ratio' => 1.0,
+            'listing_fill_height_ratio' => 0.875,
+            'listing_dominant_ratio' => 1.0,
+            'selected_crop_pass' => 'aggressive',
+            'metrics' => ['original' => ['width' => 1000, 'height' => 750]],
+            'selected_crops' => ['listing' => ['box' => ['x' => 0, 'y' => 8, 'width' => 960, 'height' => 650]]],
+        ]);
+        $wholeObject = PartImage::calculateProposedListingScore([
+            'listing_fill_width_ratio' => 0.94,
+            'listing_fill_height_ratio' => 0.72,
+            'listing_dominant_ratio' => 0.94,
+            'selected_crop_pass' => 'normal',
+            'metrics' => ['original' => ['width' => 1000, 'height' => 750]],
+            'selected_crops' => ['listing' => ['box' => ['x' => 70, 'y' => 75, 'width' => 820, 'height' => 520]]],
+        ]);
+
+        $this->assertGreaterThan($closeup, $wholeObject);
+    }
+
     public function test_part_listing_image_uses_best_presentation_metrics_when_images_are_eager_loaded(): void
     {
         $part = Part::query()->create(['name' => 'SEAT EXEO zwrotnica', 'status' => 'ready']);

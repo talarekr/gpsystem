@@ -114,11 +114,12 @@ class PartImage extends Model
         return self::calculateListingScore(
             $presentation['listing_fill_width_ratio'] ?? data_get($presentation, 'metrics.listing.fill_ratio.width_ratio'),
             $presentation['listing_fill_height_ratio'] ?? data_get($presentation, 'metrics.listing.fill_ratio.height_ratio'),
-            $presentation['listing_dominant_ratio'] ?? data_get($presentation, 'metrics.listing.fill_ratio.dominant_ratio')
+            $presentation['listing_dominant_ratio'] ?? data_get($presentation, 'metrics.listing.fill_ratio.dominant_ratio'),
+            $presentation,
         );
     }
 
-    public static function calculateListingScore(mixed $widthRatio, mixed $heightRatio, mixed $dominantRatio): ?float
+    public static function calculateListingScore(mixed $widthRatio, mixed $heightRatio, mixed $dominantRatio, ?array $presentation = null): ?float
     {
         if (! is_numeric($widthRatio) || ! is_numeric($heightRatio) || ! is_numeric($dominantRatio)) {
             return null;
@@ -142,7 +143,75 @@ class PartImage extends Model
             $score -= (0.45 - $heightRatio) * 70;
         }
 
+        if (is_array($presentation)) {
+            $score += self::listingWholeObjectAdjustment($presentation, $widthRatio, $heightRatio, $dominantRatio);
+        }
+
         return round($score, 4);
+    }
+
+    public static function calculateProposedListingScore(array $presentation): ?float
+    {
+        return self::calculateListingScore(
+            $presentation['listing_fill_width_ratio'] ?? data_get($presentation, 'metrics.listing.fill_ratio.width_ratio'),
+            $presentation['listing_fill_height_ratio'] ?? data_get($presentation, 'metrics.listing.fill_ratio.height_ratio'),
+            $presentation['listing_dominant_ratio'] ?? data_get($presentation, 'metrics.listing.fill_ratio.dominant_ratio'),
+            $presentation,
+        );
+    }
+
+    private static function listingWholeObjectAdjustment(array $presentation, float $widthRatio, float $heightRatio, float $dominantRatio): float
+    {
+        $originalWidth = (float) data_get($presentation, 'metrics.original.width', 0);
+        $originalHeight = (float) data_get($presentation, 'metrics.original.height', 0);
+        $box = data_get($presentation, 'selected_crops.listing.box', $presentation['bounding_box'] ?? []);
+
+        if ($originalWidth <= 0 || $originalHeight <= 0 || ! is_array($box)) {
+            return 0.0;
+        }
+
+        $boxX = (float) ($box['x'] ?? 0);
+        $boxY = (float) ($box['y'] ?? 0);
+        $boxWidth = (float) ($box['width'] ?? 0);
+        $boxHeight = (float) ($box['height'] ?? 0);
+
+        if ($boxWidth <= 0 || $boxHeight <= 0) {
+            return 0.0;
+        }
+
+        $leftMargin = $boxX / $originalWidth;
+        $topMargin = $boxY / $originalHeight;
+        $rightMargin = max(0.0, ($originalWidth - ($boxX + $boxWidth)) / $originalWidth);
+        $bottomMargin = max(0.0, ($originalHeight - ($boxY + $boxHeight)) / $originalHeight);
+        $minMargin = min($leftMargin, $topMargin, $rightMargin, $bottomMargin);
+        $areaRatio = ($boxWidth * $boxHeight) / max(1.0, $originalWidth * $originalHeight);
+        $adjustment = 0.0;
+
+        if ($minMargin >= 0.035 && $minMargin <= 0.22 && $areaRatio >= 0.08 && $areaRatio <= 0.82) {
+            $adjustment += 12;
+        }
+
+        if ($minMargin < 0.01) {
+            $adjustment -= 34;
+        } elseif ($minMargin < 0.025) {
+            $adjustment -= 18;
+        }
+
+        if ($areaRatio > 0.88) {
+            $adjustment -= 34;
+        } elseif ($areaRatio > 0.78) {
+            $adjustment -= 18;
+        }
+
+        if ($dominantRatio > 1.01 || $widthRatio > 1.01 || $heightRatio > 1.01) {
+            $adjustment -= 16;
+        }
+
+        if (($presentation['selected_crop_pass'] ?? data_get($presentation, 'selected_crops.listing.pass')) !== 'normal') {
+            $adjustment -= 6;
+        }
+
+        return $adjustment;
     }
 
     public function productUrl(): ?string
