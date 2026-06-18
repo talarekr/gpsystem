@@ -328,6 +328,11 @@ class Part extends Model
         return $this->primaryImage()?->path;
     }
 
+    public function getPrimaryImageUrlAttribute(): ?string
+    {
+        return $this->primaryImage()?->publicUrl();
+    }
+
 
     public function scopeInStock(Builder $query): Builder
     {
