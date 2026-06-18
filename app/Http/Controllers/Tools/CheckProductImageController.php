@@ -20,6 +20,10 @@ class CheckProductImageController extends Controller
         $part = Part::query()->with('images')->findOrFail((int) $request->query('part_id'));
         $publicStoragePath = public_path('storage');
         $storagePublicPath = storage_path('app/public');
+        $documentRoot = rtrim((string) ($_SERVER['DOCUMENT_ROOT'] ?? ''), DIRECTORY_SEPARATOR);
+        $siblingPublicHtml = dirname(base_path()).'/public_html';
+        $presentationRelativePath = 'storage/parts/photos/presentation/product/12-1a9a282e0dfe.jpg';
+        $importedRelativePath = 'storage/parts/photos/imported/2083/9db7e2614347b1e4cfc4d94a9150.jpg';
 
         $images = $part->images
             ->sortBy([['sort_order', 'asc'], ['id', 'asc']])
@@ -54,6 +58,16 @@ class CheckProductImageController extends Controller
             'absolute_primary_image_url' => $part->primary_image_url,
             'images_count' => $images->count(),
             'images' => $images,
+            'paths' => [
+                'base_path' => base_path(),
+                'public_path' => public_path(),
+                'document_root' => $_SERVER['DOCUMENT_ROOT'] ?? null,
+                'document_root_realpath' => $documentRoot === '' ? null : (realpath($documentRoot) ?: null),
+                'sibling_public_html' => $siblingPublicHtml,
+                'sibling_public_html_realpath' => is_dir($siblingPublicHtml) ? (realpath($siblingPublicHtml) ?: null) : null,
+            ],
+            'known_working_presentation_image_locations' => $this->physicalLocationDiagnostics($presentationRelativePath, $documentRoot),
+            'known_imported_image_locations' => $this->physicalLocationDiagnostics($importedRelativePath, $documentRoot),
             'public_storage' => [
                 'path' => $publicStoragePath,
                 'exists' => file_exists($publicStoragePath),
@@ -69,6 +83,26 @@ class CheckProductImageController extends Controller
             ],
             'url_rule' => 'Imported paths are stored as parts/photos/imported/{woo_product_id}/filename.jpg and should be served as absolute /storage URL in rendered <img src> attributes.',
         ], 200, [], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    }
+
+    /** @return array<string, array{path: string|null, exists: bool, perms: string|null}> */
+    private function physicalLocationDiagnostics(string $relativePath, string $documentRoot): array
+    {
+        return [
+            'public_path' => $this->fileDiagnostics(public_path($relativePath)),
+            'sibling_public_html' => $this->fileDiagnostics(dirname(base_path()).'/public_html/'.$relativePath),
+            'document_root' => $this->fileDiagnostics($documentRoot === '' ? null : $documentRoot.'/'.$relativePath),
+        ];
+    }
+
+    /** @return array{path: string|null, exists: bool, perms: string|null} */
+    private function fileDiagnostics(?string $path): array
+    {
+        return [
+            'path' => $path,
+            'exists' => $path !== null && is_file($path),
+            'perms' => $this->permissions($path),
+        ];
     }
 
     private function permissions(?string $path): ?string
