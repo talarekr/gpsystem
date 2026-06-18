@@ -35,15 +35,18 @@ class CheckProductImageController extends Controller
                     'is_primary' => (bool) $image->is_primary,
                     'storage_app_public_exists' => $path !== '' && Storage::disk('public')->exists($path),
                     'storage_app_public_path' => $path === '' ? null : Storage::disk('public')->path($path),
-                    'public_url' => $image->publicUrl(),
+                    'public_url' => $image->relativePublicUrl(),
+                    'absolute_public_url' => $image->absolutePublicUrl(),
                     'expected_url' => $path === '' ? null : '/storage/'.$path,
+                    'expected_absolute_url' => $path === '' ? null : url('/storage/'.$path),
                 ];
             });
 
         return response()->json([
             'part_id' => $part->id,
             'primary_image_path' => $part->primary_image_path,
-            'primary_image_url' => $part->primary_image_url,
+            'primary_image_url' => $part->primary_image_relative_url,
+            'absolute_primary_image_url' => $part->primary_image_url,
             'images_count' => $images->count(),
             'images' => $images,
             'public_storage' => [
@@ -54,7 +57,12 @@ class CheckProductImageController extends Controller
                 'expected_target' => $storagePublicPath,
                 'points_to_expected_target' => is_link($publicStoragePath) && realpath($publicStoragePath) === realpath($storagePublicPath),
             ],
-            'url_rule' => 'Imported paths are stored as parts/photos/imported/{woo_product_id}/filename.jpg and should be served as /storage/parts/photos/imported/{woo_product_id}/filename.jpg.',
+            'url_comparison' => [
+                'imported_url' => $part->primary_image_url,
+                'presentation_example_url' => url('/storage/parts/photos/presentation/product/12-1a9a282e0dfe.jpg'),
+                'img_src_should_use' => $part->primary_image_url,
+            ],
+            'url_rule' => 'Imported paths are stored as parts/photos/imported/{woo_product_id}/filename.jpg and should be served as absolute /storage URL in rendered <img src> attributes.',
         ], 200, [], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     }
 }
