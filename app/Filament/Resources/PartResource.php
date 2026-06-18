@@ -105,7 +105,6 @@ class PartResource extends Resource
 
                 Section::make('Informacje o samochodzie')
                     ->collapsible()
-                    ->collapsed()
                     ->columns(2)
                     ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--vehicle'])
                     ->schema([
