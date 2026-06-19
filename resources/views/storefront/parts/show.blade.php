@@ -34,12 +34,20 @@
         <section class="sf-gallery" data-product-gallery>
             <div class="sf-gallery__layout">
                 @if($galleryImages->count() > 1)
-                    <div class="sf-thumbs" aria-label="Miniatury zdjęć produktu">
-                        @foreach($galleryImages as $index => $image)
-                            <button class="sf-thumbs__item{{ $index === 0 ? ' is-active' : '' }}" type="button" data-gallery-thumb data-index="{{ $index }}" data-product-src="{{ $image['product'] }}" data-thumb-src="{{ $image['thumb'] }}" data-alt="{{ $image['alt'] }}" aria-label="Pokaż zdjęcie {{ $index + 1 }}" aria-current="{{ $index === 0 ? 'true' : 'false' }}">
-                                <img src="{{ $image['thumb'] }}" alt="{{ $image['alt'] }}" loading="lazy">
-                            </button>
-                        @endforeach
+                    <div class="sf-thumbs-shell{{ $galleryImages->count() > 5 ? ' sf-thumbs-shell--scrollable' : '' }}" aria-label="Miniatury zdjęć produktu">
+                        @if($galleryImages->count() > 5)
+                            <button class="sf-thumbs-shell__arrow sf-thumbs-shell__arrow--prev" type="button" data-gallery-thumbs-prev aria-label="Przewiń miniatury w górę">⌃</button>
+                        @endif
+                        <div class="sf-thumbs" data-gallery-thumbs-track>
+                            @foreach($galleryImages as $index => $image)
+                                <button class="sf-thumbs__item{{ $index === 0 ? ' is-active' : '' }}" type="button" data-gallery-thumb data-index="{{ $index }}" data-product-src="{{ $image['product'] }}" data-thumb-src="{{ $image['thumb'] }}" data-alt="{{ $image['alt'] }}" aria-label="Pokaż zdjęcie {{ $index + 1 }}" aria-current="{{ $index === 0 ? 'true' : 'false' }}">
+                                    <img src="{{ $image['thumb'] }}" alt="{{ $image['alt'] }}" loading="lazy">
+                                </button>
+                            @endforeach
+                        </div>
+                        @if($galleryImages->count() > 5)
+                            <button class="sf-thumbs-shell__arrow sf-thumbs-shell__arrow--next" type="button" data-gallery-thumbs-next aria-label="Przewiń miniatury w dół">⌄</button>
+                        @endif
                     </div>
                 @endif
                 <div class="sf-gallery__main">

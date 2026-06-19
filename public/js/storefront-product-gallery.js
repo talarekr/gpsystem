@@ -10,6 +10,9 @@
         var prevButtons = Array.prototype.slice.call(gallery.querySelectorAll('[data-gallery-prev], [data-gallery-main-prev]'));
         var nextButtons = Array.prototype.slice.call(gallery.querySelectorAll('[data-gallery-next], [data-gallery-main-next]'));
         var closeButtons = Array.prototype.slice.call(gallery.querySelectorAll('[data-gallery-close]'));
+        var thumbsTrack = gallery.querySelector('[data-gallery-thumbs-track]');
+        var thumbsPrevButton = gallery.querySelector('[data-gallery-thumbs-prev]');
+        var thumbsNextButton = gallery.querySelector('[data-gallery-thumbs-next]');
         var currentIndex = 0;
 
         if (!mainImage || !openButton || !lightbox || !lightboxImage) {
@@ -53,6 +56,16 @@
             setActive((currentIndex + offset + images.length) % images.length);
         }
 
+        function scrollThumbs(offset) {
+            if (!thumbsTrack) {
+                return;
+            }
+
+            var firstThumb = thumbs[0];
+            var step = firstThumb ? firstThumb.getBoundingClientRect().height + 10 : 82;
+            thumbsTrack.scrollBy({ top: offset * step, left: 0, behavior: 'smooth' });
+        }
+
         function openLightbox() {
             setActive(currentIndex);
             lightbox.hidden = false;
@@ -76,6 +89,18 @@
                 setActive(index);
             });
         });
+
+        if (thumbsPrevButton) {
+            thumbsPrevButton.addEventListener('click', function () {
+                scrollThumbs(-1);
+            });
+        }
+
+        if (thumbsNextButton) {
+            thumbsNextButton.addEventListener('click', function () {
+                scrollThumbs(1);
+            });
+        }
 
         openButton.addEventListener('click', openLightbox);
         closeButtons.forEach(function (button) {
