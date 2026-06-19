@@ -16,6 +16,7 @@ use App\Http\Controllers\Tools\CheckPartImagePresentationController;
 use App\Http\Controllers\Tools\CheckProductImageController;
 use App\Http\Controllers\Tools\FixImportedImagesPublicFilesController;
 use App\Http\Controllers\Tools\ImportedImagesStorageReportController;
+use App\Http\Controllers\Tools\PhotoStorageReportController;
 use App\Http\Controllers\Tools\ProductImagesDryRunController;
 use App\Http\Controllers\Tools\ProductImagesImportController;
 use App\Http\Controllers\Tools\ProductImagesImportRunnerController;
@@ -48,6 +49,7 @@ Route::get('/tools/process-part-image-presentation', ProcessPartImagePresentatio
 Route::get('/tools/process-part-image-presentation-runner', ProcessPartImagePresentationRunnerController::class)->name('tools.process-part-image-presentation-runner');
 Route::get('/tools/fix-imported-images-public-files', FixImportedImagesPublicFilesController::class)->name('tools.fix-imported-images-public-files');
 Route::get('/tools/imported-images-storage-report', ImportedImagesStorageReportController::class)->name('tools.imported-images-storage-report');
+Route::get('/tools/photo-storage-report', PhotoStorageReportController::class)->name('tools.photo-storage-report');
 
 
 Route::middleware(Authenticate::class)->prefix('admin')->name('admin.')->group(function (): void {
