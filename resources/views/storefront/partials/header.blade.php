@@ -6,8 +6,7 @@
         }
     }
 </style>
-<div class="sf-promo">Części samochodowe z demontażu - szybka wysyłka i pomoc w doborze po VIN <button aria-label="Zamknij">×</button></div>
-<header class="sf-top"><div class="sf-container sf-top__inner"><span>Zwrot do 14 dni</span><span>Oryginalne części używane</span><span>Pomoc: biuro@gpswiss.pl</span></div></header>
+<header class="sf-top"><div class="sf-container sf-top__inner"><span>Zwrot do 14 dni</span><span>Oryginalne części używane</span><a href="{{ route('storefront.contact') }}">Kontakt</a><span>90 dni gwarancji na Silniki, skrzynie biegów i dyferencjały</span><a href="{{ route('storefront.terms') }}">Regulamin</a></div></header>
 <div class="sf-container sf-main-row">
     @php($storefrontLogoPath = '/storage/brand/logo.png')
     @php($storefrontLogoPublicHtmlPath = dirname(base_path()) . '/public_html/storage/brand/logo.png')
