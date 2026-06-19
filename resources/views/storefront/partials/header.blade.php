@@ -2,7 +2,8 @@
 <header class="sf-top"><div class="sf-container sf-top__inner"><span>Zwrot do 14 dni</span><span>Oryginalne części używane</span><span>Pomoc: biuro@gpswiss.pl</span></div></header>
 <div class="sf-container sf-main-row">
     @php($storefrontLogoPath = '/storage/brand/logo.png')
-    @php($storefrontLogoExists = file_exists(public_path(ltrim($storefrontLogoPath, '/'))))
+    @php($storefrontLogoPublicHtmlPath = dirname(base_path()) . '/public_html/storage/brand/logo.png')
+    @php($storefrontLogoExists = file_exists($storefrontLogoPublicHtmlPath) || file_exists(public_path(ltrim($storefrontLogoPath, '/'))))
     <a class="sf-logo" href="{{ route('storefront.home') }}" aria-label="GP Swiss - strona główna">
         @if($storefrontLogoExists)
             <img src="{{ $storefrontLogoPath }}" alt="GP Swiss" style="display:block;max-width:180px;max-height:64px;width:auto;height:auto;">
