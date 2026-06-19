@@ -36,6 +36,18 @@
             setOpen(!menu.open);
         });
 
+        menu.addEventListener('toggle', () => {
+            const isOpen = menu.open;
+
+            if (menu.classList.contains('is-open') !== isOpen) {
+                setOpen(isOpen);
+            }
+        });
+
+        panel?.addEventListener('click', (event) => {
+            event.stopPropagation();
+        });
+
         triggers.forEach((trigger) => {
             trigger.addEventListener('click', () => activate(trigger.dataset.rootId));
         });

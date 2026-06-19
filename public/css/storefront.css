@@ -265,3 +265,49 @@
 .sf-category-menu.is-open > .sf-category-menu__panel {
     display: block;
 }
+
+/* Category mega-menu state hardening: a single JS-controlled panel, no hover/focus spillover. */
+.sf-category-menu:not(.is-open),
+.sf-category-menu:not([open]) {
+    overflow: visible;
+}
+
+.sf-category-menu:not(.is-open) > .sf-category-menu__panel,
+.sf-category-menu:not([open]) > .sf-category-menu__panel {
+    display: none !important;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.sf-category-menu.is-open[open] > .sf-category-menu__panel {
+    display: block !important;
+    visibility: visible;
+    pointer-events: auto;
+    overflow: hidden;
+}
+
+.sf-category-menu > .sf-category-menu__panel,
+.sf-category-menu > .sf-category-menu__panel * {
+    float: none;
+}
+
+.sf-category-menu > .sf-category-menu__panel div,
+.sf-category-menu > .sf-category-menu__panel section,
+.sf-category-menu > .sf-category-menu__panel aside {
+    position: static !important;
+    z-index: auto !important;
+    box-shadow: none;
+}
+
+.sf-category-menu > .sf-category-menu__panel .sf-category-menu__desktop {
+    display: grid;
+}
+
+.sf-category-menu > .sf-category-menu__panel .sf-category-menu__branches,
+.sf-category-menu > .sf-category-menu__panel .sf-category-menu__root-list {
+    overflow-y: auto;
+}
+
+.sf-category-menu > .sf-category-menu__panel .sf-category-menu__branch[hidden] {
+    display: none !important;
+}
