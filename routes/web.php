@@ -26,6 +26,8 @@ use App\Http\Controllers\Tools\CheckCatalogRenderController;
 use App\Http\Controllers\Tools\CheckCatalogViewController;
 use App\Http\Controllers\Tools\CheckCatalogViewStageController;
 use App\Http\Controllers\Tools\CheckCatalogErrorController;
+use App\Http\Controllers\Tools\CheckCatalogDirectController;
+use App\Http\Controllers\Tools\LastLaravelErrorController;
 use App\Http\Controllers\Tools\FixImportedImagesPublicFilesController;
 use App\Http\Controllers\Tools\ImportedImagesStorageReportController;
 use App\Http\Controllers\Tools\PhotoStorageReportController;
@@ -82,6 +84,8 @@ Route::get('/tools/check-product-image', CheckProductImageController::class)->na
 Route::get('/tools/check-catalog-search', CheckCatalogSearchController::class)->name('tools.check-catalog-search');
 Route::get('/tools/check-catalog-render', CheckCatalogRenderController::class)->name('tools.check-catalog-render');
 Route::get('/tools/check-catalog-error', CheckCatalogErrorController::class)->name('tools.check-catalog-error');
+Route::get('/tools/last-laravel-error', LastLaravelErrorController::class)->name('tools.last-laravel-error');
+Route::get('/tools/check-catalog-direct', CheckCatalogDirectController::class)->name('tools.check-catalog-direct');
 Route::get('/tools/check-catalog-view-ping', function (Request $request) {
     if (! hash_equals('gps_images_import_2026', (string) $request->query('token', ''))) {
         return response()->json([
