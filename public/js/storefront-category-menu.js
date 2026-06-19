@@ -24,6 +24,22 @@
             trigger.addEventListener('focus', () => activate(trigger.dataset.rootId));
             trigger.addEventListener('click', () => activate(trigger.dataset.rootId));
         });
+
+        document.addEventListener('click', (event) => {
+            if (!menu.open || menu.contains(event.target)) {
+                return;
+            }
+
+            menu.open = false;
+        });
+
+        document.addEventListener('keydown', (event) => {
+            if (event.key !== 'Escape' || !menu.open) {
+                return;
+            }
+
+            menu.open = false;
+        });
     });
 
     document.querySelectorAll('[data-category-tree-toggle]').forEach((toggle) => {
