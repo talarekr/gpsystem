@@ -60,7 +60,7 @@
         </div>
 
         @if(method_exists($parts, 'links'))
-            {{ $parts->withQueryString()->links() }}
+            {{ method_exists($parts, 'withQueryString') ? $parts->withQueryString()->links() : $parts->links() }}
         @endif
     </section>
 </div>
