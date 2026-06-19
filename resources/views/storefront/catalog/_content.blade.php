@@ -1,8 +1,18 @@
 @php
-    $parts ??= collect();
-    $catalogUrl = \Illuminate\Support\Facades\Route::has('storefront.catalog') ? route('storefront.catalog') : url('/czesci');
-    $resultCount = method_exists($parts, 'total') ? $parts->total() : (method_exists($parts, 'count') ? $parts->count() : 0);
-    $sortableQuery = request()->except(['sort', 'page']);
+    $parts = $parts ?? collect();
+
+    $catalogUrl = '/czesci';
+
+    $resultCount = method_exists($parts, 'total')
+        ? $parts->total()
+        : (method_exists($parts, 'count') ? $parts->count() : 0);
+
+    $currentSort = $_GET['sort'] ?? '';
+    $currentQ = $_GET['q'] ?? '';
+    $currentPartNumber = $_GET['part_number'] ?? '';
+
+    $sortableQuery = $_GET;
+    unset($sortableQuery['sort'], $sortableQuery['page'], $sortableQuery['token'], $sortableQuery['stage']);
 @endphp
 
 <div class="sf-container sf-page">
@@ -11,20 +21,24 @@
 
     <form class="sf-filters" method="get" action="{{ $catalogUrl }}">
         <h3>Wyszukaj w katalogu</h3>
+
         <label>Fraza
-            <input type="search" name="q" value="{{ request('q') }}" placeholder="np. Audi, silnik, skrzynia">
+            <input type="search" name="q" value="{{ $currentQ }}" placeholder="np. Audi, silnik, skrzynia">
         </label>
+
         <label>Numer części
-            <input name="part_number" value="{{ request('part_number') }}" placeholder="np. M156E">
+            <input name="part_number" value="{{ $currentPartNumber }}" placeholder="np. M156E">
         </label>
+
         <label>Sortowanie
             <select name="sort">
-                <option value="">Sortuj domyślnie</option>
-                <option value="price_asc" @selected(request('sort') === 'price_asc')>Cena rosnąco</option>
-                <option value="price_desc" @selected(request('sort') === 'price_desc')>Cena malejąco</option>
-                <option value="name" @selected(request('sort') === 'name')>Nazwa</option>
+                <option value="" {{ $currentSort === '' ? 'selected' : '' }}>Sortuj domyślnie</option>
+                <option value="price_asc" {{ $currentSort === 'price_asc' ? 'selected' : '' }}>Cena rosnąco</option>
+                <option value="price_desc" {{ $currentSort === 'price_desc' ? 'selected' : '' }}>Cena malejąco</option>
+                <option value="name" {{ $currentSort === 'name' ? 'selected' : '' }}>Nazwa</option>
             </select>
         </label>
+
         <button class="sf-btn" type="submit">Szukaj</button>
         <a class="sf-clear" href="{{ $catalogUrl }}">Wyczyść</a>
     </form>
@@ -32,6 +46,7 @@
     <section>
         <div class="sf-toolbar">
             <span>{{ $resultCount }} wyników</span>
+
             <form method="get" action="{{ $catalogUrl }}">
                 @foreach($sortableQuery as $key => $value)
                     @if(is_array($value))
@@ -42,11 +57,12 @@
                         <input type="hidden" name="{{ $key }}" value="{{ $value }}">
                     @endif
                 @endforeach
+
                 <select name="sort" onchange="this.form.submit()">
-                    <option value="">Sortuj domyślnie</option>
-                    <option value="price_asc" @selected(request('sort') === 'price_asc')>Cena rosnąco</option>
-                    <option value="price_desc" @selected(request('sort') === 'price_desc')>Cena malejąco</option>
-                    <option value="name" @selected(request('sort') === 'name')>Nazwa</option>
+                    <option value="" {{ $currentSort === '' ? 'selected' : '' }}>Sortuj domyślnie</option>
+                    <option value="price_asc" {{ $currentSort === 'price_asc' ? 'selected' : '' }}>Cena rosnąco</option>
+                    <option value="price_desc" {{ $currentSort === 'price_desc' ? 'selected' : '' }}>Cena malejąco</option>
+                    <option value="name" {{ $currentSort === 'name' ? 'selected' : '' }}>Nazwa</option>
                 </select>
             </form>
         </div>
@@ -60,7 +76,7 @@
         </div>
 
         @if(method_exists($parts, 'links'))
-            {{ method_exists($parts, 'withQueryString') ? $parts->withQueryString()->links() : $parts->links() }}
+            {!! method_exists($parts, 'withQueryString') ? $parts->withQueryString()->links() : $parts->links() !!}
         @endif
     </section>
 </div>
