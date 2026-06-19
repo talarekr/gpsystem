@@ -6,7 +6,7 @@
 @endphp
 
 <details class="sf-menu sf-category-menu" data-category-menu>
-    <summary data-category-menu-trigger aria-expanded="false">☰ Menu</summary>
+    <summary>☰ Menu</summary>
     <div class="sf-category-menu__panel" role="region" aria-label="Menu kategorii części">
         <div class="sf-category-menu__desktop">
             <aside class="sf-category-menu__roots" aria-label="Kategorie główne">
