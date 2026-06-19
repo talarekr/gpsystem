@@ -166,16 +166,8 @@
 }
 
 /* Active final category in storefront sidebar */
-.sf-category-tree .is-active > .sf-category-tree__row > .sf-category-tree__link--active {
+.sf-category-tree__link--active {
     color: var(--navy);
     font-weight: 700;
-    background: transparent;
-}
-
-/* Direct parent of the active final category in storefront sidebar */
-.sf-category-tree .is-ancestor.is-branch:not(.is-active) > .sf-category-tree__row > .sf-category-tree__link--active-parent,
-.sf-category-tree .is-ancestor > .sf-category-tree__row > .sf-category-tree__link--active-parent {
-    color: #5b8fc7;
-    font-weight: 400;
     background: transparent;
 }
