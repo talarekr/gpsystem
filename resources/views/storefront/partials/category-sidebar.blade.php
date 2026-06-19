@@ -8,13 +8,17 @@
         ? ($activeAncestors->first() ?? $activeCategory)
         : $categoryRoots->first();
 
-    $activeCategoryIds = $activeAncestors->pluck('id');
-
-    if ($activeCategory) {
-        $activeCategoryIds = $activeCategoryIds->push($activeCategory->id);
-    }
+    $activeCategoryId = $activeCategory ? (int) $activeCategory->id : null;
+    $activeCategoryIds = $activeAncestors
+        ->pluck('id')
+        ->push($activeCategoryId)
+        ->filter()
+        ->map(fn ($categoryId): int => (int) $categoryId)
+        ->unique()
+        ->values();
 
     $sidebarCategories = $activeRoot?->children ?? collect();
+    $isRootActive = $activeRoot && $activeCategoryId !== null && (int) $activeRoot->id === $activeCategoryId;
 @endphp
 
 <aside class="sf-category-sidebar">
@@ -28,11 +32,17 @@
         @endforeach
     </select>
 
+    @if($activeRoot)
+        <a @class(['sf-category-sidebar__current', 'is-active' => $isRootActive]) href="{{ $categoryTreeService->url($activeRoot) }}">
+            <span>{{ $activeRoot->name }}</span>
+        </a>
+    @endif
+
     <h4 class="sf-category-sidebar__section-title">Podkategorie</h4>
 
     @include('storefront.partials.category-tree', [
         'categories' => $sidebarCategories,
-        'activeCategory' => $activeCategory,
+        'activeCategoryId' => $activeCategoryId,
         'activeRoot' => $activeRoot,
         'activeCategoryIds' => $activeCategoryIds,
         'level' => 0,
