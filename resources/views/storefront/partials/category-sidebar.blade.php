@@ -1,8 +1,8 @@
 @php
     $categoryTreeService ??= app(\App\Services\Storefront\CategoryTreeService::class);
     $categoryRoots ??= $categoryTreeService->roots();
-    $activeCategory ??= null;
-    $activeCategoryId = $activeCategory ? (int) $activeCategory->id : null;
+    $activeCategory ??= $category ?? null;
+    $activeCategoryId = isset($category) ? (int) $category->id : ($activeCategory ? (int) $activeCategory->id : null);
 
     $activeAncestors = $activeCategory ? $categoryTreeService->ancestors($activeCategory) : collect();
     $activeRoot = $activeCategory
