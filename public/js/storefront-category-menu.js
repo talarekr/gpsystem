@@ -2,8 +2,16 @@
     const menus = document.querySelectorAll('[data-category-menu]');
 
     menus.forEach((menu) => {
+        const toggle = menu.querySelector('summary');
+        const panel = menu.querySelector('.sf-category-menu__panel');
         const triggers = menu.querySelectorAll('[data-root-id]');
         const panels = menu.querySelectorAll('[data-root-panel]');
+
+        function setOpen(isOpen) {
+            menu.open = isOpen;
+            menu.classList.toggle('is-open', isOpen);
+            toggle?.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        }
 
         function activate(rootId) {
             triggers.forEach((trigger) => {
@@ -19,18 +27,25 @@
             });
         }
 
+        setOpen(menu.open);
+
+        toggle?.setAttribute('aria-haspopup', 'true');
+
+        toggle?.addEventListener('click', (event) => {
+            event.preventDefault();
+            setOpen(!menu.open);
+        });
+
         triggers.forEach((trigger) => {
-            trigger.addEventListener('mouseenter', () => activate(trigger.dataset.rootId));
-            trigger.addEventListener('focus', () => activate(trigger.dataset.rootId));
             trigger.addEventListener('click', () => activate(trigger.dataset.rootId));
         });
 
         document.addEventListener('click', (event) => {
-            if (!menu.open || menu.contains(event.target)) {
+            if (!menu.open || toggle?.contains(event.target) || panel?.contains(event.target)) {
                 return;
             }
 
-            menu.open = false;
+            setOpen(false);
         });
 
         document.addEventListener('keydown', (event) => {
@@ -38,7 +53,8 @@
                 return;
             }
 
-            menu.open = false;
+            setOpen(false);
+            toggle?.focus();
         });
     });
 
