@@ -271,215 +271,200 @@ Route::get('/tools/check-catalog-view-ping', function (Request $request) {
 Route::get('/tools/check-catalog-view', CheckCatalogViewController::class)->name('tools.check-catalog-view');
 Route::get('/tools/check-catalog-view-stage', CheckCatalogViewStageController::class)->name('tools.check-catalog-view-stage');
 Route::get('/tools/check-catalog-blade-stages', function () {
-    try {
-        $trace = function (\Throwable $exception): array {
-            return collect($exception->getTrace())->take(10)->map(fn (array $frame): array => [
-                'file' => $frame['file'] ?? null,
-                'line' => $frame['line'] ?? null,
-                'function' => $frame['function'] ?? null,
-                'class' => $frame['class'] ?? null,
-            ])->values()->all();
-        };
+    $makeTrace = function (\Throwable $exception): array {
+        return collect($exception->getTrace())->take(10)->map(fn (array $frame): array => [
+            'file' => $frame['file'] ?? null,
+            'line' => $frame['line'] ?? null,
+            'function' => $frame['function'] ?? null,
+            'class' => $frame['class'] ?? null,
+        ])->values()->all();
+    };
 
-        $fail = function (\Throwable $exception, string $stage) use ($trace) {
-            return response()->json([
-                'ok' => false,
-                'failed_stage' => $stage,
-                'error_class' => $exception::class,
-                'error_message' => $exception->getMessage(),
-                'file' => $exception->getFile(),
-                'line' => $exception->getLine(),
-                'trace' => $trace($exception),
-            ], 200);
-        };
-
-        $result = [
-            'ok' => true,
-            'route_entered' => true,
-            'stages' => [],
-        ];
-
-        try {
-            if (! hash_equals('gps_images_import_2026', (string) request()->query('token', ''))) {
-                return response()->json([
-                    'ok' => false,
-                    'failed_stage' => 'token',
-                    'error_class' => 'AuthorizationException',
-                    'error_message' => 'Invalid diagnostics token.',
-                    'file' => __FILE__,
-                    'line' => __LINE__,
-                    'trace' => [],
-                ], 403);
-            }
-
-            $result['token_valid'] = true;
-        } catch (\Throwable $exception) {
-            return $fail($exception, 'token');
-        }
-
-        try {
-            $requestedStage = strtoupper((string) request()->query('stage', ''));
-            $allowedStages = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
-
-            if ($requestedStage !== '' && ! in_array($requestedStage, $allowedStages, true)) {
-                return response()->json([
-                    'ok' => false,
-                    'failed_stage' => 'stage_parameter',
-                    'error_class' => 'InvalidArgumentException',
-                    'error_message' => 'Invalid stage parameter. Allowed values: A, B, C, D, E, F, G.',
-                    'file' => __FILE__,
-                    'line' => __LINE__,
-                    'trace' => [],
-                ], 422);
-            }
-
-            $stagesToRun = $requestedStage === '' ? $allowedStages : [$requestedStage];
-            $result['requested_stage'] = $requestedStage === '' ? null : $requestedStage;
-        } catch (\Throwable $exception) {
-            return $fail($exception, 'stage_parameter');
-        }
-
-        foreach ($stagesToRun as $stage) {
-            if ($stage === 'F') {
-                $contentView = 'storefront.catalog._content';
-                $contentPath = resource_path('views/storefront/catalog/_content.blade.php');
-
-                try {
-                    $result['stages']['F1'] = [
-                        'ok' => true,
-                        'view_exists' => view()->exists($contentView),
-                        'file_exists' => \Illuminate\Support\Facades\File::exists($contentPath),
-                        'path' => $contentPath,
-                    ];
-                } catch (\Throwable $exception) {
-                    return $fail($exception, 'F1');
-                }
-
-                try {
-                    $lines = \Illuminate\Support\Facades\File::exists($contentPath)
-                        ? array_slice(file($contentPath, FILE_IGNORE_NEW_LINES) ?: [], 0, 160)
-                        : [];
-
-                    $result['stages']['F2'] = [
-                        'ok' => true,
-                        'line_count_returned' => count($lines),
-                        'source' => collect($lines)->mapWithKeys(
-                            fn (string $line, int $index): array => [(string) ($index + 1) => $line]
-                        )->all(),
-                    ];
-                } catch (\Throwable $exception) {
-                    return $fail($exception, 'F2');
-                }
-
-                try {
-                    $source = \Illuminate\Support\Facades\File::exists($contentPath)
-                        ? (string) \Illuminate\Support\Facades\File::get($contentPath)
-                        : '';
-                    $directives = ['@extends', '@section', '@endsection', '@push', '@once', '@php', '@foreach', '@if'];
-
-                    $result['stages']['F3'] = [
-                        'ok' => true,
-                        'directives' => collect($directives)->mapWithKeys(
-                            fn (string $directive): array => [$directive => substr_count($source, $directive)]
-                        )->all(),
-                    ];
-                } catch (\Throwable $exception) {
-                    return $fail($exception, 'F3');
-                }
-
-                try {
-                    $parts = \App\Models\Part::query()->storefrontVisible()->limit(3)->get();
-                    $html = \Illuminate\Support\Facades\Blade::render(
-                        '<section><h1>Katalog części</h1><div class="sf-grid sf-grid--3">@foreach($parts as $part) @include("storefront.partials.product-card", ["part" => $part]) @endforeach</div></section>',
-                        ['parts' => $parts],
-                        deleteCachedView: true
-                    );
-
-                    $result['stages']['F4'] = [
-                        'ok' => true,
-                        'rendered_length' => strlen($html),
-                    ];
-                } catch (\Throwable $exception) {
-                    return $fail($exception, 'F4');
-                }
-
-                try {
-                    $catalogUrl = \Illuminate\Support\Facades\Route::has('storefront.catalog') ? route('storefront.catalog') : url('/czesci');
-                    $html = \Illuminate\Support\Facades\Blade::render(
-                        '<form class="sf-filters" method="get" action="{{ $catalogUrl }}"><h3>Wyszukaj w katalogu</h3><label>Fraza <input type="search" name="q" value="{{ request("q") }}"></label><label>Numer części <input name="part_number" value="{{ request("part_number") }}"></label><label>Sortowanie <select name="sort"><option value="">Sortuj domyślnie</option><option value="price_asc" @selected(request("sort") === "price_asc")>Cena rosnąco</option><option value="price_desc" @selected(request("sort") === "price_desc")>Cena malejąco</option><option value="name" @selected(request("sort") === "name")>Nazwa</option></select></label><button class="sf-btn" type="submit">Szukaj</button><a class="sf-clear" href="{{ $catalogUrl }}">Wyczyść</a></form>',
-                        ['catalogUrl' => $catalogUrl],
-                        deleteCachedView: true
-                    );
-
-                    $result['stages']['F5'] = [
-                        'ok' => true,
-                        'rendered_length' => strlen($html),
-                    ];
-                } catch (\Throwable $exception) {
-                    return $fail($exception, 'F5');
-                }
-
-                try {
-                    $catalogData = app(\App\Http\Controllers\Storefront\CatalogController::class)->viewData(request(), app(\App\Services\Storefront\CategoryTreeService::class));
-                    $html = view($contentView, $catalogData)->render();
-
-                    $result['stages']['F6'] = [
-                        'ok' => true,
-                        'rendered_length' => strlen($html),
-                    ];
-                } catch (\Throwable $exception) {
-                    return $fail($exception, 'F6');
-                }
-
-                continue;
-            }
-
-            try {
-                if ($stage === 'A') {
-                    $html = '<!doctype html><html><body><h1>Catalog Blade stages diagnostic</h1><p>Inline HTML OK</p></body></html>';
-                } elseif ($stage === 'B') {
-                    $html = \Illuminate\Support\Facades\Blade::render('<div data-stage="B">Catalog Blade diagnostic: {{ $label }}</div>', ['label' => 'simple Blade OK'], deleteCachedView: true);
-                } elseif ($stage === 'C') {
-                    $html = view('storefront.partials.search-bar')->render();
-                } elseif ($stage === 'D') {
-                    $part = \App\Models\Part::query()->storefrontVisible()->first();
-                    $html = view('storefront.partials.product-card', ['part' => $part])->render();
-                } elseif ($stage === 'E') {
-                    $html = \App\Models\Part::query()->storefrontVisible()->paginate(5)->withQueryString()->links()->toHtml();
-                } elseif ($stage === 'F') {
-                    $catalogData = app(\App\Http\Controllers\Storefront\CatalogController::class)->viewData(request(), app(\App\Services\Storefront\CategoryTreeService::class));
-                    $html = view('storefront.catalog._content', $catalogData)->render();
-                } else {
-                    $catalogData = app(\App\Http\Controllers\Storefront\CatalogController::class)->viewData(request(), app(\App\Services\Storefront\CategoryTreeService::class));
-                    $html = view('storefront.catalog.index', $catalogData)->render();
-                }
-
-                $result['stages'][$stage] = [
-                    'ok' => true,
-                    'rendered_length' => strlen($html),
-                ];
-            } catch (\Throwable $exception) {
-                return $fail($exception, $stage);
-            }
-        }
-
-        return response()->json($result);
-    } catch (\Throwable $exception) {
+    $fail = function (\Throwable $exception, string $stage) use ($makeTrace) {
         return response()->json([
             'ok' => false,
-            'failed_stage' => 'route_outer',
+            'failed_stage' => $stage,
             'error_class' => $exception::class,
             'error_message' => $exception->getMessage(),
             'file' => $exception->getFile(),
             'line' => $exception->getLine(),
-            'trace' => collect($exception->getTrace())->take(10)->map(fn (array $frame): array => [
-                'file' => $frame['file'] ?? null,
-                'line' => $frame['line'] ?? null,
-                'function' => $frame['function'] ?? null,
-                'class' => $frame['class'] ?? null,
-            ])->values()->all(),
+            'trace' => $makeTrace($exception),
         ], 200);
+    };
+
+    try {
+        if (! hash_equals('gps_images_import_2026', (string) request()->query('token', ''))) {
+            return response()->json([
+                'ok' => false,
+                'failed_stage' => 'token',
+                'error_class' => 'AuthorizationException',
+                'error_message' => 'Invalid diagnostics token.',
+                'file' => __FILE__,
+                'line' => __LINE__,
+                'trace' => [],
+            ], 403);
+        }
+    } catch (\Throwable $exception) {
+        return $fail($exception, 'token');
     }
+
+    try {
+        $requestedStageRaw = (string) request()->query('stage', '');
+        $requestedStage = strtolower($requestedStageRaw) === 'ping' ? 'ping' : strtoupper($requestedStageRaw);
+
+        if ($requestedStage === 'ping') {
+            return response()->json(['ok' => true, 'stage' => 'ping']);
+        }
+
+        $allowedStages = ['A', 'B', 'C', 'D', 'E', 'F', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'G'];
+
+        if ($requestedStage !== '' && ! in_array($requestedStage, $allowedStages, true)) {
+            return response()->json([
+                'ok' => false,
+                'failed_stage' => 'stage_parameter',
+                'error_class' => 'InvalidArgumentException',
+                'error_message' => 'Invalid stage parameter. Allowed values: ping, A, B, C, D, E, F, F1, F2, F3, F4, F5, F6, G.',
+                'file' => __FILE__,
+                'line' => __LINE__,
+                'trace' => [],
+            ], 422);
+        }
+
+        if ($requestedStage === 'F') {
+            return response()->json([
+                'ok' => true,
+                'route_entered' => true,
+                'requested_stage' => 'F',
+                'message' => 'Stage F is a diagnostic index only. Run F1-F6 separately; F never renders storefront.catalog._content automatically.',
+                'available_substages' => [
+                    'F1' => 'Check whether storefront.catalog._content exists without rendering it.',
+                    'F2' => 'Read the first lines of _content.blade.php without rendering Blade.',
+                    'F3' => 'Count selected Blade directives in _content.blade.php without rendering Blade.',
+                    'F4' => 'Render a small product-card Blade diagnostic snippet.',
+                    'F5' => 'Render a small catalog filter Blade diagnostic snippet.',
+                    'F6' => 'Render the full storefront.catalog._content view with catalog data.',
+                ],
+            ]);
+        }
+
+        $stagesToRun = $requestedStage === '' ? ['A', 'B', 'C', 'D', 'E', 'G'] : [$requestedStage];
+        $result = [
+            'ok' => true,
+            'route_entered' => true,
+            'requested_stage' => $requestedStage === '' ? null : $requestedStage,
+            'stages' => [],
+        ];
+    } catch (\Throwable $exception) {
+        return $fail($exception, 'stage_parameter');
+    }
+
+    $contentView = 'storefront.catalog._content';
+    $contentPath = resource_path('views/storefront/catalog/_content.blade.php');
+
+    $runStage = function (string $stage) use ($contentView, $contentPath): array {
+        if ($stage === 'A') {
+            $html = '<!doctype html><html><body><h1>Catalog Blade stages diagnostic</h1><p>Inline HTML OK</p></body></html>';
+            return ['ok' => true, 'rendered_length' => strlen($html)];
+        }
+
+        if ($stage === 'B') {
+            $html = \Illuminate\Support\Facades\Blade::render('<div data-stage="B">Catalog Blade diagnostic: {{ $label }}</div>', ['label' => 'simple Blade OK'], deleteCachedView: true);
+            return ['ok' => true, 'rendered_length' => strlen($html)];
+        }
+
+        if ($stage === 'C') {
+            $html = view('storefront.partials.search-bar')->render();
+            return ['ok' => true, 'rendered_length' => strlen($html)];
+        }
+
+        if ($stage === 'D') {
+            $part = \App\Models\Part::query()->storefrontVisible()->first();
+            $html = view('storefront.partials.product-card', ['part' => $part])->render();
+            return ['ok' => true, 'rendered_length' => strlen($html)];
+        }
+
+        if ($stage === 'E') {
+            $html = \App\Models\Part::query()->storefrontVisible()->paginate(5)->withQueryString()->links()->toHtml();
+            return ['ok' => true, 'rendered_length' => strlen($html)];
+        }
+
+        if ($stage === 'F1') {
+            return [
+                'ok' => true,
+                'view_exists' => view()->exists($contentView),
+                'file_exists' => file_exists($contentPath),
+                'path' => $contentPath,
+            ];
+        }
+
+        if ($stage === 'F2') {
+            $lines = file_exists($contentPath) ? array_slice(file($contentPath, FILE_IGNORE_NEW_LINES) ?: [], 0, 160) : [];
+
+            return [
+                'ok' => true,
+                'line_count_returned' => count($lines),
+                'source' => collect($lines)->mapWithKeys(
+                    fn (string $line, int $index): array => [(string) ($index + 1) => $line]
+                )->all(),
+            ];
+        }
+
+        if ($stage === 'F3') {
+            $source = file_exists($contentPath) ? (string) file_get_contents($contentPath) : '';
+            $directives = ['@extends', '@section', '@endsection', '@push', '@once', '@php', '@foreach', '@if'];
+
+            return [
+                'ok' => true,
+                'directives' => collect($directives)->mapWithKeys(
+                    fn (string $directive): array => [$directive => substr_count($source, $directive)]
+                )->all(),
+            ];
+        }
+
+        if ($stage === 'F4') {
+            $parts = \App\Models\Part::query()->storefrontVisible()->limit(3)->get();
+            $html = \Illuminate\Support\Facades\Blade::render(
+                '<section><h1>Katalog części</h1><div class="sf-grid sf-grid--3">@foreach($parts as $part) @include("storefront.partials.product-card", ["part" => $part]) @endforeach</div></section>',
+                ['parts' => $parts],
+                deleteCachedView: true
+            );
+
+            return ['ok' => true, 'rendered_length' => strlen($html)];
+        }
+
+        if ($stage === 'F5') {
+            $catalogUrl = \Illuminate\Support\Facades\Route::has('storefront.catalog') ? route('storefront.catalog') : url('/czesci');
+            $html = \Illuminate\Support\Facades\Blade::render(
+                '<form class="sf-filters" method="get" action="{{ $catalogUrl }}"><h3>Wyszukaj w katalogu</h3><label>Fraza <input type="search" name="q" value="{{ request("q") }}"></label><label>Numer części <input name="part_number" value="{{ request("part_number") }}"></label><label>Sortowanie <select name="sort"><option value="">Sortuj domyślnie</option><option value="price_asc" @selected(request("sort") === "price_asc")>Cena rosnąco</option><option value="price_desc" @selected(request("sort") === "price_desc")>Cena malejąco</option><option value="name" @selected(request("sort") === "name")>Nazwa</option></select></label><button class="sf-btn" type="submit">Szukaj</button><a class="sf-clear" href="{{ $catalogUrl }}">Wyczyść</a></form>',
+                ['catalogUrl' => $catalogUrl],
+                deleteCachedView: true
+            );
+
+            return ['ok' => true, 'rendered_length' => strlen($html)];
+        }
+
+        if ($stage === 'F6') {
+            $catalogData = app(\App\Http\Controllers\Storefront\CatalogController::class)->viewData(request(), app(\App\Services\Storefront\CategoryTreeService::class));
+            $html = view($contentView, $catalogData)->render();
+
+            return ['ok' => true, 'rendered_length' => strlen($html)];
+        }
+
+        $catalogData = app(\App\Http\Controllers\Storefront\CatalogController::class)->viewData(request(), app(\App\Services\Storefront\CategoryTreeService::class));
+        $html = view('storefront.catalog.index', $catalogData)->render();
+
+        return ['ok' => true, 'rendered_length' => strlen($html)];
+    };
+
+    foreach ($stagesToRun as $stage) {
+        try {
+            $result['stages'][$stage] = $runStage($stage);
+        } catch (\Throwable $exception) {
+            return $fail($exception, $stage);
+        }
+    }
+
+    return response()->json($result);
 })->name('tools.check-catalog-blade-stages');
 Route::get('/tools/clear-view-cache', function (Request $request) {
     if (
