@@ -66,7 +66,7 @@ class PartImage extends Model
 
         $relativePath = ltrim($path, '/');
 
-        if (Str::startsWith($relativePath, 'parts/photos/') && Storage::disk('public')->exists($relativePath)) {
+        if (Str::startsWith($relativePath, 'parts/photos/') && $this->publicStorageFileExists($relativePath)) {
             return '/storage/'.$relativePath;
         }
 
@@ -234,11 +234,40 @@ class PartImage extends Model
 
         $path = ltrim($path, '/');
 
-        if (! Storage::disk('public')->exists($path)) {
+        if (! $this->publicStorageFileExists($path)) {
             return null;
         }
 
         return url('/storage/'.$path);
+    }
+
+    private function publicStorageFileExists(string $relativePath): bool
+    {
+        $relativePath = ltrim($relativePath, '/');
+
+        foreach ($this->publicStorageCandidatePaths($relativePath) as $candidatePath) {
+            if (is_file($candidatePath)) {
+                return true;
+            }
+        }
+
+        return Storage::disk('public')->exists($relativePath);
+    }
+
+    /** @return array<int, string> */
+    private function publicStorageCandidatePaths(string $relativePath): array
+    {
+        $relativePath = str_replace(['/', '\\'], DIRECTORY_SEPARATOR, ltrim($relativePath, '/'));
+        $paths = [
+            dirname(base_path()).DIRECTORY_SEPARATOR.'public_html'.DIRECTORY_SEPARATOR.'storage'.DIRECTORY_SEPARATOR.$relativePath,
+        ];
+
+        $documentRoot = rtrim((string) ($_SERVER['DOCUMENT_ROOT'] ?? ''), DIRECTORY_SEPARATOR);
+        if ($documentRoot !== '') {
+            $paths[] = $documentRoot.DIRECTORY_SEPARATOR.'storage'.DIRECTORY_SEPARATOR.$relativePath;
+        }
+
+        return array_values(array_unique($paths));
     }
 
     public function part(): BelongsTo
