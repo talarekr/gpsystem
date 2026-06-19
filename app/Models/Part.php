@@ -376,9 +376,32 @@ class Part extends Model
         }
 
         return $query->where(function (Builder $query) use ($value): void {
-            foreach (['name', 'sku', 'part_number', 'oem_number', 'manufacturer_code', 'short_description', 'description'] as $column) {
-                $query->orWhere($column, 'like', '%'.$value.'%');
-            }
+            $this->applyCaseInsensitiveLike($query, [
+                'name',
+                'sku',
+                'part_number',
+                'oem_number',
+                'manufacturer_code',
+                'short_description',
+                'description',
+                'vehicle_snapshot',
+                'legacy_payload',
+            ], $value);
+
+            $query->orWhereHas('car', function (Builder $carQuery) use ($value): void {
+                $this->applyCaseInsensitiveLike($carQuery, [
+                    'make',
+                    'model',
+                    'model_variant',
+                    'fuel_type',
+                    'engine_code',
+                    'engine_capacity_cm3',
+                    'gearbox_type',
+                    'gearbox_code',
+                    'body_type',
+                    'drivetrain',
+                ], $value);
+            });
         });
     }
 
@@ -390,14 +413,43 @@ class Part extends Model
             return $query;
         }
 
-        $normalized = str_replace([' ', '-'], '', mb_strtoupper($value));
-
-        return $query->where(function (Builder $query) use ($value, $normalized): void {
-            foreach (['part_number', 'oem_number', 'manufacturer_code', 'sku'] as $column) {
-                $query->orWhere($column, 'like', '%'.$value.'%')
-                    ->orWhereRaw("UPPER(REPLACE(REPLACE(COALESCE($column, ''), ' ', ''), '-', '')) LIKE ?", ['%'.$normalized.'%']);
-            }
+        return $query->where(function (Builder $query) use ($value): void {
+            $this->applyCaseInsensitiveLike($query, [
+                'part_number',
+                'oem_number',
+                'manufacturer_code',
+                'sku',
+                'name',
+                'short_description',
+                'description',
+                'vehicle_snapshot',
+                'legacy_payload',
+            ], $value, true);
         });
+    }
+
+    /**
+     * @param array<int, string> $columns
+     */
+    private function applyCaseInsensitiveLike(Builder $query, array $columns, string $value, bool $includeNormalized = false): void
+    {
+        $grammar = $query->getQuery()->getGrammar();
+        $driver = $query->getConnection()->getDriverName();
+        $like = '%'.mb_strtolower($value).'%';
+        $normalized = '%'.str_replace([' ', '-', '_'], '', mb_strtoupper($value)).'%';
+
+        foreach ($columns as $column) {
+            $wrapped = $grammar->wrap($column);
+            $cast = in_array($driver, ['mysql', 'mariadb'], true)
+                ? "CAST($wrapped AS CHAR)"
+                : "CAST($wrapped AS TEXT)";
+
+            $query->orWhereRaw("LOWER(COALESCE($cast, '')) LIKE ?", [$like]);
+
+            if ($includeNormalized) {
+                $query->orWhereRaw("UPPER(REPLACE(REPLACE(REPLACE(COALESCE($cast, ''), ' ', ''), '-', ''), '_', '')) LIKE ?", [$normalized]);
+            }
+        }
     }
 
     public function scopePriceBetween(Builder $query, mixed $min, mixed $max): Builder
