@@ -10,7 +10,9 @@
 <ul class="sf-category-tree sf-category-tree--level-{{ $level }}">
     @foreach($categories as $treeCategory)
         @php
-            $isActive = $activeCategoryId !== null && (int) $treeCategory->id === (int) $activeCategoryId;
+            $categoryUrl = $categoryTreeService->url($treeCategory);
+            $isCurrentUrl = trim(parse_url($categoryUrl, PHP_URL_PATH), '/') === trim(request()->path(), '/');
+            $isActive = $isCurrentUrl;
             $isAncestor = ! $isActive && $activeCategoryIds->contains($treeCategory->id);
             $hasChildren = $treeCategory->children->isNotEmpty();
             $isOpen = $hasChildren && $activeCategoryIds->contains($treeCategory->id);
@@ -23,11 +25,8 @@
                     <span class="sf-category-tree__toggle sf-category-tree__toggle--empty" aria-hidden="true"></span>
                 @endif
 
-                <a @class(['sf-category-tree__link', 'sf-category-tree__link--active' => $isActive]) href="{{ $categoryTreeService->url($treeCategory) }}" @if($isActive) aria-current="page" @endif>
-                    @if($isActive)
-                        <!-- active-category-id: {{ (int) $treeCategory->id }} -->
-                    @endif
-                    <span @class(['sf-category-tree__label', 'sf-category-tree__label--active' => $isActive])>{{ $treeCategory->name }}</span>
+                <a @class(['sf-category-tree__link', 'sf-category-tree__link--active' => $isCurrentUrl]) href="{{ $categoryUrl }}" @if($isCurrentUrl) aria-current="page" @endif>
+                    <span class="sf-category-tree__label">{{ $treeCategory->name }}</span>
                 </a>
             </div>
             @if($hasChildren)
