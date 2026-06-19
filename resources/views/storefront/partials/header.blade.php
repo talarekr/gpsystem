@@ -32,11 +32,6 @@
         gap: 24px;
         flex: 1 1 auto;
     }
-
-    .sf-category-menu > summary {
-        font-size: 17px;
-        line-height: 1;
-    }
     @media (min-width: 768px) {
         .sf-top .sf-top__inner {
             flex-wrap: nowrap;
@@ -81,7 +76,7 @@
 @php
     $storefrontMainLinks = [
         'Silniki' => '/kategoria-produktu/silnik-i-osprzet/silniki-i-osprzet/kompletne-silniki',
-        'Skrzynia biegów' => '/kategoria-produktu/uklad-napedowy/skrzynie-biegow-i-inne-elementy/automatyczna-skrzynia-biegow',
+        'Skrzynia biegów' => '/kategoria-produktu/uklad-klimatyzacji-wentylacji-chlodzenia-silnika-ogrzewanie-postojowe/chlodnice-i-wentylatory/chlodnica-oleju-skrzynia-biegow',
         'Filtry DPF' => '/kategoria-produktu/uklad-wydechowy-i-inne-elementy/elementy-systemu-kontroli-spalin/filtr-czastek-stalych-katalizator-fap-dpf',
         'Zwrotnice' => '/kategoria-produktu/os-przednia-i-inne-elementy/os-przednia/zwrotnica-kola-przedniego',
     ];
