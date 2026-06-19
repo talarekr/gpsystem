@@ -191,8 +191,9 @@ Route::get('/tools/check-catalog-direct', function () {
         return response()->json([
             'ok' => false,
             'failed_stage' => 'route_outer',
-            'error_class' => $exception::class,
-            'error_message' => $exception->getMessage(),
+            'requested_stage' => 'route_outer',
+            'exception_class' => get_class($exception),
+            'exception_message' => $exception->getMessage(),
             'file' => $exception->getFile(),
             'line' => $exception->getLine(),
             'trace' => collect($exception->getTrace())->take(5)->map(fn (array $frame): array => [
@@ -209,8 +210,9 @@ Route::get('/tools/check-catalog-minimal-view', function () {
         if (! hash_equals('gps_images_import_2026', (string) request()->query('token', ''))) {
             return response()->json([
                 'ok' => false,
-                'error_class' => 'AuthorizationException',
-                'error_message' => 'Invalid diagnostics token.',
+                'requested_stage' => 'token',
+                'exception_class' => 'AuthorizationException',
+                'exception_message' => 'Invalid diagnostics token.',
                 'file' => __FILE__,
                 'line' => __LINE__,
                 'trace' => [],
@@ -241,8 +243,9 @@ Route::get('/tools/check-catalog-minimal-view', function () {
     } catch (\Throwable $exception) {
         return response()->json([
             'ok' => false,
-            'error_class' => $exception::class,
-            'error_message' => $exception->getMessage(),
+            'requested_stage' => 'minimal_view',
+            'exception_class' => get_class($exception),
+            'exception_message' => $exception->getMessage(),
             'file' => $exception->getFile(),
             'line' => $exception->getLine(),
             'trace' => collect($exception->getTrace())->take(5)->map(fn (array $frame): array => [
@@ -284,8 +287,9 @@ Route::get('/tools/check-catalog-blade-stages', function () {
         return response()->json([
             'ok' => false,
             'failed_stage' => $stage,
-            'error_class' => $exception::class,
-            'error_message' => $exception->getMessage(),
+            'requested_stage' => $stage,
+            'exception_class' => get_class($exception),
+            'exception_message' => $exception->getMessage(),
             'file' => $exception->getFile(),
             'line' => $exception->getLine(),
             'trace' => $makeTrace($exception),
@@ -297,8 +301,9 @@ Route::get('/tools/check-catalog-blade-stages', function () {
             return response()->json([
                 'ok' => false,
                 'failed_stage' => 'token',
-                'error_class' => 'AuthorizationException',
-                'error_message' => 'Invalid diagnostics token.',
+                'requested_stage' => 'token',
+                'exception_class' => 'AuthorizationException',
+                'exception_message' => 'Invalid diagnostics token.',
                 'file' => __FILE__,
                 'line' => __LINE__,
                 'trace' => [],
@@ -316,14 +321,15 @@ Route::get('/tools/check-catalog-blade-stages', function () {
             return response()->json(['ok' => true, 'stage' => 'ping']);
         }
 
-        $allowedStages = ['A', 'B', 'C', 'D', 'E', 'F', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'G'];
+        $allowedStages = ['A', 'B', 'C', 'D', 'E', 'F', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F6A', 'F6B', 'F6C', 'F6D', 'F6E', 'F6F', 'G'];
 
         if ($requestedStage !== '' && ! in_array($requestedStage, $allowedStages, true)) {
             return response()->json([
                 'ok' => false,
                 'failed_stage' => 'stage_parameter',
-                'error_class' => 'InvalidArgumentException',
-                'error_message' => 'Invalid stage parameter. Allowed values: ping, A, B, C, D, E, F, F1, F2, F3, F4, F5, F6, G.',
+                'requested_stage' => $requestedStage,
+                'exception_class' => 'InvalidArgumentException',
+                'exception_message' => 'Invalid stage parameter. Allowed values: ping, A, B, C, D, E, F, F1, F2, F3, F4, F5, F6, F6A, F6B, F6C, F6D, F6E, F6F, G.',
                 'file' => __FILE__,
                 'line' => __LINE__,
                 'trace' => [],
@@ -342,7 +348,30 @@ Route::get('/tools/check-catalog-blade-stages', function () {
                     'F3' => 'Count selected Blade directives in _content.blade.php without rendering Blade.',
                     'F4' => 'Render a small product-card Blade diagnostic snippet.',
                     'F5' => 'Render a small catalog filter Blade diagnostic snippet.',
-                    'F6' => 'Render the full storefront.catalog._content view with catalog data.',
+                    'F6' => 'Diagnostic index for F6A-F6F; never renders storefront.catalog._content.',
+                    'F6A' => 'Prepare catalog data and inspect the parts paginator/collection without rendering Blade.',
+                    'F6B' => 'Render a diagnostic equivalent of _content lines 1-30 only.',
+                    'F6C' => 'Render a diagnostic equivalent of _content lines 32-52 only.',
+                    'F6D' => 'Render only the product grid with @forelse and product-card, without pagination.',
+                    'F6E' => 'Render only pagination using unescaped Blade output.',
+                    'F6F' => 'Render the full storefront.catalog._content view with catalog data.',
+                ],
+            ]);
+        }
+
+        if ($requestedStage === 'F6') {
+            return response()->json([
+                'ok' => true,
+                'route_entered' => true,
+                'requested_stage' => 'F6',
+                'message' => 'Stage F6 is a diagnostic index only. Run F6A-F6F separately; F6 never renders storefront.catalog._content automatically.',
+                'available_substages' => [
+                    'F6A' => 'Prepare catalog data and inspect the parts paginator/collection without rendering Blade.',
+                    'F6B' => 'Render a diagnostic equivalent of _content lines 1-30 only.',
+                    'F6C' => 'Render a diagnostic equivalent of _content lines 32-52 only.',
+                    'F6D' => 'Render only the product grid with @forelse and product-card, without pagination.',
+                    'F6E' => 'Render only pagination using unescaped Blade output.',
+                    'F6F' => 'Render the full storefront.catalog._content view with catalog data.',
                 ],
             ]);
         }
@@ -443,8 +472,68 @@ Route::get('/tools/check-catalog-blade-stages', function () {
             return ['ok' => true, 'rendered_length' => strlen($html)];
         }
 
-        if ($stage === 'F6') {
-            $catalogData = app(\App\Http\Controllers\Storefront\CatalogController::class)->viewData(request(), app(\App\Services\Storefront\CategoryTreeService::class));
+        $prepareCatalogData = function (): array {
+            return app(\App\Http\Controllers\Storefront\CatalogController::class)->viewData(request(), app(\App\Services\Storefront\CategoryTreeService::class));
+        };
+
+        if ($stage === 'F6A') {
+            $catalogData = $prepareCatalogData();
+            $parts = $catalogData['parts'] ?? collect();
+
+            return [
+                'ok' => true,
+                'count' => method_exists($parts, 'count') ? $parts->count() : null,
+                'total' => method_exists($parts, 'total') ? $parts->total() : null,
+                'parts_class' => is_object($parts) ? get_class($parts) : gettype($parts),
+            ];
+        }
+
+        if ($stage === 'F6B') {
+            $catalogData = $prepareCatalogData();
+            $html = \Illuminate\Support\Facades\Blade::render(
+                '@php $parts ??= collect(); $catalogUrl = \Illuminate\Support\Facades\Route::has("storefront.catalog") ? route("storefront.catalog") : url("/czesci"); @endphp <div class="sf-container sf-page"><h1>Katalog części</h1><p class="sf-empty">Wszystkie dostępne produkty w katalogu. Użyj wyszukiwarki, numeru części lub sortowania, aby zawęzić wyniki.</p><form class="sf-filters" method="get" action="{{ $catalogUrl }}"><h3>Wyszukaj w katalogu</h3><label>Fraza <input type="search" name="q" value="{{ request("q") }}" placeholder="np. Audi, silnik, skrzynia"></label><label>Numer części <input name="part_number" value="{{ request("part_number") }}" placeholder="np. M156E"></label><label>Sortowanie <select name="sort"><option value="">Sortuj domyślnie</option><option value="price_asc" {{ request("sort") === "price_asc" ? "selected" : "" }}>Cena rosnąco</option><option value="price_desc" {{ request("sort") === "price_desc" ? "selected" : "" }}>Cena malejąco</option><option value="name" {{ request("sort") === "name" ? "selected" : "" }}>Nazwa</option></select></label><button class="sf-btn" type="submit">Szukaj</button><a class="sf-clear" href="{{ $catalogUrl }}">Wyczyść</a></form></div>',
+                $catalogData,
+                deleteCachedView: true
+            );
+
+            return ['ok' => true, 'rendered_length' => strlen($html)];
+        }
+
+        if ($stage === 'F6C') {
+            $catalogData = $prepareCatalogData();
+            $html = \Illuminate\Support\Facades\Blade::render(
+                '@php $parts ??= collect(); $catalogUrl = \Illuminate\Support\Facades\Route::has("storefront.catalog") ? route("storefront.catalog") : url("/czesci"); $resultCount = method_exists($parts, "total") ? $parts->total() : (method_exists($parts, "count") ? $parts->count() : 0); $sortableQuery = request()->except(["sort", "page"]); @endphp <section><div class="sf-toolbar"><span>{{ $resultCount }} wyników</span><form method="get" action="{{ $catalogUrl }}">@foreach($sortableQuery as $key => $value) @if(is_array($value)) @foreach($value as $item) <input type="hidden" name="{{ $key }}[]" value="{{ $item }}"> @endforeach @elseif($value !== null && $value !== "") <input type="hidden" name="{{ $key }}" value="{{ $value }}"> @endif @endforeach <select name="sort" onchange="this.form.submit()"><option value="">Sortuj domyślnie</option><option value="price_asc" {{ request("sort") === "price_asc" ? "selected" : "" }}>Cena rosnąco</option><option value="price_desc" {{ request("sort") === "price_desc" ? "selected" : "" }}>Cena malejąco</option><option value="name" {{ request("sort") === "name" ? "selected" : "" }}>Nazwa</option></select></form></div></section>',
+                $catalogData,
+                deleteCachedView: true
+            );
+
+            return ['ok' => true, 'rendered_length' => strlen($html)];
+        }
+
+        if ($stage === 'F6D') {
+            $catalogData = $prepareCatalogData();
+            $html = \Illuminate\Support\Facades\Blade::render(
+                '<div class="sf-grid sf-grid--3">@forelse($parts as $part) @include("storefront.partials.product-card", ["part" => $part]) @empty <p class="sf-empty">Brak produktów dla wybranych kryteriów.</p> @endforelse</div>',
+                $catalogData,
+                deleteCachedView: true
+            );
+
+            return ['ok' => true, 'rendered_length' => strlen($html)];
+        }
+
+        if ($stage === 'F6E') {
+            $catalogData = $prepareCatalogData();
+            $html = \Illuminate\Support\Facades\Blade::render(
+                '@if(method_exists($parts, "links")) {!! method_exists($parts, "withQueryString") ? $parts->withQueryString()->links() : $parts->links() !!} @endif',
+                $catalogData,
+                deleteCachedView: true
+            );
+
+            return ['ok' => true, 'rendered_length' => strlen($html)];
+        }
+
+        if ($stage === 'F6F') {
+            $catalogData = $prepareCatalogData();
             $html = view($contentView, $catalogData)->render();
 
             return ['ok' => true, 'rendered_length' => strlen($html)];
