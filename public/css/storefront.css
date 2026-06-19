@@ -323,3 +323,43 @@
 
 /* Product detail gallery: fixed desktop thumbnail rail */
 .sf-gallery__layout{height:404px;min-height:404px;max-height:404px}.sf-gallery__layout .sf-thumbs-shell{position:relative;display:flex;flex-direction:column;align-self:stretch;width:78px;min-height:0;max-height:100%;overflow:hidden}.sf-gallery__layout .sf-thumbs{flex:1 1 auto;gap:10px;max-height:100%;margin:0;padding:2px 4px 2px 2px;overflow:hidden;scrollbar-width:none}.sf-gallery__layout .sf-thumbs::-webkit-scrollbar{display:none}.sf-gallery__layout .sf-thumbs-shell--scrollable .sf-thumbs{overflow-y:auto;scroll-behavior:smooth}.sf-thumbs-shell__arrow{position:absolute;left:2px;z-index:2;display:flex;align-items:center;justify-content:center;width:72px;height:24px;border:1px solid var(--line);border-radius:9px;background:#fffffff2;color:var(--navy);box-shadow:0 6px 14px #122a661f;font-size:20px;font-weight:800;line-height:1;cursor:pointer;transition:background-color .16s ease,box-shadow .16s ease}.sf-thumbs-shell__arrow--prev{top:2px}.sf-thumbs-shell__arrow--next{bottom:2px}.sf-thumbs-shell__arrow:hover,.sf-thumbs-shell__arrow:focus{background:#fff;box-shadow:0 8px 18px #122a662e;outline:3px solid #122a6614}@media(max-width:767px){.sf-gallery__layout{height:auto;min-height:0;max-height:none}.sf-gallery__layout .sf-thumbs-shell{order:2;width:auto;max-height:none;overflow:visible}.sf-gallery__layout .sf-thumbs{flex-direction:row;max-height:none;margin:12px -12px 0;padding:0 12px 6px;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin}.sf-gallery__layout .sf-thumbs-shell--scrollable .sf-thumbs{overflow-x:auto;overflow-y:hidden}.sf-thumbs-shell__arrow{display:none}}
+
+
+/* Account dropdown layering/positioning fix */
+.sf-top,
+.sf-top__inner,
+.sf-main-row {
+    overflow: visible;
+}
+
+.sf-main-row {
+    z-index: 10000;
+}
+
+.sf-profile {
+    position: relative;
+    z-index: 10001;
+    overflow: visible;
+}
+
+.sf-profile > summary {
+    position: relative;
+    z-index: 1;
+}
+
+.sf-profile > div {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    z-index: 9999;
+    display: grid;
+    gap: 8px;
+    min-width: 200px;
+    margin-top: 0;
+    padding: 14px;
+    overflow: visible;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    box-shadow: 0 18px 45px #122a662e;
+}
