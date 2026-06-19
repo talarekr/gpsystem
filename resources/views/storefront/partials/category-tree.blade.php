@@ -24,6 +24,9 @@
                 @endif
 
                 <a @class(['sf-category-tree__link', 'sf-category-tree__link--active' => $isActive]) href="{{ $categoryTreeService->url($treeCategory) }}" @if($isActive) aria-current="page" @endif>
+                    @if($isActive)
+                        <!-- active-category-id: {{ (int) $treeCategory->id }} -->
+                    @endif
                     <span @class(['sf-category-tree__label', 'sf-category-tree__label--active' => $isActive])>{{ $treeCategory->name }}</span>
                 </a>
             </div>
