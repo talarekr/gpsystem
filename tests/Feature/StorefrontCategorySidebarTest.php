@@ -165,6 +165,12 @@ class StorefrontCategorySidebarTest extends TestCase
         $response->assertSee('Czujnik spalania stukowego');
         $response->assertSee('is-ancestor', false);
         $response->assertSee('is-active', false);
+
+        $html = $response->getContent();
+
+        $this->assertSame(1, substr_count($html, 'sf-category-tree__link--active-parent'));
+        $this->assertStringContainsString('sf-category-tree__link sf-category-tree__link--active-parent', $html);
+        $this->assertStringContainsString('sf-category-tree__link sf-category-tree__link--active', $html);
         $response->assertSee('−</button>', false);
         $response->assertDontSee('Pusta trzecia kategoria');
         $response->assertDontSee('Pusta podkategoria');
