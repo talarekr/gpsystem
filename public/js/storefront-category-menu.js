@@ -2,18 +2,32 @@
     const menus = document.querySelectorAll('[data-category-menu]');
 
     menus.forEach((menu) => {
+        const trigger = menu.querySelector('[data-category-menu-trigger]');
         const triggers = menu.querySelectorAll('[data-root-id]');
         const panels = menu.querySelectorAll('[data-root-panel]');
 
+        function setMenuOpen(isOpen) {
+            menu.open = isOpen;
+            menu.classList.toggle('is-open', isOpen);
+            trigger?.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        }
+
+        setMenuOpen(menu.open);
+
+        menu.addEventListener('toggle', () => {
+            setMenuOpen(menu.open);
+        });
+
         document.addEventListener('click', (event) => {
             if (menu.open && !menu.contains(event.target)) {
-                menu.open = false;
+                setMenuOpen(false);
             }
         });
 
         document.addEventListener('keydown', (event) => {
             if (event.key === 'Escape' && menu.open) {
-                menu.open = false;
+                setMenuOpen(false);
+                trigger?.focus();
             }
         });
 
@@ -32,7 +46,6 @@
         }
 
         triggers.forEach((trigger) => {
-            trigger.addEventListener('mouseenter', () => activate(trigger.dataset.rootId));
             trigger.addEventListener('focus', () => activate(trigger.dataset.rootId));
             trigger.addEventListener('click', () => activate(trigger.dataset.rootId));
         });
