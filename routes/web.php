@@ -166,6 +166,57 @@ Route::get('/tools/check-header-source', function (Request $request) {
         'compiled_views' => $compiledViews,
     ]);
 })->name('tools.check-header-source');
+Route::get('/tools/check-compiled-header', function (Request $request) {
+    if (! hash_equals('gps_images_import_2026', (string) $request->query('token', ''))) {
+        return response()->json([
+            'ok' => false,
+            'error_message' => 'Invalid diagnostics token.',
+        ], 403);
+    }
+
+    $headerPath = resource_path('views/storefront/partials/header.blade.php');
+    $compiledPath = null;
+    $compiledSource = null;
+
+    foreach (glob(storage_path('framework/views/*.php')) ?: [] as $path) {
+        $source = (string) file_get_contents($path);
+
+        if (str_contains($source, $headerPath) || str_contains($source, 'storefront/partials/header.blade.php')) {
+            $compiledPath = $path;
+            $compiledSource = $source;
+            break;
+        }
+    }
+
+    $startLine = 50;
+    $endLine = 75;
+    $fragment = [];
+    $fragmentText = '';
+
+    if ($compiledSource !== null) {
+        $lines = preg_split('/\R/', $compiledSource) ?: [];
+
+        foreach (range($startLine, $endLine) as $lineNumber) {
+            if (array_key_exists($lineNumber - 1, $lines)) {
+                $fragment[$lineNumber] = $lines[$lineNumber - 1];
+            }
+        }
+
+        $fragmentText = implode("\n", $fragment);
+    }
+
+    return response()->json([
+        'ok' => true,
+        'header_view' => $headerPath,
+        'compiled_exists' => $compiledPath !== null,
+        'compiled_file' => $compiledPath ? basename($compiledPath) : null,
+        'compiled_path' => $compiledPath,
+        'compiled_modified_at' => $compiledPath ? date('c', filemtime($compiledPath) ?: 0) : null,
+        'fragment_range' => [$startLine, $endLine],
+        'fragment' => $fragment,
+        'fragment_contains_at' => str_contains($fragmentText, '@'),
+    ]);
+})->name('tools.check-compiled-header');
 Route::get('/tools/check-part-image-presentation', CheckPartImagePresentationController::class)->name('tools.check-part-image-presentation');
 Route::get('/tools/process-part-image-presentation', ProcessPartImagePresentationController::class)->name('tools.process-part-image-presentation');
 Route::get('/tools/process-part-image-presentation-runner', ProcessPartImagePresentationRunnerController::class)->name('tools.process-part-image-presentation-runner');
