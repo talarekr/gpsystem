@@ -84,6 +84,85 @@ Route::get('/tools/check-catalog-search', CheckCatalogSearchController::class)->
 Route::get('/tools/check-catalog-render', CheckCatalogRenderController::class)->name('tools.check-catalog-render');
 Route::get('/tools/check-catalog-error', CheckCatalogErrorController::class)->name('tools.check-catalog-error');
 Route::get('/tools/last-laravel-error', LastLaravelErrorController::class)->name('tools.last-laravel-error');
+Route::get('/tools/check-czesci-render-ping', function () {
+    if (! hash_equals('gps_images_import_2026', (string) request()->query('token', ''))) {
+        return response()->json([
+            'ok' => false,
+            'error_message' => 'Invalid diagnostics token.',
+        ], 403);
+    }
+
+    return response()->json([
+        'ok' => true,
+        'stage' => 'check-czesci-render-ping',
+    ]);
+})->name('tools.check-czesci-render-ping');
+Route::get('/tools/check-czesci-render-now', function () {
+    try {
+        if (! hash_equals('gps_images_import_2026', (string) request()->query('token', ''))) {
+            return response()->json([
+                'ok' => false,
+                'error_message' => 'Invalid diagnostics token.',
+            ], 403);
+        }
+
+        $routeNameExists = \Illuminate\Support\Facades\Route::has('storefront.catalog');
+        $routePathExists = collect(\Illuminate\Support\Facades\Route::getRoutes())->contains(
+            fn ($route) => in_array('GET', $route->methods(), true) && $route->uri() === 'czesci'
+        );
+
+        if (! $routeNameExists || ! $routePathExists) {
+            return response()->json([
+                'ok' => false,
+                'stage' => 'check-czesci-render-now',
+                'exception_class' => 'RuntimeException',
+                'exception_message' => 'The /czesci route or storefront.catalog route name is not registered.',
+                'file' => null,
+                'line' => null,
+                'trace_first_30' => [],
+                'route_path_exists' => $routePathExists,
+                'route_name_exists' => $routeNameExists,
+            ], 200);
+        }
+
+        $query = request()->query();
+        unset($query['token']);
+
+        $catalogRequest = \Illuminate\Http\Request::create('/czesci', 'GET', $query);
+        $catalogRequest->setLaravelSession(request()->session());
+        $catalogRequest->setUserResolver(fn () => request()->user());
+        $catalogRequest->setRouteResolver(fn () => \Illuminate\Support\Facades\Route::getRoutes()->getByName('storefront.catalog'));
+
+        $viewName = 'storefront.catalog.index';
+        $catalogData = app(\App\Http\Controllers\Storefront\CatalogController::class)->viewData(
+            $catalogRequest,
+            app(\App\Services\Storefront\CategoryTreeService::class)
+        );
+        $html = view($viewName, $catalogData)->render();
+
+        return response()->json([
+            'ok' => true,
+            'rendered_length' => strlen($html),
+            'view_name' => $viewName,
+        ]);
+    } catch (\Throwable $e) {
+        return response()->json([
+            'ok' => false,
+            'stage' => 'check-czesci-render-now',
+            'exception_class' => $e::class,
+            'exception_message' => $e->getMessage(),
+            'file' => $e->getFile(),
+            'line' => $e->getLine(),
+            'trace_first_30' => collect($e->getTrace())->take(30)->map(fn ($frame) => [
+                'file' => $frame['file'] ?? null,
+                'line' => $frame['line'] ?? null,
+                'function' => $frame['function'] ?? null,
+                'class' => $frame['class'] ?? null,
+                'type' => $frame['type'] ?? null,
+            ])->values()->all(),
+        ], 200);
+    }
+})->name('tools.check-czesci-render-now');
 Route::get('/tools/mark-log', function (Request $request) {
     if (! hash_equals('gps_images_import_2026', (string) $request->query('token', ''))) {
         return response()->json([
