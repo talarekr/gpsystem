@@ -4,7 +4,7 @@ namespace App\Http\Controllers\Storefront;
 
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Storefront\Concerns\BuildsStorefrontQueries;
-use App\Models\Car;
+use App\Models\Part;
 use App\Services\Storefront\CategoryTreeService;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\Request;
@@ -18,6 +18,8 @@ class CategoryController extends Controller
         $category = $categoryTree->findByPublicPath($path) ?? abort(404);
         $categoryIds = $categoryTree->categoryAndDescendantIds($category);
         $ancestors = $categoryTree->ancestors($category);
+        $categoryPartsQuery = Part::query()->storefrontVisible()->whereIn('category_id', $categoryIds);
+        $filterOptions = $this->storefrontFilterOptions($categoryPartsQuery);
 
         return view('storefront.categories.show', [
             'category' => $category,
@@ -25,7 +27,8 @@ class CategoryController extends Controller
             'categoryRoots' => $categoryTree->roots(),
             'categoryTreeService' => $categoryTree,
             'parts' => $this->storefrontQuery($request)->whereIn('category_id', $categoryIds)->paginate(60)->withQueryString(),
-            'cars' => Car::query()->select('make', 'model')->whereNotNull('make')->distinct()->orderBy('make')->limit(80)->get(),
+            'producers' => $filterOptions['producers'],
+            'models' => $filterOptions['models'],
             'metaTitle' => $category->name.' - GPSwiss',
             'metaDescription' => 'Szeroki wybór oryginalnych, używanych części samochodowych w kategorii '.$category->name.'.',
             'breadcrumbs' => [],

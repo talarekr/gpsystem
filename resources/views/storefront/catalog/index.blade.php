@@ -5,8 +5,8 @@
     <h1>Sklep GPSwiss</h1>
     <div class="sf-shop-layout">
         <div class="sf-sidebar-stack">
+            @include('storefront.partials.filters', ['filterAction'=>route('storefront.catalog'), 'producers' => $producers, 'models' => $models])
             @include('storefront.partials.category-sidebar', ['categoryRoots' => $categoryRoots, 'activeCategory' => null])
-            @include('storefront.partials.filters', ['filterAction'=>route('storefront.catalog'), 'categories' => collect()])
         </div>
         <section>
             <div class="sf-toolbar"><span>{{ $parts->total() }} wyników</span><form><input type="hidden" name="q" value="{{ request('q') }}"><select name="sort" onchange="this.form.submit()"><option value="">Sortuj domyślnie</option><option value="price_asc" @selected(request('sort')==='price_asc')>Cena rosnąco</option><option value="price_desc" @selected(request('sort')==='price_desc')>Cena malejąco</option><option value="name" @selected(request('sort')==='name')>Nazwa</option></select></form></div>
