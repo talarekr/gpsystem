@@ -2,6 +2,7 @@
 
 namespace App\Services\Storefront;
 
+use App\Models\Part;
 use App\Models\PartCategory;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
@@ -37,15 +38,31 @@ class CategoryTreeService
                 ->ordered()
                 ->get();
 
+            $productCounts = Part::query()
+                ->storefrontVisible()
+                ->whereNotNull('category_id')
+                ->selectRaw('category_id, count(*) as aggregate')
+                ->groupBy('category_id')
+                ->pluck('aggregate', 'category_id');
+
             $byParent = $categories->groupBy(fn (PartCategory $category): int => (int) ($category->parent_id ?? 0));
 
-            $attachChildren = function (PartCategory $category) use (&$attachChildren, $byParent): PartCategory {
+            $attachChildren = function (PartCategory $category) use (&$attachChildren, $byParent, $productCounts): PartCategory {
                 $children = $byParent->get((int) $category->id, new EloquentCollection())
                     ->sortBy([['sort_order', 'asc'], ['name', 'asc']])
                     ->values();
 
                 $children->each(fn (PartCategory $child) => $attachChildren($child));
-                $category->setRelation('children', new EloquentCollection($children->all()));
+
+                $visibleChildren = $children
+                    ->filter(fn (PartCategory $child): bool => (bool) $child->has_products_in_branch)
+                    ->values();
+
+                $category->setRelation('children', new EloquentCollection($visibleChildren->all()));
+                $category->setAttribute('storefront_product_count', max(
+                    (int) ($category->woo_product_count ?? 0),
+                    (int) ($productCounts[$category->id] ?? 0),
+                ));
                 $category->setAttribute('has_products_in_branch', $this->branchHasProducts($category));
 
                 return $category;
@@ -57,7 +74,11 @@ class CategoryTreeService
 
             $roots->each(fn (PartCategory $root) => $attachChildren($root));
 
-            return ['roots' => new EloquentCollection($roots->all()), 'all' => $categories->keyBy('id')];
+            $visibleRoots = $roots
+                ->filter(fn (PartCategory $root): bool => (bool) $root->has_products_in_branch)
+                ->values();
+
+            return ['roots' => new EloquentCollection($visibleRoots->all()), 'all' => $categories->keyBy('id')];
         });
     }
 
@@ -143,7 +164,7 @@ class CategoryTreeService
 
     private function branchHasProducts(PartCategory $category): bool
     {
-        return (int) $category->woo_product_count > 0
+        return (int) ($category->storefront_product_count ?? $category->woo_product_count) > 0
             || $category->children->contains(fn (PartCategory $child): bool => (bool) $child->has_products_in_branch);
     }
 }

@@ -10,10 +10,11 @@
     @foreach($categories as $treeCategory)
         @php
             $isActive = $activeCategory?->id === $treeCategory->id;
+            $isAncestor = ! $isActive && $activeCategoryIds->contains($treeCategory->id);
             $hasChildren = $treeCategory->children->isNotEmpty();
             $isOpen = $hasChildren && $activeCategoryIds->contains($treeCategory->id);
         @endphp
-        <li class="@class(['is-active' => $isActive, 'is-branch' => $isOpen, 'is-empty' => ! $treeCategory->has_products_in_branch])" data-category-tree-item>
+        <li class="@class(['is-active' => $isActive, 'is-ancestor' => $isAncestor, 'is-branch' => $isOpen])" data-category-tree-item>
             <div class="sf-category-tree__row">
                 @if($hasChildren)
                     <button class="sf-category-tree__toggle" type="button" aria-expanded="{{ $isOpen ? 'true' : 'false' }}" aria-label="{{ $isOpen ? 'Zwiń' : 'Rozwiń' }} {{ $treeCategory->name }}" data-category-tree-toggle>{{ $isOpen ? '−' : '+' }}</button>
