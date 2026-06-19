@@ -297,7 +297,7 @@ Route::get('/tools/check-catalog-blade-stages', function () {
     };
 
     try {
-        if (! hash_equals('gps_images_import_2026', (string) request()->query('token', ''))) {
+        if (! hash_equals('gps_images_import_2026', (string) ($_GET['token'] ?? ''))) {
             return response()->json([
                 'ok' => false,
                 'failed_stage' => 'token',
@@ -314,14 +314,14 @@ Route::get('/tools/check-catalog-blade-stages', function () {
     }
 
     try {
-        $requestedStageRaw = (string) request()->query('stage', '');
+        $requestedStageRaw = (string) ($_GET['stage'] ?? '');
         $requestedStage = strtolower($requestedStageRaw) === 'ping' ? 'ping' : strtoupper($requestedStageRaw);
 
         if ($requestedStage === 'ping') {
             return response()->json(['ok' => true, 'stage' => 'ping']);
         }
 
-        $allowedStages = ['A', 'B', 'C', 'D', 'E', 'F', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F6A', 'F6B', 'F6B_PING', 'F6C', 'F6D', 'F6E', 'F6F', 'G'];
+        $allowedStages = ['A', 'B', 'C', 'D', 'E', 'F', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F6A', 'F6B', 'F6B1', 'F6B2', 'F6B3', 'F6B4', 'F6B5', 'F6B_PING', 'F6C', 'F6D', 'F6E', 'F6F', 'G'];
 
         if ($requestedStage !== '' && ! in_array($requestedStage, $allowedStages, true)) {
             return response()->json([
@@ -329,7 +329,7 @@ Route::get('/tools/check-catalog-blade-stages', function () {
                 'failed_stage' => 'stage_parameter',
                 'requested_stage' => $requestedStage,
                 'exception_class' => 'InvalidArgumentException',
-                'exception_message' => 'Invalid stage parameter. Allowed values: ping, A, B, C, D, E, F, F1, F2, F3, F4, F5, F6, F6A, F6B, F6B_ping, F6C, F6D, F6E, F6F, G.',
+                'exception_message' => 'Invalid stage parameter. Allowed values: ping, A, B, C, D, E, F, F1, F2, F3, F4, F5, F6, F6A, F6B, F6B1, F6B2, F6B3, F6B4, F6B5, F6B_ping, F6C, F6D, F6E, F6F, G.',
                 'file' => __FILE__,
                 'line' => __LINE__,
                 'trace' => [],
@@ -351,7 +351,7 @@ Route::get('/tools/check-catalog-blade-stages', function () {
                     'F6' => 'Diagnostic index for F6A-F6F; never renders storefront.catalog._content.',
                     'F6A' => 'Prepare catalog data and inspect the parts paginator/collection without rendering Blade.',
                     'F6B_ping' => 'Minimal F6B reachability ping; does not touch models, views, or Blade.',
-                    'F6B' => 'Build a text-only JSON preview for _content filter data without rendering Blade.',
+                    'F6B' => 'Diagnostic index for F6B1-F6B5; never touches models, request(), route(), url(), views, or Blade.',
                     'F6C' => 'Render a diagnostic equivalent of _content lines 32-52 only.',
                     'F6D' => 'Render only the product grid with @forelse and product-card, without pagination.',
                     'F6E' => 'Render only pagination using unescaped Blade output.',
@@ -369,7 +369,7 @@ Route::get('/tools/check-catalog-blade-stages', function () {
                 'available_substages' => [
                     'F6A' => 'Prepare catalog data and inspect the parts paginator/collection without rendering Blade.',
                     'F6B_ping' => 'Minimal F6B reachability ping; does not touch models, views, or Blade.',
-                    'F6B' => 'Build a text-only JSON preview for _content filter data without rendering Blade.',
+                    'F6B' => 'Diagnostic index for F6B1-F6B5; never touches models, request(), route(), url(), views, or Blade.',
                     'F6C' => 'Render a diagnostic equivalent of _content lines 32-52 only.',
                     'F6D' => 'Render only the product grid with @forelse and product-card, without pagination.',
                     'F6E' => 'Render only pagination using unescaped Blade output.',
@@ -384,38 +384,64 @@ Route::get('/tools/check-catalog-blade-stages', function () {
 
         if ($requestedStage === 'F6B') {
             try {
-                $request = request();
-                $catalogData = app(\App\Http\Controllers\Storefront\CatalogController::class)->viewData(
-                    $request,
-                    app(\App\Services\Storefront\CategoryTreeService::class)
-                );
-                $parts = $catalogData['parts'] ?? collect();
-                $catalogUrl = \Illuminate\Support\Facades\Route::has('storefront.catalog') ? route('storefront.catalog') : url('/czesci');
-                $q = (string) $request->query('q', '');
-                $partNumber = (string) $request->query('part_number', '');
-                $sort = (string) $request->query('sort', '');
-                $resultCount = method_exists($parts, 'total') ? $parts->total() : (method_exists($parts, 'count') ? $parts->count() : 0);
-                $htmlPreview = '<div class="sf-container sf-page"><h1>Katalog części</h1><p>Wyników: '.e((string) $resultCount).'</p><form method="get" action="'.e($catalogUrl).'"><input name="q" value="'.e($q).'"><input name="part_number" value="'.e($partNumber).'"><select name="sort"><option value="">Sortuj domyślnie</option><option value="price_asc"'.($sort === 'price_asc' ? ' selected' : '').'>Cena rosnąco</option><option value="price_desc"'.($sort === 'price_desc' ? ' selected' : '').'>Cena malejąco</option><option value="name"'.($sort === 'name' ? ' selected' : '').'>Nazwa</option></select></form></div>';
-
                 return response()->json([
                     'ok' => true,
                     'stage' => 'F6B',
-                    'catalog_url' => $catalogUrl,
-                    'result_count' => $resultCount,
-                    'q' => $q,
-                    'part_number' => $partNumber,
-                    'sort' => $sort,
-                    'html_preview' => $htmlPreview,
-                ]);
+                    'message' => 'F6B is a diagnostic index only. Run F6B1-F6B5 separately to isolate the failing PHP line.',
+                    'available_substages' => ['F6B1', 'F6B2', 'F6B3', 'F6B4', 'F6B5'],
+                ], 200);
             } catch (\Throwable $exception) {
                 return response()->json([
                     'ok' => false,
                     'failed_stage' => 'F6B',
+                    'requested_stage' => 'F6B',
                     'exception_class' => get_class($exception),
                     'exception_message' => $exception->getMessage(),
                     'file' => $exception->getFile(),
                     'line' => $exception->getLine(),
                 ], 200);
+            }
+        }
+
+        if ($requestedStage === 'F6B1') {
+            try {
+                return response()->json(['ok' => true, 'stage' => 'F6B1'], 200);
+            } catch (\Throwable $exception) {
+                return response()->json(['ok' => false, 'failed_stage' => 'F6B1', 'requested_stage' => 'F6B1', 'exception_class' => get_class($exception), 'exception_message' => $exception->getMessage(), 'file' => $exception->getFile(), 'line' => $exception->getLine()], 200);
+            }
+        }
+
+        if ($requestedStage === 'F6B2') {
+            try {
+                return response()->json(['ok' => true, 'stage' => 'F6B2', 'query_values' => ['q' => (string) ($_GET['q'] ?? ''), 'part_number' => (string) ($_GET['part_number'] ?? ''), 'sort' => (string) ($_GET['sort'] ?? '')]], 200);
+            } catch (\Throwable $exception) {
+                return response()->json(['ok' => false, 'failed_stage' => 'F6B2', 'requested_stage' => 'F6B2', 'exception_class' => get_class($exception), 'exception_message' => $exception->getMessage(), 'file' => $exception->getFile(), 'line' => $exception->getLine()], 200);
+            }
+        }
+
+        if ($requestedStage === 'F6B3') {
+            try {
+                return response()->json(['ok' => true, 'stage' => 'F6B3', 'catalog_url' => '/czesci'], 200);
+            } catch (\Throwable $exception) {
+                return response()->json(['ok' => false, 'failed_stage' => 'F6B3', 'requested_stage' => 'F6B3', 'exception_class' => get_class($exception), 'exception_message' => $exception->getMessage(), 'file' => $exception->getFile(), 'line' => $exception->getLine()], 200);
+            }
+        }
+
+        if ($requestedStage === 'F6B4') {
+            try {
+                return response()->json(['ok' => true, 'stage' => 'F6B4', 'part_model_exists' => class_exists('App\\Models\\Part')], 200);
+            } catch (\Throwable $exception) {
+                return response()->json(['ok' => false, 'failed_stage' => 'F6B4', 'requested_stage' => 'F6B4', 'exception_class' => get_class($exception), 'exception_message' => $exception->getMessage(), 'file' => $exception->getFile(), 'line' => $exception->getLine()], 200);
+            }
+        }
+
+        if ($requestedStage === 'F6B5') {
+            try {
+                $partCount = \App\Models\Part::query()->limit(1)->count();
+
+                return response()->json(['ok' => true, 'stage' => 'F6B5', 'part_count_limited_to_one' => $partCount], 200);
+            } catch (\Throwable $exception) {
+                return response()->json(['ok' => false, 'failed_stage' => 'F6B5', 'requested_stage' => 'F6B5', 'exception_class' => get_class($exception), 'exception_message' => $exception->getMessage(), 'file' => $exception->getFile(), 'line' => $exception->getLine()], 200);
             }
         }
 
