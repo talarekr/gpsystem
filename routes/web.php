@@ -24,6 +24,7 @@ use App\Http\Controllers\Tools\CheckProductImageController;
 use App\Http\Controllers\Tools\CheckCatalogSearchController;
 use App\Http\Controllers\Tools\CheckCatalogRenderController;
 use App\Http\Controllers\Tools\CheckCatalogViewController;
+use App\Http\Controllers\Tools\CheckCatalogViewStageController;
 use App\Http\Controllers\Tools\CheckCatalogErrorController;
 use App\Http\Controllers\Tools\FixImportedImagesPublicFilesController;
 use App\Http\Controllers\Tools\ImportedImagesStorageReportController;
@@ -96,6 +97,7 @@ Route::get('/tools/check-catalog-view-ping', function (Request $request) {
     return response()->json(['ok' => true, 'route' => 'check-catalog-view-ping']);
 })->name('tools.check-catalog-view-ping');
 Route::get('/tools/check-catalog-view', CheckCatalogViewController::class)->name('tools.check-catalog-view');
+Route::get('/tools/check-catalog-view-stage', CheckCatalogViewStageController::class)->name('tools.check-catalog-view-stage');
 Route::get('/tools/check-part-image-presentation', CheckPartImagePresentationController::class)->name('tools.check-part-image-presentation');
 Route::get('/tools/process-part-image-presentation', ProcessPartImagePresentationController::class)->name('tools.process-part-image-presentation');
 Route::get('/tools/process-part-image-presentation-runner', ProcessPartImagePresentationRunnerController::class)->name('tools.process-part-image-presentation-runner');
