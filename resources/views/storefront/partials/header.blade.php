@@ -1,5 +1,5 @@
 <style>
-    @media (min-width: 1200px) {
+    @@media (min-width: 1200px) {
         .sf-main-row {
             grid-template-columns: 190px minmax(0, 1fr) auto auto;
             gap: 16px;
@@ -36,7 +36,7 @@
         color: inherit;
         text-decoration: inherit;
     }
-    @media (min-width: 768px) {
+    @@media (min-width: 768px) {
         .sf-top .sf-top__inner {
             flex-wrap: nowrap;
             white-space: nowrap;
