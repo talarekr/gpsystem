@@ -98,62 +98,186 @@ Route::get('/tools/check-czesci-render-ping', function () {
     ]);
 })->name('tools.check-czesci-render-ping');
 Route::get('/tools/check-czesci-render-now', function () {
-    try {
-        if (! hash_equals('gps_images_import_2026', (string) request()->query('token', ''))) {
-            return response()->json([
-                'ok' => false,
-                'error_message' => 'Invalid diagnostics token.',
-            ], 403);
-        }
-
-        $routeNameExists = \Illuminate\Support\Facades\Route::has('storefront.catalog');
-        $routePathExists = collect(\Illuminate\Support\Facades\Route::getRoutes())->contains(
-            fn ($route) => in_array('GET', $route->methods(), true) && $route->uri() === 'czesci'
-        );
-
-        if (! $routeNameExists || ! $routePathExists) {
-            return response()->json([
-                'ok' => false,
-                'stage' => 'check-czesci-render-now',
-                'exception_class' => 'RuntimeException',
-                'exception_message' => 'The /czesci route or storefront.catalog route name is not registered.',
-                'file' => null,
-                'line' => null,
-                'trace_first_30' => [],
-                'route_path_exists' => $routePathExists,
-                'route_name_exists' => $routeNameExists,
-            ], 200);
-        }
-
-        $query = request()->query();
-        unset($query['token']);
-
-        $catalogRequest = \Illuminate\Http\Request::create('/czesci', 'GET', $query);
-        $catalogRequest->setLaravelSession(request()->session());
-        $catalogRequest->setUserResolver(fn () => request()->user());
-        $catalogRequest->setRouteResolver(fn () => \Illuminate\Support\Facades\Route::getRoutes()->getByName('storefront.catalog'));
-
-        $viewName = 'storefront.catalog.index';
-        $catalogData = app(\App\Http\Controllers\Storefront\CatalogController::class)->viewData(
-            $catalogRequest,
-            app(\App\Services\Storefront\CategoryTreeService::class)
-        );
-        $html = view($viewName, $catalogData)->render();
-
-        return response()->json([
-            'ok' => true,
-            'rendered_length' => strlen($html),
-            'view_name' => $viewName,
-        ]);
-    } catch (\Throwable $e) {
+    if (! hash_equals('gps_images_import_2026', (string) request()->query('token', ''))) {
         return response()->json([
             'ok' => false,
-            'stage' => 'check-czesci-render-now',
-            'exception_class' => $e::class,
-            'exception_message' => $e->getMessage(),
-            'file' => $e->getFile(),
-            'line' => $e->getLine(),
-            'trace_first_30' => collect($e->getTrace())->take(30)->map(fn ($frame) => [
+            'error_message' => 'Invalid diagnostics token.',
+        ], 403);
+    }
+
+    try {
+        $step = (string) request()->query('step', 'index');
+        $trace = function ($exception) {
+            return collect($exception->getTrace())->take(20)->map(fn ($frame) => [
+                'file' => $frame['file'] ?? null,
+                'line' => $frame['line'] ?? null,
+                'function' => $frame['function'] ?? null,
+                'class' => $frame['class'] ?? null,
+                'type' => $frame['type'] ?? null,
+            ])->values()->all();
+        };
+        $failure = function ($exception, $failedStep) use ($trace) {
+            return response()->json([
+                'ok' => false,
+                'stage_entered' => true,
+                'step' => $failedStep,
+                'exception_class' => $exception::class,
+                'exception_message' => $exception->getMessage(),
+                'file' => $exception->getFile(),
+                'line' => $exception->getLine(),
+                'trace_first_20' => $trace($exception),
+            ], 200);
+        };
+
+        if ($step === '' || $step === 'index') {
+            try {
+                return response()->json([
+                    'ok' => true,
+                    'stage_entered' => true,
+                    'step' => 'started',
+                    'selected_step' => 'index',
+                    'available_steps' => [
+                        'routes',
+                        'model',
+                        'query',
+                        'view-exists',
+                        'render-minimal',
+                        'render-index-empty',
+                        'render-index-one',
+                    ],
+                ], 200);
+            } catch (\Throwable $exception) {
+                return $failure($exception, 'index');
+            }
+        }
+
+        if ($step === 'routes') {
+            try {
+                $routeNameExists = \Illuminate\Support\Facades\Route::has('storefront.catalog');
+                $routePathExists = collect(\Illuminate\Support\Facades\Route::getRoutes())->contains(
+                    fn ($route) => in_array('GET', $route->methods(), true) && $route->uri() === 'czesci'
+                );
+
+                return response()->json([
+                    'ok' => true,
+                    'stage_entered' => true,
+                    'step' => 'routes',
+                    'route_name_exists' => $routeNameExists,
+                    'route_path_exists' => $routePathExists,
+                    'catalog_url' => $routeNameExists ? route('storefront.catalog') : url('/czesci'),
+                ], 200);
+            } catch (\Throwable $exception) {
+                return $failure($exception, 'routes');
+            }
+        }
+
+        if ($step === 'model') {
+            try {
+                return response()->json([
+                    'ok' => true,
+                    'stage_entered' => true,
+                    'step' => 'model',
+                    'part_model_exists' => class_exists('App\\Models\\Part'),
+                ], 200);
+            } catch (\Throwable $exception) {
+                return $failure($exception, 'model');
+            }
+        }
+
+        if ($step === 'query') {
+            try {
+                return response()->json([
+                    'ok' => true,
+                    'stage_entered' => true,
+                    'step' => 'query',
+                    'count_limit_1' => \App\Models\Part::query()->limit(1)->count(),
+                ], 200);
+            } catch (\Throwable $exception) {
+                return $failure($exception, 'query');
+            }
+        }
+
+        if ($step === 'view-exists') {
+            try {
+                return response()->json([
+                    'ok' => true,
+                    'stage_entered' => true,
+                    'step' => 'view-exists',
+                    'view_exists' => view()->exists('storefront.catalog.index'),
+                ], 200);
+            } catch (\Throwable $exception) {
+                return $failure($exception, 'view-exists');
+            }
+        }
+
+        if ($step === 'render-minimal') {
+            try {
+                $html = \Illuminate\Support\Facades\Blade::render('<div>OK</div>');
+
+                return response()->json([
+                    'ok' => true,
+                    'stage_entered' => true,
+                    'step' => 'render-minimal',
+                    'rendered_length' => strlen($html),
+                    'html' => $html,
+                ], 200);
+            } catch (\Throwable $exception) {
+                return $failure($exception, 'render-minimal');
+            }
+        }
+
+        if ($step === 'render-index-empty') {
+            try {
+                $html = view('storefront.catalog.index', [
+                    'parts' => collect(),
+                ])->render();
+
+                return response()->json([
+                    'ok' => true,
+                    'stage_entered' => true,
+                    'step' => 'render-index-empty',
+                    'rendered_length' => strlen($html),
+                ], 200);
+            } catch (\Throwable $exception) {
+                return $failure($exception, 'render-index-empty');
+            }
+        }
+
+        if ($step === 'render-index-one') {
+            try {
+                $parts = \App\Models\Part::query()->limit(1)->get();
+                $html = view('storefront.catalog.index', [
+                    'parts' => $parts,
+                ])->render();
+
+                return response()->json([
+                    'ok' => true,
+                    'stage_entered' => true,
+                    'step' => 'render-index-one',
+                    'parts_count' => $parts->count(),
+                    'rendered_length' => strlen($html),
+                ], 200);
+            } catch (\Throwable $exception) {
+                return $failure($exception, 'render-index-one');
+            }
+        }
+
+        return response()->json([
+            'ok' => false,
+            'stage_entered' => true,
+            'step' => $step,
+            'error_message' => 'Unknown diagnostics step.',
+        ], 200);
+    } catch (\Throwable $exception) {
+        return response()->json([
+            'ok' => false,
+            'stage_entered' => false,
+            'step' => 'outer',
+            'exception_class' => $exception::class,
+            'exception_message' => $exception->getMessage(),
+            'file' => $exception->getFile(),
+            'line' => $exception->getLine(),
+            'trace_first_20' => collect($exception->getTrace())->take(20)->map(fn ($frame) => [
                 'file' => $frame['file'] ?? null,
                 'line' => $frame['line'] ?? null,
                 'function' => $frame['function'] ?? null,
@@ -189,8 +313,8 @@ Route::get('/tools/mark-log', function (Request $request) {
 })->name('tools.mark-log');
 Route::get('/tools/check-catalog-direct', function () {
     try {
-        $trace = function (\Throwable $exception): array {
-            return collect($exception->getTrace())->take(5)->map(fn (array $frame): array => [
+        $trace = function ($exception) {
+            return collect($exception->getTrace())->take(5)->map(fn ($frame) => [
                 'file' => $frame['file'] ?? null,
                 'line' => $frame['line'] ?? null,
                 'function' => $frame['function'] ?? null,
@@ -253,7 +377,7 @@ Route::get('/tools/check-catalog-direct', function () {
 
         try {
             $result['stage_catalog_route_exists'] = collect(\Illuminate\Support\Facades\Route::getRoutes())->contains(
-                fn ($route): bool => in_array('GET', $route->methods(), true) && $route->uri() === 'czesci'
+                fn ($route) => in_array('GET', $route->methods(), true) && $route->uri() === 'czesci'
             );
         } catch (\Throwable $exception) {
             return $fail($exception, 'stage_catalog_route_exists');
@@ -275,7 +399,7 @@ Route::get('/tools/check-catalog-direct', function () {
             'exception_message' => $exception->getMessage(),
             'file' => $exception->getFile(),
             'line' => $exception->getLine(),
-            'trace' => collect($exception->getTrace())->take(5)->map(fn (array $frame): array => [
+            'trace' => collect($exception->getTrace())->take(5)->map(fn ($frame) => [
                 'file' => $frame['file'] ?? null,
                 'line' => $frame['line'] ?? null,
                 'function' => $frame['function'] ?? null,
@@ -327,7 +451,7 @@ Route::get('/tools/check-catalog-minimal-view', function () {
             'exception_message' => $exception->getMessage(),
             'file' => $exception->getFile(),
             'line' => $exception->getLine(),
-            'trace' => collect($exception->getTrace())->take(5)->map(fn (array $frame): array => [
+            'trace' => collect($exception->getTrace())->take(5)->map(fn ($frame) => [
                 'file' => $frame['file'] ?? null,
                 'line' => $frame['line'] ?? null,
                 'function' => $frame['function'] ?? null,
@@ -354,7 +478,7 @@ Route::get('/tools/check-catalog-view', CheckCatalogViewController::class)->name
 Route::get('/tools/check-catalog-view-stage', CheckCatalogViewStageController::class)->name('tools.check-catalog-view-stage');
 Route::get('/tools/check-catalog-blade-stages', function () {
     $makeTrace = function (\Throwable $exception): array {
-        return collect($exception->getTrace())->take(10)->map(fn (array $frame): array => [
+        return collect($exception->getTrace())->take(10)->map(fn ($frame) => [
             'file' => $frame['file'] ?? null,
             'line' => $frame['line'] ?? null,
             'function' => $frame['function'] ?? null,
