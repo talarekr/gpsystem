@@ -56,26 +56,6 @@
             setActive((currentIndex + offset + images.length) % images.length);
         }
 
-        function updateThumbArrows() {
-            if (!thumbsTrack) {
-                return;
-            }
-
-            var canScroll = thumbsTrack.scrollHeight > thumbsTrack.clientHeight + 1;
-            var atStart = thumbsTrack.scrollTop <= 1;
-            var atEnd = thumbsTrack.scrollTop + thumbsTrack.clientHeight >= thumbsTrack.scrollHeight - 1;
-
-            if (thumbsPrevButton) {
-                thumbsPrevButton.hidden = !canScroll || atStart;
-                thumbsPrevButton.disabled = !canScroll || atStart;
-            }
-
-            if (thumbsNextButton) {
-                thumbsNextButton.hidden = !canScroll;
-                thumbsNextButton.disabled = !canScroll || atEnd;
-            }
-        }
-
         function scrollThumbs(offset) {
             if (!thumbsTrack) {
                 return;
@@ -84,7 +64,6 @@
             var firstThumb = thumbs[0];
             var step = firstThumb ? firstThumb.getBoundingClientRect().height + 10 : 82;
             thumbsTrack.scrollBy({ top: offset * step, left: 0, behavior: 'smooth' });
-            window.setTimeout(updateThumbArrows, 220);
         }
 
         function openLightbox() {
@@ -108,7 +87,6 @@
         thumbs.forEach(function (thumb, index) {
             thumb.addEventListener('click', function () {
                 setActive(index);
-                window.requestAnimationFrame(updateThumbArrows);
             });
         });
 
@@ -122,12 +100,6 @@
             thumbsNextButton.addEventListener('click', function () {
                 scrollThumbs(1);
             });
-        }
-
-        if (thumbsTrack) {
-            thumbsTrack.addEventListener('scroll', updateThumbArrows);
-            window.addEventListener('resize', updateThumbArrows);
-            updateThumbArrows();
         }
 
         openButton.addEventListener('click', openLightbox);
