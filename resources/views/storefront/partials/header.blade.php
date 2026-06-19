@@ -6,7 +6,7 @@
     @php($storefrontLogoExists = file_exists($storefrontLogoPublicHtmlPath) || file_exists(public_path(ltrim($storefrontLogoPath, '/'))))
     <a class="sf-logo" href="{{ route('storefront.home') }}" aria-label="GP Swiss - strona główna">
         @if($storefrontLogoExists)
-            <img src="{{ $storefrontLogoPath }}" alt="GP Swiss" style="display:block;height:clamp(38px,4vw,50px);width:auto;max-width:100%;object-fit:contain;">
+            <img src="{{ $storefrontLogoPath }}" alt="GP Swiss" style="display:block;height:clamp(72px,18vw,120px);width:auto;max-width:100%;object-fit:contain;">
         @else
             <span>GP</span>Swiss
         @endif
