@@ -116,11 +116,12 @@ Route::get('/tools/check-czesci-render-now', function () {
                 'type' => $frame['type'] ?? null,
             ])->values()->all();
         };
-        $failure = function ($exception, $failedStep) use ($trace) {
+        $failure = function ($exception, $failedStep, $limit = null) use ($trace) {
             return response()->json([
                 'ok' => false,
                 'stage_entered' => true,
                 'step' => $failedStep,
+                'limit' => $limit,
                 'exception_class' => $exception::class,
                 'exception_message' => $exception->getMessage(),
                 'file' => $exception->getFile(),
@@ -177,7 +178,14 @@ Route::get('/tools/check-czesci-render-now', function () {
             ];
         };
 
-        $partIds = fn ($parts) => collect($parts)->map($partSummary)->pluck('id')->values()->all();
+        $partsCollection = function ($parts) {
+            if ($parts instanceof \Illuminate\Pagination\AbstractPaginator) {
+                return $parts->getCollection();
+            }
+
+            return collect($parts);
+        };
+        $partIds = fn ($parts) => $partsCollection($parts)->pluck('id')->values()->all();
 
         $catalogViewData = function ($perPage = 60) {
             $controller = app(\App\Http\Controllers\Storefront\CatalogController::class);
@@ -256,13 +264,17 @@ Route::get('/tools/check-czesci-render-now', function () {
                         'render-index-empty',
                         'render-index-one',
                         'render-index-page',
+                        'render-index-page-6',
+                        'render-index-page-12',
+                        'render-index-page-24',
+                        'render-index-page-48',
+                        'render-index-page-paginate',
                         'render-product-cards-scan',
                         'render-index-page-small',
                         'render-index-page-small-collect',
                         'render-index-page-small-paginator',
                         'render-index-page-small-content-only',
                         'render-index-page-small-index',
-                        'render-index-page-12',
                     ],
                 ], 200);
             } catch (\Throwable $exception) {
@@ -383,21 +395,26 @@ Route::get('/tools/check-czesci-render-now', function () {
 
         if ($step === 'render-index-page') {
             try {
-                $data = $catalogViewData(60);
-                $html = view('storefront.catalog.index', $data)->render();
-                $parts = $data['parts'];
+                $limits = [6, 12, 24, 48];
+                $baseUrl = url('/tools/check-czesci-render-now').'?token=gps_images_import_2026&step=';
 
                 return response()->json([
                     'ok' => true,
                     'stage_entered' => true,
                     'step' => 'render-index-page',
-                    'parts_count' => method_exists($parts, 'count') ? $parts->count() : 0,
-                    'rendered_length' => strlen($html),
-                    'part_ids' => $partIds($parts),
-                    'parts' => collect($parts)->map($partSummary)->values()->all(),
+                    'message' => 'This step is an index only. Use a limit step to render storefront.catalog.index.',
+                    'limit_steps' => array_map(fn ($limit) => 'render-index-page-'.$limit, $limits),
+                    'paginate_step' => 'render-index-page-paginate',
+                    'urls' => [
+                        'limit_6' => $baseUrl.'render-index-page-6',
+                        'limit_12' => $baseUrl.'render-index-page-12',
+                        'limit_24' => $baseUrl.'render-index-page-24',
+                        'limit_48' => $baseUrl.'render-index-page-48',
+                        'paginate' => $baseUrl.'render-index-page-paginate',
+                    ],
                 ], 200);
             } catch (\Throwable $exception) {
-                return $failure($exception, 'render-index-page');
+                return $failure($exception, 'render-index-page', null);
             }
         }
 
@@ -552,7 +569,7 @@ Route::get('/tools/check-czesci-render-now', function () {
                     'parts_count' => $parts->count(),
                     'rendered_length' => strlen($html),
                     'part_ids' => $partIds($parts),
-                    'parts' => collect($parts)->map($partSummary)->values()->all(),
+                    'parts' => $partsCollection($parts)->map($partSummary)->values()->all(),
                 ], 200);
             } catch (\Throwable $exception) {
                 return $failure($exception, 'render-index-page-small-content-only');
@@ -586,30 +603,77 @@ Route::get('/tools/check-czesci-render-now', function () {
                     'parts_count' => $parts->count(),
                     'rendered_length' => strlen($html),
                     'part_ids' => $partIds($parts),
-                    'parts' => collect($parts)->map($partSummary)->values()->all(),
+                    'parts' => $partsCollection($parts)->map($partSummary)->values()->all(),
                 ], 200);
             } catch (\Throwable $exception) {
                 return $failure($exception, 'render-index-page-small-index');
             }
         }
 
-        if ($step === 'render-index-page-12') {
+        $limitSteps = [
+            'render-index-page-6' => 6,
+            'render-index-page-12' => 12,
+            'render-index-page-24' => 24,
+            'render-index-page-48' => 48,
+        ];
+
+        if (array_key_exists($step, $limitSteps)) {
+            $limit = $limitSteps[$step];
+
             try {
-                $data = $catalogViewData(12);
-                $html = view('storefront.catalog.index', $data)->render();
-                $parts = $data['parts'];
+                $collection = \App\Models\Part::query()
+                    ->with(['images', 'category', 'car'])
+                    ->storefrontVisible()
+                    ->latest('updated_at')
+                    ->take($limit)
+                    ->get();
+                $parts = new \Illuminate\Pagination\LengthAwarePaginator(
+                    $collection,
+                    $collection->count(),
+                    $limit,
+                    1,
+                    [
+                        'path' => url('/czesci'),
+                        'pageName' => 'page',
+                    ]
+                );
+                $html = view('storefront.catalog.index', ['parts' => $parts])->render();
 
                 return response()->json([
                     'ok' => true,
                     'stage_entered' => true,
-                    'step' => 'render-index-page-12',
+                    'step' => $step,
+                    'limit' => $limit,
+                    'parts_count' => $parts->count(),
+                    'rendered_length' => strlen($html),
+                    'part_ids' => $partIds($parts),
+                    'parts' => $partsCollection($parts)->map($partSummary)->values()->all(),
+                ], 200);
+            } catch (\Throwable $exception) {
+                return $failure($exception, $step, $limit);
+            }
+        }
+
+        if ($step === 'render-index-page-paginate') {
+            $limit = 60;
+
+            try {
+                $data = $catalogViewData($limit);
+                $parts = $data['parts'];
+                $html = view('storefront.catalog.index', $data)->render();
+
+                return response()->json([
+                    'ok' => true,
+                    'stage_entered' => true,
+                    'step' => 'render-index-page-paginate',
+                    'limit' => $limit,
                     'parts_count' => method_exists($parts, 'count') ? $parts->count() : 0,
                     'rendered_length' => strlen($html),
                     'part_ids' => $partIds($parts),
-                    'parts' => collect($parts)->map($partSummary)->values()->all(),
+                    'parts' => $partsCollection($parts)->map($partSummary)->values()->all(),
                 ], 200);
             } catch (\Throwable $exception) {
-                return $failure($exception, 'render-index-page-12');
+                return $failure($exception, 'render-index-page-paginate', $limit);
             }
         }
 
