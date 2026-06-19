@@ -5,18 +5,6 @@
         const triggers = menu.querySelectorAll('[data-root-id]');
         const panels = menu.querySelectorAll('[data-root-panel]');
 
-        document.addEventListener('click', (event) => {
-            if (menu.open && !menu.contains(event.target)) {
-                menu.open = false;
-            }
-        });
-
-        document.addEventListener('keydown', (event) => {
-            if (event.key === 'Escape' && menu.open) {
-                menu.open = false;
-            }
-        });
-
         function activate(rootId) {
             triggers.forEach((trigger) => {
                 const isActive = trigger.dataset.rootId === rootId;

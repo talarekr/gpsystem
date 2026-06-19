@@ -12,7 +12,6 @@ use App\Http\Controllers\Storefront\CategoryController;
 use App\Http\Controllers\Storefront\ContactController;
 use App\Http\Controllers\Storefront\HomeController;
 use App\Http\Controllers\Storefront\PartController;
-use App\Http\Controllers\Storefront\PrivacyPolicyController;
 use App\Http\Controllers\Storefront\SearchController;
 use App\Http\Controllers\Storefront\TermsController;
 use App\Http\Controllers\Tools\CheckPartImagePresentationController;
@@ -40,7 +39,6 @@ Route::get('/koszyk', [CartController::class, 'index'])->name('storefront.cart.i
 Route::get('/kontakt', [ContactController::class, 'show'])->name('storefront.contact');
 Route::post('/kontakt', [ContactController::class, 'send'])->name('storefront.contact.send');
 Route::get('/regulamin', TermsController::class)->name('storefront.terms');
-Route::get('/polityka-prywatnosci', PrivacyPolicyController::class)->name('storefront.privacy-policy');
 Route::post('/koszyk/dodaj/{part}', [CartController::class, 'add'])->name('storefront.cart.add');
 Route::post('/koszyk/aktualizuj', [CartController::class, 'update'])->name('storefront.cart.update');
 Route::post('/koszyk/usun/{part}', [CartController::class, 'remove'])->name('storefront.cart.remove');
