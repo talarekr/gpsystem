@@ -350,11 +350,14 @@
 .sf-profile > div {
     position: absolute;
     top: calc(100% + 8px);
-    right: 0;
+    left: 50%;
+    transform: translateX(-50%);
     z-index: 9999;
     display: grid;
     gap: 8px;
-    min-width: 200px;
+    width: 200px;
+    min-width: 180px;
+    max-width: 210px;
     margin-top: 0;
     padding: 14px;
     overflow: visible;
@@ -362,4 +365,27 @@
     border: 1px solid var(--line);
     border-radius: 12px;
     box-shadow: 0 18px 45px #122a662e;
+}
+
+.sf-profile > div a,
+.sf-profile > div button {
+    display: block;
+    width: 100%;
+    padding: 4px 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-weight: 700;
+    text-align: center;
+    cursor: pointer;
+}
+
+.sf-profile > div a:hover,
+.sf-profile > div button:hover {
+    text-decoration: underline;
+}
+
+.sf-profile > div form {
+    margin: 0;
 }

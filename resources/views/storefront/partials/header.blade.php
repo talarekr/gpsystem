@@ -74,7 +74,22 @@
         @endif
     </a>
     @include('storefront.partials.search-bar')
-    <details class="sf-profile"><summary><span aria-hidden="true">👤</span> Moje konto</summary><div>@auth<a href="{{ route('storefront.account') }}">Panel klienta</a><a href="{{ route('storefront.account') }}#orders">Zamówienia</a>@else<a href="{{ route('storefront.login') }}">Zaloguj się</a><a href="{{ route('storefront.register') }}">Zarejestruj się</a>@endauth</div></details>
+    <details class="sf-profile">
+        <summary><span aria-hidden="true">👤</span> Moje konto</summary>
+        <div>
+            @auth
+                <a href="{{ route('storefront.account') }}">Panel klienta</a>
+                <a href="{{ route('storefront.account') }}#orders">Zamówienia</a>
+                <form method="post" action="{{ route('storefront.logout') }}">
+                    @csrf
+                    <button type="submit">Wyloguj się</button>
+                </form>
+            @else
+                <a href="{{ route('storefront.login') }}">Zaloguj się</a>
+                <a href="{{ route('storefront.register') }}">Zarejestruj się</a>
+            @endauth
+        </div>
+    </details>
     <a class="sf-cart sf-cart--icon" href="{{ route('storefront.cart.index') }}" aria-label="Koszyk"><span aria-hidden="true">🛒</span><b>{{ $storefrontCartCount ?? 0 }}</b></a>
 </div>
 @php
