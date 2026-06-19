@@ -44,7 +44,7 @@ class CheckCatalogViewController extends Controller
                     'function' => $frame['function'] ?? null,
                     'class' => $frame['class'] ?? null,
                 ])->values()->all(),
-            ], 500);
+            ], 200);
         }
     }
 }
