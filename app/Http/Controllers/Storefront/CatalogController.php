@@ -16,6 +16,14 @@ class CatalogController extends Controller
 
     public function index(Request $request, CategoryTreeService $categoryTree): View
     {
+        return view('storefront.catalog.index', $this->viewData($request, $categoryTree));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function viewData(Request $request, CategoryTreeService $categoryTree): array
+    {
         try {
             $filterOptions = $this->storefrontFilterOptions(Part::query()->storefrontVisible());
         } catch (Throwable) {
@@ -28,7 +36,7 @@ class CatalogController extends Controller
             $categoryRoots = collect();
         }
 
-        return view('storefront.catalog.index', [
+        return [
             'parts' => $this->storefrontQuery($request)->paginate(60)->withQueryString(),
             'categoryRoots' => $categoryRoots,
             'categoryTreeService' => $categoryTree,
@@ -37,6 +45,6 @@ class CatalogController extends Controller
             'metaTitle' => 'Katalog części GPSwiss - używane części samochodowe',
             'metaDescription' => 'Katalog oryginalnych używanych części samochodowych GPSwiss.',
             'breadcrumbs' => [['label' => 'Strona główna', 'url' => route('storefront.home')], ['label' => 'Katalog części']],
-        ]);
+        ];
     }
 }

@@ -23,6 +23,7 @@ use App\Http\Controllers\Tools\CheckPartImagePresentationController;
 use App\Http\Controllers\Tools\CheckProductImageController;
 use App\Http\Controllers\Tools\CheckCatalogSearchController;
 use App\Http\Controllers\Tools\CheckCatalogRenderController;
+use App\Http\Controllers\Tools\CheckCatalogViewController;
 use App\Http\Controllers\Tools\CheckCatalogErrorController;
 use App\Http\Controllers\Tools\FixImportedImagesPublicFilesController;
 use App\Http\Controllers\Tools\ImportedImagesStorageReportController;
@@ -80,6 +81,7 @@ Route::get('/tools/check-product-image', CheckProductImageController::class)->na
 Route::get('/tools/check-catalog-search', CheckCatalogSearchController::class)->name('tools.check-catalog-search');
 Route::get('/tools/check-catalog-render', CheckCatalogRenderController::class)->name('tools.check-catalog-render');
 Route::get('/tools/check-catalog-error', CheckCatalogErrorController::class)->name('tools.check-catalog-error');
+Route::get('/tools/check-catalog-view', CheckCatalogViewController::class)->name('tools.check-catalog-view');
 Route::get('/tools/check-part-image-presentation', CheckPartImagePresentationController::class)->name('tools.check-part-image-presentation');
 Route::get('/tools/process-part-image-presentation', ProcessPartImagePresentationController::class)->name('tools.process-part-image-presentation');
 Route::get('/tools/process-part-image-presentation-runner', ProcessPartImagePresentationRunnerController::class)->name('tools.process-part-image-presentation-runner');
