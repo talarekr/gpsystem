@@ -5,9 +5,22 @@
             gap: 16px;
         }
     }
+    .sf-top .sf-top__inner {
+        justify-content: center;
+        flex-wrap: wrap;
+        overflow-x: visible;
+        white-space: normal;
+        text-align: center;
+    }
     .sf-top__highlight {
         color: var(--navy);
         font-weight: 700;
+    }
+    @media (min-width: 768px) {
+        .sf-top .sf-top__inner {
+            flex-wrap: nowrap;
+            white-space: nowrap;
+        }
     }
 </style>
 <header class="sf-top"><div class="sf-container sf-top__inner"><a href="{{ route('storefront.contact') }}">Kontakt</a><span class="sf-top__highlight">90 dni gwarancji na Silniki, skrzynie biegów i dyferencjały</span><a href="{{ route('storefront.terms') }}">Regulamin</a></div></header>
