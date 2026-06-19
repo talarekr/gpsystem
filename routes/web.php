@@ -321,7 +321,7 @@ Route::get('/tools/check-catalog-blade-stages', function () {
             return response()->json(['ok' => true, 'stage' => 'ping']);
         }
 
-        $allowedStages = ['A', 'B', 'C', 'D', 'E', 'F', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F6A', 'F6B', 'F6B1', 'F6B2', 'F6B3', 'F6B4', 'F6B5', 'F6B_PING', 'F6C', 'F6D', 'F6E', 'F6F', 'G'];
+        $allowedStages = ['A', 'B', 'C', 'D', 'E', 'F', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F6A', 'F6B', 'F6B1', 'F6B2', 'F6B3', 'F6B4', 'F6B5', 'F6B_PING', 'F6C', 'F6C1', 'F6C2', 'F6C3', 'F6C4', 'F6C5', 'F6D', 'F6E', 'F6F', 'G'];
 
         if ($requestedStage !== '' && ! in_array($requestedStage, $allowedStages, true)) {
             return response()->json([
@@ -329,7 +329,7 @@ Route::get('/tools/check-catalog-blade-stages', function () {
                 'failed_stage' => 'stage_parameter',
                 'requested_stage' => $requestedStage,
                 'exception_class' => 'InvalidArgumentException',
-                'exception_message' => 'Invalid stage parameter. Allowed values: ping, A, B, C, D, E, F, F1, F2, F3, F4, F5, F6, F6A, F6B, F6B1, F6B2, F6B3, F6B4, F6B5, F6B_ping, F6C, F6D, F6E, F6F, G.',
+                'exception_message' => 'Invalid stage parameter. Allowed values: ping, A, B, C, D, E, F, F1, F2, F3, F4, F5, F6, F6A, F6B, F6B1, F6B2, F6B3, F6B4, F6B5, F6B_ping, F6C, F6C1, F6C2, F6C3, F6C4, F6C5, F6D, F6E, F6F, G.',
                 'file' => __FILE__,
                 'line' => __LINE__,
                 'trace' => [],
@@ -352,7 +352,7 @@ Route::get('/tools/check-catalog-blade-stages', function () {
                     'F6A' => 'Prepare catalog data and inspect the parts paginator/collection without rendering Blade.',
                     'F6B_ping' => 'Minimal F6B reachability ping; does not touch models, views, or Blade.',
                     'F6B' => 'Diagnostic index for F6B1-F6B5; never touches models, request(), route(), url(), views, or Blade.',
-                    'F6C' => 'Render a diagnostic equivalent of _content lines 32-52 only.',
+                    'F6C' => 'Diagnostic index for F6C1-F6C5; never renders views, partials, or Blade automatically.',
                     'F6D' => 'Render only the product grid with @forelse and product-card, without pagination.',
                     'F6E' => 'Render only pagination using unescaped Blade output.',
                     'F6F' => 'Render the full storefront.catalog._content view with catalog data.',
@@ -370,7 +370,7 @@ Route::get('/tools/check-catalog-blade-stages', function () {
                     'F6A' => 'Prepare catalog data and inspect the parts paginator/collection without rendering Blade.',
                     'F6B_ping' => 'Minimal F6B reachability ping; does not touch models, views, or Blade.',
                     'F6B' => 'Diagnostic index for F6B1-F6B5; never touches models, request(), route(), url(), views, or Blade.',
-                    'F6C' => 'Render a diagnostic equivalent of _content lines 32-52 only.',
+                    'F6C' => 'Diagnostic index for F6C1-F6C5; never renders views, partials, or Blade automatically.',
                     'F6D' => 'Render only the product grid with @forelse and product-card, without pagination.',
                     'F6E' => 'Render only pagination using unescaped Blade output.',
                     'F6F' => 'Render the full storefront.catalog._content view with catalog data.',
@@ -442,6 +442,79 @@ Route::get('/tools/check-catalog-blade-stages', function () {
                 return response()->json(['ok' => true, 'stage' => 'F6B5', 'part_count_limited_to_one' => $partCount], 200);
             } catch (\Throwable $exception) {
                 return response()->json(['ok' => false, 'failed_stage' => 'F6B5', 'requested_stage' => 'F6B5', 'exception_class' => get_class($exception), 'exception_message' => $exception->getMessage(), 'file' => $exception->getFile(), 'line' => $exception->getLine()], 200);
+            }
+        }
+
+        if ($requestedStage === 'F6C') {
+            try {
+                return response()->json([
+                    'ok' => true,
+                    'stage' => 'F6C',
+                    'message' => 'F6C is a diagnostic index only. Run F6C1-F6C5 separately to isolate toolbar/sort Blade behavior.',
+                    'available_substages' => ['F6C1', 'F6C2', 'F6C3', 'F6C4', 'F6C5'],
+                ], 200);
+            } catch (\Throwable $exception) {
+                return response()->json(['ok' => false, 'failed_stage' => 'F6C', 'requested_stage' => 'F6C', 'exception_class' => get_class($exception), 'exception_message' => $exception->getMessage(), 'file' => $exception->getFile(), 'line' => $exception->getLine()], 200);
+            }
+        }
+
+        if ($requestedStage === 'F6C1') {
+            try {
+                return response()->json(['ok' => true, 'stage' => 'F6C1'], 200);
+            } catch (\Throwable $exception) {
+                return response()->json(['ok' => false, 'failed_stage' => 'F6C1', 'requested_stage' => 'F6C1', 'exception_class' => get_class($exception), 'exception_message' => $exception->getMessage(), 'file' => $exception->getFile(), 'line' => $exception->getLine()], 200);
+            }
+        }
+
+        if ($requestedStage === 'F6C2') {
+            try {
+                $sortableQuery = $_GET;
+                unset($sortableQuery['sort'], $sortableQuery['page']);
+
+                return response()->json(['ok' => true, 'stage' => 'F6C2', 'sortable_query' => $sortableQuery], 200);
+            } catch (\Throwable $exception) {
+                return response()->json(['ok' => false, 'failed_stage' => 'F6C2', 'requested_stage' => 'F6C2', 'exception_class' => get_class($exception), 'exception_message' => $exception->getMessage(), 'file' => $exception->getFile(), 'line' => $exception->getLine()], 200);
+            }
+        }
+
+        if ($requestedStage === 'F6C3') {
+            try {
+                $sort = (string) ($_GET['sort'] ?? '');
+                $priceAscSelected = $sort === 'price_asc' ? ' selected' : '';
+                $priceDescSelected = $sort === 'price_desc' ? ' selected' : '';
+                $nameSelected = $sort === 'name' ? ' selected' : '';
+                $htmlPreview = '<section><div class="sf-toolbar"><span>1 wyników</span><form method="get" action="/czesci"><select name="sort"><option value="">Sortuj domyślnie</option><option value="price_asc"'.$priceAscSelected.'>Cena rosnąco</option><option value="price_desc"'.$priceDescSelected.'>Cena malejąco</option><option value="name"'.$nameSelected.'>Nazwa</option></select></form></div></section>';
+
+                return response()->json(['ok' => true, 'stage' => 'F6C3', 'html_preview' => $htmlPreview], 200);
+            } catch (\Throwable $exception) {
+                return response()->json(['ok' => false, 'failed_stage' => 'F6C3', 'requested_stage' => 'F6C3', 'exception_class' => get_class($exception), 'exception_message' => $exception->getMessage(), 'file' => $exception->getFile(), 'line' => $exception->getLine()], 200);
+            }
+        }
+
+        if ($requestedStage === 'F6C4') {
+            try {
+                $resultCount = 1;
+                $html = \Illuminate\Support\Facades\Blade::render('<span>{{ $resultCount }} wyników</span>', ['resultCount' => $resultCount], deleteCachedView: true);
+
+                return response()->json(['ok' => true, 'stage' => 'F6C4', 'rendered_length' => strlen($html), 'html_preview' => $html], 200);
+            } catch (\Throwable $exception) {
+                return response()->json(['ok' => false, 'failed_stage' => 'F6C4', 'requested_stage' => 'F6C4', 'exception_class' => get_class($exception), 'exception_message' => $exception->getMessage(), 'file' => $exception->getFile(), 'line' => $exception->getLine()], 200);
+            }
+        }
+
+        if ($requestedStage === 'F6C5') {
+            try {
+                $sort = (string) ($_GET['sort'] ?? '');
+                $selected = [
+                    'price_asc' => $sort === 'price_asc' ? 'selected' : '',
+                    'price_desc' => $sort === 'price_desc' ? 'selected' : '',
+                    'name' => $sort === 'name' ? 'selected' : '',
+                ];
+                $html = \Illuminate\Support\Facades\Blade::render('<select name="sort"><option value="">Sortuj domyślnie</option><option value="price_asc" {{ $selected["price_asc"] }}>Cena rosnąco</option><option value="price_desc" {{ $selected["price_desc"] }}>Cena malejąco</option><option value="name" {{ $selected["name"] }}>Nazwa</option></select>', ['selected' => $selected], deleteCachedView: true);
+
+                return response()->json(['ok' => true, 'stage' => 'F6C5', 'rendered_length' => strlen($html), 'html_preview' => $html], 200);
+            } catch (\Throwable $exception) {
+                return response()->json(['ok' => false, 'failed_stage' => 'F6C5', 'requested_stage' => 'F6C5', 'exception_class' => get_class($exception), 'exception_message' => $exception->getMessage(), 'file' => $exception->getFile(), 'line' => $exception->getLine()], 200);
             }
         }
 
@@ -555,17 +628,6 @@ Route::get('/tools/check-catalog-blade-stages', function () {
                 'total' => method_exists($parts, 'total') ? $parts->total() : null,
                 'parts_class' => is_object($parts) ? get_class($parts) : gettype($parts),
             ];
-        }
-
-        if ($stage === 'F6C') {
-            $catalogData = $prepareCatalogData();
-            $html = \Illuminate\Support\Facades\Blade::render(
-                '@php $parts ??= collect(); $catalogUrl = \Illuminate\Support\Facades\Route::has("storefront.catalog") ? route("storefront.catalog") : url("/czesci"); $resultCount = method_exists($parts, "total") ? $parts->total() : (method_exists($parts, "count") ? $parts->count() : 0); $sortableQuery = request()->except(["sort", "page"]); @endphp <section><div class="sf-toolbar"><span>{{ $resultCount }} wyników</span><form method="get" action="{{ $catalogUrl }}">@foreach($sortableQuery as $key => $value) @if(is_array($value)) @foreach($value as $item) <input type="hidden" name="{{ $key }}[]" value="{{ $item }}"> @endforeach @elseif($value !== null && $value !== "") <input type="hidden" name="{{ $key }}" value="{{ $value }}"> @endif @endforeach <select name="sort" onchange="this.form.submit()"><option value="">Sortuj domyślnie</option><option value="price_asc" {{ request("sort") === "price_asc" ? "selected" : "" }}>Cena rosnąco</option><option value="price_desc" {{ request("sort") === "price_desc" ? "selected" : "" }}>Cena malejąco</option><option value="name" {{ request("sort") === "name" ? "selected" : "" }}>Nazwa</option></select></form></div></section>',
-                $catalogData,
-                deleteCachedView: true
-            );
-
-            return ['ok' => true, 'rendered_length' => strlen($html)];
         }
 
         if ($stage === 'F6D') {
