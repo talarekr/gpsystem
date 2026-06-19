@@ -187,65 +187,17 @@ Route::get('/tools/check-czesci-render-now', function () {
         };
         $partIds = fn ($parts) => $partsCollection($parts)->pluck('id')->values()->all();
 
-        $catalogViewData = function ($perPage = 60) {
-            $controller = app(\App\Http\Controllers\Storefront\CatalogController::class);
-            $categoryTree = app(\App\Services\Storefront\CategoryTreeService::class);
-            $data = $controller->viewData(request(), $categoryTree);
+        $paginatorSummary = function ($parts) use ($partIds) {
+            $summary = [
+                'class' => is_object($parts) ? $parts::class : gettype($parts),
+                'count' => is_object($parts) && method_exists($parts, 'count') ? $parts->count() : null,
+                'total' => is_object($parts) && method_exists($parts, 'total') ? $parts->total() : null,
+                'per_page' => is_object($parts) && method_exists($parts, 'perPage') ? $parts->perPage() : null,
+                'current_page' => is_object($parts) && method_exists($parts, 'currentPage') ? $parts->currentPage() : null,
+                'part_ids' => $parts instanceof \Illuminate\Pagination\AbstractPaginator ? $partIds($parts) : [],
+            ];
 
-            if ((int) $perPage !== 60) {
-                $parts = \App\Models\Part::query()
-                    ->with(['images', 'category', 'car'])
-                    ->storefrontVisible()
-                    ->searchStorefront(request()->string('q')->toString())
-                    ->partNumberSearch(request()->string('part_number')->toString())
-                    ->priceBetween(
-                        request()->input('price_from', request()->input('price_min')),
-                        request()->input('price_to', request()->input('price_max')),
-                    );
-
-                $producer = trim(request()->string('producer')->toString());
-                if ($producer !== '') {
-                    $parts->whereStorefrontDetail('make', $producer);
-                }
-
-                $model = trim(request()->string('model')->toString());
-                if ($model !== '') {
-                    $parts->whereStorefrontDetail('model', $model);
-                }
-
-                $vehicleModel = trim(request()->string('vehicle_model')->toString());
-                if ($vehicleModel !== '') {
-                    foreach (preg_split('/\s+/', $vehicleModel) ?: [] as $token) {
-                        $parts->where(function ($inner) use ($token) {
-                            $like = '%'.$token.'%';
-                            $inner->where('name', 'like', $like)->orWhereHas('car', function ($carQuery) use ($like) {
-                                $carQuery->where('make', 'like', $like)
-                                    ->orWhere('model', 'like', $like)
-                                    ->orWhere('model_variant', 'like', $like)
-                                    ->orWhere('engine_code', 'like', $like);
-                            });
-                        });
-                    }
-                }
-
-                $category = trim(request()->string('category')->toString());
-                if ($category !== '') {
-                    $parts->whereHas('category', function ($categoryQuery) use ($category) {
-                        $categoryQuery->where('slug', $category)->orWhere('name', 'like', '%'.$category.'%');
-                    });
-                }
-
-                match (request()->string('sort')->toString()) {
-                    'price_asc' => $parts->orderByRaw('price is null')->orderBy('price'),
-                    'price_desc' => $parts->orderByDesc('price'),
-                    'name' => $parts->orderBy('name'),
-                    default => $parts->latest('updated_at'),
-                };
-
-                $data['parts'] = $parts->paginate((int) $perPage)->withQueryString();
-            }
-
-            return $data;
+            return $summary;
         };
 
         if ($step === '' || $step === 'index') {
@@ -269,6 +221,11 @@ Route::get('/tools/check-czesci-render-now', function () {
                         'render-index-page-24',
                         'render-index-page-48',
                         'render-index-page-paginate',
+                        'render-index-page-paginate-controller-resolve',
+                        'render-index-page-paginate-viewdata',
+                        'render-index-page-paginate-parts-only',
+                        'render-index-page-paginate-render-content',
+                        'render-index-page-paginate-render-index',
                         'render-product-cards-scan',
                         'render-index-page-small',
                         'render-index-page-small-collect',
@@ -405,12 +362,24 @@ Route::get('/tools/check-czesci-render-now', function () {
                     'message' => 'This step is an index only. Use a limit step to render storefront.catalog.index.',
                     'limit_steps' => array_map(fn ($limit) => 'render-index-page-'.$limit, $limits),
                     'paginate_step' => 'render-index-page-paginate',
+                    'paginate_diagnostic_steps' => [
+                        'render-index-page-paginate-controller-resolve',
+                        'render-index-page-paginate-viewdata',
+                        'render-index-page-paginate-parts-only',
+                        'render-index-page-paginate-render-content',
+                        'render-index-page-paginate-render-index',
+                    ],
                     'urls' => [
                         'limit_6' => $baseUrl.'render-index-page-6',
                         'limit_12' => $baseUrl.'render-index-page-12',
                         'limit_24' => $baseUrl.'render-index-page-24',
                         'limit_48' => $baseUrl.'render-index-page-48',
                         'paginate' => $baseUrl.'render-index-page-paginate',
+                        'paginate_controller_resolve' => $baseUrl.'render-index-page-paginate-controller-resolve',
+                        'paginate_viewdata' => $baseUrl.'render-index-page-paginate-viewdata',
+                        'paginate_parts_only' => $baseUrl.'render-index-page-paginate-parts-only',
+                        'paginate_render_content' => $baseUrl.'render-index-page-paginate-render-content',
+                        'paginate_render_index' => $baseUrl.'render-index-page-paginate-render-index',
                     ],
                 ], 200);
             } catch (\Throwable $exception) {
@@ -655,25 +624,170 @@ Route::get('/tools/check-czesci-render-now', function () {
         }
 
         if ($step === 'render-index-page-paginate') {
-            $limit = 60;
-
             try {
-                $data = $catalogViewData($limit);
-                $parts = $data['parts'];
-                $html = view('storefront.catalog.index', $data)->render();
+                $baseUrl = url('/tools/check-czesci-render-now').'?token=gps_images_import_2026&step=';
 
                 return response()->json([
                     'ok' => true,
                     'stage_entered' => true,
                     'step' => 'render-index-page-paginate',
-                    'limit' => $limit,
-                    'parts_count' => method_exists($parts, 'count') ? $parts->count() : 0,
-                    'rendered_length' => strlen($html),
-                    'part_ids' => $partIds($parts),
-                    'parts' => $partsCollection($parts)->map($partSummary)->values()->all(),
+                    'message' => 'This step is an index only. Use the paginate diagnostic substeps to isolate controller resolution, viewData, query pagination, and rendering.',
+                    'substeps' => [
+                        'render-index-page-paginate-controller-resolve',
+                        'render-index-page-paginate-viewdata',
+                        'render-index-page-paginate-parts-only',
+                        'render-index-page-paginate-render-content',
+                        'render-index-page-paginate-render-index',
+                    ],
+                    'urls' => [
+                        'controller_resolve' => $baseUrl.'render-index-page-paginate-controller-resolve',
+                        'viewdata' => $baseUrl.'render-index-page-paginate-viewdata',
+                        'parts_only' => $baseUrl.'render-index-page-paginate-parts-only',
+                        'render_content' => $baseUrl.'render-index-page-paginate-render-content',
+                        'render_index' => $baseUrl.'render-index-page-paginate-render-index',
+                    ],
                 ], 200);
             } catch (\Throwable $exception) {
-                return $failure($exception, 'render-index-page-paginate', $limit);
+                return $failure($exception, 'render-index-page-paginate');
+            }
+        }
+
+        if ($step === 'render-index-page-paginate-controller-resolve') {
+            try {
+                $controller = app(\App\Http\Controllers\Storefront\CatalogController::class);
+
+                return response()->json([
+                    'ok' => true,
+                    'stage_entered' => true,
+                    'step' => 'render-index-page-paginate-controller-resolve',
+                    'controller_class' => $controller::class,
+                ], 200);
+            } catch (\Throwable $exception) {
+                return $failure($exception, 'render-index-page-paginate-controller-resolve');
+            }
+        }
+
+        if ($step === 'render-index-page-paginate-viewdata') {
+            try {
+                $controller = app(\App\Http\Controllers\Storefront\CatalogController::class);
+                $categoryTree = app(\App\Services\Storefront\CategoryTreeService::class);
+                $data = $controller->viewData(request(), $categoryTree);
+                $parts = $data['parts'] ?? null;
+
+                return response()->json([
+                    'ok' => true,
+                    'stage_entered' => true,
+                    'step' => 'render-index-page-paginate-viewdata',
+                    'data_keys' => array_keys($data),
+                    'parts' => $paginatorSummary($parts),
+                ], 200);
+            } catch (\Throwable $exception) {
+                return $failure($exception, 'render-index-page-paginate-viewdata');
+            }
+        }
+
+        if ($step === 'render-index-page-paginate-parts-only') {
+            try {
+                $parts = \App\Models\Part::query()
+                    ->with(['images', 'category', 'car'])
+                    ->storefrontVisible()
+                    ->searchStorefront(request()->string('q')->toString())
+                    ->partNumberSearch(request()->string('part_number')->toString())
+                    ->priceBetween(
+                        request()->input('price_from', request()->input('price_min')),
+                        request()->input('price_to', request()->input('price_max')),
+                    );
+
+                $producer = trim(request()->string('producer')->toString());
+                if ($producer !== '') {
+                    $parts->whereStorefrontDetail('make', $producer);
+                }
+
+                $model = trim(request()->string('model')->toString());
+                if ($model !== '') {
+                    $parts->whereStorefrontDetail('model', $model);
+                }
+
+                $vehicleModel = trim(request()->string('vehicle_model')->toString());
+                if ($vehicleModel !== '') {
+                    foreach (preg_split('/\s+/', $vehicleModel) ?: [] as $token) {
+                        $parts->where(function ($inner) use ($token) {
+                            $like = '%'.$token.'%';
+                            $inner->where('name', 'like', $like)->orWhereHas('car', function ($carQuery) use ($like) {
+                                $carQuery->where('make', 'like', $like)
+                                    ->orWhere('model', 'like', $like)
+                                    ->orWhere('model_variant', 'like', $like)
+                                    ->orWhere('engine_code', 'like', $like);
+                            });
+                        });
+                    }
+                }
+
+                $category = trim(request()->string('category')->toString());
+                if ($category !== '') {
+                    $parts->whereHas('category', function ($categoryQuery) use ($category) {
+                        $categoryQuery->where('slug', $category)->orWhere('name', 'like', '%'.$category.'%');
+                    });
+                }
+
+                match (request()->string('sort')->toString()) {
+                    'price_asc' => $parts->orderByRaw('price is null')->orderBy('price'),
+                    'price_desc' => $parts->orderByDesc('price'),
+                    'name' => $parts->orderBy('name'),
+                    default => $parts->latest('updated_at'),
+                };
+
+                $parts = $parts->paginate(60)->withQueryString();
+
+                return response()->json([
+                    'ok' => true,
+                    'stage_entered' => true,
+                    'step' => 'render-index-page-paginate-parts-only',
+                    'parts' => $paginatorSummary($parts),
+                    'sample_parts' => $partsCollection($parts)->map($partSummary)->values()->all(),
+                ], 200);
+            } catch (\Throwable $exception) {
+                return $failure($exception, 'render-index-page-paginate-parts-only');
+            }
+        }
+
+        if ($step === 'render-index-page-paginate-render-content') {
+            try {
+                $controller = app(\App\Http\Controllers\Storefront\CatalogController::class);
+                $categoryTree = app(\App\Services\Storefront\CategoryTreeService::class);
+                $data = $controller->viewData(request(), $categoryTree);
+                $parts = $data['parts'] ?? null;
+                $html = view('storefront.catalog._content', $data)->render();
+
+                return response()->json([
+                    'ok' => true,
+                    'stage_entered' => true,
+                    'step' => 'render-index-page-paginate-render-content',
+                    'parts' => $paginatorSummary($parts),
+                    'rendered_length' => strlen($html),
+                ], 200);
+            } catch (\Throwable $exception) {
+                return $failure($exception, 'render-index-page-paginate-render-content');
+            }
+        }
+
+        if ($step === 'render-index-page-paginate-render-index') {
+            try {
+                $controller = app(\App\Http\Controllers\Storefront\CatalogController::class);
+                $categoryTree = app(\App\Services\Storefront\CategoryTreeService::class);
+                $data = $controller->viewData(request(), $categoryTree);
+                $parts = $data['parts'] ?? null;
+                $html = view('storefront.catalog.index', $data)->render();
+
+                return response()->json([
+                    'ok' => true,
+                    'stage_entered' => true,
+                    'step' => 'render-index-page-paginate-render-index',
+                    'parts' => $paginatorSummary($parts),
+                    'rendered_length' => strlen($html),
+                ], 200);
+            } catch (\Throwable $exception) {
+                return $failure($exception, 'render-index-page-paginate-render-index');
             }
         }
 
