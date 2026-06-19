@@ -36,7 +36,7 @@
                 @if($galleryImages->count() > 1)
                     <div class="sf-thumbs-shell{{ $galleryImages->count() > 5 ? ' sf-thumbs-shell--scrollable' : '' }}" aria-label="Miniatury zdjęć produktu">
                         @if($galleryImages->count() > 5)
-                            <button class="sf-thumbs-shell__arrow sf-thumbs-shell__arrow--prev" type="button" data-gallery-thumbs-prev aria-label="Przewiń miniatury w górę">⌃</button>
+                            <button class="sf-thumbs-shell__arrow sf-thumbs-shell__arrow--prev" type="button" data-gallery-thumbs-prev aria-label="Przewiń miniatury w górę" hidden disabled>⌃</button>
                         @endif
                         <div class="sf-thumbs" data-gallery-thumbs-track>
                             @foreach($galleryImages as $index => $image)
