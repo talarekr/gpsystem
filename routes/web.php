@@ -227,6 +227,10 @@ Route::get('/tools/check-czesci-render-now', function () {
                         'render-index-page',
                         'render-product-cards-scan',
                         'render-index-page-small',
+                        'render-index-page-small-collect',
+                        'render-index-page-small-paginator',
+                        'render-index-page-small-content-only',
+                        'render-index-page-small-index',
                         'render-index-page-12',
                     ],
                 ], 200);
@@ -411,21 +415,150 @@ Route::get('/tools/check-czesci-render-now', function () {
 
         if ($step === 'render-index-page-small') {
             try {
-                $data = $catalogViewData(3);
-                $html = view('storefront.catalog.index', $data)->render();
-                $parts = $data['parts'];
-
                 return response()->json([
                     'ok' => true,
                     'stage_entered' => true,
                     'step' => 'render-index-page-small',
-                    'parts_count' => method_exists($parts, 'count') ? $parts->count() : 0,
+                    'message' => 'This step is an index only. Use one of the render-index-page-small-* substeps.',
+                    'substeps' => [
+                        'render-index-page-small-collect',
+                        'render-index-page-small-paginator',
+                        'render-index-page-small-content-only',
+                        'render-index-page-small-index',
+                    ],
+                    'urls' => [
+                        'collect' => url('/tools/check-czesci-render-now').'?token=gps_images_import_2026&step=render-index-page-small-collect',
+                        'paginator' => url('/tools/check-czesci-render-now').'?token=gps_images_import_2026&step=render-index-page-small-paginator',
+                        'content_only' => url('/tools/check-czesci-render-now').'?token=gps_images_import_2026&step=render-index-page-small-content-only',
+                        'index' => url('/tools/check-czesci-render-now').'?token=gps_images_import_2026&step=render-index-page-small-index',
+                    ],
+                ], 200);
+            } catch (\Throwable $exception) {
+                return $failure($exception, 'render-index-page-small');
+            }
+        }
+
+        if ($step === 'render-index-page-small-collect') {
+            try {
+                $parts = \App\Models\Part::query()
+                    ->with(['images', 'category', 'car'])
+                    ->storefrontVisible()
+                    ->latest('updated_at')
+                    ->take(3)
+                    ->get();
+
+                return response()->json([
+                    'ok' => true,
+                    'stage_entered' => true,
+                    'step' => 'render-index-page-small-collect',
+                    'count' => $parts->count(),
+                    'ids' => $parts->map(fn ($part) => $part->id)->values()->all(),
+                    'parts' => $parts->map($partSummary)->values()->all(),
+                ], 200);
+            } catch (\Throwable $exception) {
+                return $failure($exception, 'render-index-page-small-collect');
+            }
+        }
+
+        if ($step === 'render-index-page-small-paginator') {
+            try {
+                $collection = \App\Models\Part::query()
+                    ->with(['images', 'category', 'car'])
+                    ->storefrontVisible()
+                    ->latest('updated_at')
+                    ->take(3)
+                    ->get();
+                $parts = new \Illuminate\Pagination\LengthAwarePaginator(
+                    $collection,
+                    $collection->count(),
+                    3,
+                    1,
+                    [
+                        'path' => url('/czesci'),
+                        'pageName' => 'page',
+                    ]
+                );
+
+                return response()->json([
+                    'ok' => true,
+                    'stage_entered' => true,
+                    'step' => 'render-index-page-small-paginator',
+                    'class' => $parts::class,
+                    'count' => $parts->count(),
+                    'total' => $parts->total(),
+                    'per_page' => $parts->perPage(),
+                    'current_page' => $parts->currentPage(),
+                ], 200);
+            } catch (\Throwable $exception) {
+                return $failure($exception, 'render-index-page-small-paginator');
+            }
+        }
+
+        if ($step === 'render-index-page-small-content-only') {
+            try {
+                $collection = \App\Models\Part::query()
+                    ->with(['images', 'category', 'car'])
+                    ->storefrontVisible()
+                    ->latest('updated_at')
+                    ->take(3)
+                    ->get();
+                $parts = new \Illuminate\Pagination\LengthAwarePaginator(
+                    $collection,
+                    $collection->count(),
+                    3,
+                    1,
+                    [
+                        'path' => url('/czesci'),
+                        'pageName' => 'page',
+                    ]
+                );
+                $html = view('storefront.catalog._content', ['parts' => $parts])->render();
+
+                return response()->json([
+                    'ok' => true,
+                    'stage_entered' => true,
+                    'step' => 'render-index-page-small-content-only',
+                    'parts_count' => $parts->count(),
                     'rendered_length' => strlen($html),
                     'part_ids' => collect($parts)->map(fn ($part) => $part->id)->values()->all(),
                     'parts' => collect($parts)->map($partSummary)->values()->all(),
                 ], 200);
             } catch (\Throwable $exception) {
-                return $failure($exception, 'render-index-page-small');
+                return $failure($exception, 'render-index-page-small-content-only');
+            }
+        }
+
+        if ($step === 'render-index-page-small-index') {
+            try {
+                $collection = \App\Models\Part::query()
+                    ->with(['images', 'category', 'car'])
+                    ->storefrontVisible()
+                    ->latest('updated_at')
+                    ->take(3)
+                    ->get();
+                $parts = new \Illuminate\Pagination\LengthAwarePaginator(
+                    $collection,
+                    $collection->count(),
+                    3,
+                    1,
+                    [
+                        'path' => url('/czesci'),
+                        'pageName' => 'page',
+                    ]
+                );
+                $html = view('storefront.catalog.index', ['parts' => $parts])->render();
+
+                return response()->json([
+                    'ok' => true,
+                    'stage_entered' => true,
+                    'step' => 'render-index-page-small-index',
+                    'parts_count' => $parts->count(),
+                    'rendered_length' => strlen($html),
+                    'part_ids' => collect($parts)->map(fn ($part) => $part->id)->values()->all(),
+                    'parts' => collect($parts)->map($partSummary)->values()->all(),
+                ], 200);
+            } catch (\Throwable $exception) {
+                return $failure($exception, 'render-index-page-small-index');
             }
         }
 
