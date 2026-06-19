@@ -612,9 +612,12 @@ function runLaravelMaintenance(string $appDir, bool $seedRoles): void
         callArtisan($kernel, 'db:seed', ['--class' => 'RoleSeeder', '--force' => true], false);
     }
 
+    logLine('Clearing Laravel caches after deploy: optimize:clear, route:clear, view:clear, config:clear.');
+    callArtisan($kernel, 'optimize:clear', [], false);
+    callArtisan($kernel, 'route:clear', [], false);
+    callArtisan($kernel, 'view:clear', [], false);
     callArtisan($kernel, 'config:clear', [], false);
     callArtisan($kernel, 'cache:clear', [], false);
-    callArtisan($kernel, 'view:clear', [], false);
 }
 
 function acquireDeployLock(string $lockPath, int $staleSeconds): mixed

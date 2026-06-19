@@ -81,6 +81,20 @@ Route::get('/tools/check-product-image', CheckProductImageController::class)->na
 Route::get('/tools/check-catalog-search', CheckCatalogSearchController::class)->name('tools.check-catalog-search');
 Route::get('/tools/check-catalog-render', CheckCatalogRenderController::class)->name('tools.check-catalog-render');
 Route::get('/tools/check-catalog-error', CheckCatalogErrorController::class)->name('tools.check-catalog-error');
+Route::get('/tools/check-catalog-view-ping', function (Request $request) {
+    if (! hash_equals('gps_images_import_2026', (string) $request->query('token', ''))) {
+        return response()->json([
+            'ok' => false,
+            'error_class' => 'AuthorizationException',
+            'error_message' => 'Invalid diagnostics token.',
+            'file' => __FILE__,
+            'line' => __LINE__,
+            'trace' => [],
+        ], 403);
+    }
+
+    return response()->json(['ok' => true, 'route' => 'check-catalog-view-ping']);
+})->name('tools.check-catalog-view-ping');
 Route::get('/tools/check-catalog-view', CheckCatalogViewController::class)->name('tools.check-catalog-view');
 Route::get('/tools/check-part-image-presentation', CheckPartImagePresentationController::class)->name('tools.check-part-image-presentation');
 Route::get('/tools/process-part-image-presentation', ProcessPartImagePresentationController::class)->name('tools.process-part-image-presentation');
