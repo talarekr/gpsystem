@@ -10,6 +10,10 @@ use App\Http\Controllers\Storefront\CartController;
 use App\Http\Controllers\Storefront\CatalogController;
 use App\Http\Controllers\Storefront\CategoryController;
 use App\Http\Controllers\Storefront\ContactController;
+use App\Http\Controllers\Storefront\Auth\CustomerAuthController;
+use App\Http\Controllers\Storefront\Auth\GoogleAuthController;
+use App\Http\Controllers\Storefront\Auth\PasswordResetController;
+use App\Http\Controllers\Storefront\CustomerAccountController;
 use App\Http\Controllers\Storefront\HomeController;
 use App\Http\Controllers\Storefront\PartController;
 use App\Http\Controllers\Storefront\PrivacyPolicyController;
@@ -37,6 +41,25 @@ Route::get('/sklep', [CatalogController::class, 'index'])->name('storefront.cata
 Route::get('/czesci', [CatalogController::class, 'index'])->name('storefront.parts.alias');
 Route::get('/szukaj', [SearchController::class, 'index'])->name('storefront.search');
 Route::get('/koszyk', [CartController::class, 'index'])->name('storefront.cart.index');
+
+Route::get('/login', fn () => redirect()->route('storefront.login'))->name('login');
+Route::get('/logowanie', [CustomerAuthController::class, 'loginForm'])->name('storefront.login');
+Route::post('/logowanie', [CustomerAuthController::class, 'login'])->name('storefront.login.store');
+Route::get('/rejestracja', [CustomerAuthController::class, 'registerForm'])->name('storefront.register');
+Route::post('/rejestracja', [CustomerAuthController::class, 'register'])->name('storefront.register.store');
+Route::post('/wyloguj', [CustomerAuthController::class, 'logout'])->name('storefront.logout');
+Route::get('/przypomnij-haslo', [PasswordResetController::class, 'requestForm'])->name('password.request');
+Route::post('/przypomnij-haslo', [PasswordResetController::class, 'sendLink'])->name('password.email');
+Route::get('/reset-hasla/{token}', [PasswordResetController::class, 'resetForm'])->name('password.reset');
+Route::post('/reset-hasla', [PasswordResetController::class, 'reset'])->name('password.update');
+Route::get('/auth/google', [GoogleAuthController::class, 'redirect'])->name('storefront.google.redirect');
+Route::get('/auth/google/callback', [GoogleAuthController::class, 'callback'])->name('storefront.google.callback');
+Route::middleware('auth')->group(function (): void {
+    Route::get('/moje-konto', CustomerAccountController::class)->name('storefront.account');
+    Route::patch('/moje-konto/dane', [CustomerAccountController::class, 'update'])->name('storefront.account.update');
+    Route::post('/moje-konto/zwroty', [CustomerAccountController::class, 'storeReturn'])->name('storefront.account.returns.store');
+});
+
 Route::get('/kontakt', [ContactController::class, 'show'])->name('storefront.contact');
 Route::post('/kontakt', [ContactController::class, 'send'])->name('storefront.contact.send');
 Route::get('/regulamin', TermsController::class)->name('storefront.terms');

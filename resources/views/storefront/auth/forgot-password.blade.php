@@ -1,0 +1,2 @@
+@extends('layouts.storefront')
+@section('content')<div class="sf-container sf-auth-page"><section class="sf-auth-card"><h1>Przypomnij hasło</h1><p>Podaj e-mail konta, a wyślemy link resetu hasła.</p><form method="post" action="{{ route('password.email') }}" class="sf-auth-form">@csrf<label>Adres e-mail<input type="email" name="email" value="{{ old('email') }}" required>@error('email')<small>{{ $message }}</small>@enderror</label><button class="sf-btn" type="submit">Wyślij link resetu</button></form></section></div>@endsection

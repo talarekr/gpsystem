@@ -74,8 +74,8 @@
         @endif
     </a>
     @include('storefront.partials.search-bar')
-    <details class="sf-profile"><summary>Moje konto</summary><div><a href="#">Logowanie</a><a href="#">Zamówienia</a></div></details>
-    <a class="sf-cart" href="{{ route('storefront.cart.index') }}">Koszyk <b>{{ $storefrontCartCount ?? 0 }}</b></a>
+    <details class="sf-profile"><summary><span aria-hidden="true">👤</span> Moje konto</summary><div>@auth<a href="{{ route('storefront.account') }}">Panel klienta</a><a href="{{ route('storefront.account') }}#orders">Zamówienia</a>@else<a href="{{ route('storefront.login') }}">Zaloguj się</a><a href="{{ route('storefront.register') }}">Zarejestruj się</a>@endauth</div></details>
+    <a class="sf-cart sf-cart--icon" href="{{ route('storefront.cart.index') }}" aria-label="Koszyk"><span aria-hidden="true">🛒</span><b>{{ $storefrontCartCount ?? 0 }}</b></a>
 </div>
 @php
     $storefrontMainLinks = [
