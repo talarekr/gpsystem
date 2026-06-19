@@ -25,4 +25,25 @@
             trigger.addEventListener('click', () => activate(trigger.dataset.rootId));
         });
     });
+
+    document.querySelectorAll('[data-category-tree-toggle]').forEach((toggle) => {
+        toggle.addEventListener('click', () => {
+            const item = toggle.closest('[data-category-tree-item]');
+            const children = item ? item.querySelector(':scope > [data-category-tree-children]') : null;
+
+            if (!children) {
+                return;
+            }
+
+            const isExpanded = toggle.getAttribute('aria-expanded') === 'true';
+            const nextExpanded = !isExpanded;
+            const label = toggle.getAttribute('aria-label') || '';
+
+            children.hidden = !nextExpanded;
+            item.classList.toggle('is-branch', nextExpanded);
+            toggle.setAttribute('aria-expanded', nextExpanded ? 'true' : 'false');
+            toggle.textContent = nextExpanded ? '−' : '+';
+            toggle.setAttribute('aria-label', label.replace(isExpanded ? 'Zwiń' : 'Rozwiń', nextExpanded ? 'Zwiń' : 'Rozwiń'));
+        });
+    });
 })();
