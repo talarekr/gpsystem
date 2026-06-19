@@ -223,6 +223,13 @@ Route::get('/tools/check-czesci-render-now', function () {
                         'render-index-page-paginate',
                         'render-index-page-paginate-controller-resolve',
                         'render-index-page-paginate-viewdata',
+                        'viewdata-step-start',
+                        'viewdata-step-request',
+                        'viewdata-step-base-query',
+                        'viewdata-step-search',
+                        'viewdata-step-sort',
+                        'viewdata-step-paginate',
+                        'viewdata-step-return-array',
                         'render-index-page-paginate-parts-only',
                         'render-index-page-paginate-render-content',
                         'render-index-page-paginate-render-index',
@@ -365,6 +372,13 @@ Route::get('/tools/check-czesci-render-now', function () {
                     'paginate_diagnostic_steps' => [
                         'render-index-page-paginate-controller-resolve',
                         'render-index-page-paginate-viewdata',
+                        'viewdata-step-start',
+                        'viewdata-step-request',
+                        'viewdata-step-base-query',
+                        'viewdata-step-search',
+                        'viewdata-step-sort',
+                        'viewdata-step-paginate',
+                        'viewdata-step-return-array',
                         'render-index-page-paginate-parts-only',
                         'render-index-page-paginate-render-content',
                         'render-index-page-paginate-render-index',
@@ -377,6 +391,13 @@ Route::get('/tools/check-czesci-render-now', function () {
                         'paginate' => $baseUrl.'render-index-page-paginate',
                         'paginate_controller_resolve' => $baseUrl.'render-index-page-paginate-controller-resolve',
                         'paginate_viewdata' => $baseUrl.'render-index-page-paginate-viewdata',
+                        'viewdata_step_start' => $baseUrl.'viewdata-step-start',
+                        'viewdata_step_request' => $baseUrl.'viewdata-step-request',
+                        'viewdata_step_base_query' => $baseUrl.'viewdata-step-base-query',
+                        'viewdata_step_search' => $baseUrl.'viewdata-step-search',
+                        'viewdata_step_sort' => $baseUrl.'viewdata-step-sort',
+                        'viewdata_step_paginate' => $baseUrl.'viewdata-step-paginate',
+                        'viewdata_step_return_array' => $baseUrl.'viewdata-step-return-array',
                         'paginate_parts_only' => $baseUrl.'render-index-page-paginate-parts-only',
                         'paginate_render_content' => $baseUrl.'render-index-page-paginate-render-content',
                         'paginate_render_index' => $baseUrl.'render-index-page-paginate-render-index',
@@ -635,6 +656,13 @@ Route::get('/tools/check-czesci-render-now', function () {
                     'substeps' => [
                         'render-index-page-paginate-controller-resolve',
                         'render-index-page-paginate-viewdata',
+                        'viewdata-step-start',
+                        'viewdata-step-request',
+                        'viewdata-step-base-query',
+                        'viewdata-step-search',
+                        'viewdata-step-sort',
+                        'viewdata-step-paginate',
+                        'viewdata-step-return-array',
                         'render-index-page-paginate-parts-only',
                         'render-index-page-paginate-render-content',
                         'render-index-page-paginate-render-index',
@@ -642,6 +670,13 @@ Route::get('/tools/check-czesci-render-now', function () {
                     'urls' => [
                         'controller_resolve' => $baseUrl.'render-index-page-paginate-controller-resolve',
                         'viewdata' => $baseUrl.'render-index-page-paginate-viewdata',
+                        'viewdata_step_start' => $baseUrl.'viewdata-step-start',
+                        'viewdata_step_request' => $baseUrl.'viewdata-step-request',
+                        'viewdata_step_base_query' => $baseUrl.'viewdata-step-base-query',
+                        'viewdata_step_search' => $baseUrl.'viewdata-step-search',
+                        'viewdata_step_sort' => $baseUrl.'viewdata-step-sort',
+                        'viewdata_step_paginate' => $baseUrl.'viewdata-step-paginate',
+                        'viewdata_step_return_array' => $baseUrl.'viewdata-step-return-array',
                         'parts_only' => $baseUrl.'render-index-page-paginate-parts-only',
                         'render_content' => $baseUrl.'render-index-page-paginate-render-content',
                         'render_index' => $baseUrl.'render-index-page-paginate-render-index',
@@ -683,6 +718,238 @@ Route::get('/tools/check-czesci-render-now', function () {
                 ], 200);
             } catch (\Throwable $exception) {
                 return $failure($exception, 'render-index-page-paginate-viewdata');
+            }
+        }
+
+        if ($step === 'viewdata-step-start') {
+            try {
+                return response()->json([
+                    'ok' => true,
+                    'stage_entered' => true,
+                    'step' => 'viewdata-step-start',
+                    'controller_class' => \App\Http\Controllers\Storefront\CatalogController::class,
+                    'category_tree_class' => \App\Services\Storefront\CategoryTreeService::class,
+                ], 200);
+            } catch (\Throwable $exception) {
+                return $failure($exception, 'viewdata-step-start');
+            }
+        }
+
+        if ($step === 'viewdata-step-request') {
+            try {
+                $diagnosticRequest = request();
+
+                return response()->json([
+                    'ok' => true,
+                    'stage_entered' => true,
+                    'step' => 'viewdata-step-request',
+                    'request_class' => $diagnosticRequest::class,
+                    'path' => $diagnosticRequest->path(),
+                    'query' => $diagnosticRequest->query(),
+                    'inputs_used_by_viewdata' => [
+                        'q' => $diagnosticRequest->string('q')->toString(),
+                        'part_number' => $diagnosticRequest->string('part_number')->toString(),
+                        'price_from' => $diagnosticRequest->input('price_from', $diagnosticRequest->input('price_min')),
+                        'price_to' => $diagnosticRequest->input('price_to', $diagnosticRequest->input('price_max')),
+                        'producer' => $diagnosticRequest->string('producer')->toString(),
+                        'model' => $diagnosticRequest->string('model')->toString(),
+                        'vehicle_model' => $diagnosticRequest->string('vehicle_model')->toString(),
+                        'category' => $diagnosticRequest->string('category')->toString(),
+                        'sort' => $diagnosticRequest->string('sort')->toString(),
+                    ],
+                ], 200);
+            } catch (\Throwable $exception) {
+                return $failure($exception, 'viewdata-step-request');
+            }
+        }
+
+        if ($step === 'viewdata-step-base-query') {
+            try {
+                $query = \App\Models\Part::query()
+                    ->with(['images', 'category', 'car'])
+                    ->storefrontVisible();
+
+                return response()->json([
+                    'ok' => true,
+                    'stage_entered' => true,
+                    'step' => 'viewdata-step-base-query',
+                    'count_limit_1' => (clone $query)->limit(1)->count(),
+                    'sql' => $query->toSql(),
+                    'bindings' => $query->getBindings(),
+                ], 200);
+            } catch (\Throwable $exception) {
+                return $failure($exception, 'viewdata-step-base-query');
+            }
+        }
+
+        if ($step === 'viewdata-step-search') {
+            try {
+                $diagnosticRequest = request();
+                $query = \App\Models\Part::query()
+                    ->with(['images', 'category', 'car'])
+                    ->storefrontVisible()
+                    ->searchStorefront($diagnosticRequest->string('q')->toString())
+                    ->partNumberSearch($diagnosticRequest->string('part_number')->toString())
+                    ->priceBetween(
+                        $diagnosticRequest->input('price_from', $diagnosticRequest->input('price_min')),
+                        $diagnosticRequest->input('price_to', $diagnosticRequest->input('price_max')),
+                    );
+
+                $producer = trim($diagnosticRequest->string('producer')->toString());
+                if ($producer !== '') {
+                    $query->whereStorefrontDetail('make', $producer);
+                }
+
+                $model = trim($diagnosticRequest->string('model')->toString());
+                if ($model !== '') {
+                    $query->whereStorefrontDetail('model', $model);
+                }
+
+                $vehicleModel = trim($diagnosticRequest->string('vehicle_model')->toString());
+                if ($vehicleModel !== '') {
+                    foreach (preg_split('/\s+/', $vehicleModel) ?: [] as $token) {
+                        $query->where(function (\Illuminate\Database\Eloquent\Builder $inner) use ($token): void {
+                            $like = '%'.$token.'%';
+                            $inner->where('name', 'like', $like)->orWhereHas('car', function (\Illuminate\Database\Eloquent\Builder $carQuery) use ($like): void {
+                                $carQuery->where('make', 'like', $like)
+                                    ->orWhere('model', 'like', $like)
+                                    ->orWhere('model_variant', 'like', $like)
+                                    ->orWhere('engine_code', 'like', $like);
+                            });
+                        });
+                    }
+                }
+
+                $category = trim($diagnosticRequest->string('category')->toString());
+                if ($category !== '') {
+                    $query->whereHas('category', fn (\Illuminate\Database\Eloquent\Builder $categoryQuery) => $categoryQuery->where('slug', $category)->orWhere('name', 'like', '%'.$category.'%'));
+                }
+
+                return response()->json([
+                    'ok' => true,
+                    'stage_entered' => true,
+                    'step' => 'viewdata-step-search',
+                    'count_limit_1' => (clone $query)->limit(1)->count(),
+                    'sql' => $query->toSql(),
+                    'bindings' => $query->getBindings(),
+                ], 200);
+            } catch (\Throwable $exception) {
+                return $failure($exception, 'viewdata-step-search');
+            }
+        }
+
+        if ($step === 'viewdata-step-sort') {
+            try {
+                $diagnosticRequest = request();
+                $query = \App\Models\Part::query()
+                    ->with(['images', 'category', 'car'])
+                    ->storefrontVisible()
+                    ->searchStorefront($diagnosticRequest->string('q')->toString())
+                    ->partNumberSearch($diagnosticRequest->string('part_number')->toString())
+                    ->priceBetween(
+                        $diagnosticRequest->input('price_from', $diagnosticRequest->input('price_min')),
+                        $diagnosticRequest->input('price_to', $diagnosticRequest->input('price_max')),
+                    );
+
+                $producer = trim($diagnosticRequest->string('producer')->toString());
+                if ($producer !== '') {
+                    $query->whereStorefrontDetail('make', $producer);
+                }
+
+                $model = trim($diagnosticRequest->string('model')->toString());
+                if ($model !== '') {
+                    $query->whereStorefrontDetail('model', $model);
+                }
+
+                $vehicleModel = trim($diagnosticRequest->string('vehicle_model')->toString());
+                if ($vehicleModel !== '') {
+                    foreach (preg_split('/\s+/', $vehicleModel) ?: [] as $token) {
+                        $query->where(function (\Illuminate\Database\Eloquent\Builder $inner) use ($token): void {
+                            $like = '%'.$token.'%';
+                            $inner->where('name', 'like', $like)->orWhereHas('car', function (\Illuminate\Database\Eloquent\Builder $carQuery) use ($like): void {
+                                $carQuery->where('make', 'like', $like)
+                                    ->orWhere('model', 'like', $like)
+                                    ->orWhere('model_variant', 'like', $like)
+                                    ->orWhere('engine_code', 'like', $like);
+                            });
+                        });
+                    }
+                }
+
+                $category = trim($diagnosticRequest->string('category')->toString());
+                if ($category !== '') {
+                    $query->whereHas('category', fn (\Illuminate\Database\Eloquent\Builder $categoryQuery) => $categoryQuery->where('slug', $category)->orWhere('name', 'like', '%'.$category.'%'));
+                }
+
+                match ($diagnosticRequest->string('sort')->toString()) {
+                    'price_asc' => $query->orderByRaw('price is null')->orderBy('price'),
+                    'price_desc' => $query->orderByDesc('price'),
+                    'name' => $query->orderBy('name'),
+                    default => $query->latest('updated_at'),
+                };
+
+                return response()->json([
+                    'ok' => true,
+                    'stage_entered' => true,
+                    'step' => 'viewdata-step-sort',
+                    'sort' => $diagnosticRequest->string('sort')->toString(),
+                    'count_limit_1' => (clone $query)->limit(1)->count(),
+                    'sql' => $query->toSql(),
+                    'bindings' => $query->getBindings(),
+                ], 200);
+            } catch (\Throwable $exception) {
+                return $failure($exception, 'viewdata-step-sort');
+            }
+        }
+
+        if ($step === 'viewdata-step-paginate') {
+            try {
+                $controller = app(\App\Http\Controllers\Storefront\CatalogController::class);
+                $reflection = new \ReflectionMethod($controller, 'storefrontQuery');
+                $reflection->setAccessible(true);
+                $partsQuery = $reflection->invoke($controller, request());
+                $parts = $partsQuery->paginate(60)->withQueryString();
+
+                return response()->json([
+                    'ok' => true,
+                    'stage_entered' => true,
+                    'step' => 'viewdata-step-paginate',
+                    'parts' => $paginatorSummary($parts),
+                ], 200);
+            } catch (\Throwable $exception) {
+                return $failure($exception, 'viewdata-step-paginate');
+            }
+        }
+
+        if ($step === 'viewdata-step-return-array') {
+            try {
+                $controller = app(\App\Http\Controllers\Storefront\CatalogController::class);
+                $categoryTree = app(\App\Services\Storefront\CategoryTreeService::class);
+                $filterReflection = new \ReflectionMethod($controller, 'storefrontFilterOptions');
+                $filterReflection->setAccessible(true);
+                $filterOptions = $filterReflection->invoke($controller, \App\Models\Part::query()->storefrontVisible());
+                $categoryRoots = $categoryTree->roots();
+                $data = [
+                    'categoryRoots' => $categoryRoots,
+                    'categoryTreeService' => $categoryTree,
+                    'producers' => $filterOptions['producers'] ?? [],
+                    'models' => $filterOptions['models'] ?? [],
+                    'metaTitle' => 'Katalog części GPSwiss - używane części samochodowe',
+                    'metaDescription' => 'Katalog oryginalnych używanych części samochodowych GPSwiss.',
+                    'breadcrumbs' => [['label' => 'Strona główna', 'url' => route('storefront.home')], ['label' => 'Katalog części']],
+                ];
+
+                return response()->json([
+                    'ok' => true,
+                    'stage_entered' => true,
+                    'step' => 'viewdata-step-return-array',
+                    'data_keys' => array_keys($data),
+                    'category_roots_count' => method_exists($categoryRoots, 'count') ? $categoryRoots->count() : null,
+                    'producers_count' => count($data['producers']),
+                    'models_count' => count($data['models']),
+                ], 200);
+            } catch (\Throwable $exception) {
+                return $failure($exception, 'viewdata-step-return-array');
             }
         }
 
