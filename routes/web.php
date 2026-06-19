@@ -129,6 +129,86 @@ Route::get('/tools/check-czesci-render-now', function () {
             ], 200);
         };
 
+        $partSummary = function ($part) {
+            $mainImage = null;
+
+            try {
+                $mainImage = $part->listingImageUrl();
+            } catch (\Throwable $exception) {
+                $mainImage = null;
+            }
+
+            return [
+                'id' => $part->id ?? null,
+                'name' => $part->name ?? null,
+                'title' => $part->title ?? null,
+                'slug' => $part->slug ?? null,
+                'price' => $part->price ?? null,
+                'main_image' => $mainImage,
+            ];
+        };
+
+        $catalogViewData = function ($perPage = 60) {
+            $controller = app(\App\Http\Controllers\Storefront\CatalogController::class);
+            $categoryTree = app(\App\Services\Storefront\CategoryTreeService::class);
+            $data = $controller->viewData(request(), $categoryTree);
+
+            if ((int) $perPage !== 60) {
+                $parts = \App\Models\Part::query()
+                    ->with(['images', 'category', 'car'])
+                    ->storefrontVisible()
+                    ->searchStorefront(request()->string('q')->toString())
+                    ->partNumberSearch(request()->string('part_number')->toString())
+                    ->priceBetween(
+                        request()->input('price_from', request()->input('price_min')),
+                        request()->input('price_to', request()->input('price_max')),
+                    );
+
+                $producer = trim(request()->string('producer')->toString());
+                if ($producer !== '') {
+                    $parts->whereStorefrontDetail('make', $producer);
+                }
+
+                $model = trim(request()->string('model')->toString());
+                if ($model !== '') {
+                    $parts->whereStorefrontDetail('model', $model);
+                }
+
+                $vehicleModel = trim(request()->string('vehicle_model')->toString());
+                if ($vehicleModel !== '') {
+                    foreach (preg_split('/\s+/', $vehicleModel) ?: [] as $token) {
+                        $parts->where(function ($inner) use ($token) {
+                            $like = '%'.$token.'%';
+                            $inner->where('name', 'like', $like)->orWhereHas('car', function ($carQuery) use ($like) {
+                                $carQuery->where('make', 'like', $like)
+                                    ->orWhere('model', 'like', $like)
+                                    ->orWhere('model_variant', 'like', $like)
+                                    ->orWhere('engine_code', 'like', $like);
+                            });
+                        });
+                    }
+                }
+
+                $category = trim(request()->string('category')->toString());
+                if ($category !== '') {
+                    $parts->whereHas('category', function ($categoryQuery) use ($category) {
+                        $categoryQuery->where('slug', $category)->orWhere('name', 'like', '%'.$category.'%');
+                    });
+                }
+
+                match (request()->string('sort')->toString()) {
+                    'price_asc' => $parts->orderByRaw('price is null')->orderBy('price'),
+                    'price_desc' => $parts->orderByDesc('price'),
+                    'name' => $parts->orderBy('name'),
+                    default => $parts->latest('updated_at'),
+                };
+
+                $data['parts'] = $parts->paginate((int) $perPage)->withQueryString();
+            }
+
+            return $data;
+        };
+
         if ($step === '' || $step === 'index') {
             try {
                 return response()->json([
@@ -144,6 +224,10 @@ Route::get('/tools/check-czesci-render-now', function () {
                         'render-minimal',
                         'render-index-empty',
                         'render-index-one',
+                        'render-index-page',
+                        'render-product-cards-scan',
+                        'render-index-page-small',
+                        'render-index-page-12',
                     ],
                 ], 200);
             } catch (\Throwable $exception) {
@@ -259,6 +343,109 @@ Route::get('/tools/check-czesci-render-now', function () {
                 ], 200);
             } catch (\Throwable $exception) {
                 return $failure($exception, 'render-index-one');
+            }
+        }
+
+        if ($step === 'render-index-page') {
+            try {
+                $data = $catalogViewData(60);
+                $html = view('storefront.catalog.index', $data)->render();
+                $parts = $data['parts'];
+
+                return response()->json([
+                    'ok' => true,
+                    'stage_entered' => true,
+                    'step' => 'render-index-page',
+                    'parts_count' => method_exists($parts, 'count') ? $parts->count() : 0,
+                    'rendered_length' => strlen($html),
+                    'part_ids' => collect($parts)->map(fn ($part) => $part->id)->values()->all(),
+                    'parts' => collect($parts)->map($partSummary)->values()->all(),
+                ], 200);
+            } catch (\Throwable $exception) {
+                return $failure($exception, 'render-index-page');
+            }
+        }
+
+        if ($step === 'render-product-cards-scan') {
+            try {
+                $parts = \App\Models\Part::query()
+                    ->with(['images', 'category', 'car'])
+                    ->storefrontVisible()
+                    ->latest('updated_at')
+                    ->limit(60)
+                    ->get();
+                $failures = [];
+                $passedIds = [];
+
+                foreach ($parts as $index => $part) {
+                    try {
+                        view('storefront.partials.product-card', ['part' => $part])->render();
+                        $passedIds[] = $part->id;
+                    } catch (\Throwable $exception) {
+                        $failures[] = [
+                            'index' => $index,
+                            'part_id' => $part->id ?? null,
+                            'part_name' => $part->name ?? null,
+                            'part_title' => $part->title ?? null,
+                            'exception_class' => $exception::class,
+                            'exception_message' => $exception->getMessage(),
+                            'file' => $exception->getFile(),
+                            'line' => $exception->getLine(),
+                        ];
+                    }
+                }
+
+                return response()->json([
+                    'ok' => count($failures) === 0,
+                    'stage_entered' => true,
+                    'step' => 'render-product-cards-scan',
+                    'tested_count' => $parts->count(),
+                    'failed_count' => count($failures),
+                    'failures' => $failures,
+                    'passed_ids' => $passedIds,
+                ], 200);
+            } catch (\Throwable $exception) {
+                return $failure($exception, 'render-product-cards-scan');
+            }
+        }
+
+        if ($step === 'render-index-page-small') {
+            try {
+                $data = $catalogViewData(3);
+                $html = view('storefront.catalog.index', $data)->render();
+                $parts = $data['parts'];
+
+                return response()->json([
+                    'ok' => true,
+                    'stage_entered' => true,
+                    'step' => 'render-index-page-small',
+                    'parts_count' => method_exists($parts, 'count') ? $parts->count() : 0,
+                    'rendered_length' => strlen($html),
+                    'part_ids' => collect($parts)->map(fn ($part) => $part->id)->values()->all(),
+                    'parts' => collect($parts)->map($partSummary)->values()->all(),
+                ], 200);
+            } catch (\Throwable $exception) {
+                return $failure($exception, 'render-index-page-small');
+            }
+        }
+
+        if ($step === 'render-index-page-12') {
+            try {
+                $data = $catalogViewData(12);
+                $html = view('storefront.catalog.index', $data)->render();
+                $parts = $data['parts'];
+
+                return response()->json([
+                    'ok' => true,
+                    'stage_entered' => true,
+                    'step' => 'render-index-page-12',
+                    'parts_count' => method_exists($parts, 'count') ? $parts->count() : 0,
+                    'rendered_length' => strlen($html),
+                    'part_ids' => collect($parts)->map(fn ($part) => $part->id)->values()->all(),
+                    'parts' => collect($parts)->map($partSummary)->values()->all(),
+                ], 200);
+            } catch (\Throwable $exception) {
+                return $failure($exception, 'render-index-page-12');
             }
         }
 
