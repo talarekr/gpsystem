@@ -37,8 +37,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', [HomeController::class, 'index'])->name('storefront.home');
-Route::get('/sklep', [CatalogController::class, 'index'])->name('storefront.catalog');
-Route::get('/czesci', [CatalogController::class, 'index'])->name('storefront.parts.alias');
+Route::get('/sklep', fn (Request $request) => redirect()->route('storefront.catalog', $request->query(), 301))->name('storefront.shop.legacy');
+Route::get('/czesci', [CatalogController::class, 'index'])->name('storefront.catalog');
 Route::get('/szukaj', [SearchController::class, 'index'])->name('storefront.search');
 Route::get('/koszyk', [CartController::class, 'index'])->name('storefront.cart.index');
 

@@ -2,7 +2,7 @@
 @section('content')
 <div class="sf-container sf-page">
     @include('storefront.partials.breadcrumbs')
-    <h1>Sklep GPSwiss</h1>
+    <h1>Katalog części GPSwiss</h1>
     <div class="sf-shop-layout">
         <div class="sf-sidebar-stack">
             @include('storefront.partials.filters', ['filterAction'=>route('storefront.catalog'), 'producers' => $producers, 'models' => $models])
