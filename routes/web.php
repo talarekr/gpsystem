@@ -130,10 +130,39 @@ Route::get('/tools/check-czesci-render-now', function () {
         };
 
         $partSummary = function ($part) {
+            if (is_int($part)) {
+                return [
+                    'id' => $part,
+                    'scalar' => true,
+                ];
+            }
+
+            if (is_array($part)) {
+                return [
+                    'id' => $part['id'] ?? null,
+                    'name' => $part['name'] ?? null,
+                    'title' => $part['title'] ?? null,
+                    'slug' => $part['slug'] ?? null,
+                    'price' => $part['price'] ?? null,
+                    'main_image' => $part['main_image'] ?? $part['listing_image_url'] ?? null,
+                    'array' => true,
+                ];
+            }
+
+            if (! is_object($part)) {
+                return [
+                    'id' => null,
+                    'scalar' => true,
+                    'type' => gettype($part),
+                ];
+            }
+
             $mainImage = null;
 
             try {
-                $mainImage = $part->listingImageUrl();
+                if (method_exists($part, 'listingImageUrl')) {
+                    $mainImage = $part->listingImageUrl();
+                }
             } catch (\Throwable $exception) {
                 $mainImage = null;
             }
@@ -147,6 +176,8 @@ Route::get('/tools/check-czesci-render-now', function () {
                 'main_image' => $mainImage,
             ];
         };
+
+        $partIds = fn ($parts) => collect($parts)->map($partSummary)->pluck('id')->values()->all();
 
         $catalogViewData = function ($perPage = 60) {
             $controller = app(\App\Http\Controllers\Storefront\CatalogController::class);
@@ -362,7 +393,7 @@ Route::get('/tools/check-czesci-render-now', function () {
                     'step' => 'render-index-page',
                     'parts_count' => method_exists($parts, 'count') ? $parts->count() : 0,
                     'rendered_length' => strlen($html),
-                    'part_ids' => collect($parts)->map(fn ($part) => $part->id)->values()->all(),
+                    'part_ids' => $partIds($parts),
                     'parts' => collect($parts)->map($partSummary)->values()->all(),
                 ], 200);
             } catch (\Throwable $exception) {
@@ -452,7 +483,7 @@ Route::get('/tools/check-czesci-render-now', function () {
                     'stage_entered' => true,
                     'step' => 'render-index-page-small-collect',
                     'count' => $parts->count(),
-                    'ids' => $parts->map(fn ($part) => $part->id)->values()->all(),
+                    'ids' => $partIds($parts),
                     'parts' => $parts->map($partSummary)->values()->all(),
                 ], 200);
             } catch (\Throwable $exception) {
@@ -520,7 +551,7 @@ Route::get('/tools/check-czesci-render-now', function () {
                     'step' => 'render-index-page-small-content-only',
                     'parts_count' => $parts->count(),
                     'rendered_length' => strlen($html),
-                    'part_ids' => collect($parts)->map(fn ($part) => $part->id)->values()->all(),
+                    'part_ids' => $partIds($parts),
                     'parts' => collect($parts)->map($partSummary)->values()->all(),
                 ], 200);
             } catch (\Throwable $exception) {
@@ -554,7 +585,7 @@ Route::get('/tools/check-czesci-render-now', function () {
                     'step' => 'render-index-page-small-index',
                     'parts_count' => $parts->count(),
                     'rendered_length' => strlen($html),
-                    'part_ids' => collect($parts)->map(fn ($part) => $part->id)->values()->all(),
+                    'part_ids' => $partIds($parts),
                     'parts' => collect($parts)->map($partSummary)->values()->all(),
                 ], 200);
             } catch (\Throwable $exception) {
@@ -574,7 +605,7 @@ Route::get('/tools/check-czesci-render-now', function () {
                     'step' => 'render-index-page-12',
                     'parts_count' => method_exists($parts, 'count') ? $parts->count() : 0,
                     'rendered_length' => strlen($html),
-                    'part_ids' => collect($parts)->map(fn ($part) => $part->id)->values()->all(),
+                    'part_ids' => $partIds($parts),
                     'parts' => collect($parts)->map($partSummary)->values()->all(),
                 ], 200);
             } catch (\Throwable $exception) {
