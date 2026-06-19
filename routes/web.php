@@ -102,6 +102,70 @@ Route::get('/tools/check-catalog-view-ping', function (Request $request) {
 })->name('tools.check-catalog-view-ping');
 Route::get('/tools/check-catalog-view', CheckCatalogViewController::class)->name('tools.check-catalog-view');
 Route::get('/tools/check-catalog-view-stage', CheckCatalogViewStageController::class)->name('tools.check-catalog-view-stage');
+Route::get('/tools/clear-view-cache', function (Request $request) {
+    if (
+        ! hash_equals('gps_images_import_2026', (string) $request->query('token', ''))
+        || ! hash_equals('clear', (string) $request->query('confirm', ''))
+    ) {
+        return response()->json([
+            'ok' => false,
+            'error_message' => 'Invalid cache clear token or confirmation.',
+        ], 403);
+    }
+
+    $commands = [
+        'view:clear',
+        'optimize:clear',
+        'route:clear',
+        'config:clear',
+        'cache:clear',
+    ];
+
+    $results = [];
+    foreach ($commands as $command) {
+        $exitCode = \Illuminate\Support\Facades\Artisan::call($command);
+        $results[$command] = [
+            'exit_code' => $exitCode,
+            'output' => \Illuminate\Support\Facades\Artisan::output(),
+        ];
+    }
+
+    return response()->json([
+        'ok' => true,
+        'commands' => $results,
+    ]);
+})->name('tools.clear-view-cache');
+Route::get('/tools/check-header-source', function (Request $request) {
+    if (! hash_equals('gps_images_import_2026', (string) $request->query('token', ''))) {
+        return response()->json([
+            'ok' => false,
+            'error_message' => 'Invalid diagnostics token.',
+        ], 403);
+    }
+
+    $headerPath = resource_path('views/storefront/partials/header.blade.php');
+    $headerExists = is_file($headerPath);
+    $headerSource = $headerExists ? (string) file_get_contents($headerPath) : '';
+    $compiledViews = collect(glob(storage_path('framework/views/*.php')) ?: [])
+        ->sortByDesc(fn (string $path): int => filemtime($path) ?: 0)
+        ->take(10)
+        ->map(fn (string $path): array => [
+            'file' => basename($path),
+            'modified_at' => date('c', filemtime($path) ?: 0),
+            'size' => filesize($path) ?: 0,
+        ])
+        ->values();
+
+    return response()->json([
+        'ok' => true,
+        'header_exists' => $headerExists,
+        'header_first_120_lines' => implode("\n", array_slice(preg_split('/\R/', $headerSource) ?: [], 0, 120)),
+        'contains_at_media' => str_contains($headerSource, '@media'),
+        'contains_escaped_at_media' => str_contains($headerSource, '@@media'),
+        'header_modified_at' => $headerExists ? date('c', filemtime($headerPath) ?: 0) : null,
+        'compiled_views' => $compiledViews,
+    ]);
+})->name('tools.check-header-source');
 Route::get('/tools/check-part-image-presentation', CheckPartImagePresentationController::class)->name('tools.check-part-image-presentation');
 Route::get('/tools/process-part-image-presentation', ProcessPartImagePresentationController::class)->name('tools.process-part-image-presentation');
 Route::get('/tools/process-part-image-presentation-runner', ProcessPartImagePresentationRunnerController::class)->name('tools.process-part-image-presentation-runner');
