@@ -25,7 +25,6 @@ use App\Http\Controllers\Tools\CheckCatalogSearchController;
 use App\Http\Controllers\Tools\CheckCatalogRenderController;
 use App\Http\Controllers\Tools\CheckCatalogViewController;
 use App\Http\Controllers\Tools\CheckCatalogViewStageController;
-use App\Http\Controllers\Tools\CheckCatalogBladeStagesController;
 use App\Http\Controllers\Tools\CheckCatalogErrorController;
 use App\Http\Controllers\Tools\LastLaravelErrorController;
 use App\Http\Controllers\Tools\FixImportedImagesPublicFilesController;
@@ -271,7 +270,127 @@ Route::get('/tools/check-catalog-view-ping', function (Request $request) {
 })->name('tools.check-catalog-view-ping');
 Route::get('/tools/check-catalog-view', CheckCatalogViewController::class)->name('tools.check-catalog-view');
 Route::get('/tools/check-catalog-view-stage', CheckCatalogViewStageController::class)->name('tools.check-catalog-view-stage');
-Route::get('/tools/check-catalog-blade-stages', CheckCatalogBladeStagesController::class)->name('tools.check-catalog-blade-stages');
+Route::get('/tools/check-catalog-blade-stages', function () {
+    try {
+        $trace = function (\Throwable $exception): array {
+            return collect($exception->getTrace())->take(5)->map(fn (array $frame): array => [
+                'file' => $frame['file'] ?? null,
+                'line' => $frame['line'] ?? null,
+                'function' => $frame['function'] ?? null,
+                'class' => $frame['class'] ?? null,
+            ])->values()->all();
+        };
+
+        $fail = function (\Throwable $exception, string $stage) use ($trace) {
+            return response()->json([
+                'ok' => false,
+                'failed_stage' => $stage,
+                'error_class' => $exception::class,
+                'error_message' => $exception->getMessage(),
+                'file' => $exception->getFile(),
+                'line' => $exception->getLine(),
+                'trace' => $trace($exception),
+            ], 200);
+        };
+
+        $result = [
+            'ok' => true,
+            'route_entered' => true,
+            'stages' => [],
+        ];
+
+        try {
+            if (! hash_equals('gps_images_import_2026', (string) request()->query('token', ''))) {
+                return response()->json([
+                    'ok' => false,
+                    'failed_stage' => 'token',
+                    'error_class' => 'AuthorizationException',
+                    'error_message' => 'Invalid diagnostics token.',
+                    'file' => __FILE__,
+                    'line' => __LINE__,
+                    'trace' => [],
+                ], 403);
+            }
+
+            $result['token_valid'] = true;
+        } catch (\Throwable $exception) {
+            return $fail($exception, 'token');
+        }
+
+        try {
+            $requestedStage = strtoupper((string) request()->query('stage', ''));
+            $allowedStages = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
+
+            if ($requestedStage !== '' && ! in_array($requestedStage, $allowedStages, true)) {
+                return response()->json([
+                    'ok' => false,
+                    'failed_stage' => 'stage_parameter',
+                    'error_class' => 'InvalidArgumentException',
+                    'error_message' => 'Invalid stage parameter. Allowed values: A, B, C, D, E, F, G.',
+                    'file' => __FILE__,
+                    'line' => __LINE__,
+                    'trace' => [],
+                ], 422);
+            }
+
+            $stagesToRun = $requestedStage === '' ? $allowedStages : [$requestedStage];
+            $result['requested_stage'] = $requestedStage === '' ? null : $requestedStage;
+        } catch (\Throwable $exception) {
+            return $fail($exception, 'stage_parameter');
+        }
+
+        foreach ($stagesToRun as $stage) {
+            try {
+                if ($stage === 'A') {
+                    $html = '<!doctype html><html><body><h1>Catalog Blade stages diagnostic</h1><p>Inline HTML OK</p></body></html>';
+                } elseif ($stage === 'B') {
+                    $html = \Illuminate\Support\Facades\Blade::render('<div data-stage="B">Catalog Blade diagnostic: {{ $label }}</div>', ['label' => 'simple Blade OK'], deleteCachedView: true);
+                } elseif ($stage === 'C') {
+                    $html = view('storefront.partials.search-bar')->render();
+                } elseif ($stage === 'D') {
+                    $part = \App\Models\Part::query()->storefrontVisible()->first();
+                    $html = view('storefront.partials.product-card', ['part' => $part])->render();
+                } elseif ($stage === 'E') {
+                    $html = \App\Models\Part::query()->storefrontVisible()->paginate(5)->withQueryString()->links()->toHtml();
+                } elseif ($stage === 'F') {
+                    $catalogData = app(\App\Http\Controllers\Storefront\CatalogController::class)->viewData(request(), app(\App\Services\Storefront\CategoryTreeService::class));
+                    $blade = \Illuminate\Support\Facades\File::get(resource_path('views/storefront/catalog/index.blade.php'));
+                    $blade = preg_replace('/^\s*@extends\([^\n]+\)\s*$/m', '', $blade) ?? $blade;
+                    $blade = preg_replace('/^\s*@section\([\'\"]content[\'\"]\)\s*$/m', '', $blade) ?? $blade;
+                    $blade = preg_replace('/^\s*@endsection\s*$/m', '', $blade) ?? $blade;
+                    $html = \Illuminate\Support\Facades\Blade::render($blade, $catalogData, deleteCachedView: true);
+                } else {
+                    $catalogData = app(\App\Http\Controllers\Storefront\CatalogController::class)->viewData(request(), app(\App\Services\Storefront\CategoryTreeService::class));
+                    $html = view('storefront.catalog.index', $catalogData)->render();
+                }
+
+                $result['stages'][$stage] = [
+                    'ok' => true,
+                    'rendered_length' => strlen($html),
+                ];
+            } catch (\Throwable $exception) {
+                return $fail($exception, $stage);
+            }
+        }
+
+        return response()->json($result);
+    } catch (\Throwable $exception) {
+        return response()->json([
+            'ok' => false,
+            'failed_stage' => 'route_outer',
+            'error_class' => $exception::class,
+            'error_message' => $exception->getMessage(),
+            'file' => $exception->getFile(),
+            'line' => $exception->getLine(),
+            'trace' => collect($exception->getTrace())->take(5)->map(fn (array $frame): array => [
+                'file' => $frame['file'] ?? null,
+                'line' => $frame['line'] ?? null,
+                'function' => $frame['function'] ?? null,
+                'class' => $frame['class'] ?? null,
+            ])->values()->all(),
+        ], 200);
+    }
+})->name('tools.check-catalog-blade-stages');
 Route::get('/tools/clear-view-cache', function (Request $request) {
     if (
         ! hash_equals('gps_images_import_2026', (string) $request->query('token', ''))
