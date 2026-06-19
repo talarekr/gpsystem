@@ -85,6 +85,30 @@ Route::get('/tools/check-catalog-search', CheckCatalogSearchController::class)->
 Route::get('/tools/check-catalog-render', CheckCatalogRenderController::class)->name('tools.check-catalog-render');
 Route::get('/tools/check-catalog-error', CheckCatalogErrorController::class)->name('tools.check-catalog-error');
 Route::get('/tools/last-laravel-error', LastLaravelErrorController::class)->name('tools.last-laravel-error');
+Route::get('/tools/mark-log', function (Request $request) {
+    if (! hash_equals('gps_images_import_2026', (string) $request->query('token', ''))) {
+        return response()->json([
+            'ok' => false,
+            'error_message' => 'Invalid diagnostics token.',
+        ], 403);
+    }
+
+    $label = trim((string) $request->query('label', 'manual'));
+    $label = preg_replace('/[^A-Za-z0-9_.:-]+/', '-', $label) ?: 'manual';
+    $timestamp = now()->toIso8601String();
+    $logFile = storage_path('logs/laravel.log');
+
+    \Illuminate\Support\Facades\File::ensureDirectoryExists(dirname($logFile));
+    \Illuminate\Support\Facades\File::append($logFile, "[CATALOG_MARKER] {$label} {$timestamp}\n");
+
+    return response()->json([
+        'ok' => true,
+        'log_file' => $logFile,
+        'label' => $label,
+        'marker' => "[CATALOG_MARKER] {$label} {$timestamp}",
+        'timestamp' => $timestamp,
+    ]);
+})->name('tools.mark-log');
 Route::get('/tools/check-catalog-direct', CheckCatalogDirectController::class)->name('tools.check-catalog-direct');
 Route::get('/tools/check-catalog-view-ping', function (Request $request) {
     if (! hash_equals('gps_images_import_2026', (string) $request->query('token', ''))) {
