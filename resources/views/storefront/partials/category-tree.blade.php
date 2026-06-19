@@ -9,7 +9,7 @@
 <ul class="sf-category-tree sf-category-tree--level-{{ $level }}">
     @foreach($categories as $treeCategory)
         @php
-            $isActive = $activeCategory?->id === $treeCategory->id;
+            $isActive = $activeCategory && (int) $activeCategory->id === (int) $treeCategory->id;
             $isAncestor = ! $isActive && $activeCategoryIds->contains($treeCategory->id);
             $hasChildren = $treeCategory->children->isNotEmpty();
             $isOpen = $hasChildren && $activeCategoryIds->contains($treeCategory->id);
@@ -22,7 +22,7 @@
                     <span class="sf-category-tree__toggle sf-category-tree__toggle--empty" aria-hidden="true"></span>
                 @endif
 
-                <a class="sf-category-tree__link" href="{{ $categoryTreeService->url($treeCategory) }}">
+                <a class="sf-category-tree__link @class(['sf-category-tree__link--active' => $isActive])" href="{{ $categoryTreeService->url($treeCategory) }}">
                     <span>{{ $treeCategory->name }}</span>
                 </a>
             </div>
