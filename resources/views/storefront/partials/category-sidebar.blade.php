@@ -8,24 +8,19 @@
         ? ($activeAncestors->first() ?? $activeCategory)
         : $categoryRoots->first();
 
-    $directBranch = null;
+    $activeCategoryIds = $activeAncestors->pluck('id');
 
-    if ($activeCategory && $activeRoot) {
-        $directBranch = $activeCategory->parent_id === $activeRoot->id
-            ? $activeCategory
-            : $activeAncestors->first(fn ($ancestor) => $ancestor->parent_id === $activeRoot->id);
+    if ($activeCategory) {
+        $activeCategoryIds = $activeCategoryIds->push($activeCategory->id);
     }
 
-    $requestedOpenCategoryId = request()->integer('open_category') ?: null;
-    $openCategoryId = $requestedOpenCategoryId ?: ($directBranch?->id);
     $sidebarCategories = $activeRoot?->children ?? collect();
 @endphp
 
 <aside class="sf-category-sidebar">
     <h3>Kategoria</h3>
 
-    <label class="sf-category-sidebar__select-label" for="storefront-root-category">Kategoria</label>
-    <select id="storefront-root-category" class="sf-category-sidebar__select" onchange="if (this.value) window.location.href = this.value;">
+    <select id="storefront-root-category" class="sf-category-sidebar__select" aria-label="Kategoria" onchange="if (this.value) window.location.href = this.value;">
         @foreach($categoryRoots as $rootCategory)
             <option value="{{ $categoryTreeService->url($rootCategory) }}" @selected($activeRoot?->id === $rootCategory->id)>
                 {{ $rootCategory->name }}
@@ -39,8 +34,7 @@
         'categories' => $sidebarCategories,
         'activeCategory' => $activeCategory,
         'activeRoot' => $activeRoot,
-        'openCategoryId' => $openCategoryId,
+        'activeCategoryIds' => $activeCategoryIds,
         'level' => 0,
-        'maxDepth' => 1,
     ])
 </aside>
