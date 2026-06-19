@@ -1,6 +1,6 @@
 @php
     $categories ??= collect();
-    $activeCategoryId ??= isset($activeCategory) && $activeCategory ? (int) $activeCategory->id : null;
+    $activeCategory ??= null;
     $activeRoot ??= null;
     $activeCategoryIds ??= collect();
     $level ??= 0;
@@ -9,11 +9,10 @@
 <ul class="sf-category-tree sf-category-tree--level-{{ $level }}">
     @foreach($categories as $treeCategory)
         @php
-            $treeCategoryId = (int) $treeCategory->id;
-            $isActive = $activeCategoryId !== null && $activeCategoryId === $treeCategoryId;
-            $isAncestor = ! $isActive && $activeCategoryIds->contains($treeCategoryId);
+            $isActive = $activeCategory?->id === $treeCategory->id;
+            $isAncestor = ! $isActive && $activeCategoryIds->contains($treeCategory->id);
             $hasChildren = $treeCategory->children->isNotEmpty();
-            $isOpen = $hasChildren && $activeCategoryIds->contains($treeCategoryId);
+            $isOpen = $hasChildren && $activeCategoryIds->contains($treeCategory->id);
         @endphp
         <li class="@class(['is-active' => $isActive, 'is-ancestor' => $isAncestor, 'is-branch' => $isOpen])" data-category-tree-item>
             <div class="sf-category-tree__row">
@@ -31,7 +30,7 @@
                 <div @if(! $isOpen) hidden @endif data-category-tree-children>
                     @include('storefront.partials.category-tree', [
                         'categories' => $treeCategory->children,
-                        'activeCategoryId' => $activeCategoryId,
+                        'activeCategory' => $activeCategory,
                         'activeRoot' => $activeRoot,
                         'activeCategoryIds' => $activeCategoryIds,
                         'level' => $level + 1,

@@ -173,14 +173,3 @@
 .sf-category-tree .is-active > .sf-category-tree__row > .sf-category-tree__link small {
     color: #fff;
 }
-
-/* Storefront category sidebar active root */
-.sf-category-sidebar__current {
-    margin-top: 10px;
-}
-
-.sf-category-sidebar__current.is-active {
-    background: var(--navy);
-    color: #fff;
-    font-weight: 800;
-}
