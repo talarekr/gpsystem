@@ -269,3 +269,5 @@
         line-height: 1.55;
     }
 }
+
+.sf-category-menu > summary{font-size:17px;line-height:1}.sf-category-menu > summary::first-letter{font-size:20px}
