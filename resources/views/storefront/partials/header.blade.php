@@ -5,8 +5,12 @@
             gap: 16px;
         }
     }
+    .sf-top__highlight {
+        color: var(--navy);
+        font-weight: 700;
+    }
 </style>
-<header class="sf-top"><div class="sf-container sf-top__inner"><span>Zwrot do 14 dni</span><span>Oryginalne części używane</span><a href="{{ route('storefront.contact') }}">Kontakt</a><span>90 dni gwarancji na Silniki, skrzynie biegów i dyferencjały</span><a href="{{ route('storefront.terms') }}">Regulamin</a></div></header>
+<header class="sf-top"><div class="sf-container sf-top__inner"><a href="{{ route('storefront.contact') }}">Kontakt</a><span class="sf-top__highlight">90 dni gwarancji na Silniki, skrzynie biegów i dyferencjały</span><a href="{{ route('storefront.terms') }}">Regulamin</a></div></header>
 <div class="sf-container sf-main-row">
     @php($storefrontLogoPath = '/storage/brand/logo.png')
     @php($storefrontLogoPublicHtmlPath = dirname(base_path()) . '/public_html/storage/brand/logo.png')
