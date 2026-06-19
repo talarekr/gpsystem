@@ -127,6 +127,11 @@ class Part extends Model
         return $details;
     }
 
+    public function storefrontDetailValue(string $key): ?string
+    {
+        return $this->cleanStorefrontValue($this->formatStorefrontDetailValue($key, $this->storefrontVehicleData()[$key] ?? null));
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -400,6 +405,42 @@ class Part extends Model
         return $query
             ->when(is_numeric($min), fn (Builder $query) => $query->where('price', '>=', (float) $min))
             ->when(is_numeric($max), fn (Builder $query) => $query->where('price', '<=', (float) $max));
+    }
+
+    public function scopeWhereStorefrontDetail(Builder $query, string $key, ?string $value): Builder
+    {
+        $value = trim((string) $value);
+
+        if ($value === '') {
+            return $query;
+        }
+
+        $carColumn = match ($key) {
+            'make', 'model' => $key,
+            default => null,
+        };
+
+        $legacyKeys = match ($key) {
+            'make' => ['vehicle_make', 'make', 'brand', 'manufacturer'],
+            'model' => ['vehicle_model', 'model'],
+            default => [$key],
+        };
+
+        return $query->where(function (Builder $query) use ($key, $value, $carColumn, $legacyKeys): void {
+            if ($carColumn) {
+                $query->orWhereHas('car', fn (Builder $carQuery) => $carQuery->where($carColumn, $value));
+            }
+
+            $query->orWhere('vehicle_snapshot->'.$key, $value);
+
+            foreach ($legacyKeys as $legacyKey) {
+                foreach (['woo_product', 'meta', 'attributes'] as $section) {
+                    $query->orWhere('legacy_payload->'.$section.'->'.$legacyKey, $value);
+                }
+
+                $query->orWhere('legacy_payload->'.$legacyKey, $value);
+            }
+        });
     }
 
     public function scopeForCategory(Builder $query, PartCategory|int|null $category): Builder
