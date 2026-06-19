@@ -57,9 +57,11 @@
     </div>
 </header>
 <div class="sf-container sf-main-row">
-    @php($storefrontLogoPath = '/storage/brand/logo.png')
-    @php($storefrontLogoPublicHtmlPath = dirname(base_path()) . '/public_html/storage/brand/logo.png')
-    @php($storefrontLogoExists = file_exists($storefrontLogoPublicHtmlPath) || file_exists(public_path(ltrim($storefrontLogoPath, '/'))))
+    @php
+        $storefrontLogoPath = '/storage/brand/logo.png';
+        $storefrontLogoPublicHtmlPath = dirname(base_path()) . '/public_html/storage/brand/logo.png';
+        $storefrontLogoExists = file_exists($storefrontLogoPublicHtmlPath) || file_exists(public_path('storage/brand/logo.png'));
+    @endphp
     <a class="sf-logo" href="{{ route('storefront.home') }}" aria-label="GP Swiss - strona główna">
         @if($storefrontLogoExists)
             <img src="{{ $storefrontLogoPath }}" alt="GP Swiss" style="display:block;height:clamp(38px,8vw,50px);width:auto;max-width:100%;object-fit:contain;">
