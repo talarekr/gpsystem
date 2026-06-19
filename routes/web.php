@@ -26,7 +26,6 @@ use App\Http\Controllers\Tools\CheckCatalogRenderController;
 use App\Http\Controllers\Tools\CheckCatalogViewController;
 use App\Http\Controllers\Tools\CheckCatalogViewStageController;
 use App\Http\Controllers\Tools\CheckCatalogErrorController;
-use App\Http\Controllers\Tools\CheckCatalogDirectController;
 use App\Http\Controllers\Tools\LastLaravelErrorController;
 use App\Http\Controllers\Tools\FixImportedImagesPublicFilesController;
 use App\Http\Controllers\Tools\ImportedImagesStorageReportController;
@@ -109,7 +108,152 @@ Route::get('/tools/mark-log', function (Request $request) {
         'timestamp' => $timestamp,
     ]);
 })->name('tools.mark-log');
-Route::get('/tools/check-catalog-direct', CheckCatalogDirectController::class)->name('tools.check-catalog-direct');
+Route::get('/tools/check-catalog-direct', function () {
+    try {
+        $trace = function (\Throwable $exception): array {
+            return collect($exception->getTrace())->take(5)->map(fn (array $frame): array => [
+                'file' => $frame['file'] ?? null,
+                'line' => $frame['line'] ?? null,
+                'function' => $frame['function'] ?? null,
+                'class' => $frame['class'] ?? null,
+            ])->values()->all();
+        };
+
+        $fail = function (\Throwable $exception, string $stage) use ($trace) {
+            return response()->json([
+                'ok' => false,
+                'failed_stage' => $stage,
+                'error_class' => $exception::class,
+                'error_message' => $exception->getMessage(),
+                'file' => $exception->getFile(),
+                'line' => $exception->getLine(),
+                'trace' => $trace($exception),
+            ], 200);
+        };
+
+        $result = [
+            'ok' => true,
+            'route_entered' => true,
+        ];
+
+        try {
+            if (! hash_equals('gps_images_import_2026', (string) request()->query('token', ''))) {
+                return response()->json([
+                    'ok' => false,
+                    'failed_stage' => 'stage_token',
+                    'error_class' => 'AuthorizationException',
+                    'error_message' => 'Invalid diagnostics token.',
+                    'file' => __FILE__,
+                    'line' => __LINE__,
+                    'trace' => [],
+                ], 403);
+            }
+
+            $result['stage_token'] = true;
+        } catch (\Throwable $exception) {
+            return $fail($exception, 'stage_token');
+        }
+
+        try {
+            $result['stage_part_model_exists'] = class_exists(\App\Models\Part::class);
+        } catch (\Throwable $exception) {
+            return $fail($exception, 'stage_part_model_exists');
+        }
+
+        try {
+            $result['stage_part_count'] = \App\Models\Part::query()->count();
+        } catch (\Throwable $exception) {
+            return $fail($exception, 'stage_part_count');
+        }
+
+        try {
+            $result['stage_catalog_controller_exists'] = class_exists(\App\Http\Controllers\Storefront\CatalogController::class);
+        } catch (\Throwable $exception) {
+            return $fail($exception, 'stage_catalog_controller_exists');
+        }
+
+        try {
+            $result['stage_catalog_route_exists'] = collect(\Illuminate\Support\Facades\Route::getRoutes())->contains(
+                fn ($route): bool => in_array('GET', $route->methods(), true) && $route->uri() === 'czesci'
+            );
+        } catch (\Throwable $exception) {
+            return $fail($exception, 'stage_catalog_route_exists');
+        }
+
+        try {
+            $result['stage_catalog_view_exists'] = view()->exists('storefront.catalog.index');
+        } catch (\Throwable $exception) {
+            return $fail($exception, 'stage_catalog_view_exists');
+        }
+
+        return response()->json($result);
+    } catch (\Throwable $exception) {
+        return response()->json([
+            'ok' => false,
+            'failed_stage' => 'route_outer',
+            'error_class' => $exception::class,
+            'error_message' => $exception->getMessage(),
+            'file' => $exception->getFile(),
+            'line' => $exception->getLine(),
+            'trace' => collect($exception->getTrace())->take(5)->map(fn (array $frame): array => [
+                'file' => $frame['file'] ?? null,
+                'line' => $frame['line'] ?? null,
+                'function' => $frame['function'] ?? null,
+                'class' => $frame['class'] ?? null,
+            ])->values()->all(),
+        ], 200);
+    }
+})->name('tools.check-catalog-direct');
+Route::get('/tools/check-catalog-minimal-view', function () {
+    try {
+        if (! hash_equals('gps_images_import_2026', (string) request()->query('token', ''))) {
+            return response()->json([
+                'ok' => false,
+                'error_class' => 'AuthorizationException',
+                'error_message' => 'Invalid diagnostics token.',
+                'file' => __FILE__,
+                'line' => __LINE__,
+                'trace' => [],
+            ], 403);
+        }
+
+        $parts = \App\Models\Part::query()->limit(5)->get(['id', 'name', 'part_number']);
+        $items = $parts->map(fn ($part): array => [
+            'id' => $part->id,
+            'name' => $part->name,
+            'part_number' => $part->part_number,
+        ])->values();
+
+        if ((string) request()->query('render', '') === '1') {
+            $html = '<!doctype html><html><head><meta charset="utf-8"><title>Catalog minimal diagnostic</title></head><body><h1>Catalog minimal diagnostic</h1><ul>';
+
+            foreach ($items as $part) {
+                $html .= '<li>#'.e((string) $part['id']).' '.e((string) $part['name']).' — '.e((string) ($part['part_number'] ?? '')).'</li>';
+            }
+
+            return response($html.'</ul></body></html>');
+        }
+
+        return response()->json([
+            'ok' => true,
+            'parts' => $items,
+        ]);
+    } catch (\Throwable $exception) {
+        return response()->json([
+            'ok' => false,
+            'error_class' => $exception::class,
+            'error_message' => $exception->getMessage(),
+            'file' => $exception->getFile(),
+            'line' => $exception->getLine(),
+            'trace' => collect($exception->getTrace())->take(5)->map(fn (array $frame): array => [
+                'file' => $frame['file'] ?? null,
+                'line' => $frame['line'] ?? null,
+                'function' => $frame['function'] ?? null,
+                'class' => $frame['class'] ?? null,
+            ])->values()->all(),
+        ], 200);
+    }
+})->name('tools.check-catalog-minimal-view');
 Route::get('/tools/check-catalog-view-ping', function (Request $request) {
     if (! hash_equals('gps_images_import_2026', (string) $request->query('token', ''))) {
         return response()->json([
