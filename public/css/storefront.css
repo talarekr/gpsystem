@@ -166,8 +166,13 @@
 }
 
 /* Active final category in storefront sidebar */
-.sf-category-tree .is-active > .sf-category-tree__row > .sf-category-tree__link--active {
+.sf-category-tree .is-active > .sf-category-tree__row > .sf-category-tree__link--active,
+.sf-category-tree .is-active > .sf-category-tree__row > .sf-category-tree__link--active > .sf-category-tree__label--active {
     background: transparent;
     color: var(--navy);
     font-weight: 700;
+}
+
+.sf-category-tree .is-active > .sf-category-tree__row > .sf-category-tree__link--active {
+    background: transparent;
 }

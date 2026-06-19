@@ -2,6 +2,7 @@
     $categoryTreeService ??= app(\App\Services\Storefront\CategoryTreeService::class);
     $categoryRoots ??= $categoryTreeService->roots();
     $activeCategory ??= null;
+    $activeCategoryId = $activeCategory ? (int) $activeCategory->id : null;
 
     $activeAncestors = $activeCategory ? $categoryTreeService->ancestors($activeCategory) : collect();
     $activeRoot = $activeCategory
@@ -33,6 +34,7 @@
     @include('storefront.partials.category-tree', [
         'categories' => $sidebarCategories,
         'activeCategory' => $activeCategory,
+        'activeCategoryId' => $activeCategoryId,
         'activeRoot' => $activeRoot,
         'activeCategoryIds' => $activeCategoryIds,
         'level' => 0,
