@@ -1,7 +1,15 @@
 <div class="sf-promo">Części samochodowe z demontażu - szybka wysyłka i pomoc w doborze po VIN <button aria-label="Zamknij">×</button></div>
 <header class="sf-top"><div class="sf-container sf-top__inner"><span>Zwrot do 14 dni</span><span>Oryginalne części używane</span><span>Pomoc: biuro@gpswiss.pl</span></div></header>
 <div class="sf-container sf-main-row">
-    <a class="sf-logo" href="{{ route('storefront.home') }}"><span>GP</span>Swiss</a>
+    @php($storefrontLogoPath = '/storage/brand/logo.png')
+    @php($storefrontLogoExists = file_exists(public_path(ltrim($storefrontLogoPath, '/'))))
+    <a class="sf-logo" href="{{ route('storefront.home') }}" aria-label="GP Swiss - strona główna">
+        @if($storefrontLogoExists)
+            <img src="{{ $storefrontLogoPath }}" alt="GP Swiss" style="display:block;max-width:180px;max-height:64px;width:auto;height:auto;">
+        @else
+            <span>GP</span>Swiss
+        @endif
+    </a>
     @include('storefront.partials.search-bar')
     <details class="sf-profile"><summary>Moje konto</summary><div><a href="#">Logowanie</a><a href="#">Zamówienia</a></div></details>
     <a class="sf-cart" href="{{ route('storefront.cart.index') }}">Koszyk <b>{{ $storefrontCartCount ?? 0 }}</b></a>
