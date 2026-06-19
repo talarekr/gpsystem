@@ -25,6 +25,7 @@ use App\Http\Controllers\Tools\CheckCatalogSearchController;
 use App\Http\Controllers\Tools\CheckCatalogRenderController;
 use App\Http\Controllers\Tools\CheckCatalogViewController;
 use App\Http\Controllers\Tools\CheckCatalogViewStageController;
+use App\Http\Controllers\Tools\CheckCatalogBladeStagesController;
 use App\Http\Controllers\Tools\CheckCatalogErrorController;
 use App\Http\Controllers\Tools\LastLaravelErrorController;
 use App\Http\Controllers\Tools\FixImportedImagesPublicFilesController;
@@ -270,6 +271,7 @@ Route::get('/tools/check-catalog-view-ping', function (Request $request) {
 })->name('tools.check-catalog-view-ping');
 Route::get('/tools/check-catalog-view', CheckCatalogViewController::class)->name('tools.check-catalog-view');
 Route::get('/tools/check-catalog-view-stage', CheckCatalogViewStageController::class)->name('tools.check-catalog-view-stage');
+Route::get('/tools/check-catalog-blade-stages', CheckCatalogBladeStagesController::class)->name('tools.check-catalog-blade-stages');
 Route::get('/tools/clear-view-cache', function (Request $request) {
     if (
         ! hash_equals('gps_images_import_2026', (string) $request->query('token', ''))
