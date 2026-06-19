@@ -174,12 +174,16 @@
     color: #fff;
 }
 
+.sf-category-hero > .sf-container {
+    padding-top: 0;
+    padding-bottom: 0;
+}
+
 .sf-category-hero__inner {
     position: relative;
     overflow: hidden;
     margin-top: 24px;
-    padding-top: 34px;
-    padding-bottom: 36px;
+    padding: 34px 12px 36px;
     border: 1px solid rgba(7, 21, 46, .16);
     border-radius: 12px;
     background-color: #07152e;
