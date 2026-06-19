@@ -10,11 +10,16 @@
 <ul class="sf-category-tree sf-category-tree--level-{{ $level }}">
     @foreach($categories as $treeCategory)
         @php
-            $categoryUrl = $categoryTreeService->url($treeCategory);
+            try {
+                $categoryUrl = $categoryTreeService->url($treeCategory);
+            } catch (Throwable $exception) {
+                $categoryUrl = route('storefront.catalog');
+            }
             $isCurrentUrl = trim(parse_url($categoryUrl, PHP_URL_PATH), '/') === trim(request()->path(), '/');
             $isActive = $isCurrentUrl;
             $isAncestor = ! $isActive && $activeCategoryIds->contains($treeCategory->id);
-            $hasChildren = $treeCategory->children->isNotEmpty();
+            $children = $treeCategory->children ?? collect();
+            $hasChildren = $children->isNotEmpty();
             $isOpen = $hasChildren && $activeCategoryIds->contains($treeCategory->id);
         @endphp
         <li class="@class(['is-active' => $isActive, 'is-ancestor' => $isAncestor, 'is-branch' => $isOpen])" data-category-tree-item>
@@ -32,7 +37,7 @@
             @if($hasChildren)
                 <div @if(! $isOpen) hidden @endif data-category-tree-children>
                     @include('storefront.partials.category-tree', [
-                        'categories' => $treeCategory->children,
+                        'categories' => $children,
                         'activeCategory' => $activeCategory,
                         'activeCategoryId' => $activeCategoryId,
                         'activeRoot' => $activeRoot,
