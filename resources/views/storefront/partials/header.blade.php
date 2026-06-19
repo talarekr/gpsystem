@@ -32,6 +32,10 @@
         gap: 24px;
         flex: 1 1 auto;
     }
+    .sf-phones a {
+        color: inherit;
+        text-decoration: inherit;
+    }
     @media (min-width: 768px) {
         .sf-top .sf-top__inner {
             flex-wrap: nowrap;
@@ -88,5 +92,5 @@
             <a href="{{ $url }}">{{ $label }}</a>
         @endforeach
     </div>
-    <span class="sf-phones">📞 +48 504 266 984&nbsp;&nbsp; +48 579 152 665</span>
+    <span class="sf-phones">📞 <a href="tel:+48504266984">+48 504 266 984</a>&nbsp;&nbsp; <a href="tel:+48579152665">+48 579 152 665</a></span>
 </div></nav>
