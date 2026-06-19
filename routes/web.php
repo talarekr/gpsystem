@@ -273,7 +273,7 @@ Route::get('/tools/check-catalog-view-stage', CheckCatalogViewStageController::c
 Route::get('/tools/check-catalog-blade-stages', function () {
     try {
         $trace = function (\Throwable $exception): array {
-            return collect($exception->getTrace())->take(5)->map(fn (array $frame): array => [
+            return collect($exception->getTrace())->take(10)->map(fn (array $frame): array => [
                 'file' => $frame['file'] ?? null,
                 'line' => $frame['line'] ?? null,
                 'function' => $frame['function'] ?? null,
@@ -354,11 +354,7 @@ Route::get('/tools/check-catalog-blade-stages', function () {
                     $html = \App\Models\Part::query()->storefrontVisible()->paginate(5)->withQueryString()->links()->toHtml();
                 } elseif ($stage === 'F') {
                     $catalogData = app(\App\Http\Controllers\Storefront\CatalogController::class)->viewData(request(), app(\App\Services\Storefront\CategoryTreeService::class));
-                    $blade = \Illuminate\Support\Facades\File::get(resource_path('views/storefront/catalog/index.blade.php'));
-                    $blade = preg_replace('/^\s*@extends\([^\n]+\)\s*$/m', '', $blade) ?? $blade;
-                    $blade = preg_replace('/^\s*@section\([\'\"]content[\'\"]\)\s*$/m', '', $blade) ?? $blade;
-                    $blade = preg_replace('/^\s*@endsection\s*$/m', '', $blade) ?? $blade;
-                    $html = \Illuminate\Support\Facades\Blade::render($blade, $catalogData, deleteCachedView: true);
+                    $html = view('storefront.catalog._content', $catalogData)->render();
                 } else {
                     $catalogData = app(\App\Http\Controllers\Storefront\CatalogController::class)->viewData(request(), app(\App\Services\Storefront\CategoryTreeService::class));
                     $html = view('storefront.catalog.index', $catalogData)->render();
@@ -382,7 +378,7 @@ Route::get('/tools/check-catalog-blade-stages', function () {
             'error_message' => $exception->getMessage(),
             'file' => $exception->getFile(),
             'line' => $exception->getLine(),
-            'trace' => collect($exception->getTrace())->take(5)->map(fn (array $frame): array => [
+            'trace' => collect($exception->getTrace())->take(10)->map(fn (array $frame): array => [
                 'file' => $frame['file'] ?? null,
                 'line' => $frame['line'] ?? null,
                 'function' => $frame['function'] ?? null,

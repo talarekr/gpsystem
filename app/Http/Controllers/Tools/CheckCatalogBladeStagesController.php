@@ -9,7 +9,6 @@ use App\Services\Storefront\CategoryTreeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Blade;
-use Illuminate\Support\Facades\File;
 use Throwable;
 
 class CheckCatalogBladeStagesController extends Controller
@@ -71,13 +70,7 @@ class CheckCatalogBladeStagesController extends Controller
     /** @param array<string, mixed> $data */
     private function renderCatalogIndexWithoutLayout(array $data): string
     {
-        $path = resource_path('views/storefront/catalog/index.blade.php');
-        $blade = File::get($path);
-        $blade = preg_replace('/^\s*@extends\([^\n]+\)\s*$/m', '', $blade) ?? $blade;
-        $blade = preg_replace('/^\s*@section\([\'\"]content[\'\"]\)\s*$/m', '', $blade) ?? $blade;
-        $blade = preg_replace('/^\s*@endsection\s*$/m', '', $blade) ?? $blade;
-
-        return Blade::render($blade, $data, deleteCachedView: true);
+        return view('storefront.catalog._content', $data)->render();
     }
 
     /** @return array<string, mixed> */
@@ -89,7 +82,7 @@ class CheckCatalogBladeStagesController extends Controller
             'error_message' => $exception->getMessage(),
             'file' => $exception->getFile(),
             'line' => $exception->getLine(),
-            'trace' => collect($exception->getTrace())->take(5)->map(fn (array $frame): array => [
+            'trace' => collect($exception->getTrace())->take(10)->map(fn (array $frame): array => [
                 'file' => $frame['file'] ?? null,
                 'line' => $frame['line'] ?? null,
                 'function' => $frame['function'] ?? null,
