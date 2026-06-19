@@ -3,28 +3,28 @@
 namespace App\Http\Controllers\Tools;
 
 use App\Http\Controllers\Controller;
-use App\Http\Controllers\Storefront\CatalogController;
-use App\Services\Storefront\CategoryTreeService;
-use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 use Throwable;
 
 class CheckCatalogViewController extends Controller
 {
-    public function __invoke(Request $request, CatalogController $catalog, CategoryTreeService $categoryTree): JsonResponse
+    public function __invoke()
     {
-        if (! hash_equals('gps_images_import_2026', (string) $request->query('token', ''))) {
-            return response()->json([
-                'ok' => false,
-                'error_class' => 'AuthorizationException',
-                'error_message' => 'Invalid diagnostics token.',
-                'file' => __FILE__,
-                'line' => __LINE__,
-                'trace' => [],
-            ], 403);
-        }
-
         try {
+            $request = request();
+
+            if (! hash_equals('gps_images_import_2026', (string) $request->query('token', ''))) {
+                return response()->json([
+                    'ok' => false,
+                    'error_class' => 'AuthorizationException',
+                    'error_message' => 'Invalid diagnostics token.',
+                    'file' => __FILE__,
+                    'line' => __LINE__,
+                    'trace' => [],
+                ], 403);
+            }
+
+            $catalog = app(\App\Http\Controllers\Storefront\CatalogController::class);
+            $categoryTree = app(\App\Services\Storefront\CategoryTreeService::class);
             $html = view('storefront.catalog.index', $catalog->viewData($request, $categoryTree))->render();
 
             return response()->json([
