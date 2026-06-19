@@ -60,10 +60,13 @@ class StorefrontCategorySidebarTest extends TestCase
 
         $response->assertOk();
         $response->assertDontSee('sf-subcategory-tiles', false);
-        $response->assertSee('sf-category-sidebar__current', false);
+        $response->assertSee('<h3>Kategoria</h3>', false);
+        $response->assertSee('sf-category-sidebar__section-title', false);
+        $response->assertSee('<option value="http://localhost/kategoria-produktu/silnik-i-osprzet" selected>', false);
         $response->assertSee('Kompletne silniki');
         $response->assertSee('Silniki benzynowe');
-        $response->assertDontSee('Osprzęt silnika');
+        $response->assertSee('Osprzęt silnika');
+        $response->assertSee('−</a>', false);
         $response->assertDontSee('Karoseria');
         $response->assertDontSee('Drzwi');
     }

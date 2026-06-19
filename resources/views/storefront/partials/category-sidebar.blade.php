@@ -2,38 +2,45 @@
     $categoryTreeService ??= app(\App\Services\Storefront\CategoryTreeService::class);
     $categoryRoots ??= $categoryTreeService->roots();
     $activeCategory ??= null;
-    $activeAncestorIds = [];
 
-    if ($activeCategory) {
-        $activeChildren = $activeCategory->children ?? collect();
-        $allCategories = $categoryTreeService->all();
-        $parentCategory = $activeCategory->parent_id ? $allCategories->get($activeCategory->parent_id) : null;
+    $activeAncestors = $activeCategory ? $categoryTreeService->ancestors($activeCategory) : collect();
+    $activeRoot = $activeCategory
+        ? ($activeAncestors->first() ?? $activeCategory)
+        : $categoryRoots->first();
 
-        $sidebarCategories = $activeChildren->isNotEmpty()
-            ? $activeChildren
-            : ($parentCategory?->children ?? collect([$activeCategory]));
-    } else {
-        $sidebarCategories = $categoryRoots;
+    $directBranch = null;
+
+    if ($activeCategory && $activeRoot) {
+        $directBranch = $activeCategory->parent_id === $activeRoot->id
+            ? $activeCategory
+            : $activeAncestors->first(fn ($ancestor) => $ancestor->parent_id === $activeRoot->id);
     }
+
+    $requestedOpenCategoryId = request()->integer('open_category') ?: null;
+    $openCategoryId = $requestedOpenCategoryId ?: ($directBranch?->id);
+    $sidebarCategories = $activeRoot?->children ?? collect();
 @endphp
 
 <aside class="sf-category-sidebar">
-    <h3>{{ $activeCategory ? 'Kategorie w tej sekcji' : 'Kategorie części' }}</h3>
+    <h3>Kategoria</h3>
 
-    @if($activeCategory)
-        <a class="sf-category-sidebar__current" href="{{ $categoryTreeService->url($activeCategory) }}">
-            <span>{{ $activeCategory->name }}</span>
-            @if(! is_null($activeCategory->woo_product_count))
-                <small>{{ $activeCategory->woo_product_count }}</small>
-            @endif
-        </a>
-    @endif
+    <label class="sf-category-sidebar__select-label" for="storefront-root-category">Kategoria</label>
+    <select id="storefront-root-category" class="sf-category-sidebar__select" onchange="if (this.value) window.location.href = this.value;">
+        @foreach($categoryRoots as $rootCategory)
+            <option value="{{ $categoryTreeService->url($rootCategory) }}" @selected($activeRoot?->id === $rootCategory->id)>
+                {{ $rootCategory->name }}
+            </option>
+        @endforeach
+    </select>
+
+    <h4 class="sf-category-sidebar__section-title">Podkategorie</h4>
 
     @include('storefront.partials.category-tree', [
         'categories' => $sidebarCategories,
         'activeCategory' => $activeCategory,
-        'activeAncestorIds' => $activeAncestorIds,
+        'activeRoot' => $activeRoot,
+        'openCategoryId' => $openCategoryId,
         'level' => 0,
-        'maxDepth' => 0,
+        'maxDepth' => 1,
     ])
 </aside>
