@@ -32,17 +32,18 @@
     <details class="sf-profile">
         <summary><span aria-hidden="true">👤</span> Moje konto</summary>
         <div>
-            @auth
+            <?php $storefrontCustomer = auth()->user(); ?>
+            <?php if ($storefrontCustomer): ?>
                 <a href="{{ route('storefront.account') }}">Panel klienta</a>
                 <a href="{{ route('storefront.account') }}#orders">Zamówienia</a>
                 <form method="post" action="{{ route('storefront.logout') }}">
-                    @csrf
+                    <input type="hidden" name="_token" value="{{ csrf_token() }}">
                     <button type="submit">Wyloguj się</button>
                 </form>
-            @else
+            <?php else: ?>
                 <a href="{{ route('storefront.login') }}">Zaloguj się</a>
                 <a href="{{ route('storefront.register') }}">Zarejestruj się</a>
-            @endauth
+            <?php endif; ?>
         </div>
     </details>
     <a class="sf-cart sf-cart--icon" href="{{ route('storefront.cart.index') }}" aria-label="Koszyk"><span aria-hidden="true">🛒</span><b>{{ $storefrontCartCount ?? 0 }}</b></a>
@@ -58,9 +59,9 @@
 <nav class="sf-nav"><div class="sf-container sf-nav__inner">
     @include('storefront.partials.category-menu')
     <div class="sf-nav__links" aria-label="Menu główne">
-        @foreach($storefrontMainLinks as $label => $url)
+        <?php foreach ($storefrontMainLinks as $label => $url): ?>
             <a href="{{ $url }}">{{ $label }}</a>
-        @endforeach
+        <?php endforeach; ?>
     </div>
     <span class="sf-phones">📞 <a href="tel:+48504266984">+48 504 266 984</a>&nbsp;&nbsp; <a href="tel:+48579152665">+48 579 152 665</a></span>
 </div></nav>
