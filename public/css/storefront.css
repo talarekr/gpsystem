@@ -350,14 +350,14 @@
 .sf-profile > div {
     position: absolute;
     top: calc(100% + 8px);
-    left: 50%;
-    transform: translateX(-50%);
+    left: 0;
+    transform: none;
     z-index: 9999;
     display: grid;
     gap: 8px;
-    width: 200px;
-    min-width: 180px;
-    max-width: 210px;
+    width: clamp(220px, 18vw, 260px);
+    min-width: 220px;
+    max-width: none;
     margin-top: 0;
     padding: 14px;
     overflow: visible;
@@ -388,4 +388,13 @@
 
 .sf-profile > div form {
     margin: 0;
+}
+
+@media(max-width:767px){
+    .sf-profile > div {
+        right: 0;
+        left: auto;
+        width: min(240px, calc(100vw - 24px));
+        min-width: 0;
+    }
 }
