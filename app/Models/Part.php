@@ -9,10 +9,14 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Schema;
 
 class Part extends Model
 {
     use HasFactory;
+
+    /** @var array<string, bool> */
+    private static array $columnExistsCache = [];
 
     protected $fillable = [
         'source_system','external_id','sku','name','slug','legacy_url','legacy_slug','part_number','oem_number','manufacturer_code','short_description','description','condition_notes','code_photo_path',
@@ -386,22 +390,26 @@ class Part extends Model
                 'description',
                 'vehicle_snapshot',
                 'legacy_payload',
-            ], $value);
+            ], $value, false, 'parts');
 
-            $query->orWhereHas('car', function (Builder $carQuery) use ($value): void {
-                $this->applyCaseInsensitiveLike($carQuery, [
-                    'make',
-                    'model',
-                    'model_variant',
-                    'fuel_type',
-                    'engine_code',
-                    'engine_capacity_cm3',
-                    'gearbox_type',
-                    'gearbox_code',
-                    'body_type',
-                    'drivetrain',
-                ], $value);
-            });
+            $carColumns = $this->existingColumns('cars', [
+                'make',
+                'model',
+                'model_variant',
+                'fuel_type',
+                'engine_code',
+                'engine_capacity_cm3',
+                'gearbox_type',
+                'gearbox_code',
+                'body_type',
+                'drivetrain',
+            ]);
+
+            if ($carColumns !== []) {
+                $query->orWhereHas('car', function (Builder $carQuery) use ($value, $carColumns): void {
+                    $this->applyCaseInsensitiveLike($carQuery, $carColumns, $value, false, 'cars');
+                });
+            }
         });
     }
 
@@ -424,21 +432,21 @@ class Part extends Model
                 'description',
                 'vehicle_snapshot',
                 'legacy_payload',
-            ], $value, true);
+            ], $value, true, 'parts');
         });
     }
 
     /**
      * @param array<int, string> $columns
      */
-    private function applyCaseInsensitiveLike(Builder $query, array $columns, string $value, bool $includeNormalized = false): void
+    private function applyCaseInsensitiveLike(Builder $query, array $columns, string $value, bool $includeNormalized = false, string $table = 'parts'): void
     {
         $grammar = $query->getQuery()->getGrammar();
         $driver = $query->getConnection()->getDriverName();
         $like = '%'.mb_strtolower($value).'%';
         $normalized = '%'.str_replace([' ', '-', '_'], '', mb_strtoupper($value)).'%';
 
-        foreach ($columns as $column) {
+        foreach ($this->existingColumns($table, $columns) as $column) {
             $wrapped = $grammar->wrap($column);
             $cast = in_array($driver, ['mysql', 'mariadb'], true)
                 ? "CAST($wrapped AS CHAR)"
@@ -450,6 +458,22 @@ class Part extends Model
                 $query->orWhereRaw("UPPER(REPLACE(REPLACE(REPLACE(COALESCE($cast, ''), ' ', ''), '-', ''), '_', '')) LIKE ?", [$normalized]);
             }
         }
+    }
+
+    /**
+     * @param array<int, string> $columns
+     * @return array<int, string>
+     */
+    private function existingColumns(string $table, array $columns): array
+    {
+        return array_values(array_filter($columns, fn (string $column): bool => $this->hasDbColumn($table, $column)));
+    }
+
+    private function hasDbColumn(string $table, string $column): bool
+    {
+        $key = $table.'.'.$column;
+
+        return self::$columnExistsCache[$key] ??= Schema::hasColumn($table, $column);
     }
 
     public function scopePriceBetween(Builder $query, mixed $min, mixed $max): Builder
@@ -479,18 +503,22 @@ class Part extends Model
         };
 
         return $query->where(function (Builder $query) use ($key, $value, $carColumn, $legacyKeys): void {
-            if ($carColumn) {
+            if ($carColumn && $this->hasDbColumn('cars', $carColumn)) {
                 $query->orWhereHas('car', fn (Builder $carQuery) => $carQuery->where($carColumn, $value));
             }
 
-            $query->orWhere('vehicle_snapshot->'.$key, $value);
+            if ($this->hasDbColumn('parts', 'vehicle_snapshot')) {
+                $query->orWhere('vehicle_snapshot->'.$key, $value);
+            }
 
-            foreach ($legacyKeys as $legacyKey) {
-                foreach (['woo_product', 'meta', 'attributes'] as $section) {
-                    $query->orWhere('legacy_payload->'.$section.'->'.$legacyKey, $value);
+            if ($this->hasDbColumn('parts', 'legacy_payload')) {
+                foreach ($legacyKeys as $legacyKey) {
+                    foreach (['woo_product', 'meta', 'attributes'] as $section) {
+                        $query->orWhere('legacy_payload->'.$section.'->'.$legacyKey, $value);
+                    }
+
+                    $query->orWhere('legacy_payload->'.$legacyKey, $value);
                 }
-
-                $query->orWhere('legacy_payload->'.$legacyKey, $value);
             }
         });
     }
