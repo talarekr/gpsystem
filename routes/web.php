@@ -97,6 +97,46 @@ Route::get('/tools/check-czesci-render-ping', function () {
         'stage' => 'check-czesci-render-ping',
     ]);
 })->name('tools.check-czesci-render-ping');
+Route::get('/tools/check-czesci-final', function (Request $request) {
+    if (! hash_equals('gps_images_import_2026', (string) $request->query('token', ''))) {
+        return response()->json([
+            'ok' => false,
+            'error_message' => 'Invalid diagnostics token.',
+        ], 403);
+    }
+
+    try {
+        /** @var CatalogController $controller */
+        $controller = app(CatalogController::class);
+        $data = $controller->viewData($request);
+        $html = view('storefront.catalog.index', $data)->render();
+        $parts = $data['parts'] ?? null;
+
+        return response()->json([
+            'ok' => true,
+            'parts_count' => method_exists($parts, 'count') ? $parts->count() : null,
+            'total' => method_exists($parts, 'total') ? $parts->total() : null,
+            'per_page' => method_exists($parts, 'perPage') ? $parts->perPage() : null,
+            'rendered_length' => strlen($html),
+            'data_keys' => array_keys($data),
+        ]);
+    } catch (\Throwable $exception) {
+        return response()->json([
+            'ok' => false,
+            'exception_class' => $exception::class,
+            'exception_message' => $exception->getMessage(),
+            'file' => $exception->getFile(),
+            'line' => $exception->getLine(),
+            'trace_first_20' => collect($exception->getTrace())->take(20)->map(fn ($frame) => [
+                'file' => $frame['file'] ?? null,
+                'line' => $frame['line'] ?? null,
+                'function' => $frame['function'] ?? null,
+                'class' => $frame['class'] ?? null,
+                'type' => $frame['type'] ?? null,
+            ])->values()->all(),
+        ], 200);
+    }
+})->name('tools.check-czesci-final');
 Route::get('/tools/check-czesci-render-now', function () {
     if (! hash_equals('gps_images_import_2026', (string) request()->query('token', ''))) {
         return response()->json([
