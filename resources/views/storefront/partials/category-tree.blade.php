@@ -1,6 +1,7 @@
 @php
     $categories ??= collect();
     $activeCategory ??= null;
+    $activeCategoryId ??= $activeCategory ? (int) $activeCategory->id : null;
     $activeRoot ??= null;
     $activeCategoryIds ??= collect();
     $level ??= 0;
@@ -9,7 +10,7 @@
 <ul class="sf-category-tree sf-category-tree--level-{{ $level }}">
     @foreach($categories as $treeCategory)
         @php
-            $isActive = $activeCategory && (int) $activeCategory->id === (int) $treeCategory->id;
+            $isActive = $activeCategoryId !== null && (int) $treeCategory->id === (int) $activeCategoryId;
             $isAncestor = ! $isActive && $activeCategoryIds->contains($treeCategory->id);
             $hasChildren = $treeCategory->children->isNotEmpty();
             $isOpen = $hasChildren && $activeCategoryIds->contains($treeCategory->id);
@@ -22,8 +23,8 @@
                     <span class="sf-category-tree__toggle sf-category-tree__toggle--empty" aria-hidden="true"></span>
                 @endif
 
-                <a class="sf-category-tree__link @class(['sf-category-tree__link--active' => $isActive])" href="{{ $categoryTreeService->url($treeCategory) }}">
-                    <span>{{ $treeCategory->name }}</span>
+                <a @class(['sf-category-tree__link', 'sf-category-tree__link--active' => $isActive]) href="{{ $categoryTreeService->url($treeCategory) }}" @if($isActive) aria-current="page" @endif>
+                    <span @class(['sf-category-tree__label', 'sf-category-tree__label--active' => $isActive])>{{ $treeCategory->name }}</span>
                 </a>
             </div>
             @if($hasChildren)
@@ -31,6 +32,7 @@
                     @include('storefront.partials.category-tree', [
                         'categories' => $treeCategory->children,
                         'activeCategory' => $activeCategory,
+                        'activeCategoryId' => $activeCategoryId,
                         'activeRoot' => $activeRoot,
                         'activeCategoryIds' => $activeCategoryIds,
                         'level' => $level + 1,
