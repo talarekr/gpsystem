@@ -16,8 +16,6 @@ return [
         UserRole::Viewer->value => 'Read-only/Viewer',
     ],
 
-    'storefront_access_password' => env('STOREFRONT_ACCESS_PASSWORD', 'talarekr'),
-
     'feature_flags' => [
         'integrations_enabled' => (bool) env('GPS_INTEGRATIONS_ENABLED', false),
         'woo_writes_enabled' => (bool) env('GPS_WOO_WRITES_ENABLED', false),

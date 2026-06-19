@@ -15,7 +15,6 @@ use App\Http\Controllers\Storefront\PartController;
 use App\Http\Controllers\Storefront\SearchController;
 use App\Http\Controllers\Storefront\TermsController;
 use App\Http\Controllers\Tools\CheckPartImagePresentationController;
-use App\Http\Middleware\EnsureStorefrontUnlocked;
 use App\Http\Controllers\Tools\CheckProductImageController;
 use App\Http\Controllers\Tools\FixImportedImagesPublicFilesController;
 use App\Http\Controllers\Tools\ImportedImagesStorageReportController;
@@ -32,47 +31,20 @@ use Filament\Http\Middleware\Authenticate;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
-Route::post('/storefront-unlock', function (Request $request) {
-    $request->validate([
-        'password' => ['required', 'string'],
-    ]);
-
-    if (! hash_equals((string) config('product-hub.storefront_access_password'), (string) $request->input('password'))) {
-        return back()->withErrors(['password' => 'Nieprawidłowe hasło'])->onlyInput();
-    }
-
-    $request->session()->put('storefront_unlocked', true);
-
-    $intendedUrl = $request->session()->pull('storefront_intended_url', route('storefront.home'));
-
-    return redirect()->to($intendedUrl);
-})->name('storefront.access.unlock');
-
-Route::get('/lock', function (Request $request) {
-    $request->session()->forget(['storefront_unlocked', 'storefront_intended_url']);
-    $request->session()->put('storefront_intended_url', route('storefront.home'));
-
-    return response()->view('storefront.access.password', [
-        'metaTitle' => 'Dostęp do sklepu - GPSwiss',
-    ]);
-})->name('storefront.access.lock');
-
-Route::middleware(EnsureStorefrontUnlocked::class)->group(function (): void {
-    Route::get('/', [HomeController::class, 'index'])->name('storefront.home');
-    Route::get('/sklep', [CatalogController::class, 'index'])->name('storefront.catalog');
-    Route::get('/czesci', [CatalogController::class, 'index'])->name('storefront.parts.alias');
-    Route::get('/szukaj', [SearchController::class, 'index'])->name('storefront.search');
-    Route::get('/koszyk', [CartController::class, 'index'])->name('storefront.cart.index');
-    Route::get('/kontakt', [ContactController::class, 'show'])->name('storefront.contact');
-    Route::post('/kontakt', [ContactController::class, 'send'])->name('storefront.contact.send');
-    Route::get('/regulamin', TermsController::class)->name('storefront.terms');
-    Route::post('/koszyk/dodaj/{part}', [CartController::class, 'add'])->name('storefront.cart.add');
-    Route::post('/koszyk/aktualizuj', [CartController::class, 'update'])->name('storefront.cart.update');
-    Route::post('/koszyk/usun/{part}', [CartController::class, 'remove'])->name('storefront.cart.remove');
-    Route::post('/koszyk/wyczysc', [CartController::class, 'clear'])->name('storefront.cart.clear');
-    Route::get('/produkt/{slug}', [PartController::class, 'show'])->name('storefront.product');
-    Route::get('/kategoria-produktu/{path}', [CategoryController::class, 'show'])->where('path', '.*')->name('storefront.category');
-});
+Route::get('/', [HomeController::class, 'index'])->name('storefront.home');
+Route::get('/sklep', [CatalogController::class, 'index'])->name('storefront.catalog');
+Route::get('/czesci', [CatalogController::class, 'index'])->name('storefront.parts.alias');
+Route::get('/szukaj', [SearchController::class, 'index'])->name('storefront.search');
+Route::get('/koszyk', [CartController::class, 'index'])->name('storefront.cart.index');
+Route::get('/kontakt', [ContactController::class, 'show'])->name('storefront.contact');
+Route::post('/kontakt', [ContactController::class, 'send'])->name('storefront.contact.send');
+Route::get('/regulamin', TermsController::class)->name('storefront.terms');
+Route::post('/koszyk/dodaj/{part}', [CartController::class, 'add'])->name('storefront.cart.add');
+Route::post('/koszyk/aktualizuj', [CartController::class, 'update'])->name('storefront.cart.update');
+Route::post('/koszyk/usun/{part}', [CartController::class, 'remove'])->name('storefront.cart.remove');
+Route::post('/koszyk/wyczysc', [CartController::class, 'clear'])->name('storefront.cart.clear');
+Route::get('/produkt/{slug}', [PartController::class, 'show'])->name('storefront.product');
+Route::get('/kategoria-produktu/{path}', [CategoryController::class, 'show'])->where('path', '.*')->name('storefront.category');
 Route::get('/product-images-dry-run', ProductImagesDryRunController::class)->name('tools.product-images-dry-run');
 Route::get('/product-images-import', ProductImagesImportController::class)->name('tools.product-images-import');
 Route::get('/product-images-import-runner', ProductImagesImportRunnerController::class)->name('tools.product-images-import-runner');
