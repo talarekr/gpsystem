@@ -1,3 +1,11 @@
+<style>
+    @media (min-width: 1200px) {
+        .sf-main-row {
+            grid-template-columns: 190px minmax(0, 1fr) auto auto;
+            gap: 16px;
+        }
+    }
+</style>
 <div class="sf-promo">Części samochodowe z demontażu - szybka wysyłka i pomoc w doborze po VIN <button aria-label="Zamknij">×</button></div>
 <header class="sf-top"><div class="sf-container sf-top__inner"><span>Zwrot do 14 dni</span><span>Oryginalne części używane</span><span>Pomoc: biuro@gpswiss.pl</span></div></header>
 <div class="sf-container sf-main-row">
