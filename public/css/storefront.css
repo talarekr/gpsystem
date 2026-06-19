@@ -355,9 +355,9 @@
     z-index: 9999;
     display: grid;
     gap: 8px;
-    width: clamp(220px, 18vw, 260px);
-    min-width: 220px;
-    max-width: none;
+    width: calc(100% + 64px);
+    min-width: calc(100% + 64px);
+    max-width: calc(100% + 64px);
     margin-top: 0;
     padding: 14px;
     overflow: visible;
