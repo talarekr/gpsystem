@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Resources\OrderResource;
 use App\Filament\Resources\PartResource;
 use App\Models\ShopEvent;
 use App\Services\Admin\SalesAnalyticsService;
@@ -34,7 +35,7 @@ class Dashboard extends BaseDashboard
 
     public function ordersUrl(): string
     {
-        return Orders::getUrl();
+        return OrderResource::getUrl('index');
     }
 
     /**
