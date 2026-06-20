@@ -10,6 +10,7 @@ use App\Models\MarketplaceSyncLog;
 use App\Services\Marketplace\OvokoPartIdExtractor;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Schema;
 
 class CheckOvokoMappingController extends Controller
@@ -31,6 +32,9 @@ class CheckOvokoMappingController extends Controller
             'samples_mapped' => $this->samples('mapped'), 'samples_unmatched' => $this->samples('unmatched'), 'samples_conflict' => $this->samples('conflict'),
             'import_command_exists' => array_key_exists('marketplace:import-ovoko-mapping', Artisan::all()),
             'build_from_parts_command_exists' => array_key_exists('marketplace:build-ovoko-mappings-from-parts', Artisan::all()),
+            'unmapped_export_available' => $this->latestUnmappedExport() !== null,
+            'latest_unmapped_export' => $this->latestUnmappedExport(),
+            'manual_import_command_exists' => array_key_exists('marketplace:import-ovoko-manual-mapping', Artisan::all()),
             'duplicate_external_offer_ids' => $this->duplicateExternalOfferIds(),
             'recent_sync_logs' => $tables['marketplace_sync_logs'] ? MarketplaceSyncLog::query()->where('marketplace', 'ovoko')->latest('created_at')->limit(10)->get(['id','marketplace_listing_id','part_id','action','status','message','created_at']) : [],
             'admin_ovoko_url' => MarketplaceListingResource::getUrl('index'),
@@ -283,6 +287,26 @@ class CheckOvokoMappingController extends Controller
             'notes' => $canUseLegacyOvoko
                 ? 'W legacy_payload wykryto Ovoko ID, więc można przygotować mapowanie bez CSV dla rekordów z wykrytym identyfikatorem. CSV nadal może być przydatny do uzupełnienia braków i walidacji duplikatów.'
                 : 'Nie wykryto wystarczających Ovoko ID w legacy_payload. CSV pozostaje potrzebny; jako fallback można ocenić external_id, sku albo woo_product_id, zależnie od zgodności z eksportem WooCommerce.',
+        ];
+    }
+
+    private function latestUnmappedExport(): ?array
+    {
+        $files = collect(Storage::disk('local')->files('exports'))
+            ->filter(fn (string $file): bool => str_starts_with(basename($file), 'ovoko_unmapped_') && str_ends_with($file, '.csv'))
+            ->sortByDesc(fn (string $file): int => Storage::disk('local')->lastModified($file))
+            ->values();
+
+        $latest = $files->first();
+        if (! is_string($latest)) {
+            return null;
+        }
+
+        return [
+            'file' => Storage::disk('local')->path($latest),
+            'download_url' => url('/storage/'.$latest),
+            'generated_at' => date(DATE_ATOM, Storage::disk('local')->lastModified($latest)),
+            'size_bytes' => Storage::disk('local')->size($latest),
         ];
     }
 
