@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceListing;
 use App\Models\MarketplaceSyncLog;
+use App\Services\Marketplace\OvokoPartIdExtractor;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -29,6 +30,8 @@ class CheckOvokoMappingController extends Controller
             'mapped_count' => $counts('mapped'), 'unmatched_count' => $counts('unmatched'), 'conflict_count' => $counts('conflict'), 'ignored_count' => $counts('ignored'), 'sync_error_count' => $counts('sync_error'),
             'samples_mapped' => $this->samples('mapped'), 'samples_unmatched' => $this->samples('unmatched'), 'samples_conflict' => $this->samples('conflict'),
             'import_command_exists' => array_key_exists('marketplace:import-ovoko-mapping', Artisan::all()),
+            'build_from_parts_command_exists' => array_key_exists('marketplace:build-ovoko-mappings-from-parts', Artisan::all()),
+            'duplicate_external_offer_ids' => $this->duplicateExternalOfferIds(),
             'recent_sync_logs' => $tables['marketplace_sync_logs'] ? MarketplaceSyncLog::query()->where('marketplace', 'ovoko')->latest('created_at')->limit(10)->get(['id','marketplace_listing_id','part_id','action','status','message','created_at']) : [],
             'admin_ovoko_url' => MarketplaceListingResource::getUrl('index'),
         ];
@@ -87,6 +90,8 @@ class CheckOvokoMappingController extends Controller
                 'detected_ovoko_ids_count' => 0,
                 'detected_ovoko_ids_unique_count' => 0,
                 'detected_ovoko_ids_duplicates_count' => 0,
+                'without_detected_ovoko_id_count' => 0,
+                'top_duplicate_ovoko_ids' => [],
                 'recommendation' => 'Tabela parts nie istnieje, więc nie można zbudować mapowania Ovoko z obecnej bazy Laravel. CSV jest nadal potrzebny.',
             ];
         }
@@ -108,12 +113,50 @@ class CheckOvokoMappingController extends Controller
             'sku_not_empty' => $this->countNotEmpty('sku', $columns),
         ];
 
-        $samples = $this->ovokoIdSamples($columns);
-        $detectedIds = array_values(array_filter(array_map(
-            fn (array $sample): ?string => $sample['detected_ovoko_part_id'] ?? null,
-            $samples
-        )));
-        $uniqueDetectedIds = array_unique($detectedIds);
+        $samples = [];
+        $detectedIds = [];
+        $withoutDetectedId = 0;
+        $extractor = app(OvokoPartIdExtractor::class);
+
+        if ($columns['legacy_payload'] ?? false) {
+            $select = ['id', 'name', 'legacy_payload'];
+            foreach (['sku', 'part_number', 'external_id', 'source_system'] as $column) {
+                if ($columns[$column] ?? false) {
+                    $select[] = $column;
+                }
+            }
+
+            DB::table('parts')
+                ->select($select)
+                ->orderBy('id')
+                ->chunkById(500, function ($parts) use (&$samples, &$detectedIds, &$withoutDetectedId, $extractor): void {
+                    foreach ($parts as $part) {
+                        $ovokoId = $extractor->extract($part->legacy_payload ?? null);
+                        if ($ovokoId === null) {
+                            $withoutDetectedId++;
+                            continue;
+                        }
+
+                        $detectedIds[] = $ovokoId;
+                        if (count($samples) < 20) {
+                            $samples[] = [
+                                'part_id' => $part->id,
+                                'name' => $part->name,
+                                'sku' => $part->sku ?? null,
+                                'part_number' => $part->part_number ?? null,
+                                'external_id' => $part->external_id ?? null,
+                                'source_system' => $part->source_system ?? null,
+                                'detected_ovoko_part_id' => $ovokoId,
+                            ];
+                        }
+                    }
+                });
+        }
+
+        $idCounts = array_count_values($detectedIds);
+        $duplicates = array_filter($idCounts, fn (int $count): bool => $count > 1);
+        arsort($duplicates);
+        $uniqueDetectedIds = count($idCounts);
 
         return [
             'ok' => true,
@@ -121,10 +164,13 @@ class CheckOvokoMappingController extends Controller
             'columns' => $columns,
             'counts' => $counts,
             'samples' => $samples,
-            'detected_ovoko_ids_count' => $counts['legacy_payload_contains_ovoko_part_id'],
-            'detected_ovoko_ids_unique_count' => count($uniqueDetectedIds),
-            'detected_ovoko_ids_duplicates_count' => max(0, count($detectedIds) - count($uniqueDetectedIds)),
-            'recommendation' => $this->ovokoMappingRecommendation($columns, $counts, count($uniqueDetectedIds)),
+            'detected_ovoko_ids_count' => count($detectedIds),
+            'detected_ovoko_ids_unique_count' => $uniqueDetectedIds,
+            'detected_ovoko_ids_duplicates_count' => array_sum($duplicates),
+            'top_duplicate_ovoko_ids' => array_slice($duplicates, 0, 20, true),
+            'without_detected_ovoko_id_count' => $withoutDetectedId,
+            'known_ovoko_id_paths' => $extractor->knownPaths(),
+            'recommendation' => $this->ovokoMappingRecommendation($columns, $counts, $uniqueDetectedIds),
         ];
     }
 
@@ -238,6 +284,22 @@ class CheckOvokoMappingController extends Controller
                 ? 'W legacy_payload wykryto Ovoko ID, więc można przygotować mapowanie bez CSV dla rekordów z wykrytym identyfikatorem. CSV nadal może być przydatny do uzupełnienia braków i walidacji duplikatów.'
                 : 'Nie wykryto wystarczających Ovoko ID w legacy_payload. CSV pozostaje potrzebny; jako fallback można ocenić external_id, sku albo woo_product_id, zależnie od zgodności z eksportem WooCommerce.',
         ];
+    }
+
+    private function duplicateExternalOfferIds(): array
+    {
+        if (! Schema::hasTable('marketplace_listings')) return [];
+
+        return MarketplaceListing::query()
+            ->select('external_offer_id', DB::raw('count(*) as listings_count'))
+            ->where('marketplace', 'ovoko')
+            ->whereNotNull('external_offer_id')
+            ->groupBy('external_offer_id')
+            ->havingRaw('count(*) > 1')
+            ->orderByDesc('listings_count')
+            ->limit(20)
+            ->get()
+            ->all();
     }
 
     private function samples(string $status): array
