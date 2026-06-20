@@ -80,7 +80,7 @@ class CheckPartNumberPerformanceController extends Controller
                 'matched_ids' => $parts->getCollection()->pluck('id')->values(),
                 'queries' => $queries,
                 'rendered_length' => strlen($html),
-                'diagnosis_flags' => $this->diagnosisFlags($sql),
+                'diagnosis_flags' => $this->diagnosisFlags($sql, $bindings),
             ]);
         } catch (Throwable $exception) {
             return response()->json([
@@ -137,16 +137,23 @@ class CheckPartNumberPerformanceController extends Controller
     /**
      * @return array<string, bool>
      */
-    private function diagnosisFlags(string $sql): array
+    private function diagnosisFlags(string $sql, array $bindings): array
     {
         $lowerSql = strtolower($sql);
+        $usesLikeContainsBinding = collect($bindings)
+            ->filter(static fn ($binding): bool => is_string($binding))
+            ->contains(static fn (string $binding): bool => str_starts_with($binding, '%'));
 
         return [
-            'uses_like_contains' => str_contains($lowerSql, 'like ?'),
-            'uses_many_or_like' => substr_count($lowerSql, ' or ') >= 3 && str_contains($lowerSql, 'like ?'),
+            'uses_like_contains' => $usesLikeContainsBinding || str_contains($lowerSql, "like '%") || str_contains($lowerSql, 'like "%'),
+            'uses_many_or_like' => substr_count($lowerSql, ' or ') >= 3 && ($usesLikeContainsBinding || str_contains($lowerSql, "like '%") || str_contains($lowerSql, 'like "%')),
             'uses_lower' => str_contains($lowerSql, 'lower('),
+            'uses_cast' => str_contains($lowerSql, 'cast('),
+            'uses_coalesce' => str_contains($lowerSql, 'coalesce('),
+            'uses_replace' => str_contains($lowerSql, 'replace('),
+            'uses_upper' => str_contains($lowerSql, 'upper('),
             'uses_where_has_or_relation_exists' => str_contains($lowerSql, 'exists (') || str_contains($lowerSql, ' cars '),
-            'uses_full_search_scope_when_q_empty' => str_contains($lowerSql, 'short_description') || str_contains($lowerSql, 'legacy_payload'),
+            'uses_full_search_scope_when_q_empty' => str_contains($lowerSql, 'short_description') || str_contains($lowerSql, 'description') || str_contains($lowerSql, 'vehicle_snapshot') || str_contains($lowerSql, 'legacy_payload') || str_contains($lowerSql, 'name'),
         ];
     }
 
