@@ -544,4 +544,6 @@ class Part extends Model
     public function car(): BelongsTo { return $this->belongsTo(Car::class); }
     public function storageLocation(): BelongsTo { return $this->belongsTo(StorageLocation::class); }
     public function createdBy(): BelongsTo { return $this->belongsTo(User::class, 'created_by'); }
+    public function marketplaceListings(): HasMany { return $this->hasMany(MarketplaceListing::class); }
+    public function marketplaceSyncLogs(): HasMany { return $this->hasMany(MarketplaceSyncLog::class); }
 }

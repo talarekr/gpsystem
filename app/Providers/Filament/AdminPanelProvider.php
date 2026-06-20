@@ -10,6 +10,8 @@ use App\Filament\Pages\Help;
 use App\Filament\Pages\ImportMigration\OvokoDonorCarImportPage;
 use App\Filament\Pages\ImportMigration\WooProductImportPage;
 use App\Filament\Pages\MobileIntake;
+use App\Filament\Pages\Marketplace\MarketplaceOverview;
+use App\Filament\Pages\Marketplace\MarketplaceSyncLogs;
 use App\Filament\Pages\Orders;
 use App\Filament\Pages\Pricing;
 use App\Filament\Pages\ProductCatalog;
@@ -103,6 +105,9 @@ class AdminPanelProvider extends PanelProvider
                     ->collapsible(false),
                 NavigationGroup::make('Kanały sprzedaży')
                     ->icon('heroicon-o-building-storefront'),
+                NavigationGroup::make('Administracja marketplace')
+                    ->icon('heroicon-o-globe-alt')
+                    ->collapsible(false),
                 NavigationGroup::make('Ustawienia i integracje')
                     ->icon('heroicon-o-arrow-up-tray')
                     ->collapsible(false),
@@ -122,6 +127,8 @@ class AdminPanelProvider extends PanelProvider
                 Shipments::class,
                 ErrorCenter::class,
                 AllegroIntegration::class,
+                MarketplaceOverview::class,
+                MarketplaceSyncLogs::class,
                 Settings::class,
                 CompanyShopIdentity::class,
                 UsersRoles::class,
