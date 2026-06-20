@@ -39,6 +39,7 @@ use App\Http\Controllers\Tools\ProductImagesImportController;
 use App\Http\Controllers\Tools\ProductImagesImportRunnerController;
 use App\Http\Controllers\Tools\ProcessPartImagePresentationController;
 use App\Http\Controllers\Tools\ProcessPartImagePresentationRunnerController;
+use App\Http\Controllers\Tools\RunOvokoMappingDryRunController;
 use App\Services\ImportMigration\WooProductImport;
 use App\Support\ImportMigration\ManualImportFileResolver;
 use App\Support\ImportMigration\WooProductImportRunRepository;
@@ -89,6 +90,7 @@ Route::get('/product-images-import-runner', ProductImagesImportRunnerController:
 Route::get('/tools/check-product-image', CheckProductImageController::class)->name('tools.check-product-image');
 Route::get('/tools/check-orders-flow', CheckOrdersFlowController::class)->name('tools.check-orders-flow');
 Route::get('/tools/check-ovoko-mapping', CheckOvokoMappingController::class)->name('tools.check-ovoko-mapping');
+Route::get('/tools/run-ovoko-mapping-dry-run', RunOvokoMappingDryRunController::class)->name('tools.run-ovoko-mapping-dry-run');
 Route::get('/tools/check-part-number-performance', CheckPartNumberPerformanceController::class)->name('tools.check-part-number-performance');
 Route::get('/tools/check-catalog-search', CheckCatalogSearchController::class)->name('tools.check-catalog-search');
 Route::get('/tools/check-catalog-render', CheckCatalogRenderController::class)->name('tools.check-catalog-render');
