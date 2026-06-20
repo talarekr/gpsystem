@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Filament\Resources\OrderResource;
 use App\Filament\Resources\PartResource;
+use App\Models\Order;
 use App\Models\ShopEvent;
 use App\Services\Admin\SalesAnalyticsService;
 use Filament\Pages\Dashboard as BaseDashboard;
@@ -101,13 +102,9 @@ class Dashboard extends BaseDashboard
      */
     public function shopEventTabCounts(): array
     {
-        if (! Schema::hasTable('shop_events')) {
-            return array_fill_keys(array_keys($this->shopEventTabs()), 0);
-        }
-
         try {
             return collect(array_keys($this->shopEventTabs()))
-                ->mapWithKeys(fn (string $tab): array => [$tab => (int) $this->shopEventQuery($tab)->count()])
+                ->mapWithKeys(fn (string $tab): array => [$tab => $this->shopEventCount($tab)])
                 ->all();
         } catch (QueryException) {
             return array_fill_keys(array_keys($this->shopEventTabs()), 0);
@@ -126,10 +123,25 @@ class Dashboard extends BaseDashboard
      */
     public function shopEvents(): Collection
     {
-        return $this->shopEventQuery($this->activeShopEventTab())
-            ->orderByRaw('COALESCE(occurred_at, created_at) DESC')
-            ->limit(15)
-            ->get();
+        $events = Schema::hasTable('shop_events')
+            ? $this->shopEventQuery($this->activeShopEventTab())
+                ->orderByRaw('COALESCE(occurred_at, created_at) DESC')
+                ->limit(15)
+                ->get()
+            : new Collection();
+
+        return $events
+            ->merge($this->orderShopEvents($this->activeShopEventTab()))
+            ->sortByDesc(fn (ShopEvent $event): int => ($event->occurred_at ?: $event->created_at)?->getTimestamp() ?? 0)
+            ->take(15)
+            ->values();
+    }
+
+    private function shopEventCount(string $tab): int
+    {
+        $count = Schema::hasTable('shop_events') ? (int) $this->shopEventQuery($tab)->count() : 0;
+
+        return $count + $this->orderShopEventsCount($tab);
     }
 
     private function shopEventQuery(string $tab): Builder
@@ -145,6 +157,59 @@ class Dashboard extends BaseDashboard
         };
 
         return $query;
+    }
+
+
+    private function orderShopEventsCount(string $tab): int
+    {
+        if (! in_array($tab, ['all', 'requires_action', 'orders'], true) || ! Schema::hasTable('orders')) {
+            return 0;
+        }
+
+        return (int) Order::query()->where('status', 'new')->count();
+    }
+
+    /**
+     * @return Collection<int, ShopEvent>
+     */
+    private function orderShopEvents(string $tab): Collection
+    {
+        if (! in_array($tab, ['all', 'requires_action', 'orders'], true) || ! Schema::hasTable('orders')) {
+            return new Collection();
+        }
+
+        return Order::query()
+            ->where('status', 'new')
+            ->latest()
+            ->limit(15)
+            ->get()
+            ->map(fn (Order $order): ShopEvent => $this->orderToShopEvent($order));
+    }
+
+    private function orderToShopEvent(Order $order): ShopEvent
+    {
+        $event = new ShopEvent([
+            'source' => 'storefront',
+            'event_type' => 'order',
+            'title' => 'Nowe zamówienie sklep ' . $order->order_number,
+            'description' => trim(sprintf('Status: %s. Klient: %s.', $order->status, $order->customer_name ?: '—')),
+            'occurred_at' => $order->created_at,
+            'is_read' => false,
+            'requires_action' => true,
+            'severity' => 'warning',
+            'customer_name' => $order->customer_name,
+            'external_reference' => $order->order_number,
+            'url' => OrderResource::getUrl('view', ['record' => $order]),
+            'payload' => [
+                'order_id' => $order->id,
+                'order_number' => $order->order_number,
+                'status' => $order->status,
+            ],
+        ]);
+        $event->created_at = $order->created_at;
+        $event->updated_at = $order->updated_at;
+
+        return $event;
     }
 
     /**
