@@ -421,18 +421,19 @@ class Part extends Model
             return $query;
         }
 
-        return $query->where(function (Builder $query) use ($value): void {
-            $this->applyCaseInsensitiveLike($query, [
-                'part_number',
-                'oem_number',
-                'manufacturer_code',
-                'sku',
-                'name',
-                'short_description',
-                'description',
-                'vehicle_snapshot',
-                'legacy_payload',
-            ], $value, true, 'parts');
+        $values = array_values(array_unique(array_filter([
+            $value,
+            mb_strtoupper($value),
+            mb_strtolower($value),
+        ], static fn (string $candidate): bool => $candidate !== '')));
+
+        return $query->where(function (Builder $query) use ($values): void {
+            foreach ($this->existingColumns('parts', ['part_number', 'oem_number', 'manufacturer_code', 'sku']) as $column) {
+                foreach ($values as $candidate) {
+                    $query->orWhere($column, $candidate)
+                        ->orWhere($column, 'like', $candidate.'%');
+                }
+            }
         });
     }
 

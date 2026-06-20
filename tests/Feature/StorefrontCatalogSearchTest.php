@@ -45,22 +45,30 @@ class StorefrontCatalogSearchTest extends TestCase
         $response->assertDontSee('Zacisk hamulcowy');
     }
 
-    public function test_catalog_part_number_search_matches_partial_legacy_payload_case_insensitively(): void
+    public function test_catalog_part_number_search_uses_fast_indexable_number_columns(): void
     {
         Part::query()->create([
             'name' => 'Moduł świateł',
+            'sku' => 'M156E-YY',
             'quantity' => 1,
             'status' => 'published',
             'legacy_payload' => ['woo_product' => ['sku' => 'XX-M156E-YY'], 'meta' => ['reference_number' => 'REF-123']],
         ]);
 
         Part::query()->create(['name' => 'Osłona silnika', 'part_number' => 'ABC999', 'quantity' => 1, 'status' => 'published']);
+        Part::query()->create([
+            'name' => 'Szeroki opis',
+            'quantity' => 1,
+            'status' => 'published',
+            'legacy_payload' => ['woo_product' => ['sku' => 'XX-M156E-YY']],
+        ]);
 
         $response = $this->get('/czesci?part_number=m156e');
 
         $response->assertOk();
         $response->assertSee('Moduł świateł');
         $response->assertDontSee('Osłona silnika');
+        $response->assertDontSee('Szeroki opis');
     }
 
     public function test_legacy_shop_redirect_preserves_query_string(): void
