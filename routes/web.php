@@ -21,6 +21,7 @@ use App\Http\Controllers\Storefront\SearchController;
 use App\Http\Controllers\Storefront\TermsController;
 use App\Http\Controllers\Tools\CheckPartImagePresentationController;
 use App\Http\Controllers\Tools\CheckProductImageController;
+use App\Http\Controllers\Tools\CheckPartNumberPerformanceController;
 use App\Http\Controllers\Tools\CheckCatalogSearchController;
 use App\Http\Controllers\Tools\CheckCatalogRenderController;
 use App\Http\Controllers\Tools\CheckCatalogViewController;
@@ -80,6 +81,7 @@ Route::get('/product-images-dry-run', ProductImagesDryRunController::class)->nam
 Route::get('/product-images-import', ProductImagesImportController::class)->name('tools.product-images-import');
 Route::get('/product-images-import-runner', ProductImagesImportRunnerController::class)->name('tools.product-images-import-runner');
 Route::get('/tools/check-product-image', CheckProductImageController::class)->name('tools.check-product-image');
+Route::get('/tools/check-part-number-performance', CheckPartNumberPerformanceController::class)->name('tools.check-part-number-performance');
 Route::get('/tools/check-catalog-search', CheckCatalogSearchController::class)->name('tools.check-catalog-search');
 Route::get('/tools/check-catalog-render', CheckCatalogRenderController::class)->name('tools.check-catalog-render');
 Route::get('/tools/check-catalog-error', CheckCatalogErrorController::class)->name('tools.check-catalog-error');
