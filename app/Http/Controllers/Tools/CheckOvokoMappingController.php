@@ -20,7 +20,7 @@ class CheckOvokoMappingController extends Controller
         }
         $tables = ['marketplace_accounts'=>Schema::hasTable('marketplace_accounts'), 'marketplace_listings'=>Schema::hasTable('marketplace_listings'), 'marketplace_sync_logs'=>Schema::hasTable('marketplace_sync_logs')];
         $counts = fn ($status) => $tables['marketplace_listings'] ? MarketplaceListing::query()->where('marketplace', 'ovoko')->where('sync_status', $status)->count() : 0;
-        return response()->json([
+        $payload = [
             'ok' => ! in_array(false, $tables, true),
             'tables' => $tables,
             'models' => ['MarketplaceAccount'=>class_exists(MarketplaceAccount::class), 'MarketplaceListing'=>class_exists(MarketplaceListing::class), 'MarketplaceSyncLog'=>class_exists(MarketplaceSyncLog::class)],
@@ -31,8 +31,31 @@ class CheckOvokoMappingController extends Controller
             'import_command_exists' => array_key_exists('marketplace:import-ovoko-mapping', Artisan::all()),
             'recent_sync_logs' => $tables['marketplace_sync_logs'] ? MarketplaceSyncLog::query()->where('marketplace', 'ovoko')->latest('created_at')->limit(10)->get(['id','marketplace_listing_id','part_id','action','status','message','created_at']) : [],
             'admin_ovoko_url' => MarketplaceListingResource::getUrl('index'),
-            'laravel_ovoko_id_coverage' => $this->laravelOvokoIdCoverage(),
-        ]);
+        ];
+
+        if ((string) request()->query('coverage', '1') !== '0') {
+            $payload['laravel_ovoko_id_coverage'] = $this->safeLaravelOvokoIdCoverage();
+        }
+
+        return response()->json($payload);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function safeLaravelOvokoIdCoverage(): array
+    {
+        try {
+            return $this->laravelOvokoIdCoverage();
+        } catch (\Throwable $e) {
+            return [
+                'ok' => false,
+                'exception_class' => $e::class,
+                'exception_message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ];
+        }
     }
 
     /**
@@ -86,7 +109,10 @@ class CheckOvokoMappingController extends Controller
         ];
 
         $samples = $this->ovokoIdSamples($columns);
-        $detectedIds = $this->detectedOvokoIds($columns);
+        $detectedIds = array_values(array_filter(array_map(
+            fn (array $sample): ?string => $sample['detected_ovoko_part_id'] ?? null,
+            $samples
+        )));
         $uniqueDetectedIds = array_unique($detectedIds);
 
         return [
@@ -95,9 +121,9 @@ class CheckOvokoMappingController extends Controller
             'columns' => $columns,
             'counts' => $counts,
             'samples' => $samples,
-            'detected_ovoko_ids_count' => count($detectedIds),
+            'detected_ovoko_ids_count' => $counts['legacy_payload_contains_ovoko_part_id'],
             'detected_ovoko_ids_unique_count' => count($uniqueDetectedIds),
-            'detected_ovoko_ids_duplicates_count' => count($detectedIds) - count($uniqueDetectedIds),
+            'detected_ovoko_ids_duplicates_count' => max(0, count($detectedIds) - count($uniqueDetectedIds)),
             'recommendation' => $this->ovokoMappingRecommendation($columns, $counts, count($uniqueDetectedIds)),
         ];
     }
@@ -148,10 +174,10 @@ class CheckOvokoMappingController extends Controller
                 $query->where('legacy_payload', 'like', '%ovoko%')
                     ->orWhere('legacy_payload', 'like', '%rrr%');
             })
-            ->limit(200)
+            ->limit(20)
             ->get()
             ->map(function ($part): array {
-                $legacyPayload = (string) ($part->legacy_payload ?? '');
+                $legacyPayload = $this->payloadToString($part->legacy_payload ?? null);
 
                 return [
                     'part_id' => $part->id,
@@ -171,20 +197,17 @@ class CheckOvokoMappingController extends Controller
             ->all();
     }
 
-    /** @param array<string, bool> $columns */
-    private function detectedOvokoIds(array $columns): array
+    private function payloadToString(mixed $payload): string
     {
-        if (! ($columns['legacy_payload'] ?? false)) {
-            return [];
+        if ($payload === null) {
+            return '';
         }
 
-        return DB::table('parts')
-            ->where('legacy_payload', 'like', '%ovoko_part_id%')
-            ->pluck('legacy_payload')
-            ->map(fn ($payload): ?string => $this->detectPayloadId((string) $payload, ['_ovoko_part_id', 'ovoko_part_id']))
-            ->filter()
-            ->values()
-            ->all();
+        if (is_scalar($payload) || $payload instanceof \Stringable) {
+            return (string) $payload;
+        }
+
+        return json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '';
     }
 
     /** @param array<int, string> $keys */
