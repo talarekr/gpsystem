@@ -1,8 +1,9 @@
 @php
     use App\Filament\Resources\PartResource;
+    use App\Filament\Resources\OrderResource;
 
     $partsIndexUrl = PartResource::getUrl('index');
-    $ordersUrl = class_exists(\App\Filament\Pages\Orders::class) ? \App\Filament\Pages\Orders::getUrl() : '#';
+    $ordersUrl = class_exists(OrderResource::class) ? OrderResource::getUrl('index') : '#';
     $messagesUrl = '#';
     $ordersCount = 0;
     $messagesCount = 0;

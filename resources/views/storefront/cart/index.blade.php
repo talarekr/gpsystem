@@ -53,7 +53,7 @@
             <aside class="sf-cart-summary">
                 <h2>Podsumowanie</h2>
                 <div><span>Subtotal</span><strong>{{ number_format((float) $subtotal, 2, ',', ' ') }} {{ $items->first()['currency'] ?? 'PLN' }}</strong></div>
-                <a class="sf-btn sf-btn--disabled" aria-disabled="true" href="#">Przejdź do zamówienia</a>
+                <a class="sf-btn" href="{{ route('storefront.checkout.show') }}">Przejdź do zamówienia</a>
                 <form method="post" action="{{ route('storefront.cart.clear') }}">
                     @csrf
                     <button class="sf-btn sf-btn--outline" type="submit">Wyczyść koszyk</button>
