@@ -3,8 +3,11 @@
 namespace App\Services\Admin;
 
 use App\Models\LocalSale;
+use App\Models\Order;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Schema;
 
 class SalesAnalyticsService
 {
@@ -81,14 +84,37 @@ class SalesAnalyticsService
      */
     private function onlineChannels(CarbonInterface $startsAt, CarbonInterface $endsAt): array
     {
-        // TODO: Podłączyć odczyt zamówień online, gdy pojawią się modele/tabele integracji sklepu, Ovoko, Allegro i eBay.
+        $shopOrdersCount = 0;
+        $shopSalesPln = 0.0;
+
+        if (Schema::hasTable('orders')) {
+            $shopOrdersCount = $this->shopOrdersQuery($startsAt, $endsAt, ['new', 'processing'])->count();
+            $shopSalesPln = (float) $this->shopOrdersQuery($startsAt, $endsAt, ['new', 'processing', 'completed'])->sum('total');
+        }
+
         // eBay ma przygotowane pola EUR i kursu, ale na tym etapie nie pobieramy kursów z zewnętrznych API.
         return [
             ['key' => 'ebay', 'label' => 'eBay', 'badge' => 'eB', 'orders_count' => 0, 'sales_eur' => 0.0, 'exchange_rate' => null, 'sales_pln' => 0.0, 'note' => 'Oczekuje na integrację odczytu eBay.'],
             ['key' => 'ovoko', 'label' => 'Ovoko', 'badge' => 'Ov', 'orders_count' => 0, 'sales_pln' => 0.0, 'note' => 'Oczekuje na integrację odczytu Ovoko.'],
             ['key' => 'allegro', 'label' => 'Allegro', 'badge' => 'Al', 'orders_count' => 0, 'sales_pln' => 0.0, 'note' => 'Oczekuje na integrację odczytu Allegro.'],
-            ['key' => 'shop', 'label' => 'Sklep', 'badge' => 'Sk', 'orders_count' => 0, 'sales_pln' => 0.0, 'note' => 'Oczekuje na model zamówień sklepu.'],
+            ['key' => 'shop', 'label' => 'Sklep', 'badge' => 'Sk', 'orders_count' => $shopOrdersCount, 'sales_pln' => $shopSalesPln],
         ];
+    }
+
+    /**
+     * @param array<int, string> $statuses
+     */
+    private function shopOrdersQuery(CarbonInterface $startsAt, CarbonInterface $endsAt, array $statuses): Builder
+    {
+        return Order::query()
+            ->whereBetween('created_at', [$startsAt, $endsAt])
+            ->whereIn('status', $statuses)
+            ->where(function (Builder $query): void {
+                $query
+                    ->where('meta->source', 'storefront')
+                    ->orWhere('meta->channel', 'sklep')
+                    ->orWhereNull('meta');
+            });
     }
 
     /**
@@ -96,6 +122,10 @@ class SalesAnalyticsService
      */
     private function localSales(CarbonInterface $startsAt, CarbonInterface $endsAt): array
     {
+        if (! Schema::hasTable('local_sales')) {
+            return ['orders_count' => 0, 'sales_pln' => 0.0];
+        }
+
         $query = LocalSale::query()->whereBetween('sold_at', [$startsAt, $endsAt]);
 
         return [

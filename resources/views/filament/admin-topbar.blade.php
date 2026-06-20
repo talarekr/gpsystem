@@ -1,11 +1,22 @@
 @php
     use App\Filament\Resources\PartResource;
     use App\Filament\Resources\OrderResource;
+    use App\Models\Order;
+    use Illuminate\Database\QueryException;
+    use Illuminate\Support\Facades\Schema;
 
     $partsIndexUrl = PartResource::getUrl('index');
     $ordersUrl = class_exists(OrderResource::class) ? OrderResource::getUrl('index') : '#';
     $messagesUrl = '#';
     $ordersCount = 0;
+
+    if (Schema::hasTable('orders')) {
+        try {
+            $ordersCount = Order::query()->where('status', 'new')->count();
+        } catch (QueryException) {
+            $ordersCount = 0;
+        }
+    }
     $messagesCount = 0;
 @endphp
 
