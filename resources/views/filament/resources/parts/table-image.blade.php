@@ -33,6 +33,13 @@
         .fi-ta-table:has([data-column="admin_part_image"]) [data-column="admin_part_storage"] > *,
         .fi-ta-table:has([data-column="admin_part_image"]) [data-column="status"] > *,
         .fi-ta-table:has([data-column="admin_part_image"]) tbody tr > td:last-child > * { align-items: flex-start; justify-content: flex-start; }
+        .fi-ta-table:has([data-column="admin_part_image"]) [data-column^="admin_part_"] > .fi-ta-col-wrp,
+        .fi-ta-table:has([data-column="admin_part_image"]) [data-column^="admin_part_"] .fi-ta-col-wrp,
+        .gps-admin-part-cell,
+        .gps-admin-part-title,
+        .gps-admin-part-numbers,
+        .gps-admin-channels,
+        .gps-admin-storage { margin-left: 0; padding-left: 0; }
         .fi-ta-table tbody td, .fi-ta-table tbody td * { font-weight: 400; }
         .fi-ta-table [data-column="admin_part_image"] { width: 150px; min-width: 150px; }
         .fi-ta-table [data-column="id"] { width: 70px; min-width: 70px; color: #334155; font-size: 13px; font-weight: 500; vertical-align: top; }
@@ -48,10 +55,13 @@
         .gps-admin-part-title a { display: -webkit-box; overflow: hidden; color: #1e293b; font-size: 13px; font-weight: 400; line-height: 1.35; text-decoration: none; text-overflow: ellipsis; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
         .gps-admin-part-title a:hover { color: #2563eb; text-decoration: underline; }
         .gps-admin-part-title small { display: block; margin-top: 6px; color: #64748b; font-size: 12px; font-weight: 400; line-height: 1.35; }
-        .gps-admin-part-numbers { display: grid; align-content: start; gap: 5px; max-width: 190px; }
-        .gps-admin-part-number { display: inline-flex; width: fit-content; max-width: 100%; align-items: baseline; gap: 4px; border-radius: 999px; background: #f8fafc; padding: 2px 6px; color: #334155; font-size: 12px; line-height: 1.35; }
+        .gps-admin-part-numbers { display: inline-flex; max-width: 190px; align-items: center; gap: 6px; }
+        .gps-admin-part-number { display: inline-flex; width: fit-content; max-width: 100%; align-items: baseline; gap: 4px; color: #334155; font-size: 12px; font-weight: 600; line-height: 1.35; }
         .gps-admin-part-number__label { color: #64748b; font-size: 11px; font-weight: 500; }
-        .gps-admin-part-number__value { overflow: hidden; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+        .gps-admin-part-number__value { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+        .gps-admin-part-number__copy { display: inline-flex; width: 18px; height: 18px; align-items: center; justify-content: center; border: 0; border-radius: 999px; background: transparent; color: #64748b; cursor: pointer; padding: 0; }
+        .gps-admin-part-number__copy:hover { background: #e2e8f0; color: #1e293b; }
+        .gps-admin-part-number__copy svg { width: 13px; height: 13px; }
         .gps-admin-part-number--empty { color: #94a3b8; }
         .gps-admin-channels { display: grid; gap: 3px; min-width: 250px; color: #334155; }
         .gps-admin-channel { display: grid; grid-template-columns: 58px minmax(110px, 1fr) 18px; align-items: baseline; gap: 8px; font-size: 12px; line-height: 1.35; }
@@ -69,7 +79,7 @@
     </style>
 @endonce
 
-<div class="gps-admin-part-thumb">
+<div class="gps-admin-part-cell gps-admin-part-thumb">
     @if (! $part)
         <span class="gps-admin-part-thumb__placeholder">—</span>
     @elseif ($imageUrl)

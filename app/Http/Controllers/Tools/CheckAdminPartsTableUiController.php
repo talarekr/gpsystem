@@ -30,7 +30,10 @@ class CheckAdminPartsTableUiController extends Controller
         $imageVariantSource = $sample?->adminTableImageVariantSource() ?? 'fallback';
         $resource = file_get_contents(app_path('Filament/Resources/PartResource.php')) ?: '';
         $titleView = (string) file_get_contents(resource_path('views/filament/resources/parts/table-title.blade.php'));
+        $numbersView = (string) file_get_contents(resource_path('views/filament/resources/parts/table-numbers.blade.php'));
         $imageView = (string) file_get_contents(resource_path('views/filament/resources/parts/table-image.blade.php'));
+        $samplePartNumber = $sample ? trim((string) $sample->part_number) : null;
+        $sampleSku = $sample ? trim((string) $sample->sku) : null;
 
         $imageColumnPosition = strpos($resource, "ViewColumn::make('admin_part_image'");
         $idColumnPosition = strpos($resource, "TextColumn::make('id'");
@@ -65,6 +68,19 @@ class CheckAdminPartsTableUiController extends Controller
                 && str_contains($imageView, 'tbody tr > td:last-child'),
             'text_cells_top_padding_px' => str_contains($imageView, 'padding-top: 12px;') ? 12 : null,
             'id_column_vertical_align_top' => str_contains($imageView, '[data-column="id"] {') && str_contains($imageView, 'vertical-align: top;') && str_contains($imageView, 'align-items: flex-start'),
+            'column_content_left_aligned_with_headers' => str_contains($imageView, '.gps-admin-part-cell')
+                && str_contains($imageView, 'margin-left: 0; padding-left: 0;')
+                && str_contains($imageView, '[data-column^="admin_part_"] > .fi-ta-col-wrp'),
+            'custom_columns_inner_margin_left_px' => str_contains($imageView, 'margin-left: 0; padding-left: 0;') ? 0 : null,
+            'part_number_column_single_value' => ! str_contains($numbersView, "'Kod' =>") && ! str_contains($numbersView, "'Numer' =>") && str_contains($numbersView, '$part->part_number'),
+            'part_number_copy_action_present' => str_contains($numbersView, 'navigator.clipboard') && str_contains($numbersView, 'gps-admin-part-number__copy'),
+            'part_number_label_hidden' => ! str_contains($numbersView, 'gps-admin-part-number__label') && ! str_contains($numbersView, '{{ $label }}'),
+            'duplicate_part_number_chips_removed' => ! str_contains($numbersView, '@forelse ($numbers') && ! str_contains($numbersView, 'take(2)'),
+            'edit_main_part_code_uses_part_number' => str_contains($resource, "TextInput::make('part_number')->label('Główny kod części')"),
+            'edit_main_part_code_not_sku' => ! str_contains($resource, "TextInput::make('sku')->label('Główny kod części')"),
+            'sample_part_number' => $samplePartNumber,
+            'sample_sku' => $sampleSku,
+            'sample_edit_main_code_value_source' => 'part_number',
             'sample_marketplace_flags' => $flags,
             'warnings' => array_values(array_filter([
                 Schema::hasTable('marketplace_listings') ? null : 'marketplace_listings table is missing.',

@@ -11,7 +11,7 @@
     $storageLocation = ($part instanceof \App\Models\Part && $part->relationLoaded('storageLocation')) ? $part->storageLocation : null;
 @endphp
 
-<div class="gps-admin-storage">
+<div class="gps-admin-part-cell gps-admin-storage">
     @if (! $part)
         <span class="gps-admin-storage__location">—</span>
     @else
