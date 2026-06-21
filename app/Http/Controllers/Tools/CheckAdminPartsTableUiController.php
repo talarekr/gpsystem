@@ -53,8 +53,10 @@ class CheckAdminPartsTableUiController extends Controller
             'uses_listing_thumbnail_variant' => in_array($imageVariantSource, ['presentation', 'listing'], true),
             'image_variant_source' => $imageVariantSource,
             'sku_hidden_in_parts_table' => ! str_contains($titleView, 'SKU:'),
-            'title_column_max_width_px' => str_contains($imageView, '.gps-admin-part-title { max-width: 250px; }') ? 250 : null,
-            'title_line_clamp' => str_contains($imageView, '-webkit-line-clamp: 2') ? 2 : null,
+            'title_column_max_width_px' => str_contains($imageView, '.gps-admin-part-title { width: 360px; max-width: 360px; }') ? 360 : null,
+            'title_line_clamp' => str_contains($imageView, '-webkit-line-clamp: 2') && str_contains($imageView, 'white-space: normal') ? 2 : null,
+            'row_cells_vertical_align_top' => str_contains($imageView, '.fi-ta-table tbody td { vertical-align: top;'),
+            'id_column_vertical_align_top' => str_contains($imageView, '[data-column="id"] {') && str_contains($imageView, 'vertical-align: top;') && str_contains($imageView, 'align-items: flex-start'),
             'sample_marketplace_flags' => $flags,
             'warnings' => array_values(array_filter([
                 Schema::hasTable('marketplace_listings') ? null : 'marketplace_listings table is missing.',
