@@ -52,6 +52,7 @@ use App\Http\Controllers\Tools\FixImportedImagesPublicFilesController;
 use App\Http\Controllers\Tools\ImportedImagesStorageReportController;
 use App\Http\Controllers\Tools\InspectLegacyPayloadKeysController;
 use App\Http\Controllers\Tools\PhotoStorageReportController;
+use App\Http\Controllers\Tools\PreDomainSwitchCheckController;
 use App\Http\Controllers\Tools\ProductImagesDryRunController;
 use App\Http\Controllers\Tools\ProductImagesImportController;
 use App\Http\Controllers\Tools\ProductImagesImportRunnerController;
@@ -1898,6 +1899,7 @@ Route::get('/tools/process-part-image-presentation-runner', ProcessPartImagePres
 Route::get('/tools/fix-imported-images-public-files', FixImportedImagesPublicFilesController::class)->name('tools.fix-imported-images-public-files');
 Route::get('/tools/imported-images-storage-report', ImportedImagesStorageReportController::class)->name('tools.imported-images-storage-report');
 Route::get('/tools/photo-storage-report', PhotoStorageReportController::class)->name('tools.photo-storage-report');
+Route::get('/tools/pre-domain-switch-check', PreDomainSwitchCheckController::class)->name('tools.pre-domain-switch-check');
 
 
 Route::middleware(Authenticate::class)->prefix('admin')->name('admin.')->group(function (): void {
