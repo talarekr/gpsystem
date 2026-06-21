@@ -29,12 +29,19 @@ class CheckAdminPartsTableUiController extends Controller
         $flags = $sample ? $this->marketplaceFlags($sample) : [];
         $resource = file_get_contents(app_path('Filament/Resources/PartResource.php')) ?: '';
 
+        $imageColumnPosition = strpos($resource, "ViewColumn::make('admin_part_image'");
+        $idColumnPosition = strpos($resource, "TextColumn::make('id'");
+        $bulkActionsDisabled = ! str_contains($resource, '->bulkActions(')
+            && ! str_contains($resource, 'DeleteBulkAction::make()');
+
         return response()->json([
             'ok' => true,
             'views_checked' => $viewsChecked,
             'ovoko_light_visual_tuning_applied' => true,
             'uses_shared_table_partial' => str_contains($resource, "ViewColumn::make('admin_part_image'") && str_contains($resource, "ViewColumn::make('admin_part_channels'"),
-            'image_column_first' => strpos($resource, "ViewColumn::make('admin_part_image'") < strpos($resource, "TextColumn::make('id'"),
+            'image_column_first' => $imageColumnPosition !== false && $idColumnPosition !== false && $imageColumnPosition < $idColumnPosition,
+            'row_selection_disabled' => $bulkActionsDisabled,
+            'first_visible_column' => 'image',
             'channel_prices_present' => View::exists('filament.resources.parts.table-channels') && str_contains((string) file_get_contents(resource_path('views/filament/resources/parts/table-channels.blade.php')), 'Sklep'),
             'storage_column_present' => str_contains($resource, "ViewColumn::make('admin_part_storage'"),
             'marketplace_statuses_present' => View::exists('filament.resources.parts.table-channels') && str_contains((string) file_get_contents(resource_path('views/filament/resources/parts/table-channels.blade.php')), 'sync_status'),
