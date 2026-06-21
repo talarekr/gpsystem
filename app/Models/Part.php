@@ -316,9 +316,14 @@ class Part extends Model
         return $this->listingImage()?->listingUrl();
     }
 
+    public function storefrontImageUrl(): ?string
+    {
+        return $this->primaryImage()?->productUrl() ?? $this->primaryImageUrl();
+    }
+
     public function adminTableImageUrl(): ?string
     {
-        return $this->listingImage()?->listingPresentationUrl() ?? $this->primaryImageUrl();
+        return $this->listingImageUrl() ?? $this->primaryImageUrl();
     }
 
     public function adminTableImageVariantSource(): string

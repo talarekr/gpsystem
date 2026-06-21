@@ -69,7 +69,7 @@
         .fi-ta-table:has([data-column="admin_part_image"]) [data-column="admin_part_image"] > .fi-ta-col-wrp,
         .fi-ta-table:has([data-column="admin_part_image"]) [data-column="admin_part_image"] .fi-ta-col-wrp,
         .fi-ta-table:has([data-column="admin_part_image"]) [data-column="admin_part_image"] .fi-ta-text,
-        .fi-ta-table:has([data-column="admin_part_image"]) [data-column="admin_part_image"] .fi-ta-text-item { width: 137px; max-width: none; min-width: 137px; height: 104px; max-height: none; min-height: 104px; padding: 0; margin: 0; overflow: visible; box-sizing: content-box; flex: 0 0 auto; }
+        .fi-ta-table:has([data-column="admin_part_image"]) [data-column="admin_part_image"] .fi-ta-text-item { width: 150px; max-width: none; min-width: 150px; height: 112px; max-height: none; min-height: 112px; padding: 0; margin: 0; overflow: visible; box-sizing: content-box; flex: 0 0 auto; }
         .fi-ta-table tbody td, .fi-ta-table tbody td * { font-weight: 400; }
         .fi-ta-table [data-column="admin_part_image"] { width: 150px; min-width: 150px; }
         .fi-ta-table [data-column="id"] { width: 70px; min-width: 70px; color: #334155; font-size: 13px; font-weight: 700; vertical-align: top; }
@@ -83,7 +83,7 @@
         .fi-ta-table [data-column="admin_part_channels"] { width: 270px; min-width: 250px; }
         .fi-ta-table [data-column="admin_part_storage"] { width: 160px; min-width: 140px; }
         .gps-admin-part-cell.gps-admin-part-thumb,
-        .gps-admin-part-thumb { position: relative; width: 137px; height: 104px; padding: 0; margin: 0; overflow: hidden; display: block; box-sizing: border-box; border: 1px solid #e5e7eb; border-radius: 6px; background: #ffffff; max-width: none; max-height: none; min-width: 137px; min-height: 104px; flex: 0 0 auto; }
+        .gps-admin-part-thumb { position: relative; width: 150px; height: 112px; padding: 0; margin: 0; overflow: hidden; display: block; box-sizing: border-box; border: 1px solid #e5e7eb; border-radius: 6px; background: #ffffff; max-width: none; max-height: none; min-width: 150px; min-height: 112px; flex: 0 0 auto; }
         .gps-admin-part-thumb > a,
         .gps-admin-part-thumb > div,
         .gps-admin-part-thumb picture,
