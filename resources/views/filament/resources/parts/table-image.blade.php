@@ -61,11 +61,15 @@
         .fi-ta-table:has([data-column="admin_part_image"]) tbody tr > td:last-child > * { align-items: flex-start; justify-content: flex-start; }
         .fi-ta-table:has([data-column="admin_part_image"]) [data-column^="admin_part_"] > .fi-ta-col-wrp,
         .fi-ta-table:has([data-column="admin_part_image"]) [data-column^="admin_part_"] .fi-ta-col-wrp,
-        .gps-admin-part-cell,
         .gps-admin-part-title,
         .gps-admin-part-numbers,
         .gps-admin-channels,
         .gps-admin-storage { margin-left: 0; padding-left: 0; }
+        .fi-ta-table:has([data-column="admin_part_image"]) [data-column="admin_part_image"] > *,
+        .fi-ta-table:has([data-column="admin_part_image"]) [data-column="admin_part_image"] > .fi-ta-col-wrp,
+        .fi-ta-table:has([data-column="admin_part_image"]) [data-column="admin_part_image"] .fi-ta-col-wrp,
+        .fi-ta-table:has([data-column="admin_part_image"]) [data-column="admin_part_image"] .fi-ta-text,
+        .fi-ta-table:has([data-column="admin_part_image"]) [data-column="admin_part_image"] .fi-ta-text-item { width: 137px; max-width: none; min-width: 137px; height: 104px; max-height: none; min-height: 104px; padding: 0; margin: 0; overflow: visible; box-sizing: content-box; flex: 0 0 auto; }
         .fi-ta-table tbody td, .fi-ta-table tbody td * { font-weight: 400; }
         .fi-ta-table [data-column="admin_part_image"] { width: 150px; min-width: 150px; }
         .fi-ta-table [data-column="id"] { width: 70px; min-width: 70px; color: #334155; font-size: 13px; font-weight: 700; vertical-align: top; }
@@ -78,11 +82,10 @@
         .fi-ta-table [data-column="admin_part_numbers"] { width: 190px; min-width: 170px; }
         .fi-ta-table [data-column="admin_part_channels"] { width: 270px; min-width: 250px; }
         .fi-ta-table [data-column="admin_part_storage"] { width: 160px; min-width: 140px; }
-        .gps-admin-part-thumb { position: relative; width: 137px; height: 104px; border: 1px solid #e5e7eb; border-radius: 6px; background: #ffffff; display: block; overflow: hidden; padding: 0; }
-        .gps-admin-part-thumb,
-        .gps-admin-part-thumb > * { box-sizing: border-box; }
-        .gps-admin-part-thumb > :not(.gps-admin-part-thumb__badge) { width: 100%; height: 100%; padding: 0; margin: 0; }
-        .gps-admin-part-thumb img { display: block; width: 100%; height: 100%; min-width: 100%; min-height: 100%; max-width: none !important; max-height: none !important; object-fit: cover; padding: 0; margin: 0; }
+        .gps-admin-part-cell.gps-admin-part-thumb,
+        .gps-admin-part-thumb { position: relative; width: 137px; height: 104px; border: 1px solid #e5e7eb; border-radius: 6px; background: #ffffff; display: block; overflow: hidden; padding: 0; box-sizing: border-box; max-width: none; max-height: none; min-width: 137px; min-height: 104px; margin-left: 0; flex: 0 0 auto; }
+        .gps-admin-part-thumb > :not(.gps-admin-part-thumb__badge) { width: 100%; height: 100%; padding: 0; margin: 0; box-sizing: border-box; max-width: none; max-height: none; }
+        .gps-admin-part-thumb img { width: 100%; height: 100%; min-width: 100%; min-height: 100%; object-fit: cover; display: block; max-width: none; max-height: none; padding: 0; margin: 0; }
         .gps-admin-part-thumb__placeholder { color: #94a3b8; font-size: 11px; font-weight: 400; text-align: center; line-height: 1.25; }
         .gps-admin-part-thumb__badge { position: absolute; right: 5px; bottom: 5px; min-width: 18px; border-radius: 999px; background: rgba(248, 250, 252, .88); border: 1px solid rgba(226, 232, 240, .9); color: #64748b; padding: 1px 5px; font-size: 10px; font-weight: 500; line-height: 1.25; text-align: center; }
         .gps-admin-part-title { width: 360px; max-width: 360px; }
