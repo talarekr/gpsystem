@@ -83,12 +83,12 @@
         .fi-ta-table [data-column="admin_part_channels"] { width: 270px; min-width: 250px; }
         .fi-ta-table [data-column="admin_part_storage"] { width: 160px; min-width: 140px; }
         .gps-admin-part-cell.gps-admin-part-thumb,
-        .gps-admin-part-thumb { position: relative; width: 150px; height: 112px; padding: 0; margin: 0; overflow: hidden; display: block; box-sizing: border-box; border: 1px solid #e5e7eb; border-radius: 6px; background: #ffffff; max-width: none; max-height: none; min-width: 150px; min-height: 112px; flex: 0 0 auto; }
+        .gps-admin-part-thumb { position: relative; width: 150px !important; height: 112px !important; min-width: 150px !important; max-width: 150px !important; min-height: 112px !important; max-height: 112px !important; padding: 0 !important; margin: 0; overflow: hidden; display: block; box-sizing: border-box; border: 1px solid #e5e7eb; border-radius: 6px; background: #ffffff; flex: 0 0 auto; }
         .gps-admin-part-thumb > a,
         .gps-admin-part-thumb > div,
         .gps-admin-part-thumb picture,
-        .gps-admin-part-thumb .gps-admin-part-thumb__inner { width: 100%; height: 100%; padding: 0; margin: 0; overflow: hidden; display: block; box-sizing: border-box; }
-        .gps-admin-part-thumb img { width: 100% !important; height: 100% !important; min-width: 100%; min-height: 100%; object-fit: cover; display: block; max-width: none !important; max-height: none !important; padding: 0; margin: 0; }
+        .gps-admin-part-thumb .gps-admin-part-thumb__inner { width: 100% !important; height: 100% !important; display: block !important; padding: 0 !important; margin: 0 !important; overflow: hidden; box-sizing: border-box; }
+        .gps-admin-part-thumb img { width: 100% !important; height: 100% !important; object-fit: cover !important; display: block !important; max-width: none !important; max-height: none !important; padding: 0; margin: 0; }
         .gps-admin-part-thumb__placeholder { color: #94a3b8; font-size: 11px; font-weight: 400; text-align: center; line-height: 1.25; }
         .gps-admin-part-thumb__badge { position: absolute; right: 5px; bottom: 5px; min-width: 18px; border-radius: 999px; background: rgba(248, 250, 252, .88); border: 1px solid rgba(226, 232, 240, .9); color: #64748b; padding: 1px 5px; font-size: 10px; font-weight: 500; line-height: 1.25; text-align: center; }
         .gps-admin-part-title { width: 360px; max-width: 360px; }
