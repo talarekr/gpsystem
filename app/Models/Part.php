@@ -316,6 +316,16 @@ class Part extends Model
         return $this->listingImage()?->listingUrl();
     }
 
+    public function adminTableImageUrl(): ?string
+    {
+        return $this->listingImage()?->listingPresentationUrl() ?? $this->primaryImageUrl();
+    }
+
+    public function adminTableImageVariantSource(): string
+    {
+        return $this->listingImage()?->hasListingPresentationVariant() ? 'presentation' : ($this->primaryImageUrl() ? 'primary' : 'fallback');
+    }
+
     private function selectListingImageFromCollection($images): ?PartImage
     {
         if ($images->isEmpty()) {
