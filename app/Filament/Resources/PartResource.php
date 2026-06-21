@@ -422,29 +422,26 @@ class PartResource extends Resource
 
     public static function table(Table $table): Table
     {
-        return $table->columns([
-            Tables\Columns\TextColumn::make('id')->label('ID')->sortable()->searchable()->weight('bold')->color('primary'),
-            Tables\Columns\ImageColumn::make('primary_image_url')->label('Zdjęcie')->getStateUsing(fn (Part $record): ?string => $record->primary_image_url)->height(44)->width(44)->square(),
-            Tables\Columns\TextColumn::make('sku')->label('SKU')->searchable(),
-            Tables\Columns\TextColumn::make('name')->label('Nazwa')->searchable()->limit(32),
-            Tables\Columns\TextColumn::make('part_number')->label('Numer części')->searchable(),
-            Tables\Columns\TextColumn::make('oem_number')->label('OEM')->searchable(),
-            Tables\Columns\TextColumn::make('manufacturer_code')->label('Kod producenta')->searchable()->toggleable(isToggledHiddenByDefault: true),
-            Tables\Columns\TextColumn::make('description')->label('Opis')->searchable()->toggleable(isToggledHiddenByDefault: true),
-            Tables\Columns\TextColumn::make('condition_notes')->label('Stan')->searchable()->toggleable(isToggledHiddenByDefault: true),
-            Tables\Columns\TextColumn::make('category.name')->label('Kategoria')->searchable(),
-            Tables\Columns\TextColumn::make('price')->label('Cena')->money('PLN')->sortable(),
-            Tables\Columns\TextColumn::make('allegro_price')->label('Cena Allegro')->money('PLN')->sortable(),
-            Tables\Columns\TextColumn::make('ebay_price')->label('Cena eBay')->money('PLN')->sortable(),
+        return $table
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with([
+                'images:id,part_id,path,sort_order,is_primary',
+                'marketplaceListings:id,part_id,marketplace,price,currency,status,sync_status,match_status,last_error,url',
+                'storageLocation:id,name,description',
+                'category:id,name',
+                'car:id,make,model,model_variant,production_year,first_registration_year',
+            ]))
+            ->columns([
+            Tables\Columns\ViewColumn::make('admin_part_image')->label('Zdjęcie')->view('filament.resources.parts.table-image'),
+            Tables\Columns\TextColumn::make('id')->label('ID')->sortable()->searchable()->weight('bold')->color('primary')->copyable(),
+            Tables\Columns\ViewColumn::make('admin_part_title')->label('Nazwa części')->view('filament.resources.parts.table-title')->searchable(['name', 'sku']),
+            Tables\Columns\ViewColumn::make('admin_part_numbers')->label('Numer części')->view('filament.resources.parts.table-numbers')->searchable(['part_number', 'oem_number', 'manufacturer_code']),
+            Tables\Columns\ViewColumn::make('admin_part_channels')->label('Kanały / ceny / status wystawienia')->view('filament.resources.parts.table-channels'),
+            Tables\Columns\ViewColumn::make('admin_part_storage')->label('Magazynowanie')->view('filament.resources.parts.table-storage'),
             Tables\Columns\TextColumn::make('status')->label('Status')->formatStateUsing(fn (?string $state) => Part::statusOptions()[$state] ?? $state)->badge()->sortable(),
-            Tables\Columns\TextColumn::make('car_context')->label('Samochód')->state(fn (Part $record) => $record->car ? self::carLabel($record->car) : '—')->searchable(query: fn (Builder $query, string $search): Builder => $query->whereHas('car', fn (Builder $q) => $q->where('make','like',"%{$search}%")->orWhere('model','like',"%{$search}%"))),
-            Tables\Columns\TextColumn::make('storageLocation.name')->label('Miejsce składowania')->searchable(),
-            Tables\Columns\IconColumn::make('is_visible_storefront')->label('Widoczna w sklepie')->boolean(),
-            Tables\Columns\IconColumn::make('needs_listing')->label('Do wystawienia')->boolean()->sortable(),
-            Tables\Columns\TextColumn::make('quantity')->label('Ilość')->sortable(),
-            Tables\Columns\TextColumn::make('createdBy.name')->label('Utworzył')->placeholder('—')->searchable(),
-            Tables\Columns\TextColumn::make('created_at')->label('Utworzono')->dateTime('Y-m-d H:i')->sortable(),
-            Tables\Columns\TextColumn::make('updated_at')->label('Zaktualizowano')->dateTime('Y-m-d H:i')->sortable(),
+            Tables\Columns\TextColumn::make('category.name')->label('Kategoria')->searchable()->toggleable(isToggledHiddenByDefault: true),
+            Tables\Columns\TextColumn::make('car_context')->label('Samochód')->state(fn (Part $record) => $record->car ? self::carLabel($record->car) : '—')->searchable(query: fn (Builder $query, string $search): Builder => $query->whereHas('car', fn (Builder $q) => $q->where('make','like',"%{$search}%")->orWhere('model','like',"%{$search}%")))->toggleable(isToggledHiddenByDefault: true),
+            Tables\Columns\TextColumn::make('created_at')->label('Utworzono')->dateTime('Y-m-d H:i')->sortable()->toggleable(isToggledHiddenByDefault: true),
+            Tables\Columns\TextColumn::make('updated_at')->label('Zaktualizowano')->dateTime('Y-m-d H:i')->sortable()->toggleable(isToggledHiddenByDefault: true),
         ])->filters([
             Tables\Filters\SelectFilter::make('status')->label('Status')->options(Part::statusOptions()),
             Tables\Filters\SelectFilter::make('category_id')->label('Kategoria')->relationship('category', 'name'),
