@@ -53,7 +53,7 @@
     }
 @endphp
 
-<div class="gps-admin-channels">
+<div class="gps-admin-part-cell gps-admin-channels">
     @if (! $part)
         <div class="gps-admin-channel">
             <span class="gps-admin-channel__name">—</span>

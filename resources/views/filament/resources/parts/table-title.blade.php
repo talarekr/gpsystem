@@ -11,7 +11,7 @@
     $editUrl = $part ? \App\Filament\Resources\PartResource::getUrl('edit', ['record' => $part]) : null;
 @endphp
 
-<div class="gps-admin-part-title">
+<div class="gps-admin-part-cell gps-admin-part-title">
     @if (! $part)
         <span>—</span>
     @else
