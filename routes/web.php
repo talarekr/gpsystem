@@ -40,6 +40,7 @@ use App\Http\Controllers\Tools\ImportOvokoOrdersDryRunController;
 use App\Http\Controllers\Tools\CheckPartNumberPerformanceController;
 use App\Http\Controllers\Tools\CheckPartsToListController;
 use App\Http\Controllers\Tools\CheckAllegroChannelsController;
+use App\Http\Controllers\Tools\CheckAdminPartsTableUiController;
 use App\Http\Controllers\Tools\CheckCatalogSearchController;
 use App\Http\Controllers\Tools\CheckCatalogRenderController;
 use App\Http\Controllers\Tools\CheckCatalogViewController;
@@ -141,6 +142,7 @@ Route::get('/tools/export-ovoko-unmapped', ExportOvokoUnmappedController::class)
 Route::get('/tools/export-ovoko-orders-unmatched', ExportOvokoOrdersUnmatchedController::class)->name('tools.export-ovoko-orders-unmatched');
 Route::get('/tools/check-part-number-performance', CheckPartNumberPerformanceController::class)->name('tools.check-part-number-performance');
 Route::get('/tools/check-parts-to-list', CheckPartsToListController::class)->name('tools.check-parts-to-list');
+Route::get('/tools/check-admin-parts-table-ui', CheckAdminPartsTableUiController::class)->name('tools.check-admin-parts-table-ui');
 Route::get('/tools/check-storefront-visibility', CheckStorefrontVisibilityController::class)->name('tools.check-storefront-visibility');
 Route::get('/tools/mark-gps-gmail-to-list-dry-run', MarkGpsGmailToListDryRunController::class)->name('tools.mark-gps-gmail-to-list-dry-run');
 Route::get('/tools/mark-gps-gmail-to-list-live', MarkGpsGmailToListLiveController::class)->name('tools.mark-gps-gmail-to-list-live');
