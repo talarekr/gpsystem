@@ -432,12 +432,12 @@ class PartResource extends Resource
             ]))
             ->columns([
             Tables\Columns\ViewColumn::make('admin_part_image')->label('Zdjęcie')->view('filament.resources.parts.table-image')->viewData(fn (Part $record): array => ['part' => $record]),
-            Tables\Columns\TextColumn::make('id')->label('ID')->sortable()->searchable()->weight('bold')->color('primary')->copyable(),
+            Tables\Columns\TextColumn::make('id')->label('ID')->sortable()->searchable()->weight('semibold')->color('gray')->copyable(),
             Tables\Columns\ViewColumn::make('admin_part_title')->label('Nazwa części')->view('filament.resources.parts.table-title')->viewData(fn (Part $record): array => ['part' => $record])->searchable(['name', 'sku']),
             Tables\Columns\ViewColumn::make('admin_part_numbers')->label('Numer części')->view('filament.resources.parts.table-numbers')->viewData(fn (Part $record): array => ['part' => $record])->searchable(['part_number', 'oem_number', 'manufacturer_code']),
             Tables\Columns\ViewColumn::make('admin_part_channels')->label('Kanały / ceny / status wystawienia')->view('filament.resources.parts.table-channels')->viewData(fn (Part $record): array => ['part' => $record]),
             Tables\Columns\ViewColumn::make('admin_part_storage')->label('Magazynowanie')->view('filament.resources.parts.table-storage')->viewData(fn (Part $record): array => ['part' => $record]),
-            Tables\Columns\TextColumn::make('status')->label('Status')->formatStateUsing(fn (?string $state) => Part::statusOptions()[$state] ?? $state)->badge()->sortable(),
+            Tables\Columns\TextColumn::make('status')->label('Status')->formatStateUsing(fn (?string $state) => Part::statusOptions()[$state] ?? $state)->badge()->size('xs')->sortable(),
             Tables\Columns\TextColumn::make('category.name')->label('Kategoria')->searchable()->toggleable(isToggledHiddenByDefault: true),
             Tables\Columns\TextColumn::make('car_context')->label('Samochód')->state(fn (Part $record) => $record->car ? self::carLabel($record->car) : '—')->searchable(query: fn (Builder $query, string $search): Builder => $query->whereHas('car', fn (Builder $q) => $q->where('make','like',"%{$search}%")->orWhere('model','like',"%{$search}%")))->toggleable(isToggledHiddenByDefault: true),
             Tables\Columns\TextColumn::make('created_at')->label('Utworzono')->dateTime('Y-m-d H:i')->sortable()->toggleable(isToggledHiddenByDefault: true),
@@ -459,12 +459,13 @@ class PartResource extends Resource
             self::rangeFilter('price', 'Cena'), self::rangeFilter('allegro_price', 'Cena Allegro'), self::rangeFilter('ebay_price', 'Cena eBay'),
             Tables\Filters\Filter::make('created_by')->label('Utworzył')->form([Forms\Components\TextInput::make('value')->label('Utworzył')])->query(fn (Builder $query, array $data): Builder => filled($data['value'] ?? null) ? $query->whereHas('createdBy', fn (Builder $q) => $q->where('name', 'like', '%'.$data['value'].'%')->orWhere('email', 'like', '%'.$data['value'].'%')) : $query),
         ])->filtersFormColumns(3)->actions([
-            Tables\Actions\ViewAction::make()
-                ->label('Podgląd')
-                ->url(fn (Part $record): string => static::getUrl('view', ['record' => $record])),
             Tables\Actions\EditAction::make()
                 ->label('Edytuj')
                 ->url(fn (Part $record): string => static::getUrl('edit', ['record' => $record])),
+            Tables\Actions\ViewAction::make()
+                ->label('Podgląd')
+                ->color('gray')
+                ->url(fn (Part $record): string => static::getUrl('view', ['record' => $record])),
             Tables\Actions\Action::make('mark_listing_ready')
                 ->label('Oznacz jako gotowe')
                 ->icon('heroicon-o-check-circle')

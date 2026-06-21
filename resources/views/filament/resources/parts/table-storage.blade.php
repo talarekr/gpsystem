@@ -13,12 +13,12 @@
 
 <div class="gps-admin-storage">
     @if (! $part)
-        <strong>—</strong>
+        <span class="gps-admin-storage__location">—</span>
     @else
-        <strong>{{ $storageLocation?->name ?: 'Brak lokalizacji' }}</strong>
+        <span class="gps-admin-storage__location">{{ $storageLocation?->name ?: 'Brak lokalizacji' }}</span>
         @if ($storageLocation?->description)
-            <span>{{ $storageLocation->description }}</span><br>
+            <span class="gps-admin-storage__description">{{ $storageLocation->description }}</span>
         @endif
-        <span class="gps-admin-chip">Ilość: {{ $part->quantity ?? 0 }}</span>
+        <span class="gps-admin-storage__quantity">Ilość: {{ $part->quantity ?? 0 }}</span>
     @endif
 </div>
