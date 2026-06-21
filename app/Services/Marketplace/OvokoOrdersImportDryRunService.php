@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 
 class OvokoOrdersImportDryRunService
 {
@@ -18,6 +19,24 @@ class OvokoOrdersImportDryRunService
     private const ENDPOINT_PATH = '/v2/get/orders';
     private const MAX_ORDERS = 500;
     private const SAMPLE_LIMIT = 10;
+
+    private const EXPORT_COLUMNS = [
+        'ovoko_order_id',
+        'order_date',
+        'buyer_country',
+        'ovoko_part_id',
+        'item_name',
+        'unit_price',
+        'currency',
+        'order_total_seller_amount',
+        'order_total_seller_currency',
+        'match_status',
+        'reason',
+        'laravel_part_id',
+        'sku',
+        'notes',
+        'manual_action',
+    ];
 
     public function run(string $from, ?string $to = null): array
     {
@@ -121,6 +140,87 @@ class OvokoOrdersImportDryRunService
         ]);
     }
 
+
+    public function exportUnmatched(string $from, ?string $to = null): array
+    {
+        $to ??= now()->toDateString();
+
+        $result = $this->fetchOrders($from, $to);
+        if (! ($result['ok'] ?? false)) {
+            return $result;
+        }
+
+        $receivedOrders = $result['orders'];
+        $orders = array_slice($receivedOrders, 0, self::MAX_ORDERS);
+        $summary = $this->summarizeImport($orders);
+        $rows = $this->unmatchedExportRows($orders);
+        $relativePath = 'exports/ovoko-orders-unmatched-'.$from.'-'.$to.'-'.now()->format('Ymd-His').'.csv';
+        $absolutePath = Storage::disk('local')->path($relativePath);
+
+        Storage::disk('local')->makeDirectory('exports');
+        $handle = fopen($absolutePath, 'wb');
+        fputcsv($handle, self::EXPORT_COLUMNS);
+        foreach ($rows as $row) {
+            fputcsv($handle, array_map(fn (string $column) => $row[$column] ?? '', self::EXPORT_COLUMNS));
+        }
+        fclose($handle);
+
+        return [
+            'ok' => true,
+            'dry_run' => true,
+            'from' => $from,
+            'to' => $to,
+            'orders_count' => $summary['orders_count'],
+            'order_items_count' => $summary['order_items_count'],
+            'unmatched_items_count' => $summary['unmatched_items_count'],
+            'rows_count' => count($rows),
+            'file' => $absolutePath,
+            'download_url' => null,
+            'generated_at' => now()->toISOString(),
+            'http_response_code' => 200,
+        ];
+    }
+
+    private function fetchOrders(string $from, string $to): array
+    {
+        $account = Schema::hasTable('marketplace_accounts')
+            ? MarketplaceAccount::query()->where('code', 'ovoko_main')->first()
+            : null;
+
+        $credentials = is_array($account?->api_credentials) ? $account->api_credentials : [];
+        $credentialsConfigured = filled($credentials['username'] ?? null)
+            && filled($credentials['password'] ?? null)
+            && filled($credentials['user_token'] ?? null);
+
+        if ($account === null) {
+            return ['ok' => false, 'api_status_message' => 'Marketplace account ovoko_main was not found.', 'http_response_code' => 404];
+        }
+
+        $validationMessage = $this->validateConfiguration($account, $credentialsConfigured);
+        if ($validationMessage !== null) {
+            return ['ok' => false, 'api_status_message' => $validationMessage, 'http_response_code' => 422];
+        }
+
+        try {
+            $response = Http::asForm()->acceptJson()->timeout(30)->post($this->endpointUsed((string) $account->api_base_url, $from, $to), [
+                'username' => (string) $credentials['username'],
+                'password' => (string) $credentials['password'],
+                'user_token' => (string) $credentials['user_token'],
+            ]);
+        } catch (ConnectionException) {
+            return ['ok' => false, 'api_status_message' => 'Ovoko/RRR orders request timed out or failed.', 'http_response_code' => 502];
+        }
+
+        $payload = is_array($response->json()) ? $response->json() : [];
+        $apiStatusCode = $payload['status_code'] ?? null;
+        $apiStatusMessage = $payload['msg'] ?? ($payload['message'] ?? null);
+        if (! ($response->successful() && $apiStatusCode === 'R200')) {
+            return ['ok' => false, 'api_status_message' => $this->safeFailureMessage($apiStatusCode, $apiStatusMessage, $response->status()), 'http_response_code' => 502];
+        }
+
+        return ['ok' => true, 'orders' => $this->ordersFromPayload($payload)];
+    }
+
     public function validateDates(string $from, ?string $to = null): ?string
     {
         $to ??= now()->toDateString();
@@ -200,6 +300,49 @@ class OvokoOrdersImportDryRunService
         ];
     }
 
+
+    private function unmatchedExportRows(array $orders): array
+    {
+        $items = [];
+        foreach ($orders as $order) {
+            foreach ($this->itemsFromOrder((array) $order) as $item) {
+                $items[] = ['order' => (array) $order, 'item' => $item, 'ovoko_part_id' => $this->extractPartId($item)];
+            }
+        }
+
+        $partIds = collect($items)->pluck('ovoko_part_id')->filter()->unique()->values();
+        $listings = MarketplaceListing::query()->where('marketplace', 'ovoko')->whereIn('external_offer_id', $partIds)->pluck('id', 'external_offer_id');
+        $rows = [];
+        foreach ($items as $row) {
+            $ovokoPartId = $row['ovoko_part_id'];
+            if ($ovokoPartId && $listings->has((string) $ovokoPartId)) {
+                continue;
+            }
+
+            $order = $row['order'];
+            $item = $row['item'];
+            $rows[] = [
+                'ovoko_order_id' => $this->orderId($order),
+                'order_date' => $order['order_date'] ?? $order['created_at'] ?? $order['date'] ?? '',
+                'buyer_country' => $order['client_address_country'] ?? $order['buyer_country'] ?? data_get($order, 'buyer.country', ''),
+                'ovoko_part_id' => $ovokoPartId,
+                'item_name' => $item['name'] ?? data_get($item, 'item.name', data_get($item, 'part.name', data_get($item, 'product.name', ''))),
+                'unit_price' => data_get($item, 'sell_price.seller.amount', data_get($item, 'price.seller.amount', $item['price'] ?? '')),
+                'currency' => data_get($item, 'sell_price.seller.currency', data_get($item, 'price.seller.currency', $item['currency'] ?? '')),
+                'order_total_seller_amount' => data_get($order, 'total_price.seller.amount', data_get($order, 'total.seller.amount', $order['total_price'] ?? $order['total'] ?? '')),
+                'order_total_seller_currency' => data_get($order, 'total_price.seller.currency', data_get($order, 'total.seller.currency', $order['currency'] ?? '')),
+                'match_status' => 'unmatched',
+                'reason' => 'no marketplace listing for ovoko_part_id',
+                'laravel_part_id' => '',
+                'sku' => $item['sku'] ?? data_get($item, 'item.sku', data_get($item, 'part.sku', data_get($item, 'product.sku', ''))),
+                'notes' => '',
+                'manual_action' => '',
+            ];
+        }
+
+        return $rows;
+    }
+
     private function findExistingOrder(?string $ovokoOrderId): ?object
     {
         if (! $ovokoOrderId || ! Schema::hasTable('orders')) return null;
@@ -277,7 +420,7 @@ class OvokoOrdersImportDryRunService
     private function endpointUsed(string $baseUrl, string $from, string $to): string { return rtrim($baseUrl, '/').self::ENDPOINT_PATH.'/'.$from.'/'.$to; }
     private function ordersFromPayload(array $payload): array { $orders = $payload['list'] ?? $payload['data'] ?? $payload['orders'] ?? []; return is_array($orders) ? array_values($orders) : []; }
     private function itemsFromOrder(array $order): array { $items = $order['item_list'] ?? $order['items'] ?? $order['parts'] ?? []; return is_array($items) ? array_map(fn ($item) => (array) $item, array_values($items)) : []; }
-    private function extractPartId(array $item): ?string { $value = data_get($item, 'id'); return is_scalar($value) && filled($value) && trim((string) $value) !== '0' ? trim((string) $value) : null; }
+    private function extractPartId(array $item): ?string { foreach (['id', 'part_id', 'rrr_part_id', 'external_id', 'part.id', 'part.part_id', 'part.rrr_part_id', 'item.id', 'item.part_id', 'product.id', 'product.part_id', 'listing_id', 'listing.id', 'product.listing_id', 'id_bridge'] as $path) { $value = data_get($item, $path); if (is_scalar($value) && filled($value) && trim((string) $value) !== '0') return trim((string) $value); } return null; }
     private function orderId(array $order): ?string { $value = $order['order_id'] ?? $order['id'] ?? null; return is_scalar($value) && filled($value) ? (string) $value : null; }
     private function safeFailureMessage(mixed $apiStatusCode, mixed $apiStatusMessage, int $httpStatus): string { return "HTTP {$httpStatus}; API status ".($apiStatusCode ?: 'missing').'; '.(filled($apiStatusMessage) ? (string) $apiStatusMessage : 'Ovoko/RRR API returned a non-success status.'); }
 }
