@@ -31,6 +31,7 @@ use App\Http\Controllers\Tools\ExportOvokoUnmappedController;
 use App\Http\Controllers\Tools\CheckPartImagePresentationController;
 use App\Http\Controllers\Tools\CheckProductImageController;
 use App\Http\Controllers\Tools\TestOvokoApiConnectionController;
+use App\Http\Controllers\Tools\OvokoOrdersDryRunController;
 use App\Http\Controllers\Tools\CheckPartNumberPerformanceController;
 use App\Http\Controllers\Tools\CheckPartsToListController;
 use App\Http\Controllers\Tools\CheckAllegroChannelsController;
@@ -109,6 +110,7 @@ Route::get('/tools/check-orders-flow', CheckOrdersFlowController::class)->name('
 Route::get('/tools/check-ovoko-mapping', CheckOvokoMappingController::class)->name('tools.check-ovoko-mapping');
 Route::get('/tools/check-ovoko-api-settings', CheckOvokoApiSettingsController::class)->name('tools.check-ovoko-api-settings');
 Route::get('/tools/test-ovoko-api-connection', TestOvokoApiConnectionController::class)->name('tools.test-ovoko-api-connection');
+Route::get('/tools/ovoko-orders-dry-run', OvokoOrdersDryRunController::class)->name('tools.ovoko-orders-dry-run');
 Route::get('/tools/check-marketplace-mappings', CheckOvokoMappingController::class)->name('tools.check-marketplace-mappings');
 Route::get('/tools/check-allegro-channels', CheckAllegroChannelsController::class)->name('tools.check-allegro-channels');
 Route::get('/tools/run-ovoko-mapping-dry-run', RunOvokoMappingDryRunController::class)->name('tools.run-ovoko-mapping-dry-run');
