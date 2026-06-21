@@ -79,10 +79,14 @@ class OvokoOrdersDryRunController extends Controller
             'order_items_count' => 0,
             'matched_items_count' => 0,
             'unmatched_items_count' => 0,
+            'conflict_items_count' => 0,
+            'already_zero_items_count' => 0,
             'would_mark_sold_count' => 0,
             'would_set_quantity_zero_count' => 0,
             'samples_orders' => [],
             'samples_matched_items' => [],
+            'samples_conflict_items' => [],
+            'samples_already_zero_items' => [],
             'samples_unmatched_items' => [],
             'samples_would_update_parts' => [],
             'endpoint_used' => $this->endpointUsed((string) ($account?->api_base_url ?? ''), $from, $to),
@@ -127,7 +131,7 @@ class OvokoOrdersDryRunController extends Controller
             $summary = $this->summarizeOrders($orders);
 
             Log::info('Ovoko orders dry-run completed.', Arr::only($summary, [
-                'orders_count', 'order_items_count', 'matched_items_count', 'unmatched_items_count', 'would_mark_sold_count', 'would_set_quantity_zero_count',
+                'orders_count', 'order_items_count', 'matched_items_count', 'unmatched_items_count', 'conflict_items_count', 'already_zero_items_count', 'would_mark_sold_count', 'would_set_quantity_zero_count',
             ]) + ['from' => $from, 'to' => $to, 'truncated' => $truncated]);
 
             return response()->json(array_merge($baseResponse, $summary, [
@@ -278,15 +282,33 @@ class OvokoOrdersDryRunController extends Controller
 
         $matched = [];
         $unmatched = [];
+        $conflicts = [];
+        $alreadyZero = [];
         $parts = [];
         foreach ($items as $row) {
             $listing = $row['ovoko_part_id'] ? $listings->get((string) $row['ovoko_part_id']) : null;
-            $sample = $this->itemSample($row['order'], $row['item'], $row['ovoko_part_id'], $listing);
-            if ($listing) {
-                $matched[] = $sample;
-                $parts[$listing->part_id] = $sample;
-            } else {
+            $action = $this->dryRunAction($listing);
+            $sample = $this->itemSample($row['order'], $row['item'], $row['ovoko_part_id'], $listing, $action);
+
+            if (! $listing) {
                 $unmatched[] = $sample;
+                continue;
+            }
+
+            $matched[] = $sample;
+
+            if ($action === 'no_action_conflict_listing') {
+                $conflicts[] = $sample;
+                continue;
+            }
+
+            if ($action === 'already_quantity_zero_no_action') {
+                $alreadyZero[] = $sample;
+                continue;
+            }
+
+            if ($action === 'would_mark_sold_and_set_quantity_0') {
+                $parts[$listing->part_id] = $sample;
             }
         }
 
@@ -295,10 +317,14 @@ class OvokoOrdersDryRunController extends Controller
             'order_items_count' => count($items),
             'matched_items_count' => count($matched),
             'unmatched_items_count' => count($unmatched),
+            'conflict_items_count' => count($conflicts),
+            'already_zero_items_count' => count($alreadyZero),
             'would_mark_sold_count' => count($parts),
             'would_set_quantity_zero_count' => count($parts),
             'samples_orders' => array_slice(array_map(fn ($order) => $this->orderSample((array) $order), $orders), 0, self::SAMPLE_LIMIT),
             'samples_matched_items' => array_slice($matched, 0, self::SAMPLE_LIMIT),
+            'samples_conflict_items' => array_slice($conflicts, 0, self::SAMPLE_LIMIT),
+            'samples_already_zero_items' => array_slice($alreadyZero, 0, self::SAMPLE_LIMIT),
             'samples_unmatched_items' => array_slice($unmatched, 0, self::SAMPLE_LIMIT),
             'samples_would_update_parts' => array_slice(array_values($parts), 0, self::SAMPLE_LIMIT),
         ];
@@ -336,7 +362,24 @@ class OvokoOrdersDryRunController extends Controller
         ];
     }
 
-    private function itemSample(array $order, array $item, ?string $ovokoPartId, ?MarketplaceListing $listing): array
+    private function dryRunAction(?MarketplaceListing $listing): string
+    {
+        if (! $listing) {
+            return 'no_action_unmatched';
+        }
+
+        if ($listing->part_id === null || $listing->sync_status === 'conflict' || $listing->match_status === 'conflict' || ! $listing->part) {
+            return 'no_action_conflict_listing';
+        }
+
+        if ((int) $listing->part->quantity <= 0) {
+            return 'already_quantity_zero_no_action';
+        }
+
+        return 'would_mark_sold_and_set_quantity_0';
+    }
+
+    private function itemSample(array $order, array $item, ?string $ovokoPartId, ?MarketplaceListing $listing, string $action): array
     {
         $part = $listing?->part;
         return [
@@ -347,7 +390,7 @@ class OvokoOrdersDryRunController extends Controller
             'title' => $part?->name ?? $listing?->title ?? ($item['name'] ?? null),
             'current_quantity' => $part?->quantity ?? $listing?->quantity,
             'current_status' => $part?->status ?? $listing?->status,
-            'action' => $listing ? 'would_mark_sold_and_set_quantity_0' : 'no_action_unmatched',
+            'action' => $action,
         ];
     }
 
