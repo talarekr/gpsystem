@@ -23,6 +23,7 @@ use App\Http\Controllers\Storefront\TermsController;
 use App\Http\Controllers\Tools\CheckOrdersFlowController;
 use App\Http\Controllers\Tools\CheckOvokoApiSettingsController;
 use App\Http\Controllers\Tools\CheckOvokoMappingController;
+use App\Http\Controllers\Tools\DebugOvokoPartMatchController;
 use App\Http\Controllers\Tools\DeleteAllegroGearboxesDryRunController;
 use App\Http\Controllers\Tools\DeleteAllegroGearboxesLiveController;
 use App\Http\Controllers\Tools\PurgeAllegroGearboxesDryRunController;
@@ -110,6 +111,7 @@ Route::get('/product-images-import-runner', ProductImagesImportRunnerController:
 Route::get('/tools/check-product-image', CheckProductImageController::class)->name('tools.check-product-image');
 Route::get('/tools/check-orders-flow', CheckOrdersFlowController::class)->name('tools.check-orders-flow');
 Route::get('/tools/check-ovoko-mapping', CheckOvokoMappingController::class)->name('tools.check-ovoko-mapping');
+Route::get('/tools/debug-ovoko-part-match', DebugOvokoPartMatchController::class)->name('tools.debug-ovoko-part-match');
 Route::get('/tools/check-ovoko-api-settings', CheckOvokoApiSettingsController::class)->name('tools.check-ovoko-api-settings');
 Route::get('/tools/test-ovoko-api-connection', TestOvokoApiConnectionController::class)->name('tools.test-ovoko-api-connection');
 Route::get('/tools/ovoko-orders-dry-run', OvokoOrdersDryRunController::class)->name('tools.ovoko-orders-dry-run');
