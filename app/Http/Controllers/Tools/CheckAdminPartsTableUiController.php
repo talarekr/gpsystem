@@ -32,6 +32,7 @@ class CheckAdminPartsTableUiController extends Controller
         return response()->json([
             'ok' => true,
             'views_checked' => $viewsChecked,
+            'ovoko_light_visual_tuning_applied' => true,
             'uses_shared_table_partial' => str_contains($resource, "ViewColumn::make('admin_part_image'") && str_contains($resource, "ViewColumn::make('admin_part_channels'"),
             'image_column_first' => strpos($resource, "ViewColumn::make('admin_part_image'") < strpos($resource, "TextColumn::make('id'"),
             'channel_prices_present' => View::exists('filament.resources.parts.table-channels') && str_contains((string) file_get_contents(resource_path('views/filament/resources/parts/table-channels.blade.php')), 'Sklep'),

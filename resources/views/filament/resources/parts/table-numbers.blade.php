@@ -10,18 +10,21 @@
 
     $numbers = $part ? collect([
         'Numer' => $part->part_number,
-        'OEM' => $part->oem_number,
         'Kod' => $part->manufacturer_code,
-    ])->filter(fn ($value) => filled($value)) : collect();
+        'OEM' => $part->oem_number,
+    ])->filter(fn ($value) => filled($value))->take(2) : collect();
 @endphp
-<div class="gps-admin-chip-wrap">
+<div class="gps-admin-part-numbers">
     @if (! $part)
-        <span class="gps-admin-chip">—</span>
+        <span class="gps-admin-part-number gps-admin-part-number--empty">—</span>
     @else
         @forelse ($numbers as $label => $number)
-            <span class="gps-admin-chip {{ $loop->first ? 'gps-admin-chip--main' : '' }}">{{ $label }}: {{ $number }}</span>
+            <span class="gps-admin-part-number">
+                <span class="gps-admin-part-number__label">{{ $label }}:</span>
+                <span class="gps-admin-part-number__value">{{ $number }}</span>
+            </span>
         @empty
-            <span class="gps-admin-chip">Brak numeru</span>
+            <span class="gps-admin-part-number gps-admin-part-number--empty">Brak numeru</span>
         @endforelse
     @endif
 </div>
