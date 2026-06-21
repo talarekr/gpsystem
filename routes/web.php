@@ -30,6 +30,7 @@ use App\Http\Controllers\Tools\ExportOvokoUnmappedController;
 use App\Http\Controllers\Tools\CheckPartImagePresentationController;
 use App\Http\Controllers\Tools\CheckProductImageController;
 use App\Http\Controllers\Tools\CheckPartNumberPerformanceController;
+use App\Http\Controllers\Tools\CheckPartsToListController;
 use App\Http\Controllers\Tools\CheckAllegroChannelsController;
 use App\Http\Controllers\Tools\CheckCatalogSearchController;
 use App\Http\Controllers\Tools\CheckCatalogRenderController;
@@ -117,6 +118,7 @@ Route::get('/tools/purge-allegro-gearboxes-live', PurgeAllegroGearboxesLiveContr
 Route::get('/tools/inspect-legacy-payload-keys', InspectLegacyPayloadKeysController::class)->name('tools.inspect-legacy-payload-keys');
 Route::get('/tools/export-ovoko-unmapped', ExportOvokoUnmappedController::class)->name('tools.export-ovoko-unmapped');
 Route::get('/tools/check-part-number-performance', CheckPartNumberPerformanceController::class)->name('tools.check-part-number-performance');
+Route::get('/tools/check-parts-to-list', CheckPartsToListController::class)->name('tools.check-parts-to-list');
 Route::get('/tools/check-catalog-search', CheckCatalogSearchController::class)->name('tools.check-catalog-search');
 Route::get('/tools/check-catalog-render', CheckCatalogRenderController::class)->name('tools.check-catalog-render');
 Route::get('/tools/check-catalog-error', CheckCatalogErrorController::class)->name('tools.check-catalog-error');

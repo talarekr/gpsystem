@@ -110,6 +110,7 @@ class PartResource extends Resource
                         Forms\Components\Hidden::make('category_confidence'),
                         Forms\Components\Hidden::make('category_suggestion_reason'),
                         Forms\Components\Hidden::make('category_needs_review'),
+                        Forms\Components\Toggle::make('needs_listing')->label('Część do wystawienia')->helperText('Zaznacz, aby pokazać część w roboczej kolejce Części do wystawienia.')->default(false)->inline(false)->columnSpanFull(),
                     ]),
 
                 Section::make('Informacje o samochodzie')
@@ -439,6 +440,7 @@ class PartResource extends Resource
             Tables\Columns\TextColumn::make('car_context')->label('Samochód')->state(fn (Part $record) => $record->car ? self::carLabel($record->car) : '—')->searchable(query: fn (Builder $query, string $search): Builder => $query->whereHas('car', fn (Builder $q) => $q->where('make','like',"%{$search}%")->orWhere('model','like',"%{$search}%"))),
             Tables\Columns\TextColumn::make('storageLocation.name')->label('Miejsce składowania')->searchable(),
             Tables\Columns\IconColumn::make('is_visible_storefront')->label('Widoczna w sklepie')->boolean(),
+            Tables\Columns\IconColumn::make('needs_listing')->label('Do wystawienia')->boolean()->sortable(),
             Tables\Columns\TextColumn::make('quantity')->label('Ilość')->sortable(),
             Tables\Columns\TextColumn::make('createdBy.name')->label('Utworzył')->placeholder('—')->searchable(),
             Tables\Columns\TextColumn::make('created_at')->label('Utworzono')->dateTime('Y-m-d H:i')->sortable(),
@@ -448,12 +450,18 @@ class PartResource extends Resource
             Tables\Filters\SelectFilter::make('category_id')->label('Kategoria')->relationship('category', 'name'),
             Tables\Filters\TernaryFilter::make('category_needs_review')->label('Kategoria wymaga sprawdzenia'),
             Tables\Filters\TernaryFilter::make('is_visible_storefront')->label('Widoczna w sklepie'),
+            Tables\Filters\TernaryFilter::make('needs_listing')->label('Część do wystawienia'),
+            Tables\Filters\TernaryFilter::make('missing_images')->label('Brak zdjęć')->queries(true: fn (Builder $query): Builder => $query->doesntHave('images'), false: fn (Builder $query): Builder => $query->has('images')),
+            Tables\Filters\TernaryFilter::make('missing_price')->label('Brak ceny')->queries(true: fn (Builder $query): Builder => $query->whereNull('price')->orWhere('price', '<=', 0), false: fn (Builder $query): Builder => $query->whereNotNull('price')->where('price', '>', 0)),
+            Tables\Filters\TernaryFilter::make('missing_sku')->label('Brak SKU')->queries(true: fn (Builder $query): Builder => $query->where(fn (Builder $q) => $q->whereNull('sku')->orWhere('sku', '')), false: fn (Builder $query): Builder => $query->whereNotNull('sku')->where('sku', '<>', '')),
+            Tables\Filters\TernaryFilter::make('missing_part_number')->label('Brak numeru części')->queries(true: fn (Builder $query): Builder => $query->where(fn (Builder $q) => $q->whereNull('part_number')->orWhere('part_number', '')), false: fn (Builder $query): Builder => $query->whereNotNull('part_number')->where('part_number', '<>', '')),
+            Tables\Filters\Filter::make('created_at')->label('Data dodania')->form([Grid::make(2)->schema([Forms\Components\DatePicker::make('from')->label('Od'), Forms\Components\DatePicker::make('until')->label('Do')])])->query(fn (Builder $query, array $data): Builder => $query->when(filled($data['from'] ?? null), fn (Builder $q) => $q->whereDate('created_at', '>=', $data['from']))->when(filled($data['until'] ?? null), fn (Builder $q) => $q->whereDate('created_at', '<=', $data['until']))),
             Tables\Filters\SelectFilter::make('car_id')->label('Samochód')->options(fn () => Car::query()->get()->mapWithKeys(fn (Car $car) => [$car->id => self::carLabel($car)])->all()),
             Tables\Filters\SelectFilter::make('storage_location_id')->label('Miejsce składowania')->relationship('storageLocation', 'name'),
             Tables\Filters\Filter::make('condition_notes')->label('Stan / uwagi')->form([Forms\Components\TextInput::make('value')->label('Stan / uwagi')])->query(fn (Builder $query, array $data): Builder => filled($data['value'] ?? null) ? $query->where('condition_notes', 'like', '%'.$data['value'].'%') : $query),
             self::rangeFilter('price', 'Cena'), self::rangeFilter('allegro_price', 'Cena Allegro'), self::rangeFilter('ebay_price', 'Cena eBay'),
             Tables\Filters\Filter::make('created_by')->label('Utworzył')->form([Forms\Components\TextInput::make('value')->label('Utworzył')])->query(fn (Builder $query, array $data): Builder => filled($data['value'] ?? null) ? $query->whereHas('createdBy', fn (Builder $q) => $q->where('name', 'like', '%'.$data['value'].'%')->orWhere('email', 'like', '%'.$data['value'].'%')) : $query),
-        ])->filtersFormColumns(3)->actions([Tables\Actions\ViewAction::make()->label('Podgląd'), Tables\Actions\EditAction::make()->label('Edytuj')])->bulkActions([Tables\Actions\DeleteBulkAction::make()->label('Usuń zaznaczone')])->defaultSort('id', 'desc');
+        ])->filtersFormColumns(3)->actions([Tables\Actions\ViewAction::make()->label('Podgląd'), Tables\Actions\EditAction::make()->label('Edytuj'), Tables\Actions\Action::make('mark_listing_ready')->label('Oznacz jako gotowe')->icon('heroicon-o-check-circle')->color('success')->requiresConfirmation()->visible(fn (Part $record): bool => (bool) $record->needs_listing)->action(fn (Part $record) => $record->update(['needs_listing' => false]))])->bulkActions([Tables\Actions\DeleteBulkAction::make()->label('Usuń zaznaczone')])->defaultSort('id', 'desc');
     }
 
     public static function rangeFilter(string $field, string $label): Tables\Filters\Filter
@@ -509,6 +517,7 @@ class PartResource extends Resource
         return [
             NavigationItem::make('Dodaj część')->group(static::getNavigationGroup())->sort(static::getNavigationSort())->url(static::getUrl('create'))->isActiveWhen(fn () => request()->routeIs('filament.admin.resources.parts.create')),
             NavigationItem::make('Wszystkie części')->group(static::getNavigationGroup())->sort((static::getNavigationSort() ?? 20) + 1)->url(static::getUrl('index'))->isActiveWhen(fn () => request()->routeIs('filament.admin.resources.parts.index')),
+            NavigationItem::make('Części do wystawienia')->group(static::getNavigationGroup())->sort((static::getNavigationSort() ?? 20) + 2)->url(static::getUrl('to-list'))->isActiveWhen(fn () => request()->routeIs('filament.admin.resources.parts.to-list')),
         ];
     }
 
@@ -521,5 +530,5 @@ class PartResource extends Resource
     public static function rolesWithViewAccess(): array { return array_map(fn (UserRole $role) => $role->value, UserRole::cases()); }
     public static function rolesWithWriteAccess(): array { return [UserRole::OwnerAdmin->value, UserRole::Manager->value, UserRole::WarehouseProductStaff->value, UserRole::PricingStaff->value]; }
     public static function rolesWithFullAccess(): array { return [UserRole::OwnerAdmin->value, UserRole::Manager->value]; }
-    public static function getPages(): array { return ['index' => Pages\ListParts::route('/'), 'create' => Pages\CreatePart::route('/create'), 'view' => Pages\ViewPart::route('/{record}'), 'edit' => Pages\EditPart::route('/{record}/edit')]; }
+    public static function getPages(): array { return ['index' => Pages\ListParts::route('/'), 'create' => Pages\CreatePart::route('/create'), 'to-list' => Pages\PartsToList::route('/to-list'), 'view' => Pages\ViewPart::route('/{record}'), 'edit' => Pages\EditPart::route('/{record}/edit')]; }
 }
