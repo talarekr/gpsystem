@@ -461,7 +461,21 @@ class PartResource extends Resource
             Tables\Filters\Filter::make('condition_notes')->label('Stan / uwagi')->form([Forms\Components\TextInput::make('value')->label('Stan / uwagi')])->query(fn (Builder $query, array $data): Builder => filled($data['value'] ?? null) ? $query->where('condition_notes', 'like', '%'.$data['value'].'%') : $query),
             self::rangeFilter('price', 'Cena'), self::rangeFilter('allegro_price', 'Cena Allegro'), self::rangeFilter('ebay_price', 'Cena eBay'),
             Tables\Filters\Filter::make('created_by')->label('Utworzył')->form([Forms\Components\TextInput::make('value')->label('Utworzył')])->query(fn (Builder $query, array $data): Builder => filled($data['value'] ?? null) ? $query->whereHas('createdBy', fn (Builder $q) => $q->where('name', 'like', '%'.$data['value'].'%')->orWhere('email', 'like', '%'.$data['value'].'%')) : $query),
-        ])->filtersFormColumns(3)->actions([Tables\Actions\ViewAction::make()->label('Podgląd'), Tables\Actions\EditAction::make()->label('Edytuj'), Tables\Actions\Action::make('mark_listing_ready')->label('Oznacz jako gotowe')->icon('heroicon-o-check-circle')->color('success')->requiresConfirmation()->visible(fn (Part $record): bool => (bool) $record->needs_listing)->action(fn (Part $record) => $record->update(['needs_listing' => false]))])->bulkActions([Tables\Actions\DeleteBulkAction::make()->label('Usuń zaznaczone')])->defaultSort('id', 'desc');
+        ])->filtersFormColumns(3)->actions([
+            Tables\Actions\ViewAction::make()
+                ->label('Podgląd')
+                ->url(fn (Part $record): string => static::getUrl('view', ['record' => $record])),
+            Tables\Actions\EditAction::make()
+                ->label('Edytuj')
+                ->url(fn (Part $record): string => static::getUrl('edit', ['record' => $record])),
+            Tables\Actions\Action::make('mark_listing_ready')
+                ->label('Oznacz jako gotowe')
+                ->icon('heroicon-o-check-circle')
+                ->color('success')
+                ->requiresConfirmation()
+                ->visible(fn (Part $record): bool => (bool) $record->needs_listing)
+                ->action(fn (Part $record) => $record->update(['needs_listing' => false])),
+        ])->bulkActions([Tables\Actions\DeleteBulkAction::make()->label('Usuń zaznaczone')])->defaultSort('id', 'desc');
     }
 
     public static function rangeFilter(string $field, string $label): Tables\Filters\Filter
