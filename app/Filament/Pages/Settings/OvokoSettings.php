@@ -41,7 +41,7 @@ class OvokoSettings extends Page implements HasForms
             'api_enabled' => (bool) $account->api_enabled,
             'api_base_url' => $account->api_base_url ?: 'https://api.rrr.lt',
             'api_mode' => $account->api_mode ?: 'dry_run',
-            'username' => $credentials['username'] ?? '',
+            'username' => '',
             'password' => '',
             'user_token' => '',
         ]);
@@ -77,7 +77,7 @@ class OvokoSettings extends Page implements HasForms
                                 ->revealable(false)
                                 ->autocomplete('off')
                                 ->maxLength(255)
-                                ->helperText('Po zapisaniu nie pokazujemy wartości jawnie.'),
+                                ->helperText('Zostaw puste, aby zachować obecną wartość. Po zapisaniu nie pokazujemy wartości jawnie.'),
                             TextInput::make('password')
                                 ->label('Password')
                                 ->password()
@@ -129,7 +129,7 @@ class OvokoSettings extends Page implements HasForms
             'api_enabled' => (bool) $account->api_enabled,
             'api_base_url' => $account->api_base_url,
             'api_mode' => $account->api_mode,
-            'username' => $credentials['username'] ?? '',
+            'username' => '',
             'password' => '',
             'user_token' => '',
         ]);
