@@ -87,9 +87,15 @@ class CheckAdminPartsTableUiController extends Controller
             'id_top_aligned_with_row_content' => str_contains($imageView, '[data-column="id"] > *')
                 && str_contains($imageView, '[data-column="id"] .fi-ta-col-wrp')
                 && str_contains($imageView, '.gps-admin-part-id { display: block; padding-top: 0; margin-top: 0;'),
-            'image_container_width_px' => str_contains($imageView, '.gps-admin-part-thumb { position: relative; width: 137px;') ? 137 : null,
+            'image_alignment_css_isolated' => str_contains($imageView, '[data-column="admin_part_image"] > *')
+                && str_contains($imageView, '.gps-admin-part-cell.gps-admin-part-thumb,')
+                && str_contains($imageView, 'flex: 0 0 auto;'),
+            'image_column_not_affected_by_text_alignment_resets' => ! str_contains($imageView, '.gps-col-image > *')
+                && ! str_contains($imageView, '.gps-admin-part-cell,')
+                && str_contains($imageView, '[data-column="admin_part_image"] .fi-ta-text-item { width: 137px;'),
+            'image_container_width_px' => str_contains($imageView, 'width: 137px; height: 104px;') ? 137 : null,
             'image_container_height_px' => str_contains($imageView, 'width: 137px; height: 104px;') ? 104 : null,
-            'image_fills_container_height' => str_contains($imageView, '.gps-admin-part-thumb img { display: block; width: 100%; height: 100%;')
+            'image_fills_container_height' => str_contains($imageView, '.gps-admin-part-thumb img { width: 100%; height: 100%;')
                 && str_contains($imageView, 'max-height: none;'),
             'image_object_fit' => str_contains($imageView, 'object-fit: cover;') ? 'cover' : null,
             'sku_hidden_in_parts_table' => ! str_contains($titleView, 'SKU:'),
