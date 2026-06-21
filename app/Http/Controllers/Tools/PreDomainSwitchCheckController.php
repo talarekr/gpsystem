@@ -21,11 +21,23 @@ class PreDomainSwitchCheckController extends Controller
             ], 403);
         }
 
+        $routeDiagnostics = $this->routeDiagnostics();
+
         return response()->json([
             'ok' => true,
             'check' => 'pre-domain-switch',
+            'checks' => [
+                'route_registered' => $routeDiagnostics['registered'],
+            ],
+            'warnings' => [],
+            'blockers' => [],
+            'recommended_next_steps' => [
+                'Deploy this branch to gpsystem.thecamels.pl before switching gpswiss.pl.',
+                'Confirm this endpoint returns HTTP 200 JSON after deployment.',
+            ],
             'generated_at' => now()->toISOString(),
-            'route' => $this->routeDiagnostics(),
+            'route_registered' => $routeDiagnostics['registered'],
+            'route' => $routeDiagnostics,
             'cache' => [
                 'routes_cached' => app()->routesAreCached(),
                 'config_cached' => app()->configurationIsCached(),
