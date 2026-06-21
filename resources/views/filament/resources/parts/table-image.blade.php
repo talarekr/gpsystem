@@ -20,11 +20,33 @@
         .fi-ta-table thead th { color: #475569; font-size: 12px; font-weight: 600; }
         .fi-ta-table tbody tr { min-height: 124px; border-color: #eef2f7; }
         .fi-ta-table tbody tr:hover { background: rgba(148, 163, 184, .10); }
-        .fi-ta-table:has([data-column="admin_part_image"]) thead tr > th,
-        .fi-ta-table:has([data-column="admin_part_image"]) tbody tr > td { padding-left: 16px; padding-right: 16px; }
-        .fi-ta-table:has([data-column="admin_part_image"]) thead tr > th > *,
-        .fi-ta-table:has([data-column="admin_part_image"]) tbody tr > td > * { margin-left: 0; padding-left: 0; }
-        .fi-ta-table:has([data-column="admin_part_image"]) tbody tr > td { vertical-align: top; padding-top: 12px; padding-bottom: 12px; }
+        .fi-ta-table:has(.gps-col-image) th.gps-col-image,
+        .fi-ta-table:has(.gps-col-image) td.gps-col-image { padding-left: 16px !important; padding-right: 16px !important; }
+        .fi-ta-table:has(.gps-col-image) th.gps-col-id,
+        .fi-ta-table:has(.gps-col-image) td.gps-col-id { padding-left: 16px !important; padding-right: 16px !important; }
+        .fi-ta-table:has(.gps-col-image) th.gps-col-title,
+        .fi-ta-table:has(.gps-col-image) td.gps-col-title { padding-left: 16px !important; padding-right: 16px !important; }
+        .fi-ta-table:has(.gps-col-image) th.gps-col-number,
+        .fi-ta-table:has(.gps-col-image) td.gps-col-number { padding-left: 16px !important; padding-right: 16px !important; }
+        .fi-ta-table:has(.gps-col-image) th.gps-col-channels,
+        .fi-ta-table:has(.gps-col-image) td.gps-col-channels { padding-left: 16px !important; padding-right: 16px !important; }
+        .fi-ta-table:has(.gps-col-image) th.gps-col-storage,
+        .fi-ta-table:has(.gps-col-image) td.gps-col-storage { padding-left: 16px !important; padding-right: 16px !important; }
+        .fi-ta-table:has(.gps-col-image) th.gps-col-status,
+        .fi-ta-table:has(.gps-col-image) td.gps-col-status { padding-left: 16px !important; padding-right: 16px !important; }
+        .gps-col-title > *,
+        .gps-col-number > *,
+        .gps-col-channels > *,
+        .gps-col-storage > * { margin-left: 0 !important; padding-left: 0 !important; }
+        .gps-col-title .fi-ta-col-wrp,
+        .gps-col-number .fi-ta-col-wrp,
+        .gps-col-channels .fi-ta-col-wrp,
+        .gps-col-storage .fi-ta-col-wrp,
+        .gps-col-title-content,
+        .gps-col-number-content,
+        .gps-col-channels-content,
+        .gps-col-storage-content { margin-left: 0 !important; padding-left: 0 !important; }
+        .fi-ta-table:has(.gps-col-image) tbody tr > td { vertical-align: top; padding-top: 12px; padding-bottom: 12px; }
         .fi-ta-table:has([data-column="admin_part_image"]) tbody tr > td > .fi-ta-col-wrp,
         .fi-ta-table:has([data-column="admin_part_image"]) tbody tr > td .fi-ta-text,
         .fi-ta-table:has([data-column="admin_part_image"]) tbody tr > td .fi-ta-text-item,

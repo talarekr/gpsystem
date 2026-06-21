@@ -39,6 +39,19 @@ class CheckAdminPartsTableUiController extends Controller
         $idColumnPosition = strpos($resource, "TextColumn::make('id'");
         $bulkActionsDisabled = ! str_contains($resource, '->bulkActions(')
             && ! str_contains($resource, 'DeleteBulkAction::make()');
+        $requiredColumnClasses = [
+            'gps-col-image',
+            'gps-col-id',
+            'gps-col-title',
+            'gps-col-number',
+            'gps-col-channels',
+            'gps-col-storage',
+            'gps-col-status',
+        ];
+        $perColumnClassesApplied = collect($requiredColumnClasses)->every(fn (string $class): bool => str_contains($resource, "extraHeaderAttributes(['class' => '{$class}']")
+            && str_contains($resource, "extraCellAttributes(['class' => '{$class}']"));
+        $samePadding = fn (string $class): bool => str_contains($imageView, "th.{$class},")
+            && str_contains($imageView, "td.{$class} { padding-left: 16px !important; padding-right: 16px !important; }");
 
         return response()->json([
             'ok' => true,
@@ -71,11 +84,22 @@ class CheckAdminPartsTableUiController extends Controller
             'column_content_left_aligned_with_headers' => str_contains($imageView, '.gps-admin-part-cell')
                 && str_contains($imageView, 'margin-left: 0; padding-left: 0;')
                 && str_contains($imageView, '[data-column^="admin_part_"] > .fi-ta-col-wrp'),
-            'table_header_body_horizontal_alignment_fixed' => str_contains($imageView, 'thead tr > th,')
-                && str_contains($imageView, 'tbody tr > td { padding-left: 16px; padding-right: 16px; }')
-                && str_contains($imageView, 'tbody tr > td > * { margin-left: 0; padding-left: 0; }'),
-            'th_td_padding_consistent' => str_contains($imageView, 'thead tr > th,')
-                && str_contains($imageView, 'tbody tr > td { padding-left: 16px; padding-right: 16px; }'),
+            'table_header_body_horizontal_alignment_fixed' => $perColumnClassesApplied
+                && $samePadding('gps-col-title')
+                && $samePadding('gps-col-number')
+                && $samePadding('gps-col-channels')
+                && $samePadding('gps-col-storage')
+                && str_contains($imageView, '.gps-col-title > *')
+                && str_contains($imageView, '.gps-col-storage > * { margin-left: 0 !important; padding-left: 0 !important; }'),
+            'th_td_padding_consistent' => $samePadding('gps-col-title')
+                && $samePadding('gps-col-number')
+                && $samePadding('gps-col-channels')
+                && $samePadding('gps-col-storage'),
+            'per_column_alignment_classes_applied' => $perColumnClassesApplied,
+            'title_column_header_cell_same_padding' => $samePadding('gps-col-title'),
+            'number_column_header_cell_same_padding' => $samePadding('gps-col-number'),
+            'channels_column_header_cell_same_padding' => $samePadding('gps-col-channels'),
+            'storage_column_header_cell_same_padding' => $samePadding('gps-col-storage'),
             'all_custom_columns_left_aligned_with_headers' => str_contains($imageView, '[data-column="admin_part_image"]')
                 && str_contains($imageView, '[data-column="admin_part_title"]')
                 && str_contains($imageView, '[data-column="admin_part_numbers"]')
@@ -97,6 +121,7 @@ class CheckAdminPartsTableUiController extends Controller
             'warnings' => array_values(array_filter([
                 Schema::hasTable('marketplace_listings') ? null : 'marketplace_listings table is missing.',
                 $sample ? null : 'No sample part found.',
+                $perColumnClassesApplied ? null : 'Per-column TH/TD alignment classes are missing from PartResource column configuration.',
             ])),
             'blockers' => array_values(array_filter([
                 in_array(false, $viewsChecked, true) ? 'One or more admin parts table views are missing.' : null,
