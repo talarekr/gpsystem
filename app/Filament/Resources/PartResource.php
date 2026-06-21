@@ -473,7 +473,7 @@ class PartResource extends Resource
                 ->requiresConfirmation()
                 ->visible(fn (Part $record): bool => (bool) $record->needs_listing)
                 ->action(fn (Part $record) => $record->update(['needs_listing' => false])),
-        ])->bulkActions([Tables\Actions\DeleteBulkAction::make()->label('Usuń zaznaczone')])->defaultSort('id', 'desc');
+        ])->defaultSort('id', 'desc');
     }
 
     public static function rangeFilter(string $field, string $label): Tables\Filters\Filter
