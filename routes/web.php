@@ -28,6 +28,7 @@ use App\Http\Controllers\Tools\DeleteAllegroGearboxesLiveController;
 use App\Http\Controllers\Tools\PurgeAllegroGearboxesDryRunController;
 use App\Http\Controllers\Tools\PurgeAllegroGearboxesLiveController;
 use App\Http\Controllers\Tools\ExportOvokoUnmappedController;
+use App\Http\Controllers\Tools\ExportOvokoOrdersUnmatchedController;
 use App\Http\Controllers\Tools\CheckPartImagePresentationController;
 use App\Http\Controllers\Tools\CheckProductImageController;
 use App\Http\Controllers\Tools\TestOvokoApiConnectionController;
@@ -128,6 +129,7 @@ Route::get('/tools/purge-allegro-gearboxes-dry-run', PurgeAllegroGearboxesDryRun
 Route::get('/tools/purge-allegro-gearboxes-live', PurgeAllegroGearboxesLiveController::class)->name('tools.purge-allegro-gearboxes-live');
 Route::get('/tools/inspect-legacy-payload-keys', InspectLegacyPayloadKeysController::class)->name('tools.inspect-legacy-payload-keys');
 Route::get('/tools/export-ovoko-unmapped', ExportOvokoUnmappedController::class)->name('tools.export-ovoko-unmapped');
+Route::get('/tools/export-ovoko-orders-unmatched', ExportOvokoOrdersUnmatchedController::class)->name('tools.export-ovoko-orders-unmatched');
 Route::get('/tools/check-part-number-performance', CheckPartNumberPerformanceController::class)->name('tools.check-part-number-performance');
 Route::get('/tools/check-parts-to-list', CheckPartsToListController::class)->name('tools.check-parts-to-list');
 Route::get('/tools/mark-gps-gmail-to-list-dry-run', MarkGpsGmailToListDryRunController::class)->name('tools.mark-gps-gmail-to-list-dry-run');
