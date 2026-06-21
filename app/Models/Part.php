@@ -22,7 +22,7 @@ class Part extends Model
         'source_system','external_id','sku','name','slug','legacy_url','legacy_slug','part_number','oem_number','manufacturer_code','short_description','description','condition_notes','code_photo_path',
         'category_id','suggested_category_id','category_confidence','category_suggestion_reason','category_needs_review',
         'car_id','vehicle_snapshot','legacy_payload','storage_location_id','price','currency','allegro_price','ebay_price','quantity','status',
-        'is_visible_storefront','created_by',
+        'is_visible_storefront','needs_listing','created_by',
     ];
 
     protected function casts(): array
@@ -37,6 +37,7 @@ class Part extends Model
             'ebay_price' => 'decimal:2',
             'quantity' => 'integer',
             'is_visible_storefront' => 'boolean',
+            'needs_listing' => 'boolean',
         ];
     }
 
@@ -48,6 +49,7 @@ class Part extends Model
             $part->currency ??= 'PLN';
             $part->quantity ??= 1;
             $part->is_visible_storefront ??= false;
+            $part->needs_listing ??= false;
             $part->fillVehicleSnapshot();
             app(PartCategorySuggestionService::class)->suggest($part);
         });
