@@ -19,6 +19,7 @@ class CartService
 
         $parts = Part::query()
             ->with('images')
+            ->storefrontVisible()
             ->whereIn('id', $items->keys()->map(fn ($key) => (int) $key)->all())
             ->get()
             ->keyBy('id');

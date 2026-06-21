@@ -367,10 +367,12 @@ class Part extends Model
 
     public function scopeStorefrontVisible(Builder $query): Builder
     {
-        // Temporary for staging/dev: imported Woo products may remain draft before final publishing workflow is enabled.
-        return $query->inStock()->notSold()->whereIn('status', ['draft', 'needs_review', 'ready', 'published'])->where(function (Builder $query): void {
-            $query->where('is_visible_storefront', true)->orWhereIn('status', ['draft', 'needs_review', 'ready', 'published']);
-        });
+        return $query
+            ->where('status', '!=', 'archived')
+            ->where('is_visible_storefront', true)
+            ->where('needs_listing', false)
+            ->inStock()
+            ->notSold();
     }
 
     public function scopeSearchStorefront(Builder $query, ?string $value): Builder
