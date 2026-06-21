@@ -10,38 +10,64 @@ class AllegroOfferExtractor
         $data = $this->normalizePayload($payload);
         if ($data === []) return [];
 
-        return array_values(array_filter([
-            $this->listing($data, 'primary', '_allegro_offer_id', '_allegro_offer_url', '_allegro_status'),
-            $this->listing($data, 'secondary', '_secondary_allegro_offer_id', '_secondary_allegro_offer_url', '_secondary_allegro_status'),
-        ]));
+        $listing = $this->primaryListing($data);
+
+        return $listing === null ? [] : [$listing];
     }
 
     /** @return array<int, string> */
     public function knownKeys(): array
     {
-        return ['_allegro_offer_id', '_secondary_allegro_offer_id', '_allegro_offer_url', '_secondary_allegro_offer_url', '_allegro_status', '_secondary_allegro_status', '_source_marketplace', '_source_account', '_source_channel'];
+        return [
+            'legacy_payload_json._allegro_offer_id',
+            'woo_product.allegro_offer_id',
+            'legacy_payload_json._allegro_status',
+            'legacy_payload_json._allegro_category_id',
+            'legacy_payload_json._allegro_currency',
+            'legacy_payload_json._allegro_imported_at',
+            'legacy_payload_json._allegro_parameters',
+            'legacy_payload_json._allegro_offer_url',
+        ];
     }
 
     /** @param array<string, mixed> $data @return array<string, mixed>|null */
-    private function listing(array $data, string $kind, string $idKey, string $urlKey, string $statusKey): ?array
+    private function primaryListing(array $data): ?array
     {
-        $offerId = $this->clean($data[$idKey] ?? null);
+        $legacy = data_get($data, 'legacy_payload_json');
+        $legacy = is_array($legacy) ? $legacy : [];
+
+        $offerId = $this->clean(data_get($data, 'legacy_payload_json._allegro_offer_id'))
+            ?? $this->clean(data_get($data, 'woo_product.allegro_offer_id'))
+            ?? $this->clean($data['_allegro_offer_id'] ?? null);
+
         if ($offerId === null) return null;
 
-        $account = $this->clean($data['_source_account'] ?? null);
-        $channel = $this->clean($data['_source_channel'] ?? null) ?? $kind;
+        $canonicalUrl = $this->canonicalUrl($offerId);
+        $currency = $this->clean(data_get($data, 'legacy_payload_json._allegro_currency')) ?? 'PLN';
 
         return [
-            'kind' => $kind,
+            'kind' => 'primary',
             'offer_id' => $offerId,
-            'url' => $this->clean($data[$urlKey] ?? null),
-            'status' => $this->clean($data[$statusKey] ?? null),
-            'source_marketplace' => $this->clean($data['_source_marketplace'] ?? null),
-            'source_account' => $account,
-            'source_channel' => $channel,
-            'account_code' => 'allegro_'.str($account ?: $channel ?: $kind)->slug('_')->toString(),
-            'account_name' => 'Allegro '.($account ?: $channel ?: $kind),
+            'url' => $canonicalUrl,
+            'canonical_url' => $canonicalUrl,
+            'status' => $this->clean(data_get($data, 'legacy_payload_json._allegro_status')) ?? 'imported',
+            'category_id' => $this->clean(data_get($data, 'legacy_payload_json._allegro_category_id')),
+            'currency' => $currency,
+            'imported_at' => $this->clean(data_get($data, 'legacy_payload_json._allegro_imported_at')),
+            'parameters' => data_get($data, 'legacy_payload_json._allegro_parameters'),
+            'legacy_offer_url' => $this->clean(data_get($data, 'legacy_payload_json._allegro_offer_url')),
+            'source_marketplace' => 'allegro',
+            'source_account' => 'allegro_main',
+            'source_channel' => 'allegro_main',
+            'account_code' => 'allegro_main',
+            'account_name' => 'Allegro main',
+            'source_keys' => array_keys($legacy),
         ];
+    }
+
+    private function canonicalUrl(string $offerId): string
+    {
+        return 'https://allegro.pl/oferta/'.$offerId;
     }
 
     /** @return array<string, mixed> */
