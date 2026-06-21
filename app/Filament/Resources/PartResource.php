@@ -431,12 +431,12 @@ class PartResource extends Resource
                 'car:id,make,model,model_variant,production_year,first_registration_year',
             ]))
             ->columns([
-            Tables\Columns\ViewColumn::make('admin_part_image')->label('Zdjęcie')->view('filament.resources.parts.table-image'),
+            Tables\Columns\ViewColumn::make('admin_part_image')->label('Zdjęcie')->view('filament.resources.parts.table-image')->viewData(fn (Part $record): array => ['part' => $record]),
             Tables\Columns\TextColumn::make('id')->label('ID')->sortable()->searchable()->weight('bold')->color('primary')->copyable(),
-            Tables\Columns\ViewColumn::make('admin_part_title')->label('Nazwa części')->view('filament.resources.parts.table-title')->searchable(['name', 'sku']),
-            Tables\Columns\ViewColumn::make('admin_part_numbers')->label('Numer części')->view('filament.resources.parts.table-numbers')->searchable(['part_number', 'oem_number', 'manufacturer_code']),
-            Tables\Columns\ViewColumn::make('admin_part_channels')->label('Kanały / ceny / status wystawienia')->view('filament.resources.parts.table-channels'),
-            Tables\Columns\ViewColumn::make('admin_part_storage')->label('Magazynowanie')->view('filament.resources.parts.table-storage'),
+            Tables\Columns\ViewColumn::make('admin_part_title')->label('Nazwa części')->view('filament.resources.parts.table-title')->viewData(fn (Part $record): array => ['part' => $record])->searchable(['name', 'sku']),
+            Tables\Columns\ViewColumn::make('admin_part_numbers')->label('Numer części')->view('filament.resources.parts.table-numbers')->viewData(fn (Part $record): array => ['part' => $record])->searchable(['part_number', 'oem_number', 'manufacturer_code']),
+            Tables\Columns\ViewColumn::make('admin_part_channels')->label('Kanały / ceny / status wystawienia')->view('filament.resources.parts.table-channels')->viewData(fn (Part $record): array => ['part' => $record]),
+            Tables\Columns\ViewColumn::make('admin_part_storage')->label('Magazynowanie')->view('filament.resources.parts.table-storage')->viewData(fn (Part $record): array => ['part' => $record]),
             Tables\Columns\TextColumn::make('status')->label('Status')->formatStateUsing(fn (?string $state) => Part::statusOptions()[$state] ?? $state)->badge()->sortable(),
             Tables\Columns\TextColumn::make('category.name')->label('Kategoria')->searchable()->toggleable(isToggledHiddenByDefault: true),
             Tables\Columns\TextColumn::make('car_context')->label('Samochód')->state(fn (Part $record) => $record->car ? self::carLabel($record->car) : '—')->searchable(query: fn (Builder $query, string $search): Builder => $query->whereHas('car', fn (Builder $q) => $q->where('make','like',"%{$search}%")->orWhere('model','like',"%{$search}%")))->toggleable(isToggledHiddenByDefault: true),

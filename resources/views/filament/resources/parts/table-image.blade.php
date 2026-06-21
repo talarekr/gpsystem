@@ -1,6 +1,15 @@
 @php
-    $images = $record->relationLoaded('images') ? $record->images : collect();
-    $imageUrl = $record->primary_image_url;
+    $part = (isset($part) && $part instanceof \App\Models\Part) ? $part : null;
+
+    if (! $part && isset($getRecord) && is_callable($getRecord)) {
+        $candidate = $getRecord();
+        $part = $candidate instanceof \App\Models\Part ? $candidate : null;
+    } elseif (isset($record) && $record instanceof \App\Models\Part) {
+        $part = $record;
+    }
+
+    $images = ($part instanceof \App\Models\Part && $part->relationLoaded('images')) ? $part->images : collect();
+    $imageUrl = $part instanceof \App\Models\Part ? $part->primary_image_url : null;
     $imageCount = $images->count();
 @endphp
 
@@ -36,8 +45,10 @@
 @endonce
 
 <div class="gps-admin-part-thumb">
-    @if ($imageUrl)
-        <img src="{{ $imageUrl }}" alt="Zdjęcie części #{{ $record->id }}" loading="lazy">
+    @if (! $part)
+        <span class="gps-admin-part-thumb__placeholder">—</span>
+    @elseif ($imageUrl)
+        <img src="{{ $imageUrl }}" alt="Zdjęcie części #{{ $part->id }}" loading="lazy">
         @if ($imageCount > 1)
             <span class="gps-admin-part-thumb__badge">{{ $imageCount }}</span>
         @endif
