@@ -94,7 +94,17 @@ class PartImage extends Model
 
     public function listingUrl(): ?string
     {
-        return $this->presentationUrl('listing_path') ?? $this->absolutePublicUrl();
+        return $this->listingPresentationUrl() ?? $this->absolutePublicUrl();
+    }
+
+    public function listingPresentationUrl(): ?string
+    {
+        return $this->presentationUrl('listing_path');
+    }
+
+    public function hasListingPresentationVariant(): bool
+    {
+        return $this->listingPresentationUrl() !== null;
     }
 
     public function listingScore(): ?float

@@ -27,6 +27,7 @@ class CheckAdminPartsTableUiController extends Controller
         $viewsChecked = collect($views)->mapWithKeys(fn (string $view): array => [$view => View::exists($view)])->all();
         $sample = Part::query()->with(['images', 'marketplaceListings', 'storageLocation'])->orderByDesc('id')->first();
         $flags = $sample ? $this->marketplaceFlags($sample) : [];
+        $imageVariantSource = $sample?->adminTableImageVariantSource() ?? 'fallback';
         $resource = file_get_contents(app_path('Filament/Resources/PartResource.php')) ?: '';
 
         $imageColumnPosition = strpos($resource, "ViewColumn::make('admin_part_image'");
@@ -47,6 +48,8 @@ class CheckAdminPartsTableUiController extends Controller
             'marketplace_statuses_present' => View::exists('filament.resources.parts.table-channels') && str_contains((string) file_get_contents(resource_path('views/filament/resources/parts/table-channels.blade.php')), 'sync_status'),
             'sample_part_id' => $sample?->id,
             'sample_part_has_image' => (bool) ($sample?->images->isNotEmpty()),
+            'uses_listing_thumbnail_variant' => $imageVariantSource === 'presentation',
+            'image_variant_source' => $imageVariantSource,
             'sample_marketplace_flags' => $flags,
             'warnings' => array_values(array_filter([
                 Schema::hasTable('marketplace_listings') ? null : 'marketplace_listings table is missing.',

@@ -9,7 +9,7 @@
     }
 
     $images = ($part instanceof \App\Models\Part && $part->relationLoaded('images')) ? $part->images : collect();
-    $imageUrl = $part instanceof \App\Models\Part ? $part->primary_image_url : null;
+    $imageUrl = $part instanceof \App\Models\Part ? $part->adminTableImageUrl() : null;
     $imageCount = $images->count();
 @endphp
 
@@ -29,9 +29,9 @@
         .fi-ta-table [data-column="admin_part_channels"] { width: 270px; min-width: 250px; }
         .fi-ta-table [data-column="admin_part_storage"] { width: 160px; min-width: 140px; }
         .gps-admin-part-thumb { position: relative; width: 130px; height: 100px; border: 1px solid #e5e7eb; border-radius: 6px; background: #ffffff; display: flex; align-items: center; justify-content: center; overflow: hidden; }
-        .gps-admin-part-thumb img { max-width: 130px; max-height: 100px; width: auto; height: auto; object-fit: contain; padding: 4px; }
-        .gps-admin-part-thumb__placeholder { color: #94a3b8; font-size: 12px; font-weight: 400; text-align: center; line-height: 1.25; }
-        .gps-admin-part-thumb__badge { position: absolute; right: 5px; bottom: 5px; min-width: 20px; border-radius: 999px; background: rgba(248, 250, 252, .94); border: 1px solid #e2e8f0; color: #475569; padding: 1px 6px; font-size: 10px; font-weight: 500; line-height: 1.3; text-align: center; }
+        .gps-admin-part-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; padding: 0; }
+        .gps-admin-part-thumb__placeholder { color: #94a3b8; font-size: 11px; font-weight: 400; text-align: center; line-height: 1.25; }
+        .gps-admin-part-thumb__badge { position: absolute; right: 5px; bottom: 5px; min-width: 18px; border-radius: 999px; background: rgba(248, 250, 252, .88); border: 1px solid rgba(226, 232, 240, .9); color: #64748b; padding: 1px 5px; font-size: 10px; font-weight: 500; line-height: 1.25; text-align: center; }
         .gps-admin-part-title { max-width: 420px; }
         .gps-admin-part-title a { display: -webkit-box; overflow: hidden; color: #1e293b; font-size: 13px; font-weight: 500; line-height: 1.35; text-decoration: none; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
         .gps-admin-part-title a:hover { color: #2563eb; text-decoration: underline; }
