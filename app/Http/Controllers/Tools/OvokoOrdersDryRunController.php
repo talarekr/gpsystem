@@ -24,22 +24,23 @@ class OvokoOrdersDryRunController extends Controller
     private const INSPECT_LIMIT = 3;
 
     private const PART_ID_PATHS = [
+        'id',
         'part_id',
         'rrr_part_id',
-        'id_bridge',
         'external_id',
         'part.id',
         'part.part_id',
         'part.rrr_part_id',
-        'item.part_id',
         'item.id',
-        'product.part_id',
+        'item.part_id',
         'product.id',
+        'product.part_id',
         'part.code',
         'part.external_id',
         'listing_id',
         'listing.id',
         'product.listing_id',
+        'id_bridge',
     ];
 
     public function __invoke(Request $request): JsonResponse
@@ -314,7 +315,7 @@ class OvokoOrdersDryRunController extends Controller
         foreach (self::PART_ID_PATHS as $path) {
             $value = data_get($item, $path);
             if ($this->isUsableIdentifier($value)) {
-                return (string) $value;
+                return trim((string) $value);
             }
         }
 
@@ -374,7 +375,7 @@ class OvokoOrdersDryRunController extends Controller
             'sample_order_top_level_keys' => array_keys($sampleOrder),
             'sample_order_item_keys' => array_keys($sampleItem),
             'sample_order_item_safe' => $this->safeTechnicalSample($sampleItem),
-            'candidate_part_id_fields' => $this->candidateFields($sampleItems, ['part_id', 'rrr_part_id', 'part.id', 'part.part_id', 'item.part_id', 'product.part_id', 'part.code', 'part.external_id']),
+            'candidate_part_id_fields' => $this->candidateFields($sampleItems, ['id', 'part_id', 'rrr_part_id', 'part.id', 'part.part_id', 'item.id', 'item.part_id', 'product.id', 'product.part_id', 'part.code', 'part.external_id', 'id_bridge']),
             'candidate_listing_id_fields' => $this->candidateFields($sampleItems, ['listing_id', 'listing.id', 'offer_id', 'external_offer_id', 'product.listing_id']),
             'candidate_sku_fields' => $this->candidateFields($sampleItems, ['sku', 'oem', 'oem_code', 'part_number', 'part.sku', 'product.sku', 'code']),
             'raw_paths_with_id_like_keys' => $this->filterPaths($paths, '/(^|[._-])id($|[._-])/i'),
