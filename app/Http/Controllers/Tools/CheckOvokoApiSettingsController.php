@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers\Tools;
 
-use App\Filament\Pages\Settings\OvokoSettings;
 use App\Http\Controllers\Controller;
 use App\Models\MarketplaceAccount;
 use Illuminate\Http\JsonResponse;
@@ -30,7 +29,6 @@ class CheckOvokoApiSettingsController extends Controller
             && filled($credentials['user_token'] ?? null);
 
         return response()->json([
-            'ok' => true,
             'account_exists' => $account !== null,
             'api_enabled' => (bool) ($account?->api_enabled ?? false),
             'api_base_url' => $account?->api_base_url,
@@ -39,9 +37,6 @@ class CheckOvokoApiSettingsController extends Controller
             'password_configured' => filled($credentials['password'] ?? null),
             'user_token_configured' => filled($credentials['user_token'] ?? null),
             'credentials_configured' => $credentialsConfigured,
-            'last_connection_check_at' => $account?->last_connection_check_at?->toISOString(),
-            'last_connection_status' => $account?->last_connection_status,
-            'admin_url' => OvokoSettings::getUrl(),
         ]);
     }
 }

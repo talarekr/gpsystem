@@ -12,7 +12,7 @@ return new class extends Migration
             $table->boolean('api_enabled')->default(false)->after('status');
             $table->string('api_base_url')->nullable()->after('api_enabled');
             $table->string('api_mode')->default('dry_run')->after('api_base_url');
-            $table->json('api_credentials')->nullable()->after('api_mode');
+            $table->longText('api_credentials')->nullable()->after('api_mode');
             $table->json('api_settings')->nullable()->after('api_credentials');
             $table->timestamp('last_connection_check_at')->nullable()->after('api_settings');
             $table->string('last_connection_status')->nullable()->after('last_connection_check_at');
