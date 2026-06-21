@@ -20,12 +20,22 @@
         .fi-ta-table thead th { color: #475569; font-size: 12px; font-weight: 600; }
         .fi-ta-table tbody tr { min-height: 124px; border-color: #eef2f7; }
         .fi-ta-table tbody tr:hover { background: rgba(148, 163, 184, .10); }
-        .fi-ta-table tbody td { vertical-align: top; padding-top: 12px; padding-bottom: 12px; }
-        .fi-ta-table tbody td > .fi-ta-col-wrp, .fi-ta-table tbody td .fi-ta-text { align-items: flex-start; }
+        .fi-ta-table:has([data-column="admin_part_image"]) tbody tr > td { vertical-align: top; padding-top: 12px; padding-bottom: 12px; }
+        .fi-ta-table:has([data-column="admin_part_image"]) tbody tr > td > .fi-ta-col-wrp,
+        .fi-ta-table:has([data-column="admin_part_image"]) tbody tr > td .fi-ta-text,
+        .fi-ta-table:has([data-column="admin_part_image"]) tbody tr > td .fi-ta-text-item,
+        .fi-ta-table:has([data-column="admin_part_image"]) tbody tr > td .fi-ta-actions,
+        .fi-ta-table:has([data-column="admin_part_image"]) tbody tr > td .fi-ta-actions > *,
+        .fi-ta-table:has([data-column="admin_part_image"]) [data-column="id"] > *,
+        .fi-ta-table:has([data-column="admin_part_image"]) [data-column="admin_part_title"] > *,
+        .fi-ta-table:has([data-column="admin_part_image"]) [data-column="admin_part_numbers"] > *,
+        .fi-ta-table:has([data-column="admin_part_image"]) [data-column="admin_part_channels"] > *,
+        .fi-ta-table:has([data-column="admin_part_image"]) [data-column="admin_part_storage"] > *,
+        .fi-ta-table:has([data-column="admin_part_image"]) [data-column="status"] > *,
+        .fi-ta-table:has([data-column="admin_part_image"]) tbody tr > td:last-child > * { align-items: flex-start; justify-content: flex-start; }
         .fi-ta-table tbody td, .fi-ta-table tbody td * { font-weight: 400; }
         .fi-ta-table [data-column="admin_part_image"] { width: 150px; min-width: 150px; }
         .fi-ta-table [data-column="id"] { width: 70px; min-width: 70px; color: #334155; font-size: 13px; font-weight: 500; vertical-align: top; }
-        .fi-ta-table [data-column="id"] > *, .fi-ta-table [data-column="id"] .fi-ta-text, .fi-ta-table [data-column="id"] .fi-ta-text-item { align-items: flex-start; justify-content: flex-start; }
         .fi-ta-table [data-column="admin_part_title"] { width: 380px; min-width: 360px; max-width: 380px; }
         .fi-ta-table [data-column="admin_part_numbers"] { width: 190px; min-width: 170px; }
         .fi-ta-table [data-column="admin_part_channels"] { width: 270px; min-width: 250px; }
