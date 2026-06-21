@@ -71,6 +71,18 @@ class CheckAdminPartsTableUiController extends Controller
             'column_content_left_aligned_with_headers' => str_contains($imageView, '.gps-admin-part-cell')
                 && str_contains($imageView, 'margin-left: 0; padding-left: 0;')
                 && str_contains($imageView, '[data-column^="admin_part_"] > .fi-ta-col-wrp'),
+            'table_header_body_horizontal_alignment_fixed' => str_contains($imageView, 'thead tr > th,')
+                && str_contains($imageView, 'tbody tr > td { padding-left: 16px; padding-right: 16px; }')
+                && str_contains($imageView, 'tbody tr > td > * { margin-left: 0; padding-left: 0; }'),
+            'th_td_padding_consistent' => str_contains($imageView, 'thead tr > th,')
+                && str_contains($imageView, 'tbody tr > td { padding-left: 16px; padding-right: 16px; }'),
+            'all_custom_columns_left_aligned_with_headers' => str_contains($imageView, '[data-column="admin_part_image"]')
+                && str_contains($imageView, '[data-column="admin_part_title"]')
+                && str_contains($imageView, '[data-column="admin_part_numbers"]')
+                && str_contains($imageView, '[data-column="admin_part_channels"]')
+                && str_contains($imageView, '[data-column="admin_part_storage"]')
+                && str_contains($imageView, '.gps-admin-part-cell')
+                && str_contains($imageView, 'margin-left: 0; padding-left: 0;'),
             'custom_columns_inner_margin_left_px' => str_contains($imageView, 'margin-left: 0; padding-left: 0;') ? 0 : null,
             'part_number_column_single_value' => ! str_contains($numbersView, "'Kod' =>") && ! str_contains($numbersView, "'Numer' =>") && str_contains($numbersView, '$part->part_number'),
             'part_number_copy_action_present' => str_contains($numbersView, 'navigator.clipboard') && str_contains($numbersView, 'gps-admin-part-number__copy'),
