@@ -50,6 +50,8 @@ use App\Http\Controllers\Tools\RunOvokoMappingDryRunController;
 use App\Http\Controllers\Tools\RunOvokoMappingLiveController;
 use App\Http\Controllers\Tools\RunAllegroMappingDryRunController;
 use App\Http\Controllers\Tools\RunAllegroMappingLiveController;
+use App\Http\Controllers\Tools\RunEbayMappingDryRunController;
+use App\Http\Controllers\Tools\RunEbayMappingLiveController;
 use App\Services\ImportMigration\WooProductImport;
 use App\Support\ImportMigration\ManualImportFileResolver;
 use App\Support\ImportMigration\WooProductImportRunRepository;
@@ -106,6 +108,8 @@ Route::get('/tools/run-ovoko-mapping-dry-run', RunOvokoMappingDryRunController::
 Route::get('/tools/run-ovoko-mapping-live', RunOvokoMappingLiveController::class)->name('tools.run-ovoko-mapping-live');
 Route::get('/tools/run-allegro-mapping-dry-run', RunAllegroMappingDryRunController::class)->name('tools.run-allegro-mapping-dry-run');
 Route::get('/tools/run-allegro-mapping-live', RunAllegroMappingLiveController::class)->name('tools.run-allegro-mapping-live');
+Route::get('/tools/run-ebay-mapping-dry-run', RunEbayMappingDryRunController::class)->name('tools.run-ebay-mapping-dry-run');
+Route::get('/tools/run-ebay-mapping-live', RunEbayMappingLiveController::class)->name('tools.run-ebay-mapping-live');
 Route::get('/tools/delete-allegro-gearboxes-dry-run', DeleteAllegroGearboxesDryRunController::class)->name('tools.delete-allegro-gearboxes-dry-run');
 Route::get('/tools/delete-allegro-gearboxes-live', DeleteAllegroGearboxesLiveController::class)->name('tools.delete-allegro-gearboxes-live');
 Route::get('/tools/purge-allegro-gearboxes-dry-run', PurgeAllegroGearboxesDryRunController::class)->name('tools.purge-allegro-gearboxes-dry-run');
