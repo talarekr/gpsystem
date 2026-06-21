@@ -22,6 +22,8 @@ use App\Http\Controllers\Storefront\SearchController;
 use App\Http\Controllers\Storefront\TermsController;
 use App\Http\Controllers\Tools\CheckOrdersFlowController;
 use App\Http\Controllers\Tools\CheckOvokoMappingController;
+use App\Http\Controllers\Tools\DeleteAllegroGearboxesDryRunController;
+use App\Http\Controllers\Tools\DeleteAllegroGearboxesLiveController;
 use App\Http\Controllers\Tools\ExportOvokoUnmappedController;
 use App\Http\Controllers\Tools\CheckPartImagePresentationController;
 use App\Http\Controllers\Tools\CheckProductImageController;
@@ -102,6 +104,8 @@ Route::get('/tools/run-ovoko-mapping-dry-run', RunOvokoMappingDryRunController::
 Route::get('/tools/run-ovoko-mapping-live', RunOvokoMappingLiveController::class)->name('tools.run-ovoko-mapping-live');
 Route::get('/tools/run-allegro-mapping-dry-run', RunAllegroMappingDryRunController::class)->name('tools.run-allegro-mapping-dry-run');
 Route::get('/tools/run-allegro-mapping-live', RunAllegroMappingLiveController::class)->name('tools.run-allegro-mapping-live');
+Route::get('/tools/delete-allegro-gearboxes-dry-run', DeleteAllegroGearboxesDryRunController::class)->name('tools.delete-allegro-gearboxes-dry-run');
+Route::get('/tools/delete-allegro-gearboxes-live', DeleteAllegroGearboxesLiveController::class)->name('tools.delete-allegro-gearboxes-live');
 Route::get('/tools/inspect-legacy-payload-keys', InspectLegacyPayloadKeysController::class)->name('tools.inspect-legacy-payload-keys');
 Route::get('/tools/export-ovoko-unmapped', ExportOvokoUnmappedController::class)->name('tools.export-ovoko-unmapped');
 Route::get('/tools/check-part-number-performance', CheckPartNumberPerformanceController::class)->name('tools.check-part-number-performance');
