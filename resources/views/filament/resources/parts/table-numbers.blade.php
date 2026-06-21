@@ -23,7 +23,7 @@
                 class="gps-admin-part-number__copy"
                 title="Kopiuj numer części"
                 aria-label="Kopiuj numer części {{ $number }}"
-                onclick="navigator.clipboard?.writeText(@js($number))"
+                onclick="event.preventDefault(); event.stopPropagation(); navigator.clipboard?.writeText(@js($number));"
             >
                 <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                     <path d="M7 3.5A2.5 2.5 0 0 1 9.5 1h6A2.5 2.5 0 0 1 18 3.5v6a2.5 2.5 0 0 1-2.5 2.5h-6A2.5 2.5 0 0 1 7 9.5v-6Z" />

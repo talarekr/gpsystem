@@ -26,9 +26,18 @@ class CheckAdminPartsTableUiController extends Controller
             'filament.resources.parts.table-storage',
         ];
         $viewsChecked = collect($views)->mapWithKeys(fn (string $view): array => [$view => View::exists($view)])->all();
-        $sample = Part::query()->with(['images', 'marketplaceListings', 'storageLocation'])->orderByDesc('id')->first();
+        $sample = Part::query()->with(['images', 'marketplaceListings', 'storageLocation'])->find(7843)
+            ?? Part::query()->with(['images', 'marketplaceListings', 'storageLocation'])->orderByDesc('id')->first();
         $flags = $sample ? $this->marketplaceFlags($sample) : [];
         $imageVariantSource = $sample?->adminTableImageVariantSource() ?? 'fallback';
+        $listingImage = $sample?->listingImage();
+        $primaryImage = $sample?->primaryImage();
+        $adminImageUrl = $sample?->adminTableImageUrl();
+        $presentationImageUrl = $listingImage?->listingPresentationUrl();
+        $listingImageUrl = $sample?->listingImageUrl();
+        $storefrontImageUrl = $sample && method_exists($sample, 'storefrontImageUrl') ? $sample->storefrontImageUrl() : null;
+        $primaryImageUrl = $sample?->primaryImageUrl();
+        $originalImageUrl = $primaryImage?->absolutePublicUrl();
         $resource = file_get_contents(app_path('Filament/Resources/PartResource.php')) ?: '';
         $titleView = (string) file_get_contents(resource_path('views/filament/resources/parts/table-title.blade.php'));
         $idView = (string) file_get_contents(resource_path('views/filament/resources/parts/table-id.blade.php'));
@@ -60,7 +69,7 @@ class CheckAdminPartsTableUiController extends Controller
             'views_checked' => $viewsChecked,
             'ovoko_light_visual_tuning_applied' => true,
             'uses_shared_table_partial' => str_contains($resource, "ViewColumn::make('admin_part_image'") && str_contains($resource, "ViewColumn::make('admin_part_channels'"),
-            'image_css_forces_full_fill' => str_contains($imageView, 'width: 137px; height: 104px;')
+            'image_css_forces_full_fill' => str_contains($imageView, 'width: 150px; height: 112px;')
                 && str_contains($imageView, 'padding: 0; margin: 0; overflow: hidden;')
                 && str_contains($imageView, 'min-width: 100%; min-height: 100%;')
                 && str_contains($imageView, 'object-fit: cover;')
@@ -81,6 +90,15 @@ class CheckAdminPartsTableUiController extends Controller
             'marketplace_statuses_present' => View::exists('filament.resources.parts.table-channels') && str_contains((string) file_get_contents(resource_path('views/filament/resources/parts/table-channels.blade.php')), 'sync_status'),
             'sample_part_id' => $sample?->id,
             'sample_part_has_image' => (bool) ($sample?->images->isNotEmpty()),
+            'admin_image_url' => $adminImageUrl,
+            'presentation_image_url' => $presentationImageUrl,
+            'listing_image_url' => $listingImageUrl,
+            'storefront_image_url' => $storefrontImageUrl,
+            'primary_image_url' => $primaryImageUrl,
+            'original_image_url' => $originalImageUrl,
+            'admin_image_url_equals_listing_image_url' => $adminImageUrl !== null && $adminImageUrl === $listingImageUrl,
+            'admin_image_url_equals_storefront_image_url' => $adminImageUrl !== null && $adminImageUrl === $storefrontImageUrl,
+            'admin_uses_best_available_thumbnail_variant' => $adminImageUrl !== null && ($adminImageUrl === $listingImageUrl || ($listingImageUrl === null && $adminImageUrl === $storefrontImageUrl) || ($listingImageUrl === null && $storefrontImageUrl === null && $adminImageUrl === $primaryImageUrl)),
             'uses_listing_thumbnail_variant' => in_array($imageVariantSource, ['presentation', 'listing'], true),
             'image_variant_source' => $imageVariantSource,
             'global_table_font_weight_reset_detected' => str_contains($imageView, '.fi-ta-table tbody td, .fi-ta-table tbody td * { font-weight: 400; }'),
@@ -98,9 +116,9 @@ class CheckAdminPartsTableUiController extends Controller
                 && str_contains($imageView, 'flex: 0 0 auto;'),
             'image_column_not_affected_by_text_alignment_resets' => ! str_contains($imageView, '.gps-col-image > *')
                 && ! str_contains($imageView, '.gps-admin-part-cell,')
-                && str_contains($imageView, '[data-column="admin_part_image"] .fi-ta-text-item { width: 137px;'),
-            'image_container_width_px' => str_contains($imageView, 'width: 137px; height: 104px;') ? 137 : null,
-            'image_container_height_px' => str_contains($imageView, 'width: 137px; height: 104px;') ? 104 : null,
+                && str_contains($imageView, '[data-column="admin_part_image"] .fi-ta-text-item { width: 150px;'),
+            'image_container_width_px' => str_contains($imageView, 'width: 150px; height: 112px;') ? 150 : null,
+            'image_container_height_px' => str_contains($imageView, 'width: 150px; height: 112px;') ? 112 : null,
             'image_fills_container_height' => str_contains($imageView, '.gps-admin-part-thumb img { width: 100% !important; height: 100% !important;')
                 && str_contains($imageView, 'max-height: none !important;'),
             'image_object_fit' => str_contains($imageView, 'object-fit: cover;') ? 'cover' : null,
@@ -150,6 +168,10 @@ class CheckAdminPartsTableUiController extends Controller
                 && str_contains($numbersView, 'gps-admin-part-number__copy'),
             'part_number_column_single_value' => ! str_contains($numbersView, "'Kod' =>") && ! str_contains($numbersView, "'Numer' =>") && str_contains($numbersView, '$part->part_number'),
             'part_number_copy_action_present' => str_contains($numbersView, 'navigator.clipboard') && str_contains($numbersView, 'gps-admin-part-number__copy'),
+            'part_number_copy_uses_button' => str_contains($numbersView, '<button') && str_contains($numbersView, 'type="button"') && ! str_contains($numbersView, 'href='),
+            'part_number_copy_stops_propagation' => str_contains($numbersView, 'stopPropagation'),
+            'part_number_copy_prevents_default' => str_contains($numbersView, 'preventDefault'),
+            'part_number_copy_not_record_link' => str_contains($numbersView, '<button') && ! str_contains($numbersView, '<a') && ! str_contains($numbersView, 'href='),
             'part_number_label_hidden' => ! str_contains($numbersView, 'gps-admin-part-number__label') && ! str_contains($numbersView, '{{ $label }}'),
             'duplicate_part_number_chips_removed' => ! str_contains($numbersView, '@forelse ($numbers') && ! str_contains($numbersView, 'take(2)'),
             'edit_main_part_code_uses_part_number' => str_contains($resource, "TextInput::make('part_number')->label('Główny kod części')"),
