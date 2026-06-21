@@ -8,6 +8,7 @@ use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\View;
+use Illuminate\Support\Str;
 
 class CheckAdminPartsTableUiController extends Controller
 {
@@ -38,6 +39,16 @@ class CheckAdminPartsTableUiController extends Controller
         $storefrontImageUrl = $sample && method_exists($sample, 'storefrontImageUrl') ? $sample->storefrontImageUrl() : null;
         $primaryImageUrl = $sample?->primaryImageUrl();
         $originalImageUrl = $primaryImage?->absolutePublicUrl();
+        $adminImagePath = $this->publicImagePathFromUrl($adminImageUrl);
+        $adminImageSize = $this->imageSize($adminImagePath);
+        $listingVariantPath = $this->publicImagePathFromUrl($listingImage?->listingPresentationUrl());
+        $productVariantPath = $this->publicImagePathFromUrl($listingImage?->productUrl());
+        $listingVariantPadding = $this->imageMayHaveInternalPadding($listingImage, 'listing');
+        $productVariantPadding = $this->imageMayHaveInternalPadding($listingImage, 'product');
+        $expectedThumbWidth = 150;
+        $expectedThumbHeight = 112;
+        $imageIssueReason = $this->adminImageIssueReason($adminImageSize, $listingVariantPadding, $productVariantPadding);
+        $recommendedAdminImageFix = $this->recommendedAdminImageFix($imageIssueReason, $listingVariantPadding, $productVariantPadding);
         $resource = file_get_contents(app_path('Filament/Resources/PartResource.php')) ?: '';
         $titleView = (string) file_get_contents(resource_path('views/filament/resources/parts/table-title.blade.php'));
         $idView = (string) file_get_contents(resource_path('views/filament/resources/parts/table-id.blade.php'));
@@ -69,12 +80,13 @@ class CheckAdminPartsTableUiController extends Controller
             'views_checked' => $viewsChecked,
             'ovoko_light_visual_tuning_applied' => true,
             'uses_shared_table_partial' => str_contains($resource, "ViewColumn::make('admin_part_image'") && str_contains($resource, "ViewColumn::make('admin_part_channels'"),
-            'image_css_forces_full_fill' => str_contains($imageView, 'width: 150px; height: 112px;')
+            'image_css_forces_full_fill' => (str_contains($imageView, 'width: 150px !important; height: 112px !important;') || str_contains($imageView, 'width: 150px; height: 112px;'))
                 && str_contains($imageView, 'padding: 0; margin: 0; overflow: hidden;')
-                && str_contains($imageView, 'min-width: 100%; min-height: 100%;')
-                && str_contains($imageView, 'object-fit: cover;')
+                && str_contains($imageView, 'max-width: none !important;')
+                && str_contains($imageView, 'max-height: none !important;')
+                && (str_contains($imageView, 'object-fit: cover !important;') || str_contains($imageView, 'object-fit: cover;'))
                 && str_contains($imageView, 'margin: 0;'),
-            'image_inner_wrappers_full_size' => str_contains($imageView, '.gps-admin-part-thumb .gps-admin-part-thumb__inner { width: 100%; height: 100%; padding: 0; margin: 0; overflow: hidden; display: block; box-sizing: border-box; }')
+            'image_inner_wrappers_full_size' => (str_contains($imageView, '.gps-admin-part-thumb .gps-admin-part-thumb__inner { width: 100% !important; height: 100% !important;') || str_contains($imageView, '.gps-admin-part-thumb .gps-admin-part-thumb__inner { width: 100%; height: 100%; padding: 0; margin: 0; overflow: hidden; display: block; box-sizing: border-box; }'))
                 && str_contains($imageView, 'class="gps-admin-part-thumb__inner"'),
             'id_rendered_with_custom_top_aligned_wrapper' => str_contains($resource, "ViewColumn::make('id'")
                 && str_contains($resource, "view('filament.resources.parts.table-id')")
@@ -91,6 +103,21 @@ class CheckAdminPartsTableUiController extends Controller
             'sample_part_id' => $sample?->id,
             'sample_part_has_image' => (bool) ($sample?->images->isNotEmpty()),
             'admin_image_url' => $adminImageUrl,
+            'admin_image_path' => $adminImagePath,
+            'admin_image_file_exists' => $adminImagePath !== null && is_file($adminImagePath),
+            'admin_image_file_width' => $adminImageSize['width'],
+            'admin_image_file_height' => $adminImageSize['height'],
+            'admin_image_file_aspect_ratio' => $adminImageSize['aspect_ratio'],
+            'expected_thumb_width_px' => $expectedThumbWidth,
+            'expected_thumb_height_px' => $expectedThumbHeight,
+            'expected_thumb_aspect_ratio' => round($expectedThumbWidth / $expectedThumbHeight, 4),
+            'image_may_have_internal_padding' => $listingVariantPadding,
+            'image_thumbnail_issue_reason' => $imageIssueReason,
+            'recommended_admin_image_fix' => $recommendedAdminImageFix,
+            'listing_variant_path' => $listingVariantPath,
+            'product_variant_path' => $productVariantPath,
+            'listing_variant_may_have_internal_padding' => $listingVariantPadding,
+            'product_variant_may_have_internal_padding' => $productVariantPadding,
             'presentation_image_url' => $presentationImageUrl,
             'listing_image_url' => $listingImageUrl,
             'storefront_image_url' => $storefrontImageUrl,
@@ -117,11 +144,11 @@ class CheckAdminPartsTableUiController extends Controller
             'image_column_not_affected_by_text_alignment_resets' => ! str_contains($imageView, '.gps-col-image > *')
                 && ! str_contains($imageView, '.gps-admin-part-cell,')
                 && str_contains($imageView, '[data-column="admin_part_image"] .fi-ta-text-item { width: 150px;'),
-            'image_container_width_px' => str_contains($imageView, 'width: 150px; height: 112px;') ? 150 : null,
-            'image_container_height_px' => str_contains($imageView, 'width: 150px; height: 112px;') ? 112 : null,
+            'image_container_width_px' => (str_contains($imageView, 'width: 150px !important; height: 112px !important;') || str_contains($imageView, 'width: 150px; height: 112px;')) ? 150 : null,
+            'image_container_height_px' => (str_contains($imageView, 'width: 150px !important; height: 112px !important;') || str_contains($imageView, 'width: 150px; height: 112px;')) ? 112 : null,
             'image_fills_container_height' => str_contains($imageView, '.gps-admin-part-thumb img { width: 100% !important; height: 100% !important;')
                 && str_contains($imageView, 'max-height: none !important;'),
-            'image_object_fit' => str_contains($imageView, 'object-fit: cover;') ? 'cover' : null,
+            'image_object_fit' => (str_contains($imageView, 'object-fit: cover !important;') || str_contains($imageView, 'object-fit: cover;')) ? 'cover' : null,
             'sku_hidden_in_parts_table' => ! str_contains($titleView, 'SKU:'),
             'title_column_max_width_px' => str_contains($imageView, '.gps-admin-part-title { width: 360px; max-width: 360px; }') ? 360 : null,
             'title_line_clamp' => str_contains($imageView, '-webkit-line-clamp: 2') && str_contains($imageView, 'white-space: normal') ? 2 : null,
@@ -189,6 +216,118 @@ class CheckAdminPartsTableUiController extends Controller
                 in_array(false, $viewsChecked, true) ? 'One or more admin parts table views are missing.' : null,
             ])),
         ]);
+    }
+
+    private function publicImagePathFromUrl(?string $url): ?string
+    {
+        if (! is_string($url) || trim($url) === '') {
+            return null;
+        }
+
+        $path = parse_url($url, PHP_URL_PATH);
+
+        if (! is_string($path) || $path === '') {
+            return null;
+        }
+
+        $path = urldecode($path);
+        $candidates = [];
+
+        if (Str::startsWith($path, '/storage/')) {
+            $relative = ltrim(substr($path, strlen('/storage/')), '/');
+            $candidates[] = storage_path('app/public/'.$relative);
+            $candidates[] = public_path('storage/'.$relative);
+            $candidates[] = dirname(base_path()).'/public_html/storage/'.$relative;
+        }
+
+        $candidates[] = public_path(ltrim($path, '/'));
+
+        foreach (array_unique($candidates) as $candidate) {
+            if (is_file($candidate)) {
+                return $candidate;
+            }
+        }
+
+        return $candidates[0] ?? null;
+    }
+
+    /** @return array{width: ?int, height: ?int, aspect_ratio: ?float} */
+    private function imageSize(?string $path): array
+    {
+        if (! is_string($path) || ! is_file($path)) {
+            return ['width' => null, 'height' => null, 'aspect_ratio' => null];
+        }
+
+        $size = @getimagesize($path);
+
+        if (! is_array($size) || empty($size[0]) || empty($size[1])) {
+            return ['width' => null, 'height' => null, 'aspect_ratio' => null];
+        }
+
+        return [
+            'width' => (int) $size[0],
+            'height' => (int) $size[1],
+            'aspect_ratio' => round($size[0] / max(1, $size[1]), 4),
+        ];
+    }
+
+    private function imageMayHaveInternalPadding(?\App\Models\PartImage $image, string $variant): ?bool
+    {
+        if (! $image) {
+            return null;
+        }
+
+        $presentation = $image->legacy_payload['presentation'] ?? null;
+
+        if (! is_array($presentation)) {
+            return null;
+        }
+
+        $widthRatio = data_get($presentation, "metrics.{$variant}.fill_ratio.width_ratio", $presentation["{$variant}_fill_width_ratio"] ?? null);
+        $heightRatio = data_get($presentation, "metrics.{$variant}.fill_ratio.height_ratio", $presentation["{$variant}_fill_height_ratio"] ?? null);
+        $dominantRatio = data_get($presentation, "metrics.{$variant}.fill_ratio.dominant_ratio", $presentation["{$variant}_dominant_ratio"] ?? null);
+
+        if (! is_numeric($widthRatio) && ! is_numeric($heightRatio) && ! is_numeric($dominantRatio)) {
+            return null;
+        }
+
+        return (is_numeric($widthRatio) && (float) $widthRatio < 0.72)
+            || (is_numeric($heightRatio) && (float) $heightRatio < 0.72)
+            || (is_numeric($dominantRatio) && (float) $dominantRatio < 0.82);
+    }
+
+    private function adminImageIssueReason(array $adminImageSize, ?bool $listingVariantPadding, ?bool $productVariantPadding): string
+    {
+        if ($adminImageSize['width'] === null || $adminImageSize['height'] === null) {
+            return 'admin image file could not be resolved on disk; verify URL-to-file mapping and public storage symlink';
+        }
+
+        if ($listingVariantPadding === true && $productVariantPadding === false) {
+            return 'listing presentation variant may contain internal padding; product variant appears better for admin thumbnail';
+        }
+
+        if ($listingVariantPadding === true && $productVariantPadding === true) {
+            return 'listing and product presentation variants may both contain internal padding';
+        }
+
+        return 'CSS thumbnail box and image fill should be verified in browser; no strong file-padding signal detected';
+    }
+
+    private function recommendedAdminImageFix(string $issueReason, ?bool $listingVariantPadding, ?bool $productVariantPadding): string
+    {
+        if ($listingVariantPadding === true && $productVariantPadding === false) {
+            return 'use product presentation variant for the admin parts table thumbnail';
+        }
+
+        if ($listingVariantPadding === true && $productVariantPadding === true) {
+            return 'admin thumbnail crop regeneration needed';
+        }
+
+        if (str_contains($issueReason, 'CSS')) {
+            return 'keep admin thumbnail CSS constrained to 150x112 with inner and img forced to 100% x 100% object-fit: cover';
+        }
+
+        return 'inspect public storage image file and regenerate presentation variants if the source contains white margins';
     }
 
     private function marketplaceFlags(Part $part): array

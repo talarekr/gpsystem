@@ -323,12 +323,57 @@ class Part extends Model
 
     public function adminTableImageUrl(): ?string
     {
-        return $this->listingImageUrl() ?? $this->primaryImageUrl();
+        $listingImage = $this->listingImage();
+
+        if ($listingImage && $this->adminTableShouldUseProductVariant($listingImage)) {
+            return $listingImage->productUrl();
+        }
+
+        return $listingImage?->listingUrl() ?? $this->primaryImageUrl();
     }
 
     public function adminTableImageVariantSource(): string
     {
-        return $this->listingImage()?->hasListingPresentationVariant() ? 'presentation' : ($this->primaryImageUrl() ? 'primary' : 'fallback');
+        $listingImage = $this->listingImage();
+
+        if ($listingImage && $this->adminTableShouldUseProductVariant($listingImage)) {
+            return 'product';
+        }
+
+        return $listingImage?->hasListingPresentationVariant() ? 'presentation' : ($this->primaryImageUrl() ? 'primary' : 'fallback');
+    }
+
+    private function adminTableShouldUseProductVariant(PartImage $image): bool
+    {
+        if ($image->productUrl() === null) {
+            return false;
+        }
+
+        $listingPadding = $this->presentationVariantMayHavePadding($image, 'listing');
+        $productPadding = $this->presentationVariantMayHavePadding($image, 'product');
+
+        return $listingPadding === true && $productPadding === false;
+    }
+
+    private function presentationVariantMayHavePadding(PartImage $image, string $variant): ?bool
+    {
+        $presentation = $image->legacy_payload['presentation'] ?? null;
+
+        if (! is_array($presentation)) {
+            return null;
+        }
+
+        $widthRatio = data_get($presentation, "metrics.{$variant}.fill_ratio.width_ratio", $presentation["{$variant}_fill_width_ratio"] ?? null);
+        $heightRatio = data_get($presentation, "metrics.{$variant}.fill_ratio.height_ratio", $presentation["{$variant}_fill_height_ratio"] ?? null);
+        $dominantRatio = data_get($presentation, "metrics.{$variant}.fill_ratio.dominant_ratio", $presentation["{$variant}_dominant_ratio"] ?? null);
+
+        if (! is_numeric($widthRatio) && ! is_numeric($heightRatio) && ! is_numeric($dominantRatio)) {
+            return null;
+        }
+
+        return (is_numeric($widthRatio) && (float) $widthRatio < 0.72)
+            || (is_numeric($heightRatio) && (float) $heightRatio < 0.72)
+            || (is_numeric($dominantRatio) && (float) $dominantRatio < 0.82);
     }
 
     private function selectListingImageFromCollection($images): ?PartImage
