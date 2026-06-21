@@ -8,6 +8,7 @@ use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceListing;
 use App\Models\MarketplaceSyncLog;
 use App\Services\Marketplace\AllegroOfferExtractor;
+use App\Services\Marketplace\EbayListingExtractor;
 use App\Services\Marketplace\OvokoPartIdExtractor;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
@@ -31,7 +32,7 @@ class CheckOvokoMappingController extends Controller
             'ovoko_listings_count' => $tables['marketplace_listings'] ? MarketplaceListing::query()->where('marketplace', 'ovoko')->count() : 0,
             'marketplace_totals' => $this->marketplaceTotals(),
             'channel_account_totals' => $this->channelAccountTotals(),
-            'mapped_count' => $counts('mapped'), 'unmatched_count' => $counts('unmatched'), 'conflict_count' => $counts('conflict'), 'ignored_count' => $counts('ignored'), 'sync_error_count' => $counts('sync_error'),
+            'ovoko_mapped_count' => $counts('mapped'), 'ovoko_unmatched_count' => $counts('unmatched'), 'ovoko_conflict_count' => $counts('conflict'), 'ovoko_ignored_count' => $counts('ignored'), 'ovoko_sync_error_count' => $counts('sync_error'),
             'samples_mapped' => $this->samples('mapped'), 'samples_unmatched' => $this->samples('unmatched'), 'samples_conflict' => $this->samples('conflict'),
             'import_command_exists' => array_key_exists('marketplace:import-ovoko-mapping', Artisan::all()),
             'build_from_parts_command_exists' => array_key_exists('marketplace:build-ovoko-mappings-from-parts', Artisan::all()),
@@ -39,6 +40,13 @@ class CheckOvokoMappingController extends Controller
             'latest_unmapped_export' => $this->latestUnmappedExport(),
             'manual_import_command_exists' => array_key_exists('marketplace:import-ovoko-manual-mapping', Artisan::all()),
             'allegro_build_from_parts_command_exists' => array_key_exists('marketplace:build-allegro-mappings-from-parts', Artisan::all()),
+            'ebay_build_from_parts_command_exists' => array_key_exists('marketplace:build-ebay-mappings-from-parts', Artisan::all()),
+            'command_availability' => [
+                'marketplace:import-ovoko-mapping' => array_key_exists('marketplace:import-ovoko-mapping', Artisan::all()),
+                'marketplace:build-ovoko-mappings-from-parts' => array_key_exists('marketplace:build-ovoko-mappings-from-parts', Artisan::all()),
+                'marketplace:build-allegro-mappings-from-parts' => array_key_exists('marketplace:build-allegro-mappings-from-parts', Artisan::all()),
+                'marketplace:build-ebay-mappings-from-parts' => array_key_exists('marketplace:build-ebay-mappings-from-parts', Artisan::all()),
+            ],
             'duplicate_external_offer_ids' => $this->duplicateExternalOfferIds(),
             'duplicates_by_marketplace' => $this->duplicatesByMarketplace(),
             'recent_sync_logs' => $tables['marketplace_sync_logs'] ? MarketplaceSyncLog::query()->where('marketplace', 'ovoko')->latest('created_at')->limit(10)->get(['id','marketplace_listing_id','part_id','action','status','message','created_at']) : [],
@@ -49,9 +57,31 @@ class CheckOvokoMappingController extends Controller
         if ((string) request()->query('coverage', '1') !== '0') {
             $payload['laravel_ovoko_id_coverage'] = $this->safeLaravelOvokoIdCoverage();
             $payload['laravel_allegro_id_coverage'] = $this->safeLaravelAllegroIdCoverage();
+            $payload['laravel_ebay_de_coverage'] = $this->safeLaravelEbayCoverage('ebay_de');
+            $payload['laravel_ebay_fr_coverage'] = $this->safeLaravelEbayCoverage('ebay_fr');
         }
 
         return response()->json($payload);
+    }
+
+
+    private function safeLaravelEbayCoverage(string $channel): array
+    {
+        try {
+            $extractor = app(EbayListingExtractor::class);
+            $detected = []; $samples = []; $without = 0;
+            if (! Schema::hasTable('parts') || ! Schema::hasColumn('parts', 'legacy_payload')) return ['ok'=>false, 'table_exists'=>Schema::hasTable('parts')];
+            DB::table('parts')->select(['id','sku','name','legacy_payload'])->orderBy('id')->chunkById(500, function ($parts) use (&$detected, &$samples, &$without, $extractor, $channel): void {
+                foreach ($parts as $part) {
+                    $listing = $extractor->extract($part->legacy_payload ?? null, $channel);
+                    if ($listing === null) { $without++; continue; }
+                    $detected[] = $listing['external_offer_id'];
+                    if (count($samples) < 20) $samples[] = ['part_id'=>$part->id,'sku'=>$part->sku,'name'=>$part->name,'listing'=>$listing];
+                }
+            });
+            $counts = array_count_values($detected); $duplicates = array_filter($counts, fn (int $count): bool => $count > 1); arsort($duplicates);
+            return ['ok'=>true,'channel'=>$channel,'detected_ebay_ids_count'=>count($detected),'detected_ebay_ids_unique_count'=>count($counts),'detected_ebay_ids_duplicates_count'=>array_sum($duplicates),'without_detected_ebay_id_count'=>$without,'top_duplicate_ebay_ids'=>array_slice($duplicates, 0, 20, true),'samples'=>$samples];
+        } catch (\Throwable $e) { return ['ok'=>false,'channel'=>$channel,'exception_class'=>$e::class,'exception_message'=>$e->getMessage(),'file'=>$e->getFile(),'line'=>$e->getLine()]; }
     }
 
     /** @return array<string, mixed> */
@@ -77,19 +107,19 @@ class CheckOvokoMappingController extends Controller
     private function marketplaceTotals(): array
     {
         if (! Schema::hasTable('marketplace_listings')) return [];
-        return MarketplaceListing::query()->select('marketplace', DB::raw('count(*) as total'), DB::raw("sum(sync_status = 'mapped') as mapped"), DB::raw("sum(sync_status = 'conflict') as conflict"), DB::raw("sum(sync_status = 'unmatched') as unmatched"), DB::raw("sum(sync_status = 'ignored') as ignored"), DB::raw("sum(sync_status = 'sync_error') as sync_error"))->whereIn('marketplace', ['ovoko','allegro'])->groupBy('marketplace')->get()->all();
+        return MarketplaceListing::query()->select('marketplace', DB::raw('count(*) as total'), DB::raw("sum(sync_status = 'mapped') as mapped"), DB::raw("sum(sync_status = 'conflict') as conflict"), DB::raw("sum(sync_status = 'unmatched') as unmatched"), DB::raw("sum(sync_status = 'ignored') as ignored"), DB::raw("sum(sync_status = 'sync_error') as sync_error"))->whereIn('marketplace', ['ovoko','allegro','ebay_de','ebay_fr'])->groupBy('marketplace')->get()->all();
     }
 
     private function channelAccountTotals(): array
     {
         if (! Schema::hasTable('marketplace_listings')) return [];
-        return MarketplaceListing::query()->leftJoin('marketplace_accounts', 'marketplace_accounts.id', '=', 'marketplace_listings.marketplace_account_id')->select('marketplace_listings.marketplace','marketplace_accounts.code','marketplace_accounts.name', DB::raw('count(*) as total'), DB::raw("sum(marketplace_listings.sync_status = 'mapped') as mapped"), DB::raw("sum(marketplace_listings.sync_status = 'conflict') as conflict"), DB::raw("sum(marketplace_listings.sync_status = 'unmatched') as unmatched"), DB::raw("sum(marketplace_listings.sync_status = 'ignored') as ignored"), DB::raw("sum(marketplace_listings.sync_status = 'sync_error') as sync_error"))->whereIn('marketplace_listings.marketplace', ['ovoko','allegro'])->groupBy('marketplace_listings.marketplace','marketplace_accounts.code','marketplace_accounts.name')->get()->all();
+        return MarketplaceListing::query()->leftJoin('marketplace_accounts', 'marketplace_accounts.id', '=', 'marketplace_listings.marketplace_account_id')->select('marketplace_listings.marketplace','marketplace_accounts.code','marketplace_accounts.name', DB::raw('count(*) as total'), DB::raw("sum(marketplace_listings.sync_status = 'mapped') as mapped"), DB::raw("sum(marketplace_listings.sync_status = 'conflict') as conflict"), DB::raw("sum(marketplace_listings.sync_status = 'unmatched') as unmatched"), DB::raw("sum(marketplace_listings.sync_status = 'ignored') as ignored"), DB::raw("sum(marketplace_listings.sync_status = 'sync_error') as sync_error"))->whereIn('marketplace_listings.marketplace', ['ovoko','allegro','ebay_de','ebay_fr'])->groupBy('marketplace_listings.marketplace','marketplace_accounts.code','marketplace_accounts.name')->get()->all();
     }
 
     private function duplicatesByMarketplace(): array
     {
         if (! Schema::hasTable('marketplace_listings')) return [];
-        return MarketplaceListing::query()->select('marketplace','external_offer_id', DB::raw('count(*) as listings_count'))->whereIn('marketplace', ['ovoko','allegro'])->whereNotNull('external_offer_id')->groupBy('marketplace','external_offer_id')->havingRaw('count(*) > 1')->orderByDesc('listings_count')->limit(50)->get()->all();
+        return MarketplaceListing::query()->select('marketplace','external_offer_id', DB::raw('count(*) as listings_count'))->whereIn('marketplace', ['ovoko','allegro','ebay_de','ebay_fr'])->whereNotNull('external_offer_id')->groupBy('marketplace','external_offer_id')->havingRaw('count(*) > 1')->orderByDesc('listings_count')->limit(50)->get()->all();
     }
 
     /**
@@ -361,7 +391,7 @@ class CheckOvokoMappingController extends Controller
 
         return MarketplaceListing::query()
             ->select('external_offer_id', DB::raw('count(*) as listings_count'))
-            ->where('marketplace', 'ovoko')
+            ->whereIn('marketplace', ['ovoko','allegro','ebay_de','ebay_fr'])
             ->whereNotNull('external_offer_id')
             ->groupBy('external_offer_id')
             ->havingRaw('count(*) > 1')

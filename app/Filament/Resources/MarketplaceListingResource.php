@@ -23,7 +23,7 @@ class MarketplaceListingResource extends Resource
 
     public static function getEloquentQuery(): Builder
     {
-        return parent::getEloquentQuery()->whereIn('marketplace', ['ovoko', 'allegro'])->with(['part', 'account']);
+        return parent::getEloquentQuery()->whereIn('marketplace', ['ovoko', 'allegro', 'ebay_de', 'ebay_fr'])->with(['part', 'account']);
     }
 
     public static function form(Form $form): Form
@@ -60,7 +60,7 @@ class MarketplaceListingResource extends Resource
                 Tables\Columns\TextColumn::make('match_reason')->label('match_reason')->wrap()->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
-                Tables\Filters\SelectFilter::make('marketplace')->label('Marketplace')->options(['ovoko'=>'Ovoko','allegro'=>'Allegro']),
+                Tables\Filters\SelectFilter::make('marketplace')->label('Marketplace')->options(['ovoko'=>'Ovoko','allegro'=>'Allegro','ebay_de'=>'eBay DE','ebay_fr'=>'eBay FR']),
                 Tables\Filters\SelectFilter::make('marketplace_account_id')->label('Channel/account')->relationship('account', 'code'),
                 Tables\Filters\SelectFilter::make('sync_status')->label('Sync status')->options(['mapped'=>'mapped','unmatched'=>'unmatched','conflict'=>'conflict','ignored'=>'ignored','sync_error'=>'sync_error']),
                 Tables\Filters\Filter::make('mapped')->query(fn (Builder $query): Builder => $query->where('sync_status', 'mapped')),
