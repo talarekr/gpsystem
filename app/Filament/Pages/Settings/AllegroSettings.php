@@ -2,17 +2,24 @@
 
 namespace App\Filament\Pages\Settings;
 
-class AllegroSettings extends SettingsPlaceholderPage
+class AllegroSettings extends MarketplaceApiSettingsPage
 {
     protected static bool $shouldRegisterNavigation = true;
     protected static ?string $navigationIcon = null;
     protected static ?string $navigationLabel = 'Allegro';
-    protected static ?string $navigationGroup = 'Kanały sprzedaży';
-    protected static ?string $title = 'Allegro';
-    protected static ?int $navigationSort = 10;
+    protected static ?string $navigationGroup = 'Administracja marketplace';
+    protected static ?string $title = 'Allegro → Ustawienia API';
+    protected static ?int $navigationSort = 51;
 
-    public function getPlaceholderDescription(): string
+    protected function accountDefinitions(): array
     {
-        return 'Placeholder kanału sprzedaży Allegro. Integracja, mapowanie i publikowanie ofert Allegro nie są wdrożone.';
+        return [
+            'allegro_main' => [
+                'label' => 'Allegro', 'marketplace' => 'allegro', 'name' => 'Allegro main',
+                'api_base_url' => 'https://api.allegro.pl.allegrosandbox.pl',
+                'credential_fields' => ['client_id' => 'Client ID', 'client_secret' => 'Client secret', 'access_token' => 'Access token', 'refresh_token' => 'Refresh token', 'expires_at' => 'Expires at'],
+                'required_credentials' => ['client_id', 'client_secret', 'access_token', 'refresh_token'],
+            ],
+        ];
     }
 }

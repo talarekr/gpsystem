@@ -22,6 +22,7 @@ use App\Http\Controllers\Storefront\SearchController;
 use App\Http\Controllers\Storefront\TermsController;
 use App\Http\Controllers\Tools\CheckOrdersFlowController;
 use App\Http\Controllers\Tools\CheckOvokoApiSettingsController;
+use App\Http\Controllers\Tools\MarketplaceApiSettingsDiagnosticsController;
 use App\Http\Controllers\Tools\CheckOvokoMappingController;
 use App\Http\Controllers\Tools\DebugOvokoPartMatchController;
 use App\Http\Controllers\Tools\DeleteAllegroGearboxesDryRunController;
@@ -115,6 +116,10 @@ Route::get('/tools/check-ovoko-mapping', CheckOvokoMappingController::class)->na
 Route::get('/tools/debug-ovoko-part-match', DebugOvokoPartMatchController::class)->name('tools.debug-ovoko-part-match');
 Route::get('/tools/check-ovoko-api-settings', CheckOvokoApiSettingsController::class)->name('tools.check-ovoko-api-settings');
 Route::get('/tools/test-ovoko-api-connection', TestOvokoApiConnectionController::class)->name('tools.test-ovoko-api-connection');
+Route::get('/tools/check-allegro-api-settings', [MarketplaceApiSettingsDiagnosticsController::class, 'allegro'])->name('tools.check-allegro-api-settings');
+Route::get('/tools/check-ebay-api-settings', [MarketplaceApiSettingsDiagnosticsController::class, 'ebay'])->name('tools.check-ebay-api-settings');
+Route::get('/tools/test-allegro-api-connection', [MarketplaceApiSettingsDiagnosticsController::class, 'testAllegro'])->name('tools.test-allegro-api-connection');
+Route::get('/tools/test-ebay-api-connection', [MarketplaceApiSettingsDiagnosticsController::class, 'testEbay'])->name('tools.test-ebay-api-connection');
 Route::get('/tools/ovoko-orders-dry-run', OvokoOrdersDryRunController::class)->name('tools.ovoko-orders-dry-run');
 Route::get('/tools/import-ovoko-orders-dry-run', ImportOvokoOrdersDryRunController::class)->name('tools.import-ovoko-orders-dry-run');
 Route::get('/tools/inspect-ovoko-orders-structure', [OvokoOrdersDryRunController::class, 'inspect'])->name('tools.inspect-ovoko-orders-structure');
