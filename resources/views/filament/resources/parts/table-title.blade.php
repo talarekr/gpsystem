@@ -16,8 +16,5 @@
         <span>—</span>
     @else
         <a href="{{ $editUrl }}">{{ $part->name ?: 'Część #'.$part->id }}</a>
-        @if (filled($part->sku))
-            <small>SKU: {{ $part->sku }}</small>
-        @endif
     @endif
 </div>

@@ -24,7 +24,7 @@
         .fi-ta-table tbody td, .fi-ta-table tbody td * { font-weight: 400; }
         .fi-ta-table [data-column="admin_part_image"] { width: 150px; min-width: 150px; }
         .fi-ta-table [data-column="id"] { width: 70px; min-width: 70px; color: #334155; font-weight: 600; }
-        .fi-ta-table [data-column="admin_part_title"] { width: 410px; min-width: 380px; }
+        .fi-ta-table [data-column="admin_part_title"] { width: 280px; min-width: 260px; }
         .fi-ta-table [data-column="admin_part_numbers"] { width: 210px; min-width: 190px; }
         .fi-ta-table [data-column="admin_part_channels"] { width: 270px; min-width: 250px; }
         .fi-ta-table [data-column="admin_part_storage"] { width: 160px; min-width: 140px; }
@@ -32,8 +32,8 @@
         .gps-admin-part-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; padding: 0; }
         .gps-admin-part-thumb__placeholder { color: #94a3b8; font-size: 11px; font-weight: 400; text-align: center; line-height: 1.25; }
         .gps-admin-part-thumb__badge { position: absolute; right: 5px; bottom: 5px; min-width: 18px; border-radius: 999px; background: rgba(248, 250, 252, .88); border: 1px solid rgba(226, 232, 240, .9); color: #64748b; padding: 1px 5px; font-size: 10px; font-weight: 500; line-height: 1.25; text-align: center; }
-        .gps-admin-part-title { max-width: 420px; }
-        .gps-admin-part-title a { display: -webkit-box; overflow: hidden; color: #1e293b; font-size: 13px; font-weight: 500; line-height: 1.35; text-decoration: none; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+        .gps-admin-part-title { max-width: 250px; }
+        .gps-admin-part-title a { display: -webkit-box; overflow: hidden; color: #1e293b; font-size: 13px; font-weight: 400; line-height: 1.35; text-decoration: none; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
         .gps-admin-part-title a:hover { color: #2563eb; text-decoration: underline; }
         .gps-admin-part-title small { display: block; margin-top: 6px; color: #64748b; font-size: 12px; font-weight: 400; line-height: 1.35; }
         .gps-admin-part-numbers { display: grid; gap: 5px; max-width: 220px; }
@@ -53,7 +53,7 @@
         .gps-admin-storage { min-width: 140px; color: #334155; font-size: 12px; line-height: 1.4; }
         .gps-admin-storage__location { display: block; color: #334155; font-size: 13px; font-weight: 400; }
         .gps-admin-storage__description, .gps-admin-storage__quantity { display: block; margin-top: 3px; color: #64748b; font-size: 12px; font-weight: 400; }
-        @media (max-width: 1100px) { .gps-admin-part-thumb { width: 118px; height: 92px; } .fi-ta-table [data-column="admin_part_title"] { min-width: 280px; } }
+        @media (max-width: 1100px) { .gps-admin-part-thumb { width: 118px; height: 92px; } .fi-ta-table [data-column="admin_part_title"] { min-width: 250px; } }
     </style>
 @endonce
 
