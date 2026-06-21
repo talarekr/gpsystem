@@ -16,7 +16,7 @@
     @else
         @if (filled($number))
             <span class="gps-admin-part-number">
-                <span class="gps-admin-part-number__value">{{ $number }}</span>
+                <span class="gps-admin-part-number-value">{{ $number }}</span>
             </span>
             <button
                 type="button"
