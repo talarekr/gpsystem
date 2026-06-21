@@ -29,6 +29,8 @@ class CheckAdminPartsTableUiController extends Controller
         $flags = $sample ? $this->marketplaceFlags($sample) : [];
         $imageVariantSource = $sample?->adminTableImageVariantSource() ?? 'fallback';
         $resource = file_get_contents(app_path('Filament/Resources/PartResource.php')) ?: '';
+        $titleView = (string) file_get_contents(resource_path('views/filament/resources/parts/table-title.blade.php'));
+        $imageView = (string) file_get_contents(resource_path('views/filament/resources/parts/table-image.blade.php'));
 
         $imageColumnPosition = strpos($resource, "ViewColumn::make('admin_part_image'");
         $idColumnPosition = strpos($resource, "TextColumn::make('id'");
@@ -48,8 +50,11 @@ class CheckAdminPartsTableUiController extends Controller
             'marketplace_statuses_present' => View::exists('filament.resources.parts.table-channels') && str_contains((string) file_get_contents(resource_path('views/filament/resources/parts/table-channels.blade.php')), 'sync_status'),
             'sample_part_id' => $sample?->id,
             'sample_part_has_image' => (bool) ($sample?->images->isNotEmpty()),
-            'uses_listing_thumbnail_variant' => $imageVariantSource === 'presentation',
+            'uses_listing_thumbnail_variant' => in_array($imageVariantSource, ['presentation', 'listing'], true),
             'image_variant_source' => $imageVariantSource,
+            'sku_hidden_in_parts_table' => ! str_contains($titleView, 'SKU:'),
+            'title_column_max_width_px' => str_contains($imageView, '.gps-admin-part-title { max-width: 250px; }') ? 250 : null,
+            'title_line_clamp' => str_contains($imageView, '-webkit-line-clamp: 2') ? 2 : null,
             'sample_marketplace_flags' => $flags,
             'warnings' => array_values(array_filter([
                 Schema::hasTable('marketplace_listings') ? null : 'marketplace_listings table is missing.',
