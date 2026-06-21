@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Tools;
 
+use App\Filament\Resources\PartResource;
 use App\Http\Controllers\Controller;
 use App\Models\Part;
 use Illuminate\Http\JsonResponse;
@@ -20,6 +21,7 @@ class CheckPartsToListController extends Controller
             ], 403);
         }
 
+        $adminAllParts = PartResource::adminAllPartsQuery();
         $partsToList = Part::query()->where('needs_listing', true);
         $gpsGmailParts = Part::query()->whereRaw('LOWER(COALESCE(sku, \'\')) LIKE ?', ['%gps-gmail%']);
         $visibleNeedsListing = Part::query()->storefrontVisible()->where('needs_listing', true);
@@ -28,6 +30,21 @@ class CheckPartsToListController extends Controller
             'ok' => true,
             'parts_total' => Part::query()->count(),
             'needs_listing_count' => (clone $partsToList)->count(),
+            'admin_all_parts_count' => (clone $adminAllParts)->count(),
+            'admin_parts_to_list_count' => (clone $partsToList)->count(),
+            'admin_all_excludes_needs_listing' => (clone $adminAllParts)->where('needs_listing', true)->doesntExist(),
+            'samples_needs_listing_in_admin_all' => (clone $adminAllParts)
+                ->where('needs_listing', true)
+                ->orderBy('id')
+                ->limit(10)
+                ->get(['id', 'name', 'sku', 'needs_listing'])
+                ->map(fn (Part $part): array => [
+                    'part_id' => $part->id,
+                    'sku' => $part->sku,
+                    'title' => $part->name,
+                    'name' => $part->name,
+                    'needs_listing' => (bool) $part->needs_listing,
+                ])->values(),
             'gps_gmail_sku_count' => (clone $gpsGmailParts)->count(),
             'gps_gmail_needs_listing_count' => (clone $gpsGmailParts)->where('needs_listing', true)->count(),
             'gps_gmail_not_needs_listing_count' => (clone $gpsGmailParts)->where('needs_listing', false)->count(),

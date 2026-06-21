@@ -512,13 +512,18 @@ class PartResource extends Resource
         return '<span class="gps-selected-vehicle gps-selected-vehicle--empty">Nie wybrano samochodu.</span>';
     }
 
+    public static function adminAllPartsQuery(): Builder
+    {
+        return Part::query()->where('needs_listing', false);
+    }
+
     public static function getAllPartsNavigationCount(): int
     {
         if (! Schema::hasTable('parts')) {
             return 0;
         }
 
-        return Part::query()->count();
+        return static::adminAllPartsQuery()->count();
     }
 
     public static function getPartsToListNavigationCount(): int

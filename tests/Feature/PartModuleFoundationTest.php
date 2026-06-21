@@ -241,8 +241,23 @@ class PartModuleFoundationTest extends TestCase
         Part::query()->create(['name' => 'Część do wystawienia 1', 'needs_listing' => true]);
         Part::query()->create(['name' => 'Część do wystawienia 2', 'needs_listing' => true]);
 
-        $this->assertSame(3, PartResource::getAllPartsNavigationCount());
+        $this->assertSame(1, PartResource::getAllPartsNavigationCount());
         $this->assertSame(2, PartResource::getPartsToListNavigationCount());
+    }
+
+    public function test_parts_to_list_diagnostics_reports_admin_view_split(): void
+    {
+        Part::query()->create(['name' => 'Część bez wystawienia']);
+        Part::query()->create(['name' => 'Część do wystawienia 1', 'needs_listing' => true]);
+        Part::query()->create(['name' => 'Część do wystawienia 2', 'needs_listing' => true]);
+
+        $this->getJson('/tools/check-parts-to-list?token=gps_images_import_2026')
+            ->assertOk()
+            ->assertJsonPath('admin_all_parts_count', 1)
+            ->assertJsonPath('admin_parts_to_list_count', 2)
+            ->assertJsonPath('needs_listing_count', 2)
+            ->assertJsonPath('admin_all_excludes_needs_listing', true)
+            ->assertJsonPath('samples_needs_listing_in_admin_all', []);
     }
 
     public function test_part_resource_navigation_and_labels_are_polish_and_iconless_children(): void
