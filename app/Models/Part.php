@@ -362,14 +362,14 @@ class Part extends Model
 
     public function scopeNotSold(Builder $query): Builder
     {
-        return $query->whereNotIn('status', ['sold', 'archived']);
+        return $query->where(fn (Builder $query): Builder => $query
+            ->whereNull('status')
+            ->orWhereNotIn('status', ['sold', 'archived']));
     }
 
     public function scopeStorefrontVisible(Builder $query): Builder
     {
         return $query
-            ->where('status', '!=', 'archived')
-            ->where('is_visible_storefront', true)
             ->where('needs_listing', false)
             ->inStock()
             ->notSold();
