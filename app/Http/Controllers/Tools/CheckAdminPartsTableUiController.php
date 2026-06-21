@@ -68,6 +68,16 @@ class CheckAdminPartsTableUiController extends Controller
             'sample_part_has_image' => (bool) ($sample?->images->isNotEmpty()),
             'uses_listing_thumbnail_variant' => in_array($imageVariantSource, ['presentation', 'listing'], true),
             'image_variant_source' => $imageVariantSource,
+            'id_text_bold' => str_contains($imageView, '[data-column="id"] { width: 70px; min-width: 70px; color: #334155; font-size: 13px; font-weight: 700;')
+                && str_contains($imageView, '[data-column="id"] .fi-ta-text-item { align-items: flex-start; justify-content: flex-start; margin-top: 0; padding-top: 0; color: #334155; font-weight: 700; }'),
+            'id_top_aligned_with_row_content' => str_contains($imageView, '[data-column="id"] > *')
+                && str_contains($imageView, '[data-column="id"] .fi-ta-col-wrp')
+                && str_contains($imageView, 'margin-top: 0; padding-top: 0;'),
+            'image_container_width_px' => str_contains($imageView, '.gps-admin-part-thumb { position: relative; width: 137px;') ? 137 : null,
+            'image_container_height_px' => str_contains($imageView, 'width: 137px; height: 104px;') ? 104 : null,
+            'image_fills_container_height' => str_contains($imageView, '.gps-admin-part-thumb img { display: block; width: 100%; height: 100%;')
+                && str_contains($imageView, 'max-height: none;'),
+            'image_object_fit' => str_contains($imageView, 'object-fit: cover;') ? 'cover' : null,
             'sku_hidden_in_parts_table' => ! str_contains($titleView, 'SKU:'),
             'title_column_max_width_px' => str_contains($imageView, '.gps-admin-part-title { width: 360px; max-width: 360px; }') ? 360 : null,
             'title_line_clamp' => str_contains($imageView, '-webkit-line-clamp: 2') && str_contains($imageView, 'white-space: normal') ? 2 : null,
@@ -108,6 +118,11 @@ class CheckAdminPartsTableUiController extends Controller
                 && str_contains($imageView, '.gps-admin-part-cell')
                 && str_contains($imageView, 'margin-left: 0; padding-left: 0;'),
             'custom_columns_inner_margin_left_px' => str_contains($imageView, 'margin-left: 0; padding-left: 0;') ? 0 : null,
+            'part_number_font_size_px' => str_contains($imageView, '.gps-admin-part-number { display: inline-flex; width: fit-content; max-width: 100%; align-items: baseline; gap: 4px; color: #334155; font-size: 14px; font-weight: 700;') ? 14 : null,
+            'part_number_bold' => str_contains($imageView, '.gps-admin-part-number { display: inline-flex; width: fit-content; max-width: 100%; align-items: baseline; gap: 4px; color: #334155; font-size: 14px; font-weight: 700;')
+                && str_contains($imageView, '.gps-admin-part-number__value { overflow: hidden; font-weight: 700;'),
+            'part_number_copy_icon_adjacent' => str_contains($imageView, '.gps-admin-part-numbers { display: inline-flex; max-width: 190px; align-items: center; gap: 5px; }')
+                && str_contains($numbersView, 'gps-admin-part-number__copy'),
             'part_number_column_single_value' => ! str_contains($numbersView, "'Kod' =>") && ! str_contains($numbersView, "'Numer' =>") && str_contains($numbersView, '$part->part_number'),
             'part_number_copy_action_present' => str_contains($numbersView, 'navigator.clipboard') && str_contains($numbersView, 'gps-admin-part-number__copy'),
             'part_number_label_hidden' => ! str_contains($numbersView, 'gps-admin-part-number__label') && ! str_contains($numbersView, '{{ $label }}'),
