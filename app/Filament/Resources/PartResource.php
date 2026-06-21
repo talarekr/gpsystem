@@ -512,12 +512,30 @@ class PartResource extends Resource
         return '<span class="gps-selected-vehicle gps-selected-vehicle--empty">Nie wybrano samochodu.</span>';
     }
 
+    public static function getAllPartsNavigationCount(): int
+    {
+        if (! Schema::hasTable('parts')) {
+            return 0;
+        }
+
+        return Part::query()->count();
+    }
+
+    public static function getPartsToListNavigationCount(): int
+    {
+        if (! Schema::hasTable('parts')) {
+            return 0;
+        }
+
+        return Part::query()->where('needs_listing', true)->count();
+    }
+
     public static function getNavigationItems(): array
     {
         return [
             NavigationItem::make('Dodaj część')->group(static::getNavigationGroup())->sort(static::getNavigationSort())->url(static::getUrl('create'))->isActiveWhen(fn () => request()->routeIs('filament.admin.resources.parts.create')),
-            NavigationItem::make('Wszystkie części')->group(static::getNavigationGroup())->sort((static::getNavigationSort() ?? 20) + 1)->url(static::getUrl('index'))->isActiveWhen(fn () => request()->routeIs('filament.admin.resources.parts.index')),
-            NavigationItem::make('Części do wystawienia')->group(static::getNavigationGroup())->sort((static::getNavigationSort() ?? 20) + 2)->url(static::getUrl('to-list'))->isActiveWhen(fn () => request()->routeIs('filament.admin.resources.parts.to-list')),
+            NavigationItem::make('Wszystkie części')->group(static::getNavigationGroup())->sort((static::getNavigationSort() ?? 20) + 1)->url(static::getUrl('index'))->badge((string) static::getAllPartsNavigationCount())->isActiveWhen(fn () => request()->routeIs('filament.admin.resources.parts.index')),
+            NavigationItem::make('Części do wystawienia')->group(static::getNavigationGroup())->sort((static::getNavigationSort() ?? 20) + 2)->url(static::getUrl('to-list'))->badge((string) static::getPartsToListNavigationCount())->isActiveWhen(fn () => request()->routeIs('filament.admin.resources.parts.to-list')),
         ];
     }
 

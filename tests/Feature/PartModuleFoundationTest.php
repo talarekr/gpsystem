@@ -235,6 +235,16 @@ class PartModuleFoundationTest extends TestCase
         $this->assertTrue($unknown->category_needs_review);
     }
 
+    public function test_part_navigation_counts_use_real_parts_and_needs_listing_queue(): void
+    {
+        Part::query()->create(['name' => 'Część bez wystawienia']);
+        Part::query()->create(['name' => 'Część do wystawienia 1', 'needs_listing' => true]);
+        Part::query()->create(['name' => 'Część do wystawienia 2', 'needs_listing' => true]);
+
+        $this->assertSame(3, PartResource::getAllPartsNavigationCount());
+        $this->assertSame(2, PartResource::getPartsToListNavigationCount());
+    }
+
     public function test_part_resource_navigation_and_labels_are_polish_and_iconless_children(): void
     {
         $this->assertSame('Części', PartResource::getNavigationGroup());
