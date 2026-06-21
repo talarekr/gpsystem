@@ -69,7 +69,7 @@
         .fi-ta-table:has([data-column="admin_part_image"]) [data-column="admin_part_image"] > .fi-ta-col-wrp,
         .fi-ta-table:has([data-column="admin_part_image"]) [data-column="admin_part_image"] .fi-ta-col-wrp,
         .fi-ta-table:has([data-column="admin_part_image"]) [data-column="admin_part_image"] .fi-ta-text,
-        .fi-ta-table:has([data-column="admin_part_image"]) [data-column="admin_part_image"] .fi-ta-text-item { width: 150px; max-width: none; min-width: 150px; height: auto; max-height: none; min-height: 0; line-height: 0; padding: 0; margin: 0; overflow: visible; box-sizing: content-box; flex: 0 0 auto; }
+        .fi-ta-table:has([data-column="admin_part_image"]) [data-column="admin_part_image"] .fi-ta-text-item { width: 150px; max-width: none; min-width: 150px; height: 112px; max-height: none; min-height: 112px; padding: 0; margin: 0; overflow: visible; box-sizing: content-box; flex: 0 0 auto; }
         .fi-ta-table tbody td, .fi-ta-table tbody td * { font-weight: 400; }
         .fi-ta-table [data-column="admin_part_image"] { width: 150px; min-width: 150px; }
         .fi-ta-table [data-column="id"] { width: 70px; min-width: 70px; color: #334155; font-size: 13px; font-weight: 700; vertical-align: top; }
@@ -83,14 +83,14 @@
         .fi-ta-table [data-column="admin_part_channels"] { width: 270px; min-width: 250px; }
         .fi-ta-table [data-column="admin_part_storage"] { width: 160px; min-width: 140px; }
         .gps-admin-part-cell.gps-admin-part-thumb,
-        .gps-admin-part-thumb { position: relative; width: 150px !important; min-width: 150px !important; max-width: 150px !important; height: auto !important; min-height: 0 !important; max-height: none !important; line-height: 0 !important; padding: 0 !important; margin: 0 !important; overflow: hidden; display: inline-block; box-sizing: border-box; border: 1px solid #e5e7eb; border-radius: 6px; background: #ffffff; flex: 0 0 auto; vertical-align: top; }
+        .gps-admin-part-thumb { position: relative; width: 150px !important; height: 112px !important; min-width: 150px !important; max-width: 150px !important; min-height: 112px !important; max-height: 112px !important; padding: 0 !important; margin: 0; overflow: hidden; display: block; box-sizing: border-box; border: 1px solid #e5e7eb; border-radius: 6px; background: #ffffff; flex: 0 0 auto; }
         .gps-admin-part-thumb > a,
         .gps-admin-part-thumb > div,
         .gps-admin-part-thumb picture,
-        .gps-admin-part-thumb .gps-admin-part-thumb__inner { width: 100% !important; height: auto !important; display: block !important; line-height: 0 !important; padding: 0 !important; margin: 0 !important; overflow: hidden; box-sizing: border-box; }
-        .gps-admin-part-thumb img { width: 100% !important; height: auto !important; display: block !important; max-width: none !important; max-height: none !important; padding: 0 !important; margin: 0 !important; }
+        .gps-admin-part-thumb .gps-admin-part-thumb__inner { width: 100% !important; height: 100% !important; display: block !important; padding: 0 !important; margin: 0 !important; overflow: hidden; box-sizing: border-box; }
+        .gps-admin-part-thumb img { width: 100% !important; height: 100% !important; object-fit: cover !important; display: block !important; max-width: none !important; max-height: none !important; padding: 0; margin: 0; }
         .gps-admin-part-thumb__placeholder { color: #94a3b8; font-size: 11px; font-weight: 400; text-align: center; line-height: 1.25; }
-        .gps-admin-part-thumb__badge { position: absolute; right: 5px; bottom: 5px; z-index: 1; min-width: 18px; border-radius: 999px; background: rgba(248, 250, 252, .88); border: 1px solid rgba(226, 232, 240, .9); color: #64748b; padding: 1px 5px; font-size: 10px; font-weight: 500; line-height: 1.25; text-align: center; }
+        .gps-admin-part-thumb__badge { position: absolute; right: 5px; bottom: 5px; min-width: 18px; border-radius: 999px; background: rgba(248, 250, 252, .88); border: 1px solid rgba(226, 232, 240, .9); color: #64748b; padding: 1px 5px; font-size: 10px; font-weight: 500; line-height: 1.25; text-align: center; }
         .gps-admin-part-title { width: 360px; max-width: 360px; }
         .gps-admin-part-title a { display: -webkit-box; overflow: hidden; color: #1e293b; font-size: 13px; font-weight: 400; line-height: 1.35; text-decoration: none; text-overflow: ellipsis; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
         .gps-admin-part-title a:hover { color: #2563eb; text-decoration: underline; }

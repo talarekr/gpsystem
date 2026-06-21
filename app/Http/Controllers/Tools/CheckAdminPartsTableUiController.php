@@ -46,7 +46,7 @@ class CheckAdminPartsTableUiController extends Controller
         $listingVariantPadding = $this->imageMayHaveInternalPadding($listingImage, 'listing');
         $productVariantPadding = $this->imageMayHaveInternalPadding($listingImage, 'product');
         $expectedThumbWidth = 150;
-        $expectedThumbHeight = $adminImageSize['height'];
+        $expectedThumbHeight = 112;
         $imageIssueReason = $this->adminImageIssueReason($adminImageSize, $listingVariantPadding, $productVariantPadding);
         $recommendedAdminImageFix = $this->recommendedAdminImageFix($imageIssueReason, $listingVariantPadding, $productVariantPadding);
         $resource = file_get_contents(app_path('Filament/Resources/PartResource.php')) ?: '';
@@ -80,25 +80,13 @@ class CheckAdminPartsTableUiController extends Controller
             'views_checked' => $viewsChecked,
             'ovoko_light_visual_tuning_applied' => true,
             'uses_shared_table_partial' => str_contains($resource, "ViewColumn::make('admin_part_image'") && str_contains($resource, "ViewColumn::make('admin_part_channels'"),
-            'image_css_forces_full_fill' => str_contains($imageView, 'width: 150px !important;')
-                && str_contains($imageView, 'height: auto !important;')
-                && str_contains($imageView, 'line-height: 0 !important;')
-                && str_contains($imageView, 'padding: 0 !important;')
-                && str_contains($imageView, 'margin: 0 !important;')
-                && str_contains($imageView, 'overflow: hidden;')
-                && str_contains($imageView, 'display: block !important;')
-                && ! str_contains($imageView, 'object-fit: cover'),
-            'image_frame_fits_image_height' => str_contains($imageView, '.gps-admin-part-thumb { position: relative; width: 150px !important;')
-                && str_contains($imageView, 'height: auto !important;')
-                && str_contains($imageView, '.gps-admin-part-thumb img { width: 100% !important; height: auto !important;'),
-            'image_frame_has_no_vertical_padding' => str_contains($imageView, 'line-height: 0 !important; padding: 0 !important; margin: 0 !important; overflow: hidden;')
-                && str_contains($imageView, '.gps-admin-part-thumb__inner { width: 100% !important; height: auto !important; display: block !important; line-height: 0 !important; padding: 0 !important; margin: 0 !important;'),
-            'image_frame_has_no_extra_bottom_space' => str_contains($imageView, '.gps-admin-part-thumb img { width: 100% !important; height: auto !important; display: block !important;')
-                && str_contains($imageView, 'line-height: 0 !important;'),
-            'image_badge_does_not_affect_frame_height' => str_contains($imageView, '.gps-admin-part-thumb__badge { position: absolute;')
-                && str_contains($imageView, 'z-index: 1;'),
-            'image_rendering_strategy' => 'fit-frame-to-image',
-            'image_inner_wrappers_full_size' => str_contains($imageView, '.gps-admin-part-thumb .gps-admin-part-thumb__inner { width: 100% !important; height: auto !important; display: block !important; line-height: 0 !important;')
+            'image_css_forces_full_fill' => (str_contains($imageView, 'width: 150px !important; height: 112px !important;') || str_contains($imageView, 'width: 150px; height: 112px;'))
+                && str_contains($imageView, 'padding: 0; margin: 0; overflow: hidden;')
+                && str_contains($imageView, 'max-width: none !important;')
+                && str_contains($imageView, 'max-height: none !important;')
+                && (str_contains($imageView, 'object-fit: cover !important;') || str_contains($imageView, 'object-fit: cover;'))
+                && str_contains($imageView, 'margin: 0;'),
+            'image_inner_wrappers_full_size' => (str_contains($imageView, '.gps-admin-part-thumb .gps-admin-part-thumb__inner { width: 100% !important; height: 100% !important;') || str_contains($imageView, '.gps-admin-part-thumb .gps-admin-part-thumb__inner { width: 100%; height: 100%; padding: 0; margin: 0; overflow: hidden; display: block; box-sizing: border-box; }'))
                 && str_contains($imageView, 'class="gps-admin-part-thumb__inner"'),
             'id_rendered_with_custom_top_aligned_wrapper' => str_contains($resource, "ViewColumn::make('id'")
                 && str_contains($resource, "view('filament.resources.parts.table-id')")
@@ -122,7 +110,7 @@ class CheckAdminPartsTableUiController extends Controller
             'admin_image_file_aspect_ratio' => $adminImageSize['aspect_ratio'],
             'expected_thumb_width_px' => $expectedThumbWidth,
             'expected_thumb_height_px' => $expectedThumbHeight,
-            'expected_thumb_aspect_ratio' => $expectedThumbHeight ? round($expectedThumbWidth / $expectedThumbHeight, 4) : null,
+            'expected_thumb_aspect_ratio' => round($expectedThumbWidth / $expectedThumbHeight, 4),
             'image_may_have_internal_padding' => $listingVariantPadding,
             'image_thumbnail_issue_reason' => $imageIssueReason,
             'recommended_admin_image_fix' => $recommendedAdminImageFix,
@@ -156,11 +144,11 @@ class CheckAdminPartsTableUiController extends Controller
             'image_column_not_affected_by_text_alignment_resets' => ! str_contains($imageView, '.gps-col-image > *')
                 && ! str_contains($imageView, '.gps-admin-part-cell,')
                 && str_contains($imageView, '[data-column="admin_part_image"] .fi-ta-text-item { width: 150px;'),
-            'image_container_width_px' => str_contains($imageView, 'width: 150px !important;') ? 150 : null,
-            'image_container_height_px' => null,
-            'image_fills_container_height' => str_contains($imageView, '.gps-admin-part-thumb img { width: 100% !important; height: auto !important;')
-                && str_contains($imageView, 'display: block !important;'),
-            'image_object_fit' => null,
+            'image_container_width_px' => (str_contains($imageView, 'width: 150px !important; height: 112px !important;') || str_contains($imageView, 'width: 150px; height: 112px;')) ? 150 : null,
+            'image_container_height_px' => (str_contains($imageView, 'width: 150px !important; height: 112px !important;') || str_contains($imageView, 'width: 150px; height: 112px;')) ? 112 : null,
+            'image_fills_container_height' => str_contains($imageView, '.gps-admin-part-thumb img { width: 100% !important; height: 100% !important;')
+                && str_contains($imageView, 'max-height: none !important;'),
+            'image_object_fit' => (str_contains($imageView, 'object-fit: cover !important;') || str_contains($imageView, 'object-fit: cover;')) ? 'cover' : null,
             'sku_hidden_in_parts_table' => ! str_contains($titleView, 'SKU:'),
             'title_column_max_width_px' => str_contains($imageView, '.gps-admin-part-title { width: 360px; max-width: 360px; }') ? 360 : null,
             'title_line_clamp' => str_contains($imageView, '-webkit-line-clamp: 2') && str_contains($imageView, 'white-space: normal') ? 2 : null,
