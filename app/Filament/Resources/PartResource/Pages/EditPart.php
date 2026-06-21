@@ -61,6 +61,20 @@ class EditPart extends EditRecord
 
                     Notification::make()->title("Przetworzono zdjęcia: {$processed}")->success()->send();
                 }),
+            Actions\Action::make('markListingReady')
+                ->label('Oznacz jako gotowe')
+                ->icon('heroicon-o-check-circle')
+                ->color('success')
+                ->requiresConfirmation()
+                ->visible(fn (): bool => (bool) $this->record->needs_listing)
+                ->action(function (): void {
+                    $this->record->update(['needs_listing' => false]);
+
+                    Notification::make()
+                        ->title('Część oznaczona jako gotowa')
+                        ->success()
+                        ->send();
+                }),
             Actions\ViewAction::make()->label('Podgląd'),
             Actions\DeleteAction::make()->label('Usuń'),
         ];
