@@ -38,6 +38,8 @@ use App\Http\Controllers\Tools\CheckCatalogViewController;
 use App\Http\Controllers\Tools\CheckCatalogViewStageController;
 use App\Http\Controllers\Tools\CheckCatalogErrorController;
 use App\Http\Controllers\Tools\LastLaravelErrorController;
+use App\Http\Controllers\Tools\MarkGpsGmailToListDryRunController;
+use App\Http\Controllers\Tools\MarkGpsGmailToListLiveController;
 use App\Http\Controllers\Tools\FixImportedImagesPublicFilesController;
 use App\Http\Controllers\Tools\ImportedImagesStorageReportController;
 use App\Http\Controllers\Tools\InspectLegacyPayloadKeysController;
@@ -119,6 +121,8 @@ Route::get('/tools/inspect-legacy-payload-keys', InspectLegacyPayloadKeysControl
 Route::get('/tools/export-ovoko-unmapped', ExportOvokoUnmappedController::class)->name('tools.export-ovoko-unmapped');
 Route::get('/tools/check-part-number-performance', CheckPartNumberPerformanceController::class)->name('tools.check-part-number-performance');
 Route::get('/tools/check-parts-to-list', CheckPartsToListController::class)->name('tools.check-parts-to-list');
+Route::get('/tools/mark-gps-gmail-to-list-dry-run', MarkGpsGmailToListDryRunController::class)->name('tools.mark-gps-gmail-to-list-dry-run');
+Route::get('/tools/mark-gps-gmail-to-list-live', MarkGpsGmailToListLiveController::class)->name('tools.mark-gps-gmail-to-list-live');
 Route::get('/tools/check-catalog-search', CheckCatalogSearchController::class)->name('tools.check-catalog-search');
 Route::get('/tools/check-catalog-render', CheckCatalogRenderController::class)->name('tools.check-catalog-render');
 Route::get('/tools/check-catalog-error', CheckCatalogErrorController::class)->name('tools.check-catalog-error');

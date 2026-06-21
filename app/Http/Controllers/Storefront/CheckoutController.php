@@ -34,6 +34,10 @@ class CheckoutController extends Controller
             throw ValidationException::withMessages(['cart' => 'Koszyk nie może być pusty.']);
         }
 
+        if ($items->contains(fn (array $item): bool => ! (bool) ($item['is_available'] ?? false))) {
+            throw ValidationException::withMessages(['cart' => 'Koszyk zawiera produkt niedostępny. Usuń go przed złożeniem zamówienia.']);
+        }
+
         $validated = $request->validate([
             'customer_name' => ['required', 'string', 'max:255'],
             'company_name' => ['nullable', 'string', 'max:255'],
