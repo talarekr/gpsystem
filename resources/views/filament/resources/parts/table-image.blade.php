@@ -20,6 +20,10 @@
         .fi-ta-table thead th { color: #475569; font-size: 12px; font-weight: 600; }
         .fi-ta-table tbody tr { min-height: 124px; border-color: #eef2f7; }
         .fi-ta-table tbody tr:hover { background: rgba(148, 163, 184, .10); }
+        .fi-ta-table:has([data-column="admin_part_image"]) thead tr > th,
+        .fi-ta-table:has([data-column="admin_part_image"]) tbody tr > td { padding-left: 16px; padding-right: 16px; }
+        .fi-ta-table:has([data-column="admin_part_image"]) thead tr > th > *,
+        .fi-ta-table:has([data-column="admin_part_image"]) tbody tr > td > * { margin-left: 0; padding-left: 0; }
         .fi-ta-table:has([data-column="admin_part_image"]) tbody tr > td { vertical-align: top; padding-top: 12px; padding-bottom: 12px; }
         .fi-ta-table:has([data-column="admin_part_image"]) tbody tr > td > .fi-ta-col-wrp,
         .fi-ta-table:has([data-column="admin_part_image"]) tbody tr > td .fi-ta-text,
