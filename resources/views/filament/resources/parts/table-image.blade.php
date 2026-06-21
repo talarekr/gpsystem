@@ -77,15 +77,18 @@
         .fi-ta-table:has([data-column="admin_part_image"]) [data-column="id"] .fi-ta-col-wrp,
         .fi-ta-table:has([data-column="admin_part_image"]) [data-column="id"] .fi-ta-text,
         .fi-ta-table:has([data-column="admin_part_image"]) [data-column="id"] .fi-ta-text-item { align-items: flex-start !important; justify-content: flex-start !important; margin-top: 0 !important; padding-top: 0 !important; color: #334155; font-weight: 700; }
-        .gps-admin-part-id { display: block; padding-top: 0; margin-top: 0; color: #334155; font-size: 13px; font-weight: 700; line-height: 1.25; }
+        .gps-admin-part-id { display: block; margin-top: 0; padding-top: 0; align-self: flex-start; color: #334155; font-size: 13px; font-weight: 700 !important; line-height: 1.25; }
         .fi-ta-table [data-column="admin_part_title"] { width: 380px; min-width: 360px; max-width: 380px; }
         .fi-ta-table [data-column="admin_part_numbers"] { width: 190px; min-width: 170px; }
         .fi-ta-table [data-column="admin_part_channels"] { width: 270px; min-width: 250px; }
         .fi-ta-table [data-column="admin_part_storage"] { width: 160px; min-width: 140px; }
         .gps-admin-part-cell.gps-admin-part-thumb,
-        .gps-admin-part-thumb { position: relative; width: 137px; height: 104px; border: 1px solid #e5e7eb; border-radius: 6px; background: #ffffff; display: block; overflow: hidden; padding: 0; box-sizing: border-box; max-width: none; max-height: none; min-width: 137px; min-height: 104px; margin-left: 0; flex: 0 0 auto; }
-        .gps-admin-part-thumb > :not(.gps-admin-part-thumb__badge) { width: 100%; height: 100%; padding: 0; margin: 0; box-sizing: border-box; max-width: none; max-height: none; }
-        .gps-admin-part-thumb img { width: 100%; height: 100%; min-width: 100%; min-height: 100%; object-fit: cover; display: block; max-width: none; max-height: none; padding: 0; margin: 0; }
+        .gps-admin-part-thumb { position: relative; width: 137px; height: 104px; padding: 0; margin: 0; overflow: hidden; display: block; box-sizing: border-box; border: 1px solid #e5e7eb; border-radius: 6px; background: #ffffff; max-width: none; max-height: none; min-width: 137px; min-height: 104px; flex: 0 0 auto; }
+        .gps-admin-part-thumb > a,
+        .gps-admin-part-thumb > div,
+        .gps-admin-part-thumb picture,
+        .gps-admin-part-thumb .gps-admin-part-thumb__inner { width: 100%; height: 100%; padding: 0; margin: 0; overflow: hidden; display: block; box-sizing: border-box; }
+        .gps-admin-part-thumb img { width: 100% !important; height: 100% !important; min-width: 100%; min-height: 100%; object-fit: cover; display: block; max-width: none !important; max-height: none !important; padding: 0; margin: 0; }
         .gps-admin-part-thumb__placeholder { color: #94a3b8; font-size: 11px; font-weight: 400; text-align: center; line-height: 1.25; }
         .gps-admin-part-thumb__badge { position: absolute; right: 5px; bottom: 5px; min-width: 18px; border-radius: 999px; background: rgba(248, 250, 252, .88); border: 1px solid rgba(226, 232, 240, .9); color: #64748b; padding: 1px 5px; font-size: 10px; font-weight: 500; line-height: 1.25; text-align: center; }
         .gps-admin-part-title { width: 360px; max-width: 360px; }
@@ -94,7 +97,7 @@
         .gps-admin-part-title small { display: block; margin-top: 6px; color: #64748b; font-size: 12px; font-weight: 400; line-height: 1.35; }
         .gps-admin-part-numbers { display: inline-flex; max-width: 190px; align-items: center; gap: 0; }
         .gps-admin-part-number { display: inline-flex; width: fit-content; max-width: 100%; align-items: baseline; gap: 4px; color: #334155; font-size: 14px; font-weight: 700; line-height: 1.25; }
-        .gps-admin-part-number-value { overflow: hidden; color: #334155; font-size: 14px; font-weight: 700; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+        .gps-admin-part-number-value { overflow: hidden; color: #334155; font-size: 14px !important; font-weight: 700 !important; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
         .gps-admin-part-number__label { color: #64748b; font-size: 11px; font-weight: 500; }
         .gps-admin-part-number__value { overflow: hidden; font-size: 14px; font-weight: 700; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
         .gps-admin-part-number__copy { display: inline-flex; width: 18px; height: 18px; align-items: center; justify-content: center; margin-left: 5px; border: 0; border-radius: 999px; background: transparent; color: #64748b; cursor: pointer; padding: 0; vertical-align: middle; }
@@ -121,7 +124,9 @@
     @if (! $part)
         <span class="gps-admin-part-thumb__placeholder">—</span>
     @elseif ($imageUrl)
-        <img src="{{ $imageUrl }}" alt="Zdjęcie części #{{ $part->id }}" loading="lazy">
+        <div class="gps-admin-part-thumb__inner">
+            <img src="{{ $imageUrl }}" alt="Zdjęcie części #{{ $part->id }}" loading="lazy">
+        </div>
         @if ($imageCount > 1)
             <span class="gps-admin-part-thumb__badge">{{ $imageCount }}</span>
         @endif
