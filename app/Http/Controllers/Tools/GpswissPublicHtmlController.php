@@ -63,7 +63,8 @@ class GpswissPublicHtmlController extends Controller
             $blockers[] = 'Target public_html does not exist.';
         }
 
-        $indexPointsToApp = $this->indexPointsToApp($targetIndexPhp);
+        $indexInfo = $this->targetIndexPhpInfo($targetIndexPhp);
+        $indexPointsToApp = (bool) $indexInfo['points_to_app_path'];
         if ($targetExists && ! file_exists($targetIndexPhp)) {
             $warnings[] = 'Target index.php is missing.';
         }
@@ -95,7 +96,10 @@ class GpswissPublicHtmlController extends Controller
                 'target_storage_exists' => file_exists($targetStorage),
                 'target_storage_is_symlink' => is_link($targetStorage),
                 'target_index_php_points_to_app_path' => $indexPointsToApp,
+                'target_index_php_autoload_path' => $indexInfo['autoload_path'],
+                'target_index_php_bootstrap_path' => $indexInfo['bootstrap_path'],
                 'target_looks_like_laravel_public_html' => $looksLikeLaravel,
+                'index_php_snippet_safe' => $indexPointsToApp ? null : $indexInfo['snippet_safe'],
             ],
             'copied_files' => [],
             'copied_directories' => [],
@@ -169,7 +173,26 @@ class GpswissPublicHtmlController extends Controller
             $copiedFiles[] = $relativeFile;
         }
 
-        $this->prepareTargetIndexPhp();
+        $indexPreparation = $this->prepareTargetIndexPhp();
+        if (! $indexPreparation['ok']) {
+            $blockers = array_merge($blockers, $indexPreparation['blockers']);
+
+            return $this->json([
+                'ok' => false,
+                'dry_run' => false,
+                'source_exists' => $sourceExists,
+                'target_exists' => $targetExists,
+                'copied_files' => $copiedFiles,
+                'copied_directories' => $copiedDirectories,
+                'backed_up_files' => $backedUpFiles,
+                'skipped' => $this->skippedPublicEntries($filesToCopy, $directoriesToCopy),
+                'storage' => $storage,
+                'index_php_preparation' => $indexPreparation,
+                'warnings' => array_merge($warnings, $storage['warnings']),
+                'blockers' => $blockers,
+                'next_steps' => $this->nextSteps($blockers, array_merge($warnings, $storage['warnings'])),
+            ]);
+        }
 
         foreach ($directoriesToCopy as $relativeDirectory) {
             $this->copyDirectory($relativeDirectory);
@@ -177,10 +200,6 @@ class GpswissPublicHtmlController extends Controller
         }
 
         $storage = $this->storagePlan(false);
-        if (($storage['action'] ?? null) === 'create_symlink') {
-            symlink((string) $storage['source_target'], self::TARGET_PUBLIC_HTML.'/storage');
-            $storage['created'] = true;
-        }
 
         if (file_exists(self::TARGET_PUBLIC_HTML.'/index.html') && file_exists(self::TARGET_PUBLIC_HTML.'/index.php') && $this->indexPointsToApp(self::TARGET_PUBLIC_HTML.'/index.php')) {
             $backup = 'index.html.directadmin.bak.'.now()->format('YmdHis');
@@ -198,6 +217,7 @@ class GpswissPublicHtmlController extends Controller
             'backed_up_files' => $backedUpFiles,
             'skipped' => $this->skippedPublicEntries($filesToCopy, $directoriesToCopy),
             'storage' => $storage,
+            'index_php_preparation' => $indexPreparation,
             'warnings' => array_merge($warnings, $storage['warnings']),
             'blockers' => [],
             'next_steps' => $this->nextSteps([], array_merge($warnings, $storage['warnings'])),
@@ -274,25 +294,120 @@ class GpswissPublicHtmlController extends Controller
         }
     }
 
-    private function prepareTargetIndexPhp(): void
+    /** @return array{ok: bool, autoload_replaced: bool, bootstrap_replaced: bool, autoload_path: ?string, bootstrap_path: ?string, snippet_safe: ?string, blockers: list<string>} */
+    private function prepareTargetIndexPhp(): array
     {
         $indexPath = self::TARGET_PUBLIC_HTML.'/index.php';
+        if (! is_file($indexPath)) {
+            return [
+                'ok' => false,
+                'autoload_replaced' => false,
+                'bootstrap_replaced' => false,
+                'autoload_path' => null,
+                'bootstrap_path' => null,
+                'snippet_safe' => null,
+                'blockers' => ['Target index.php does not exist after copy.'],
+            ];
+        }
+
         $contents = file_get_contents($indexPath) ?: '';
-        $contents = preg_replace("~require(?:_once)?\s+[^;]*vendor/autoload\.php['\"];~", "require '".self::APP_PATH."/vendor/autoload.php';", $contents) ?? $contents;
-        $contents = preg_replace("~\$app\s*=\s*require(?:_once)?\s+[^;]*bootstrap/app\.php['\"];~", "\$app = require_once '".self::APP_PATH."/bootstrap/app.php';", $contents) ?? $contents;
+        $autoloadReplacement = "require '".self::APP_PATH."/vendor/autoload.php';";
+        $bootstrapReplacement = "\$app = require_once '".self::APP_PATH."/bootstrap/app.php';";
+
+        [$contents, $autoloadCount] = $this->replaceIndexPhpRequire($contents, 'vendor/autoload.php', $autoloadReplacement);
+        [$contents, $bootstrapCount] = $this->replaceIndexPhpRequire($contents, 'bootstrap/app.php', $bootstrapReplacement, true);
+
+        if ($autoloadCount === 0 || $bootstrapCount === 0) {
+            $info = $this->indexPhpInfoFromContents($contents);
+
+            return [
+                'ok' => false,
+                'autoload_replaced' => $autoloadCount > 0,
+                'bootstrap_replaced' => $bootstrapCount > 0,
+                'autoload_path' => $info['autoload_path'],
+                'bootstrap_path' => $info['bootstrap_path'],
+                'snippet_safe' => $info['snippet_safe'],
+                'blockers' => ['Could not automatically rewrite target index.php Laravel app paths. Review index_php_preparation.snippet_safe and update the replacement patterns.'],
+            ];
+        }
+
         file_put_contents($indexPath, $contents);
+        $info = $this->targetIndexPhpInfo($indexPath);
+
+        return [
+            'ok' => (bool) $info['points_to_app_path'],
+            'autoload_replaced' => true,
+            'bootstrap_replaced' => true,
+            'autoload_path' => $info['autoload_path'],
+            'bootstrap_path' => $info['bootstrap_path'],
+            'snippet_safe' => $info['snippet_safe'],
+            'blockers' => $info['points_to_app_path'] ? [] : ['Target index.php was rewritten, but does not point to the expected app path.'],
+        ];
+    }
+
+    /** @return array{0: string, 1: int} */
+    private function replaceIndexPhpRequire(string $contents, string $requiredSuffix, string $replacement, bool $allowAssignment = false): array
+    {
+        $suffix = preg_quote($requiredSuffix, '~');
+        $prefix = $allowAssignment ? '(?:\$app\s*=\s*)?' : '';
+        $pattern = '~'.$prefix.'require(?:_once)?\s*(?:\(?\s*)?(?:(?:__DIR__|dirname\s*\(\s*__DIR__\s*\)|base_path\s*\([^)]*\))\s*\.\s*)?[\'\"][^\'\"]*'.$suffix.'[\'\"]\s*\)?\s*;~m';
+        $count = 0;
+        $updated = preg_replace($pattern, $replacement, $contents, -1, $count);
+
+        return [$updated ?? $contents, $count];
     }
 
     private function indexPointsToApp(string $indexPath): bool
     {
+        return (bool) $this->targetIndexPhpInfo($indexPath)['points_to_app_path'];
+    }
+
+    /** @return array{points_to_app_path: bool, autoload_path: ?string, bootstrap_path: ?string, snippet_safe: ?string} */
+    private function targetIndexPhpInfo(string $indexPath): array
+    {
         if (! is_file($indexPath)) {
-            return false;
+            return [
+                'points_to_app_path' => false,
+                'autoload_path' => null,
+                'bootstrap_path' => null,
+                'snippet_safe' => null,
+            ];
         }
 
-        $contents = file_get_contents($indexPath) ?: '';
+        return $this->indexPhpInfoFromContents(file_get_contents($indexPath) ?: '');
+    }
 
-        return str_contains($contents, self::APP_PATH.'/vendor/autoload.php')
-            && str_contains($contents, self::APP_PATH.'/bootstrap/app.php');
+    /** @return array{points_to_app_path: bool, autoload_path: ?string, bootstrap_path: ?string, snippet_safe: string} */
+    private function indexPhpInfoFromContents(string $contents): array
+    {
+        $autoloadPath = $this->extractRequiredPath($contents, 'vendor/autoload.php');
+        $bootstrapPath = $this->extractRequiredPath($contents, 'bootstrap/app.php');
+
+        return [
+            'points_to_app_path' => $autoloadPath === self::APP_PATH.'/vendor/autoload.php'
+                && $bootstrapPath === self::APP_PATH.'/bootstrap/app.php',
+            'autoload_path' => $autoloadPath,
+            'bootstrap_path' => $bootstrapPath,
+            'snippet_safe' => $this->safeSnippet($contents),
+        ];
+    }
+
+    private function extractRequiredPath(string $contents, string $requiredSuffix): ?string
+    {
+        $suffix = preg_quote($requiredSuffix, '~');
+        if (preg_match('~[\'\"]([^\'\"]*'.$suffix.')[\'\"]~', $contents, $matches) !== 1) {
+            return null;
+        }
+
+        return $matches[1];
+    }
+
+    private function safeSnippet(string $contents): string
+    {
+        $snippet = implode("\n", array_slice(preg_split('/\R/', $contents) ?: [], 0, 80));
+        $snippet = preg_replace('~token=([^\s\'\"]+)~i', 'token=[redacted]', $snippet) ?? $snippet;
+
+        return mb_substr($snippet, 0, 4000);
     }
 
     /** @return array<string, mixed> */
@@ -325,15 +440,11 @@ class GpswissPublicHtmlController extends Controller
                 $sourceTarget = dirname($source).'/'.$sourceTarget;
             }
             $plan['source_target'] = $sourceTarget;
-            $plan['action'] = 'create_symlink';
-            $plan['can_create_symlink'] = function_exists('symlink') && is_writable(self::TARGET_PUBLIC_HTML);
-            if (! $plan['can_create_symlink']) {
-                $warnings[] = 'Source storage is a symlink, but target symlink creation may not be available/writable.';
-                $plan['action'] = 'manual_required';
-            }
+            $plan['action'] = 'skipped_no_touch';
+            $warnings[] = 'Source public_html/storage is a symlink; storage will not be touched by this sync.';
         } elseif (is_dir($source)) {
-            $warnings[] = 'Source public_html/storage is a directory; it will not be copied automatically to avoid copying large photo storage.';
-            $plan['action'] = 'manual_required';
+            $warnings[] = 'Source public_html/storage is a directory; storage will not be touched by this sync.';
+            $plan['action'] = 'skipped_no_touch';
         }
 
         $plan['dry_run'] = $dryRun;
