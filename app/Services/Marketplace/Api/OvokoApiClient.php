@@ -2,6 +2,7 @@
 
 namespace App\Services\Marketplace\Api;
 
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Http;
 
 class OvokoApiClient extends AbstractMarketplaceApiClient
@@ -12,7 +13,7 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
 
     protected function requestSample(int $limit): array
     {
-        $response = Http::asForm()->acceptJson()->timeout(15)->post($this->endpointUsed($limit).'&page=1', $this->credentials());
+        $response = Http::asForm()->acceptJson()->timeout(15)->post($this->endpointUsed($limit, 1), $this->authFields());
         $json = $response->json();
         $apiOk = $response->successful() && (($json['status_code'] ?? null) === 'R200' || ($json['status_code'] ?? null) === 200);
         return ['http_status' => $response->status(), 'json' => is_array($json) ? $json : [], 'api_ok' => $apiOk, 'error' => $json['msg'] ?? $json['message'] ?? null];
@@ -23,13 +24,15 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
         $response = Http::asForm()
             ->acceptJson()
             ->timeout(30)
-            ->post($this->endpointUsed($limit).'&page='.$page, $this->credentials());
+            ->post($this->endpointUsed($limit, $page), $this->authFields());
 
         $json = $response->json();
         $payload = is_array($json) ? $json : [];
         $statusCode = $payload['status_code'] ?? null;
         $apiOk = $response->successful() && ($statusCode === 'R200' || $statusCode === 200);
         $pagination = is_array($payload['pagination'] ?? null) ? $payload['pagination'] : [];
+
+        $parts = $this->extractOffers($payload);
 
         return [
             'http_status' => $response->status(),
@@ -38,8 +41,52 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
             'error' => $payload['msg'] ?? $payload['message'] ?? null,
             'page' => $page,
             'limit' => $limit,
+            'endpoint_used' => $this->endpointUsed($limit, $page),
             'total_count' => is_numeric($pagination['total_count'] ?? null) ? (int) $pagination['total_count'] : null,
-            'parts' => $this->extractOffers($payload),
+            'parts' => $parts,
+            'diagnostics' => $this->safeDiagnostics($response->status(), $payload, $parts, $page, $limit),
+        ];
+    }
+
+    public function safeDiagnostics(?int $httpStatus, array $payload, array $parts, int $page, int $limit, ?string $errorMessage = null): array
+    {
+        $pagination = is_array($payload['pagination'] ?? null) ? $payload['pagination'] : [];
+
+        return [
+            'http_status' => $httpStatus,
+            'ovoko_status_code' => $payload['status_code'] ?? null,
+            'ovoko_status_message' => $payload['msg'] ?? ($payload['message'] ?? null),
+            'ovoko_msg' => $payload['msg'] ?? null,
+            'endpoint_used' => $this->endpointUsed($limit, $page),
+            'request_page' => $page,
+            'request_limit' => $limit,
+            'request_method' => 'POST',
+            'request_format' => 'form-data',
+            'response_top_level_keys' => array_values(array_slice(array_keys($payload), 0, 30)),
+            'response_data_count' => is_countable($payload['data'] ?? null) ? count($payload['data']) : count($parts),
+            'response_pagination' => $pagination === [] ? null : Arr::only($pagination, ['page', 'limit', 'total_count', 'total_pages']),
+            'error_message_safe' => $errorMessage ?? $payload['msg'] ?? ($payload['message'] ?? null),
+        ];
+    }
+
+    public function safeExceptionDiagnostics(int $page, int $limit, string $message): array
+    {
+        return $this->safeDiagnostics(null, [], [], $page, $limit, $message);
+    }
+
+    protected function endpointUsed(int $limit, int $page = 1): string
+    {
+        return rtrim((string) $this->account?->api_base_url, '/').$this->endpointPath().'?limit='.$limit.'&page='.$page;
+    }
+
+    private function authFields(): array
+    {
+        $credentials = $this->credentials();
+
+        return [
+            'username' => (string) ($credentials['username'] ?? ''),
+            'password' => (string) ($credentials['password'] ?? ''),
+            'user_token' => (string) ($credentials['user_token'] ?? ''),
         ];
     }
 
