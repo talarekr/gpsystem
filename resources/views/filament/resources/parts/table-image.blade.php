@@ -80,7 +80,7 @@
         .gps-admin-part-id { display: block; margin-top: 0; padding-top: 0; align-self: flex-start; color: #334155; font-size: 13px; font-weight: 700 !important; line-height: 1.25; }
         .fi-ta-table [data-column="admin_part_title"] { width: 380px; min-width: 360px; max-width: 380px; }
         .fi-ta-table [data-column="admin_part_numbers"] { width: 190px; min-width: 170px; }
-        .fi-ta-table [data-column="admin_part_channels"] { width: 260px; min-width: 260px; max-width: 260px; }
+        .fi-ta-table [data-column="admin_part_channels"] { width: 270px; min-width: 270px; max-width: 270px; }
         .fi-ta-table [data-column="admin_part_storage"] { width: 160px; min-width: 140px; }
         .gps-admin-part-cell.gps-admin-part-thumb,
         .gps-admin-part-thumb { position: relative; width: 150px !important; height: 112px !important; min-width: 150px !important; max-width: 150px !important; min-height: 112px !important; max-height: 112px !important; padding: 0 !important; margin: 0; overflow: hidden; display: block; box-sizing: border-box; border: 1px solid #e5e7eb; border-radius: 6px; background: #ffffff; flex: 0 0 auto; }
@@ -104,7 +104,7 @@
         .gps-admin-part-number__copy:hover { background: #e2e8f0; color: #1e293b; }
         .gps-admin-part-number__copy svg { width: 13px; height: 13px; }
         .gps-admin-part-number--empty { color: #94a3b8; }
-        .gps-admin-channels, .gps-admin-channels.part-channel-list { display: flex; flex-direction: column; width: 260px; min-width: 260px; max-width: 260px; gap: 2px; overflow: visible; color: #334155; }
+        .gps-admin-channels, .gps-admin-channels.part-channel-list { display: flex; flex-direction: column; width: 270px; min-width: 270px; max-width: 270px; gap: 2px; overflow: hidden; color: #334155; }
         .gps-admin-channel { display: grid; grid-template-columns: 58px minmax(80px, max-content) 18px 18px; width: fit-content; max-width: 100%; align-items: center; column-gap: 5px; font-size: 12px; line-height: 1.35; white-space: nowrap; }
         .gps-admin-channel__name { overflow: hidden; color: #475569; font-weight: 400; text-overflow: ellipsis; }
         .gps-admin-channel__price { min-width: 0; overflow: hidden; color: #1e293b; text-overflow: ellipsis; white-space: nowrap; }
