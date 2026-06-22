@@ -3,6 +3,7 @@
 use App\Http\Controllers\Admin\ImportMigration\PartImagePresentationController;
 use App\Http\Controllers\Admin\LocalSaleController;
 use App\Http\Controllers\Admin\Allegro\AllegroOAuthController;
+use App\Http\Controllers\Admin\Ebay\EbayOAuthController;
 use App\Http\Controllers\Admin\PartSearchController;
 use App\Http\Controllers\Admin\ImportMigration\WooCategoryTreeController;
 use App\Http\Controllers\Admin\ImportMigration\WooProductImportRunController;
@@ -134,6 +135,8 @@ Route::get('/kategoria-produktu/{path}', [CategoryController::class, 'show'])->w
 Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/allegro/oauth/redirect', [AllegroOAuthController::class, 'redirect'])->name('admin.allegro.oauth.redirect');
     Route::get('/admin/allegro/oauth/callback', [AllegroOAuthController::class, 'callback'])->name('admin.allegro.oauth.callback');
+    Route::get('/admin/ebay/oauth/redirect', [EbayOAuthController::class, 'redirect'])->name('admin.ebay.oauth.redirect');
+    Route::get('/admin/ebay/oauth/callback', [EbayOAuthController::class, 'callback'])->name('admin.ebay.oauth.callback');
 });
 
 Route::get('/product-images-dry-run', ProductImagesDryRunController::class)->name('tools.product-images-dry-run');
@@ -178,6 +181,7 @@ Route::get('/tools/refresh-allegro-active-offer-links', RefreshAllegroActiveOffe
 Route::get('/tools/check-admin-marketplace-status-ui', CheckAdminMarketplaceStatusUiController::class)->name('tools.check-admin-marketplace-status-ui');
 Route::get('/tools/export-allegro-offer-id-coverage', ExportAllegroOfferIdCoverageController::class)->name('tools.export-allegro-offer-id-coverage');
 Route::get('/tools/check-ebay-api-settings', [MarketplaceApiSettingsDiagnosticsController::class, 'ebay'])->name('tools.check-ebay-api-settings');
+Route::get('/tools/check-ebay-api-readiness', [MarketplaceApiSettingsDiagnosticsController::class, 'ebayReadiness'])->name('tools.check-ebay-api-readiness');
 Route::get('/tools/check-ebay-legacy-category-mappings', CheckEbayLegacyCategoryMappingsController::class)->name('tools.check-ebay-legacy-category-mappings');
 Route::get('/tools/import-ebay-legacy-category-mappings-dry-run', [EbayLegacyCategoryMappingImportController::class, 'dryRun'])->name('tools.import-ebay-legacy-category-mappings-dry-run');
 Route::get('/tools/import-ebay-legacy-category-mappings', [EbayLegacyCategoryMappingImportController::class, 'live'])->name('tools.import-ebay-legacy-category-mappings');
