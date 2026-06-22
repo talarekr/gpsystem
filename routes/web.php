@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Admin\ImportMigration\PartImagePresentationController;
 use App\Http\Controllers\Admin\LocalSaleController;
+use App\Http\Controllers\Admin\Allegro\AllegroOAuthController;
 use App\Http\Controllers\Admin\PartSearchController;
 use App\Http\Controllers\Admin\ImportMigration\WooCategoryTreeController;
 use App\Http\Controllers\Admin\ImportMigration\WooProductImportRunController;
@@ -41,6 +42,7 @@ use App\Http\Controllers\Tools\ImportOvokoOrdersDryRunController;
 use App\Http\Controllers\Tools\CheckPartNumberPerformanceController;
 use App\Http\Controllers\Tools\CheckPartsToListController;
 use App\Http\Controllers\Tools\CheckAllegroChannelsController;
+use App\Http\Controllers\Tools\CheckAllegroOAuthReadinessController;
 use App\Http\Controllers\Tools\CheckAdminPartsTableUiController;
 use App\Http\Controllers\Tools\CheckCatalogSearchController;
 use App\Http\Controllers\Tools\CheckCatalogRenderController;
@@ -116,6 +118,12 @@ Route::post('/zamowienie', [CheckoutController::class, 'store'])->name('storefro
 Route::get('/zamowienie/dziekujemy/{order}', [CheckoutController::class, 'thankYou'])->name('storefront.checkout.thank-you');
 Route::get('/produkt/{slug}', [PartController::class, 'show'])->name('storefront.product');
 Route::get('/kategoria-produktu/{path}', [CategoryController::class, 'show'])->where('path', '.*')->name('storefront.category');
+
+Route::middleware([Authenticate::class])->group(function (): void {
+    Route::get('/admin/allegro/oauth/redirect', [AllegroOAuthController::class, 'redirect'])->name('admin.allegro.oauth.redirect');
+    Route::get('/admin/allegro/oauth/callback', [AllegroOAuthController::class, 'callback'])->name('admin.allegro.oauth.callback');
+});
+
 Route::get('/product-images-dry-run', ProductImagesDryRunController::class)->name('tools.product-images-dry-run');
 Route::get('/product-images-import', ProductImagesImportController::class)->name('tools.product-images-import');
 Route::get('/product-images-import-runner', ProductImagesImportRunnerController::class)->name('tools.product-images-import-runner');
@@ -137,6 +145,7 @@ Route::get('/tools/check-marketplace-stock-readiness', [MarketplaceApiFoundation
 Route::get('/tools/check-marketplace-linking-health', [MarketplaceApiFoundationController::class, 'linkingHealth'])->name('tools.check-marketplace-linking-health');
 Route::get('/tools/test-ovoko-api-connection', TestOvokoApiConnectionController::class)->name('tools.test-ovoko-api-connection');
 Route::get('/tools/check-allegro-api-settings', [MarketplaceApiSettingsDiagnosticsController::class, 'allegro'])->name('tools.check-allegro-api-settings');
+Route::get('/tools/check-allegro-oauth-readiness', CheckAllegroOAuthReadinessController::class)->name('tools.check-allegro-oauth-readiness');
 Route::get('/tools/check-ebay-api-settings', [MarketplaceApiSettingsDiagnosticsController::class, 'ebay'])->name('tools.check-ebay-api-settings');
 Route::get('/tools/test-allegro-api-connection', [MarketplaceApiSettingsDiagnosticsController::class, 'testAllegro'])->name('tools.test-allegro-api-connection');
 Route::get('/tools/test-ebay-api-connection', [MarketplaceApiSettingsDiagnosticsController::class, 'testEbay'])->name('tools.test-ebay-api-connection');
