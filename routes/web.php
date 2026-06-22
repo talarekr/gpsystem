@@ -57,6 +57,7 @@ use App\Http\Controllers\Tools\CheckCatalogRenderController;
 use App\Http\Controllers\Tools\CheckCatalogViewController;
 use App\Http\Controllers\Tools\CheckDomainHardcodedLinksController;
 use App\Http\Controllers\Tools\CheckEbayLegacyCategoryMappingsController;
+use App\Http\Controllers\Tools\CheckEbayLegacyShippingMappingsController;
 use App\Http\Controllers\Tools\EbayLegacyCategoryMappingImportController;
 use App\Http\Controllers\Tools\CheckFrontendMaintenanceController;
 use App\Http\Controllers\Tools\PostDomainSwitchCheckController;
@@ -184,6 +185,7 @@ Route::get('/tools/check-ebay-api-settings', [MarketplaceApiSettingsDiagnosticsC
 Route::get('/tools/check-ebay-api-readiness', [MarketplaceApiSettingsDiagnosticsController::class, 'ebayReadiness'])->name('tools.check-ebay-api-readiness');
 Route::get('/tools/check-ebay-oauth-routes', [MarketplaceApiSettingsDiagnosticsController::class, 'ebayOAuthRoutes'])->name('tools.check-ebay-oauth-routes');
 Route::get('/tools/check-ebay-legacy-category-mappings', CheckEbayLegacyCategoryMappingsController::class)->name('tools.check-ebay-legacy-category-mappings');
+Route::get('/tools/check-ebay-legacy-shipping-mappings', CheckEbayLegacyShippingMappingsController::class)->name('tools.check-ebay-legacy-shipping-mappings');
 Route::get('/tools/import-ebay-legacy-category-mappings-dry-run', [EbayLegacyCategoryMappingImportController::class, 'dryRun'])->name('tools.import-ebay-legacy-category-mappings-dry-run');
 Route::get('/tools/import-ebay-legacy-category-mappings', [EbayLegacyCategoryMappingImportController::class, 'live'])->name('tools.import-ebay-legacy-category-mappings');
 Route::get('/tools/check-marketplace-category-mappings', [EbayLegacyCategoryMappingImportController::class, 'check'])->name('tools.check-marketplace-category-mappings');
