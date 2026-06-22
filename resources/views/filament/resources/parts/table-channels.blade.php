@@ -20,27 +20,27 @@
             display: flex;
             flex-direction: column;
             gap: 2px;
-            width: 260px;
-            min-width: 260px;
-            max-width: 260px;
-            overflow: visible;
+            width: 225px;
+            min-width: 225px;
+            max-width: 225px;
+            overflow: hidden;
             color: #334155;
         }
 
         .gps-admin-channels .part-channel-row {
             display: grid;
-            grid-template-columns: 62px 105px 18px 18px;
-            column-gap: 4px;
+            grid-template-columns: 58px 96px 16px 16px;
+            column-gap: 3px;
             align-items: center;
             width: 100%;
-            max-width: none;
+            max-width: 100%;
             font-size: 12px;
             line-height: 1.35;
             white-space: nowrap;
         }
 
         .gps-admin-channels .part-channel-label {
-            overflow: visible;
+            overflow: hidden;
             color: #475569;
             font-weight: 400;
             text-overflow: clip;
@@ -48,7 +48,7 @@
         }
 
         .gps-admin-channels .part-channel-price {
-            overflow: visible;
+            overflow: hidden;
             color: #1e293b;
             text-overflow: clip;
             white-space: nowrap;
@@ -59,8 +59,8 @@
         .gps-admin-channels .part-channel-link,
         .gps-admin-channels .part-channel-link-placeholder {
             display: inline-block;
-            width: 18px;
-            overflow: visible;
+            width: 16px;
+            overflow: hidden;
             text-align: center;
             white-space: nowrap;
         }
