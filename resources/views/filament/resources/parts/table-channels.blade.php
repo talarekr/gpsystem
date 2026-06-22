@@ -59,26 +59,38 @@
 
 
         .gps-admin-channels .part-channel-status,
-        .gps-admin-channels .part-channel-status-link {
+        .gps-admin-channels .part-channel-status--link,
+        .gps-admin-channels a.part-channel-status--link {
+            display: inline;
             flex: 0 0 auto;
-            line-height: 1;
+            width: auto;
+            min-width: 0;
+            height: auto;
             padding: 0;
             margin: 0;
-            font-size: 12px;
-            font-weight: 500;
+            border: 0;
+            background: transparent;
+            line-height: inherit;
+            font: inherit;
             text-decoration: none;
             white-space: nowrap;
+            vertical-align: baseline;
         }
 
-        .gps-admin-channels .part-channel-status-link:hover {
+        .gps-admin-channels .part-channel-status--link:hover,
+        .gps-admin-channels a.part-channel-status--link:hover {
             text-decoration: underline;
         }
 
-        .gps-admin-channels .part-channel-status--ok {
+        .gps-admin-channels .part-channel-status.is-listed,
+        .gps-admin-channels .part-channel-status--link.is-listed,
+        .gps-admin-channels a.part-channel-status--link.is-listed {
             color: #16a34a;
         }
 
-        .gps-admin-channels .part-channel-status--missing {
+        .gps-admin-channels .part-channel-status.is-not-listed,
+        .gps-admin-channels .part-channel-status--link.is-not-listed,
+        .gps-admin-channels a.part-channel-status--link.is-not-listed {
             color: #dc2626;
         }
 
@@ -90,7 +102,7 @@
         <div class="part-channel-row">
             <span class="part-channel-label">—</span>
             <span class="part-channel-price">—</span>
-            <span class="part-channel-status part-channel-status--missing" title="Brak rekordu">✕</span>
+            <span class="part-channel-status is-not-listed" title="Brak rekordu">✕</span>
         </div>
     @else
         @foreach ($rows as $row)
@@ -99,7 +111,7 @@
                 <span class="part-channel-price">{{ $row['price'] }}</span>
                 @if ($row['listed'] && $row['url'])
                     <a
-                        class="part-channel-status part-channel-status-link part-channel-status--ok"
+                        class="part-channel-status part-channel-status--link is-listed"
                         href="{{ $row['url'] }}"
                         target="_blank"
                         rel="noopener noreferrer"
@@ -108,7 +120,7 @@
                     >✓</a>
                 @else
                     <span
-                        class="part-channel-status {{ $row['listed'] ? 'part-channel-status--ok' : 'part-channel-status--missing' }}"
+                        class="part-channel-status {{ $row['listed'] ? 'is-listed' : 'is-not-listed' }}"
                         title="{{ $row['title'] }}"
                         aria-label="{{ $row['title'] }}"
                     >{{ $row['listed'] ? '✓' : '✕' }}</span>
