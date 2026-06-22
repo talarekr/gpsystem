@@ -80,7 +80,7 @@
         .gps-admin-part-id { display: block; margin-top: 0; padding-top: 0; align-self: flex-start; color: #334155; font-size: 13px; font-weight: 700 !important; line-height: 1.25; }
         .fi-ta-table [data-column="admin_part_title"] { width: 380px; min-width: 360px; max-width: 380px; }
         .fi-ta-table [data-column="admin_part_numbers"] { width: 190px; min-width: 170px; }
-        .fi-ta-table [data-column="admin_part_channels"] { width: 270px; min-width: 250px; }
+        .fi-ta-table [data-column="admin_part_channels"] { width: 245px; min-width: 245px; max-width: 245px; }
         .fi-ta-table [data-column="admin_part_storage"] { width: 160px; min-width: 140px; }
         .gps-admin-part-cell.gps-admin-part-thumb,
         .gps-admin-part-thumb { position: relative; width: 150px !important; height: 112px !important; min-width: 150px !important; max-width: 150px !important; min-height: 112px !important; max-height: 112px !important; padding: 0 !important; margin: 0; overflow: hidden; display: block; box-sizing: border-box; border: 1px solid #e5e7eb; border-radius: 6px; background: #ffffff; flex: 0 0 auto; }
@@ -104,17 +104,18 @@
         .gps-admin-part-number__copy:hover { background: #e2e8f0; color: #1e293b; }
         .gps-admin-part-number__copy svg { width: 13px; height: 13px; }
         .gps-admin-part-number--empty { color: #94a3b8; }
-        .gps-admin-channels { display: grid; gap: 3px; min-width: 250px; color: #334155; }
-        .gps-admin-channel { display: grid; grid-template-columns: 58px minmax(110px, 1fr) 18px 18px; align-items: baseline; gap: 8px; font-size: 12px; line-height: 1.35; }
-        .gps-admin-channel__name { color: #475569; font-weight: 400; }
-        .gps-admin-channel__price { color: #1e293b; white-space: nowrap; }
+        .gps-admin-channels { display: grid; width: 225px; min-width: 225px; max-width: 225px; gap: 3px; overflow: hidden; color: #334155; }
+        .part-channel-list { width: 225px; min-width: 225px; max-width: 225px; }
+        .gps-admin-channel { display: grid; grid-template-columns: 58px minmax(80px, max-content) 18px 18px; width: fit-content; max-width: 100%; align-items: center; column-gap: 5px; font-size: 12px; line-height: 1.35; white-space: nowrap; }
+        .gps-admin-channel__name { overflow: hidden; color: #475569; font-weight: 400; text-overflow: ellipsis; }
+        .gps-admin-channel__price { min-width: 0; overflow: hidden; color: #1e293b; text-overflow: ellipsis; white-space: nowrap; }
         .gps-admin-channel__calc { margin-left: 4px; color: #94a3b8; font-size: 10px; font-weight: 400; text-transform: lowercase; }
-        .gps-admin-channel__state { justify-self: end; font-size: 12px; font-weight: 500; }
+        .gps-admin-channel__state { justify-self: start; font-size: 12px; font-weight: 500; }
         .gps-admin-channel__state--ok { color: #16a34a; }
         .gps-admin-channel__state--empty { color: #94a3b8; }
         .gps-admin-channel__state--missing { color: #dc2626; }
         .gps-admin-channel__state--warn { color: #ca8a04; font-size: 11px; }
-        .gps-admin-channel__link { justify-self: end; color: #2563eb; font-size: 12px; font-weight: 700; text-decoration: none; }
+        .gps-admin-channel__link { justify-self: start; color: #2563eb; font-size: 12px; font-weight: 700; text-decoration: none; }
         .gps-admin-channel__link:hover { color: #1d4ed8; text-decoration: underline; }
         .gps-admin-channel__link-placeholder { display: block; width: 18px; }
         .gps-admin-storage { min-width: 140px; color: #334155; font-size: 12px; line-height: 1.4; }
