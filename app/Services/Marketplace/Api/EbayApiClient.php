@@ -41,6 +41,67 @@ class EbayApiClient extends AbstractMarketplaceApiClient
         return ['ok' => collect($results)->every(fn ($row) => (bool) $row['ok']), 'channel' => $this->channel, 'read_only' => true, 'results' => $results];
     }
 
+
+    public function businessPoliciesDiagnostics(): array
+    {
+        $readiness = $this->getAccountReadiness();
+        $marketplaceId = (string) (($this->account?->api_settings ?? [])['marketplace_id'] ?? '');
+        $base = [
+            'ok' => false,
+            'channel' => $this->channel,
+            'marketplace_id' => $marketplaceId ?: null,
+            'api_mode' => $this->account?->api_mode,
+            'fulfillment_policies_count' => 0,
+            'payment_policies_count' => 0,
+            'return_policies_count' => 0,
+            'fulfillment_policies' => [],
+            'payment_policies' => [],
+            'return_policies' => [],
+            'blockers' => $readiness['blockers'] ?? [],
+            'warnings' => $readiness['warnings'] ?? [],
+            'read_only' => true,
+        ];
+
+        if ($base['blockers'] !== []) return $base;
+
+        $token = $this->accessToken();
+        $baseUrl = rtrim((string) $this->account?->api_base_url, '/');
+        $headers = ['X-EBAY-C-MARKETPLACE-ID' => $marketplaceId ?: 'EBAY_DE'];
+        $endpoints = [
+            'fulfillment' => ['path' => '/sell/account/v1/fulfillment_policy', 'json_key' => 'fulfillmentPolicies'],
+            'payment' => ['path' => '/sell/account/v1/payment_policy', 'json_key' => 'paymentPolicies'],
+            'return' => ['path' => '/sell/account/v1/return_policy', 'json_key' => 'returnPolicies'],
+        ];
+
+        foreach ($endpoints as $type => $endpoint) {
+            $response = Http::withToken($token)->withHeaders($headers)->acceptJson()->timeout(15)->get($baseUrl.$endpoint['path'], ['marketplace_id' => $headers['X-EBAY-C-MARKETPLACE-ID']]);
+            $json = $response->json();
+
+            if (! $response->successful()) {
+                $base['blockers'][] = sprintf('Could not read %s policies from eBay Account API (HTTP %s).', $type, $response->status());
+                continue;
+            }
+
+            $policies = is_array($json) && is_array($json[$endpoint['json_key']] ?? null) ? $json[$endpoint['json_key']] : [];
+            $base[$type.'_policies'] = array_values(array_map(fn (array $policy) => $this->formatBusinessPolicy($policy), array_filter($policies, 'is_array')));
+            $base[$type.'_policies_count'] = count($base[$type.'_policies']);
+        }
+
+        $base['ok'] = $base['blockers'] === [];
+
+        return $base;
+    }
+
+    private function formatBusinessPolicy(array $policy): array
+    {
+        return array_filter([
+            'id' => $policy['fulfillmentPolicyId'] ?? $policy['paymentPolicyId'] ?? $policy['returnPolicyId'] ?? $policy['policyId'] ?? null,
+            'name' => $policy['name'] ?? null,
+            'categoryTypes' => $policy['categoryTypes'] ?? null,
+            'marketplaceId' => $policy['marketplaceId'] ?? null,
+        ], fn ($value) => $value !== null && $value !== '');
+    }
+
     private function accessToken(): string
     {
         $credentials = $this->credentials();

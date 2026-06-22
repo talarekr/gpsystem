@@ -2,6 +2,8 @@
 
 namespace App\Filament\Pages\Settings;
 
+use App\Models\MarketplaceAccount;
+use App\Services\Marketplace\Api\EbayApiClient;
 use Filament\Forms\Components\Actions;
 use Filament\Forms\Components\Actions\Action;
 use Filament\Forms\Components\Placeholder;
@@ -37,6 +39,56 @@ class EbaySettings extends MarketplaceApiSettingsPage
                     ->url(route('admin.ebay.oauth.redirect', ['channel' => $code]))
                     ->openUrlInNewTab(false),
             ]),
+            Placeholder::make("{$code}.business_policies")
+                ->label('eBay Business Policies — read-only')
+                ->content(fn () => new HtmlString($this->businessPoliciesHtml($code))),
         ];
     }
+    private function businessPoliciesHtml(string $code): string
+    {
+        try {
+            $account = MarketplaceAccount::query()->where('code', $code)->first();
+            $payload = (new EbayApiClient($code, $account))->businessPoliciesDiagnostics();
+        } catch (\Throwable) {
+            return '<div><strong>eBay Business Policies</strong><div>Diagnostyka read-only nie powiodła się bez ujawniania danych dostępowych.</div></div>';
+        }
+
+        $html = '<div style="display:grid; gap: 0.75rem;">';
+        $html .= '<div><strong>'.e($payload['marketplace_id'] ?? strtoupper($code)).'</strong> · API mode: <code>'.e($payload['api_mode'] ?? '').'</code> · read-only/dry-run</div>';
+
+        foreach ([
+            'fulfillment_policies' => 'Fulfillment policies',
+            'payment_policies' => 'Payment policies',
+            'return_policies' => 'Return policies',
+        ] as $key => $label) {
+            $html .= $this->policiesTableHtml($label, $payload[$key] ?? []);
+        }
+
+        if (($payload['blockers'] ?? []) !== []) {
+            $html .= '<div><strong>Blockers:</strong><ul><li>'.implode('</li><li>', array_map('e', $payload['blockers'])).'</li></ul></div>';
+        }
+
+        if (($payload['warnings'] ?? []) !== []) {
+            $html .= '<div><strong>Warnings:</strong><ul><li>'.implode('</li><li>', array_map('e', $payload['warnings'])).'</li></ul></div>';
+        }
+
+        return $html.'</div>';
+    }
+
+    private function policiesTableHtml(string $label, array $policies): string
+    {
+        $html = '<div><strong>'.e($label).'</strong>';
+        if ($policies === []) return $html.'<div>Brak policy lub brak dostępu read-only.</div></div>';
+
+        $html .= '<table style="width:100%; border-collapse: collapse; margin-top: .25rem;"><thead><tr><th style="text-align:left; border-bottom:1px solid #ddd;">ID</th><th style="text-align:left; border-bottom:1px solid #ddd;">Nazwa</th><th style="text-align:left; border-bottom:1px solid #ddd;">Typ kategorii / marketplace</th></tr></thead><tbody>';
+        foreach ($policies as $policy) {
+            $categoryTypes = $policy['categoryTypes'] ?? [];
+            $categoryText = is_array($categoryTypes) ? implode(', ', array_map(fn ($row) => is_array($row) ? (string) ($row['name'] ?? json_encode($row)) : (string) $row, $categoryTypes)) : (string) $categoryTypes;
+            $marketplace = (string) ($policy['marketplaceId'] ?? '');
+            $html .= '<tr><td style="padding:.25rem 0;">'.e($policy['id'] ?? '').'</td><td>'.e($policy['name'] ?? '').'</td><td>'.e(trim($categoryText.($marketplace !== '' ? ' / '.$marketplace : ''))).'</td></tr>';
+        }
+
+        return $html.'</tbody></table></div>';
+    }
+
 }

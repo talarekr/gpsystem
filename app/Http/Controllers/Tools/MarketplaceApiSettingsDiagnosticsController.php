@@ -35,6 +35,41 @@ class MarketplaceApiSettingsDiagnosticsController extends Controller
         }
     }
 
+
+    public function checkEbayBusinessPolicies(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidToken();
+
+        $payload = [];
+        foreach (['ebay_de', 'ebay_fr'] as $channel) {
+            $account = Schema::hasTable('marketplace_accounts') ? MarketplaceAccount::query()->where('code', $channel)->first() : null;
+            $client = new EbayApiClient($channel, $account);
+
+            try {
+                $payload[$channel] = $client->businessPoliciesDiagnostics();
+            } catch (\Throwable) {
+                $settings = is_array($account?->api_settings) ? $account->api_settings : [];
+                $payload[$channel] = [
+                    'ok' => false,
+                    'channel' => $channel,
+                    'marketplace_id' => $settings['marketplace_id'] ?? null,
+                    'api_mode' => $account?->api_mode,
+                    'fulfillment_policies_count' => 0,
+                    'payment_policies_count' => 0,
+                    'return_policies_count' => 0,
+                    'fulfillment_policies' => [],
+                    'payment_policies' => [],
+                    'return_policies' => [],
+                    'blockers' => ['Read-only eBay business policies diagnostics failed without exposing credentials.'],
+                    'warnings' => [],
+                    'read_only' => true,
+                ];
+            }
+        }
+
+        return response()->json($payload, collect($payload)->every(fn (array $row) => (bool) ($row['ok'] ?? false)) ? 200 : 422);
+    }
+
     public function ebayReadiness(Request $request): JsonResponse { return $this->settings($request, ['ebay_de' => ['admin' => '/admin/ebay-settings', 'need_site' => true], 'ebay_fr' => ['admin' => '/admin/ebay-settings', 'need_site' => true]]); }
 
     public function ebayOAuthRoutes(Request $request): JsonResponse
