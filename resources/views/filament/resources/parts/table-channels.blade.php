@@ -31,7 +31,6 @@
             display: inline-flex;
             align-items: center;
             gap: 4px;
-            width: fit-content;
             max-width: 100%;
             white-space: nowrap;
             overflow: hidden;
@@ -57,14 +56,24 @@
 
 
         .gps-admin-channels .part-channel-status,
-        .gps-admin-channels .part-channel-link {
+        .gps-admin-channels .part-channel-status-link {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
             flex: 0 0 auto;
+            line-height: 1;
+            width: auto;
+            min-width: 10px;
+            padding: 0;
+            margin: 0;
+            font-size: 12px;
+            font-weight: 500;
+            text-decoration: none;
             white-space: nowrap;
         }
 
-        .gps-admin-channels .part-channel-status {
-            font-size: 12px;
-            font-weight: 500;
+        .gps-admin-channels .part-channel-status-link:hover {
+            text-decoration: underline;
         }
 
         .gps-admin-channels .part-channel-status--ok {
@@ -73,19 +82,6 @@
 
         .gps-admin-channels .part-channel-status--missing {
             color: #dc2626;
-        }
-
-        .gps-admin-channels .part-channel-link {
-            color: #2563eb;
-            font-size: 12px;
-            font-weight: 700;
-            line-height: 1;
-            text-decoration: none;
-        }
-
-        .gps-admin-channels .part-channel-link:hover {
-            color: #1d4ed8;
-            text-decoration: underline;
         }
 
     </style>
@@ -103,20 +99,21 @@
             <div class="part-channel-row">
                 <span class="part-channel-label">{{ $row['label'] }}:</span>
                 <span class="part-channel-price">{{ $row['price'] }}</span>
-                <span
-                    class="part-channel-status {{ $row['listed'] ? 'part-channel-status--ok' : 'part-channel-status--missing' }}"
-                    title="{{ $row['title'] }}"
-                    aria-label="{{ $row['title'] }}"
-                >{{ $row['listed'] ? '✓' : '✕' }}</span>
-                @if ($row['url'])
+                @if ($row['listed'] && $row['url'])
                     <a
-                        class="part-channel-link"
+                        class="part-channel-status part-channel-status-link part-channel-status--ok"
                         href="{{ $row['url'] }}"
                         target="_blank"
                         rel="noopener noreferrer"
-                        title="Otwórz ofertę {{ $row['label'] }} w nowej karcie"
-                        aria-label="Otwórz ofertę {{ $row['label'] }} w nowej karcie"
-                    >↗</a>
+                        title="{{ $row['title'] }}"
+                        aria-label="{{ $row['title'] }}"
+                    >✓</a>
+                @else
+                    <span
+                        class="part-channel-status {{ $row['listed'] ? 'part-channel-status--ok' : 'part-channel-status--missing' }}"
+                        title="{{ $row['title'] }}"
+                        aria-label="{{ $row['title'] }}"
+                    >{{ $row['listed'] ? '✓' : '✕' }}</span>
                 @endif
             </div>
         @endforeach
