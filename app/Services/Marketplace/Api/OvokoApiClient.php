@@ -33,7 +33,8 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
             ->post($this->endpointUsed($limit, $page), $this->authFields());
 
         $json = $response->json();
-        $payload = is_array($json) ? $json : [];
+        $hasJsonPayload = is_array($json);
+        $payload = $hasJsonPayload ? $json : [];
         $statusCode = $payload['status_code'] ?? null;
         $apiOk = $response->successful() && ($statusCode === 'R200' || $statusCode === 200);
         $pagination = is_array($payload['pagination'] ?? null) ? $payload['pagination'] : [];
@@ -44,6 +45,7 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
             'http_status' => $response->status(),
             'api_status_code' => $statusCode,
             'api_ok' => $apiOk,
+            'has_json_payload' => $hasJsonPayload,
             'error' => $payload['msg'] ?? $payload['message'] ?? null,
             'page' => $page,
             'limit' => $limit,
