@@ -70,6 +70,7 @@ use App\Http\Controllers\Tools\MarkGpsGmailToListLiveController;
 use App\Http\Controllers\Tools\FinalizeDomainSwitchController;
 use App\Http\Controllers\Tools\FixImportedImagesPublicFilesController;
 use App\Http\Controllers\Tools\GpswissPublicHtmlController;
+use App\Http\Controllers\Tools\GoogleTranslateDiagnosticsController;
 use App\Http\Controllers\Tools\ImportedImagesStorageReportController;
 use App\Http\Controllers\Tools\InspectLegacyPayloadKeysController;
 use App\Http\Controllers\Tools\PhotoStorageReportController;
@@ -196,6 +197,9 @@ Route::get('/tools/check-ebay-category-shipping-coverage', [EbayCategoryShipping
 Route::get('/tools/test-allegro-api-connection', [MarketplaceApiSettingsDiagnosticsController::class, 'testAllegro'])->name('tools.test-allegro-api-connection');
 Route::get('/tools/test-ebay-api-connection', [MarketplaceApiSettingsDiagnosticsController::class, 'testEbay'])->name('tools.test-ebay-api-connection');
 Route::get('/tools/check-ebay-business-policies', [MarketplaceApiSettingsDiagnosticsController::class, 'checkEbayBusinessPolicies'])->name('tools.check-ebay-business-policies');
+Route::get('/tools/check-google-translate-readiness', [GoogleTranslateDiagnosticsController::class, 'readiness'])->name('tools.check-google-translate-readiness');
+Route::get('/tools/test-google-translate', [GoogleTranslateDiagnosticsController::class, 'test'])->name('tools.test-google-translate');
+Route::get('/tools/dry-run-product-translation', [GoogleTranslateDiagnosticsController::class, 'dryRunProduct'])->name('tools.dry-run-product-translation');
 Route::get('/tools/ovoko-orders-dry-run', OvokoOrdersDryRunController::class)->name('tools.ovoko-orders-dry-run');
 Route::get('/tools/import-ovoko-orders-dry-run', ImportOvokoOrdersDryRunController::class)->name('tools.import-ovoko-orders-dry-run');
 Route::get('/tools/inspect-ovoko-orders-structure', [OvokoOrdersDryRunController::class, 'inspect'])->name('tools.inspect-ovoko-orders-structure');
