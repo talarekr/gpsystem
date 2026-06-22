@@ -7,6 +7,7 @@ use App\Models\MarketplaceListing;
 use App\Models\Part;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 
 class MarketplaceListingReadinessService
 {
@@ -111,10 +112,32 @@ class MarketplaceListingReadinessService
     /** @return array<string, mixed> */
     public function checkAll(Part $part): array
     {
-        $channels = collect(self::CHANNELS)->mapWithKeys(fn (string $channel): array => [$channel => $this->checkPartReadiness($part, $channel)])->all();
-        return ['channels' => $channels, 'summary' => ['ready_channels' => array_keys(array_filter($channels, fn ($r) => $r['can_prepare'])), 'blocked_channels' => array_keys(array_filter($channels, fn ($r) => $r['blockers'] !== [])), 'warning_channels' => array_keys(array_filter($channels, fn ($r) => $r['warnings'] !== []))], 'blockers' => array_values(array_unique(array_merge(...array_map(fn ($r) => $r['blockers'], $channels)))), 'warnings' => array_values(array_unique(array_merge(...array_map(fn ($r) => $r['warnings'], $channels))))];
+        $channels = [];
+
+        foreach (self::CHANNELS as $channel) {
+            try {
+                $channels[$channel] = $this->checkPartReadiness($part, $channel);
+            } catch (\Throwable $e) {
+                $channels[$channel] = $this->channelExceptionResult($part, $channel, $e);
+            }
+        }
+
+        return [
+            'channels' => $channels,
+            'summary' => [
+                'ready_channels' => array_keys(array_filter($channels, fn ($r) => $r['can_prepare'])),
+                'blocked_channels' => array_keys(array_filter($channels, fn ($r) => $r['blockers'] !== [])),
+                'warning_channels' => array_keys(array_filter($channels, fn ($r) => $r['warnings'] !== [])),
+            ],
+            'blockers' => array_values(array_unique(array_merge(...array_map(fn ($r) => $r['blockers'], $channels)))),
+            'warnings' => array_values(array_unique(array_merge(...array_map(fn ($r) => $r['warnings'], $channels)))),
+        ];
     }
 
+    private function failedStageForChannel(string $channel): string { return match ($channel) { 'storefront' => 'storefront_readiness', 'allegro_main' => 'allegro_readiness', 'ovoko' => 'ovoko_readiness', 'ebay_de' => 'ebay_de_readiness', 'ebay_fr' => 'ebay_fr_readiness', default => 'channel_readiness' }; }
+    private function safeExceptionMessage(\Throwable $e): string { return Str::limit(preg_replace(['/([?&](?:token|api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|client[_-]?secret|credential)[^=]*=)[^&\s]+/i', '/\b(?:token|api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|client[_-]?secret|credential)\b\s*[:=]\s*[^\s,;]+/i'], ['$1[redacted]', '[redacted_secret]'], $e->getMessage()), 500, '...'); }
+    /** @return array<string, mixed> */
+    private function channelExceptionResult(Part $part, string $channel, \Throwable $e): array { return ['channel' => $channel, 'part_id' => $part->id, 'can_prepare' => false, 'can_publish_later' => false, 'required_fields' => [], 'missing_fields' => [], 'warnings' => [], 'blockers' => ['channel_readiness_exception'], 'exception_class' => $e::class, 'exception_message_safe' => $this->safeExceptionMessage($e), 'failed_stage' => $this->failedStageForChannel($channel), 'prepared_payload_preview_safe' => ['dry_run' => true, 'channel' => $channel, 'part_id' => $part->id, 'will_make_marketplace_request' => false], 'price_source' => 'none', 'local_price' => is_numeric($part->price ?? null) ? (float) $part->price : null, 'marketplace_price' => null, 'currency' => 'PLN', 'images_count' => 0, 'has_required_images' => false, 'category_ready' => false, 'vehicle_ready' => false, 'description_ready' => false, 'title_ready' => filled($part->name ?? null), 'stock_ready' => false, 'external_mapping_exists' => false, 'notes' => ['dry_run_only' => 'Readiness does not publish, update, delete, sync prices, sync stock, or import orders.']]; }
     private function loadSafeRelations(Part $part): void { $relations = array_filter([method_exists($part, 'images') ? 'images' : null, method_exists($part, 'partImages') ? 'partImages' : null, method_exists($part, 'category') ? 'category' : null, method_exists($part, 'car') ? 'car' : null, method_exists($part, 'marketplaceListings') ? (Schema::hasTable('marketplace_accounts') ? 'marketplaceListings.account' : 'marketplaceListings') : null]); try { $part->loadMissing($relations); } catch (\Throwable) { foreach ($relations as $relation) { try { $part->loadMissing([$relation]); } catch (\Throwable) {} } } }
     private function imagesFor(Part $part): \Illuminate\Support\Collection { foreach (['images', 'partImages'] as $relation) { if (! method_exists($part, $relation)) continue; try { return $part->relationLoaded($relation) ? $part->{$relation}->filter() : $part->{$relation}()->get(); } catch (\Throwable) {} } return collect(); }
     private function accountFor(string $channel): ?MarketplaceAccount { if (! Schema::hasTable('marketplace_accounts')) return null; $code = $channel === 'ovoko' ? 'ovoko_main' : $channel; return MarketplaceAccount::query()->where('code', $code)->first(); }
