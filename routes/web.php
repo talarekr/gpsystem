@@ -44,6 +44,8 @@ use App\Http\Controllers\Tools\CheckAdminPartsTableUiController;
 use App\Http\Controllers\Tools\CheckCatalogSearchController;
 use App\Http\Controllers\Tools\CheckCatalogRenderController;
 use App\Http\Controllers\Tools\CheckCatalogViewController;
+use App\Http\Controllers\Tools\CheckDomainHardcodedLinksController;
+use App\Http\Controllers\Tools\PostDomainSwitchCheckController;
 use App\Http\Controllers\Tools\CheckCatalogViewStageController;
 use App\Http\Controllers\Tools\CheckCatalogErrorController;
 use App\Http\Controllers\Tools\LastLaravelErrorController;
@@ -1902,6 +1904,8 @@ Route::get('/tools/fix-imported-images-public-files', FixImportedImagesPublicFil
 Route::get('/tools/imported-images-storage-report', ImportedImagesStorageReportController::class)->name('tools.imported-images-storage-report');
 Route::get('/tools/photo-storage-report', PhotoStorageReportController::class)->name('tools.photo-storage-report');
 Route::get('/tools/pre-domain-switch-check', PreDomainSwitchCheckController::class)->name('tools.pre-domain-switch-check');
+Route::get('/tools/check-domain-hardcoded-links', CheckDomainHardcodedLinksController::class)->name('tools.check-domain-hardcoded-links');
+Route::get('/tools/post-domain-switch-check', PostDomainSwitchCheckController::class)->name('tools.post-domain-switch-check');
 
 
 Route::middleware(Authenticate::class)->prefix('admin')->name('admin.')->group(function (): void {

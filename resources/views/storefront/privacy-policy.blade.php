@@ -14,7 +14,7 @@
         <p>W sprawach związanych z przetwarzaniem danych osobowych można kontaktować się pod adresem:<br><a href="mailto:biuro@gpswiss.pl">biuro@gpswiss.pl</a></p>
 
         <h2>2. Informacje ogólne</h2>
-        <p>Niniejsza Polityka Prywatności określa zasady przetwarzania danych osobowych oraz wykorzystywania plików cookies w związku z korzystaniem ze strony internetowej <a href="https://gpswiss.pl/">https://gpswiss.pl/</a>.</p>
+        <p>Niniejsza Polityka Prywatności określa zasady przetwarzania danych osobowych oraz wykorzystywania plików cookies w związku z korzystaniem ze strony internetowej <a href="{{ url('/') }}">{{ url('/') }}</a>.</p>
 
         <h2>3. Zakres przetwarzanych danych</h2>
         <p>W zależności od sposobu korzystania z serwisu przetwarzane mogą być następujące dane:</p>
