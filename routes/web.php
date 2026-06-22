@@ -149,6 +149,8 @@ Route::get('/tools/check-marketplace-api-readiness', [MarketplaceApiFoundationCo
 Route::get('/tools/test-marketplace-api-connection', [MarketplaceApiFoundationController::class, 'testConnection'])->name('tools.test-marketplace-api-connection');
 Route::get('/tools/fetch-marketplace-offers-sample', [MarketplaceApiFoundationController::class, 'fetchOffersSample'])->name('tools.fetch-marketplace-offers-sample');
 Route::get('/tools/check-marketplace-price-strategy', [MarketplaceApiFoundationController::class, 'priceStrategy'])->name('tools.check-marketplace-price-strategy');
+Route::get('/tools/check-marketplace-price-fields', [MarketplaceApiFoundationController::class, 'priceFields'])->name('tools.check-marketplace-price-fields');
+Route::get('/tools/check-marketplace-price-coverage', [MarketplaceApiFoundationController::class, 'priceCoverage'])->name('tools.check-marketplace-price-coverage');
 Route::get('/tools/check-marketplace-stock-readiness', [MarketplaceApiFoundationController::class, 'stockReadiness'])->name('tools.check-marketplace-stock-readiness');
 Route::get('/tools/check-marketplace-linking-health', [MarketplaceApiFoundationController::class, 'linkingHealth'])->name('tools.check-marketplace-linking-health');
 Route::get('/tools/test-ovoko-api-connection', TestOvokoApiConnectionController::class)->name('tools.test-ovoko-api-connection');
