@@ -19,6 +19,7 @@
         .gps-admin-channels.part-channel-list {
             display: flex;
             flex-direction: column;
+            align-items: flex-start;
             gap: 2px;
             width: 260px;
             min-width: 260px;
@@ -28,9 +29,11 @@
         }
 
         .gps-admin-channels .part-channel-row {
-            display: inline-flex;
+            display: flex;
             align-items: center;
+            justify-content: flex-start;
             gap: 4px;
+            width: 100%;
             max-width: 100%;
             white-space: nowrap;
             overflow: hidden;
@@ -57,13 +60,8 @@
 
         .gps-admin-channels .part-channel-status,
         .gps-admin-channels .part-channel-status-link {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
             flex: 0 0 auto;
             line-height: 1;
-            width: auto;
-            min-width: 10px;
             padding: 0;
             margin: 0;
             font-size: 12px;
