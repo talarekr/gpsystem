@@ -189,6 +189,7 @@ Route::get('/tools/import-ebay-legacy-category-mappings', [EbayLegacyCategoryMap
 Route::get('/tools/check-marketplace-category-mappings', [EbayLegacyCategoryMappingImportController::class, 'check'])->name('tools.check-marketplace-category-mappings');
 Route::get('/tools/test-allegro-api-connection', [MarketplaceApiSettingsDiagnosticsController::class, 'testAllegro'])->name('tools.test-allegro-api-connection');
 Route::get('/tools/test-ebay-api-connection', [MarketplaceApiSettingsDiagnosticsController::class, 'testEbay'])->name('tools.test-ebay-api-connection');
+Route::get('/tools/check-ebay-business-policies', [MarketplaceApiSettingsDiagnosticsController::class, 'checkEbayBusinessPolicies'])->name('tools.check-ebay-business-policies');
 Route::get('/tools/ovoko-orders-dry-run', OvokoOrdersDryRunController::class)->name('tools.ovoko-orders-dry-run');
 Route::get('/tools/import-ovoko-orders-dry-run', ImportOvokoOrdersDryRunController::class)->name('tools.import-ovoko-orders-dry-run');
 Route::get('/tools/inspect-ovoko-orders-structure', [OvokoOrdersDryRunController::class, 'inspect'])->name('tools.inspect-ovoko-orders-structure');
