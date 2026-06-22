@@ -68,7 +68,7 @@ class OvokoPriceImportController extends Controller
             return response()->json(['ok' => false, 'blockers' => $blockers], 422);
         }
 
-        $limit = max(1, min((int) $request->query('limit', 200), 1000));
+        $limit = max(1, min((int) $request->query('limit', OvokoApiClient::MAX_PARTS_PAGE_LIMIT), OvokoApiClient::MAX_PARTS_PAGE_LIMIT));
         $maxPages = max(1, min((int) $request->query('max_pages', 50), 200));
         $diagnostics = null;
 
@@ -90,6 +90,8 @@ class OvokoPriceImportController extends Controller
                 return response()->json([
                     'ok' => true,
                     'ovoko_part_id' => $ovokoPartId,
+                    'endpoint_used' => $result['endpoint_used'] ?? ($result['diagnostics']['endpoint_used'] ?? null),
+                    'ovoko_status_code' => $result['api_status_code'] ?? null,
                     'price' => $item['price'] ?? null,
                     'currency' => $item['currency'] ?? null,
                     'original_price' => $item['original_price'] ?? null,
@@ -150,7 +152,7 @@ class OvokoPriceImportController extends Controller
         $apiTotal = null;
         $firstPageDiagnostics = null;
         $page = 1;
-        $pageSize = min($limit, 200);
+        $pageSize = min($limit, OvokoApiClient::MAX_PARTS_PAGE_LIMIT);
         while (count($items) < $limit) {
             $requestLimit = min($pageSize, $limit - count($items));
 
@@ -171,7 +173,9 @@ class OvokoPriceImportController extends Controller
             if (! ($result['api_ok'] ?? false)) {
                 $statusCode = $result['api_status_code'] ?? ($result['diagnostics']['ovoko_status_code'] ?? 'missing');
                 $message = $result['error'] ?? ($result['diagnostics']['error_message_safe'] ?? 'Ovoko API returned a non-success response.');
-                $blockers[] = 'ovoko_api_non_success_status: '.$statusCode.'; '.$this->safeMessage($message);
+                $blockers[] = $this->isOvokoPageSizeLimitError($message)
+                    ? 'ovoko_api_page_size_limit: '.$statusCode.'; '.$this->safeMessage($message)
+                    : 'ovoko_api_non_success_status: '.$statusCode.'; '.$this->safeMessage($message);
                 break;
             }
 
@@ -241,6 +245,11 @@ class OvokoPriceImportController extends Controller
             ->replaceMatches('/(username|password|user_token)=[^\s&]+/i', '$1=[redacted]')
             ->limit(300, '')
             ->toString();
+    }
+
+    private function isOvokoPageSizeLimitError(mixed $message): bool
+    {
+        return is_string($message) && str_contains(strtolower($message), 'limit maximum is 100');
     }
 
     private function resolveApiPricePln(array $item): array

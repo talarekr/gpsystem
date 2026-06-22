@@ -7,12 +7,15 @@ use Illuminate\Support\Facades\Http;
 
 class OvokoApiClient extends AbstractMarketplaceApiClient
 {
+    public const MAX_PARTS_PAGE_LIMIT = 100;
+
     protected function requiredCredentialKeys(): array { return ['username', 'password', 'user_token']; }
     protected function optionalCredentialKeys(): array { return []; }
     protected function endpointPath(): string { return '/v2/get/parts'; }
 
     protected function requestSample(int $limit): array
     {
+        $limit = $this->normalizePartsPageLimit($limit);
         $response = Http::asForm()->acceptJson()->timeout(15)->post($this->endpointUsed($limit, 1), $this->authFields());
         $json = $response->json();
         $apiOk = $response->successful() && (($json['status_code'] ?? null) === 'R200' || ($json['status_code'] ?? null) === 200);
@@ -21,6 +24,9 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
 
     public function fetchPartsPage(int $page, int $limit): array
     {
+        $page = max(1, $page);
+        $limit = $this->normalizePartsPageLimit($limit);
+
         $response = Http::asForm()
             ->acceptJson()
             ->timeout(30)
@@ -76,7 +82,12 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
 
     protected function endpointUsed(int $limit, int $page = 1): string
     {
-        return rtrim((string) $this->account?->api_base_url, '/').$this->endpointPath().'?limit='.$limit.'&page='.$page;
+        return rtrim((string) $this->account?->api_base_url, '/').$this->endpointPath().'?limit='.$this->normalizePartsPageLimit($limit).'&page='.max(1, $page);
+    }
+
+    private function normalizePartsPageLimit(int $limit): int
+    {
+        return max(1, min($limit, self::MAX_PARTS_PAGE_LIMIT));
     }
 
     private function authFields(): array
