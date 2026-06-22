@@ -12,6 +12,7 @@ class EbayCategoryShippingPolicyCsvImportService
     private const CSV_PATH = 'app/imports/RAFEL WEB DESIGNER (1).csv';
     private const CHANNELS = ['ebay_de', 'ebay_fr'];
     private const BLOCK_REASON_DE = 'Zablokowane w legacy CSV: DO WYWALENIA — nie wystawiać na eBay.de';
+    private const BLOCK_REASON_FR = 'Zablokowane w legacy CSV: DO WYWALENIA — nie wystawiać na eBay.fr';
     private const MAX_SAMPLES = 20;
 
     private const POLICIES = [
@@ -55,8 +56,8 @@ class EbayCategoryShippingPolicyCsvImportService
         $rows = $this->readCsv($csvPath);
         $indexes = $this->categoryIndexes();
         $actions = [];
-        $matched = $unmatched = $conflicts = $skipped = $frCandidates = 0;
-        $samples = ['matches'=>[], 'unmatched'=>[], 'conflicts'=>[], 'skipped'=>[], 'blocked_de'=>[], 'fr_candidates'=>[]];
+        $matched = $unmatched = $conflicts = $skipped = 0;
+        $samples = ['matches'=>[], 'unmatched'=>[], 'conflicts'=>[], 'skipped'=>[], 'blocked_de'=>[], 'blocked_fr'=>[]];
         $csvCounts = ['30'=>0, '50'=>0, '130'=>0, 'DO WYWALENIA'=>0];
         $withGroup = 0;
 
@@ -74,7 +75,9 @@ class EbayCategoryShippingPolicyCsvImportService
 
             if ($group === 'DO WYWALENIA') {
                 $actions[] = ['local_category_id'=>$match['id'], 'channel'=>'ebay_de', 'fulfillment_policy_id'=>null, 'shipping_group'=>null, 'is_blocked'=>true, 'block_reason'=>self::BLOCK_REASON_DE, 'match'=>$match, 'group'=>$group];
-                $frCandidates++; $this->sample($samples['blocked_de'], $match + ['csv' => $this->csvSample($row)]); $this->sample($samples['fr_candidates'], $match + ['csv' => $this->csvSample($row)]);
+                $actions[] = ['local_category_id'=>$match['id'], 'channel'=>'ebay_fr', 'fulfillment_policy_id'=>null, 'shipping_group'=>null, 'is_blocked'=>true, 'block_reason'=>self::BLOCK_REASON_FR, 'match'=>$match, 'group'=>$group];
+                $this->sample($samples['blocked_de'], $match + ['csv' => $this->csvSample($row)]);
+                $this->sample($samples['blocked_fr'], $match + ['csv' => $this->csvSample($row)]);
                 continue;
             }
             if (! isset(self::POLICIES['ebay_de'][$group])) { $skipped++; $this->sample($samples['skipped'], $this->csvSample($row) + ['reason'=>'unsupported_shipping_group']); continue; }
@@ -95,7 +98,7 @@ class EbayCategoryShippingPolicyCsvImportService
         $perGroup = []; $perPolicy = [];
         foreach ($actions as $a) { if ($a['shipping_group']) $perGroup[$a['shipping_group']] = ($perGroup[$a['shipping_group']] ?? 0) + 1; if ($a['fulfillment_policy_id']) $perPolicy[$a['fulfillment_policy_id']] = ($perPolicy[$a['fulfillment_policy_id']] ?? 0) + 1; }
 
-        return array_merge($base, ['ok'=>$blockers===[], 'mode'=>$live?'live':'dry_run', 'csv_rows_total'=>count($rows), 'csv_rows_with_shipping_group'=>$withGroup, 'csv_rows_30_count'=>$csvCounts['30'], 'csv_rows_50_count'=>$csvCounts['50'], 'csv_rows_130_count'=>$csvCounts['130'], 'csv_rows_do_wywalenia_count'=>$csvCounts['DO WYWALENIA'], 'matched_categories_count'=>$matched, 'unmatched_categories_count'=>$unmatched, 'conflict_count'=>$conflicts, 'would_update_ebay_de_shipping_count'=>$this->actionCount($actions,'ebay_de',false), 'would_update_ebay_fr_shipping_count'=>$this->actionCount($actions,'ebay_fr',false), 'would_block_ebay_de_count'=>$this->actionCount($actions,'ebay_de',true), 'fr_block_candidate_count'=>$frCandidates, 'would_clear_fulfillment_for_blocked_count'=>$this->actionCount($actions,'ebay_de',true), 'would_skip_count'=>$skipped, 'count_per_shipping_group'=>$perGroup, 'count_per_fulfillment_policy_id'=>$perPolicy, 'sample_matches'=>$samples['matches'], 'sample_unmatched'=>$samples['unmatched'], 'sample_conflicts'=>$samples['conflicts'], 'sample_skipped'=>$samples['skipped'], 'sample_blocked_ebay_de'=>$samples['blocked_de'], 'sample_fr_block_candidates'=>$samples['fr_candidates'], 'blockers'=>$blockers]);
+        return array_merge($base, ['ok'=>$blockers===[], 'mode'=>$live?'live':'dry_run', 'csv_rows_total'=>count($rows), 'csv_rows_with_shipping_group'=>$withGroup, 'csv_rows_30_count'=>$csvCounts['30'], 'csv_rows_50_count'=>$csvCounts['50'], 'csv_rows_130_count'=>$csvCounts['130'], 'csv_rows_do_wywalenia_count'=>$csvCounts['DO WYWALENIA'], 'matched_categories_count'=>$matched, 'unmatched_categories_count'=>$unmatched, 'conflict_count'=>$conflicts, 'would_update_ebay_de_shipping_count'=>$this->actionCount($actions,'ebay_de',false), 'would_update_ebay_fr_shipping_count'=>$this->actionCount($actions,'ebay_fr',false), 'would_block_ebay_de_count'=>$this->actionCount($actions,'ebay_de',true), 'would_block_ebay_fr_count'=>$this->actionCount($actions,'ebay_fr',true), 'would_clear_fulfillment_for_blocked_count'=>$this->actionCount($actions,'ebay_de',true) + $this->actionCount($actions,'ebay_fr',true), 'would_skip_count'=>$skipped, 'count_per_shipping_group'=>$perGroup, 'count_per_fulfillment_policy_id'=>$perPolicy, 'sample_matches'=>$samples['matches'], 'sample_unmatched'=>$samples['unmatched'], 'sample_conflicts'=>$samples['conflicts'], 'sample_skipped'=>$samples['skipped'], 'sample_blocked_ebay_de'=>$samples['blocked_de'], 'sample_blocked_ebay_fr'=>$samples['blocked_fr'], 'blockers'=>$blockers]);
     }
 
     private function readCsv(string $path): array
@@ -129,7 +132,7 @@ class EbayCategoryShippingPolicyCsvImportService
     private function schemaBlockers(bool $live): array { $b=[]; foreach(['part_categories','marketplace_category_mappings'] as $t) if(!Schema::hasTable($t)) $b[]="$t table is missing."; foreach(['fulfillment_policy_id','shipping_group','is_blocked','block_reason'] as $c) if(Schema::hasTable('marketplace_category_mappings')&&!Schema::hasColumn('marketplace_category_mappings',$c)) $b[]="marketplace_category_mappings.$c column is missing."; return $b; }
     private function actionCount(array $a,string $ch,bool $blocked): int { return count(array_filter($a,fn($x)=>$x['channel']===$ch && (bool)$x['is_blocked']===$blocked)); }
     private function normalizeGroup($v): ?string { $v=trim((string)$v); if($v==='') return null; $u=mb_strtoupper($v); return str_contains($u,'DO WYWALENIA') ? 'DO WYWALENIA' : (in_array($v,['30','50','130'],true)?$v:$u); }
-    private function emptyImportResponse(string $p,bool $exists,array $w,array $b): array { return ['ok'=>$b===[], 'csv_path'=>$p, 'csv_exists'=>$exists, 'csv_rows_total'=>0, 'csv_rows_with_shipping_group'=>0, 'csv_rows_30_count'=>0, 'csv_rows_50_count'=>0, 'csv_rows_130_count'=>0, 'csv_rows_do_wywalenia_count'=>0, 'matched_categories_count'=>0, 'unmatched_categories_count'=>0, 'conflict_count'=>0, 'would_update_ebay_de_shipping_count'=>0, 'would_update_ebay_fr_shipping_count'=>0, 'would_block_ebay_de_count'=>0, 'fr_block_candidate_count'=>0, 'would_clear_fulfillment_for_blocked_count'=>0, 'would_skip_count'=>0, 'count_per_shipping_group'=>[], 'count_per_fulfillment_policy_id'=>[], 'sample_matches'=>[], 'sample_unmatched'=>[], 'sample_conflicts'=>[], 'sample_skipped'=>[], 'sample_blocked_ebay_de'=>[], 'sample_fr_block_candidates'=>[], 'blockers'=>$b, 'warnings'=>$w]; }
+    private function emptyImportResponse(string $p,bool $exists,array $w,array $b): array { return ['ok'=>$b===[], 'csv_path'=>$p, 'csv_exists'=>$exists, 'csv_rows_total'=>0, 'csv_rows_with_shipping_group'=>0, 'csv_rows_30_count'=>0, 'csv_rows_50_count'=>0, 'csv_rows_130_count'=>0, 'csv_rows_do_wywalenia_count'=>0, 'matched_categories_count'=>0, 'unmatched_categories_count'=>0, 'conflict_count'=>0, 'would_update_ebay_de_shipping_count'=>0, 'would_update_ebay_fr_shipping_count'=>0, 'would_block_ebay_de_count'=>0, 'would_block_ebay_fr_count'=>0, 'would_clear_fulfillment_for_blocked_count'=>0, 'would_skip_count'=>0, 'count_per_shipping_group'=>[], 'count_per_fulfillment_policy_id'=>[], 'sample_matches'=>[], 'sample_unmatched'=>[], 'sample_conflicts'=>[], 'sample_skipped'=>[], 'sample_blocked_ebay_de'=>[], 'sample_blocked_ebay_fr'=>[], 'blockers'=>$b, 'warnings'=>$w]; }
     private function csvSample(array $r): array { return ['term_id'=>$r['term_id']??null,'name'=>$r['name']??null,'full_path'=>$r['full_path']??null,'shipping_group'=>$r['shipping_group']??null]; }
     private function sample(array &$a,array $v): void { if(count($a)<self::MAX_SAMPLES) $a[]=$v; }
     private function decode($v): array { if(is_array($v)) return $v; if(is_string($v)&&$v!=='') return json_decode($v,true) ?: []; return []; }
