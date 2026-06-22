@@ -34,6 +34,11 @@ class PartCategory extends Model
         return $this->hasMany(Part::class, 'category_id');
     }
 
+    public function marketplaceMappings(): HasMany
+    {
+        return $this->hasMany(MarketplaceCategoryMapping::class, 'local_category_id');
+    }
+
     public function scopeRoots(Builder $query): Builder
     {
         return $query->whereNull('parent_id');
