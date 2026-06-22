@@ -55,6 +55,7 @@ use App\Http\Controllers\Tools\CheckCatalogSearchController;
 use App\Http\Controllers\Tools\CheckCatalogRenderController;
 use App\Http\Controllers\Tools\CheckCatalogViewController;
 use App\Http\Controllers\Tools\CheckDomainHardcodedLinksController;
+use App\Http\Controllers\Tools\CheckEbayLegacyCategoryMappingsController;
 use App\Http\Controllers\Tools\CheckFrontendMaintenanceController;
 use App\Http\Controllers\Tools\PostDomainSwitchCheckController;
 use App\Http\Controllers\Tools\CheckCatalogViewStageController;
@@ -176,6 +177,7 @@ Route::get('/tools/refresh-allegro-active-offer-links', RefreshAllegroActiveOffe
 Route::get('/tools/check-admin-marketplace-status-ui', CheckAdminMarketplaceStatusUiController::class)->name('tools.check-admin-marketplace-status-ui');
 Route::get('/tools/export-allegro-offer-id-coverage', ExportAllegroOfferIdCoverageController::class)->name('tools.export-allegro-offer-id-coverage');
 Route::get('/tools/check-ebay-api-settings', [MarketplaceApiSettingsDiagnosticsController::class, 'ebay'])->name('tools.check-ebay-api-settings');
+Route::get('/tools/check-ebay-legacy-category-mappings', CheckEbayLegacyCategoryMappingsController::class)->name('tools.check-ebay-legacy-category-mappings');
 Route::get('/tools/test-allegro-api-connection', [MarketplaceApiSettingsDiagnosticsController::class, 'testAllegro'])->name('tools.test-allegro-api-connection');
 Route::get('/tools/test-ebay-api-connection', [MarketplaceApiSettingsDiagnosticsController::class, 'testEbay'])->name('tools.test-ebay-api-connection');
 Route::get('/tools/ovoko-orders-dry-run', OvokoOrdersDryRunController::class)->name('tools.ovoko-orders-dry-run');
