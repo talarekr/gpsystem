@@ -75,6 +75,7 @@ abstract class MarketplaceApiSettingsPage extends Page implements HasForms
                     ]),
                     Grid::make(2)->schema($credentialInputs),
                     Placeholder::make("{$code}.credentials_status")->label('Credentials configured')->content(fn () => new HtmlString($this->credentialsConfigured($code, $definition) ? '<strong>yes</strong>' : '<strong>no</strong>')),
+                    ...$this->additionalAccountSchema($code, $definition),
                 ]);
         }
 
@@ -109,6 +110,11 @@ abstract class MarketplaceApiSettingsPage extends Page implements HasForms
     }
 
     public function getFormActions(): array { return [Action::make('save')->label('Zapisz')->submit('save')]; }
+
+    protected function additionalAccountSchema(string $code, array $definition): array
+    {
+        return [];
+    }
 
     protected function getAccount(string $code, array $definition): MarketplaceAccount
     {
