@@ -28,22 +28,15 @@
         }
 
         .gps-admin-channels .part-channel-row {
-            display: grid;
-            grid-template-columns: minmax(220px, 1fr) 16px 16px;
-            column-gap: 3px;
+            display: flex;
             align-items: center;
+            gap: 4px;
             width: 100%;
+            max-width: 100%;
             font-size: 12px;
             line-height: 1.35;
             white-space: nowrap;
-        }
-
-        .gps-admin-channels .part-channel-main {
-            display: inline-flex;
-            gap: 4px;
-            min-width: 0;
             overflow: hidden;
-            white-space: nowrap;
         }
 
         .gps-admin-channels .part-channel-label {
@@ -65,11 +58,10 @@
 
 
         .gps-admin-channels .part-channel-status,
-        .gps-admin-channels .part-channel-link,
-        .gps-admin-channels .part-channel-link-placeholder {
-            display: inline-block;
-            width: 16px;
-            overflow: hidden;
+        .gps-admin-channels .part-channel-link {
+            flex: 0 0 auto;
+            width: auto;
+            min-width: 10px;
             text-align: center;
             white-space: nowrap;
         }
@@ -100,32 +92,21 @@
             text-decoration: underline;
         }
 
-        .gps-admin-channels .part-channel-status-link {
-            display: inline-flex;
-            gap: 3px;
-            align-items: center;
-            white-space: nowrap;
-        }
     </style>
 @endonce
 
 <div class="gps-admin-part-cell gps-admin-channels part-channel-list">
     @if (! $part)
         <div class="part-channel-row">
-            <span class="part-channel-main">
-                <span class="part-channel-label">—</span>
-                <span class="part-channel-price">—</span>
-            </span>
+            <span class="part-channel-label">—</span>
+            <span class="part-channel-price">—</span>
             <span class="part-channel-status part-channel-status--missing" title="Brak rekordu">✕</span>
-            <span class="part-channel-link-placeholder" aria-hidden="true"></span>
         </div>
     @else
         @foreach ($rows as $row)
             <div class="part-channel-row">
-                <span class="part-channel-main">
-                    <span class="part-channel-label">{{ $row['label'] }}:</span>
-                    <span class="part-channel-price">{{ $row['price'] }}</span>
-                </span>
+                <span class="part-channel-label">{{ $row['label'] }}:</span>
+                <span class="part-channel-price">{{ $row['price'] }}</span>
                 <span
                     class="part-channel-status {{ $row['listed'] ? 'part-channel-status--ok' : 'part-channel-status--missing' }}"
                     title="{{ $row['title'] }}"
@@ -140,8 +121,6 @@
                         title="Otwórz ofertę {{ $row['label'] }} w nowej karcie"
                         aria-label="Otwórz ofertę {{ $row['label'] }} w nowej karcie"
                     >↗</a>
-                @else
-                    <span class="part-channel-link-placeholder" aria-hidden="true"></span>
                 @endif
             </div>
         @endforeach
