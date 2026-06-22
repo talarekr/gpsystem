@@ -13,6 +13,7 @@ class GpswissPublicHtmlController extends Controller
     private const TOKEN = 'gps_images_import_2026';
     private const SOURCE_PUBLIC_HTML = '/home/gpsystem/domains/gpsystem.thecamels.pl/public_html';
     private const TARGET_PUBLIC_HTML = '/home/gpsystem/domains/gpswiss.pl/public_html';
+    private const SAMPLE_STORAGE_IMAGE_URL_GPSWISS = 'https://gpswiss.pl/storage/parts/photos/presentation/product/';
     private const APP_PATH = '/home/gpsystem/domains/gpsystem.thecamels.pl/app';
 
     /** @var list<string> */
@@ -53,6 +54,9 @@ class GpswissPublicHtmlController extends Controller
         $targetHtaccess = self::TARGET_PUBLIC_HTML.'/.htaccess';
         $targetBuild = self::TARGET_PUBLIC_HTML.'/build';
         $targetStorage = self::TARGET_PUBLIC_HTML.'/storage';
+        $sourceStorage = self::SOURCE_PUBLIC_HTML.'/storage';
+        $targetStorageExists = file_exists($targetStorage) || is_link($targetStorage);
+        $sourceStorageExists = file_exists($sourceStorage) || is_link($sourceStorage);
         $targetIndexHtml = self::TARGET_PUBLIC_HTML.'/index.html';
 
         if (! $sourceExists) {
@@ -93,8 +97,11 @@ class GpswissPublicHtmlController extends Controller
                 'target_index_php_exists' => file_exists($targetIndexPhp),
                 'target_htaccess_exists' => file_exists($targetHtaccess),
                 'target_build_exists' => is_dir($targetBuild),
-                'target_storage_exists' => file_exists($targetStorage),
+                'target_storage_exists' => $targetStorageExists,
                 'target_storage_is_symlink' => is_link($targetStorage),
+                'target_storage_points_to_source' => $this->pathPointsTo($targetStorage, $sourceStorage),
+                'source_storage_exists' => $sourceStorageExists,
+                'sample_storage_image_url_gpswiss' => self::SAMPLE_STORAGE_IMAGE_URL_GPSWISS,
                 'target_index_php_points_to_app_path' => $indexPointsToApp,
                 'target_index_php_autoload_path' => $indexInfo['autoload_path'],
                 'target_index_php_bootstrap_path' => $indexInfo['bootstrap_path'],
@@ -221,6 +228,80 @@ class GpswissPublicHtmlController extends Controller
             'warnings' => array_merge($warnings, $storage['warnings']),
             'blockers' => [],
             'next_steps' => $this->nextSteps([], array_merge($warnings, $storage['warnings'])),
+        ]);
+    }
+
+
+    public function linkStorage(Request $request): JsonResponse
+    {
+        if ($unauthorized = $this->unauthorizedResponse($request)) {
+            return $unauthorized;
+        }
+
+        $dryRun = (string) $request->query('dry_run', '1') !== '0';
+        $source = self::SOURCE_PUBLIC_HTML.'/storage';
+        $target = self::TARGET_PUBLIC_HTML.'/storage';
+        $warnings = [];
+        $blockers = [];
+        $sourceExists = file_exists($source) || is_link($source);
+        $sourceIsDir = is_dir($source);
+        $targetExists = file_exists($target) || is_link($target);
+        $targetIsSymlink = is_link($target);
+        $targetRealpath = $this->resolvedPath($target);
+        $targetPointsToSource = $this->pathPointsTo($target, $source);
+        $wouldCreateSymlink = false;
+        $symlinkCreated = false;
+
+        if (! $sourceExists) {
+            $blockers[] = 'Source storage path does not exist.';
+        } elseif (! $sourceIsDir) {
+            $blockers[] = 'Source storage path exists but is not a directory.';
+        }
+
+        if (! $targetExists) {
+            $wouldCreateSymlink = $sourceExists && $sourceIsDir;
+        } elseif ($targetIsSymlink && $targetPointsToSource) {
+            // Already linked correctly; no action required.
+        } else {
+            $blockers[] = 'Target storage path already exists and is not the expected symlink. It was not modified.';
+        }
+
+        if (! $dryRun && $wouldCreateSymlink && count($blockers) === 0) {
+            $symlinkCreated = symlink($source, $target);
+            if (! $symlinkCreated) {
+                $blockers[] = 'Failed to create storage symlink.';
+            }
+
+            $targetExists = file_exists($target) || is_link($target);
+            $targetIsSymlink = is_link($target);
+            $targetRealpath = $this->resolvedPath($target);
+            $targetPointsToSource = $this->pathPointsTo($target, $source);
+        }
+
+        if ($dryRun && $wouldCreateSymlink) {
+            $warnings[] = 'Dry run only: target storage symlink was not created.';
+        }
+
+        return $this->json([
+            'ok' => count($blockers) === 0 && ($dryRun || ! $wouldCreateSymlink || $symlinkCreated || ($targetIsSymlink && $targetPointsToSource)),
+            'dry_run' => $dryRun,
+            'source' => $source,
+            'target' => $target,
+            'source_exists' => $sourceExists,
+            'source_is_dir' => $sourceIsDir,
+            'target_exists' => $targetExists,
+            'target_is_symlink' => $targetIsSymlink,
+            'target_realpath' => $targetRealpath,
+            'target_storage_points_to_source' => $targetPointsToSource,
+            'target_type' => $targetExists ? $this->pathType($target) : null,
+            'would_create_symlink' => $wouldCreateSymlink,
+            'symlink_created' => $symlinkCreated,
+            'warnings' => $warnings,
+            'blockers' => $blockers,
+            'next_steps' => $this->storageNextSteps($dryRun, $wouldCreateSymlink, $symlinkCreated, $blockers),
+            'recommendation' => count($blockers) > 0 && $targetExists && ! ($targetIsSymlink && $targetPointsToSource)
+                ? 'Manually inspect the existing target path. If it is safe, move it out of the way outside this endpoint, then rerun the dry run.'
+                : null,
         ]);
     }
 
@@ -408,6 +489,72 @@ class GpswissPublicHtmlController extends Controller
         $snippet = preg_replace('~token=([^\s\'\"]+)~i', 'token=[redacted]', $snippet) ?? $snippet;
 
         return mb_substr($snippet, 0, 4000);
+    }
+
+
+    private function pathPointsTo(string $path, string $expected): bool
+    {
+        if (! is_link($path)) {
+            return false;
+        }
+
+        $actual = $this->resolvedPath($path);
+        $expectedReal = realpath($expected) ?: $expected;
+
+        return $actual === $expectedReal;
+    }
+
+    private function resolvedPath(string $path): ?string
+    {
+        if (! is_link($path)) {
+            return realpath($path) ?: null;
+        }
+
+        $linkTarget = readlink($path);
+        if (! is_string($linkTarget)) {
+            return null;
+        }
+
+        if (! str_starts_with($linkTarget, '/')) {
+            $linkTarget = dirname($path).'/'.$linkTarget;
+        }
+
+        return realpath($linkTarget) ?: $linkTarget;
+    }
+
+    private function pathType(string $path): string
+    {
+        if (is_link($path)) {
+            return 'symlink';
+        }
+
+        if (is_dir($path)) {
+            return 'directory';
+        }
+
+        if (is_file($path)) {
+            return 'file';
+        }
+
+        return 'other';
+    }
+
+    /** @return list<string> */
+    private function storageNextSteps(bool $dryRun, bool $wouldCreateSymlink, bool $symlinkCreated, array $blockers): array
+    {
+        if (count($blockers) > 0) {
+            return ['Resolve blockers manually; this endpoint will not delete, move, or overwrite existing storage paths.'];
+        }
+
+        if ($dryRun && $wouldCreateSymlink) {
+            return ['Run /tools/link-gpswiss-storage?token=...&dry_run=0 to create the symlink.', 'After live run, check /tools/check-gpswiss-public-html?token=... and test a gpswiss.pl storage image URL.'];
+        }
+
+        if ($symlinkCreated) {
+            return ['Symlink created. Check /tools/check-gpswiss-public-html?token=... and test a gpswiss.pl storage image URL.'];
+        }
+
+        return ['No storage symlink action required. Test a gpswiss.pl storage image URL manually.'];
     }
 
     /** @return array<string, mixed> */
