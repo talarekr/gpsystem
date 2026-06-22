@@ -11,6 +11,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\StreamedResponse;
+use Throwable;
 
 class OvokoPriceImportController extends Controller
 {
@@ -77,18 +78,44 @@ class OvokoPriceImportController extends Controller
         $client = $manager->client('ovoko');
         $warnings = [];
         $blockers = [];
-        if (! $client instanceof OvokoApiClient) $blockers[] = 'ovoko_client_unavailable';
+        if (! $client instanceof OvokoApiClient) {
+            $blockers[] = 'ovoko_client_unavailable';
+            return $this->emptySummary($limit, $onlyMissing, $changedOnly, $warnings, $blockers);
+        }
+
         $readiness = $client->getAccountReadiness();
         $blockers = array_merge($blockers, $readiness['blockers'] ?? []);
         if ($blockers !== []) return $this->emptySummary($limit, $onlyMissing, $changedOnly, $warnings, $blockers);
 
         $items = [];
         $apiTotal = null;
+        $firstPageDiagnostics = null;
         $page = 1;
-        $pageSize = min($limit, 500);
+        $pageSize = min($limit, 200);
         while (count($items) < $limit) {
-            $result = $client->fetchPartsPage($page, min($pageSize, $limit - count($items)));
-            if (! ($result['api_ok'] ?? false)) { $blockers[] = 'ovoko_api_non_success_status'; break; }
+            $requestLimit = min($pageSize, $limit - count($items));
+
+            try {
+                $result = $client->fetchPartsPage($page, $requestLimit);
+            } catch (Throwable) {
+                $result = [
+                    'api_ok' => false,
+                    'error' => 'Ovoko/RRR API request failed without exposing credentials.',
+                    'diagnostics' => $client->safeExceptionDiagnostics($page, $requestLimit, 'Ovoko/RRR API request failed without exposing credentials.'),
+                    'parts' => [],
+                    'limit' => $requestLimit,
+                ];
+            }
+
+            if ($page === 1) $firstPageDiagnostics = $result['diagnostics'] ?? null;
+
+            if (! ($result['api_ok'] ?? false)) {
+                $statusCode = $result['api_status_code'] ?? ($result['diagnostics']['ovoko_status_code'] ?? 'missing');
+                $message = $result['error'] ?? ($result['diagnostics']['error_message_safe'] ?? 'Ovoko API returned a non-success response.');
+                $blockers[] = 'ovoko_api_non_success_status: '.$statusCode.'; '.$this->safeMessage($message);
+                break;
+            }
+
             $apiTotal ??= $result['total_count'];
             $batch = $result['parts'];
             if ($batch === []) break;
@@ -104,6 +131,7 @@ class OvokoPriceImportController extends Controller
         $summary['api_total_count'] = $apiTotal;
         $summary['api_fetched_count'] = count($items);
         $summary['local_ovoko_listings_total'] = $localTotal;
+        $summary['safe_api_diagnostics_first_page'] = $firstPageDiagnostics;
 
         foreach ($items as $item) {
             $listing = $listings->get((string) $item['external_offer_id']);
@@ -129,17 +157,28 @@ class OvokoPriceImportController extends Controller
             if ($different) $this->push($summary['sample_different_price'], $row);
         }
         $summary['ok'] = $blockers === [];
+        if (! (bool) (int) $request->query('debug', 0) && $summary['ok']) {
+            unset($summary['safe_api_diagnostics_first_page']);
+        }
         return $summary;
     }
 
     private function emptySummary(int $limit, bool $onlyMissing, bool $changedOnly, array $warnings, array $blockers): array
     {
-        return ['ok'=>false,'limit'=>$limit,'only_missing'=>$onlyMissing,'changed_only'=>$changedOnly,'api_total_count'=>null,'api_fetched_count'=>0,'local_ovoko_listings_total'=>0,'matched_to_part_count'=>0,'unmatched_api_items_count'=>0,'missing_local_ovoko_price_count'=>0,'same_price_count'=>0,'different_price_count'=>0,'would_update_count'=>0,'would_skip_count'=>0,'sample_would_update'=>[],'sample_missing_local_price'=>[],'sample_different_price'=>[],'sample_unmatched_api_items'=>[],'warnings'=>$warnings,'blockers'=>$blockers,'rows_for_export'=>[]];
+        return ['ok'=>false,'limit'=>$limit,'only_missing'=>$onlyMissing,'changed_only'=>$changedOnly,'api_total_count'=>null,'api_fetched_count'=>0,'local_ovoko_listings_total'=>0,'matched_to_part_count'=>0,'unmatched_api_items_count'=>0,'missing_local_ovoko_price_count'=>0,'same_price_count'=>0,'different_price_count'=>0,'would_update_count'=>0,'would_skip_count'=>0,'sample_would_update'=>[],'sample_missing_local_price'=>[],'sample_different_price'=>[],'sample_unmatched_api_items'=>[],'safe_api_diagnostics_first_page'=>null,'warnings'=>$warnings,'blockers'=>$blockers,'rows_for_export'=>[]];
     }
 
     private function guard(Request $request): ?JsonResponse
     {
         return hash_equals(self::TOKEN, (string) $request->query('token', '')) ? null : response()->json(['ok' => false, 'error_message' => 'Invalid diagnostics token.'], 403);
+    }
+
+    private function safeMessage(mixed $message): string
+    {
+        return str($message ?: 'Ovoko API returned a non-success response.')
+            ->replaceMatches('/(username|password|user_token)=[^\s&]+/i', '$1=[redacted]')
+            ->limit(300, '')
+            ->toString();
     }
 
     private function money(mixed $value): ?float { return is_numeric($value) ? round((float) $value, 2) : null; }
