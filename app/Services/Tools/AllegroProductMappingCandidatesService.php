@@ -129,56 +129,45 @@ class AllegroProductMappingCandidatesService
 
     private function buildRows(array $offers, bool $includeExisting, array &$warnings): array
     {
-        $offerIds = array_values(array_filter(Arr::pluck($offers, 'allegro_offer_id')));
-        $listings = MarketplaceListing::query()->with('part', 'account')->where('marketplace', self::MARKETPLACE)->whereIn('external_offer_id', $offerIds)->whereHas('account', fn ($q) => $q->where('code', self::ACCOUNT_CODE))->get()->keyBy('external_offer_id');
-        $partListingIds = MarketplaceListing::query()->where('marketplace', self::MARKETPLACE)->whereHas('account', fn ($q) => $q->where('code', self::ACCOUNT_CODE))->whereNotNull('part_id')->pluck('external_offer_id', 'part_id')->all();
+        $warnings[] = 'Candidate matching by part_number/title/SKU is disabled. This endpoint now reports only existing allegro_main marketplace listings by external_offer_id; use /tools/check-allegro-local-id-sources and /tools/check-allegro-offer-id-coverage for ID-only diagnostics.';
 
-        $numbers = [];
-        foreach ($offers as $offer) foreach ($this->partNumbersFromTitle($offer['allegro_title']) as $number) $numbers[$this->key($number)] = $number;
-        $partsByNumber = $this->partsByCodes(array_keys($numbers));
-        $partsBySku = $this->partsBySku(array_filter(array_unique(Arr::pluck($offers, 'allegro_sku'))));
-        $allParts = Part::query()->select(['id','sku','name','part_number','price','allegro_price','quantity'])->limit(10000)->get();
+        $offerIds = array_values(array_filter(Arr::pluck($offers, 'allegro_offer_id')));
+        $listings = MarketplaceListing::query()
+            ->with('part', 'account')
+            ->where('marketplace', self::MARKETPLACE)
+            ->whereIn('external_offer_id', $offerIds)
+            ->whereHas('account', fn ($q) => $q->where('code', self::ACCOUNT_CODE))
+            ->get()
+            ->keyBy('external_offer_id');
 
         $rows = [];
         foreach ($offers as $offer) {
             $listing = $listings->get($offer['allegro_offer_id']);
             if ($listing && ! $includeExisting) continue;
-            $rows[] = $this->rowForOffer($offer, $listing, $partsByNumber, $partsBySku, $allParts, $partListingIds);
+            $base = $offer + [
+                'listing_exists' => $listing !== null,
+                'current_part_id' => $listing?->part_id,
+                'current_part_number' => $listing?->part?->part_number,
+                'current_local_name' => $listing?->part?->name,
+                'local_sku' => $listing?->part?->sku,
+                'local_price' => $listing?->part?->price,
+                'local_quantity' => $listing?->part?->quantity,
+            ];
+            $rows[] = $base + [
+                'match_type' => $listing ? 'already_mapped' : 'no_local_offer_id_found',
+                'confidence' => $listing ? 'exact_id' : 'none',
+                'auto_map_safe' => false,
+                'candidate_part_id' => $listing?->part_id,
+                'candidate_part_number' => $listing?->part?->part_number,
+                'candidate_name' => $listing?->part?->name,
+                'candidate_sku' => $listing?->part?->sku,
+                'candidate_price' => $listing?->part?->allegro_price ?? $listing?->part?->price,
+                'candidate_quantity' => $listing?->part?->quantity,
+                'notes' => $listing ? 'Existing allegro_main marketplace listing found by external_offer_id.' : 'No local marketplace listing found by external_offer_id; no title/SKU/part_number matching was attempted.',
+            ];
         }
+
         return $rows;
-    }
-
-    private function rowForOffer(array $offer, ?MarketplaceListing $listing, array $partsByNumber, array $partsBySku, $allParts, array $partListingIds): array
-    {
-        $base = $offer + ['listing_exists' => $listing !== null, 'current_part_id' => $listing?->part_id, 'current_part_number' => $listing?->part?->part_number, 'current_local_name' => $listing?->part?->name, 'local_sku' => $listing?->part?->sku, 'local_price' => $listing?->part?->price, 'local_quantity' => $listing?->part?->quantity];
-        if ($listing) {
-            return $base + ['match_type' => 'already_mapped', 'confidence' => 'exact', 'auto_map_safe' => false, 'candidate_part_id' => $listing->part_id, 'candidate_part_number' => $listing->part?->part_number, 'candidate_name' => $listing->part?->name, 'candidate_sku' => $listing->part?->sku, 'candidate_price' => $listing->part?->price, 'candidate_quantity' => $listing->part?->quantity, 'notes' => 'Existing allegro_main marketplace listing found.'];
-        }
-
-        $matched = collect();
-        foreach ($this->partNumbersFromTitle($offer['allegro_title']) as $number) $matched = $matched->merge($partsByNumber[$this->key($number)] ?? []);
-        $matched = $matched->unique('id')->values();
-        $matchType = $matched->count() === 1 ? 'exact_part_number' : ($matched->count() > 1 ? 'multiple_part_number_matches' : 'no_match');
-        $confidence = $matched->count() === 1 ? 'exact' : ($matched->count() > 1 ? 'ambiguous' : 'none');
-        $notes = [];
-
-        if ($matched->isEmpty() && $offer['allegro_sku'] !== '') {
-            $skuMatches = collect($partsBySku[$offer['allegro_sku']] ?? [])->unique('id')->values();
-            if ($skuMatches->count() === 1) { $matched = $skuMatches; $matchType = 'sku_match'; $confidence = 'likely'; $notes[] = 'SKU match is shown as likely only; SKU is not treated as certain unless reviewed.'; }
-            elseif ($skuMatches->count() > 1) { $matched = $skuMatches; $matchType = 'sku_match'; $confidence = 'ambiguous'; $notes[] = 'Allegro SKU matched multiple local products.'; }
-        }
-
-        if ($matched->isEmpty()) {
-            $candidate = $this->titleCandidate($offer['allegro_title'], $allParts);
-            if ($candidate) { $matched = collect([$candidate]); $matchType = 'title_similarity'; $confidence = 'low'; $notes[] = 'Fallback title/name similarity only; not safe for automatic mapping.'; }
-        }
-
-        $candidate = $matched->first();
-        $autoSafe = $matched->count() === 1 && $matchType === 'exact_part_number' && ! isset($partListingIds[$candidate->id ?? null]);
-        if (! $autoSafe && $matchType === 'exact_part_number') $notes[] = 'Candidate part already has another allegro_main marketplace listing.';
-        if (! $candidate) $notes[] = 'No local product candidate found.';
-
-        return $base + ['match_type' => $matchType, 'confidence' => $confidence, 'auto_map_safe' => $autoSafe, 'candidate_part_id' => $candidate?->id, 'candidate_part_number' => $candidate?->part_number, 'candidate_name' => $candidate?->name, 'candidate_sku' => $candidate?->sku, 'candidate_price' => $candidate?->allegro_price ?? $candidate?->price, 'candidate_quantity' => $candidate?->quantity, 'notes' => implode(' ', $notes)];
     }
 
     private function partsByCodes(array $keys): array
