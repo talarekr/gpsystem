@@ -15,8 +15,10 @@ class EbayOAuthController extends Controller
 {
     public function redirect(Request $request): RedirectResponse
     {
-        $channel = $this->channel($request);
-        if (! $channel) return redirect('/admin/ebay-settings')->with('error', 'Nieprawidłowy kanał eBay OAuth.');
+        $channel = $this->channelFromQuery($request);
+        if (! $channel) {
+            return redirect('/admin/ebay-settings')->with('error', 'Nieprawidłowy kanał eBay OAuth.');
+        }
 
         $account = MarketplaceAccount::query()->where('code', $channel)->first();
         $credentials = is_array($account?->api_credentials) ? $account->api_credentials : [];
@@ -41,21 +43,27 @@ class EbayOAuthController extends Controller
 
     public function callback(Request $request): RedirectResponse
     {
-        $channel = $this->channel($request);
-        if (! $channel) return redirect('/admin/ebay-settings')->with('error', 'Nieprawidłowy kanał eBay OAuth.');
+        $state = (string) $request->query('state', '');
+        $statePayload = $state !== '' ? EbayOAuthConfig::decodeState($state) : null;
+        $channel = is_array($statePayload) ? (string) $statePayload['channel'] : $this->channelFromQuery($request);
 
-        if ($request->filled('error')) {
-            return redirect('/admin/ebay-settings')->with('error', 'eBay OAuth error: '.(string) $request->query('error').' '.(string) $request->query('error_description'));
+        if (! $channel) {
+            return redirect('/admin/ebay-settings')->with('error', 'Nieprawidłowy kanał eBay OAuth.');
         }
 
-        $state = (string) $request->query('state', '');
+        if ($request->filled('error')) {
+            return redirect('/admin/ebay-settings')->with('error', 'eBay OAuth error: '.$this->safeQueryError($request));
+        }
+
         $expectedState = (string) $request->session()->pull('ebay_oauth_state_'.$channel, '');
-        if ($state === '' || $expectedState === '' || ! hash_equals($expectedState, $state) || ! str_starts_with($state, $channel.'|')) {
+        if ($state === '' || $statePayload === null || ($expectedState !== '' && ! hash_equals($expectedState, $state))) {
             return redirect('/admin/ebay-settings')->with('error', 'Nieprawidłowy state OAuth eBay. Spróbuj ponownie.');
         }
 
         $code = (string) $request->query('code', '');
-        if ($code === '') return redirect('/admin/ebay-settings')->with('error', 'eBay nie zwrócił kodu autoryzacyjnego.');
+        if ($code === '') {
+            return redirect('/admin/ebay-settings')->with('error', 'eBay nie zwrócił kodu autoryzacyjnego.');
+        }
 
         $account = MarketplaceAccount::query()->where('code', $channel)->first();
         $credentials = is_array($account?->api_credentials) ? $account->api_credentials : [];
@@ -83,6 +91,7 @@ class EbayOAuthController extends Controller
             Log::warning('eBay OAuth token exchange returned non-success status.', ['channel' => $channel, 'status' => $response->status()]);
             return redirect('/admin/ebay-settings')->with('error', 'eBay odrzucił wymianę kodu na tokeny: '.$this->safeError($payload, $response->status()));
         }
+
         if (! is_array($payload) || blank($payload['access_token'] ?? null) || blank($payload['refresh_token'] ?? null)) {
             return redirect('/admin/ebay-settings')->with('error', 'Odpowiedź eBay nie zawiera wymaganych tokenów.');
         }
@@ -102,18 +111,26 @@ class EbayOAuthController extends Controller
             'last_connected_at' => now(),
         ])->save();
 
-        return redirect('/admin/ebay-settings')->with('success', 'eBay DE zostało połączone. Tokeny zapisane bezpiecznie.');
+        return redirect('/admin/ebay-settings')->with('success', strtoupper(str_replace('_', ' ', $channel)).' zostało połączone. Tokeny zapisane bezpiecznie.');
     }
 
-    private function channel(Request $request): ?string
+    private function channelFromQuery(Request $request): ?string
     {
         $channel = (string) $request->query('channel', 'ebay_de');
         return in_array($channel, ['ebay_de', 'ebay_fr'], true) ? $channel : null;
     }
 
+    private function safeQueryError(Request $request): string
+    {
+        return trim((string) $request->query('error').' '.(string) $request->query('error_description'));
+    }
+
     private function safeError(mixed $payload, int $status): string
     {
-        if (! is_array($payload)) return 'HTTP '.$status;
+        if (! is_array($payload)) {
+            return 'HTTP '.$status;
+        }
+
         return trim('HTTP '.$status.' '.(string) ($payload['error'] ?? '').' '.(string) ($payload['error_description'] ?? ($payload['message'] ?? '')));
     }
 }

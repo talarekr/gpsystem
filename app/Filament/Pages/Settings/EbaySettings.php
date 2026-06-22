@@ -4,6 +4,8 @@ namespace App\Filament\Pages\Settings;
 
 use Filament\Forms\Components\Actions;
 use Filament\Forms\Components\Actions\Action;
+use Filament\Forms\Components\Placeholder;
+use Illuminate\Support\HtmlString;
 
 class EbaySettings extends MarketplaceApiSettingsPage
 {
@@ -25,12 +27,13 @@ class EbaySettings extends MarketplaceApiSettingsPage
 
     protected function additionalAccountSchema(string $code, array $definition): array
     {
-        if ($code !== 'ebay_de') return [];
-
         return [
+            Placeholder::make("{$code}.ebay_developer_callback_info")
+                ->label('eBay Developer OAuth callback')
+                ->content(fn () => new HtmlString('W eBay Developer ustaw <strong>Auth accepted URL</strong> i <strong>Auth declined URL</strong> na:<br><code>https://gpswiss.pl/admin/ebay/oauth/callback</code>')),
             Actions::make([
                 Action::make('connect_'.$code)
-                    ->label('Połącz eBay DE')
+                    ->label('Połącz '.$definition['label'])
                     ->url(route('admin.ebay.oauth.redirect', ['channel' => $code]))
                     ->openUrlInNewTab(false),
             ]),

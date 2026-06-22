@@ -2,6 +2,7 @@
 
 namespace App\Support\Marketplace;
 
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Str;
 
 class EbayOAuthConfig
@@ -22,7 +23,31 @@ class EbayOAuthConfig
 
     public static function state(string $channel): string
     {
-        return $channel.'|'.Str::random(48);
+        return Crypt::encryptString(json_encode([
+            'channel' => $channel,
+            'nonce' => Str::random(48),
+            'issued_at' => now()->timestamp,
+        ], JSON_THROW_ON_ERROR));
+    }
+
+    public static function decodeState(string $state): ?array
+    {
+        try {
+            $payload = json_decode(Crypt::decryptString($state), true, 512, JSON_THROW_ON_ERROR);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        if (! is_array($payload)) {
+            return null;
+        }
+
+        $channel = $payload['channel'] ?? null;
+        if (! in_array($channel, ['ebay_de', 'ebay_fr'], true)) {
+            return null;
+        }
+
+        return $payload;
     }
 
     public static function tokenExpiresAt(mixed $expiresIn): ?string
