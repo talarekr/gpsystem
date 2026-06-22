@@ -1,0 +1,111 @@
+<?php
+
+namespace App\Services\Admin;
+
+use App\Models\MarketplaceListing;
+use App\Models\Part;
+use Illuminate\Support\Collection;
+
+class PartMarketplaceStatusResolver
+{
+    /**
+     * @return array<int, array{key: string, label: string, price: string, listed: bool, external_offer_id: ?string, url: ?string, title: string, note: ?string}>
+     */
+    public function rowsForPart(Part $part): array
+    {
+        $listings = $part->relationLoaded('marketplaceListings')
+            ? $part->marketplaceListings
+            : collect();
+
+        $ovoko = $this->listedListing($listings, ['ovoko']);
+        $ebayListings = $this->listedListings($listings, ['ebay_de', 'ebay_fr']);
+        $ebay = $ebayListings->first();
+        $ebayUrlListing = $ebayListings->first(fn (MarketplaceListing $listing): bool => $this->listingUrl($listing) !== null);
+        $allegro = $this->listedListing($listings, ['allegro', 'allegro_main']);
+
+        $storefrontVisible = ! $part->needs_listing
+            && ! in_array($part->status, ['sold', 'archived'], true)
+            && (int) $part->quantity > 0;
+
+        $ebayPrice = is_numeric($part->ebay_price)
+            ? $part->ebay_price
+            : (is_numeric($part->price) ? ((float) $part->price * 1.25) : null);
+        $ebayCalc = ! is_numeric($part->ebay_price) && is_numeric($part->price);
+        $ebayMarkets = $ebayListings
+            ->pluck('marketplace')
+            ->map(fn (string $marketplace): string => match ($marketplace) {
+                'ebay_de' => 'DE',
+                'ebay_fr' => 'FR',
+                default => $marketplace,
+            })
+            ->unique()
+            ->implode('/');
+
+        return [
+            $this->row('storefront', 'Sklep', $part->price, 'zł', $storefrontVisible, null, null, $storefrontVisible ? 'Widoczny w sklepie' : 'Niewidoczny w sklepie'),
+            $this->row('ovoko', 'Ovoko', $ovoko?->price, 'zł', $ovoko !== null, $this->externalOfferId($ovoko), $this->listingUrl($ovoko), $ovoko ? 'Oferta Ovoko wystawiona lokalnie' : 'Brak lokalnej oferty Ovoko'),
+            $this->row('ebay', 'eBay', $ebayPrice, 'zł', $ebay !== null, $this->externalOfferId($ebay), $this->listingUrl($ebayUrlListing), $ebay ? 'Oferta eBay wystawiona lokalnie' : 'Brak lokalnej oferty eBay', $ebayCalc ? 'calc' : ($ebayMarkets ?: null)),
+            $this->row('allegro', 'Allegro', is_numeric($part->allegro_price) ? $part->allegro_price : $part->price, 'zł', $allegro !== null, $this->externalOfferId($allegro), $this->allegroUrl($allegro), $allegro ? 'Oferta Allegro wystawiona lokalnie' : 'Brak lokalnej oferty Allegro'),
+        ];
+    }
+
+    /**
+     * @param Collection<int, MarketplaceListing> $listings
+     * @param array<int, string> $marketplaces
+     */
+    private function listedListing(Collection $listings, array $marketplaces): ?MarketplaceListing
+    {
+        return $this->listedListings($listings, $marketplaces)->first();
+    }
+
+    /**
+     * @param Collection<int, MarketplaceListing> $listings
+     * @param array<int, string> $marketplaces
+     * @return Collection<int, MarketplaceListing>
+     */
+    private function listedListings(Collection $listings, array $marketplaces): Collection
+    {
+        return $listings
+            ->whereIn('marketplace', $marketplaces)
+            ->filter(fn (MarketplaceListing $listing): bool => $this->externalOfferId($listing) !== null)
+            ->values();
+    }
+
+    private function row(string $key, string $label, mixed $price, ?string $currency, bool $listed, ?string $externalOfferId, ?string $url, string $title, ?string $note = null): array
+    {
+        return compact('key', 'label', 'listed', 'externalOfferId', 'url', 'title', 'note') + [
+            'price' => $this->formatPrice($price, $currency),
+            'external_offer_id' => $externalOfferId,
+        ];
+    }
+
+    private function formatPrice(mixed $price, ?string $currency = null): string
+    {
+        if (! is_numeric($price)) {
+            return '—';
+        }
+
+        return number_format((float) $price, 2, ',', ' ').' '.($currency ?: 'zł');
+    }
+
+    private function externalOfferId(?MarketplaceListing $listing): ?string
+    {
+        $id = trim((string) ($listing?->external_offer_id ?? ''));
+
+        return $id === '' ? null : $id;
+    }
+
+    private function listingUrl(?MarketplaceListing $listing): ?string
+    {
+        $url = trim((string) ($listing?->url ?? ''));
+
+        return $url === '' ? null : $url;
+    }
+
+    private function allegroUrl(?MarketplaceListing $listing): ?string
+    {
+        $offerId = $this->externalOfferId($listing);
+
+        return $offerId ? 'https://allegro.pl/oferta/'.$offerId : null;
+    }
+}
