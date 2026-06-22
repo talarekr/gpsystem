@@ -51,6 +51,7 @@ use App\Http\Controllers\Tools\CheckCatalogErrorController;
 use App\Http\Controllers\Tools\LastLaravelErrorController;
 use App\Http\Controllers\Tools\MarkGpsGmailToListDryRunController;
 use App\Http\Controllers\Tools\MarkGpsGmailToListLiveController;
+use App\Http\Controllers\Tools\FinalizeDomainSwitchController;
 use App\Http\Controllers\Tools\FixImportedImagesPublicFilesController;
 use App\Http\Controllers\Tools\GpswissPublicHtmlController;
 use App\Http\Controllers\Tools\ImportedImagesStorageReportController;
@@ -1909,6 +1910,7 @@ Route::get('/tools/imported-images-storage-report', ImportedImagesStorageReportC
 Route::get('/tools/photo-storage-report', PhotoStorageReportController::class)->name('tools.photo-storage-report');
 Route::get('/tools/pre-domain-switch-check', PreDomainSwitchCheckController::class)->name('tools.pre-domain-switch-check');
 Route::get('/tools/check-domain-hardcoded-links', CheckDomainHardcodedLinksController::class)->name('tools.check-domain-hardcoded-links');
+Route::get('/tools/finalize-domain-switch', FinalizeDomainSwitchController::class)->name('tools.finalize-domain-switch');
 Route::get('/tools/post-domain-switch-check', PostDomainSwitchCheckController::class)->name('tools.post-domain-switch-check');
 
 
