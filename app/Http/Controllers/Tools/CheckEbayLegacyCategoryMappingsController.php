@@ -120,12 +120,15 @@ class CheckEbayLegacyCategoryMappingsController extends Controller
     private function detectedMappings(?string $catTable, ?string $partsTable, ?string $listingsTable): array
     {
         $map = [];
+        $partCounts = ($partsTable && Schema::hasColumn($partsTable, 'category_id'))
+            ? DB::table($partsTable)->select('category_id', DB::raw('count(*) as c'))->whereNotNull('category_id')->groupBy('category_id')->pluck('c', 'category_id')
+            : collect();
         if ($catTable) {
             $cols = Schema::getColumnListing($catTable);
-            DB::table($catTable)->orderBy('id')->chunk(500, function ($rows) use (&$map, $cols, $catTable) {
+            DB::table($catTable)->orderBy('id')->chunk(500, function ($rows) use (&$map, $cols, $catTable, $partCounts) {
                 foreach ($rows as $row) {
                     $a=(array)$row; $vals=$this->extractEbayValues($a); if (! $vals) continue;
-                    $id=$a['id']; $map[$id] = $this->mappingRow($a, $cols, $vals, 'category legacy_payload/columns', 'high');
+                    $id=$a['id']; $map[$id] = $this->mappingRow($a, $cols, $vals, 'part_categories.legacy_payload.marketplace_mappings/columns', 'high', (int) ($partCounts[$id] ?? 0));
                 }
             });
         }
@@ -135,7 +138,14 @@ class CheckEbayLegacyCategoryMappingsController extends Controller
             if ($m['ebay_fr_category_id']) $summary['detected_ebay_fr_category_mappings_count']++;
             if ($m['generic_ebay_category_id']) $summary['detected_generic_ebay_category_mappings_count']++;
             $summary['mappings_'.$m['confidence'].'_confidence_count']++;
+            if ($m['products_count'] > 0) $summary['used_local_categories_with_ebay_mapping']++;
             if ($m['ambiguous']) $summary['ambiguous_mappings_count']++;
+        }
+        if ($partsTable && Schema::hasColumn($partsTable, 'category_id')) {
+            $usedCategoryIds = DB::table($partsTable)->whereNotNull('category_id')->distinct()->pluck('category_id');
+            foreach ($usedCategoryIds as $categoryId) {
+                if (! isset($map[$categoryId])) $summary['used_local_categories_missing_ebay_mapping']++;
+            }
         }
         return ['summary' => $summary, 'sample_mappings' => array_slice(array_values($map), 0, self::MAX)];
     }
@@ -159,8 +169,77 @@ class CheckEbayLegacyCategoryMappingsController extends Controller
 
     private function categorySample(array $a, array $cols, $partCounts): array { return ['id'=>$a['id']??null,'name'=>$a['name']??null,'slug'=>$a['slug']??null,'parent_id'=>$a['parent_id']??null,'path'=>$a['category_path']??($a['full_slug_path']??null),'parts_count'=>(int)($partCounts[$a['id']??0]??0),'old_woocommerce_term_id'=>$a['external_id']??($a['old_term_id']??null),'has_legacy_payload'=>!empty($a['legacy_payload'])]; }
     private function legacySample(array $a, array $cols, string $table): array { $vals=$this->extractEbayValues($a); return ['local_category_id'=>$a['id']??null,'local_category_name_path'=>$a['category_path']??($a['name']??null),'detected_old_term_id'=>$a['external_id']??null,'safe_detected_keys'=>array_keys($vals),'possible_ebay_category_values'=>$vals,'source_column'=>'legacy_payload/columns','source_table'=>$table]; }
-    private function mappingRow(array $a, array $cols, array $vals, string $source, string $confidence): array { $all=array_unique(array_values($vals)); return ['local_category_id'=>$a['id']??null,'local_category_name_path'=>$a['category_path']??($a['name']??null),'old_category_id'=>$a['external_id']??null,'ebay_de_category_id'=>$vals['ebay_de_category_id']??null,'ebay_de_category_name_path'=>$vals['ebay_de_category_name']??null,'ebay_fr_category_id'=>$vals['ebay_fr_category_id']??null,'ebay_fr_category_name_path'=>$vals['ebay_fr_category_name']??null,'generic_ebay_category_id'=>$vals['ebay_category_id']??($vals['category_id']??null),'products_count'=>null,'source'=>$source,'confidence'=>$confidence,'ambiguous'=>count($all)>1]; }
-    private function extractEbayValues(array $row): array { $flat=$this->flatten($row); $out=[]; foreach($flat as $k=>$v){ if(!is_scalar($v)||$v===''||preg_match('/token|secret|key|password/i',$k)) continue; if(preg_match('/ebay.*(category.*id|catid)|ebay_de|de.*ebay|ebay_fr|fr.*ebay|external_category_id/i',$k)){ $out[$k]=(string)$v; }} return array_slice($out,0,20,true); }
+    private function mappingRow(array $a, array $cols, array $vals, string $source, string $confidence, int $productsCount = 0): array
+    {
+        $channelValues = [
+            'ebay_de' => $this->channelCategoryIds($vals, 'ebay_de'),
+            'ebay_fr' => $this->channelCategoryIds($vals, 'ebay_fr'),
+            'ebay' => $this->channelCategoryIds($vals, 'ebay'),
+        ];
+        $ambiguous = collect($channelValues)->contains(fn ($ids) => count($ids) > 1);
+
+        return [
+            'local_category_id'=>$a['id']??null,
+            'local_category_name_path'=>$a['category_path']??($a['name']??null),
+            'old_category_id'=>$a['external_id']??null,
+            'ebay_de_category_id'=>$vals['ebay_de_category_id']??null,
+            'ebay_de_category_name_path'=>$vals['ebay_de_category_name']??null,
+            'ebay_fr_category_id'=>$vals['ebay_fr_category_id']??null,
+            'ebay_fr_category_name_path'=>$vals['ebay_fr_category_name']??null,
+            'generic_ebay_category_id'=>$vals['ebay_category_id']??($vals['category_id']??null),
+            'products_count'=>$productsCount,
+            'source'=>$source,
+            'confidence'=>$confidence,
+            'ambiguous'=>$ambiguous,
+        ];
+    }
+
+    private function channelCategoryIds(array $vals, string $channel): array
+    {
+        $ids = [];
+        foreach ($vals as $key => $value) {
+            if (! is_scalar($value) || $value === '') {
+                continue;
+            }
+            if ($channel === 'ebay' && preg_match('/(^|[._-])ebay([._-]).*(category.*id|catid)$/i', $key) && ! preg_match('/ebay_(de|fr)/i', $key)) {
+                $ids[] = (string) $value;
+            }
+            if ($channel !== 'ebay' && preg_match('/'.preg_quote($channel, '/').'.*(category.*id|catid)$/i', $key)) {
+                $ids[] = (string) $value;
+            }
+        }
+
+        return array_values(array_unique($ids));
+    }
+
+    private function extractEbayValues(array $row): array
+    {
+        $flat=$this->flatten($row);
+        $out=[];
+        $pathMap = [
+            'legacy_payload.marketplace_mappings.ebay.category_id' => 'ebay_category_id',
+            'legacy_payload.marketplace_mappings.ebay_de.category_id' => 'ebay_de_category_id',
+            'legacy_payload.marketplace_mappings.ebay_fr.category_id' => 'ebay_fr_category_id',
+            'marketplace_mappings.ebay.category_id' => 'ebay_category_id',
+            'marketplace_mappings.ebay_de.category_id' => 'ebay_de_category_id',
+            'marketplace_mappings.ebay_fr.category_id' => 'ebay_fr_category_id',
+        ];
+
+        foreach ($pathMap as $path => $key) {
+            if (isset($flat[$path]) && is_scalar($flat[$path]) && $flat[$path] !== '') {
+                $out[$key] = (string) $flat[$path];
+            }
+        }
+
+        foreach($flat as $k=>$v){
+            if(!is_scalar($v)||$v===''||preg_match('/token|secret|key|password/i',$k)) continue;
+            if(preg_match('/ebay.*(category.*id|catid)|ebay_de|de.*ebay|ebay_fr|fr.*ebay|external_category_id/i',$k)){
+                $out[$k]=(string)$v;
+            }
+        }
+
+        return array_slice($out,0,20,true);
+    }
     private function flatten(array $a, string $p=''): array { $r=[]; foreach($a as $k=>$v){ $key=$p===''?(string)$k:$p.'.'.$k; if(is_string($v)&&str_starts_with(trim($v),'{')) $v=json_decode($v,true)?:$v; if(is_array($v)) $r+=$this->flatten($v,$key); else $r[$key]=$v; } return $r; }
     private function firstExisting(array $tables): ?string { foreach($tables as $t) if(Schema::hasTable($t)) return $t; return null; }
     private function safeCount(string $table): int { return (int) DB::table($table)->count(); }
@@ -169,8 +248,8 @@ class CheckEbayLegacyCategoryMappingsController extends Controller
         $s = $m['summary'];
         $has = ($s['detected_ebay_de_category_mappings_count'] + $s['detected_ebay_fr_category_mappings_count'] + $s['detected_generic_ebay_category_mappings_count']) > 0;
         $recommendations = [
-            ['status' => $has ? 'yes' : 'no', 'message' => $has ? 'W Laravel wykryto możliwe stare mapowania lokalnych kategorii do eBay.' : 'Nie wykryto pewnych mapowań lokalnych kategorii do eBay w tabelach kategorii.'],
-            ['message' => $has ? 'Mapowanie jest widoczne przy kategoriach; produkty/listingi pozostają źródłem pomocniczym.' : 'Jeżeli mappingi istnieją tylko w produktach/listingach, trzeba je potraktować jako średnią lub niską pewność.'],
+            ['status' => $has ? 'yes' : 'no', 'message' => $has ? 'W Laravel wykryto stare mapowania lokalnych kategorii do eBay bezpośrednio w part_categories.legacy_payload.marketplace_mappings.' : 'Nie wykryto pewnych mapowań lokalnych kategorii do eBay w tabelach kategorii.'],
+            ['message' => $has ? 'Dane mają high confidence, bo siedzą bezpośrednio w part_categories.legacy_payload.marketplace_mappings; produkty/listingi pozostają źródłem pomocniczym.' : 'Jeżeli mappingi istnieją tylko w produktach/listingach, trzeba je potraktować jako średnią lub niską pewność.'],
             ['message' => $has ? 'Późniejsze automatyczne utworzenie marketplace_category_mappings powinno być możliwe po walidacji próbek.' : 'Automatyczne utworzenie marketplace_category_mappings wymaga odzyskania term meta/custom table ze starego Woo/WordPress/dumpa.'],
             ['message' => ($s['detected_ebay_de_category_mappings_count'] && $s['detected_ebay_fr_category_mappings_count']) ? 'eBay DE i FR wyglądają na rozróżnialne.' : 'Nie ma pełnej pewności rozróżnienia eBay DE i FR.'],
             ['message' => 'Kategorie używane przez produkty bez wykrytego mappingu są raportowane w licznikach used_local_categories_missing_ebay_mapping, jeśli dane relacji są dostępne.'],
