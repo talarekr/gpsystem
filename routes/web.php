@@ -182,6 +182,7 @@ Route::get('/tools/check-admin-marketplace-status-ui', CheckAdminMarketplaceStat
 Route::get('/tools/export-allegro-offer-id-coverage', ExportAllegroOfferIdCoverageController::class)->name('tools.export-allegro-offer-id-coverage');
 Route::get('/tools/check-ebay-api-settings', [MarketplaceApiSettingsDiagnosticsController::class, 'ebay'])->name('tools.check-ebay-api-settings');
 Route::get('/tools/check-ebay-api-readiness', [MarketplaceApiSettingsDiagnosticsController::class, 'ebayReadiness'])->name('tools.check-ebay-api-readiness');
+Route::get('/tools/check-ebay-oauth-routes', [MarketplaceApiSettingsDiagnosticsController::class, 'ebayOAuthRoutes'])->name('tools.check-ebay-oauth-routes');
 Route::get('/tools/check-ebay-legacy-category-mappings', CheckEbayLegacyCategoryMappingsController::class)->name('tools.check-ebay-legacy-category-mappings');
 Route::get('/tools/import-ebay-legacy-category-mappings-dry-run', [EbayLegacyCategoryMappingImportController::class, 'dryRun'])->name('tools.import-ebay-legacy-category-mappings-dry-run');
 Route::get('/tools/import-ebay-legacy-category-mappings', [EbayLegacyCategoryMappingImportController::class, 'live'])->name('tools.import-ebay-legacy-category-mappings');

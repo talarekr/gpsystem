@@ -8,6 +8,7 @@ use App\Models\MarketplaceSyncLog;
 use App\Services\Marketplace\Api\EbayApiClient;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 
 class MarketplaceApiSettingsDiagnosticsController extends Controller
@@ -35,6 +36,40 @@ class MarketplaceApiSettingsDiagnosticsController extends Controller
     }
 
     public function ebayReadiness(Request $request): JsonResponse { return $this->settings($request, ['ebay_de' => ['admin' => '/admin/ebay-settings', 'need_site' => true], 'ebay_fr' => ['admin' => '/admin/ebay-settings', 'need_site' => true]]); }
+
+    public function ebayOAuthRoutes(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidToken();
+
+        $redirectExists = Route::has('admin.ebay.oauth.redirect');
+        $callbackExists = Route::has('admin.ebay.oauth.callback');
+        $blockers = [];
+        $warnings = [];
+
+        if (! $redirectExists) $blockers[] = 'eBay OAuth redirect route is not registered.';
+        if (! $callbackExists) $blockers[] = 'eBay OAuth callback route is not registered.';
+
+        $expectedCallbackUrl = 'https://gpswiss.pl/admin/ebay/oauth/callback';
+        $callbackUrl = $callbackExists ? route('admin.ebay.oauth.callback') : null;
+
+        if ($callbackUrl !== null && $callbackUrl !== $expectedCallbackUrl) {
+            $warnings[] = 'Generated callback URL differs from the expected production eBay Developer URL.';
+        }
+
+        return response()->json([
+            'ok' => $blockers === [],
+            'redirect_route_exists' => $redirectExists,
+            'callback_route_exists' => $callbackExists,
+            'callback_url' => $callbackUrl,
+            'expected_accepted_url_for_ebay_developer' => $expectedCallbackUrl,
+            'expected_declined_url_for_ebay_developer' => $expectedCallbackUrl,
+            'redirect_url_ebay_de' => $redirectExists ? route('admin.ebay.oauth.redirect', ['channel' => 'ebay_de']) : null,
+            'redirect_url_ebay_fr' => $redirectExists ? route('admin.ebay.oauth.redirect', ['channel' => 'ebay_fr']) : null,
+            'admin_ebay_settings_url' => url('/admin/ebay-settings'),
+            'blockers' => $blockers,
+            'warnings' => $warnings,
+        ], $blockers === [] ? 200 : 500);
+    }
 
     private function settings(Request $request, array $definitions): JsonResponse
     {
