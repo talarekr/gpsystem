@@ -100,6 +100,8 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
             'sku' => $row['sku'] ?? $row['code'] ?? null,
             'price' => $row['price'] ?? $row['sell_price'] ?? null,
             'currency' => $row['currency'] ?? $row['price_currency'] ?? null,
+            'original_price' => $row['original_price'] ?? null,
+            'original_currency' => $row['original_currency'] ?? null,
             'quantity' => $row['quantity'] ?? $row['stock'] ?? $row['qty'] ?? null,
             'status' => $row['status'] ?? null,
             'url' => $row['url'] ?? null,
