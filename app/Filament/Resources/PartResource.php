@@ -176,9 +176,41 @@ class PartResource extends Resource
                         Forms\Components\Hidden::make('currency')->default('PLN'),
                     ]),
 
+                Section::make('Przygotowanie do wystawienia na marketplace')
+                    ->collapsible()
+                    ->collapsed()
+                    ->description('Diagnostyka dry-run: sprawdza dane lokalnie i pokazuje braki. Nie publikuje ofert, nie edytuje live ofert, nie wysyła cen/stanów i nie importuje zamówień.')
+                    ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--marketplace-preparation'])
+                    ->schema([
+                        Forms\Components\Actions::make([
+                            self::marketplaceReadinessLinkAction('checkAllegroReadiness', 'Sprawdź Allegro', 'allegro_main'),
+                            self::marketplaceReadinessLinkAction('checkOvokoReadiness', 'Sprawdź Ovoko', 'ovoko'),
+                            self::marketplaceReadinessLinkAction('checkEbayReadiness', 'Sprawdź eBay', 'ebay_de'),
+                            self::marketplaceReadinessLinkAction('checkAllMarketplaceReadiness', 'Sprawdź wszystkie', null),
+                        ])->columnSpanFull(),
+                        Forms\Components\Placeholder::make('marketplace_preparation_note')
+                            ->hiddenLabel()
+                            ->content('Przyciski otwierają bezpieczne endpointy diagnostyczne /tools z tokenem technicznym. Wyniki zawierają tylko preview payloadu bez sekretów i bez requestów modyfikujących do marketplace.')
+                            ->columnSpanFull(),
+                    ]),
+
+
             ]);
     }
 
+
+    private static function marketplaceReadinessLinkAction(string $name, string $label, ?string $channel): Action
+    {
+        return Action::make($name)
+            ->label($label)
+            ->icon('heroicon-o-clipboard-document-check')
+            ->color('gray')
+            ->disabled(fn (?Part $record): bool => $record === null || ! $record->exists)
+            ->url(fn (?Part $record): ?string => $record ? ($channel
+                ? route('tools.check-part-marketplace-preparation-payload', ['token' => 'gps_images_import_2026', 'part_id' => $record->id, 'channel' => $channel])
+                : route('tools.check-part-marketplace-readiness', ['token' => 'gps_images_import_2026', 'part_id' => $record->id])) : null)
+            ->openUrlInNewTab();
+    }
 
 
     private static function storageLocationSearchResults(string $search): array

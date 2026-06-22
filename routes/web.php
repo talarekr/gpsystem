@@ -38,6 +38,7 @@ use App\Http\Controllers\Tools\CheckProductImageController;
 use App\Http\Controllers\Tools\CheckStorefrontVisibilityController;
 use App\Http\Controllers\Tools\TestOvokoApiConnectionController;
 use App\Http\Controllers\Tools\OvokoOrdersDryRunController;
+use App\Http\Controllers\Tools\PartMarketplaceReadinessController;
 use App\Http\Controllers\Tools\ImportOvokoOrdersDryRunController;
 use App\Http\Controllers\Tools\CheckPartNumberPerformanceController;
 use App\Http\Controllers\Tools\CheckPartsToListController;
@@ -187,6 +188,8 @@ Route::get('/tools/export-ovoko-unmapped', ExportOvokoUnmappedController::class)
 Route::get('/tools/export-ovoko-orders-unmatched', ExportOvokoOrdersUnmatchedController::class)->name('tools.export-ovoko-orders-unmatched');
 Route::get('/tools/check-part-number-performance', CheckPartNumberPerformanceController::class)->name('tools.check-part-number-performance');
 Route::get('/tools/check-parts-to-list', CheckPartsToListController::class)->name('tools.check-parts-to-list');
+Route::get('/tools/check-part-marketplace-readiness', [PartMarketplaceReadinessController::class, 'check'])->name('tools.check-part-marketplace-readiness');
+Route::get('/tools/check-part-marketplace-preparation-payload', [PartMarketplaceReadinessController::class, 'payload'])->name('tools.check-part-marketplace-preparation-payload');
 Route::get('/tools/check-admin-parts-table-ui', CheckAdminPartsTableUiController::class)->name('tools.check-admin-parts-table-ui');
 Route::get('/tools/check-storefront-visibility', CheckStorefrontVisibilityController::class)->name('tools.check-storefront-visibility');
 Route::get('/tools/mark-gps-gmail-to-list-dry-run', MarkGpsGmailToListDryRunController::class)->name('tools.mark-gps-gmail-to-list-dry-run');
