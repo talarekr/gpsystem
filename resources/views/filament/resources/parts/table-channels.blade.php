@@ -13,7 +13,7 @@
         : [];
 @endphp
 
-<div class="gps-admin-part-cell gps-admin-channels">
+<div class="gps-admin-part-cell gps-admin-channels part-channel-list">
     @if (! $part)
         <div class="gps-admin-channel">
             <span class="gps-admin-channel__name">—</span>
