@@ -33,17 +33,75 @@ class OvokoPriceImportController extends Controller
 
         return response()->streamDownload(function () use ($rows): void {
             $out = fopen('php://output', 'w');
-            fputcsv($out, ['part_id','part_number','name','ovoko_external_offer_id','storefront_price_pln','current_ovoko_price_pln','ovoko_api_price_pln','difference','ovoko_title','ovoko_status','ovoko_quantity','action','notes']);
+            fputcsv($out, ['part_id','part_number','name','ovoko_external_offer_id','storefront_price_pln','current_ovoko_price_pln','ovoko_api_price','ovoko_api_currency','ovoko_original_price','ovoko_original_currency','ovoko_api_price_pln','price_source','price_import_safe','difference','ovoko_title','ovoko_status','ovoko_quantity','action','notes']);
             foreach ($rows as $row) {
                 fputcsv($out, [
                     $row['part_id'], $row['part_number'], $row['name'], $row['ovoko_external_offer_id'],
-                    $row['storefront_price_pln'], $row['current_ovoko_price_pln'], $row['ovoko_api_price_pln'],
+                    $row['storefront_price_pln'], $row['current_ovoko_price_pln'], $row['ovoko_api_price'],
+                    $row['ovoko_api_currency'], $row['ovoko_original_price'], $row['ovoko_original_currency'],
+                    $row['ovoko_api_price_pln'], $row['price_source'], $row['price_import_safe'] ? 'true' : 'false',
                     $row['difference'], $row['ovoko_title'], $row['ovoko_status'], $row['ovoko_quantity'],
                     $row['action'], implode('; ', $row['notes']),
                 ]);
             }
             fclose($out);
         }, 'ovoko_price_import_'.now()->format('Ymd_His').'.csv', ['Content-Type' => 'text/csv; charset=UTF-8']);
+    }
+
+    public function debugPriceFields(Request $request, MarketplaceApiManager $manager): JsonResponse
+    {
+        if ($forbidden = $this->guard($request)) return $forbidden;
+
+        $ovokoPartId = (string) $request->query('ovoko_part_id', '');
+        if ($ovokoPartId === '') {
+            return response()->json(['ok' => false, 'error_message' => 'Missing ovoko_part_id.'], 422);
+        }
+
+        $client = $manager->client('ovoko');
+        if (! $client instanceof OvokoApiClient) {
+            return response()->json(['ok' => false, 'blockers' => ['ovoko_client_unavailable']], 422);
+        }
+
+        $readiness = $client->getAccountReadiness();
+        $blockers = $readiness['blockers'] ?? [];
+        if ($blockers !== []) {
+            return response()->json(['ok' => false, 'blockers' => $blockers], 422);
+        }
+
+        $limit = max(1, min((int) $request->query('limit', 200), 1000));
+        $maxPages = max(1, min((int) $request->query('max_pages', 50), 200));
+        $diagnostics = null;
+
+        for ($page = 1; $page <= $maxPages; $page++) {
+            try {
+                $result = $client->fetchPartsPage($page, $limit);
+            } catch (Throwable) {
+                return response()->json(['ok' => false, 'blockers' => ['ovoko_api_request_failed'], 'diagnostics' => $client->safeExceptionDiagnostics($page, $limit, 'Ovoko/RRR API request failed without exposing credentials.')], 502);
+            }
+
+            $diagnostics ??= $result['diagnostics'] ?? null;
+            if (! ($result['api_ok'] ?? false)) {
+                return response()->json(['ok' => false, 'blockers' => ['ovoko_api_non_success_status'], 'diagnostics' => $result['diagnostics'] ?? null], 502);
+            }
+
+            foreach (($result['parts'] ?? []) as $item) {
+                if ((string) ($item['external_offer_id'] ?? '') !== $ovokoPartId) continue;
+
+                return response()->json([
+                    'ok' => true,
+                    'ovoko_part_id' => $ovokoPartId,
+                    'price' => $item['price'] ?? null,
+                    'currency' => $item['currency'] ?? null,
+                    'original_price' => $item['original_price'] ?? null,
+                    'original_currency' => $item['original_currency'] ?? null,
+                    'price_resolution' => $this->resolveApiPricePln($item),
+                ]);
+            }
+
+            if (count($result['parts'] ?? []) < ($result['limit'] ?? $limit)) break;
+        }
+
+        return response()->json(['ok' => false, 'ovoko_part_id' => $ovokoPartId, 'blockers' => ['ovoko_part_not_found_in_fetched_pages'], 'diagnostics' => $diagnostics], 404);
     }
 
     public function import(Request $request, MarketplaceApiManager $manager): JsonResponse
@@ -62,6 +120,7 @@ class OvokoPriceImportController extends Controller
         DB::transaction(function () use ($comparison, &$updated): void {
             foreach ($comparison['rows_for_export'] as $row) {
                 if (($row['action'] ?? null) !== 'would_update_ovoko_price') continue;
+                if (($row['price_import_safe'] ?? false) !== true) continue;
                 Part::query()->whereKey($row['part_id'])->update(['ovoko_price' => $row['ovoko_api_price_pln']]);
                 if (count($updated) < 10) $updated[] = $row + ['action' => 'updated_ovoko_price'];
             }
@@ -138,7 +197,9 @@ class OvokoPriceImportController extends Controller
             $part = $listing?->part;
             if (! $part) { $summary['unmatched_api_items_count']++; $this->push($summary['sample_unmatched_api_items'], $item); continue; }
             $summary['matched_to_part_count']++;
-            $apiPrice = $this->money($item['price']);
+            $resolution = $this->resolveApiPricePln($item);
+            $apiPrice = $resolution['ovoko_api_price_pln'];
+            $safe = $resolution['price_import_safe'];
             $local = $this->money($part->ovoko_price);
             $diff = $apiPrice !== null && $local !== null ? round($apiPrice - $local, 2) : null;
             $same = $apiPrice !== null && $local !== null && abs($diff) < 0.01;
@@ -147,9 +208,10 @@ class OvokoPriceImportController extends Controller
             if ($missing) $summary['missing_local_ovoko_price_count']++;
             if ($same) $summary['same_price_count']++;
             if ($different) $summary['different_price_count']++;
-            $action = ($apiPrice !== null && ($missing || (! $onlyMissing && $different))) ? 'would_update_ovoko_price' : 'skip';
+            $action = ($safe && $apiPrice !== null && ($missing || (! $onlyMissing && $different))) ? 'would_update_ovoko_price' : 'skip';
             if ($changedOnly && $action === 'skip') continue;
-            $row = ['part_id'=>$part->id,'part_number'=>$part->part_number,'name'=>$part->name,'ovoko_external_offer_id'=>(string)$item['external_offer_id'],'storefront_price_pln'=>$this->money($part->price),'current_ovoko_price_pln'=>$local,'ovoko_api_price_pln'=>$apiPrice,'difference'=>$diff,'ovoko_title'=>$item['title'],'ovoko_status'=>$item['status'],'ovoko_quantity'=>$item['quantity'],'action'=>$action,'notes'=>array_values(array_filter([$missing ? 'missing_local_ovoko_price' : null, $different ? 'different_price' : null, $same ? 'same_price' : null, $apiPrice === null ? 'missing_api_price' : null]))];
+            $notes = array_values(array_filter(array_merge([$missing ? 'missing_local_ovoko_price' : null, $different ? 'different_price' : null, $same ? 'same_price' : null, $apiPrice === null ? 'missing_api_price_pln' : null], $resolution['warnings'])));
+            $row = ['part_id'=>$part->id,'part_number'=>$part->part_number,'name'=>$part->name,'ovoko_external_offer_id'=>(string)$item['external_offer_id'],'storefront_price_pln'=>$this->money($part->price),'current_ovoko_price_pln'=>$local,'ovoko_api_price'=>$this->money($item['price'] ?? null),'ovoko_api_currency'=>$this->currency($item['currency'] ?? null),'ovoko_original_price'=>$this->money($item['original_price'] ?? null),'ovoko_original_currency'=>$this->currency($item['original_currency'] ?? null),'ovoko_api_price_pln'=>$apiPrice,'price_source'=>$resolution['price_source'],'price_import_safe'=>$safe,'difference'=>$diff,'ovoko_title'=>$item['title'],'ovoko_status'=>$item['status'],'ovoko_quantity'=>$item['quantity'],'action'=>$action,'notes'=>$notes];
             $summary[$action === 'would_update_ovoko_price' ? 'would_update_count' : 'would_skip_count']++;
             $summary['rows_for_export'][] = $row;
             if ($action === 'would_update_ovoko_price') $this->push($summary['sample_would_update'], $row);
@@ -181,6 +243,33 @@ class OvokoPriceImportController extends Controller
             ->toString();
     }
 
+    private function resolveApiPricePln(array $item): array
+    {
+        $price = $this->money($item['price'] ?? null);
+        $currency = $this->currency($item['currency'] ?? null);
+        $originalPrice = $this->money($item['original_price'] ?? null);
+        $originalCurrency = $this->currency($item['original_currency'] ?? null);
+
+        if ($originalCurrency === 'PLN' && $originalPrice !== null && $originalPrice > 0) {
+            return ['ovoko_api_price_pln' => $originalPrice, 'price_source' => 'original_price_pln', 'price_import_safe' => true, 'warnings' => []];
+        }
+
+        if ($originalCurrency === 'EUR') {
+            return ['ovoko_api_price_pln' => null, 'price_source' => 'blocked_original_price_eur', 'price_import_safe' => false, 'warnings' => ['blocked_original_price_eur_no_auto_conversion']];
+        }
+
+        if ($originalPrice === null && $currency === 'PLN' && $price !== null && $price > 0) {
+            return ['ovoko_api_price_pln' => $price, 'price_source' => 'price_pln', 'price_import_safe' => true, 'warnings' => []];
+        }
+
+        if ($currency === 'EUR') {
+            return ['ovoko_api_price_pln' => null, 'price_source' => 'blocked_price_eur', 'price_import_safe' => false, 'warnings' => ['blocked_price_eur_no_auto_conversion']];
+        }
+
+        return ['ovoko_api_price_pln' => null, 'price_source' => null, 'price_import_safe' => false, 'warnings' => ['missing_confirmed_pln_price']];
+    }
+
+    private function currency(mixed $value): ?string { return is_string($value) && trim($value) !== '' ? strtoupper(trim($value)) : null; }
     private function money(mixed $value): ?float { return is_numeric($value) ? round((float) $value, 2) : null; }
     private function push(array &$bucket, array $row): void { if (count($bucket) < 10) $bucket[] = $row; }
 }
