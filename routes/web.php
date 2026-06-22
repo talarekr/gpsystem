@@ -52,6 +52,7 @@ use App\Http\Controllers\Tools\LastLaravelErrorController;
 use App\Http\Controllers\Tools\MarkGpsGmailToListDryRunController;
 use App\Http\Controllers\Tools\MarkGpsGmailToListLiveController;
 use App\Http\Controllers\Tools\FixImportedImagesPublicFilesController;
+use App\Http\Controllers\Tools\GpswissPublicHtmlController;
 use App\Http\Controllers\Tools\ImportedImagesStorageReportController;
 use App\Http\Controllers\Tools\InspectLegacyPayloadKeysController;
 use App\Http\Controllers\Tools\PhotoStorageReportController;
@@ -115,6 +116,8 @@ Route::get('/product-images-dry-run', ProductImagesDryRunController::class)->nam
 Route::get('/product-images-import', ProductImagesImportController::class)->name('tools.product-images-import');
 Route::get('/product-images-import-runner', ProductImagesImportRunnerController::class)->name('tools.product-images-import-runner');
 Route::get('/tools/check-product-image', CheckProductImageController::class)->name('tools.check-product-image');
+Route::get('/tools/check-gpswiss-public-html', [GpswissPublicHtmlController::class, 'check'])->name('tools.check-gpswiss-public-html');
+Route::get('/tools/sync-gpswiss-public-html', [GpswissPublicHtmlController::class, 'sync'])->name('tools.sync-gpswiss-public-html');
 Route::get('/tools/check-orders-flow', CheckOrdersFlowController::class)->name('tools.check-orders-flow');
 Route::get('/tools/check-ovoko-mapping', CheckOvokoMappingController::class)->name('tools.check-ovoko-mapping');
 Route::get('/tools/debug-ovoko-part-match', DebugOvokoPartMatchController::class)->name('tools.debug-ovoko-part-match');
