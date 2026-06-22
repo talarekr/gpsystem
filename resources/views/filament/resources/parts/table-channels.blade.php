@@ -58,9 +58,7 @@
         }
 
 
-        .gps-admin-channels .part-channel-status,
-        .gps-admin-channels .part-channel-status--link,
-        .gps-admin-channels a.part-channel-status--link {
+        .gps-admin-channels .part-channel-status {
             display: inline;
             flex: 0 0 auto;
             width: auto;
@@ -77,20 +75,11 @@
             vertical-align: baseline;
         }
 
-        .gps-admin-channels .part-channel-status--link:hover,
-        .gps-admin-channels a.part-channel-status--link:hover {
-            text-decoration: underline;
-        }
-
-        .gps-admin-channels .part-channel-status.is-listed,
-        .gps-admin-channels .part-channel-status--link.is-listed,
-        .gps-admin-channels a.part-channel-status--link.is-listed {
+        .gps-admin-channels .part-channel-status.is-listed {
             color: #16a34a;
         }
 
-        .gps-admin-channels .part-channel-status.is-not-listed,
-        .gps-admin-channels .part-channel-status--link.is-not-listed,
-        .gps-admin-channels a.part-channel-status--link.is-not-listed {
+        .gps-admin-channels .part-channel-status.is-not-listed {
             color: #dc2626;
         }
 
@@ -109,22 +98,11 @@
             <div class="part-channel-row">
                 <span class="part-channel-label">{{ $row['label'] }}:</span>
                 <span class="part-channel-price">{{ $row['price'] }}</span>
-                @if ($row['listed'] && $row['url'])
-                    <a
-                        class="part-channel-status part-channel-status--link is-listed"
-                        href="{{ $row['url'] }}"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        title="{{ $row['title'] }}"
-                        aria-label="{{ $row['title'] }}"
-                    >✓</a>
-                @else
-                    <span
-                        class="part-channel-status {{ $row['listed'] ? 'is-listed' : 'is-not-listed' }}"
-                        title="{{ $row['title'] }}"
-                        aria-label="{{ $row['title'] }}"
-                    >{{ $row['listed'] ? '✓' : '✕' }}</span>
-                @endif
+                <span
+                    class="part-channel-status {{ $row['listed'] ? 'is-listed' : 'is-not-listed' }}"
+                    title="{{ $row['title'] }}"
+                    aria-label="{{ $row['title'] }}"
+                >{{ $row['listed'] ? '✓' : '✕' }}</span>
             </div>
         @endforeach
     @endif
