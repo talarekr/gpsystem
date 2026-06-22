@@ -8,11 +8,11 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class MarketplaceListing extends Model
 {
-    protected $fillable = ['marketplace','marketplace_account_id','part_id','external_offer_id','external_listing_id','external_inventory_id','sku','title','price','quantity','currency','status','url','raw_payload','sync_status','match_status','match_confidence','match_reason','last_synced_at','last_error'];
+    protected $fillable = ['marketplace','marketplace_account_id','part_id','external_offer_id','external_listing_id','external_inventory_id','sku','title','price','quantity','currency','status','url','raw_payload','sync_status','match_status','match_confidence','match_reason','last_synced_at','last_seen_at','last_api_status','not_seen_in_active_api_at','last_error'];
 
     protected function casts(): array
     {
-        return ['raw_payload' => 'array', 'price' => 'decimal:2', 'quantity' => 'integer', 'last_synced_at' => 'datetime'];
+        return ['raw_payload' => 'array', 'price' => 'decimal:2', 'quantity' => 'integer', 'last_synced_at' => 'datetime', 'last_seen_at' => 'datetime', 'not_seen_in_active_api_at' => 'datetime'];
     }
 
     public function account(): BelongsTo

@@ -426,7 +426,7 @@ class PartResource extends Resource
         return $table
             ->modifyQueryUsing(fn (Builder $query): Builder => $query->with([
                 'images:id,part_id,path,sort_order,is_primary',
-                'marketplaceListings:id,part_id,marketplace,external_offer_id,price,currency,status,sync_status,match_status,last_error,url',
+                'marketplaceListings:id,part_id,marketplace,external_offer_id,price,currency,status,sync_status,match_status,last_error,url,last_api_status,last_seen_at,not_seen_in_active_api_at',
                 'storageLocation:id,name,description',
                 'category:id,name',
                 'car:id,make,model,model_variant,production_year,first_registration_year',

@@ -21,7 +21,8 @@ class PartMarketplaceStatusResolver
         $ebayListings = $this->listedListings($listings, ['ebay_de', 'ebay_fr']);
         $ebay = $ebayListings->first();
         $ebayUrlListing = $ebayListings->first(fn (MarketplaceListing $listing): bool => $this->listingUrl($listing) !== null);
-        $allegro = $this->listedListing($listings, ['allegro', 'allegro_main']);
+        $allegro = $this->allegroListing($listings);
+        $allegroListed = $this->isActiveAllegroListing($allegro);
 
         $storefrontVisible = ! $part->needs_listing
             && ! in_array($part->status, ['sold', 'archived'], true)
@@ -45,8 +46,41 @@ class PartMarketplaceStatusResolver
             $this->row('storefront', 'Sklep', $part->price, 'zł', $storefrontVisible, null, null, $storefrontVisible ? 'Widoczny w sklepie' : 'Niewidoczny w sklepie'),
             $this->row('ovoko', 'Ovoko', $ovoko?->price, 'zł', $ovoko !== null, $this->externalOfferId($ovoko), $this->listingUrl($ovoko), $ovoko ? 'Oferta Ovoko wystawiona lokalnie' : 'Brak lokalnej oferty Ovoko'),
             $this->row('ebay', 'eBay', $ebayPrice, 'zł', $ebay !== null, $this->externalOfferId($ebay), $this->listingUrl($ebayUrlListing), $ebay ? 'Oferta eBay wystawiona lokalnie' : 'Brak lokalnej oferty eBay', $ebayCalc ? 'calc' : ($ebayMarkets ?: null)),
-            $this->row('allegro', 'Allegro', is_numeric($part->allegro_price) ? $part->allegro_price : $part->price, 'zł', $allegro !== null, $this->externalOfferId($allegro), $this->allegroUrl($allegro), $allegro ? 'Oferta Allegro wystawiona lokalnie' : 'Brak lokalnej oferty Allegro'),
+            $this->row('allegro', 'Allegro', is_numeric($part->allegro_price) ? $part->allegro_price : $part->price, 'zł', $allegroListed, $this->externalOfferId($allegro), $this->allegroUrl($allegro), $this->allegroTitle($allegro, $allegroListed)),
         ];
+    }
+
+
+    /**
+     * @param Collection<int, MarketplaceListing> $listings
+     */
+    private function allegroListing(Collection $listings): ?MarketplaceListing
+    {
+        return $listings
+            ->whereIn('marketplace', ['allegro', 'allegro_main'])
+            ->filter(fn (MarketplaceListing $listing): bool => $this->externalOfferId($listing) !== null)
+            ->sortByDesc(fn (MarketplaceListing $listing): int => $this->isActiveAllegroListing($listing) ? 1 : 0)
+            ->first();
+    }
+
+    private function isActiveAllegroListing(?MarketplaceListing $listing): bool
+    {
+        if (! $listing || $this->externalOfferId($listing) === null) {
+            return false;
+        }
+
+        return $listing->last_api_status === 'ACTIVE' || $listing->status === 'ACTIVE';
+    }
+
+    private function allegroTitle(?MarketplaceListing $listing, bool $listed): string
+    {
+        if (! $listing || $this->externalOfferId($listing) === null) {
+            return 'Brak lokalnej oferty Allegro';
+        }
+
+        return $listed
+            ? 'Oferta Allegro aktywna według ostatniego odświeżenia API'
+            : 'Oferta Allegro nie została znaleziona w ACTIVE API podczas ostatniego odświeżenia';
     }
 
     /**
