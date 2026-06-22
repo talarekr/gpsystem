@@ -14,7 +14,6 @@ class AllegroActiveOfferLinksRefreshService
 {
     private const ACCOUNT_CODE = 'allegro_main';
     private const MARKETPLACE = 'allegro';
-    private const MAX_LIMIT = 5000;
     private const NOT_FOUND_STATUS = 'NOT_FOUND_IN_ACTIVE_API';
 
     public function dryRun(int $limit = 5000, string $status = 'ACTIVE'): array
@@ -61,13 +60,17 @@ class AllegroActiveOfferLinksRefreshService
 
     private function report(int $limit, string $status, bool $live): array
     {
-        $limit = max(1, min($limit, self::MAX_LIMIT));
+        $limit = max(1, $limit);
         $blockers = $this->tableBlockers($live);
         if ($blockers !== []) return ['ok' => false, 'warnings' => [], 'blockers' => $blockers];
 
         $api = $this->fetchOffers($limit, $status);
-        if ($live && is_int($api['total_count']) && $api['total_count'] > count($api['offers'])) {
-            $api['blockers'][] = 'Refusing live refresh because API totalCount is greater than api_fetched_count. Increase limit to cover all ACTIVE offers before updating local statuses.';
+        if (is_int($api['total_count']) && $api['total_count'] > count($api['offers'])) {
+            $api['blockers'][] = sprintf(
+                'Partial API fetch: fetched %d of %d active offers. Increase limit or fix pagination.',
+                count($api['offers']),
+                $api['total_count']
+            );
         }
         $apiIds = array_values(array_unique(array_filter(Arr::pluck($api['offers'], 'allegro_offer_id'))));
         $apiSet = array_fill_keys($apiIds, true);
@@ -77,15 +80,19 @@ class AllegroActiveOfferLinksRefreshService
         $localSet = array_fill_keys($localRows->pluck('external_offer_id')->map(fn ($id) => (string) $id)->all(), true);
         $apiNotLocal = array_values(array_filter($api['offers'], fn ($offer): bool => ! isset($localSet[(string) $offer['allegro_offer_id']])));
 
+        $updatedCount = 0;
         if ($live && $api['blockers'] === []) {
             $now = now();
-            DB::transaction(function () use ($matched, $notSeen, $now): void {
+            $updatedCount = DB::transaction(function () use ($matched, $notSeen, $now): int {
+                $count = 0;
                 if ($matched->isNotEmpty()) {
-                    MarketplaceListing::query()->whereIn('id', $matched->pluck('id'))->update(['status' => 'ACTIVE', 'last_api_status' => 'ACTIVE', 'last_seen_at' => $now, 'updated_at' => $now]);
+                    $count += MarketplaceListing::query()->whereIn('id', $matched->pluck('id'))->update(['status' => 'ACTIVE', 'last_api_status' => 'ACTIVE', 'last_seen_at' => $now, 'updated_at' => $now]);
                 }
                 if ($notSeen->isNotEmpty()) {
-                    MarketplaceListing::query()->whereIn('id', $notSeen->pluck('id'))->update(['status' => self::NOT_FOUND_STATUS, 'last_api_status' => self::NOT_FOUND_STATUS, 'not_seen_in_active_api_at' => $now, 'updated_at' => $now]);
+                    $count += MarketplaceListing::query()->whereIn('id', $notSeen->pluck('id'))->update(['status' => self::NOT_FOUND_STATUS, 'last_api_status' => self::NOT_FOUND_STATUS, 'not_seen_in_active_api_at' => $now, 'updated_at' => $now]);
                 }
+
+                return $count;
             });
         }
 
@@ -93,6 +100,7 @@ class AllegroActiveOfferLinksRefreshService
             'ok' => $api['blockers'] === [],
             'api_total_count' => $api['total_count'],
             'api_fetched_count' => count($api['offers']),
+            'updated_count' => $updatedCount,
             'local_allegro_listings_total' => $this->allegroListingsQuery()->count(),
             'matched_active_listing_count' => $matched->count(),
             'local_listing_not_seen_active_count' => $notSeen->count(),
@@ -167,9 +175,15 @@ class AllegroActiveOfferLinksRefreshService
         $token = (string) (($account->api_credentials ?? [])['access_token'] ?? '');
         if ($token === '' || blank($account->api_base_url)) return ['offers'=>[], 'total_count'=>null, 'warnings'=>[], 'blockers'=>['Allegro access token or API base URL is missing.']];
 
-        $offers = []; $warnings = []; $blockers = []; $offset = 0; $total = null;
-        while (count($offers) < $limit) {
-            $query = ['limit' => min(1000, $limit - count($offers)), 'offset' => $offset];
+        $offersById = []; $warnings = []; $blockers = []; $offset = 0; $total = null;
+        while (count($offersById) < $limit) {
+            $remaining = $limit - count($offersById);
+            if (is_int($total)) {
+                $remaining = min($remaining, max(0, $total - count($offersById)));
+            }
+            if ($remaining <= 0) break;
+
+            $query = ['limit' => min(1000, $remaining), 'offset' => $offset];
             if ($status !== '') $query['publication.status'] = $status;
             $response = Http::withToken($token)->accept('application/vnd.allegro.public.v1+json')->timeout(20)->get(rtrim((string) $account->api_base_url, '/').'/sale/offers', $query);
             if (! $response->successful()) { $blockers[] = 'Allegro /sale/offers read-only request failed with HTTP '.$response->status().'.'; break; }
@@ -177,10 +191,14 @@ class AllegroActiveOfferLinksRefreshService
             if (! is_array($json)) { $blockers[] = 'Allegro /sale/offers returned a non-JSON response.'; break; }
             $total ??= is_numeric($json['totalCount'] ?? null) ? (int) $json['totalCount'] : null;
             $page = array_values(array_filter($json['offers'] ?? [], 'is_array'));
-            foreach ($page as $row) $offers[] = ['allegro_offer_id' => (string) ($row['id'] ?? ''), 'allegro_title' => (string) ($row['name'] ?? ''), 'allegro_status' => data_get($row, 'publication.status')];
+            foreach ($page as $row) {
+                $offerId = (string) ($row['id'] ?? '');
+                if ($offerId === '') continue;
+                $offersById[$offerId] = ['allegro_offer_id' => $offerId, 'allegro_title' => (string) ($row['name'] ?? ''), 'allegro_status' => data_get($row, 'publication.status')];
+            }
             if (count($page) < $query['limit']) break;
             $offset += count($page);
         }
-        return ['offers'=>$offers, 'total_count'=>$total, 'warnings'=>$warnings, 'blockers'=>$blockers];
+        return ['offers'=>array_values($offersById), 'total_count'=>$total, 'warnings'=>$warnings, 'blockers'=>$blockers];
     }
 }
