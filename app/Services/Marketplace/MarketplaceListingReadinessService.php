@@ -125,13 +125,36 @@ class MarketplaceListingReadinessService
         return [
             'channels' => $channels,
             'summary' => [
-                'ready_channels' => array_keys(array_filter($channels, fn ($r) => $r['can_prepare'])),
-                'blocked_channels' => array_keys(array_filter($channels, fn ($r) => $r['blockers'] !== [])),
-                'warning_channels' => array_keys(array_filter($channels, fn ($r) => $r['warnings'] !== [])),
+                'ready_channels' => array_keys(array_filter($channels, fn ($r) => (bool) ($r['can_prepare'] ?? false))),
+                'blocked_channels' => array_keys(array_filter($channels, fn ($r) => ($r['blockers'] ?? []) !== [])),
+                'warning_channels' => array_keys(array_filter($channels, fn ($r) => ($r['warnings'] ?? []) !== [])),
             ],
-            'blockers' => array_values(array_unique(array_merge(...array_map(fn ($r) => $r['blockers'], $channels)))),
-            'warnings' => array_values(array_unique(array_merge(...array_map(fn ($r) => $r['warnings'], $channels)))),
+            'blockers' => $this->collectChannelMessages($channels, 'blockers'),
+            'warnings' => $this->collectChannelMessages($channels, 'warnings'),
         ];
+    }
+
+    /**
+     * @param  array<string, array<string, mixed>>  $channels
+     * @return array<int, mixed>
+     */
+    private function collectChannelMessages(array $channels, string $key): array
+    {
+        $messages = [];
+
+        foreach ($channels as $result) {
+            $channelMessages = $result[$key] ?? [];
+
+            if (! is_array($channelMessages)) {
+                continue;
+            }
+
+            foreach ($channelMessages as $message) {
+                $messages[] = $message;
+            }
+        }
+
+        return array_values(array_unique($messages));
     }
 
     private function failedStageForChannel(string $channel): string { return match ($channel) { 'storefront' => 'storefront_readiness', 'allegro_main' => 'allegro_readiness', 'ovoko' => 'ovoko_readiness', 'ebay_de' => 'ebay_de_readiness', 'ebay_fr' => 'ebay_fr_readiness', default => 'channel_readiness' }; }
