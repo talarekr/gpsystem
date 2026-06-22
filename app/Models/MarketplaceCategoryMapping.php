@@ -10,7 +10,7 @@ class MarketplaceCategoryMapping extends Model
     protected $fillable = [
         'local_category_id', 'channel', 'external_category_id', 'external_category_name', 'external_category_path',
         'local_category_name', 'local_category_path', 'old_category_id', 'source', 'confidence', 'is_blocked',
-        'block_reason', 'shipping_group', 'fulfillment_policy_id', 'metadata', 'imported_at',
+        'block_reason', 'shipping_group', 'fulfillment_policy_id', 'notes', 'metadata', 'imported_at',
     ];
 
     protected function casts(): array
