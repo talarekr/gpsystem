@@ -173,8 +173,7 @@ class PartResource extends Resource
                             ->prefix('PLN')
                             ->minValue(0)
                             ->readOnly(),
-                        Forms\Components\TextInput::make('currency')->label('Waluta')->hiddenLabel()->placeholder('Waluta')->default('PLN')->maxLength(3),
-                        Forms\Components\Placeholder::make('marketplace_price_note')->hiddenLabel()->content('eBay price is stored in PLN. EUR conversion will happen later during eBay listing/sync using NBP table A.'),
+                        Forms\Components\Hidden::make('currency')->default('PLN'),
                     ]),
 
             ]);
