@@ -137,10 +137,44 @@ class PartResource extends Resource
                     ->columns(4)
                     ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--prices'])
                     ->schema([
-                        Forms\Components\TextInput::make('price')->label('Cena')->hiddenLabel()->placeholder('Cena')->numeric()->prefix('PLN')->minValue(0),
+                        Forms\Components\TextInput::make('price')
+                            ->label('Cena sklep')
+                            ->numeric()
+                            ->prefix('PLN')
+                            ->minValue(0)
+                            ->live(onBlur: true)
+                            ->afterStateUpdated(function (Forms\Set $set, mixed $state): void {
+                                if (! is_numeric($state)) {
+                                    $set('allegro_price', null);
+                                    $set('ebay_price', null);
+
+                                    return;
+                                }
+
+                                $storefrontPrice = round((float) $state, 2);
+
+                                $set('allegro_price', number_format($storefrontPrice, 2, '.', ''));
+                                $set('ebay_price', number_format(round($storefrontPrice * 1.25, 2), 2, '.', ''));
+                            }),
+                        Forms\Components\TextInput::make('allegro_price')
+                            ->label('Cena Allegro')
+                            ->numeric()
+                            ->prefix('PLN')
+                            ->minValue(0)
+                            ->readOnly(),
+                        Forms\Components\TextInput::make('ovoko_price')
+                            ->label('Cena Ovoko')
+                            ->numeric()
+                            ->prefix('PLN')
+                            ->minValue(0),
+                        Forms\Components\TextInput::make('ebay_price')
+                            ->label('Cena eBay')
+                            ->numeric()
+                            ->prefix('PLN')
+                            ->minValue(0)
+                            ->readOnly(),
                         Forms\Components\TextInput::make('currency')->label('Waluta')->hiddenLabel()->placeholder('Waluta')->default('PLN')->maxLength(3),
-                        Forms\Components\TextInput::make('ebay_price')->label('Cena eBay')->hiddenLabel()->placeholder('Cena eBay')->numeric()->prefix('PLN')->minValue(0),
-                        Forms\Components\Placeholder::make('marketplace_price_note')->hiddenLabel()->content('Cena Allegro istnieje w bazie, ale sekcja Allegro i wystawianie są celowo ukryte na tym etapie.'),
+                        Forms\Components\Placeholder::make('marketplace_price_note')->hiddenLabel()->content('eBay price is stored in PLN. EUR conversion will happen later during eBay listing/sync using NBP table A.'),
                     ]),
 
             ]);

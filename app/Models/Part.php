@@ -21,7 +21,7 @@ class Part extends Model
     protected $fillable = [
         'source_system','external_id','sku','name','slug','legacy_url','legacy_slug','part_number','oem_number','manufacturer_code','short_description','description','condition_notes','code_photo_path',
         'category_id','suggested_category_id','category_confidence','category_suggestion_reason','category_needs_review',
-        'car_id','vehicle_snapshot','legacy_payload','storage_location_id','price','currency','allegro_price','ebay_price','quantity','status',
+        'car_id','vehicle_snapshot','legacy_payload','storage_location_id','price','currency','allegro_price','ovoko_price','ebay_price','quantity','status',
         'is_visible_storefront','needs_listing','created_by',
     ];
 
@@ -34,6 +34,7 @@ class Part extends Model
             'category_needs_review' => 'boolean',
             'price' => 'decimal:2',
             'allegro_price' => 'decimal:2',
+            'ovoko_price' => 'decimal:2',
             'ebay_price' => 'decimal:2',
             'quantity' => 'integer',
             'is_visible_storefront' => 'boolean',
@@ -57,6 +58,14 @@ class Part extends Model
         static::saving(function (Part $part): void {
             if ($part->isDirty('car_id')) {
                 $part->fillVehicleSnapshot();
+            }
+
+            // eBay price is stored in PLN. EUR conversion will happen later during eBay listing/sync using NBP table A.
+            if (is_numeric($part->price)) {
+                $storefrontPrice = round((float) $part->price, 2);
+
+                $part->allegro_price = $storefrontPrice;
+                $part->ebay_price = round($storefrontPrice * 1.25, 2);
             }
         });
     }
