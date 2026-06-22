@@ -15,6 +15,7 @@
 
 @once
     <style>
+        .gps-admin-channels,
         .gps-admin-channels.part-channel-list {
             display: flex;
             flex-direction: column;
@@ -28,10 +29,10 @@
 
         .gps-admin-channels .part-channel-row {
             display: grid;
-            grid-template-columns: 62px 100px 28px 18px 18px;
+            grid-template-columns: 62px 105px 18px 18px;
             column-gap: 4px;
             align-items: center;
-            width: 230px;
+            width: 100%;
             max-width: none;
             font-size: 12px;
             line-height: 1.35;
@@ -53,14 +54,6 @@
             white-space: nowrap;
         }
 
-        .gps-admin-channels .part-channel-note {
-            overflow: visible;
-            color: #94a3b8;
-            font-size: 11px;
-            font-weight: 400;
-            text-transform: lowercase;
-            white-space: nowrap;
-        }
 
         .gps-admin-channels .part-channel-status,
         .gps-admin-channels .part-channel-link,
@@ -112,7 +105,6 @@
         <div class="part-channel-row">
             <span class="part-channel-label">—</span>
             <span class="part-channel-price">—</span>
-            <span class="part-channel-note"></span>
             <span class="part-channel-status part-channel-status--missing" title="Brak rekordu">✕</span>
             <span class="part-channel-link-placeholder" aria-hidden="true"></span>
         </div>
@@ -121,7 +113,6 @@
             <div class="part-channel-row">
                 <span class="part-channel-label">{{ $row['label'] }}:</span>
                 <span class="part-channel-price">{{ $row['price'] }}</span>
-                <span class="part-channel-note">{{ $row['note'] ?: '' }}</span>
                 <span
                     class="part-channel-status {{ $row['listed'] ? 'part-channel-status--ok' : 'part-channel-status--missing' }}"
                     title="{{ $row['title'] }}"
