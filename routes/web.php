@@ -164,6 +164,7 @@ Route::get('/tools/start-ovoko-price-import-run', [OvokoPriceImportController::c
 Route::get('/tools/ovoko-price-import-runner', [OvokoPriceImportController::class, 'runner'])->name('tools.ovoko-price-import-runner');
 Route::get('/tools/run-ovoko-price-import-batch', [OvokoPriceImportController::class, 'runBatch'])->name('tools.run-ovoko-price-import-batch');
 Route::get('/tools/check-ovoko-price-import-run', [OvokoPriceImportController::class, 'checkRun'])->name('tools.check-ovoko-price-import-run');
+Route::get('/tools/resume-ovoko-price-import-run', [OvokoPriceImportController::class, 'resumeRun'])->name('tools.resume-ovoko-price-import-run');
 Route::get('/tools/check-allegro-api-settings', [MarketplaceApiSettingsDiagnosticsController::class, 'allegro'])->name('tools.check-allegro-api-settings');
 Route::get('/tools/check-allegro-oauth-readiness', CheckAllegroOAuthReadinessController::class)->name('tools.check-allegro-oauth-readiness');
 Route::get('/tools/check-allegro-product-mapping-candidates', CheckAllegroProductMappingCandidatesController::class)->name('tools.check-allegro-product-mapping-candidates');

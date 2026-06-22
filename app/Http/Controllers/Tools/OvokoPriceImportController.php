@@ -20,6 +20,8 @@ class OvokoPriceImportController extends Controller
     private const TOKEN = 'gps_images_import_2026';
     private const RUN_TYPE = 'ovoko_price_import';
     private const BATCH_SIZE = 100;
+    private const MAX_BATCH_RETRIES = 3;
+    private const RETRY_DELAYS_SECONDS = [2, 5, 10];
 
 
     public function startRun(Request $request, MarketplaceApiManager $manager): JsonResponse
@@ -95,6 +97,33 @@ HTML)->header('Content-Type', 'text/html; charset=UTF-8');
         return response()->json($this->statusPayload($run));
     }
 
+    public function resumeRun(Request $request): JsonResponse
+    {
+        if ($forbidden = $this->guard($request)) return $forbidden;
+        $runId = (string) $request->query('run_id', '');
+
+        return $this->withRunLock($runId, function () use ($runId) {
+            $run = $this->readRun($runId);
+            if (! $run) return response()->json(['ok' => false, 'blockers' => ['run_not_found']], 404);
+
+            $failedPage = (int) ($run['failed_page'] ?? $run['current_page'] ?? 0);
+            if (($run['status'] ?? null) !== 'failed' || $failedPage < 1) {
+                return response()->json(array_merge($this->statusPayload($run), ['ok' => false, 'blockers' => ['run_is_not_resumable']]), 422);
+            }
+
+            $run['ok'] = true;
+            $run['status'] = 'pending';
+            $run['failed_page'] = $failedPage;
+            $run['current_page'] = $failedPage;
+            $run['retry_count'] = 0;
+            $run['finished_at'] = null;
+            $run['blockers'] = [];
+            $this->writeRun($run);
+
+            return response()->json($this->statusPayload($run));
+        });
+    }
+
     public function runBatch(Request $request, MarketplaceApiManager $manager): JsonResponse
     {
         if ($forbidden = $this->guard($request)) return $forbidden;
@@ -108,11 +137,8 @@ HTML)->header('Content-Type', 'text/html; charset=UTF-8');
             $client = $manager->client('ovoko');
             if (! $client instanceof OvokoApiClient) return $this->failRun($run, ['ovoko_client_unavailable']);
 
-            try { $result = $client->fetchPartsPage($page, self::BATCH_SIZE); }
-            catch (Throwable) { return $this->failRun($run, ['ovoko_api_request_failed'], $client->safeExceptionDiagnostics($page, self::BATCH_SIZE, 'Ovoko/RRR API request failed without exposing credentials.')); }
-            if (! ($result['api_ok'] ?? false)) {
-                return $this->failRun($run, ['ovoko_api_non_success_status: '.($result['api_status_code'] ?? 'missing').'; '.$this->safeMessage($result['error'] ?? null)], $result['diagnostics'] ?? null);
-            }
+            $result = $this->fetchPartsPageWithRetry($client, $run, $page);
+            if ($result instanceof JsonResponse) return $result;
 
             $items = $result['parts'] ?? [];
             $run['api_total_count'] ??= $result['total_count'] ?? null;
@@ -356,7 +382,8 @@ HTML)->header('Content-Type', 'text/html; charset=UTF-8');
             'status' => 'pending', 'batch_size' => self::BATCH_SIZE, 'started_at' => now()->toIso8601String(), 'finished_at' => null,
             'current_page' => 1, 'api_total_count' => null, 'processed_count_total' => 0, 'matched_to_part_count_total' => 0,
             'would_update_count_total' => 0, 'updated_count_total' => 0, 'skipped_count_total' => 0, 'unmatched_count_total' => 0,
-            'unsafe_price_count_total' => 0, 'warnings' => [], 'blockers' => [],
+            'unsafe_price_count_total' => 0, 'failed_page' => null, 'last_error_safe' => null, 'retry_count' => 0,
+            'last_failed_at' => null, 'warnings' => [], 'blockers' => [],
         ];
     }
 
@@ -383,18 +410,22 @@ HTML)->header('Content-Type', 'text/html; charset=UTF-8');
             $batch['skipped_count']++; $run['skipped_count_total']++;
             return;
         }
-        $batch['would_update_count']++; $run['would_update_count_total']++;
-        $this->push($batch['sample_would_update'], $sample);
-        if ($run['mode'] === 'live') {
-            $changed = Part::query()->whereKey($part->id)->where(function ($q) use ($apiPrice): void {
-                $q->whereNull('ovoko_price')->orWhere('ovoko_price', '!=', $apiPrice);
-            })->update(['ovoko_price' => $apiPrice]);
-            if ($changed > 0) {
-                $batch['updated_count']++; $run['updated_count_total']++;
-                $this->push($batch['sample_updated'], $sample + ['action' => 'updated_ovoko_price']);
-            } else {
-                $batch['skipped_count']++; $run['skipped_count_total']++;
-            }
+        if ($run['mode'] !== 'live') {
+            $batch['would_update_count']++; $run['would_update_count_total']++;
+            $this->push($batch['sample_would_update'], $sample);
+            return;
+        }
+
+        $changed = Part::query()->whereKey($part->id)->where(function ($q) use ($apiPrice): void {
+            $q->whereNull('ovoko_price')->orWhere('ovoko_price', '!=', $apiPrice);
+        })->update(['ovoko_price' => $apiPrice]);
+        if ($changed > 0) {
+            $batch['would_update_count']++; $run['would_update_count_total']++;
+            $batch['updated_count']++; $run['updated_count_total']++;
+            $this->push($batch['sample_would_update'], $sample);
+            $this->push($batch['sample_updated'], $sample + ['action' => 'updated_ovoko_price']);
+        } else {
+            $batch['skipped_count']++; $run['skipped_count_total']++;
         }
     }
 
@@ -412,12 +443,86 @@ HTML)->header('Content-Type', 'text/html; charset=UTF-8');
 
     private function statusPayload(array $run): array
     {
-        return collect($run)->only(['ok','run_id','mode','status','started_at','finished_at','current_page','batch_size','api_total_count','processed_count_total','matched_to_part_count_total','would_update_count_total','updated_count_total','skipped_count_total','unmatched_count_total','unsafe_price_count_total','warnings','blockers'])->all();
+        $payload = collect($run)->only(['ok','run_id','mode','status','started_at','finished_at','current_page','batch_size','api_total_count','processed_count_total','matched_to_part_count_total','would_update_count_total','updated_count_total','skipped_count_total','unmatched_count_total','unsafe_price_count_total','failed_page','last_error_safe','retry_count','last_failed_at','warnings','blockers'])->all();
+        $payload['can_resume'] = ($run['status'] ?? null) === 'failed' && (int) ($run['failed_page'] ?? $run['current_page'] ?? 0) > 0;
+        $payload['resume_url'] = $payload['can_resume'] ? url('/tools/resume-ovoko-price-import-run').'?'.http_build_query(['token'=>self::TOKEN,'run_id'=>$run['run_id']]) : null;
+        $payload['runner_url'] = url('/tools/ovoko-price-import-runner').'?'.http_build_query(['token'=>self::TOKEN,'run_id'=>$run['run_id']]);
+
+        return $payload;
     }
 
-    private function failRun(array $run, array $blockers, ?array $diagnostics = null): JsonResponse
+    private function fetchPartsPageWithRetry(OvokoApiClient $client, array &$run, int $page): array|JsonResponse
     {
-        $run['ok'] = false; $run['status'] = 'failed'; $run['blockers'] = array_values(array_merge($run['blockers'] ?? [], $blockers)); $run['finished_at'] = now()->toIso8601String();
+        $lastResult = null;
+        $lastDiagnostics = null;
+        $lastBlocker = 'ovoko_api_request_failed';
+
+        for ($attempt = 1; $attempt <= self::MAX_BATCH_RETRIES; $attempt++) {
+            $run['retry_count'] = $attempt - 1;
+
+            try {
+                $result = $client->fetchPartsPage($page, self::BATCH_SIZE);
+            } catch (Throwable) {
+                $result = [
+                    'api_ok' => false,
+                    'http_status' => null,
+                    'api_status_code' => null,
+                    'error' => 'Ovoko/RRR API request failed without exposing credentials.',
+                    'diagnostics' => $client->safeExceptionDiagnostics($page, self::BATCH_SIZE, 'Ovoko/RRR API request failed without exposing credentials.'),
+                ];
+            }
+
+            $lastResult = $result;
+            $lastDiagnostics = $result['diagnostics'] ?? null;
+
+            if ($result['api_ok'] ?? false) {
+                $run['retry_count'] = 0;
+                $run['failed_page'] = null;
+                $run['last_error_safe'] = null;
+                $run['last_failed_at'] = null;
+
+                return $result;
+            }
+
+            $httpStatus = $result['http_status'] ?? null;
+            $hasJson = $result['has_json_payload'] ?? ! empty($result['diagnostics']['response_top_level_keys'] ?? []);
+            $retryable = in_array($httpStatus, [500, 502, 503, 504], true) || ! $hasJson;
+            $lastBlocker = 'ovoko_api_non_success_status: '.($result['api_status_code'] ?? $httpStatus ?? 'missing').'; '.$this->safeMessage($result['error'] ?? null);
+
+            if (! $retryable || $attempt >= self::MAX_BATCH_RETRIES) {
+                break;
+            }
+
+            sleep(self::RETRY_DELAYS_SECONDS[$attempt - 1] ?? 10);
+        }
+
+        $retryCount = self::MAX_BATCH_RETRIES;
+        if ($lastResult !== null && ! $this->isRetryableOvokoResult($lastResult)) {
+            $retryCount = max(0, (int) ($run['retry_count'] ?? 0));
+        }
+
+        return $this->failRun($run, [$lastBlocker], $lastDiagnostics, $page, $retryCount);
+    }
+
+    private function isRetryableOvokoResult(array $result): bool
+    {
+        $httpStatus = $result['http_status'] ?? null;
+        $hasJson = $result['has_json_payload'] ?? ! empty($result['diagnostics']['response_top_level_keys'] ?? []);
+
+        return in_array($httpStatus, [500, 502, 503, 504], true) || ! $hasJson;
+    }
+
+    private function failRun(array $run, array $blockers, ?array $diagnostics = null, ?int $failedPage = null, int $retryCount = 0): JsonResponse
+    {
+        $run['ok'] = false;
+        $run['status'] = 'failed';
+        $run['failed_page'] = $failedPage ?? (int) ($run['current_page'] ?? 1);
+        $run['current_page'] = (int) $run['failed_page'];
+        $run['last_error_safe'] = implode('; ', array_map(fn ($blocker) => $this->safeMessage($blocker), $blockers));
+        $run['retry_count'] = $retryCount;
+        $run['last_failed_at'] = now()->toIso8601String();
+        $run['blockers'] = array_values(array_merge($run['blockers'] ?? [], $blockers));
+        $run['finished_at'] = now()->toIso8601String();
         if ($diagnostics !== null) $run['warnings'][] = ['safe_api_diagnostics' => $diagnostics];
         $this->writeRun($run);
         return response()->json($this->batchPayload($run, []), 502);
