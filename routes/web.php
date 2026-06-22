@@ -38,6 +38,7 @@ use App\Http\Controllers\Tools\CheckProductImageController;
 use App\Http\Controllers\Tools\CheckStorefrontVisibilityController;
 use App\Http\Controllers\Tools\TestOvokoApiConnectionController;
 use App\Http\Controllers\Tools\OvokoOrdersDryRunController;
+use App\Http\Controllers\Tools\OvokoPriceImportController;
 use App\Http\Controllers\Tools\PartMarketplaceReadinessController;
 use App\Http\Controllers\Tools\ImportOvokoOrdersDryRunController;
 use App\Http\Controllers\Tools\CheckPartNumberPerformanceController;
@@ -155,6 +156,9 @@ Route::get('/tools/check-marketplace-price-coverage', [MarketplaceApiFoundationC
 Route::get('/tools/check-marketplace-stock-readiness', [MarketplaceApiFoundationController::class, 'stockReadiness'])->name('tools.check-marketplace-stock-readiness');
 Route::get('/tools/check-marketplace-linking-health', [MarketplaceApiFoundationController::class, 'linkingHealth'])->name('tools.check-marketplace-linking-health');
 Route::get('/tools/test-ovoko-api-connection', TestOvokoApiConnectionController::class)->name('tools.test-ovoko-api-connection');
+Route::get('/tools/check-ovoko-price-import', [OvokoPriceImportController::class, 'check'])->name('tools.check-ovoko-price-import');
+Route::get('/tools/export-ovoko-price-import', [OvokoPriceImportController::class, 'export'])->name('tools.export-ovoko-price-import');
+Route::get('/tools/import-ovoko-prices', [OvokoPriceImportController::class, 'import'])->name('tools.import-ovoko-prices');
 Route::get('/tools/check-allegro-api-settings', [MarketplaceApiSettingsDiagnosticsController::class, 'allegro'])->name('tools.check-allegro-api-settings');
 Route::get('/tools/check-allegro-oauth-readiness', CheckAllegroOAuthReadinessController::class)->name('tools.check-allegro-oauth-readiness');
 Route::get('/tools/check-allegro-product-mapping-candidates', CheckAllegroProductMappingCandidatesController::class)->name('tools.check-allegro-product-mapping-candidates');
