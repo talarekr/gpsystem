@@ -43,6 +43,8 @@ use App\Http\Controllers\Tools\CheckPartNumberPerformanceController;
 use App\Http\Controllers\Tools\CheckPartsToListController;
 use App\Http\Controllers\Tools\CheckAllegroChannelsController;
 use App\Http\Controllers\Tools\CheckAllegroOAuthReadinessController;
+use App\Http\Controllers\Tools\CheckAllegroProductMappingCandidatesController;
+use App\Http\Controllers\Tools\ExportAllegroProductMappingCandidatesController;
 use App\Http\Controllers\Tools\CheckAdminPartsTableUiController;
 use App\Http\Controllers\Tools\CheckCatalogSearchController;
 use App\Http\Controllers\Tools\CheckCatalogRenderController;
@@ -146,6 +148,8 @@ Route::get('/tools/check-marketplace-linking-health', [MarketplaceApiFoundationC
 Route::get('/tools/test-ovoko-api-connection', TestOvokoApiConnectionController::class)->name('tools.test-ovoko-api-connection');
 Route::get('/tools/check-allegro-api-settings', [MarketplaceApiSettingsDiagnosticsController::class, 'allegro'])->name('tools.check-allegro-api-settings');
 Route::get('/tools/check-allegro-oauth-readiness', CheckAllegroOAuthReadinessController::class)->name('tools.check-allegro-oauth-readiness');
+Route::get('/tools/check-allegro-product-mapping-candidates', CheckAllegroProductMappingCandidatesController::class)->name('tools.check-allegro-product-mapping-candidates');
+Route::get('/tools/export-allegro-product-mapping-candidates', ExportAllegroProductMappingCandidatesController::class)->name('tools.export-allegro-product-mapping-candidates');
 Route::get('/tools/check-ebay-api-settings', [MarketplaceApiSettingsDiagnosticsController::class, 'ebay'])->name('tools.check-ebay-api-settings');
 Route::get('/tools/test-allegro-api-connection', [MarketplaceApiSettingsDiagnosticsController::class, 'testAllegro'])->name('tools.test-allegro-api-connection');
 Route::get('/tools/test-ebay-api-connection', [MarketplaceApiSettingsDiagnosticsController::class, 'testEbay'])->name('tools.test-ebay-api-connection');
