@@ -3,10 +3,10 @@
 @section('content')
 @php
     $sectionUrls = [
-        'Silniki kompletne' => 'https://gpsystem.thecamels.pl/kategoria-produktu/silnik-i-osprzet/silniki-i-osprzet/kompletne-silniki',
-        'Skrzynia biegów' => 'https://gpsystem.thecamels.pl/kategoria-produktu/uklad-napedowy/skrzynie-biegow-i-inne-elementy/automatyczna-skrzynia-biegow',
-        'Zwrotnice' => 'https://gpsystem.thecamels.pl/kategoria-produktu/os-przednia-i-inne-elementy/os-przednia/zwrotnica-kola-przedniego',
-        'Filtry DPF' => 'https://gpsystem.thecamels.pl/kategoria-produktu/uklad-wydechowy-i-inne-elementy/elementy-systemu-kontroli-spalin/filtr-czastek-stalych-katalizator-fap-dpf',
+        'Silniki kompletne' => route('storefront.category', ['path' => 'silnik-i-osprzet/silniki-i-osprzet/kompletne-silniki']),
+        'Skrzynia biegów' => route('storefront.category', ['path' => 'uklad-napedowy/skrzynie-biegow-i-inne-elementy/automatyczna-skrzynia-biegow']),
+        'Zwrotnice' => route('storefront.category', ['path' => 'os-przednia-i-inne-elementy/os-przednia/zwrotnica-kola-przedniego']),
+        'Filtry DPF' => route('storefront.category', ['path' => 'uklad-wydechowy-i-inne-elementy/elementy-systemu-kontroli-spalin/filtr-czastek-stalych-katalizator-fap-dpf']),
     ];
 @endphp
 
