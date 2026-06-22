@@ -12,6 +12,9 @@ class GoogleTranslateService
     private const PROVIDER = 'google_translate';
     private const SUPPORTED_TARGETS = ['fr', 'de', 'en'];
     private const DEFAULT_SOURCE = 'pl';
+    private const API_TEST_TEXT = 'Oryginalna używana część samochodowa';
+    private const API_TEST_TARGET = 'fr';
+    private const API_TEST_ENDPOINT_FAMILY = 'translate_v2_basic';
 
     /**
      * @return array<string, mixed>
@@ -29,6 +32,7 @@ class GoogleTranslateService
         $credentialsPathExists = $credentialsPathConfigured && is_file($credentialsPath);
         $apiKeyConfigured = $apiKey !== '';
         $apiTestOk = null;
+        $apiTestDetails = $this->emptyApiTestDetails();
 
         if (! $enabled) {
             $blockers[] = 'Google Translate API is disabled. Set GOOGLE_TRANSLATE_ENABLED=true to enable diagnostics calls.';
@@ -51,8 +55,9 @@ class GoogleTranslateService
         }
 
         if ($probeApi && $enabled && $mode === 'dry_run' && $apiKeyConfigured) {
-            $probe = $this->sendApiKeyTranslateRequest('test', 'en', 'pl');
+            $probe = $this->sendApiKeyTranslateRequest(self::API_TEST_TEXT, self::API_TEST_TARGET, self::DEFAULT_SOURCE);
             $apiTestOk = $probe['ok'];
+            $apiTestDetails = $this->apiTestDetails($probe);
 
             if (! $apiTestOk) {
                 $blockers[] = 'Cloud Translation API test request failed: '.$probe['error'];
@@ -66,6 +71,11 @@ class GoogleTranslateService
             'api_mode' => $mode,
             'api_key_configured' => $apiKeyConfigured,
             'api_test_ok' => $apiTestOk,
+            'api_test_http_status' => $apiTestDetails['api_test_http_status'],
+            'google_error_status' => $apiTestDetails['google_error_status'],
+            'google_error_message' => $apiTestDetails['google_error_message'],
+            'google_error_reason' => $apiTestDetails['google_error_reason'],
+            'api_test_endpoint_family' => self::API_TEST_ENDPOINT_FAMILY,
             'project_id_configured' => $projectId !== '',
             'credentials_configured' => $apiKeyConfigured,
             'credentials_path_configured' => $credentialsPathConfigured,
@@ -118,6 +128,10 @@ class GoogleTranslateService
             }
         }
 
+        $apiTestDetails = isset($response) && is_array($response)
+            ? $this->apiTestDetails($response)
+            : $this->emptyApiTestDetails();
+
         return [
             'ok' => $blockers === [],
             'provider' => self::PROVIDER,
@@ -127,6 +141,11 @@ class GoogleTranslateService
             'input_text' => $text,
             'translated_text' => $translatedText,
             'detected_source_language' => $detectedSourceLanguage,
+            'api_test_http_status' => $apiTestDetails['api_test_http_status'],
+            'google_error_status' => $apiTestDetails['google_error_status'],
+            'google_error_message' => $apiTestDetails['google_error_message'],
+            'google_error_reason' => $apiTestDetails['google_error_reason'],
+            'api_test_endpoint_family' => self::API_TEST_ENDPOINT_FAMILY,
             'character_count' => Str::length($text),
             'blockers' => $blockers,
             'warnings' => $warnings,
@@ -183,7 +202,7 @@ class GoogleTranslateService
     }
 
     /**
-     * @return array{ok: bool, translated_text: ?string, detected_source_language: ?string, error: string}
+     * @return array{ok: bool, translated_text: ?string, detected_source_language: ?string, error: string, http_status: ?int, google_error_status: ?string, google_error_message: ?string, google_error_reason: ?string}
      */
     private function sendApiKeyTranslateRequest(string $text, string $target, string $source): array
     {
@@ -195,6 +214,10 @@ class GoogleTranslateService
                 'translated_text' => null,
                 'detected_source_language' => null,
                 'error' => 'GOOGLE_TRANSLATE_API_KEY is not configured.',
+                'http_status' => null,
+                'google_error_status' => null,
+                'google_error_message' => null,
+                'google_error_reason' => null,
             ];
         }
 
@@ -213,15 +236,25 @@ class GoogleTranslateService
                 'translated_text' => null,
                 'detected_source_language' => null,
                 'error' => $this->safeExceptionMessage($e),
+                'http_status' => null,
+                'google_error_status' => null,
+                'google_error_message' => null,
+                'google_error_reason' => null,
             ];
         }
 
         if (! $response->successful()) {
+            $errorDetails = $this->googleErrorDetails($response->json());
+
             return [
                 'ok' => false,
                 'translated_text' => null,
                 'detected_source_language' => null,
                 'error' => 'HTTP '.$response->status().'.',
+                'http_status' => $response->status(),
+                'google_error_status' => $errorDetails['google_error_status'],
+                'google_error_message' => $errorDetails['google_error_message'],
+                'google_error_reason' => $errorDetails['google_error_reason'],
             ];
         }
 
@@ -233,6 +266,10 @@ class GoogleTranslateService
                 'translated_text' => null,
                 'detected_source_language' => null,
                 'error' => 'Response did not include translated text.',
+                'http_status' => $response->status(),
+                'google_error_status' => null,
+                'google_error_message' => null,
+                'google_error_reason' => null,
             ];
         }
 
@@ -241,6 +278,54 @@ class GoogleTranslateService
             'translated_text' => html_entity_decode((string) $translation['translatedText'], ENT_QUOTES | ENT_HTML5, 'UTF-8'),
             'detected_source_language' => $translation['detectedSourceLanguage'] ?? null,
             'error' => '',
+            'http_status' => $response->status(),
+            'google_error_status' => null,
+            'google_error_message' => null,
+            'google_error_reason' => null,
+        ];
+    }
+
+
+    /**
+     * @return array{api_test_http_status: ?int, google_error_status: ?string, google_error_message: ?string, google_error_reason: ?string}
+     */
+    private function emptyApiTestDetails(): array
+    {
+        return [
+            'api_test_http_status' => null,
+            'google_error_status' => null,
+            'google_error_message' => null,
+            'google_error_reason' => null,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $probe
+     * @return array{api_test_http_status: ?int, google_error_status: ?string, google_error_message: ?string, google_error_reason: ?string}
+     */
+    private function apiTestDetails(array $probe): array
+    {
+        return [
+            'api_test_http_status' => $probe['http_status'] ?? null,
+            'google_error_status' => $probe['google_error_status'] ?? null,
+            'google_error_message' => $probe['google_error_message'] ?? null,
+            'google_error_reason' => $probe['google_error_reason'] ?? null,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed>|null $payload
+     * @return array{google_error_status: ?string, google_error_message: ?string, google_error_reason: ?string}
+     */
+    private function googleErrorDetails(?array $payload): array
+    {
+        $error = is_array($payload['error'] ?? null) ? $payload['error'] : [];
+        $firstNestedError = is_array($error['errors'][0] ?? null) ? $error['errors'][0] : [];
+
+        return [
+            'google_error_status' => isset($error['status']) ? $this->safeDiagnosticString((string) $error['status']) : null,
+            'google_error_message' => isset($error['message']) ? $this->safeDiagnosticString((string) $error['message']) : null,
+            'google_error_reason' => isset($firstNestedError['reason']) ? $this->safeDiagnosticString((string) $firstNestedError['reason']) : null,
         ];
     }
 
@@ -250,8 +335,15 @@ class GoogleTranslateService
     }
 
 
+    private function safeDiagnosticString(string $value): string
+    {
+        $redacted = preg_replace('/((?:api[_-]?key|key|token|secret|credential|assertion)\s*[:=]\s*)[^\s,;&]+/i', '$1[redacted_secret]', $value);
+
+        return Str::limit($redacted ?: 'Google Translate request failed.', 300, '...');
+    }
+
     private function safeExceptionMessage(Throwable $e): string
     {
-        return Str::limit(preg_replace('/(key|token|secret|credential|assertion)[^\s,;]*/i', '[redacted_secret]', $e->getMessage()) ?: 'Google Translate request failed.', 300, '...');
+        return $this->safeDiagnosticString($e->getMessage());
     }
 }
