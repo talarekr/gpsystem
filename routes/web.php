@@ -59,6 +59,7 @@ use App\Http\Controllers\Tools\CheckDomainHardcodedLinksController;
 use App\Http\Controllers\Tools\CheckEbayLegacyCategoryMappingsController;
 use App\Http\Controllers\Tools\CheckEbayLegacyShippingMappingsController;
 use App\Http\Controllers\Tools\EbayLegacyCategoryMappingImportController;
+use App\Http\Controllers\Tools\EbayCategoryShippingPolicyCsvImportController;
 use App\Http\Controllers\Tools\CheckFrontendMaintenanceController;
 use App\Http\Controllers\Tools\PostDomainSwitchCheckController;
 use App\Http\Controllers\Tools\CheckCatalogViewStageController;
@@ -189,6 +190,9 @@ Route::get('/tools/check-ebay-legacy-shipping-mappings', CheckEbayLegacyShipping
 Route::get('/tools/import-ebay-legacy-category-mappings-dry-run', [EbayLegacyCategoryMappingImportController::class, 'dryRun'])->name('tools.import-ebay-legacy-category-mappings-dry-run');
 Route::get('/tools/import-ebay-legacy-category-mappings', [EbayLegacyCategoryMappingImportController::class, 'live'])->name('tools.import-ebay-legacy-category-mappings');
 Route::get('/tools/check-marketplace-category-mappings', [EbayLegacyCategoryMappingImportController::class, 'check'])->name('tools.check-marketplace-category-mappings');
+Route::get('/tools/import-ebay-category-shipping-policies-from-csv-dry-run', [EbayCategoryShippingPolicyCsvImportController::class, 'dryRun'])->name('tools.import-ebay-category-shipping-policies-from-csv-dry-run');
+Route::get('/tools/import-ebay-category-shipping-policies-from-csv', [EbayCategoryShippingPolicyCsvImportController::class, 'live'])->name('tools.import-ebay-category-shipping-policies-from-csv');
+Route::get('/tools/check-ebay-category-shipping-coverage', [EbayCategoryShippingPolicyCsvImportController::class, 'coverage'])->name('tools.check-ebay-category-shipping-coverage');
 Route::get('/tools/test-allegro-api-connection', [MarketplaceApiSettingsDiagnosticsController::class, 'testAllegro'])->name('tools.test-allegro-api-connection');
 Route::get('/tools/test-ebay-api-connection', [MarketplaceApiSettingsDiagnosticsController::class, 'testEbay'])->name('tools.test-ebay-api-connection');
 Route::get('/tools/check-ebay-business-policies', [MarketplaceApiSettingsDiagnosticsController::class, 'checkEbayBusinessPolicies'])->name('tools.check-ebay-business-policies');
