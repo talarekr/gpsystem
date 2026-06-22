@@ -6,6 +6,7 @@ use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceListing;
 use App\Models\Part;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Schema;
 
 class MarketplaceListingReadinessService
 {
@@ -16,12 +17,13 @@ class MarketplaceListingReadinessService
     /** @return array<string, mixed> */
     public function checkPartReadiness(Part $part, string $channel): array
     {
-        $part->loadMissing(['images', 'category', 'car', 'marketplaceListings.account']);
         $channel = $channel === 'ebay' ? 'ebay_de' : $channel;
 
         if (! in_array($channel, self::CHANNELS, true)) {
-            throw new \InvalidArgumentException('Unsupported marketplace readiness channel.');
+            return $this->unsupportedChannelResult($part, $channel);
         }
+
+        $this->loadSafeRelations($part);
 
         $required = ['title', 'price', 'quantity', 'images'];
         $missing = [];
@@ -31,22 +33,23 @@ class MarketplaceListingReadinessService
         $marketplace = $this->marketplaceCode($channel);
         $account = $this->accountFor($channel);
         $price = $this->priceFor($part, $channel);
-        $imagesCount = $part->images->count();
+        $images = $this->imagesFor($part);
+        $imagesCount = $images->count();
         $hasActiveListing = $marketplace ? $this->hasActiveListing($part, $marketplace, $channel) : false;
 
-        $this->requireFilled($part->name, 'title', $missing, $blockers);
+        $this->requireFilled($part->name ?? null, 'title', $missing, $blockers);
         $this->requirePositive($price, 'price', $missing, $blockers);
-        $this->requirePositive($part->quantity, 'quantity', $missing, $blockers);
+        $this->requirePositive($part->quantity ?? null, 'quantity', $missing, $blockers);
         if ($imagesCount < 1) {
             $missing[] = 'images';
             $blockers[] = 'At least one part image is required.';
         }
 
-        $categoryReady = filled($part->category_id);
-        $vehicleReady = $part->car_id !== null || is_array($part->vehicle_snapshot);
-        $descriptionReady = filled(strip_tags((string) $part->description)) || filled(strip_tags((string) $part->short_description));
-        $titleReady = filled($part->name);
-        $stockReady = is_numeric($part->quantity) && (int) $part->quantity > 0;
+        $categoryReady = filled($part->category_id ?? null) && ($part->relationLoaded('category') ? $part->category !== null : true);
+        $vehicleReady = filled($part->car_id ?? null) || is_array($part->vehicle_snapshot ?? null);
+        $descriptionReady = filled(strip_tags((string) ($part->description ?? ''))) || filled(strip_tags((string) ($part->short_description ?? '')));
+        $titleReady = filled($part->name ?? null);
+        $stockReady = is_numeric($part->quantity ?? null) && (int) $part->quantity > 0;
 
         if ($hasActiveListing) {
             $blockers[] = 'Part already has an active marketplace listing for this channel.';
@@ -66,14 +69,14 @@ class MarketplaceListingReadinessService
             $this->checkAccount($account, $blockers, $warnings, 'Ovoko API credentials/account are not configured or not enabled.');
             if (! $vehicleReady) { $missing[] = 'vehicle'; $blockers[] = 'Vehicle data is required for Ovoko readiness.'; }
             if (! $categoryReady) { $missing[] = 'ovoko_category_mapping'; $blockers[] = 'Ovoko/RRR category mapping is missing.'; }
-            if (! $descriptionReady && blank($part->condition_notes)) { $missing[] = 'description_or_condition'; $warnings[] = 'Ovoko description or condition notes are missing.'; }
+            if (! $descriptionReady && blank($part->condition_notes ?? null)) { $missing[] = 'description_or_condition'; $warnings[] = 'Ovoko description or condition notes are missing.'; }
         } else {
             $required = ['title', 'ebay_price_pln', 'quantity', 'images', 'translation_credentials', 'description_template', 'business_policies', 'marketplace_country'];
             $this->checkEbayAccount($account, $blockers, $warnings);
-            if (! $this->translationService->isGoogleTranslateConfigured()) { $missing[] = 'translation_credentials'; $warnings[] = 'Google Translate credentials are not configured for later title/description/condition translation dry-runs.'; }
+            if (! $this->isGoogleTranslateConfigured()) { $missing[] = 'translation_credentials'; $warnings[] = 'Google Translate credentials are not configured for later title/description/condition translation dry-runs.'; }
             if (! $this->ebayTemplateExists($channel)) { $missing[] = 'description_template'; $blockers[] = 'eBay description template for '.$channel.' is missing.'; }
             if (! $this->ebayBusinessPoliciesReady($account)) { $missing[] = 'business_policies'; $blockers[] = 'eBay business policies are missing: payment, fulfillment/shipping, or return.'; }
-            $notes['translation'] = ['source_language' => 'PL', 'target_language' => $this->translationService->targetLanguageForChannel($channel), 'fields' => ['title', 'description', 'condition_notes']];
+            $notes['translation'] = ['source_language' => 'PL', 'target_language' => $this->targetLanguageForChannel($channel), 'fields' => ['title', 'description', 'condition_notes']];
         }
 
         $blockers = array_values(array_unique($blockers));
@@ -90,7 +93,7 @@ class MarketplaceListingReadinessService
             'blockers' => $blockers,
             'prepared_payload_preview_safe' => $this->safePayloadPreview($part, $channel, $price),
             'price_source' => $this->priceSource($channel),
-            'local_price' => $part->price !== null ? (float) $part->price : null,
+            'local_price' => is_numeric($part->price ?? null) ? (float) $part->price : null,
             'marketplace_price' => $price,
             'currency' => 'PLN',
             'images_count' => $imagesCount,
@@ -109,20 +112,26 @@ class MarketplaceListingReadinessService
     public function checkAll(Part $part): array
     {
         $channels = collect(self::CHANNELS)->mapWithKeys(fn (string $channel): array => [$channel => $this->checkPartReadiness($part, $channel)])->all();
-        return ['channels' => $channels, 'summary' => ['ready_channels' => array_keys(array_filter($channels, fn ($r) => $r['can_prepare'])), 'blocked_channels' => array_keys(array_filter($channels, fn ($r) => $r['blockers'] !== [])), 'warning_channels' => array_keys(array_filter($channels, fn ($r) => $r['warnings'] !== []))], 'blockers' => array_merge(...array_map(fn ($r) => $r['blockers'], $channels)), 'warnings' => array_merge(...array_map(fn ($r) => $r['warnings'], $channels))];
+        return ['channels' => $channels, 'summary' => ['ready_channels' => array_keys(array_filter($channels, fn ($r) => $r['can_prepare'])), 'blocked_channels' => array_keys(array_filter($channels, fn ($r) => $r['blockers'] !== [])), 'warning_channels' => array_keys(array_filter($channels, fn ($r) => $r['warnings'] !== []))], 'blockers' => array_values(array_unique(array_merge(...array_map(fn ($r) => $r['blockers'], $channels)))), 'warnings' => array_values(array_unique(array_merge(...array_map(fn ($r) => $r['warnings'], $channels))))];
     }
 
-    private function accountFor(string $channel): ?MarketplaceAccount { $code = $channel === 'ovoko' ? 'ovoko_main' : $channel; return MarketplaceAccount::query()->where('code', $code)->first(); }
+    private function loadSafeRelations(Part $part): void { $relations = array_filter([method_exists($part, 'images') ? 'images' : null, method_exists($part, 'partImages') ? 'partImages' : null, method_exists($part, 'category') ? 'category' : null, method_exists($part, 'car') ? 'car' : null, method_exists($part, 'marketplaceListings') ? (Schema::hasTable('marketplace_accounts') ? 'marketplaceListings.account' : 'marketplaceListings') : null]); try { $part->loadMissing($relations); } catch (\Throwable) { foreach ($relations as $relation) { try { $part->loadMissing([$relation]); } catch (\Throwable) {} } } }
+    private function imagesFor(Part $part): \Illuminate\Support\Collection { foreach (['images', 'partImages'] as $relation) { if (! method_exists($part, $relation)) continue; try { return $part->relationLoaded($relation) ? $part->{$relation}->filter() : $part->{$relation}()->get(); } catch (\Throwable) {} } return collect(); }
+    private function accountFor(string $channel): ?MarketplaceAccount { if (! Schema::hasTable('marketplace_accounts')) return null; $code = $channel === 'ovoko' ? 'ovoko_main' : $channel; return MarketplaceAccount::query()->where('code', $code)->first(); }
     private function marketplaceCode(string $channel): ?string { return match (true) { $channel === 'storefront' => null, $channel === 'allegro_main' => 'allegro', str_starts_with($channel, 'ebay_') => $channel, default => $channel }; }
-    private function priceFor(Part $part, string $channel): ?float { $value = match ($channel) { 'ovoko' => $part->ovoko_price, 'ebay_de', 'ebay_fr' => $part->ebay_price ?? (is_numeric($part->price) ? round((float) $part->price * 1.25, 2) : null), 'allegro_main' => $part->allegro_price ?? $part->price, default => $part->price }; return is_numeric($value) ? (float) $value : null; }
+    private function priceFor(Part $part, string $channel): ?float { $base = is_numeric($part->price ?? null) ? (float) $part->price : null; $value = match ($channel) { 'ovoko' => $part->ovoko_price ?? null, 'ebay_de', 'ebay_fr' => $part->ebay_price ?? ($base !== null ? round($base * 1.25, 2) : null), 'allegro_main' => $part->allegro_price ?? $base, default => $base }; return is_numeric($value) ? (float) $value : null; }
     private function priceSource(string $channel): string { return match ($channel) { 'ovoko' => 'parts.ovoko_price_pln', 'ebay_de', 'ebay_fr' => 'parts.ebay_price_pln_or_storefront_price_x_1_25_pln', 'allegro_main' => 'parts.allegro_price_pln_or_storefront_price_pln', default => 'parts.price_pln' }; }
     private function requireFilled(mixed $value, string $field, array &$missing, array &$blockers): void { if (blank($value)) { $missing[] = $field; $blockers[] = ucfirst($field).' is required.'; } }
     private function requirePositive(mixed $value, string $field, array &$missing, array &$blockers): void { if (! is_numeric($value) || (float) $value <= 0) { $missing[] = $field; $blockers[] = ucfirst($field).' must be greater than zero.'; } }
-    private function checkAccount(?MarketplaceAccount $account, array &$blockers, array &$warnings, string $missingMessage): void { if (! $account || ! $account->api_enabled || $account->status !== 'enabled') $blockers[] = $missingMessage; elseif ($account->last_connection_status && $account->last_connection_status !== 'ok') $warnings[] = 'Last read-only API connection check is not ok.'; }
-    private function checkEbayAccount(?MarketplaceAccount $account, array &$blockers, array &$warnings): void { if (! $account || ! $account->api_enabled) $blockers[] = 'eBay API not configured'; else $this->checkAccount($account, $blockers, $warnings, 'eBay API not configured'); }
-    private function ebayTemplateExists(string $channel): bool { return filled(config('marketplace.ebay.templates.'.$channel)) || view()->exists('marketplace.ebay.templates.'.$channel); }
+    private function checkAccount(?MarketplaceAccount $account, array &$blockers, array &$warnings, string $missingMessage): void { if (! $account || ! ($account->api_enabled ?? false) || ! in_array($account->status, ['enabled', 'active'], true)) $blockers[] = $missingMessage; elseif (($account->last_connection_status ?? null) && $account->last_connection_status !== 'ok') $warnings[] = 'Last read-only API connection check is not ok.'; }
+    private function checkEbayAccount(?MarketplaceAccount $account, array &$blockers, array &$warnings): void { if (! $account || ! ($account->api_enabled ?? false)) $blockers[] = 'eBay API/settings are not configured or not enabled.'; else $this->checkAccount($account, $blockers, $warnings, 'eBay API/settings are not configured or not enabled.'); }
+    private function isGoogleTranslateConfigured(): bool { try { return $this->translationService->isGoogleTranslateConfigured(); } catch (\Throwable) { return false; } }
+    private function targetLanguageForChannel(string $channel): ?string { try { return $this->translationService->targetLanguageForChannel($channel); } catch (\Throwable) { return null; } }
+    private function ebayTemplateExists(string $channel): bool { try { return filled(config('marketplace.ebay.templates.'.$channel)) || view()->exists('marketplace.ebay.templates.'.$channel); } catch (\Throwable) { return false; } }
     private function ebayBusinessPoliciesReady(?MarketplaceAccount $account): bool { $settings = is_array($account?->api_settings) ? $account->api_settings : []; return filled(Arr::get($settings, 'business_policies.payment')) && filled(Arr::get($settings, 'business_policies.fulfillment')) && filled(Arr::get($settings, 'business_policies.return')); }
-    private function hasActiveListing(Part $part, ?string $marketplace, string $channel): bool { if (! $marketplace) return false; return MarketplaceListing::query()->where('part_id', $part->id)->where('marketplace', $marketplace)->whereNotNull('external_offer_id')->whereNotIn('status', ['ended', 'deleted', 'archived', 'inactive'])->exists(); }
+    private function hasActiveListing(Part $part, ?string $marketplace, string $channel): bool { if (! $marketplace || ! Schema::hasTable('marketplace_listings')) return false; return MarketplaceListing::query()->where('part_id', $part->id)->where('marketplace', $marketplace)->whereNotNull('external_offer_id')->whereNotIn('status', ['ended', 'deleted', 'archived', 'inactive'])->exists(); }
     /** @return array<string, mixed> */
-    private function safePayloadPreview(Part $part, string $channel, ?float $price): array { return ['dry_run' => true, 'channel' => $channel, 'sku' => $part->sku, 'title' => $part->name, 'description_present' => filled(strip_tags((string) ($part->description ?: $part->short_description))), 'condition_notes_present' => filled($part->condition_notes), 'price_pln' => $price, 'quantity' => $part->quantity, 'currency' => 'PLN', 'image_urls' => $part->images->take(5)->map(fn ($image) => $image->listingUrl())->filter()->values()->all(), 'category_id' => $part->category_id, 'vehicle' => ['car_id' => $part->car_id, 'snapshot_present' => is_array($part->vehicle_snapshot)], 'will_make_marketplace_request' => false]; }
+    private function safePayloadPreview(Part $part, string $channel, ?float $price): array { return ['dry_run' => true, 'channel' => $channel, 'sku' => $part->sku ?? null, 'title' => $part->name ?? null, 'description_present' => filled(strip_tags((string) (($part->description ?? null) ?: ($part->short_description ?? null)))), 'condition_notes_present' => filled($part->condition_notes ?? null), 'price_pln' => $price, 'quantity' => $part->quantity ?? null, 'currency' => 'PLN', 'image_urls' => $this->imagesFor($part)->take(5)->map(fn ($image) => method_exists($image, 'listingUrl') ? $image->listingUrl() : null)->filter()->values()->all(), 'category_id' => $part->category_id ?? null, 'vehicle' => ['car_id' => $part->car_id ?? null, 'snapshot_present' => is_array($part->vehicle_snapshot ?? null)], 'will_make_marketplace_request' => false]; }
+    /** @return array<string, mixed> */
+    private function unsupportedChannelResult(Part $part, string $channel): array { return ['channel' => $channel, 'can_prepare' => false, 'can_publish_later' => false, 'required_fields' => [], 'missing_fields' => ['channel'], 'warnings' => [], 'blockers' => ['Unsupported marketplace readiness channel.'], 'prepared_payload_preview_safe' => ['dry_run' => true, 'channel' => $channel, 'part_id' => $part->id, 'will_make_marketplace_request' => false], 'price_source' => 'none', 'local_price' => null, 'marketplace_price' => null, 'currency' => 'PLN', 'images_count' => 0, 'has_required_images' => false, 'category_ready' => false, 'vehicle_ready' => false, 'description_ready' => false, 'title_ready' => filled($part->name ?? null), 'stock_ready' => false, 'external_mapping_exists' => false, 'notes' => ['dry_run_only' => 'Readiness does not publish, update, delete, sync prices, sync stock, or import orders.']]; }
 }
