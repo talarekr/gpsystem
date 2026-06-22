@@ -31,22 +31,41 @@
                         <span class="gps-admin-channel__calc">{{ $row['note'] }}</span>
                     @endif
                 </span>
-                <span
-                    class="gps-admin-channel__state {{ $row['listed'] ? 'gps-admin-channel__state--ok' : 'gps-admin-channel__state--missing' }}"
-                    title="{{ $row['title'] }}"
-                    aria-label="{{ $row['title'] }}"
-                >{{ $row['listed'] ? '✓' : '✕' }}</span>
-                @if ($row['url'])
-                    <a
-                        class="gps-admin-channel__link"
-                        href="{{ $row['url'] }}"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        title="Otwórz ofertę {{ $row['label'] }} w nowej karcie"
-                        aria-label="Otwórz ofertę {{ $row['label'] }} w nowej karcie"
-                    >↗</a>
+                @if ($row['key'] === 'allegro' && $row['listed'] && $row['url'])
+                    <span style="display: inline-flex; align-items: center; gap: 3px; white-space: nowrap;">
+                        <span
+                            class="gps-admin-channel__state gps-admin-channel__state--ok"
+                            title="{{ $row['title'] }}"
+                            aria-label="{{ $row['title'] }}"
+                        >✓</span>
+                        <a
+                            class="gps-admin-channel__link"
+                            style="font-size: 11px; line-height: 1;"
+                            href="{{ $row['url'] }}"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Otwórz ofertę {{ $row['label'] }} w nowej karcie"
+                            aria-label="Otwórz ofertę {{ $row['label'] }} w nowej karcie"
+                        >↗</a>
+                    </span>
                 @else
-                    <span class="gps-admin-channel__link-placeholder" aria-hidden="true"></span>
+                    <span
+                        class="gps-admin-channel__state {{ $row['listed'] ? 'gps-admin-channel__state--ok' : 'gps-admin-channel__state--missing' }}"
+                        title="{{ $row['title'] }}"
+                        aria-label="{{ $row['title'] }}"
+                    >{{ $row['listed'] ? '✓' : '✕' }}</span>
+                    @if ($row['url'])
+                        <a
+                            class="gps-admin-channel__link"
+                            href="{{ $row['url'] }}"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Otwórz ofertę {{ $row['label'] }} w nowej karcie"
+                            aria-label="Otwórz ofertę {{ $row['label'] }} w nowej karcie"
+                        >↗</a>
+                    @else
+                        <span class="gps-admin-channel__link-placeholder" aria-hidden="true"></span>
+                    @endif
                 @endif
             </div>
         @endforeach
