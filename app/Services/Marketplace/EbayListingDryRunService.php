@@ -23,7 +23,7 @@ class EbayListingDryRunService
     {
         $blockers = [];
         $warnings = ['Read-only dry-run only: no eBay write API calls, no inventory item, no offer, no publish, no local listing/part mutations.'];
-        $part = Part::query()->with(['category', 'images', 'marketplaceListings'])->find($partId);
+        $part = Part::query()->with(['category', 'images', 'marketplaceListings', 'car'])->find($partId);
         if (! $part) $blockers[] = 'Part not found.';
         if (! isset(self::CHANNELS[$channel])) $blockers[] = 'Unsupported channel. Allowed: ebay_de, ebay_fr.';
 
@@ -108,7 +108,7 @@ class EbayListingDryRunService
             'untranslated_technical_values' => $preview['untranslated_technical_values'] ?? [],
             'aspects_source' => $aspectDiagnostics['aspects_source'],
             'existing_listing' => $existing,
-            'compatibility' => ['status' => $this->compatibilityStatus($part)],
+            'compatibility' => $this->listingCompatibilitySummary($part, $channel, $mapping?->external_category_id, $marketplaceId),
             'blockers' => array_values(array_unique($blockers)),
             'warnings' => array_values(array_unique($warnings)),
         ];
@@ -117,7 +117,7 @@ class EbayListingDryRunService
     public function dryRunPayload(int $partId, string $channel): array
     {
         $ready = $this->readiness($partId, $channel);
-        $part = Part::query()->with(['images'])->find($partId);
+        $part = Part::query()->with(['images', 'car'])->find($partId);
         $preview = $part && isset(self::CHANNELS[$channel]) ? $this->templateService->preview($part->id, $channel) : [];
         $sku = $part?->sku ?: 'part-'.$partId;
         $publishable = ($ready['ready'] ?? false) && ! ($ready['category']['is_blocked'] ?? false);
@@ -147,8 +147,72 @@ class EbayListingDryRunService
             'translated_specification_values' => $preview['translated_specification_values'] ?? [],
             'untranslated_technical_values' => $preview['untranslated_technical_values'] ?? [],
             'aspects_source' => $aspectDiagnostics['aspects_source'],
+            'compatibility' => $ready['compatibility'] ?? $this->listingCompatibilitySummary($part, $channel, $ready['category']['external_category_id'] ?? null, $ready['marketplace_id'] ?? null),
             'blockers' => $ready['blockers'] ?? [],
             'warnings' => $warnings,
+        ];
+    }
+
+
+    public function compatibilityDiagnostics(int $partId, string $channel): array
+    {
+        $part = Part::query()->with(['category', 'car'])->find($partId);
+        $channelSupported = isset(self::CHANNELS[$channel]);
+        $marketplaceId = $this->marketplaceId($channel);
+        $mapping = $part && $channelSupported && Schema::hasTable('marketplace_category_mappings')
+            ? MarketplaceCategoryMapping::query()->where('local_category_id', $part->category_id)->where('channel', $channel)->first()
+            : null;
+        $diagnostics = $this->vehicleCompatibilityDiagnostics($part, $mapping?->external_category_id, $marketplaceId);
+        $blockers = $diagnostics['blockers'];
+        $warnings = $diagnostics['warnings'];
+
+        if (! $part) $blockers[] = 'Part not found.';
+        if (! $channelSupported) $blockers[] = 'Unsupported channel. Allowed: ebay_de, ebay_fr.';
+        if ($part && ! $mapping) $blockers[] = 'Category mapping missing in marketplace_category_mappings.';
+        if ($mapping?->is_blocked) $blockers[] = 'Category is blocked for this eBay channel.';
+        if ($mapping && blank($mapping->external_category_id)) $blockers[] = 'External eBay category ID missing.';
+        if (blank($marketplaceId)) $blockers[] = 'Marketplace ID missing.';
+
+        return [
+            'ok' => true,
+            'part_id' => $partId,
+            'channel' => $channel,
+            'compatibility_status' => $this->compatibilityStatus($part),
+            'source' => $diagnostics['source'],
+            'vehicle_count' => $diagnostics['vehicle_count'],
+            'vehicles_sample' => $diagnostics['vehicles_sample'],
+            'missing_required_vehicle_fields' => $diagnostics['missing_required_vehicle_fields'],
+            'can_build_ebay_fitment_payload' => $diagnostics['can_build_ebay_fitment_payload'],
+            'ebay_category_id' => $mapping?->external_category_id,
+            'marketplace_id' => $marketplaceId,
+            'blockers' => array_values(array_unique($blockers)),
+            'warnings' => array_values(array_unique($warnings)),
+        ];
+    }
+
+    public function dryRunCompatibilityPayload(int $partId, string $channel): array
+    {
+        $diagnostics = $this->compatibilityDiagnostics($partId, $channel);
+        $payload = [
+            'ebay_fitment_payload' => null,
+            'local_description_compatibility' => $diagnostics['vehicles_sample'],
+            'payload_ready_for_ebay_write' => false,
+            'note' => 'Local dry-run only; donor/legacy vehicle data can be rendered in the description, but is not sent as eBay Product Compatibility without category-specific requirements.',
+        ];
+
+        return [
+            'ok' => true,
+            'dry_run' => true,
+            'part_id' => $partId,
+            'channel' => $channel,
+            'marketplace_id' => $diagnostics['marketplace_id'],
+            'category_id' => $diagnostics['ebay_category_id'],
+            'compatibility_payload' => $payload,
+            'vehicle_count' => $diagnostics['vehicle_count'],
+            'vehicles_sample' => $diagnostics['vehicles_sample'],
+            'would_send' => false,
+            'blockers' => $diagnostics['blockers'],
+            'warnings' => $diagnostics['warnings'],
         ];
     }
 
@@ -165,6 +229,86 @@ class EbayListingDryRunService
     private function translation(string $channel, array $preview): array { $required = $channel === 'ebay_fr'; $readiness = $required ? $this->translateService->readiness(false) : ['ok' => true]; return ['required' => $required, 'available' => (bool) ($readiness['ok'] ?? false), 'translation_needed_fields' => $preview['translation_needed_fields'] ?? []]; }
     private function existingListing(?Part $part, string $channel): array { $listing = $part ? MarketplaceListing::query()->where('part_id', $part->id)->where('marketplace', $channel)->whereIn('status', ['active', 'published', 'live'])->first() : null; return ['exists' => $listing !== null, 'status' => $listing?->status, 'external_offer_id' => $listing?->external_offer_id]; }
     private function compatibilityStatus(?Part $part): string { if (! $part) return 'missing'; return ($part->car_id || filled($part->vehicle_snapshot)) ? 'available' : 'not_required_yet'; }
+
+    private function listingCompatibilitySummary(?Part $part, string $channel, ?string $categoryId, ?string $marketplaceId): array
+    {
+        $diagnostics = $this->vehicleCompatibilityDiagnostics($part, $categoryId, $marketplaceId);
+
+        return [
+            'status' => $this->compatibilityStatus($part),
+            'payload_ready' => $diagnostics['can_build_ebay_fitment_payload'],
+            'vehicle_count' => $diagnostics['vehicle_count'],
+            'included_in_listing_description' => $diagnostics['vehicle_count'] > 0,
+            'included_as_ebay_fitment_payload' => false,
+            'blockers' => $diagnostics['blockers'],
+            'warnings' => $diagnostics['warnings'],
+        ];
+    }
+
+    private function vehicleCompatibilityDiagnostics(?Part $part, ?string $categoryId, ?string $marketplaceId): array
+    {
+        $vehicles = $this->compatibilityVehicles($part);
+        $missing = [];
+        foreach ($vehicles as $vehicle) {
+            $missing[] = array_values(array_filter(['make', 'model', 'production_year'], fn (string $field) => blank($vehicle[$field] ?? null)));
+        }
+        $missingRequired = array_values(array_unique(array_merge(...($missing ?: [[]]))));
+        $blockers = [];
+        $warnings = ['Read-only compatibility dry-run only: no eBay API write, no inventory item, no offer, no publish, no price/stock sync, no product/listing mutation.'];
+
+        if ($vehicles === []) {
+            $blockers[] = 'No donor vehicle, fitment table rows, part vehicle relation, or legacy vehicle metadata found.';
+        }
+        if ($missingRequired !== []) {
+            $blockers[] = 'Vehicle compatibility data is missing required local fields: '.implode(', ', $missingRequired).'.';
+        }
+        if (blank($categoryId)) {
+            $blockers[] = 'Cannot evaluate eBay fitment payload without mapped eBay category ID.';
+        }
+        if (blank($marketplaceId)) {
+            $blockers[] = 'Cannot evaluate eBay fitment payload without marketplace ID.';
+        }
+
+        $blockers[] = 'Full eBay Product Compatibility requirements/properties are not available locally for this category; not guessing fitment property names or values.';
+        if (($vehicles[0]['source'] ?? null) === 'donor_vehicle') {
+            $warnings[] = 'Only donor vehicle compatibility was found; use it in the listing description, not as full eBay fitment, unless category-specific eBay compatibility requirements are imported.';
+        }
+
+        return [
+            'source' => $vehicles[0]['source'] ?? null,
+            'vehicle_count' => count($vehicles),
+            'vehicles_sample' => array_slice($vehicles, 0, 10),
+            'missing_required_vehicle_fields' => $missingRequired,
+            'can_build_ebay_fitment_payload' => false,
+            'blockers' => $blockers,
+            'warnings' => $warnings,
+        ];
+    }
+
+    private function compatibilityVehicles(?Part $part): array
+    {
+        if (! $part) return [];
+        $vehicle = [];
+        foreach (['make', 'model', 'model_variant', 'production_year', 'production_period', 'engine_capacity_cm3', 'engine_code', 'fuel_type', 'gearbox_type', 'body_type', 'steering_side'] as $key) {
+            $vehicle[$key] = $this->cleanAspectValue($part->storefrontDetailValue($key));
+        }
+        $vehicle = array_filter($vehicle, fn ($value) => filled($value));
+        if ($vehicle !== []) {
+            $vehicle['source'] = ($part->car_id || $part->relationLoaded('car') && $part->car) ? 'donor_vehicle' : 'legacy_vehicle_metadata';
+            $vehicle['car_id'] = $part->car_id;
+            return [$vehicle];
+        }
+
+        return [];
+    }
+
+
+    private function marketplaceId(string $channel): ?string
+    {
+        $account = isset(self::CHANNELS[$channel]) && Schema::hasTable('marketplace_accounts') ? MarketplaceAccount::query()->where('code', $channel)->first() : null;
+        $settings = is_array($account?->api_settings) ? $account->api_settings : [];
+        return $settings['marketplace_id'] ?? (self::CHANNELS[$channel] ?? null);
+    }
 
     private function aspectsWithDiagnostics(?Part $part): array
     {
