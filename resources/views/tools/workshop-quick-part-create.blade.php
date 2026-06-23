@@ -34,8 +34,13 @@
         .ocr-modal { position:fixed; inset:0; z-index:20; background:#000; color:#fff; display:grid; grid-template-rows:auto 1fr auto; }
         .ocr-modal video { width:100%; height:100%; object-fit:cover; }
         .ocr-header, .ocr-footer { position:relative; z-index:3; padding:16px; background:rgba(0,0,0,.62); text-align:center; }
-        .ocr-frame { position:absolute; left:50%; top:46%; width:90vw; max-width:620px; height:46px; transform:translate(-50%,-50%); border:3px solid #fff; border-radius:12px; box-shadow:0 0 0 9999px var(--overlay); z-index:2; }
-        .ocr-tip { position:absolute; left:50%; top:calc(46% + 42px); transform:translateX(-50%); width:min(92vw, 620px); z-index:3; margin:0; padding:10px 12px; border-radius:14px; background:rgba(0,0,0,.68); color:#fff; font-size:15px; font-weight:800; text-align:center; }
+        .ocr-header { display:grid; gap:12px; }
+        .ocr-mode-title { font-size:15px; font-weight:900; letter-spacing:.02em; text-transform:uppercase; }
+        .ocr-mode-toggle { display:grid; grid-template-columns:1fr 1fr; gap:8px; width:min(100%, 360px); margin:0 auto; padding:4px; border:2px solid rgba(255,255,255,.76); border-radius:18px; background:rgba(255,255,255,.12); }
+        .ocr-mode-toggle button { min-height:48px; border-radius:13px; padding:10px 12px; background:transparent; color:#fff; border:0; font-size:17px; }
+        .ocr-mode-toggle button[aria-pressed="true"] { background:#fff; color:#1849a9; box-shadow:0 6px 18px rgba(0,0,0,.28); }
+        .ocr-frame { position:absolute; left:50%; top:46%; width:var(--ocr-frame-width, 92vw); max-width:620px; height:var(--ocr-frame-height, 60px); transform:translate(-50%,-50%); border:3px solid #fff; border-radius:12px; box-shadow:0 0 0 9999px var(--overlay); z-index:2; transition:width .18s ease, height .18s ease; }
+        .ocr-tip { position:absolute; left:50%; top:calc(46% + var(--ocr-tip-offset, 46px)); transform:translateX(-50%); width:min(92vw, 620px); z-index:3; margin:0; padding:10px 12px; border-radius:14px; background:rgba(0,0,0,.68); color:#fff; font-size:15px; font-weight:800; text-align:center; }
         .ocr-focus-message { position:absolute; left:50%; top:calc(46% - 86px); transform:translateX(-50%); z-index:4; padding:10px 14px; border-radius:999px; background:rgba(21,94,239,.92); color:#fff; font-weight:900; box-shadow:0 8px 20px rgba(0,0,0,.25); }
         .ocr-footer { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
         .ocr-footer button { width:100%; }
@@ -106,11 +111,18 @@
     </div>
 </div>
 <div id="ocrModal" class="ocr-modal hidden" role="dialog" aria-modal="true" aria-labelledby="ocrTitle">
-    <div class="ocr-header"><strong id="ocrTitle">Ustaw tylko jeden wiersz kodu części w ramce</strong></div>
+    <div class="ocr-header">
+        <strong id="ocrTitle">Ustaw tylko jeden wiersz kodu części w ramce</strong>
+        <div class="ocr-mode-title">Rozmiar etykiety</div>
+        <div class="ocr-mode-toggle" role="group" aria-label="Rozmiar etykiety">
+            <button type="button" id="ocrSmallModeBtn" aria-pressed="true">Mała</button>
+            <button type="button" id="ocrLargeModeBtn" aria-pressed="false">Duża</button>
+        </div>
+    </div>
     <div style="position:relative; overflow:hidden;">
         <video id="ocrVideo" autoplay playsinline muted></video>
         <div id="ocrFrame" class="ocr-frame" aria-hidden="true"></div>
-        <p class="ocr-tip">Trzymaj telefon blisko etykiety i dotknij ekranu, aby ustawić ostrość.</p>
+        <p id="ocrTip" class="ocr-tip">Mała etykieta: podejdź bliżej i dotknij ekranu, aby ustawić ostrość.</p>
         <div id="ocrFocusMessage" class="ocr-focus-message hidden" aria-live="polite">Ustawiam ostrość...</div>
     </div>
     <div class="ocr-footer">
@@ -141,11 +153,52 @@
     const ocrScanBtn = document.getElementById('ocrScanBtn');
     const ocrCancelBtn = document.getElementById('ocrCancelBtn');
     const ocrFocusMessage = document.getElementById('ocrFocusMessage');
+    const ocrTip = document.getElementById('ocrTip');
+    const ocrSmallModeBtn = document.getElementById('ocrSmallModeBtn');
+    const ocrLargeModeBtn = document.getElementById('ocrLargeModeBtn');
     let ocrStream = null;
     let tesseractLoadPromise = null;
+    let currentScanMode = 'small';
+    const scanModes = {
+        small: {
+            label: 'Mała etykieta',
+            tip: 'Mała etykieta: podejdź bliżej i dotknij ekranu, aby ustawić ostrość.',
+            frameHeightPx: 60,
+            frameWidthRatio: 0.92,
+            upscale: 4,
+            focusDelayMs: 1000,
+            frameDelaysMs: [800, 1200, 1600],
+            contrast: 1.4,
+            sharpen: true,
+            threshold: true,
+        },
+        large: {
+            label: 'Duża etykieta',
+            tip: 'Duża etykieta: odsuń telefon tak, aby w ramce był tylko jeden wiersz kodu.',
+            frameHeightPx: 42,
+            frameWidthRatio: 0.86,
+            upscale: 2,
+            focusDelayMs: 500,
+            frameDelaysMs: [500, 900],
+            contrast: 1.2,
+            sharpen: false,
+            threshold: false,
+        },
+    };
     const ignoredOcrWords = new Set(['BOSCH', 'VWAG', 'VW', 'AG', 'MADEINROMANIA', 'MADEIN', 'ROMANIA', 'GERMANY']);
     const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+
+    const applyScanMode = mode => {
+        currentScanMode = scanModes[mode] ? mode : 'small';
+        const config = scanModes[currentScanMode];
+        ocrFrame?.style.setProperty('--ocr-frame-height', `${config.frameHeightPx}px`);
+        ocrFrame?.style.setProperty('--ocr-frame-width', `${config.frameWidthRatio * 100}vw`);
+        ocrTip?.style.setProperty('--ocr-tip-offset', `${(config.frameHeightPx / 2) + 16}px`);
+        if (ocrTip) ocrTip.textContent = config.tip;
+        ocrSmallModeBtn?.setAttribute('aria-pressed', currentScanMode === 'small' ? 'true' : 'false');
+        ocrLargeModeBtn?.setAttribute('aria-pressed', currentScanMode === 'large' ? 'true' : 'false');
+    };
 
     const setScanStatus = (message, isError = false) => {
         if (!scanStatus) return;
@@ -208,7 +261,7 @@
         if (constraints.advanced.length) {
             try { await track.applyConstraints(constraints); } catch (error) { /* Best-effort browser support. */ }
         }
-        await sleep(650);
+        await sleep(scanModes[currentScanMode].focusDelayMs);
     };
     const cropFrameToCanvas = () => {
         const videoRect = ocrVideo.getBoundingClientRect();
@@ -219,7 +272,8 @@
         const sourceY = Math.round((frameRect.top - videoRect.top) * scaleY);
         const sourceWidth = Math.round(frameRect.width * scaleX);
         const sourceHeight = Math.round(frameRect.height * scaleY);
-        const outputScale = sourceWidth < 1200 ? 3 : 2;
+        const mode = scanModes[currentScanMode];
+        const outputScale = mode.upscale;
         const canvas = document.createElement('canvas');
         canvas.width = sourceWidth * outputScale;
         canvas.height = sourceHeight * outputScale;
@@ -230,8 +284,9 @@
         const data = image.data;
         for (let i = 0; i < data.length; i += 4) {
             const gray = (data[i] * 0.299) + (data[i + 1] * 0.587) + (data[i + 2] * 0.114);
-            const contrasted = Math.max(0, Math.min(255, (gray - 128) * 1.65 + 128));
-            const value = contrasted > 168 ? 255 : contrasted < 92 ? 0 : contrasted;
+            const contrasted = Math.max(0, Math.min(255, (gray - 128) * mode.contrast + 128));
+            const sharpened = mode.sharpen ? Math.max(0, Math.min(255, (contrasted - 128) * 1.08 + 128)) : contrasted;
+            const value = mode.threshold && sharpened > 176 ? 255 : (mode.threshold && sharpened < 78 ? 0 : sharpened);
             data[i] = data[i + 1] = data[i + 2] = value;
         }
         context.putImageData(image, 0, 0);
@@ -242,12 +297,15 @@
         try {
             ocrStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 }, focusMode: { ideal: 'continuous' } }, audio: false });
             ocrVideo.srcObject = ocrStream;
+            applyScanMode('small');
             ocrModal.classList.remove('hidden');
             setScanStatus('Ustaw tylko jeden wiersz kodu części w ramce i kliknij Skanuj.');
         } catch (error) {
             setScanStatus('Nie udało się uruchomić kamery. Wpisz kod ręcznie.', true);
         }
     });
+    ocrSmallModeBtn?.addEventListener('click', () => applyScanMode('small'));
+    ocrLargeModeBtn?.addEventListener('click', () => applyScanMode('large'));
     ocrPreview?.addEventListener('click', requestCameraFocus);
     ocrCancelBtn?.addEventListener('click', closeOcr);
     ocrScanBtn?.addEventListener('click', async () => {
@@ -257,8 +315,8 @@
             const Tesseract = await loadTesseract();
             await requestCameraFocus();
             const texts = [];
-            for (const delay of [0, 400, 400]) {
-                if (delay) await sleep(delay);
+            for (const delay of scanModes[currentScanMode].frameDelaysMs) {
+                await sleep(delay);
                 const result = await Tesseract.recognize(cropFrameToCanvas(), 'eng', { logger: () => {}, tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789' });
                 texts.push(result?.data?.text || '');
             }
