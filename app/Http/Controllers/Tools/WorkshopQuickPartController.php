@@ -4,13 +4,11 @@ namespace App\Http\Controllers\Tools;
 
 use App\Http\Controllers\Controller;
 use App\Models\Part;
-use App\Models\PartImage;
 use App\Models\StorageLocation;
+use App\Services\Parts\PartImageUploadService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
 use Illuminate\View\View;
 
 class WorkshopQuickPartController extends Controller
@@ -29,7 +27,7 @@ class WorkshopQuickPartController extends Controller
         ]);
     }
 
-    public function store(Request $request): RedirectResponse
+    public function store(Request $request, PartImageUploadService $partImageUploadService): RedirectResponse
     {
         if (! $this->hasValidToken($request)) {
             abort(403);
@@ -50,7 +48,7 @@ class WorkshopQuickPartController extends Controller
             'part_number.required' => 'Podaj główny kod części.',
         ]);
 
-        $part = DB::transaction(function () use ($request, $validated): Part {
+        $part = DB::transaction(function () use ($request, $validated, $partImageUploadService): Part {
             $location = StorageLocation::query()->firstOrCreate(
                 ['name' => trim($validated['storage_location'])],
                 ['is_active' => true]
@@ -68,24 +66,11 @@ class WorkshopQuickPartController extends Controller
                 'needs_review' => false,
             ]);
 
-            foreach ($request->file('photos', []) as $index => $photo) {
-                $originalName = $photo->getClientOriginalName();
-                $extension = $photo->extension() ?: $photo->guessExtension() ?: 'jpg';
-                $filename = Str::uuid()->toString().'.'.$extension;
-                $relativePath = 'parts/photos/workshop/'.$part->id.'/'.$filename;
-
-                Storage::disk('public')->put($relativePath, $photo->get());
-
-                PartImage::query()->create([
-                    'part_id' => $part->id,
-                    'path' => $relativePath,
-                    'sort_order' => $index,
-                    'is_primary' => $index === 0,
-                    'source_system' => 'workshop_quick_create',
-                    'external_id' => $filename,
-                    'alt_text' => $originalName,
-                ]);
-            }
+            $partImageUploadService->attachUploadedImages(
+                part: $part,
+                uploadedFiles: $request->file('photos', []),
+                sourceSystem: 'workshop_quick_create',
+            );
 
             return $part;
         });
