@@ -72,6 +72,7 @@ class OvokoStockReconciliationController extends Controller
         if (($ovoko['selected_id_field'] ?? null) === null) $blockers[] = 'ovoko_id_field_not_detected';
 
         $activeIds = $ovoko['active_ids'] ?? [];
+        $ovokoComplete = (bool) ($ovoko['last_page_reached'] ?? false);
         $matched = [];
         $missing = [];
         $conflicts = [];
@@ -132,6 +133,8 @@ class OvokoStockReconciliationController extends Controller
             'ovoko_limit_per_page' => $ovoko['limit_per_page'] ?? null,
             'ovoko_last_page_reached' => $ovoko['last_page_reached'] ?? false,
             'ovoko_has_more' => $ovoko['has_more'] ?? null,
+            'ovoko_max_pages' => $ovoko['max_pages'] ?? null,
+            'ovoko_fetch_all_requested' => $ovoko['fetch_all_ovoko'] ?? false,
             'ovoko_active_ids_count' => count($activeIds),
             'ovoko_active_ids_min_max_sample' => $this->idMinMaxSample($activeIds),
             'ovoko_selected_id_field' => $ovoko['selected_id_field'] ?? null,
@@ -141,7 +144,8 @@ class OvokoStockReconciliationController extends Controller
             'local_checked_ovoko_ids_sample' => array_slice($localCheckedIds, 0, $sampleLimit),
             'local_candidate_parts_count' => $candidates->count(),
             'matched_active_ovoko_count' => count($matched),
-            'missing_in_ovoko_active_count' => count($missing),
+            'partial_missing_in_fetched_ovoko_count' => $ovokoComplete ? null : count($missing),
+            'missing_in_ovoko_active_count' => $ovokoComplete ? count($missing) : null,
             'would_mark_needs_review_count' => $blockers === [] ? count(array_filter($missing, fn ($row) => ! ($row['needs_review'] ?? false))) : null,
             'marked_needs_review_count' => $updated,
             'already_needs_review_count' => $alreadyNeedsReview,
@@ -164,7 +168,9 @@ class OvokoStockReconciliationController extends Controller
 
         $limit = max(1, min(100, (int) $request->query('ovoko_limit', $request->query('limit', 100))));
         $page = max(1, (int) $request->query('ovoko_page', 1));
-        $maxPages = max(1, min(200, (int) $request->query('ovoko_max_pages', 50)));
+        $fetchAllOvoko = $request->boolean('fetch_all_ovoko', false);
+        $requestedMaxPages = (int) $request->query('max_pages', $request->query('ovoko_max_pages', $fetchAllOvoko ? 200 : 50));
+        $maxPages = max(1, min(200, $requestedMaxPages));
         $rawItems = [];
         $detectedFields = [];
         $totalCount = null;
@@ -215,6 +221,8 @@ class OvokoStockReconciliationController extends Controller
                 'limit_per_page' => $limit,
                 'last_page_reached' => $lastPageReached,
                 'has_more' => $hasMore,
+                'max_pages' => $maxPages,
+                'fetch_all_ovoko' => $fetchAllOvoko,
             ];
         } catch (Throwable) {
             return ['ok' => false, 'error' => 'ovoko_api_exception', 'active_ids' => [], 'raw_items' => $rawItems, 'detected_id_fields' => $detectedFields, 'last_page_reached' => false, 'pages_fetched' => $pagesFetched, 'limit_per_page' => $limit, 'total_count' => $totalCount, 'has_more' => true];
