@@ -16,6 +16,10 @@ return [
         UserRole::Viewer->value => 'Read-only/Viewer',
     ],
 
+    'exchange_rates' => [
+        'nbp_cache_hours' => (int) env('GPS_NBP_CACHE_HOURS', 12),
+    ],
+
     'feature_flags' => [
         'integrations_enabled' => (bool) env('GPS_INTEGRATIONS_ENABLED', false),
         'woo_writes_enabled' => (bool) env('GPS_WOO_WRITES_ENABLED', false),

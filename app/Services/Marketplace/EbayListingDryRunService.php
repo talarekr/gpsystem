@@ -16,6 +16,7 @@ class EbayListingDryRunService
     public function __construct(
         private readonly EbayDescriptionTemplateService $templateService,
         private readonly GoogleTranslateService $translateService,
+        private readonly NbpExchangeRateService $exchangeRateService,
     ) {}
 
     public function readiness(int $partId, string $channel): array
@@ -52,9 +53,20 @@ class EbayListingDryRunService
         $ebayPricePln = $this->money($part?->ebay_price ?? null);
         $storefrontPricePln = $this->money($part?->price ?? null);
         if ($part && $storefrontPricePln === null) $blockers[] = 'Storefront price missing.';
+        $ebayPriceSource = null;
+        if ($part && $ebayPricePln !== null) {
+            $ebayPriceSource = 'parts.ebay_price';
+        } elseif ($part && $storefrontPricePln !== null) {
+            $ebayPricePln = round($storefrontPricePln * 1.25, 2);
+            $ebayPriceSource = 'calculated_from_storefront_price';
+        }
         if ($part && $ebayPricePln === null) $blockers[] = 'eBay price missing/cannot be calculated.';
-        $rate = $this->eurRate($settings);
-        if ($rate === null) $blockers[] = 'PLN to EUR conversion is not configured/available; price is not guessed.';
+        $conversion = $this->exchangeRateService->eurPln();
+        $rate = is_numeric($conversion['rate'] ?? null) ? (float) $conversion['rate'] : null;
+        if ($rate === null) {
+            $blockers[] = 'PLN to EUR conversion is not configured/available; price is not guessed.';
+            if (filled($conversion['warning'] ?? null)) $warnings[] = (string) $conversion['warning'];
+        }
         $estimatedEur = $ebayPricePln !== null && $rate !== null ? round($ebayPricePln / $rate, 2) : null;
 
         if ($part && (int) $part->quantity <= 0) $blockers[] = 'Quantity must be greater than zero.';
@@ -84,7 +96,7 @@ class EbayListingDryRunService
             'marketplace_id' => $marketplaceId,
             'category' => ['local_category_id' => $part?->category_id, 'external_category_id' => $mapping?->external_category_id, 'external_category_name' => $mapping?->external_category_name, 'is_blocked' => (bool) ($mapping?->is_blocked ?? false), 'block_reason' => $mapping?->block_reason],
             'business_policies' => ['fulfillment_policy_id' => $mapping?->fulfillment_policy_id, 'payment_policy_id' => $paymentPolicyId, 'return_policy_id' => $returnPolicyId],
-            'price' => ['storefront_price_pln' => $storefrontPricePln, 'ebay_price_pln' => $ebayPricePln, 'estimated_price_eur' => $estimatedEur, 'currency' => 'EUR', 'conversion_source' => $rate === null ? null : 'marketplace_account.api_settings.eur_rate/pln_to_eur_rate'],
+            'price' => ['storefront_price_pln' => $storefrontPricePln, 'ebay_price_pln' => $ebayPricePln, 'ebay_price_source' => $ebayPriceSource, 'eur_rate' => $rate, 'estimated_price_eur' => $estimatedEur, 'currency' => 'EUR', 'conversion_source' => $rate === null ? null : 'nbp', 'conversion_fetched_at' => $conversion['fetched_at'] ?? null, 'conversion_effective_date' => $conversion['effective_date'] ?? null],
             'inventory' => ['quantity' => $part?->quantity, 'status' => $part?->status, 'needs_listing' => (bool) ($part?->needs_listing ?? false)],
             'template' => ['ok' => (bool) ($template['ok'] ?? false), 'html_length' => $template['html_length'] ?? 0, 'missing_assets' => $template['missing_assets'] ?? [], 'warnings' => $template['warnings'] ?? []],
             'images' => ['count' => $part?->images->count() ?? 0, 'public_urls_sample' => $imageUrls->take(5)->all(), 'missing_public_images_count' => max(0, ($part?->images->count() ?? 0) - $imageUrls->count())],
@@ -135,8 +147,7 @@ class EbayListingDryRunService
         return ['part_id' => $partId, 'channels' => $channels, 'overall_ready' => collect($channels)->every(fn ($r) => (bool) $r['ready']), 'blockers' => array_values(array_unique(array_merge($channels['ebay_de']['blockers'], $channels['ebay_fr']['blockers']))), 'warnings' => array_values(array_unique(array_merge($channels['ebay_de']['warnings'], $channels['ebay_fr']['warnings'])))];
     }
 
-    private function policyId(array $settings, string $type): ?string { foreach (["{$type}_policy_id", "default_{$type}_policy_id", "ebay_{$type}_policy_id"] as $key) if (filled($settings[$key] ?? null)) return (string) $settings[$key]; return null; }
-    private function eurRate(array $settings): ?float { foreach (['eur_rate', 'pln_to_eur_rate', 'nbp_eur_rate'] as $key) if (is_numeric($settings[$key] ?? null) && (float) $settings[$key] > 0) return (float) $settings[$key]; return config('product-hub.feature_flags.nbp_rates_enabled') ? null : null; }
+    private function policyId(array $settings, string $type): ?string { foreach (["{$type}_policy_id", "default_{$type}_policy_id", "ebay_{$type}_policy_id"] as $key) if (filled($settings[$key] ?? null)) return (string) $settings[$key]; $policies = is_array($settings['business_policies'] ?? null) ? $settings['business_policies'] : []; return filled($policies[$type] ?? null) ? (string) $policies[$type] : null; }
     private function money(mixed $value): ?float { return is_numeric($value) ? round((float) $value, 2) : null; }
     private function translation(string $channel, array $preview): array { $required = $channel === 'ebay_fr'; $readiness = $required ? $this->translateService->readiness(false) : ['ok' => true]; return ['required' => $required, 'available' => (bool) ($readiness['ok'] ?? false), 'translation_needed_fields' => $preview['translation_needed_fields'] ?? []]; }
     private function existingListing(?Part $part, string $channel): array { $listing = $part ? MarketplaceListing::query()->where('part_id', $part->id)->where('marketplace', $channel)->whereIn('status', ['active', 'published', 'live'])->first() : null; return ['exists' => $listing !== null, 'status' => $listing?->status, 'external_offer_id' => $listing?->external_offer_id]; }

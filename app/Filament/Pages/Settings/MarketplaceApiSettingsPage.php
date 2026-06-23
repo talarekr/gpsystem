@@ -43,6 +43,8 @@ abstract class MarketplaceApiSettingsPage extends Page implements HasForms
                 'seller_account_id' => $settings['seller_account_id'] ?? '',
                 'marketplace_id' => $settings['marketplace_id'] ?? ($definition['marketplace_id'] ?? ''),
                 'site_id' => $settings['site_id'] ?? ($definition['site_id'] ?? ''),
+                'payment_policy_id' => $settings['payment_policy_id'] ?? ($definition['payment_policy_id'] ?? ''),
+                'return_policy_id' => $settings['return_policy_id'] ?? ($definition['return_policy_id'] ?? ''),
             ];
             foreach ($definition['credential_fields'] as $field => $label) {
                 $state[$code][$field] = '';
@@ -73,6 +75,7 @@ abstract class MarketplaceApiSettingsPage extends Page implements HasForms
                         TextInput::make("{$code}.marketplace_id")->label('Marketplace id / site')->maxLength(255),
                         TextInput::make("{$code}.site_id")->label('Site id')->maxLength(255),
                     ]),
+                    Grid::make(2)->schema($this->policyInputs($code)),
                     Grid::make(2)->schema($credentialInputs),
                     Placeholder::make("{$code}.credentials_status")->label('Credentials configured')->content(fn () => new HtmlString($this->credentialsConfigured($code, $definition) ? '<strong>yes</strong>' : '<strong>no</strong>')),
                     ...$this->additionalAccountSchema($code, $definition),
@@ -98,11 +101,13 @@ abstract class MarketplaceApiSettingsPage extends Page implements HasForms
                 'api_base_url' => rtrim((string) ($state[$code]['api_base_url'] ?: ($definition['api_base_url'] ?? '')), '/'),
                 'api_mode' => (string) ($state[$code]['api_mode'] ?: 'dry_run'),
                 'api_credentials' => $credentials,
-                'api_settings' => array_filter([
+                'api_settings' => array_filter(array_merge($settings, [
                     'seller_account_id' => trim((string) ($state[$code]['seller_account_id'] ?? '')),
                     'marketplace_id' => trim((string) ($state[$code]['marketplace_id'] ?? '')),
                     'site_id' => trim((string) ($state[$code]['site_id'] ?? '')),
-                ], fn ($value) => $value !== ''),
+                    'payment_policy_id' => trim((string) ($state[$code]['payment_policy_id'] ?? '')),
+                    'return_policy_id' => trim((string) ($state[$code]['return_policy_id'] ?? '')),
+                ]), fn ($value) => $value !== ''),
             ])->save();
         }
         $this->mount();
@@ -110,6 +115,11 @@ abstract class MarketplaceApiSettingsPage extends Page implements HasForms
     }
 
     public function getFormActions(): array { return [Action::make('save')->label('Zapisz')->submit('save')]; }
+
+    protected function policyInputs(string $code): array
+    {
+        return [];
+    }
 
     protected function additionalAccountSchema(string $code, array $definition): array
     {
