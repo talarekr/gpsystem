@@ -111,17 +111,18 @@ class EbayDescriptionTemplateService
         if ($blockers !== []) return $this->emptyPreview($partId, $channel, $blockers);
 
         $fields = $this->fields($part);
-        $fields['specification_rows'] = $this->specificationRows($fields, $channel);
         $translated = [];
         $translationNeeded = [];
+        $translatedSpecificationValues = [];
+        $untranslatedTechnicalValues = [];
         if ($channel === 'ebay_fr') {
             foreach (['title', 'short_inventory_description', 'description', 'fits_to', 'part_type', 'version', 'placement'] as $key) {
                 if (filled($fields[$key] ?? null)) $translationNeeded[] = $key;
             }
             $translated = $this->translatePreviewFields($fields, $translationNeeded, $warnings, $blockers);
             foreach ($translated as $key => $value) if (filled($value)) $fields[$key] = $value;
-            $fields['specification_rows'] = $this->specificationRows($fields, $channel);
         }
+        $fields['specification_rows'] = $this->specificationRows($fields, $channel, $translatedSpecificationValues, $untranslatedTechnicalValues, $warnings);
 
         $html = $this->renderHtml($fields, $channel);
         $assetCheck = $this->checkAssets();
@@ -144,6 +145,8 @@ class EbayDescriptionTemplateService
             'used_fields' => array_keys(array_filter($fields, fn ($v) => filled($v))),
             'translation_needed_fields' => $translationNeeded,
             'translated_preview_fields' => $translated,
+            'translated_specification_values' => $translatedSpecificationValues,
+            'untranslated_technical_values' => $untranslatedTechnicalValues,
             'would_save' => false,
             'blockers' => array_values(array_unique($blockers)),
             'warnings' => $warnings,
@@ -174,6 +177,8 @@ class EbayDescriptionTemplateService
             'required_fields_present' => $required,
             'used_fields' => $preview['used_fields'] ?? [],
             'translation_needed_fields' => $preview['translation_needed_fields'] ?? [],
+            'translated_specification_values' => $preview['translated_specification_values'] ?? [],
+            'untranslated_technical_values' => $preview['untranslated_technical_values'] ?? [],
             'blockers' => $preview['blockers'] ?? [],
             'warnings' => array_values(array_unique(array_merge($preview['warnings'] ?? [], $external ? ['HTML references external assets outside https://gpswiss.pl/ebay-template/.'] : []))),
         ];
@@ -392,7 +397,7 @@ HTML;
         ];
     }
 
-    private function specificationRows(array $fields, string $channel): string
+    private function specificationRows(array $fields, string $channel, array &$translatedSpecificationValues = [], array &$untranslatedTechnicalValues = [], array &$warnings = []): string
     {
         $labels = $channel === 'ebay_fr' ? [
             'color_code' => 'Code couleur', 'engine_code' => 'Code moteur', 'color' => 'Couleur', 'drivetrain' => 'Transmission',
@@ -410,11 +415,66 @@ HTML;
 
         $rows = '';
         foreach ($labels as $key => $label) {
-            $value = filled($fields[$key] ?? null) ? (string) $fields[$key] : '—';
+            $sourceValue = filled($fields[$key] ?? null) ? (string) $fields[$key] : '—';
+            $value = $this->localizedSpecificationValue($key, $sourceValue, $channel, $translatedSpecificationValues, $untranslatedTechnicalValues, $warnings);
             $rows .= '<tr><td width="42%" style="padding:9px 14px;border-bottom:1px solid #d6e0ee;background:#f4f7fb;color:#06275d;font-weight:900;text-align:center;font-size:12px;">'.$this->e($label).'</td><td width="58%" style="padding:9px 14px;border-bottom:1px solid #d6e0ee;background:#ffffff;color:#1f2937;text-align:center;font-size:12px;">'.$this->e($value).'</td></tr>';
         }
 
         return $rows;
+    }
+
+
+    private function localizedSpecificationValue(string $key, string $value, string $channel, array &$translated, array &$technical, array &$warnings): string
+    {
+        if ($value === '—' || ! in_array($channel, self::CHANNELS, true) || $this->isTechnicalSpecificationValue($key, $value)) {
+            if ($value !== '—') $technical[$key] = $value;
+            return $value;
+        }
+
+        $dictionary = $this->specificationValueDictionary($key, $channel);
+        $normalized = mb_strtolower(trim($value));
+        if (isset($dictionary[$normalized])) {
+            $translated[$key] = ['source' => $value, 'translated' => $dictionary[$normalized], 'provider' => 'local_dictionary'];
+            return $dictionary[$normalized];
+        }
+
+        $translation = $this->translateService->translate($value, $channel === 'ebay_fr' ? 'fr' : 'de', 'pl');
+        $warnings = array_merge($warnings, $translation['warnings'] ?? []);
+        if (($translation['ok'] ?? false) && filled($translation['translated_text'] ?? null)) {
+            $translated[$key] = ['source' => $value, 'translated' => $translation['translated_text'], 'provider' => 'google_translate'];
+            return (string) $translation['translated_text'];
+        }
+
+        $warnings[] = "Specification value translation skipped for {$key}; source value shown without saving.";
+        return $value;
+    }
+
+    private function specificationValueDictionary(string $key, string $channel): array
+    {
+        $common = [
+            'diesel' => 'Diesel',
+            'awd' => 'AWD',
+        ];
+        $de = $common + [
+            'biały' => 'Weiß', 'czarny' => 'Schwarz', 'szary' => 'Grau', 'srebrny' => 'Silber',
+            'używany / sprawdzony' => 'Gebraucht / geprüft', 'automatyczny' => 'Automatik', 'manualny' => 'Schaltgetriebe', 'benzyna' => 'Benzin',
+            'lewa strona' => $key === 'steering_side' ? 'Linkslenker' : 'Linke Seite', 'prawa strona' => $key === 'steering_side' ? 'Rechtslenker' : 'Rechte Seite',
+        ];
+        $fr = $common + [
+            'biały' => 'Blanc', 'czarny' => 'Noir', 'szary' => 'Gris', 'srebrny' => 'Argent',
+            'używany / sprawdzony' => 'Occasion / vérifié', 'automatyczny' => 'Automatique', 'manualny' => 'Manuelle', 'benzyna' => 'Essence',
+            'lewa strona' => $key === 'steering_side' ? 'Volant à gauche' : 'Côté gauche', 'prawa strona' => $key === 'steering_side' ? 'Volant à droite' : 'Côté droit',
+        ];
+
+        return $channel === 'ebay_fr' ? $fr : $de;
+    }
+
+    private function isTechnicalSpecificationValue(string $key, string $value): bool
+    {
+        if (in_array($key, ['part_number', 'oem_numbers', 'color_code', 'engine_code', 'engine_power', 'production_period', 'engine_capacity', 'vehicle_year', 'mileage'], true)) return true;
+        if (preg_match('/\d/u', $value) === 1) return true;
+        if (preg_match('/^[A-Z0-9][A-Z0-9 .\/-]{1,18}$/u', $value) === 1 && preg_match('/[a-ząćęłńóśźż]/u', $value) !== 1) return true;
+        return false;
     }
 
     private function placeholderMap(array $values): array
@@ -470,6 +530,6 @@ HTML;
     {
         $assetCheck = $this->checkAssets();
 
-        return ['ok' => false, 'part_id' => $partId, 'channel' => $channel, 'marketplace_id' => null, 'title' => null, 'short_inventory_description' => null, 'listing_description_html' => '', 'html_length' => 0, 'asset_urls' => $assetCheck['asset_urls'], 'asset_check_paths' => $assetCheck['asset_check_paths'], 'asset_found_locations' => $assetCheck['asset_found_locations'], 'asset_public_urls' => $assetCheck['asset_public_urls'], 'missing_assets' => $assetCheck['missing_public_assets'], 'used_fields' => [], 'translation_needed_fields' => [], 'translated_preview_fields' => [], 'would_save' => false, 'blockers' => $blockers, 'warnings' => []];
+        return ['ok' => false, 'part_id' => $partId, 'channel' => $channel, 'marketplace_id' => null, 'title' => null, 'short_inventory_description' => null, 'listing_description_html' => '', 'html_length' => 0, 'asset_urls' => $assetCheck['asset_urls'], 'asset_check_paths' => $assetCheck['asset_check_paths'], 'asset_found_locations' => $assetCheck['asset_found_locations'], 'asset_public_urls' => $assetCheck['asset_public_urls'], 'missing_assets' => $assetCheck['missing_public_assets'], 'used_fields' => [], 'translation_needed_fields' => [], 'translated_preview_fields' => [], 'translated_specification_values' => [], 'untranslated_technical_values' => [], 'would_save' => false, 'blockers' => $blockers, 'warnings' => []];
     }
 }
