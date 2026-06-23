@@ -6,6 +6,7 @@ use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceListing;
 use App\Models\Part;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -205,6 +206,130 @@ class OvokoStockReconciliationControllerTest extends TestCase
         $this->assertFalse($part->refresh()->needs_review);
     }
 
+    public function test_prepare_snapshot_fetches_complete_ovoko_list_and_caches_ids_without_local_writes(): void
+    {
+        Http::fake([
+            'api.rrr.lt/v2/get/parts?limit=2&page=1' => Http::response(['status_code' => 'R200', 'parts' => [['id' => 'A1'], ['id' => 'A2']], 'total_count' => 3], 200),
+            'api.rrr.lt/v2/get/parts?limit=2&page=2' => Http::response(['status_code' => 'R200', 'parts' => [['id' => 'A3']], 'total_count' => 3], 200),
+        ]);
+        $this->account();
+        $part = $this->partWithOvoko('A1', false);
+
+        $response = $this->getJson('/tools/prepare-ovoko-stock-reconciliation-snapshot?token=gps_images_import_2026&ovoko_limit=2&max_ovoko_pages=2');
+
+        $response->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('dry_run', true)
+            ->assertJsonPath('ovoko_api_total_count', 3)
+            ->assertJsonPath('ovoko_pages_fetched', 2)
+            ->assertJsonPath('ovoko_last_page_reached', true)
+            ->assertJsonPath('ovoko_has_more', false)
+            ->assertJsonPath('ovoko_active_ids_count', 3)
+            ->assertJsonPath('blockers', []);
+        $this->assertNotEmpty($response->json('snapshot_id'));
+        $this->assertFalse($part->refresh()->needs_review);
+        Http::assertSentCount(2);
+    }
+
+    public function test_prepare_snapshot_blocks_and_does_not_cache_incomplete_ovoko_list(): void
+    {
+        Http::fake(['api.rrr.lt/v2/get/parts?limit=2&page=1' => Http::response(['status_code' => 'R200', 'parts' => [['id' => 'A1'], ['id' => 'A2']], 'total_count' => 5], 200)]);
+        $this->account();
+
+        $response = $this->getJson('/tools/prepare-ovoko-stock-reconciliation-snapshot?token=gps_images_import_2026&ovoko_limit=2&max_ovoko_pages=1');
+
+        $response->assertOk()
+            ->assertJsonPath('ok', false)
+            ->assertJsonPath('snapshot_id', null)
+            ->assertJsonPath('ovoko_last_page_reached', false)
+            ->assertJsonFragment(['ovoko_active_list_incomplete_cannot_mark_missing']);
+    }
+
+    public function test_snapshot_batch_scans_single_local_page_and_reports_next_page_without_writes_or_http_calls(): void
+    {
+        Http::fake();
+        $this->account();
+        $matched = $this->partWithOvoko('A1', false);
+        $missing = $this->partWithOvoko('MISSING', false);
+        $this->partWithOvoko('A3', true);
+        $snapshotId = $this->putSnapshot(['A1', 'A3']);
+
+        $response = $this->getJson('/tools/dry-run-ovoko-stock-reconciliation-batch?token=gps_images_import_2026&snapshot_id='.$snapshotId.'&page=1&local_limit=2&sample_limit=5');
+
+        $response->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('dry_run', true)
+            ->assertJsonPath('snapshot_id', $snapshotId)
+            ->assertJsonPath('page', 1)
+            ->assertJsonPath('local_limit', 2)
+            ->assertJsonPath('local_candidate_parts_count', 2)
+            ->assertJsonPath('matched_active_ovoko_count', 1)
+            ->assertJsonPath('missing_in_ovoko_active_count', 1)
+            ->assertJsonPath('would_mark_needs_review_count', 1)
+            ->assertJsonPath('already_needs_review_count', 0)
+            ->assertJsonPath('conflict_count', 0)
+            ->assertJsonPath('has_more_local', true)
+            ->assertJsonPath('next_page', 2)
+            ->assertJsonFragment(['ovoko_external_id' => 'A1'])
+            ->assertJsonFragment(['ovoko_external_id' => 'MISSING']);
+        $this->assertFalse($matched->refresh()->needs_review);
+        $this->assertFalse($missing->refresh()->needs_review);
+        Http::assertNothingSent();
+    }
+
+    public function test_snapshot_batch_last_page_has_no_next_page(): void
+    {
+        Http::fake();
+        $this->account();
+        $this->partWithOvoko('A1', false);
+        $this->partWithOvoko('A2', false);
+        $snapshotId = $this->putSnapshot(['A1', 'A2']);
+
+        $response = $this->getJson('/tools/dry-run-ovoko-stock-reconciliation-batch?token=gps_images_import_2026&snapshot_id='.$snapshotId.'&page=2&local_limit=1');
+
+        $response->assertOk()
+            ->assertJsonPath('local_candidate_parts_count', 1)
+            ->assertJsonPath('has_more_local', false)
+            ->assertJsonPath('next_page', null);
+        Http::assertNothingSent();
+    }
+
+    public function test_snapshot_batch_blocks_when_snapshot_missing_or_expired(): void
+    {
+        $missing = $this->getJson('/tools/dry-run-ovoko-stock-reconciliation-batch?token=gps_images_import_2026&snapshot_id=missing&page=1');
+        $missing->assertOk()
+            ->assertJsonPath('ok', false)
+            ->assertJsonFragment(['ovoko_snapshot_not_found']);
+
+        $snapshotId = $this->putSnapshot(['A1'], now()->subMinute());
+        $expired = $this->getJson('/tools/dry-run-ovoko-stock-reconciliation-batch?token=gps_images_import_2026&snapshot_id='.$snapshotId.'&page=1');
+        $expired->assertOk()
+            ->assertJsonPath('ok', false)
+            ->assertJsonFragment(['ovoko_snapshot_expired']);
+    }
+
+    public function test_snapshot_range_scans_limited_pages_against_snapshot(): void
+    {
+        Http::fake();
+        $this->account();
+        $this->partWithOvoko('A1', false);
+        $this->partWithOvoko('MISSING', false);
+        $this->partWithOvoko('A3', true);
+        $snapshotId = $this->putSnapshot(['A1', 'A3']);
+
+        $response = $this->getJson('/tools/dry-run-ovoko-stock-reconciliation-range?token=gps_images_import_2026&snapshot_id='.$snapshotId.'&from_page=1&to_page=2&local_limit=2');
+
+        $response->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('local_candidate_parts_count', 3)
+            ->assertJsonPath('matched_active_ovoko_count', 2)
+            ->assertJsonPath('missing_in_ovoko_active_count', 1)
+            ->assertJsonPath('would_mark_needs_review_count', 1)
+            ->assertJsonPath('already_needs_review_count', 1)
+            ->assertJsonPath('has_more_local', false);
+        Http::assertNothingSent();
+    }
+
     private function partWithOvoko(string $externalId, bool $needsReview): Part
     {
         $part = Part::query()->create(['name' => 'Lamp '.$externalId, 'quantity' => 1, 'status' => 'published', 'needs_listing' => false, 'needs_review' => $needsReview]);
@@ -222,5 +347,24 @@ class OvokoStockReconciliationControllerTest extends TestCase
             'api_base_url' => 'https://api.rrr.lt',
             'api_credentials' => ['username' => 'u', 'password' => 'p', 'user_token' => 't'],
         ]);
+    }
+
+    private function putSnapshot(array $activeIds, $expiresAt = null): string
+    {
+        $snapshotId = 'test-snapshot-'.str_replace('.', '-', (string) microtime(true));
+        $expiresAt ??= now()->addHour();
+        Cache::put('ovoko_stock_reconciliation_snapshot:'.$snapshotId, [
+            'snapshot_id' => $snapshotId,
+            'active_ids' => $activeIds,
+            'created_at' => now()->toISOString(),
+            'expires_at' => $expiresAt->toISOString(),
+            'ovoko_api_total_count' => count($activeIds),
+            'ovoko_pages_fetched' => 1,
+            'ovoko_last_page_reached' => true,
+            'ovoko_has_more' => false,
+            'ovoko_selected_id_field' => 'id',
+            'ovoko_detected_id_fields' => ['id' => count($activeIds)],
+        ], now()->addHour());
+        return $snapshotId;
     }
 }

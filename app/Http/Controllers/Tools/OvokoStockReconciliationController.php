@@ -10,8 +10,10 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 use Throwable;
 
 class OvokoStockReconciliationController extends Controller
@@ -20,6 +22,8 @@ class OvokoStockReconciliationController extends Controller
     private const SOURCE = 'ovoko_stock_reconciliation';
     private const REASON = 'missing_in_ovoko_active_stock';
     private const ENDPOINT_PATH = '/v2/get/parts';
+    private const SNAPSHOT_CACHE_PREFIX = 'ovoko_stock_reconciliation_snapshot:';
+    private const SNAPSHOT_TTL_HOURS = 3;
 
     public function dryRun(Request $request): JsonResponse
     {
@@ -29,6 +33,21 @@ class OvokoStockReconciliationController extends Controller
     public function dryRunAll(Request $request): JsonResponse
     {
         return response()->json($this->reconcileAll($request));
+    }
+
+    public function prepareSnapshot(Request $request): JsonResponse
+    {
+        return response()->json($this->prepareOvokoSnapshot($request));
+    }
+
+    public function dryRunBatch(Request $request): JsonResponse
+    {
+        return response()->json($this->reconcileSnapshotBatch($request));
+    }
+
+    public function dryRunRange(Request $request): JsonResponse
+    {
+        return response()->json($this->reconcileSnapshotRange($request));
     }
 
     public function run(Request $request): JsonResponse
@@ -271,6 +290,167 @@ class OvokoStockReconciliationController extends Controller
             'blockers' => $blockers,
             'warnings' => $warnings,
         ];
+    }
+
+    private function prepareOvokoSnapshot(Request $request): array
+    {
+        if (! $this->validToken($request)) return ['ok' => false, 'dry_run' => true, 'blockers' => ['invalid_token'], 'warnings' => []];
+
+        $warnings = ['read_only_snapshot_no_local_or_marketplace_writes'];
+        $blockers = [];
+        $ovokoRequest = $request->duplicate($request->query(), null);
+        $ovokoRequest->query->set('fetch_all_ovoko', '1');
+        $ovokoRequest->query->set('ovoko_limit', $request->query('ovoko_limit', 100));
+        $ovokoRequest->query->set('ovoko_page', 1);
+        $ovokoRequest->query->set('ovoko_max_pages', $request->query('max_ovoko_pages', $request->query('ovoko_max_pages', 200)));
+        $ovoko = $this->fetchOvokoActiveIds($ovokoRequest, []);
+
+        if (! ($ovoko['ok'] ?? false)) $blockers[] = $ovoko['error'] ?? 'ovoko_api_failed';
+        if (! ($ovoko['last_page_reached'] ?? false)) $blockers[] = 'ovoko_active_list_incomplete_cannot_mark_missing';
+        if (($ovoko['selected_id_field'] ?? null) === null || ($ovoko['mapping_confident'] ?? false) === false) $blockers[] = 'ovoko_id_mapping_not_confident';
+        $blockers = array_values(array_unique($blockers));
+
+        $snapshotId = null;
+        $activeIds = $ovoko['active_ids'] ?? [];
+        if ($blockers === []) {
+            $createdAt = now();
+            $expiresAt = $createdAt->copy()->addHours(self::SNAPSHOT_TTL_HOURS);
+            $snapshotId = (string) Str::uuid();
+            Cache::put($this->snapshotCacheKey($snapshotId), [
+                'snapshot_id' => $snapshotId,
+                'active_ids' => array_values(array_unique(array_map('strval', $activeIds))),
+                'created_at' => $createdAt->toISOString(),
+                'expires_at' => $expiresAt->toISOString(),
+                'ovoko_api_total_count' => $ovoko['total_count'] ?? null,
+                'ovoko_pages_fetched' => $ovoko['pages_fetched'] ?? 0,
+                'ovoko_last_page_reached' => $ovoko['last_page_reached'] ?? false,
+                'ovoko_has_more' => $ovoko['has_more'] ?? null,
+                'ovoko_selected_id_field' => $ovoko['selected_id_field'] ?? null,
+                'ovoko_detected_id_fields' => $ovoko['detected_id_fields'] ?? [],
+            ], $expiresAt);
+        }
+
+        return [
+            'ok' => $blockers === [],
+            'dry_run' => true,
+            'snapshot_id' => $snapshotId,
+            'ovoko_api_total_count' => $ovoko['total_count'] ?? null,
+            'ovoko_pages_fetched' => $ovoko['pages_fetched'] ?? 0,
+            'ovoko_last_page_reached' => $ovoko['last_page_reached'] ?? false,
+            'ovoko_has_more' => $ovoko['has_more'] ?? null,
+            'ovoko_active_ids_count' => count($activeIds),
+            'ovoko_selected_id_field' => $ovoko['selected_id_field'] ?? null,
+            'blockers' => $blockers,
+            'warnings' => $warnings,
+        ];
+    }
+
+    private function reconcileSnapshotBatch(Request $request): array
+    {
+        if (! $this->validToken($request)) return ['ok' => false, 'dry_run' => true, 'blockers' => ['invalid_token'], 'warnings' => []];
+
+        $snapshot = $this->loadSnapshot((string) $request->query('snapshot_id', ''));
+        if ($snapshot['blockers'] !== []) {
+            return ['ok' => false, 'dry_run' => true, 'snapshot_id' => (string) $request->query('snapshot_id', ''), 'blockers' => $snapshot['blockers'], 'warnings' => ['read_only_batch_no_local_or_marketplace_writes']];
+        }
+
+        $page = max(1, (int) $request->query('page', 1));
+        $localLimit = max(1, min(1000, (int) $request->query('local_limit', 100)));
+        $sampleLimit = max(1, min(200, (int) $request->query('sample_limit', 50)));
+
+        return $this->scanSnapshotLocalPage($request, $snapshot['data'], $page, $localLimit, $sampleLimit);
+    }
+
+    private function reconcileSnapshotRange(Request $request): array
+    {
+        if (! $this->validToken($request)) return ['ok' => false, 'dry_run' => true, 'blockers' => ['invalid_token'], 'warnings' => []];
+
+        $snapshot = $this->loadSnapshot((string) $request->query('snapshot_id', ''));
+        if ($snapshot['blockers'] !== []) {
+            return ['ok' => false, 'dry_run' => true, 'snapshot_id' => (string) $request->query('snapshot_id', ''), 'blockers' => $snapshot['blockers'], 'warnings' => ['read_only_range_no_local_or_marketplace_writes']];
+        }
+
+        $fromPage = max(1, (int) $request->query('from_page', 1));
+        $toPage = max($fromPage, (int) $request->query('to_page', $fromPage));
+        $toPage = min($toPage, $fromPage + 19);
+        $localLimit = max(1, min(1000, (int) $request->query('local_limit', 100)));
+        $sampleLimit = max(1, min(200, (int) $request->query('sample_limit', 100)));
+        $totals = ['local_candidate_parts_count' => 0, 'matched_active_ovoko_count' => 0, 'missing_in_ovoko_active_count' => 0, 'would_mark_needs_review_count' => 0, 'already_needs_review_count' => 0, 'conflict_count' => 0];
+        $samples = ['sample_would_mark_needs_review' => [], 'sample_matched' => [], 'sample_conflicts' => []];
+        $hasMore = false;
+        $nextPage = null;
+
+        for ($page = $fromPage; $page <= $toPage; $page++) {
+            $batch = $this->scanSnapshotLocalPage($request, $snapshot['data'], $page, $localLimit, $sampleLimit);
+            foreach ($totals as $key => $_) $totals[$key] += (int) ($batch[$key] ?? 0);
+            foreach ($samples as $key => $_) $samples[$key] = array_slice(array_merge($samples[$key], $batch[$key] ?? []), 0, $sampleLimit);
+            $hasMore = (bool) ($batch['has_more_local'] ?? false);
+            $nextPage = $batch['next_page'] ?? null;
+            if (! $hasMore) break;
+        }
+
+        return array_merge(['ok' => true, 'dry_run' => true, 'snapshot_id' => $snapshot['data']['snapshot_id'], 'from_page' => $fromPage, 'to_page' => $toPage, 'local_limit' => $localLimit], $totals, $samples, ['has_more_local' => $hasMore, 'next_page' => $nextPage, 'blockers' => [], 'warnings' => ['read_only_range_no_local_or_marketplace_writes']]);
+    }
+
+    private function scanSnapshotLocalPage(Request $request, array $snapshot, int $page, int $localLimit, int $sampleLimit): array
+    {
+        $activeIdSet = array_flip(array_map('strval', $snapshot['active_ids'] ?? []));
+        $batch = $this->candidateQueryForPage($request, $page, $localLimit)->get();
+        $matched = [];
+        $missing = [];
+        $conflicts = [];
+        $alreadyNeedsReview = 0;
+        foreach ($batch as $part) {
+            $listing = $this->ovokoListing($part);
+            $ids = $this->listingIds($listing);
+            if ((bool) $part->needs_review) $alreadyNeedsReview++;
+            if ($ids === []) {
+                $conflicts[] = $this->partSample($part) + ['conflict' => 'missing_local_ovoko_external_id'];
+            } elseif (array_intersect_key(array_flip($ids), $activeIdSet) !== []) {
+                $matched[] = $this->partSample($part);
+            } else {
+                $missing[] = $this->partSample($part) + ['checked_ovoko_ids' => $ids];
+            }
+        }
+        $count = $batch->count();
+        $hasMore = $count >= $localLimit && $this->candidateQueryForPage($request, $page + 1, 1)->exists();
+
+        return [
+            'ok' => true,
+            'dry_run' => true,
+            'snapshot_id' => $snapshot['snapshot_id'],
+            'page' => $page,
+            'local_limit' => $localLimit,
+            'local_candidate_parts_count' => $count,
+            'matched_active_ovoko_count' => count($matched),
+            'missing_in_ovoko_active_count' => count($missing),
+            'would_mark_needs_review_count' => count(array_filter($missing, fn ($row) => ! ($row['needs_review'] ?? false))),
+            'already_needs_review_count' => $alreadyNeedsReview,
+            'conflict_count' => count($conflicts),
+            'sample_would_mark_needs_review' => array_slice($missing, 0, $sampleLimit),
+            'sample_matched' => array_slice($matched, 0, $sampleLimit),
+            'sample_conflicts' => array_slice($conflicts, 0, $sampleLimit),
+            'has_more_local' => $hasMore,
+            'next_page' => $hasMore ? $page + 1 : null,
+            'blockers' => [],
+            'warnings' => ['read_only_batch_no_local_or_marketplace_writes'],
+        ];
+    }
+
+    private function loadSnapshot(string $snapshotId): array
+    {
+        if ($snapshotId === '') return ['data' => null, 'blockers' => ['ovoko_snapshot_not_found']];
+        $snapshot = Cache::get($this->snapshotCacheKey($snapshotId));
+        if (! is_array($snapshot)) return ['data' => null, 'blockers' => ['ovoko_snapshot_not_found']];
+        if (empty($snapshot['expires_at']) || now()->greaterThanOrEqualTo(\Illuminate\Support\Carbon::parse($snapshot['expires_at']))) return ['data' => null, 'blockers' => ['ovoko_snapshot_expired']];
+        if (($snapshot['ovoko_last_page_reached'] ?? false) !== true) return ['data' => null, 'blockers' => ['ovoko_active_list_incomplete_cannot_mark_missing']];
+        if (empty($snapshot['ovoko_selected_id_field'])) return ['data' => null, 'blockers' => ['ovoko_id_mapping_not_confident']];
+        return ['data' => $snapshot, 'blockers' => []];
+    }
+
+    private function snapshotCacheKey(string $snapshotId): string
+    {
+        return self::SNAPSHOT_CACHE_PREFIX.$snapshotId;
     }
 
     private function fetchOvokoActiveIds(Request $request, array $localCheckedIds): array
