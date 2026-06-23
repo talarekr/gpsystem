@@ -64,11 +64,14 @@ class OvokoStockReconciliationController extends Controller
         $sampleLimit = max(1, min(200, (int) $request->query('sample_limit', 50)));
         $warnings = ['read_only_ovoko_api_no_marketplace_writes'];
         $blockers = [];
-        $ovoko = $this->fetchOvokoActiveIds($request);
+        $candidates = $this->candidateQuery($request)->get();
+        $localCheckedIds = $candidates->flatMap(fn (Part $part) => $this->listingIds($this->ovokoListing($part)))->unique()->values()->all();
+        $ovoko = $this->fetchOvokoActiveIds($request, $localCheckedIds);
         if (! ($ovoko['ok'] ?? false)) $blockers[] = $ovoko['error'] ?? 'ovoko_api_failed';
+        if (! ($ovoko['last_page_reached'] ?? false)) $blockers[] = 'ovoko_active_list_incomplete_cannot_mark_missing';
+        if (($ovoko['selected_id_field'] ?? null) === null) $blockers[] = 'ovoko_id_field_not_detected';
 
         $activeIds = $ovoko['active_ids'] ?? [];
-        $candidates = $this->candidateQuery($request)->get();
         $matched = [];
         $missing = [];
         $conflicts = [];
@@ -88,6 +91,14 @@ class OvokoStockReconciliationController extends Controller
                 $missing[] = $this->partSample($part) + ['checked_ovoko_ids' => $ids];
             }
         }
+
+        if ($candidates->count() > 0 && count($activeIds) > 0 && count($matched) === 0) {
+            $blockers[] = 'zero_matches_between_local_and_ovoko_check_id_mapping_before_confirm';
+        }
+        if (($ovoko['mapping_confident'] ?? false) === false) {
+            $blockers[] = 'ovoko_id_mapping_not_confident';
+        }
+        $blockers = array_values(array_unique($blockers));
 
         $updated = 0;
         if ($write && $blockers === []) {
@@ -117,11 +128,21 @@ class OvokoStockReconciliationController extends Controller
             'dry_run' => ! $write,
             'local_update_only' => $write,
             'ovoko_api_total_count' => $ovoko['total_count'] ?? null,
+            'ovoko_pages_fetched' => $ovoko['pages_fetched'] ?? 0,
+            'ovoko_limit_per_page' => $ovoko['limit_per_page'] ?? null,
+            'ovoko_last_page_reached' => $ovoko['last_page_reached'] ?? false,
+            'ovoko_has_more' => $ovoko['has_more'] ?? null,
             'ovoko_active_ids_count' => count($activeIds),
+            'ovoko_active_ids_min_max_sample' => $this->idMinMaxSample($activeIds),
+            'ovoko_selected_id_field' => $ovoko['selected_id_field'] ?? null,
+            'ovoko_detected_id_fields' => $ovoko['detected_id_fields'] ?? [],
+            'sample_ovoko_active_raw' => array_slice($ovoko['raw_items'] ?? [], 0, $sampleLimit),
+            'sample_ovoko_active_ids' => array_slice($activeIds, 0, $sampleLimit),
+            'local_checked_ovoko_ids_sample' => array_slice($localCheckedIds, 0, $sampleLimit),
             'local_candidate_parts_count' => $candidates->count(),
             'matched_active_ovoko_count' => count($matched),
             'missing_in_ovoko_active_count' => count($missing),
-            'would_mark_needs_review_count' => count(array_filter($missing, fn ($row) => ! ($row['needs_review'] ?? false))),
+            'would_mark_needs_review_count' => $blockers === [] ? count(array_filter($missing, fn ($row) => ! ($row['needs_review'] ?? false))) : null,
             'marked_needs_review_count' => $updated,
             'already_needs_review_count' => $alreadyNeedsReview,
             'conflict_count' => count($conflicts),
@@ -133,27 +154,70 @@ class OvokoStockReconciliationController extends Controller
         ];
     }
 
-    private function fetchOvokoActiveIds(Request $request): array
+    private function fetchOvokoActiveIds(Request $request, array $localCheckedIds): array
     {
         $account = Schema::hasTable('marketplace_accounts') ? MarketplaceAccount::query()->where('code', 'ovoko_main')->first() : null;
         $credentials = is_array($account?->api_credentials) ? $account->api_credentials : [];
         if (! $account || blank($account->api_base_url) || blank($credentials['username'] ?? null) || blank($credentials['password'] ?? null) || blank($credentials['user_token'] ?? null)) {
-            return ['ok' => false, 'error' => 'ovoko_api_credentials_missing', 'active_ids' => []];
+            return ['ok' => false, 'error' => 'ovoko_api_credentials_missing', 'active_ids' => [], 'last_page_reached' => false, 'pages_fetched' => 0];
         }
 
-        $limit = max(1, min(100, (int) $request->query('limit', 100)));
-        $page = max(1, (int) $request->query('page', 1));
+        $limit = max(1, min(100, (int) $request->query('ovoko_limit', $request->query('limit', 100))));
+        $page = max(1, (int) $request->query('ovoko_page', 1));
+        $maxPages = max(1, min(200, (int) $request->query('ovoko_max_pages', 50)));
+        $rawItems = [];
+        $detectedFields = [];
+        $totalCount = null;
+        $lastPageReached = false;
+        $hasMore = null;
+        $pagesFetched = 0;
+
         try {
-            $response = Http::asForm()->acceptJson()->timeout(30)->post(rtrim((string) $account->api_base_url, '/').self::ENDPOINT_PATH.'?limit='.$limit.'&page='.$page, Arr::only($credentials, ['username', 'password', 'user_token']));
-            $payload = $response->json() ?: [];
-            if (! $response->successful() || ($payload['status_code'] ?? null) !== 'R200') {
-                return ['ok' => false, 'error' => 'ovoko_api_business_error', 'active_ids' => []];
+            for ($i = 0; $i < $maxPages; $i++, $page++) {
+                $response = Http::asForm()->acceptJson()->timeout(30)->post(rtrim((string) $account->api_base_url, '/').self::ENDPOINT_PATH.'?limit='.$limit.'&page='.$page, Arr::only($credentials, ['username', 'password', 'user_token']));
+                $payload = $response->json() ?: [];
+                $pagesFetched++;
+                if (! $response->successful() || ($payload['status_code'] ?? null) !== 'R200') {
+                    return ['ok' => false, 'error' => 'ovoko_api_business_error', 'active_ids' => [], 'raw_items' => $rawItems, 'detected_id_fields' => $detectedFields, 'last_page_reached' => false, 'pages_fetched' => $pagesFetched, 'limit_per_page' => $limit, 'total_count' => $totalCount, 'has_more' => true];
+                }
+
+                $totalCount ??= $payload['total_count'] ?? $payload['data']['total_count'] ?? $payload['pagination']['total_count'] ?? $payload['pagination']['total'] ?? $payload['total'] ?? null;
+                $items = $payload['parts'] ?? $payload['data']['parts'] ?? $payload['data'] ?? [];
+                $items = is_array($items) ? array_values($items) : [];
+                foreach ($items as $item) {
+                    $item = (array) $item;
+                    $rawItems[] = $item;
+                    foreach ($this->ovokoCandidateIdFields($item) as $field => $value) {
+                        $detectedFields[$field] = ($detectedFields[$field] ?? 0) + 1;
+                    }
+                }
+
+                $payloadHasMore = $payload['has_more'] ?? $payload['data']['has_more'] ?? $payload['pagination']['has_more'] ?? null;
+                $hasMore = is_bool($payloadHasMore) ? $payloadHasMore : (count($items) >= $limit);
+                if ($hasMore === false || count($items) < $limit || ($totalCount !== null && count($rawItems) >= (int) $totalCount)) {
+                    $lastPageReached = true;
+                    $hasMore = false;
+                    break;
+                }
             }
-            $items = $payload['parts'] ?? $payload['data']['parts'] ?? $payload['data'] ?? [];
-            $ids = collect(is_array($items) ? $items : [])->flatMap(fn ($item) => $this->ovokoItemIds((array) $item))->filter()->unique()->values()->all();
-            return ['ok' => true, 'active_ids' => $ids, 'total_count' => $payload['total_count'] ?? $payload['data']['total_count'] ?? $payload['total'] ?? null];
+
+            $selectedField = $this->selectOvokoIdField($rawItems, $localCheckedIds, (string) $request->query('ovoko_id_field', 'auto'));
+            $ids = $selectedField ? collect($rawItems)->map(fn ($item) => $item[$selectedField] ?? null)->filter()->map(fn ($v) => (string) $v)->unique()->values()->all() : [];
+            return [
+                'ok' => true,
+                'active_ids' => $ids,
+                'raw_items' => $rawItems,
+                'detected_id_fields' => $detectedFields,
+                'selected_id_field' => $selectedField,
+                'mapping_confident' => $selectedField !== null && (count($localCheckedIds) === 0 || count(array_intersect($ids, $localCheckedIds)) > 0),
+                'total_count' => $totalCount,
+                'pages_fetched' => $pagesFetched,
+                'limit_per_page' => $limit,
+                'last_page_reached' => $lastPageReached,
+                'has_more' => $hasMore,
+            ];
         } catch (Throwable) {
-            return ['ok' => false, 'error' => 'ovoko_api_exception', 'active_ids' => []];
+            return ['ok' => false, 'error' => 'ovoko_api_exception', 'active_ids' => [], 'raw_items' => $rawItems, 'detected_id_fields' => $detectedFields, 'last_page_reached' => false, 'pages_fetched' => $pagesFetched, 'limit_per_page' => $limit, 'total_count' => $totalCount, 'has_more' => true];
         }
     }
 
@@ -168,7 +232,42 @@ class OvokoStockReconciliationController extends Controller
 
     private function ovokoListing(Part $part): ?MarketplaceListing { return $part->marketplaceListings->firstWhere('marketplace', 'ovoko'); }
     private function listingIds(?MarketplaceListing $listing): array { return collect([$listing?->external_offer_id, $listing?->external_listing_id, $listing?->external_inventory_id, $listing?->sku])->filter()->map(fn ($v) => (string) $v)->unique()->values()->all(); }
-    private function ovokoItemIds(array $item): array { return collect([$item['id'] ?? null, $item['part_id'] ?? null, $item['external_id'] ?? null, $item['external_listing_id'] ?? null, $item['sku'] ?? null])->filter()->map(fn ($v) => (string) $v)->unique()->values()->all(); }
+    private function ovokoCandidateIdFields(array $item): array
+    {
+        $fields = ['id', 'part_id', 'external_id', 'car_part_id', 'code', 'external_listing_id', 'sku'];
+        return collect($fields)->filter(fn (string $field): bool => filled($item[$field] ?? null))->mapWithKeys(fn (string $field): array => [$field => (string) $item[$field]])->all();
+    }
+
+    private function selectOvokoIdField(array $items, array $localCheckedIds, string $requestedField): ?string
+    {
+        $available = collect($items)->flatMap(fn (array $item): array => array_keys($this->ovokoCandidateIdFields($item)))->unique()->values();
+        if ($requestedField !== 'auto') {
+            return $available->contains($requestedField) ? $requestedField : null;
+        }
+
+        $localSet = array_flip(array_map('strval', $localCheckedIds));
+        $scores = [];
+        foreach ($available as $field) {
+            $values = collect($items)->map(fn (array $item) => isset($item[$field]) ? (string) $item[$field] : null)->filter()->unique()->values()->all();
+            $scores[$field] = count(array_intersect_key(array_flip($values), $localSet));
+        }
+        arsort($scores);
+        $bestField = array_key_first($scores);
+        if ($bestField !== null && ($scores[$bestField] ?? 0) > 0) return $bestField;
+
+        return $available->contains('id') ? 'id' : ($available->first() ?: null);
+    }
+
+    private function idMinMaxSample(array $ids): array
+    {
+        $numeric = collect($ids)->filter(fn ($id): bool => is_numeric($id))->map(fn ($id): int => (int) $id);
+        return [
+            'min' => $numeric->isNotEmpty() ? $numeric->min() : null,
+            'max' => $numeric->isNotEmpty() ? $numeric->max() : null,
+            'sample' => array_slice($ids, 0, 20),
+        ];
+    }
+
     private function partSample(Part $part): array { $listing = $this->ovokoListing($part); return ['part_id' => $part->id, 'name' => $part->name, 'part_number' => $part->part_number, 'sku' => $part->sku, 'quantity' => $part->quantity, 'status' => $part->status, 'needs_review' => (bool) $part->needs_review, 'review_reason' => $part->review_reason, 'ovoko_listing_id' => $listing?->id, 'ovoko_external_id' => $listing?->external_offer_id ?? $listing?->external_listing_id]; }
     private function validToken(Request $request): bool { return hash_equals(self::TOKEN, (string) $request->query('token', '')); }
     private function invalidTokenResponse(): JsonResponse { return response()->json(['ok' => false, 'error_message' => 'Invalid diagnostics token.'], 403); }
