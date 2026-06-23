@@ -503,7 +503,12 @@ class PartResource extends Resource
             Tables\Columns\ViewColumn::make('admin_part_numbers')->label('Numer części')->view('filament.resources.parts.table-numbers')->viewData(fn (Part $record): array => ['part' => $record])->searchable(['part_number', 'oem_number', 'manufacturer_code'])->extraHeaderAttributes(['class' => 'gps-col-number'])->extraCellAttributes(['class' => 'gps-col-number'])->extraAttributes(['class' => 'gps-col-number-content']),
             Tables\Columns\ViewColumn::make('admin_part_channels')->label('Kanały sprzedaży')->view('filament.resources.parts.table-channels')->viewData(fn (Part $record): array => ['part' => $record])->extraHeaderAttributes(['class' => 'gps-col-channels'])->extraCellAttributes(['class' => 'gps-col-channels'])->extraAttributes(['class' => 'gps-col-channels-content']),
             Tables\Columns\ViewColumn::make('admin_part_storage')->label('Magazynowanie')->view('filament.resources.parts.table-storage')->viewData(fn (Part $record): array => ['part' => $record])->extraHeaderAttributes(['class' => 'gps-col-storage'])->extraCellAttributes(['class' => 'gps-col-storage'])->extraAttributes(['class' => 'gps-col-storage-content']),
+            Tables\Columns\TextColumn::make('quantity')->label('Ilość')->sortable(),
             Tables\Columns\TextColumn::make('status')->label('Status')->formatStateUsing(fn (?string $state) => Part::statusOptions()[$state] ?? $state)->badge()->size('xs')->sortable()->extraHeaderAttributes(['class' => 'gps-col-status'])->extraCellAttributes(['class' => 'gps-col-status'])->extraAttributes(['class' => 'gps-col-status-content']),
+            Tables\Columns\TextColumn::make('review_reason')->label('Powód wyjaśnienia')->toggleable(),
+            Tables\Columns\TextColumn::make('review_detected_at')->label('Wykryto')->dateTime('Y-m-d H:i')->sortable()->toggleable(),
+            Tables\Columns\TextColumn::make('review_source')->label('Źródło')->toggleable(),
+            Tables\Columns\TextColumn::make('ovoko_listing_id')->label('Ovoko ID')->state(fn (Part $record): string => (string) ($record->marketplaceListings->firstWhere('marketplace', 'ovoko')?->external_offer_id ?? $record->marketplaceListings->firstWhere('marketplace', 'ovoko')?->external_listing_id ?? '—'))->toggleable(),
             Tables\Columns\TextColumn::make('category.name')->label('Kategoria')->searchable()->toggleable(isToggledHiddenByDefault: true),
             Tables\Columns\TextColumn::make('car_context')->label('Samochód')->state(fn (Part $record) => $record->car ? self::carLabel($record->car) : '—')->searchable(query: fn (Builder $query, string $search): Builder => $query->whereHas('car', fn (Builder $q) => $q->where('make','like',"%{$search}%")->orWhere('model','like',"%{$search}%")))->toggleable(isToggledHiddenByDefault: true),
             Tables\Columns\TextColumn::make('created_at')->label('Utworzono')->dateTime('Y-m-d H:i')->sortable()->toggleable(isToggledHiddenByDefault: true),
@@ -514,6 +519,7 @@ class PartResource extends Resource
             Tables\Filters\TernaryFilter::make('category_needs_review')->label('Kategoria wymaga sprawdzenia'),
             Tables\Filters\TernaryFilter::make('is_visible_storefront')->label('Widoczna w sklepie'),
             Tables\Filters\TernaryFilter::make('needs_listing')->label('Część do wystawienia'),
+            Tables\Filters\TernaryFilter::make('needs_review')->label('Do wyjaśnienia'),
             Tables\Filters\TernaryFilter::make('missing_images')->label('Brak zdjęć')->queries(true: fn (Builder $query): Builder => $query->doesntHave('images'), false: fn (Builder $query): Builder => $query->has('images')),
             Tables\Filters\TernaryFilter::make('missing_price')->label('Brak ceny')->queries(true: fn (Builder $query): Builder => $query->whereNull('price')->orWhere('price', '<=', 0), false: fn (Builder $query): Builder => $query->whereNotNull('price')->where('price', '>', 0)),
             Tables\Filters\TernaryFilter::make('missing_sku')->label('Brak SKU')->queries(true: fn (Builder $query): Builder => $query->where(fn (Builder $q) => $q->whereNull('sku')->orWhere('sku', '')), false: fn (Builder $query): Builder => $query->whereNotNull('sku')->where('sku', '<>', '')),
@@ -592,7 +598,7 @@ class PartResource extends Resource
 
     public static function adminAllPartsQuery(): Builder
     {
-        return Part::query()->where('needs_listing', false);
+        return Part::query()->where('needs_listing', false)->where(fn (Builder $query) => $query->where('needs_review', false)->orWhereNull('needs_review'));
     }
 
     public static function getAllPartsNavigationCount(): int
@@ -602,6 +608,15 @@ class PartResource extends Resource
         }
 
         return static::adminAllPartsQuery()->count();
+    }
+
+    public static function getPartsNeedsReviewNavigationCount(): int
+    {
+        if (! Schema::hasTable('parts')) {
+            return 0;
+        }
+
+        return Part::query()->where('needs_review', true)->count();
     }
 
     public static function getPartsToListNavigationCount(): int
@@ -619,6 +634,7 @@ class PartResource extends Resource
             NavigationItem::make('Dodaj część')->group(static::getNavigationGroup())->sort(static::getNavigationSort())->url(static::getUrl('create'))->isActiveWhen(fn () => request()->routeIs('filament.admin.resources.parts.create')),
             NavigationItem::make('Wszystkie części')->group(static::getNavigationGroup())->sort((static::getNavigationSort() ?? 20) + 1)->url(static::getUrl('index'))->badge((string) static::getAllPartsNavigationCount())->isActiveWhen(fn () => request()->routeIs('filament.admin.resources.parts.index')),
             NavigationItem::make('Części do wystawienia')->group(static::getNavigationGroup())->sort((static::getNavigationSort() ?? 20) + 2)->url(static::getUrl('to-list'))->badge((string) static::getPartsToListNavigationCount())->isActiveWhen(fn () => request()->routeIs('filament.admin.resources.parts.to-list')),
+            NavigationItem::make('Do wyjaśnienia')->group(static::getNavigationGroup())->sort((static::getNavigationSort() ?? 20) + 3)->url(static::getUrl('needs-review'))->badge((string) static::getPartsNeedsReviewNavigationCount())->isActiveWhen(fn () => request()->routeIs('filament.admin.resources.parts.needs-review')),
         ];
     }
 
@@ -631,5 +647,5 @@ class PartResource extends Resource
     public static function rolesWithViewAccess(): array { return array_map(fn (UserRole $role) => $role->value, UserRole::cases()); }
     public static function rolesWithWriteAccess(): array { return [UserRole::OwnerAdmin->value, UserRole::Manager->value, UserRole::WarehouseProductStaff->value, UserRole::PricingStaff->value]; }
     public static function rolesWithFullAccess(): array { return [UserRole::OwnerAdmin->value, UserRole::Manager->value]; }
-    public static function getPages(): array { return ['index' => Pages\ListParts::route('/'), 'create' => Pages\CreatePart::route('/create'), 'to-list' => Pages\PartsToList::route('/to-list'), 'view' => Pages\ViewPart::route('/{record}'), 'edit' => Pages\EditPart::route('/{record}/edit')]; }
+    public static function getPages(): array { return ['index' => Pages\ListParts::route('/'), 'create' => Pages\CreatePart::route('/create'), 'to-list' => Pages\PartsToList::route('/to-list'), 'needs-review' => Pages\PartsNeedsReview::route('/needs-review'), 'view' => Pages\ViewPart::route('/{record}'), 'edit' => Pages\EditPart::route('/{record}/edit')]; }
 }

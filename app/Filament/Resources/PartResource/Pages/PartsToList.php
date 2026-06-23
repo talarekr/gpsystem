@@ -20,6 +20,6 @@ class PartsToList extends ListRecords
 
     protected function getTableQuery(): ?Builder
     {
-        return parent::getTableQuery()?->where('needs_listing', true);
+        return parent::getTableQuery()?->where('needs_listing', true)->where(fn (Builder $query) => $query->where('needs_review', false)->orWhereNull('needs_review'));
     }
 }

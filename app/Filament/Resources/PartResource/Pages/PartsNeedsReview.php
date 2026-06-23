@@ -7,9 +7,11 @@ use Filament\Actions;
 use Filament\Resources\Pages\ListRecords;
 use Illuminate\Database\Eloquent\Builder;
 
-class ListParts extends ListRecords
+class PartsNeedsReview extends ListRecords
 {
     protected static string $resource = PartResource::class;
+
+    protected static ?string $title = 'Części do wyjaśnienia';
 
     protected function getHeaderActions(): array
     {
@@ -18,6 +20,6 @@ class ListParts extends ListRecords
 
     protected function getTableQuery(): ?Builder
     {
-        return parent::getTableQuery()?->where('needs_listing', false)->where(fn (Builder $query) => $query->where('needs_review', false)->orWhereNull('needs_review'));
+        return parent::getTableQuery()?->where('needs_review', true);
     }
 }

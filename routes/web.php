@@ -42,6 +42,7 @@ use App\Http\Controllers\Tools\CheckStorefrontVisibilityController;
 use App\Http\Controllers\Tools\TestOvokoApiConnectionController;
 use App\Http\Controllers\Tools\OvokoOrdersDryRunController;
 use App\Http\Controllers\Tools\OvokoPriceImportController;
+use App\Http\Controllers\Tools\OvokoStockReconciliationController;
 use App\Http\Controllers\Tools\PartMarketplaceReadinessController;
 use App\Http\Controllers\Tools\ImportOvokoOrdersDryRunController;
 use App\Http\Controllers\Tools\CheckPartNumberPerformanceController;
@@ -168,6 +169,9 @@ Route::get('/tools/check-marketplace-stock-readiness', [MarketplaceApiFoundation
 Route::get('/tools/check-marketplace-linking-health', [MarketplaceApiFoundationController::class, 'linkingHealth'])->name('tools.check-marketplace-linking-health');
 Route::get('/tools/test-ovoko-api-connection', TestOvokoApiConnectionController::class)->name('tools.test-ovoko-api-connection');
 Route::get('/tools/check-ovoko-price-import', [OvokoPriceImportController::class, 'check'])->name('tools.check-ovoko-price-import');
+Route::get('/tools/dry-run-ovoko-stock-reconciliation', [OvokoStockReconciliationController::class, 'dryRun'])->name('tools.dry-run-ovoko-stock-reconciliation');
+Route::get('/tools/run-ovoko-stock-reconciliation', [OvokoStockReconciliationController::class, 'run'])->name('tools.run-ovoko-stock-reconciliation');
+Route::get('/tools/check-parts-needs-review', [OvokoStockReconciliationController::class, 'check'])->name('tools.check-parts-needs-review');
 Route::get('/tools/debug-ovoko-price-fields', [OvokoPriceImportController::class, 'debugPriceFields'])->name('tools.debug-ovoko-price-fields');
 Route::get('/tools/export-ovoko-price-import', [OvokoPriceImportController::class, 'export'])->name('tools.export-ovoko-price-import');
 Route::get('/tools/import-ovoko-prices', [OvokoPriceImportController::class, 'import'])->name('tools.import-ovoko-prices');
