@@ -204,6 +204,11 @@ Route::get('/tools/set-ebay-account-policy-settings', [EbayListingDryRunControll
 Route::get('/tools/check-ebay-listing-readiness', [EbayListingDryRunController::class, 'readiness'])->name('tools.check-ebay-listing-readiness');
 Route::get('/tools/dry-run-ebay-listing-payload', [EbayListingDryRunController::class, 'dryRunPayload'])->name('tools.dry-run-ebay-listing-payload');
 Route::get('/tools/check-ebay-part-compatibility', [EbayListingDryRunController::class, 'compatibility'])->name('tools.check-ebay-part-compatibility');
+Route::get('/tools/check-ebay-compatibility-policies', [EbayListingDryRunController::class, 'compatibilityPolicies'])->name('tools.check-ebay-compatibility-policies');
+Route::get('/tools/check-ebay-compatibility-properties', [EbayListingDryRunController::class, 'compatibilityProperties'])->name('tools.check-ebay-compatibility-properties');
+Route::get('/tools/check-ebay-compatibility-property-values', [EbayListingDryRunController::class, 'compatibilityPropertyValues'])->name('tools.check-ebay-compatibility-property-values');
+Route::get('/tools/dry-run-ebay-fitment-match', [EbayListingDryRunController::class, 'dryRunFitmentMatch'])->name('tools.dry-run-ebay-fitment-match');
+Route::get('/tools/dry-run-ebay-fitment-coverage', [EbayListingDryRunController::class, 'dryRunFitmentCoverage'])->name('tools.dry-run-ebay-fitment-coverage');
 Route::get('/tools/dry-run-ebay-part-compatibility-payload', [EbayListingDryRunController::class, 'dryRunCompatibilityPayload'])->name('tools.dry-run-ebay-part-compatibility-payload');
 Route::get('/tools/check-ebay-listing-readiness-all', [EbayListingDryRunController::class, 'readinessAll'])->name('tools.check-ebay-listing-readiness-all');
 Route::get('/tools/check-ebay-template-assets', [EbayDescriptionTemplateController::class, 'checkAssets'])->name('tools.check-ebay-template-assets');

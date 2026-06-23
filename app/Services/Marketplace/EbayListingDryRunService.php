@@ -6,6 +6,7 @@ use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceCategoryMapping;
 use App\Models\MarketplaceListing;
 use App\Models\Part;
+use App\Services\Marketplace\Api\EbayApiClient;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
@@ -216,6 +217,76 @@ class EbayListingDryRunService
         ];
     }
 
+    public function compatibilityPolicies(string $channel, string $categoryId): array
+    {
+        $client = $this->ebayClient($channel);
+        if (! $client) return ['ok' => false, 'channel' => $channel, 'marketplace_id' => self::CHANNELS[$channel] ?? null, 'category_id' => $categoryId, 'supports_compatibility' => false, 'policy' => null, 'compatibility_classification' => null, 'max_number_of_compatible_vehicles' => null, 'required_properties' => [], 'blockers' => ['Unsupported channel or marketplace account missing.'], 'warnings' => []];
+        return $client->automotivePartsCompatibilityPolicies($categoryId);
+    }
+
+    public function compatibilityProperties(string $channel, string $categoryId): array
+    {
+        $client = $this->ebayClient($channel);
+        if (! $client) return ['ok' => false, 'channel' => $channel, 'marketplace_id' => self::CHANNELS[$channel] ?? null, 'category_id' => $categoryId, 'properties_count' => 0, 'properties' => [], 'blockers' => ['Unsupported channel or marketplace account missing.'], 'warnings' => []];
+        return $client->compatibilityProperties($categoryId);
+    }
+
+    public function compatibilityPropertyValues(string $channel, string $categoryId, string $property, array $filters = []): array
+    {
+        $client = $this->ebayClient($channel);
+        if (! $client) return ['ok' => false, 'property' => $property, 'values_count' => 0, 'values_sample' => [], 'blockers' => ['Unsupported channel or marketplace account missing.'], 'warnings' => []];
+        return $client->compatibilityPropertyValues($categoryId, $property, $filters);
+    }
+
+    public function dryRunFitmentMatch(int $partId, string $channel): array
+    {
+        $part = Part::query()->with(['category', 'car'])->find($partId);
+        $categoryId = $part ? $this->mappedCategoryId($part, $channel) : null;
+        $props = $categoryId ? $this->compatibilityProperties($channel, $categoryId) : ['properties' => [], 'blockers' => ['External eBay category ID missing.']];
+        $vehicle = $this->compatibilityVehicles($part)[0] ?? [];
+        $map = ['Make' => 'make', 'Model' => 'model', 'Year' => 'production_year', 'Engine' => 'engine_code', 'Fuel Type' => 'fuel_type', 'Body Type' => 'body_type', 'Transmission' => 'gearbox_type'];
+        $mapped = []; $unmapped = []; $candidate = []; $normalization = []; $blockers = $props['blockers'] ?? [];
+        foreach (($props['properties'] ?? []) as $prop) {
+            $name = (string) ($prop['name'] ?? '');
+            $local = $map[$name] ?? null;
+            $value = $local ? ($vehicle[$local] ?? null) : null;
+            if (! $local) { $unmapped[] = ['property' => $name, 'required' => (bool) ($prop['required'] ?? false), 'reason' => 'no_local_dictionary_mapping']; if (($prop['required'] ?? false)) $blockers[] = 'No local dictionary mapping for required fitment property: '.$name; continue; }
+            if (! filled($value)) { if (($prop['required'] ?? false)) { $unmapped[] = ['property' => $name, 'required' => true, 'reason' => 'missing_local_value']; $blockers[] = 'Missing required fitment property: '.$name; } continue; }
+            $status = 'local_value_found_not_value_confirmed';
+            $confirmed = false;
+            if ($categoryId && ($prop['allowed_values_available'] ?? true)) {
+                $values = $this->compatibilityPropertyValues($channel, $categoryId, $name);
+                $sample = array_map(fn ($v) => is_array($v) ? (string) ($v['value'] ?? $v['localizedValue'] ?? '') : (string) $v, $values['values_sample'] ?? []);
+                $confirmed = in_array((string) $value, $sample, true);
+                $status = $confirmed ? 'matched_ebay_allowed_value' : 'requires_normalization_or_dependent_value_lookup';
+                if (! $confirmed && ($prop['required'] ?? false)) $blockers[] = 'Required fitment property value is not confirmed by eBay values: '.$name;
+            }
+            $mapped[] = ['property' => $name, 'local_field' => $local, 'value' => $value, 'status' => $status];
+            if ($confirmed || ! ($prop['allowed_values_available'] ?? true)) $candidate[] = ['name' => $name, 'value' => $value];
+        }
+        if (($props['properties_count'] ?? 0) === 0) $blockers[] = 'No eBay compatibility properties available for category; cannot build official payload.';
+        $requiredNames = array_map(fn ($p) => (string) ($p['name'] ?? ''), array_values(array_filter($props['properties'] ?? [], fn ($p) => (bool)($p['required'] ?? false))));
+        $candidateNames = array_map(fn ($p) => (string) $p['name'], $candidate);
+        foreach (array_diff($requiredNames, $candidateNames) as $missingRequiredCandidate) $blockers[] = 'Required fitment property is not confirmed for publishable candidate: '.$missingRequiredCandidate;
+        $can = $blockers === [] && $candidate !== [];
+        return ['ok' => true, 'part_id' => $partId, 'channel' => $channel, 'marketplace_id' => $this->marketplaceId($channel), 'category_id' => $categoryId, 'source_vehicle' => $vehicle, 'ebay_required_properties' => array_values(array_filter($props['properties'] ?? [], fn ($p) => (bool)($p['required'] ?? false))), 'mapped_properties' => $mapped, 'unmapped_properties' => $unmapped, 'normalization_used' => $normalization, 'candidate_compatibility_payload' => $can ? ['compatibleProducts' => [['productFamilyProperties' => $candidate]]] : null, 'can_build_ebay_fitment_payload' => $can, 'would_send' => false, 'blockers' => array_values(array_unique($blockers)), 'warnings' => ['Dry-run only: no eBay write API calls or local product/listing mutations. Values are not guessed; candidate payload is only returned when required values are confirmed.']];
+    }
+
+    public function dryRunFitmentCoverage(string $channel, int $limit): array
+    {
+        $parts = Part::query()->with('car')->limit(max(1, min($limit, 500)))->get();
+        $with = 0; $can = 0; $missing = []; $sampleCan = []; $sampleMissing = [];
+        foreach ($parts as $part) {
+            $vehicles = $this->compatibilityVehicles($part);
+            if ($vehicles === []) continue;
+            $with++;
+            $match = $this->dryRunFitmentMatch((int)$part->id, $channel);
+            if ($match['can_build_ebay_fitment_payload']) { $can++; if (count($sampleCan) < 5) $sampleCan[] = ['part_id' => $part->id]; }
+            else { foreach ($match['unmapped_properties'] as $u) $missing[$u['property']] = ($missing[$u['property']] ?? 0) + 1; if (count($sampleMissing) < 5) $sampleMissing[] = ['part_id' => $part->id, 'blockers' => $match['blockers']]; }
+        }
+        return ['ok' => true, 'channel' => $channel, 'limit' => $limit, 'parts_scanned_count' => $parts->count(), 'parts_with_donor_vehicle_count' => $with, 'parts_without_vehicle_count' => $parts->count() - $with, 'parts_can_build_candidate_fitment_count' => $can, 'parts_missing_required_fitment_fields_count' => $with - $can, 'count_by_missing_property' => $missing, 'sample_can_build' => $sampleCan, 'sample_missing' => $sampleMissing, 'sample_blocked' => array_slice($sampleMissing, 0, 5), 'blockers' => [], 'warnings' => ['Coverage dry-run only; reads cached eBay metadata/taxonomy and local data only.']];
+    }
+
     public function readinessAll(int $partId): array
     {
         $channels = ['ebay_de' => $this->readiness($partId, 'ebay_de'), 'ebay_fr' => $this->readiness($partId, 'ebay_fr')];
@@ -302,6 +373,19 @@ class EbayListingDryRunService
         return [];
     }
 
+
+    private function ebayClient(string $channel): ?EbayApiClient
+    {
+        if (! isset(self::CHANNELS[$channel]) || ! Schema::hasTable('marketplace_accounts')) return null;
+        $account = MarketplaceAccount::query()->where('code', $channel)->first();
+        return $account ? new EbayApiClient($channel, $account) : null;
+    }
+
+    private function mappedCategoryId(Part $part, string $channel): ?string
+    {
+        if (! isset(self::CHANNELS[$channel]) || ! Schema::hasTable('marketplace_category_mappings')) return null;
+        return MarketplaceCategoryMapping::query()->where('local_category_id', $part->category_id)->where('channel', $channel)->value('external_category_id');
+    }
 
     private function marketplaceId(string $channel): ?string
     {
