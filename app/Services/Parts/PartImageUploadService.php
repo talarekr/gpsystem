@@ -33,6 +33,8 @@ class PartImageUploadService
                     throw new RuntimeException('Nie udało się zapisać przesłanego zdjęcia części.');
                 }
 
+                $this->mirrorOriginalToServedPublicStorage($path);
+
                 $storedPaths[] = [
                     'path' => $path,
                     'source_system' => $sourceSystem,
@@ -93,6 +95,53 @@ class PartImageUploadService
     private function originalUploadDirectory(Part $part): string
     {
         return self::IMPORTED_DIRECTORY.'/'.((string) $part->getKey());
+    }
+
+    private function mirrorOriginalToServedPublicStorage(string $path): void
+    {
+        $source = Storage::disk(self::DISK)->path($path);
+        $target = $this->servedPublicStoragePath($path);
+
+        if ($source === $target || is_file($target)) {
+            return;
+        }
+
+        $targetDirectory = dirname($target);
+
+        if (! is_dir($targetDirectory) && ! mkdir($targetDirectory, 0755, true) && ! is_dir($targetDirectory)) {
+            throw new RuntimeException('Nie udało się utworzyć publicznego katalogu dla zdjęcia części.');
+        }
+
+        if (! copy($source, $target)) {
+            throw new RuntimeException('Nie udało się zapisać zdjęcia części w publicznym katalogu storage.');
+        }
+
+        chmod($target, 0644);
+    }
+
+    private function servedPublicStoragePath(string $path): string
+    {
+        return $this->servedPublicStorageRoot().DIRECTORY_SEPARATOR.str_replace(['/', '\\'], DIRECTORY_SEPARATOR, ltrim($path, '/'));
+    }
+
+    private function servedPublicStorageRoot(): string
+    {
+        $configuredRoot = trim((string) config('filesystems.served_public_storage_root', ''));
+        if ($configuredRoot !== '') {
+            return rtrim($configuredRoot, DIRECTORY_SEPARATOR);
+        }
+
+        $documentRoot = rtrim((string) ($_SERVER['DOCUMENT_ROOT'] ?? ''), DIRECTORY_SEPARATOR);
+        if ($documentRoot !== '') {
+            return $documentRoot.DIRECTORY_SEPARATOR.'storage';
+        }
+
+        $siblingPublicHtmlStorage = dirname(base_path()).DIRECTORY_SEPARATOR.'public_html'.DIRECTORY_SEPARATOR.'storage';
+        if (is_dir(dirname($siblingPublicHtmlStorage))) {
+            return $siblingPublicHtmlStorage;
+        }
+
+        return public_path('storage');
     }
 
     private function normalizeStoredImage(mixed $image): array

@@ -38,6 +38,7 @@ class WorkshopImageDiagnosticsController extends Controller
 
         return response()->json([
             'part_id' => $part->id,
+            'storage_paths' => $this->storagePathsPayload($request, $part),
             'request_host' => $request->getHost(),
             'app_url' => config('app.url'),
             'public_disk_url' => config('filesystems.disks.public.url'),
@@ -53,6 +54,63 @@ class WorkshopImageDiagnosticsController extends Controller
             'images_relation_count' => $part->images->count(),
             'images' => $part->images->map(fn (PartImage $image): array => $this->imagePayload($image))->values(),
         ]);
+    }
+
+    private function storagePathsPayload(Request $request, Part $part): array
+    {
+        $newWorkshopPath = ltrim((string) $request->query('new_workshop_path', $part->images->first()?->path), '/');
+        $oldImportedReferencePath = ltrim((string) $request->query(
+            'old_imported_reference_path',
+            'parts/photos/imported/63924/23201.jpg'
+        ), '/');
+        $diagnosticPath = $newWorkshopPath !== '' ? $newWorkshopPath : $oldImportedReferencePath;
+        $publicStorageRoot = $this->publicStorageRoot();
+        $documentRoot = rtrim((string) ($_SERVER['DOCUMENT_ROOT'] ?? ''), DIRECTORY_SEPARATOR);
+
+        return [
+            'storage_disk_public_root' => config('filesystems.disks.public.root'),
+            'storage_disk_public_full_path' => Storage::disk('public')->path($diagnosticPath),
+            'storage_disk_public_exists' => $diagnosticPath !== '' && Storage::disk('public')->exists($diagnosticPath),
+            'public_path_storage' => public_path('storage'),
+            'public_path_storage_is_link' => is_link(public_path('storage')),
+            'public_path_storage_realpath' => realpath(public_path('storage')) ?: null,
+            'document_root' => $documentRoot !== '' ? $documentRoot : null,
+            'document_root_storage_path' => $documentRoot !== '' ? $documentRoot.DIRECTORY_SEPARATOR.'storage' : null,
+            'document_root_storage_exists' => $documentRoot !== '' && file_exists($documentRoot.DIRECTORY_SEPARATOR.'storage'),
+            'gpswiss_expected_public_file_path' => $this->publicStorageFilePath($diagnosticPath, $publicStorageRoot),
+            'gpswiss_expected_public_file_exists' => $diagnosticPath !== '' && is_file($this->publicStorageFilePath($diagnosticPath, $publicStorageRoot)),
+            'old_imported_reference_path' => $oldImportedReferencePath,
+            'old_imported_reference_storage_exists' => $oldImportedReferencePath !== '' && Storage::disk('public')->exists($oldImportedReferencePath),
+            'old_imported_reference_public_exists' => $oldImportedReferencePath !== '' && is_file($this->publicStorageFilePath($oldImportedReferencePath, $publicStorageRoot)),
+            'new_workshop_path' => $newWorkshopPath,
+            'new_workshop_storage_exists' => $newWorkshopPath !== '' && Storage::disk('public')->exists($newWorkshopPath),
+            'new_workshop_public_exists' => $newWorkshopPath !== '' && is_file($this->publicStorageFilePath($newWorkshopPath, $publicStorageRoot)),
+        ];
+    }
+
+    private function publicStorageRoot(): string
+    {
+        $configuredRoot = trim((string) config('filesystems.served_public_storage_root', ''));
+        if ($configuredRoot !== '') {
+            return rtrim($configuredRoot, DIRECTORY_SEPARATOR);
+        }
+
+        $documentRoot = rtrim((string) ($_SERVER['DOCUMENT_ROOT'] ?? ''), DIRECTORY_SEPARATOR);
+        if ($documentRoot !== '') {
+            return $documentRoot.DIRECTORY_SEPARATOR.'storage';
+        }
+
+        $siblingPublicHtmlStorage = dirname(base_path()).DIRECTORY_SEPARATOR.'public_html'.DIRECTORY_SEPARATOR.'storage';
+        if (is_dir(dirname($siblingPublicHtmlStorage))) {
+            return $siblingPublicHtmlStorage;
+        }
+
+        return public_path('storage');
+    }
+
+    private function publicStorageFilePath(string $relativePath, string $publicStorageRoot): string
+    {
+        return $publicStorageRoot.DIRECTORY_SEPARATOR.str_replace(['/', '\\'], DIRECTORY_SEPARATOR, ltrim($relativePath, '/'));
     }
 
 
