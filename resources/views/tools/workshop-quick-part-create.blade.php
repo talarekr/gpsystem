@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>Warsztat — dodaj część</title>
     <style>
-        :root { color-scheme: light; --blue:#155eef; --bg:#f4f7fb; --text:#111827; --muted:#6b7280; --danger:#b42318; --border:#d0d5dd; --ok:#12b76a; }
+        :root { color-scheme: light; --blue:#155eef; --bg:#f4f7fb; --text:#111827; --muted:#6b7280; --danger:#b42318; --border:#d0d5dd; --ok:#12b76a; --overlay:rgba(16,24,40,.72); }
         * { box-sizing: border-box; }
         body { margin:0; background:var(--bg); color:var(--text); font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size:18px; }
         .wrap { width:100%; max-width:560px; margin:0 auto; min-height:100vh; padding:18px 14px 128px; }
@@ -29,6 +29,14 @@
         .errors { background:#fef3f2; color:var(--danger); border:1px solid #fecdca; border-radius:16px; padding:12px 14px; margin:0 0 16px; font-weight:700; }
         .hint { color:var(--muted); font-size:15px; margin-top:8px; }
         .upload-message { margin:12px 0 0; padding:12px 14px; border-radius:16px; background:#eef4ff; color:#1849a9; font-weight:800; }
+        .scan-status { margin:10px 0 0; padding:10px 12px; border-radius:14px; background:#ecfdf3; color:#027a48; font-weight:800; }
+        .scan-status.error { background:#fef3f2; color:var(--danger); }
+        .ocr-modal { position:fixed; inset:0; z-index:20; background:#000; color:#fff; display:grid; grid-template-rows:auto 1fr auto; }
+        .ocr-modal video { width:100%; height:100%; object-fit:cover; }
+        .ocr-header, .ocr-footer { position:relative; z-index:3; padding:16px; background:rgba(0,0,0,.62); text-align:center; }
+        .ocr-frame { position:absolute; left:50%; top:50%; width:90vw; max-width:620px; height:68px; transform:translate(-50%,-50%); border:3px solid #fff; border-radius:14px; box-shadow:0 0 0 9999px var(--overlay); z-index:2; }
+        .ocr-footer { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+        .ocr-footer button { width:100%; }
         .actions { position:fixed; left:0; right:0; bottom:0; background:rgba(255,255,255,.96); border-top:1px solid var(--border); padding:12px max(14px, env(safe-area-inset-left)) max(12px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-right)); display:flex; gap:10px; justify-content:center; }
         .actions-inner { width:100%; max-width:560px; display:flex; gap:10px; } .actions-inner > * { flex:1; }
         .success { border-left:6px solid var(--ok); }
@@ -47,7 +55,7 @@
             <p><strong>Część dodana do: Części -&gt; Do wystawienia</strong></p>
             <p>Kod części: {{ $part['part_number'] }}</p>
             <div class="success-actions">
-                <a class="btn primary" href="{{ url('/tools/workshop/quick-part-create?token='.$token) }}">Dodaj kolejną część</a>
+                <a class="btn primary" href="{{ $createAnotherUrl }}">Dodaj kolejną część</a>
                 <a class="btn secondary" href="{{ $part['admin_url'] }}">Otwórz część</a>
             </div>
         @else
@@ -56,7 +64,7 @@
             @if($errors->any())
                 <div class="errors"><ul>@foreach($errors->all() as $error)<li>{{ $error }}</li>@endforeach</ul></div>
             @endif
-            <form id="quickPartForm" method="post" action="{{ route('tools.workshop.quick-part-create.store', ['token' => $token]) }}" enctype="multipart/form-data">
+            <form id="quickPartForm" method="post" action="{{ $formAction }}" enctype="multipart/form-data">
                 @csrf
                 <section class="section" aria-labelledby="photosHeading">
                     <h2 id="photosHeading">1. Zdjęcia części</h2>
@@ -79,6 +87,8 @@
                     <h2>3. Główny kod części</h2>
                     <label for="part_number">Główny kod części</label>
                     <input id="part_number" name="part_number" type="text" value="{{ old('part_number') }}" placeholder="np. 8K0953568D" required>
+                    <button type="button" id="scanPartNumberBtn" class="secondary">Skanuj kod z etykiety</button>
+                    <p id="scanStatus" class="scan-status hidden" aria-live="polite"></p>
                 </section>
                 <section class="section">
                     <h2>4. Notatka wewnętrzna</h2>
@@ -91,6 +101,17 @@
                 </div></div>
             </form>
         @endif
+    </div>
+</div>
+<div id="ocrModal" class="ocr-modal hidden" role="dialog" aria-modal="true" aria-labelledby="ocrTitle">
+    <div class="ocr-header"><strong id="ocrTitle">Ustaw jeden wiersz kodu części w ramce</strong></div>
+    <div style="position:relative; overflow:hidden;">
+        <video id="ocrVideo" autoplay playsinline muted></video>
+        <div id="ocrFrame" class="ocr-frame" aria-hidden="true"></div>
+    </div>
+    <div class="ocr-footer">
+        <button type="button" id="ocrScanBtn" class="primary">Skanuj</button>
+        <button type="button" id="ocrCancelBtn" class="ghost">Anuluj</button>
     </div>
 </div>
 <script>
@@ -106,6 +127,87 @@
     const uploadMessage = document.getElementById('uploadMessage');
     const files = new DataTransfer();
     const objectUrls = [];
+    const partNumberInput = document.getElementById('part_number');
+    const scanPartNumberBtn = document.getElementById('scanPartNumberBtn');
+    const scanStatus = document.getElementById('scanStatus');
+    const ocrModal = document.getElementById('ocrModal');
+    const ocrVideo = document.getElementById('ocrVideo');
+    const ocrFrame = document.getElementById('ocrFrame');
+    const ocrScanBtn = document.getElementById('ocrScanBtn');
+    const ocrCancelBtn = document.getElementById('ocrCancelBtn');
+    let ocrStream = null;
+    let tesseractLoadPromise = null;
+    const ignoredOcrWords = new Set(['BOSCH', 'VWAG', 'VW', 'AG', 'MADEINROMANIA', 'MADEIN', 'ROMANIA', 'GERMANY']);
+
+
+    const setScanStatus = (message, isError = false) => {
+        if (!scanStatus) return;
+        scanStatus.textContent = message;
+        scanStatus.classList.toggle('error', isError);
+        scanStatus.classList.remove('hidden');
+    };
+    const normalizeOcrLine = line => line.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const choosePartCode = text => (text || '')
+        .split(/\r?\n/)
+        .map(normalizeOcrLine)
+        .filter(value => value.length >= 6 && value.length <= 15 && /[A-Z]/.test(value) && /\d/.test(value) && !ignoredOcrWords.has(value))
+        .sort((a, b) => b.length - a.length)[0] || '';
+    const loadTesseract = () => {
+        if (window.Tesseract) return Promise.resolve(window.Tesseract);
+        if (!tesseractLoadPromise) {
+            tesseractLoadPromise = new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+                script.onload = () => resolve(window.Tesseract);
+                script.onerror = () => reject(new Error('Nie można załadować OCR.'));
+                document.head.appendChild(script);
+            });
+        }
+        return tesseractLoadPromise;
+    };
+    const stopOcrCamera = () => { ocrStream?.getTracks().forEach(track => track.stop()); ocrStream = null; if (ocrVideo) ocrVideo.srcObject = null; };
+    const closeOcr = () => { stopOcrCamera(); ocrModal?.classList.add('hidden'); };
+    const cropFrameToCanvas = () => {
+        const videoRect = ocrVideo.getBoundingClientRect();
+        const frameRect = ocrFrame.getBoundingClientRect();
+        const scaleX = ocrVideo.videoWidth / videoRect.width;
+        const scaleY = ocrVideo.videoHeight / videoRect.height;
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(frameRect.width * scaleX);
+        canvas.height = Math.round(frameRect.height * scaleY);
+        canvas.getContext('2d').drawImage(ocrVideo, Math.round((frameRect.left - videoRect.left) * scaleX), Math.round((frameRect.top - videoRect.top) * scaleY), canvas.width, canvas.height, 0, 0, canvas.width, canvas.height);
+        return canvas;
+    };
+    scanPartNumberBtn?.addEventListener('click', async () => {
+        if (!navigator.mediaDevices?.getUserMedia) { setScanStatus('Kamera nie jest dostępna w tej przeglądarce. Wpisz kod ręcznie.', true); return; }
+        try {
+            ocrStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+            ocrVideo.srcObject = ocrStream;
+            ocrModal.classList.remove('hidden');
+            setScanStatus('Ustaw jeden wiersz kodu części w ramce i kliknij Skanuj.');
+        } catch (error) {
+            setScanStatus('Nie udało się uruchomić kamery. Wpisz kod ręcznie.', true);
+        }
+    });
+    ocrCancelBtn?.addEventListener('click', closeOcr);
+    ocrScanBtn?.addEventListener('click', async () => {
+        if (!ocrVideo?.videoWidth) return;
+        ocrScanBtn.disabled = true; ocrScanBtn.textContent = 'Rozpoznawanie...';
+        try {
+            const Tesseract = await loadTesseract();
+            const result = await Tesseract.recognize(cropFrameToCanvas(), 'eng', { logger: () => {} });
+            const code = choosePartCode(result?.data?.text || '');
+            if (!code) { setScanStatus('Nie udało się pewnie rozpoznać kodu. Spróbuj ponownie albo wpisz ręcznie.', true); return; }
+            partNumberInput.value = code;
+            partNumberInput.dispatchEvent(new Event('input', { bubbles: true }));
+            setScanStatus(`Rozpoznano kod: ${code}`);
+            closeOcr();
+        } catch (error) {
+            setScanStatus('Nie udało się pewnie rozpoznać kodu. Spróbuj ponownie albo wpisz ręcznie.', true);
+        } finally {
+            ocrScanBtn.disabled = false; ocrScanBtn.textContent = 'Skanuj';
+        }
+    });
 
     const syncInput = () => { if (photosInput) photosInput.files = files.files; };
     const revokeObjectUrls = () => { while (objectUrls.length) URL.revokeObjectURL(objectUrls.pop()); };
