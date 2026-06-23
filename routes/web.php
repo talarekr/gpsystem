@@ -26,6 +26,7 @@ use App\Http\Controllers\Tools\CheckOrdersFlowController;
 use App\Http\Controllers\Tools\CheckOvokoApiSettingsController;
 use App\Http\Controllers\Tools\MarketplaceApiSettingsDiagnosticsController;
 use App\Http\Controllers\Tools\MarketplaceApiFoundationController;
+use App\Http\Controllers\Tools\EbayListingDryRunController;
 use App\Http\Controllers\Tools\CheckOvokoMappingController;
 use App\Http\Controllers\Tools\DebugOvokoPartMatchController;
 use App\Http\Controllers\Tools\DeleteAllegroGearboxesDryRunController;
@@ -198,6 +199,9 @@ Route::get('/tools/check-ebay-category-shipping-coverage', [EbayCategoryShipping
 Route::get('/tools/test-allegro-api-connection', [MarketplaceApiSettingsDiagnosticsController::class, 'testAllegro'])->name('tools.test-allegro-api-connection');
 Route::get('/tools/test-ebay-api-connection', [MarketplaceApiSettingsDiagnosticsController::class, 'testEbay'])->name('tools.test-ebay-api-connection');
 Route::get('/tools/check-ebay-business-policies', [MarketplaceApiSettingsDiagnosticsController::class, 'checkEbayBusinessPolicies'])->name('tools.check-ebay-business-policies');
+Route::get('/tools/check-ebay-listing-readiness', [EbayListingDryRunController::class, 'readiness'])->name('tools.check-ebay-listing-readiness');
+Route::get('/tools/dry-run-ebay-listing-payload', [EbayListingDryRunController::class, 'dryRunPayload'])->name('tools.dry-run-ebay-listing-payload');
+Route::get('/tools/check-ebay-listing-readiness-all', [EbayListingDryRunController::class, 'readinessAll'])->name('tools.check-ebay-listing-readiness-all');
 Route::get('/tools/check-ebay-template-assets', [EbayDescriptionTemplateController::class, 'checkAssets'])->name('tools.check-ebay-template-assets');
 Route::get('/tools/sync-ebay-template-assets-dry-run', [EbayDescriptionTemplateController::class, 'syncAssetsDryRun'])->name('tools.sync-ebay-template-assets-dry-run');
 Route::get('/tools/sync-ebay-template-assets', [EbayDescriptionTemplateController::class, 'syncAssets'])->name('tools.sync-ebay-template-assets');
