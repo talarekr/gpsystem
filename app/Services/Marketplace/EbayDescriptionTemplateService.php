@@ -97,6 +97,7 @@ class EbayDescriptionTemplateService
         if ($blockers !== []) return $this->emptyPreview($partId, $channel, $blockers);
 
         $fields = $this->fields($part);
+        $fields['specification_rows'] = $this->specificationRows($fields, $channel);
         $translated = [];
         $translationNeeded = [];
         if ($channel === 'ebay_fr') {
@@ -105,6 +106,7 @@ class EbayDescriptionTemplateService
             }
             $translated = $this->translatePreviewFields($fields, $translationNeeded, $warnings, $blockers);
             foreach ($translated as $key => $value) if (filled($value)) $fields[$key] = $value;
+            $fields['specification_rows'] = $this->specificationRows($fields, $channel);
         }
 
         $html = $this->renderHtml($fields, $channel);
@@ -175,7 +177,18 @@ class EbayDescriptionTemplateService
             'vehicle_year' => $this->clean($part->storefrontDetailValue('production_year')),
             'engine' => trim(collect([$part->storefrontDetailValue('engine_capacity_cm3'), $part->storefrontDetailValue('engine_code'), $part->storefrontDetailValue('fuel_type')])->filter()->implode(' / ')),
             'transmission' => $this->clean($part->storefrontDetailValue('gearbox_type')),
-            'description' => $this->clean($part->description ?: $part->short_description ?: $part->condition_notes) ?: 'Original used car part, checked before shipment.',
+            'color_code' => $this->clean($part->storefrontDetailValue('color_code')),
+            'engine_code' => $this->clean($part->storefrontDetailValue('engine_code')),
+            'color' => $this->clean($part->storefrontDetailValue('color')),
+            'drivetrain' => $this->clean($part->storefrontDetailValue('drivetrain')),
+            'engine_power' => $this->clean($part->storefrontDetailValue('engine_power_kw')),
+            'production_period' => $this->clean($part->storefrontDetailValue('production_period')),
+            'engine_capacity' => $this->clean($part->storefrontDetailValue('engine_capacity_cm3')),
+            'steering_side' => $this->clean($part->storefrontDetailValue('steering_side')),
+            'mileage' => $this->clean($part->storefrontDetailValue('mileage_km')),
+            'fuel_type' => $this->clean($part->storefrontDetailValue('fuel_type')),
+            'condition_value_dynamic' => $this->clean($details->get('Stan')) ?: 'Original',
+            'description' => $this->cleanMultiline($part->description ?: $part->short_description ?: $part->condition_notes) ?: 'Original used car part, checked before shipment.',
             'compatibility_list' => $this->compatibilityList($part),
             'same_vehicle_url' => 'https://gpswiss.pl/szukaj?car_id='.urlencode((string) ($part->car_id ?? '')),
         ];
@@ -192,221 +205,70 @@ class EbayDescriptionTemplateService
     private function baseTemplateHtml(): string
     {
         return <<<'HTML'
-<div style="max-width:980px;margin:0 auto;background:#ffffff;color:#1f2937;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.55;border:1px solid #dbe3ef;border-radius:10px;overflow:hidden;">
-
-  <!-- Benefit bar -->
-  <div style="background:#f8fbff;border-bottom:1px solid #dbe3ef;">
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
+<div style="max-width:980px;margin:0 auto;background:#ffffff;color:#1f2937;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.45;border:1px solid #d6e0ee;overflow:hidden;">
+  <div style="background:#ffffff;border-bottom:1px solid #d6e0ee;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;table-layout:fixed;">
       <tr>
-        <td width="25%" align="center" style="padding:16px 12px;color:#06275d;font-weight:800;font-size:15px;border-right:1px solid #dbe3ef;">
-          <img src="https://gpswiss.pl/ebay-template/icon-shipping.png" alt="{{BENEFIT_SHIPPING_ALT}}" style="width:36px;height:auto;border:0;display:inline-block;vertical-align:middle;margin-right:8px;" />
-          {{BENEFIT_SHIPPING}}
+        <td width="25%" valign="middle" style="padding:12px 10px;color:#06275d;font-weight:700;font-size:12px;border-right:1px solid #d6e0ee;text-align:left;">
+          <img src="https://gpswiss.pl/ebay-template/icon-shipping.png" alt="{{BENEFIT_SHIPPING_ALT}}" style="width:28px;height:auto;border:0;display:inline-block;vertical-align:middle;margin-right:6px;" />{{BENEFIT_SHIPPING}}
         </td>
-        <td width="25%" align="center" style="padding:16px 12px;color:#06275d;font-weight:800;font-size:15px;border-right:1px solid #dbe3ef;">
-          <img src="https://gpswiss.pl/ebay-template/icon-returns.png" alt="{{BENEFIT_RETURNS_ALT}}" style="width:36px;height:auto;border:0;display:inline-block;vertical-align:middle;margin-right:8px;" />
-          {{BENEFIT_RETURNS}}
+        <td width="25%" valign="middle" style="padding:12px 10px;color:#06275d;font-weight:700;font-size:12px;border-right:1px solid #d6e0ee;text-align:left;">
+          <img src="https://gpswiss.pl/ebay-template/icon-returns.png" alt="{{BENEFIT_RETURNS_ALT}}" style="width:28px;height:auto;border:0;display:inline-block;vertical-align:middle;margin-right:6px;" />{{BENEFIT_RETURNS}}
         </td>
-        <td width="25%" align="center" style="padding:16px 12px;color:#06275d;font-weight:800;font-size:15px;border-right:1px solid #dbe3ef;">
-          <img src="https://gpswiss.pl/ebay-template/icon-packaging.png" alt="{{BENEFIT_PACKAGING_ALT}}" style="width:36px;height:auto;border:0;display:inline-block;vertical-align:middle;margin-right:8px;" />
-          {{BENEFIT_PACKAGING}}
+        <td width="25%" valign="middle" style="padding:12px 10px;color:#06275d;font-weight:700;font-size:12px;border-right:1px solid #d6e0ee;text-align:left;">
+          <img src="https://gpswiss.pl/ebay-template/icon-packaging.png" alt="{{BENEFIT_PACKAGING_ALT}}" style="width:28px;height:auto;border:0;display:inline-block;vertical-align:middle;margin-right:6px;" />{{BENEFIT_PACKAGING}}
         </td>
-        <td width="25%" align="center" style="padding:16px 12px;color:#06275d;font-weight:800;font-size:15px;">
-          <img src="https://gpswiss.pl/ebay-template/icon-original.png" alt="{{BENEFIT_ORIGINAL_ALT}}" style="width:36px;height:auto;border:0;display:inline-block;vertical-align:middle;margin-right:8px;" />
-          {{BENEFIT_ORIGINAL}}
+        <td width="25%" valign="middle" style="padding:12px 10px;color:#06275d;font-weight:700;font-size:12px;text-align:left;">
+          <img src="https://gpswiss.pl/ebay-template/icon-original.png" alt="{{BENEFIT_ORIGINAL_ALT}}" style="width:28px;height:auto;border:0;display:inline-block;vertical-align:middle;margin-right:6px;" />{{BENEFIT_ORIGINAL}}
         </td>
       </tr>
     </table>
   </div>
 
-  <!-- Main content -->
-  <div style="padding:26px 28px 10px;">
+  <div style="padding:22px 28px 28px;">
+    <h1 style="margin:0 0 18px;color:#06275d;font-size:28px;line-height:1.1;font-weight:900;text-transform:uppercase;">{{TITLE}}</h1>
 
-    <!-- Title -->
-    <h1 style="margin:0 0 8px;color:#06275d;font-size:28px;line-height:1.25;font-weight:900;">
-      {{TITLE}}
-    </h1>
-
-    <div style="margin:0 0 22px;color:#4b5563;font-size:15px;">
-      <strong style="color:#06275d;">{{CONDITION_LABEL}}:</strong> {{CONDITION_VALUE}}
+    <div style="border:1px solid #d6e0ee;background:#ffffff;margin:0 0 22px;overflow:hidden;">
+      <div style="background:#06275d;color:#ffffff;text-align:center;padding:8px 12px;font-size:13px;font-weight:900;">{{DESCRIPTION_HEADING}}</div>
+      <div style="background:#fbfdff;min-height:68px;padding:22px 28px;color:#1f2937;font-size:13px;line-height:1.7;text-align:center;">{{DESCRIPTION}}</div>
     </div>
 
-    <!-- Product details row -->
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;margin:0 0 20px;">
-      <tr>
-        <td width="50%" valign="top" style="padding:0 10px 0 0;">
-          <div style="border:1px solid #dbe3ef;border-radius:8px;background:#ffffff;overflow:hidden;">
-            <div style="background:#06275d;color:#ffffff;padding:12px 16px;font-size:17px;font-weight:900;">
-              {{PRODUCT_DETAILS_HEADING}}
-            </div>
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
-              <tr>
-                <td style="padding:10px 14px;border-bottom:1px solid #e5edf7;color:#64748b;font-weight:700;width:42%;">{{PART_NUMBER_LABEL}}</td>
-                <td style="padding:10px 14px;border-bottom:1px solid #e5edf7;color:#111827;">{{PART_NUMBER}}</td>
-              </tr>
-              <tr>
-                <td style="padding:10px 14px;border-bottom:1px solid #e5edf7;color:#64748b;font-weight:700;">{{OEM_NUMBERS_LABEL}}</td>
-                <td style="padding:10px 14px;border-bottom:1px solid #e5edf7;color:#111827;">{{OEM_NUMBERS}}</td>
-              </tr>
-              <tr>
-                <td style="padding:10px 14px;border-bottom:1px solid #e5edf7;color:#64748b;font-weight:700;">{{MANUFACTURER_LABEL}}</td>
-                <td style="padding:10px 14px;border-bottom:1px solid #e5edf7;color:#111827;">{{MANUFACTURER}}</td>
-              </tr>
-              <tr>
-                <td style="padding:10px 14px;color:#64748b;font-weight:700;">{{FITS_TO_LABEL}}</td>
-                <td style="padding:10px 14px;color:#111827;">{{FITS_TO}}</td>
-              </tr>
-            </table>
-          </div>
-        </td>
-
-        <td width="50%" valign="top" style="padding:0 0 0 10px;">
-          <div style="border:1px solid #dbe3ef;border-radius:8px;background:#ffffff;overflow:hidden;">
-            <div style="background:#f97316;color:#ffffff;padding:12px 16px;font-size:17px;font-weight:900;">
-              {{SPECIFICATIONS_HEADING}}
-            </div>
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
-              <tr>
-                <td style="padding:10px 14px;border-bottom:1px solid #e5edf7;color:#64748b;font-weight:700;width:42%;">{{PART_TYPE_LABEL}}</td>
-                <td style="padding:10px 14px;border-bottom:1px solid #e5edf7;color:#111827;">{{PART_TYPE}}</td>
-              </tr>
-              <tr>
-                <td style="padding:10px 14px;border-bottom:1px solid #e5edf7;color:#64748b;font-weight:700;">{{VERSION_LABEL}}</td>
-                <td style="padding:10px 14px;border-bottom:1px solid #e5edf7;color:#111827;">{{VERSION}}</td>
-              </tr>
-              <tr>
-                <td style="padding:10px 14px;border-bottom:1px solid #e5edf7;color:#64748b;font-weight:700;">{{CONDITION_SHORT_LABEL}}</td>
-                <td style="padding:10px 14px;border-bottom:1px solid #e5edf7;color:#111827;">{{CONDITION_VALUE}}</td>
-              </tr>
-              <tr>
-                <td style="padding:10px 14px;color:#64748b;font-weight:700;">{{PLACEMENT_LABEL}}</td>
-                <td style="padding:10px 14px;color:#111827;">{{PLACEMENT}}</td>
-              </tr>
-            </table>
-          </div>
-        </td>
-      </tr>
-    </table>
-
-    <!-- Vehicle and description row -->
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;margin:0 0 20px;">
-      <tr>
-        <td width="50%" valign="top" style="padding:0 10px 0 0;">
-          <div style="border:1px solid #dbe3ef;border-radius:8px;background:#ffffff;overflow:hidden;">
-            <div style="background:#06275d;color:#ffffff;padding:12px 16px;font-size:17px;font-weight:900;">
-              {{VEHICLE_HEADING}}
-            </div>
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
-              <tr>
-                <td style="padding:10px 14px;border-bottom:1px solid #e5edf7;color:#64748b;font-weight:700;width:42%;">{{VEHICLE_MAKE_LABEL}}</td>
-                <td style="padding:10px 14px;border-bottom:1px solid #e5edf7;color:#111827;">{{VEHICLE_MAKE}}</td>
-              </tr>
-              <tr>
-                <td style="padding:10px 14px;border-bottom:1px solid #e5edf7;color:#64748b;font-weight:700;">{{VEHICLE_MODEL_LABEL}}</td>
-                <td style="padding:10px 14px;border-bottom:1px solid #e5edf7;color:#111827;">{{VEHICLE_MODEL}}</td>
-              </tr>
-              <tr>
-                <td style="padding:10px 14px;border-bottom:1px solid #e5edf7;color:#64748b;font-weight:700;">{{VEHICLE_YEAR_LABEL}}</td>
-                <td style="padding:10px 14px;border-bottom:1px solid #e5edf7;color:#111827;">{{VEHICLE_YEAR}}</td>
-              </tr>
-              <tr>
-                <td style="padding:10px 14px;border-bottom:1px solid #e5edf7;color:#64748b;font-weight:700;">{{ENGINE_LABEL}}</td>
-                <td style="padding:10px 14px;border-bottom:1px solid #e5edf7;color:#111827;">{{ENGINE}}</td>
-              </tr>
-              <tr>
-                <td style="padding:10px 14px;color:#64748b;font-weight:700;">{{TRANSMISSION_LABEL}}</td>
-                <td style="padding:10px 14px;color:#111827;">{{TRANSMISSION}}</td>
-              </tr>
-            </table>
-          </div>
-        </td>
-
-        <td width="50%" valign="top" style="padding:0 0 0 10px;">
-          <div style="border:1px solid #dbe3ef;border-radius:8px;background:#ffffff;overflow:hidden;">
-            <div style="background:#06275d;color:#ffffff;padding:12px 16px;font-size:17px;font-weight:900;">
-              {{DESCRIPTION_HEADING}}
-            </div>
-            <div style="padding:16px;color:#1f2937;font-size:15px;line-height:1.7;">
-              {{DESCRIPTION}}
-            </div>
-          </div>
-        </td>
-      </tr>
-    </table>
-
-    <!-- Compatibility -->
-    <div style="border:1px solid #dbe3ef;background:#ffffff;margin:0 0 20px;border-radius:8px;overflow:hidden;">
-      <div style="background:#f8fbff;border-bottom:1px solid #dbe3ef;padding:14px 16px;color:#06275d;font-size:18px;font-weight:900;">
-        {{COMPATIBILITY_HEADING}}
-      </div>
-      <div style="padding:16px 18px;color:#1f2937;font-size:15px;line-height:1.7;">
-        {{COMPATIBILITY_LIST}}
-        <div style="margin-top:12px;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:12px 14px;color:#7c2d12;">
-          {{COMPATIBILITY_NOTE}}
-        </div>
-      </div>
+    <div style="border:1px solid #d6e0ee;background:#ffffff;margin:0 0 20px;overflow:hidden;">
+      <div style="background:#06275d;color:#ffffff;text-align:center;padding:8px 12px;font-size:13px;font-weight:900;">{{SPECIFICATIONS_HEADING}}</div>
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;table-layout:fixed;background:#ffffff;">
+        {{SPECIFICATION_ROWS}}
+      </table>
     </div>
 
-    <!-- Same vehicle CTA -->
     <div style="text-align:center;margin:0 0 24px;">
-      <a href="{{SAME_VEHICLE_URL}}" style="display:inline-block;background:#f97316;color:#ffffff;text-decoration:none;font-weight:900;font-size:16px;padding:13px 24px;border-radius:6px;">
-        {{SAME_VEHICLE_TEXT}}
-      </a>
+      <a href="{{SAME_VEHICLE_URL}}" style="display:inline-block;background:#005eea;color:#ffffff;text-decoration:none;font-weight:900;font-size:12px;padding:11px 22px;border-radius:3px;text-transform:uppercase;">{{SAME_VEHICLE_TEXT}}</a>
     </div>
 
-    <!-- Delivery Europe -->
-    <div style="border:1px solid #dbe3ef;background:#ffffff;margin:0 0 20px;border-radius:8px;overflow:hidden;">
-      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
+    <div style="border:1px solid #d6e0ee;background:#ffffff;margin:0 0 18px;overflow:hidden;text-align:center;">
+      <div style="padding:22px 28px 8px;">
+        <h2 style="margin:0 0 8px;color:#06275d;font-size:24px;line-height:1.15;font-weight:900;">{{DELIVERY_HEADING}}</h2>
+        <p style="margin:0 0 14px;color:#1f2937;font-size:13px;line-height:1.6;">{{DELIVERY_TEXT}}</p>
+        <div style="display:inline-block;background:#eef6ff;border:1px solid #bcd3f0;color:#06275d;padding:9px 16px;font-size:12px;font-weight:900;">{{DELIVERY_TIME}}</div>
+      </div>
+      <div style="padding:0 18px 18px;text-align:left;">
+        <img src="https://gpswiss.pl/ebay-template/europe-map.png" alt="{{EUROPE_MAP_ALT}}" style="max-width:100%;height:auto;border:0;display:block;margin:0;" />
+      </div>
+    </div>
+
+    <div style="border:1px solid #d6e0ee;background:#ffffff;margin:0 0 28px;padding:14px 18px;">
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;table-layout:fixed;">
         <tr>
-          <td width="58%" valign="middle" align="center" style="padding:26px 28px;text-align:center;">
-            <h2 style="margin:0 0 10px;color:#06275d;font-size:26px;line-height:1.2;font-weight:900;text-align:center;">
-              {{DELIVERY_HEADING}}
-            </h2>
-            <p style="margin:0 0 16px;color:#1f2937;font-size:16px;line-height:1.7;text-align:center;">
-              {{DELIVERY_TEXT}}
-            </p>
-            <div style="display:inline-block;background:#eaf2ff;border:1px solid #c9dcf8;color:#06275d;border-radius:6px;padding:12px 16px;font-size:16px;font-weight:900;">
-              {{DELIVERY_TIME}}
-            </div>
-          </td>
-          <td width="42%" valign="middle" align="center" style="padding:22px;background:#f4f8fe;border-left:1px solid #dbe3ef;">
-            <div style="border:2px dashed #b9c9df;border-radius:12px;padding:28px 18px;">
-              <img src="https://gpswiss.pl/ebay-template/europe-map.png" alt="{{EUROPE_MAP_ALT}}" style="max-width:100%;height:auto;border:0;display:block;margin:0 auto;" />
-            </div>
-          </td>
+          <td width="50%" align="center" style="padding:0 8px 0 0;"><div style="border:1px solid #d6e0ee;background:#ffffff;padding:13px 12px;"><img src="https://gpswiss.pl/ebay-template/dhl-logo.png" alt="DHL" style="max-width:130px;height:auto;border:0;display:block;margin:0 auto;" /></div></td>
+          <td width="50%" align="center" style="padding:0 0 0 8px;"><div style="border:1px solid #d6e0ee;background:#ffffff;padding:13px 12px;"><img src="https://gpswiss.pl/ebay-template/dpd-logo.png" alt="DPD" style="max-width:130px;height:auto;border:0;display:block;margin:0 auto;" /></div></td>
         </tr>
       </table>
     </div>
-
-    <!-- DHL / DPD -->
-    <div style="border:1px solid #dbe3ef;background:#f8fbff;margin:0 0 22px;border-radius:8px;padding:18px 20px;">
-      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
-        <tr>
-          <td width="50%" align="center" style="padding:0 10px 0 0;">
-            <div style="background:#ffffff;border:1px solid #dbe3ef;border-radius:8px;padding:18px 12px;">
-              <img src="https://gpswiss.pl/ebay-template/dhl-logo.png" alt="DHL" style="max-width:160px;height:auto;border:0;display:block;margin:0 auto;" />
-            </div>
-          </td>
-          <td width="50%" align="center" style="padding:0 0 0 10px;">
-            <div style="background:#ffffff;border:1px solid #dbe3ef;border-radius:8px;padding:18px 12px;">
-              <img src="https://gpswiss.pl/ebay-template/dpd-logo.png" alt="DPD" style="max-width:160px;height:auto;border:0;display:block;margin:0 auto;" />
-            </div>
-          </td>
-        </tr>
-      </table>
-    </div>
-
   </div>
 
-  <!-- Footer -->
   <div style="background:#06275d;color:#ffffff;text-align:center;padding:18px 22px;">
-    <div style="font-size:18px;font-weight:900;margin-bottom:4px;">
-      {{FOOTER_HEADING}}
-    </div>
-    <div style="font-size:14px;color:#dbeafe;">
-      {{FOOTER_TEXT}}
-    </div>
+    <div style="font-size:18px;font-weight:900;margin-bottom:4px;">{{FOOTER_HEADING}}</div>
+    <div style="font-size:12px;color:#ffffff;font-weight:700;">{{FOOTER_TEXT}}</div>
   </div>
-
 </div>
 HTML;
     }
@@ -446,13 +308,13 @@ HTML;
             'description_heading' => 'Beschreibung',
             'compatibility_heading' => 'Kompatibilität / Passgenauigkeit',
             'compatibility_note' => 'Bitte vergleichen Sie vor dem Kauf die Teilenummer und die Fotos. Das Teil passt möglicherweise nicht zu Fahrzeugen ohne passende Ausstattung oder Paketversion.',
-            'same_vehicle_text' => 'Mehr Teile von diesem Fahrzeug ansehen',
+            'same_vehicle_text' => 'MEHR TEILE VON DIESEM FAHRZEUG ANSEHEN',
             'delivery_heading' => 'Wir liefern in ganz Europa',
             'delivery_text' => 'Wir versenden in alle europäischen Länder – schnell, zuverlässig und sicher.',
             'delivery_time' => 'Lieferzeit 2–5 Tage',
             'europe_map_alt' => 'Lieferung in Europa',
             'footer_heading' => 'Kaufen Sie mit Vertrauen',
-            'footer_text' => 'Hochwertige gebrauchte Teile | Sorgfältig geprüft | Professionell verpackt',
+            'footer_text' => 'Geprüfte gebrauchte Teile | Sorgfältig kontrolliert | Professionell verpackt',
         ];
     }
 
@@ -501,9 +363,36 @@ HTML;
         ];
     }
 
-    private function placeholderMap(array $values): array { $map = []; foreach ($values as $key => $value) $map['{{'.Str::upper($key).'}}'] = $this->e((string) $value); return $map; }
+    private function specificationRows(array $fields, string $channel): string
+    {
+        $labels = $channel === 'ebay_fr' ? [
+            'color_code' => 'Code couleur', 'engine_code' => 'Code moteur', 'color' => 'Couleur', 'drivetrain' => 'Transmission',
+            'engine_power' => 'Puissance moteur', 'vehicle_model' => 'Modèle', 'version' => 'Variante / version', 'part_number' => 'Référence',
+            'production_period' => 'Période de production', 'engine_capacity' => 'Cylindrée', 'steering_side' => 'Position du volant',
+            'manufacturer' => 'Fabricant', 'mileage' => 'Kilométrage', 'fuel_type' => 'Carburant', 'vehicle_year' => 'Année du véhicule',
+            'condition_value_dynamic' => 'État de l’emballage', 'transmission' => 'Type de boîte de vitesses',
+        ] : [
+            'color_code' => 'Farbcode', 'engine_code' => 'Motorcode', 'color' => 'Farbe', 'drivetrain' => 'Antrieb',
+            'engine_power' => 'Motorleistung', 'vehicle_model' => 'Modell', 'version' => 'Variante / Ausführung', 'part_number' => 'Teilenummer',
+            'production_period' => 'Bauzeitraum', 'engine_capacity' => 'Hubraum', 'steering_side' => 'Lenkradposition',
+            'manufacturer' => 'Hersteller', 'mileage' => 'Laufleistung', 'fuel_type' => 'Kraftstoffart', 'vehicle_year' => 'Baujahr des Fahrzeugs',
+            'condition_value_dynamic' => 'Verpackungszustand', 'transmission' => 'Getriebeart',
+        ];
+
+        $rows = '';
+        foreach ($labels as $key => $label) {
+            $value = filled($fields[$key] ?? null) ? (string) $fields[$key] : '—';
+            $rows .= '<tr><td width="42%" style="padding:9px 14px;border-bottom:1px solid #d6e0ee;background:#f4f7fb;color:#06275d;font-weight:900;text-align:center;font-size:12px;">'.$this->e($label).'</td><td width="58%" style="padding:9px 14px;border-bottom:1px solid #d6e0ee;background:#ffffff;color:#1f2937;text-align:center;font-size:12px;">'.$this->e($value).'</td></tr>';
+        }
+
+        return $rows;
+    }
+
+    private function placeholderMap(array $values): array { $map = []; foreach ($values as $key => $value) { $placeholder = '{{'.Str::upper($key).'}}'; $map[$placeholder] = in_array($key, ['description', 'specification_rows'], true) ? $this->htmlValue((string) $value, $key === 'description') : $this->e((string) $value); } return $map; }
     private function compatibilityList(Part $part): string { return trim(collect([$part->storefrontDetailValue('make'), $part->storefrontDetailValue('model'), $part->storefrontDetailValue('production_year')])->filter()->implode(' ')); }
     private function clean(mixed $value): ?string { $value = trim(preg_replace('/\s+/u', ' ', strip_tags((string) $value)) ?: ''); return $value === '' ? null : $value; }
+    private function cleanMultiline(mixed $value): ?string { $value = trim(strip_tags((string) $value)); return $value === '' ? null : preg_replace('/[ \t]+/u', ' ', $value); }
+    private function htmlValue(string $value, bool $preserveBreaks): string { return $preserveBreaks ? nl2br($this->e($value), false) : $value; }
     private function e(mixed $value): string { return e((string) ($value ?: '—'), false); }
 
     private function translatePreviewFields(array $fields, array $keys, array &$warnings, array &$blockers): array
