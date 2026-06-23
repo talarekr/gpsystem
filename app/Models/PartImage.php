@@ -269,6 +269,8 @@ class PartImage extends Model
     {
         $relativePath = str_replace(['/', '\\'], DIRECTORY_SEPARATOR, ltrim($relativePath, '/'));
         $paths = [
+            Storage::disk('public')->path($relativePath),
+            public_path('storage'.DIRECTORY_SEPARATOR.$relativePath),
             dirname(base_path()).DIRECTORY_SEPARATOR.'public_html'.DIRECTORY_SEPARATOR.'storage'.DIRECTORY_SEPARATOR.$relativePath,
         ];
 
