@@ -78,9 +78,12 @@ class WorkshopQuickPartControllerTest extends TestCase
 
         foreach ($part->images as $image) {
             $this->assertStringStartsWith('parts/photos/workshop/'.$part->id.'/', $image->path);
+            $this->assertStringNotStartsWith('/storage/', $image->path);
+            $this->assertStringNotStartsWith('http://', $image->path);
+            $this->assertStringNotStartsWith('https://', $image->path);
             $this->assertSame('workshop_quick_create', $image->source_system);
             $this->assertNotEmpty($image->external_id);
-            $this->assertNotNull($image->relativePublicUrl());
+            $this->assertSame('/storage/'.$image->path, $image->relativePublicUrl());
             Storage::disk('public')->assertExists($image->path);
         }
     }
