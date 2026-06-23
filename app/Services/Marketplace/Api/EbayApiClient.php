@@ -81,13 +81,16 @@ class EbayApiClient extends AbstractMarketplaceApiClient
         return $base;
     }
 
-    public function compatibilityPropertyValues(string $categoryId, string $property, array $filters = []): array
+    public function compatibilityPropertyValues(string $categoryId, string $property, array $filters = [], string $query = '', int $limit = 50, bool $includeAll = false): array
     {
         $readiness = $this->getAccountReadiness();
         $marketplaceId = $this->marketplaceId();
         $treeId = $this->categoryTreeId();
         $path = '/commerce/taxonomy/v1/category_tree/'.$treeId.'/get_compatibility_property_values';
-        $filterQuery = $this->compatibilityPropertyValueFilter($filters);
+        $query = trim($query);
+        $limit = max(1, min($limit, $includeAll ? 1000 : 50));
+        $apiFilters = array_diff_key($filters, array_flip(['q', 'limit', 'include_all']));
+        $filterQuery = $this->compatibilityPropertyValueFilter($apiFilters);
         $params = array_filter([
             'category_id' => $categoryId,
             'compatibility_property' => $property,
@@ -103,6 +106,11 @@ class EbayApiClient extends AbstractMarketplaceApiClient
             'applied_filters' => $filterQuery,
             'values_count' => 0,
             'values_sample' => [],
+            'query' => $query,
+            'matched_values' => [],
+            'matched_values_count' => 0,
+            'has_more' => false,
+            'limit' => $limit,
             'api_endpoint_family' => 'commerce/taxonomy/category_tree/get_compatibility_property_values',
             'api_request_path_safe' => $path,
             'api_query_safe' => $params,
@@ -118,10 +126,27 @@ class EbayApiClient extends AbstractMarketplaceApiClient
         }
         $payload = is_array($json['json'] ?? null) ? $json['json'] : [];
         $values = array_values(array_filter($payload['compatibilityPropertyValues'] ?? $payload['values'] ?? [], 'is_array'));
+        $valueLabels = array_map(fn ($v) => $this->compatibilityPropertyValueLabel($v), $values);
         $base['values_count'] = count($values);
-        $base['values_sample'] = array_slice(array_map(fn ($v) => $v['value'] ?? $v['localizedValue'] ?? $v, $values), 0, 50);
+        $base['values_sample'] = array_slice($valueLabels, 0, $limit);
+
+        if ($query !== '') {
+            $matched = array_values(array_filter($valueLabels, fn ($value) => stripos((string) $value, $query) !== false));
+            $base['matched_values_count'] = count($matched);
+            $base['matched_values'] = array_slice($matched, 0, $limit);
+            $base['has_more'] = count($matched) > count($base['matched_values']);
+        }
+
         $base['ok'] = true;
         return $base;
+    }
+
+
+    private function compatibilityPropertyValueLabel(array $value): string
+    {
+        $label = $value['value'] ?? $value['localizedValue'] ?? null;
+
+        return is_scalar($label) ? (string) $label : json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     }
 
     private function cachedEbayGet(string $key, string $path, array $query): array

@@ -231,11 +231,11 @@ class EbayListingDryRunService
         return $client->compatibilityProperties($categoryId);
     }
 
-    public function compatibilityPropertyValues(string $channel, string $categoryId, string $property, array $filters = []): array
+    public function compatibilityPropertyValues(string $channel, string $categoryId, string $property, array $filters = [], string $query = '', int $limit = 50, bool $includeAll = false): array
     {
         $client = $this->ebayClient($channel);
-        if (! $client) return ['ok' => false, 'property' => $property, 'values_count' => 0, 'values_sample' => [], 'blockers' => ['Unsupported channel or marketplace account missing.'], 'warnings' => []];
-        return $client->compatibilityPropertyValues($categoryId, $property, $filters);
+        if (! $client) return ['ok' => false, 'property' => $property, 'values_count' => 0, 'values_sample' => [], 'query' => $query, 'matched_values' => [], 'matched_values_count' => 0, 'has_more' => false, 'limit' => max(1, min($limit, $includeAll ? 1000 : 50)), 'blockers' => ['Unsupported channel or marketplace account missing.'], 'warnings' => []];
+        return $client->compatibilityPropertyValues($categoryId, $property, $filters, $query, $limit, $includeAll);
     }
 
     public function dryRunFitmentMatch(int $partId, string $channel): array
@@ -250,6 +250,10 @@ class EbayListingDryRunService
             $name = (string) ($prop['name'] ?? '');
             $local = $map[$name] ?? null;
             $value = $local ? ($vehicle[$local] ?? null) : null;
+            if ($name === 'Make' && is_string($value) && strcasecmp($value, 'Volkswagen') === 0) {
+                $normalization[] = ['property' => $name, 'from' => $value, 'to' => 'VW', 'reason' => 'ebay_make_value'];
+                $value = 'VW';
+            }
             if (! $local) { $unmapped[] = ['property' => $name, 'required' => (bool) ($prop['required'] ?? false), 'reason' => 'no_local_dictionary_mapping']; if (($prop['required'] ?? false)) $blockers[] = 'No local dictionary mapping for required fitment property: '.$name; continue; }
             if (! filled($value)) { if (($prop['required'] ?? false)) { $unmapped[] = ['property' => $name, 'required' => true, 'reason' => 'missing_local_value']; $blockers[] = 'Missing required fitment property: '.$name; } continue; }
             $status = 'local_value_found_not_value_confirmed';
