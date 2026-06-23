@@ -169,6 +169,7 @@ Route::get('/tools/check-marketplace-stock-readiness', [MarketplaceApiFoundation
 Route::get('/tools/check-marketplace-linking-health', [MarketplaceApiFoundationController::class, 'linkingHealth'])->name('tools.check-marketplace-linking-health');
 Route::get('/tools/test-ovoko-api-connection', TestOvokoApiConnectionController::class)->name('tools.test-ovoko-api-connection');
 Route::get('/tools/check-ovoko-price-import', [OvokoPriceImportController::class, 'check'])->name('tools.check-ovoko-price-import');
+Route::get('/tools/ovoko-stock-reconciliation-runner', [OvokoStockReconciliationController::class, 'runner'])->name('tools.ovoko-stock-reconciliation-runner');
 Route::get('/tools/dry-run-ovoko-stock-reconciliation', [OvokoStockReconciliationController::class, 'dryRun'])->name('tools.dry-run-ovoko-stock-reconciliation');
 Route::get('/tools/dry-run-ovoko-stock-reconciliation-all', [OvokoStockReconciliationController::class, 'dryRunAll'])->name('tools.dry-run-ovoko-stock-reconciliation-all');
 Route::get('/tools/prepare-ovoko-stock-reconciliation-snapshot', [OvokoStockReconciliationController::class, 'prepareSnapshot'])->name('tools.prepare-ovoko-stock-reconciliation-snapshot');
