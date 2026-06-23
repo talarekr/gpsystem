@@ -49,7 +49,7 @@ class WorkshopQuickPartControllerTest extends TestCase
             'status' => 'draft',
             'is_visible_storefront' => false,
             'needs_review' => false,
-            'internal_note' => null,
+            'description' => null,
         ]);
     }
 
@@ -71,7 +71,7 @@ class WorkshopQuickPartControllerTest extends TestCase
         $this->assertSame('draft', $part->status);
         $this->assertFalse($part->is_visible_storefront);
         $this->assertFalse($part->needs_review);
-        $this->assertSame('rysa, cena 300 zł', $part->internal_note);
+        $this->assertSame('rysa, cena 300 zł', $part->description);
         $this->assertSame('Hala B / Kosz 12', $part->storageLocation->name);
         $this->assertCount(2, $part->images);
         $this->assertNotContains($part->id, Part::query()->storefrontVisible()->pluck('id')->all());
@@ -87,4 +87,32 @@ class WorkshopQuickPartControllerTest extends TestCase
             Storage::disk('public')->assertExists($image->path);
         }
     }
+
+    public function test_workshop_image_diagnostics_reports_admin_urls_and_storage_state(): void
+    {
+        Storage::fake('public');
+
+        $this->post('/tools/workshop/quick-part-create?token='.self::TOKEN, [
+            'photos' => [UploadedFile::fake()->image('front.jpg')],
+            'storage_location' => 'A1',
+            'part_number' => 'DIAG123',
+        ])->assertRedirect('/tools/workshop/quick-part-create?token='.self::TOKEN);
+
+        $part = Part::query()->with('images')->where('part_number', 'DIAG123')->firstOrFail();
+        $image = $part->images->first();
+
+        $this->get('/tools/check-workshop-part-images?token='.self::TOKEN.'&part_id='.$part->id)
+            ->assertOk()
+            ->assertJsonPath('part_id', $part->id)
+            ->assertJsonPath('images_relation_count', 1)
+            ->assertJsonPath('images.0.id', $image->id)
+            ->assertJsonPath('images.0.storage_public_exists', true)
+            ->assertJsonPath('images.0.is_primary', true)
+            ->assertJsonPath('images.0.admin_image_url_accessor', $image->absolutePublicUrl())
+            ->assertJsonPath('images.0.storage_url', 'https://gpswiss.pl/storage/'.$image->path)
+            ->assertJsonPath('images.0.storage_url_host', 'gpswiss.pl')
+            ->assertJsonPath('images.0.gpswiss_storage_url', 'https://gpswiss.pl/storage/'.$image->path)
+            ->assertJsonPath('images.0.relative_storage_url', '/storage/'.$image->path);
+    }
+
 }
