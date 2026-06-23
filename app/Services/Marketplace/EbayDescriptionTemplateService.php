@@ -23,21 +23,35 @@ class EbayDescriptionTemplateService
     public function checkAssets(): array
     {
         $importDir = storage_path('app/imports/ebay-template');
-        $publicDir = public_path('ebay-template');
+        $assetCheckPaths = $this->assetCheckPaths();
+        $publicDir = $assetCheckPaths[2];
         $missingImport = [];
         $missingPublic = [];
         $assetUrls = [];
+        $assetFoundLocations = [];
 
         foreach (self::ASSETS as $asset) {
             $assetUrls[$asset] = self::PUBLIC_BASE_URL.'/'.$asset;
+            $assetFoundLocations[$asset] = null;
             if (! is_file($importDir.DIRECTORY_SEPARATOR.$asset)) $missingImport[] = $asset;
-            if (! is_file($publicDir.DIRECTORY_SEPARATOR.$asset)) $missingPublic[] = $asset;
+
+            foreach ($assetCheckPaths as $assetCheckPath) {
+                if (is_file($assetCheckPath.DIRECTORY_SEPARATOR.$asset)) {
+                    $assetFoundLocations[$asset] = $assetCheckPath;
+                    break;
+                }
+            }
+
+            if ($assetFoundLocations[$asset] === null) $missingPublic[] = $asset;
         }
 
         return [
             'ok' => $missingImport === [] && $missingPublic === [],
             'import_path' => $importDir,
             'public_path' => $publicDir,
+            'asset_check_paths' => $assetCheckPaths,
+            'asset_found_locations' => $assetFoundLocations,
+            'asset_public_urls' => $assetUrls,
             'missing_import_assets' => $missingImport,
             'missing_public_assets' => $missingPublic,
             'asset_urls' => $assetUrls,
@@ -123,6 +137,9 @@ class EbayDescriptionTemplateService
             'listing_description_html' => $html,
             'html_length' => Str::length($html),
             'asset_urls' => $assetCheck['asset_urls'],
+            'asset_check_paths' => $assetCheck['asset_check_paths'],
+            'asset_found_locations' => $assetCheck['asset_found_locations'],
+            'asset_public_urls' => $assetCheck['asset_public_urls'],
             'missing_assets' => $assetCheck['missing_public_assets'],
             'used_fields' => array_keys(array_filter($fields, fn ($v) => filled($v))),
             'translation_needed_fields' => $translationNeeded,
@@ -151,11 +168,23 @@ class EbayDescriptionTemplateService
             'has_iframe' => str_contains(mb_strtolower($html), '<iframe'),
             'has_external_assets' => $external !== [],
             'missing_assets' => $preview['missing_assets'] ?? [],
+            'asset_check_paths' => $preview['asset_check_paths'] ?? [],
+            'asset_found_locations' => $preview['asset_found_locations'] ?? [],
+            'asset_public_urls' => $preview['asset_public_urls'] ?? [],
             'required_fields_present' => $required,
             'used_fields' => $preview['used_fields'] ?? [],
             'translation_needed_fields' => $preview['translation_needed_fields'] ?? [],
             'blockers' => $preview['blockers'] ?? [],
             'warnings' => array_values(array_unique(array_merge($preview['warnings'] ?? [], $external ? ['HTML references external assets outside https://gpswiss.pl/ebay-template/.'] : []))),
+        ];
+    }
+
+    private function assetCheckPaths(): array
+    {
+        return [
+            '/home/gpsystem/domains/gpswiss.pl/public_html/ebay-template',
+            '/home/gpsystem/domains/gpsystem.thecamels.pl/public_html/ebay-template',
+            public_path('ebay-template'),
         ];
     }
 
@@ -388,11 +417,41 @@ HTML;
         return $rows;
     }
 
-    private function placeholderMap(array $values): array { $map = []; foreach ($values as $key => $value) { $placeholder = '{{'.Str::upper($key).'}}'; $map[$placeholder] = in_array($key, ['description', 'specification_rows'], true) ? $this->htmlValue((string) $value, $key === 'description') : $this->e((string) $value); } return $map; }
+    private function placeholderMap(array $values): array
+    {
+        $map = [];
+        foreach ($values as $key => $value) {
+            $placeholder = '{{'.Str::upper($key).'}}';
+            $map[$placeholder] = match ($key) {
+                'description' => $this->descriptionHtml((string) $value),
+                'specification_rows' => $this->htmlValue((string) $value),
+                default => $this->e((string) $value),
+            };
+        }
+
+        return $map;
+    }
+
+    private function descriptionHtml(string $value): string
+    {
+        $lines = collect(preg_split('/\R/u', strip_tags($value)) ?: [])
+            ->map(fn ($line) => trim(preg_replace('/\s+/u', ' ', $line) ?: ''))
+            ->filter(fn ($line) => $line !== '')
+            ->values();
+
+        if ($lines->isEmpty()) return $this->e('—');
+
+        $hasListMarkers = $lines->contains(fn ($line) => preg_match('/^(?:[-*•]|\d+[.)])\s+/u', $line) === 1);
+        $shouldPreserveLines = $hasListMarkers || $lines->count() > 3;
+        $description = $shouldPreserveLines ? $lines->implode("\n") : $lines->implode(' ');
+
+        return nl2br($this->e($description), false);
+    }
+
     private function compatibilityList(Part $part): string { return trim(collect([$part->storefrontDetailValue('make'), $part->storefrontDetailValue('model'), $part->storefrontDetailValue('production_year')])->filter()->implode(' ')); }
     private function clean(mixed $value): ?string { $value = trim(preg_replace('/\s+/u', ' ', strip_tags((string) $value)) ?: ''); return $value === '' ? null : $value; }
     private function cleanMultiline(mixed $value): ?string { $value = trim(strip_tags((string) $value)); return $value === '' ? null : preg_replace('/[ \t]+/u', ' ', $value); }
-    private function htmlValue(string $value, bool $preserveBreaks): string { return $preserveBreaks ? nl2br($this->e($value), false) : $value; }
+    private function htmlValue(string $value): string { return $value; }
     private function e(mixed $value): string { return e((string) ($value ?: '—'), false); }
 
     private function translatePreviewFields(array $fields, array $keys, array &$warnings, array &$blockers): array
@@ -409,6 +468,8 @@ HTML;
 
     private function emptyPreview(int $partId, string $channel, array $blockers): array
     {
-        return ['ok' => false, 'part_id' => $partId, 'channel' => $channel, 'marketplace_id' => null, 'title' => null, 'short_inventory_description' => null, 'listing_description_html' => '', 'html_length' => 0, 'asset_urls' => $this->checkAssets()['asset_urls'], 'missing_assets' => $this->checkAssets()['missing_public_assets'], 'used_fields' => [], 'translation_needed_fields' => [], 'translated_preview_fields' => [], 'would_save' => false, 'blockers' => $blockers, 'warnings' => []];
+        $assetCheck = $this->checkAssets();
+
+        return ['ok' => false, 'part_id' => $partId, 'channel' => $channel, 'marketplace_id' => null, 'title' => null, 'short_inventory_description' => null, 'listing_description_html' => '', 'html_length' => 0, 'asset_urls' => $assetCheck['asset_urls'], 'asset_check_paths' => $assetCheck['asset_check_paths'], 'asset_found_locations' => $assetCheck['asset_found_locations'], 'asset_public_urls' => $assetCheck['asset_public_urls'], 'missing_assets' => $assetCheck['missing_public_assets'], 'used_fields' => [], 'translation_needed_fields' => [], 'translated_preview_fields' => [], 'would_save' => false, 'blockers' => $blockers, 'warnings' => []];
     }
 }
