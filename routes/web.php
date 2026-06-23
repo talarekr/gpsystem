@@ -23,6 +23,7 @@ use App\Http\Controllers\Storefront\PrivacyPolicyController;
 use App\Http\Controllers\Storefront\SearchController;
 use App\Http\Controllers\Storefront\TermsController;
 use App\Http\Controllers\Tools\CheckOrdersFlowController;
+use App\Http\Controllers\Tools\WorkshopQuickPartController;
 use App\Http\Controllers\Tools\CheckOvokoApiSettingsController;
 use App\Http\Controllers\Tools\MarketplaceApiSettingsDiagnosticsController;
 use App\Http\Controllers\Tools\MarketplaceApiFoundationController;
@@ -155,6 +156,8 @@ Route::get('/tools/set-frontend-maintenance', SetFrontendMaintenanceController::
 Route::get('/tools/check-gpswiss-public-html', [GpswissPublicHtmlController::class, 'check'])->name('tools.check-gpswiss-public-html');
 Route::get('/tools/link-gpswiss-storage', [GpswissPublicHtmlController::class, 'linkStorage'])->name('tools.link-gpswiss-storage');
 Route::get('/tools/sync-gpswiss-public-html', [GpswissPublicHtmlController::class, 'sync'])->name('tools.sync-gpswiss-public-html');
+Route::get('/tools/workshop/quick-part-create', [WorkshopQuickPartController::class, 'create'])->name('tools.workshop.quick-part-create');
+Route::post('/tools/workshop/quick-part-create', [WorkshopQuickPartController::class, 'store'])->name('tools.workshop.quick-part-create.store');
 Route::get('/tools/check-orders-flow', CheckOrdersFlowController::class)->name('tools.check-orders-flow');
 Route::get('/tools/check-ovoko-mapping', CheckOvokoMappingController::class)->name('tools.check-ovoko-mapping');
 Route::get('/tools/debug-ovoko-part-match', DebugOvokoPartMatchController::class)->name('tools.debug-ovoko-part-match');
