@@ -42,59 +42,29 @@ class PartImage extends Model
 
     public function relativePublicUrl(): ?string
     {
-        $path = trim((string) $this->path);
+        $path = $this->publicDiskPath($this->path);
 
-        if ($path === '') {
+        if ($path === null) {
             return null;
         }
 
-        if (Str::startsWith($path, ['http://', 'https://'])) {
-            return $path;
-        }
-
-        if (Str::startsWith($path, '/storage/')) {
-            return $path;
-        }
-
-        if (Str::startsWith($path, 'storage/')) {
-            return '/'.ltrim($path, '/');
-        }
-
-        if (Str::startsWith($path, '/')) {
-            return $path;
-        }
-
-        $relativePath = ltrim($path, '/');
-
-        if (Str::startsWith($relativePath, 'parts/photos/') && $this->publicStorageFileExists($relativePath)) {
-            return '/storage/'.$relativePath;
-        }
-
-        if (Storage::disk('public')->exists($relativePath)) {
-            return Storage::disk('public')->url($relativePath);
-        }
-
-        if (is_file(public_path($relativePath))) {
-            return asset($relativePath);
-        }
-
-        return Storage::disk('public')->url($relativePath);
+        return '/storage/'.$path;
     }
 
     public function absolutePublicUrl(): ?string
     {
-        $url = $this->relativePublicUrl();
+        $path = $this->publicDiskPath($this->path);
 
-        if ($url === null || Str::startsWith($url, ['http://', 'https://'])) {
-            return $url;
+        if ($path !== null) {
+            return Storage::disk('public')->url($path);
         }
 
-        return url($url);
+        return $this->legacyUrlFallback();
     }
 
     public function listingUrl(): ?string
     {
-        return $this->listingPresentationUrl() ?? $this->absolutePublicUrl();
+        return $this->presentationUrl('listing_path') ?? $this->absolutePublicUrl();
     }
 
     public function listingPresentationUrl(): ?string
@@ -236,19 +206,48 @@ class PartImage extends Model
 
     private function presentationUrl(string $key): ?string
     {
-        $path = data_get($this->legacy_payload, 'presentation.'.$key);
+        $path = $this->publicDiskPath(data_get($this->legacy_payload, 'presentation.'.$key));
 
+        if ($path === null || ! $this->publicStorageFileExists($path)) {
+            return null;
+        }
+
+        return Storage::disk('public')->url($path);
+    }
+
+    private function publicDiskPath(mixed $path): ?string
+    {
         if (! is_string($path) || trim($path) === '') {
             return null;
         }
 
-        $path = ltrim($path, '/');
+        $path = trim($path);
 
-        if (! $this->publicStorageFileExists($path)) {
-            return null;
+        if (Str::startsWith($path, ['http://', 'https://'])) {
+            $storagePrefix = '/storage/';
+            $urlPath = parse_url($path, PHP_URL_PATH);
+
+            if (! is_string($urlPath) || ! Str::startsWith($urlPath, $storagePrefix)) {
+                return null;
+            }
+
+            $path = substr($urlPath, strlen($storagePrefix));
         }
 
-        return url('/storage/'.$path);
+        $path = ltrim($path, '/');
+
+        if (Str::startsWith($path, 'storage/')) {
+            $path = substr($path, strlen('storage/'));
+        }
+
+        return $path !== '' ? $path : null;
+    }
+
+    private function legacyUrlFallback(): ?string
+    {
+        $url = $this->getAttribute('url');
+
+        return is_string($url) && trim($url) !== '' ? $url : null;
     }
 
     private function publicStorageFileExists(string $relativePath): bool
