@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Part;
+use App\Models\PartImage;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -77,7 +78,7 @@ class WorkshopQuickPartControllerTest extends TestCase
         $this->assertNotContains($part->id, Part::query()->storefrontVisible()->pluck('id')->all());
 
         foreach ($part->images as $image) {
-            $this->assertStringStartsWith('parts/photos/workshop/'.$part->id.'/', $image->path);
+            $this->assertStringStartsWith('parts/photos/imported/'.$part->id.'/', $image->path);
             $this->assertStringNotStartsWith('/storage/', $image->path);
             $this->assertStringNotStartsWith('http://', $image->path);
             $this->assertStringNotStartsWith('https://', $image->path);
@@ -113,6 +114,36 @@ class WorkshopQuickPartControllerTest extends TestCase
             ->assertJsonPath('images.0.storage_url_host', 'gpswiss.pl')
             ->assertJsonPath('images.0.gpswiss_storage_url', 'https://gpswiss.pl/storage/'.$image->path)
             ->assertJsonPath('images.0.relative_storage_url', '/storage/'.$image->path);
+    }
+
+
+    public function test_workshop_image_diagnostics_can_repair_one_direct_workshop_original_path(): void
+    {
+        Storage::fake('public');
+        Storage::disk('public')->put('parts/photos/original.jpg', 'fake image');
+
+        $part = Part::factory()->create();
+        $image = PartImage::query()->create([
+            'part_id' => $part->id,
+            'path' => 'parts/photos/original.jpg',
+            'source_system' => 'workshop_quick_create',
+            'legacy_payload' => [
+                'presentation' => [
+                    'source_path' => 'parts/photos/original.jpg',
+                ],
+            ],
+        ]);
+
+        $this->get('/tools/check-workshop-part-images?token='.self::TOKEN.'&part_id='.$part->id.'&repair_direct_original=1')
+            ->assertOk()
+            ->assertJsonPath('repair_direct_original.0.image_id', $image->id)
+            ->assertJsonPath('repair_direct_original.0.old_path', 'parts/photos/original.jpg')
+            ->assertJsonPath('repair_direct_original.0.new_path', 'parts/photos/imported/'.$part->id.'/original.jpg')
+            ->assertJsonPath('repair_direct_original.0.status', 'repaired')
+            ->assertJsonPath('images.0.path', 'parts/photos/imported/'.$part->id.'/original.jpg');
+
+        Storage::disk('public')->assertExists('parts/photos/imported/'.$part->id.'/original.jpg');
+        $this->assertSame('parts/photos/imported/'.$part->id.'/original.jpg', $image->fresh()->path);
     }
 
 }

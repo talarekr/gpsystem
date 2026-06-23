@@ -8,6 +8,7 @@ use App\Models\PartImage;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 class WorkshopImageDiagnosticsController extends Controller
 {
@@ -21,6 +22,13 @@ class WorkshopImageDiagnosticsController extends Controller
         abort_unless($partId > 0, 422, 'part_id is required.');
 
         $part = Part::query()->with('images')->findOrFail($partId);
+        $repair = $request->boolean('repair_direct_original')
+            ? $this->repairDirectWorkshopOriginals($part)
+            : [];
+
+        if ($repair !== []) {
+            $part->refresh()->load('images');
+        }
 
         $referenceUrl = (string) $request->query('reference_url', 'https://gpswiss.pl/storage/parts/photos/imported/63924/23201.jpg');
 
@@ -41,9 +49,64 @@ class WorkshopImageDiagnosticsController extends Controller
             'primary_image_url_host' => parse_url((string) $primaryImageUrl, PHP_URL_HOST),
             'listing_image_url' => $listingImageUrl,
             'listing_image_url_host' => parse_url((string) $listingImageUrl, PHP_URL_HOST),
+            'repair_direct_original' => $repair,
             'images_relation_count' => $part->images->count(),
             'images' => $part->images->map(fn (PartImage $image): array => $this->imagePayload($image))->values(),
         ]);
+    }
+
+
+    /** @return array<int, array<string, mixed>> */
+    private function repairDirectWorkshopOriginals(Part $part): array
+    {
+        $repairs = [];
+
+        foreach ($part->images as $image) {
+            $oldPath = ltrim((string) $image->path, '/');
+
+            if (! Str::startsWith($oldPath, 'parts/photos/') || Str::contains(Str::after($oldPath, 'parts/photos/'), '/')) {
+                continue;
+            }
+
+            if ($image->source_system !== 'workshop_quick_create') {
+                continue;
+            }
+
+            if (! Storage::disk('public')->exists($oldPath)) {
+                $repairs[] = [
+                    'image_id' => $image->id,
+                    'old_path' => $oldPath,
+                    'status' => 'skipped_missing_source',
+                ];
+
+                continue;
+            }
+
+            $newPath = 'parts/photos/imported/'.$part->id.'/'.basename($oldPath);
+
+            if (! Storage::disk('public')->exists($newPath)) {
+                Storage::disk('public')->copy($oldPath, $newPath);
+            }
+
+            $payload = $image->legacy_payload ?? [];
+            if (is_array($payload)) {
+                data_set($payload, 'presentation.source_path', $newPath);
+            }
+
+            $image->forceFill([
+                'path' => $newPath,
+                'legacy_payload' => $payload,
+            ])->save();
+
+            $repairs[] = [
+                'image_id' => $image->id,
+                'old_path' => $oldPath,
+                'new_path' => $newPath,
+                'status' => 'repaired',
+            ];
+        }
+
+        return $repairs;
     }
 
     private function imagePayload(PartImage $image): array
