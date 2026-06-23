@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>Warsztat — dodaj część</title>
     <style>
-        :root { color-scheme: light; --blue:#155eef; --bg:#f4f7fb; --text:#111827; --muted:#6b7280; --danger:#b42318; --border:#d0d5dd; --ok:#12b76a; --overlay:rgba(16,24,40,.72); }
+        :root { color-scheme: light; --blue:#155eef; --bg:#f4f7fb; --text:#111827; --muted:#6b7280; --danger:#b42318; --border:#d0d5dd; --ok:#12b76a; --overlay:rgba(16,24,40,.86); }
         * { box-sizing: border-box; }
         body { margin:0; background:var(--bg); color:var(--text); font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size:18px; }
         .wrap { width:100%; max-width:560px; margin:0 auto; min-height:100vh; padding:18px 14px 128px; }
@@ -34,7 +34,9 @@
         .ocr-modal { position:fixed; inset:0; z-index:20; background:#000; color:#fff; display:grid; grid-template-rows:auto 1fr auto; }
         .ocr-modal video { width:100%; height:100%; object-fit:cover; }
         .ocr-header, .ocr-footer { position:relative; z-index:3; padding:16px; background:rgba(0,0,0,.62); text-align:center; }
-        .ocr-frame { position:absolute; left:50%; top:50%; width:90vw; max-width:620px; height:68px; transform:translate(-50%,-50%); border:3px solid #fff; border-radius:14px; box-shadow:0 0 0 9999px var(--overlay); z-index:2; }
+        .ocr-frame { position:absolute; left:50%; top:46%; width:90vw; max-width:620px; height:46px; transform:translate(-50%,-50%); border:3px solid #fff; border-radius:12px; box-shadow:0 0 0 9999px var(--overlay); z-index:2; }
+        .ocr-tip { position:absolute; left:50%; top:calc(46% + 42px); transform:translateX(-50%); width:min(92vw, 620px); z-index:3; margin:0; padding:10px 12px; border-radius:14px; background:rgba(0,0,0,.68); color:#fff; font-size:15px; font-weight:800; text-align:center; }
+        .ocr-focus-message { position:absolute; left:50%; top:calc(46% - 86px); transform:translateX(-50%); z-index:4; padding:10px 14px; border-radius:999px; background:rgba(21,94,239,.92); color:#fff; font-weight:900; box-shadow:0 8px 20px rgba(0,0,0,.25); }
         .ocr-footer { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
         .ocr-footer button { width:100%; }
         .actions { position:fixed; left:0; right:0; bottom:0; background:rgba(255,255,255,.96); border-top:1px solid var(--border); padding:12px max(14px, env(safe-area-inset-left)) max(12px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-right)); display:flex; gap:10px; justify-content:center; }
@@ -104,10 +106,12 @@
     </div>
 </div>
 <div id="ocrModal" class="ocr-modal hidden" role="dialog" aria-modal="true" aria-labelledby="ocrTitle">
-    <div class="ocr-header"><strong id="ocrTitle">Ustaw jeden wiersz kodu części w ramce</strong></div>
+    <div class="ocr-header"><strong id="ocrTitle">Ustaw tylko jeden wiersz kodu części w ramce</strong></div>
     <div style="position:relative; overflow:hidden;">
         <video id="ocrVideo" autoplay playsinline muted></video>
         <div id="ocrFrame" class="ocr-frame" aria-hidden="true"></div>
+        <p class="ocr-tip">Trzymaj telefon blisko etykiety i dotknij ekranu, aby ustawić ostrość.</p>
+        <div id="ocrFocusMessage" class="ocr-focus-message hidden" aria-live="polite">Ustawiam ostrość...</div>
     </div>
     <div class="ocr-footer">
         <button type="button" id="ocrScanBtn" class="primary">Skanuj</button>
@@ -133,11 +137,14 @@
     const ocrModal = document.getElementById('ocrModal');
     const ocrVideo = document.getElementById('ocrVideo');
     const ocrFrame = document.getElementById('ocrFrame');
+    const ocrPreview = ocrVideo?.parentElement;
     const ocrScanBtn = document.getElementById('ocrScanBtn');
     const ocrCancelBtn = document.getElementById('ocrCancelBtn');
+    const ocrFocusMessage = document.getElementById('ocrFocusMessage');
     let ocrStream = null;
     let tesseractLoadPromise = null;
     const ignoredOcrWords = new Set(['BOSCH', 'VWAG', 'VW', 'AG', 'MADEINROMANIA', 'MADEIN', 'ROMANIA', 'GERMANY']);
+    const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 
     const setScanStatus = (message, isError = false) => {
@@ -147,11 +154,31 @@
         scanStatus.classList.remove('hidden');
     };
     const normalizeOcrLine = line => line.toUpperCase().replace(/[^A-Z0-9]/g, '');
-    const choosePartCode = text => (text || '')
-        .split(/\r?\n/)
-        .map(normalizeOcrLine)
-        .filter(value => value.length >= 6 && value.length <= 15 && /[A-Z]/.test(value) && /\d/.test(value) && !ignoredOcrWords.has(value))
-        .sort((a, b) => b.length - a.length)[0] || '';
+    const scorePartCode = value => {
+        if (value.length < 6 || value.length > 15 || !/\d/.test(value) || ignoredOcrWords.has(value)) return 0;
+        let score = 10;
+        if (/[A-Z]/.test(value)) score += 8;
+        if (/^[A-Z0-9]{2,4}[0-9]{5,8}[A-Z0-9]{0,3}$/.test(value)) score += 18;
+        if (/^[0-9][A-Z0-9]{1,3}[0-9]{5,8}[A-Z]?$/.test(value)) score += 8;
+        if (/^[A-Z]+$/.test(value) || /^\d+$/.test(value)) score -= 8;
+        if (value.length >= 9 && value.length <= 12) score += 4;
+        return score;
+    };
+    const choosePartCode = texts => {
+        const joinedText = Array.isArray(texts) ? texts.join('\n') : (texts || '');
+        const candidates = joinedText
+            .split(/[^A-Z0-9]+/i)
+            .map(normalizeOcrLine)
+            .filter(Boolean);
+        joinedText.split(/\r?\n/).forEach(line => {
+            const normalized = normalizeOcrLine(line);
+            if (normalized) candidates.push(normalized);
+        });
+        return candidates
+            .map(value => ({ value, score: scorePartCode(value) }))
+            .filter(candidate => candidate.score >= 18)
+            .sort((a, b) => b.score - a.score || b.value.length - a.value.length)[0]?.value || '';
+    };
     const loadTesseract = () => {
         if (window.Tesseract) return Promise.resolve(window.Tesseract);
         if (!tesseractLoadPromise) {
@@ -167,36 +194,75 @@
     };
     const stopOcrCamera = () => { ocrStream?.getTracks().forEach(track => track.stop()); ocrStream = null; if (ocrVideo) ocrVideo.srcObject = null; };
     const closeOcr = () => { stopOcrCamera(); ocrModal?.classList.add('hidden'); };
+    const showFocusMessage = () => {
+        ocrFocusMessage?.classList.remove('hidden');
+        setTimeout(() => ocrFocusMessage?.classList.add('hidden'), 1100);
+    };
+    const requestCameraFocus = async () => {
+        showFocusMessage();
+        const track = ocrStream?.getVideoTracks()[0];
+        const capabilities = track?.getCapabilities?.() || {};
+        const constraints = { advanced: [] };
+        if (Array.isArray(capabilities.focusMode) && capabilities.focusMode.includes('continuous')) constraints.advanced.push({ focusMode: 'continuous' });
+        if (Array.isArray(capabilities.focusMode) && capabilities.focusMode.includes('single-shot')) constraints.advanced.push({ focusMode: 'single-shot' });
+        if (constraints.advanced.length) {
+            try { await track.applyConstraints(constraints); } catch (error) { /* Best-effort browser support. */ }
+        }
+        await sleep(650);
+    };
     const cropFrameToCanvas = () => {
         const videoRect = ocrVideo.getBoundingClientRect();
         const frameRect = ocrFrame.getBoundingClientRect();
         const scaleX = ocrVideo.videoWidth / videoRect.width;
         const scaleY = ocrVideo.videoHeight / videoRect.height;
+        const sourceX = Math.round((frameRect.left - videoRect.left) * scaleX);
+        const sourceY = Math.round((frameRect.top - videoRect.top) * scaleY);
+        const sourceWidth = Math.round(frameRect.width * scaleX);
+        const sourceHeight = Math.round(frameRect.height * scaleY);
+        const outputScale = sourceWidth < 1200 ? 3 : 2;
         const canvas = document.createElement('canvas');
-        canvas.width = Math.round(frameRect.width * scaleX);
-        canvas.height = Math.round(frameRect.height * scaleY);
-        canvas.getContext('2d').drawImage(ocrVideo, Math.round((frameRect.left - videoRect.left) * scaleX), Math.round((frameRect.top - videoRect.top) * scaleY), canvas.width, canvas.height, 0, 0, canvas.width, canvas.height);
+        canvas.width = sourceWidth * outputScale;
+        canvas.height = sourceHeight * outputScale;
+        const context = canvas.getContext('2d', { willReadFrequently: true });
+        context.imageSmoothingEnabled = false;
+        context.drawImage(ocrVideo, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
+        const image = context.getImageData(0, 0, canvas.width, canvas.height);
+        const data = image.data;
+        for (let i = 0; i < data.length; i += 4) {
+            const gray = (data[i] * 0.299) + (data[i + 1] * 0.587) + (data[i + 2] * 0.114);
+            const contrasted = Math.max(0, Math.min(255, (gray - 128) * 1.65 + 128));
+            const value = contrasted > 168 ? 255 : contrasted < 92 ? 0 : contrasted;
+            data[i] = data[i + 1] = data[i + 2] = value;
+        }
+        context.putImageData(image, 0, 0);
         return canvas;
     };
     scanPartNumberBtn?.addEventListener('click', async () => {
         if (!navigator.mediaDevices?.getUserMedia) { setScanStatus('Kamera nie jest dostępna w tej przeglądarce. Wpisz kod ręcznie.', true); return; }
         try {
-            ocrStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+            ocrStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 }, focusMode: { ideal: 'continuous' } }, audio: false });
             ocrVideo.srcObject = ocrStream;
             ocrModal.classList.remove('hidden');
-            setScanStatus('Ustaw jeden wiersz kodu części w ramce i kliknij Skanuj.');
+            setScanStatus('Ustaw tylko jeden wiersz kodu części w ramce i kliknij Skanuj.');
         } catch (error) {
             setScanStatus('Nie udało się uruchomić kamery. Wpisz kod ręcznie.', true);
         }
     });
+    ocrPreview?.addEventListener('click', requestCameraFocus);
     ocrCancelBtn?.addEventListener('click', closeOcr);
     ocrScanBtn?.addEventListener('click', async () => {
         if (!ocrVideo?.videoWidth) return;
-        ocrScanBtn.disabled = true; ocrScanBtn.textContent = 'Rozpoznawanie...';
+        ocrScanBtn.disabled = true; ocrScanBtn.textContent = 'Czytam kod...'; setScanStatus('Czytam kod...');
         try {
             const Tesseract = await loadTesseract();
-            const result = await Tesseract.recognize(cropFrameToCanvas(), 'eng', { logger: () => {} });
-            const code = choosePartCode(result?.data?.text || '');
+            await requestCameraFocus();
+            const texts = [];
+            for (const delay of [0, 400, 400]) {
+                if (delay) await sleep(delay);
+                const result = await Tesseract.recognize(cropFrameToCanvas(), 'eng', { logger: () => {}, tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789' });
+                texts.push(result?.data?.text || '');
+            }
+            const code = choosePartCode(texts);
             if (!code) { setScanStatus('Nie udało się pewnie rozpoznać kodu. Spróbuj ponownie albo wpisz ręcznie.', true); return; }
             partNumberInput.value = code;
             partNumberInput.dispatchEvent(new Event('input', { bubbles: true }));
