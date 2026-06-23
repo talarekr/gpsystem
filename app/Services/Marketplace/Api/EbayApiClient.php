@@ -3,6 +3,7 @@
 namespace App\Services\Marketplace\Api;
 
 use App\Support\Marketplace\EbayOAuthConfig;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 
 class EbayApiClient extends AbstractMarketplaceApiClient
@@ -40,6 +41,73 @@ class EbayApiClient extends AbstractMarketplaceApiClient
 
         return ['ok' => collect($results)->every(fn ($row) => (bool) $row['ok']), 'channel' => $this->channel, 'read_only' => true, 'results' => $results];
     }
+
+    public function automotivePartsCompatibilityPolicies(string $categoryId): array
+    {
+        $readiness = $this->getAccountReadiness();
+        $marketplaceId = $this->marketplaceId();
+        $base = ['ok' => false, 'channel' => $this->channel, 'marketplace_id' => $marketplaceId, 'category_id' => $categoryId, 'supports_compatibility' => false, 'policy' => null, 'compatibility_classification' => null, 'max_number_of_compatible_vehicles' => null, 'required_properties' => [], 'blockers' => $readiness['blockers'] ?? [], 'warnings' => [], 'read_only' => true];
+        if ($base['blockers'] !== []) return $base;
+        $json = $this->cachedEbayGet('metadata.compatibility_policies.'.$marketplaceId.'.'.$categoryId, '/sell/metadata/v1/marketplace/'.$marketplaceId.'/get_automotive_parts_compatibility_policies', ['filter' => 'categoryIds:{'.$categoryId.'}']);
+        if (! ($json['ok'] ?? false)) return array_merge($base, ['blockers' => ['Could not read eBay automotive parts compatibility policies (HTTP '.($json['http_status'] ?? 'n/a').').']]);
+        $payload = is_array($json['json'] ?? null) ? $json['json'] : [];
+        $policies = array_values(array_filter($payload['automotivePartsCompatibilityPolicies'] ?? [], fn ($p) => is_array($p) && (string)($p['categoryId'] ?? '') === $categoryId));
+        $policy = $policies[0] ?? null;
+        $base['warnings'] = array_values(array_filter(array_map(fn ($w) => is_array($w) ? ($w['message'] ?? $w['errorId'] ?? null) : null, $payload['warnings'] ?? [])));
+        $base['policy'] = $policy;
+        $base['supports_compatibility'] = $policy !== null;
+        $base['compatibility_classification'] = $policy['compatibilityClassification'] ?? $policy['compatibilityType'] ?? null;
+        $base['max_number_of_compatible_vehicles'] = $policy['maxNumberOfCompatibleVehicles'] ?? $policy['maxCompatibleVehicles'] ?? null;
+        $base['required_properties'] = $policy['requiredProperties'] ?? $policy['requiredCompatibilityProperties'] ?? [];
+        $base['ok'] = true;
+        if (! $base['supports_compatibility']) $base['blockers'][] = 'Category not returned by eBay as supporting automotive parts compatibility.';
+        return $base;
+    }
+
+    public function compatibilityProperties(string $categoryId): array
+    {
+        $readiness = $this->getAccountReadiness();
+        $marketplaceId = $this->marketplaceId();
+        $treeId = $this->categoryTreeId();
+        $base = ['ok' => false, 'channel' => $this->channel, 'marketplace_id' => $marketplaceId, 'category_id' => $categoryId, 'properties_count' => 0, 'properties' => [], 'blockers' => $readiness['blockers'] ?? [], 'warnings' => [], 'read_only' => true];
+        if ($base['blockers'] !== []) return $base;
+        $json = $this->cachedEbayGet('taxonomy.compatibility_properties.'.$treeId.'.'.$categoryId, '/commerce/taxonomy/v1/category_tree/'.$treeId.'/get_compatibility_properties', ['category_id' => $categoryId]);
+        if (! ($json['ok'] ?? false)) return array_merge($base, ['blockers' => ['Could not read eBay compatibility properties (HTTP '.($json['http_status'] ?? 'n/a').').']]);
+        $payload = is_array($json['json'] ?? null) ? $json['json'] : [];
+        $props = array_values(array_filter($payload['compatibilityProperties'] ?? [], 'is_array'));
+        $base['properties'] = array_map(fn ($p) => ['name' => $p['name'] ?? $p['localizedName'] ?? null, 'localized_name' => $p['localizedName'] ?? $p['name'] ?? null, 'required' => (bool)($p['required'] ?? false), 'usage' => $p['usage'] ?? null, 'allowed_values_available' => (bool)($p['allowedValuesAvailable'] ?? true), 'raw' => $p], $props);
+        $base['properties_count'] = count($base['properties']);
+        $base['ok'] = true;
+        return $base;
+    }
+
+    public function compatibilityPropertyValues(string $categoryId, string $property, array $filters = []): array
+    {
+        $readiness = $this->getAccountReadiness();
+        $treeId = $this->categoryTreeId();
+        $base = ['ok' => false, 'property' => $property, 'values_count' => 0, 'values_sample' => [], 'blockers' => $readiness['blockers'] ?? [], 'warnings' => [], 'read_only' => true];
+        if ($base['blockers'] !== []) return $base;
+        $params = ['category_id' => $categoryId, 'compatibility_property' => $property] + $filters;
+        $json = $this->cachedEbayGet('taxonomy.compatibility_values.'.$treeId.'.'.$categoryId.'.'.md5(json_encode($params)), '/commerce/taxonomy/v1/category_tree/'.$treeId.'/get_compatibility_property_values', $params);
+        if (! ($json['ok'] ?? false)) return array_merge($base, ['blockers' => ['Could not read eBay compatibility property values (HTTP '.($json['http_status'] ?? 'n/a').').']]);
+        $payload = is_array($json['json'] ?? null) ? $json['json'] : [];
+        $values = array_values(array_filter($payload['compatibilityPropertyValues'] ?? $payload['values'] ?? [], 'is_array'));
+        $base['values_count'] = count($values);
+        $base['values_sample'] = array_slice(array_map(fn ($v) => $v['value'] ?? $v['localizedValue'] ?? $v, $values), 0, 50);
+        $base['ok'] = true;
+        return $base;
+    }
+
+    private function cachedEbayGet(string $key, string $path, array $query): array
+    {
+        return Cache::remember('ebay_readonly:'.$key, now()->addHours(24), function () use ($path, $query) {
+            $response = Http::withToken($this->accessToken())->withHeaders(['X-EBAY-C-MARKETPLACE-ID' => $this->marketplaceId()])->acceptJson()->timeout(20)->get(rtrim((string) $this->account?->api_base_url, '/').$path, $query);
+            return ['ok' => $response->successful(), 'http_status' => $response->status(), 'json' => is_array($response->json()) ? $response->json() : []];
+        });
+    }
+
+    private function marketplaceId(): string { return (string) (($this->account?->api_settings ?? [])['marketplace_id'] ?? ($this->channel === 'ebay_fr' ? 'EBAY_FR' : 'EBAY_DE')); }
+    private function categoryTreeId(): string { $settings = is_array($this->account?->api_settings) ? $this->account->api_settings : []; return (string) ($settings['category_tree_id'] ?? $settings['site_id'] ?? ($this->channel === 'ebay_fr' ? '71' : '77')); }
 
 
     public function businessPoliciesDiagnostics(): array

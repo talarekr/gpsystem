@@ -43,6 +43,42 @@ class EbayListingDryRunController extends Controller
         return response()->json($payload, ($payload['blockers'] ?? []) === [] ? 200 : 422);
     }
 
+    public function compatibilityPolicies(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidToken();
+        $payload = $this->service->compatibilityPolicies((string) $request->query('channel', 'ebay_de'), (string) $request->query('category_id', ''));
+        return response()->json($payload, ($payload['blockers'] ?? []) === [] ? 200 : 422);
+    }
+
+    public function compatibilityProperties(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidToken();
+        $payload = $this->service->compatibilityProperties((string) $request->query('channel', 'ebay_de'), (string) $request->query('category_id', ''));
+        return response()->json($payload, ($payload['blockers'] ?? []) === [] ? 200 : 422);
+    }
+
+    public function compatibilityPropertyValues(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidToken();
+        $filters = $request->except(['token', 'channel', 'category_id', 'property']);
+        $payload = $this->service->compatibilityPropertyValues((string) $request->query('channel', 'ebay_de'), (string) $request->query('category_id', ''), (string) $request->query('property', ''), $filters);
+        return response()->json($payload, ($payload['blockers'] ?? []) === [] ? 200 : 422);
+    }
+
+    public function dryRunFitmentMatch(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidToken();
+        $payload = $this->service->dryRunFitmentMatch((int) $request->integer('part_id'), (string) $request->query('channel', 'ebay_de'));
+        return response()->json($payload, ($payload['blockers'] ?? []) === [] ? 200 : 422);
+    }
+
+    public function dryRunFitmentCoverage(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidToken();
+        $payload = $this->service->dryRunFitmentCoverage((string) $request->query('channel', 'ebay_de'), (int) $request->integer('limit', 100));
+        return response()->json($payload, 200);
+    }
+
     public function readinessAll(Request $request): JsonResponse
     {
         if (! $this->validToken($request)) return $this->invalidToken();
