@@ -60,8 +60,16 @@ class EbayListingDryRunController extends Controller
     public function compatibilityPropertyValues(Request $request): JsonResponse
     {
         if (! $this->validToken($request)) return $this->invalidToken();
-        $filters = $request->except(['token', 'channel', 'category_id', 'property']);
-        $payload = $this->service->compatibilityPropertyValues((string) $request->query('channel', 'ebay_de'), (string) $request->query('category_id', ''), (string) $request->query('property', ''), $filters);
+        $filters = $request->except(['token', 'channel', 'category_id', 'property', 'q', 'limit', 'include_all']);
+        $payload = $this->service->compatibilityPropertyValues(
+            (string) $request->query('channel', 'ebay_de'),
+            (string) $request->query('category_id', ''),
+            (string) $request->query('property', ''),
+            $filters,
+            (string) $request->query('q', ''),
+            (int) $request->integer('limit', 50),
+            (bool) $request->boolean('include_all', false),
+        );
         return response()->json($payload, ($payload['blockers'] ?? []) === [] ? 200 : 422);
     }
 
