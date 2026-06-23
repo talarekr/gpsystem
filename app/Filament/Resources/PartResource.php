@@ -8,6 +8,7 @@ use App\Models\Car;
 use App\Models\Part;
 use App\Models\PartCategory;
 use App\Models\PartImage;
+use App\Services\Parts\PartImageUploadService;
 use App\Models\StorageLocation;
 use App\Services\PartCategorySuggestionService;
 use Filament\Forms;
@@ -469,21 +470,7 @@ class PartResource extends Resource
 
     public static function syncPartImages(Part $part, mixed $paths): void
     {
-        $paths = collect($paths ?? [])
-            ->map(fn (mixed $path): string => trim((string) (is_array($path) ? ($path['path'] ?? $path['file'] ?? '') : $path)))
-            ->filter()
-            ->unique()
-            ->values();
-
-        $existingImages = $part->images()->get()->keyBy('path');
-        foreach ($paths as $index => $path) {
-            $image = $existingImages->get($path) ?? new PartImage(['path' => $path]);
-            $image->part_id = $part->id;
-            $image->sort_order = $index;
-            $image->is_primary = $index === 0;
-            $image->save();
-        }
-
+        app(PartImageUploadService::class)->syncStoredImages($part, $paths);
     }
 
     public static function table(Table $table): Table
