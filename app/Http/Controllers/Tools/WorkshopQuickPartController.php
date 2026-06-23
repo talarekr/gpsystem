@@ -9,6 +9,7 @@ use App\Models\StorageLocation;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\View\View;
 
@@ -71,11 +72,13 @@ class WorkshopQuickPartController extends Controller
                 $originalName = $photo->getClientOriginalName();
                 $extension = $photo->extension() ?: $photo->guessExtension() ?: 'jpg';
                 $filename = Str::uuid()->toString().'.'.$extension;
-                $path = $photo->storeAs('parts/photos/workshop/'.$part->id, $filename, 'public');
+                $relativePath = 'parts/photos/workshop/'.$part->id.'/'.$filename;
+
+                Storage::disk('public')->put($relativePath, $photo->get());
 
                 PartImage::query()->create([
                     'part_id' => $part->id,
-                    'path' => $path,
+                    'path' => $relativePath,
                     'sort_order' => $index,
                     'is_primary' => $index === 0,
                     'source_system' => 'workshop_quick_create',
