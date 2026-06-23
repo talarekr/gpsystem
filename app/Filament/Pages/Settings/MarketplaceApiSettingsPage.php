@@ -91,6 +91,7 @@ abstract class MarketplaceApiSettingsPage extends Page implements HasForms
         foreach ($this->accountDefinitions() as $code => $definition) {
             $account = $this->getAccount($code, $definition);
             $credentials = is_array($account->api_credentials) ? $account->api_credentials : [];
+            $settings = is_array($account->api_settings) ? $account->api_settings : [];
             foreach (array_keys($definition['credential_fields']) as $field) {
                 $value = trim((string) ($state[$code][$field] ?? ''));
                 if ($value !== '') $credentials[$field] = $value;
