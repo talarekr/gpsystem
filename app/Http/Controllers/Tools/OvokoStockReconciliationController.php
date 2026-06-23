@@ -9,6 +9,7 @@ use App\Models\Part;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\View\View;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -25,6 +26,15 @@ class OvokoStockReconciliationController extends Controller
     private const SNAPSHOT_CACHE_PREFIX = 'ovoko_stock_reconciliation_snapshot:';
     private const RUN_CACHE_PREFIX = 'ovoko_stock_reconciliation_run:';
     private const SNAPSHOT_TTL_HOURS = 3;
+
+    public function runner(Request $request): View|JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+
+        return view('tools.ovoko-stock-reconciliation-runner', [
+            'token' => self::TOKEN,
+        ]);
+    }
 
     public function dryRun(Request $request): JsonResponse
     {

@@ -419,6 +419,17 @@ class OvokoStockReconciliationControllerTest extends TestCase
         return $part;
     }
 
+    public function test_runner_page_is_available_with_token_and_contains_expected_dry_run_texts(): void
+    {
+        $response = $this->get('/tools/ovoko-stock-reconciliation-runner?token=gps_images_import_2026');
+
+        $response->assertOk()
+            ->assertSee('Start dry-run')
+            ->assertSee('DRY-RUN ONLY')
+            ->assertSee('/tools/run-ovoko-stock-snapshot-step')
+            ->assertSee('/tools/run-ovoko-stock-reconciliation-step');
+    }
+
     private function account(): MarketplaceAccount
     {
         return MarketplaceAccount::query()->create([
