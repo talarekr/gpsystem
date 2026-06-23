@@ -12,7 +12,7 @@ use RuntimeException;
 class PartImageUploadService
 {
     private const DISK = 'public';
-    private const DIRECTORY = 'parts/photos';
+    private const IMPORTED_DIRECTORY = 'parts/photos/imported';
 
     /**
      * @param  iterable<int, UploadedFile>  $uploadedFiles
@@ -27,7 +27,7 @@ class PartImageUploadService
                     throw new RuntimeException('Nie udało się odczytać przesłanego zdjęcia części.');
                 }
 
-                $path = $uploadedFile->store(self::DIRECTORY, self::DISK);
+                $path = $uploadedFile->store($this->originalUploadDirectory($part), self::DISK);
 
                 if (! is_string($path) || $path === '' || ! Storage::disk(self::DISK)->exists($path)) {
                     throw new RuntimeException('Nie udało się zapisać przesłanego zdjęcia części.');
@@ -88,6 +88,11 @@ class PartImageUploadService
         }
 
         return $syncedImages;
+    }
+
+    private function originalUploadDirectory(Part $part): string
+    {
+        return self::IMPORTED_DIRECTORY.'/'.((string) $part->getKey());
     }
 
     private function normalizeStoredImage(mixed $image): array
