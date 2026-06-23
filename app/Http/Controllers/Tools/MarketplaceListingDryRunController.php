@@ -146,6 +146,7 @@ class MarketplaceListingDryRunController extends Controller
 
         if (! $visible) $warnings[] = 'storefront_not_visible';
         if (! is_numeric($price) || (float) $price <= 0) $blockers[] = 'missing_price';
+        if ((bool) ($part->needs_review ?? false)) $blockers[] = 'part_needs_review';
         if (! is_numeric($part->quantity) || (int) $part->quantity <= 0) $blockers[] = 'missing_or_zero_quantity';
         if (blank($part->name)) $blockers[] = 'missing_name';
         if ($images['count'] < 1) $blockers[] = 'missing_images';
@@ -164,7 +165,7 @@ class MarketplaceListingDryRunController extends Controller
             'ready' => $ready,
             'part_id' => $part->id,
             'channel' => $channel,
-            'part' => ['name' => $part->name, 'part_number' => $part->part_number, 'sku' => $part->sku, 'status' => $part->status, 'quantity' => $part->quantity, 'needs_listing' => (bool) $part->needs_listing],
+            'part' => ['name' => $part->name, 'part_number' => $part->part_number, 'sku' => $part->sku, 'status' => $part->status, 'quantity' => $part->quantity, 'needs_listing' => (bool) $part->needs_listing, 'needs_review' => (bool) ($part->needs_review ?? false)],
             'visibility' => ['storefront_visible' => $visible, 'blocked_reason' => $visible ? null : 'storefront_not_visible'],
             'price' => $channel === 'ovoko' ? ['ovoko_price' => $price, 'currency' => 'PLN'] : ['allegro_price' => $price, 'fallback_price' => is_numeric($part->price) ? (float) $part->price : null, 'currency' => 'PLN'],
             'category' => ['local_category_id' => $part->category_id, 'local_category_path' => $part->category?->category_path ?? $part->category?->name, 'marketplace_category_mapping_exists' => (bool) $mapping, 'external_category_id' => $mapping?->external_category_id, 'is_blocked' => (bool) ($mapping?->is_blocked ?? false), 'block_reason' => $mapping?->block_reason],
@@ -240,6 +241,7 @@ class MarketplaceListingDryRunController extends Controller
         if ($request->boolean('storefront_visible_only', true)) $query->where('is_visible_storefront', true);
         if (! $request->boolean('include_needs_listing', false)) $query->where(function ($q) { $q->where('needs_listing', false)->orWhereNull('needs_listing'); });
         if (! $request->boolean('include_archived', false)) $query->where('status', '!=', 'archived');
+        if (! $request->boolean('include_needs_review', false)) $query->where(function ($q) { $q->where('needs_review', false)->orWhereNull('needs_review'); });
         if (! $request->boolean('include_existing_listings', false) && Schema::hasTable('marketplace_listings')) {
             $channel = $this->channel($request);
             $marketplaces = $channel === 'allegro_main' ? ['allegro_main', 'allegro'] : [$this->marketplace($channel)];
