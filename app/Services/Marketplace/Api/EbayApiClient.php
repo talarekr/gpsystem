@@ -84,12 +84,38 @@ class EbayApiClient extends AbstractMarketplaceApiClient
     public function compatibilityPropertyValues(string $categoryId, string $property, array $filters = []): array
     {
         $readiness = $this->getAccountReadiness();
+        $marketplaceId = $this->marketplaceId();
         $treeId = $this->categoryTreeId();
-        $base = ['ok' => false, 'property' => $property, 'values_count' => 0, 'values_sample' => [], 'blockers' => $readiness['blockers'] ?? [], 'warnings' => [], 'read_only' => true];
+        $path = '/commerce/taxonomy/v1/category_tree/'.$treeId.'/get_compatibility_property_values';
+        $filterQuery = $this->compatibilityPropertyValueFilter($filters);
+        $params = array_filter([
+            'category_id' => $categoryId,
+            'compatibility_property' => $property,
+            'filter' => $filterQuery,
+        ], fn ($value) => $value !== null && $value !== '');
+        $base = [
+            'ok' => false,
+            'channel' => $this->channel,
+            'marketplace_id' => $marketplaceId,
+            'category_tree_id' => $treeId,
+            'category_id' => $categoryId,
+            'property' => $property,
+            'applied_filters' => $filterQuery,
+            'values_count' => 0,
+            'values_sample' => [],
+            'api_endpoint_family' => 'commerce/taxonomy/category_tree/get_compatibility_property_values',
+            'api_request_path_safe' => $path,
+            'api_query_safe' => $params,
+            'blockers' => $readiness['blockers'] ?? [],
+            'warnings' => ['Read-only diagnostics only: no eBay write API calls and no local product, listing, offer, or marketplace mutation.'],
+            'read_only' => true,
+        ];
         if ($base['blockers'] !== []) return $base;
-        $params = ['category_id' => $categoryId, 'compatibility_property' => $property] + $filters;
-        $json = $this->cachedEbayGet('taxonomy.compatibility_values.'.$treeId.'.'.$categoryId.'.'.md5(json_encode($params)), '/commerce/taxonomy/v1/category_tree/'.$treeId.'/get_compatibility_property_values', $params);
-        if (! ($json['ok'] ?? false)) return array_merge($base, ['blockers' => ['Could not read eBay compatibility property values (HTTP '.($json['http_status'] ?? 'n/a').').']]);
+
+        $json = $this->cachedEbayGet('taxonomy.compatibility_values.'.$treeId.'.'.$categoryId.'.'.md5(json_encode($params)), $path, $params);
+        if (! ($json['ok'] ?? false)) {
+            return array_merge($base, $this->safeEbayErrorDetails($json), ['blockers' => ['Could not read eBay compatibility property values (HTTP '.($json['http_status'] ?? 'n/a').'). See safe API error fields for details.']]);
+        }
         $payload = is_array($json['json'] ?? null) ? $json['json'] : [];
         $values = array_values(array_filter($payload['compatibilityPropertyValues'] ?? $payload['values'] ?? [], 'is_array'));
         $base['values_count'] = count($values);
@@ -102,12 +128,47 @@ class EbayApiClient extends AbstractMarketplaceApiClient
     {
         return Cache::remember('ebay_readonly:'.$key, now()->addHours(24), function () use ($path, $query) {
             $response = Http::withToken($this->accessToken())->withHeaders(['X-EBAY-C-MARKETPLACE-ID' => $this->marketplaceId()])->acceptJson()->timeout(20)->get(rtrim((string) $this->account?->api_base_url, '/').$path, $query);
-            return ['ok' => $response->successful(), 'http_status' => $response->status(), 'json' => is_array($response->json()) ? $response->json() : []];
+            return ['ok' => $response->successful(), 'http_status' => $response->status(), 'json' => is_array($response->json()) ? $response->json() : [], 'path' => $path, 'query' => $query];
         });
     }
 
+    private function compatibilityPropertyValueFilter(array $filters): ?string
+    {
+        if (isset($filters['filter']) && is_string($filters['filter']) && trim($filters['filter']) !== '') return trim($filters['filter']);
+
+        $pairs = [];
+        $genericFilters = is_array($filters['filters'] ?? null) ? $filters['filters'] : [];
+        foreach ($genericFilters as $name => $value) {
+            if (is_string($name) && ! blank($value)) $pairs[$name] = (string) $value;
+        }
+
+        foreach (['make' => 'Make', 'model' => 'Model', 'year' => 'Year', 'platform' => 'Platform', 'type' => 'Type', 'engine' => 'Engine', 'trim' => 'Trim'] as $suffix => $propertyName) {
+            $value = $filters['filter_'.$suffix] ?? null;
+            if (! blank($value)) $pairs[$propertyName] = (string) $value;
+        }
+
+        if ($pairs === []) return null;
+
+        return collect($pairs)
+            ->map(fn (string $value, string $name) => $name.':'.$value)
+            ->implode(',');
+    }
+
+    private function safeEbayErrorDetails(array $response): array
+    {
+        $json = is_array($response['json'] ?? null) ? $response['json'] : [];
+        $error = is_array($json['errors'][0] ?? null) ? $json['errors'][0] : [];
+
+        return [
+            'api_http_status' => $response['http_status'] ?? null,
+            'ebay_error_id' => $error['errorId'] ?? null,
+            'ebay_error_message' => $error['message'] ?? $json['message'] ?? null,
+            'ebay_error_long_message' => $error['longMessage'] ?? null,
+        ];
+    }
+
     private function marketplaceId(): string { return (string) (($this->account?->api_settings ?? [])['marketplace_id'] ?? ($this->channel === 'ebay_fr' ? 'EBAY_FR' : 'EBAY_DE')); }
-    private function categoryTreeId(): string { $settings = is_array($this->account?->api_settings) ? $this->account->api_settings : []; return (string) ($settings['category_tree_id'] ?? $settings['site_id'] ?? ($this->channel === 'ebay_fr' ? '71' : '77')); }
+    private function categoryTreeId(): string { $settings = is_array($this->account?->api_settings) ? $this->account->api_settings : []; $marketplaceId = $this->marketplaceId(); if ($marketplaceId === 'EBAY_DE') return '77'; if ($marketplaceId === 'EBAY_FR') return '71'; return (string) ($settings['category_tree_id'] ?? $settings['site_id'] ?? ($this->channel === 'ebay_fr' ? '71' : '77')); }
 
 
     public function businessPoliciesDiagnostics(): array
