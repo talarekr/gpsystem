@@ -17,7 +17,16 @@ class WorkshopQuickPartControllerTest extends TestCase
     public function test_workshop_quick_part_page_requires_token(): void
     {
         $this->get('/tools/workshop/quick-part-create')->assertForbidden();
-        $this->get('/tools/workshop/quick-part-create?token='.self::TOKEN)->assertOk();
+        $this->get('/tools/workshop/quick-part-create?token='.self::TOKEN)
+            ->assertOk()
+            ->assertSee('Zrób zdjęcie')
+            ->assertSee('Wybierz z telefonu')
+            ->assertSee('Magazyn / miejsce składowania')
+            ->assertSee('Główny kod części')
+            ->assertSee('Notatka wewnętrzna')
+            ->assertSee('Zapisz część')
+            ->assertSee('capture="environment"', false)
+            ->assertDontSee('Krok 1/4');
     }
 
     public function test_required_fields_are_validated_and_internal_note_is_optional(): void
@@ -69,6 +78,9 @@ class WorkshopQuickPartControllerTest extends TestCase
 
         foreach ($part->images as $image) {
             $this->assertStringStartsWith('parts/photos/workshop/'.$part->id.'/', $image->path);
+            $this->assertSame('workshop_quick_create', $image->source_system);
+            $this->assertNotEmpty($image->external_id);
+            $this->assertNotNull($image->relativePublicUrl());
             Storage::disk('public')->assertExists($image->path);
         }
     }
