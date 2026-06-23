@@ -199,6 +199,8 @@ Route::get('/tools/check-ebay-category-shipping-coverage', [EbayCategoryShipping
 Route::get('/tools/test-allegro-api-connection', [MarketplaceApiSettingsDiagnosticsController::class, 'testAllegro'])->name('tools.test-allegro-api-connection');
 Route::get('/tools/test-ebay-api-connection', [MarketplaceApiSettingsDiagnosticsController::class, 'testEbay'])->name('tools.test-ebay-api-connection');
 Route::get('/tools/check-ebay-business-policies', [MarketplaceApiSettingsDiagnosticsController::class, 'checkEbayBusinessPolicies'])->name('tools.check-ebay-business-policies');
+Route::get('/tools/check-ebay-account-policy-settings', [EbayListingDryRunController::class, 'checkAccountPolicySettings'])->name('tools.check-ebay-account-policy-settings');
+Route::get('/tools/set-ebay-account-policy-settings', [EbayListingDryRunController::class, 'setAccountPolicySettings'])->name('tools.set-ebay-account-policy-settings');
 Route::get('/tools/check-ebay-listing-readiness', [EbayListingDryRunController::class, 'readiness'])->name('tools.check-ebay-listing-readiness');
 Route::get('/tools/dry-run-ebay-listing-payload', [EbayListingDryRunController::class, 'dryRunPayload'])->name('tools.dry-run-ebay-listing-payload');
 Route::get('/tools/check-ebay-listing-readiness-all', [EbayListingDryRunController::class, 'readinessAll'])->name('tools.check-ebay-listing-readiness-all');

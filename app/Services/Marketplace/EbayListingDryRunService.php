@@ -44,8 +44,8 @@ class EbayListingDryRunService
         if ($mapping?->is_blocked) $blockers[] = 'Category is blocked for this eBay channel.';
         if ($mapping && blank($mapping->external_category_id)) $blockers[] = 'External eBay category ID missing.';
 
-        $paymentPolicyId = $this->policyId($settings, 'payment');
-        $returnPolicyId = $this->policyId($settings, 'return');
+        $paymentPolicyId = $this->resolvedPaymentPolicyId($settings);
+        $returnPolicyId = $this->resolvedReturnPolicyId($settings);
         if ($mapping && blank($mapping->fulfillment_policy_id)) $blockers[] = 'fulfillment_policy_id missing.';
         if (blank($paymentPolicyId)) $blockers[] = 'payment_policy_id missing from marketplace account api_settings/config.';
         if (blank($returnPolicyId)) $blockers[] = 'return_policy_id missing from marketplace account api_settings/config.';
@@ -147,6 +147,8 @@ class EbayListingDryRunService
         return ['part_id' => $partId, 'channels' => $channels, 'overall_ready' => collect($channels)->every(fn ($r) => (bool) $r['ready']), 'blockers' => array_values(array_unique(array_merge($channels['ebay_de']['blockers'], $channels['ebay_fr']['blockers']))), 'warnings' => array_values(array_unique(array_merge($channels['ebay_de']['warnings'], $channels['ebay_fr']['warnings'])))];
     }
 
+    public function resolvedPaymentPolicyId(array $settings): ?string { return $this->policyId($settings, 'payment'); }
+    public function resolvedReturnPolicyId(array $settings): ?string { return $this->policyId($settings, 'return'); }
     private function policyId(array $settings, string $type): ?string { foreach (["{$type}_policy_id", "default_{$type}_policy_id", "ebay_{$type}_policy_id"] as $key) if (filled($settings[$key] ?? null)) return (string) $settings[$key]; $policies = is_array($settings['business_policies'] ?? null) ? $settings['business_policies'] : []; return filled($policies[$type] ?? null) ? (string) $policies[$type] : null; }
     private function money(mixed $value): ?float { return is_numeric($value) ? round((float) $value, 2) : null; }
     private function translation(string $channel, array $preview): array { $required = $channel === 'ebay_fr'; $readiness = $required ? $this->translateService->readiness(false) : ['ok' => true]; return ['required' => $required, 'available' => (bool) ($readiness['ok'] ?? false), 'translation_needed_fields' => $preview['translation_needed_fields'] ?? []]; }
