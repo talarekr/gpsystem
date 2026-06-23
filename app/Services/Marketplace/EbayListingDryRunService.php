@@ -85,6 +85,9 @@ class EbayListingDryRunService
         $translation = $this->translation($channel, $preview);
         if ($translation['required'] && ! $translation['available']) $blockers[] = 'Google Translate is required for FR preview but is not available.';
 
+        $aspectDiagnostics = $this->aspectsWithDiagnostics($part);
+        $warnings = array_merge($warnings, $aspectDiagnostics['warnings']);
+
         $existing = $this->existingListing($part, $channel);
         if ($existing['exists'] && in_array(strtolower((string) $existing['status']), ['active', 'published', 'live'], true)) $warnings[] = 'Existing active local marketplace listing found; do not create a duplicate.';
 
@@ -101,6 +104,9 @@ class EbayListingDryRunService
             'template' => ['ok' => (bool) ($template['ok'] ?? false), 'html_length' => $template['html_length'] ?? 0, 'missing_assets' => $template['missing_assets'] ?? [], 'warnings' => $template['warnings'] ?? []],
             'images' => ['count' => $part?->images->count() ?? 0, 'public_urls_sample' => $imageUrls->take(5)->all(), 'missing_public_images_count' => max(0, ($part?->images->count() ?? 0) - $imageUrls->count())],
             'translation' => $translation,
+            'translated_specification_values' => $preview['translated_specification_values'] ?? [],
+            'untranslated_technical_values' => $preview['untranslated_technical_values'] ?? [],
+            'aspects_source' => $aspectDiagnostics['aspects_source'],
             'existing_listing' => $existing,
             'compatibility' => ['status' => $this->compatibilityStatus($part)],
             'blockers' => array_values(array_unique($blockers)),
@@ -120,6 +126,8 @@ class EbayListingDryRunService
         $short = (string) ($preview['short_inventory_description'] ?? Str::limit(strip_tags((string) ($part?->description ?? '')), 400, ''));
         $html = (string) ($preview['listing_description_html'] ?? '');
         $priceEur = $ready['price']['estimated_price_eur'] ?? null;
+        $aspectDiagnostics = $this->aspectsWithDiagnostics($part);
+        $warnings = array_values(array_unique(array_merge($ready['warnings'] ?? [], $aspectDiagnostics['warnings'])));
 
         return [
             'ok' => true,
@@ -133,11 +141,14 @@ class EbayListingDryRunService
                 'offer_create_or_update' => ['would_send' => false, 'method' => 'POST/PATCH', 'path' => '/sell/inventory/v1/offer', 'dry_run_only' => true],
                 'offer_publish' => ['would_send' => false, 'method' => 'POST', 'path' => '/sell/inventory/v1/offer/{offerId}/publish', 'dry_run_only' => true, 'publishable_payload_ready' => $publishable],
             ],
-            'inventory_item_payload' => $publishable ? ['sku' => $sku, 'product' => ['title' => $title, 'description' => $short, 'imageUrls' => $imageUrls, 'aspects' => $this->aspects($part)], 'condition' => 'USED_EXCELLENT', 'availability' => ['shipToLocationAvailability' => ['quantity' => (int) ($part?->quantity ?? 0)]]] : null,
+            'inventory_item_payload' => $publishable ? ['sku' => $sku, 'product' => ['title' => $title, 'description' => $short, 'imageUrls' => $imageUrls, 'aspects' => $aspectDiagnostics['aspects']], 'condition' => 'USED_EXCELLENT', 'availability' => ['shipToLocationAvailability' => ['quantity' => (int) ($part?->quantity ?? 0)]]] : null,
             'offer_payload' => $publishable ? ['marketplaceId' => $ready['marketplace_id'], 'format' => 'FIXED_PRICE', 'availableQuantity' => (int) ($part?->quantity ?? 0), 'categoryId' => $ready['category']['external_category_id'], 'listingDescription' => $html, 'pricingSummary' => ['price' => ['value' => $priceEur, 'currency' => 'EUR']], 'listingPolicies' => ['fulfillmentPolicyId' => $ready['business_policies']['fulfillment_policy_id'], 'paymentPolicyId' => $ready['business_policies']['payment_policy_id'], 'returnPolicyId' => $ready['business_policies']['return_policy_id']]] : null,
             'listing_description_html_length' => Str::length($html),
+            'translated_specification_values' => $preview['translated_specification_values'] ?? [],
+            'untranslated_technical_values' => $preview['untranslated_technical_values'] ?? [],
+            'aspects_source' => $aspectDiagnostics['aspects_source'],
             'blockers' => $ready['blockers'] ?? [],
-            'warnings' => $ready['warnings'] ?? [],
+            'warnings' => $warnings,
         ];
     }
 
@@ -154,5 +165,54 @@ class EbayListingDryRunService
     private function translation(string $channel, array $preview): array { $required = $channel === 'ebay_fr'; $readiness = $required ? $this->translateService->readiness(false) : ['ok' => true]; return ['required' => $required, 'available' => (bool) ($readiness['ok'] ?? false), 'translation_needed_fields' => $preview['translation_needed_fields'] ?? []]; }
     private function existingListing(?Part $part, string $channel): array { $listing = $part ? MarketplaceListing::query()->where('part_id', $part->id)->where('marketplace', $channel)->whereIn('status', ['active', 'published', 'live'])->first() : null; return ['exists' => $listing !== null, 'status' => $listing?->status, 'external_offer_id' => $listing?->external_offer_id]; }
     private function compatibilityStatus(?Part $part): string { if (! $part) return 'missing'; return ($part->car_id || filled($part->vehicle_snapshot)) ? 'available' : 'not_required_yet'; }
-    private function aspects(?Part $part): array { return array_filter(['Brand' => $part?->manufacturer_code, 'Manufacturer Part Number' => $part?->part_number, 'Reference OE/OEM Number' => $part?->oem_number]); }
+
+    private function aspectsWithDiagnostics(?Part $part): array
+    {
+        $brand = $part ? $this->cleanAspectValue($part->storefrontDetailValue('make')) : null;
+        $source = $brand ? 'vehicle_make' : null;
+        $fallbackUsed = false;
+
+        if (! $brand) {
+            $brand = $this->cleanAspectValue(data_get($part?->legacy_payload, 'brand') ?? data_get($part?->legacy_payload, 'manufacturer'));
+            $source = $brand ? 'legacy_payload_brand_or_manufacturer' : null;
+        }
+
+        if (! $brand || $this->looksLikePartCode($brand, $part)) {
+            $brand = 'GPSwiss';
+            $source = 'fallback_gpswiss';
+            $fallbackUsed = true;
+        }
+
+        $aspects = array_filter([
+            'Brand' => $brand,
+            'Manufacturer Part Number' => $part?->part_number,
+            'Reference OE/OEM Number' => $part?->oem_number,
+        ]);
+
+        return [
+            'aspects' => $aspects,
+            'aspects_source' => [
+                'Brand' => $source,
+                'Manufacturer Part Number' => filled($part?->part_number) ? 'parts.part_number' : null,
+                'Reference OE/OEM Number' => filled($part?->oem_number) ? 'parts.oem_number' : null,
+            ],
+            'warnings' => $fallbackUsed ? ['Brand aspect uses fallback GPSwiss because no vehicle/manufacturer brand was available; part number was not used as Brand.'] : [],
+        ];
+    }
+
+    private function cleanAspectValue(mixed $value): ?string
+    {
+        $value = trim(preg_replace('/\s+/u', ' ', strip_tags((string) $value)) ?: '');
+        return $value === '' ? null : $value;
+    }
+
+    private function looksLikePartCode(string $value, ?Part $part): bool
+    {
+        $normalized = mb_strtolower($value);
+        foreach ([$part?->part_number, $part?->oem_number, $part?->sku, $part?->manufacturer_code] as $code) {
+            if (filled($code) && $normalized === mb_strtolower((string) $code)) return true;
+        }
+
+        return preg_match('/\d/u', $value) === 1 && preg_match('/^[A-Z0-9 .\/-]{5,}$/u', $value) === 1;
+    }
 }
