@@ -29,6 +29,20 @@ class EbayListingDryRunController extends Controller
         return response()->json($payload, ($payload['blockers'] ?? []) === [] ? 200 : 422);
     }
 
+    public function compatibility(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidToken();
+        $payload = $this->service->compatibilityDiagnostics((int) $request->integer('part_id'), (string) $request->query('channel', 'ebay_de'));
+        return response()->json($payload, ($payload['blockers'] ?? []) === [] ? 200 : 422);
+    }
+
+    public function dryRunCompatibilityPayload(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidToken();
+        $payload = $this->service->dryRunCompatibilityPayload((int) $request->integer('part_id'), (string) $request->query('channel', 'ebay_de'));
+        return response()->json($payload, ($payload['blockers'] ?? []) === [] ? 200 : 422);
+    }
+
     public function readinessAll(Request $request): JsonResponse
     {
         if (! $this->validToken($request)) return $this->invalidToken();

@@ -203,6 +203,8 @@ Route::get('/tools/check-ebay-account-policy-settings', [EbayListingDryRunContro
 Route::get('/tools/set-ebay-account-policy-settings', [EbayListingDryRunController::class, 'setAccountPolicySettings'])->name('tools.set-ebay-account-policy-settings');
 Route::get('/tools/check-ebay-listing-readiness', [EbayListingDryRunController::class, 'readiness'])->name('tools.check-ebay-listing-readiness');
 Route::get('/tools/dry-run-ebay-listing-payload', [EbayListingDryRunController::class, 'dryRunPayload'])->name('tools.dry-run-ebay-listing-payload');
+Route::get('/tools/check-ebay-part-compatibility', [EbayListingDryRunController::class, 'compatibility'])->name('tools.check-ebay-part-compatibility');
+Route::get('/tools/dry-run-ebay-part-compatibility-payload', [EbayListingDryRunController::class, 'dryRunCompatibilityPayload'])->name('tools.dry-run-ebay-part-compatibility-payload');
 Route::get('/tools/check-ebay-listing-readiness-all', [EbayListingDryRunController::class, 'readinessAll'])->name('tools.check-ebay-listing-readiness-all');
 Route::get('/tools/check-ebay-template-assets', [EbayDescriptionTemplateController::class, 'checkAssets'])->name('tools.check-ebay-template-assets');
 Route::get('/tools/sync-ebay-template-assets-dry-run', [EbayDescriptionTemplateController::class, 'syncAssetsDryRun'])->name('tools.sync-ebay-template-assets-dry-run');
