@@ -26,6 +26,11 @@ class OvokoStockReconciliationController extends Controller
         return response()->json($this->reconcile($request, false));
     }
 
+    public function dryRunAll(Request $request): JsonResponse
+    {
+        return response()->json($this->reconcileAll($request));
+    }
+
     public function run(Request $request): JsonResponse
     {
         if (! $request->boolean('confirm', false)) {
@@ -158,6 +163,116 @@ class OvokoStockReconciliationController extends Controller
         ];
     }
 
+
+    private function reconcileAll(Request $request): array
+    {
+        if (! $this->validToken($request)) return ['ok' => false, 'dry_run' => true, 'local_update_only' => false, 'blockers' => ['invalid_token'], 'warnings' => []];
+
+        $sampleLimit = max(1, min(200, (int) $request->query('sample_limit', 50)));
+        $localLimit = max(1, min(1000, (int) $request->query('local_limit', 100)));
+        $maxLocalPages = max(1, min(10000, (int) $request->query('max_local_pages', 500)));
+        $warnings = ['read_only_dry_run_all_no_local_or_marketplace_writes'];
+        $blockers = [];
+
+        $ovokoRequest = $request->duplicate($request->query(), null);
+        $ovokoRequest->query->set('fetch_all_ovoko', $request->query('fetch_all_ovoko', '1'));
+        $ovokoRequest->query->set('ovoko_limit', $request->query('ovoko_limit', 100));
+        $ovokoRequest->query->set('ovoko_page', 1);
+        $ovokoRequest->query->set('ovoko_max_pages', $request->query('max_ovoko_pages', $request->query('ovoko_max_pages', 200)));
+        $ovoko = $this->fetchOvokoActiveIds($ovokoRequest, []);
+
+        if (! ($ovoko['ok'] ?? false)) $blockers[] = $ovoko['error'] ?? 'ovoko_api_failed';
+        if (! ($ovoko['last_page_reached'] ?? false)) $blockers[] = 'ovoko_active_list_incomplete_cannot_mark_missing';
+        if (($ovoko['selected_id_field'] ?? null) === null || ($ovoko['mapping_confident'] ?? false) === false) $blockers[] = 'ovoko_id_mapping_not_confident';
+
+        $activeIds = $ovoko['active_ids'] ?? [];
+        $activeIdSet = array_flip(array_map('strval', $activeIds));
+        $localPagesFetched = 0;
+        $localLastPageReached = false;
+        $localHasMore = false;
+        $localCandidateCount = 0;
+        $matched = [];
+        $missing = [];
+        $conflicts = [];
+        $alreadyNeedsReview = 0;
+
+        for ($page = 1; $page <= $maxLocalPages; $page++) {
+            $batch = $this->candidateQueryForPage($request, $page, $localLimit)->get();
+            $count = $batch->count();
+            if ($count === 0) {
+                $localLastPageReached = true;
+                $localHasMore = false;
+                break;
+            }
+
+            $localPagesFetched++;
+            $localCandidateCount += $count;
+            foreach ($batch as $part) {
+                $listing = $this->ovokoListing($part);
+                $ids = $this->listingIds($listing);
+                if ((bool) $part->needs_review) $alreadyNeedsReview++;
+                if ($ids === []) {
+                    $conflicts[] = $this->partSample($part) + ['conflict' => 'missing_local_ovoko_external_id'];
+                    continue;
+                }
+                if (array_intersect_key(array_flip($ids), $activeIdSet) !== []) {
+                    $matched[] = $this->partSample($part);
+                } else {
+                    $missing[] = $this->partSample($part) + ['checked_ovoko_ids' => $ids];
+                }
+            }
+
+            if ($count < $localLimit) {
+                $localLastPageReached = true;
+                $localHasMore = false;
+                break;
+            }
+
+            if ($page === $maxLocalPages) {
+                $localHasMore = true;
+                $blockers[] = 'local_candidate_scan_incomplete';
+            }
+        }
+
+        if ($localCandidateCount > 0 && count($activeIds) > 0 && count($matched) === 0) {
+            $blockers[] = 'zero_matches_between_local_and_ovoko_check_id_mapping_before_confirm';
+        }
+        $blockers = array_values(array_unique($blockers));
+        $localComplete = $localLastPageReached && ! $localHasMore;
+        $completeForFinalMissing = $localComplete && (bool) ($ovoko['last_page_reached'] ?? false);
+
+        return [
+            'ok' => $blockers === [],
+            'dry_run' => true,
+            'local_update_only' => false,
+            'ovoko_api_total_count' => $ovoko['total_count'] ?? null,
+            'ovoko_pages_fetched' => $ovoko['pages_fetched'] ?? 0,
+            'ovoko_limit_per_page' => $ovoko['limit_per_page'] ?? null,
+            'ovoko_last_page_reached' => $ovoko['last_page_reached'] ?? false,
+            'ovoko_has_more' => $ovoko['has_more'] ?? null,
+            'ovoko_max_pages' => $ovoko['max_pages'] ?? null,
+            'ovoko_active_ids_count' => count($activeIds),
+            'ovoko_selected_id_field' => $ovoko['selected_id_field'] ?? null,
+            'ovoko_detected_id_fields' => $ovoko['detected_id_fields'] ?? [],
+            'local_pages_fetched' => $localPagesFetched,
+            'local_limit_per_page' => $localLimit,
+            'local_last_page_reached' => $localLastPageReached,
+            'local_has_more' => $localHasMore,
+            'local_candidate_parts_count' => $localCandidateCount,
+            'matched_active_ovoko_count' => count($matched),
+            'partial_missing_in_scanned_local_count' => $completeForFinalMissing ? null : count($missing),
+            'missing_in_ovoko_active_count' => $completeForFinalMissing ? count($missing) : null,
+            'would_mark_needs_review_count' => ($completeForFinalMissing && $blockers === []) ? count(array_filter($missing, fn ($row) => ! ($row['needs_review'] ?? false))) : null,
+            'already_needs_review_count' => $alreadyNeedsReview,
+            'conflict_count' => count($conflicts),
+            'sample_would_mark_needs_review' => array_slice($missing, 0, $sampleLimit),
+            'sample_matched' => array_slice($matched, 0, $sampleLimit),
+            'sample_conflicts' => array_slice($conflicts, 0, $sampleLimit),
+            'blockers' => $blockers,
+            'warnings' => $warnings,
+        ];
+    }
+
     private function fetchOvokoActiveIds(Request $request, array $localCheckedIds): array
     {
         $account = Schema::hasTable('marketplace_accounts') ? MarketplaceAccount::query()->where('code', 'ovoko_main')->first() : null;
@@ -231,11 +346,16 @@ class OvokoStockReconciliationController extends Controller
 
     private function candidateQuery(Request $request): Builder
     {
+        return $this->candidateQueryForPage($request, max(1, (int) $request->query('page', 1)), max(1, min(1000, (int) $request->query('limit', 100))));
+    }
+
+    private function candidateQueryForPage(Request $request, int $page, int $limit): Builder
+    {
         $query = Part::query()->with(['marketplaceListings'])->where('quantity', '>', 0)->where(fn (Builder $q) => $q->whereNull('status')->orWhereNotIn('status', ['sold', 'archived']));
         if (! $request->boolean('include_needs_listing', false)) $query->where(fn (Builder $q) => $q->where('needs_listing', false)->orWhereNull('needs_listing'));
         if (! $request->boolean('include_archived', false)) $query->where(fn (Builder $q) => $q->whereNull('status')->orWhere('status', '!=', 'archived'));
         if ($request->boolean('only_with_ovoko_mapping', true)) $query->whereHas('marketplaceListings', fn (Builder $q) => $q->where('marketplace', 'ovoko'));
-        return $query->orderBy('id')->forPage(max(1, (int) $request->query('page', 1)), max(1, min(1000, (int) $request->query('limit', 100))));
+        return $query->orderBy('id')->forPage($page, $limit);
     }
 
     private function ovokoListing(Part $part): ?MarketplaceListing { return $part->marketplaceListings->firstWhere('marketplace', 'ovoko'); }
