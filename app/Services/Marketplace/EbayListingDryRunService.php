@@ -244,8 +244,11 @@ class EbayListingDryRunService
         $categoryId = $part ? $this->mappedCategoryId($part, $channel) : null;
         $props = $categoryId ? $this->compatibilityProperties($channel, $categoryId) : ['properties' => [], 'blockers' => ['External eBay category ID missing.']];
         $vehicle = $this->compatibilityVehicles($part)[0] ?? [];
-        $map = ['Make' => 'make', 'Model' => 'model', 'Year' => 'production_year', 'Engine' => 'engine_code', 'Fuel Type' => 'fuel_type', 'Body Type' => 'body_type', 'Transmission' => 'gearbox_type'];
-        $mapped = []; $unmapped = []; $candidate = []; $normalization = []; $blockers = $props['blockers'] ?? [];
+        $map = ['Make' => 'make', 'Model' => 'model', 'Year' => 'production_year', 'Engine' => 'engine_capacity_cm3', 'Fuel Type' => 'fuel_type', 'Body Type' => 'body_type', 'Transmission' => 'gearbox_type'];
+        $matched = []; $mapped = []; $unmapped = []; $ambiguous = []; $candidate = []; $normalization = []; $blockers = $props['blockers'] ?? [];
+        $confirmedValues = [];
+        $propertyNames = array_map(fn ($p) => (string) ($p['name'] ?? ''), $props['properties'] ?? []);
+
         foreach (($props['properties'] ?? []) as $prop) {
             $name = (string) ($prop['name'] ?? '');
             $local = $map[$name] ?? null;
@@ -255,25 +258,68 @@ class EbayListingDryRunService
                 $value = 'VW';
             }
             if (! $local) { $unmapped[] = ['property' => $name, 'required' => (bool) ($prop['required'] ?? false), 'reason' => 'no_local_dictionary_mapping']; if (($prop['required'] ?? false)) $blockers[] = 'No local dictionary mapping for required fitment property: '.$name; continue; }
-            if (! filled($value)) { if (($prop['required'] ?? false)) { $unmapped[] = ['property' => $name, 'required' => true, 'reason' => 'missing_local_value']; $blockers[] = 'Missing required fitment property: '.$name; } continue; }
+            if (! filled($value)) { if (($prop['required'] ?? false) || in_array($name, ['Make', 'Model', 'Year'], true)) { $unmapped[] = ['property' => $name, 'required' => (bool) ($prop['required'] ?? false), 'reason' => 'missing_local_value']; $blockers[] = 'Missing required fitment property: '.$name; } continue; }
+
+            if ($name === 'Engine') {
+                $engine = $this->matchEngineFitmentValue($channel, (string) $categoryId, $vehicle, $confirmedValues);
+                if (($engine['status'] ?? null) === 'matched_ebay_allowed_value') {
+                    $value = $engine['value'];
+                    $matched[] = ['property' => $name, 'local_field' => $local, 'value' => $value, 'status' => 'matched_ebay_allowed_value'];
+                    $candidate[] = ['name' => $name, 'value' => $value];
+                } elseif (($engine['status'] ?? null) === 'ambiguous') {
+                    $ambiguous[] = $engine;
+                    $blockers[] = 'Engine is ambiguous: multiple eBay Engine values match '.preg_replace('/\D+/', '', (string) $value).' ccm and local engine power is missing.';
+                    $mapped[] = ['property' => $name, 'local_field' => $local, 'value' => $value, 'status' => 'ambiguous'];
+                } else {
+                    $unmapped[] = ['property' => $name, 'required' => (bool) ($prop['required'] ?? false), 'reason' => $engine['reason'] ?? 'engine_not_confirmed', 'local_value' => $value];
+                    if (($prop['required'] ?? false)) $blockers[] = 'Required fitment property value is not confirmed by eBay values: '.$name;
+                }
+                continue;
+            }
+
+            $filters = [];
+            if ($name === 'Model' && filled($confirmedValues['Make'] ?? null)) $filters['filter_make'] = $confirmedValues['Make'];
+            if ($name === 'Year') { if (filled($confirmedValues['Make'] ?? null)) $filters['filter_make'] = $confirmedValues['Make']; if (filled($confirmedValues['Model'] ?? null)) $filters['filter_model'] = $confirmedValues['Model']; }
             $status = 'local_value_found_not_value_confirmed';
             $confirmed = false;
             if ($categoryId && ($prop['allowed_values_available'] ?? true)) {
-                $values = $this->compatibilityPropertyValues($channel, $categoryId, $name);
-                $sample = array_map(fn ($v) => is_array($v) ? (string) ($v['value'] ?? $v['localizedValue'] ?? '') : (string) $v, $values['values_sample'] ?? []);
-                $confirmed = in_array((string) $value, $sample, true);
+                $values = $this->compatibilityPropertyValues($channel, $categoryId, $name, $filters, (string) $value, 50, true);
+                $labels = $this->fitmentValueLabels($values);
+                $confirmed = in_array((string) $value, $labels, true);
                 $status = $confirmed ? 'matched_ebay_allowed_value' : 'requires_normalization_or_dependent_value_lookup';
-                if (! $confirmed && ($prop['required'] ?? false)) $blockers[] = 'Required fitment property value is not confirmed by eBay values: '.$name;
+                if (! $confirmed && (($prop['required'] ?? false) || in_array($name, ['Make', 'Model', 'Year'], true))) $blockers[] = 'Required fitment property value is not confirmed by eBay values: '.$name;
             }
-            $mapped[] = ['property' => $name, 'local_field' => $local, 'value' => $value, 'status' => $status];
-            if ($confirmed || ! ($prop['allowed_values_available'] ?? true)) $candidate[] = ['name' => $name, 'value' => $value];
+            $row = ['property' => $name, 'local_field' => $local, 'value' => $value, 'status' => $status];
+            if ($confirmed || ! ($prop['allowed_values_available'] ?? true)) { $matched[] = $row; $confirmedValues[$name] = (string) $value; $candidate[] = ['name' => $name, 'value' => $value]; } else { $mapped[] = $row; }
         }
         if (($props['properties_count'] ?? 0) === 0) $blockers[] = 'No eBay compatibility properties available for category; cannot build official payload.';
-        $requiredNames = array_map(fn ($p) => (string) ($p['name'] ?? ''), array_values(array_filter($props['properties'] ?? [], fn ($p) => (bool)($p['required'] ?? false))));
-        $candidateNames = array_map(fn ($p) => (string) $p['name'], $candidate);
-        foreach (array_diff($requiredNames, $candidateNames) as $missingRequiredCandidate) $blockers[] = 'Required fitment property is not confirmed for publishable candidate: '.$missingRequiredCandidate;
-        $can = $blockers === [] && $candidate !== [];
-        return ['ok' => true, 'part_id' => $partId, 'channel' => $channel, 'marketplace_id' => $this->marketplaceId($channel), 'category_id' => $categoryId, 'source_vehicle' => $vehicle, 'ebay_required_properties' => array_values(array_filter($props['properties'] ?? [], fn ($p) => (bool)($p['required'] ?? false))), 'mapped_properties' => $mapped, 'unmapped_properties' => $unmapped, 'normalization_used' => $normalization, 'candidate_compatibility_payload' => $can ? ['compatibleProducts' => [['productFamilyProperties' => $candidate]]] : null, 'can_build_ebay_fitment_payload' => $can, 'would_send' => false, 'blockers' => array_values(array_unique($blockers)), 'warnings' => ['Dry-run only: no eBay write API calls or local product/listing mutations. Values are not guessed; candidate payload is only returned when required values are confirmed.']];
+        foreach (['Make', 'Model', 'Year'] as $core) if (in_array($core, $propertyNames, true) && ! in_array($core, array_column($candidate, 'name'), true)) $blockers[] = 'Core fitment property is not confirmed for publishable candidate: '.$core;
+        $can = $blockers === [] && $candidate !== [] && count(array_intersect(['Make', 'Model', 'Year'], array_column($candidate, 'name'))) === 3;
+        $partialPayload = $candidate !== [] ? ['payload_status' => $can ? 'publishable' : 'partial_payload', 'compatibleProducts' => [['productFamilyProperties' => $candidate]]] : null;
+        return ['ok' => true, 'part_id' => $partId, 'channel' => $channel, 'marketplace_id' => $this->marketplaceId($channel), 'category_id' => $categoryId, 'source_vehicle' => $vehicle, 'ebay_required_properties' => array_values(array_filter($props['properties'] ?? [], fn ($p) => (bool)($p['required'] ?? false))), 'matched_properties' => $matched, 'mapped_properties' => array_merge($matched, $mapped), 'unmapped_properties' => $unmapped, 'ambiguous_properties' => $ambiguous, 'normalization_used' => $normalization, 'partial_candidate_compatibility_payload' => $partialPayload, 'candidate_compatibility_payload' => $can ? $partialPayload : null, 'can_build_ebay_fitment_payload' => $can, 'fitment_payload_ready_reason' => $can ? 'All core and required/confirmed compatibility properties are matched.' : 'Official eBay Product Compatibility payload is not ready; see blockers and ambiguous_properties.', 'would_send' => false, 'blockers' => array_values(array_unique($blockers)), 'warnings' => ['Dry-run only: no eBay write API calls, no inventory/offer/publish calls, no product mutation, and no marketplace listing mutation. Compatibility may be used in listing description, but partial payload is not official eBay Product Compatibility.']];
+    }
+
+    private function matchEngineFitmentValue(string $channel, string $categoryId, array $vehicle, array $confirmedValues): array
+    {
+        $capacity = $vehicle['engine_capacity_cm3'] ?? null;
+        if (! filled($capacity)) return ['status' => 'missing', 'reason' => 'missing_engine_capacity_cm3'];
+        $filters = [];
+        if (filled($confirmedValues['Make'] ?? null)) $filters['filter_make'] = $confirmedValues['Make'];
+        if (filled($confirmedValues['Model'] ?? null)) $filters['filter_model'] = $confirmedValues['Model'];
+        if (filled($confirmedValues['Year'] ?? null)) $filters['filter_year'] = $confirmedValues['Year'];
+        $needle = preg_replace('/\D+/', '', (string) $capacity).' ccm';
+        $values = $this->compatibilityPropertyValues($channel, $categoryId, 'Engine', $filters, $needle, 100, true);
+        $matches = array_values(array_filter($this->fitmentValueLabels($values), fn ($label) => str_contains(strtolower($label), strtolower($needle))));
+        $power = $vehicle['engine_power_kw'] ?? null;
+        if (count($matches) > 1 && ! filled($power)) return ['property' => 'Engine', 'status' => 'ambiguous', 'local_engine_capacity_cm3' => $capacity, 'local_engine_code' => $vehicle['engine_code'] ?? null, 'local_engine_power_kw' => null, 'matched_ebay_values' => array_slice($matches, 0, 20), 'reason' => 'multiple_ebay_engine_values_match_capacity_without_local_power'];
+        if (count($matches) === 1) return ['property' => 'Engine', 'status' => 'matched_ebay_allowed_value', 'value' => $matches[0]];
+        return ['status' => 'not_matched', 'reason' => 'no_unambiguous_ebay_engine_value'];
+    }
+
+    private function fitmentValueLabels(array $values): array
+    {
+        $sample = ($values['matched_values'] ?? []) ?: ($values['values_sample'] ?? []);
+        return array_values(array_filter(array_map(fn ($v) => is_array($v) ? (string) ($v['value'] ?? $v['localizedValue'] ?? '') : (string) $v, $sample), fn ($v) => $v !== ''));
     }
 
     public function dryRunFitmentCoverage(string $channel, int $limit): array
@@ -364,7 +410,7 @@ class EbayListingDryRunService
     {
         if (! $part) return [];
         $vehicle = [];
-        foreach (['make', 'model', 'model_variant', 'production_year', 'production_period', 'engine_capacity_cm3', 'engine_code', 'fuel_type', 'gearbox_type', 'body_type', 'steering_side'] as $key) {
+        foreach (['make', 'model', 'model_variant', 'production_year', 'production_period', 'engine_capacity_cm3', 'engine_power_kw', 'engine_code', 'fuel_type', 'gearbox_type', 'body_type', 'steering_side'] as $key) {
             $vehicle[$key] = $this->cleanAspectValue($part->storefrontDetailValue($key));
         }
         $vehicle = array_filter($vehicle, fn ($value) => filled($value));
