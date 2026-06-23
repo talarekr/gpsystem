@@ -163,8 +163,8 @@
         small: {
             label: 'Mała etykieta',
             tip: 'Mała etykieta: podejdź bliżej i dotknij ekranu, aby ustawić ostrość.',
-            frameHeightPx: 60,
-            frameWidthRatio: 0.92,
+            frameHeightPx: 42,
+            frameWidthRatio: 0.86,
             upscale: 4,
             focusDelayMs: 1000,
             frameDelaysMs: [800, 1200, 1600],
@@ -175,8 +175,8 @@
         large: {
             label: 'Duża etykieta',
             tip: 'Duża etykieta: odsuń telefon tak, aby w ramce był tylko jeden wiersz kodu.',
-            frameHeightPx: 42,
-            frameWidthRatio: 0.86,
+            frameHeightPx: 60,
+            frameWidthRatio: 0.94,
             upscale: 2,
             focusDelayMs: 500,
             frameDelaysMs: [500, 900],
