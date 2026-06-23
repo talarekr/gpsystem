@@ -21,10 +21,12 @@ class WorkshopQuickPartController extends Controller
             abort(403);
         }
 
-        return view('tools.workshop-quick-part-create', [
-            'token' => $request->query('token'),
-            'part' => $request->session()->pull('workshop_quick_part_created'),
-        ]);
+        return $this->renderForm($request);
+    }
+
+    public function createAuthenticated(Request $request): View
+    {
+        return $this->renderForm($request);
     }
 
     public function store(Request $request, PartImageUploadService $partImageUploadService): RedirectResponse
@@ -33,6 +35,23 @@ class WorkshopQuickPartController extends Controller
             abort(403);
         }
 
+        return $this->storePart($request, $partImageUploadService, 'tools.workshop.quick-part-create', [
+            'token' => $request->query('token'),
+        ]);
+    }
+
+    public function storeAuthenticated(Request $request, PartImageUploadService $partImageUploadService): RedirectResponse
+    {
+        return $this->storePart($request, $partImageUploadService, 'workshop.quick-part-create');
+    }
+
+    private function storePart(
+        Request $request,
+        PartImageUploadService $partImageUploadService,
+        string $redirectRoute,
+        array $redirectParameters = []
+    ): RedirectResponse
+    {
         $validated = $request->validate([
             'photos' => ['required', 'array', 'min:1'],
             'photos.*' => ['required', 'image', 'max:12288'],
@@ -76,12 +95,28 @@ class WorkshopQuickPartController extends Controller
         });
 
         return redirect()
-            ->route('tools.workshop.quick-part-create', ['token' => $request->query('token')])
+            ->route($redirectRoute, $redirectParameters)
             ->with('workshop_quick_part_created', [
                 'id' => $part->id,
                 'part_number' => $part->part_number,
                 'admin_url' => url('/admin/parts/'.$part->id.'/edit'),
             ]);
+    }
+
+    private function renderForm(Request $request): View
+    {
+        $isAuthenticatedWorkshopRoute = $request->routeIs('workshop.quick-part-create');
+
+        return view('tools.workshop-quick-part-create', [
+            'token' => $request->query('token'),
+            'part' => $request->session()->pull('workshop_quick_part_created'),
+            'formAction' => $isAuthenticatedWorkshopRoute
+                ? route('workshop.quick-part-create.store')
+                : route('tools.workshop.quick-part-create.store', ['token' => $request->query('token')]),
+            'createAnotherUrl' => $isAuthenticatedWorkshopRoute
+                ? route('workshop.quick-part-create')
+                : url('/tools/workshop/quick-part-create?token='.$request->query('token')),
+        ]);
     }
 
     private function hasValidToken(Request $request): bool

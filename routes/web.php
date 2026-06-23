@@ -142,6 +142,9 @@ Route::get('/produkt/{slug}', [PartController::class, 'show'])->name('storefront
 Route::get('/kategoria-produktu/{path}', [CategoryController::class, 'show'])->where('path', '.*')->name('storefront.category');
 
 Route::middleware([Authenticate::class])->group(function (): void {
+    Route::get('/warsztat', [WorkshopQuickPartController::class, 'createAuthenticated'])->name('workshop.quick-part-create');
+    Route::post('/warsztat', [WorkshopQuickPartController::class, 'storeAuthenticated'])->name('workshop.quick-part-create.store');
+
     Route::get('/admin/allegro/oauth/redirect', [AllegroOAuthController::class, 'redirect'])->name('admin.allegro.oauth.redirect');
     Route::get('/admin/allegro/oauth/callback', [AllegroOAuthController::class, 'callback'])->name('admin.allegro.oauth.callback');
     Route::get('/admin/ebay/oauth/redirect', [EbayOAuthController::class, 'redirect'])->name('admin.ebay.oauth.redirect');
