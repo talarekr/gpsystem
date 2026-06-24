@@ -22,6 +22,27 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
         return ['http_status' => $response->status(), 'json' => is_array($json) ? $json : [], 'api_ok' => $apiOk, 'error' => $json['msg'] ?? $json['message'] ?? null];
     }
 
+    public function fetchCategories(): array
+    {
+        $endpoint = rtrim((string) $this->account?->api_base_url, '/').'/get/categories';
+        $response = Http::asForm()->acceptJson()->timeout(30)->post($endpoint, $this->authFields());
+        $json = $response->json();
+        $payload = is_array($json) ? $json : [];
+        $statusCode = $payload['status_code'] ?? null;
+        $apiOk = $response->successful() && ($statusCode === 'R200' || $statusCode === 200);
+        $rows = $payload['list'] ?? $payload['data'] ?? $payload['categories'] ?? [];
+
+        return [
+            'http_status' => $response->status(),
+            'api_status_code' => $statusCode,
+            'api_ok' => $apiOk,
+            'endpoint_used' => $endpoint,
+            'categories' => is_array($rows) ? array_values(array_filter($rows, 'is_array')) : [],
+            'error' => $payload['msg'] ?? $payload['message'] ?? null,
+            'response_top_level_keys' => array_values(array_slice(array_keys($payload), 0, 30)),
+        ];
+    }
+
     public function fetchPartsPage(int $page, int $limit): array
     {
         $page = max(1, $page);
@@ -121,9 +142,9 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
             'quantity' => $row['quantity'] ?? $row['stock'] ?? $row['qty'] ?? null,
             'status' => $row['status'] ?? null,
             'url' => $row['url'] ?? null,
-            'ovoko_category_id' => $row['category_id'] ?? $row['categoryId'] ?? $category['id'] ?? $category['category_id'] ?? $category['categoryId'] ?? null,
-            'ovoko_category_name' => $row['category_name'] ?? $row['categoryName'] ?? $category['name'] ?? $category['category_name'] ?? null,
-            'ovoko_category_path' => $row['category_path'] ?? $row['categoryPath'] ?? $category['path'] ?? $category['category_path'] ?? null,
+            'ovoko_category_id' => $row['category_id'] ?? $row['categoryId'] ?? $row['part_category_id'] ?? $category['id'] ?? $category['category_id'] ?? $category['categoryId'] ?? null,
+            'ovoko_category_name' => $row['category_name'] ?? $row['categoryName'] ?? $category['name'] ?? $category['category_name'] ?? $category['pl'] ?? $category['en'] ?? null,
+            'ovoko_category_path' => $row['category_title_path'] ?? $row['category_path'] ?? $row['categoryPath'] ?? $category['path'] ?? $category['category_path'] ?? $category['category_title_path'] ?? null,
             'raw_category_fields' => $this->rawCategoryFields($row),
         ];
         }, array_filter($rows, 'is_array')));
@@ -134,8 +155,10 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
         return array_filter([
             'category_id' => $row['category_id'] ?? null,
             'categoryId' => $row['categoryId'] ?? null,
+            'part_category_id' => $row['part_category_id'] ?? null,
             'category_name' => $row['category_name'] ?? null,
             'categoryName' => $row['categoryName'] ?? null,
+            'category_title_path' => $row['category_title_path'] ?? null,
             'category_path' => $row['category_path'] ?? null,
             'categoryPath' => $row['categoryPath'] ?? null,
             'category' => $row['category'] ?? null,

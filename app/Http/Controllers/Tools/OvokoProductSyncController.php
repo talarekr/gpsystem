@@ -127,6 +127,30 @@ class OvokoProductSyncController extends Controller
     }
 
 
+    public function fetchOvokoCategoryTreePreview(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+
+        $sampleLimit = max(1, min(100, (int) $request->query('sample_limit', 20)));
+        $result = ['ok' => true, 'dry_run' => true, 'ovoko_write' => false, 'local_update' => false, 'ovoko_read_request' => true, 'endpoint' => 'https://api.rrr.lt/get/categories', 'category_count' => 0, 'level_counts' => [], 'sample_categories' => [], 'sample_level_3_categories' => [], 'id_map' => [], 'sample_full_pl_paths' => [], 'sample_errors' => [], 'warnings' => ['read_only_preview_no_ovoko_allegro_ebay_or_local_writes']];
+        $tree = $this->fetchOvokoCategoryTree($result);
+        $categories = $tree['categories'];
+        $result['category_count'] = count($categories);
+        foreach ($categories as $category) {
+            $level = (string) ($category['level'] ?? 'unknown');
+            $result['level_counts'][$level] = ($result['level_counts'][$level] ?? 0) + 1;
+            $this->pushSample($result['sample_categories'], $category, $sampleLimit);
+            if ((int) ($category['level'] ?? 0) === 3) $this->pushSample($result['sample_level_3_categories'], $category, $sampleLimit);
+            if (count($result['id_map']) < $sampleLimit) $result['id_map'][(string) $category['id']] = ['pl' => $category['pl'] ?? null, 'en' => $category['en'] ?? null, 'parent_id' => $category['parent_id'] ?? null, 'level' => $category['level'] ?? null];
+        }
+        foreach ($categories as $category) {
+            if ((int) ($category['level'] ?? 0) === 3) $this->pushSample($result['sample_full_pl_paths'], ['id' => (string) $category['id'], 'pl_path' => $this->ovokoCategoryPath($category, $tree['by_id'], 'pl')], $sampleLimit);
+        }
+        ksort($result['level_counts']);
+
+        return response()->json($result);
+    }
+
 
     public function dryRunOvokoCategoryMappingFromLinkedProducts(Request $request): JsonResponse
     {
@@ -141,6 +165,7 @@ class OvokoProductSyncController extends Controller
         $result = $this->emptyLinkedCategoryMappingResponse($page, $limit);
         $parts = $this->linkedOvokoPartsQuery($onlyMissing)->forPage($page, $limit)->get();
 
+        $categoryTree = $this->fetchOvokoCategoryTree($result);
         $ovokoPartsById = $this->fetchOvokoPartsByLinkedIds($parts, $page, $limit, $result);
         $groups = [];
 
@@ -148,9 +173,9 @@ class OvokoProductSyncController extends Controller
             $result['linked_products_checked']++;
             $listing = $this->ovokoListing($part);
             $ovokoId = $this->listingOvokoExternalId($listing);
-            if (! $part->category_id) { $result['skipped_uncategorized_count']++; continue; }
+            if (! $part->category_id || $this->isBezKategorii($part)) { $result['skipped_uncategorized_count']++; continue; }
             $ovoko = $ovokoId !== null ? ($ovokoPartsById[$ovokoId] ?? null) : null;
-            $category = $ovoko ? $this->extractOvokoCategory($ovoko) : null;
+            $category = $ovoko ? $this->extractOvokoCategory($ovoko, $categoryTree, $result) : null;
             if (! $category || blank($category['ovoko_category_id'])) {
                 $result['unmapped_or_missing_category_count']++;
                 $this->pushSample($result['sample_products_without_ovoko_category'], $this->linkedProductSample($part, $ovokoId, $category), $sampleLimit);
@@ -216,7 +241,8 @@ class OvokoProductSyncController extends Controller
             $result['linked_products_checked']++;
             $result['local_category_path'] ??= $part->category?->category_path ?? $part->category?->name;
             $ovokoId = $this->listingOvokoExternalId($this->ovokoListing($part));
-            $category = $ovokoId ? $this->extractOvokoCategory($ovokoPartsById[$ovokoId] ?? []) : null;
+            $categoryTree = $categoryTree ?? $this->fetchOvokoCategoryTree($result);
+            $category = $ovokoId ? $this->extractOvokoCategory($ovokoPartsById[$ovokoId] ?? [], $categoryTree, $result) : null;
             $this->pushSample($result['sample_products'], $this->linkedProductSample($part, $ovokoId, $category), $sampleLimit);
             if (! $category || blank($category['ovoko_category_id'])) continue;
             $key = (string) $category['ovoko_category_id'];
@@ -385,21 +411,60 @@ class OvokoProductSyncController extends Controller
         }
     }
 
-    private function extractOvokoCategory(?array $row): ?array
+    private function extractOvokoCategory(?array $row, ?array $tree = null, ?array &$result = null): ?array
     {
         if (! $row) return null;
         $raw = $row['raw_category_fields'] ?? [];
         $rawCategory = is_array($raw['category'] ?? null) ? $raw['category'] : [];
-        $id = $row['ovoko_category_id'] ?? $raw['category_id'] ?? $raw['categoryId'] ?? $rawCategory['id'] ?? $rawCategory['category_id'] ?? null;
-        $name = $row['ovoko_category_name'] ?? $raw['category_name'] ?? $raw['categoryName'] ?? $rawCategory['name'] ?? null;
-        $path = $row['ovoko_category_path'] ?? $raw['category_path'] ?? $raw['categoryPath'] ?? $rawCategory['path'] ?? $rawCategory['category_path'] ?? null;
+        $id = $row['ovoko_category_id'] ?? $raw['category_id'] ?? $raw['categoryId'] ?? $raw['part_category_id'] ?? $rawCategory['id'] ?? $rawCategory['category_id'] ?? null;
+        $name = $row['ovoko_category_name'] ?? $raw['category_name'] ?? $raw['categoryName'] ?? $rawCategory['name'] ?? $rawCategory['pl'] ?? $rawCategory['en'] ?? null;
+        $path = $row['ovoko_category_path'] ?? $raw['category_title_path'] ?? $raw['category_path'] ?? $raw['categoryPath'] ?? $rawCategory['path'] ?? $rawCategory['category_path'] ?? $rawCategory['category_title_path'] ?? null;
         if (blank($id) && blank($name) && blank($path)) return null;
-        return ['ovoko_category_id' => filled($id) ? (string) $id : null, 'ovoko_category_name' => filled($name) ? (string) $name : null, 'ovoko_category_path' => filled($path) ? (string) $path : null, 'raw_category_fields' => $raw];
+        $warning = null;
+        if (filled($id) && $tree && isset($tree['by_id'][(string) $id])) {
+            $treeCategory = $tree['by_id'][(string) $id];
+            $name = $treeCategory['pl'] ?? $name;
+            $path = $this->ovokoCategoryPath($treeCategory, $tree['by_id'], 'pl');
+            if ((int) ($treeCategory['level'] ?? 0) !== 3) $warning = 'ovoko_category_id_not_level_3';
+        } elseif (filled($id) && $tree && count($tree['by_id']) > 0) {
+            $warning = 'ovoko_category_id_missing_from_category_tree';
+            if ($result !== null) $this->pushSample($result['sample_errors'], ['type' => $warning, 'ovoko_category_id' => (string) $id], 50);
+        }
+        return ['ovoko_category_id' => filled($id) ? (string) $id : null, 'ovoko_category_name' => filled($name) ? (string) $name : null, 'ovoko_category_path' => filled($path) ? (string) $path : null, 'category_tree_warning' => $warning, 'raw_category_fields' => $raw];
+    }
+
+    private function fetchOvokoCategoryTree(array &$result): array
+    {
+        try { $api = app(MarketplaceApiManager::class)->client('ovoko')->fetchCategories(); }
+        catch (\Throwable $e) { $result['sample_errors'][] = ['type' => 'ovoko_categories_api_exception', 'message' => $e->getMessage()]; return ['categories' => [], 'by_id' => []]; }
+        if (! ($api['api_ok'] ?? false)) $result['sample_errors'][] = ['type' => 'ovoko_categories_api_status_not_ok', 'http_status' => $api['http_status'] ?? null, 'api_status_code' => $api['api_status_code'] ?? null, 'error' => $api['error'] ?? null];
+        $categories = $api['categories'] ?? [];
+        $byId = [];
+        foreach ($categories as $category) if (isset($category['id'])) $byId[(string) $category['id']] = $category;
+        return ['categories' => $categories, 'by_id' => $byId];
+    }
+
+    private function ovokoCategoryPath(array $category, array $byId, string $locale): ?string
+    {
+        $parts = []; $current = $category; $guard = 0;
+        while ($current && $guard++ < 10) {
+            array_unshift($parts, (string) ($current[$locale] ?? $current['en'] ?? $current['id'] ?? ''));
+            $parentId = $current['parent_id'] ?? null;
+            $current = filled($parentId) && isset($byId[(string) $parentId]) ? $byId[(string) $parentId] : null;
+        }
+        $parts = array_values(array_filter($parts, fn ($part) => $part !== ''));
+        return $parts === [] ? null : implode(' > ', $parts);
     }
 
     private function localCategoryGroup(Part $part): array
     {
         return ['local_category_id' => $part->category_id, 'local_category_name' => $part->category?->name, 'local_category_path' => $part->category?->category_path ?? $part->category?->name, 'observed_ovoko_categories' => [], 'sample_parts' => []];
+    }
+
+    private function isBezKategorii(Part $part): bool
+    {
+        $value = mb_strtolower(trim((string) ($part->category?->category_path ?? $part->category?->name ?? '')));
+        return $value === 'bez kategorii';
     }
 
     private function linkedProductSample(Part $part, ?string $ovokoId, ?array $category): array

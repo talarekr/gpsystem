@@ -182,6 +182,7 @@ Route::get('/tools/dry-run-ovoko-product-sync', [OvokoProductSyncController::cla
 Route::get('/tools/check-ovoko-product-sync-readiness', [OvokoProductSyncController::class, 'readiness'])->name('tools.check-ovoko-product-sync-readiness');
 Route::get('/tools/check-ovoko-category-data-sources', [OvokoProductSyncController::class, 'categoryDataSources'])->name('tools.check-ovoko-category-data-sources');
 Route::get('/tools/inspect-ovoko-category-legacy-payloads', [OvokoProductSyncController::class, 'inspectOvokoCategoryLegacyPayloads'])->name('tools.inspect-ovoko-category-legacy-payloads');
+Route::get('/tools/fetch-ovoko-category-tree-preview', [OvokoProductSyncController::class, 'fetchOvokoCategoryTreePreview'])->name('tools.fetch-ovoko-category-tree-preview');
 Route::get('/tools/dry-run-ovoko-category-mapping-from-linked-products', [OvokoProductSyncController::class, 'dryRunOvokoCategoryMappingFromLinkedProducts'])->name('tools.dry-run-ovoko-category-mapping-from-linked-products');
 Route::get('/tools/preview-ovoko-category-from-linked-products', [OvokoProductSyncController::class, 'previewOvokoCategoryFromLinkedProducts'])->name('tools.preview-ovoko-category-from-linked-products');
 Route::get('/tools/ovoko-stock-reconciliation-runner', [OvokoStockReconciliationController::class, 'runner'])->name('tools.ovoko-stock-reconciliation-runner');
