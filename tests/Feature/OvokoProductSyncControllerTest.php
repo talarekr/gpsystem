@@ -433,6 +433,28 @@ class OvokoProductSyncControllerTest extends TestCase
             ->assertJsonPath('next_url', fn ($url) => is_string($url) && str_contains($url, '/tools/run-ovoko-category-mapping-autorun') && str_contains($url, 'run_id='.$runId));
     }
 
+    public function test_autorun_start_returns_json_failure_when_active_state_is_malformed(): void
+    {
+        Cache::flush();
+        Cache::put('ovoko_category_mapping_autorun_active', 'broken-run', now()->addDay());
+        Cache::put('ovoko_category_mapping_autorun_broken-run', ['status' => 'started'], now()->addDay());
+
+        $response = $this->getJson('/tools/start-ovoko-category-mapping-autorun?token=gps_images_import_2026&batch_size=100&sample_limit=10&only_missing_ovoko_category_mapping=1');
+
+        $response->assertStatus(500);
+        $this->assertStringContainsString('application/json', (string) $response->headers->get('content-type'));
+
+        $response->assertJsonPath('ok', false)
+            ->assertJsonPath('dry_run', true)
+            ->assertJsonPath('ovoko_write', false)
+            ->assertJsonPath('local_update', false)
+            ->assertJsonPath('status', 'failed')
+            ->assertJsonPath('endpoint', 'start-ovoko-category-mapping-autorun')
+            ->assertJsonPath('exception_class', 'ErrorException')
+            ->assertJsonPath('error', 'ErrorException')
+            ->assertJsonPath('warnings', []);
+    }
+
     public function test_autorun_tick_processes_started_run_and_returns_next_url_when_remaining(): void
     {
         Cache::flush();
