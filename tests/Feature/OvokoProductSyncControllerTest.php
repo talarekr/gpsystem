@@ -206,6 +206,90 @@ class OvokoProductSyncControllerTest extends TestCase
         $this->assertDatabaseCount('marketplace_category_mappings', 0);
     }
 
+
+
+    public function test_dry_run_ovoko_category_path_mapping_matches_exact_normalized_name_and_skips_uncategorized_read_only(): void
+    {
+        MarketplaceAccount::query()->create(['id' => 92, 'marketplace' => 'ovoko', 'name' => 'Ovoko main', 'code' => 'ovoko_main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'dry_run', 'api_credentials' => ['username' => 'u', 'password' => 'p', 'user_token' => 't']]);
+        DB::table('part_categories')->insert([
+            ['id' => 41, 'name' => 'Silniki', 'category_path' => 'Części > Silnik > Silniki', 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 42, 'name' => 'Skrzynie biegów', 'category_path' => ' Części /  Napęd / Skrzynie biegów ', 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 43, 'name' => 'Akumulatory', 'category_path' => 'Local only', 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 44, 'name' => 'Bez kategorii', 'category_path' => 'Bez kategorii', 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 45, 'name' => 'Lampy', 'category_path' => 'Unknown', 'created_at' => now(), 'updated_at' => now()],
+        ]);
+        DB::table('parts')->insert([
+            ['id' => 801, 'name' => 'Engine', 'part_number' => 'PN-801', 'description' => 'Desc', 'price' => 1, 'quantity' => 1, 'status' => 'ready', 'is_visible_storefront' => true, 'needs_listing' => false, 'needs_review' => false, 'category_id' => 41, 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 802, 'name' => 'Gearbox', 'part_number' => 'PN-802', 'description' => 'Desc', 'price' => 1, 'quantity' => 1, 'status' => 'ready', 'is_visible_storefront' => true, 'needs_listing' => false, 'needs_review' => false, 'category_id' => 42, 'created_at' => now(), 'updated_at' => now()],
+        ]);
+        Http::fake(['https://ovoko.example.test/get/categories' => Http::response(['status_code' => 'R200', 'list' => [
+            ['id' => 'OV-ROOT', 'parent_id' => null, 'level' => 1, 'pl' => 'Części', 'en' => 'Parts'],
+            ['id' => 'OV-ENG', 'parent_id' => 'OV-ROOT', 'level' => 2, 'pl' => 'Silnik', 'en' => 'Engine'],
+            ['id' => 'OV-CAT-41', 'parent_id' => 'OV-ENG', 'level' => 3, 'pl' => 'Silniki', 'en' => 'Engines'],
+            ['id' => 'OV-DRV', 'parent_id' => 'OV-ROOT', 'level' => 2, 'pl' => 'Napęd', 'en' => 'Drive'],
+            ['id' => 'OV-CAT-42', 'parent_id' => 'OV-DRV', 'level' => 3, 'pl' => 'Skrzynie biegów', 'en' => 'Gearboxes'],
+            ['id' => 'OV-EL', 'parent_id' => 'OV-ROOT', 'level' => 2, 'pl' => 'Elektryka', 'en' => 'Electrical'],
+            ['id' => 'OV-CAT-43', 'parent_id' => 'OV-EL', 'level' => 3, 'pl' => 'Akumulatory', 'en' => 'Batteries'],
+            ['id' => 'OV-FRONT', 'parent_id' => 'OV-ROOT', 'level' => 2, 'pl' => 'Przód', 'en' => 'Front'],
+            ['id' => 'OV-LAMP-A', 'parent_id' => 'OV-FRONT', 'level' => 3, 'pl' => 'Lampy', 'en' => 'Lamps'],
+            ['id' => 'OV-REAR', 'parent_id' => 'OV-ROOT', 'level' => 2, 'pl' => 'Tył', 'en' => 'Rear'],
+            ['id' => 'OV-LAMP-B', 'parent_id' => 'OV-REAR', 'level' => 3, 'pl' => 'Lampy', 'en' => 'Lamps'],
+        ]], 200)]);
+
+        $response = $this->getJson('/tools/dry-run-ovoko-category-path-mapping?token=gps_images_import_2026&sample_limit=50');
+
+        $response->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('dry_run', true)
+            ->assertJsonPath('ovoko_write', false)
+            ->assertJsonPath('local_update', false)
+            ->assertJsonPath('local_categories_count', 5)
+            ->assertJsonPath('ovoko_level_3_count', 5)
+            ->assertJsonPath('exact_path_match_count', 1)
+            ->assertJsonPath('normalized_path_match_count', 1)
+            ->assertJsonPath('exact_name_match_count', 1)
+            ->assertJsonPath('ambiguous_name_match_count', 1)
+            ->assertJsonPath('skipped_uncategorized_count', 1)
+            ->assertJsonPath('preview_mappings.0.local_category_id', 41)
+            ->assertJsonPath('preview_mappings.0.match_type', 'exact_path_match')
+            ->assertJsonPath('preview_mappings.0.confidence', 'high')
+            ->assertJsonPath('preview_mappings.0.local_parts_count', 1)
+            ->assertJsonPath('preview_mappings.1.local_category_id', 42)
+            ->assertJsonPath('preview_mappings.1.match_type', 'normalized_path_match')
+            ->assertJsonPath('preview_mappings.2.local_category_id', 43)
+            ->assertJsonPath('preview_mappings.2.match_type', 'exact_name_match')
+            ->assertJsonPath('preview_mappings.2.confidence', 'medium')
+            ->assertJsonPath('sample_ambiguous.0.local_category_id', 45);
+
+        Http::assertSentCount(1);
+        $this->assertDatabaseCount('marketplace_category_mappings', 0);
+    }
+
+    public function test_dry_run_ovoko_category_path_mapping_combines_linked_products_consensus_from_autorun_cache(): void
+    {
+        MarketplaceAccount::query()->create(['id' => 93, 'marketplace' => 'ovoko', 'name' => 'Ovoko main', 'code' => 'ovoko_main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'dry_run', 'api_credentials' => ['username' => 'u', 'password' => 'p', 'user_token' => 't']]);
+        DB::table('part_categories')->insert(['id' => 51, 'name' => 'Silniki', 'category_path' => 'Części > Silnik > Silniki', 'created_at' => now(), 'updated_at' => now()]);
+        Cache::put('ovoko_category_mapping_autorun_run-path-test', [
+            'run_id' => 'run-path-test', 'params' => ['sample_limit' => 50], 'groups' => [
+                ['local_category_id' => 51, 'local_category_name' => 'Silniki', 'local_category_path' => 'Części > Silnik > Silniki', 'observed_ovoko_categories' => ['OV-CAT-51' => ['ovoko_category_id' => 'OV-CAT-51', 'ovoko_category_name' => 'Silniki', 'ovoko_category_path' => 'Części > Silnik > Silniki', 'count' => 3]]],
+            ], 'no_evidence' => []
+        ], now()->addHour());
+        Http::fake(['https://ovoko.example.test/get/categories' => Http::response(['status_code' => 'R200', 'list' => [
+            ['id' => 'OV-ROOT', 'parent_id' => null, 'level' => 1, 'pl' => 'Części', 'en' => 'Parts'],
+            ['id' => 'OV-ENG', 'parent_id' => 'OV-ROOT', 'level' => 2, 'pl' => 'Silnik', 'en' => 'Engine'],
+            ['id' => 'OV-CAT-51', 'parent_id' => 'OV-ENG', 'level' => 3, 'pl' => 'Silniki', 'en' => 'Engines'],
+        ]], 200)]);
+
+        $response = $this->getJson('/tools/dry-run-ovoko-category-path-mapping?token=gps_images_import_2026&sample_limit=50&run_id=run-path-test');
+
+        $response->assertOk()
+            ->assertJsonPath('preview_mappings.0.match_type', 'linked_products_consensus + exact_path_match')
+            ->assertJsonPath('preview_mappings.0.confidence', 'very_high')
+            ->assertJsonPath('preview_mappings.0.linked_products_evidence_count', 3);
+
+        $this->assertDatabaseCount('marketplace_category_mappings', 0);
+    }
+
     public function test_preview_ovoko_category_from_linked_products_marks_ambiguous_read_only(): void
     {
         MarketplaceAccount::query()->create(['id' => 91, 'marketplace' => 'ovoko', 'name' => 'Ovoko main', 'code' => 'ovoko_main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'dry_run', 'api_credentials' => ['username' => 'u', 'password' => 'p', 'user_token' => 't']]);
