@@ -2440,6 +2440,104 @@ HTML, 200, ['Content-Type' => 'text/html; charset=UTF-8']);
         return response()->json($result);
     }
 
+
+    public function dryRunVerifyWooEbayMappingForCategorySplits(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+
+        $sampleLimit = max(1, min(500, (int) $request->query('sample_limit', 100)));
+        $only = (string) $request->query('only', 'all');
+        if (! in_array($only, ['all', 'verified', 'conflicts', 'missing', 'copy_possible', 'manual_review'], true)) $only = 'all';
+        $relativeCsvPath = 'storage/app/imports/RAFEL WEB DESIGNER (3).csv';
+        $csvPath = storage_path('app/imports/RAFEL WEB DESIGNER (3).csv');
+        $warnings = ['read_only_no_part_categories_marketplace_mappings_products_or_marketplace_writes'];
+
+        $result = [
+            'ok' => true, 'dry_run' => true, 'local_update' => false, 'ovoko_write' => false, 'allegro_write' => false, 'ebay_write' => false,
+            'woo_ebay_csv_path' => $relativeCsvPath, 'woo_ebay_csv_exists' => is_file($csvPath), 'woo_ebay_rows_count' => 0,
+            'split_categories_count' => 0, 'split_categories_with_woo_term_id_count' => 0, 'woo_ebay_row_found_count' => 0, 'woo_ebay_row_missing_count' => 0,
+            'source_ebay_de_mapping_same_count' => 0, 'source_ebay_de_mapping_different_count' => 0, 'source_ebay_de_mapping_missing_in_laravel_count' => 0, 'source_ebay_de_mapping_missing_in_csv_count' => 0,
+            'source_ebay_fr_mapping_same_count' => 0, 'source_ebay_fr_mapping_different_count' => 0, 'source_ebay_fr_mapping_missing_in_laravel_count' => 0, 'source_ebay_fr_mapping_missing_in_csv_count' => 0,
+            'target_mapping_empty_count' => 0, 'target_mapping_same_count' => 0, 'target_mapping_conflict_count' => 0,
+            'can_copy_mapping_to_target_count' => 0, 'mapping_copy_not_needed_count' => 0, 'manual_review_count' => 0,
+            'sample_verified' => [], 'sample_conflicts' => [], 'sample_missing_rows' => [], 'warnings' => &$warnings,
+        ];
+
+        if (! Schema::hasTable('part_categories') || ! Schema::hasTable('marketplace_categories') || ! Schema::hasTable('marketplace_category_mappings')) {
+            $result['ok'] = false; $warnings[] = 'missing_required_tables'; return response()->json($result, 422);
+        }
+        if (! $result['woo_ebay_csv_exists']) { $result['ok'] = false; $warnings[] = 'woo_ebay_csv_not_found'; return response()->json($result, 404); }
+
+        $wooRows = $this->readWooCategoryTreeCsv($csvPath, $warnings);
+        $result['woo_ebay_rows_count'] = count($wooRows);
+        $wooByTerm = collect($wooRows)->filter(fn (array $row): bool => filled($row['term_id'] ?? null))->keyBy(fn (array $row): string => (string) $row['term_id']);
+
+        $localRows = PartCategory::query()->get();
+        $localById = $localRows->keyBy(fn (PartCategory $cat): string => (string) $cat->id);
+        $localInfos = $localRows->map(function (PartCategory $cat) use ($localById): array {
+            $path = $this->localCategoryDisplayPath($cat->toArray(), $localById);
+            return ['model' => $cat, 'path' => $path, 'normalized_path' => $this->normalizeCanonicalCategoryDisplayPath($path)];
+        });
+        $localByNormalizedPath = $localInfos->filter(fn (array $info): bool => $info['normalized_path'] !== '')->keyBy('normalized_path');
+        $ovokoRows = DB::table('marketplace_categories')->select($this->safeSelectColumns('marketplace_categories', ['id', 'external_category_id', 'full_path']))->where('channel', 'ovoko')->get()->map(fn ($row): array => (array) $row)->all();
+        $ovokoByNorm = collect($ovokoRows)->filter(fn (array $row): bool => filled($row['full_path'] ?? null))->groupBy(fn (array $row): string => $this->normalizeCanonicalCategoryDisplayPath((string) $row['full_path']));
+        $mappings = DB::table('marketplace_category_mappings')->select($this->safeSelectColumns('marketplace_category_mappings', ['local_category_id', 'channel', 'external_category_id']))->whereIn('channel', ['ebay_de', 'ebay_fr'])->get()->groupBy('local_category_id');
+
+        foreach ($localInfos as $info) {
+            /** @var PartCategory $cat */
+            $cat = $info['model']; $path = $info['path']; $norm = $info['normalized_path'];
+            if ($path === '' || $ovokoByNorm->get($norm, collect())->isNotEmpty()) continue;
+            $matches = collect();
+            foreach ($this->shopTreeDisplayAuditCandidates($path) as $candidate) {
+                $candidateMatches = $ovokoByNorm->get($this->normalizeCanonicalCategoryDisplayPath($candidate), collect());
+                if ($candidateMatches->isNotEmpty()) $matches = $candidateMatches; if ($matches->count() === 1) break;
+            }
+            if ($matches->isEmpty()) continue;
+            $target = $matches->count() === 1 ? $matches->first() : null;
+            $targetNorm = $target ? $this->normalizeCanonicalCategoryDisplayPath((string) ($target['full_path'] ?? '')) : null;
+            $targetLocal = $targetNorm ? $localByNormalizedPath->get($targetNorm) : null;
+            $result['split_categories_count']++;
+            $wooTermId = filled($cat->external_id) ? (string) $cat->external_id : '';
+            if ($wooTermId !== '') $result['split_categories_with_woo_term_id_count']++;
+            $woo = $wooTermId !== '' ? $wooByTerm->get($wooTermId) : null;
+            if (! $woo) { $result['woo_ebay_row_missing_count']++; }
+            else { $result['woo_ebay_row_found_count']++; }
+
+            $sourceMaps = $mappings->get($cat->id, collect())->keyBy('channel');
+            $targetMaps = $targetLocal ? $mappings->get($targetLocal['model']->id, collect())->keyBy('channel') : collect();
+            $srcDe = $this->cleanCategoryMappingId($sourceMaps->get('ebay_de')->external_category_id ?? null);
+            $srcFr = $this->cleanCategoryMappingId($sourceMaps->get('ebay_fr')->external_category_id ?? null);
+            $wooDe = $this->cleanCategoryMappingId($woo['mapped_ebay_de_category_id'] ?? null);
+            $wooFr = $this->cleanCategoryMappingId($woo['mapped_ebay_fr_category_id'] ?? null);
+            $tgtDe = $this->cleanCategoryMappingId($targetMaps->get('ebay_de')->external_category_id ?? null);
+            $tgtFr = $this->cleanCategoryMappingId($targetMaps->get('ebay_fr')->external_category_id ?? null);
+            $deStatus = $this->mappingCompareStatus($srcDe, $wooDe); $frStatus = $this->mappingCompareStatus($srcFr, $wooFr);
+            $result['source_ebay_de_mapping_'.$deStatus.'_count']++;
+            $result['source_ebay_fr_mapping_'.$frStatus.'_count']++;
+
+            $sourceMatchesWoo = in_array($deStatus, ['same', 'missing_in_csv'], true) && in_array($frStatus, ['same', 'missing_in_csv'], true) && ($deStatus === 'same' || $frStatus === 'same');
+            $targetConflict = ($tgtDe !== '' && $wooDe !== '' && $tgtDe !== $wooDe) || ($tgtFr !== '' && $wooFr !== '' && $tgtFr !== $wooFr);
+            $targetSame = ($tgtDe !== '' && $wooDe !== '' && $tgtDe === $wooDe) || ($tgtFr !== '' && $wooFr !== '' && $tgtFr === $wooFr);
+            $targetEmpty = $tgtDe === '' && $tgtFr === '';
+            $targetStatus = ! $targetLocal ? 'not_applicable' : ($targetConflict ? 'conflict' : ($targetEmpty ? 'empty' : ($targetSame ? 'same' : 'not_applicable')));
+            if ($targetStatus === 'empty') $result['target_mapping_empty_count']++;
+            if ($targetStatus === 'same') $result['target_mapping_same_count']++;
+            if ($targetStatus === 'conflict') $result['target_mapping_conflict_count']++;
+            $canCopy = $targetLocal && $targetEmpty && $sourceMatchesWoo;
+            $notNeeded = $targetLocal && $targetSame && $sourceMatchesWoo && ! $targetConflict;
+            $manual = ! $targetLocal || ! $woo || $targetConflict || ! $sourceMatchesWoo;
+            if ($canCopy) $result['can_copy_mapping_to_target_count']++;
+            if ($notNeeded) $result['mapping_copy_not_needed_count']++;
+            if ($manual) $result['manual_review_count']++;
+            $sample = ['local_category_id' => (int) $cat->id, 'local_category_path' => $path, 'woo_term_id' => $wooTermId ?: null, 'excluded_from_ebay' => $woo['excluded_from_ebay'] ?? null, 'source_laravel_ebay_de_category_id' => $srcDe ?: null, 'woo_mapped_ebay_de_category_id' => $wooDe ?: null, 'source_ebay_de_status' => $deStatus, 'source_laravel_ebay_fr_category_id' => $srcFr ?: null, 'woo_mapped_ebay_fr_category_id' => $wooFr ?: null, 'source_ebay_fr_status' => $frStatus, 'target_exists_locally' => (bool) $targetLocal, 'target_local_category_id' => $targetLocal['model']->id ?? null, 'target_local_path' => $targetLocal['path'] ?? null, 'target_ebay_de_category_id' => $tgtDe ?: null, 'target_ebay_fr_category_id' => $tgtFr ?: null, 'target_mapping_status' => $targetStatus, 'can_copy_mapping_to_target' => $canCopy, 'mapping_copy_not_needed' => $notNeeded, 'manual_review' => $manual, 'reason' => $canCopy ? 'woo_ebay_mapping_matches_source_and_target_empty' : ($notNeeded ? 'target_mapping_already_matches_verified_source' : ($targetConflict ? 'target_mapping_conflict' : (! $woo ? 'woo_ebay_row_missing' : 'manual_review_required')))] ;
+            if ($woo && ! $manual && ($only === 'all' || $only === 'verified' || ($only === 'copy_possible' && $canCopy))) $this->pushSample($result['sample_verified'], $sample, $sampleLimit);
+            if ($targetConflict && ($only === 'all' || $only === 'conflicts' || $only === 'manual_review')) $this->pushSample($result['sample_conflicts'], $sample, $sampleLimit);
+            if (! $woo && ($only === 'all' || $only === 'missing' || $only === 'manual_review')) $this->pushSample($result['sample_missing_rows'], $sample, $sampleLimit);
+        }
+        unset($result['warnings']); $result['warnings'] = $warnings;
+        return response()->json($result);
+    }
+
     public function dryRunPlanFixCategoryDisplaySplits(Request $request): JsonResponse
     {
         if (! $this->validToken($request)) return $this->invalidTokenResponse();
@@ -2539,6 +2637,19 @@ HTML, 200, ['Content-Type' => 'text/html; charset=UTF-8']);
         return response()->json($result);
     }
 
+
+
+    private function cleanCategoryMappingId(mixed $value): string
+    {
+        return trim((string) $value);
+    }
+
+    private function mappingCompareStatus(string $laravel, string $csv): string
+    {
+        if ($csv === '') return 'missing_in_csv';
+        if ($laravel === '') return 'missing_in_laravel';
+        return $laravel === $csv ? 'same' : 'different';
+    }
 
     private function normalizeCanonicalCategoryDisplayPath(?string $value): string
     {
