@@ -2,10 +2,12 @@
 
 namespace Tests\Feature;
 
+use App\Mail\WorkshopPartCreatedMail;
 use App\Models\Part;
 use App\Models\PartImage;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -87,6 +89,102 @@ class WorkshopQuickPartControllerTest extends TestCase
             $this->assertSame('/storage/'.$image->path, $image->relativePublicUrl());
             Storage::disk('public')->assertExists($image->path);
         }
+    }
+
+    public function test_email_copy_checkbox_is_visible_and_checked_before_save_button(): void
+    {
+        $response = $this->get('/tools/workshop/quick-part-create?token='.self::TOKEN)
+            ->assertOk()
+            ->assertSee('Wyślij kopię wiadomości na e-mail')
+            ->assertSee('name="send_email_copy" type="checkbox" value="1" checked', false);
+
+        $html = $response->getContent();
+        $this->assertLessThan(
+            strpos($html, 'Zapisz część'),
+            strpos($html, 'Wyślij kopię wiadomości na e-mail')
+        );
+    }
+
+    public function test_checked_email_copy_sends_workshop_notification(): void
+    {
+        Storage::fake('public');
+        Mail::fake();
+        config(['services.workshop_intake.notification_email' => 'workshop@example.com']);
+
+        $this->post('/tools/workshop/quick-part-create?token='.self::TOKEN, [
+            'photos' => [UploadedFile::fake()->image('front.jpg')],
+            'storage_location' => 'A1-P2',
+            'part_number' => '3Q0919294F',
+            'internal_note' => 'notatka warsztatowa',
+            'send_email_copy' => '1',
+        ])->assertRedirect('/tools/workshop/quick-part-create?token='.self::TOKEN);
+
+        $part = Part::query()->with(['images', 'storageLocation'])->where('part_number', '3Q0919294F')->firstOrFail();
+
+        Mail::assertSent(WorkshopPartCreatedMail::class, function (WorkshopPartCreatedMail $mail) use ($part): bool {
+            return $mail->hasTo('workshop@example.com')
+                && $mail->part->is($part)
+                && $mail->envelope()->subject === 'Warsztat: A1-P2 - 3Q0919294F';
+        });
+    }
+
+    public function test_unchecked_email_copy_does_not_send_workshop_notification(): void
+    {
+        Storage::fake('public');
+        Mail::fake();
+        config(['services.workshop_intake.notification_email' => 'workshop@example.com']);
+
+        $this->post('/tools/workshop/quick-part-create?token='.self::TOKEN, [
+            'photos' => [UploadedFile::fake()->image('front.jpg')],
+            'storage_location' => 'A1-P2',
+            'part_number' => 'NOEMAIL123',
+            'send_email_copy' => '0',
+        ])->assertRedirect('/tools/workshop/quick-part-create?token='.self::TOKEN);
+
+        $this->assertDatabaseHas('parts', ['part_number' => 'NOEMAIL123']);
+        Mail::assertNothingSent();
+    }
+
+    public function test_missing_notification_email_does_not_block_part_creation(): void
+    {
+        Storage::fake('public');
+        Mail::fake();
+        config(['services.workshop_intake.notification_email' => null]);
+
+        $this->post('/tools/workshop/quick-part-create?token='.self::TOKEN, [
+            'photos' => [UploadedFile::fake()->image('front.jpg')],
+            'storage_location' => 'A1-P2',
+            'part_number' => 'NOCONFIG123',
+            'send_email_copy' => '1',
+        ])->assertRedirect('/tools/workshop/quick-part-create?token='.self::TOKEN);
+
+        $this->assertDatabaseHas('parts', ['part_number' => 'NOCONFIG123']);
+        Mail::assertNothingSent();
+    }
+
+    public function test_workshop_notification_mail_contains_required_body_and_original_image_attachments(): void
+    {
+        Storage::fake('public');
+
+        $this->post('/tools/workshop/quick-part-create?token='.self::TOKEN, [
+            'photos' => [UploadedFile::fake()->image('front.jpg'), UploadedFile::fake()->image('side.jpg')],
+            'storage_location' => 'A1-P2',
+            'part_number' => 'BODY123',
+            'internal_note' => 'opis testowy',
+            'send_email_copy' => '0',
+        ])->assertRedirect('/tools/workshop/quick-part-create?token='.self::TOKEN);
+
+        $part = Part::query()->with(['images', 'storageLocation'])->where('part_number', 'BODY123')->firstOrFail();
+        $mail = new WorkshopPartCreatedMail($part);
+
+        $mail->assertSeeInHtml('Dodano nową część przez formularz warsztatowy.');
+        $mail->assertSeeInHtml('BODY123');
+        $mail->assertSeeInHtml('A1-P2');
+        $mail->assertSeeInHtml('opis testowy');
+        $mail->assertSeeInHtml((string) $part->id);
+        $mail->assertDontSeeInHtml('Cena');
+        $mail->assertDontSeeInHtml('Marketplace');
+        $this->assertCount(2, $mail->attachments());
     }
 
     public function test_workshop_image_diagnostics_reports_admin_urls_and_storage_state(): void

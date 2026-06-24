@@ -45,7 +45,9 @@
         .ocr-footer { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
         .ocr-footer button { width:100%; }
         .actions { position:fixed; left:0; right:0; bottom:0; background:rgba(255,255,255,.96); border-top:1px solid var(--border); padding:12px max(14px, env(safe-area-inset-left)) max(12px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-right)); display:flex; gap:10px; justify-content:center; }
-        .actions-inner { width:100%; max-width:560px; display:flex; gap:10px; } .actions-inner > * { flex:1; }
+        .actions-inner { width:100%; max-width:560px; display:grid; gap:10px; } .actions-inner > * { width:100%; }
+        .email-copy-option { display:flex; align-items:center; gap:10px; margin:0; font-size:16px; font-weight:800; }
+        .email-copy-option input { width:22px; height:22px; flex:0 0 auto; }
         .success { border-left:6px solid var(--ok); }
         .success-actions { display:grid; gap:12px; }
         .hidden { display:none !important; }
@@ -61,6 +63,9 @@
             <h1>Część dodana</h1>
             <p><strong>Część dodana do: Części -&gt; Do wystawienia</strong></p>
             <p>Kod części: {{ $part['part_number'] }}</p>
+            @if(session('workshop_quick_part_mail_warning'))
+                <div class="errors">{{ session('workshop_quick_part_mail_warning') }}</div>
+            @endif
             <div class="success-actions">
                 <a class="btn primary" href="{{ $createAnotherUrl }}">Dodaj kolejną część</a>
                 <a class="btn secondary" href="{{ $part['admin_url'] }}">Otwórz część</a>
@@ -104,6 +109,11 @@
                 </section>
                 <p id="uploadMessage" class="upload-message hidden">Trwa przesyłanie zdjęć, nie zamykaj strony</p>
                 <div class="actions"><div class="actions-inner">
+                    <input type="hidden" name="send_email_copy" value="0">
+                    <label for="send_email_copy" class="email-copy-option">
+                        <input id="send_email_copy" name="send_email_copy" type="checkbox" value="1" @checked(old('send_email_copy', '1') === '1')>
+                        Wyślij kopię wiadomości na e-mail
+                    </label>
                     <button type="submit" id="saveBtn" class="primary"><span id="saveSpinner" class="spinner hidden" aria-hidden="true"></span><span id="saveText">Zapisz część</span></button>
                 </div></div>
             </form>
