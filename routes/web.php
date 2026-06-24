@@ -180,6 +180,7 @@ Route::get('/tools/test-ovoko-api-connection', TestOvokoApiConnectionController:
 Route::get('/tools/check-ovoko-price-import', [OvokoPriceImportController::class, 'check'])->name('tools.check-ovoko-price-import');
 Route::get('/tools/dry-run-ovoko-product-sync', [OvokoProductSyncController::class, 'dryRun'])->name('tools.dry-run-ovoko-product-sync');
 Route::get('/tools/check-ovoko-product-sync-readiness', [OvokoProductSyncController::class, 'readiness'])->name('tools.check-ovoko-product-sync-readiness');
+Route::get('/tools/check-ovoko-category-data-sources', [OvokoProductSyncController::class, 'categoryDataSources'])->name('tools.check-ovoko-category-data-sources');
 Route::get('/tools/ovoko-stock-reconciliation-runner', [OvokoStockReconciliationController::class, 'runner'])->name('tools.ovoko-stock-reconciliation-runner');
 Route::get('/tools/dry-run-ovoko-stock-reconciliation', [OvokoStockReconciliationController::class, 'dryRun'])->name('tools.dry-run-ovoko-stock-reconciliation');
 Route::get('/tools/dry-run-ovoko-stock-reconciliation-all', [OvokoStockReconciliationController::class, 'dryRunAll'])->name('tools.dry-run-ovoko-stock-reconciliation-all');

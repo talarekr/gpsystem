@@ -102,4 +102,35 @@ class OvokoProductSyncControllerTest extends TestCase
             ->assertJsonPath('local_candidate_parts_count', 0)
             ->assertJsonPath('would_create_ovoko_count', 0);
     }
+    public function test_category_data_sources_discovers_existing_ovoko_like_category_data_read_only(): void
+    {
+        DB::table('part_categories')->insert([
+            ['id' => 610, 'name' => 'Gearboxes', 'slug' => 'gearboxes', 'category_path' => 'Parts > Gearboxes', 'source_system' => 'ovoko_old', 'external_id' => 'OV-OLD-610', 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 611, 'name' => 'Unmatched local', 'slug' => 'unmatched-local', 'category_path' => 'Parts > Unmatched local', 'created_at' => now(), 'updated_at' => now()],
+        ]);
+        DB::table('marketplace_category_mappings')->insert([
+            ['local_category_id' => 610, 'channel' => 'ovoko_old', 'external_category_id' => 'OV-CAT-610', 'external_category_name' => 'Gearboxes', 'external_category_path' => 'Parts > Gearboxes', 'created_at' => now(), 'updated_at' => now()],
+            ['local_category_id' => 611, 'channel' => 'rrr_lt', 'external_category_id' => 'RRR-611', 'external_category_name' => 'Other', 'external_category_path' => 'Parts > Other', 'created_at' => now(), 'updated_at' => now()],
+        ]);
+        DB::table('parts')->insert(['id' => 620, 'name' => 'Candidate gearbox', 'part_number' => 'PN-620', 'description' => 'Desc', 'price' => 1, 'quantity' => 1, 'status' => 'ready', 'is_visible_storefront' => true, 'needs_listing' => false, 'needs_review' => false, 'category_id' => 610, 'created_at' => now(), 'updated_at' => now()]);
+
+        $response = $this->getJson('/tools/check-ovoko-category-data-sources?token=gps_images_import_2026&sample_limit=10');
+
+        $response->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('dry_run', true)
+            ->assertJsonPath('ovoko_write', false)
+            ->assertJsonPath('local_update', false)
+            ->assertJsonFragment(['table' => 'part_categories'])
+            ->assertJsonFragment(['table' => 'marketplace_category_mappings'])
+            ->assertJsonFragment(['channel' => 'ovoko_old', 'count' => 1])
+            ->assertJsonFragment(['channel' => 'rrr_lt', 'count' => 1])
+            ->assertJsonFragment(['confidence' => 'exact_path_match'])
+            ->assertJsonFragment(['possible_external_category_id' => 'OV-CAT-610'])
+            ->assertJsonFragment(['part_number' => 'PN-620']);
+
+        $this->assertDatabaseCount('marketplace_category_mappings', 2);
+        $this->assertDatabaseMissing('marketplace_listings', ['part_id' => 620]);
+    }
+
 }
