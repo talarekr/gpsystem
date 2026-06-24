@@ -273,16 +273,23 @@ class OvokoProductSyncController extends Controller
     }
 
 
-    public function dryRunOvokoCategoryPathMapping(Request $request): JsonResponse
+    public function dryRunOvokoCategoryPathMapping(Request $request)
     {
         if (! $this->validToken($request)) return $this->invalidTokenResponse();
 
-        $sampleLimit = max(1, min(100, (int) $request->query('sample_limit', 50)));
-        $result = ['ok'=>true,'dry_run'=>true,'ovoko_write'=>false,'local_update'=>false,'local_categories_count'=>0,'ovoko_categories_count'=>0,'ovoko_level_3_count'=>0,'exact_path_match_count'=>0,'normalized_path_match_count'=>0,'exact_name_match_count'=>0,'ambiguous_name_match_count'=>0,'unmatched_count'=>0,'skipped_uncategorized_count'=>0,'preview_mappings'=>[],'sample_exact_path_matches'=>[],'sample_normalized_path_matches'=>[],'sample_ambiguous'=>[],'sample_unmatched'=>[],'sample_errors'=>[],'warnings'=>['read_only_dry_run_no_ovoko_allegro_ebay_or_local_writes']];
+        $sampleLimit = max(1, min(300, (int) $request->query('sample_limit', 300)));
+        $only = (string) $request->query('only', 'all');
+        $format = (string) $request->query('format', 'json');
+        $allowedOnly = ['all', 'matched', 'unmatched', 'exact_path', 'normalized_path', 'exact_name'];
+        if (! in_array($only, $allowedOnly, true)) return response()->json(['ok' => false, 'dry_run' => true, 'error_message' => 'Unsupported only value.', 'allowed_only' => $allowedOnly], 422);
+        if (! in_array($format, ['json', 'csv'], true)) return response()->json(['ok' => false, 'dry_run' => true, 'error_message' => 'Unsupported format value.', 'allowed_format' => ['json', 'csv']], 422);
+        $includeUnmatched = $request->boolean('include_unmatched', false) || $only === 'unmatched';
+
+        $result = ['ok'=>true,'dry_run'=>true,'ovoko_write'=>false,'local_update'=>false,'only'=>$only,'format'=>$format,'sample_limit'=>$sampleLimit,'include_unmatched'=>$includeUnmatched,'local_categories_count'=>0,'ovoko_categories_count'=>0,'ovoko_level_3_count'=>0,'exact_path_match_count'=>0,'normalized_path_match_count'=>0,'exact_name_match_count'=>0,'ambiguous_name_match_count'=>0,'unmatched_count'=>0,'skipped_uncategorized_count'=>0,'preview_mappings'=>[],'unmatched_categories'=>[],'sample_exact_path_matches'=>[],'sample_normalized_path_matches'=>[],'sample_exact_name_matches'=>[],'sample_ambiguous'=>[],'sample_unmatched'=>[],'sample_errors'=>[],'warnings'=>['read_only_dry_run_no_ovoko_allegro_ebay_or_local_writes']];
 
         if (! Schema::hasTable('part_categories')) {
             $result['warnings'][] = 'part_categories_table_missing';
-            return response()->json($result);
+            return $this->pathMappingResponse($result, $format, $only);
         }
 
         $tree = $this->fetchOvokoCategoryTree($result);
@@ -294,7 +301,7 @@ class OvokoProductSyncController extends Controller
 
         $partCounts = Schema::hasTable('parts') ? DB::table('parts')->select('category_id', DB::raw('count(*) as c'))->whereNotNull('category_id')->groupBy('category_id')->pluck('c','category_id')->all() : [];
         $select = $this->safeSelectColumns('part_categories', ['id','name','category_path']);
-        DB::table('part_categories')->select($select)->orderBy('id')->chunk(500, function ($rows) use (&$result, $ovoko, $linkedConsensus, $partCounts, $sampleLimit): void {
+        DB::table('part_categories')->select($select)->orderBy('id')->chunk(500, function ($rows) use (&$result, $ovoko, $linkedConsensus, $partCounts, $sampleLimit, $only, $includeUnmatched): void {
             foreach ($rows as $row) {
                 $local = (array) $row;
                 $result['local_categories_count']++;
@@ -302,10 +309,13 @@ class OvokoProductSyncController extends Controller
                 $name = (string) ($local['name'] ?? '');
                 if ($this->isUncategorizedCategoryValue($path) || $this->isUncategorizedCategoryValue($name)) { $result['skipped_uncategorized_count']++; continue; }
 
+                $partsCount = (int)($partCounts[$local['id']] ?? 0);
                 $match = $this->matchLocalCategoryToOvokoPath($local, $ovoko);
                 if ($match['match_type'] === 'unmatched') {
                     $result['unmatched_count']++;
-                    $this->pushSample($result['sample_unmatched'], ['local_category_id'=>(int)$local['id'],'local_category_name'=>$name,'local_category_path'=>$path], $sampleLimit);
+                    $unmatched = ['local_category_id'=>(int)$local['id'],'local_category_name'=>$name,'local_category_path'=>$path,'local_parts_count'=>$partsCount,'reason'=>'no_exact_or_normalized_ovoko_path_match'];
+                    $this->pushSample($result['sample_unmatched'], $unmatched, $sampleLimit);
+                    if ($includeUnmatched) $result['unmatched_categories'][] = $unmatched;
                     continue;
                 }
                 if ($match['match_type'] === 'ambiguous_name_match') {
@@ -316,17 +326,18 @@ class OvokoProductSyncController extends Controller
 
                 $bucket = $match['match_type'].'_count';
                 if (array_key_exists($bucket, $result)) $result[$bucket]++;
-                $mapping = $this->pathMappingPreview($local, $match, (int)($partCounts[$local['id']] ?? 0), $linkedConsensus[(string)$local['id']] ?? null);
-                $result['preview_mappings'][] = $mapping;
+                $mapping = $this->pathMappingPreview($local, $match, $partsCount, $linkedConsensus[(string)$local['id']] ?? null);
+                if ($this->includePathMappingForOnly($mapping['match_type'], $only)) $result['preview_mappings'][] = $mapping;
                 if ($match['match_type'] === 'exact_path_match') $this->pushSample($result['sample_exact_path_matches'], $mapping, $sampleLimit);
                 if ($match['match_type'] === 'normalized_path_match') $this->pushSample($result['sample_normalized_path_matches'], $mapping, $sampleLimit);
+                if ($match['match_type'] === 'exact_name_match') $this->pushSample($result['sample_exact_name_matches'], $mapping, $sampleLimit);
             }
         });
 
         $result['preview_mappings'] = array_slice($result['preview_mappings'], 0, $sampleLimit);
-        return response()->json($result);
+        if (! $includeUnmatched) unset($result['unmatched_categories']);
+        return $this->pathMappingResponse($result, $format, $only);
     }
-
 
     public function ovokoCategoryMappingAutorun(Request $request)
     {
@@ -1149,6 +1160,38 @@ HTML, 200, ['Content-Type' => 'text/html; charset=UTF-8']);
             $leaf[$this->normalizeCategoryPath((string) ($category['pl'] ?? $category['en'] ?? ''))][] = $item;
         }
         return ['level3'=>$level3,'exact'=>$exact,'normalized'=>$normalized,'leaf'=>$leaf];
+    }
+
+    private function includePathMappingForOnly(string $matchType, string $only): bool
+    {
+        if ($only === 'all' || $only === 'matched') return true;
+        return match ($only) {
+            'exact_path' => str_contains($matchType, 'exact_path_match'),
+            'normalized_path' => $matchType === 'normalized_path_match',
+            'exact_name' => $matchType === 'exact_name_match',
+            default => false,
+        };
+    }
+
+    private function pathMappingResponse(array $result, string $format, string $only)
+    {
+        if ($format !== 'csv') return response()->json($result);
+
+        $rows = $only === 'unmatched' ? ($result['unmatched_categories'] ?? []) : ($result['preview_mappings'] ?? []);
+        $columns = $only === 'unmatched'
+            ? ['local_category_id', 'local_category_name', 'local_category_path', 'local_parts_count', 'reason']
+            : ['local_category_id', 'local_category_name', 'local_category_path', 'ovoko_category_id', 'ovoko_category_name', 'ovoko_category_path', 'ovoko_level', 'match_type', 'confidence', 'local_parts_count', 'linked_products_evidence_count'];
+        $handle = fopen('php://temp', 'r+');
+        fputcsv($handle, $columns);
+        foreach ($rows as $row) fputcsv($handle, array_map(fn (string $column) => $row[$column] ?? null, $columns));
+        rewind($handle);
+        $csv = stream_get_contents($handle);
+        fclose($handle);
+
+        return response($csv, 200, [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => 'attachment; filename="ovoko-category-path-mapping-'.$only.'.csv"',
+        ]);
     }
 
     private function matchLocalCategoryToOvokoPath(array $local, array $ovoko): array
