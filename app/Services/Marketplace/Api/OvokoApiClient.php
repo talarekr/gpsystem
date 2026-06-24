@@ -22,10 +22,10 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
         return ['http_status' => $response->status(), 'json' => is_array($json) ? $json : [], 'api_ok' => $apiOk, 'error' => $json['msg'] ?? $json['message'] ?? null];
     }
 
-    public function fetchCategories(): array
+    public function fetchCategories(int $timeoutSeconds = 30): array
     {
         $endpoint = rtrim((string) $this->account?->api_base_url, '/').'/get/categories';
-        $response = Http::asForm()->acceptJson()->timeout(30)->post($endpoint, $this->authFields());
+        $response = Http::asForm()->acceptJson()->timeout(max(1, $timeoutSeconds))->post($endpoint, $this->authFields());
         $json = $response->json();
         $payload = is_array($json) ? $json : [];
         $statusCode = $payload['status_code'] ?? null;
@@ -43,14 +43,14 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
         ];
     }
 
-    public function fetchPartsPage(int $page, int $limit): array
+    public function fetchPartsPage(int $page, int $limit, int $timeoutSeconds = 30): array
     {
         $page = max(1, $page);
         $limit = $this->normalizePartsPageLimit($limit);
 
         $response = Http::asForm()
             ->acceptJson()
-            ->timeout(30)
+            ->timeout(max(1, $timeoutSeconds))
             ->post($this->endpointUsed($limit, $page), $this->authFields());
 
         $json = $response->json();
