@@ -50,28 +50,25 @@ class MarketplaceCategoryMapperController extends Controller
             ->withCount(['children', 'parts'])
             ->when($q !== '', fn ($query) => $query->where(fn ($sub) => $sub->where('name', 'like', "%{$q}%")->orWhere('category_path', 'like', "%{$q}%")->orWhere('full_slug_path', 'like', "%{$q}%")))
             ->when($q === '', fn ($query) => filled($parentId) ? $query->where('parent_id', $parentId) : $query->whereNull('parent_id'))
-            ->ordered()
             ->limit($q !== '' ? 50 : 200)
             ->get();
 
-        return response()->json(['items' => $categories->map(fn (PartCategory $category): array => [
+        $items = $categories->map(fn (PartCategory $category): array => [
             'id' => (string) $category->id,
             'parent_id' => $category->parent_id ? (string) $category->parent_id : null,
             'name' => $category->name,
             'path' => $category->category_path ?: $this->localPath($category),
             'has_children' => $category->children_count > 0,
             'products_count' => $category->woo_product_count ?? $category->parts_count,
-        ])->values()]);
+        ])->all();
+
+        return response()->json(['items' => $this->sortTreeItems($items, true)]);
     }
 
     public function channelTree(Request $request, string $channel): JsonResponse
     {
         if (! in_array($channel, self::CHANNELS, true)) {
             return response()->json(['items' => [], 'placeholder' => true, 'message' => 'Nieobsługiwany kanał.'], 404);
-        }
-
-        if ($channel === 'ovoko') {
-            return response()->json(['items' => $this->ovokoTree($request), 'placeholder' => false]);
         }
 
         $payload = $this->referenceOrExistingExternalCategories($request, $channel);
@@ -180,10 +177,10 @@ class MarketplaceCategoryMapperController extends Controller
         $categories = MarketplaceCategory::query()->where('channel', $treeChannel)->where('active', true)
             ->when($q !== '', fn ($query) => $query->where(fn ($sub) => $sub->where('name', 'like', "%{$q}%")->orWhere('full_path', 'like', "%{$q}%")))
             ->when($q === '', fn ($query) => filled($parent) ? $query->where('parent_external_category_id', (string) $parent) : $query->whereNull('parent_external_category_id'))
-            ->orderBy('name')->limit($q !== '' ? 50 : 200)->get();
+            ->limit($q !== '' ? 50 : 200)->get();
         $ids = $categories->pluck('external_category_id')->all();
         $parents = MarketplaceCategory::query()->where('channel', $treeChannel)->whereIn('parent_external_category_id', $ids)->pluck('parent_external_category_id')->all();
-        $items = $categories->map(fn (MarketplaceCategory $category): array => ['id' => (string) $category->external_category_id, 'parent_id' => $category->parent_external_category_id, 'name' => $category->name, 'path' => $category->full_path ?: $category->name, 'has_children' => in_array($category->external_category_id, $parents, true)])->values()->all();
+        $items = $this->sortTreeItems($categories->map(fn (MarketplaceCategory $category): array => ['id' => (string) $category->external_category_id, 'parent_id' => $category->parent_external_category_id, 'name' => $category->name, 'path' => $category->full_path ?: $category->name, 'has_children' => in_array($category->external_category_id, $parents, true)])->all());
 
         return $this->withTreeMeta([
             'items' => $items,
@@ -281,10 +278,12 @@ class MarketplaceCategoryMapperController extends Controller
     private function existingExternalCategories(Request $request, string $channel): array
     {
         $q = trim((string) $request->query('q', ''));
-        return MarketplaceCategoryMapping::query()->whereIn('channel', $channel === 'ebay' ? ['ebay', 'ebay_de'] : [$channel])->whereNotNull('external_category_id')
+        $items = MarketplaceCategoryMapping::query()->whereIn('channel', $channel === 'ebay' ? ['ebay', 'ebay_de'] : [$channel])->whereNotNull('external_category_id')
             ->when($q !== '', fn ($query) => $query->where(fn ($sub) => $sub->where('external_category_name', 'like', "%{$q}%")->orWhere('external_category_path', 'like', "%{$q}%")->orWhere('external_category_id', 'like', "%{$q}%")))
-            ->select(['external_category_id', 'external_category_name', 'external_category_path'])->distinct()->orderBy('external_category_name')->limit(50)->get()
+            ->select(['external_category_id', 'external_category_name', 'external_category_path'])->distinct()->limit(50)->get()
             ->map(fn ($m): array => ['id' => (string) $m->external_category_id, 'parent_id' => null, 'name' => $m->external_category_name ?: 'Kategoria '.$m->external_category_id, 'path' => $m->external_category_path ?: ($m->external_category_name ?: 'ID '.$m->external_category_id), 'has_children' => false])->values()->all();
+
+        return $this->sortTreeItems($items);
     }
 
     private function normalizeOvokoCategories(array $categories): array
@@ -296,7 +295,7 @@ class MarketplaceCategoryMapperController extends Controller
             return ['id' => $id, 'parent_id' => filled($parent) && (string) $parent !== '0' ? (string) $parent : null, 'name' => $name, 'path' => (string) ($row['category_title_path'] ?? $row['category_path'] ?? $row['path'] ?? $name)];
         })->filter(fn ($row) => filled($row['id']))->values();
         $parents = $rows->pluck('parent_id')->filter()->unique()->all();
-        return $rows->map(fn ($row) => $row + ['has_children' => in_array($row['id'], $parents, true)])->all();
+        return $this->sortTreeItems($rows->map(fn ($row) => $row + ['has_children' => in_array($row['id'], $parents, true)])->all());
     }
 
     private function mappingPayload(?MarketplaceCategoryMapping $mapping): ?array
@@ -307,5 +306,35 @@ class MarketplaceCategoryMapperController extends Controller
     private function localPath(PartCategory $category): string
     {
         return $category->category_path ?: $category->full_slug_path ?: $category->name;
+    }
+
+    private function sortTreeItems(array $items, bool $local = false): array
+    {
+        usort($items, function (array $a, array $b) use ($local): int {
+            if ($local) {
+                $aUncategorized = $this->isUncategorizedLabel((string) ($a['name'] ?? ''));
+                $bUncategorized = $this->isUncategorizedLabel((string) ($b['name'] ?? ''));
+                if ($aUncategorized !== $bUncategorized) return $aUncategorized ? -1 : 1;
+            }
+
+            return strnatcasecmp($this->sortKey((string) ($a['name'] ?? $a['label'] ?? '')), $this->sortKey((string) ($b['name'] ?? $b['label'] ?? '')));
+        });
+
+        return array_values($items);
+    }
+
+    private function sortKey(string $value): string
+    {
+        $value = mb_strtolower(trim($value));
+        if (class_exists(\Transliterator::class)) {
+            $value = \Transliterator::create('Any-Latin; Latin-ASCII')?->transliterate($value) ?: $value;
+        }
+
+        return $value;
+    }
+
+    private function isUncategorizedLabel(string $value): bool
+    {
+        return $this->sortKey($value) === 'bez kategorii';
     }
 }
