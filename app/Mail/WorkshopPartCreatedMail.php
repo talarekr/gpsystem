@@ -27,7 +27,7 @@ class WorkshopPartCreatedMail extends Mailable
     {
         return new Envelope(
             subject: sprintf(
-                'Warsztat: %s - %s',
+                '%s - %s',
                 $this->storageLocation(),
                 $this->partNumber()
             ),
