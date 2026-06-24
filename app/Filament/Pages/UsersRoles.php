@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 class UsersRoles extends OperationalPlaceholderPage
 {
+    protected static bool $shouldRegisterNavigation = false;
     protected static ?string $navigationIcon = 'heroicon-o-users';
     protected static ?string $navigationLabel = 'Pracownicy';
     protected static ?string $title = 'Pracownicy';

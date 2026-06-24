@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 class WooSyncPreparation extends OperationalPlaceholderPage
 {
+    protected static bool $shouldRegisterNavigation = false;
     protected static ?string $navigationIcon = null;
     protected static ?string $navigationLabel = 'WooCommerce';
     protected static ?string $navigationGroup = 'Kanały sprzedaży';

@@ -6,7 +6,7 @@ use App\Filament\Pages\Settings\SettingsPlaceholderPage;
 
 class Settings extends SettingsPlaceholderPage
 {
-    protected static bool $shouldRegisterNavigation = true;
+    protected static bool $shouldRegisterNavigation = false;
     protected static ?string $navigationIcon = 'heroicon-o-cog-6-tooth';
     protected static ?string $navigationLabel = 'Ustawienia';
     protected static ?string $title = 'Ustawienia';

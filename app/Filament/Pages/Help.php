@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 class Help extends OperationalPlaceholderPage
 {
+    protected static bool $shouldRegisterNavigation = false;
     protected static ?string $navigationIcon = 'heroicon-o-question-mark-circle';
     protected static ?string $navigationLabel = 'Pomoc';
     protected static ?string $title = 'Pomoc';

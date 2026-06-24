@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 class AllegroIntegration extends OperationalPlaceholderPage
 {
+    protected static bool $shouldRegisterNavigation = false;
     protected static ?string $navigationIcon = 'heroicon-o-link';
     protected static ?string $navigationLabel = 'Integracja Allegro';
     protected static ?string $title = 'Integracja Allegro';

@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 class ErrorCenter extends OperationalPlaceholderPage
 {
+    protected static bool $shouldRegisterNavigation = false;
     protected static ?string $navigationIcon = 'heroicon-o-queue-list';
     protected static ?string $navigationLabel = 'Zadania';
     protected static ?string $title = 'Zadania';

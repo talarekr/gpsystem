@@ -103,8 +103,6 @@ class AdminPanelProvider extends PanelProvider
                 NavigationGroup::make('Magazynowanie')
                     ->icon('heroicon-o-building-office-2')
                     ->collapsible(false),
-                NavigationGroup::make('Kanały sprzedaży')
-                    ->icon('heroicon-o-building-storefront'),
                 NavigationGroup::make('Administracja marketplace')
                     ->icon('heroicon-o-globe-alt')
                     ->collapsible(false),
