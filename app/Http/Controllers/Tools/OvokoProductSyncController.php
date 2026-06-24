@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Tools;
 
 use App\Http\Controllers\Controller;
+use App\Models\MarketplaceCategory;
 use App\Models\MarketplaceCategoryMapping;
 use App\Models\MarketplaceListing;
 use App\Models\Part;
@@ -337,6 +338,150 @@ class OvokoProductSyncController extends Controller
         $result['preview_mappings'] = array_slice($result['preview_mappings'], 0, $sampleLimit);
         if (! $includeUnmatched) unset($result['unmatched_categories']);
         return $this->pathMappingResponse($result, $format, $only);
+    }
+
+    public function dryRunSyncOvokoTreeToShopCategories(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+
+        $sampleLimit = max(1, min(200, (int) $request->query('sample_limit', 50)));
+        $result = [
+            'ok' => true,
+            'dry_run' => true,
+            'local_update' => false,
+            'ovoko_write' => false,
+            'allegro_write' => false,
+            'ebay_write' => false,
+            'ovoko_categories_count' => 0,
+            'local_categories_count' => 0,
+            'existing_mapping_match_count' => 0,
+            'external_id_match_count' => 0,
+            'exact_path_match_count' => 0,
+            'normalized_path_match_count' => 0,
+            'already_existing_count' => 0,
+            'would_create_count' => 0,
+            'would_create_level_1_count' => 0,
+            'would_create_level_2_count' => 0,
+            'would_create_level_3_count' => 0,
+            'would_create_mapping_count' => 0,
+            'would_skip_duplicate_count' => 0,
+            'would_skip_ambiguous_count' => 0,
+            'sample_existing_matches' => [],
+            'sample_would_create' => [],
+            'sample_parent_chains' => [],
+            'sample_ambiguous' => [],
+            'sample_old_unmatched_local_categories' => [],
+            'warnings' => ['read_only_dry_run_no_ovoko_allegro_ebay_or_local_writes_no_part_categories_or_mapping_writes'],
+        ];
+
+        if (! Schema::hasTable('marketplace_categories') || ! Schema::hasTable('part_categories')) {
+            $result['warnings'][] = 'required_table_missing';
+            return response()->json($result);
+        }
+
+        $ovoko = MarketplaceCategory::query()
+            ->where('channel', 'ovoko')
+            ->get(['external_category_id', 'parent_external_category_id', 'level', 'name', 'full_path'])
+            ->map(fn (MarketplaceCategory $category): array => [
+                'id' => (string) $category->external_category_id,
+                'parent_id' => filled($category->parent_external_category_id) ? (string) $category->parent_external_category_id : null,
+                'level' => (int) ($category->level ?: $this->pathLevel((string) ($category->full_path ?: $category->name))),
+                'name' => (string) $category->name,
+                'full_path' => (string) ($category->full_path ?: $category->name),
+            ])
+            ->filter(fn (array $row): bool => filled($row['id']) && filled($row['full_path']))
+            ->sortBy([['level', 'asc'], ['full_path', 'asc']], SORT_NATURAL | SORT_FLAG_CASE)
+            ->values();
+
+        $result['ovoko_categories_count'] = $ovoko->count();
+        $byOvokoId = $ovoko->keyBy('id');
+
+        $localSelect = $this->safeSelectColumns('part_categories', ['id', 'parent_id', 'name', 'category_path', 'external_id']);
+        $locals = DB::table('part_categories')->select($localSelect)->get()->map(fn ($row): array => (array) $row);
+        $result['local_categories_count'] = $locals->count();
+
+        $mappingByOvokoId = Schema::hasTable('marketplace_category_mappings')
+            ? DB::table('marketplace_category_mappings')
+                ->where('channel', 'ovoko')
+                ->whereNotNull('external_category_id')
+                ->select($this->safeSelectColumns('marketplace_category_mappings', ['local_category_id', 'external_category_id', 'external_category_name', 'external_category_path']))
+                ->get()
+                ->groupBy(fn ($row): string => (string) $row->external_category_id)
+            : collect();
+
+        $localsById = $locals->keyBy(fn (array $row): string => (string) ($row['id'] ?? ''));
+        $externalIdIndex = Schema::hasColumn('part_categories', 'external_id') ? $locals->filter(fn (array $row): bool => filled($row['external_id'] ?? null))->groupBy(fn (array $row): string => (string) $row['external_id']) : collect();
+        $exactPathIndex = $locals->filter(fn (array $row): bool => filled($row['category_path'] ?? null))->groupBy(fn (array $row): string => (string) $row['category_path']);
+        $normalizedPathIndex = $locals->filter(fn (array $row): bool => filled($row['category_path'] ?? null))->groupBy(fn (array $row): string => $this->normalizeTreeSyncPath((string) $row['category_path']));
+
+        $matchedLocalIds = [];
+        $matchedOvokoIds = [];
+        $wouldCreateIds = [];
+
+        foreach ($ovoko as $category) {
+            $match = $this->matchOvokoTreeCategoryToLocal($category, $mappingByOvokoId, $externalIdIndex, $exactPathIndex, $normalizedPathIndex, $localsById);
+            if (($match['ambiguous'] ?? false) === true) {
+                $result['would_skip_ambiguous_count']++;
+                $this->pushSample($result['sample_ambiguous'], $match['sample'], $sampleLimit);
+                continue;
+            }
+
+            if ($match['local'] !== null) {
+                $local = $match['local'];
+                $type = $match['match_type'];
+                $result[$type.'_count']++;
+                $result['already_existing_count']++;
+                if (isset($matchedLocalIds[(string) $local['id']])) $result['would_skip_duplicate_count']++;
+                $matchedLocalIds[(string) $local['id']] = true;
+                $matchedOvokoIds[$category['id']] = ['local_id' => (int) $local['id'], 'match_type' => $type];
+                if ($type !== 'existing_mapping_match') $result['would_create_mapping_count']++;
+                $this->pushSample($result['sample_existing_matches'], [
+                    'local_category_id' => (int) $local['id'],
+                    'local_category_name' => $local['name'] ?? null,
+                    'local_category_path' => $local['category_path'] ?? ($local['name'] ?? null),
+                    'ovoko_category_id' => $category['id'],
+                    'ovoko_name' => $category['name'],
+                    'ovoko_path' => $category['full_path'],
+                    'match_type' => $type,
+                ], $sampleLimit);
+                continue;
+            }
+
+            $wouldCreateIds[$category['id']] = true;
+            $level = max(1, (int) $category['level']);
+            $result['would_create_count']++;
+            if ($level >= 1 && $level <= 3) $result['would_create_level_'.$level.'_count']++;
+
+            $parentId = $category['parent_id'];
+            $parentMatch = $parentId ? ($matchedOvokoIds[$parentId] ?? null) : null;
+            $parentWouldCreate = $parentId ? isset($wouldCreateIds[$parentId]) : false;
+            $sample = [
+                'ovoko_category_id' => $category['id'],
+                'ovoko_parent_id' => $parentId,
+                'ovoko_level' => $level,
+                'name' => $category['name'],
+                'full_path' => $category['full_path'],
+                'parent_full_path' => $parentId && $byOvokoId->has($parentId) ? $byOvokoId->get($parentId)['full_path'] : null,
+                'would_parent_exist' => $parentId === null || $parentMatch !== null,
+                'would_parent_be_created' => $parentWouldCreate,
+                'suggested_local_parent_id' => $parentMatch['local_id'] ?? null,
+            ];
+            $this->pushSample($result['sample_would_create'], $sample, $sampleLimit);
+            if ($parentWouldCreate) $this->pushSample($result['sample_parent_chains'], $sample, $sampleLimit);
+        }
+
+        foreach ($locals as $local) {
+            if (! isset($matchedLocalIds[(string) ($local['id'] ?? '')])) {
+                $this->pushSample($result['sample_old_unmatched_local_categories'], [
+                    'local_category_id' => (int) ($local['id'] ?? 0),
+                    'local_category_name' => $local['name'] ?? null,
+                    'local_category_path' => $local['category_path'] ?? ($local['name'] ?? null),
+                    'note' => 'left_unchanged_for_separate_analysis',
+                ], $sampleLimit);
+            }
+        }
+
+        return response()->json($result);
     }
 
     public function ovokoCategoryMappingAutorun(Request $request)
@@ -1240,6 +1385,60 @@ HTML, 200, ['Content-Type' => 'text/html; charset=UTF-8']);
         $value = preg_replace('/\s*>\s*/u', ' > ', $value) ?? $value;
         $value = preg_replace('/\s+/u', ' ', trim($value)) ?? trim($value);
         return mb_strtolower($value);
+    }
+
+    private function matchOvokoTreeCategoryToLocal(array $category, $mappingByOvokoId, $externalIdIndex, $exactPathIndex, $normalizedPathIndex, $localsById): array
+    {
+        $id = (string) $category['id'];
+        $mappingRows = $mappingByOvokoId->get($id, collect());
+        $mappedLocalIds = collect($mappingRows)->pluck('local_category_id')->filter()->map(fn ($value): string => (string) $value)->unique()->values();
+        if ($mappedLocalIds->count() === 1) {
+            $local = $localsById->get($mappedLocalIds->first());
+            if ($local) return ['match_type' => 'existing_mapping_match', 'local' => $local];
+        }
+        if ($mappedLocalIds->count() > 1) return $this->ambiguousTreeSyncMatch($category, 'existing_mapping_match', $mappedLocalIds->all());
+
+        foreach ([
+            'external_id_match' => $externalIdIndex->get($id, collect()),
+            'exact_path_match' => $exactPathIndex->get((string) $category['full_path'], collect()),
+            'normalized_path_match' => $normalizedPathIndex->get($this->normalizeTreeSyncPath((string) $category['full_path']), collect()),
+        ] as $type => $matches) {
+            $matches = collect($matches)->values();
+            if ($matches->count() === 1) return ['match_type' => $type, 'local' => $matches->first()];
+            if ($matches->count() > 1) return $this->ambiguousTreeSyncMatch($category, $type, $matches->pluck('id')->all());
+        }
+
+        return ['match_type' => null, 'local' => null];
+    }
+
+    private function ambiguousTreeSyncMatch(array $category, string $matchType, array $localIds): array
+    {
+        return [
+            'ambiguous' => true,
+            'local' => null,
+            'sample' => [
+                'ovoko_category_id' => $category['id'],
+                'ovoko_name' => $category['name'],
+                'ovoko_path' => $category['full_path'],
+                'match_type' => $matchType,
+                'candidate_local_category_ids' => array_values(array_slice($localIds, 0, 20)),
+                'reason' => 'more_than_one_local_category_candidate',
+            ],
+        ];
+    }
+
+    private function normalizeTreeSyncPath(string $value): string
+    {
+        $value = html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $parts = preg_split('/\s+>\s+/u', $value) ?: [$value];
+        $parts = array_map(fn (string $part): string => preg_replace('/\s+/u', ' ', trim($part)) ?? trim($part), $parts);
+        return mb_strtolower(implode(' > ', array_filter($parts, fn (string $part): bool => $part !== '')));
+    }
+
+    private function pathLevel(string $path): int
+    {
+        if ($path === '') return 1;
+        return count(preg_split('/\s+>\s+/u', $path) ?: [$path]);
     }
 
     private function leafName(string $path): string
