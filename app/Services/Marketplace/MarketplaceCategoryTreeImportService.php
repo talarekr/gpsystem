@@ -5,9 +5,11 @@ namespace App\Services\Marketplace;
 use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceCategory;
 use App\Services\Marketplace\Api\MarketplaceApiManager;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 
 class MarketplaceCategoryTreeImportService
 {
@@ -60,6 +62,171 @@ class MarketplaceCategoryTreeImportService
         ];
     }
 
+
+    public function startAutorun(string $channel = 'all', int $batchSize = 200, bool $includeRawPayload = false, int $timeLimit = 10): array
+    {
+        $channel = $this->normalizeAutorunChannel($channel);
+        $batchSize = $this->normalizeBatchSize($batchSize);
+        $startedAt = now()->toIso8601String();
+        $runId = 'marketplace_category_tree_import_'.now()->format('YmdHis').'_'.Str::lower(Str::random(8));
+        $channels = $channel === 'all' ? self::CHANNELS : [$channel];
+        $warnings = [];
+        $worklist = [];
+
+        foreach ($channels as $currentChannel) {
+            try {
+                foreach ($this->buildWorklist($currentChannel, $includeRawPayload) as $row) {
+                    $worklist[] = $row;
+                }
+            } catch (\Throwable $e) {
+                $warnings[] = $currentChannel.': '.$e->getMessage();
+            }
+        }
+
+        $state = [
+            'run_id' => $runId,
+            'stage' => 'import',
+            'status' => 'started',
+            'channel' => $channel,
+            'channels' => $channels,
+            'batch_size' => $batchSize,
+            'include_raw_payload' => $includeRawPayload,
+            'time_limit' => max(1, min(30, $timeLimit)),
+            'processed_count' => 0,
+            'total_count' => count($worklist),
+            'created_count' => 0,
+            'updated_count' => 0,
+            'failed_count' => 0,
+            'sample_errors' => [],
+            'warnings' => $warnings,
+            'started_at' => $startedAt,
+            'updated_at' => $startedAt,
+            'completed_at' => null,
+            'worklist' => $worklist,
+        ];
+
+        $this->putAutorunState($runId, $state);
+        Cache::put($this->latestAutorunCacheKey(), $runId, now()->addHours(24));
+
+        return $this->publicAutorunState($state, 'started');
+    }
+
+    public function tickAutorun(string $runId): array
+    {
+        $state = $this->getAutorunState($runId);
+        if (! $state) return ['ok' => false, 'error_message' => 'Autorun not found or expired.', 'run_id' => $runId];
+        if (($state['status'] ?? null) === 'complete') return $this->publicAutorunState($state, 'complete');
+
+        $started = microtime(true);
+        $limit = (float) ($state['time_limit'] ?? 10);
+        $batchSize = (int) ($state['batch_size'] ?? 200);
+        $worklist = $state['worklist'] ?? [];
+        $total = count($worklist);
+        $processedThisTick = 0;
+        $state['status'] = 'running';
+        $state['stage'] = 'import';
+
+        while (($state['processed_count'] ?? 0) < $total && $processedThisTick < $batchSize && (microtime(true) - $started) < $limit) {
+            $row = $worklist[(int) $state['processed_count']];
+            try {
+                $exists = MarketplaceCategory::query()
+                    ->where('channel', $row['channel'])
+                    ->where('external_category_id', $row['external_category_id'])
+                    ->exists();
+                MarketplaceCategory::query()->updateOrCreate(
+                    ['channel' => $row['channel'], 'external_category_id' => $row['external_category_id']],
+                    [
+                        'parent_external_category_id' => $row['parent_external_category_id'],
+                        'level' => $row['level'],
+                        'name' => $row['name'],
+                        'full_path' => $row['full_path'],
+                        'raw_payload' => $row['raw_payload'] ?? null,
+                        'active' => $row['active'] ?? true,
+                        'imported_at' => $row['imported_at'] ?? now(),
+                    ]
+                );
+                $exists ? $state['updated_count']++ : $state['created_count']++;
+            } catch (\Throwable $e) {
+                $state['failed_count']++;
+                if (count($state['sample_errors']) < 20) {
+                    $state['sample_errors'][] = [
+                        'channel' => $row['channel'] ?? null,
+                        'external_category_id' => $row['external_category_id'] ?? null,
+                        'error_message' => Str::limit($e->getMessage(), 500),
+                    ];
+                }
+            }
+            $state['processed_count']++;
+            $processedThisTick++;
+        }
+
+        if (($state['processed_count'] ?? 0) >= $total) {
+            $state['status'] = 'complete';
+            $state['stage'] = 'complete';
+            $state['completed_at'] = now()->toIso8601String();
+            unset($state['worklist']);
+        }
+        $state['updated_at'] = now()->toIso8601String();
+        $this->putAutorunState($runId, $state);
+
+        return $this->publicAutorunState($state, $state['status'], ['processed_this_tick' => $processedThisTick]);
+    }
+
+    public function statusAutorun(string $runId): array
+    {
+        $state = $this->getAutorunState($runId);
+        return $state ? $this->publicAutorunState($state, $state['status'] ?? 'unknown') : ['ok' => false, 'error_message' => 'Autorun not found or expired.', 'run_id' => $runId];
+    }
+
+    public function resetAutorun(string $runId): array
+    {
+        Cache::forget($this->autorunCacheKey($runId));
+        if (Cache::get($this->latestAutorunCacheKey()) === $runId) Cache::forget($this->latestAutorunCacheKey());
+        return ['ok' => true, 'run_id' => $runId, 'status' => 'reset'];
+    }
+
+    public function resultsAutorun(string $runId): array
+    {
+        return $this->statusAutorun($runId) + ['results' => true];
+    }
+
+    public function latestAutorun(): ?array
+    {
+        $runId = Cache::get($this->latestAutorunCacheKey());
+        return is_string($runId) && $runId !== '' ? $this->getAutorunState($runId) : null;
+    }
+
+    public function debugAutorun(): array
+    {
+        $columns = Schema::hasTable('marketplace_categories') ? Schema::getColumnListing('marketplace_categories') : [];
+        $sample = null; $canBuild = false; $estimated = 0; $error = null;
+        try {
+            foreach (self::CHANNELS as $channel) {
+                $rows = $this->buildWorklist($channel, false);
+                $estimated += count($rows);
+                $sample ??= $rows[0] ?? null;
+            }
+            $canBuild = true;
+        } catch (\Throwable $e) { $error = $e->getMessage(); }
+        $cacheKey = 'marketplace_category_tree_import_debug_'.Str::random(8);
+        Cache::put($cacheKey, ['ok' => true], now()->addMinutes(5));
+        $cacheOk = (bool) data_get(Cache::get($cacheKey), 'ok');
+        Cache::forget($cacheKey);
+        return [
+            'ok' => true,
+            'table_exists' => Schema::hasTable('marketplace_categories'),
+            'columns' => $columns,
+            'model_ok' => class_exists(MarketplaceCategory::class),
+            'can_build_worklist' => $canBuild,
+            'estimated_total_count' => $estimated,
+            'sample_record' => $sample,
+            'sample_record_size_bytes' => $sample ? strlen(json_encode($sample)) : 0,
+            'cache_driver' => config('cache.default'),
+            'cache_write_test' => $cacheOk,
+            'error_message' => $error,
+        ];
+    }
+
     public function backfillEbayDe(bool $write): array
     {
         $channels = ['ebay_de', 'ebay'];
@@ -82,6 +249,99 @@ class MarketplaceCategoryTreeImportService
             }
         }
         return ['ok' => true, 'dry_run' => ! $write, 'local_update' => $write, 'category_tree_id' => $treeId, 'mapping_count' => $mappings->count(), 'would_backfill_count' => count($would), 'not_found_in_tree_count' => count($missing), 'sample_would_backfill' => array_slice($would, 0, 20), 'sample_not_found' => array_slice($missing, 0, 20)];
+    }
+
+
+    public function normalizeAutorunChannel(string $channel): string
+    {
+        return in_array($channel, array_merge(['all'], self::CHANNELS), true) ? $channel : 'all';
+    }
+
+    public function normalizeBatchSize(int $batchSize): int
+    {
+        return in_array($batchSize, [50, 100, 200], true) ? $batchSize : 200;
+    }
+
+    private function buildWorklist(string $channel, bool $includeRawPayload): array
+    {
+        return array_map(function (array $row) use ($includeRawPayload) {
+            return [
+                'channel' => (string) $row['channel'],
+                'external_category_id' => (string) $row['external_category_id'],
+                'parent_external_category_id' => filled($row['parent_external_category_id'] ?? null) ? (string) $row['parent_external_category_id'] : null,
+                'level' => (int) ($row['level'] ?? 0),
+                'name' => (string) ($row['name'] ?? $row['external_category_id']),
+                'full_path' => (string) ($row['full_path'] ?? $row['name'] ?? $row['external_category_id']),
+                'active' => (bool) ($row['active'] ?? true),
+                'imported_at' => now(),
+                'raw_payload' => $includeRawPayload ? $this->cleanRawPayload($row['raw_payload'] ?? []) : null,
+            ];
+        }, $this->fetch($channel));
+    }
+
+    private function cleanRawPayload(array $payload): array
+    {
+        unset($payload['childCategoryTreeNodes']);
+        foreach ($payload as $key => $value) {
+            if (is_array($value)) $payload[$key] = $this->limitedRaw($value);
+            if (is_string($value)) $payload[$key] = Str::limit($value, 1000)->value();
+        }
+        return $payload;
+    }
+
+    private function autorunCacheKey(string $runId): string
+    {
+        return 'marketplace_category_tree_import_autorun:'.$runId;
+    }
+
+    private function latestAutorunCacheKey(): string
+    {
+        return 'marketplace_category_tree_import_autorun:latest';
+    }
+
+    private function putAutorunState(string $runId, array $state): void
+    {
+        Cache::put($this->autorunCacheKey($runId), $state, now()->addHours(24));
+    }
+
+    private function getAutorunState(string $runId): ?array
+    {
+        $state = Cache::get($this->autorunCacheKey($runId));
+        return is_array($state) ? $state : null;
+    }
+
+    private function publicAutorunState(array $state, string $status, array $extra = []): array
+    {
+        $total = (int) ($state['total_count'] ?? 0);
+        $processed = (int) ($state['processed_count'] ?? 0);
+        $elapsed = isset($state['started_at']) ? max(0, now()->diffInSeconds(\Carbon\Carbon::parse($state['started_at']))) : null;
+        $nextUrl = $status === 'complete' ? null : url('/tools/run-marketplace-category-tree-import-autorun').'?token=gps_images_import_2026&run_id='.urlencode((string) $state['run_id']);
+        return array_merge([
+            'ok' => true,
+            'local_update' => true,
+            'ovoko_write' => false,
+            'allegro_write' => false,
+            'ebay_write' => false,
+            'run_id' => $state['run_id'],
+            'stage' => $state['stage'] ?? 'import',
+            'status' => $status,
+            'channel' => $state['channel'] ?? 'all',
+            'batch_size' => (int) ($state['batch_size'] ?? 200),
+            'processed_count' => $processed,
+            'total_count' => $total,
+            'created_count' => (int) ($state['created_count'] ?? 0),
+            'updated_count' => (int) ($state['updated_count'] ?? 0),
+            'failed_count' => (int) ($state['failed_count'] ?? 0),
+            'progress_percent' => $total > 0 ? round(($processed / $total) * 100, 2) : 100,
+            'sample_errors' => $state['sample_errors'] ?? [],
+            'warnings' => $state['warnings'] ?? [],
+            'next_url' => $nextUrl,
+            'elapsed' => $elapsed,
+            'time_spent' => $elapsed,
+            'started_at' => $state['started_at'] ?? null,
+            'updated_at' => $state['updated_at'] ?? null,
+            'completed_at' => $state['completed_at'] ?? null,
+        ], $extra);
     }
 
     private function fetch(string $channel): array

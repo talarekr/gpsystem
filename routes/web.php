@@ -2049,6 +2049,13 @@ Route::get('/tools/check-compiled-header', function (Request $request) {
 Route::get('/tools/dry-run-import-marketplace-category-trees', [MarketplaceCategoryTreeImportController::class, 'dryRunImport'])->name('tools.dry-run-import-marketplace-category-trees');
 Route::get('/tools/debug-marketplace-category-tree-fetch', [MarketplaceCategoryTreeImportController::class, 'debugFetch'])->name('tools.debug-marketplace-category-tree-fetch');
 Route::get('/tools/import-marketplace-category-trees', [MarketplaceCategoryTreeImportController::class, 'import'])->name('tools.import-marketplace-category-trees');
+Route::get('/tools/marketplace-category-tree-import-autorun', [MarketplaceCategoryTreeImportController::class, 'autorun'])->name('tools.marketplace-category-tree-import-autorun');
+Route::get('/tools/start-marketplace-category-tree-import-autorun', [MarketplaceCategoryTreeImportController::class, 'startAutorun'])->name('tools.start-marketplace-category-tree-import-autorun');
+Route::get('/tools/run-marketplace-category-tree-import-autorun', [MarketplaceCategoryTreeImportController::class, 'runAutorun'])->name('tools.run-marketplace-category-tree-import-autorun');
+Route::get('/tools/status-marketplace-category-tree-import-autorun', [MarketplaceCategoryTreeImportController::class, 'statusAutorun'])->name('tools.status-marketplace-category-tree-import-autorun');
+Route::get('/tools/reset-marketplace-category-tree-import-autorun', [MarketplaceCategoryTreeImportController::class, 'resetAutorun'])->name('tools.reset-marketplace-category-tree-import-autorun');
+Route::get('/tools/results-marketplace-category-tree-import-autorun', [MarketplaceCategoryTreeImportController::class, 'resultsAutorun'])->name('tools.results-marketplace-category-tree-import-autorun');
+Route::get('/tools/debug-marketplace-category-tree-import-autorun', [MarketplaceCategoryTreeImportController::class, 'debugAutorun'])->name('tools.debug-marketplace-category-tree-import-autorun');
 Route::get('/tools/dry-run-backfill-ebay-de-category-mapping-names', [MarketplaceCategoryTreeImportController::class, 'dryRunBackfill'])->name('tools.dry-run-backfill-ebay-de-category-mapping-names');
 Route::get('/tools/backfill-ebay-de-category-mapping-names', [MarketplaceCategoryTreeImportController::class, 'backfill'])->name('tools.backfill-ebay-de-category-mapping-names');
 Route::get('/tools/check-part-image-presentation', CheckPartImagePresentationController::class)->name('tools.check-part-image-presentation');
