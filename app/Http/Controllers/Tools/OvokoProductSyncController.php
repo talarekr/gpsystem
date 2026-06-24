@@ -277,7 +277,7 @@ class OvokoProductSyncController extends Controller
 <!doctype html><html><head><meta charset="utf-8"><title>Ovoko category mapping autorun</title><style>body{font-family:system-ui;margin:24px;max-width:1200px}button{font-size:16px;padding:8px 14px;margin-right:8px}pre{background:#111;color:#eee;padding:16px;overflow:auto;max-height:360px}.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.card{border:1px solid #ddd;padding:12px;border-radius:8px;overflow-wrap:anywhere}.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.meta{margin:16px 0;border:1px solid #ddd;border-radius:8px;padding:12px}.meta div{margin:4px 0}.error{color:#b00020;font-weight:700}</style></head><body>
 <h1>Ovoko category mapping autorun</h1>
 <div class="toolbar"><button id="start">Start</button><button id="resume">Resume active run</button><button id="manualTick" disabled>Manual tick</button><button id="refresh" disabled>Refresh status</button> <span id="state">idle</span></div>
-<div class="meta"><div><b>run_id:</b> <code id="runId">-</code></div><div><b>last_request_url:</b> <code id="lastRequestUrl">-</code></div><div><b>last_response_status:</b> <code id="lastResponseStatus">-</code></div><div><b>last_error:</b> <span id="lastError" class="error">-</span></div><div><b>next_url:</b> <code id="nextUrl">-</code></div><div><a id="results" href="#" style="display:none">Results for current run</a></div></div>
+<div class="meta"><div><b>run_id:</b> <code id="runId">-</code></div><div><b>last_request_url:</b> <code id="lastRequestUrl">-</code></div><div><b>last_response_status:</b> <code id="lastResponseStatus">-</code></div><div><b>last_error:</b> <span id="lastError" class="error">-</span></div><div><b>warning:</b> <span id="lastWarning" class="error">-</span></div><div><b>next_url:</b> <code id="nextUrl">-</code></div><div><a id="results" href="#" style="display:none">Results for current run</a></div></div>
 <div class="grid" id="cards"></div><h2>Request / response preview</h2><h3>Start response JSON</h3><pre id="startOut">{}</pre><h3>Last tick/status response JSON</h3><pre id="tickOut">{}</pre><h3>Samples / errors</h3><pre id="out">{}</pre>
 <script>
 const token=new URLSearchParams(location.search).get('token')||'';let currentRunId=null;let nextUrl=null;let running=false;
@@ -288,10 +288,11 @@ function setControls(isRunning){running=isRunning;const hasRun=!!currentRunId;do
 function resultsUrl(){return '/tools/results-ovoko-category-mapping-autorun?token='+encodeURIComponent(token)+'&run_id='+encodeURIComponent(currentRunId)}
 function tickUrl(){return '/tools/run-ovoko-category-mapping-autorun?token='+encodeURIComponent(token)+'&run_id='+encodeURIComponent(currentRunId)}
 function statusUrl(){return '/tools/status-ovoko-category-mapping-autorun?token='+encodeURIComponent(token)+'&run_id='+encodeURIComponent(currentRunId)}
-function render(d, target){if(!d)return;currentRunId=d.run_id||currentRunId;nextUrl=d.next_url||null;setText('runId',currentRunId);setText('nextUrl',nextUrl);document.getElementById('state').textContent=(d.status||'')+' '+(d.progress_percent??0)+'%';const keys=['processed_count','processed_total','remaining_count','current_batch','suggested_mapping_count','high_confidence_mapping_count','medium_confidence_mapping_count','ambiguous_mapping_count','no_evidence_count','categories_with_existing_ovoko_mapping_count','categories_missing_ovoko_mapping_count'];document.getElementById('cards').innerHTML=keys.map(k=>`<div class="card"><b>${k}</b><br>${typeof d[k]==='object'?JSON.stringify(d[k]):(d[k]??'')}</div>`).join('');document.getElementById('out').textContent=JSON.stringify({warnings:d.warnings,sample_errors:d.sample_errors,sample_suggested_mappings:d.sample_suggested_mappings,sample_high_confidence_mappings:d.sample_high_confidence_mappings,sample_ambiguous_mappings:d.sample_ambiguous_mappings},null,2);if(target)document.getElementById(target).textContent=JSON.stringify(d,null,2);if(currentRunId){let a=document.getElementById('results');a.href=resultsUrl();a.style.display='inline'}setControls(running)}
+function ensureNextUrl(d){if((d.status==='started'||d.status==='running')&&d.run_id&&!d.next_url&&(d.remaining_count??1)>0){setText('lastWarning','start_missing_next_url_fallback_used');return tickUrl()}setText('lastWarning','-');return d.next_url||null}
+function render(d, target){if(!d)return;currentRunId=d.run_id||currentRunId;nextUrl=ensureNextUrl(d);setText('runId',currentRunId);setText('nextUrl',nextUrl);document.getElementById('state').textContent=(d.status||'')+' '+(d.progress_percent??0)+'%';const keys=['processed_count','processed_total','remaining_count','current_batch','suggested_mapping_count','high_confidence_mapping_count','medium_confidence_mapping_count','ambiguous_mapping_count','no_evidence_count','categories_with_existing_ovoko_mapping_count','categories_missing_ovoko_mapping_count'];document.getElementById('cards').innerHTML=keys.map(k=>`<div class="card"><b>${k}</b><br>${typeof d[k]==='object'?JSON.stringify(d[k]):(d[k]??'')}</div>`).join('');document.getElementById('out').textContent=JSON.stringify({warnings:d.warnings,sample_errors:d.sample_errors,sample_suggested_mappings:d.sample_suggested_mappings,sample_high_confidence_mappings:d.sample_high_confidence_mappings,sample_ambiguous_mappings:d.sample_ambiguous_mappings},null,2);if(target)document.getElementById(target).textContent=JSON.stringify(d,null,2);if(currentRunId){let a=document.getElementById('results');a.href=resultsUrl();a.style.display='inline'}setControls(running)}
 async function call(url, target, retry=0){const resolved=absoluteUrl(url);setText('lastRequestUrl',resolved);setText('lastError','-');try{let r=await fetch(resolved,{cache:'no-store'});setText('lastResponseStatus',String(r.status));let text=await r.text();let d;try{d=text?JSON.parse(text):{}}catch(e){throw new Error('Invalid JSON from '+resolved+': '+text.slice(0,300))}if(!r.ok)throw new Error('HTTP '+r.status+': '+(d.error_message||text.slice(0,300)));return d}catch(e){setText('lastError',e.message);if(retry<2){await sleep(1000);return call(url,target,retry+1)}throw e}}
-async function autoTick(firstUrl){setControls(true);let url=firstUrl;try{while(url){await sleep(650);const d=await call(url,'tickOut');render(d,'tickOut');if(d.status==='failed'){setText('lastError',d.error_message||'Run failed');break}if(d.status==='complete')break;if(d.status==='started'||d.status==='running'){url=d.next_url||null;continue}break}}catch(e){document.getElementById('state').textContent='failed: '+e.message}finally{setControls(false)}}
-async function startRun(){setControls(true);try{const d=await call('/tools/start-ovoko-category-mapping-autorun?token='+encodeURIComponent(token)+'&batch_size=100&sample_limit=50&only_missing_ovoko_category_mapping=1&include_ambiguous=1&continue_on_error=1','startOut');render(d,'startOut');if((d.status==='started'||d.status==='running')&&d.next_url){await autoTick(d.next_url)}}catch(e){document.getElementById('state').textContent='failed: '+e.message;setControls(false)}}
+async function autoTick(firstUrl){setControls(true);let url=firstUrl;try{while(url){await sleep(650);const d=await call(url,'tickOut');render(d,'tickOut');if(d.status==='failed'){setText('lastError',d.error_message||'Run failed');break}if(d.status==='complete')break;if(d.status==='started'||d.status==='running'){url=ensureNextUrl(d);continue}break}}catch(e){document.getElementById('state').textContent='failed: '+e.message}finally{setControls(false)}}
+async function startRun(){setControls(true);try{const d=await call('/tools/start-ovoko-category-mapping-autorun?token='+encodeURIComponent(token)+'&batch_size=100&sample_limit=50&only_missing_ovoko_category_mapping=1&include_ambiguous=1&continue_on_error=1','startOut');render(d,'startOut');if((d.status==='started'||d.status==='running')&&nextUrl){await autoTick(nextUrl)}}catch(e){document.getElementById('state').textContent='failed: '+e.message;setControls(false)}}
 async function manualTick(){if(!currentRunId)return;const d=await call(nextUrl||tickUrl(),'tickOut');render(d,'tickOut')}
 async function refreshStatus(){if(!currentRunId)return;const d=await call(statusUrl(),'tickOut');render(d,'tickOut')}
 document.getElementById('start').onclick=startRun;document.getElementById('resume').onclick=startRun;document.getElementById('manualTick').onclick=manualTick;document.getElementById('refresh').onclick=refreshStatus;
@@ -304,16 +305,17 @@ HTML, 200, ['Content-Type' => 'text/html; charset=UTF-8']);
         if (! $this->validToken($request)) return $this->invalidTokenResponse();
         $activeId = Cache::get('ovoko_category_mapping_autorun_active');
         if ($activeId && ($active = Cache::get($this->autorunCacheKey($activeId))) && in_array($active['status'] ?? null, ['started','running'], true)) {
-            return response()->json($this->autorunPublicState($active) + ['active_run' => true, 'next_url' => $this->autorunNextUrl($request, $activeId)]);
+            return response()->json($this->autorunPublicStateWithNextUrl($active, $request) + ['active_run' => true]);
         }
         $batchSize = max(1, min(100, (int) $request->query('batch_size', 100)));
         $sampleLimit = max(1, min(100, (int) $request->query('sample_limit', 50)));
         $onlyMissing = $request->boolean('only_missing_ovoko_category_mapping', true);
         $runId = 'ovoko_catmap_'.date('Ymd_His').'_'.bin2hex(random_bytes(4));
         $total = $this->linkedOvokoPartsQuery($onlyMissing)->count();
-        $state = ['run_id'=>$runId,'status'=>'started','params'=>['batch_size'=>$batchSize,'sample_limit'=>$sampleLimit,'only_missing_ovoko_category_mapping'=>$onlyMissing,'include_ambiguous'=>$request->boolean('include_ambiguous', true),'continue_on_error'=>$request->boolean('continue_on_error', true)],'processed_count'=>0,'processed_total'=>$total,'current_offset'=>0,'groups'=>[],'no_evidence'=>[],'sample_errors'=>[],'warnings'=>['read_only_autorun_no_ovoko_allegro_ebay_or_marketplace_category_mapping_writes'],'started_at'=>now()->toISOString(),'updated_at'=>now()->toISOString(),'completed_at'=>null];
-        $this->putAutorun($state); Cache::put('ovoko_category_mapping_autorun_active', $runId, now()->addDay());
-        return response()->json($this->autorunPublicState($state) + ['status'=>'started','next_url'=>$this->autorunNextUrl($request, $runId)]);
+        $state = ['run_id'=>$runId,'status'=>$total > 0 ? 'started' : 'complete','params'=>['batch_size'=>$batchSize,'sample_limit'=>$sampleLimit,'only_missing_ovoko_category_mapping'=>$onlyMissing,'include_ambiguous'=>$request->boolean('include_ambiguous', true),'continue_on_error'=>$request->boolean('continue_on_error', true)],'processed_count'=>0,'processed_total'=>$total,'current_offset'=>0,'groups'=>[],'no_evidence'=>[],'sample_errors'=>[],'warnings'=>['read_only_autorun_no_ovoko_allegro_ebay_or_marketplace_category_mapping_writes'],'started_at'=>now()->toISOString(),'updated_at'=>now()->toISOString(),'completed_at'=>null];
+        $this->putAutorun($state);
+        if ($total > 0) Cache::put('ovoko_category_mapping_autorun_active', $runId, now()->addDay());
+        return response()->json($this->autorunPublicStateWithNextUrl($state, $request));
     }
 
     public function runOvokoCategoryMappingAutorun(Request $request): JsonResponse
@@ -330,7 +332,7 @@ HTML, 200, ['Content-Type' => 'text/html; charset=UTF-8']);
         foreach ($result['sample_errors'] as $e) $this->pushSample($state['sample_errors'], $e, $sampleLimit); $state['warnings'] = array_values(array_unique(array_merge($state['warnings'], $result['warnings'] ?? [])));
         $state['processed_count'] = min((int)$state['processed_total'], $offset + $processed); $state['current_offset'] = $offset + $processed; $state['current_batch'] = ['offset'=>$offset,'processed'=>$processed,'errors'=>$result['sample_errors']];
         if ($processed === 0 || $state['processed_count'] >= $state['processed_total']) { $state['status']='complete'; $state['completed_at']=now()->toISOString(); Cache::forget('ovoko_category_mapping_autorun_active'); }
-        $state['updated_at']=now()->toISOString(); $this->putAutorun($state); $public=$this->autorunPublicState($state); if ($state['status']==='running') $public['next_url']=$this->autorunNextUrl($request,$runId); return response()->json($public);
+        $state['updated_at']=now()->toISOString(); $this->putAutorun($state); return response()->json($this->autorunPublicStateWithNextUrl($state, $request));
     }
 
     public function statusOvokoCategoryMappingAutorun(Request $request): JsonResponse { if (! $this->validToken($request)) return $this->invalidTokenResponse(); $state=Cache::get($this->autorunCacheKey((string)$request->query('run_id',''))); return $state ? response()->json($this->autorunPublicState($state)) : response()->json(['ok'=>false,'error_message'=>'run_id not found'],404); }
@@ -827,6 +829,15 @@ HTML, 200, ['Content-Type' => 'text/html; charset=UTF-8']);
     private function autorunCacheKey(string $runId): string { return 'ovoko_category_mapping_autorun_'.$runId; }
     private function putAutorun(array $state): void { Cache::put($this->autorunCacheKey($state['run_id']), $state, now()->addDay()); }
     private function autorunNextUrl(Request $request, string $runId): string { return url('/tools/run-ovoko-category-mapping-autorun').'?token='.urlencode((string)$request->query('token')).'&run_id='.urlencode($runId); }
+    private function autorunPublicStateWithNextUrl(array $state, Request $request): array
+    {
+        $public = $this->autorunPublicState($state);
+        if (in_array($public['status'] ?? null, ['started', 'running'], true) && (int) ($public['remaining_count'] ?? 0) > 0) {
+            $public['next_url'] = $this->autorunNextUrl($request, (string) $public['run_id']);
+        }
+
+        return $public;
+    }
     private function autorunPublicState(array $state): array
     {
         $final = $this->finalizeAutorunMappings($state, (int)($state['params']['sample_limit'] ?? 50));

@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\MarketplaceAccount;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -401,6 +402,68 @@ class OvokoProductSyncControllerTest extends TestCase
             ->assertJsonPath('matched_part.category_path_pl', 'Części > Baterie');
 
         Http::assertSentCount(2);
+    }
+
+
+    public function test_autorun_start_and_active_resume_return_next_url_until_complete(): void
+    {
+        Cache::flush();
+        MarketplaceAccount::query()->create(['id' => 98, 'marketplace' => 'ovoko', 'name' => 'Ovoko main', 'code' => 'ovoko_main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'dry_run', 'api_credentials' => ['username' => 'u', 'password' => 'p', 'user_token' => 't']]);
+        DB::table('part_categories')->insert(['id' => 131, 'name' => 'Starters', 'category_path' => 'Parts > Starters', 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('parts')->insert(['id' => 981, 'name' => 'Starter A', 'part_number' => 'PN-981', 'description' => 'Desc', 'price' => 1, 'quantity' => 1, 'status' => 'ready', 'is_visible_storefront' => true, 'needs_listing' => false, 'needs_review' => false, 'category_id' => 131, 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('marketplace_listings')->insert(['marketplace' => 'ovoko', 'part_id' => 981, 'external_offer_id' => 'OV-981', 'created_at' => now(), 'updated_at' => now()]);
+
+        $response = $this->getJson('/tools/start-ovoko-category-mapping-autorun?token=gps_images_import_2026&batch_size=100&sample_limit=10&only_missing_ovoko_category_mapping=1');
+
+        $response->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('status', 'started')
+            ->assertJsonPath('remaining_count', 1)
+            ->assertJsonPath('next_url', fn ($url) => is_string($url) && str_contains($url, '/tools/run-ovoko-category-mapping-autorun') && str_contains($url, 'run_id='));
+
+        $runId = $response->json('run_id');
+
+        $resume = $this->getJson('/tools/start-ovoko-category-mapping-autorun?token=gps_images_import_2026&batch_size=100&sample_limit=10&only_missing_ovoko_category_mapping=1');
+
+        $resume->assertOk()
+            ->assertJsonPath('active_run', true)
+            ->assertJsonPath('run_id', $runId)
+            ->assertJsonPath('status', 'started')
+            ->assertJsonPath('remaining_count', 1)
+            ->assertJsonPath('next_url', fn ($url) => is_string($url) && str_contains($url, '/tools/run-ovoko-category-mapping-autorun') && str_contains($url, 'run_id='.$runId));
+    }
+
+    public function test_autorun_tick_processes_started_run_and_returns_next_url_when_remaining(): void
+    {
+        Cache::flush();
+        MarketplaceAccount::query()->create(['id' => 99, 'marketplace' => 'ovoko', 'name' => 'Ovoko main', 'code' => 'ovoko_main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'dry_run', 'api_credentials' => ['username' => 'u', 'password' => 'p', 'user_token' => 't']]);
+        DB::table('part_categories')->insert(['id' => 132, 'name' => 'Alternators', 'category_path' => 'Parts > Alternators', 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('parts')->insert([
+            ['id' => 991, 'name' => 'Alternator A', 'part_number' => 'PN-991', 'description' => 'Desc', 'price' => 1, 'quantity' => 1, 'status' => 'ready', 'is_visible_storefront' => true, 'needs_listing' => false, 'needs_review' => false, 'category_id' => 132, 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 992, 'name' => 'Alternator B', 'part_number' => 'PN-992', 'description' => 'Desc', 'price' => 1, 'quantity' => 1, 'status' => 'ready', 'is_visible_storefront' => true, 'needs_listing' => false, 'needs_review' => false, 'category_id' => 132, 'created_at' => now(), 'updated_at' => now()],
+        ]);
+        DB::table('marketplace_listings')->insert([
+            ['marketplace' => 'ovoko', 'part_id' => 991, 'external_offer_id' => 'OV-991', 'created_at' => now(), 'updated_at' => now()],
+            ['marketplace' => 'ovoko', 'part_id' => 992, 'external_offer_id' => 'OV-992', 'created_at' => now(), 'updated_at' => now()],
+        ]);
+        Http::fake([
+            'https://ovoko.example.test/get/categories' => Http::response(['status_code' => 'R200', 'list' => []], 200),
+            'https://ovoko.example.test/v2/get/parts*' => Http::response(['status_code' => 'R200', 'data' => [
+                ['id' => 'OV-991', 'category' => ['id' => 'OV-CAT-132', 'name' => 'Alternators', 'path' => 'Ovoko > Alternators']],
+                ['id' => 'OV-992', 'category' => ['id' => 'OV-CAT-132', 'name' => 'Alternators', 'path' => 'Ovoko > Alternators']],
+            ]], 200),
+        ]);
+
+        $start = $this->getJson('/tools/start-ovoko-category-mapping-autorun?token=gps_images_import_2026&batch_size=1&sample_limit=10&only_missing_ovoko_category_mapping=1');
+        $runId = $start->json('run_id');
+
+        $tick = $this->getJson('/tools/run-ovoko-category-mapping-autorun?token=gps_images_import_2026&run_id='.$runId);
+
+        $tick->assertOk()
+            ->assertJsonPath('status', 'running')
+            ->assertJsonPath('processed_count', 1)
+            ->assertJsonPath('remaining_count', 1)
+            ->assertJsonPath('next_url', fn ($url) => is_string($url) && str_contains($url, '/tools/run-ovoko-category-mapping-autorun') && str_contains($url, 'run_id='.$runId));
     }
 
 }
