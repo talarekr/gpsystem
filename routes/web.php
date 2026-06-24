@@ -193,6 +193,7 @@ Route::get('/tools/dry-run-audit-shop-category-tree-display', [OvokoProductSyncC
 Route::get('/tools/dry-run-compare-woo-category-tree-with-laravel', [OvokoProductSyncController::class, 'dryRunCompareWooCategoryTreeWithLaravel'])->name('tools.dry-run-compare-woo-category-tree-with-laravel');
 Route::get('/tools/dry-run-audit-category-display-against-woo-and-ovoko', [OvokoProductSyncController::class, 'dryRunAuditCategoryDisplayAgainstWooAndOvoko'])->name('tools.dry-run-audit-category-display-against-woo-and-ovoko');
 Route::get('/tools/dry-run-plan-fix-category-display-splits', [OvokoProductSyncController::class, 'dryRunPlanFixCategoryDisplaySplits'])->name('tools.dry-run-plan-fix-category-display-splits');
+Route::get('/tools/dry-run-verify-woo-ebay-mapping-for-category-splits', [OvokoProductSyncController::class, 'dryRunVerifyWooEbayMappingForCategorySplits'])->name('tools.dry-run-verify-woo-ebay-mapping-for-category-splits');
 Route::get('/tools/ovoko-category-mapping-autorun', [OvokoProductSyncController::class, 'ovokoCategoryMappingAutorun'])->name('tools.ovoko-category-mapping-autorun');
 Route::get('/tools/ovoko-category-mapping-autorun-smoke', [OvokoProductSyncController::class, 'ovokoCategoryMappingAutorunSmoke'])->name('tools.ovoko-category-mapping-autorun-smoke');
 Route::get('/tools/debug-ovoko-category-mapping-autorun-start-minimal', [OvokoProductSyncController::class, 'debugOvokoCategoryMappingAutorunStartMinimal'])->name('tools.debug-ovoko-category-mapping-autorun-start-minimal');
