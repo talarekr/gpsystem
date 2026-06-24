@@ -4,7 +4,7 @@ namespace App\Filament\Pages\Settings;
 
 class AuditLog extends SettingsPlaceholderPage
 {
-    protected static bool $shouldRegisterNavigation = true;
+    protected static bool $shouldRegisterNavigation = false;
     protected static ?string $navigationIcon = 'heroicon-o-key';
     protected static ?string $navigationLabel = 'Logowania';
     protected static ?string $title = 'Logowania';

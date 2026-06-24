@@ -4,7 +4,7 @@ namespace App\Filament\Pages\Settings;
 
 class EbayDeSettings extends SettingsPlaceholderPage
 {
-    protected static bool $shouldRegisterNavigation = true;
+    protected static bool $shouldRegisterNavigation = false;
     protected static ?string $navigationIcon = null;
     protected static ?string $navigationLabel = 'eBay DE';
     protected static ?string $navigationGroup = 'Kanały sprzedaży';

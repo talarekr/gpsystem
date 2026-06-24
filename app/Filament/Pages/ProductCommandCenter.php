@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 class ProductCommandCenter extends OperationalPlaceholderPage
 {
+    protected static bool $shouldRegisterNavigation = false;
     protected static ?string $navigationIcon = 'heroicon-o-cube';
     protected static ?string $navigationLabel = 'Części';
     protected static ?string $title = 'Części';
