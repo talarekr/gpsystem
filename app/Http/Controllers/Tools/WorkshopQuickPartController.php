@@ -3,12 +3,15 @@
 namespace App\Http\Controllers\Tools;
 
 use App\Http\Controllers\Controller;
+use App\Mail\WorkshopPartCreatedMail;
 use App\Models\Part;
 use App\Models\StorageLocation;
 use App\Services\Parts\PartImageUploadService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\View\View;
 
 class WorkshopQuickPartController extends Controller
@@ -58,6 +61,7 @@ class WorkshopQuickPartController extends Controller
             'storage_location' => ['required', 'string', 'max:255'],
             'part_number' => ['required', 'string', 'max:255'],
             'internal_note' => ['nullable', 'string', 'max:5000'],
+            'send_email_copy' => ['nullable', 'boolean'],
         ], [
             'photos.required' => 'Dodaj minimum jedno zdjęcie części.',
             'photos.min' => 'Dodaj minimum jedno zdjęcie części.',
@@ -94,13 +98,53 @@ class WorkshopQuickPartController extends Controller
             return $part;
         });
 
-        return redirect()
+        $mailWarning = null;
+
+        if ($request->boolean('send_email_copy')) {
+            $mailWarning = $this->sendWorkshopNotification($part);
+        }
+
+        $redirect = redirect()
             ->route($redirectRoute, $redirectParameters)
             ->with('workshop_quick_part_created', [
                 'id' => $part->id,
                 'part_number' => $part->part_number,
                 'admin_url' => url('/admin/parts/'.$part->id.'/edit'),
             ]);
+
+        if ($mailWarning !== null) {
+            $redirect->with('workshop_quick_part_mail_warning', $mailWarning);
+        }
+
+        return $redirect;
+    }
+
+    private function sendWorkshopNotification(Part $part): ?string
+    {
+        $recipient = config('services.workshop_intake.notification_email');
+
+        if (blank($recipient)) {
+            Log::warning('Workshop intake notification email is not configured.', [
+                'part_id' => $part->id,
+            ]);
+
+            return null;
+        }
+
+        try {
+            Mail::to($recipient)->send(new WorkshopPartCreatedMail(
+                $part->loadMissing(['images', 'storageLocation'])
+            ));
+        } catch (\Throwable $exception) {
+            Log::error('Workshop intake notification email failed.', [
+                'part_id' => $part->id,
+                'exception' => $exception,
+            ]);
+
+            return 'Część została dodana, ale nie udało się wysłać kopii e-mail';
+        }
+
+        return null;
     }
 
     private function renderForm(Request $request): View
