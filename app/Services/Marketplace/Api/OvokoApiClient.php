@@ -241,6 +241,11 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
 
             return [
             'external_offer_id' => (string) ($row['id'] ?? $row['part_id'] ?? $row['ovoko_part_id'] ?? $row['external_id'] ?? ''),
+            'raw_id' => $row['id'] ?? null,
+            'external_id_raw' => $row['external_id'] ?? null,
+            'part_id_raw' => $row['part_id'] ?? null,
+            'ovoko_part_id_raw' => $row['ovoko_part_id'] ?? null,
+            'rrr_id_raw' => $row['rrr_id'] ?? null,
             'title' => $row['name'] ?? $row['title'] ?? null,
             'sku' => $row['sku'] ?? $row['code'] ?? null,
             'price' => $row['price'] ?? $row['sell_price'] ?? null,
@@ -249,11 +254,12 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
             'original_currency' => $row['original_currency'] ?? null,
             'quantity' => $row['quantity'] ?? $row['stock'] ?? $row['qty'] ?? null,
             'status' => $row['status'] ?? null,
-            'url' => $row['url'] ?? null,
+            'url' => $row['shop_url'] ?? $row['url'] ?? $row['link'] ?? null,
             'ovoko_category_id' => $row['category_id'] ?? $row['categoryId'] ?? $row['part_category_id'] ?? $category['id'] ?? $category['category_id'] ?? $category['categoryId'] ?? null,
             'ovoko_category_name' => $row['category_name'] ?? $row['categoryName'] ?? $category['name'] ?? $category['category_name'] ?? $category['pl'] ?? $category['en'] ?? null,
             'ovoko_category_path' => $row['category_title_path'] ?? $row['category_path'] ?? $row['categoryPath'] ?? $category['path'] ?? $category['category_path'] ?? $category['category_title_path'] ?? null,
             'raw_category_fields' => $this->rawCategoryFields($row),
+            'raw_top_level_keys' => array_values(array_slice(array_keys($row), 0, 80)),
         ];
         }, array_filter($rows, 'is_array')));
     }

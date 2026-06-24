@@ -320,7 +320,7 @@ class OvokoProductSyncControllerTest extends TestCase
         $this->assertDatabaseCount('marketplace_category_mappings', 0);
     }
 
-    public function test_linked_products_mapping_falls_back_to_part_detail_endpoint_when_page_misses_ids(): void
+    public function test_linked_products_mapping_uses_snapshot_pages_for_linked_ids(): void
     {
         MarketplaceAccount::query()->create(['id' => 94, 'marketplace' => 'ovoko', 'name' => 'Ovoko main', 'code' => 'ovoko_main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'dry_run', 'api_credentials' => ['username' => 'u', 'password' => 'p', 'user_token' => 't']]);
         DB::table('part_categories')->insert(['id' => 32, 'name' => 'Gearbox', 'category_path' => 'Parts > Gearbox', 'created_at' => now(), 'updated_at' => now()]);
@@ -332,8 +332,7 @@ class OvokoProductSyncControllerTest extends TestCase
                 ['id' => '2', 'parent_id' => '1', 'level' => 2, 'pl' => 'Skrzynia', 'en' => 'Gearbox'],
                 ['id' => '123', 'parent_id' => '2', 'level' => 3, 'pl' => 'Automatyczna skrzynia biegów', 'en' => 'Automatic gearbox'],
             ]], 200),
-            'https://ovoko.example.test/v2/get/parts*' => Http::response(['status_code' => 'R200', 'data' => []], 200),
-            'https://ovoko.example.test/v2/get/part/10776' => Http::response(['status_code' => 'R200', 'data' => ['id' => '10776', 'name' => 'Gearbox A', 'category_id' => '123']], 200),
+            'https://ovoko.example.test/v2/get/parts*' => Http::response(['status_code' => 'R200', 'data' => [['id' => '10776', 'name' => 'Gearbox A', 'category_id' => '123']]], 200),
         ]);
 
         $response = $this->getJson('/tools/dry-run-ovoko-category-mapping-from-linked-products?token=gps_images_import_2026&limit=100&page=1&sample_limit=50&only_missing_ovoko_category_mapping=1');
@@ -348,7 +347,7 @@ class OvokoProductSyncControllerTest extends TestCase
         $this->assertDatabaseCount('marketplace_category_mappings', 0);
     }
 
-    public function test_linked_products_mapping_rejects_detail_category_when_returned_id_does_not_match(): void
+    public function test_linked_products_mapping_does_not_use_detail_endpoint_when_snapshot_misses_id(): void
     {
         MarketplaceAccount::query()->create(['id' => 96, 'marketplace' => 'ovoko', 'name' => 'Ovoko main', 'code' => 'ovoko_main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'dry_run', 'api_credentials' => ['username' => 'u', 'password' => 'p', 'user_token' => 't']]);
         DB::table('part_categories')->insert(['id' => 33, 'name' => 'Battery', 'category_path' => 'Parts > Battery', 'created_at' => now(), 'updated_at' => now()]);
@@ -356,9 +355,6 @@ class OvokoProductSyncControllerTest extends TestCase
         DB::table('marketplace_listings')->insert(['marketplace' => 'ovoko', 'part_id' => 731, 'external_offer_id' => '10776', 'created_at' => now(), 'updated_at' => now()]);
         Http::fake([
             'https://ovoko.example.test/get/categories' => Http::response(['status_code' => 'R200', 'list' => []], 200),
-            'https://ovoko.example.test/v2/get/parts/10776' => Http::response(['status_code' => 'R200', 'data' => ['id' => '3', 'name' => 'Wrong default', 'category_id' => '1689']], 200),
-            'https://ovoko.example.test/v2/get/part/10776' => Http::response(['status_code' => 'R200', 'data' => ['id' => '3', 'name' => 'Wrong default', 'category_id' => '1689']], 200),
-            'https://ovoko.example.test/get/part/10776' => Http::response(['status_code' => 'R200', 'data' => ['id' => '3', 'name' => 'Wrong default', 'category_id' => '1689']], 200),
             'https://ovoko.example.test/v2/get/parts*' => Http::response(['status_code' => 'R200', 'data' => []], 200),
         ]);
 
@@ -369,10 +365,42 @@ class OvokoProductSyncControllerTest extends TestCase
             ->assertJsonPath('linked_products_with_ovoko_category', 0)
             ->assertJsonPath('suggested_mapping_count', 0)
             ->assertJsonPath('unmapped_or_missing_category_count', 1)
-            ->assertJsonPath('sample_errors.0.type', 'detail_id_mismatch')
-            ->assertJsonPath('sample_errors.0.mismatches.0.returned_raw_id', '3');
+            ->assertJsonPath('sample_errors.0.type', 'ovoko_part_not_found_in_snapshot')
+            ->assertJsonPath('sample_errors.0.ovoko_part_id', '10776');
 
         $this->assertDatabaseCount('marketplace_category_mappings', 0);
+    }
+
+    public function test_debug_ovoko_find_linked_part_in_snapshot_reports_match_read_only(): void
+    {
+        MarketplaceAccount::query()->create(['id' => 97, 'marketplace' => 'ovoko', 'name' => 'Ovoko main', 'code' => 'ovoko_main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'dry_run', 'api_credentials' => ['username' => 'u', 'password' => 'p', 'user_token' => 't']]);
+        Http::fake([
+            'https://ovoko.example.test/get/categories' => Http::response(['status_code' => 'R200', 'list' => [
+                ['id' => '1', 'parent_id' => null, 'level' => 1, 'pl' => 'Części', 'en' => 'Parts'],
+                ['id' => '1689', 'parent_id' => '1', 'level' => 3, 'pl' => 'Baterie', 'en' => 'Batteries'],
+            ]], 200),
+            'https://ovoko.example.test/v2/get/parts*' => Http::response(['status_code' => 'R200', 'data' => [
+                ['id' => '10776', 'external_id' => '10776', 'name' => 'Battery', 'category_id' => '1689', 'shop_url' => 'https://shop.example.test/10776'],
+            ]], 200),
+        ]);
+
+        $response = $this->getJson('/tools/debug-ovoko-find-linked-part-in-snapshot?token=gps_images_import_2026&ovoko_part_id=10776');
+
+        $response->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('dry_run', true)
+            ->assertJsonPath('ovoko_write', false)
+            ->assertJsonPath('local_update', false)
+            ->assertJsonPath('ovoko_read_request', true)
+            ->assertJsonPath('requested_ovoko_part_id', '10776')
+            ->assertJsonPath('found', true)
+            ->assertJsonPath('matched_part.page', 1)
+            ->assertJsonPath('matched_part.raw_id', '10776')
+            ->assertJsonPath('matched_part.external_id', '10776')
+            ->assertJsonPath('matched_part.category_id', '1689')
+            ->assertJsonPath('matched_part.category_path_pl', 'Części > Baterie');
+
+        Http::assertSentCount(2);
     }
 
 }

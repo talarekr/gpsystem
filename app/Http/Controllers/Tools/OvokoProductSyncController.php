@@ -167,7 +167,7 @@ class OvokoProductSyncController extends Controller
         $parts = $this->linkedOvokoPartsQuery($onlyMissing)->forPage($page, $limit)->get();
 
         $categoryTree = $this->fetchOvokoCategoryTree($result);
-        $ovokoPartsById = $this->fetchOvokoPartsByLinkedIds($parts, $page, $limit, $result);
+        $ovokoPartsById = $this->fetchOvokoPartsSnapshotByLinkedIds($parts, $result);
         $groups = [];
 
         foreach ($parts as $part) {
@@ -236,7 +236,7 @@ class OvokoProductSyncController extends Controller
         $sampleLimit = max(1, min(100, (int) $request->query('sample_limit', 50)));
         $result = ['ok' => true, 'dry_run' => true, 'ovoko_write' => false, 'local_update' => false, 'ovoko_read_request' => true, 'local_category_id' => $localCategoryId, 'local_category_path' => null, 'linked_products_checked' => 0, 'observed_ovoko_categories' => [], 'suggested_mapping' => null, 'ambiguous' => false, 'sample_products' => [], 'sample_errors' => [], 'warnings' => ['read_only_preview_no_ovoko_allegro_ebay_or_local_writes']];
         $parts = $this->linkedOvokoPartsQuery(false)->where('category_id', $localCategoryId)->limit(100)->get();
-        $ovokoPartsById = $this->fetchOvokoPartsByLinkedIds($parts, 1, 100, $result);
+        $ovokoPartsById = $this->fetchOvokoPartsSnapshotByLinkedIds($parts, $result);
         $observed = [];
         foreach ($parts as $part) {
             $result['linked_products_checked']++;
@@ -356,6 +356,59 @@ class OvokoProductSyncController extends Controller
         } catch (\Throwable $e) {
             $result['warnings'][] = 'ovoko_api_exception';
             $result['tested_endpoints'][] = ['endpoint' => null, 'request_fields' => [], 'http_status' => null, 'api_status_code' => null, 'matched_requested_id' => false, 'returned_raw_id' => null, 'returned_external_id' => null, 'returned_name' => null, 'returned_category_id' => null, 'returned_shop_url' => null, 'top_level_keys' => [], 'error' => $e->getMessage()];
+        }
+
+        return response()->json($result);
+    }
+
+    public function debugOvokoFindLinkedPartInSnapshot(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+
+        $requestedId = trim((string) $request->query('ovoko_part_id', ''));
+        if ($requestedId === '') return response()->json(['ok' => false, 'error_message' => 'ovoko_part_id is required.'], 422);
+
+        $result = [
+            'ok' => true,
+            'dry_run' => true,
+            'ovoko_write' => false,
+            'local_update' => false,
+            'ovoko_read_request' => true,
+            'requested_ovoko_part_id' => $requestedId,
+            'found' => false,
+            'pages_checked' => 0,
+            'total_seen' => 0,
+            'matched_part' => null,
+            'sample_ids' => [],
+            'warnings' => ['read_only_snapshot_diagnostics_no_ovoko_allegro_ebay_or_local_writes'],
+        ];
+
+        $tree = $this->fetchOvokoCategoryTree($result);
+        $snapshot = $this->fetchOvokoPartsSnapshotByIds([$requestedId], $result, false);
+        $result['pages_checked'] = $snapshot['pages_checked'];
+        $result['total_seen'] = $snapshot['total_seen'];
+        $result['sample_ids'] = $snapshot['sample_ids'];
+        $result['warnings'] = array_values(array_unique(array_merge($result['warnings'], $snapshot['warnings'])));
+
+        $part = $snapshot['parts_by_id'][$requestedId] ?? null;
+        if ($part) {
+            $category = $this->extractOvokoCategory($part, $tree, $result);
+            $result['found'] = true;
+            $result['matched_part'] = [
+                'page' => $part['snapshot_page'] ?? null,
+                'raw_id' => $part['raw_id'] ?? null,
+                'external_id' => $part['external_offer_id'] ?? null,
+                'name' => $part['title'] ?? null,
+                'category_id' => $category['ovoko_category_id'] ?? ($part['ovoko_category_id'] ?? null),
+                'category_id_resolved' => (bool) (($category['ovoko_category_id'] ?? null) && isset($tree['by_id'][(string) $category['ovoko_category_id']])),
+                'category_path_pl' => $category['ovoko_category_path'] ?? null,
+                'shop_url' => $part['url'] ?? null,
+                'top_level_keys' => $part['raw_top_level_keys'] ?? [],
+            ];
+        } else {
+            $result['warnings'][] = 'requested_id_not_found_in_ovoko_parts_snapshot';
+            $result['snapshot_contains_requested_id_as_string'] = in_array($requestedId, array_map('strval', array_column($snapshot['sample_ids'], 'id')), true);
+            $result['snapshot_contains_requested_id_as_int'] = ctype_digit($requestedId) && in_array((int) $requestedId, array_column($snapshot['sample_ids'], 'id'), true);
         }
 
         return response()->json($result);
@@ -541,38 +594,77 @@ class OvokoProductSyncController extends Controller
         return $query;
     }
 
-    private function fetchOvokoPartsByLinkedIds($parts, int $page, int $limit, array &$result): array
+    private function fetchOvokoPartsSnapshotByLinkedIds($parts, array &$result): array
     {
-        $ids = $parts->map(fn ($part) => $this->listingOvokoExternalId($this->ovokoListing($part)))->filter()->map(fn ($id) => (string) $id)->unique()->values()->all();
+        $ids = $parts->map(fn ($part) => $this->listingOvokoExternalId($this->ovokoListing($part)))
+            ->filter()->map(fn ($id) => (string) $id)->unique()->values()->all();
         if ($ids === []) return [];
+
+        return $this->fetchOvokoPartsSnapshotByIds($ids, $result, true)['parts_by_id'];
+    }
+
+    private function fetchOvokoPartsSnapshotByIds(array $ids, array &$result, bool $stopWhenAllFound = true): array
+    {
+        $wanted = array_values(array_unique(array_map('strval', $ids)));
+        $wantedSet = array_flip($wanted);
+        $partsById = [];
+        $warnings = [];
+        $sampleIds = [];
+        $pagesChecked = 0;
+        $totalSeen = 0;
+        $maxPages = 200;
+        $limit = OvokoApiClient::MAX_PARTS_PAGE_LIMIT;
+
         try {
-            $api = app(MarketplaceApiManager::class)->client('ovoko')->fetchPartsPage($page, $limit);
-            if (! ($api['api_ok'] ?? false)) $result['sample_errors'][] = ['type' => 'ovoko_api_status_not_ok', 'http_status' => $api['http_status'] ?? null, 'api_status_code' => $api['api_status_code'] ?? null, 'error' => $api['error'] ?? null];
-            $byId = [];
-            foreach (($api['parts'] ?? []) as $row) {
-                $id = (string) ($row['external_offer_id'] ?? '');
-                if ($id !== '' && in_array($id, $ids, true)) $byId[$id] = $row;
+            $client = app(MarketplaceApiManager::class)->client('ovoko');
+            if (! $client instanceof OvokoApiClient) {
+                return ['parts_by_id' => [], 'pages_checked' => 0, 'total_seen' => 0, 'sample_ids' => [], 'warnings' => ['ovoko_client_unavailable']];
             }
 
-            $missingIds = array_values(array_diff($ids, array_keys($byId)));
-            $client = app(MarketplaceApiManager::class)->client('ovoko');
-            if ($client instanceof OvokoApiClient) {
-                foreach ($missingIds as $id) {
-                    $detail = $client->fetchPartRawById($id);
-                    if (($detail['api_ok'] ?? false) && is_array($detail['normalized'] ?? null)) {
-                        $byId[$id] = $detail['normalized'];
-                    } else {
-                        $type = ($detail['error'] ?? null) === 'detail_id_mismatch' ? 'detail_id_mismatch' : 'ovoko_part_detail_not_found';
-                        $this->pushSample($result['sample_errors'], ['type' => $type, 'ovoko_part_id' => $id, 'error' => $detail['error'] ?? null, 'mismatches' => $detail['mismatches'] ?? []], 50);
+            for ($page = 1; $page <= $maxPages; $page++) {
+                $api = $client->fetchPartsPage($page, $limit);
+                $pagesChecked++;
+                if (! ($api['api_ok'] ?? false)) {
+                    $warnings[] = 'ovoko_parts_api_status_not_ok';
+                    $result['sample_errors'][] = ['type' => 'ovoko_parts_api_status_not_ok', 'page' => $page, 'http_status' => $api['http_status'] ?? null, 'api_status_code' => $api['api_status_code'] ?? null, 'error' => $api['error'] ?? null];
+                    break;
+                }
+
+                $rows = $api['parts'] ?? [];
+                foreach ($rows as $row) {
+                    if (! is_array($row)) continue;
+                    $totalSeen++;
+                    $row['snapshot_page'] = $page;
+                    foreach ($this->ovokoSnapshotMatchIds($row) as $id) {
+                        $this->pushSample($sampleIds, ['id' => $id, 'page' => $page], 50);
+                        if (isset($wantedSet[$id])) $partsById[$id] = $row;
                     }
                 }
-            }
 
-            return $byId;
+                if ($stopWhenAllFound && count(array_intersect($wanted, array_keys($partsById))) === count($wanted)) break;
+                if (count($rows) < $limit) break;
+            }
         } catch (\Throwable $e) {
-            $result['sample_errors'][] = ['type' => 'ovoko_api_exception', 'message' => $e->getMessage()];
-            return [];
+            $warnings[] = 'ovoko_parts_snapshot_exception';
+            $result['sample_errors'][] = ['type' => 'ovoko_parts_snapshot_exception', 'message' => $e->getMessage()];
         }
+
+        foreach (array_diff($wanted, array_keys($partsById)) as $missingId) {
+            $this->pushSample($result['sample_errors'], ['type' => 'ovoko_part_not_found_in_snapshot', 'ovoko_part_id' => $missingId], 50);
+        }
+
+        return ['parts_by_id' => $partsById, 'pages_checked' => $pagesChecked, 'total_seen' => $totalSeen, 'sample_ids' => $sampleIds, 'warnings' => $warnings];
+    }
+
+    private function ovokoSnapshotMatchIds(array $row): array
+    {
+        $ids = [];
+        foreach (['raw_id', 'external_offer_id', 'external_id_raw', 'part_id_raw', 'ovoko_part_id_raw', 'rrr_id_raw'] as $key) {
+            $value = $row[$key] ?? null;
+            if (is_scalar($value) && (string) $value !== '') $ids[] = (string) $value;
+        }
+
+        return array_values(array_unique($ids));
     }
 
     private function extractOvokoCategory(?array $row, ?array $tree = null, ?array &$result = null): ?array
