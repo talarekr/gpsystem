@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\MarketplaceCategory;
 use App\Models\MarketplaceCategoryMapping;
 use App\Models\PartCategory;
 use App\Services\Marketplace\Api\MarketplaceApiManager;
@@ -17,6 +18,7 @@ use Illuminate\View\View;
 class MarketplaceCategoryMapperController extends Controller
 {
     private const CHANNELS = ['allegro_main', 'ovoko', 'ebay'];
+    private const TREE_CHANNELS = ['allegro_main' => 'allegro_main', 'ovoko' => 'ovoko', 'ebay' => 'ebay_de'];
 
     public function index(): View
     {
@@ -70,9 +72,9 @@ class MarketplaceCategoryMapperController extends Controller
         }
 
         return response()->json([
-            'items' => $this->existingExternalCategories($request, $channel),
-            'placeholder' => true,
-            'message' => 'Pełne drzewo nie jest jeszcze zaimportowane; lista używa obecnych lokalnych mapowań jako bezpiecznego startu.',
+            'items' => $this->referenceOrExistingExternalCategories($request, $channel),
+            'placeholder' => ! MarketplaceCategory::query()->where('channel', self::TREE_CHANNELS[$channel])->exists(),
+            'message' => 'Lokalne drzewo referencyjne nie jest jeszcze zaimportowane; lista używa obecnych lokalnych mapowań jako bezpiecznego startu.',
         ]);
     }
 
@@ -141,13 +143,37 @@ class MarketplaceCategoryMapperController extends Controller
             ->take($q !== '' ? 50 : 200)->values()->all();
     }
 
+    private function referenceOrExistingExternalCategories(Request $request, string $channel): array
+    {
+        $treeChannel = self::TREE_CHANNELS[$channel];
+        if (MarketplaceCategory::query()->where('channel', $treeChannel)->exists()) {
+            return $this->referenceCategories($request, $treeChannel);
+        }
+
+        return $this->existingExternalCategories($request, $channel);
+    }
+
+    private function referenceCategories(Request $request, string $treeChannel): array
+    {
+        $q = trim((string) $request->query('q', ''));
+        $parent = $request->query('parent_external_id');
+        $categories = MarketplaceCategory::query()->where('channel', $treeChannel)->where('active', true)
+            ->when($q !== '', fn ($query) => $query->where(fn ($sub) => $sub->where('name', 'like', "%{$q}%")->orWhere('full_path', 'like', "%{$q}%")))
+            ->when($q === '', fn ($query) => filled($parent) ? $query->where('parent_external_category_id', (string) $parent) : $query->whereNull('parent_external_category_id'))
+            ->orderBy('name')->limit($q !== '' ? 50 : 200)->get();
+        $ids = $categories->pluck('external_category_id')->all();
+        $parents = MarketplaceCategory::query()->where('channel', $treeChannel)->whereIn('parent_external_category_id', $ids)->pluck('parent_external_category_id')->all();
+
+        return $categories->map(fn (MarketplaceCategory $category): array => ['id' => (string) $category->external_category_id, 'parent_id' => $category->parent_external_category_id, 'name' => $category->name, 'path' => $category->full_path ?: $category->name, 'has_children' => in_array($category->external_category_id, $parents, true)])->values()->all();
+    }
+
     private function existingExternalCategories(Request $request, string $channel): array
     {
         $q = trim((string) $request->query('q', ''));
-        return MarketplaceCategoryMapping::query()->where('channel', $channel)->whereNotNull('external_category_id')
-            ->when($q !== '', fn ($query) => $query->where(fn ($sub) => $sub->where('external_category_name', 'like', "%{$q}%")->orWhere('external_category_path', 'like', "%{$q}%")))
+        return MarketplaceCategoryMapping::query()->whereIn('channel', $channel === 'ebay' ? ['ebay', 'ebay_de'] : [$channel])->whereNotNull('external_category_id')
+            ->when($q !== '', fn ($query) => $query->where(fn ($sub) => $sub->where('external_category_name', 'like', "%{$q}%")->orWhere('external_category_path', 'like', "%{$q}%")->orWhere('external_category_id', 'like', "%{$q}%")))
             ->select(['external_category_id', 'external_category_name', 'external_category_path'])->distinct()->orderBy('external_category_name')->limit(50)->get()
-            ->map(fn ($m): array => ['id' => (string) $m->external_category_id, 'parent_id' => null, 'name' => $m->external_category_name ?: $m->external_category_id, 'path' => $m->external_category_path ?: $m->external_category_name, 'has_children' => false])->values()->all();
+            ->map(fn ($m): array => ['id' => (string) $m->external_category_id, 'parent_id' => null, 'name' => $m->external_category_name ?: 'Kategoria '.$m->external_category_id, 'path' => $m->external_category_path ?: ($m->external_category_name ?: 'ID '.$m->external_category_id), 'has_children' => false])->values()->all();
     }
 
     private function normalizeOvokoCategories(array $categories): array
