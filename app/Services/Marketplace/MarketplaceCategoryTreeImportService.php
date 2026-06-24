@@ -423,9 +423,40 @@ class MarketplaceCategoryTreeImportService
             $id = (string) ($r['id'] ?? $r['category_id'] ?? $r['categoryId'] ?? '');
             $parent = $r['parent_id'] ?? $r['parentId'] ?? $r['parent_category_id'] ?? null;
             $name = (string) ($r['pl'] ?? $r['name'] ?? $r['category_name'] ?? $r['en'] ?? $id);
-            return ['channel'=>'ovoko','external_category_id'=>$id,'parent_external_category_id'=>filled($parent) && (string)$parent !== '0' ? (string)$parent : null,'level'=>0,'name'=>$name,'full_path'=>(string)($r['category_title_path'] ?? $r['category_path'] ?? $r['path'] ?? $name),'raw_payload'=>$r,'active'=>true,'imported_at'=>now()];
+            return ['channel'=>'ovoko','external_category_id'=>$id,'parent_external_category_id'=>filled($parent) && (string)$parent !== '0' ? (string)$parent : null,'level'=>0,'name'=>$name,'full_path'=>$name,'raw_payload'=>$r,'active'=>true,'imported_at'=>now()];
         })->filter(fn($r)=>filled($r['external_category_id']))->values();
-        return $this->withLevels($base->all());
+
+        return $this->withParentPaths($this->withLevels($base->all()));
+    }
+
+    private function withParentPaths(array $rows): array
+    {
+        $by = collect($rows)->keyBy('external_category_id');
+
+        return array_map(function (array $row) use ($by): array {
+            $parts = [];
+            $current = $row;
+            $seen = [];
+            $guard = 0;
+
+            while ($current && $guard++ < 20) {
+                $id = (string) ($current['external_category_id'] ?? '');
+                if ($id !== '') {
+                    if (isset($seen[$id])) break;
+                    $seen[$id] = true;
+                }
+
+                $name = trim((string) ($current['name'] ?? ''));
+                if ($name !== '') array_unshift($parts, $name);
+
+                $parent = $current['parent_external_category_id'] ?? null;
+                $current = filled($parent) && $by->has((string) $parent) ? $by->get((string) $parent) : null;
+            }
+
+            if ($parts !== []) $row['full_path'] = implode(' > ', $parts);
+
+            return $row;
+        }, $rows);
     }
 
     private function fetchAllegro(): array

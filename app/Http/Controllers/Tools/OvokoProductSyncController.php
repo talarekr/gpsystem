@@ -379,19 +379,7 @@ class OvokoProductSyncController extends Controller
             return response()->json($result);
         }
 
-        $ovoko = MarketplaceCategory::query()
-            ->where('channel', 'ovoko')
-            ->get(['external_category_id', 'parent_external_category_id', 'level', 'name', 'full_path'])
-            ->map(fn (MarketplaceCategory $category): array => [
-                'id' => (string) $category->external_category_id,
-                'parent_id' => filled($category->parent_external_category_id) ? (string) $category->parent_external_category_id : null,
-                'level' => (int) ($category->level ?: $this->pathLevel((string) ($category->full_path ?: $category->name))),
-                'name' => (string) $category->name,
-                'full_path' => (string) ($category->full_path ?: $category->name),
-            ])
-            ->filter(fn (array $row): bool => filled($row['id']) && filled($row['full_path']))
-            ->sortBy([['level', 'asc'], ['full_path', 'asc']], SORT_NATURAL | SORT_FLAG_CASE)
-            ->values();
+        $ovoko = $this->marketplaceOvokoCategoriesWithParentPaths();
 
         $result['ovoko_categories_count'] = $ovoko->count();
         $byOvokoId = $ovoko->keyBy('id');
@@ -1385,6 +1373,69 @@ HTML, 200, ['Content-Type' => 'text/html; charset=UTF-8']);
         $value = preg_replace('/\s*>\s*/u', ' > ', $value) ?? $value;
         $value = preg_replace('/\s+/u', ' ', trim($value)) ?? trim($value);
         return mb_strtolower($value);
+    }
+
+
+    private function marketplaceOvokoCategoriesWithParentPaths(): \Illuminate\Support\Collection
+    {
+        $rows = MarketplaceCategory::query()
+            ->where('channel', 'ovoko')
+            ->get(['external_category_id', 'parent_external_category_id', 'level', 'name', 'full_path'])
+            ->map(fn (MarketplaceCategory $category): array => [
+                'id' => (string) $category->external_category_id,
+                'parent_id' => filled($category->parent_external_category_id) ? (string) $category->parent_external_category_id : null,
+                'stored_level' => (int) $category->level,
+                'name' => (string) $category->name,
+                'stored_full_path' => (string) ($category->full_path ?: $category->name),
+            ])
+            ->filter(fn (array $row): bool => filled($row['id']) && filled($row['name']))
+            ->values();
+
+        $byId = $rows->keyBy('id');
+
+        return $rows
+            ->map(function (array $row) use ($byId): array {
+                $fullPath = $this->ovokoMarketplaceCategoryParentPath($row, $byId);
+                $level = max(1, count(explode(' > ', $fullPath)));
+
+                return [
+                    'id' => $row['id'],
+                    'parent_id' => $row['parent_id'],
+                    'level' => $level,
+                    'name' => $row['name'],
+                    'full_path' => $fullPath,
+                    'stored_full_path' => $row['stored_full_path'],
+                ];
+            })
+            ->filter(fn (array $row): bool => filled($row['full_path']))
+            ->sortBy([['level', 'asc'], ['full_path', 'asc']], SORT_NATURAL | SORT_FLAG_CASE)
+            ->values();
+    }
+
+    private function ovokoMarketplaceCategoryParentPath(array $category, $byId): string
+    {
+        $parts = [];
+        $current = $category;
+        $seen = [];
+        $guard = 0;
+
+        while ($current && $guard++ < 20) {
+            $id = (string) ($current['id'] ?? '');
+            if ($id !== '') {
+                if (isset($seen[$id])) break;
+                $seen[$id] = true;
+            }
+
+            $name = trim((string) ($current['name'] ?? ''));
+            if ($name !== '') array_unshift($parts, $name);
+
+            $parentId = $current['parent_id'] ?? null;
+            $current = filled($parentId) && $byId->has((string) $parentId) ? $byId->get((string) $parentId) : null;
+        }
+
+        if ($parts === []) return (string) ($category['stored_full_path'] ?? $category['name'] ?? $category['id'] ?? '');
+
+        return implode(' > ', $parts);
     }
 
     private function matchOvokoTreeCategoryToLocal(array $category, $mappingByOvokoId, $externalIdIndex, $exactPathIndex, $normalizedPathIndex, $localsById): array
