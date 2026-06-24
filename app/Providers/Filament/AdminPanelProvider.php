@@ -48,6 +48,7 @@ use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
 use Filament\Navigation\NavigationGroup;
+use Filament\Navigation\NavigationItem;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
@@ -109,6 +110,13 @@ class AdminPanelProvider extends PanelProvider
                 NavigationGroup::make('Ustawienia i integracje')
                     ->icon('heroicon-o-arrow-up-tray')
                     ->collapsible(false),
+            ])
+            ->navigationItems([
+                NavigationItem::make('Kategorie - mapowanie kategorii')
+                    ->icon('heroicon-o-tag')
+                    ->sort(45)
+                    ->url(fn (): string => route('admin.marketplace-category-mapper.index'))
+                    ->isActiveWhen(fn (): bool => request()->routeIs('admin.marketplace-category-mapper.*')),
             ])
             ->pages([
                 Dashboard::class,
