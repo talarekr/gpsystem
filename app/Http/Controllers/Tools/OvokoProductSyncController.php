@@ -2249,6 +2249,124 @@ HTML, 200, ['Content-Type' => 'text/html; charset=UTF-8']);
     }
 
 
+
+
+    public function dryRunAuditCategoryDisplayAgainstWooAndOvoko(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+
+        $sampleLimit = max(1, min(500, (int) $request->query('sample_limit', 100)));
+        $only = (string) $request->query('only', 'all');
+        if (! in_array($only, ['all', 'split', 'front_visible', 'move_candidates', 'safe_to_hide', 'manual_review', 'canonical_ok'], true)) $only = 'all';
+        $includeProducts = $request->boolean('include_products', true);
+        $includeChildren = $request->boolean('include_children', true);
+        $includeDescendants = $request->boolean('include_descendants', true);
+        $csvPath = storage_path('app/imports/woo_category_tree.csv');
+
+        $result = [
+            'ok' => true, 'dry_run' => true, 'local_update' => false, 'ovoko_write' => false, 'allegro_write' => false, 'ebay_write' => false,
+            'csv_path' => 'storage/app/imports/woo_category_tree.csv', 'csv_exists' => is_file($csvPath),
+            'woo_rows_count' => 0, 'laravel_categories_count' => 0, 'ovoko_categories_count' => 0, 'woo_matched_by_term_id_count' => 0,
+            'canonical_ok_count' => 0, 'split_display_vs_ovoko_count' => 0, 'duplicate_has_existing_canonical_target_count' => 0, 'needs_canonical_target_create_count' => 0,
+            'front_visible_problem_count' => 0, 'with_products_count' => 0, 'with_children_count' => 0, 'with_marketplace_mapping_count' => 0,
+            'safe_to_hide_empty_count' => 0, 'move_products_candidate_count' => 0, 'manual_review_count' => 0,
+            'sample_canonical_ok' => [], 'sample_split_display_vs_ovoko' => [], 'sample_front_visible_problems' => [], 'sample_move_products_candidates' => [], 'sample_safe_to_hide_empty' => [], 'sample_manual_review' => [],
+            'warnings' => ['read_only_no_part_categories_products_marketplace_mappings_or_marketplace_writes'],
+        ];
+        if (! $result['csv_exists']) $result['warnings'][] = 'woo_category_tree_csv_not_found';
+
+        $wooRows = $result['csv_exists'] ? $this->readWooCategoryTreeCsv($csvPath, $result['warnings']) : [];
+        $result['woo_rows_count'] = count($wooRows);
+        $wooByTerm = collect($wooRows)->filter(fn (array $row): bool => filled($row['term_id'] ?? null))->keyBy(fn (array $row): string => (string) $row['term_id']);
+
+        $localRows = PartCategory::query()->with('marketplaceMappings')->get();
+        $result['laravel_categories_count'] = $localRows->count();
+        $localById = $localRows->keyBy(fn (PartCategory $cat): string => (string) $cat->id);
+        $localInfos = $localRows->map(function (PartCategory $cat) use ($localById): array {
+            $path = $this->localCategoryDisplayPath($cat->toArray(), $localById);
+            return ['model' => $cat, 'path' => $path, 'normalized_path' => $this->normalizeCanonicalCategoryDisplayPath($path)];
+        });
+        $localByNormalizedPath = $localInfos->filter(fn (array $info): bool => $info['normalized_path'] !== '')->keyBy('normalized_path');
+
+        $ovokoRows = Schema::hasTable('marketplace_categories')
+            ? DB::table('marketplace_categories')->select($this->safeSelectColumns('marketplace_categories', ['id', 'external_category_id', 'name', 'full_path']))->where('channel', 'ovoko')->get()->map(fn ($row): array => (array) $row)->all()
+            : [];
+        $result['ovoko_categories_count'] = count($ovokoRows);
+        $ovokoByNorm = collect($ovokoRows)->filter(fn (array $row): bool => filled($row['full_path'] ?? null))->groupBy(fn (array $row): string => $this->normalizeCanonicalCategoryDisplayPath((string) $row['full_path']));
+
+        $partsCounts = $includeProducts && Schema::hasTable('parts') && Schema::hasColumn('parts', 'category_id')
+            ? DB::table('parts')->select('category_id', DB::raw('count(*) as count'))->whereNotNull('category_id')->groupBy('category_id')->pluck('count', 'category_id')->all()
+            : [];
+        $childrenCounts = $includeChildren ? $localRows->groupBy('parent_id')->map->count()->all() : [];
+        $mappingRows = Schema::hasTable('marketplace_category_mappings')
+            ? DB::table('marketplace_category_mappings')->select($this->safeSelectColumns('marketplace_category_mappings', ['local_category_id', 'channel']))->get()->groupBy('local_category_id')
+            : collect();
+
+        foreach ($localInfos as $info) {
+            /** @var PartCategory $cat */
+            $cat = $info['model'];
+            $path = $info['path'];
+            $norm = $info['normalized_path'];
+            $woo = filled($cat->external_id) ? $wooByTerm->get((string) $cat->external_id) : null;
+            if ($woo) $result['woo_matched_by_term_id_count']++;
+            $exactOvoko = $norm !== '' ? $ovokoByNorm->get($norm, collect()) : collect();
+            if ($exactOvoko->isNotEmpty()) {
+                $result['canonical_ok_count']++;
+                if ($only === 'all' || $only === 'canonical_ok') $this->pushSample($result['sample_canonical_ok'], ['local_category_id' => $cat->id, 'local_category_name' => $cat->name, 'local_category_path' => $path, 'proposed_ovoko_category_id' => (string) ($exactOvoko->first()['external_category_id'] ?? $exactOvoko->first()['id'] ?? ''), 'proposed_ovoko_path' => $exactOvoko->first()['full_path'] ?? null, 'canonical_status' => 'canonical_ok'], $sampleLimit);
+                continue;
+            }
+
+            $target = null;
+            foreach ($this->shopTreeDisplayAuditCandidates($path) as $candidate) {
+                $matches = $ovokoByNorm->get($this->normalizeCanonicalCategoryDisplayPath($candidate), collect());
+                if ($matches->count() === 1) { $target = $matches->first(); break; }
+            }
+            if (! $target) continue;
+
+            $productsCount = (int) ($partsCounts[$cat->id] ?? 0);
+            $childrenCount = (int) ($childrenCounts[$cat->id] ?? 0);
+            $descendantsProductsCount = $includeDescendants ? $this->descendantsProductsCountForPath($path, $localInfos, $partsCounts, (int) $cat->id) : 0;
+            $channels = $mappingRows->get($cat->id, collect())->pluck('channel')->filter()->values()->all();
+            $hasEbay = (bool) collect($channels)->first(fn ($c) => str_starts_with((string) $c, 'ebay'));
+            $hasAllegro = in_array('allegro_main', $channels, true) || in_array('allegro', $channels, true);
+            $hasOvoko = in_array('ovoko', $channels, true);
+            $hasMapping = $channels !== [];
+            $targetNorm = $this->normalizeCanonicalCategoryDisplayPath((string) ($target['full_path'] ?? ''));
+            $targetLocal = $localByNormalizedPath->get($targetNorm);
+            $targetExists = (bool) $targetLocal;
+            $isActive = $this->categoryBooleanColumnValue($cat, ['active', 'is_active', 'status'], true);
+            $isVisible = $this->categoryBooleanColumnValue($cat, ['is_visible', 'visible'], null);
+            $showInMenu = $this->categoryBooleanColumnValue($cat, ['show_in_menu'], null);
+            $hasActiveChildren = $this->hasActiveChildren($cat->id, $localRows);
+            $frontReason = $this->frontVisibleReason($productsCount, $childrenCount, $isActive, $isVisible, $showInMenu);
+            $frontVisible = $frontReason !== 'unknown';
+            $suggested = $hasMapping ? 'manual_review' : ($productsCount > 0 ? 'move_products_to_canonical_target' : ($childrenCount > 0 ? 'manual_review' : ($targetExists ? 'hide_empty' : 'create_canonical_target_later')));
+            if ($hasMapping) $suggested = 'manual_review';
+            if ($productsCount > 0 && $suggested === 'hide_empty') $suggested = 'move_products_to_canonical_target';
+            $confidence = $targetExists ? 'high' : 'medium';
+
+            $sample = ['local_category_id' => $cat->id, 'local_category_name' => $cat->name, 'local_category_path' => $path, 'woo_match' => (bool) $woo, 'woo_term_id' => $woo['term_id'] ?? ($cat->external_id ?: null), 'woo_full_path' => $woo['full_path'] ?? null, 'local_products_count' => $productsCount, 'descendants_products_count' => $descendantsProductsCount, 'children_count' => $childrenCount, 'is_active' => $isActive, 'is_visible' => $isVisible, 'show_in_menu' => $showInMenu, 'has_active_children' => $hasActiveChildren, 'front_visible_reason' => $frontReason, 'has_marketplace_mapping' => $hasMapping, 'has_ebay_mapping' => $hasEbay, 'has_allegro_mapping' => $hasAllegro, 'has_ovoko_mapping' => $hasOvoko, 'proposed_ovoko_category_id' => (string) ($target['external_category_id'] ?? $target['id'] ?? ''), 'proposed_ovoko_path' => $target['full_path'] ?? null, 'target_exists_locally' => $targetExists, 'proposed_target_local_category_id' => $targetLocal['model']->id ?? null, 'proposed_target_local_path' => $targetLocal['path'] ?? null, 'canonical_status' => 'split_display_vs_ovoko', 'suggested_action' => $suggested, 'confidence' => $confidence, 'reason' => 'local_display_segments_rejoined_with_slash_match_ovoko_full_path'];
+
+            $result['split_display_vs_ovoko_count']++;
+            if ($targetExists) $result['duplicate_has_existing_canonical_target_count']++; else $result['needs_canonical_target_create_count']++;
+            if ($frontVisible) $result['front_visible_problem_count']++;
+            if ($productsCount > 0) $result['with_products_count']++;
+            if ($childrenCount > 0) $result['with_children_count']++;
+            if ($hasMapping) $result['with_marketplace_mapping_count']++;
+            if ($suggested === 'hide_empty') $result['safe_to_hide_empty_count']++;
+            if ($suggested === 'move_products_to_canonical_target') $result['move_products_candidate_count']++;
+            if ($suggested === 'manual_review') $result['manual_review_count']++;
+
+            if ($only === 'all' || $only === 'split') $this->pushSample($result['sample_split_display_vs_ovoko'], $sample, $sampleLimit);
+            if (($only === 'all' || $only === 'front_visible') && $frontVisible) $this->pushSample($result['sample_front_visible_problems'], $sample, $sampleLimit);
+            if (($only === 'all' || $only === 'move_candidates') && $suggested === 'move_products_to_canonical_target') $this->pushSample($result['sample_move_products_candidates'], $sample, $sampleLimit);
+            if (($only === 'all' || $only === 'safe_to_hide') && $suggested === 'hide_empty') $this->pushSample($result['sample_safe_to_hide_empty'], $sample, $sampleLimit);
+            if (($only === 'all' || $only === 'manual_review') && $suggested === 'manual_review') $this->pushSample($result['sample_manual_review'], $sample, $sampleLimit);
+        }
+
+        return response()->json($result);
+    }
+
     public function dryRunCompareWooCategoryTreeWithLaravel(Request $request): JsonResponse
     {
         if (! $this->validToken($request)) return $this->invalidTokenResponse();
@@ -2320,6 +2438,58 @@ HTML, 200, ['Content-Type' => 'text/html; charset=UTF-8']);
 
         if (! $includeProducts) $result['warnings'][] = 'include_products_not_set_local_product_count_uses_eager_parts_count_only';
         return response()->json($result);
+    }
+
+
+    private function normalizeCanonicalCategoryDisplayPath(?string $value): string
+    {
+        $value = mb_strtolower(trim((string) $value));
+        $value = preg_replace('/\s*>\s*/u', ' > ', $value) ?? $value;
+        $value = preg_replace('/\s*\/\s*/u', '/', $value) ?? $value;
+        $value = preg_replace('/\s+/u', ' ', $value) ?? $value;
+        return trim($value);
+    }
+
+    private function descendantsProductsCountForPath(string $path, $localInfos, array $partsCounts, int $selfId): int
+    {
+        $prefix = $path.' > ';
+        $total = 0;
+        foreach ($localInfos as $info) {
+            $id = (int) $info['model']->id;
+            if ($id === $selfId) continue;
+            if (str_starts_with((string) $info['path'], $prefix)) $total += (int) ($partsCounts[$id] ?? 0);
+        }
+        return $total;
+    }
+
+    private function categoryBooleanColumnValue(PartCategory $category, array $columns, ?bool $default): ?bool
+    {
+        foreach ($columns as $column) {
+            if (! Schema::hasColumn('part_categories', $column)) continue;
+            $value = $category->getAttribute($column);
+            if ($value === null) return null;
+            if ($column === 'status') return in_array(mb_strtolower((string) $value), ['1', 'active', 'published', 'visible', 'enabled'], true);
+            return filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? (bool) $value;
+        }
+        return $default;
+    }
+
+    private function hasActiveChildren(int $categoryId, $localRows): bool
+    {
+        foreach ($localRows as $child) {
+            if ((int) ($child->parent_id ?? 0) === $categoryId && $this->categoryBooleanColumnValue($child, ['active', 'is_active', 'status'], true) === true) return true;
+        }
+        return false;
+    }
+
+    private function frontVisibleReason(int $productsCount, int $childrenCount, ?bool $isActive, ?bool $isVisible, ?bool $showInMenu): string
+    {
+        if ($productsCount > 0) return 'products';
+        if ($childrenCount > 0) return 'children';
+        if ($showInMenu === true) return 'show_in_menu';
+        if ($isVisible === true) return 'active';
+        if ($isActive === true) return 'active';
+        return 'unknown';
     }
 
     private function readWooCategoryTreeCsv(string $path, array &$warnings): array
