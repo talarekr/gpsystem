@@ -8,7 +8,7 @@
         :root { color-scheme: light; --blue:#155eef; --bg:#f4f7fb; --text:#111827; --muted:#6b7280; --danger:#b42318; --border:#d0d5dd; --ok:#12b76a; --overlay:rgba(16,24,40,.86); }
         * { box-sizing: border-box; }
         body { margin:0; background:var(--bg); color:var(--text); font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size:18px; }
-        .wrap { width:100%; max-width:560px; margin:0 auto; min-height:100vh; padding:18px 14px 128px; }
+        .wrap { width:100%; max-width:560px; margin:0 auto; min-height:100vh; padding:18px 14px 32px; }
         .card { background:#fff; border-radius:22px; padding:20px; box-shadow:0 10px 28px rgba(16,24,40,.08); }
         h1 { font-size:24px; margin:0 0 8px; } h2 { font-size:21px; margin:0 0 14px; } p { line-height:1.45; }
         .section { padding:18px 0; border-top:1px solid #eaecf0; }
@@ -44,10 +44,10 @@
         .ocr-focus-message { position:absolute; left:50%; top:calc(46% - 86px); transform:translateX(-50%); z-index:4; padding:10px 14px; border-radius:999px; background:rgba(21,94,239,.92); color:#fff; font-weight:900; box-shadow:0 8px 20px rgba(0,0,0,.25); }
         .ocr-footer { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
         .ocr-footer button { width:100%; }
-        .actions { position:fixed; left:0; right:0; bottom:0; background:rgba(255,255,255,.96); border-top:1px solid var(--border); padding:12px max(14px, env(safe-area-inset-left)) max(12px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-right)); display:flex; gap:10px; justify-content:center; }
-        .actions-inner { width:100%; max-width:560px; display:grid; gap:10px; } .actions-inner > * { width:100%; }
-        .email-copy-option { display:flex; align-items:center; gap:10px; margin:0; font-size:16px; font-weight:800; }
-        .email-copy-option input { width:22px; height:22px; flex:0 0 auto; }
+        .actions { margin-top:18px; padding:18px 0 max(10px, env(safe-area-inset-bottom)); border-top:1px solid #eaecf0; }
+        .actions-inner { width:100%; display:grid; gap:12px; } .actions-inner > * { width:100%; }
+        .email-copy-option { display:flex; align-items:center; gap:12px; margin:0; padding:10px 0; font-size:16px; font-weight:800; }
+        .email-copy-option input { width:24px; height:24px; flex:0 0 auto; }
         .success { border-left:6px solid var(--ok); }
         .success-actions { display:grid; gap:12px; }
         .hidden { display:none !important; }
