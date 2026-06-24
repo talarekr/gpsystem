@@ -273,6 +273,61 @@ class OvokoProductSyncController extends Controller
     }
 
 
+    public function dryRunOvokoCategoryPathMapping(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+
+        $sampleLimit = max(1, min(100, (int) $request->query('sample_limit', 50)));
+        $result = ['ok'=>true,'dry_run'=>true,'ovoko_write'=>false,'local_update'=>false,'local_categories_count'=>0,'ovoko_categories_count'=>0,'ovoko_level_3_count'=>0,'exact_path_match_count'=>0,'normalized_path_match_count'=>0,'exact_name_match_count'=>0,'ambiguous_name_match_count'=>0,'unmatched_count'=>0,'skipped_uncategorized_count'=>0,'preview_mappings'=>[],'sample_exact_path_matches'=>[],'sample_normalized_path_matches'=>[],'sample_ambiguous'=>[],'sample_unmatched'=>[],'sample_errors'=>[],'warnings'=>['read_only_dry_run_no_ovoko_allegro_ebay_or_local_writes']];
+
+        if (! Schema::hasTable('part_categories')) {
+            $result['warnings'][] = 'part_categories_table_missing';
+            return response()->json($result);
+        }
+
+        $tree = $this->fetchOvokoCategoryTree($result);
+        $ovoko = $this->ovokoCategoryIndexes($tree);
+        $result['ovoko_categories_count'] = count($tree['categories']);
+        $result['ovoko_level_3_count'] = count($ovoko['level3']);
+        $linkedConsensus = $this->linkedConsensusMappingsFromAutorun($request, $sampleLimit);
+        if ($linkedConsensus === []) $result['warnings'][] = 'linked_products_consensus_not_loaded_pass_run_id_to_combine_results';
+
+        $partCounts = Schema::hasTable('parts') ? DB::table('parts')->select('category_id', DB::raw('count(*) as c'))->whereNotNull('category_id')->groupBy('category_id')->pluck('c','category_id')->all() : [];
+        $select = $this->safeSelectColumns('part_categories', ['id','name','category_path']);
+        DB::table('part_categories')->select($select)->orderBy('id')->chunk(500, function ($rows) use (&$result, $ovoko, $linkedConsensus, $partCounts, $sampleLimit): void {
+            foreach ($rows as $row) {
+                $local = (array) $row;
+                $result['local_categories_count']++;
+                $path = (string) ($local['category_path'] ?? $local['name'] ?? '');
+                $name = (string) ($local['name'] ?? '');
+                if ($this->isUncategorizedCategoryValue($path) || $this->isUncategorizedCategoryValue($name)) { $result['skipped_uncategorized_count']++; continue; }
+
+                $match = $this->matchLocalCategoryToOvokoPath($local, $ovoko);
+                if ($match['match_type'] === 'unmatched') {
+                    $result['unmatched_count']++;
+                    $this->pushSample($result['sample_unmatched'], ['local_category_id'=>(int)$local['id'],'local_category_name'=>$name,'local_category_path'=>$path], $sampleLimit);
+                    continue;
+                }
+                if ($match['match_type'] === 'ambiguous_name_match') {
+                    $result['ambiguous_name_match_count']++;
+                    $this->pushSample($result['sample_ambiguous'], $match['sample'], $sampleLimit);
+                    continue;
+                }
+
+                $bucket = $match['match_type'].'_count';
+                if (array_key_exists($bucket, $result)) $result[$bucket]++;
+                $mapping = $this->pathMappingPreview($local, $match, (int)($partCounts[$local['id']] ?? 0), $linkedConsensus[(string)$local['id']] ?? null);
+                $result['preview_mappings'][] = $mapping;
+                if ($match['match_type'] === 'exact_path_match') $this->pushSample($result['sample_exact_path_matches'], $mapping, $sampleLimit);
+                if ($match['match_type'] === 'normalized_path_match') $this->pushSample($result['sample_normalized_path_matches'], $mapping, $sampleLimit);
+            }
+        });
+
+        $result['preview_mappings'] = array_slice($result['preview_mappings'], 0, $sampleLimit);
+        return response()->json($result);
+    }
+
+
     public function ovokoCategoryMappingAutorun(Request $request)
     {
         if (! $this->validToken($request)) return $this->invalidTokenResponse();
@@ -1077,6 +1132,82 @@ HTML, 200, ['Content-Type' => 'text/html; charset=UTF-8']);
         }
         $parts = array_values(array_filter($parts, fn ($part) => $part !== ''));
         return $parts === [] ? null : implode(' > ', $parts);
+    }
+
+
+    private function ovokoCategoryIndexes(array $tree): array
+    {
+        $level3 = []; $exact = []; $normalized = []; $leaf = [];
+        foreach ($tree['categories'] as $category) {
+            if ((int) ($category['level'] ?? 0) !== 3) continue;
+            $path = $this->ovokoCategoryPath($category, $tree['by_id'], 'pl');
+            if (! filled($path)) continue;
+            $item = $category + ['full_path_pl' => $path];
+            $level3[] = $item;
+            $exact[(string) $path] = $item;
+            $normalized[$this->normalizeCategoryPath($path)][] = $item;
+            $leaf[$this->normalizeCategoryPath((string) ($category['pl'] ?? $category['en'] ?? ''))][] = $item;
+        }
+        return ['level3'=>$level3,'exact'=>$exact,'normalized'=>$normalized,'leaf'=>$leaf];
+    }
+
+    private function matchLocalCategoryToOvokoPath(array $local, array $ovoko): array
+    {
+        $path = (string) ($local['category_path'] ?? $local['name'] ?? '');
+        $name = (string) ($local['name'] ?? $this->leafName($path));
+        if (isset($ovoko['exact'][$path])) return ['match_type'=>'exact_path_match','category'=>$ovoko['exact'][$path]];
+        $normalizedPath = $this->normalizeCategoryPath($path);
+        $pathMatches = $ovoko['normalized'][$normalizedPath] ?? [];
+        if (count($pathMatches) === 1) return ['match_type'=>'normalized_path_match','category'=>$pathMatches[0]];
+        $leafMatches = $ovoko['leaf'][$this->normalizeCategoryPath($name)] ?? [];
+        if (count($leafMatches) === 1) return ['match_type'=>'exact_name_match','category'=>$leafMatches[0]];
+        if (count($leafMatches) > 1) return ['match_type'=>'ambiguous_name_match','sample'=>['local_category_id'=>(int)$local['id'],'local_category_name'=>$name,'local_category_path'=>$path,'candidate_count'=>count($leafMatches),'candidates'=>array_map(fn($c)=>['ovoko_category_id'=>(string)$c['id'],'ovoko_category_name'=>$c['pl'] ?? $c['en'] ?? null,'ovoko_category_path'=>$c['full_path_pl'],'ovoko_level'=>$c['level'] ?? null], array_slice($leafMatches,0,10))]];
+        return ['match_type'=>'unmatched'];
+    }
+
+    private function pathMappingPreview(array $local, array $match, int $partsCount, ?array $linkedConsensus): array
+    {
+        $category = $match['category'];
+        $confidence = $match['match_type'] === 'exact_name_match' ? 'medium' : 'high';
+        $matchType = $match['match_type'];
+        $evidence = $linkedConsensus['evidence_count'] ?? null;
+        if ($linkedConsensus && (string)($linkedConsensus['ovoko_category_id'] ?? '') === (string)$category['id'] && $matchType === 'exact_path_match') {
+            $confidence = 'very_high';
+            $matchType = 'linked_products_consensus + exact_path_match';
+        }
+        return ['local_category_id'=>(int)$local['id'],'local_category_name'=>$local['name'] ?? null,'local_category_path'=>$local['category_path'] ?? ($local['name'] ?? null),'ovoko_category_id'=>(string)$category['id'],'ovoko_category_name'=>$category['pl'] ?? $category['en'] ?? null,'ovoko_category_path'=>$category['full_path_pl'],'ovoko_level'=>$category['level'] ?? null,'match_type'=>$matchType,'confidence'=>$confidence,'local_parts_count'=>$partsCount,'linked_products_evidence_count'=>$evidence];
+    }
+
+    private function linkedConsensusMappingsFromAutorun(Request $request, int $sampleLimit): array
+    {
+        $runId = (string) $request->query('run_id', '');
+        if ($runId === '') return [];
+        $state = Cache::get($this->autorunCacheKey($runId));
+        if (! is_array($state)) return [];
+        $final = $this->finalizeAutorunMappings($state, $sampleLimit);
+        $out = [];
+        foreach ($final['suggested_mappings'] ?? [] as $mapping) $out[(string)$mapping['local_category_id']] = $mapping;
+        return $out;
+    }
+
+    private function normalizeCategoryPath(string $value): string
+    {
+        $value = html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $value = str_replace(['/', '\\', '›', '»', '→', '|'], '>', $value);
+        $value = preg_replace('/\s*>\s*/u', ' > ', $value) ?? $value;
+        $value = preg_replace('/\s+/u', ' ', trim($value)) ?? trim($value);
+        return mb_strtolower($value);
+    }
+
+    private function leafName(string $path): string
+    {
+        $parts = preg_split('/\s*>\s*|\/|\\|›|»|→|\|/u', $path) ?: [$path];
+        return trim((string) end($parts));
+    }
+
+    private function isUncategorizedCategoryValue(string $value): bool
+    {
+        return $this->normalizeCategoryPath($value) === 'bez kategorii';
     }
 
     private function localCategoryGroup(Part $part): array
