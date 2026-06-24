@@ -30,6 +30,7 @@ use App\Http\Controllers\Tools\CheckOvokoApiSettingsController;
 use App\Http\Controllers\Tools\MarketplaceApiSettingsDiagnosticsController;
 use App\Http\Controllers\Tools\MarketplaceApiFoundationController;
 use App\Http\Controllers\Tools\MarketplaceListingDryRunController;
+use App\Http\Controllers\Tools\MarketplaceCategoryTreeImportController;
 use App\Http\Controllers\Tools\EbayListingDryRunController;
 use App\Http\Controllers\Tools\CheckOvokoMappingController;
 use App\Http\Controllers\Tools\DebugOvokoPartMatchController;
@@ -2045,6 +2046,10 @@ Route::get('/tools/check-compiled-header', function (Request $request) {
         'fragment_contains_at' => str_contains($fragmentText, '@'),
     ]);
 })->name('tools.check-compiled-header');
+Route::get('/tools/dry-run-import-marketplace-category-trees', [MarketplaceCategoryTreeImportController::class, 'dryRunImport'])->name('tools.dry-run-import-marketplace-category-trees');
+Route::get('/tools/import-marketplace-category-trees', [MarketplaceCategoryTreeImportController::class, 'import'])->name('tools.import-marketplace-category-trees');
+Route::get('/tools/dry-run-backfill-ebay-de-category-mapping-names', [MarketplaceCategoryTreeImportController::class, 'dryRunBackfill'])->name('tools.dry-run-backfill-ebay-de-category-mapping-names');
+Route::get('/tools/backfill-ebay-de-category-mapping-names', [MarketplaceCategoryTreeImportController::class, 'backfill'])->name('tools.backfill-ebay-de-category-mapping-names');
 Route::get('/tools/check-part-image-presentation', CheckPartImagePresentationController::class)->name('tools.check-part-image-presentation');
 Route::get('/tools/process-part-image-presentation', ProcessPartImagePresentationController::class)->name('tools.process-part-image-presentation');
 Route::get('/tools/process-part-image-presentation-runner', ProcessPartImagePresentationRunnerController::class)->name('tools.process-part-image-presentation-runner');
