@@ -107,7 +107,10 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
     {
         $rows = $payload['data'] ?? $payload['parts'] ?? [];
         if (! is_array($rows)) return [];
-        return array_values(array_map(fn ($row) => [
+        return array_values(array_map(function ($row) {
+            $category = is_array($row['category'] ?? null) ? $row['category'] : [];
+
+            return [
             'external_offer_id' => (string) ($row['id'] ?? $row['part_id'] ?? $row['ovoko_part_id'] ?? $row['external_id'] ?? ''),
             'title' => $row['name'] ?? $row['title'] ?? null,
             'sku' => $row['sku'] ?? $row['code'] ?? null,
@@ -118,6 +121,24 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
             'quantity' => $row['quantity'] ?? $row['stock'] ?? $row['qty'] ?? null,
             'status' => $row['status'] ?? null,
             'url' => $row['url'] ?? null,
-        ], array_filter($rows, 'is_array')));
+            'ovoko_category_id' => $row['category_id'] ?? $row['categoryId'] ?? $category['id'] ?? $category['category_id'] ?? $category['categoryId'] ?? null,
+            'ovoko_category_name' => $row['category_name'] ?? $row['categoryName'] ?? $category['name'] ?? $category['category_name'] ?? null,
+            'ovoko_category_path' => $row['category_path'] ?? $row['categoryPath'] ?? $category['path'] ?? $category['category_path'] ?? null,
+            'raw_category_fields' => $this->rawCategoryFields($row),
+        ];
+        }, array_filter($rows, 'is_array')));
+    }
+
+    private function rawCategoryFields(array $row): array
+    {
+        return array_filter([
+            'category_id' => $row['category_id'] ?? null,
+            'categoryId' => $row['categoryId'] ?? null,
+            'category_name' => $row['category_name'] ?? null,
+            'categoryName' => $row['categoryName'] ?? null,
+            'category_path' => $row['category_path'] ?? null,
+            'categoryPath' => $row['categoryPath'] ?? null,
+            'category' => $row['category'] ?? null,
+        ], fn ($value) => $value !== null && $value !== '');
     }
 }

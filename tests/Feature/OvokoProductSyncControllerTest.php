@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\MarketplaceAccount;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -155,6 +156,74 @@ class OvokoProductSyncControllerTest extends TestCase
             ->assertJsonFragment(['local_category_id' => 31, 'ovoko_external_category_id' => 'RRR-31'])
             ->assertJsonPath('sample_current_missing_ovoko_mapping_with_legacy_payload.0.has_ovoko_or_rrr', true);
 
+        $this->assertDatabaseCount('marketplace_category_mappings', 0);
+    }
+
+    public function test_dry_run_ovoko_category_mapping_from_linked_products_builds_consensus_preview_read_only(): void
+    {
+        MarketplaceAccount::query()->create(['id' => 90, 'marketplace' => 'ovoko', 'name' => 'Ovoko main', 'code' => 'ovoko_main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'dry_run', 'api_credentials' => ['username' => 'u', 'password' => 'p', 'user_token' => 't']]);
+        DB::table('part_categories')->insert(['id' => 31, 'name' => 'Engines', 'category_path' => 'Parts > Engines', 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('parts')->insert([
+            ['id' => 701, 'name' => 'Engine A', 'part_number' => 'PN-701', 'description' => 'Desc', 'price' => 1, 'quantity' => 1, 'status' => 'ready', 'is_visible_storefront' => true, 'needs_listing' => false, 'needs_review' => false, 'category_id' => 31, 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 702, 'name' => 'Engine B', 'part_number' => 'PN-702', 'description' => 'Desc', 'price' => 1, 'quantity' => 1, 'status' => 'ready', 'is_visible_storefront' => true, 'needs_listing' => false, 'needs_review' => false, 'category_id' => 31, 'created_at' => now(), 'updated_at' => now()],
+        ]);
+        DB::table('marketplace_listings')->insert([
+            ['marketplace' => 'ovoko', 'part_id' => 701, 'external_offer_id' => 'OV-701', 'created_at' => now(), 'updated_at' => now()],
+            ['marketplace' => 'ovoko', 'part_id' => 702, 'external_offer_id' => 'OV-702', 'created_at' => now(), 'updated_at' => now()],
+        ]);
+        Http::fake(['https://ovoko.example.test/v2/get/parts*' => Http::response(['status_code' => 'R200', 'data' => [
+            ['id' => 'OV-701', 'name' => 'Engine A', 'category_id' => 'OV-CAT-31', 'category_name' => 'Ovoko engines', 'category_path' => 'Ovoko > Engines'],
+            ['id' => 'OV-702', 'name' => 'Engine B', 'category_id' => 'OV-CAT-31', 'category_name' => 'Ovoko engines', 'category_path' => 'Ovoko > Engines'],
+        ]], 200)]);
+
+        $response = $this->getJson('/tools/dry-run-ovoko-category-mapping-from-linked-products?token=gps_images_import_2026&limit=100&page=1&sample_limit=50&only_missing_ovoko_category_mapping=1');
+
+        $response->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('dry_run', true)
+            ->assertJsonPath('ovoko_write', false)
+            ->assertJsonPath('local_update', false)
+            ->assertJsonPath('linked_products_checked', 2)
+            ->assertJsonPath('linked_products_with_ovoko_category', 2)
+            ->assertJsonPath('suggested_mapping_count', 1)
+            ->assertJsonPath('ambiguous_mapping_count', 0)
+            ->assertJsonPath('suggested_mappings.0.local_category_id', 31)
+            ->assertJsonPath('suggested_mappings.0.ovoko_category_id', 'OV-CAT-31')
+            ->assertJsonPath('suggested_mappings.0.confidence', 'high')
+            ->assertJsonPath('suggested_mappings.0.match_type', 'linked_products_consensus');
+
+        Http::assertSentCount(1);
+        $this->assertDatabaseCount('marketplace_category_mappings', 0);
+    }
+
+    public function test_preview_ovoko_category_from_linked_products_marks_ambiguous_read_only(): void
+    {
+        MarketplaceAccount::query()->create(['id' => 91, 'marketplace' => 'ovoko', 'name' => 'Ovoko main', 'code' => 'ovoko_main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'dry_run', 'api_credentials' => ['username' => 'u', 'password' => 'p', 'user_token' => 't']]);
+        DB::table('part_categories')->insert(['id' => 31, 'name' => 'Engines', 'category_path' => 'Parts > Engines', 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('parts')->insert([
+            ['id' => 711, 'name' => 'Engine A', 'part_number' => 'PN-711', 'description' => 'Desc', 'price' => 1, 'quantity' => 1, 'status' => 'ready', 'is_visible_storefront' => true, 'needs_listing' => false, 'needs_review' => false, 'category_id' => 31, 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 712, 'name' => 'Engine B', 'part_number' => 'PN-712', 'description' => 'Desc', 'price' => 1, 'quantity' => 1, 'status' => 'ready', 'is_visible_storefront' => true, 'needs_listing' => false, 'needs_review' => false, 'category_id' => 31, 'created_at' => now(), 'updated_at' => now()],
+        ]);
+        DB::table('marketplace_listings')->insert([
+            ['marketplace' => 'ovoko', 'part_id' => 711, 'external_offer_id' => 'OV-711', 'created_at' => now(), 'updated_at' => now()],
+            ['marketplace' => 'ovoko', 'part_id' => 712, 'external_offer_id' => 'OV-712', 'created_at' => now(), 'updated_at' => now()],
+        ]);
+        Http::fake(['https://ovoko.example.test/v2/get/parts*' => Http::response(['status_code' => 'R200', 'data' => [
+            ['id' => 'OV-711', 'category' => ['id' => 'OV-CAT-A', 'name' => 'A', 'path' => 'Ovoko > A']],
+            ['id' => 'OV-712', 'category' => ['id' => 'OV-CAT-B', 'name' => 'B', 'path' => 'Ovoko > B']],
+        ]], 200)]);
+
+        $response = $this->getJson('/tools/preview-ovoko-category-from-linked-products?token=gps_images_import_2026&local_category_id=31&sample_limit=50');
+
+        $response->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('local_category_id', 31)
+            ->assertJsonPath('linked_products_checked', 2)
+            ->assertJsonPath('ambiguous', true)
+            ->assertJsonPath('suggested_mapping', null)
+            ->assertJsonCount(2, 'observed_ovoko_categories');
+
+        Http::assertSentCount(1);
         $this->assertDatabaseCount('marketplace_category_mappings', 0);
     }
 

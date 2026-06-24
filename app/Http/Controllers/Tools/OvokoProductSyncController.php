@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\MarketplaceCategoryMapping;
 use App\Models\MarketplaceListing;
 use App\Models\Part;
+use App\Services\Marketplace\Api\MarketplaceApiManager;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -126,6 +127,113 @@ class OvokoProductSyncController extends Controller
     }
 
 
+
+    public function dryRunOvokoCategoryMappingFromLinkedProducts(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+
+        $limit = max(1, min(100, (int) $request->query('limit', 100)));
+        $page = max(1, (int) $request->query('page', 1));
+        $sampleLimit = max(1, min(100, (int) $request->query('sample_limit', 50)));
+        $onlyMissing = $request->boolean('only_missing_ovoko_category_mapping', true);
+        $includeAmbiguous = $request->boolean('include_ambiguous', true);
+
+        $result = $this->emptyLinkedCategoryMappingResponse($page, $limit);
+        $parts = $this->linkedOvokoPartsQuery($onlyMissing)->forPage($page, $limit)->get();
+
+        $ovokoPartsById = $this->fetchOvokoPartsByLinkedIds($parts, $page, $limit, $result);
+        $groups = [];
+
+        foreach ($parts as $part) {
+            $result['linked_products_checked']++;
+            $listing = $this->ovokoListing($part);
+            $ovokoId = $this->listingOvokoExternalId($listing);
+            if (! $part->category_id) { $result['skipped_uncategorized_count']++; continue; }
+            $ovoko = $ovokoId !== null ? ($ovokoPartsById[$ovokoId] ?? null) : null;
+            $category = $ovoko ? $this->extractOvokoCategory($ovoko) : null;
+            if (! $category || blank($category['ovoko_category_id'])) {
+                $result['unmapped_or_missing_category_count']++;
+                $this->pushSample($result['sample_products_without_ovoko_category'], $this->linkedProductSample($part, $ovokoId, $category), $sampleLimit);
+                continue;
+            }
+            $result['linked_products_with_ovoko_category']++;
+            $key = (string) $part->category_id;
+            $groups[$key] ??= $this->localCategoryGroup($part);
+            $catKey = (string) $category['ovoko_category_id'];
+            $groups[$key]['observed_ovoko_categories'][$catKey] ??= $category + ['count' => 0, 'sample_part_ids' => [], 'sample_ovoko_part_ids' => []];
+            $groups[$key]['observed_ovoko_categories'][$catKey]['count']++;
+            $this->pushSample($groups[$key]['observed_ovoko_categories'][$catKey]['sample_part_ids'], ['part_id' => $part->id], $sampleLimit);
+            $this->pushSample($groups[$key]['observed_ovoko_categories'][$catKey]['sample_ovoko_part_ids'], ['ovoko_part_id' => $ovokoId], $sampleLimit);
+            $this->pushSample($groups[$key]['sample_parts'], $this->linkedProductSample($part, $ovokoId, $category), $sampleLimit);
+        }
+
+        foreach ($groups as $group) {
+            $observed = array_values($group['observed_ovoko_categories']);
+            $result['local_categories_observed_count']++;
+            if (count($observed) === 1) {
+                $cat = $observed[0];
+                $result['suggested_mapping_count']++;
+                $result['suggested_mappings'][] = [
+                    'local_category_id' => $group['local_category_id'],
+                    'local_category_name' => $group['local_category_name'],
+                    'local_category_path' => $group['local_category_path'],
+                    'ovoko_category_id' => $cat['ovoko_category_id'],
+                    'ovoko_category_name' => $cat['ovoko_category_name'],
+                    'ovoko_category_path' => $cat['ovoko_category_path'],
+                    'evidence_count' => $cat['count'],
+                    'sample_part_ids' => array_column($cat['sample_part_ids'], 'part_id'),
+                    'sample_ovoko_part_ids' => array_column($cat['sample_ovoko_part_ids'], 'ovoko_part_id'),
+                    'confidence' => 'high',
+                    'match_type' => 'linked_products_consensus',
+                ];
+            } else {
+                $result['ambiguous_mapping_count']++;
+                if ($includeAmbiguous) $result['ambiguous_mappings'][] = [
+                    'local_category_id' => $group['local_category_id'],
+                    'local_category_path' => $group['local_category_path'],
+                    'observed_ovoko_categories' => $observed,
+                    'reason' => 'multiple_ovoko_categories_observed_for_one_local_category',
+                    'sample_parts' => $group['sample_parts'],
+                ];
+            }
+        }
+
+        return response()->json($result);
+    }
+
+    public function previewOvokoCategoryFromLinkedProducts(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+        $localCategoryId = (int) $request->query('local_category_id');
+        if ($localCategoryId < 1) return response()->json(['ok' => false, 'error_message' => 'local_category_id is required.'], 422);
+
+        $sampleLimit = max(1, min(100, (int) $request->query('sample_limit', 50)));
+        $result = ['ok' => true, 'dry_run' => true, 'ovoko_write' => false, 'local_update' => false, 'ovoko_read_request' => true, 'local_category_id' => $localCategoryId, 'local_category_path' => null, 'linked_products_checked' => 0, 'observed_ovoko_categories' => [], 'suggested_mapping' => null, 'ambiguous' => false, 'sample_products' => [], 'sample_errors' => [], 'warnings' => ['read_only_preview_no_ovoko_allegro_ebay_or_local_writes']];
+        $parts = $this->linkedOvokoPartsQuery(false)->where('category_id', $localCategoryId)->limit(100)->get();
+        $ovokoPartsById = $this->fetchOvokoPartsByLinkedIds($parts, 1, 100, $result);
+        $observed = [];
+        foreach ($parts as $part) {
+            $result['linked_products_checked']++;
+            $result['local_category_path'] ??= $part->category?->category_path ?? $part->category?->name;
+            $ovokoId = $this->listingOvokoExternalId($this->ovokoListing($part));
+            $category = $ovokoId ? $this->extractOvokoCategory($ovokoPartsById[$ovokoId] ?? []) : null;
+            $this->pushSample($result['sample_products'], $this->linkedProductSample($part, $ovokoId, $category), $sampleLimit);
+            if (! $category || blank($category['ovoko_category_id'])) continue;
+            $key = (string) $category['ovoko_category_id'];
+            $observed[$key] ??= $category + ['count' => 0, 'sample_part_ids' => [], 'sample_ovoko_part_ids' => []];
+            $observed[$key]['count']++;
+            $this->pushSample($observed[$key]['sample_part_ids'], ['part_id' => $part->id], $sampleLimit);
+            $this->pushSample($observed[$key]['sample_ovoko_part_ids'], ['ovoko_part_id' => $ovokoId], $sampleLimit);
+        }
+        $result['observed_ovoko_categories'] = array_values($observed);
+        $result['ambiguous'] = count($observed) > 1;
+        if (count($observed) === 1) {
+            $cat = array_values($observed)[0];
+            $result['suggested_mapping'] = ['local_category_id' => $localCategoryId, 'local_category_path' => $result['local_category_path'], 'ovoko_category_id' => $cat['ovoko_category_id'], 'ovoko_category_name' => $cat['ovoko_category_name'], 'ovoko_category_path' => $cat['ovoko_category_path'], 'evidence_count' => $cat['count'], 'confidence' => 'high', 'match_type' => 'linked_products_consensus'];
+        }
+        return response()->json($result);
+    }
+
     public function categoryDataSources(Request $request): JsonResponse
     {
         if (! $this->validToken($request)) return $this->invalidTokenResponse();
@@ -244,6 +352,71 @@ class OvokoProductSyncController extends Controller
         ]);
     }
 
+
+
+    private function linkedOvokoPartsQuery(bool $onlyMissingMapping): Builder
+    {
+        $query = Part::query()->with(['category', 'marketplaceListings'])->whereNotNull('category_id')
+            ->whereHas('marketplaceListings', fn ($q) => $q->where('marketplace', 'ovoko')->where(fn ($qq) => $qq->whereNotNull('external_offer_id')->orWhereNotNull('external_listing_id')))
+            ->where(fn ($q) => $q->whereNull('status')->orWhereNotIn('status', ['archived', 'sold']))
+            ->orderBy('id');
+        if ($onlyMissingMapping && Schema::hasTable('marketplace_category_mappings')) {
+            $query->whereNotExists(fn ($q) => $q->select(DB::raw(1))->from('marketplace_category_mappings')->whereColumn('marketplace_category_mappings.local_category_id', 'parts.category_id')->where('channel', 'ovoko'));
+        }
+        return $query;
+    }
+
+    private function fetchOvokoPartsByLinkedIds($parts, int $page, int $limit, array &$result): array
+    {
+        $ids = $parts->map(fn ($part) => $this->listingOvokoExternalId($this->ovokoListing($part)))->filter()->map(fn ($id) => (string) $id)->unique()->values()->all();
+        if ($ids === []) return [];
+        try {
+            $api = app(MarketplaceApiManager::class)->client('ovoko')->fetchPartsPage($page, $limit);
+            if (! ($api['api_ok'] ?? false)) $result['sample_errors'][] = ['type' => 'ovoko_api_status_not_ok', 'http_status' => $api['http_status'] ?? null, 'api_status_code' => $api['api_status_code'] ?? null, 'error' => $api['error'] ?? null];
+            $byId = [];
+            foreach (($api['parts'] ?? []) as $row) {
+                $id = (string) ($row['external_offer_id'] ?? '');
+                if ($id !== '' && in_array($id, $ids, true)) $byId[$id] = $row;
+            }
+            return $byId;
+        } catch (\Throwable $e) {
+            $result['sample_errors'][] = ['type' => 'ovoko_api_exception', 'message' => $e->getMessage()];
+            return [];
+        }
+    }
+
+    private function extractOvokoCategory(?array $row): ?array
+    {
+        if (! $row) return null;
+        $raw = $row['raw_category_fields'] ?? [];
+        $rawCategory = is_array($raw['category'] ?? null) ? $raw['category'] : [];
+        $id = $row['ovoko_category_id'] ?? $raw['category_id'] ?? $raw['categoryId'] ?? $rawCategory['id'] ?? $rawCategory['category_id'] ?? null;
+        $name = $row['ovoko_category_name'] ?? $raw['category_name'] ?? $raw['categoryName'] ?? $rawCategory['name'] ?? null;
+        $path = $row['ovoko_category_path'] ?? $raw['category_path'] ?? $raw['categoryPath'] ?? $rawCategory['path'] ?? $rawCategory['category_path'] ?? null;
+        if (blank($id) && blank($name) && blank($path)) return null;
+        return ['ovoko_category_id' => filled($id) ? (string) $id : null, 'ovoko_category_name' => filled($name) ? (string) $name : null, 'ovoko_category_path' => filled($path) ? (string) $path : null, 'raw_category_fields' => $raw];
+    }
+
+    private function localCategoryGroup(Part $part): array
+    {
+        return ['local_category_id' => $part->category_id, 'local_category_name' => $part->category?->name, 'local_category_path' => $part->category?->category_path ?? $part->category?->name, 'observed_ovoko_categories' => [], 'sample_parts' => []];
+    }
+
+    private function linkedProductSample(Part $part, ?string $ovokoId, ?array $category): array
+    {
+        return ['part_id' => $part->id, 'part_number' => $part->part_number, 'name' => $part->name, 'local_category_id' => $part->category_id, 'local_category_path' => $part->category?->category_path ?? $part->category?->name, 'ovoko_part_id' => $ovokoId, 'ovoko_category' => $category];
+    }
+
+    private function listingOvokoExternalId(?MarketplaceListing $listing): ?string
+    {
+        $id = $listing?->external_offer_id ?: $listing?->external_listing_id;
+        return filled($id) ? (string) $id : null;
+    }
+
+    private function emptyLinkedCategoryMappingResponse(int $page, int $limit): array
+    {
+        return ['ok' => true, 'dry_run' => true, 'ovoko_write' => false, 'local_update' => false, 'ovoko_read_request' => true, 'page' => $page, 'limit' => $limit, 'linked_products_checked' => 0, 'linked_products_with_ovoko_category' => 0, 'local_categories_observed_count' => 0, 'suggested_mapping_count' => 0, 'ambiguous_mapping_count' => 0, 'unmapped_or_missing_category_count' => 0, 'skipped_uncategorized_count' => 0, 'suggested_mappings' => [], 'ambiguous_mappings' => [], 'sample_products_without_ovoko_category' => [], 'sample_errors' => [], 'warnings' => ['read_only_dry_run_no_ovoko_allegro_ebay_or_local_writes']];
+    }
 
     private function analysePart(Part $part, bool $includeAlreadyListed): array
     {
