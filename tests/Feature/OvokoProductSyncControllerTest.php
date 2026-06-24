@@ -171,10 +171,17 @@ class OvokoProductSyncControllerTest extends TestCase
             ['marketplace' => 'ovoko', 'part_id' => 701, 'external_offer_id' => 'OV-701', 'created_at' => now(), 'updated_at' => now()],
             ['marketplace' => 'ovoko', 'part_id' => 702, 'external_offer_id' => 'OV-702', 'created_at' => now(), 'updated_at' => now()],
         ]);
-        Http::fake(['https://ovoko.example.test/v2/get/parts*' => Http::response(['status_code' => 'R200', 'data' => [
-            ['id' => 'OV-701', 'name' => 'Engine A', 'category_id' => 'OV-CAT-31', 'category_name' => 'Ovoko engines', 'category_path' => 'Ovoko > Engines'],
-            ['id' => 'OV-702', 'name' => 'Engine B', 'category_id' => 'OV-CAT-31', 'category_name' => 'Ovoko engines', 'category_path' => 'Ovoko > Engines'],
-        ]], 200)]);
+        Http::fake([
+            'https://ovoko.example.test/get/categories' => Http::response(['status_code' => 'R200', 'list' => [
+                ['id' => 'OV-ROOT', 'parent_id' => null, 'level' => 1, 'pl' => 'Części', 'en' => 'Parts'],
+                ['id' => 'OV-PARENT', 'parent_id' => 'OV-ROOT', 'level' => 2, 'pl' => 'Silnik', 'en' => 'Engine'],
+                ['id' => 'OV-CAT-31', 'parent_id' => 'OV-PARENT', 'level' => 3, 'pl' => 'Silniki', 'en' => 'Engines'],
+            ]], 200),
+            'https://ovoko.example.test/v2/get/parts*' => Http::response(['status_code' => 'R200', 'data' => [
+                ['id' => 'OV-701', 'name' => 'Engine A', 'category_id' => 'OV-CAT-31'],
+                ['id' => 'OV-702', 'name' => 'Engine B', 'category_id' => 'OV-CAT-31'],
+            ]], 200),
+        ]);
 
         $response = $this->getJson('/tools/dry-run-ovoko-category-mapping-from-linked-products?token=gps_images_import_2026&limit=100&page=1&sample_limit=50&only_missing_ovoko_category_mapping=1');
 
@@ -189,10 +196,12 @@ class OvokoProductSyncControllerTest extends TestCase
             ->assertJsonPath('ambiguous_mapping_count', 0)
             ->assertJsonPath('suggested_mappings.0.local_category_id', 31)
             ->assertJsonPath('suggested_mappings.0.ovoko_category_id', 'OV-CAT-31')
+            ->assertJsonPath('suggested_mappings.0.ovoko_category_name', 'Silniki')
+            ->assertJsonPath('suggested_mappings.0.ovoko_category_path', 'Części > Silnik > Silniki')
             ->assertJsonPath('suggested_mappings.0.confidence', 'high')
             ->assertJsonPath('suggested_mappings.0.match_type', 'linked_products_consensus');
 
-        Http::assertSentCount(1);
+        Http::assertSentCount(2);
         $this->assertDatabaseCount('marketplace_category_mappings', 0);
     }
 
@@ -208,10 +217,13 @@ class OvokoProductSyncControllerTest extends TestCase
             ['marketplace' => 'ovoko', 'part_id' => 711, 'external_offer_id' => 'OV-711', 'created_at' => now(), 'updated_at' => now()],
             ['marketplace' => 'ovoko', 'part_id' => 712, 'external_offer_id' => 'OV-712', 'created_at' => now(), 'updated_at' => now()],
         ]);
-        Http::fake(['https://ovoko.example.test/v2/get/parts*' => Http::response(['status_code' => 'R200', 'data' => [
-            ['id' => 'OV-711', 'category' => ['id' => 'OV-CAT-A', 'name' => 'A', 'path' => 'Ovoko > A']],
-            ['id' => 'OV-712', 'category' => ['id' => 'OV-CAT-B', 'name' => 'B', 'path' => 'Ovoko > B']],
-        ]], 200)]);
+        Http::fake([
+            'https://ovoko.example.test/get/categories' => Http::response(['status_code' => 'R200', 'list' => []], 200),
+            'https://ovoko.example.test/v2/get/parts*' => Http::response(['status_code' => 'R200', 'data' => [
+                ['id' => 'OV-711', 'category' => ['id' => 'OV-CAT-A', 'name' => 'A', 'path' => 'Ovoko > A']],
+                ['id' => 'OV-712', 'category' => ['id' => 'OV-CAT-B', 'name' => 'B', 'path' => 'Ovoko > B']],
+            ]], 200),
+        ]);
 
         $response = $this->getJson('/tools/preview-ovoko-category-from-linked-products?token=gps_images_import_2026&local_category_id=31&sample_limit=50');
 
@@ -222,6 +234,30 @@ class OvokoProductSyncControllerTest extends TestCase
             ->assertJsonPath('ambiguous', true)
             ->assertJsonPath('suggested_mapping', null)
             ->assertJsonCount(2, 'observed_ovoko_categories');
+
+        Http::assertSentCount(2);
+        $this->assertDatabaseCount('marketplace_category_mappings', 0);
+    }
+
+    public function test_fetch_ovoko_category_tree_preview_is_read_only(): void
+    {
+        MarketplaceAccount::query()->create(['id' => 92, 'marketplace' => 'ovoko', 'name' => 'Ovoko main', 'code' => 'ovoko_main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'dry_run', 'api_credentials' => ['username' => 'u', 'password' => 'p', 'user_token' => 't']]);
+        Http::fake(['https://ovoko.example.test/get/categories' => Http::response(['status_code' => 'R200', 'list' => [
+            ['id' => '1', 'parent_id' => null, 'level' => 1, 'pl' => 'Części', 'en' => 'Parts'],
+            ['id' => '2', 'parent_id' => '1', 'level' => 2, 'pl' => 'Nadwozie', 'en' => 'Body'],
+            ['id' => '3', 'parent_id' => '2', 'level' => 3, 'pl' => 'Drzwi', 'en' => 'Door'],
+        ]], 200)]);
+
+        $response = $this->getJson('/tools/fetch-ovoko-category-tree-preview?token=gps_images_import_2026&sample_limit=10');
+
+        $response->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('ovoko_write', false)
+            ->assertJsonPath('local_update', false)
+            ->assertJsonPath('category_count', 3)
+            ->assertJsonPath('level_counts.3', 1)
+            ->assertJsonPath('id_map.3.pl', 'Drzwi')
+            ->assertJsonPath('sample_full_pl_paths.0.pl_path', 'Części > Nadwozie > Drzwi');
 
         Http::assertSentCount(1);
         $this->assertDatabaseCount('marketplace_category_mappings', 0);
