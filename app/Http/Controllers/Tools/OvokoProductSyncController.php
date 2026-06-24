@@ -7,6 +7,7 @@ use App\Models\MarketplaceCategoryMapping;
 use App\Models\MarketplaceListing;
 use App\Models\Part;
 use App\Services\Marketplace\Api\MarketplaceApiManager;
+use App\Services\Marketplace\Api\OvokoApiClient;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -260,6 +261,66 @@ class OvokoProductSyncController extends Controller
         return response()->json($result);
     }
 
+    public function debugOvokoLinkedProductRawFields(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+
+        $limit = max(1, min(50, (int) $request->query('limit', 10)));
+        $defaultIds = ['10776', '10686', '10647', '10500', '10489'];
+        $ids = collect(explode(',', (string) $request->query('ovoko_part_ids', implode(',', $defaultIds))))
+            ->map(fn (string $id) => trim($id))->filter()->unique()->take($limit)->values()->all();
+
+        $result = [
+            'ok' => true,
+            'dry_run' => true,
+            'ovoko_write' => false,
+            'local_update' => false,
+            'requested_ovoko_part_ids' => $ids,
+            'checked_count' => 0,
+            'products' => [],
+            'sample_errors' => [],
+            'warnings' => ['read_only_diagnostics_only_no_ovoko_allegro_ebay_or_local_writes'],
+        ];
+
+        try {
+            $client = app(MarketplaceApiManager::class)->client('ovoko');
+            foreach ($ids as $id) {
+                $result['checked_count']++;
+                $detail = $client instanceof OvokoApiClient ? $client->fetchPartRawById($id) : ['api_ok' => false, 'error' => 'ovoko_client_unavailable'];
+                $raw = is_array($detail['raw'] ?? null) ? $detail['raw'] : [];
+                $normalized = is_array($detail['normalized'] ?? null) ? $detail['normalized'] : [];
+
+                $result['products'][] = [
+                    'ovoko_part_id' => $id,
+                    'found_in_ovoko_response' => (bool) (($detail['api_ok'] ?? false) && $raw !== []),
+                    'endpoint_used' => $detail['endpoint_used'] ?? null,
+                    'http_status' => $detail['http_status'] ?? null,
+                    'api_status_code' => $detail['api_status_code'] ?? null,
+                    'response_top_level_keys' => $detail['response_top_level_keys'] ?? [],
+                    'raw_top_level_keys' => array_values(array_slice(array_keys($raw), 0, 80)),
+                    'category_like_fields' => $this->categoryLikeFields($raw),
+                    'has_category_id' => filled(data_get($raw, 'category_id')) || filled(data_get($normalized, 'ovoko_category_id')),
+                    'category_id' => data_get($raw, 'category_id') ?? data_get($normalized, 'ovoko_category_id'),
+                    'has_category_title_path' => filled(data_get($raw, 'category_title_path')) || filled(data_get($normalized, 'ovoko_category_path')),
+                    'category_title_path' => data_get($raw, 'category_title_path') ?? data_get($normalized, 'ovoko_category_path'),
+                    'has_part' => array_key_exists('part', $raw),
+                    'has_category' => array_key_exists('category', $raw),
+                    'has_type' => array_key_exists('type', $raw),
+                    'has_group' => array_key_exists('group', $raw),
+                    'has_category_tree' => array_key_exists('category_tree', $raw),
+                    'normalized_category' => $this->extractOvokoCategory($normalized, null, $result),
+                    'trimmed_raw_payload' => $this->trimRawPayload($raw),
+                    'error' => $detail['error'] ?? null,
+                ];
+            }
+        } catch (\Throwable $e) {
+            $result['sample_errors'][] = ['type' => 'ovoko_api_exception', 'message' => $e->getMessage()];
+        }
+
+        return response()->json($result);
+    }
+
+
     public function categoryDataSources(Request $request): JsonResponse
     {
         if (! $this->validToken($request)) return $this->invalidTokenResponse();
@@ -380,6 +441,35 @@ class OvokoProductSyncController extends Controller
 
 
 
+
+    private function categoryLikeFields(array $raw): array
+    {
+        $out = [];
+        $walk = function ($value, string $path) use (&$walk, &$out): void {
+            if (! is_array($value)) return;
+            foreach ($value as $key => $child) {
+                $childPath = $path === '' ? (string) $key : $path.'.'.$key;
+                if (preg_match('/(category|part|type|group|tree)/i', (string) $key)) {
+                    $out[$childPath] = is_scalar($child) || $child === null ? $child : $this->trimRawPayload($child, 8);
+                }
+                if (is_array($child) && count($out) < 120) $walk($child, $childPath);
+            }
+        };
+        $walk($raw, '');
+        return $out;
+    }
+
+    private function trimRawPayload(array $raw, int $limit = 40): array
+    {
+        $blocked = ['username', 'password', 'user_token', 'token', 'api_key', 'authorization'];
+        $out = [];
+        foreach (array_slice($raw, 0, $limit, true) as $key => $value) {
+            if (in_array(strtolower((string) $key), $blocked, true)) continue;
+            $out[$key] = is_array($value) ? $this->trimRawPayload($value, 20) : $value;
+        }
+        return $out;
+    }
+
     private function linkedOvokoPartsQuery(bool $onlyMissingMapping): Builder
     {
         $query = Part::query()->with(['category', 'marketplaceListings'])->whereNotNull('category_id')
@@ -404,6 +494,20 @@ class OvokoProductSyncController extends Controller
                 $id = (string) ($row['external_offer_id'] ?? '');
                 if ($id !== '' && in_array($id, $ids, true)) $byId[$id] = $row;
             }
+
+            $missingIds = array_values(array_diff($ids, array_keys($byId)));
+            $client = app(MarketplaceApiManager::class)->client('ovoko');
+            if ($client instanceof OvokoApiClient) {
+                foreach ($missingIds as $id) {
+                    $detail = $client->fetchPartRawById($id);
+                    if (($detail['api_ok'] ?? false) && is_array($detail['normalized'] ?? null)) {
+                        $byId[$id] = $detail['normalized'];
+                    } else {
+                        $this->pushSample($result['sample_errors'], ['type' => 'ovoko_part_detail_not_found', 'ovoko_part_id' => $id, 'error' => $detail['error'] ?? null], 50);
+                    }
+                }
+            }
+
             return $byId;
         } catch (\Throwable $e) {
             $result['sample_errors'][] = ['type' => 'ovoko_api_exception', 'message' => $e->getMessage()];

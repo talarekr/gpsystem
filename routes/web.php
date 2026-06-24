@@ -185,6 +185,7 @@ Route::get('/tools/inspect-ovoko-category-legacy-payloads', [OvokoProductSyncCon
 Route::get('/tools/fetch-ovoko-category-tree-preview', [OvokoProductSyncController::class, 'fetchOvokoCategoryTreePreview'])->name('tools.fetch-ovoko-category-tree-preview');
 Route::get('/tools/dry-run-ovoko-category-mapping-from-linked-products', [OvokoProductSyncController::class, 'dryRunOvokoCategoryMappingFromLinkedProducts'])->name('tools.dry-run-ovoko-category-mapping-from-linked-products');
 Route::get('/tools/preview-ovoko-category-from-linked-products', [OvokoProductSyncController::class, 'previewOvokoCategoryFromLinkedProducts'])->name('tools.preview-ovoko-category-from-linked-products');
+Route::get('/tools/debug-ovoko-linked-product-raw-fields', [OvokoProductSyncController::class, 'debugOvokoLinkedProductRawFields'])->name('tools.debug-ovoko-linked-product-raw-fields');
 Route::get('/tools/ovoko-stock-reconciliation-runner', [OvokoStockReconciliationController::class, 'runner'])->name('tools.ovoko-stock-reconciliation-runner');
 Route::get('/tools/dry-run-ovoko-stock-reconciliation', [OvokoStockReconciliationController::class, 'dryRun'])->name('tools.dry-run-ovoko-stock-reconciliation');
 Route::get('/tools/dry-run-ovoko-stock-reconciliation-all', [OvokoStockReconciliationController::class, 'dryRunAll'])->name('tools.dry-run-ovoko-stock-reconciliation-all');

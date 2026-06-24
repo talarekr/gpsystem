@@ -263,4 +263,59 @@ class OvokoProductSyncControllerTest extends TestCase
         $this->assertDatabaseCount('marketplace_category_mappings', 0);
     }
 
+
+
+    public function test_debug_ovoko_linked_product_raw_fields_shows_category_like_fields_read_only(): void
+    {
+        MarketplaceAccount::query()->create(['id' => 93, 'marketplace' => 'ovoko', 'name' => 'Ovoko main', 'code' => 'ovoko_main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'dry_run', 'api_credentials' => ['username' => 'u', 'password' => 'p', 'user_token' => 't']]);
+        Http::fake([
+            'https://ovoko.example.test/v2/get/part/10776' => Http::response(['status_code' => 'R200', 'data' => ['id' => '10776', 'name' => 'Part', 'category_id' => '123', 'category_title_path' => 'A > B', 'category' => ['id' => '123'], 'group' => ['name' => 'G']]], 200),
+        ]);
+
+        $response = $this->getJson('/tools/debug-ovoko-linked-product-raw-fields?token=gps_images_import_2026&limit=1&ovoko_part_ids=10776');
+
+        $response->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('ovoko_write', false)
+            ->assertJsonPath('local_update', false)
+            ->assertJsonPath('products.0.found_in_ovoko_response', true)
+            ->assertJsonPath('products.0.has_category_id', true)
+            ->assertJsonPath('products.0.category_id', '123')
+            ->assertJsonPath('products.0.has_category_title_path', true)
+            ->assertJsonPath('products.0.has_category', true)
+            ->assertJsonPath('products.0.has_group', true)
+            ->assertJsonPath('products.0.normalized_category.ovoko_category_id', '123');
+
+        Http::assertSentCount(1);
+        $this->assertDatabaseCount('marketplace_category_mappings', 0);
+    }
+
+    public function test_linked_products_mapping_falls_back_to_part_detail_endpoint_when_page_misses_ids(): void
+    {
+        MarketplaceAccount::query()->create(['id' => 94, 'marketplace' => 'ovoko', 'name' => 'Ovoko main', 'code' => 'ovoko_main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'dry_run', 'api_credentials' => ['username' => 'u', 'password' => 'p', 'user_token' => 't']]);
+        DB::table('part_categories')->insert(['id' => 32, 'name' => 'Gearbox', 'category_path' => 'Parts > Gearbox', 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('parts')->insert(['id' => 721, 'name' => 'Gearbox A', 'part_number' => 'PN-721', 'description' => 'Desc', 'price' => 1, 'quantity' => 1, 'status' => 'ready', 'is_visible_storefront' => true, 'needs_listing' => false, 'needs_review' => false, 'category_id' => 32, 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('marketplace_listings')->insert(['marketplace' => 'ovoko', 'part_id' => 721, 'external_offer_id' => '10776', 'created_at' => now(), 'updated_at' => now()]);
+        Http::fake([
+            'https://ovoko.example.test/get/categories' => Http::response(['status_code' => 'R200', 'list' => [
+                ['id' => '1', 'parent_id' => null, 'level' => 1, 'pl' => 'Części', 'en' => 'Parts'],
+                ['id' => '2', 'parent_id' => '1', 'level' => 2, 'pl' => 'Skrzynia', 'en' => 'Gearbox'],
+                ['id' => '123', 'parent_id' => '2', 'level' => 3, 'pl' => 'Automatyczna skrzynia biegów', 'en' => 'Automatic gearbox'],
+            ]], 200),
+            'https://ovoko.example.test/v2/get/parts*' => Http::response(['status_code' => 'R200', 'data' => []], 200),
+            'https://ovoko.example.test/v2/get/part/10776' => Http::response(['status_code' => 'R200', 'data' => ['id' => '10776', 'name' => 'Gearbox A', 'category_id' => '123']], 200),
+        ]);
+
+        $response = $this->getJson('/tools/dry-run-ovoko-category-mapping-from-linked-products?token=gps_images_import_2026&limit=100&page=1&sample_limit=50&only_missing_ovoko_category_mapping=1');
+
+        $response->assertOk()
+            ->assertJsonPath('linked_products_checked', 1)
+            ->assertJsonPath('linked_products_with_ovoko_category', 1)
+            ->assertJsonPath('suggested_mapping_count', 1)
+            ->assertJsonPath('suggested_mappings.0.ovoko_category_id', '123')
+            ->assertJsonPath('suggested_mappings.0.ovoko_category_path', 'Części > Skrzynia > Automatyczna skrzynia biegów');
+
+        $this->assertDatabaseCount('marketplace_category_mappings', 0);
+    }
+
 }
