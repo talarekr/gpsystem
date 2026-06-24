@@ -185,6 +185,10 @@ Route::get('/tools/inspect-ovoko-category-legacy-payloads', [OvokoProductSyncCon
 Route::get('/tools/fetch-ovoko-category-tree-preview', [OvokoProductSyncController::class, 'fetchOvokoCategoryTreePreview'])->name('tools.fetch-ovoko-category-tree-preview');
 Route::get('/tools/dry-run-ovoko-category-mapping-from-linked-products', [OvokoProductSyncController::class, 'dryRunOvokoCategoryMappingFromLinkedProducts'])->name('tools.dry-run-ovoko-category-mapping-from-linked-products');
 Route::get('/tools/ovoko-category-mapping-autorun', [OvokoProductSyncController::class, 'ovokoCategoryMappingAutorun'])->name('tools.ovoko-category-mapping-autorun');
+Route::get('/tools/ovoko-category-mapping-autorun-smoke', [OvokoProductSyncController::class, 'ovokoCategoryMappingAutorunSmoke'])->name('tools.ovoko-category-mapping-autorun-smoke');
+Route::get('/tools/debug-ovoko-category-mapping-autorun-start-minimal', [OvokoProductSyncController::class, 'debugOvokoCategoryMappingAutorunStartMinimal'])->name('tools.debug-ovoko-category-mapping-autorun-start-minimal');
+Route::get('/tools/app-deploy-debug', [OvokoProductSyncController::class, 'appDeployDebug'])->name('tools.app-deploy-debug');
+Route::get('/tools/clear-laravel-cache', [OvokoProductSyncController::class, 'clearLaravelCache'])->name('tools.clear-laravel-cache');
 Route::get('/tools/start-ovoko-category-mapping-autorun', [OvokoProductSyncController::class, 'startOvokoCategoryMappingAutorun'])->name('tools.start-ovoko-category-mapping-autorun');
 Route::get('/tools/run-ovoko-category-mapping-autorun', [OvokoProductSyncController::class, 'runOvokoCategoryMappingAutorun'])->name('tools.run-ovoko-category-mapping-autorun');
 Route::get('/tools/status-ovoko-category-mapping-autorun', [OvokoProductSyncController::class, 'statusOvokoCategoryMappingAutorun'])->name('tools.status-ovoko-category-mapping-autorun');
