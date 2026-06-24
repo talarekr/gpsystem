@@ -133,4 +133,29 @@ class OvokoProductSyncControllerTest extends TestCase
         $this->assertDatabaseMissing('marketplace_listings', ['part_id' => 620]);
     }
 
+
+    public function test_inspect_ovoko_category_legacy_payloads_finds_rrr_candidates_read_only(): void
+    {
+        DB::table('part_categories')->insert([
+            ['id' => 31, 'name' => 'Engines', 'slug' => 'engines', 'category_path' => 'Parts > Engines', 'external_id' => 'OLD-31', 'legacy_payload' => json_encode(['marketplace_mappings' => ['rrr.lt' => ['category_id' => 'RRR-31', 'category_name' => 'Engines', 'category_path' => 'RRR > Engines']]]), 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 32, 'name' => 'Doors', 'slug' => 'doors', 'category_path' => 'Parts > Doors', 'external_id' => 'OLD-32', 'legacy_payload' => json_encode(['marketplaces' => ['ovoko' => ['externalCategoryId' => 'OV-32', 'category_name' => 'Doors']]]), 'created_at' => now(), 'updated_at' => now()],
+        ]);
+
+        $response = $this->getJson('/tools/inspect-ovoko-category-legacy-payloads?token=gps_images_import_2026&sample_limit=10');
+
+        $response->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('dry_run', true)
+            ->assertJsonPath('ovoko_write', false)
+            ->assertJsonPath('local_update', false)
+            ->assertJsonPath('categories_checked', 2)
+            ->assertJsonPath('legacy_payload_non_empty_count', 2)
+            ->assertJsonFragment(['possible_external_category_id' => 'RRR-31'])
+            ->assertJsonFragment(['possible_external_category_id' => 'OV-32'])
+            ->assertJsonFragment(['local_category_id' => 31, 'ovoko_external_category_id' => 'RRR-31'])
+            ->assertJsonPath('sample_current_missing_ovoko_mapping_with_legacy_payload.0.has_ovoko_or_rrr', true);
+
+        $this->assertDatabaseCount('marketplace_category_mappings', 0);
+    }
+
 }

@@ -175,6 +175,75 @@ class OvokoProductSyncController extends Controller
             'warnings' => ['read_only_discovery_only_no_ovoko_allegro_ebay_or_local_writes'],
         ]);
     }
+    public function inspectOvokoCategoryLegacyPayloads(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+
+        $sampleLimit = max(1, min(100, (int) $request->query('sample_limit', 20)));
+        $focusIds = collect(explode(',', (string) $request->query('focus_ids', '31,32,20')))
+            ->map(fn (string $id) => (int) trim($id))->filter()->values()->all();
+        $warnings = ['read_only_diagnostics_only_no_ovoko_allegro_ebay_or_local_writes'];
+
+        if (! Schema::hasTable('part_categories')) {
+            return response()->json([
+                'ok' => true, 'dry_run' => true, 'ovoko_write' => false, 'local_update' => false,
+                'categories_checked' => 0, 'legacy_payload_non_empty_count' => 0,
+                'detected_legacy_payload_shapes' => [], 'possible_ovoko_keys' => [],
+                'possible_ovoko_category_records_count' => 0,
+                'sample_possible_ovoko_category_records' => [],
+                'sample_current_missing_ovoko_mapping_with_legacy_payload' => [],
+                'suggested_mapping_strategy' => [],
+                'warnings' => array_merge($warnings, ['part_categories_table_missing']),
+            ]);
+        }
+
+        $select = $this->safeSelectColumns('part_categories', ['id', 'name', 'category_path', 'external_id', 'legacy_payload']);
+        $categoriesChecked = $this->safeCount('part_categories');
+        $legacyNonEmptyCount = Schema::hasColumn('part_categories', 'legacy_payload') ? $this->nonEmptyCount('part_categories', 'legacy_payload') : 0;
+        $shapes = [];
+        $possibleKeys = [];
+        $records = [];
+        $strategy = [];
+
+        if (! Schema::hasColumn('part_categories', 'legacy_payload')) {
+            $warnings[] = 'part_categories_legacy_payload_column_missing';
+        } else {
+            DB::table('part_categories')->select($select)->whereNotNull('legacy_payload')->where('legacy_payload', '!=', '')->orderBy('id')->chunk(200, function ($rows) use (&$shapes, &$possibleKeys, &$records, &$strategy, $sampleLimit): void {
+                foreach ($rows as $row) {
+                    $category = (array) $row;
+                    $payload = $this->decodeLegacyPayload($category['legacy_payload'] ?? null);
+                    if (! is_array($payload)) continue;
+                    $shape = implode(',', array_slice(array_keys($payload), 0, 20));
+                    $shapes[$shape] = ($shapes[$shape] ?? 0) + 1;
+                    foreach ($this->findOvokoLegacyPayloadCandidates($payload) as $candidate) {
+                        $possibleKeys[$candidate['detected_key_path']] = ($possibleKeys[$candidate['detected_key_path']] ?? 0) + 1;
+                        $record = $this->legacyCandidateRecord($category, $candidate);
+                        if ($record['possible_external_category_id'] && $record['confidence'] === 'high') {
+                            $strategyKey = ($record['local_category_id'] ?? '').'|'.$record['possible_external_category_id'];
+                            $strategy[$strategyKey] = ['local_category_id' => $record['local_category_id'], 'ovoko_external_category_id' => $record['possible_external_category_id'], 'source' => $record['detected_key_path'], 'confidence' => $record['confidence']];
+                        }
+                        if (count($records) < $sampleLimit) $records[] = $record;
+                    }
+                }
+            });
+        }
+
+        arsort($shapes); arsort($possibleKeys);
+
+        return response()->json([
+            'ok' => true, 'dry_run' => true, 'ovoko_write' => false, 'local_update' => false,
+            'categories_checked' => $categoriesChecked,
+            'legacy_payload_non_empty_count' => $legacyNonEmptyCount,
+            'detected_legacy_payload_shapes' => $this->assocCounts($shapes),
+            'possible_ovoko_keys' => $this->assocCounts($possibleKeys),
+            'possible_ovoko_category_records_count' => array_sum($possibleKeys),
+            'sample_possible_ovoko_category_records' => $records,
+            'sample_current_missing_ovoko_mapping_with_legacy_payload' => $this->missingOvokoMappingLegacySamples($focusIds, $sampleLimit),
+            'suggested_mapping_strategy' => array_values($strategy),
+            'warnings' => $warnings,
+        ]);
+    }
+
 
     private function analysePart(Part $part, bool $includeAlreadyListed): array
     {
@@ -254,6 +323,80 @@ class OvokoProductSyncController extends Controller
     }
 
 
+
+    private function decodeLegacyPayload(mixed $payload): mixed
+    {
+        if (is_array($payload)) return $payload;
+        if (is_string($payload) && trim($payload) !== '') {
+            $decoded = json_decode($payload, true);
+            return json_last_error() === JSON_ERROR_NONE ? $decoded : null;
+        }
+        return null;
+    }
+
+    private function findOvokoLegacyPayloadCandidates(array $payload, string $path = 'legacy_payload'): array
+    {
+        $needles = '/(ovoko|rrr|rrr\.lt|category_id|categoryId|category|marketplace_mappings|marketplaces|external_id|externalCategoryId|external_category_id|category_path|category_name)/i';
+        $out = [];
+        foreach ($payload as $key => $value) {
+            $current = $path.'.'.$key;
+            $keyHit = preg_match($needles, (string) $key) === 1;
+            $valueText = is_scalar($value) ? (string) $value : json_encode($value);
+            $valueHit = is_string($valueText) && preg_match($needles, $valueText) === 1;
+            if ($keyHit || $valueHit) $out[] = ['detected_key_path' => $current, 'detected_value' => $value, 'key_hit' => $keyHit, 'value_hit' => $valueHit];
+            if (is_array($value)) $out = array_merge($out, $this->findOvokoLegacyPayloadCandidates($value, $current));
+        }
+        return $out;
+    }
+
+    private function legacyCandidateRecord(array $category, array $candidate): array
+    {
+        $value = $candidate['detected_value'];
+        $path = $candidate['detected_key_path'];
+        $flat = is_array($value) ? $value : [];
+        $externalId = $flat['external_category_id'] ?? $flat['externalCategoryId'] ?? $flat['category_id'] ?? $flat['categoryId'] ?? $flat['id'] ?? null;
+        if (! $externalId && preg_match('/(external_category_id|externalCategoryId|category_id|categoryId|external_id)$/i', $path) && is_scalar($value)) $externalId = (string) $value;
+        $name = $flat['external_category_name'] ?? $flat['category_name'] ?? $flat['categoryName'] ?? $flat['name'] ?? null;
+        $categoryPath = $flat['external_category_path'] ?? $flat['category_path'] ?? $flat['categoryPath'] ?? $flat['path'] ?? null;
+        $hasOvokoContext = preg_match('/(ovoko|rrr)/i', $path.' '.(is_scalar($value) ? (string) $value : json_encode($value))) === 1;
+        $confidence = $hasOvokoContext && $externalId ? 'high' : ($hasOvokoContext || $externalId ? 'medium' : 'low');
+        return [
+            'local_category_id' => $category['id'] ?? null,
+            'local_category_path' => $category['category_path'] ?? $category['name'] ?? null,
+            'part_categories_external_id' => $category['external_id'] ?? null,
+            'detected_key_path' => $path,
+            'detected_value' => is_array($value) ? $value : (string) $value,
+            'possible_external_category_id' => $externalId ? (string) $externalId : null,
+            'possible_external_category_name' => $name ? (string) $name : null,
+            'possible_external_category_path' => $categoryPath ? (string) $categoryPath : null,
+            'confidence' => $confidence,
+        ];
+    }
+
+    private function missingOvokoMappingLegacySamples(array $focusIds, int $limit): array
+    {
+        if (! Schema::hasTable('part_categories') || ! Schema::hasColumn('part_categories', 'legacy_payload')) return [];
+        $query = DB::table('part_categories')->select($this->safeSelectColumns('part_categories', ['id', 'name', 'category_path', 'external_id', 'legacy_payload']))->whereNotNull('legacy_payload')->where('legacy_payload', '!=', '');
+        if ($focusIds !== []) $query->whereIn('id', $focusIds);
+        return $query->limit($limit)->get()->map(function ($row) {
+            $cat = (array) $row; $payload = $this->decodeLegacyPayload($cat['legacy_payload'] ?? null);
+            $fragment = is_array($payload) ? ($payload['marketplace_mappings'] ?? $payload['marketplaces'] ?? null) : null;
+            $text = json_encode($payload);
+            return $cat + [
+                'legacy_payload' => $payload,
+                'marketplace_mappings_fragment' => $fragment,
+                'has_ovoko_or_rrr' => is_string($text) && preg_match('/(ovoko|rrr|rrr\.lt)/i', $text) === 1,
+                'local_external_id_matches_payload_value' => isset($cat['external_id']) && $cat['external_id'] !== null && is_string($text) && str_contains($text, (string) $cat['external_id']),
+                'current_ovoko_mapping_exists' => Schema::hasTable('marketplace_category_mappings') ? DB::table('marketplace_category_mappings')->where('local_category_id', $cat['id'])->where('channel', 'ovoko')->exists() : false,
+            ];
+        })->filter(fn ($row) => ! $row['current_ovoko_mapping_exists'])->values()->all();
+    }
+
+    private function assocCounts(array $counts): array
+    {
+        return collect($counts)->map(fn ($count, $value) => ['value' => $value, 'count' => $count])->values()->all();
+    }
+
     private function databaseTables(): array { try { return array_map(fn ($row) => reset($row), array_map('get_object_vars', DB::select("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"))); } catch (\Throwable) { try { return array_map(fn ($row) => reset($row), array_map('get_object_vars', DB::select('SHOW TABLES'))); } catch (\Throwable) { return []; } } }
     private function looksLikeOvokoCategoryColumn(string $column): bool { return (bool) preg_match('/(ovoko|category|external|marketplace|source|import|slug|path|name|metadata|json|settings|raw|legacy)/i', $column); }
     private function safeCount(string $table): int { try { return (int) DB::table($table)->count(); } catch (\Throwable) { return 0; } }
@@ -261,7 +404,7 @@ class OvokoProductSyncController extends Controller
     private function safeSelectColumns(string $table, array $wanted): array { $columns = Schema::getColumnListing($table); return array_values(array_intersect($wanted, $columns)) ?: ['id']; }
     private function columnSamples(string $table, string $column, int $limit): array { try { return DB::table($table)->select($this->safeSelectColumns($table, ['id', 'local_category_id', 'channel', 'external_category_id', 'external_category_name', 'external_category_path', 'name', 'category_path', 'slug', $column]))->whereNotNull($column)->where($column, '!=', '')->limit($limit)->get()->map(fn ($r) => (array) $r)->all(); } catch (\Throwable) { return []; } }
     private function tableSummary(?string $table, array $columns, int $limit): array { if (! $table || ! Schema::hasTable($table)) return ['table' => $table, 'exists' => false]; return ['table' => $table, 'exists' => true, 'record_count' => $this->safeCount($table), 'columns' => Schema::getColumnListing($table), 'samples' => DB::table($table)->select($this->safeSelectColumns($table, $columns))->limit($limit)->get()->map(fn ($r) => (array) $r)->all()]; }
-    private function marketplaceMappingsSummary(int $limit): array { if (! Schema::hasTable('marketplace_category_mappings')) return ['exists' => false]; return ['exists' => true, 'count_per_channel' => DB::table('marketplace_category_mappings')->select('channel', DB::raw('count(*) as count'))->groupBy('channel')->orderBy('channel')->get()->map(fn ($r) => (array) $r)->all(), 'non_ovoko_external_category_id_count' => DB::table('marketplace_category_mappings')->where('channel', '!=', 'ovoko')->whereNotNull('external_category_id')->count(), 'samples' => DB::table('marketplace_category_mappings')->limit($limit)->get()->map(fn ($r) => (array) $r)->all()]; }
+    private function marketplaceMappingsSummary(int $limit): array { if (! Schema::hasTable('marketplace_category_mappings')) return ['exists' => false]; $countPerChannel = DB::table('marketplace_category_mappings')->select('channel', DB::raw('count(*) as count'))->groupBy('channel')->orderBy('channel')->get()->map(fn ($r) => (array) $r)->all(); $ovokoCount = (int) DB::table('marketplace_category_mappings')->where('channel', 'ovoko')->count(); if (! collect($countPerChannel)->contains(fn ($row) => ($row['channel'] ?? null) === 'ovoko')) $countPerChannel[] = ['channel' => 'ovoko', 'count' => 0]; return ['exists' => true, 'count_per_channel' => $countPerChannel, 'ovoko_channel_exists' => $ovokoCount > 0, 'ovoko_count' => $ovokoCount, 'non_ovoko_external_category_id_count' => DB::table('marketplace_category_mappings')->where('channel', '!=', 'ovoko')->whereNotNull('external_category_id')->count(), 'samples' => DB::table('marketplace_category_mappings')->limit($limit)->get()->map(fn ($r) => (array) $r)->all()]; }
     private function partsCategorySummary(int $limit, array $matches = [], ?string $categoryTable = null): array { if (! Schema::hasTable('parts')) return ['exists' => false]; $matchByCategory = collect($matches)->keyBy('local_category_id'); $samples = DB::table('parts')->select($this->safeSelectColumns('parts', ['id', 'part_number', 'name', 'category_id']))->whereNotExists(fn ($q) => $q->select(DB::raw(1))->from('marketplace_listings')->whereColumn('marketplace_listings.part_id', 'parts.id')->where('marketplace', 'ovoko'))->limit($limit)->get()->map(function ($r) use ($matchByCategory, $categoryTable) { $part = (array) $r; $match = $matchByCategory->get($part['category_id'] ?? null, []); $category = ($categoryTable && isset($part['category_id'])) ? DB::table($categoryTable)->select($this->safeSelectColumns($categoryTable, ['id', 'name', 'category_path']))->where('id', $part['category_id'])->first() : null; return $part + ['local_category_id' => $part['category_id'] ?? null, 'local_category_path' => $match['local_category_path'] ?? ((array) $category)['category_path'] ?? ((array) $category)['name'] ?? null, 'found_possible_ovoko_category_source' => $match['found_possible_ovoko_category_source'] ?? null, 'possible_external_category_id' => $match['possible_external_category_id'] ?? null, 'confidence' => $match['confidence'] ?? 'none', 'source_table' => $match['source_table'] ?? null, 'source_column' => $match['source_column'] ?? null]; })->all(); return ['exists' => true, 'record_count' => $this->safeCount('parts'), 'with_category_id_count' => Schema::hasColumn('parts', 'category_id') ? DB::table('parts')->whereNotNull('category_id')->count() : null, 'samples_without_ovoko_listing' => $samples]; }
     private function ovokoCategoryLikeRows(array $tables, int $limit): array { $rows = []; foreach ($tables as $table) { if (! Schema::hasTable($table)) continue; $cols = Schema::getColumnListing($table); if (! preg_match('/(ovoko|category)/i', $table) && ! in_array('external_category_id', $cols, true)) continue; foreach (array_intersect(['id','name','category_path','external_id','external_category_id','external_category_name','external_category_path','channel','source_system'], $cols) as $_) {} $select = $this->safeSelectColumns($table, ['id','name','category_path','external_id','external_category_id','external_category_name','external_category_path','channel','source_system']); foreach (DB::table($table)->select($select)->limit($limit)->get() as $r) { $a=(array)$r; $rows[]=['source_table'=>$table,'source_column'=>isset($a['external_category_id'])?'external_category_id':(isset($a['external_id'])?'external_id':'id'),'id'=>$a['external_category_id']??$a['external_id']??$a['id']??null,'name'=>$a['external_category_name']??$a['name']??null,'path'=>$a['external_category_path']??$a['category_path']??null,'raw'=>$a]; } } return $rows; }
     private function norm(?string $value): string { return mb_strtolower(trim((string) $value)); }
