@@ -56,8 +56,40 @@ class OvokoProductSyncControllerTest extends TestCase
             ->assertJsonPath('already_has_ovoko_listing_count', 1)
             ->assertJsonPath('blockers.missing_price', 1)
             ->assertJsonPath('blockers.missing_images', 3)
+            ->assertJsonPath('missing_ovoko_listing_candidate_count', 2)
             ->assertJsonPath('blockers.missing_ovoko_category_mapping', 3)
-            ->assertJsonPath('blockers.already_has_ovoko_listing', 1);
+            ->assertJsonPath('blockers.already_has_ovoko_listing', 1)
+            ->assertJsonPath('top_blockers_already_listed.already_has_ovoko_listing', 1)
+            ->assertJsonPath('top_blockers_missing_listing.missing_price', 1)
+            ->assertJsonPath('sample_missing_listing_blocked.0.has_ovoko_listing', false)
+            ->assertJsonMissingPath('sample_missing_listing_blocked.0.ovoko_external_id')
+            ->assertJsonPath('sample_missing_listing_blocked.0.storage_location.source', 'parts.storage_location_id -> storage_locations.name')
+            ->assertJsonPath('sample_missing_listing_blocked.0.ovoko_category_mapping.source', 'marketplace_category_mappings.local_category_id = parts.category_id and channel = ovoko');
+    }
+
+    public function test_dry_run_separates_blockers_for_missing_listing_candidates_from_already_listed_parts(): void
+    {
+        Http::fake();
+
+        DB::table('parts')->insert([
+            ['id' => 401, 'name' => 'Already listed without data', 'part_number' => 'PN-401', 'description' => 'Desc', 'price' => 1, 'quantity' => 1, 'status' => 'ready', 'is_visible_storefront' => true, 'needs_listing' => false, 'needs_review' => false, 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 402, 'name' => 'Create candidate without data', 'part_number' => 'PN-402', 'description' => 'Desc', 'price' => 1, 'quantity' => 1, 'status' => 'ready', 'is_visible_storefront' => true, 'needs_listing' => false, 'needs_review' => false, 'created_at' => now(), 'updated_at' => now()],
+        ]);
+        DB::table('marketplace_listings')->insert(['marketplace' => 'ovoko', 'part_id' => 401, 'external_offer_id' => 'OV-401', 'created_at' => now(), 'updated_at' => now()]);
+
+        $response = $this->getJson('/tools/dry-run-ovoko-product-sync?token=gps_images_import_2026&include_already_listed=0&limit=50');
+
+        $response->assertOk()
+            ->assertJsonPath('local_candidate_parts_count', 2)
+            ->assertJsonPath('already_has_ovoko_listing_count', 1)
+            ->assertJsonPath('missing_ovoko_listing_candidate_count', 1)
+            ->assertJsonPath('top_blockers_already_listed.already_has_ovoko_listing', 1)
+            ->assertJsonPath('top_blockers_missing_listing.missing_storage_location', 1)
+            ->assertJsonPath('top_blockers_missing_listing.missing_ovoko_category_mapping', 1)
+            ->assertJsonPath('sample_already_listed_blocked.0.part_id', 401)
+            ->assertJsonPath('sample_missing_listing_blocked.0.part_id', 402)
+            ->assertJsonPath('sample_create_missing_blocked.0.part_id', 402)
+            ->assertJsonPath('sample_missing_listing_blocked.0.has_ovoko_listing', false);
     }
 
     public function test_needs_listing_parts_are_excluded_by_default(): void
