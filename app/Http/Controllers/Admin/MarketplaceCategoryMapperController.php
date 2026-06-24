@@ -19,6 +19,9 @@ class MarketplaceCategoryMapperController extends Controller
 {
     private const CHANNELS = ['allegro_main', 'ovoko', 'ebay'];
     private const TREE_CHANNELS = ['allegro_main' => 'allegro_main', 'ovoko' => 'ovoko', 'ebay' => 'ebay_de'];
+    private const ALLEGRO_DEFAULT_PARENT_EXTERNAL_ID = '620';
+    private const EBAY_DE_ROOT_EXTERNAL_ID = '131090';
+    private const EBAY_DE_DEFAULT_SUBTREE_NAME = 'Autoteile & Zubehör';
 
     public function index(): View
     {
@@ -71,11 +74,9 @@ class MarketplaceCategoryMapperController extends Controller
             return response()->json(['items' => $this->ovokoTree($request), 'placeholder' => false]);
         }
 
-        return response()->json([
-            'items' => $this->referenceOrExistingExternalCategories($request, $channel),
-            'placeholder' => ! MarketplaceCategory::query()->where('channel', self::TREE_CHANNELS[$channel])->exists(),
-            'message' => 'Lokalne drzewo referencyjne nie jest jeszcze zaimportowane; lista używa obecnych lokalnych mapowań jako bezpiecznego startu.',
-        ]);
+        $payload = $this->referenceOrExistingExternalCategories($request, $channel);
+
+        return response()->json($payload);
     }
 
     public function showMapping(int $local_category_id): JsonResponse
@@ -146,25 +147,135 @@ class MarketplaceCategoryMapperController extends Controller
     private function referenceOrExistingExternalCategories(Request $request, string $channel): array
     {
         $treeChannel = self::TREE_CHANNELS[$channel];
+        $debug = $request->boolean('debug');
+
         if (MarketplaceCategory::query()->where('channel', $treeChannel)->exists()) {
-            return $this->referenceCategories($request, $treeChannel);
+            return $this->referenceCategories($request, $channel, $treeChannel, $debug);
         }
 
-        return $this->existingExternalCategories($request, $channel);
+        $items = $this->existingExternalCategories($request, $channel);
+
+        return $this->withTreeMeta([
+            'items' => $items,
+            'placeholder' => true,
+            'message' => 'Lokalne drzewo referencyjne nie jest jeszcze zaimportowane; lista używa obecnych lokalnych mapowań jako bezpiecznego startu.',
+        ], $debug, [
+            'requested_channel' => $channel,
+            'resolved_channel' => $treeChannel,
+            'parent_external_id' => $request->query('parent_external_id'),
+            'default_parent_external_id' => null,
+            'returned_count' => count($items),
+            'sample_categories' => array_slice($items, 0, 5),
+            'reason_if_empty' => count($items) === 0 ? 'No imported tree and no existing mappings for this channel.' : null,
+        ]);
     }
 
-    private function referenceCategories(Request $request, string $treeChannel): array
+    private function referenceCategories(Request $request, string $requestedChannel, string $treeChannel, bool $debug = false): array
     {
         $q = trim((string) $request->query('q', ''));
-        $parent = $request->query('parent_external_id');
+        $requestedParent = $request->query('parent_external_id');
+        $defaultParent = $this->defaultParentExternalId($treeChannel);
+        $parent = filled($requestedParent) ? (string) $requestedParent : $defaultParent;
+
         $categories = MarketplaceCategory::query()->where('channel', $treeChannel)->where('active', true)
             ->when($q !== '', fn ($query) => $query->where(fn ($sub) => $sub->where('name', 'like', "%{$q}%")->orWhere('full_path', 'like', "%{$q}%")))
             ->when($q === '', fn ($query) => filled($parent) ? $query->where('parent_external_category_id', (string) $parent) : $query->whereNull('parent_external_category_id'))
             ->orderBy('name')->limit($q !== '' ? 50 : 200)->get();
         $ids = $categories->pluck('external_category_id')->all();
         $parents = MarketplaceCategory::query()->where('channel', $treeChannel)->whereIn('parent_external_category_id', $ids)->pluck('parent_external_category_id')->all();
+        $items = $categories->map(fn (MarketplaceCategory $category): array => ['id' => (string) $category->external_category_id, 'parent_id' => $category->parent_external_category_id, 'name' => $category->name, 'path' => $category->full_path ?: $category->name, 'has_children' => in_array($category->external_category_id, $parents, true)])->values()->all();
 
-        return $categories->map(fn (MarketplaceCategory $category): array => ['id' => (string) $category->external_category_id, 'parent_id' => $category->parent_external_category_id, 'name' => $category->name, 'path' => $category->full_path ?: $category->name, 'has_children' => in_array($category->external_category_id, $parents, true)])->values()->all();
+        return $this->withTreeMeta([
+            'items' => $items,
+            'placeholder' => false,
+            'breadcrumb' => $q === '' && filled($parent) ? $this->breadcrumb($treeChannel, (string) $parent) : [],
+        ], $debug, [
+            'requested_channel' => $requestedChannel,
+            'resolved_channel' => $treeChannel,
+            'parent_external_id' => $requestedParent,
+            'default_parent_external_id' => $defaultParent,
+            'returned_count' => count($items),
+            'sample_categories' => array_slice($items, 0, 5),
+            'reason_if_empty' => count($items) === 0 ? $this->emptyReason($treeChannel, $parent, $q) : null,
+        ]);
+    }
+
+
+    private function defaultParentExternalId(string $treeChannel): ?string
+    {
+        if ($treeChannel === 'allegro_main') {
+            return self::ALLEGRO_DEFAULT_PARENT_EXTERNAL_ID;
+        }
+
+        if ($treeChannel !== 'ebay_de') {
+            return null;
+        }
+
+        $subtree = MarketplaceCategory::query()
+            ->where('channel', 'ebay_de')
+            ->where('active', true)
+            ->where('name', self::EBAY_DE_DEFAULT_SUBTREE_NAME)
+            ->where(function ($query): void {
+                $query->where('parent_external_category_id', self::EBAY_DE_ROOT_EXTERNAL_ID)
+                    ->orWhere('full_path', 'like', '%Auto & Motorrad: Teile%');
+            })
+            ->orderBy('level')
+            ->first();
+
+        if ($subtree) {
+            return (string) $subtree->external_category_id;
+        }
+
+        if (MarketplaceCategory::query()->where('channel', 'ebay_de')->where('external_category_id', self::EBAY_DE_ROOT_EXTERNAL_ID)->exists()) {
+            return self::EBAY_DE_ROOT_EXTERNAL_ID;
+        }
+
+        return null;
+    }
+
+    private function breadcrumb(string $treeChannel, string $externalCategoryId): array
+    {
+        $byId = MarketplaceCategory::query()
+            ->where('channel', $treeChannel)
+            ->get(['external_category_id', 'parent_external_category_id', 'name', 'full_path'])
+            ->keyBy(fn (MarketplaceCategory $category): string => (string) $category->external_category_id);
+        $breadcrumb = [];
+        $current = $byId->get($externalCategoryId);
+
+        while ($current) {
+            array_unshift($breadcrumb, [
+                'id' => (string) $current->external_category_id,
+                'parent_id' => $current->parent_external_category_id,
+                'name' => $current->name,
+                'path' => $current->full_path ?: $current->name,
+            ]);
+            $parentId = $current->parent_external_category_id;
+            $current = filled($parentId) ? $byId->get((string) $parentId) : null;
+        }
+
+        return $breadcrumb;
+    }
+
+    private function emptyReason(string $treeChannel, ?string $parent, string $q): string
+    {
+        if ($q !== '') {
+            return 'No categories matched the search query.';
+        }
+
+        if (! filled($parent)) {
+            return 'No root categories found for resolved channel.';
+        }
+
+        return "No children found for parent_external_category_id={$parent} in channel={$treeChannel}.";
+    }
+
+    private function withTreeMeta(array $payload, bool $debug, array $diagnostics): array
+    {
+        if ($debug) {
+            $payload['debug'] = $diagnostics;
+        }
+
+        return $payload;
     }
 
     private function existingExternalCategories(Request $request, string $channel): array
