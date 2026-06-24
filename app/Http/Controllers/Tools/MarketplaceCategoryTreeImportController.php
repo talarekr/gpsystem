@@ -20,7 +20,7 @@ class MarketplaceCategoryTreeImportController extends Controller
     public function debugFetch(Request $request, MarketplaceCategoryTreeImportService $service): JsonResponse
     {
         if ($deny = $this->denyBadToken($request)) return $deny;
-        return response()->json($service->debugFetch());
+        return response()->json($service->debugFetch($request->boolean('verbose')));
     }
 
     public function import(Request $request, MarketplaceCategoryTreeImportService $service): JsonResponse

@@ -41,7 +41,7 @@ class MarketplaceCategoryTreeImportService
         return ['ok' => true, 'dry_run' => ! $write, 'local_update' => $write, 'ovoko_write' => false, 'allegro_write' => false, 'ebay_write' => false, 'channels' => $channels, 'warnings' => $warnings];
     }
 
-    public function debugFetch(): array
+    public function debugFetch(bool $verbose = false): array
     {
         $warnings = [];
         return [
@@ -53,8 +53,8 @@ class MarketplaceCategoryTreeImportService
             'ebay_write' => false,
             'channels' => [
                 'ovoko' => $this->debugOvoko($warnings),
-                'allegro_main' => $this->debugAllegro($warnings),
-                'ebay_de' => $this->debugEbayDe($warnings),
+                'allegro_main' => $this->debugAllegro($warnings, $verbose),
+                'ebay_de' => $this->debugEbayDe($warnings, $verbose),
             ],
             'warnings' => $warnings,
         ];
@@ -65,17 +65,23 @@ class MarketplaceCategoryTreeImportService
         $channels = ['ebay_de', 'ebay'];
         $mappings = DB::table('marketplace_category_mappings')->whereIn('channel', $channels)->whereNotNull('external_category_id')->get();
         $tree = MarketplaceCategory::query()->where('channel', 'ebay_de')->get()->keyBy('external_category_id');
+        $account = MarketplaceAccount::query()->where('code','ebay_de')->first();
+        [$treeId] = $this->ebayTree($account);
+        $apiLookup = $this->lookupEbayCategoryIds($mappings->pluck('external_category_id')->map(fn ($id) => (string) $id)->all(), $treeId, $account);
         $would = []; $missing = [];
         foreach ($mappings as $m) {
             $cat = $tree->get((string) $m->external_category_id);
-            if (! $cat) { $missing[] = ['mapping_id' => $m->id, 'channel' => $m->channel, 'local_category_id' => $m->local_category_id, 'external_category_id' => $m->external_category_id]; continue; }
+            $lookup = $apiLookup[(string) $m->external_category_id] ?? null;
+            $name = $cat?->name ?: data_get($lookup, 'name');
+            $path = $cat?->full_path ?: data_get($lookup, 'path');
+            if (! $cat && ! data_get($lookup, 'ok')) { $missing[] = ['mapping_id' => $m->id, 'channel' => $m->channel, 'local_category_id' => $m->local_category_id, 'external_category_id' => $m->external_category_id, 'api_lookup_status' => data_get($lookup, 'http_status'), 'safe_error_message' => data_get($lookup, 'safe_error_message')]; continue; }
             if (blank($m->external_category_name) || blank($m->external_category_path)) {
-                $row = ['mapping_id' => $m->id, 'channel' => $m->channel, 'local_category_id' => $m->local_category_id, 'external_category_id' => $m->external_category_id, 'external_category_name' => $cat->name, 'external_category_path' => $cat->full_path];
+                $row = ['mapping_id' => $m->id, 'channel' => $m->channel, 'local_category_id' => $m->local_category_id, 'external_category_id' => $m->external_category_id, 'external_category_name' => $name, 'external_category_path' => $path, 'source' => $cat ? 'local_tree' : 'ebay_taxonomy_lookup'];
                 $would[] = $row;
-                if ($write) DB::table('marketplace_category_mappings')->where('id', $m->id)->update(['external_category_name' => $cat->name, 'external_category_path' => $cat->full_path, 'updated_at' => now()]);
+                if ($write) DB::table('marketplace_category_mappings')->where('id', $m->id)->update(['external_category_name' => $name, 'external_category_path' => $path, 'updated_at' => now()]);
             }
         }
-        return ['ok' => true, 'dry_run' => ! $write, 'local_update' => $write, 'mapping_count' => $mappings->count(), 'would_backfill_count' => count($would), 'not_found_in_tree_count' => count($missing), 'sample_would_backfill' => array_slice($would, 0, 20), 'sample_not_found' => array_slice($missing, 0, 20)];
+        return ['ok' => true, 'dry_run' => ! $write, 'local_update' => $write, 'category_tree_id' => $treeId, 'mapping_count' => $mappings->count(), 'would_backfill_count' => count($would), 'not_found_in_tree_count' => count($missing), 'sample_would_backfill' => array_slice($would, 0, 20), 'sample_not_found' => array_slice($missing, 0, 20)];
     }
 
     private function fetch(string $channel): array
@@ -89,12 +95,12 @@ class MarketplaceCategoryTreeImportService
 
     private function debugOvoko(array &$warnings): array
     {
-        $base = ['configured' => false, 'fetch_ok' => false, 'raw_count' => 0, 'sample_roots' => [], 'sample_level_2' => [], 'sample_level_3' => [], 'error' => null];
+        $base = ['configured' => false, 'fetch_ok' => false, 'raw_count' => 0, 'empty_response' => false, 'sample_roots' => [], 'sample_level_2' => [], 'sample_level_3' => [], 'error' => null];
         try {
             $account = MarketplaceAccount::query()->where('code', 'ovoko_main')->first();
             $base['configured'] = $this->accountConfigured($account);
             $rows = $this->normalizeOvoko(app(MarketplaceApiManager::class)->client('ovoko')->fetchCategories(60)['categories'] ?? []);
-            $base['fetch_ok'] = true; $base['raw_count'] = count($rows);
+            $base['raw_count'] = count($rows); $base['empty_response'] = count($rows) === 0; $base['fetch_ok'] = count($rows) > 0;
             $base['sample_roots'] = $this->sampleRows($rows, fn ($r) => (int) $r['level'] === 0);
             $base['sample_level_2'] = $this->sampleRows($rows, fn ($r) => (int) $r['level'] === 1);
             $base['sample_level_3'] = $this->sampleRows($rows, fn ($r) => (int) $r['level'] === 2);
@@ -102,31 +108,40 @@ class MarketplaceCategoryTreeImportService
         return $base;
     }
 
-    private function debugAllegro(array &$warnings): array
+    private function debugAllegro(array &$warnings, bool $verbose = false): array
     {
-        $base = ['configured' => false, 'fetch_ok' => false, 'raw_count' => 0, 'root_candidates' => [], 'wanted_root' => self::ALLEGRO_WANTED_ROOT, 'wanted_root_found' => false, 'children_count' => 0, 'sample_children' => [], 'error' => null];
+        $base = ['configured' => false, 'fetch_ok' => false, 'raw_count' => 0, 'empty_response' => false, 'root_candidates' => [], 'wanted_root' => self::ALLEGRO_WANTED_ROOT, 'wanted_root_found' => false, 'children_count' => 0, 'sample_children' => [], 'error' => null];
         try {
-            $account = MarketplaceAccount::query()->where('code', 'allegro_main')->first(); $base['configured'] = $this->accountConfigured($account);
-            [$roots, $children] = $this->allegroRootAndSubtreeDiagnostics($account);
+            $account = MarketplaceAccount::query()->where('code', 'allegro_main')->first();
+            $base['configured'] = $this->accountConfigured($account);
+            $base['token_present'] = filled(data_get($account, 'api_credentials.access_token'));
+            $diag = $this->allegroRootAndSubtreeDiagnostics($account, $verbose);
+            [$roots, $children] = [$diag['roots'], $diag['children']];
             $rows = $this->fetchAllegro();
-            $base['fetch_ok'] = true; $base['raw_count'] = count($rows); $base['root_candidates'] = $roots;
+            $base = array_merge($base, $diag['meta']);
+            $base['raw_count'] = count($rows); $base['root_candidates'] = $roots;
+            $base['empty_response'] = count($rows) === 0 || (int) ($base['root_raw_count'] ?? 0) === 0;
+            $base['fetch_ok'] = ! $base['empty_response'] && (int) ($base['http_status'] ?? 0) >= 200 && (int) ($base['http_status'] ?? 0) < 300;
             $base['wanted_root_found'] = count($rows) > 0; $base['children_count'] = count($children); $base['sample_children'] = array_slice($children, 0, 20);
-        } catch (\Throwable $e) { $base['error'] = $e->getMessage(); $warnings[] = 'allegro_main: '.$e->getMessage(); }
+            if ($base['empty_response']) $warnings[] = 'allegro_main: empty_response';
+        } catch (\Throwable $e) { $base['error'] = $e->getMessage(); $base['safe_error_message'] = $e->getMessage(); $warnings[] = 'allegro_main: '.$e->getMessage(); }
         return $base;
     }
 
-    private function debugEbayDe(array &$warnings): array
+    private function debugEbayDe(array &$warnings, bool $verbose = false): array
     {
-        $base = ['configured' => false, 'fetch_ok' => false, 'taxonomy_ok' => false, 'raw_count' => 0, 'root_candidates' => [], 'wanted_root' => self::EBAY_DE_WANTED_ROOT, 'wanted_root_found' => false, 'children_count' => 0, 'sample_children' => [], 'sample_existing_mapping_ids_lookup' => [], 'error' => null];
+        $base = ['configured' => false, 'fetch_ok' => false, 'taxonomy_ok' => false, 'raw_count' => 0, 'empty_response' => false, 'root_candidates' => [], 'wanted_root' => self::EBAY_DE_WANTED_ROOT, 'wanted_root_found' => false, 'children_count' => 0, 'sample_children' => [], 'sample_existing_mapping_ids_lookup' => [], 'error' => null];
         try {
-            $account = MarketplaceAccount::query()->where('code', 'ebay_de')->first(); $base['configured'] = $this->accountConfigured($account);
-            [$treeId, $root, $rootCandidates] = $this->ebayTree($account);
-            $base['taxonomy_ok'] = filled($treeId) && is_array($root); $base['root_candidates'] = $rootCandidates;
+            $account = MarketplaceAccount::query()->where('code', 'ebay_de')->first(); $base['configured'] = $this->accountConfigured($account); $base['token_present'] = filled(data_get($account, 'api_credentials.access_token'));
+            [$treeId, $root, $rootCandidates, $meta] = $this->ebayTree($account, $verbose);
+            $base = array_merge($base, $meta); $base['category_tree_id'] = $treeId; $base['taxonomy_ok'] = filled($treeId) && is_array($root); $base['root_candidates'] = $rootCandidates;
             $rows = is_array($root) ? $this->flattenEbayWantedSubtree([$root]) : [];
-            $base['fetch_ok'] = true; $base['raw_count'] = count($rows); $base['wanted_root_found'] = count($rows) > 0;
+            $base['raw_count'] = count($rows); $base['empty_response'] = count($rows) === 0;
+            $base['fetch_ok'] = $base['taxonomy_ok'] && ! $base['empty_response']; $base['wanted_root_found'] = count($rows) > 0;
             $base['children_count'] = max(0, count($rows) - 1); $base['sample_children'] = array_slice(array_map(fn ($r) => $this->rowSummary($r), $rows), 0, 20);
-            $base['sample_existing_mapping_ids_lookup'] = $this->lookupExistingEbayMappings($rows);
-        } catch (\Throwable $e) { $base['error'] = $e->getMessage(); $warnings[] = 'ebay_de: '.$e->getMessage(); }
+            $base['sample_existing_mapping_ids_lookup'] = $this->lookupExistingEbayMappings($rows, $treeId, $account);
+            if ($base['empty_response'] || ! $base['taxonomy_ok']) $warnings[] = 'ebay_de: empty_response_or_taxonomy_unavailable';
+        } catch (\Throwable $e) { $base['error'] = $e->getMessage(); $base['safe_error_message'] = $e->getMessage(); $warnings[] = 'ebay_de: '.$e->getMessage(); }
         return $base;
     }
 
@@ -144,7 +159,8 @@ class MarketplaceCategoryTreeImportService
     private function fetchAllegro(): array
     {
         $account = MarketplaceAccount::query()->where('code','allegro_main')->first();
-        [$roots] = $this->allegroRootAndSubtreeDiagnostics($account);
+        $diag = $this->allegroRootAndSubtreeDiagnostics($account);
+        $roots = $diag['roots'];
         $wantedRoot = collect($roots)->first(fn ($r) => $this->isAllegroMotoryzacjaRoot((string) $r['name']));
         if (! $wantedRoot) return [];
         $rootPath = (string) $wantedRoot['name'];
@@ -155,18 +171,26 @@ class MarketplaceCategoryTreeImportService
         return array_merge([$rootRow, $partsRoot], $this->fetchAllegroDescendants((string) $partsRoot['external_category_id'], (string) $partsRoot['full_path'], 2));
     }
 
-    private function allegroRootAndSubtreeDiagnostics(?MarketplaceAccount $account): array
+    private function allegroRootAndSubtreeDiagnostics(?MarketplaceAccount $account, bool $verbose = false): array
     {
-        $token = (string) data_get($account, 'api_credentials.access_token'); $base = rtrim((string) $account?->api_base_url, '/');
-        if ($base === '' || $token === '') return [[], []];
-        $res = Http::withToken($token)->accept('application/vnd.allegro.public.v1+json')->timeout(30)->get($base.'/sale/categories');
+        $token = (string) data_get($account, 'api_credentials.access_token');
+        $base = rtrim((string) $account?->api_base_url, '/');
+        $endpoint = $base === '' ? null : $base.'/sale/categories';
+        $meta = ['endpoint_used' => $endpoint, 'http_status' => null, 'raw_response_keys' => [], 'root_raw_count' => 0, 'empty_response' => true, 'safe_error_message' => null];
+        if ($base === '' || $token === '') return ['roots' => [], 'children' => [], 'meta' => $meta];
+        $res = Http::withToken($token)->accept('application/vnd.allegro.public.v1+json')->timeout(30)->get($endpoint);
+        $json = $res->json() ?: [];
+        $meta['http_status'] = $res->status();
+        $meta['raw_response_keys'] = is_array($json) ? array_keys($json) : [];
+        $meta['safe_error_message'] = $this->safeErrorMessage($json);
+        if ($verbose) $meta['sample_raw_response_limited'] = $this->limitedRaw($json);
         $roots = [];
-        foreach (($res->json('categories') ?: []) as $c) if (is_array($c)) $roots[] = ['id' => (string)($c['id'] ?? ''), 'name' => (string)($c['name'] ?? ''), 'leaf' => (bool)($c['leaf'] ?? false), 'raw' => $c];
+        foreach (($json['categories'] ?? []) as $c) if (is_array($c)) $roots[] = ['id' => (string)($c['id'] ?? ''), 'name' => (string)($c['name'] ?? ''), 'leaf' => (bool)($c['leaf'] ?? false), 'raw' => $c];
+        $meta['root_raw_count'] = count($roots); $meta['empty_response'] = count($roots) === 0;
         $wanted = collect($roots)->first(fn ($r) => $this->isAllegroMotoryzacjaRoot((string) $r['name']));
         $children = $wanted ? array_map(fn ($r) => $this->rowSummary($r), $this->fetchAllegroChildren((string) $wanted['id'], (string) $wanted['name'], 1)) : [];
-        return [array_map(fn ($r) => array_diff_key($r, ['raw' => true]), $roots), $children];
+        return ['roots' => array_map(fn ($r) => array_diff_key($r, ['raw' => true]), $roots), 'children' => $children, 'meta' => $meta];
     }
-
 
     private function fetchAllegroChildren(string $parentId, string $path, int $level): array
     {
@@ -206,15 +230,31 @@ class MarketplaceCategoryTreeImportService
         return is_array($root) ? $this->flattenEbayWantedSubtree([$root]) : [];
     }
 
-    private function ebayTree(?MarketplaceAccount $account): array
+    private function ebayTree(?MarketplaceAccount $account, bool $verbose = false): array
     {
-        $token=(string)data_get($account,'api_credentials.access_token'); $base=rtrim((string)$account?->api_base_url,'/'); if ($base===''||$token==='') return [null, null, []];
-        $headers=['X-EBAY-C-MARKETPLACE-ID'=>'EBAY_DE'];
-        $tree=Http::withToken($token)->withHeaders($headers)->acceptJson()->timeout(30)->get($base.'/commerce/taxonomy/v1/get_default_category_tree_id',['marketplace_id'=>'EBAY_DE'])->json('categoryTreeId'); if (!$tree) return [null, null, []];
-        $json=Http::withToken($token)->withHeaders($headers)->acceptJson()->timeout(60)->get($base.'/commerce/taxonomy/v1/category_tree/'.$tree)->json();
+        $token=(string)data_get($account,'api_credentials.access_token'); $base=rtrim((string)$account?->api_base_url,'/');
+        $marketplaceId = 'EBAY_DE';
+        $meta = ['marketplace_id' => $marketplaceId, 'endpoint_used' => null, 'taxonomy_endpoint' => null, 'http_status' => null, 'raw_response_keys' => [], 'get_default_category_tree_id_result' => null, 'safe_error_message' => null];
+        if ($base===''||$token==='') return [null, null, [], $meta];
+        $headers=['X-EBAY-C-MARKETPLACE-ID'=>$marketplaceId];
+        $defaultEndpoint = $base.'/commerce/taxonomy/v1/get_default_category_tree_id';
+        $meta['endpoint_used'] = $defaultEndpoint;
+        $default = Http::withToken($token)->withHeaders($headers)->acceptJson()->timeout(30)->get($defaultEndpoint,['marketplace_id'=>$marketplaceId]);
+        $defaultJson = $default->json() ?: [];
+        $tree = $defaultJson['categoryTreeId'] ?? null;
+        $meta['http_status'] = $default->status(); $meta['raw_response_keys'] = is_array($defaultJson) ? array_keys($defaultJson) : [];
+        $meta['get_default_category_tree_id_result'] = $this->limitedRaw($defaultJson); $meta['safe_error_message'] = $this->safeErrorMessage($defaultJson);
+        if (!$tree) return [null, null, [], $meta];
+        $treeEndpoint = $base.'/commerce/taxonomy/v1/category_tree/'.$tree;
+        $meta['taxonomy_endpoint'] = $treeEndpoint; $meta['endpoint_used'] = $treeEndpoint;
+        $treeRes=Http::withToken($token)->withHeaders($headers)->acceptJson()->timeout(60)->get($treeEndpoint);
+        $json=$treeRes->json() ?: [];
+        $meta['http_status'] = $treeRes->status(); $meta['raw_response_keys'] = is_array($json) ? array_keys($json) : [];
+        $meta['safe_error_message'] = $this->safeErrorMessage($json) ?: $meta['safe_error_message'];
+        if ($verbose) $meta['sample_raw_response_limited'] = $this->limitedRaw($json);
         $root=$json['rootCategoryNode'] ?? null;
         $candidates = is_array($root) ? array_merge([['category_tree_id' => (string) $tree] + $this->ebayNodeSummary($root)], array_slice(array_map(fn ($n) => ['category_tree_id' => (string) $tree] + $this->ebayNodeSummary($n), $root['childCategoryTreeNodes'] ?? []), 0, 50)) : [['category_tree_id' => (string) $tree]];
-        return [(string) $tree, $root, $candidates];
+        return [(string) $tree, $root, $candidates, $meta];
     }
 
     private function flattenEbayWantedSubtree(array $nodes, ?string $parent = null, string $path = '', int $level = 0, bool $insideWanted = false): array
@@ -232,16 +272,60 @@ class MarketplaceCategoryTreeImportService
         return $out;
     }
 
-    private function lookupExistingEbayMappings(array $rows): array
+    private function lookupExistingEbayMappings(array $rows, ?string $treeId = null, ?MarketplaceAccount $account = null): array
     {
-        if (! Schema::hasTable('marketplace_category_mappings')) return [];
+        $lookupIds = ['33578', '33588', '9887'];
+        if (Schema::hasTable('marketplace_category_mappings')) {
+            $mappingIds = DB::table('marketplace_category_mappings')->whereIn('channel', ['ebay', 'ebay_de'])->whereNotNull('external_category_id')->select('external_category_id')->distinct()->limit(20)->pluck('external_category_id')->map(fn ($id) => (string) $id)->all();
+            $lookupIds = array_values(array_unique(array_merge($lookupIds, $mappingIds)));
+        }
         $byId = collect($rows)->keyBy('external_category_id');
-        return DB::table('marketplace_category_mappings')->whereIn('channel', ['ebay', 'ebay_de'])->whereNotNull('external_category_id')->select('id','channel','local_category_id','external_category_id')->distinct()->limit(20)->get()->map(function ($m) use ($byId) {
-            $cat = $byId->get((string) $m->external_category_id);
-            return ['mapping_id' => $m->id, 'channel' => $m->channel, 'local_category_id' => $m->local_category_id, 'external_category_id' => (string) $m->external_category_id, 'found_in_fetched_tree' => $cat !== null, 'name' => $cat['name'] ?? null, 'path' => $cat['full_path'] ?? null];
+        $apiLookup = $this->lookupEbayCategoryIds($lookupIds, $treeId, $account);
+        if (! Schema::hasTable('marketplace_category_mappings')) {
+            return array_map(fn ($id) => ['external_category_id' => $id, 'found_in_fetched_tree' => $byId->has($id), 'api_lookup' => $apiLookup[$id] ?? null], $lookupIds);
+        }
+        return DB::table('marketplace_category_mappings')->whereIn('channel', ['ebay', 'ebay_de'])->whereNotNull('external_category_id')->select('id','channel','local_category_id','external_category_id')->distinct()->limit(20)->get()->map(function ($m) use ($byId, $apiLookup) {
+            $id = (string) $m->external_category_id; $cat = $byId->get($id);
+            return ['mapping_id' => $m->id, 'channel' => $m->channel, 'local_category_id' => $m->local_category_id, 'external_category_id' => $id, 'found_in_fetched_tree' => $cat !== null, 'name' => $cat['name'] ?? data_get($apiLookup, $id.'.name'), 'path' => $cat['full_path'] ?? data_get($apiLookup, $id.'.path'), 'api_lookup_ok' => (bool) data_get($apiLookup, $id.'.ok', false), 'api_lookup_status' => data_get($apiLookup, $id.'.http_status')];
         })->all();
     }
 
+    private function lookupEbayCategoryIds(array $ids, ?string $treeId, ?MarketplaceAccount $account): array
+    {
+        $token=(string)data_get($account,'api_credentials.access_token'); $base=rtrim((string)$account?->api_base_url,'/');
+        if (!$treeId || $base==='' || $token==='') return [];
+        $out = []; $headers=['X-EBAY-C-MARKETPLACE-ID'=>'EBAY_DE'];
+        foreach (array_slice(array_values(array_unique($ids)), 0, 25) as $id) {
+            $endpoint = $base.'/commerce/taxonomy/v1/category_tree/'.$treeId.'/get_category_subtree';
+            $res = Http::withToken($token)->withHeaders($headers)->acceptJson()->timeout(20)->get($endpoint, ['category_id' => $id]);
+            $json = $res->json() ?: []; $node = $json['categorySubtreeNode'] ?? null; $cat = is_array($node) ? ($node['category'] ?? []) : [];
+            $out[(string) $id] = ['ok' => $res->successful() && is_array($cat) && filled($cat['categoryId'] ?? null), 'http_status' => $res->status(), 'endpoint_used' => $endpoint, 'name' => $cat['categoryName'] ?? null, 'path' => $cat['categoryName'] ?? null, 'safe_error_message' => $this->safeErrorMessage($json)];
+        }
+        return $out;
+    }
+
+
+    private function safeErrorMessage(array $json): ?string
+    {
+        $message = $json['message'] ?? $json['error_description'] ?? $json['error'] ?? null;
+        if (!$message && isset($json['errors']) && is_array($json['errors'])) $message = collect($json['errors'])->pluck('message')->filter()->implode(' | ');
+        return filled($message) ? str($message)->limit(500)->value() : null;
+    }
+
+    private function limitedRaw(array $json, int $depth = 0): array
+    {
+        $out = [];
+        foreach (array_slice($json, 0, 20, true) as $key => $value) {
+            if (is_array($value)) {
+                $out[$key] = $depth >= 2 ? ['_truncated_count' => count($value)] : $this->limitedRaw($value, $depth + 1);
+            } elseif (is_string($value)) {
+                $out[$key] = str($value)->limit(500)->value();
+            } else {
+                $out[$key] = $value;
+            }
+        }
+        return $out;
+    }
     private function marketplaceRow(string $channel, string $id, ?string $parent, int $level, string $name, string $fullPath, array $raw): array { return ['channel'=>$channel,'external_category_id'=>$id,'parent_external_category_id'=>$parent,'level'=>$level,'name'=>$name,'full_path'=>$fullPath,'raw_payload'=>$raw,'active'=>true,'imported_at'=>now()]; }
     private function accountConfigured(?MarketplaceAccount $account): bool { return (bool) ($account && $account->api_enabled && filled($account->api_base_url) && filled(data_get($account, 'api_credentials.access_token'))); }
     private function normalizeText(string $value): string { return str($value)->ascii()->lower()->replaceMatches('/[^a-z0-9]+/', ' ')->trim()->value(); }
