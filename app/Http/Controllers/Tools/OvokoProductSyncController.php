@@ -11,6 +11,7 @@ use App\Services\Marketplace\Api\OvokoApiClient;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
@@ -164,6 +165,9 @@ class OvokoProductSyncController extends Controller
         $includeAmbiguous = $request->boolean('include_ambiguous', true);
 
         $result = $this->emptyLinkedCategoryMappingResponse($page, $limit);
+        $existingMappingsCount = Schema::hasTable('marketplace_category_mappings') ? (int) DB::table('marketplace_category_mappings')->where('channel', 'ovoko')->distinct('local_category_id')->count('local_category_id') : 0;
+        $result['categories_with_existing_ovoko_mapping_count'] = $existingMappingsCount;
+        $result['categories_missing_ovoko_mapping_count'] = max(0, $this->localCategoriesCount() - $existingMappingsCount);
         $parts = $this->linkedOvokoPartsQuery($onlyMissing)->forPage($page, $limit)->get();
 
         $categoryTree = $this->fetchOvokoCategoryTree($result);
@@ -179,6 +183,7 @@ class OvokoProductSyncController extends Controller
             $category = $ovoko ? $this->extractOvokoCategory($ovoko, $categoryTree, $result) : null;
             if (! $category || blank($category['ovoko_category_id'])) {
                 $result['unmapped_or_missing_category_count']++;
+                $result['no_evidence_count']++;
                 $this->pushSample($result['sample_products_without_ovoko_category'], $this->linkedProductSample($part, $ovokoId, $category), $sampleLimit);
                 continue;
             }
@@ -199,7 +204,8 @@ class OvokoProductSyncController extends Controller
             if (count($observed) === 1) {
                 $cat = $observed[0];
                 $result['suggested_mapping_count']++;
-                $result['suggested_mappings'][] = [
+                $result['high_confidence_mapping_count']++;
+                $mapping = [
                     'local_category_id' => $group['local_category_id'],
                     'local_category_name' => $group['local_category_name'],
                     'local_category_path' => $group['local_category_path'],
@@ -212,6 +218,8 @@ class OvokoProductSyncController extends Controller
                     'confidence' => 'high',
                     'match_type' => 'linked_products_consensus',
                 ];
+                $result['suggested_mappings'][] = $mapping;
+                $this->pushSample($result['sample_high_confidence_mappings'], ['local_category_id' => $mapping['local_category_id'], 'local_category_path' => $mapping['local_category_path'], 'ovoko_category_id' => $mapping['ovoko_category_id'], 'ovoko_category_path' => $mapping['ovoko_category_path'], 'evidence_count' => $mapping['evidence_count'], 'match_type' => $mapping['match_type']], $sampleLimit);
             } else {
                 $result['ambiguous_mapping_count']++;
                 if ($includeAmbiguous) $result['ambiguous_mappings'][] = [
@@ -260,6 +268,61 @@ class OvokoProductSyncController extends Controller
         }
         return response()->json($result);
     }
+
+
+    public function ovokoCategoryMappingAutorun(Request $request)
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+        return response(<<<'HTML'
+<!doctype html><html><head><meta charset="utf-8"><title>Ovoko category mapping autorun</title><style>body{font-family:system-ui;margin:24px;max-width:1200px}button{font-size:18px;padding:10px 18px}pre{background:#111;color:#eee;padding:16px;overflow:auto}.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.card{border:1px solid #ddd;padding:12px;border-radius:8px}</style></head><body>
+<h1>Ovoko category mapping autorun</h1><button id="start">Start</button> <span id="state">idle</span><p><a id="results" href="#" style="display:none">Results</a></p><div class="grid" id="cards"></div><h2>Samples / errors</h2><pre id="out">{}</pre>
+<script>
+const token=new URLSearchParams(location.search).get('token')||'';let retries=0;
+function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
+function render(d){document.getElementById('state').textContent=(d.status||'')+' '+(d.progress_percent??0)+'%';const keys=['processed_count','processed_total','remaining_count','current_batch','suggested_mapping_count','high_confidence_mapping_count','medium_confidence_mapping_count','ambiguous_mapping_count','no_evidence_count','categories_with_existing_ovoko_mapping_count','categories_missing_ovoko_mapping_count'];document.getElementById('cards').innerHTML=keys.map(k=>`<div class="card"><b>${k}</b><br>${typeof d[k]==='object'?JSON.stringify(d[k]):(d[k]??'')}</div>`).join('');document.getElementById('out').textContent=JSON.stringify({warnings:d.warnings,sample_errors:d.sample_errors,sample_suggested_mappings:d.sample_suggested_mappings,sample_high_confidence_mappings:d.sample_high_confidence_mappings,sample_ambiguous_mappings:d.sample_ambiguous_mappings},null,2);if(d.run_id){let a=document.getElementById('results');a.href='/tools/results-ovoko-category-mapping-autorun?token='+encodeURIComponent(token)+'&run_id='+encodeURIComponent(d.run_id);a.style.display='inline';}}
+async function call(url){try{let r=await fetch(url,{cache:'no-store'});if(!r.ok)throw new Error('HTTP '+r.status);retries=0;return await r.json()}catch(e){if(retries++<2){await sleep(1000);return call(url)}throw e}}
+async function run(){document.getElementById('start').disabled=true;try{let d=await call('/tools/start-ovoko-category-mapping-autorun?token='+encodeURIComponent(token)+'&batch_size=100&sample_limit=50&only_missing_ovoko_category_mapping=1&include_ambiguous=1&continue_on_error=1');render(d);while(d.next_url && (d.status==='started'||d.status==='running')){await sleep(700);d=await call(d.next_url);render(d)} }catch(e){document.getElementById('state').textContent='failed: '+e.message}finally{document.getElementById('start').disabled=false}}
+document.getElementById('start').onclick=run;
+</script></body></html>
+HTML, 200, ['Content-Type' => 'text/html; charset=UTF-8']);
+    }
+
+    public function startOvokoCategoryMappingAutorun(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+        $activeId = Cache::get('ovoko_category_mapping_autorun_active');
+        if ($activeId && ($active = Cache::get($this->autorunCacheKey($activeId))) && in_array($active['status'] ?? null, ['started','running'], true)) {
+            return response()->json($this->autorunPublicState($active) + ['active_run' => true, 'next_url' => $this->autorunNextUrl($request, $activeId)]);
+        }
+        $batchSize = max(1, min(100, (int) $request->query('batch_size', 100)));
+        $sampleLimit = max(1, min(100, (int) $request->query('sample_limit', 50)));
+        $onlyMissing = $request->boolean('only_missing_ovoko_category_mapping', true);
+        $runId = 'ovoko_catmap_'.date('Ymd_His').'_'.bin2hex(random_bytes(4));
+        $total = $this->linkedOvokoPartsQuery($onlyMissing)->count();
+        $state = ['run_id'=>$runId,'status'=>'started','params'=>['batch_size'=>$batchSize,'sample_limit'=>$sampleLimit,'only_missing_ovoko_category_mapping'=>$onlyMissing,'include_ambiguous'=>$request->boolean('include_ambiguous', true),'continue_on_error'=>$request->boolean('continue_on_error', true)],'processed_count'=>0,'processed_total'=>$total,'current_offset'=>0,'groups'=>[],'no_evidence'=>[],'sample_errors'=>[],'warnings'=>['read_only_autorun_no_ovoko_allegro_ebay_or_marketplace_category_mapping_writes'],'started_at'=>now()->toISOString(),'updated_at'=>now()->toISOString(),'completed_at'=>null];
+        $this->putAutorun($state); Cache::put('ovoko_category_mapping_autorun_active', $runId, now()->addDay());
+        return response()->json($this->autorunPublicState($state) + ['status'=>'started','next_url'=>$this->autorunNextUrl($request, $runId)]);
+    }
+
+    public function runOvokoCategoryMappingAutorun(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+        $runId = (string) $request->query('run_id', ''); $state = Cache::get($this->autorunCacheKey($runId));
+        if (! $state) return response()->json(['ok'=>false,'error_message'=>'run_id not found'], 404);
+        if (($state['status'] ?? null) === 'complete' || ($state['status'] ?? null) === 'failed') return response()->json($this->autorunPublicState($state));
+        $state['status'] = 'running'; $batchSize = (int) $state['params']['batch_size']; $sampleLimit = (int) $state['params']['sample_limit']; $offset = (int) $state['current_offset'];
+        $parts = $this->linkedOvokoPartsQuery((bool) $state['params']['only_missing_ovoko_category_mapping'])->skip($offset)->take($batchSize)->get();
+        $result = ['sample_errors'=>[], 'warnings'=>[]]; $tree = $this->fetchOvokoCategoryTree($result); $ovokoPartsById = $this->fetchOvokoPartsSnapshotByLinkedIds($parts, $result);
+        $processed = 0;
+        foreach ($parts as $part) { $processed++; $listing=$this->ovokoListing($part); $ovokoId=$this->listingOvokoExternalId($listing); if (! $part->category_id || $this->isBezKategorii($part)) continue; $ovoko=$ovokoId!==null?($ovokoPartsById[$ovokoId]??null):null; $category=$ovoko?$this->extractOvokoCategory($ovoko,$tree,$result):null; $key=(string)$part->category_id; if (! $category || blank($category['ovoko_category_id'])) { $state['no_evidence'][$key] ??= ['local_category_id'=>$part->category_id,'local_category_path'=>$part->category?->category_path ?? $part->category?->name,'sample_parts'=>[]]; $this->pushSample($state['no_evidence'][$key]['sample_parts'], $this->linkedProductSample($part,$ovokoId,$category), $sampleLimit); continue; } $state['groups'][$key] ??= $this->localCategoryGroup($part); $catKey=(string)$category['ovoko_category_id']; $state['groups'][$key]['observed_ovoko_categories'][$catKey] ??= $category + ['count'=>0,'sample_part_ids'=>[],'sample_ovoko_part_ids'=>[]]; $state['groups'][$key]['observed_ovoko_categories'][$catKey]['count']++; $this->pushSample($state['groups'][$key]['observed_ovoko_categories'][$catKey]['sample_part_ids'], ['part_id'=>$part->id], $sampleLimit); $this->pushSample($state['groups'][$key]['observed_ovoko_categories'][$catKey]['sample_ovoko_part_ids'], ['ovoko_part_id'=>$ovokoId], $sampleLimit); }
+        foreach ($result['sample_errors'] as $e) $this->pushSample($state['sample_errors'], $e, $sampleLimit); $state['warnings'] = array_values(array_unique(array_merge($state['warnings'], $result['warnings'] ?? [])));
+        $state['processed_count'] = min((int)$state['processed_total'], $offset + $processed); $state['current_offset'] = $offset + $processed; $state['current_batch'] = ['offset'=>$offset,'processed'=>$processed,'errors'=>$result['sample_errors']];
+        if ($processed === 0 || $state['processed_count'] >= $state['processed_total']) { $state['status']='complete'; $state['completed_at']=now()->toISOString(); Cache::forget('ovoko_category_mapping_autorun_active'); }
+        $state['updated_at']=now()->toISOString(); $this->putAutorun($state); $public=$this->autorunPublicState($state); if ($state['status']==='running') $public['next_url']=$this->autorunNextUrl($request,$runId); return response()->json($public);
+    }
+
+    public function statusOvokoCategoryMappingAutorun(Request $request): JsonResponse { if (! $this->validToken($request)) return $this->invalidTokenResponse(); $state=Cache::get($this->autorunCacheKey((string)$request->query('run_id',''))); return $state ? response()->json($this->autorunPublicState($state)) : response()->json(['ok'=>false,'error_message'=>'run_id not found'],404); }
+    public function resultsOvokoCategoryMappingAutorun(Request $request): JsonResponse { return $this->statusOvokoCategoryMappingAutorun($request); }
 
     public function debugOvokoLinkedProductRawFields(Request $request): JsonResponse
     {
@@ -612,6 +675,7 @@ class OvokoProductSyncController extends Controller
         $sampleIds = [];
         $pagesChecked = 0;
         $totalSeen = 0;
+        $snapshotComplete = false;
         $maxPages = 200;
         $limit = OvokoApiClient::MAX_PARTS_PAGE_LIMIT;
 
@@ -622,7 +686,13 @@ class OvokoProductSyncController extends Controller
             }
 
             for ($page = 1; $page <= $maxPages; $page++) {
-                $api = $client->fetchPartsPage($page, $limit);
+                $api = null;
+                for ($attempt = 1; $attempt <= 3; $attempt++) {
+                    $api = $client->fetchPartsPage($page, $limit);
+                    if (($api['api_ok'] ?? false) || (int) ($api['http_status'] ?? 0) !== 520) break;
+                    $warnings[] = 'ovoko_parts_api_http_520_retry';
+                    usleep(250000);
+                }
                 $pagesChecked++;
                 if (! ($api['api_ok'] ?? false)) {
                     $warnings[] = 'ovoko_parts_api_status_not_ok';
@@ -642,7 +712,7 @@ class OvokoProductSyncController extends Controller
                 }
 
                 if ($stopWhenAllFound && count(array_intersect($wanted, array_keys($partsById))) === count($wanted)) break;
-                if (count($rows) < $limit) break;
+                if (count($rows) < $limit) { $snapshotComplete = true; break; }
             }
         } catch (\Throwable $e) {
             $warnings[] = 'ovoko_parts_snapshot_exception';
@@ -650,10 +720,12 @@ class OvokoProductSyncController extends Controller
         }
 
         foreach (array_diff($wanted, array_keys($partsById)) as $missingId) {
-            $this->pushSample($result['sample_errors'], ['type' => 'ovoko_part_not_found_in_snapshot', 'ovoko_part_id' => $missingId], 50);
+            $type = $snapshotComplete ? 'ovoko_part_not_found_in_snapshot' : 'snapshot_incomplete_cannot_confirm_missing_id';
+            if (! $snapshotComplete) $warnings[] = 'snapshot_incomplete_cannot_confirm_missing_id';
+            $this->pushSample($result['sample_errors'], ['type' => $type, 'ovoko_part_id' => $missingId], 50);
         }
 
-        return ['parts_by_id' => $partsById, 'pages_checked' => $pagesChecked, 'total_seen' => $totalSeen, 'sample_ids' => $sampleIds, 'warnings' => $warnings];
+        return ['parts_by_id' => $partsById, 'pages_checked' => $pagesChecked, 'total_seen' => $totalSeen, 'sample_ids' => $sampleIds, 'warnings' => array_values(array_unique($warnings))];
     }
 
     private function ovokoSnapshotMatchIds(array $row): array
@@ -736,8 +808,27 @@ class OvokoProductSyncController extends Controller
 
     private function emptyLinkedCategoryMappingResponse(int $page, int $limit): array
     {
-        return ['ok' => true, 'dry_run' => true, 'ovoko_write' => false, 'local_update' => false, 'ovoko_read_request' => true, 'page' => $page, 'limit' => $limit, 'linked_products_checked' => 0, 'linked_products_with_ovoko_category' => 0, 'local_categories_observed_count' => 0, 'suggested_mapping_count' => 0, 'ambiguous_mapping_count' => 0, 'unmapped_or_missing_category_count' => 0, 'skipped_uncategorized_count' => 0, 'suggested_mappings' => [], 'ambiguous_mappings' => [], 'sample_products_without_ovoko_category' => [], 'sample_errors' => [], 'warnings' => ['read_only_dry_run_no_ovoko_allegro_ebay_or_local_writes']];
+        return ['ok' => true, 'dry_run' => true, 'ovoko_write' => false, 'local_update' => false, 'ovoko_read_request' => true, 'page' => $page, 'limit' => $limit, 'linked_products_checked' => 0, 'linked_products_with_ovoko_category' => 0, 'local_categories_observed_count' => 0, 'suggested_mapping_count' => 0, 'high_confidence_mapping_count' => 0, 'medium_confidence_mapping_count' => 0, 'ambiguous_mapping_count' => 0, 'no_evidence_count' => 0, 'unmapped_or_missing_category_count' => 0, 'skipped_uncategorized_count' => 0, 'suggested_mappings' => [], 'ambiguous_mappings' => [], 'sample_high_confidence_mappings' => [], 'sample_products_without_ovoko_category' => [], 'sample_errors' => [], 'warnings' => ['read_only_dry_run_no_ovoko_allegro_ebay_or_local_writes']];
     }
+
+
+    private function autorunCacheKey(string $runId): string { return 'ovoko_category_mapping_autorun_'.$runId; }
+    private function putAutorun(array $state): void { Cache::put($this->autorunCacheKey($state['run_id']), $state, now()->addDay()); }
+    private function autorunNextUrl(Request $request, string $runId): string { return url('/tools/run-ovoko-category-mapping-autorun').'?token='.urlencode((string)$request->query('token')).'&run_id='.urlencode($runId); }
+    private function autorunPublicState(array $state): array
+    {
+        $final = $this->finalizeAutorunMappings($state, (int)($state['params']['sample_limit'] ?? 50));
+        $processed=(int)($state['processed_count'] ?? 0); $total=(int)($state['processed_total'] ?? 0);
+        return ['ok'=>true,'dry_run'=>true,'ovoko_write'=>false,'local_update'=>false,'run_id'=>$state['run_id'],'status'=>$state['status'],'batch_size'=>(int)$state['params']['batch_size'],'processed_count'=>$processed,'processed_total'=>$total,'remaining_count'=>max(0,$total-$processed),'progress_percent'=>$total>0?round($processed*100/$total,2):100,'current_batch'=>$state['current_batch'] ?? ['offset'=>(int)($state['current_offset'] ?? 0),'processed'=>0,'errors'=>[]]] + $final + ['sample_errors'=>$state['sample_errors'] ?? [],'next_url'=>null,'warnings'=>$state['warnings'] ?? []];
+    }
+    private function finalizeAutorunMappings(array $state, int $sampleLimit): array
+    {
+        $suggested=[]; $ambiguous=[]; $high=[]; $medium=[];
+        foreach (($state['groups'] ?? []) as $group) { $observed=array_values($group['observed_ovoko_categories'] ?? []); if (count($observed)===1) { $cat=$observed[0]; $m=['local_category_id'=>$group['local_category_id'],'local_category_name'=>$group['local_category_name'],'local_category_path'=>$group['local_category_path'],'ovoko_category_id'=>$cat['ovoko_category_id'],'ovoko_category_name'=>$cat['ovoko_category_name'],'ovoko_category_path'=>$cat['ovoko_category_path'],'evidence_count'=>$cat['count'],'confidence'=>$cat['count'] >= 2 ? 'high' : 'medium','match_type'=>'linked_products_consensus']; $suggested[]=$m; if ($m['confidence'] === 'high') $high[] = $m; else $medium[] = $m; } elseif (count($observed)>1) { $ambiguous[]=['local_category_id'=>$group['local_category_id'],'local_category_path'=>$group['local_category_path'],'observed_ovoko_categories'=>$observed,'reason'=>'multiple_ovoko_categories_observed_for_one_local_category']; } }
+        $existing = Schema::hasTable('marketplace_category_mappings') ? (int) DB::table('marketplace_category_mappings')->where('channel','ovoko')->distinct('local_category_id')->count('local_category_id') : 0;
+        return ['suggested_mapping_count'=>count($suggested),'high_confidence_mapping_count'=>count($high),'medium_confidence_mapping_count'=>count($medium),'ambiguous_mapping_count'=>count($ambiguous),'no_evidence_count'=>count($state['no_evidence'] ?? []),'categories_with_existing_ovoko_mapping_count'=>$existing,'categories_missing_ovoko_mapping_count'=>max(0, $this->localCategoriesCount() - $existing),'suggested_mappings'=>$suggested,'high_confidence_mappings'=>$high,'medium_confidence_mappings'=>$medium,'ambiguous_mappings'=>$ambiguous,'no_evidence_categories'=>array_values($state['no_evidence'] ?? []),'sample_suggested_mappings'=>array_slice($suggested,0,$sampleLimit),'sample_high_confidence_mappings'=>array_slice($high,0,$sampleLimit),'sample_ambiguous_mappings'=>array_slice($ambiguous,0,$sampleLimit)];
+    }
+    private function localCategoriesCount(): int { $table = Schema::hasTable('part_categories') ? 'part_categories' : (Schema::hasTable('categories') ? 'categories' : null); return $table ? $this->safeCount($table) : 0; }
 
     private function analysePart(Part $part, bool $includeAlreadyListed): array
     {

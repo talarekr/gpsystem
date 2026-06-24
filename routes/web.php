@@ -184,6 +184,11 @@ Route::get('/tools/check-ovoko-category-data-sources', [OvokoProductSyncControll
 Route::get('/tools/inspect-ovoko-category-legacy-payloads', [OvokoProductSyncController::class, 'inspectOvokoCategoryLegacyPayloads'])->name('tools.inspect-ovoko-category-legacy-payloads');
 Route::get('/tools/fetch-ovoko-category-tree-preview', [OvokoProductSyncController::class, 'fetchOvokoCategoryTreePreview'])->name('tools.fetch-ovoko-category-tree-preview');
 Route::get('/tools/dry-run-ovoko-category-mapping-from-linked-products', [OvokoProductSyncController::class, 'dryRunOvokoCategoryMappingFromLinkedProducts'])->name('tools.dry-run-ovoko-category-mapping-from-linked-products');
+Route::get('/tools/ovoko-category-mapping-autorun', [OvokoProductSyncController::class, 'ovokoCategoryMappingAutorun'])->name('tools.ovoko-category-mapping-autorun');
+Route::get('/tools/start-ovoko-category-mapping-autorun', [OvokoProductSyncController::class, 'startOvokoCategoryMappingAutorun'])->name('tools.start-ovoko-category-mapping-autorun');
+Route::get('/tools/run-ovoko-category-mapping-autorun', [OvokoProductSyncController::class, 'runOvokoCategoryMappingAutorun'])->name('tools.run-ovoko-category-mapping-autorun');
+Route::get('/tools/status-ovoko-category-mapping-autorun', [OvokoProductSyncController::class, 'statusOvokoCategoryMappingAutorun'])->name('tools.status-ovoko-category-mapping-autorun');
+Route::get('/tools/results-ovoko-category-mapping-autorun', [OvokoProductSyncController::class, 'resultsOvokoCategoryMappingAutorun'])->name('tools.results-ovoko-category-mapping-autorun');
 Route::get('/tools/preview-ovoko-category-from-linked-products', [OvokoProductSyncController::class, 'previewOvokoCategoryFromLinkedProducts'])->name('tools.preview-ovoko-category-from-linked-products');
 Route::get('/tools/debug-ovoko-linked-product-raw-fields', [OvokoProductSyncController::class, 'debugOvokoLinkedProductRawFields'])->name('tools.debug-ovoko-linked-product-raw-fields');
 Route::get('/tools/debug-ovoko-part-detail-endpoints', [OvokoProductSyncController::class, 'debugOvokoPartDetailEndpoints'])->name('tools.debug-ovoko-part-detail-endpoints');
