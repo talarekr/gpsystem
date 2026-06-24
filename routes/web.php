@@ -188,6 +188,7 @@ Route::get('/tools/ovoko-category-mapping-autorun', [OvokoProductSyncController:
 Route::get('/tools/start-ovoko-category-mapping-autorun', [OvokoProductSyncController::class, 'startOvokoCategoryMappingAutorun'])->name('tools.start-ovoko-category-mapping-autorun');
 Route::get('/tools/run-ovoko-category-mapping-autorun', [OvokoProductSyncController::class, 'runOvokoCategoryMappingAutorun'])->name('tools.run-ovoko-category-mapping-autorun');
 Route::get('/tools/status-ovoko-category-mapping-autorun', [OvokoProductSyncController::class, 'statusOvokoCategoryMappingAutorun'])->name('tools.status-ovoko-category-mapping-autorun');
+Route::get('/tools/reset-ovoko-category-mapping-autorun', [OvokoProductSyncController::class, 'resetOvokoCategoryMappingAutorun'])->name('tools.reset-ovoko-category-mapping-autorun');
 Route::get('/tools/results-ovoko-category-mapping-autorun', [OvokoProductSyncController::class, 'resultsOvokoCategoryMappingAutorun'])->name('tools.results-ovoko-category-mapping-autorun');
 Route::get('/tools/preview-ovoko-category-from-linked-products', [OvokoProductSyncController::class, 'previewOvokoCategoryFromLinkedProducts'])->name('tools.preview-ovoko-category-from-linked-products');
 Route::get('/tools/debug-ovoko-linked-product-raw-fields', [OvokoProductSyncController::class, 'debugOvokoLinkedProductRawFields'])->name('tools.debug-ovoko-linked-product-raw-fields');
