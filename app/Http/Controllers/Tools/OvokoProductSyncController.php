@@ -7,6 +7,7 @@ use App\Models\MarketplaceCategory;
 use App\Models\MarketplaceCategoryMapping;
 use App\Models\MarketplaceListing;
 use App\Models\Part;
+use App\Models\PartCategory;
 use App\Services\Marketplace\Api\MarketplaceApiManager;
 use App\Services\Marketplace\Api\OvokoApiClient;
 use Illuminate\Database\Eloquent\Builder;
@@ -2246,6 +2247,97 @@ HTML, 200, ['Content-Type' => 'text/html; charset=UTF-8']);
         }
         return array_keys($out);
     }
+
+
+    public function dryRunCompareWooCategoryTreeWithLaravel(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+
+        $sampleLimit = max(1, min(500, (int) $request->query('sample_limit', 100)));
+        $only = (string) $request->query('only', 'all');
+        if (! in_array($only, ['all', 'matched', 'woo_missing', 'laravel_extra', 'ebay_diff', 'artifacts'], true)) $only = 'all';
+        $includeProducts = $request->boolean('include_products', false);
+        $csvPath = storage_path('app/imports/woo_category_tree.csv');
+
+        $result = [
+            'ok' => true, 'dry_run' => true, 'local_update' => false, 'ovoko_write' => false, 'allegro_write' => false, 'ebay_write' => false,
+            'csv_path' => 'storage/app/imports/woo_category_tree.csv', 'csv_exists' => is_file($csvPath),
+            'woo_rows_count' => 0, 'laravel_categories_count' => 0,
+            'matched_by_term_id_count' => 0, 'matched_by_external_id_count' => 0, 'matched_by_slug_count' => 0, 'matched_by_full_path_count' => 0, 'matched_by_normalized_path_count' => 0,
+            'woo_not_found_in_laravel_count' => 0, 'laravel_not_found_in_woo_count' => 0,
+            'ebay_mapping_same_count' => 0, 'ebay_mapping_different_count' => 0, 'ebay_mapping_missing_in_laravel_count' => 0, 'ebay_mapping_missing_in_woo_count' => 0,
+            'suspected_import_artifacts_count' => 0, 'suspected_bad_split_count' => 0,
+            'sample_matched' => [], 'sample_woo_not_found_in_laravel' => [], 'sample_laravel_not_found_in_woo' => [], 'sample_ebay_mapping_different' => [], 'sample_import_artifacts' => [],
+            'warnings' => ['read_only_no_part_categories_marketplace_mappings_products_or_marketplace_writes'],
+        ];
+        if (! $result['csv_exists']) { $result['ok'] = false; $result['warnings'][] = 'woo_category_tree_csv_not_found'; return response()->json($result, 404); }
+
+        $wooRows = $this->readWooCategoryTreeCsv($csvPath, $result['warnings']);
+        $result['woo_rows_count'] = count($wooRows);
+        $localRows = PartCategory::query()->with('marketplaceMappings')->withCount('parts')->get();
+        $result['laravel_categories_count'] = $localRows->count();
+        $localById = $localRows->keyBy(fn ($cat) => (string) $cat->id);
+        $localInfo = $localRows->map(function (PartCategory $cat) use ($localById) {
+            $path = $this->localCategoryDisplayPath($cat->toArray(), $localById);
+            $maps = $cat->marketplaceMappings->keyBy('channel');
+            return ['model' => $cat, 'path' => $path, 'normalized_path' => $this->normalizedWooComparePath($path), 'mappings' => $maps];
+        });
+
+        $byExternal = $localRows->filter(fn ($c) => filled($c->external_id))->keyBy(fn ($c) => (string) $c->external_id);
+        $byOldCategoryId = Schema::hasTable('marketplace_category_mappings') ? DB::table('marketplace_category_mappings')->whereNotNull('old_category_id')->where('old_category_id', '!=', '')->get()->keyBy(fn ($m) => (string) $m->old_category_id) : collect();
+        $bySlug = $localRows->filter(fn ($c) => filled($c->slug))->keyBy(fn ($c) => (string) $c->slug);
+        $byPath = $localInfo->filter(fn ($i) => filled($i['path']))->keyBy('path');
+        $byNorm = $localInfo->filter(fn ($i) => filled($i['normalized_path']))->keyBy('normalized_path');
+        $matchedLocal = []; $matchedWoo = [];
+
+        foreach ($wooRows as $woo) {
+            $match = null; $type = null; $term = (string) ($woo['term_id'] ?? '');
+            if ($term !== '' && isset($byExternal[$term]) && (string) ($byExternal[$term]->source_system ?? '') === 'woo') { $match = $byExternal[$term]; $type = 'term_id'; $result['matched_by_term_id_count']++; }
+            elseif ($term !== '' && isset($byExternal[$term])) { $match = $byExternal[$term]; $type = 'external_id'; $result['matched_by_external_id_count']++; }
+            elseif ($term !== '' && $byOldCategoryId->has($term) && $localById->has((string) $byOldCategoryId->get($term)->local_category_id)) { $match = $localById->get((string) $byOldCategoryId->get($term)->local_category_id); $type = 'old_category_id'; $result['matched_by_external_id_count']++; }
+            elseif (filled($woo['slug'] ?? null) && isset($bySlug[$woo['slug']])) { $match = $bySlug[$woo['slug']]; $type = 'slug'; $result['matched_by_slug_count']++; }
+            elseif (filled($woo['full_path'] ?? null) && isset($byPath[$woo['full_path']])) { $match = $byPath[$woo['full_path']]['model']; $type = 'full_path'; $result['matched_by_full_path_count']++; }
+            else { $norm = $this->normalizedWooComparePath($woo['full_path'] ?? null); if ($norm !== '' && isset($byNorm[$norm])) { $match = $byNorm[$norm]['model']; $type = 'normalized_path'; $result['matched_by_normalized_path_count']++; } }
+
+            if (! $match) {
+                $result['woo_not_found_in_laravel_count']++;
+                if ($only === 'all' || $only === 'woo_missing') $this->pushSample($result['sample_woo_not_found_in_laravel'], $this->wooMissingSample($woo), $sampleLimit);
+                continue;
+            }
+            $matchedLocal[(string) $match->id] = true; $matchedWoo[$term ?: (string) spl_object_id((object) $woo)] = true;
+            $info = $localInfo->first(fn ($i) => (int) $i['model']->id === (int) $match->id);
+            $ebay = $info['mappings']->get('ebay') ?? $info['mappings']->get('ebay_de');
+            $ebayDe = $info['mappings']->get('ebay_de');
+            if ($only === 'all' || $only === 'matched') $this->pushSample($result['sample_matched'], $this->matchedWooSample($woo, $match, $info['path'], $type, $ebay, $ebayDe), $sampleLimit);
+            $this->compareWooEbayMapping($result, $woo, $match, $info['path'], $ebay, $ebayDe, $sampleLimit, $only);
+        }
+
+        foreach ($localInfo as $info) {
+            $cat = $info['model']; $maps = $info['mappings']; $reason = $this->suspectedImportArtifactReason($cat->name, $info['path']);
+            if ($reason !== null) { $result['suspected_import_artifacts_count']++; if (str_contains($reason, 'slash') || str_contains($reason, 'fragment')) $result['suspected_bad_split_count']++; if ($only === 'all' || $only === 'artifacts') $this->pushSample($result['sample_import_artifacts'], $this->localExtraSample($cat, $info['path'], $maps, $reason), $sampleLimit); }
+            if (! isset($matchedLocal[(string) $cat->id])) { $result['laravel_not_found_in_woo_count']++; if ($only === 'all' || $only === 'laravel_extra') $this->pushSample($result['sample_laravel_not_found_in_woo'], $this->localExtraSample($cat, $info['path'], $maps, $reason), $sampleLimit); }
+        }
+
+        if (! $includeProducts) $result['warnings'][] = 'include_products_not_set_local_product_count_uses_eager_parts_count_only';
+        return response()->json($result);
+    }
+
+    private function readWooCategoryTreeCsv(string $path, array &$warnings): array
+    {
+        $handle = fopen($path, 'rb'); if (! $handle) { $warnings[] = 'csv_open_failed'; return []; }
+        $header = fgetcsv($handle); if (! is_array($header)) { fclose($handle); $warnings[] = 'csv_header_missing'; return []; }
+        $header = array_map(fn ($h) => trim((string) $h), $header); $rows = [];
+        while (($data = fgetcsv($handle)) !== false) { $row = []; foreach ($header as $i => $key) $row[$key] = $data[$i] ?? null; $rows[] = $row; }
+        fclose($handle); return $rows;
+    }
+
+    private function normalizedWooComparePath(?string $value): string
+    { $value = mb_strtolower(trim((string) $value)); $value = str_replace(['/', '\\'], ' > ', $value); $value = preg_replace('/\s*>\s*/u', ' > ', $value) ?? $value; $value = preg_replace('/\s+/u', ' ', $value) ?? $value; return trim($value); }
+    private function wooMissingSample(array $w): array { return ['woo_term_id'=>$w['term_id']??null,'woo_name'=>$w['name']??null,'woo_full_path'=>$w['full_path']??null,'woo_product_count'=>(int)($w['product_count']??0),'ebay_category_id'=>$w['ebay_category_id']??null,'ebay_category_id_de'=>$w['ebay_category_id_de']??null,'ebay_category_path_de'=>$w['ebay_category_path_de']??null]; }
+    private function matchedWooSample(array $w, PartCategory $c, string $path, string $type, $ebay, $ebayDe): array { return ['woo_term_id'=>$w['term_id']??null,'woo_name'=>$w['name']??null,'woo_full_path'=>$w['full_path']??null,'laravel_category_id'=>$c->id,'laravel_name'=>$c->name,'laravel_path'=>$path,'match_type'=>$type,'woo_product_count'=>(int)($w['product_count']??0),'laravel_product_count'=>$c->parts_count ?? null,'woo_ebay_category_id'=>$w['ebay_category_id']??null,'woo_ebay_category_id_de'=>$w['ebay_category_id_de']??null,'laravel_ebay_category_id'=>$ebay?->external_category_id,'laravel_ebay_de_category_id'=>$ebayDe?->external_category_id]; }
+    private function localExtraSample(PartCategory $c, string $path, $maps, ?string $reason): array { return ['local_category_id'=>$c->id,'local_category_name'=>$c->name,'local_category_path'=>$path,'product_count'=>$c->parts_count ?? null,'has_ebay_mapping'=>$maps->has('ebay') || $maps->has('ebay_de') || $maps->has('ebay_fr'),'has_allegro_mapping'=>$maps->has('allegro_main'),'has_ovoko_mapping'=>$maps->has('ovoko'),'suspected_reason'=>$reason]; }
+    private function compareWooEbayMapping(array &$result, array $w, PartCategory $c, string $path, $ebay, $ebayDe, int $limit, string $only): void { $wooMain=trim((string)($w['ebay_category_id']??'')); $wooDe=trim((string)($w['ebay_category_id_de']??'')); $localMain=trim((string)($ebay?->external_category_id??'')); $localDe=trim((string)($ebayDe?->external_category_id??'')); if ($wooMain==='' && $wooDe==='') { if ($localMain!=='' || $localDe!=='') $result['ebay_mapping_missing_in_woo_count']++; return; } if ($localMain==='' && $localDe==='') { $result['ebay_mapping_missing_in_laravel_count']++; return; } if (($wooMain==='' || $wooMain===$localMain || $wooMain===$localDe) && ($wooDe==='' || $wooDe===$localDe || $wooDe===$localMain)) { $result['ebay_mapping_same_count']++; return; } $result['ebay_mapping_different_count']++; if ($only==='all'||$only==='ebay_diff') $this->pushSample($result['sample_ebay_mapping_different'], ['woo_term_id'=>$w['term_id']??null,'local_category_id'=>$c->id,'woo_full_path'=>$w['full_path']??null,'laravel_path'=>$path,'woo_ebay_category_id'=>$w['ebay_category_id']??null,'woo_ebay_category_id_de'=>$w['ebay_category_id_de']??null,'laravel_ebay_category_id'=>$ebay?->external_category_id,'laravel_ebay_de_category_id'=>$ebayDe?->external_category_id,'difference_reason'=>'woo_and_laravel_ebay_category_ids_do_not_match'], $limit); }
+    private function suspectedImportArtifactReason(?string $name, ?string $path): ?string { $n=$this->normalizeCategoryPathForSlashDetection($name); $p=$this->normalizeCategoryPathForSlashDetection($path); if (preg_match('/(^| > )(c|fap|dpf|karoserii|moduły|moduly|sterowniki|sterownik|komputery)( > |$)/u', $p)) return 'suspicious_fragment_category_after_import_split'; if (str_contains($p, ' / ') || preg_match('/(^| > )[^>]+\/[^>]+( > |$)/u', $p)) return 'contains_slash_path_may_need_original_woo_comparison'; if (mb_strlen($n) <= 2 || in_array($n, ['c','fap','dpf','karoserii','moduły','moduly','sterowniki'], true)) return 'suspicious_short_or_fragment_name'; return null; }
 
     private function pushSample(array &$items, array $item, int $limit): void { if (count($items) < $limit) $items[] = $item; }
     private function validToken(Request $request): bool { return hash_equals(self::TOKEN, (string) $request->query('token', '')); }
