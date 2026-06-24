@@ -320,6 +320,47 @@ class OvokoProductSyncController extends Controller
         return response()->json($result);
     }
 
+    public function debugOvokoPartDetailEndpoints(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+
+        $ovokoPartId = trim((string) $request->query('ovoko_part_id', ''));
+        if ($ovokoPartId === '') return response()->json(['ok' => false, 'error_message' => 'ovoko_part_id is required.'], 422);
+
+        $result = [
+            'ok' => true,
+            'dry_run' => true,
+            'ovoko_write' => false,
+            'local_update' => false,
+            'ovoko_read_request' => true,
+            'ovoko_part_id' => $ovokoPartId,
+            'tested_endpoints' => [],
+            'best_match' => null,
+            'warnings' => ['read_only_diagnostics_only_no_ovoko_allegro_ebay_or_local_writes'],
+        ];
+
+        try {
+            $client = app(MarketplaceApiManager::class)->client('ovoko');
+            if (! $client instanceof OvokoApiClient) {
+                $result['warnings'][] = 'ovoko_client_unavailable';
+                return response()->json($result);
+            }
+
+            foreach ($client->comparePartDetailEndpoints($ovokoPartId) as $candidate) {
+                $public = $this->publicEndpointDiagnostic($candidate);
+                $result['tested_endpoints'][] = $public;
+                if ($result['best_match'] === null && ($public['matched_requested_id'] ?? false)) $result['best_match'] = $public;
+                if (($public['api_status_code'] ?? null) === 'R200' && ! ($public['matched_requested_id'] ?? false)) $result['warnings'][] = 'endpoint_returned_success_but_not_requested_part_id';
+            }
+            $result['warnings'] = array_values(array_unique($result['warnings']));
+        } catch (\Throwable $e) {
+            $result['warnings'][] = 'ovoko_api_exception';
+            $result['tested_endpoints'][] = ['endpoint' => null, 'request_fields' => [], 'http_status' => null, 'api_status_code' => null, 'matched_requested_id' => false, 'returned_raw_id' => null, 'returned_external_id' => null, 'returned_name' => null, 'returned_category_id' => null, 'returned_shop_url' => null, 'top_level_keys' => [], 'error' => $e->getMessage()];
+        }
+
+        return response()->json($result);
+    }
+
 
     public function categoryDataSources(Request $request): JsonResponse
     {
@@ -470,6 +511,24 @@ class OvokoProductSyncController extends Controller
         return $out;
     }
 
+    private function publicEndpointDiagnostic(array $candidate): array
+    {
+        return [
+            'endpoint' => $candidate['endpoint'] ?? null,
+            'request_fields' => $candidate['request_fields'] ?? [],
+            'http_status' => $candidate['http_status'] ?? null,
+            'api_status_code' => $candidate['api_status_code'] ?? null,
+            'matched_requested_id' => (bool) ($candidate['matched_requested_id'] ?? false),
+            'returned_raw_id' => $candidate['returned_raw_id'] ?? null,
+            'returned_external_id' => $candidate['returned_external_id'] ?? null,
+            'returned_name' => $candidate['returned_name'] ?? null,
+            'returned_category_id' => $candidate['returned_category_id'] ?? null,
+            'returned_shop_url' => $candidate['returned_shop_url'] ?? null,
+            'top_level_keys' => $candidate['top_level_keys'] ?? [],
+            'error' => $candidate['error'] ?? null,
+        ];
+    }
+
     private function linkedOvokoPartsQuery(bool $onlyMissingMapping): Builder
     {
         $query = Part::query()->with(['category', 'marketplaceListings'])->whereNotNull('category_id')
@@ -503,7 +562,8 @@ class OvokoProductSyncController extends Controller
                     if (($detail['api_ok'] ?? false) && is_array($detail['normalized'] ?? null)) {
                         $byId[$id] = $detail['normalized'];
                     } else {
-                        $this->pushSample($result['sample_errors'], ['type' => 'ovoko_part_detail_not_found', 'ovoko_part_id' => $id, 'error' => $detail['error'] ?? null], 50);
+                        $type = ($detail['error'] ?? null) === 'detail_id_mismatch' ? 'detail_id_mismatch' : 'ovoko_part_detail_not_found';
+                        $this->pushSample($result['sample_errors'], ['type' => $type, 'ovoko_part_id' => $id, 'error' => $detail['error'] ?? null, 'mismatches' => $detail['mismatches'] ?? []], 50);
                     }
                 }
             }

@@ -290,6 +290,36 @@ class OvokoProductSyncControllerTest extends TestCase
         $this->assertDatabaseCount('marketplace_category_mappings', 0);
     }
 
+    public function test_debug_ovoko_part_detail_endpoints_compares_variants_and_selects_matching_id_read_only(): void
+    {
+        MarketplaceAccount::query()->create(['id' => 95, 'marketplace' => 'ovoko', 'name' => 'Ovoko main', 'code' => 'ovoko_main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'dry_run', 'api_credentials' => ['username' => 'u', 'password' => 'p', 'user_token' => 't']]);
+        Http::fake([
+            'https://ovoko.example.test/v2/get/parts/10776' => Http::response(['status_code' => 'R200', 'data' => ['id' => '3', 'name' => 'Wrong default', 'category_id' => '1689']], 200),
+            'https://ovoko.example.test/v2/get/part/10776' => Http::response(['status_code' => 'R200', 'data' => ['id' => '10776', 'name' => 'Requested part', 'category_id' => '123', 'shop_url' => 'https://shop.example.test/10776']], 200),
+            'https://ovoko.example.test/get/part/10776' => Http::response(['status_code' => 'R404', 'msg' => 'Not found'], 200),
+            'https://ovoko.example.test/v2/get/parts' => Http::response(['status_code' => 'R200', 'data' => []], 200),
+        ]);
+
+        $response = $this->getJson('/tools/debug-ovoko-part-detail-endpoints?token=gps_images_import_2026&ovoko_part_id=10776');
+
+        $response->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('dry_run', true)
+            ->assertJsonPath('ovoko_write', false)
+            ->assertJsonPath('local_update', false)
+            ->assertJsonPath('ovoko_read_request', true)
+            ->assertJsonPath('ovoko_part_id', '10776')
+            ->assertJsonPath('tested_endpoints.0.matched_requested_id', false)
+            ->assertJsonPath('tested_endpoints.0.returned_raw_id', '3')
+            ->assertJsonPath('tested_endpoints.1.matched_requested_id', true)
+            ->assertJsonPath('best_match.returned_raw_id', '10776')
+            ->assertJsonPath('best_match.returned_category_id', '123')
+            ->assertJsonFragment(['endpoint_returned_success_but_not_requested_part_id']);
+
+        Http::assertSentCount(6);
+        $this->assertDatabaseCount('marketplace_category_mappings', 0);
+    }
+
     public function test_linked_products_mapping_falls_back_to_part_detail_endpoint_when_page_misses_ids(): void
     {
         MarketplaceAccount::query()->create(['id' => 94, 'marketplace' => 'ovoko', 'name' => 'Ovoko main', 'code' => 'ovoko_main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'dry_run', 'api_credentials' => ['username' => 'u', 'password' => 'p', 'user_token' => 't']]);
@@ -314,6 +344,33 @@ class OvokoProductSyncControllerTest extends TestCase
             ->assertJsonPath('suggested_mapping_count', 1)
             ->assertJsonPath('suggested_mappings.0.ovoko_category_id', '123')
             ->assertJsonPath('suggested_mappings.0.ovoko_category_path', 'Części > Skrzynia > Automatyczna skrzynia biegów');
+
+        $this->assertDatabaseCount('marketplace_category_mappings', 0);
+    }
+
+    public function test_linked_products_mapping_rejects_detail_category_when_returned_id_does_not_match(): void
+    {
+        MarketplaceAccount::query()->create(['id' => 96, 'marketplace' => 'ovoko', 'name' => 'Ovoko main', 'code' => 'ovoko_main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'dry_run', 'api_credentials' => ['username' => 'u', 'password' => 'p', 'user_token' => 't']]);
+        DB::table('part_categories')->insert(['id' => 33, 'name' => 'Battery', 'category_path' => 'Parts > Battery', 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('parts')->insert(['id' => 731, 'name' => 'Battery A', 'part_number' => 'PN-731', 'description' => 'Desc', 'price' => 1, 'quantity' => 1, 'status' => 'ready', 'is_visible_storefront' => true, 'needs_listing' => false, 'needs_review' => false, 'category_id' => 33, 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('marketplace_listings')->insert(['marketplace' => 'ovoko', 'part_id' => 731, 'external_offer_id' => '10776', 'created_at' => now(), 'updated_at' => now()]);
+        Http::fake([
+            'https://ovoko.example.test/get/categories' => Http::response(['status_code' => 'R200', 'list' => []], 200),
+            'https://ovoko.example.test/v2/get/parts/10776' => Http::response(['status_code' => 'R200', 'data' => ['id' => '3', 'name' => 'Wrong default', 'category_id' => '1689']], 200),
+            'https://ovoko.example.test/v2/get/part/10776' => Http::response(['status_code' => 'R200', 'data' => ['id' => '3', 'name' => 'Wrong default', 'category_id' => '1689']], 200),
+            'https://ovoko.example.test/get/part/10776' => Http::response(['status_code' => 'R200', 'data' => ['id' => '3', 'name' => 'Wrong default', 'category_id' => '1689']], 200),
+            'https://ovoko.example.test/v2/get/parts*' => Http::response(['status_code' => 'R200', 'data' => []], 200),
+        ]);
+
+        $response = $this->getJson('/tools/dry-run-ovoko-category-mapping-from-linked-products?token=gps_images_import_2026&limit=100&page=1&sample_limit=50&only_missing_ovoko_category_mapping=1');
+
+        $response->assertOk()
+            ->assertJsonPath('linked_products_checked', 1)
+            ->assertJsonPath('linked_products_with_ovoko_category', 0)
+            ->assertJsonPath('suggested_mapping_count', 0)
+            ->assertJsonPath('unmapped_or_missing_category_count', 1)
+            ->assertJsonPath('sample_errors.0.type', 'detail_id_mismatch')
+            ->assertJsonPath('sample_errors.0.mismatches.0.returned_raw_id', '3');
 
         $this->assertDatabaseCount('marketplace_category_mappings', 0);
     }

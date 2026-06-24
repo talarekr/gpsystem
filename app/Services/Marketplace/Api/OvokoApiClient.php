@@ -131,36 +131,105 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
 
     public function fetchPartRawById(string $id): array
     {
-        $base = rtrim((string) $this->account?->api_base_url, '/');
-        $candidates = [
-            $base.'/v2/get/part/'.rawurlencode($id),
-            $base.'/v2/get/parts/'.rawurlencode($id),
-            $base.'/get/part/'.rawurlencode($id),
-        ];
-
-        foreach ($candidates as $endpoint) {
-            $response = Http::asForm()->acceptJson()->timeout(30)->post($endpoint, $this->authFields());
-            $json = $response->json();
-            $payload = is_array($json) ? $json : [];
-            $statusCode = $payload['status_code'] ?? null;
-            $apiOk = $response->successful() && ($statusCode === 'R200' || $statusCode === 200);
-            $row = $this->extractSingleOfferRow($payload);
-
-            if ($apiOk && is_array($row)) {
+        $mismatches = [];
+        foreach ($this->comparePartDetailEndpoints($id) as $candidate) {
+            if (($candidate['api_ok'] ?? false) && ($candidate['matched_requested_id'] ?? false) && is_array($candidate['raw'] ?? null)) {
                 return [
-                    'http_status' => $response->status(),
-                    'api_status_code' => $statusCode,
+                    'http_status' => $candidate['http_status'] ?? null,
+                    'api_status_code' => $candidate['api_status_code'] ?? null,
                     'api_ok' => true,
-                    'endpoint_used' => $endpoint,
-                    'raw' => $row,
-                    'normalized' => $this->normalizeOffer($row),
-                    'response_top_level_keys' => array_values(array_slice(array_keys($payload), 0, 30)),
-                    'error' => $payload['msg'] ?? $payload['message'] ?? null,
+                    'endpoint_used' => $candidate['endpoint'],
+                    'raw' => $candidate['raw'],
+                    'normalized' => $this->normalizeOffer($candidate['raw']),
+                    'response_top_level_keys' => $candidate['top_level_keys'] ?? [],
+                    'error' => $candidate['error'] ?? null,
+                    'matched_requested_id' => true,
+                    'returned_raw_id' => $candidate['returned_raw_id'] ?? null,
+                    'returned_external_id' => $candidate['returned_external_id'] ?? null,
+                ];
+            }
+            if (($candidate['api_ok'] ?? false) && is_array($candidate['raw'] ?? null)) {
+                $mismatches[] = [
+                    'endpoint' => $candidate['endpoint'] ?? null,
+                    'returned_raw_id' => $candidate['returned_raw_id'] ?? null,
+                    'returned_external_id' => $candidate['returned_external_id'] ?? null,
+                    'returned_name' => $candidate['returned_name'] ?? null,
                 ];
             }
         }
 
-        return ['api_ok' => false, 'error' => 'part_detail_not_found_on_known_read_only_endpoints'];
+        return ['api_ok' => false, 'error' => $mismatches === [] ? 'part_detail_not_found_on_known_read_only_endpoints' : 'detail_id_mismatch', 'matched_requested_id' => false, 'mismatches' => $mismatches];
+    }
+
+    public function comparePartDetailEndpoints(string $id): array
+    {
+        $base = rtrim((string) $this->account?->api_base_url, '/');
+        $encodedId = rawurlencode($id);
+        $variants = [
+            ['endpoint' => $base.'/v2/get/parts/'.$encodedId, 'fields' => []],
+            ['endpoint' => $base.'/v2/get/part/'.$encodedId, 'fields' => []],
+            ['endpoint' => $base.'/get/part/'.$encodedId, 'fields' => []],
+            ['endpoint' => $base.'/v2/get/parts', 'fields' => ['id' => $id]],
+            ['endpoint' => $base.'/v2/get/parts', 'fields' => ['part_id' => $id]],
+            ['endpoint' => $base.'/v2/get/parts', 'fields' => ['ids' => [$id]]],
+        ];
+
+        return array_map(fn (array $variant): array => $this->probePartDetailEndpoint($variant['endpoint'], $variant['fields'], $id), $variants);
+    }
+
+    private function probePartDetailEndpoint(string $endpoint, array $fields, string $requestedId): array
+    {
+        try {
+            $response = Http::asForm()->acceptJson()->timeout(30)->post($endpoint, $this->authFields() + $fields);
+            $json = $response->json();
+            $payload = is_array($json) ? $json : [];
+            $row = $this->extractSingleOfferRow($payload);
+            $normalized = is_array($row) ? $this->normalizeOffer($row) : [];
+            $rawId = is_array($row) ? $this->stringOrNull($row['id'] ?? $row['raw_id'] ?? null) : null;
+            $externalId = is_array($row) ? $this->firstString($row, ['external_id', 'external_offer_id', 'part_id', 'ovoko_part_id', 'rrr_id', 'id']) : null;
+
+            return [
+                'endpoint' => $endpoint,
+                'request_fields' => array_keys($fields),
+                'http_status' => $response->status(),
+                'api_status_code' => $payload['status_code'] ?? null,
+                'api_ok' => $response->successful() && (($payload['status_code'] ?? null) === 'R200' || ($payload['status_code'] ?? null) === 200),
+                'matched_requested_id' => $this->matchesRequestedId($requestedId, $row ?? null, $normalized),
+                'returned_raw_id' => $rawId,
+                'returned_external_id' => $externalId,
+                'returned_name' => is_array($row) ? ($row['name'] ?? $row['title'] ?? null) : null,
+                'returned_category_id' => is_array($row) ? ($row['category_id'] ?? $row['categoryId'] ?? $row['part_category_id'] ?? data_get($row, 'category.id') ?? null) : null,
+                'returned_shop_url' => is_array($row) ? ($row['shop_url'] ?? $row['url'] ?? $row['link'] ?? null) : null,
+                'top_level_keys' => array_values(array_slice(array_keys($payload), 0, 30)),
+                'error' => $payload['msg'] ?? $payload['message'] ?? null,
+                'raw' => is_array($row) ? $row : null,
+            ];
+        } catch (\Throwable $e) {
+            return ['endpoint' => $endpoint, 'request_fields' => array_keys($fields), 'http_status' => null, 'api_status_code' => null, 'api_ok' => false, 'matched_requested_id' => false, 'returned_raw_id' => null, 'returned_external_id' => null, 'returned_name' => null, 'returned_category_id' => null, 'returned_shop_url' => null, 'top_level_keys' => [], 'error' => $e->getMessage(), 'raw' => null];
+        }
+    }
+
+    private function matchesRequestedId(string $requestedId, ?array $row, array $normalized): bool
+    {
+        if (! is_array($row)) return false;
+        foreach (['id', 'external_id', 'external_offer_id', 'part_id', 'ovoko_part_id', 'rrr_id'] as $key) {
+            if ($this->stringOrNull($row[$key] ?? null) === $requestedId) return true;
+        }
+        return $this->stringOrNull($normalized['external_offer_id'] ?? null) === $requestedId;
+    }
+
+    private function firstString(array $row, array $keys): ?string
+    {
+        foreach ($keys as $key) {
+            $value = $this->stringOrNull($row[$key] ?? null);
+            if ($value !== null) return $value;
+        }
+        return null;
+    }
+
+    private function stringOrNull(mixed $value): ?string
+    {
+        return is_scalar($value) && (string) $value !== '' ? (string) $value : null;
     }
 
     protected function extractOffers(array $payload): array
