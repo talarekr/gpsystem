@@ -189,6 +189,7 @@ Route::get('/tools/dry-run-ovoko-category-mapping-from-linked-products', [OvokoP
 Route::get('/tools/dry-run-ovoko-category-path-mapping', [OvokoProductSyncController::class, 'dryRunOvokoCategoryPathMapping'])->name('tools.dry-run-ovoko-category-path-mapping');
 Route::get('/tools/dry-run-sync-ovoko-tree-to-shop-categories', [OvokoProductSyncController::class, 'dryRunSyncOvokoTreeToShopCategories'])->name('tools.dry-run-sync-ovoko-tree-to-shop-categories');
 Route::get('/tools/dry-run-detect-bad-slash-split-categories', [OvokoProductSyncController::class, 'dryRunDetectBadSlashSplitCategories'])->name('tools.dry-run-detect-bad-slash-split-categories');
+Route::get('/tools/dry-run-audit-shop-category-tree-display', [OvokoProductSyncController::class, 'dryRunAuditShopCategoryTreeDisplay'])->name('tools.dry-run-audit-shop-category-tree-display');
 Route::get('/tools/ovoko-category-mapping-autorun', [OvokoProductSyncController::class, 'ovokoCategoryMappingAutorun'])->name('tools.ovoko-category-mapping-autorun');
 Route::get('/tools/ovoko-category-mapping-autorun-smoke', [OvokoProductSyncController::class, 'ovokoCategoryMappingAutorunSmoke'])->name('tools.ovoko-category-mapping-autorun-smoke');
 Route::get('/tools/debug-ovoko-category-mapping-autorun-start-minimal', [OvokoProductSyncController::class, 'debugOvokoCategoryMappingAutorunStartMinimal'])->name('tools.debug-ovoko-category-mapping-autorun-start-minimal');

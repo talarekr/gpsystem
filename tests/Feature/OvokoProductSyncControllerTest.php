@@ -629,4 +629,36 @@ class OvokoProductSyncControllerTest extends TestCase
             ->assertJsonPath('next_url', fn ($url) => is_string($url) && str_contains($url, '/tools/run-ovoko-category-mapping-autorun') && str_contains($url, 'run_id='.$runId));
     }
 
+
+    public function test_dry_run_audit_shop_category_tree_display_detects_split_front_branches(): void
+    {
+        DB::table('marketplace_categories')->insert([
+            ['channel' => 'ovoko', 'external_category_id' => 'ov-1', 'level' => 1, 'name' => 'Elementy przedniej części nadwozia / karoserii', 'full_path' => 'Elementy przedniej części nadwozia / karoserii', 'created_at' => now(), 'updated_at' => now()],
+            ['channel' => 'ovoko', 'external_category_id' => 'ov-2', 'level' => 1, 'name' => 'Układ klimatyzacji / Wentylacji / Chłodzenia silnika / Ogrzewanie postojowe', 'full_path' => 'Układ klimatyzacji / Wentylacji / Chłodzenia silnika / Ogrzewanie postojowe', 'created_at' => now(), 'updated_at' => now()],
+        ]);
+        DB::table('part_categories')->insert([
+            ['id' => 900, 'name' => 'Elementy przedniej części nadwozia / karoserii', 'category_path' => 'Elementy przedniej części nadwozia / karoserii', 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 901, 'name' => 'Elementy przedniej części nadwozia', 'category_path' => 'Elementy przedniej części nadwozia', 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 902, 'parent_id' => 901, 'name' => 'karoserii', 'category_path' => 'Elementy przedniej części nadwozia > karoserii', 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 903, 'parent_id' => 902, 'name' => 'Maski', 'category_path' => 'Elementy przedniej części nadwozia > karoserii > Maski', 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 904, 'name' => 'Układ klimatyzacji', 'category_path' => 'Układ klimatyzacji', 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 905, 'parent_id' => 904, 'name' => 'Wentylacji', 'category_path' => 'Układ klimatyzacji > Wentylacji', 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 906, 'parent_id' => 905, 'name' => 'Chłodzenia silnika', 'category_path' => 'Układ klimatyzacji > Wentylacji > Chłodzenia silnika', 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 907, 'parent_id' => 906, 'name' => 'Ogrzewanie postojowe', 'category_path' => 'Układ klimatyzacji > Wentylacji > Chłodzenia silnika > Ogrzewanie postojowe', 'created_at' => now(), 'updated_at' => now()],
+        ]);
+
+        $response = $this->getJson('/tools/dry-run-audit-shop-category-tree-display?token=gps_images_import_2026&sample_limit=20&include_children=1');
+
+        $response->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('dry_run', true)
+            ->assertJsonPath('local_update', false)
+            ->assertJsonPath('ovoko_write', false)
+            ->assertJsonPath('ok_exact_ovoko_match_count', 1)
+            ->assertJsonFragment(['local_category_path' => 'Elementy przedniej części nadwozia > karoserii', 'proposed_correct_ovoko_path' => 'Elementy przedniej części nadwozia / karoserii'])
+            ->assertJsonFragment(['local_category_path' => 'Układ klimatyzacji > Wentylacji > Chłodzenia silnika > Ogrzewanie postojowe', 'proposed_correct_ovoko_path' => 'Układ klimatyzacji / Wentylacji / Chłodzenia silnika / Ogrzewanie postojowe']);
+
+        $this->assertDatabaseCount('marketplace_category_mappings', 0);
+    }
+
 }

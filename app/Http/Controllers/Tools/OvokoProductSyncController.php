@@ -1905,6 +1905,162 @@ HTML, 200, ['Content-Type' => 'text/html; charset=UTF-8']);
         return response()->json($result);
     }
 
+
+    public function dryRunAuditShopCategoryTreeDisplay(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+
+        $sampleLimit = max(1, min(500, (int) $request->query('sample_limit', 100)));
+        $only = (string) $request->query('only', 'all');
+        if (! in_array($only, ['bad_display', 'safe_to_hide', 'manual_review', 'all'], true)) $only = 'all';
+        $includeChildren = $request->boolean('include_children', false);
+        $includeProducts = $request->boolean('include_products', false);
+        $warnings = ['read_only_audit_no_local_or_marketplace_writes'];
+
+        $result = [
+            'ok' => true,
+            'dry_run' => true,
+            'local_update' => false,
+            'ovoko_write' => false,
+            'allegro_write' => false,
+            'ebay_write' => false,
+            'local_categories_count' => 0,
+            'ovoko_categories_count' => 0,
+            'ok_exact_ovoko_match_count' => 0,
+            'suspected_bad_display_branch_count' => 0,
+            'duplicate_branch_count' => 0,
+            'bad_split_branch_count' => 0,
+            'orphan_non_ovoko_branch_count' => 0,
+            'safe_to_hide_empty_count' => 0,
+            'needs_manual_review_count' => 0,
+            'with_products_count' => 0,
+            'with_marketplace_mapping_count' => 0,
+            'sample_bad_display_branches' => [],
+            'sample_safe_to_hide_empty' => [],
+            'sample_manual_review' => [],
+            'warnings' => $warnings,
+        ];
+
+        if (! Schema::hasTable('part_categories') || ! Schema::hasTable('marketplace_categories')) {
+            $result['ok'] = false;
+            $result['warnings'][] = 'missing_required_tables';
+            return response()->json($result, 422);
+        }
+
+        $ovokoRows = DB::table('marketplace_categories')
+            ->select($this->safeSelectColumns('marketplace_categories', ['id', 'external_category_id', 'name', 'full_path']))
+            ->where('channel', 'ovoko')
+            ->whereNotNull('full_path')
+            ->get()
+            ->map(fn ($row): array => (array) $row)
+            ->filter(fn (array $row): bool => trim((string) ($row['full_path'] ?? '')) !== '')
+            ->values()
+            ->all();
+
+        $ovokoNorm = [];
+        foreach ($ovokoRows as $row) {
+            $ovokoNorm[$this->normalizeCategoryPathForSlashDetection((string) $row['full_path'])][] = $row;
+        }
+
+        $localSelect = $this->safeSelectColumns('part_categories', ['id', 'parent_id', 'name', 'category_path']);
+        $locals = DB::table('part_categories')->select($localSelect)->get()->map(fn ($row): array => (array) $row)->values();
+        $result['local_categories_count'] = $locals->count();
+        $result['ovoko_categories_count'] = count($ovokoRows);
+
+        $localById = $locals->keyBy(fn (array $row): string => (string) ($row['id'] ?? ''));
+        $childrenByParent = $locals->groupBy(fn (array $row): string => (string) ($row['parent_id'] ?? ''));
+        $localByNorm = [];
+        foreach ($locals as $row) {
+            $path = $this->localCategoryDisplayPath($row, $localById);
+            $localByNorm[$this->normalizeCategoryPathForSlashDetection($path)][] = $row + ['_display_path' => $path];
+        }
+
+        $productCounts = Schema::hasTable('parts') && Schema::hasColumn('parts', 'category_id')
+            ? DB::table('parts')->select('category_id', DB::raw('count(*) as count'))->whereNotNull('category_id')->groupBy('category_id')->pluck('count', 'category_id')->map(fn ($v) => (int) $v)->all()
+            : [];
+        $mappingRows = Schema::hasTable('marketplace_category_mappings')
+            ? DB::table('marketplace_category_mappings')->select($this->safeSelectColumns('marketplace_category_mappings', ['local_category_id', 'channel']))->get()->groupBy('local_category_id')
+            : collect();
+
+        foreach ($locals as $cat) {
+            $path = $this->localCategoryDisplayPath($cat, $localById);
+            if ($path === '') continue;
+            $normPath = $this->normalizeCategoryPathForSlashDetection($path);
+            if (isset($ovokoNorm[$normPath])) {
+                $result['ok_exact_ovoko_match_count']++;
+                continue;
+            }
+
+            $children = $childrenByParent->get((string) ($cat['id'] ?? ''), collect());
+            $childrenCount = $children->count();
+            $productsCount = (int) ($productCounts[$cat['id']] ?? 0);
+            $channels = $mappingRows->get($cat['id'], collect())->pluck('channel')->map(fn ($v) => (string) $v)->all();
+            $hasMapping = $channels !== [];
+            $hasEbay = collect($channels)->contains(fn (string $channel): bool => str_starts_with($channel, 'ebay'));
+            if ($productsCount > 0) $result['with_products_count']++;
+            if ($hasMapping) $result['with_marketplace_mapping_count']++;
+
+            $matches = [];
+            foreach ($this->shopTreeDisplayAuditCandidates($path) as $candidate) {
+                foreach ($ovokoNorm[$this->normalizeCategoryPathForSlashDetection($candidate)] ?? [] as $row) {
+                    $matches[(string) ($row['external_category_id'] ?? $row['id'])] = $row;
+                }
+            }
+
+            $problemType = null;
+            if ($matches !== []) $problemType = 'slash_split_branch';
+            elseif ($this->looksLikeArtificialCategorySegment((string) ($cat['name'] ?? ''))) $problemType = 'bad_artificial_segment';
+            elseif ($childrenCount > 0) $problemType = 'orphan_non_ovoko_branch';
+            else continue;
+
+            $target = count($matches) === 1 ? array_values($matches)[0] : null;
+            $targetNorm = $target ? $this->normalizeCategoryPathForSlashDetection((string) ($target['full_path'] ?? '')) : null;
+            $targetLocal = $targetNorm ? ($localByNorm[$targetNorm][0] ?? null) : null;
+            $hasDuplicateLocal = $targetLocal !== null;
+            if ($hasDuplicateLocal) $problemType = $problemType === 'slash_split_branch' ? 'slash_split_branch' : 'duplicate_branch';
+
+            $suggested = 'manual_review';
+            $confidence = $target && count($matches) === 1 ? 'high' : 'medium';
+            if (count($matches) !== 1) $confidence = 'low';
+            if ($productsCount === 0 && ! $hasMapping && $childrenCount === 0) $suggested = 'hide_empty_branch';
+            elseif ($productsCount > 0 && $targetLocal) $suggested = 'move_products_then_hide';
+            elseif ($productsCount > 0 && $target) $suggested = 'create_target_then_move';
+            else $suggested = 'manual_review';
+
+            $sample = [
+                'local_category_id' => (int) $cat['id'],
+                'local_category_name' => $cat['name'] ?? null,
+                'local_category_path' => $path,
+                'local_products_count' => $productsCount,
+                'children_count' => $childrenCount,
+                'has_marketplace_mapping' => $hasMapping,
+                'has_ebay_mapping' => $hasEbay,
+                'problem_type' => $problemType,
+                'proposed_correct_ovoko_path' => $target['full_path'] ?? null,
+                'proposed_correct_local_category_id' => $targetLocal['id'] ?? null,
+                'target_exists_locally' => (bool) $targetLocal,
+                'suggested_action' => $suggested,
+                'confidence' => $confidence,
+                'reason' => $target ? 'local tree segments can be rejoined with / to match Ovoko full_path' : 'local branch has children or artificial segment but no Ovoko full_path match',
+            ];
+            if ($includeChildren) $sample['children'] = $children->take(20)->map(fn (array $child): array => ['id' => $child['id'] ?? null, 'name' => $child['name'] ?? null, 'path' => $this->localCategoryDisplayPath($child, $localById)])->values()->all();
+            if ($includeProducts && $productsCount > 0 && Schema::hasTable('parts')) $sample['sample_product_ids'] = DB::table('parts')->where('category_id', $cat['id'])->limit(10)->pluck('id')->all();
+
+            $result['suspected_bad_display_branch_count']++;
+            if ($hasDuplicateLocal) $result['duplicate_branch_count']++;
+            if ($problemType === 'slash_split_branch') $result['bad_split_branch_count']++;
+            if ($problemType === 'orphan_non_ovoko_branch') $result['orphan_non_ovoko_branch_count']++;
+            if ($suggested === 'hide_empty_branch') $result['safe_to_hide_empty_count']++;
+            if ($suggested === 'manual_review') $result['needs_manual_review_count']++;
+
+            if ($only === 'all' || $only === 'bad_display') $this->pushSample($result['sample_bad_display_branches'], $sample, $sampleLimit);
+            if ($suggested === 'hide_empty_branch' && ($only === 'all' || $only === 'safe_to_hide')) $this->pushSample($result['sample_safe_to_hide_empty'], $sample, $sampleLimit);
+            if ($suggested === 'manual_review' && ($only === 'all' || $only === 'manual_review')) $this->pushSample($result['sample_manual_review'], $sample, $sampleLimit);
+        }
+
+        return response()->json($result);
+    }
+
     private function imageUrls(Part $part): array
     {
         $urls = [];
@@ -2019,6 +2175,43 @@ HTML, 200, ['Content-Type' => 'text/html; charset=UTF-8']);
     private function ovokoListing(Part $part): ?MarketplaceListing { return $part->marketplaceListings->first(fn ($listing) => $listing->marketplace === 'ovoko'); }
     private function ovokoListingsCount(Part $part): int { return $part->marketplaceListings->filter(fn ($listing) => $listing->marketplace === 'ovoko')->count(); }
     private function ovokoCategoryMapping(Part $part): ?MarketplaceCategoryMapping { if (! Schema::hasTable('marketplace_category_mappings') || ! $part->category_id) return null; return MarketplaceCategoryMapping::query()->where('local_category_id', $part->category_id)->where('channel', 'ovoko')->first(); }
+
+
+    private function localCategoryDisplayPath(array $category, $localById): string
+    {
+        $path = trim((string) ($category['category_path'] ?? ''));
+        if ($path !== '') return $path;
+        $segments = [];
+        $current = $category;
+        $guard = 0;
+        while ($current && $guard++ < 20) {
+            array_unshift($segments, trim((string) ($current['name'] ?? '')));
+            $parentId = $current['parent_id'] ?? null;
+            $current = $parentId ? $localById->get((string) $parentId) : null;
+        }
+        return implode(' > ', array_values(array_filter($segments, fn (string $segment): bool => $segment !== '')));
+    }
+
+    private function shopTreeDisplayAuditCandidates(string $path): array
+    {
+        $candidates = $this->slashReconstructionCandidates($path);
+        $segments = array_values(array_filter(array_map('trim', explode(' > ', $path)), fn (string $segment): bool => $segment !== ''));
+        for ($start = 0; $start < count($segments) - 1; $start++) {
+            $suffix = array_slice($segments, $start);
+            if (count($suffix) >= 2) {
+                $candidates[] = implode(' / ', $suffix);
+                $candidates[] = implode('/', $suffix);
+            }
+        }
+        return array_values(array_unique(array_filter($candidates, fn (string $candidate): bool => trim($candidate) !== '')));
+    }
+
+    private function looksLikeArtificialCategorySegment(string $name): bool
+    {
+        $normalized = $this->normalizeCategoryPathForSlashDetection($name);
+        $segments = ['karoserii', 'wentylacji', 'chłodzenia silnika', 'komputery', 'moduły', 'moduly', 'sterowniki', 'a', 'c', 'fap', 'dpf'];
+        return in_array($normalized, $segments, true);
+    }
 
     private function normalizeCategoryPathForSlashDetection(?string $value): string
     {
