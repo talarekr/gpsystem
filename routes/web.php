@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Admin\ImportMigration\PartImagePresentationController;
 use App\Http\Controllers\Admin\LocalSaleController;
+use App\Http\Controllers\Admin\MarketplaceCategoryMapperController;
 use App\Http\Controllers\Admin\Allegro\AllegroOAuthController;
 use App\Http\Controllers\Admin\Ebay\EbayOAuthController;
 use App\Http\Controllers\Admin\PartSearchController;
@@ -2059,6 +2060,11 @@ Route::get('/tools/post-domain-switch-check', PostDomainSwitchCheckController::c
 Route::middleware(Authenticate::class)->prefix('admin')->name('admin.')->group(function (): void {
     Route::get('/search/parts', PartSearchController::class)->name('search.parts');
     Route::post('/local-sales', [LocalSaleController::class, 'store'])->name('local-sales.store');
+    Route::get('/marketplace-category-mapper', [MarketplaceCategoryMapperController::class, 'index'])->name('marketplace-category-mapper.index');
+    Route::get('/marketplace-category-mapper/tree/local', [MarketplaceCategoryMapperController::class, 'localTree'])->name('marketplace-category-mapper.tree.local');
+    Route::get('/marketplace-category-mapper/tree/{channel}', [MarketplaceCategoryMapperController::class, 'channelTree'])->name('marketplace-category-mapper.tree.channel');
+    Route::get('/marketplace-category-mapper/mapping/{local_category_id}', [MarketplaceCategoryMapperController::class, 'showMapping'])->name('marketplace-category-mapper.mapping.show');
+    Route::post('/marketplace-category-mapper/mapping/{local_category_id}', [MarketplaceCategoryMapperController::class, 'saveMapping'])->name('marketplace-category-mapper.mapping.save');
 });
 
 Route::middleware(Authenticate::class)->prefix('admin/import-migracyjny/produkty-woo')->name('admin.import-migration.woo-products.')->group(function (): void {
