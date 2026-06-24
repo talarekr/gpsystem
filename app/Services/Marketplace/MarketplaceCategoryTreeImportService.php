@@ -65,6 +65,11 @@ class MarketplaceCategoryTreeImportService
 
     public function startAutorun(string $channel = 'all', int $batchSize = 200, bool $includeRawPayload = false, int $timeLimit = 10): array
     {
+        $active = $this->activeAutorun();
+        if ($active) {
+            return $this->publicAutorunState($active, $active['status'] ?? 'running', ['reused_active_run' => true]);
+        }
+
         $channel = $this->normalizeAutorunChannel($channel);
         $batchSize = $this->normalizeBatchSize($batchSize);
         $startedAt = now()->toIso8601String();
@@ -194,6 +199,13 @@ class MarketplaceCategoryTreeImportService
     {
         $runId = Cache::get($this->latestAutorunCacheKey());
         return is_string($runId) && $runId !== '' ? $this->getAutorunState($runId) : null;
+    }
+
+    public function activeAutorun(): ?array
+    {
+        $state = $this->latestAutorun();
+        if (! $state) return null;
+        return in_array($state['status'] ?? null, ['started', 'running'], true) ? $state : null;
     }
 
     public function debugAutorun(): array
