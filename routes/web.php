@@ -2047,6 +2047,7 @@ Route::get('/tools/check-compiled-header', function (Request $request) {
     ]);
 })->name('tools.check-compiled-header');
 Route::get('/tools/dry-run-import-marketplace-category-trees', [MarketplaceCategoryTreeImportController::class, 'dryRunImport'])->name('tools.dry-run-import-marketplace-category-trees');
+Route::get('/tools/debug-marketplace-category-tree-fetch', [MarketplaceCategoryTreeImportController::class, 'debugFetch'])->name('tools.debug-marketplace-category-tree-fetch');
 Route::get('/tools/import-marketplace-category-trees', [MarketplaceCategoryTreeImportController::class, 'import'])->name('tools.import-marketplace-category-trees');
 Route::get('/tools/dry-run-backfill-ebay-de-category-mapping-names', [MarketplaceCategoryTreeImportController::class, 'dryRunBackfill'])->name('tools.dry-run-backfill-ebay-de-category-mapping-names');
 Route::get('/tools/backfill-ebay-de-category-mapping-names', [MarketplaceCategoryTreeImportController::class, 'backfill'])->name('tools.backfill-ebay-de-category-mapping-names');
