@@ -124,6 +124,45 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
         ];
     }
 
+    public function normalizeOffer(array $row): array
+    {
+        return $this->extractOffers(['data' => [$row]])[0] ?? [];
+    }
+
+    public function fetchPartRawById(string $id): array
+    {
+        $base = rtrim((string) $this->account?->api_base_url, '/');
+        $candidates = [
+            $base.'/v2/get/part/'.rawurlencode($id),
+            $base.'/v2/get/parts/'.rawurlencode($id),
+            $base.'/get/part/'.rawurlencode($id),
+        ];
+
+        foreach ($candidates as $endpoint) {
+            $response = Http::asForm()->acceptJson()->timeout(30)->post($endpoint, $this->authFields());
+            $json = $response->json();
+            $payload = is_array($json) ? $json : [];
+            $statusCode = $payload['status_code'] ?? null;
+            $apiOk = $response->successful() && ($statusCode === 'R200' || $statusCode === 200);
+            $row = $this->extractSingleOfferRow($payload);
+
+            if ($apiOk && is_array($row)) {
+                return [
+                    'http_status' => $response->status(),
+                    'api_status_code' => $statusCode,
+                    'api_ok' => true,
+                    'endpoint_used' => $endpoint,
+                    'raw' => $row,
+                    'normalized' => $this->normalizeOffer($row),
+                    'response_top_level_keys' => array_values(array_slice(array_keys($payload), 0, 30)),
+                    'error' => $payload['msg'] ?? $payload['message'] ?? null,
+                ];
+            }
+        }
+
+        return ['api_ok' => false, 'error' => 'part_detail_not_found_on_known_read_only_endpoints'];
+    }
+
     protected function extractOffers(array $payload): array
     {
         $rows = $payload['data'] ?? $payload['parts'] ?? [];
@@ -150,18 +189,37 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
         }, array_filter($rows, 'is_array')));
     }
 
+    private function extractSingleOfferRow(array $payload): ?array
+    {
+        foreach (['data', 'part', 'item', 'offer'] as $key) {
+            $value = $payload[$key] ?? null;
+            if (is_array($value) && array_is_list($value)) {
+                $first = $value[0] ?? null;
+                if (is_array($first)) return $first;
+            }
+            if (is_array($value)) return $value;
+        }
+
+        return null;
+    }
+
     private function rawCategoryFields(array $row): array
     {
         return array_filter([
             'category_id' => $row['category_id'] ?? null,
             'categoryId' => $row['categoryId'] ?? null,
             'part_category_id' => $row['part_category_id'] ?? null,
+            'categoryIdRaw' => $row['categoryIdRaw'] ?? null,
+            'category_title_path' => $row['category_title_path'] ?? null,
             'category_name' => $row['category_name'] ?? null,
             'categoryName' => $row['categoryName'] ?? null,
-            'category_title_path' => $row['category_title_path'] ?? null,
             'category_path' => $row['category_path'] ?? null,
             'categoryPath' => $row['categoryPath'] ?? null,
             'category' => $row['category'] ?? null,
+            'part' => $row['part'] ?? null,
+            'type' => $row['type'] ?? null,
+            'group' => $row['group'] ?? null,
+            'category_tree' => $row['category_tree'] ?? null,
         ], fn ($value) => $value !== null && $value !== '');
     }
 }
