@@ -2440,6 +2440,105 @@ HTML, 200, ['Content-Type' => 'text/html; charset=UTF-8']);
         return response()->json($result);
     }
 
+    public function dryRunPlanFixCategoryDisplaySplits(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+
+        $sampleLimit = max(1, min(500, (int) $request->query('sample_limit', 100)));
+        $only = (string) $request->query('only', 'all');
+        if (! in_array($only, ['all', 'auto_safe', 'manual_review', 'target_exists', 'target_create_needed'], true)) $only = 'all';
+        $includeProducts = $request->boolean('include_products', false);
+        $includeChildren = $request->boolean('include_children', false);
+        $includeOperations = $request->boolean('include_operations', true);
+        $csvPath = storage_path('app/imports/woo_category_tree.csv');
+        $warnings = ['read_only_plan_no_part_categories_products_marketplace_mappings_or_marketplace_writes'];
+
+        $result = [
+            'ok' => true, 'dry_run' => true, 'local_update' => false, 'ovoko_write' => false, 'allegro_write' => false, 'ebay_write' => false,
+            'split_display_vs_ovoko_count' => 0, 'repair_groups_count' => 0,
+            'target_exists_count' => 0, 'target_create_needed_count' => 0,
+            'would_create_categories_count' => 0, 'would_move_products_count' => 0, 'would_move_products_total' => 0,
+            'would_reparent_children_count' => 0, 'would_copy_mappings_count' => 0, 'would_hide_old_categories_count' => 0,
+            'auto_safe_count' => 0, 'manual_review_count' => 0,
+            'sample_repair_groups' => [], 'sample_auto_safe' => [], 'sample_manual_review' => [], 'warnings' => $warnings,
+        ];
+
+        if (! Schema::hasTable('part_categories') || ! Schema::hasTable('marketplace_categories')) {
+            $result['ok'] = false; $result['warnings'][] = 'missing_required_tables';
+            return response()->json($result, 422);
+        }
+        if (! is_file($csvPath)) $result['warnings'][] = 'woo_category_tree_csv_not_found';
+        $wooByTerm = is_file($csvPath) ? collect($this->readWooCategoryTreeCsv($csvPath, $result['warnings']))->filter(fn (array $row): bool => filled($row['term_id'] ?? null))->keyBy(fn (array $row): string => (string) $row['term_id']) : collect();
+
+        $localRows = PartCategory::query()->with('marketplaceMappings')->get();
+        $localById = $localRows->keyBy(fn (PartCategory $cat): string => (string) $cat->id);
+        $localInfos = $localRows->map(function (PartCategory $cat) use ($localById): array {
+            $path = $this->localCategoryDisplayPath($cat->toArray(), $localById);
+            return ['model' => $cat, 'path' => $path, 'normalized_path' => $this->normalizeCanonicalCategoryDisplayPath($path)];
+        });
+        $localByNormalizedPath = $localInfos->filter(fn (array $info): bool => $info['normalized_path'] !== '')->keyBy('normalized_path');
+        $pathById = $localInfos->mapWithKeys(fn (array $info): array => [(int) $info['model']->id => $info['path']])->all();
+
+        $ovokoRows = DB::table('marketplace_categories')->select($this->safeSelectColumns('marketplace_categories', ['id', 'external_category_id', 'name', 'full_path']))->where('channel', 'ovoko')->get()->map(fn ($row): array => (array) $row)->all();
+        $ovokoByNorm = collect($ovokoRows)->filter(fn (array $row): bool => filled($row['full_path'] ?? null))->groupBy(fn (array $row): string => $this->normalizeCanonicalCategoryDisplayPath((string) $row['full_path']));
+        $partsCounts = Schema::hasTable('parts') && Schema::hasColumn('parts', 'category_id') ? DB::table('parts')->select('category_id', DB::raw('count(*) as count'))->whereNotNull('category_id')->groupBy('category_id')->pluck('count', 'category_id')->map(fn ($v) => (int) $v)->all() : [];
+        $childrenByParent = $localRows->groupBy(fn (PartCategory $cat): string => (string) ($cat->parent_id ?? ''));
+        $mappingRows = Schema::hasTable('marketplace_category_mappings') ? DB::table('marketplace_category_mappings')->select($this->safeSelectColumns('marketplace_category_mappings', ['local_category_id', 'channel']))->get()->groupBy('local_category_id') : collect();
+
+        $splits = [];
+        foreach ($localInfos as $info) {
+            /** @var PartCategory $cat */
+            $cat = $info['model']; $path = $info['path']; $norm = $info['normalized_path'];
+            if ($path === '' || $ovokoByNorm->get($norm, collect())->isNotEmpty()) continue;
+            $matches = collect();
+            foreach ($this->shopTreeDisplayAuditCandidates($path) as $candidate) {
+                $candidateMatches = $ovokoByNorm->get($this->normalizeCanonicalCategoryDisplayPath($candidate), collect());
+                if ($candidateMatches->isNotEmpty()) $matches = $candidateMatches; if ($matches->count() === 1) break;
+            }
+            if ($matches->isEmpty()) continue;
+            $target = $matches->count() === 1 ? $matches->first() : null;
+            $targetNorm = $target ? $this->normalizeCanonicalCategoryDisplayPath((string) ($target['full_path'] ?? '')) : null;
+            $targetLocal = $targetNorm ? $localByNormalizedPath->get($targetNorm) : null;
+            $channels = $mappingRows->get($cat->id, collect())->pluck('channel')->filter()->values()->map(fn ($v) => (string) $v)->all();
+            $children = $childrenByParent->get((string) $cat->id, collect());
+            $splits[(int) $cat->id] = [
+                'cat' => $cat, 'path' => $path, 'matches_count' => $matches->count(), 'target' => $target, 'target_local' => $targetLocal,
+                'products_count' => (int) ($partsCounts[$cat->id] ?? 0),
+                'descendants_products_count' => $this->descendantsProductsCountForPath($path, $localInfos, $partsCounts, (int) $cat->id),
+                'children_count' => $children->count(), 'channels' => $channels,
+                'woo' => filled($cat->external_id) ? $wooByTerm->get((string) $cat->external_id) : null,
+            ];
+        }
+
+        $result['split_display_vs_ovoko_count'] = count($splits);
+        $childrenSplitIds = [];
+        foreach ($splits as $id => $split) {
+            $parentId = (int) ($split['cat']->parent_id ?? 0);
+            if ($parentId && isset($splits[$parentId])) $childrenSplitIds[$id] = true;
+        }
+        foreach ($splits as $id => $split) {
+            if (isset($childrenSplitIds[$id])) continue;
+            $members = collect($splits)->filter(fn (array $candidate): bool => (int) $candidate['cat']->id === $id || str_starts_with((string) $candidate['path'], $split['path'].' > '))->values();
+            $group = $this->categoryDisplaySplitRepairGroup($split, $members, $partsCounts, $pathById, $includeProducts, $includeChildren, $includeOperations);
+            $result['repair_groups_count']++;
+            $result[$group['target_exists_locally'] ? 'target_exists_count' : 'target_create_needed_count']++;
+            foreach ($group['operations'] as $op) {
+                if ($op['type'] === 'create_target_category') $result['would_create_categories_count']++;
+                if ($op['type'] === 'move_products') { $result['would_move_products_count']++; $result['would_move_products_total'] += (int) $op['products_count']; }
+                if ($op['type'] === 'reparent_children') $result['would_reparent_children_count']++;
+                if ($op['type'] === 'copy_mapping') $result['would_copy_mappings_count']++;
+                if ($op['type'] === 'hide_old_category') $result['would_hide_old_categories_count']++;
+            }
+            $bucket = $group['suggested_action'] === 'auto_fix_possible' ? 'auto_safe' : 'manual_review';
+            $result[$bucket === 'auto_safe' ? 'auto_safe_count' : 'manual_review_count']++;
+            if (($only === 'all') || ($only === $bucket) || ($only === 'target_exists' && $group['target_exists_locally']) || ($only === 'target_create_needed' && ! $group['target_exists_locally'])) $this->pushSample($result['sample_repair_groups'], $group, $sampleLimit);
+            if ($bucket === 'auto_safe' && ($only === 'all' || $only === 'auto_safe')) $this->pushSample($result['sample_auto_safe'], $group, $sampleLimit);
+            if ($bucket === 'manual_review' && ($only === 'all' || $only === 'manual_review')) $this->pushSample($result['sample_manual_review'], $group, $sampleLimit);
+        }
+
+        return response()->json($result);
+    }
+
 
     private function normalizeCanonicalCategoryDisplayPath(?string $value): string
     {
@@ -2448,6 +2547,54 @@ HTML, 200, ['Content-Type' => 'text/html; charset=UTF-8']);
         $value = preg_replace('/\s*\/\s*/u', '/', $value) ?? $value;
         $value = preg_replace('/\s+/u', ' ', $value) ?? $value;
         return trim($value);
+    }
+
+    private function categoryDisplaySplitRepairGroup(array $root, $members, array $partsCounts, array $pathById, bool $includeProducts, bool $includeChildren, bool $includeOperations): array
+    {
+        $rootTarget = $root['target'] ?? null; $rootTargetLocal = $root['target_local'] ?? null;
+        $hasAnyEbay = false; $hasAnyAllegro = false; $hasAmbiguous = false; $operations = []; $categories = [];
+        foreach ($members as $member) {
+            /** @var PartCategory $cat */
+            $cat = $member['cat']; $channels = $member['channels'];
+            $hasEbay = (bool) collect($channels)->first(fn (string $channel): bool => str_starts_with($channel, 'ebay'));
+            $hasAllegro = in_array('allegro_main', $channels, true) || in_array('allegro', $channels, true);
+            $hasAnyEbay = $hasAnyEbay || $hasEbay; $hasAnyAllegro = $hasAnyAllegro || $hasAllegro;
+            $targetLocal = $member['target_local'] ?? null; $target = $member['target'] ?? null;
+            $hasAmbiguous = $hasAmbiguous || (int) ($member['matches_count'] ?? 0) !== 1;
+            $category = [
+                'local_category_id' => (int) $cat->id, 'local_category_path' => $member['path'], 'local_products_count' => (int) $member['products_count'],
+                'descendants_products_count' => (int) $member['descendants_products_count'], 'children_count' => (int) $member['children_count'],
+                'has_marketplace_mapping' => $channels !== [], 'has_ebay_mapping' => $hasEbay, 'has_allegro_mapping' => $hasAllegro,
+                'proposed_ovoko_category_id' => $target ? (string) ($target['external_category_id'] ?? $target['id'] ?? '') : null,
+                'proposed_ovoko_path' => $target['full_path'] ?? null, 'target_exists_locally' => (bool) $targetLocal,
+                'proposed_target_local_category_id' => $targetLocal['model']->id ?? null,
+                'target_create_needed' => ! (bool) $targetLocal, 'needs_move_products' => (int) $member['products_count'] > 0,
+                'needs_reparent_children' => (int) $member['children_count'] > 0, 'needs_copy_mapping' => $channels !== [], 'old_category_can_be_hidden_after_fix' => true,
+            ];
+            if ($includeProducts && (int) $member['products_count'] > 0 && Schema::hasTable('parts')) $category['sample_product_ids'] = DB::table('parts')->where('category_id', $cat->id)->limit(10)->pluck('id')->all();
+            if ($includeChildren) $category['child_category_ids'] = collect($pathById)->filter(fn (string $path, int $id): bool => str_starts_with($path, $member['path'].' > ') && substr_count($path, ' > ') === substr_count($member['path'], ' > ') + 1)->keys()->values()->all();
+            $categories[] = $category;
+
+            if (! $includeOperations) continue;
+            if (! $targetLocal) $operations[] = ['type' => 'create_target_category', 'source_category_id' => (int) $cat->id, 'target_category_id' => null, 'target_ovoko_category_id' => $category['proposed_ovoko_category_id'], 'products_count' => 0, 'mapping_count' => 0, 'safe' => ! $hasAmbiguous, 'reason' => 'canonical Ovoko category is matched but no local canonical category exists'];
+            if ((int) $member['products_count'] > 0) $operations[] = ['type' => 'move_products', 'source_category_id' => (int) $cat->id, 'target_category_id' => $targetLocal['model']->id ?? null, 'target_ovoko_category_id' => $category['proposed_ovoko_category_id'], 'products_count' => (int) $member['products_count'], 'mapping_count' => 0, 'safe' => (bool) $target, 'reason' => 'move products from split display category to canonical category'];
+            if ((int) $member['children_count'] > 0) $operations[] = ['type' => 'reparent_children', 'source_category_id' => (int) $cat->id, 'target_category_id' => $targetLocal['model']->id ?? null, 'target_ovoko_category_id' => $category['proposed_ovoko_category_id'], 'products_count' => 0, 'mapping_count' => 0, 'safe' => (bool) $target, 'reason' => 'keep branch together by reparenting direct children to canonical category'];
+            if ($channels !== []) $operations[] = ['type' => 'copy_mapping', 'source_category_id' => (int) $cat->id, 'target_category_id' => $targetLocal['model']->id ?? null, 'target_ovoko_category_id' => $category['proposed_ovoko_category_id'], 'products_count' => 0, 'mapping_count' => count($channels), 'safe' => true, 'reason' => 'copy mappings only; do not delete source mappings in dry run plan'];
+            $operations[] = ['type' => 'hide_old_category', 'source_category_id' => (int) $cat->id, 'target_category_id' => $targetLocal['model']->id ?? null, 'target_ovoko_category_id' => $category['proposed_ovoko_category_id'], 'products_count' => 0, 'mapping_count' => 0, 'safe' => (bool) $targetLocal, 'reason' => 'old split category can be hidden after products, children, and mappings are migrated'];
+        }
+        $targetExists = (bool) $rootTargetLocal; $targetCreateNeeded = ! $targetExists;
+        $needsParentCreate = $targetCreateNeeded && str_contains((string) ($rootTarget['full_path'] ?? ''), ' > ');
+        $confidence = $hasAmbiguous ? 'low' : ($targetExists ? 'high' : 'medium');
+        $manual = $confidence !== 'high' || (($hasAnyEbay || $hasAnyAllegro) && $targetCreateNeeded) || ($members->contains(fn (array $m): bool => (int) $m['children_count'] > 0) && $targetCreateNeeded) || $needsParentCreate;
+        return [
+            'group_key' => 'split_display_fix:'.$root['cat']->id, 'root_local_category_id' => (int) $root['cat']->id, 'root_local_path' => $root['path'],
+            'proposed_root_ovoko_category_id' => $rootTarget ? (string) ($rootTarget['external_category_id'] ?? $rootTarget['id'] ?? '') : null, 'proposed_root_ovoko_path' => $rootTarget['full_path'] ?? null,
+            'target_exists_locally' => $targetExists, 'target_local_category_id' => $rootTargetLocal['model']->id ?? null, 'target_local_path' => $rootTargetLocal['path'] ?? null,
+            'categories_in_group' => $categories, 'operations' => $operations,
+            'risk_level' => $manual ? ($confidence === 'low' ? 'high' : 'medium') : 'low', 'confidence' => $confidence,
+            'suggested_action' => $manual ? 'manual_review' : 'auto_fix_possible',
+            'reason' => $manual ? 'requires manual review by safety rules before any future write runner' : 'high confidence grouped branch plan; still dry-run only',
+        ];
     }
 
     private function descendantsProductsCountForPath(string $path, $localInfos, array $partsCounts, int $selfId): int
