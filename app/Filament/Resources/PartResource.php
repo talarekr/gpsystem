@@ -27,6 +27,15 @@ use Illuminate\Support\HtmlString;
 
 class PartResource extends Resource
 {
+    public const ADMIN_STEERING_FIELD_PATH = 'vehicle_snapshot.steering_side';
+    public const ADMIN_STEERING_FORM_STATE = 'steering_side';
+    public const EXPECTED_LEFT_STEERING_VALUE = 'po lewej';
+    public const EXPECTED_RIGHT_STEERING_VALUE = 'po prawej';
+    public const ADMIN_STEERING_OPTIONS = [
+        self::EXPECTED_LEFT_STEERING_VALUE => self::EXPECTED_LEFT_STEERING_VALUE,
+        self::EXPECTED_RIGHT_STEERING_VALUE => self::EXPECTED_RIGHT_STEERING_VALUE,
+    ];
+
     protected static ?string $model = Part::class;
     protected static ?string $navigationGroup = 'Części';
     protected static ?string $navigationIcon = null;
@@ -105,7 +114,7 @@ class PartResource extends Resource
                         Forms\Components\Select::make('category_id')->label('Kategoria')->placeholder('Kategoria')->relationship('category', 'name')->searchable()->preload()->native(false)->suffixAction(self::categoryTreeAction())->columnSpanFull(),
                         Forms\Components\Select::make('condition_notes')->label('Jakość')->placeholder('Jakość')->options(['Używany' => 'Używany', 'Nowy' => 'Nowy', 'Uszkodzony' => 'Uszkodzony', 'Regenerowany' => 'Regenerowany'])->default('Używany')->native(false)->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])->columnSpan(6),
                         Forms\Components\Select::make('part_position')->label('Pozycja części (strona zabudowy)')->placeholder('Wybierz')->options(['Wszystkie' => 'Wszystkie', 'Lewa strona' => 'Lewa strona', 'Środek' => 'Środek', 'Prawa strona' => 'Prawa strona', 'Komplet' => 'Komplet', 'Tył strona lewa' => 'Tył strona lewa', 'Tył strona prawa' => 'Tył strona prawa', 'Przód strona lewa' => 'Przód strona lewa', 'Przód strona prawa' => 'Przód strona prawa', 'Przód' => 'Przód', 'Tył' => 'Tył'])->default(null)->native(false)->dehydrated(false)->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])->columnSpan(6),
-                        Forms\Components\Select::make('steering_side')->label('Kierownica po stronie')->placeholder('Kierownica po stronie')->options(['po lewej' => 'po lewej', 'po prawej' => 'po prawej'])->default('po lewej')->native(false)->dehydrated(false)->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])->columnSpan(6),
+                        Forms\Components\Select::make(self::ADMIN_STEERING_FORM_STATE)->label('Kierownica po stronie')->placeholder('Kierownica po stronie')->options(self::ADMIN_STEERING_OPTIONS)->default(self::EXPECTED_LEFT_STEERING_VALUE)->native(false)->dehydrated(false)->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])->columnSpan(6),
                         Forms\Components\Select::make('storage_location_id')->label('Magazyn')->placeholder('Wpisz min. 3 znaki')->searchable()->searchDebounce(400)->getSearchResultsUsing(fn (string $search): array => self::storageLocationSearchResults($search))->getOptionLabelUsing(fn ($value): ?string => self::storageLocationOptionLabel($value))->native(false)->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])->columnSpan(6),
                         Forms\Components\RichEditor::make('description')->label('Opis')->placeholder('Opis')->columnSpanFull(),
                         Forms\Components\Hidden::make('suggested_category_id'),
@@ -197,6 +206,38 @@ class PartResource extends Resource
 
 
             ]);
+    }
+
+
+    public static function adminSteeringOptions(): array
+    {
+        return self::ADMIN_STEERING_OPTIONS;
+    }
+
+    public static function adminSteeringFieldPath(): string
+    {
+        return self::ADMIN_STEERING_FIELD_PATH;
+    }
+
+    public static function expectedLeftSteeringValue(): string
+    {
+        return self::EXPECTED_LEFT_STEERING_VALUE;
+    }
+
+    public static function adminSteeringFormValue(mixed $value): ?string
+    {
+        $normalized = mb_strtolower(trim((string) $value));
+
+        return match ($normalized) {
+            'po lewej', 'lewa strona' => self::EXPECTED_LEFT_STEERING_VALUE,
+            'po prawej', 'prawa strona' => self::EXPECTED_RIGHT_STEERING_VALUE,
+            default => null,
+        };
+    }
+
+    public static function isAdminSteeringVisible(mixed $value): bool
+    {
+        return self::adminSteeringFormValue($value) !== null;
     }
 
 

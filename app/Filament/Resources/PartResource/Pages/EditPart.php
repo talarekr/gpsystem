@@ -19,6 +19,8 @@ class EditPart extends EditRecord
 
     protected function mutateFormDataBeforeFill(array $data): array
     {
+        $data[PartResource::ADMIN_STEERING_FORM_STATE] = PartResource::adminSteeringFormValue($this->record->vehicle_snapshot['steering_side'] ?? null);
+
         $data['part_photo_paths'] = $this->record->images()
             ->orderBy('sort_order')
             ->orderBy('id')
