@@ -61,6 +61,15 @@ class PartCategory extends Model
             $query->where('is_visible', true);
         }
 
+        $query->where(function (Builder $query): void {
+            $query->whereNull('name')->orWhereRaw('LOWER(TRIM(name)) <> ?', ['bez kategorii']);
+        });
+
         return $query;
+    }
+
+    public function isSystemUncategorized(): bool
+    {
+        return mb_strtolower(trim((string) $this->name)) === 'bez kategorii';
     }
 }

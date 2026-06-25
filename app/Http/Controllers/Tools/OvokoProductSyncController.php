@@ -2779,6 +2779,47 @@ HTML);
         return response()->json(['ok' => $failed === 0, 'local_update' => true, 'ovoko_write' => false, 'allegro_write' => false, 'ebay_write' => false, 'hidden_count' => $hidden, 'failed_count' => $failed, 'hide_method' => $this->categoryDisplaySplitHideMethod(), 'cache_cleared' => $cleared, 'sample_hidden' => $sample, 'warnings' => array_values(array_unique($warnings))]);
     }
 
+    public function hideEmptyPublicCategories(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+        if ((string) $request->query('confirm') !== '1') return response()->json(['ok' => false, 'error_message' => 'confirm=1 required'], 422);
+        $ids = collect(explode(',', (string) $request->query('category_ids', '')))->map(fn ($id) => (int) trim($id))->filter()->unique()->values()->all();
+        $search = trim((string) $request->query('search', ''));
+        if ($ids === [] && $search === '') return response()->json(['ok' => false, 'error_message' => 'category_ids or search required'], 422);
+        if ($this->categoryDisplaySplitVisibilityColumns() === []) return response()->json(['ok' => false, 'error_message' => 'no visibility columns available'], 422);
+
+        $query = PartCategory::query()->withCount(['children', 'parts']);
+        if ($ids !== []) $query->whereIn('id', $ids);
+        if ($search !== '') $query->where(fn ($q) => $q->where('name', 'like', "%{$search}%")->orWhere('category_path', 'like', "%{$search}%"));
+        $hidden = 0; $blocked = 0; $sampleHidden = []; $sampleBlocked = [];
+
+        foreach ($query->limit(200)->get() as $category) {
+            $products = (int) ($category->parts_count ?? 0);
+            $children = (int) ($category->children_count ?? 0);
+            $descendants = $this->descendantsProductsCountForCategory((int) $category->id);
+            $systemUncategorized = method_exists($category, 'isSystemUncategorized') && $category->isSystemUncategorized();
+            $safe = $systemUncategorized || ($products === 0 && $children === 0 && $descendants === 0);
+            $sample = ['id' => (int) $category->id, 'name' => $category->name, 'category_path' => $category->category_path, 'products_count' => $products, 'children_count' => $children, 'descendants_products_count' => $descendants, 'is_system_uncategorized' => $systemUncategorized];
+            if (! $safe) {
+                $blocked++;
+                $sample['reason'] = 'not_empty_and_not_system_uncategorized';
+                $this->pushSample($sampleBlocked, $sample, 50);
+                continue;
+            }
+            if ($this->hideCategoryDisplaySplitOldCategory((int) $category->id)) {
+                $hidden++;
+                $sample['reason'] = $systemUncategorized ? 'system_uncategorized' : 'empty_public_category';
+                $this->pushSample($sampleHidden, $sample, 50);
+            } else {
+                $blocked++;
+                $sample['reason'] = 'hide_update_failed';
+                $this->pushSample($sampleBlocked, $sample, 50);
+            }
+        }
+
+        return response()->json(['ok' => $blocked === 0, 'local_update' => true, 'ovoko_write' => false, 'allegro_write' => false, 'ebay_write' => false, 'products_changed' => false, 'mappings_changed' => false, 'hidden_count' => $hidden, 'blocked_count' => $blocked, 'hide_method' => $this->categoryDisplaySplitHideMethod(), 'cache_cleared' => $this->clearCategoryCaches(), 'sample_hidden' => $sampleHidden, 'sample_blocked' => $sampleBlocked]);
+    }
+
     public function debugCategoryDisplayNames(Request $request): JsonResponse
     {
         if (! $this->validToken($request)) return $this->invalidTokenResponse();
@@ -2829,16 +2870,24 @@ HTML);
     {
         if (! $this->validToken($request)) return $this->invalidTokenResponse();
         $ids = collect(explode(',', (string) $request->query('category_ids', '')))->map(fn ($id) => (int) trim($id))->filter()->unique()->values()->all();
-        $rows = PartCategory::query()->whereIn('id', $ids)->withCount(['children', 'parts'])->get()->keyBy('id');
+        $search = trim((string) $request->query('search', ''));
+        $query = PartCategory::query()->withCount(['children', 'parts']);
+        if ($ids !== []) $query->whereIn('id', $ids);
+        if ($search !== '') $query->where(fn ($q) => $q->where('name', 'like', "%{$search}%")->orWhere('category_path', 'like', "%{$search}%"));
+        $rows = $query->limit($search !== '' ? 100 : max(1, count($ids)))->get()->keyBy('id');
+        $inputIds = $ids !== [] ? $ids : $rows->keys()->map(fn ($id) => (int) $id)->all();
         $publicAll = $categoryTree->all();
         $mapperDefault = PartCategory::query()->visibleForPublic()->pluck('id')->map(fn ($id) => (int) $id)->flip();
         $mapperHidden = PartCategory::query()->pluck('id')->map(fn ($id) => (int) $id)->flip();
-        $items = collect($ids)->map(function (int $id) use ($rows, $publicAll, $mapperDefault, $mapperHidden, $categoryTree): array {
+        $items = collect($inputIds)->map(function (int $id) use ($rows, $publicAll, $mapperDefault, $mapperHidden, $categoryTree): array {
             $category = $rows->get($id);
             if (! $category) return ['id' => $id, 'found' => false, 'reason' => 'not_found'];
             $inPublic = $publicAll->has($id);
             $isVisible = Schema::hasColumn('part_categories', 'is_visible') ? (bool) $category->is_visible : true;
             $descendantsProducts = $this->descendantsProductsCountForCategory($id);
+            $productIds = Schema::hasTable('parts') && Schema::hasColumn('parts', 'category_id') ? DB::table('parts')->where('category_id', $id)->limit(10)->pluck('id')->all() : [];
+            $mapping = Schema::hasTable('marketplace_category_mappings') ? DB::table('marketplace_category_mappings')->where('local_category_id', $id)->where('channel', 'ovoko')->first() : null;
+            $systemUncategorized = method_exists($category, 'isSystemUncategorized') && $category->isSystemUncategorized();
             return [
                 'id' => $id,
                 'name' => $category->name,
@@ -2847,15 +2896,19 @@ HTML);
                 'products_count' => (int) ($category->parts_count ?? 0),
                 'children_count' => (int) ($category->children_count ?? 0),
                 'descendants_products_count' => $descendantsProducts,
+                'sample_product_ids' => $productIds,
+                'is_system_uncategorized' => $systemUncategorized,
+                'canonical_status' => $mapping ? 'ovoko_mapping_exists' : 'no_ovoko_mapping',
+                'ovoko_match' => $mapping ? ['external_category_id' => $mapping->external_category_id ?? null, 'external_category_name' => $mapping->external_category_name ?? null, 'external_category_path' => $mapping->external_category_path ?? null] : null,
                 'appears_in_public_tree' => $inPublic,
                 'appears_in_public_children_list' => $inPublic,
                 'appears_in_public_breadcrumb' => $inPublic && $categoryTree->ancestors($category)->every(fn ($ancestor) => $publicAll->has((int) $ancestor->id)),
                 'appears_in_mapper_tree_default' => $mapperDefault->has($id),
                 'appears_in_mapper_tree_show_hidden' => $mapperHidden->has($id),
-                'reason' => ! $isVisible ? 'hidden_by_is_visible' : ($inPublic ? 'visible_public_category' : 'not_in_public_tree_no_products_or_filtered'),
+                'reason' => ! $isVisible ? 'hidden_by_is_visible' : ($systemUncategorized ? 'system_uncategorized_filtered' : ($inPublic ? 'visible_public_category' : 'not_in_public_tree_no_products_or_filtered')),
             ];
         })->all();
-        return response()->json(['ok' => true, 'read_only' => true, 'items' => $items]);
+        return response()->json(['ok' => true, 'read_only' => true, 'search' => $search ?: null, 'items' => $items]);
     }
 
     public function clearCategoryTreeCache(Request $request): JsonResponse
@@ -3182,8 +3235,10 @@ HTML);
 
     private function clearCategoryCaches(): array
     {
-        $cleared = [CategoryTreeService::CACHE_KEY];
+        $cleared = [CategoryTreeService::CACHE_KEY, 'storefront.category_tree.v1', 'marketplace_mapper.local_tree'];
         Cache::forget(CategoryTreeService::CACHE_KEY);
+        Cache::forget('storefront.category_tree.v1');
+        Cache::forget('marketplace_mapper.local_tree');
         if (function_exists('opcache_reset')) @opcache_reset();
         try { Artisan::call('view:clear'); $cleared[] = 'laravel.views'; } catch (Throwable) {}
         try { Artisan::call('cache:clear'); $cleared[] = 'laravel.cache'; } catch (Throwable) {}
