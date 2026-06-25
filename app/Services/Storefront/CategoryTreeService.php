@@ -12,7 +12,7 @@ use Illuminate\Support\Str;
 
 class CategoryTreeService
 {
-    public const CACHE_KEY = 'storefront.category_tree.v1';
+    public const CACHE_KEY = 'storefront.category_tree.v2';
     public const CACHE_TTL_SECONDS = 600;
 
     /** @return EloquentCollection<int, PartCategory> */
@@ -80,7 +80,14 @@ class CategoryTreeService
                 ->filter(fn (PartCategory $root): bool => (bool) $root->has_products_in_branch)
                 ->values();
 
-            return ['roots' => new EloquentCollection($visibleRoots->all()), 'all' => $categories->keyBy('id')];
+            $publicCategories = collect();
+            $collectPublic = function (PartCategory $category) use (&$collectPublic, $publicCategories): void {
+                $publicCategories->put((int) $category->id, $category);
+                $category->children->each(fn (PartCategory $child) => $collectPublic($child));
+            };
+            $visibleRoots->each(fn (PartCategory $root) => $collectPublic($root));
+
+            return ['roots' => new EloquentCollection($visibleRoots->all()), 'all' => $publicCategories];
         });
     }
 
@@ -98,6 +105,7 @@ class CategoryTreeService
 
         return $this->all()->first(function (PartCategory $category) use ($path, $lastSegment): bool {
             if (Schema::hasColumn('part_categories', 'is_visible') && ! (bool) $category->is_visible) return false;
+            if ($category->isSystemUncategorized()) return false;
             return $category->full_slug_path === $path
                 || $category->category_path === $path
                 || $category->slug === $path
