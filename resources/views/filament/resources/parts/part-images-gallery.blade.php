@@ -2,18 +2,18 @@
     $images = $part?->images?->sortBy([['sort_order', 'asc'], ['id', 'asc']])->values() ?? collect();
     $editable = (bool) ($editable ?? false);
     $thumbnailClasses = $editable
-        ? 'h-32 w-32 sm:h-36 sm:w-36 object-cover'
+        ? 'h-full w-full object-contain'
         : 'aspect-square h-full w-full object-cover';
 @endphp
 
-@if ($images->isEmpty())
+@if ($images->isEmpty() && ! $editable)
     <div class="text-sm text-gray-500 dark:text-gray-400">Brak zdjęć części.</div>
-@else
-    <div class="grid gap-3 {{ $editable ? 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6' }}">
+@elseif ($images->isNotEmpty())
+    <div class="gps-part-images-gallery {{ $editable ? 'gps-part-images-gallery--editable' : 'grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6' }}">
         @foreach ($images as $image)
             @php($src = $image->absolutePublicUrl())
-            <div class="relative inline-flex w-fit overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900">
-                <a href="{{ $src }}" target="_blank" rel="noopener noreferrer" class="block transition hover:opacity-90" title="Otwórz zdjęcie w nowej karcie">
+            <div class="gps-part-image-tile relative inline-flex overflow-hidden rounded-lg border border-gray-200 bg-transparent shadow-sm dark:border-gray-700">
+                <a href="{{ $src }}" target="_blank" rel="noopener noreferrer" class="flex h-full w-full items-center justify-center transition hover:opacity-90" title="Otwórz zdjęcie w nowej karcie">
                     <img src="{{ $src }}" alt="{{ $image->alt_text ?: ($part?->name ?? 'Zdjęcie części') }}" class="{{ $thumbnailClasses }}" loading="lazy">
                 </a>
 
