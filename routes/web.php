@@ -59,6 +59,7 @@ use App\Http\Controllers\Tools\CheckAllegroOfferIdCoverageController;
 use App\Http\Controllers\Tools\CheckAllegroLocalIdSourcesController;
 use App\Http\Controllers\Tools\SuggestAllegroCategoryMappingsFromLegacyCsvController;
 use App\Http\Controllers\Tools\SuggestOvokoCategoryMappingsFromLocalTreeController;
+use App\Http\Controllers\Tools\WarehouseImportFromAllegroCsvController;
 use App\Http\Controllers\Tools\SetOvokoCategoryMappingsBatchController;
 use App\Http\Controllers\Tools\CheckAllegroProductMappingCandidatesController;
 use App\Http\Controllers\Tools\ExportAllegroProductMappingCandidatesController;
@@ -260,6 +261,8 @@ Route::get('/tools/check-allegro-product-mapping-candidates', CheckAllegroProduc
 Route::get('/tools/export-allegro-product-mapping-candidates', ExportAllegroProductMappingCandidatesController::class)->name('tools.export-allegro-product-mapping-candidates');
 Route::get('/tools/suggest-allegro-category-mappings-from-legacy-csv', SuggestAllegroCategoryMappingsFromLegacyCsvController::class)->name('tools.suggest-allegro-category-mappings-from-legacy-csv');
 Route::get('/tools/suggest-ovoko-category-mappings-from-local-tree', SuggestOvokoCategoryMappingsFromLocalTreeController::class)->name('tools.suggest-ovoko-category-mappings-from-local-tree');
+Route::get('/tools/suggest-warehouse-import-from-allegro-csv', [WarehouseImportFromAllegroCsvController::class, 'suggest'])->name('tools.suggest-warehouse-import-from-allegro-csv');
+Route::get('/tools/apply-warehouse-import-from-allegro-csv', [WarehouseImportFromAllegroCsvController::class, 'apply'])->name('tools.apply-warehouse-import-from-allegro-csv');
 Route::get('/tools/set-ovoko-category-mappings-batch', SetOvokoCategoryMappingsBatchController::class)->name('tools.set-ovoko-category-mappings-batch');
 Route::get('/tools/apply-ovoko-category-mappings-from-local-tree', [SuggestOvokoCategoryMappingsFromLocalTreeController::class, 'apply'])->name('tools.apply-ovoko-category-mappings-from-local-tree');
 Route::get('/tools/apply-allegro-category-mappings-from-legacy-csv', [SuggestAllegroCategoryMappingsFromLegacyCsvController::class, 'apply'])->name('tools.apply-allegro-category-mappings-from-legacy-csv');
