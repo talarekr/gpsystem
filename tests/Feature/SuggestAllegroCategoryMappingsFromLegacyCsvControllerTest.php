@@ -268,6 +268,35 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvControllerTest extends TestCase
         $this->assertDatabaseCount('marketplace_category_mappings', 0);
     }
 
+    public function test_allegro_legacy_category_mapping_batch_record_limit_reached_is_informational(): void
+    {
+        $imports = storage_path('app/imports');
+        if (! is_dir($imports)) mkdir($imports, 0777, true);
+        file_put_contents($imports.'/woo_allegro_legacy_mapping.csv', implode("\n", [
+            'woo_product_id,sku,allegro_offer_id,raw_allegro_meta_json',
+            '501,SKU-501,AL-501,"{""_allegro_category_id"":""123""}"',
+            '502,SKU-502,AL-502,"{""_allegro_category_id"":""123""}"',
+            '503,SKU-503,AL-503,"{""_allegro_category_id"":""123""}"',
+        ]));
+
+        DB::table('part_categories')->insert(['id' => 31, 'name' => 'Silniki', 'category_path' => 'Części > Silniki', 'is_visible' => true, 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('marketplace_categories')->insert(['channel' => 'allegro', 'external_category_id' => '123', 'name' => 'Części samochodowe', 'active' => true, 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('parts')->insert([
+            ['id' => 101, 'source_system' => 'woo', 'external_id' => '501', 'sku' => 'SKU-501', 'name' => 'Part A', 'category_id' => 31, 'price' => 1, 'quantity' => 1, 'status' => 'ready', 'is_visible_storefront' => true, 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 102, 'source_system' => 'woo', 'external_id' => '502', 'sku' => 'SKU-502', 'name' => 'Part B', 'category_id' => 31, 'price' => 1, 'quantity' => 1, 'status' => 'ready', 'is_visible_storefront' => true, 'created_at' => now(), 'updated_at' => now()],
+        ]);
+
+        $this->getJson('/tools/run-allegro-legacy-category-mapping-batch?token=gps_images_import_2026&offset=0&batch_size=2&record_limit=2&dry_run=1')
+            ->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('done', true)
+            ->assertJsonPath('errors_count', 0)
+            ->assertJsonPath('diagnostics.errors_sample', [])
+            ->assertJsonPath('diagnostics.info_sample.0.type', 'record_limit_reached');
+
+        $this->assertDatabaseCount('marketplace_category_mappings', 0);
+    }
+
     public function test_allegro_legacy_category_mapping_batch_dry_run_counts_would_create_items_once(): void
     {
         $imports = storage_path('app/imports');

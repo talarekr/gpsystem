@@ -50,7 +50,7 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvController extends Controller
 
             foreach ($this->readRows($csvPath, $diagnostics) as $row) {
                 if ($stats['total_legacy_rows'] >= $recordLimit) {
-                    $this->addDiagnosticError($diagnostics, 'record_limit_reached', "Stopped after {$recordLimit} CSV rows.");
+                    $this->addDiagnosticInfo($diagnostics, 'record_limit_reached', "Stopped after {$recordLimit} CSV rows.");
                     break;
                 }
 
@@ -314,7 +314,7 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvController extends Controller
             'skipped_existing_mapping_count' => $counts['skipped_existing_mapping_count'],
             'skipped_low_confidence_count' => $counts['skipped_low_confidence_count'],
             'skipped_low_share_count' => $counts['skipped_low_share_count'],
-            'errors_count' => count(data_get($payload, 'diagnostics.errors_sample', [])),
+            'errors_count' => $this->diagnosticErrorsCount($payload['diagnostics'] ?? []),
             'items' => $items,
             'diagnostics' => $payload['diagnostics'] ?? [],
         ];
@@ -473,7 +473,7 @@ HTML;
 <label>min_matched_products <input id="min_matched_products" type="number" value="1" min="1"></label>
 <label>confidence <input id="confidence" placeholder="opcjonalnie, np. high"></label>
 <button onclick="start(false)">Start dry-run</button><button onclick="start(true)">Start confirm local mappings</button><button onclick="stopRunner()">Stop</button></section>
-<h2>Postęp</h2><progress id="progress" value="0" max="100"></progress><p id="progressText">processed_rows: <span id="processedRows">0</span> / <span id="recordLimit">5000</span>, batch: <span id="batchNumber">0</span></p><div class="cards"><div class="card"><b>created_count</b><br><span id="createdCount">0</span></div><div class="card"><b>would_create_count</b><br><span id="wouldCreateCount">0</span></div><div class="card"><b>skipped_count</b><br><span id="skippedCount">0</span></div></div><div class="cards" id="cards"></div><h2>Ostatnia partia</h2><table><thead><tr><th>local_category_id</th><th>local_category_name</th><th>suggested_allegro_category_id</th><th>suggested_allegro_category_name</th><th>matched_products_count</th><th>suggested_share</th><th>confidence</th><th>action</th><th>status/reason</th></tr></thead><tbody id="rows"></tbody></table><h2>JSON / error</h2><pre id="out"></pre>
+<h2>Postęp</h2><progress id="progress" value="0" max="100"></progress><p id="progressText">processed_rows: <span id="processedRows">0</span> / <span id="recordLimit">5000</span>, batch: <span id="batchNumber">0</span></p><div class="cards"><div class="card"><b>created_count</b><br><span id="createdCount">0</span></div><div class="card"><b>would_create_count</b><br><span id="wouldCreateCount">0</span></div><div class="card"><b>skipped_count</b><br><span id="skippedCount">0</span></div></div><div class="cards" id="cards"></div><h2>Ostatnia partia</h2><table><thead><tr><th>local_category_id</th><th>local_category_name</th><th>suggested_allegro_category_id</th><th>suggested_allegro_category_name</th><th>matched_products_count</th><th>suggested_share</th><th>confidence</th><th>action</th><th>status/reason</th></tr></thead><tbody id="rows"></tbody></table><h2>JSON / diagnostics</h2><pre id="out"></pre>
 <script>
 const token = __TOKEN_JSON__; let running=false, totals={}, batchNumber=0; let processedRows=0, nextOffset=0, createdCount=0, wouldCreateCount=0, skippedCount=0;
 function v(id){return document.getElementById(id).value} function c(id){return document.getElementById(id).checked?'1':'0'} function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
@@ -569,6 +569,8 @@ HTML;
             'count_parts_with_legacy_payload_id_matching_sample' => 0,
             'count_parts_with_sku_matching_sample' => 0,
             'errors_sample' => [],
+            'info_sample' => [],
+            'warnings_sample' => [],
         ];
     }
 
@@ -588,6 +590,23 @@ HTML;
         }
 
         $diagnostics['errors_sample'][] = ['type' => $type, 'message' => $message, 'context' => $context];
+    }
+
+    private function addDiagnosticInfo(array &$diagnostics, string $type, string $message, array $context = []): void
+    {
+        if (count($diagnostics['info_sample']) >= 20) {
+            return;
+        }
+
+        $diagnostics['info_sample'][] = ['type' => $type, 'message' => $message, 'context' => $context];
+    }
+
+    private function diagnosticErrorsCount(array $diagnostics): int
+    {
+        return count(array_filter(
+            $diagnostics['errors_sample'] ?? [],
+            fn (array $error) => ($error['type'] ?? null) !== 'record_limit_reached'
+        ));
     }
 
     private function readRows(string $path, array &$diagnostics): iterable
