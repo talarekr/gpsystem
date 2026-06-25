@@ -230,8 +230,12 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvControllerTest extends TestCase
     {
         $this->get('/tools/allegro-legacy-category-mapping-runner?token=gps_images_import_2026')
             ->assertOk()
+            ->assertDontSee('Undefined variable')
             ->assertSee('Allegro legacy category mapping runner')
-            ->assertSee('/tools/run-allegro-legacy-category-mapping-batch');
+            ->assertSee('/tools/run-allegro-legacy-category-mapping-batch')
+            ->assertSee('id="processedRows"', false)
+            ->assertSee('id="createdCount"', false)
+            ->assertSee('id="wouldCreateCount"', false);
     }
 
     public function test_allegro_legacy_category_mapping_runner_diagnostics_returns_json_200(): void
