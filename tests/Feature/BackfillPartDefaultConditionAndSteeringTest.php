@@ -63,6 +63,35 @@ class BackfillPartDefaultConditionAndSteeringTest extends TestCase
         $this->assertSame('BMW', $part->vehicle_snapshot['make']);
     }
 
+    public function test_confirm_updates_parts_by_id_not_key_and_does_not_throw_unknown_key_column_error(): void
+    {
+        $part = Part::query()->create(['id' => 7200, 'name' => 'Explicit id', 'vehicle_snapshot' => ['steering_side' => ''], 'needs_listing' => true, 'needs_review' => false]);
+        $queries = [];
+
+        DB::listen(function ($query) use (&$queries): void {
+            if (str_contains(strtolower($query->sql), 'update')) {
+                $queries[] = $query->sql;
+            }
+        });
+
+        $this->getJson($this->url.'&dry_run=0&confirm=1')
+            ->assertOk()
+            ->assertJsonPath('errors_count', 0)
+            ->assertJsonMissing(['reason' => "SQLSTATE[42S22]: Column not found: 1054 Unknown column 'key' in 'WHERE'"]);
+
+        $part->refresh();
+        $this->assertSame('Używany', $part->condition_notes);
+        $this->assertSame('po lewej', $part->vehicle_snapshot['steering_side']);
+        $this->assertTrue(
+            collect($queries)->contains(fn (string $sql): bool => str_contains($sql, '"id" = ?') || str_contains($sql, '`id` = ?')),
+            'Expected the confirm update to target parts.id.'
+        );
+        $this->assertFalse(
+            collect($queries)->contains(fn (string $sql): bool => str_contains($sql, '"key"') || str_contains($sql, '`key`')),
+            'Confirm update must not target a key column.'
+        );
+    }
+
     public function test_confirm_does_not_overwrite_existing_values(): void
     {
         $part = Part::query()->create(['name' => 'Already set', 'condition_notes' => 'Nowy', 'vehicle_snapshot' => ['steering_side' => 'po prawej'], 'needs_listing' => true, 'needs_review' => false]);
@@ -108,19 +137,24 @@ class BackfillPartDefaultConditionAndSteeringTest extends TestCase
         DB::table('part_categories')->insert(['id' => 77, 'name' => 'Cat', 'created_at' => now(), 'updated_at' => now()]);
         DB::table('storage_locations')->insert(['id' => 88, 'name' => 'A1', 'created_at' => now(), 'updated_at' => now()]);
         DB::table('marketplace_category_mappings')->insert(['local_category_id' => 77, 'channel' => 'ovoko', 'external_category_id' => 'OV-77', 'created_at' => now(), 'updated_at' => now()]);
-        $part = Part::query()->create(['name' => 'Safe', 'category_id' => 77, 'storage_location_id' => 88, 'price' => 123.45, 'quantity' => 9, 'needs_listing' => true, 'needs_review' => false]);
+        $part = Part::query()->create(['name' => 'Safe', 'category_id' => 77, 'storage_location_id' => 88, 'price' => 123.45, 'quantity' => 9, 'condition_notes' => '', 'vehicle_snapshot' => ['make' => 'Audi', 'steering_side' => ''], 'needs_listing' => true, 'needs_review' => false]);
         MarketplaceListing::query()->create(['marketplace' => 'ovoko', 'part_id' => $part->id, 'external_offer_id' => 'OV-1', 'price' => 222, 'quantity' => 3]);
 
         $listingBefore = DB::table('marketplace_listings')->get()->toJson();
         $mappingBefore = DB::table('marketplace_category_mappings')->get()->toJson();
 
-        $this->getJson($this->url.'&dry_run=0&confirm=1')->assertOk();
+        $this->getJson($this->url.'&dry_run=0&confirm=1')
+            ->assertOk()
+            ->assertJsonPath('allegro_write', false)
+            ->assertJsonPath('ovoko_write', false)
+            ->assertJsonPath('ebay_write', false);
 
         $part->refresh();
         $this->assertSame(77, $part->category_id);
         $this->assertSame(88, $part->storage_location_id);
         $this->assertSame('123.45', (string) $part->price);
         $this->assertSame(9, $part->quantity);
+        $this->assertSame('Audi', $part->vehicle_snapshot['make']);
         $this->assertSame($listingBefore, DB::table('marketplace_listings')->get()->toJson());
         $this->assertSame($mappingBefore, DB::table('marketplace_category_mappings')->get()->toJson());
     }

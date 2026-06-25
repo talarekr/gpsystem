@@ -76,23 +76,41 @@ class BackfillPartDefaultConditionAndSteeringController extends Controller
                     continue;
                 }
 
-                DB::transaction(function () use ($part, $vehicleSnapshot, $shouldSetQuality, $shouldSetSteering): void {
+                $result = DB::transaction(function () use ($part): array {
+                    $lockedPart = Part::query()->lockForUpdate()->findOrFail($part->id);
+                    $lockedVehicleSnapshot = is_array($lockedPart->vehicle_snapshot) ? $lockedPart->vehicle_snapshot : [];
+                    $lockedCurrentSteering = $lockedVehicleSnapshot['steering_side'] ?? null;
+                    $lockedShouldSetQuality = $this->isMissing($lockedPart->condition_notes);
+                    $lockedShouldSetSteering = $this->isMissing($lockedCurrentSteering);
+
+                    if (! $lockedShouldSetQuality && ! $lockedShouldSetSteering) {
+                        return ['updated' => false, 'quality_updated' => false, 'steering_updated' => false];
+                    }
+
                     $updates = ['updated_at' => now()];
-                    if ($shouldSetQuality) {
+                    if ($lockedShouldSetQuality) {
                         $updates['condition_notes'] = self::DEFAULT_QUALITY;
                     }
-                    if ($shouldSetSteering) {
-                        $vehicleSnapshot['steering_side'] = self::DEFAULT_STEERING_SIDE;
-                        $updates['vehicle_snapshot'] = json_encode($vehicleSnapshot, JSON_UNESCAPED_UNICODE);
+                    if ($lockedShouldSetSteering) {
+                        $lockedVehicleSnapshot['steering_side'] = self::DEFAULT_STEERING_SIDE;
+                        $updates['vehicle_snapshot'] = json_encode($lockedVehicleSnapshot, JSON_UNESCAPED_UNICODE);
                     }
 
-                    DB::table('parts')->whereKey($part->id)->update($updates);
+                    DB::table('parts')->where('id', $lockedPart->id)->update($updates);
+
+                    return ['updated' => true, 'quality_updated' => $lockedShouldSetQuality, 'steering_updated' => $lockedShouldSetSteering];
                 });
 
+                if (! $result['updated']) {
+                    $skippedAlreadySetCount++;
+                    $items[] = $this->item($part->id, $currentQuality, null, $currentSteering, null, 'skipped_already_set', 'quality_and_steering_side_already_set');
+                    continue;
+                }
+
                 $updatedPartsCount++;
-                $qualityUpdatedCount += $shouldSetQuality ? 1 : 0;
-                $steeringUpdatedCount += $shouldSetSteering ? 1 : 0;
-                $items[] = $this->item($part->id, $currentQuality, $shouldSetQuality ? self::DEFAULT_QUALITY : null, $currentSteering, $shouldSetSteering ? self::DEFAULT_STEERING_SIDE : null, 'updated', 'local_defaults_backfilled');
+                $qualityUpdatedCount += $result['quality_updated'] ? 1 : 0;
+                $steeringUpdatedCount += $result['steering_updated'] ? 1 : 0;
+                $items[] = $this->item($part->id, $currentQuality, $result['quality_updated'] ? self::DEFAULT_QUALITY : null, $currentSteering, $result['steering_updated'] ? self::DEFAULT_STEERING_SIDE : null, 'updated', 'local_defaults_backfilled');
             } catch (\Throwable $e) {
                 $errorsCount++;
                 $items[] = $this->item($part->id, $part->condition_notes, null, is_array($part->vehicle_snapshot) ? ($part->vehicle_snapshot['steering_side'] ?? null) : null, null, 'error', $e->getMessage());
