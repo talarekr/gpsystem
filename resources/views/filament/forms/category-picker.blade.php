@@ -4,20 +4,41 @@
 
 @once
     <style>
+        .fi-modal:has(.gps-category-picker-modal),
+        .fi-modal:has(.gps-category-picker-modal) .fi-modal-wrapper,
+        .fi-modal:has(.gps-category-picker-modal) .fi-modal-window-ctn {
+            position: fixed !important;
+            inset: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            max-height: 100vh !important;
+            margin: 0 !important;
+            padding: 0 !important;
+        }
+
+        .fi-modal:has(.gps-category-picker-modal) .fi-modal-window-ctn {
+            display: flex !important;
+            align-items: stretch !important;
+            justify-content: flex-end !important;
+        }
+
         .fi-modal-window.gps-category-picker-modal,
         .gps-category-picker-modal.fi-modal-window {
             display: flex !important;
             flex-direction: column !important;
-            height: calc(100vh - 40px) !important;
-            max-height: calc(100vh - 40px) !important;
+            height: 100vh !important;
+            max-height: 100vh !important;
             min-height: 0 !important;
         }
 
         @supports (height: 100dvh) {
+            .fi-modal:has(.gps-category-picker-modal),
+            .fi-modal:has(.gps-category-picker-modal) .fi-modal-wrapper,
+            .fi-modal:has(.gps-category-picker-modal) .fi-modal-window-ctn,
             .fi-modal-window.gps-category-picker-modal,
             .gps-category-picker-modal.fi-modal-window {
-                height: calc(100dvh - 40px) !important;
-                max-height: calc(100dvh - 40px) !important;
+                height: 100dvh !important;
+                max-height: 100dvh !important;
             }
         }
 
@@ -54,7 +75,8 @@
             flex: 1 1 auto !important;
             flex-direction: column !important;
             min-height: 0 !important;
-            overflow: hidden !important;
+            overflow-x: visible !important;
+            overflow-y: visible !important;
         }
 
         .fi-modal-window.gps-category-picker-modal .fi-modal-content > form,
