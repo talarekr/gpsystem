@@ -2332,8 +2332,7 @@ HTML, 200, ['Content-Type' => 'text/html; charset=UTF-8']);
             $hasAllegro = in_array('allegro_main', $channels, true) || in_array('allegro', $channels, true);
             $hasOvoko = in_array('ovoko', $channels, true);
             $hasMapping = $channels !== [];
-            $targetNorm = $this->normalizeCanonicalCategoryDisplayPath((string) ($target['full_path'] ?? ''));
-            $targetLocal = $localByNormalizedPath->get($targetNorm);
+            $targetLocal = $this->resolveLocalOvokoTargetCategory($target, $localInfos);
             $targetExists = (bool) $targetLocal;
             $isActive = $this->categoryBooleanColumnValue($cat, ['active', 'is_active', 'status'], true);
             $isVisible = $this->categoryBooleanColumnValue($cat, ['is_visible', 'visible'], null);
@@ -2722,6 +2721,54 @@ HTML);
     public function resultsCategoryDisplaySplitsFixAutorun(Request $request): JsonResponse { return $this->statusCategoryDisplaySplitsFixAutorun($request); }
     public function resetCategoryDisplaySplitsFixAutorun(Request $request): JsonResponse { if (! $this->validToken($request)) return $this->invalidTokenResponse(); if ((string) $request->query('confirm') !== '1') return response()->json(['ok'=>false,'error_message'=>'confirm=1 required'],422); Cache::forget($this->categoryDisplaySplitRunCacheKey((string) $request->query('run_id',''))); return response()->json(['ok'=>true,'reset'=>true]); }
 
+
+    public function dryRunHideEmptyCategoryDisplaySplits(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+        $warnings = ['read_only_no_products_mappings_marketplace_writes_category_delete_or_offer_changes'];
+        $candidates = $this->emptyCategoryDisplaySplitHideCandidates($warnings);
+        $visibilityColumns = $this->categoryDisplaySplitVisibilityColumns();
+        if ($visibilityColumns === []) $warnings[] = 'no_visibility_columns_available_add_part_categories_is_visible_boolean_default_true_and_filter_frontend';
+
+        return response()->json([
+            'ok' => true,
+            'dry_run' => true,
+            'local_update' => false,
+            'ovoko_write' => false,
+            'allegro_write' => false,
+            'ebay_write' => false,
+            'candidate_count' => count($candidates),
+            'safe_to_hide_count' => count($visibilityColumns) > 0 ? count($candidates) : 0,
+            'blocked_count' => count($visibilityColumns) > 0 ? 0 : count($candidates),
+            'visibility_columns_detected' => $visibilityColumns,
+            'available_part_categories_columns' => Schema::hasTable('part_categories') ? Schema::getColumnListing('part_categories') : [],
+            'sample_candidates' => array_slice($candidates, 0, max(1, min(500, (int) $request->query('sample_limit', 100)))),
+            'warnings' => array_values(array_unique($warnings)),
+        ]);
+    }
+
+    public function hideEmptyCategoryDisplaySplits(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+        if ((string) $request->query('confirm') !== '1') return response()->json(['ok' => false, 'error_message' => 'confirm=1 required'], 422);
+        $warnings = ['local_only_no_products_mappings_marketplace_writes_category_delete_or_offer_changes'];
+        $candidates = $this->emptyCategoryDisplaySplitHideCandidates($warnings);
+        $visibilityColumns = $this->categoryDisplaySplitVisibilityColumns();
+        if ($visibilityColumns === []) {
+            $warnings[] = 'no_visibility_columns_available_add_part_categories_is_visible_boolean_default_true_and_filter_frontend';
+            return response()->json(['ok' => false, 'local_update' => false, 'hidden_count' => 0, 'failed_count' => count($candidates), 'visibility_columns_detected' => [], 'available_part_categories_columns' => Schema::hasTable('part_categories') ? Schema::getColumnListing('part_categories') : [], 'sample_hidden' => [], 'warnings' => array_values(array_unique($warnings))], 422);
+        }
+        $hidden = 0; $failed = 0; $sample = [];
+        foreach ($candidates as $candidate) {
+            try {
+                $ok = $this->hideCategoryDisplaySplitOldCategory((int) $candidate['id']);
+                if ($ok) { $hidden++; $this->pushSample($sample, $candidate, 100); }
+                else { $failed++; }
+            } catch (Throwable $e) { $failed++; $warnings[] = 'hide_failed:'.$candidate['id'].':'.$e->getMessage(); }
+        }
+        return response()->json(['ok' => $failed === 0, 'local_update' => true, 'ovoko_write' => false, 'allegro_write' => false, 'ebay_write' => false, 'hidden_count' => $hidden, 'failed_count' => $failed, 'sample_hidden' => $sample, 'warnings' => array_values(array_unique($warnings))]);
+    }
+
     private function buildCategoryDisplaySplitFixGroups(array &$warnings): array
     {
         if (! Schema::hasTable('part_categories') || ! Schema::hasTable('marketplace_categories')) { $warnings[] = 'missing_required_tables'; return []; }
@@ -2770,7 +2817,46 @@ HTML);
     private function canonicalCategoryLeafName(string $fullPath): string { $parts=preg_split('/\s*>\s*/', trim($fullPath)); return trim((string) end($parts)); }
     private function reparentCategoryDisplaySplitChildrenIdempotently(int $sourceId, int $targetId, array &$state): int { $count=0; foreach (PartCategory::query()->where('parent_id',$sourceId)->where('id','!=',$targetId)->get() as $child) { try { $child->parent_id=$targetId; $child->save(); $count++; } catch (Throwable $e) { $state['warnings'][]='child_reparent_skipped_duplicate_or_constraint:'.$child->id; $this->pushSample($state['sample_skipped_groups'], ['source_category_id'=>$sourceId,'target_category_id'=>$targetId,'child_category_id'=>$child->id,'reason'=>'reparent_constraint_or_duplicate','error'=>$e->getMessage()], 20); } } return $count; }
 
-    private function hideCategoryDisplaySplitOldCategory(int $categoryId): bool { $data=[]; foreach (['active','is_active','visible','is_visible','show_in_menu'] as $col) if (Schema::hasColumn('part_categories',$col)) $data[$col]=false; if (Schema::hasColumn('part_categories','status')) $data['status']='inactive'; if ($data===[]) return false; PartCategory::query()->whereKey($categoryId)->update($data); return true; }
+
+    private function emptyCategoryDisplaySplitHideCandidates(array &$warnings): array
+    {
+        if (! Schema::hasTable('part_categories') || ! Schema::hasTable('marketplace_categories')) { $warnings[] = 'missing_required_tables'; return []; }
+        $localRows = PartCategory::query()->get();
+        $localById = $localRows->keyBy(fn (PartCategory $cat): string => (string) $cat->id);
+        $localInfos = $localRows->map(function (PartCategory $cat) use ($localById): array { $path = $this->localCategoryDisplayPath($cat->toArray(), $localById); return ['model' => $cat, 'path' => $path, 'normalized_path' => $this->normalizeCanonicalCategoryDisplayPath($path)]; });
+        $ovokoRows = DB::table('marketplace_categories')->select($this->safeSelectColumns('marketplace_categories', ['id','external_category_id','full_path']))->where('channel','ovoko')->get()->map(fn ($r)=>(array)$r)->all();
+        $ovokoByNorm = collect($ovokoRows)->filter(fn ($r) => filled($r['full_path'] ?? null))->groupBy(fn ($r) => $this->normalizeCanonicalCategoryDisplayPath((string) $r['full_path']));
+        $partsCounts = Schema::hasTable('parts') && Schema::hasColumn('parts','category_id') ? DB::table('parts')->select('category_id', DB::raw('count(*) as count'))->whereNotNull('category_id')->groupBy('category_id')->pluck('count','category_id')->map(fn ($v)=>(int)$v)->all() : [];
+        $childrenCounts = $localRows->groupBy('parent_id')->map->count()->all();
+        $candidates = [];
+        foreach ($localInfos as $info) {
+            /** @var PartCategory $cat */ $cat = $info['model']; $path = (string) $info['path'];
+            if ($path === '' || $ovokoByNorm->get($info['normalized_path'], collect())->isNotEmpty()) continue;
+            $target = null;
+            foreach ($this->shopTreeDisplayAuditCandidates($path) as $candidatePath) { $matches = $ovokoByNorm->get($this->normalizeCanonicalCategoryDisplayPath($candidatePath), collect()); if ($matches->count() === 1) { $target = $matches->first(); break; } }
+            if (! $target) continue;
+            $products = (int) ($partsCounts[$cat->id] ?? 0); $children = (int) ($childrenCounts[$cat->id] ?? 0); $desc = $this->descendantsProductsCountForPath($path, $localInfos, $partsCounts, (int) $cat->id);
+            if ($products !== 0 || $children !== 0 || $desc !== 0) continue;
+            $candidates[] = ['id' => (int) $cat->id, 'name' => (string) $cat->name, 'category_path' => $path, 'products_count' => $products, 'local_products_count' => $products, 'children_count' => $children, 'descendants_products_count' => $desc, 'proposed_ovoko_category_id' => (string) ($target['external_category_id'] ?? $target['id'] ?? ''), 'proposed_ovoko_path' => $target['full_path'] ?? null, 'hide_method' => $this->categoryDisplaySplitHideMethod()];
+        }
+        return $candidates;
+    }
+
+    private function categoryDisplaySplitHideMethod(): ?string
+    {
+        foreach (['active','is_active','is_visible','visible','show_in_menu'] as $col) if (Schema::hasColumn('part_categories', $col)) return $col.'=false';
+        if (Schema::hasColumn('part_categories', 'status')) return 'status='.$this->categoryDisplaySplitInactiveStatusValue();
+        return null;
+    }
+
+    private function categoryDisplaySplitInactiveStatusValue(): string
+    {
+        if (! Schema::hasTable('part_categories') || ! Schema::hasColumn('part_categories', 'status')) return 'inactive';
+        $values = DB::table('part_categories')->whereNotNull('status')->distinct()->limit(50)->pluck('status')->map(fn ($v) => mb_strtolower(trim((string) $v)))->all();
+        return in_array('hidden', $values, true) ? 'hidden' : 'inactive';
+    }
+
+    private function hideCategoryDisplaySplitOldCategory(int $categoryId): bool { $data=[]; foreach (['active','is_active','visible','is_visible','show_in_menu'] as $col) if (Schema::hasColumn('part_categories',$col)) $data[$col]=false; if (Schema::hasColumn('part_categories','status')) $data['status']=$this->categoryDisplaySplitInactiveStatusValue(); if ($data===[]) return false; PartCategory::query()->whereKey($categoryId)->update($data); return true; }
     private function categoryDisplaySplitVisibilityColumns(): array { return array_values(array_filter(['active','is_active','visible','is_visible','show_in_menu','status'], fn ($c) => Schema::hasColumn('part_categories',$c))); }
     private function categoryDisplaySplitRunCacheKey(string $runId): string { return 'category_display_splits_fix_autorun_'.$runId; }
     private function putCategoryDisplaySplitRun(array $state): void { Cache::put($this->categoryDisplaySplitRunCacheKey($state['run_id']), $state, now()->addDay()); }
