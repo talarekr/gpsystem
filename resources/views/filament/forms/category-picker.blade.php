@@ -2,6 +2,27 @@
     $categories = $categories ?? [];
 @endphp
 
+@once
+    <style>
+        .fi-modal-window.gps-category-picker-modal .fi-modal-header,
+        .gps-category-picker-modal.fi-modal-window .fi-modal-header {
+            position: relative !important;
+            align-items: center !important;
+            padding-right: 3rem !important;
+        }
+
+        .fi-modal-window.gps-category-picker-modal .fi-modal-header :where(.fi-modal-close-btn, .fi-modal-close-button, [aria-label="Close"], [aria-label="Zamknij"]),
+        .gps-category-picker-modal.fi-modal-window .fi-modal-header :where(.fi-modal-close-btn, .fi-modal-close-button, [aria-label="Close"], [aria-label="Zamknij"]) {
+            position: absolute !important;
+            top: 50% !important;
+            right: 1rem !important;
+            bottom: auto !important;
+            margin: 0 !important;
+            transform: translateY(-50%) !important;
+        }
+    </style>
+@endonce
+
 <div
     class="gps-category-picker"
     x-data="{
