@@ -55,7 +55,9 @@ class EditPart extends EditRecord
             return;
         }
 
-        $category = PartCategory::query()->find($categoryId);
+        $category = PartCategory::query()
+            ->withCount('children')
+            ->find($categoryId);
 
         if (! $category) {
             Log::warning('Admin part category picker received an invalid category id.', [
@@ -66,6 +68,16 @@ class EditPart extends EditRecord
             Notification::make()
                 ->title('Nie znaleziono wybranej kategorii')
                 ->body('Odśwież stronę i spróbuj ponownie. Jeśli problem wróci, sprawdź logi aplikacji.')
+                ->danger()
+                ->send();
+
+            return;
+        }
+
+        if ($category->children_count > 0) {
+            Notification::make()
+                ->title('Nie można wybrać grupy nadrzędnej')
+                ->body('Wybierz kategorię końcową, nie grupę nadrzędną.')
                 ->danger()
                 ->send();
 
