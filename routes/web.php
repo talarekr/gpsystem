@@ -26,6 +26,7 @@ use App\Http\Controllers\Storefront\TermsController;
 use App\Http\Controllers\Tools\CheckOrdersFlowController;
 use App\Http\Controllers\Tools\WorkshopQuickPartController;
 use App\Http\Controllers\Tools\BackfillPartDefaultConditionAndSteeringController;
+use App\Http\Controllers\Tools\BackfillPartMarketplacePricesController;
 use App\Http\Controllers\Tools\WorkshopImageDiagnosticsController;
 use App\Http\Controllers\Tools\CheckOvokoApiSettingsController;
 use App\Http\Controllers\Tools\MarketplaceApiSettingsDiagnosticsController;
@@ -172,6 +173,7 @@ Route::get('/tools/link-gpswiss-storage', [GpswissPublicHtmlController::class, '
 Route::get('/tools/sync-gpswiss-public-html', [GpswissPublicHtmlController::class, 'sync'])->name('tools.sync-gpswiss-public-html');
 Route::get('/tools/check-workshop-part-images', WorkshopImageDiagnosticsController::class)->name('tools.check-workshop-part-images');
 Route::get('/tools/backfill-part-default-condition-and-steering', BackfillPartDefaultConditionAndSteeringController::class)->name('tools.backfill-part-default-condition-and-steering');
+Route::get('/tools/backfill-part-marketplace-prices', BackfillPartMarketplacePricesController::class)->name('tools.backfill-part-marketplace-prices');
 Route::get('/tools/workshop/quick-part-create', [WorkshopQuickPartController::class, 'create'])->name('tools.workshop.quick-part-create');
 Route::post('/tools/workshop/quick-part-create', [WorkshopQuickPartController::class, 'store'])->name('tools.workshop.quick-part-create.store');
 Route::get('/tools/check-orders-flow', CheckOrdersFlowController::class)->name('tools.check-orders-flow');
