@@ -22,15 +22,28 @@ class LocalCategoryDeleteSafetyService
                 'can_delete' => false,
                 'blockers' => ['Kategoria lokalna nie istnieje.'],
                 'counts' => ['products_count' => 0, 'children_count' => 0, 'descendants_products_count' => 0, 'mappings_count' => 0],
-                'samples' => ['product_ids' => [], 'children' => []],
+                'count_sources' => $this->countSources(),
+                'samples' => ['product_ids' => [], 'blocking_products' => [], 'children' => []],
                 'mappings' => ['has_marketplace_mapping' => false, 'has_ebay_mapping' => false, 'has_allegro_mapping' => false, 'has_ovoko_mapping' => false, 'items' => []],
             ];
         }
 
         $children = PartCategory::query()->where('parent_id', $category->id)->ordered()->limit(10)->get(['id', 'name', 'category_path', 'full_slug_path']);
         $childrenCount = PartCategory::query()->where('parent_id', $category->id)->count();
-        $productIds = DB::table('parts')->where('category_id', $category->id)->limit(10)->pluck('id')->map(fn ($id): int => (int) $id)->all();
         $productsCount = DB::table('parts')->where('category_id', $category->id)->count();
+        $blockingProducts = DB::table('parts')
+            ->where('category_id', $category->id)
+            ->orderBy('id')
+            ->limit(10)
+            ->get(['id', 'name', 'category_id'])
+            ->map(fn (object $part): array => [
+                'product_id' => (int) $part->id,
+                'title' => (string) ($part->name ?? ''),
+                'current_category_id' => $part->category_id === null ? null : (int) $part->category_id,
+                'edit_url' => url('/admin/parts/'.((int) $part->id).'/edit'),
+            ])
+            ->values()
+            ->all();
         $descendantIds = $this->descendantIds((int) $category->id);
         $descendantsProductsCount = $descendantIds === [] ? 0 : DB::table('parts')->whereIn('category_id', $descendantIds)->count();
         $mappings = MarketplaceCategoryMapping::query()->where('local_category_id', $category->id)->get();
@@ -63,8 +76,10 @@ class LocalCategoryDeleteSafetyService
                 'descendants_products_count' => $descendantsProductsCount,
                 'mappings_count' => $mappings->count(),
             ],
+            'count_sources' => $this->countSources(),
             'samples' => [
-                'product_ids' => $productIds,
+                'product_ids' => array_column($blockingProducts, 'product_id'),
+                'blocking_products' => $blockingProducts,
                 'children' => $children->map(fn (PartCategory $child): array => ['id' => (string) $child->id, 'name' => $child->name, 'category_path' => $this->localPath($child)])->values()->all(),
             ],
             'mappings' => [
@@ -79,9 +94,23 @@ class LocalCategoryDeleteSafetyService
 
     public function hardDelete(PartCategory $category): array
     {
+        $productsCount = DB::table('parts')->where('category_id', $category->id)->count();
+        if ($productsCount > 0) {
+            throw new \RuntimeException('Hard delete zablokowany: kategoria ma produkty przypisane bezpośrednio przez parts.category_id.');
+        }
+
         DB::transaction(fn () => $category->delete());
 
         return $this->clearCaches();
+    }
+
+    private function countSources(): array
+    {
+        return [
+            'products_count' => 'Bezpośredni licznik: COUNT(*) FROM parts WHERE parts.category_id = part_categories.id. Nie używa potomków ani cache woo_product_count.',
+            'descendants_products_count' => 'Licznik potomków: COUNT(*) FROM parts WHERE parts.category_id IN (rekurencyjne dzieci kategorii). Nie jest doliczany do kolumny Produkty.',
+            'woo_product_count' => 'Cache WooCommerce part_categories.woo_product_count nie zasila kolumny Produkty ani blokady hard delete.',
+        ];
     }
 
     private function descendantIds(int $categoryId): array
