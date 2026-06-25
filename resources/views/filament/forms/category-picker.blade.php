@@ -109,7 +109,6 @@
             <button type="button" class="gps-category-picker__row" x-bind:class="{ 'is-selected': String(selectedId) === String(category.id) }" x-on:click="open(category)">
                 <span>
                     <strong x-text="category.name"></strong>
-                    <small x-show="category.woo_product_count !== null" x-text="`${category.woo_product_count} produktów`"></small>
                 </span>
                 <span class="gps-category-picker__arrow" x-text="category.has_children ? '›' : 'Wybierz'"></span>
             </button>
