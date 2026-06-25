@@ -118,7 +118,28 @@ class StorageLocationModuleFoundationTest extends TestCase
 
         Livewire::test(ViewStorageLocation::class, ['record' => StorageLocation::query()->first()->getRouteKey()])
             ->assertSee('Części w tym miejscu')
-            ->assertSee('Moduł części zostanie dodany w kolejnym etapie.');
+            ->assertDontSee('Moduł części zostanie dodany w kolejnym etapie.');
+    }
+
+
+    public function test_import_source_description_is_hidden_in_storage_location_ui(): void
+    {
+        $this->actingAsWarehouseUser();
+
+        $location = StorageLocation::query()->create([
+            'name' => '2D3',
+            'description' => StorageLocation::ALLEGRO_IMPORT_DESCRIPTION,
+        ]);
+
+        $this->assertNull($location->publicDescription());
+
+        Livewire::test(ListStorageLocations::class)
+            ->assertSee('2D3')
+            ->assertDontSee(StorageLocation::ALLEGRO_IMPORT_DESCRIPTION);
+
+        Livewire::test(ViewStorageLocation::class, ['record' => $location->getRouteKey()])
+            ->assertSee('2D3')
+            ->assertDontSee(StorageLocation::ALLEGRO_IMPORT_DESCRIPTION);
     }
 
     public function test_no_risky_parts_import_or_external_integration_flags_were_enabled(): void
