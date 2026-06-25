@@ -257,6 +257,9 @@ Route::get('/tools/check-allegro-oauth-readiness', CheckAllegroOAuthReadinessCon
 Route::get('/tools/check-allegro-product-mapping-candidates', CheckAllegroProductMappingCandidatesController::class)->name('tools.check-allegro-product-mapping-candidates');
 Route::get('/tools/export-allegro-product-mapping-candidates', ExportAllegroProductMappingCandidatesController::class)->name('tools.export-allegro-product-mapping-candidates');
 Route::get('/tools/suggest-allegro-category-mappings-from-legacy-csv', SuggestAllegroCategoryMappingsFromLegacyCsvController::class)->name('tools.suggest-allegro-category-mappings-from-legacy-csv');
+Route::get('/tools/apply-allegro-category-mappings-from-legacy-csv', [SuggestAllegroCategoryMappingsFromLegacyCsvController::class, 'apply'])->name('tools.apply-allegro-category-mappings-from-legacy-csv');
+Route::get('/tools/allegro-legacy-category-mapping-runner', [SuggestAllegroCategoryMappingsFromLegacyCsvController::class, 'runner'])->name('tools.allegro-legacy-category-mapping-runner');
+Route::get('/tools/run-allegro-legacy-category-mapping-batch', [SuggestAllegroCategoryMappingsFromLegacyCsvController::class, 'batch'])->name('tools.run-allegro-legacy-category-mapping-batch');
 Route::get('/tools/check-allegro-local-id-sources', CheckAllegroLocalIdSourcesController::class)->name('tools.check-allegro-local-id-sources');
 Route::get('/tools/check-allegro-offer-id-coverage', CheckAllegroOfferIdCoverageController::class)->name('tools.check-allegro-offer-id-coverage');
 Route::get('/tools/refresh-allegro-active-offer-links-dry-run', RefreshAllegroActiveOfferLinksDryRunController::class)->name('tools.refresh-allegro-active-offer-links-dry-run');
