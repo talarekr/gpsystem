@@ -12,7 +12,21 @@
         selectedId: null,
         selectedName: '',
         isSaving: false,
-        init() {},
+        init() {
+            this.$nextTick(() => this.mountActionsInModalFooter());
+        },
+        mountActionsInModalFooter() {
+            const actions = this.$refs.actions;
+            const modal = this.$root.closest('.fi-modal-window');
+            const footer = modal?.querySelector('.fi-modal-footer');
+
+            if (! actions || ! footer || footer.contains(actions)) {
+                return;
+            }
+
+            footer.prepend(actions);
+            actions.classList.add('is-in-modal-footer');
+        },
         children(parentId = null) {
             return this.categories.filter((category) => category.parent_id === parentId);
         },
@@ -147,7 +161,7 @@
         <p class="gps-category-picker__empty" x-show="currentChildren().length === 0">Brak podkategorii.</p>
     </div>
 
-    <div class="gps-category-picker__actions">
+    <div class="gps-category-picker__actions" x-ref="actions">
         <button
             type="button"
             class="fi-btn fi-btn-size-md fi-color-primary"
