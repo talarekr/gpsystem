@@ -3137,6 +3137,72 @@ HTML);
         return response()->json(['ok' => true, 'cleared' => $this->clearCategoryCaches(), 'warnings' => []]);
     }
 
+    public function dryRunCleanCategoryDbNames(Request $request, CategoryTreeService $categoryTree): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+        $items = $this->categoryDbNameCleanItems($request, $categoryTree);
+
+        return response()->json([
+            'ok' => true,
+            'dry_run' => true,
+            'candidate_count' => count($items),
+            'safe_to_clean_count' => count(array_filter($items, fn (array $item): bool => (bool) $item['can_clean'])),
+            'blocked_count' => count(array_filter($items, fn (array $item): bool => ! (bool) $item['can_clean'])),
+            'items' => array_slice($items, 0, max(1, min(1000, (int) $request->query('sample_limit', 200)))),
+            'local_update' => false,
+            'products_changed' => false,
+            'mappings_changed' => false,
+            'marketplace_writes' => false,
+            'ovoko_write' => false,
+            'allegro_write' => false,
+            'ebay_write' => false,
+        ]);
+    }
+
+    public function cleanCategoryDbNames(Request $request, CategoryTreeService $categoryTree): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+        if ((string) $request->query('confirm') !== '1') return response()->json(['ok' => false, 'error_message' => 'confirm=1 required'], 422);
+        $items = $this->categoryDbNameCleanItems($request, $categoryTree);
+        $updated = [];
+        $skipped = [];
+
+        foreach ($items as $item) {
+            if (! (bool) $item['can_clean']) {
+                $skipped[] = $item;
+                continue;
+            }
+
+            try {
+                PartCategory::query()->whereKey($item['id'])->update(['name' => $item['new_name']]);
+                $updated[] = $item;
+            } catch (Throwable $e) {
+                $item['can_clean'] = false;
+                $item['reason'] = 'update_failed';
+                $item['blockers'][] = 'update_failed_or_constraint';
+                $item['error'] = $e->getMessage();
+                $skipped[] = $item;
+            }
+        }
+
+        return response()->json([
+            'ok' => true,
+            'dry_run' => false,
+            'updated_count' => count($updated),
+            'skipped_count' => count($skipped),
+            'updated_items' => $updated,
+            'skipped_items' => $skipped,
+            'cache_cleared' => $this->clearCategoryCaches(),
+            'local_update' => true,
+            'products_changed' => false,
+            'mappings_changed' => false,
+            'marketplace_writes' => false,
+            'ovoko_write' => false,
+            'allegro_write' => false,
+            'ebay_write' => false,
+        ]);
+    }
+
     public function dryRunCleanCategoryDisplayNames(Request $request): JsonResponse
     {
         if (! $this->validToken($request)) return $this->invalidTokenResponse();
@@ -3177,6 +3243,85 @@ HTML);
         Cache::forget(\App\Services\Storefront\CategoryTreeService::CACHE_KEY);
 
         return response()->json(['ok' => $failed === 0, 'local_update' => true, 'ovoko_write' => false, 'allegro_write' => false, 'ebay_write' => false, 'updated_count' => $updated, 'failed_count' => $failed, 'conflict_count' => count($conflicts), 'sample_updated' => $sample, 'sample_conflicts' => array_slice($conflicts, 0, 100), 'warnings' => $warnings]);
+    }
+
+    private function categoryDbNameCleanItems(Request $request, CategoryTreeService $categoryTree): array
+    {
+        if (! Schema::hasTable('part_categories')) return [];
+        $ids = collect(explode(',', (string) $request->query('category_ids', '')))->map(fn ($id) => (int) trim($id))->filter()->unique()->values()->all();
+        $search = trim((string) $request->query('search', ''));
+        $limit = max(1, min(5000, (int) $request->query('limit', $request->query('sample_limit', 200))));
+        $includeHidden = (string) $request->query('include_hidden', '') === '1';
+        $onlyPublicProblems = (string) $request->query('only_public_problems', '') === '1';
+
+        $publicProblemIds = null;
+        if ($onlyPublicProblems) {
+            $auditLimit = max($limit, 5000);
+            $publicProblemIds = collect($this->publicCategoryLabelAuditItems($categoryTree, $search, $includeHidden, $auditLimit, $ids))
+                ->filter(fn (array $item): bool => ($item['problem_fields'] ?? []) !== [])
+                ->pluck('id')
+                ->map(fn ($id): int => (int) $id)
+                ->flip();
+        }
+
+        $query = PartCategory::query()->withCount(['children', 'parts']);
+        if ($ids !== []) $query->whereIn('id', $ids);
+        if ($search !== '') $query->where(fn ($q) => $q->where('name', 'like', "%{$search}%")->orWhere('category_path', 'like', "%{$search}%"));
+        if ($ids === [] && ! $includeHidden) $query->visibleForPublic();
+        if ($publicProblemIds !== null) {
+            if ($publicProblemIds->isEmpty()) return [];
+            $query->whereIn('id', $publicProblemIds->keys()->all());
+        }
+
+        $publicAll = $categoryTree->all();
+
+        return $query->ordered()->limit($limit)->get()->map(function (PartCategory $category) use ($publicAll): array {
+            $oldName = (string) $category->name;
+            $categoryPath = (string) ($category->category_path ?? '');
+            [$newName, $parseReason] = $this->cleanCategoryDbNameProposal($oldName, $categoryPath);
+            $blockers = [];
+            $warnings = [];
+
+            if ($newName === '') $blockers[] = 'new_name_empty';
+            if (! str_contains($oldName, ' — ')) $blockers[] = 'old_name_missing_dash_separator';
+            if ($newName === $oldName) $blockers[] = 'new_name_same_as_old_name';
+            if ($parseReason !== 'clean_db_name') $blockers[] = $parseReason;
+            if ($newName !== '' && PartCategory::query()->where('parent_id', $category->parent_id)->where('name', $newName)->whereKeyNot((int) $category->id)->exists()) {
+                $warnings[] = 'duplicate_sibling_name';
+            }
+
+            $canClean = $blockers === [];
+
+            return [
+                'id' => (int) $category->id,
+                'old_name' => $oldName,
+                'new_name' => $newName,
+                'category_path' => $categoryPath,
+                'is_visible' => Schema::hasColumn('part_categories', 'is_visible') ? (bool) $category->is_visible : true,
+                'products_count' => (int) ($category->parts_count ?? 0),
+                'children_count' => (int) ($category->children_count ?? 0),
+                'descendants_products_count' => $this->descendantsProductsCountForCategory((int) $category->id),
+                'appears_in_public_tree' => $publicAll->has((int) $category->id),
+                'reason' => $canClean ? 'clean_db_name' : $parseReason,
+                'can_clean' => $canClean,
+                'blockers' => $blockers,
+                'warnings' => $warnings,
+            ];
+        })->values()->all();
+    }
+
+    private function cleanCategoryDbNameProposal(string $oldName, string $categoryPath): array
+    {
+        if (! str_contains($oldName, ' — ')) return [$oldName, 'old_name_missing_dash_separator'];
+        [$left, $right] = explode(' — ', $oldName, 2);
+        $left = trim($left);
+        $right = trim($right);
+        if ($left === '') return ['', 'new_name_empty'];
+        $rightLooksLikePath = str_contains($right, '>')
+            || ($categoryPath !== '' && $right === trim($categoryPath))
+            || $right === $left;
+
+        return $rightLooksLikePath ? [$left, 'clean_db_name'] : [$left, 'right_side_not_category_path'];
     }
 
     private function buildCategoryDisplaySplitFixGroups(array &$warnings): array
