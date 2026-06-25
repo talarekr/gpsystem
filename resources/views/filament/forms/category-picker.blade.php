@@ -109,9 +109,20 @@
             this.isSaving = true;
 
             this.$wire.setPartCategoryFromPicker(this.selectedId)
+                .then((saved) => {
+                    if (saved) {
+                        this.closePicker();
+                    }
+                })
                 .finally(() => {
                     this.isSaving = false;
                 });
+        },
+        closePicker() {
+            const modal = this.$root.closest('.fi-modal-window');
+            const closeButton = modal?.querySelector('.fi-modal-header [aria-label="Zamknij"], .fi-modal-header [aria-label="Close"], .fi-modal-close-btn, .fi-modal-close-button');
+
+            closeButton?.click();
         },
         back() {
             this.stack.pop();
@@ -144,10 +155,6 @@
         >
     </div>
 
-    <div class="gps-category-picker__selected" x-show="canSave()" x-cloak>
-        <strong>Wybrano:</strong>
-        <span x-text="selectedName || selectedCategory()?.name"></span>
-    </div>
 
     <template x-if="search.trim().length >= 2">
         <div class="gps-category-picker__section">
@@ -214,6 +221,13 @@
             <span x-show="! isSaving">Ustaw kategorię</span>
             <span x-show="isSaving">Zapisywanie...</span>
         </button>
-        <p class="gps-category-picker__empty" x-show="! canSave()">Wybierz kategorię końcową przed zapisaniem.</p>
+        <button
+            type="button"
+            class="fi-btn fi-btn-size-md fi-color-gray"
+            x-bind:disabled="isSaving"
+            x-on:click="closePicker()"
+        >
+            Zamknij
+        </button>
     </div>
 </div>

@@ -403,7 +403,7 @@ class PartResource extends Resource
             ->tooltip('Wybierz kategorię z drzewa')
             ->modalHeading('Kategorie')
             ->modalSubmitAction(false)
-            ->modalCancelActionLabel('Zamknij')
+            ->modalCancelAction(false)
             ->extraModalWindowAttributes(['class' => 'gps-category-picker-modal'])
             ->slideOver()
             ->form([
