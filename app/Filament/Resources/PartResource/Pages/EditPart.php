@@ -43,7 +43,7 @@ class EditPart extends EditRecord
         PartResource::syncPartImages($this->record, $this->partPhotoPaths);
     }
 
-    public function setPartCategoryFromPicker(mixed $categoryId = null): bool
+    public function setPartCategoryFromPicker(mixed $categoryId = null): void
     {
         if (blank($categoryId)) {
             Notification::make()
@@ -52,7 +52,7 @@ class EditPart extends EditRecord
                 ->danger()
                 ->send();
 
-            return false;
+            return;
         }
 
         $category = PartCategory::query()
@@ -71,7 +71,7 @@ class EditPart extends EditRecord
                 ->danger()
                 ->send();
 
-            return false;
+            return;
         }
 
         if ($category->children_count > 0) {
@@ -81,7 +81,7 @@ class EditPart extends EditRecord
                 ->danger()
                 ->send();
 
-            return false;
+            return;
         }
 
         try {
@@ -94,8 +94,6 @@ class EditPart extends EditRecord
                 ->body('Nowa kategoria: '.$category->name)
                 ->success()
                 ->send();
-
-            return true;
         } catch (Throwable $exception) {
             Log::error('Admin part category picker failed to save part category.', [
                 'part_id' => $this->record?->getKey(),
@@ -108,8 +106,6 @@ class EditPart extends EditRecord
                 ->body('Zmiana nie została zapisana. Szczegóły błędu zapisano w logach aplikacji.')
                 ->danger()
                 ->send();
-
-            return false;
         }
     }
 
