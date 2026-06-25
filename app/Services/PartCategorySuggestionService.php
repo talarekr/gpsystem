@@ -37,12 +37,6 @@ class PartCategorySuggestionService
         $categories = [];
 
         foreach ($candidates as $part) {
-            $rawCandidateParts[] = $this->partDiagnosticPayload($part, ['score' => 0, 'matched_terms' => [], 'matched_ngrams' => []], 'Surowy kandydat znaleziony po frazie lub tokenie wyszukiwania.');
-
-            if (! $part->category) {
-                continue;
-            }
-
             $partAnalysis = $this->analyzeTitle(implode(' ', array_filter([
                 $part->name,
                 $part->sku,
@@ -52,6 +46,12 @@ class PartCategorySuggestionService
             ])));
 
             $scoreData = $this->scorePart($analysis, $partAnalysis, $documentFrequency, max(1, $candidates->count()));
+            $rawCandidateParts[] = $this->partDiagnosticPayload($part, $scoreData, 'Surowy kandydat znaleziony po frazie lub tokenie wyszukiwania; pokazano wyliczony score diagnostyczny.');
+
+            if (! $part->category) {
+                continue;
+            }
+
             $included = $scoreData['score'] >= $minScore && $scoreData['important_overlap'] >= 1;
             $why = $included
                 ? $this->includedReason($scoreData)
@@ -164,6 +164,8 @@ class PartCategorySuggestionService
 
     private function noiseType(string $token): ?string
     {
+        if (in_array($token, $this->technicalCategoryTokens(), true)) return null;
+
         $brandsModels = ['audi','volkswagen','vw','bmw','mercedes','opel','seat','skoda','ford','renault','peugeot','citroen','toyota','honda','nissan','mazda','volvo','fiat','hyundai','kia','a4','s4','a3','a5','a6','golf','passat','tiguan','octavia','leon'];
         $state = ['sprawny','sprawna','nowy','nowa','uzywany','uzywana','oryginal','oryginalny','oryginalna','kompletny','kompletna','komplet'];
         if (in_array($token, $brandsModels, true) || in_array($token, $state, true)) return 'low_weight';
@@ -227,19 +229,36 @@ class PartCategorySuggestionService
         $partTokens = array_unique($part['important_tokens']);
         $overlap = array_values(array_intersect($inputTokens, $partTokens));
         $score = 0.0;
-        foreach ($overlap as $token) $score += 2.5 * (1 + log(($docs + 1) / (($df[$token] ?? 0) + 1)));
+        foreach ($overlap as $token) $score += $this->tokenWeight($token) * (1 + log(($docs + 1) / (($df[$token] ?? 0) + 1)));
         $inputTerms = $this->candidateTerms($input['important_tokens'], false);
         $partPhrase = ' '.implode(' ', $part['important_tokens']).' ';
         $ngrams = [];
         foreach ($inputTerms as $term) {
             if (substr_count($term, ' ') >= 1 && str_contains($partPhrase, ' '.$term.' ')) {
                 $ngrams[] = $term;
-                $score += substr_count($term, ' ') >= 2 ? 8 : 7;
+                $score += (substr_count($term, ' ') >= 2 ? 8 : 7) + $this->phraseDistinctiveBoost($term);
             }
         }
         $oemOverlap = array_intersect($input['oem_tokens'], $part['oem_tokens']);
         if ($oemOverlap && $overlap) $score += 2;
         return ['score'=>$score, 'important_overlap'=>count($overlap), 'matched_terms'=>$overlap, 'matched_ngrams'=>array_slice(array_values(array_unique($ngrams)), 0, 8)];
+    }
+
+    /** @return array<int, string> */
+    private function technicalCategoryTokens(): array
+    {
+        return ['chlodnicy','chłodnicy','wody','oleju','klimatyzacji','intercoolera','wspomagania','paliwa','powietrza','nagrzewnicy','podcisnienia','podciśnienia','hamulcowy','hamulcowego','akumulatora','drzwi'];
+    }
+
+    private function tokenWeight(string $token): float
+    {
+        return in_array($token, ['chlodnicy','wody','klimatyzacji','intercoolera','wspomagania','paliwa','powietrza','podcisnienia','oleju','nagrzewnicy'], true) ? 4.0 : 2.5;
+    }
+
+    private function phraseDistinctiveBoost(string $term): float
+    {
+        $tokens = explode(' ', $term);
+        return count(array_intersect($tokens, ['chlodnicy','wody','klimatyzacji','intercoolera','wspomagania','paliwa','powietrza','podcisnienia','oleju','nagrzewnicy'])) > 0 ? 3.0 : 0.0;
     }
 
     private function confidence(array $top, ?array $second): int
