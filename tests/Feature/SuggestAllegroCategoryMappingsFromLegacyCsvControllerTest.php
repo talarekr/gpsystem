@@ -234,6 +234,18 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvControllerTest extends TestCase
             ->assertSee('/tools/run-allegro-legacy-category-mapping-batch');
     }
 
+    public function test_allegro_legacy_category_mapping_runner_diagnostics_returns_json_200(): void
+    {
+        $this->getJson('/tools/allegro-legacy-category-mapping-runner?token=gps_images_import_2026&diagnostics=1')
+            ->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('route_loaded', true)
+            ->assertJsonPath('ui_method_exists', true)
+            ->assertJsonPath('batch_route_url', url('/tools/run-allegro-legacy-category-mapping-batch'))
+            ->assertJsonPath('default_parameters.batch_size', 100)
+            ->assertJsonPath('default_parameters.record_limit', 5000);
+    }
+
     public function test_allegro_legacy_category_mapping_batch_dry_run_returns_next_offset_and_no_writes(): void
     {
         $this->seedApplyFixture(31, 'Silniki');

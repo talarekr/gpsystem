@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Route;
 use SplFileObject;
 use Throwable;
 
@@ -181,7 +182,17 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvController extends Controller
             return response('Invalid diagnostics token.', 403);
         }
 
-        return response($this->runnerHtml((string) $request->query('token')), 200)->header('Content-Type', 'text/html; charset=UTF-8');
+        if ($request->boolean('diagnostics')) {
+            return response()->json($this->runnerDiagnosticsPayload(true));
+        }
+
+        try {
+            return response($this->runnerHtml((string) $request->query('token')), 200)
+                ->header('Content-Type', 'text/html; charset=UTF-8');
+        } catch (Throwable $e) {
+            return response($this->runnerErrorHtml($e), 200)
+                ->header('Content-Type', 'text/html; charset=UTF-8');
+        }
     }
 
     public function batch(Request $request)
@@ -368,6 +379,54 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvController extends Controller
             if (isset($counts[$action.'_count'])) $counts[$action.'_count']++;
         }
         return $counts;
+    }
+
+    private function runnerDiagnosticsPayload(bool $ok): array
+    {
+        return [
+            'ok' => $ok,
+            'route_loaded' => Route::has('tools.allegro-legacy-category-mapping-runner'),
+            'ui_method_exists' => method_exists($this, 'runner'),
+            'batch_route_url' => url('/tools/run-allegro-legacy-category-mapping-batch'),
+            'default_parameters' => $this->runnerDefaultParameters(),
+        ];
+    }
+
+    private function runnerDefaultParameters(): array
+    {
+        return [
+            'batch_size' => 100,
+            'offset' => 0,
+            'record_limit' => 5000,
+            'sample_limit' => 100,
+            'only_missing_allegro' => true,
+            'only_public' => true,
+            'leaf_only' => true,
+            'exclude_uncategorized' => true,
+            'min_suggested_share' => 0.9,
+            'min_matched_products' => 1,
+            'confidence' => null,
+        ];
+    }
+
+    private function runnerErrorHtml(Throwable $e): string
+    {
+        $payload = [
+            'ok' => false,
+            'exception_class' => $e::class,
+            'exception_message' => $e->getMessage(),
+            'exception_file' => $e->getFile(),
+            'exception_line' => $e->getLine(),
+        ];
+        $json = htmlspecialchars(json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '{}', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+
+        return <<<HTML
+<!doctype html><html lang="pl"><head><meta charset="utf-8"><title>Allegro legacy category mapping runner error</title><style>body{font-family:system-ui,Arial,sans-serif;margin:24px;color:#111}pre{background:#111;color:#eee;padding:12px;overflow:auto}</style></head><body>
+<h1>Allegro legacy category mapping runner</h1>
+<p>UI runner nie mógł zostać wyrenderowany. Laravel 500 został zastąpiony defensywną stroną błędu.</p>
+<pre>{$json}</pre>
+</body></html>
+HTML;
     }
 
     private function runnerHtml(string $token): string
