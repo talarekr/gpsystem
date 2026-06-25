@@ -86,6 +86,35 @@ class SuggestOvokoCategoryMappingsFromLocalTreeControllerTest extends TestCase
             ->assertJsonPath('items.0.local_category_id', 21);
     }
 
+    public function test_exclude_uncategorized_removes_category_from_items_and_suggested_mappings(): void
+    {
+        $this->seedCategory(20, 'Bez kategorii', 'Bez kategorii');
+        $this->seedPart(120, 20);
+        $this->seedOvoko('OV-UNCAT', 'Bez kategorii', 'Bez kategorii');
+
+        $this->getJson('/tools/suggest-ovoko-category-mappings-from-local-tree?token=gps_images_import_2026&exclude_uncategorized=1&min_score=0.85')
+            ->assertOk()
+            ->assertJsonPath('diagnostics.filters.exclude_uncategorized', true)
+            ->assertJsonPath('summary.excluded_uncategorized_count', 1)
+            ->assertJsonMissing(['local_category_id' => 20]);
+    }
+
+    public function test_uncategorized_can_appear_as_no_match_when_filter_disabled(): void
+    {
+        $this->seedCategory(20, 'Bez kategorii', 'Bez kategorii');
+        $this->seedPart(120, 20);
+        $this->seedOvoko('OV-OTHER', 'Skrzynia biegów', 'Części > Skrzynia biegów');
+
+        $this->getJson('/tools/suggest-ovoko-category-mappings-from-local-tree?token=gps_images_import_2026&exclude_uncategorized=0&min_score=0.85')
+            ->assertOk()
+            ->assertJsonPath('diagnostics.filters.exclude_uncategorized', false)
+            ->assertJsonPath('summary.excluded_uncategorized_count', 0)
+            ->assertJsonPath('items.0.local_category_id', 20)
+            ->assertJsonPath('items.0.status', 'no_match')
+            ->assertJsonPath('suggested_mappings.0.local_category_id', 20)
+            ->assertJsonPath('suggested_mappings.0.status', 'no_match');
+    }
+
     private function seedCategory(int $id, string $name, ?string $path = null, ?int $parentId = null): void
     {
         DB::table('part_categories')->insert(['id' => $id, 'parent_id' => $parentId, 'name' => $name, 'category_path' => $path ?? $name, 'is_visible' => true, 'created_at' => now(), 'updated_at' => now()]);
