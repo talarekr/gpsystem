@@ -4,8 +4,26 @@
 
 @once
     <style>
+        .fi-modal-window.gps-category-picker-modal,
+        .gps-category-picker-modal.fi-modal-window {
+            display: flex !important;
+            flex-direction: column !important;
+            height: 100vh !important;
+            max-height: 100vh !important;
+            min-height: 0 !important;
+        }
+
+        @supports (height: 100dvh) {
+            .fi-modal-window.gps-category-picker-modal,
+            .gps-category-picker-modal.fi-modal-window {
+                height: 100dvh !important;
+                max-height: 100dvh !important;
+            }
+        }
+
         .fi-modal-window.gps-category-picker-modal .fi-modal-header,
         .gps-category-picker-modal.fi-modal-window .fi-modal-header {
+            flex: 0 0 auto !important;
             position: relative !important;
             align-items: center !important;
             padding-right: 3rem !important;
@@ -40,9 +58,16 @@
 
         .gps-category-picker {
             display: flex !important;
+            flex: 1 1 auto !important;
             flex-direction: column !important;
             min-height: 0 !important;
             height: 100% !important;
+            max-height: 100% !important;
+        }
+
+        .gps-category-picker__search,
+        .gps-category-picker__selected {
+            flex: 0 0 auto !important;
         }
 
         .gps-category-picker__content {
