@@ -1721,6 +1721,8 @@ body.fi-body :where(
     flex: 0 0 auto !important;
     display: flex !important;
     align-items: center !important;
+    justify-content: space-between !important;
+    gap: 0.75rem !important;
     min-height: 2.5rem !important;
     padding-top: 0.5rem !important;
     padding-bottom: 0.5rem !important;
@@ -1739,9 +1741,12 @@ body.fi-body :where(
 .gps-category-picker-modal.fi-modal-window .fi-modal-header :where(.fi-modal-close-btn, .fi-modal-close-button, [aria-label="Close"], [aria-label="Zamknij"]),
 .fi-modal-window.gps-vehicle-picker-modal .fi-modal-header :where(.fi-modal-close-btn, .fi-modal-close-button, [aria-label="Close"], [aria-label="Zamknij"]),
 .gps-vehicle-picker-modal.fi-modal-window .fi-modal-header :where(.fi-modal-close-btn, .fi-modal-close-button, [aria-label="Close"], [aria-label="Zamknij"]) {
+    position: static !important;
     align-self: center !important;
     margin-top: 0 !important;
+    margin-left: auto !important;
     top: auto !important;
+    right: auto !important;
     transform: none !important;
 }
 
@@ -1750,6 +1755,10 @@ body.fi-body :where(
 .fi-modal-window.gps-vehicle-picker-modal .fi-modal-footer,
 .gps-vehicle-picker-modal.fi-modal-window .fi-modal-footer {
     flex: 0 0 auto !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-end !important;
+    gap: 0.75rem !important;
 }
 
 .gps-category-picker {
@@ -1758,26 +1767,6 @@ body.fi-body :where(
     gap: 0.75rem;
 }
 
-
-.gps-category-picker__selected {
-    border: 1px solid rgba(37, 99, 235, 0.28);
-    border-radius: 0.65rem;
-    background: rgba(37, 99, 235, 0.06);
-    color: #1e3a8a;
-    padding: 0.55rem 0.7rem;
-    font-size: 0.82rem;
-}
-
-.gps-category-picker__selected strong {
-    font-weight: 700;
-}
-
-.gps-category-picker__selected small {
-    display: block;
-    margin-top: 0.2rem;
-    color: #475569;
-    font-size: 0.68rem;
-}
 
 .gps-category-picker__search-input {
     width: 100%;
@@ -2033,6 +2022,7 @@ button.gps-category-picker__arrow:hover {
 
 .gps-category-picker__actions {
     display: flex;
+    width: 100%;
     align-items: center;
     justify-content: flex-end;
     gap: 0.75rem;
@@ -2040,8 +2030,12 @@ button.gps-category-picker__arrow:hover {
 }
 
 .gps-category-picker__actions.is-in-modal-footer {
-    margin-right: auto;
+    margin-right: 0;
     padding-top: 0;
+}
+
+.gps-category-picker__actions .fi-btn {
+    flex: 0 0 auto;
 }
 
 .gps-category-picker__actions .gps-category-picker__empty {
