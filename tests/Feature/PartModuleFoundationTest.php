@@ -2,15 +2,23 @@
 
 namespace Tests\Feature;
 
+use App\Enums\UserRole;
 use App\Filament\Resources\PartResource;
+use App\Filament\Resources\PartResource\Pages\EditPart;
+use App\Filament\Resources\PartResource\Pages\ViewPart;
 use App\Models\Car;
 use App\Models\Part;
 use App\Models\PartCategory;
 use App\Models\PartImage;
 use App\Models\StorageLocation;
+use App\Models\User;
+use Database\Seeders\RoleSeeder;
+use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use Livewire\Livewire;
+use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
 
 class PartModuleFoundationTest extends TestCase
@@ -314,10 +322,74 @@ class PartModuleFoundationTest extends TestCase
             ->assertJsonPath('samples_needs_listing_in_admin_all', []);
     }
 
+
+    public function test_part_admin_view_and_edit_share_existing_images_and_safe_preview_actions(): void
+    {
+        $this->actingAsWarehouseUser();
+
+        $part = Part::query()->create([
+            'name' => 'Widoczny reflektor',
+            'slug' => 'widoczny-reflektor',
+            'price' => 199,
+            'quantity' => 2,
+            'status' => 'ready',
+            'needs_listing' => false,
+            'needs_review' => false,
+        ]);
+
+        PartImage::query()->create(['part_id' => $part->id, 'path' => 'parts/photos/front.jpg', 'sort_order' => 1]);
+        PartImage::query()->create(['part_id' => $part->id, 'path' => 'parts/photos/side.jpg', 'sort_order' => 2]);
+
+        $expectedImagePaths = ['parts/photos/front.jpg', 'parts/photos/side.jpg'];
+
+        $this->assertSame($expectedImagePaths, PartResource::partImagePaths($part->fresh('images')));
+
+        Livewire::test(ViewPart::class, ['record' => $part->getRouteKey()])
+            ->assertSee($expectedImagePaths[0])
+            ->assertSee($expectedImagePaths[1])
+            ->assertDontSee('Przetwórz zdjęcia produktu');
+
+        Livewire::test(EditPart::class, ['record' => $part->getRouteKey()])
+            ->assertFormSet(['part_photo_paths' => $expectedImagePaths])
+            ->assertSee($expectedImagePaths[0])
+            ->assertSee($expectedImagePaths[1])
+            ->assertSee(route('storefront.product', $part->slug))
+            ->assertSeeHtml('target="_blank"')
+            ->assertDontSee('Przetwórz zdjęcia produktu')
+            ->fillForm(['name' => 'Widoczny reflektor po edycji'])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $this->assertSame($expectedImagePaths, PartResource::partImagePaths($part->fresh('images')));
+        $this->assertSame(route('storefront.product', $part->slug), PartResource::publicProductUrl($part->fresh()));
+
+        $draftPart = Part::query()->create(['name' => 'Robocza część', 'slug' => null, 'quantity' => 0, 'status' => 'draft']);
+
+        $this->assertNull(PartResource::publicProductUrl($draftPart));
+    }
+
     public function test_part_resource_navigation_and_labels_are_polish_and_iconless_children(): void
     {
         $this->assertSame('Części', PartResource::getNavigationGroup());
         $this->assertSame('Wszystkie części', PartResource::getNavigationLabel());
         $this->assertNull(PartResource::getNavigationIcon());
+    }
+
+    private function actingAsWarehouseUser(): User
+    {
+        $this->seed(RoleSeeder::class);
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+
+        $user = User::query()->create([
+            'name' => 'Warehouse User',
+            'email' => 'warehouse-part@example.test',
+            'password' => 'password',
+        ]);
+
+        $user->assignRole(UserRole::WarehouseProductStaff->value);
+        $this->actingAs($user);
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
+
+        return $user;
     }
 }

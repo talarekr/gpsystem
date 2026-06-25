@@ -4,7 +4,6 @@ namespace App\Filament\Resources\PartResource\Pages;
 
 use App\Filament\Resources\PartResource;
 use App\Models\PartCategory;
-use App\Services\Images\PartImagePresentationService;
 use Filament\Actions;
 use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\Log;
@@ -21,20 +20,16 @@ class EditPart extends EditRecord
     {
         $data[PartResource::ADMIN_STEERING_FORM_STATE] = PartResource::adminSteeringFormValue($this->record->vehicle_snapshot['steering_side'] ?? null);
 
-        $data['part_photo_paths'] = $this->record->images()
-            ->orderBy('sort_order')
-            ->orderBy('id')
-            ->pluck('path')
-            ->filter()
-            ->values()
-            ->all();
+        $data['part_photo_paths'] = PartResource::partImagePaths($this->record);
 
         return $data;
     }
 
     protected function mutateFormDataBeforeSave(array $data): array
     {
-        $this->partPhotoPaths = $data['part_photo_paths'] ?? [];
+        $this->partPhotoPaths = array_key_exists('part_photo_paths', $data)
+            ? $data['part_photo_paths']
+            : PartResource::partImagePaths($this->record);
         unset($data['part_photo_paths']);
 
         return $data;
@@ -118,24 +113,6 @@ class EditPart extends EditRecord
     protected function getHeaderActions(): array
     {
         return [
-            Actions\Action::make('processPartImages')
-                ->label('Przetwórz zdjęcia produktu')
-                ->icon('heroicon-o-photo')
-                ->action(function (): void {
-                    $processed = 0;
-
-                    foreach ($this->record->images as $image) {
-                        if (! $image->path) {
-                            continue;
-                        }
-
-                        $image->legacy_payload = app(PartImagePresentationService::class)->process($image, true);
-                        $image->saveQuietly();
-                        $processed++;
-                    }
-
-                    Notification::make()->title("Przetworzono zdjęcia: {$processed}")->success()->send();
-                }),
             Actions\Action::make('markListingReady')
                 ->label('Oznacz jako gotowe')
                 ->icon('heroicon-o-check-circle')
@@ -150,7 +127,13 @@ class EditPart extends EditRecord
                         ->success()
                         ->send();
                 }),
-            Actions\ViewAction::make()->label('Podgląd'),
+            Actions\Action::make('storefrontPreview')
+                ->label('Podgląd')
+                ->icon('heroicon-o-arrow-top-right-on-square')
+                ->color('gray')
+                ->url(fn (): ?string => PartResource::publicProductUrl($this->record))
+                ->openUrlInNewTab()
+                ->visible(fn (): bool => PartResource::publicProductUrl($this->record) !== null),
             Actions\DeleteAction::make()->label('Usuń'),
         ];
     }

@@ -78,7 +78,7 @@ class PartResource extends Resource
                             ->label('Zdjęcia części')
                             ->hiddenLabel()
                             ->dehydrated(false)
-                            ->visibleOn('view')
+                            ->visibleOn(['view', 'edit'])
                             ->view('filament.resources.parts.part-images-gallery')
                             ->viewData(fn (?Part $record): array => ['part' => $record])
                             ->columnSpanFull(),
@@ -505,6 +505,36 @@ class PartResource extends Resource
             ->get()
             ->mapWithKeys(fn (PartCategory $category): array => [$category->id => trim($category->name.' '.($category->full_slug_path ? '('.$category->full_slug_path.')' : ''))])
             ->all();
+    }
+
+
+    /**
+     * @return array<int, string>
+     */
+    public static function partImagePaths(Part $part): array
+    {
+        $images = $part->relationLoaded('images') ? $part->images : $part->images()->get();
+
+        return $images
+            ->sortBy([
+                ['sort_order', 'asc'],
+                ['id', 'asc'],
+            ])
+            ->pluck('path')
+            ->filter()
+            ->values()
+            ->all();
+    }
+
+    public static function publicProductUrl(Part $part, bool $absolute = true): ?string
+    {
+        if (! $part->storefrontVisible()->whereKey($part->getKey())->exists()) {
+            return null;
+        }
+
+        $slug = filled($part->slug) ? $part->slug : $part->getKey();
+
+        return route('storefront.product', $slug, absolute: $absolute);
     }
 
     public static function syncPartImages(Part $part, mixed $paths): void
