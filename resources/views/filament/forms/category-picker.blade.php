@@ -30,11 +30,22 @@
             display: none !important;
         }
 
-        .fi-modal-window.gps-category-picker-modal .fi-modal-footer .gps-category-picker__actions,
-        .gps-category-picker-modal.fi-modal-window .fi-modal-footer .gps-category-picker__actions {
+        .gps-category-picker__actions {
+            position: sticky !important;
+            bottom: 0 !important;
+            z-index: 10 !important;
             display: flex !important;
             justify-content: center !important;
             width: 100% !important;
+            margin-top: 1rem !important;
+            border-top: 1px solid rgb(229 231 235) !important;
+            background: rgb(255 255 255) !important;
+            padding: 1rem 0 0 !important;
+        }
+
+        .dark .gps-category-picker__actions {
+            border-top-color: rgb(55 65 81) !important;
+            background: rgb(17 24 39) !important;
         }
 
         .gps-category-picker__submit {
@@ -85,33 +96,7 @@
         selectedId: null,
         selectedName: '',
         isSaving: false,
-        init() {
-            this.$nextTick(() => this.mountActionsInModalFooter());
-        },
-        mountActionsInModalFooter() {
-            const actions = this.$refs.actions;
-            const modal = this.categoryPickerModal();
-            const footer = modal?.querySelector('.fi-modal-footer');
-
-            this.markCategoryPickerCloseButton(modal);
-
-            if (! actions || ! footer || footer.contains(actions)) {
-                return;
-            }
-
-            footer.prepend(actions);
-            actions.classList.add('is-in-modal-footer');
-        },
-        categoryPickerModal() {
-            return this.$root.closest('.fi-modal-window') || this.$root.closest('[role=\'dialog\']');
-        },
-        markCategoryPickerCloseButton(modal = this.categoryPickerModal()) {
-            const closeButton = modal?.querySelector('.fi-modal-header :where(.fi-modal-close-btn, .fi-modal-close-button, [aria-label*=\'Close\'], [aria-label*=\'Zamknij\'])');
-
-            closeButton?.setAttribute('data-category-picker-close', '');
-
-            return closeButton;
-        },
+        init() {},
         children(parentId = null) {
             return this.categories.filter((category) => category.parent_id === parentId);
         },
@@ -193,23 +178,26 @@
 
             this.isSaving = true;
 
-            const closeButton = this.markCategoryPickerCloseButton();
-
             this.$wire.setPartCategoryFromPicker(this.selectedId)
                 .then((saved) => {
                     if (saved === true) {
-                        this.closeCategoryPicker(closeButton);
+                        this.selectedId = null;
+                        this.selectedName = '';
+                        this.closeCategoryPicker();
                     }
                 })
                 .finally(() => {
                     this.isSaving = false;
                 });
         },
-        closeCategoryPicker(closeButton = null) {
-            const modal = this.categoryPickerModal();
-            const pickerCloseButton = closeButton || modal?.querySelector('[data-category-picker-close]') || this.markCategoryPickerCloseButton(modal);
+        closeCategoryPicker() {
+            if (typeof this.$wire.unmountFormComponentAction === 'function') {
+                this.$wire.unmountFormComponentAction(false, true);
 
-            pickerCloseButton?.click();
+                return;
+            }
+
+            this.$dispatch('close-modal', { id: 'form-component-action' });
         },
         back() {
             this.stack.pop();
