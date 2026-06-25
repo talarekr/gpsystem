@@ -7,6 +7,7 @@ use App\Models\Part;
 use App\Models\PartCategory;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -60,15 +61,15 @@ class LocalCategoryDeleteSafetyService
         return $result['cache_cleared'];
     }
 
-    public function analyzeMany(array $categoryIds): array
+    public function analyzeMany(array $categoryIds, bool $deleteLocalMappings = false): array
     {
         return collect($categoryIds)
-            ->map(fn (int $categoryId): array => $this->analyze($categoryId))
+            ->map(fn (int $categoryId): array => $this->analyze($categoryId, $deleteLocalMappings))
             ->values()
             ->all();
     }
 
-    public function analyze(int $categoryId): array
+    public function analyze(int $categoryId, bool $deleteLocalMappings = false): array
     {
         $category = PartCategory::query()->find($categoryId);
 
@@ -88,8 +89,16 @@ class LocalCategoryDeleteSafetyService
                 'has_allegro_mapping' => false,
                 'has_ebay_mapping' => false,
                 'mapping_details' => [],
+                'mappings_to_delete' => [],
                 'can_delete' => false,
+                'can_delete_with_local_mappings' => false,
                 'blockers' => ['category_not_found'],
+                'warning' => null,
+                'ovoko_write' => false,
+                'allegro_write' => false,
+                'ebay_write' => false,
+                'offers_changed' => false,
+                'products_changed' => false,
             ];
         }
 
@@ -117,6 +126,25 @@ class LocalCategoryDeleteSafetyService
         if ($descendantsProductsCount > 0) $blockers[] = 'descendants_have_products';
         if ($mappings->count() > 0) $blockers[] = 'category_has_marketplace_mappings';
 
+        $mappingDetails = $mappings->map(fn (MarketplaceCategoryMapping $mapping): array => [
+            'id' => (int) $mapping->id,
+            'channel' => $mapping->channel,
+            'external_category_id' => $mapping->external_category_id,
+            'external_category_name' => $mapping->external_category_name,
+            'external_category_path' => $mapping->external_category_path,
+            'source' => $mapping->source,
+            'confidence' => $mapping->confidence,
+            'is_blocked' => (bool) $mapping->is_blocked,
+        ])->all();
+        $mappingsToDelete = $mappings->map(fn (MarketplaceCategoryMapping $mapping): array => [
+            'id' => (int) $mapping->id,
+            'channel' => $mapping->channel,
+            'external_category_id' => $mapping->external_category_id,
+            'source' => $mapping->source,
+        ])->all();
+        $blockersWithoutMappings = array_values(array_diff($blockers, ['category_has_marketplace_mappings']));
+        $canDeleteWithLocalMappings = $deleteLocalMappings && $blockersWithoutMappings === [];
+
         return [
             'id' => (int) $category->id,
             'name' => $category->name,
@@ -135,53 +163,66 @@ class LocalCategoryDeleteSafetyService
             'has_ovoko_mapping' => $this->hasChannel($channels, 'ovoko'),
             'has_allegro_mapping' => $this->hasChannel($channels, 'allegro'),
             'has_ebay_mapping' => $this->hasChannel($channels, 'ebay'),
-            'mapping_details' => $mappings->map(fn (MarketplaceCategoryMapping $mapping): array => [
-                'id' => (int) $mapping->id,
-                'channel' => $mapping->channel,
-                'external_category_id' => $mapping->external_category_id,
-                'external_category_name' => $mapping->external_category_name,
-                'external_category_path' => $mapping->external_category_path,
-                'source' => $mapping->source,
-                'confidence' => $mapping->confidence,
-                'is_blocked' => (bool) $mapping->is_blocked,
-            ])->all(),
+            'mapping_details' => $mappingDetails,
+            'mappings_to_delete' => $mappingsToDelete,
             'can_delete' => $blockers === [],
-            'blockers' => $blockers,
+            'can_delete_with_local_mappings' => $canDeleteWithLocalMappings,
+            'blockers' => $deleteLocalMappings && $canDeleteWithLocalMappings ? $blockersWithoutMappings : $blockers,
+            'warning' => $deleteLocalMappings && $mappingsToDelete !== [] ? 'local_mappings_will_be_deleted' : null,
+            'ovoko_write' => false,
+            'allegro_write' => false,
+            'ebay_write' => false,
+            'offers_changed' => false,
+            'products_changed' => false,
         ];
     }
 
-    public function deleteMany(array $categoryIds, ?int $userId = null): array
+    public function deleteMany(array $categoryIds, ?int $userId = null, bool $deleteLocalMappings = false): array
     {
         $deleted = [];
         $blocked = [];
+        $deletedLocalMappings = [];
 
-        foreach ($categoryIds as $categoryId) {
-            $analysis = $this->analyze((int) $categoryId);
-            $deletedNow = false;
+        DB::transaction(function () use ($categoryIds, $userId, $deleteLocalMappings, &$deleted, &$blocked, &$deletedLocalMappings): void {
+            foreach ($categoryIds as $categoryId) {
+                $analysis = $this->analyze((int) $categoryId, $deleteLocalMappings);
+                $deletedNow = false;
+                $mappingIdsDeleted = [];
 
-            if ($analysis['can_delete'] === true) {
-                PartCategory::query()->whereKey($categoryId)->delete();
-                $deletedNow = true;
-                $deleted[] = $analysis;
-            } else {
-                $blocked[] = $analysis;
+                if ($analysis['can_delete'] === true || ($deleteLocalMappings && $analysis['can_delete_with_local_mappings'] === true)) {
+                    if ($deleteLocalMappings && $analysis['mappings_to_delete'] !== []) {
+                        $mappingIdsDeleted = array_column($analysis['mappings_to_delete'], 'id');
+                        MarketplaceCategoryMapping::query()
+                            ->where('local_category_id', $categoryId)
+                            ->whereIn('id', $mappingIdsDeleted)
+                            ->delete();
+                        $deletedLocalMappings = array_merge($deletedLocalMappings, $analysis['mappings_to_delete']);
+                    }
+
+                    PartCategory::query()->whereKey($categoryId)->delete();
+                    $deletedNow = true;
+                    $deleted[] = $analysis;
+                } else {
+                    $blocked[] = $analysis;
+                }
+
+                Log::info('Local PartCategory hard delete safety result', [
+                    'user_id' => $userId,
+                    'category_id' => $analysis['id'],
+                    'name' => $analysis['name'],
+                    'category_path' => $analysis['category_path'],
+                    'mapping_ids_deleted' => $mappingIdsDeleted,
+                    'counts_before_delete' => [
+                        'products_count' => $analysis['products_count'],
+                        'children_count' => $analysis['children_count'],
+                        'descendants_products_count' => $analysis['descendants_products_count'],
+                    ],
+                    'blockers' => $analysis['blockers'],
+                    'deleted' => $deletedNow,
+                    'cache_cleared' => false,
+                ]);
             }
-
-            Log::info('Local PartCategory hard delete safety result', [
-                'user_id' => $userId,
-                'category_id' => $analysis['id'],
-                'name' => $analysis['name'],
-                'category_path' => $analysis['category_path'],
-                'counts_before_delete' => [
-                    'products_count' => $analysis['products_count'],
-                    'children_count' => $analysis['children_count'],
-                    'descendants_products_count' => $analysis['descendants_products_count'],
-                ],
-                'blockers' => $analysis['blockers'],
-                'deleted' => $deletedNow,
-                'cache_cleared' => false,
-            ]);
-        }
+        });
 
         $cacheCleared = $deleted === [] ? [] : $this->clearCaches();
 
@@ -199,6 +240,8 @@ class LocalCategoryDeleteSafetyService
 
         return [
             'deleted' => $deleted,
+            'deleted_local_mappings' => $deletedLocalMappings,
+            'mapping_deleted_count' => count($deletedLocalMappings),
             'blocked' => $blocked,
             'cache_cleared' => $cacheCleared,
         ];

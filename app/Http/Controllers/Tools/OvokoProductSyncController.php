@@ -40,17 +40,22 @@ class OvokoProductSyncController extends Controller
 
         $categoryIds = $this->categoryIdsFromRequest($request);
 
+        $deleteLocalMappings = $request->query('delete_local_mappings') === '1';
+
         return response()->json([
             'ok' => true,
             'dry_run' => true,
             'requested_category_ids' => $categoryIds,
-            'items' => $service->analyzeMany($categoryIds),
+            'delete_local_mappings' => $deleteLocalMappings,
+            'items' => $service->analyzeMany($categoryIds, $deleteLocalMappings),
             'local_delete' => false,
             'ovoko_write' => false,
             'allegro_write' => false,
             'ebay_write' => false,
             'products_changed' => false,
+            'offers_changed' => false,
             'mappings_changed' => false,
+            'local_mappings_changed' => false,
         ]);
     }
 
@@ -59,28 +64,36 @@ class OvokoProductSyncController extends Controller
         if (! $this->validToken($request)) return $this->invalidTokenResponse();
 
         $categoryIds = $this->categoryIdsFromRequest($request);
+        $deleteLocalMappings = $request->query('delete_local_mappings') === '1';
 
         if ($request->query('confirm') !== '1') {
             return response()->json([
                 'ok' => false,
                 'requested_category_ids' => $categoryIds,
+                'delete_local_mappings' => $deleteLocalMappings,
                 'blockers' => ['confirm_1_required'],
                 'local_delete' => false,
                 'ovoko_write' => false,
                 'allegro_write' => false,
                 'ebay_write' => false,
                 'products_changed' => false,
+                'offers_changed' => false,
                 'mappings_changed' => false,
+                'local_mappings_changed' => false,
             ], 422);
         }
 
-        $result = $service->deleteMany($categoryIds, $request->user()?->id);
+        $result = $service->deleteMany($categoryIds, $request->user()?->id, $deleteLocalMappings);
 
         return response()->json([
             'ok' => true,
             'requested_category_ids' => $categoryIds,
+            'delete_local_mappings' => $deleteLocalMappings,
             'deleted_count' => count($result['deleted']),
+            'deleted_categories' => $result['deleted'],
             'deleted_items' => $result['deleted'],
+            'deleted_local_mappings' => $result['deleted_local_mappings'],
+            'mapping_deleted_count' => $result['mapping_deleted_count'],
             'blocked_count' => count($result['blocked']),
             'blocked_items' => $result['blocked'],
             'local_delete' => true,
@@ -88,7 +101,9 @@ class OvokoProductSyncController extends Controller
             'allegro_write' => false,
             'ebay_write' => false,
             'products_changed' => false,
+            'offers_changed' => false,
             'mappings_changed' => false,
+            'local_mappings_changed' => $result['mapping_deleted_count'] > 0,
             'cache_cleared' => $result['cache_cleared'],
         ]);
     }
