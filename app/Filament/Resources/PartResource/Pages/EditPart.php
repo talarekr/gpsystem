@@ -4,6 +4,7 @@ namespace App\Filament\Resources\PartResource\Pages;
 
 use App\Filament\Resources\PartResource;
 use App\Models\PartCategory;
+use App\Models\PartImage;
 use Filament\Actions;
 use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\Log;
@@ -20,16 +21,15 @@ class EditPart extends EditRecord
     {
         $data[PartResource::ADMIN_STEERING_FORM_STATE] = PartResource::adminSteeringFormValue($this->record->vehicle_snapshot['steering_side'] ?? null);
 
-        $data['part_photo_paths'] = PartResource::partImagePaths($this->record);
+        // Existing images are rendered by the edit gallery; keep FileUpload empty so it only adds new photos.
+        $data['part_photo_paths'] = [];
 
         return $data;
     }
 
     protected function mutateFormDataBeforeSave(array $data): array
     {
-        $this->partPhotoPaths = array_key_exists('part_photo_paths', $data)
-            ? $data['part_photo_paths']
-            : PartResource::partImagePaths($this->record);
+        $this->partPhotoPaths = array_values(array_filter((array) ($data['part_photo_paths'] ?? []), fn (mixed $path): bool => filled($path)));
         unset($data['part_photo_paths']);
 
         return $data;
@@ -37,7 +37,46 @@ class EditPart extends EditRecord
 
     protected function afterSave(): void
     {
-        PartResource::syncPartImages($this->record, $this->partPhotoPaths);
+        if ($this->partPhotoPaths === []) {
+            return;
+        }
+
+        $this->record->load('images');
+
+        PartResource::syncPartImages($this->record, array_merge(
+            PartResource::partImagePaths($this->record),
+            $this->partPhotoPaths,
+        ));
+
+        $this->record->refresh();
+        $this->record->load('images');
+        $this->data['part_photo_paths'] = [];
+    }
+
+    public function deletePartImage(int $imageId): void
+    {
+        $image = PartImage::query()
+            ->where('part_id', $this->record->getKey())
+            ->find($imageId);
+
+        if (! $image) {
+            Notification::make()
+                ->title('Nie znaleziono zdjęcia części')
+                ->danger()
+                ->send();
+
+            return;
+        }
+
+        $image->delete();
+
+        $this->record->refresh();
+        $this->record->load('images');
+
+        Notification::make()
+            ->title('Zdjęcie części zostało usunięte')
+            ->success()
+            ->send();
     }
 
     public function setPartCategoryFromPicker(mixed $categoryId = null): bool
