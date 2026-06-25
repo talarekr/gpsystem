@@ -379,6 +379,81 @@ class PartModuleFoundationTest extends TestCase
         $this->assertNull(PartResource::publicProductUrl($draftPart));
     }
 
+
+    public function test_admin_part_photo_upload_paths_are_moved_to_part_scoped_public_storage_and_render_in_gallery(): void
+    {
+        Storage::fake('public');
+
+        $part = Part::query()->create([
+            'name' => 'Admin upload test',
+            'slug' => 'admin-upload-test',
+            'price' => 150,
+            'quantity' => 1,
+            'status' => 'ready',
+            'needs_listing' => false,
+            'needs_review' => false,
+        ]);
+
+        Storage::disk('public')->put('parts/photos/admin-upload.png', 'fake admin image');
+
+        PartResource::syncPartImages($part, ['parts/photos/admin-upload.png']);
+
+        $image = $part->fresh('images')->images->first();
+
+        $this->assertNotNull($image);
+        $this->assertSame('parts/photos/admin/'.$part->id.'/admin-upload.png', $image->path);
+        $this->assertSame('/storage/parts/photos/admin/'.$part->id.'/admin-upload.png', $image->relativePublicUrl());
+        $this->assertStringEndsWith('/storage/parts/photos/admin/'.$part->id.'/admin-upload.png', $image->absolutePublicUrl());
+        Storage::disk('public')->assertExists($image->path);
+        Storage::disk('public')->assertMissing('parts/photos/admin-upload.png');
+        $this->assertDatabaseHas('part_images', [
+            'part_id' => $part->getKey(),
+            'path' => 'parts/photos/admin/'.$part->id.'/admin-upload.png',
+        ]);
+
+        $renderedGallery = view('filament.resources.parts.part-images-gallery', [
+            'part' => $part->fresh('images'),
+            'editable' => true,
+        ])->render();
+
+        $this->assertStringContainsString('/storage/parts/photos/admin/'.$part->id.'/admin-upload.png', $renderedGallery);
+        $this->assertStringNotContainsString('/storage/parts/photos/admin-upload.png', $renderedGallery);
+    }
+
+    public function test_imported_part_photo_paths_still_render_without_being_rewritten(): void
+    {
+        Storage::fake('public');
+
+        $part = Part::query()->create([
+            'name' => 'Imported upload test',
+            'slug' => 'imported-upload-test',
+            'price' => 150,
+            'quantity' => 1,
+            'status' => 'ready',
+            'needs_listing' => false,
+            'needs_review' => false,
+        ]);
+        $importedPath = 'parts/photos/imported/'.$part->id.'/imported-photo.jpg';
+
+        Storage::disk('public')->put($importedPath, 'fake imported image');
+
+        PartResource::syncPartImages($part, [$importedPath]);
+
+        $image = $part->fresh('images')->images->first();
+
+        $this->assertNotNull($image);
+        $this->assertSame($importedPath, $image->path);
+        $this->assertSame('/storage/'.$importedPath, $image->relativePublicUrl());
+        Storage::disk('public')->assertExists($importedPath);
+
+        $renderedGallery = view('filament.resources.parts.part-images-gallery', [
+            'part' => $part->fresh('images'),
+            'editable' => true,
+        ])->render();
+
+        $this->assertStringContainsString('/storage/'.$importedPath, $renderedGallery);
+    }
+
     public function test_part_resource_navigation_and_labels_are_polish_and_iconless_children(): void
     {
         $this->assertSame('Części', PartResource::getNavigationGroup());
