@@ -7,14 +7,18 @@ use App\Models\MarketplaceCategory;
 use App\Models\MarketplaceCategoryMapping;
 use App\Models\PartCategory;
 use App\Services\Marketplace\Api\MarketplaceApiManager;
+use App\Services\Storefront\CategoryTreeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\View\View;
+use Throwable;
 
 class MarketplaceCategoryMapperController extends Controller
 {
@@ -37,6 +41,8 @@ class MarketplaceCategoryMapperController extends Controller
                 'channelTree' => route('admin.marketplace-category-mapper.tree.channel', ['channel' => '__CHANNEL__']),
                 'mapping' => route('admin.marketplace-category-mapper.mapping.show', ['local_category_id' => '__ID__']),
                 'save' => route('admin.marketplace-category-mapper.mapping.save', ['local_category_id' => '__ID__']),
+                'deleteInspect' => route('admin.marketplace-category-mapper.delete.inspect', ['local_category_id' => '__ID__']),
+                'delete' => route('admin.marketplace-category-mapper.delete', ['local_category_id' => '__ID__']),
             ],
         ]);
     }
@@ -131,6 +137,57 @@ class MarketplaceCategoryMapperController extends Controller
         });
 
         return response()->json(['ok' => true, 'saved' => collect($saved)->map(fn ($mapping) => $this->mappingPayload($mapping))->values()]);
+    }
+
+    public function inspectLocalCategoryDeleteSafety(int $local_category_id): JsonResponse
+    {
+        return response()->json($this->localCategoryDeleteSafety($local_category_id));
+    }
+
+    public function deleteLocalCategory(Request $request, int $local_category_id): JsonResponse
+    {
+        $request->validate([
+            'confirm' => ['accepted'],
+        ]);
+
+        $safety = $this->localCategoryDeleteSafety($local_category_id);
+
+        if (! ($safety['exists'] ?? false)) {
+            return response()->json($safety + ['ok' => false, 'message' => 'Kategoria lokalna nie istnieje.'], 404);
+        }
+
+        if (! ($safety['can_delete'] ?? false)) {
+            return response()->json($safety + ['ok' => false, 'message' => 'Usunięcie kategorii jest zablokowane.'], 422);
+        }
+
+        $category = PartCategory::query()->findOrFail($local_category_id);
+        $categoryId = (int) $category->id;
+        $name = (string) $category->name;
+        $path = $category->category_path ?: $this->localPath($category);
+        $counts = $safety['counts'];
+        DB::transaction(function () use ($category): void {
+            $category->delete();
+        });
+
+        $cacheCleared = $this->clearCategoryCaches();
+
+        Log::info('marketplace_mapper.local_category_hard_deleted', [
+            'user_id' => Auth::id(),
+            'category_id' => $categoryId,
+            'name' => $name,
+            'category_path' => $path,
+            'deleted_at' => now()->toIso8601String(),
+            'counts_before_delete' => $counts,
+            'cache_cleared' => $cacheCleared !== [],
+            'cache_keys_cleared' => $cacheCleared,
+        ]);
+
+        return response()->json([
+            'ok' => true,
+            'deleted' => true,
+            'category_id' => (string) $categoryId,
+            'cache_cleared' => $cacheCleared,
+        ]);
     }
 
     private function ovokoTree(Request $request): array
@@ -308,6 +365,104 @@ class MarketplaceCategoryMapperController extends Controller
     private function mappingPayload(?MarketplaceCategoryMapping $mapping): ?array
     {
         return $mapping ? Arr::only($mapping->toArray(), ['channel', 'external_category_id', 'external_category_name', 'external_category_path', 'source', 'updated_at']) : null;
+    }
+
+    private function localCategoryDeleteSafety(int $categoryId): array
+    {
+        $category = PartCategory::query()->find($categoryId);
+
+        if (! $category) {
+            return [
+                'exists' => false,
+                'can_delete' => false,
+                'blockers' => ['Kategoria lokalna nie istnieje.'],
+                'counts' => ['products_count' => 0, 'children_count' => 0, 'descendants_products_count' => 0, 'mappings_count' => 0],
+                'samples' => ['product_ids' => [], 'children' => []],
+                'mappings' => ['has_marketplace_mapping' => false, 'has_ebay_mapping' => false, 'has_allegro_mapping' => false, 'has_ovoko_mapping' => false, 'items' => []],
+            ];
+        }
+
+        $children = PartCategory::query()->where('parent_id', $category->id)->ordered()->limit(10)->get(['id', 'name', 'category_path']);
+        $childrenCount = PartCategory::query()->where('parent_id', $category->id)->count();
+        $productIds = DB::table('parts')->where('category_id', $category->id)->limit(10)->pluck('id')->map(fn ($id): int => (int) $id)->all();
+        $productsCount = DB::table('parts')->where('category_id', $category->id)->count();
+        $descendantIds = $this->localCategoryDescendantIds((int) $category->id);
+        $descendantsProductsCount = $descendantIds === [] ? 0 : DB::table('parts')->whereIn('category_id', $descendantIds)->count();
+        $mappings = MarketplaceCategoryMapping::query()->where('local_category_id', $category->id)->get();
+        $mappingItems = $mappings->map(fn (MarketplaceCategoryMapping $mapping): array => [
+            'id' => $mapping->id,
+            'channel' => $mapping->channel,
+            'external_category_id' => $mapping->external_category_id,
+            'external_category_name' => $mapping->external_category_name,
+            'external_category_path' => $mapping->external_category_path,
+        ])->values()->all();
+
+        $hasEbay = $mappings->contains(fn (MarketplaceCategoryMapping $mapping): bool => str_starts_with((string) $mapping->channel, 'ebay'));
+        $hasAllegro = $mappings->contains(fn (MarketplaceCategoryMapping $mapping): bool => str_starts_with((string) $mapping->channel, 'allegro'));
+        $hasOvoko = $mappings->contains(fn (MarketplaceCategoryMapping $mapping): bool => (string) $mapping->channel === 'ovoko');
+
+        $blockers = [];
+        if ($productsCount > 0) $blockers[] = 'ma produkty';
+        if ($childrenCount > 0) $blockers[] = 'ma dzieci';
+        if ($descendantsProductsCount > 0) $blockers[] = 'ma potomków z produktami';
+        if ($mappings->isNotEmpty()) $blockers[] = 'ma mappingi';
+
+        return [
+            'exists' => true,
+            'can_delete' => $blockers === [],
+            'blockers' => $blockers,
+            'local_category' => [
+                'id' => (string) $category->id,
+                'name' => $category->name,
+                'category_path' => $category->category_path ?: $this->localPath($category),
+            ],
+            'counts' => [
+                'products_count' => $productsCount,
+                'children_count' => $childrenCount,
+                'descendants_products_count' => $descendantsProductsCount,
+                'mappings_count' => $mappings->count(),
+            ],
+            'samples' => [
+                'product_ids' => $productIds,
+                'children' => $children->map(fn (PartCategory $child): array => ['id' => (string) $child->id, 'name' => $child->name, 'category_path' => $child->category_path ?: $this->localPath($child)])->values()->all(),
+            ],
+            'mappings' => [
+                'has_marketplace_mapping' => $mappings->isNotEmpty(),
+                'has_ebay_mapping' => $hasEbay,
+                'has_allegro_mapping' => $hasAllegro,
+                'has_ovoko_mapping' => $hasOvoko,
+                'items' => $mappingItems,
+            ],
+        ];
+    }
+
+    /** @return array<int, int> */
+    private function localCategoryDescendantIds(int $categoryId): array
+    {
+        $childrenByParent = PartCategory::query()->get(['id', 'parent_id'])->groupBy(fn (PartCategory $category): int => (int) ($category->parent_id ?? 0));
+        $ids = [];
+        $walk = function (int $parentId) use (&$walk, &$ids, $childrenByParent): void {
+            foreach ($childrenByParent->get($parentId, collect()) as $child) {
+                $ids[] = (int) $child->id;
+                $walk((int) $child->id);
+            }
+        };
+        $walk($categoryId);
+
+        return array_values(array_unique($ids));
+    }
+
+    private function clearCategoryCaches(): array
+    {
+        $cleared = [CategoryTreeService::CACHE_KEY, 'storefront.category_tree.v1', 'marketplace_mapper.local_tree'];
+        Cache::forget(CategoryTreeService::CACHE_KEY);
+        Cache::forget('storefront.category_tree.v1');
+        Cache::forget('marketplace_mapper.local_tree');
+        if (function_exists('opcache_reset')) @opcache_reset();
+        try { Artisan::call('view:clear'); $cleared[] = 'laravel.views'; } catch (Throwable) {}
+        try { Artisan::call('cache:clear'); $cleared[] = 'laravel.cache'; } catch (Throwable) {}
+
+        return array_values(array_unique($cleared));
     }
 
     private function localPath(PartCategory $category): string

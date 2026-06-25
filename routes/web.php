@@ -2100,6 +2100,8 @@ Route::middleware(Authenticate::class)->prefix('admin')->name('admin.')->group(f
     Route::get('/marketplace-category-mapper/tree/{channel}', [MarketplaceCategoryMapperController::class, 'channelTree'])->name('marketplace-category-mapper.tree.channel');
     Route::get('/marketplace-category-mapper/mapping/{local_category_id}', [MarketplaceCategoryMapperController::class, 'showMapping'])->name('marketplace-category-mapper.mapping.show');
     Route::post('/marketplace-category-mapper/mapping/{local_category_id}', [MarketplaceCategoryMapperController::class, 'saveMapping'])->name('marketplace-category-mapper.mapping.save');
+    Route::get('/marketplace-category-mapper/local-category/{local_category_id}/delete-safety', [MarketplaceCategoryMapperController::class, 'inspectLocalCategoryDeleteSafety'])->name('marketplace-category-mapper.delete.inspect');
+    Route::delete('/marketplace-category-mapper/local-category/{local_category_id}', [MarketplaceCategoryMapperController::class, 'deleteLocalCategory'])->name('marketplace-category-mapper.delete');
 });
 
 Route::middleware(Authenticate::class)->prefix('admin/import-migracyjny/produkty-woo')->name('admin.import-migration.woo-products.')->group(function (): void {
