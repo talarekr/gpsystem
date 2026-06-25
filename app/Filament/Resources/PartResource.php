@@ -76,22 +76,6 @@ class PartResource extends Resource
                     ->collapsible()
                     ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--photos'])
                     ->schema([
-                        Forms\Components\ViewField::make('part_images_gallery')
-                            ->label('Zdjęcia części')
-                            ->hiddenLabel()
-                            ->dehydrated(false)
-                            ->visibleOn('view')
-                            ->view('filament.resources.parts.part-images-gallery')
-                            ->viewData(fn (?Part $record): array => ['part' => $record, 'editable' => false])
-                            ->columnSpanFull(),
-                        Forms\Components\ViewField::make('part_images_editor')
-                            ->label('Zdjęcia części')
-                            ->hiddenLabel()
-                            ->dehydrated(false)
-                            ->visibleOn('edit')
-                            ->view('filament.resources.parts.part-images-gallery')
-                            ->viewData(fn (?Part $record): array => ['part' => $record, 'editable' => true])
-                            ->columnSpanFull(),
                         Forms\Components\FileUpload::make('part_photo_paths')
                             ->label('Zdjęcia części')
                             ->hiddenOn('view')
@@ -110,6 +94,24 @@ class PartResource extends Resource
                             ->imagePreviewHeight('96')
                             ->placeholder('Przeciągnij i upuść lub wybierz pliki')
                             ->extraAttributes(['class' => 'gps-part-photos-upload gps-part-upload-dropzone'])
+                            ->extraFieldWrapperAttributes(['class' => 'gps-part-photos-upload-field'])
+                            ->columnSpanFull(),
+                        Forms\Components\ViewField::make('part_images_gallery')
+                            ->label('Zdjęcia części')
+                            ->hiddenLabel()
+                            ->dehydrated(false)
+                            ->visibleOn('view')
+                            ->view('filament.resources.parts.part-images-gallery')
+                            ->viewData(fn (?Part $record): array => ['part' => $record, 'editable' => false])
+                            ->columnSpanFull(),
+                        Forms\Components\ViewField::make('part_images_editor')
+                            ->label('Zdjęcia części')
+                            ->hiddenLabel()
+                            ->dehydrated(false)
+                            ->visibleOn('edit')
+                            ->view('filament.resources.parts.part-images-gallery')
+                            ->viewData(fn (?Part $record): array => ['part' => $record, 'editable' => true])
+                            ->extraFieldWrapperAttributes(['class' => 'gps-part-images-editor-field'])
                             ->columnSpanFull(),
                     ]),
 

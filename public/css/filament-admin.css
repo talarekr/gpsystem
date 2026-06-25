@@ -2139,3 +2139,53 @@ button.gps-category-picker__arrow:hover {
     cursor: not-allowed;
     opacity: 0.55;
 }
+
+.gps-part-form .gps-part-form-section--photos {
+    --gps-part-photo-tile-size: 9rem;
+}
+
+/* Compact edit grid for the native part-photo uploader and existing thumbnails. */
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload-field,
+.gps-part-form .gps-part-form-section--photos .gps-part-images-editor-field,
+.gps-part-form .gps-part-form-section--photos .gps-part-images-gallery--editable {
+    display: contents !important;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload-field .fi-fo-field-wrp,
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload,
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload .fi-fo-file-upload {
+    width: var(--gps-part-photo-tile-size) !important;
+    max-width: var(--gps-part-photo-tile-size) !important;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload .fi-fo-file-upload {
+    min-height: var(--gps-part-photo-tile-size) !important;
+    border: 0 !important;
+    background: transparent !important;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload :where(.filepond--root) {
+    width: var(--gps-part-photo-tile-size) !important;
+    min-height: var(--gps-part-photo-tile-size) !important;
+    margin: 0 !important;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload :where(.filepond--drop-label) {
+    width: var(--gps-part-photo-tile-size) !important;
+    min-height: var(--gps-part-photo-tile-size) !important;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-photos-upload :where(.filepond--list-scroller) {
+    display: none !important;
+}
+
+.gps-part-form .gps-part-form-section--photos .gps-part-image-tile {
+    width: 9rem;
+    height: 9rem;
+    background: transparent !important;
+}
+
+.gps-part-form .gps-part-form-section--photos :where(.fi-section-content > .grid, .fi-section-content-ctn > .grid) {
+    grid-template-columns: repeat(auto-fill, minmax(var(--gps-part-photo-tile-size), var(--gps-part-photo-tile-size))) !important;
+    align-items: start !important;
+}
