@@ -16,12 +16,32 @@ class PartCategoryTitleSuggestionTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_window_lifter_title_auto_selects_category_from_similar_parts_without_phrase_dictionary(): void
+    {
+        $lifter = $this->category(9, 'Mechanizm / podnośnik szyby');
+        $this->part('VW Passat elektryczny podnosnik szyby drzwi lewy', $lifter->id);
+        $this->part('Skoda Octavia mechanizm podnosnik szyby przednich drzwi', $lifter->id);
+        $this->part('BMW podnosnik szyby elektryczny drzwi prawy', $lifter->id);
+        $this->part('Audi A4 B7 lusterko elektryczne drzwi 8E0837462C', $this->category(8, 'Lusterka')->id);
+
+        $result = app(PartCategorySuggestionService::class)->suggestCategoryFromTitle('Audi A4 S4 B7 8E 8H Elektryczny podnośnik szyby drzwi 8E0837462C');
+
+        $this->assertTrue($result['auto_select']);
+        $this->assertSame($lifter->id, $result['selected_category_id']);
+        $this->assertContains('audi', $result['diagnostics']['noise_tokens_removed']);
+        $this->assertContains('b7', $result['diagnostics']['noise_tokens_removed']);
+        $this->assertStringContainsString('podnosnik szyby', implode(' | ', $result['diagnostics']['candidate_terms']));
+        $this->assertNotEmpty($result['diagnostics']['matched_parts']);
+        $this->assertNotEmpty($result['diagnostics']['matched_categories']);
+        $this->assertIsInt($result['diagnostics']['confidence']);
+    }
+
     public function test_dpf_title_auto_selects_dpf_category_from_similar_parts(): void
     {
         $dpf = $this->category(10, 'DPF / katalizator / filtr cząstek stałych');
         $this->part('BMW DPF filtr cząstek stałych sprawny', $dpf->id);
         $this->part('AUDI kompletny DPF katalizator filtr czastek stalych', $dpf->id);
-        $this->part('VW Tiguan DPF 03N131656G', $dpf->id);
+        $this->part('VW Tiguan DPF filtr czastek stalych 03N131656G', $dpf->id);
 
         $result = app(PartCategorySuggestionService::class)->suggestCategoryFromTitle('VOLKSWAGEN Tiguan 2018 2.0 KOMPLETNY DPF SPRAWNY 03N131656G');
 
@@ -29,7 +49,7 @@ class PartCategoryTitleSuggestionTest extends TestCase
         $this->assertSame($dpf->id, $result['selected_category_id']);
     }
 
-    public function test_egr_cooler_title_suggests_egr_cooler_category(): void
+    public function test_egr_cooler_title_suggests_egr_cooler_category_from_similar_parts(): void
     {
         $egr = $this->category(20, 'Chłodnica spalin EGR');
         $this->part('AUDI A4 chłodnica spalin EGR 04L131512A', $egr->id);
@@ -39,6 +59,18 @@ class PartCategoryTitleSuggestionTest extends TestCase
 
         $this->assertSame($egr->id, $result['suggestions'][0]['category_id']);
         $this->assertSame('Chłodnica spalin EGR', $result['suggestions'][0]['category_name']);
+    }
+
+    public function test_oem_model_and_brand_match_without_part_name_does_not_auto_select_wrong_category(): void
+    {
+        $mirror = $this->category(21, 'Lusterka');
+        $this->part('Audi A4 B7 lusterko zewnętrzne lewe 8E0837462C', $mirror->id);
+        $this->part('Audi A4 B7 lusterko prawe kompletne', $mirror->id);
+
+        $result = app(PartCategorySuggestionService::class)->suggestCategoryFromTitle('Audi A4 S4 B7 8E 8H Elektryczny podnośnik szyby drzwi 8E0837462C');
+
+        $this->assertFalse($result['auto_select']);
+        $this->assertNull($result['selected_category_id']);
     }
 
     public function test_uncertain_match_returns_three_suggestions_without_auto_select(): void
@@ -98,6 +130,21 @@ class PartCategoryTitleSuggestionTest extends TestCase
         $this->assertFalse($result['auto_select']);
         $this->assertNull($result['selected_category_id']);
         $this->assertSame([], $result['suggestions']);
+    }
+
+    public function test_suggestion_lookup_does_not_change_mappings_offers_products_prices_stock_or_images(): void
+    {
+        $category = $this->category(60, 'Alternator');
+        $part = $this->part('Audi alternator ładowania silnika', $category->id);
+        DB::table('marketplace_category_mappings')->insert(['local_category_id' => $category->id, 'channel' => 'allegro_main', 'external_category_id' => 'ALG-OLD', 'created_at' => now(), 'updated_at' => now()]);
+        $beforeParts = DB::table('parts')->get()->map(fn ($row) => (array) $row)->all();
+        $beforeMappings = DB::table('marketplace_category_mappings')->get()->map(fn ($row) => (array) $row)->all();
+
+        app(PartCategorySuggestionService::class)->suggestCategoryFromTitle('BMW alternator ładowania silnika');
+
+        $this->assertSame($beforeParts, DB::table('parts')->get()->map(fn ($row) => (array) $row)->all());
+        $this->assertSame($beforeMappings, DB::table('marketplace_category_mappings')->get()->map(fn ($row) => (array) $row)->all());
+        $this->assertDatabaseHas('parts', ['id' => $part->id, 'price' => '1.00', 'quantity' => 1]);
     }
 
     private function category(int $id, string $name): PartCategory

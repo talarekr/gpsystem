@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\MarketplaceCategoryMapping;
 use App\Models\Part;
 use App\Models\PartCategory;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 
 class PartCategorySuggestionService
@@ -13,81 +14,93 @@ class PartCategorySuggestionService
     public function suggestCategoryFromTitle(string $title, ?int $ignorePartId = null, int $limit = 3): array
     {
         $limit = max(1, min(5, $limit));
-        $terms = $this->expandedTerms($title);
+        $analysis = $this->analyzeTitle($title);
 
-        if ($terms === []) {
-            return $this->emptyResponse('Brak wystarczających fraz części w tytule.');
+        if ($analysis['important_tokens'] === []) {
+            return $this->emptyResponse('Brak wystarczających znaczących tokenów części w tytule.', $analysis);
         }
 
-        $matches = Part::query()
-            ->with('category:id,name,parent_id,category_path,full_slug_path')
-            ->select(['id', 'category_id', 'name', 'sku', 'part_number', 'oem_number', 'manufacturer_code'])
-            ->whereNotNull('category_id')
-            ->when($ignorePartId, fn ($query) => $query->whereKeyNot($ignorePartId))
-            ->where(function ($query) use ($terms): void {
-                foreach ($terms as $term => $weight) {
-                    if (Str::length($term) < 3) continue;
-                    $like = '%'.$term.'%';
-                    $query->orWhere('name', 'like', $like)->orWhere('sku', 'like', $like)->orWhere('part_number', 'like', $like)->orWhere('oem_number', 'like', $like)->orWhere('manufacturer_code', 'like', $like);
-                    $ascii = Str::ascii($term);
-                    if ($ascii !== $term) $query->orWhere('name', 'like', '%'.$ascii.'%');
-                }
-            })
-            ->latest('id')
-            ->limit(60)
-            ->get();
-
-        if ($matches->isEmpty()) {
-            return $this->emptyResponse('Brak podobnych części z finalną kategorią.');
+        $candidates = $this->candidateParts($analysis, $ignorePartId);
+        if ($candidates->isEmpty()) {
+            return $this->emptyResponse('Brak podobnych części z finalną kategorią.', $analysis);
         }
 
-        $scored = [];
-        foreach ($matches as $part) {
-            if (! $part->category) continue;
-            $haystack = $this->normalize(implode(' ', array_filter([$part->name, $part->sku, $part->part_number, $part->oem_number, $part->manufacturer_code])));
-            $matchedTerms = [];
-            $score = 0.0;
-            foreach ($terms as $term => $weight) {
-                if (str_contains($haystack, $term) || str_contains($haystack, Str::ascii($term))) {
-                    $matchedTerms[] = $term;
-                    $score += $weight;
-                }
+        $documentFrequency = $this->documentFrequency($candidates);
+        $matchedParts = [];
+        $categories = [];
+
+        foreach ($candidates as $part) {
+            if (! $part->category) {
+                continue;
             }
-            if ($score <= 0) continue;
-            $cid = (int) $part->category_id;
-            $scored[$cid] ??= ['category' => $part->category, 'score' => 0.0, 'matched_terms' => [], 'parts' => []];
-            $scored[$cid]['score'] += $score;
-            $scored[$cid]['matched_terms'] = array_values(array_unique(array_merge($scored[$cid]['matched_terms'], $matchedTerms)));
-            $scored[$cid]['parts'][$part->id] = ['id' => $part->id, 'title' => $part->name];
+
+            $partAnalysis = $this->analyzeTitle(implode(' ', array_filter([
+                $part->name,
+                $part->sku,
+                $part->part_number,
+                $part->oem_number,
+                $part->manufacturer_code,
+            ])));
+
+            $scoreData = $this->scorePart($analysis, $partAnalysis, $documentFrequency, max(1, $candidates->count()));
+            if ($scoreData['score'] < 3.5 || $scoreData['important_overlap'] < 1) {
+                continue;
+            }
+
+            $categoryId = (int) $part->category_id;
+            $matchedParts[] = [
+                'id' => $part->id,
+                'title' => $part->name,
+                'category_id' => $categoryId,
+                'score' => round($scoreData['score'], 2),
+                'matched_terms' => $scoreData['matched_terms'],
+                'matched_ngrams' => $scoreData['matched_ngrams'],
+            ];
+
+            $categories[$categoryId] ??= [
+                'category' => $part->category,
+                'score' => 0.0,
+                'parts' => [],
+                'matched_terms' => [],
+            ];
+            $categories[$categoryId]['score'] += $scoreData['score'];
+            $categories[$categoryId]['parts'][$part->id] = ['id' => $part->id, 'title' => $part->name, 'score' => round($scoreData['score'], 2)];
+            $categories[$categoryId]['matched_terms'] = array_values(array_unique(array_merge($categories[$categoryId]['matched_terms'], $scoreData['matched_terms'], $scoreData['matched_ngrams'])));
         }
 
-        $suggestions = collect($scored)->map(function (array $row, int $categoryId): array {
+        $suggestions = collect($categories)->map(function (array $row, int $categoryId): array {
             $category = $row['category'];
             $partCount = count($row['parts']);
+            $consistencyBoost = $partCount > 1 ? min(8, $partCount * 2) : 0;
+
             return [
                 'category_id' => $categoryId,
                 'category_name' => $category->name,
                 'category_path' => $this->categoryPath($category),
-                'score' => round($row['score'] + ($partCount * 2), 2),
-                'matched_terms' => array_values(array_slice($row['matched_terms'], 0, 8)),
+                'score' => round($row['score'] + $consistencyBoost, 2),
+                'matched_terms' => array_values(array_slice($row['matched_terms'], 0, 10)),
                 'matched_parts_count' => $partCount,
-                'matched_parts' => array_values(array_slice($row['parts'], 0, 3, true)),
+                'matched_parts' => array_values(array_slice($row['parts'], 0, 5, true)),
             ];
         })->sortByDesc('score')->values();
 
-        if ($suggestions->isEmpty()) return $this->emptyResponse('Brak punktowanych dopasowań kategorii.');
+        if ($suggestions->isEmpty()) {
+            return $this->emptyResponse('Brak punktowanych dopasowań kategorii.', $analysis, $matchedParts);
+        }
 
         $top = $suggestions->first();
         $second = $suggestions->get(1);
-        $auto = $top['score'] >= 12 && ($top['matched_parts_count'] >= 2 || $top['score'] >= 18) && (! $second || $top['score'] >= ($second['score'] * 1.45));
+        $confidence = $this->confidence($top, $second);
+        $auto = $confidence >= 78 && $top['matched_parts_count'] >= 2 && (! $second || $top['score'] >= ($second['score'] * 1.55));
         $selected = $auto ? (int) $top['category_id'] : null;
+        $reason = $auto ? 'Jedna kategoria ma wyraźną przewagę podobnych produktów.' : 'Brak wyraźnego zwycięzcy; pokazano propozycje.';
 
         return [
             'auto_select' => $auto,
             'selected_category_id' => $selected,
             'suggestions' => $suggestions->take($limit)->values()->all(),
             'marketplace_mappings' => $selected ? $this->marketplaceMappingsForCategory($selected) : null,
-            'diagnostics' => (bool) config('app.debug') ? ['terms' => $terms, 'matched_parts_count' => $matches->count()] : null,
+            'diagnostics' => $this->diagnostics($analysis, $matchedParts, $suggestions->all(), $reason, $confidence),
         ];
     }
 
@@ -96,7 +109,7 @@ class PartCategorySuggestionService
     {
         $result = $this->suggestCategoryFromTitle((string) ($data['name'] ?? ''), $ignorePartId);
         $top = $result['suggestions'][0] ?? null;
-        return ['category_id' => $result['selected_category_id'] ?? ($top['category_id'] ?? null), 'confidence' => $top ? min(100, (int) round($top['score'] * 5)) : null, 'reason' => $top ? 'Sugestia z podobnych części: '.$top['matched_parts_count'].' dopasowań.' : ($result['diagnostics']['reason'] ?? null), 'auto_fill' => (bool) $result['auto_select']];
+        return ['category_id' => $result['selected_category_id'] ?? ($top['category_id'] ?? null), 'confidence' => $result['diagnostics']['confidence'] ?? null, 'reason' => $top ? 'Sugestia z podobnych części: '.$top['matched_parts_count'].' dopasowań.' : ($result['diagnostics']['auto_select_reason'] ?? null), 'auto_fill' => (bool) $result['auto_select']];
     }
 
     public function suggest(Part $part): Part { $s = $this->suggestionForInput($part->only(['name']), $part->exists ? $part->id : null); if ($s['category_id']) { $part->suggested_category_id=$s['category_id']; $part->category_confidence=$s['confidence']; $part->category_suggestion_reason=$s['reason']; $part->category_needs_review=!$s['auto_fill']; if (!$part->category_id && $s['auto_fill']) $part->category_id=$s['category_id']; } return $part; }
@@ -115,24 +128,106 @@ class PartCategorySuggestionService
         })->all();
     }
 
-    /** @return array<string, float> */
-    private function expandedTerms(string $title): array
+    /** @return array<string, mixed> */
+    private function analyzeTitle(string $title): array
     {
         $normalized = $this->normalize($title);
-        $stop = ['volkswagen','audi','bmw','seat','skoda','tiguan','sprawny','nowa','nowy','oryginal','oryginalny','kompletny'];
-        $terms = [];
-        foreach (['kompletny dpf'=>7,'dpf'=>9,'filtr czastek stalych'=>9,'katalizator'=>7,'chlodnica zawor egr'=>10,'chlodnica egr'=>10,'chlodnica spalin egr'=>10,'zawor egr'=>7,'egr'=>5,'alternator'=>8,'rozrusznik'=>8] as $phrase=>$weight) if (str_contains($normalized, $phrase)) $terms[$phrase]=$weight;
-        if (str_contains($normalized, 'dpf')) $terms += ['filtr czastek stalych'=>9, 'katalizator'=>5];
-        if (str_contains($normalized, 'chlodnica') && str_contains($normalized, 'egr')) $terms += ['chlodnica egr'=>10, 'chlodnica spalin egr'=>10, 'zawor egr'=>6];
-        foreach (preg_split('/\s+/', $normalized) ?: [] as $token) {
-            if (strlen($token) < 3 || in_array($token, $stop, true) || preg_match('/^(\d{4}|\d+[.,]?\d*|[a-z0-9]{8,})$/i', $token)) continue;
-            $terms[$token] ??= 2;
+        $tokens = array_values(array_filter(preg_split('/\s+/', $normalized) ?: []));
+        $noise = [];
+        $important = [];
+        $oem = [];
+        foreach ($tokens as $token) {
+            $type = $this->noiseType($token);
+            if ($type) { $noise[] = $token; if ($type === 'oem') $oem[] = $token; continue; }
+            if (strlen($token) >= 2) $important[] = $token;
         }
-        arsort($terms);
-        return array_slice($terms, 0, 12, true);
+        $candidateTerms = $this->candidateTerms($important, false);
+        $searchPhrases = array_values(array_unique(array_merge($candidateTerms, $oem)));
+        return ['normalized_title'=>$normalized, 'tokens'=>$tokens, 'important_tokens'=>$important, 'noise_tokens_removed'=>array_values(array_unique($noise)), 'oem_tokens'=>$oem, 'candidate_terms'=>$candidateTerms, 'search_phrases'=>$searchPhrases];
     }
 
-    private function normalize(string $value): string { $value = Str::ascii(Str::lower($value)); return preg_replace('/[^a-z0-9]+/', ' ', $value) ?: ''; }
+    private function normalize(string $value): string
+    {
+        $value = Str::ascii(Str::lower($value));
+        return trim(preg_replace('/[^a-z0-9]+/', ' ', $value) ?: '');
+    }
+
+    private function noiseType(string $token): ?string
+    {
+        $brandsModels = ['audi','volkswagen','vw','bmw','mercedes','opel','seat','skoda','ford','renault','peugeot','citroen','toyota','honda','nissan','mazda','volvo','fiat','hyundai','kia','a4','s4','a3','a5','a6','golf','passat','tiguan','octavia','leon'];
+        $state = ['sprawny','sprawna','nowy','nowa','uzywany','uzywana','oryginal','oryginalny','oryginalna','kompletny','kompletna','komplet'];
+        if (in_array($token, $brandsModels, true) || in_array($token, $state, true)) return 'low_weight';
+        if (preg_match('/^(19|20)\d{2}$/', $token)) return 'year';
+        if (preg_match('/^\d+[.,]?\d*$/', $token)) return 'capacity_or_number';
+        if (preg_match('/^[a-z0-9]{8,}$/', $token)) return 'oem';
+        if (preg_match('/^(b\d|[0-9][a-z]|[a-z][0-9])$/', $token)) return 'generation';
+        return null;
+    }
+
+    /** @return array<int, string> */
+    private function candidateTerms(array $tokens, bool $withSingles = true): array
+    {
+        $terms = [];
+        $count = count($tokens);
+        if ($count) $terms[] = implode(' ', $tokens);
+        for ($n = min(5, $count); $n >= 2; $n--) {
+            for ($i = 0; $i <= $count - $n; $i++) $terms[] = implode(' ', array_slice($tokens, $i, $n));
+        }
+        if ($withSingles) foreach ($tokens as $token) if (strlen($token) >= 3) $terms[] = $token;
+        return array_values(array_unique($terms));
+    }
+
+    private function candidateParts(array $analysis, ?int $ignorePartId): Collection
+    {
+        $phrases = array_slice($analysis['search_phrases'], 0, 18);
+        return Part::query()->with('category:id,name,parent_id,category_path,full_slug_path')
+            ->select(['id','category_id','name','sku','part_number','oem_number','manufacturer_code'])
+            ->whereNotNull('category_id')
+            ->when($ignorePartId, fn ($query) => $query->whereKeyNot($ignorePartId))
+            ->where(function ($query) use ($phrases): void {
+                foreach ($phrases as $phrase) {
+                    if (strlen($phrase) < 3) continue;
+                    $like = '%'.$phrase.'%';
+                    $query->orWhere('name', 'like', $like)->orWhere('sku', 'like', $like)->orWhere('part_number', 'like', $like)->orWhere('oem_number', 'like', $like)->orWhere('manufacturer_code', 'like', $like);
+                }
+            })->latest('id')->limit(120)->get();
+    }
+
+    private function documentFrequency(Collection $parts): array
+    {
+        $df = [];
+        foreach ($parts as $part) foreach (array_unique($this->analyzeTitle($part->name)['important_tokens']) as $token) $df[$token] = ($df[$token] ?? 0) + 1;
+        return $df;
+    }
+
+    private function scorePart(array $input, array $part, array $df, int $docs): array
+    {
+        $inputTokens = array_unique($input['important_tokens']);
+        $partTokens = array_unique($part['important_tokens']);
+        $overlap = array_values(array_intersect($inputTokens, $partTokens));
+        $score = 0.0;
+        foreach ($overlap as $token) $score += 2.5 * (1 + log(($docs + 1) / (($df[$token] ?? 0) + 1)));
+        $inputTerms = $this->candidateTerms($input['important_tokens'], false);
+        $partPhrase = ' '.implode(' ', $part['important_tokens']).' ';
+        $ngrams = [];
+        foreach ($inputTerms as $term) if (substr_count($term, ' ') >= 1 && str_contains($partPhrase, ' '.$term.' ')) { $ngrams[] = $term; $score += 4 + substr_count($term, ' '); }
+        $oemOverlap = array_intersect($input['oem_tokens'], $part['oem_tokens']);
+        if ($oemOverlap && $overlap) $score += 2;
+        return ['score'=>$score, 'important_overlap'=>count($overlap), 'matched_terms'=>$overlap, 'matched_ngrams'=>array_slice($ngrams, 0, 5)];
+    }
+
+    private function confidence(array $top, ?array $second): int
+    {
+        $base = min(90, (int) round($top['score'] * 4));
+        if ($second) $base = min($base, (int) round(55 + min(35, (($top['score'] - $second['score']) / max(1, $top['score'])) * 100)));
+        return max(0, min(100, $base));
+    }
+
+    private function diagnostics(array $analysis, array $matchedParts, array $matchedCategories, string $reason, int $confidence): array
+    {
+        return ['normalized_title'=>$analysis['normalized_title'], 'noise_tokens_removed'=>$analysis['noise_tokens_removed'], 'candidate_terms'=>$analysis['candidate_terms'], 'search_phrases'=>$analysis['search_phrases'], 'matched_parts'=>$matchedParts, 'matched_categories'=>$matchedCategories, 'auto_select_reason'=>$reason, 'confidence'=>$confidence];
+    }
+
     private function categoryPath(PartCategory $category): string { return $category->category_path ?: $category->full_slug_path ?: $category->name; }
-    private function emptyResponse(string $reason): array { return ['auto_select'=>false,'selected_category_id'=>null,'suggestions'=>[],'marketplace_mappings'=>null,'diagnostics'=>(bool) config('app.debug')?['reason'=>$reason]:null]; }
+    private function emptyResponse(string $reason, array $analysis = [], array $matchedParts = []): array { return ['auto_select'=>false,'selected_category_id'=>null,'suggestions'=>[],'marketplace_mappings'=>null,'diagnostics'=>$this->diagnostics($analysis + ['normalized_title'=>'','noise_tokens_removed'=>[],'candidate_terms'=>[],'search_phrases'=>[]], $matchedParts, [], $reason, 0)]; }
 }
