@@ -115,6 +115,119 @@ class SuggestOvokoCategoryMappingsFromLocalTreeControllerTest extends TestCase
             ->assertJsonPath('suggested_mappings.0.status', 'no_match');
     }
 
+
+    public function test_apply_dry_run_returns_would_create_for_high_suggested_item_and_writes_nothing(): void
+    {
+        $this->seedCategory(31, 'Zderzak przedni', 'Części > Zderzak przedni');
+        $this->seedPart(131, 31);
+        $this->seedOvoko('OV-31', 'Zderzak przedni', 'Części > Zderzak przedni');
+
+        $this->getJson('/tools/apply-ovoko-category-mappings-from-local-tree?token=gps_images_import_2026&dry_run=1&confirm=0&min_score=0.85&confidence=high')
+            ->assertOk()
+            ->assertJsonPath('read_only', true)
+            ->assertJsonPath('local_update', false)
+            ->assertJsonPath('mappings_changed', false)
+            ->assertJsonPath('items.0.action', 'would_create')
+            ->assertJsonPath('would_create_count', 1);
+
+        $this->assertDatabaseCount('marketplace_category_mappings', 0);
+    }
+
+    public function test_apply_confirm_creates_local_ovoko_mapping(): void
+    {
+        $this->seedCategory(32, 'Maska', 'Części > Maska');
+        $this->seedPart(132, 32);
+        $this->seedOvoko('OV-32', 'Maska', 'Części > Maska');
+
+        $this->getJson('/tools/apply-ovoko-category-mappings-from-local-tree?token=gps_images_import_2026&dry_run=0&confirm=1&min_score=0.85&confidence=high')
+            ->assertOk()
+            ->assertJsonPath('read_only', false)
+            ->assertJsonPath('local_update', true)
+            ->assertJsonPath('mappings_changed', true)
+            ->assertJsonPath('items.0.action', 'created')
+            ->assertJsonPath('created_count', 1);
+
+        $this->assertDatabaseHas('marketplace_category_mappings', ['local_category_id' => 32, 'channel' => 'ovoko', 'external_category_id' => 'OV-32', 'source' => 'local_ovoko_tree_name_match', 'confidence' => 'high']);
+        $this->assertDatabaseCount('marketplace_category_mappings', 1);
+    }
+
+    public function test_apply_existing_ovoko_mapping_is_skipped(): void
+    {
+        $this->seedCategory(33, 'Błotnik', 'Części > Błotnik');
+        $this->seedPart(133, 33);
+        $this->seedOvoko('OV-33', 'Błotnik', 'Części > Błotnik');
+        DB::table('marketplace_category_mappings')->insert(['local_category_id' => 33, 'channel' => 'ovoko', 'external_category_id' => 'OLD', 'created_at' => now(), 'updated_at' => now()]);
+
+        $this->getJson('/tools/apply-ovoko-category-mappings-from-local-tree?token=gps_images_import_2026&dry_run=0&confirm=1')
+            ->assertOk()
+            ->assertJsonPath('items.0.action', 'skipped_existing_mapping')
+            ->assertJsonPath('skipped_existing_mapping_count', 1);
+
+        $this->assertDatabaseCount('marketplace_category_mappings', 1);
+        $this->assertDatabaseHas('marketplace_category_mappings', ['local_category_id' => 33, 'channel' => 'ovoko', 'external_category_id' => 'OLD']);
+    }
+
+    public function test_apply_ambiguous_is_skipped_and_not_written(): void
+    {
+        $this->seedCategory(34, 'Lampa tylna');
+        $this->seedPart(134, 34);
+        $this->seedOvoko('OV-34A', 'Lampa tylna', 'Auta > Lampa tylna');
+        $this->seedOvoko('OV-34B', 'Tylna lampa', 'Auta > Tylna lampa');
+
+        $this->getJson('/tools/apply-ovoko-category-mappings-from-local-tree?token=gps_images_import_2026&dry_run=0&confirm=1')
+            ->assertOk()
+            ->assertJsonPath('items.0.action', 'skipped_ambiguous')
+            ->assertJsonPath('skipped_ambiguous_count', 1);
+
+        $this->assertDatabaseCount('marketplace_category_mappings', 0);
+    }
+
+    public function test_apply_no_match_is_skipped_and_not_written(): void
+    {
+        $this->seedCategory(35, 'Nieznana kategoria');
+        $this->seedPart(135, 35);
+        $this->seedOvoko('OV-35', 'Skrzynia biegów');
+
+        $this->getJson('/tools/apply-ovoko-category-mappings-from-local-tree?token=gps_images_import_2026&dry_run=0&confirm=1')
+            ->assertOk()
+            ->assertJsonPath('items.0.action', 'skipped_no_match')
+            ->assertJsonPath('skipped_no_match_count', 1);
+
+        $this->assertDatabaseCount('marketplace_category_mappings', 0);
+    }
+
+    public function test_apply_uncategorized_is_skipped(): void
+    {
+        $this->seedCategory(20, 'Bez kategorii', 'Bez kategorii');
+        $this->seedPart(120, 20);
+        $this->seedOvoko('OV-UNCAT', 'Bez kategorii', 'Bez kategorii');
+
+        $this->getJson('/tools/apply-ovoko-category-mappings-from-local-tree?token=gps_images_import_2026&dry_run=0&confirm=1&exclude_uncategorized=0')
+            ->assertOk()
+            ->assertJsonPath('items.0.action', 'skipped_uncategorized')
+            ->assertJsonPath('skipped_count', 1);
+
+        $this->assertDatabaseCount('marketplace_category_mappings', 0);
+    }
+
+    public function test_apply_does_not_change_products_offers_or_external_write_flags(): void
+    {
+        $this->seedCategory(36, 'Drzwi przednie', 'Części > Drzwi przednie');
+        $this->seedPart(136, 36);
+        $this->seedOvoko('OV-36', 'Drzwi przednie', 'Części > Drzwi przednie');
+        $partBefore = (array) DB::table('parts')->where('id', 136)->first();
+
+        $this->getJson('/tools/apply-ovoko-category-mappings-from-local-tree?token=gps_images_import_2026&dry_run=0&confirm=1&confidence=high')
+            ->assertOk()
+            ->assertJsonPath('ovoko_write', false)
+            ->assertJsonPath('allegro_write', false)
+            ->assertJsonPath('ebay_write', false)
+            ->assertJsonPath('products_changed', false)
+            ->assertJsonPath('offers_changed', false);
+
+        $this->assertEquals($partBefore, (array) DB::table('parts')->where('id', 136)->first());
+    }
+
     private function seedCategory(int $id, string $name, ?string $path = null, ?int $parentId = null): void
     {
         DB::table('part_categories')->insert(['id' => $id, 'parent_id' => $parentId, 'name' => $name, 'category_path' => $path ?? $name, 'is_visible' => true, 'created_at' => now(), 'updated_at' => now()]);

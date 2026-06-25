@@ -24,7 +24,7 @@ class SuggestOvokoCategoryMappingsFromLocalTreeController extends Controller
             'only_with_products' => $request->boolean('only_with_products', true),
             'leaf_only' => $request->boolean('leaf_only', true),
             'only_missing_ovoko' => $request->boolean('only_missing_ovoko', true),
-            'sample_limit' => max(0, min(1000, (int) $request->query('sample_limit', 200))),
+            'sample_limit' => max(0, min(2000, (int) $request->query('sample_limit', 200))),
             'min_score' => max(0.0, min(1.0, (float) $request->query('min_score', 0.85))),
             'category_id' => $request->query('category_id'),
             'include_existing' => $request->boolean('include_existing', false),
@@ -74,9 +74,92 @@ class SuggestOvokoCategoryMappingsFromLocalTreeController extends Controller
         }
     }
 
+    public function apply(Request $request)
+    {
+        if (! hash_equals(self::TOKEN, (string) $request->query('token', ''))) {
+            return response()->json(['ok' => false, 'error_message' => 'Invalid diagnostics token.'], 403);
+        }
+
+        $confirm = $request->boolean('confirm', false);
+        $dryRun = $request->boolean('dry_run', true) || ! $confirm;
+        $minScore = max(0.0, min(1.0, (float) $request->query('min_score', 0.85)));
+        $confidence = $request->query('confidence');
+        $status = $request->query('status', 'suggested');
+        $internalQuery = $request->query();
+        $internalQuery['sample_limit'] = max(0, min(2000, (int) $request->query('sample_limit', 1000)));
+        $internalQuery['min_score'] = $minScore;
+        $internalQuery['exclude_uncategorized'] = $request->boolean('exclude_uncategorized', true) ? 1 : 0;
+        $internalQuery['include_existing'] = 1;
+        $internalQuery['only_missing_ovoko'] = 0;
+
+        $payload = $this->__invoke(Request::create('/tools/suggest-ovoko-category-mappings-from-local-tree', 'GET', $internalQuery))->getData(true);
+        if (! ($payload['ok'] ?? false)) return response()->json($this->applyFlags($confirm && ! $dryRun, false) + $payload);
+
+        $items = [];
+        foreach (($payload['suggested_mappings'] ?? []) as $mapping) {
+            $item = $this->applyItem($mapping, $request->boolean('only_missing_ovoko', true), $request->boolean('exclude_uncategorized', true), $minScore, $confidence, $status);
+            if ($confirm && ! $dryRun && $item['action'] === 'would_create') {
+                if ($this->existingOvokoMapping((int) $item['local_category_id'])) {
+                    $item['action'] = 'skipped_existing_mapping';
+                } else {
+                    $this->createOvokoMapping($item);
+                    $item['action'] = 'created';
+                }
+            }
+            $items[] = $item;
+        }
+        $counts = $this->applyCounts($items);
+
+        return response()->json($this->applyFlags($confirm && ! $dryRun, $counts['created_count'] > 0) + $counts + [
+            'ok' => true,
+            'dry_run' => $dryRun,
+            'parameters' => ['only_public' => $request->boolean('only_public', true), 'only_with_products' => $request->boolean('only_with_products', true), 'leaf_only' => $request->boolean('leaf_only', true), 'only_missing_ovoko' => $request->boolean('only_missing_ovoko', true), 'exclude_uncategorized' => $request->boolean('exclude_uncategorized', true), 'sample_limit' => $internalQuery['sample_limit'], 'min_score' => $minScore, 'confidence' => $confidence, 'status' => $status],
+            'suggested_mapping_count' => count($payload['suggested_mappings'] ?? []),
+            'errors_count' => count($payload['diagnostics']['errors_sample'] ?? []),
+            'items' => $items,
+        ]);
+    }
+
     private function flags(): array
     {
         return ['read_only' => true, 'local_update' => false, 'ovoko_write' => false, 'allegro_write' => false, 'ebay_write' => false, 'products_changed' => false, 'offers_changed' => false, 'mappings_changed' => false];
+    }
+
+
+    private function applyFlags(bool $confirmedWrite, bool $changed): array
+    {
+        return ['read_only' => ! $confirmedWrite, 'local_update' => $confirmedWrite, 'ovoko_write' => false, 'allegro_write' => false, 'ebay_write' => false, 'products_changed' => false, 'offers_changed' => false, 'mappings_changed' => $confirmedWrite && $changed];
+    }
+
+    private function applyItem(array $mapping, bool $onlyMissingOvoko, bool $excludeUncategorized, float $minScore, ?string $confidenceFilter, ?string $statusFilter): array
+    {
+        $item = $mapping + ['action' => 'would_create'];
+        if ((int) ($item['local_category_id'] ?? 0) === 20 || $this->normalize((string) ($item['local_category_name'] ?? '')) === $this->normalize('Bez kategorii') || $this->normalize((string) ($item['category_path'] ?? '')) === $this->normalize('Bez kategorii')) $item['action'] = 'skipped_uncategorized';
+        elseif ($onlyMissingOvoko && $this->existingOvokoMapping((int) $item['local_category_id'])) $item['action'] = 'skipped_existing_mapping';
+        elseif (($item['status'] ?? null) === 'ambiguous') $item['action'] = 'skipped_ambiguous';
+        elseif (($item['status'] ?? null) === 'no_match' || empty($item['suggested_ovoko_category_id'])) $item['action'] = 'skipped_no_match';
+        elseif ($statusFilter !== null && $statusFilter !== '' && ($item['status'] ?? null) !== $statusFilter) $item['action'] = 'skipped_no_match';
+        elseif ($confidenceFilter !== null && $confidenceFilter !== '' && ($item['confidence'] ?? null) !== $confidenceFilter) $item['action'] = 'skipped_low_confidence';
+        elseif ((float) ($item['score'] ?? 0) < $minScore) $item['action'] = 'skipped_low_score';
+        return $item;
+    }
+
+    private function createOvokoMapping(array $item): void
+    {
+        $now = now();
+        $row = ['local_category_id' => (int) $item['local_category_id'], 'channel' => 'ovoko', 'external_category_id' => (string) $item['suggested_ovoko_category_id'], 'external_category_name' => $item['suggested_ovoko_category_name'], 'external_category_path' => $item['suggested_ovoko_category_path'], 'local_category_name' => $item['local_category_name'], 'local_category_path' => $item['category_path'], 'source' => 'local_ovoko_tree_name_match', 'confidence' => $item['confidence'], 'metadata' => json_encode(['score' => $item['score'], 'local_category_name' => $item['local_category_name'], 'category_path' => $item['category_path'], 'candidates_count' => count($item['candidates'] ?? [])]), 'imported_at' => $now, 'created_at' => $now, 'updated_at' => $now];
+        DB::table('marketplace_category_mappings')->insert(array_filter($row, fn ($value, $column) => Schema::hasColumn('marketplace_category_mappings', $column), ARRAY_FILTER_USE_BOTH));
+    }
+
+    private function applyCounts(array $items): array
+    {
+        $counts = array_fill_keys(['would_create_count','created_count','skipped_count','skipped_existing_mapping_count','skipped_ambiguous_count','skipped_no_match_count','skipped_low_confidence_count','skipped_low_score_count'], 0);
+        foreach ($items as $item) {
+            $action = (string) ($item['action'] ?? '');
+            if (isset($counts[$action.'_count'])) $counts[$action.'_count']++;
+            if (str_starts_with($action, 'skipped_')) $counts['skipped_count']++;
+        }
+        return $counts;
     }
 
     private function loadLocalRows(array $filters)
