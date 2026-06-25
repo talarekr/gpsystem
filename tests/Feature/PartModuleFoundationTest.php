@@ -354,6 +354,7 @@ class PartModuleFoundationTest extends TestCase
             ->assertSee($expectedImagePaths[0])
             ->assertSee($expectedImagePaths[1])
             ->assertSee('Usuń zdjęcie części')
+            ->assertSeeHtml('style="right: 0.25rem; color: var(--gps-admin-navy);"')
             ->assertSee(route('storefront.product', $part->slug))
             ->assertSeeHtml('target="_blank"')
             ->assertDontSee('Przetwórz zdjęcia produktu')
