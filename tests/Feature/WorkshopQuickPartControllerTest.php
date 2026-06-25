@@ -5,10 +5,14 @@ namespace Tests\Feature;
 use App\Mail\WorkshopPartCreatedMail;
 use App\Models\Part;
 use App\Models\PartImage;
+use App\Models\StorageLocation;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class WorkshopQuickPartControllerTest extends TestCase
@@ -88,6 +92,92 @@ class WorkshopQuickPartControllerTest extends TestCase
             $this->assertNotEmpty($image->external_id);
             $this->assertSame('/storage/'.$image->path, $image->relativePublicUrl());
             Storage::disk('public')->assertExists($image->path);
+        }
+    }
+    public function test_workshop_storage_autocomplete_returns_existing_locations_after_minimum_three_characters_without_import_description(): void
+    {
+        $this->actingAs(User::factory()->create());
+
+        StorageLocation::query()->create([
+            'name' => '2D3',
+            'description' => StorageLocation::ALLEGRO_IMPORT_DESCRIPTION,
+        ]);
+
+        $this->getJson('/warsztat/storage-locations?q=2D')
+            ->assertOk()
+            ->assertJsonPath('data', []);
+
+        $response = $this->getJson('/warsztat/storage-locations?q=2D3')
+            ->assertOk()
+            ->assertJsonPath('data.0.name', '2D3');
+
+        $this->assertStringNotContainsString(StorageLocation::ALLEGRO_IMPORT_DESCRIPTION, $response->getContent());
+    }
+
+    public function test_workshop_selected_existing_storage_location_assigns_existing_id(): void
+    {
+        Storage::fake('public');
+        $location = StorageLocation::query()->create(['name' => 'HGF7904']);
+
+        $this->post('/tools/workshop/quick-part-create?token='.self::TOKEN, [
+            'photos' => [UploadedFile::fake()->image('front.jpg')],
+            'storage_location' => 'HGF7904',
+            'storage_location_id' => $location->id,
+            'part_number' => 'EXISTING-ID',
+        ])->assertRedirect('/tools/workshop/quick-part-create?token='.self::TOKEN);
+
+        $this->assertSame($location->id, Part::query()->where('part_number', 'EXISTING-ID')->value('storage_location_id'));
+        $this->assertSame(1, StorageLocation::query()->where('name', 'HGF7904')->count());
+    }
+
+    public function test_workshop_does_not_duplicate_storage_location_matching_normalized_name(): void
+    {
+        Storage::fake('public');
+        $location = StorageLocation::query()->create(['name' => 'KON 12']);
+
+        $this->post('/tools/workshop/quick-part-create?token='.self::TOKEN, [
+            'photos' => [UploadedFile::fake()->image('front.jpg')],
+            'storage_location' => '  kon   12  ',
+            'part_number' => 'NORMALIZED-ID',
+        ])->assertRedirect('/tools/workshop/quick-part-create?token='.self::TOKEN);
+
+        $this->assertSame($location->id, Part::query()->where('part_number', 'NORMALIZED-ID')->value('storage_location_id'));
+        $this->assertSame(1, StorageLocation::query()->count());
+    }
+
+    public function test_workshop_creates_new_storage_location_only_when_no_match_exists_and_trims_whitespace(): void
+    {
+        Storage::fake('public');
+
+        $this->post('/tools/workshop/quick-part-create?token='.self::TOKEN, [
+            'photos' => [UploadedFile::fake()->image('front.jpg')],
+            'storage_location' => '  Nowy   Regał  7  ',
+            'part_number' => 'NEW-LOCATION-ID',
+        ])->assertRedirect('/tools/workshop/quick-part-create?token='.self::TOKEN);
+
+        $this->assertDatabaseHas('storage_locations', ['name' => 'Nowy Regał 7']);
+        $this->assertSame('Nowy Regał 7', Part::query()->where('part_number', 'NEW-LOCATION-ID')->firstOrFail()->storageLocation->name);
+    }
+
+    public function test_workshop_storage_changes_do_not_enable_marketplace_or_api_writes(): void
+    {
+        Storage::fake('public');
+
+        $beforeListings = Schema::hasTable('marketplace_listings') ? DB::table('marketplace_listings')->count() : null;
+
+        $this->post('/tools/workshop/quick-part-create?token='.self::TOKEN, [
+            'photos' => [UploadedFile::fake()->image('front.jpg')],
+            'storage_location' => 'NOAPI',
+            'part_number' => 'NOAPI-ID',
+        ])->assertRedirect('/tools/workshop/quick-part-create?token='.self::TOKEN);
+
+        $this->assertFalse(config('product-hub.feature_flags.external_api_writes_enabled'));
+        $this->assertFalse(config('product-hub.feature_flags.ebay_publishing_enabled'));
+        $this->assertFalse(config('product-hub.feature_flags.allegro_integration_enabled'));
+        $this->assertFalse(config('product-hub.feature_flags.ovoko_integration_enabled'));
+
+        if ($beforeListings !== null) {
+            $this->assertSame($beforeListings, DB::table('marketplace_listings')->count());
         }
     }
 

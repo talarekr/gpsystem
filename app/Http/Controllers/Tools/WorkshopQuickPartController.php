@@ -7,6 +7,7 @@ use App\Mail\WorkshopPartCreatedMail;
 use App\Models\Part;
 use App\Models\StorageLocation;
 use App\Services\Parts\PartImageUploadService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -30,6 +31,29 @@ class WorkshopQuickPartController extends Controller
     public function createAuthenticated(Request $request): View
     {
         return $this->renderForm($request);
+    }
+
+    public function storageLocationAutocomplete(Request $request): JsonResponse
+    {
+        $search = StorageLocation::displayName((string) $request->query('q', ''));
+
+        if (mb_strlen($search) < 3) {
+            return response()->json(['data' => []]);
+        }
+
+        $locations = StorageLocation::query()
+            ->where('is_active', true)
+            ->where('name', 'like', '%'.$search.'%')
+            ->orderBy('name')
+            ->limit(20)
+            ->get(['id', 'name'])
+            ->map(fn (StorageLocation $location): array => [
+                'id' => $location->id,
+                'name' => $location->name,
+            ])
+            ->values();
+
+        return response()->json(['data' => $locations]);
     }
 
     public function store(Request $request, PartImageUploadService $partImageUploadService): RedirectResponse
@@ -59,6 +83,7 @@ class WorkshopQuickPartController extends Controller
             'photos' => ['required', 'array', 'min:1'],
             'photos.*' => ['required', 'image', 'max:12288'],
             'storage_location' => ['required', 'string', 'max:255'],
+            'storage_location_id' => ['nullable', 'integer', 'exists:storage_locations,id'],
             'part_number' => ['required', 'string', 'max:255'],
             'internal_note' => ['nullable', 'string', 'max:5000'],
             'send_email_copy' => ['nullable', 'boolean'],
@@ -72,9 +97,9 @@ class WorkshopQuickPartController extends Controller
         ]);
 
         $part = DB::transaction(function () use ($request, $validated, $partImageUploadService): Part {
-            $location = StorageLocation::query()->firstOrCreate(
-                ['name' => trim($validated['storage_location'])],
-                ['is_active' => true]
+            $location = $this->resolveStorageLocation(
+                StorageLocation::displayName($validated['storage_location']),
+                isset($validated['storage_location_id']) ? (int) $validated['storage_location_id'] : null,
             );
 
             $part = Part::query()->create([
@@ -117,6 +142,32 @@ class WorkshopQuickPartController extends Controller
         }
 
         return $redirect;
+    }
+
+    private function resolveStorageLocation(string $name, ?int $selectedLocationId): StorageLocation
+    {
+        if ($selectedLocationId !== null) {
+            $selected = StorageLocation::query()->find($selectedLocationId);
+
+            if ($selected !== null) {
+                return $selected;
+            }
+        }
+
+        $normalizedName = StorageLocation::normalizeName($name);
+
+        $existing = StorageLocation::query()
+            ->get()
+            ->first(fn (StorageLocation $location): bool => StorageLocation::normalizeName($location->name) === $normalizedName);
+
+        if ($existing !== null) {
+            return $existing;
+        }
+
+        return StorageLocation::query()->create([
+            'name' => $name,
+            'is_active' => true,
+        ]);
     }
 
     private function sendWorkshopNotification(Part $part): ?string

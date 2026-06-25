@@ -101,12 +101,12 @@ class PartResource extends Resource
                     ->schema([
                         Forms\Components\TextInput::make('name')->label('Tytuł produktu')->required()->maxLength(255)->live(onBlur: true)->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))->columnSpanFull(),
                         Forms\Components\TextInput::make('part_number')->label('Główny kod części')->maxLength(255)->live(onBlur: true)->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))->columnSpanFull(),
-                        Forms\Components\TextInput::make('sku')->label('SKU / kod wewnętrzny')->unique(ignoreRecord: true)->maxLength(255)->live(onBlur: true)->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))->columnSpanFull(),
+                        Forms\Components\Hidden::make('sku'),
                         Forms\Components\Select::make('category_id')->label('Kategoria')->placeholder('Kategoria')->relationship('category', 'name')->searchable()->preload()->native(false)->suffixAction(self::categoryTreeAction())->columnSpanFull(),
                         Forms\Components\Select::make('condition_notes')->label('Jakość')->placeholder('Jakość')->options(['Używany' => 'Używany', 'Nowy' => 'Nowy', 'Uszkodzony' => 'Uszkodzony', 'Regenerowany' => 'Regenerowany'])->default('Używany')->native(false)->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])->columnSpan(6),
                         Forms\Components\Select::make('part_position')->label('Pozycja części (strona zabudowy)')->placeholder('Wybierz')->options(['Wszystkie' => 'Wszystkie', 'Lewa strona' => 'Lewa strona', 'Środek' => 'Środek', 'Prawa strona' => 'Prawa strona', 'Komplet' => 'Komplet', 'Tył strona lewa' => 'Tył strona lewa', 'Tył strona prawa' => 'Tył strona prawa', 'Przód strona lewa' => 'Przód strona lewa', 'Przód strona prawa' => 'Przód strona prawa', 'Przód' => 'Przód', 'Tył' => 'Tył'])->default(null)->native(false)->dehydrated(false)->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])->columnSpan(6),
-                        Forms\Components\Select::make('steering_side')->label('Kierownica po stronie')->placeholder('Kierownica po stronie')->options(['Lewej' => 'Lewej', 'Prawej' => 'Prawej'])->default('Lewej')->native(false)->dehydrated(false)->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])->columnSpan(6),
-                        Forms\Components\Select::make('storage_location_id')->label('Magazyn')->placeholder('Wpisz min. 2 znaki')->searchable()->searchDebounce(400)->getSearchResultsUsing(fn (string $search): array => self::storageLocationSearchResults($search))->getOptionLabelUsing(fn ($value): ?string => self::storageLocationOptionLabel($value))->native(false)->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])->columnSpan(6),
+                        Forms\Components\Select::make('steering_side')->label('Kierownica po stronie')->placeholder('Kierownica po stronie')->options(['po lewej' => 'po lewej', 'po prawej' => 'po prawej'])->default('po lewej')->native(false)->dehydrated(false)->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])->columnSpan(6),
+                        Forms\Components\Select::make('storage_location_id')->label('Magazyn')->placeholder('Wpisz min. 3 znaki')->searchable()->searchDebounce(400)->getSearchResultsUsing(fn (string $search): array => self::storageLocationSearchResults($search))->getOptionLabelUsing(fn ($value): ?string => self::storageLocationOptionLabel($value))->native(false)->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])->columnSpan(6),
                         Forms\Components\RichEditor::make('description')->label('Opis')->placeholder('Opis')->columnSpanFull(),
                         Forms\Components\Hidden::make('suggested_category_id'),
                         Forms\Components\Hidden::make('category_confidence'),
@@ -216,7 +216,7 @@ class PartResource extends Resource
 
     private static function storageLocationSearchResults(string $search): array
     {
-        if (mb_strlen(trim($search)) < 2) {
+        if (mb_strlen(trim($search)) < 3) {
             return [];
         }
 
@@ -251,7 +251,7 @@ class PartResource extends Resource
 
     private static function storageLocationLabel(StorageLocation $location): string
     {
-        return trim($location->name.' — '.($location->description ?? ''), ' —');
+        return $location->name;
     }
 
 
