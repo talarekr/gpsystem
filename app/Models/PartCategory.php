@@ -12,6 +12,7 @@ class PartCategory extends Model
     protected $fillable = [
         'parent_id', 'source_system', 'external_id', 'name', 'slug', 'sort_order', 'category_path',
         'full_slug_path', 'woo_product_count', 'description', 'thumbnail_url', 'legacy_payload',
+        'active', 'is_active', 'visible', 'is_visible', 'show_in_menu', 'status',
     ];
 
     protected function casts(): array

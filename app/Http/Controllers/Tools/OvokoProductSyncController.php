@@ -20,6 +20,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Str;
 use Throwable;
 
 class OvokoProductSyncController extends Controller
@@ -2637,6 +2638,125 @@ HTML, 200, ['Content-Type' => 'text/html; charset=UTF-8']);
         return response()->json($result);
     }
 
+
+    public function categoryDisplaySplitsFixAutorun(Request $request)
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+        $token = (string) $request->query('token', self::TOKEN);
+        $startUrl = url('/tools/start-category-display-splits-fix-autorun').'?token='.urlencode($token).'&confirm=1&batch_size=20&ignore_ebay_mapping=1&copy_mappings=0';
+        $debugUrl = url('/tools/debug-category-display-splits-fix-autorun').'?token='.urlencode($token);
+        return response(<<<HTML
+<!doctype html><html><head><meta charset="utf-8"><title>Category display splits fix autorun</title><style>body{font-family:system-ui;margin:24px;max-width:1200px}button{font-size:16px;padding:8px 14px;margin-right:8px}pre{background:#111;color:#eee;padding:16px;overflow:auto;max-height:420px}.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.card{border:1px solid #ddd;padding:12px;border-radius:8px}.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.error{color:#b00020;font-weight:700}</style></head><body>
+<h1>Category display splits fix autorun</h1><p>Local Laravel-only repair. Marketplace mapping copy is disabled; no eBay/Ovoko/Allegro API writes.</p>
+<div class="toolbar"><button onclick="startRun()">Start/Resume</button><button onclick="paused=true;state('paused')">Pause/Stop locally</button><button onclick="debugRun()">Debug</button></div><p id="state">idle</p><div id="cards" class="grid"></div><h2>Output</h2><pre id="out"></pre>
+<script>
+let runId=null, paused=false; const startUrl='$startUrl', debugUrl='$debugUrl';
+function state(s){document.getElementById('state').textContent=s} function show(d){document.getElementById('out').textContent=JSON.stringify(d,null,2); runId=d.run_id||runId; const keys=['status','processed_groups_count','total_groups_count','created_categories_count','moved_products_count','reparented_children_count','hidden_old_categories_count','failed_count']; document.getElementById('cards').innerHTML=keys.map(k=>'<div class="card"><b>'+k+'</b><br>'+(d[k]??'')+'</div>').join('')}
+async function get(u){const r=await fetch(u); const d=await r.json(); show(d); if(!r.ok) throw new Error(d.error_message||'request failed'); return d}
+async function startRun(){paused=false; state('starting'); const d=await get(startUrl); if(d.next_url) tick(d.next_url)}
+async function tick(u){if(paused)return; state('running'); const d=await get(u); if((d.status==='running'||d.status==='started')&&d.next_url&&!paused)setTimeout(()=>tick(d.next_url),400); else state(d.status||'done')}
+async function debugRun(){state('debug'); await get(debugUrl)}
+</script></body></html>
+HTML);
+    }
+
+    public function debugCategoryDisplaySplitsFixAutorun(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+        $warnings = [];
+        $groups = $this->buildCategoryDisplaySplitFixGroups($warnings);
+        $visibility = $this->categoryDisplaySplitVisibilityColumns();
+        $cacheKey = 'category_display_splits_fix_autorun_debug_'.Str::random(8);
+        Cache::put($cacheKey, 'ok', now()->addMinute());
+        return response()->json([
+            'ok' => true, 'can_build_plan' => $groups !== [], 'split_categories_count' => collect($groups)->sum(fn ($g) => count($g['categories_in_group'] ?? [])),
+            'repair_groups_count' => count($groups), 'estimated_create_categories_count' => collect($groups)->where('target_exists_locally', false)->count(),
+            'estimated_move_products_count' => collect($groups)->sum(fn ($g) => collect($g['categories_in_group'])->sum('local_products_count')),
+            'estimated_reparent_children_count' => collect($groups)->sum(fn ($g) => collect($g['categories_in_group'])->sum('children_count')),
+            'estimated_hide_old_categories_count' => collect($groups)->sum(fn ($g) => count($g['categories_in_group'] ?? [])),
+            'visibility_columns_detected' => $visibility, 'mapping_copy_disabled' => true, 'marketplace_api_write' => false,
+            'sample_group' => $groups[0] ?? null, 'cache_write_test' => Cache::get($cacheKey) === 'ok', 'warnings' => $warnings,
+        ]);
+    }
+
+    public function startCategoryDisplaySplitsFixAutorun(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+        if ((string) $request->query('confirm') !== '1') return response()->json(['ok' => false, 'error_message' => 'confirm=1 required'], 422);
+        $warnings = [];
+        $groups = $this->buildCategoryDisplaySplitFixGroups($warnings);
+        $runId = (string) Str::uuid();
+        $state = $this->categoryDisplaySplitInitialState($runId, $groups, max(1, min(100, (int) $request->query('batch_size', 20))), $request->boolean('ignore_ebay_mapping', true), $request->boolean('copy_mappings', false), $warnings);
+        $this->putCategoryDisplaySplitRun($state);
+        return response()->json($this->categoryDisplaySplitPublicStateWithNextUrl($state, $request));
+    }
+
+    public function runCategoryDisplaySplitsFixAutorun(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+        $state = Cache::get($this->categoryDisplaySplitRunCacheKey((string) $request->query('run_id', '')));
+        if (! $state) return response()->json(['ok' => false, 'error_message' => 'run_id not found'], 404);
+        if (($state['status'] ?? '') !== 'running') return response()->json($this->categoryDisplaySplitPublicState($state));
+        $batchSize = (int) ($state['batch_size'] ?? 20);
+        for ($i = 0; $i < $batchSize && (int) $state['processed_groups_count'] < (int) $state['total_groups_count']; $i++) {
+            $idx = (int) $state['processed_groups_count'];
+            try { $this->processCategoryDisplaySplitGroup($state, $state['groups'][$idx]); } catch (Throwable $e) { $state['failed_count']++; $this->pushSample($state['sample_errors'], ['group_index' => $idx, 'error' => $e->getMessage()], 20); }
+            $state['processed_groups_count']++;
+        }
+        if ((int) $state['processed_groups_count'] >= (int) $state['total_groups_count']) $state['status'] = 'complete';
+        $state['updated_at'] = now()->toISOString(); $this->putCategoryDisplaySplitRun($state);
+        return response()->json($this->categoryDisplaySplitPublicStateWithNextUrl($state, $request));
+    }
+
+    public function statusCategoryDisplaySplitsFixAutorun(Request $request): JsonResponse { if (! $this->validToken($request)) return $this->invalidTokenResponse(); $state = Cache::get($this->categoryDisplaySplitRunCacheKey((string) $request->query('run_id', ''))); return $state ? response()->json($this->categoryDisplaySplitPublicState($state)) : response()->json(['ok'=>false,'error_message'=>'run_id not found'],404); }
+    public function resultsCategoryDisplaySplitsFixAutorun(Request $request): JsonResponse { return $this->statusCategoryDisplaySplitsFixAutorun($request); }
+    public function resetCategoryDisplaySplitsFixAutorun(Request $request): JsonResponse { if (! $this->validToken($request)) return $this->invalidTokenResponse(); if ((string) $request->query('confirm') !== '1') return response()->json(['ok'=>false,'error_message'=>'confirm=1 required'],422); Cache::forget($this->categoryDisplaySplitRunCacheKey((string) $request->query('run_id',''))); return response()->json(['ok'=>true,'reset'=>true]); }
+
+    private function buildCategoryDisplaySplitFixGroups(array &$warnings): array
+    {
+        if (! Schema::hasTable('part_categories') || ! Schema::hasTable('marketplace_categories')) { $warnings[] = 'missing_required_tables'; return []; }
+        $localRows = PartCategory::query()->with('marketplaceMappings')->get(); $localById = $localRows->keyBy(fn (PartCategory $cat): string => (string) $cat->id);
+        $localInfos = $localRows->map(fn (PartCategory $cat): array => ['model'=>$cat,'path'=>$this->localCategoryDisplayPath($cat->toArray(), $localById),'normalized_path'=>$this->normalizeCanonicalCategoryDisplayPath($this->localCategoryDisplayPath($cat->toArray(), $localById))]);
+        $localByNormalizedPath = $localInfos->filter(fn ($i) => $i['normalized_path'] !== '')->keyBy('normalized_path'); $pathById = $localInfos->mapWithKeys(fn ($i) => [(int) $i['model']->id => $i['path']])->all();
+        $ovokoRows = DB::table('marketplace_categories')->select($this->safeSelectColumns('marketplace_categories', ['id','external_category_id','name','full_path']))->where('channel','ovoko')->get()->map(fn ($r)=>(array)$r)->all();
+        $ovokoByNorm = collect($ovokoRows)->filter(fn ($r) => filled($r['full_path'] ?? null))->groupBy(fn ($r) => $this->normalizeCanonicalCategoryDisplayPath((string) $r['full_path']));
+        $partsCounts = Schema::hasTable('parts') && Schema::hasColumn('parts','category_id') ? DB::table('parts')->select('category_id', DB::raw('count(*) as count'))->whereNotNull('category_id')->groupBy('category_id')->pluck('count','category_id')->map(fn ($v)=>(int)$v)->all() : [];
+        $childrenByParent = $localRows->groupBy(fn (PartCategory $cat): string => (string) ($cat->parent_id ?? '')); $mappingRows = Schema::hasTable('marketplace_category_mappings') ? DB::table('marketplace_category_mappings')->select($this->safeSelectColumns('marketplace_category_mappings', ['local_category_id','channel']))->get()->groupBy('local_category_id') : collect();
+        $splits = [];
+        foreach ($localInfos as $info) { $cat=$info['model']; $path=$info['path']; if ($path==='' || $ovokoByNorm->get($info['normalized_path'], collect())->isNotEmpty()) continue; $matches=collect(); foreach ($this->shopTreeDisplayAuditCandidates($path) as $candidate) { $candidateMatches=$ovokoByNorm->get($this->normalizeCanonicalCategoryDisplayPath($candidate), collect()); if ($candidateMatches->isNotEmpty()) $matches=$candidateMatches; if ($matches->count()===1) break; } if ($matches->count() !== 1) continue; $target=$matches->first(); $targetNorm=$this->normalizeCanonicalCategoryDisplayPath((string)($target['full_path']??'')); $channels=$mappingRows->get($cat->id, collect())->pluck('channel')->filter()->values()->map(fn($v)=>(string)$v)->all(); $children=$childrenByParent->get((string)$cat->id, collect()); $splits[(int)$cat->id]=['cat'=>$cat,'path'=>$path,'matches_count'=>1,'target'=>$target,'target_local'=>$localByNormalizedPath->get($targetNorm),'products_count'=>(int)($partsCounts[$cat->id]??0),'descendants_products_count'=>$this->descendantsProductsCountForPath($path,$localInfos,$partsCounts,(int)$cat->id),'children_count'=>$children->count(),'channels'=>$channels,'woo'=>null]; }
+        $childrenSplitIds=[]; foreach ($splits as $id=>$split) { $parentId=(int)($split['cat']->parent_id??0); if ($parentId && isset($splits[$parentId])) $childrenSplitIds[$id]=true; }
+        $groups=[]; foreach ($splits as $id=>$split) { if (isset($childrenSplitIds[$id])) continue; $members=collect($splits)->filter(fn ($candidate) => (int)$candidate['cat']->id===$id || str_starts_with((string)$candidate['path'], $split['path'].' > '))->values(); $group=$this->categoryDisplaySplitRepairGroup($split,$members,$partsCounts,$pathById,false,false,true); $group['operations']=array_values(array_filter($group['operations'], fn ($op) => ($op['type'] ?? '') !== 'copy_mapping')); $groups[]=$group; }
+        return $groups;
+    }
+
+    private function processCategoryDisplaySplitGroup(array &$state, array $group): void
+    {
+        foreach ($group['categories_in_group'] as $category) {
+            $sourceId=(int)$category['local_category_id']; $targetPath=(string)$category['proposed_ovoko_path']; if ($sourceId <= 0 || $targetPath === '') { $state['skipped_groups_count']++; $this->pushSample($state['sample_skipped_groups'], $category, 20); continue; }
+            $target = $this->ensureCanonicalCategoryForOvokoPath($targetPath, (string)($category['proposed_ovoko_category_id'] ?? ''), $state);
+            $targetId = (int) $target->id; if ($targetId === $sourceId) continue;
+            if (Schema::hasTable('parts') && Schema::hasColumn('parts','category_id')) { $moved=DB::table('parts')->where('category_id',$sourceId)->update(['category_id'=>$targetId]); $state['moved_products_count'] += $moved; if ($moved) $this->pushSample($state['sample_moved_products'], ['source_category_id'=>$sourceId,'target_category_id'=>$targetId,'count'=>$moved], 20); }
+            $reparented=PartCategory::query()->where('parent_id',$sourceId)->where('id','!=',$targetId)->update(['parent_id'=>$targetId]); $state['reparented_children_count'] += $reparented; if ($reparented) $this->pushSample($state['sample_reparented_children'], ['source_category_id'=>$sourceId,'target_category_id'=>$targetId,'count'=>$reparented], 20);
+            $remainingProducts = Schema::hasTable('parts') && Schema::hasColumn('parts','category_id') ? DB::table('parts')->where('category_id',$sourceId)->count() : 0; $remainingChildren = PartCategory::query()->where('parent_id',$sourceId)->count();
+            if ($remainingProducts == 0 && $remainingChildren == 0) { if ($this->hideCategoryDisplaySplitOldCategory($sourceId)) { $state['hidden_old_categories_count']++; $this->pushSample($state['sample_hidden_old_categories'], ['source_category_id'=>$sourceId], 20); } else $state['warnings'][]='no_visibility_column_old_category_not_hidden:'.$sourceId; }
+        }
+    }
+
+    private function ensureCanonicalCategoryForOvokoPath(string $fullPath, string $externalId, array &$state): PartCategory
+    {
+        $norm=$this->normalizeCanonicalCategoryDisplayPath($fullPath); $all=PartCategory::query()->get(); $byId=$all->keyBy(fn ($c)=>(string)$c->id); foreach ($all as $cat) if ($this->normalizeCanonicalCategoryDisplayPath($this->localCategoryDisplayPath($cat->toArray(), $byId))===$norm) return $cat;
+        $segments=array_values(array_filter(array_map('trim', explode(' > ', $fullPath)))); $path=''; $parentId=null; $created=null;
+        foreach ($segments as $i=>$segment) { $path=$path===''?$segment:$path.' > '.$segment; $existing=PartCategory::query()->where('category_path',$path)->first(); if (!$existing) { $data=['parent_id'=>$parentId,'source_system'=>'ovoko','name'=>$segment,'slug'=>Str::slug($segment),'category_path'=>$path,'legacy_payload'=>['source'=>'category_display_split_fix','ovoko_full_path'=>$path]]; if (Schema::hasColumn('part_categories','external_id') && $i===count($segments)-1 && $externalId!=='') $data['external_id']=$externalId; foreach (['active','is_active','visible','is_visible','show_in_menu'] as $col) if (Schema::hasColumn('part_categories',$col)) $data[$col]=true; $existing=PartCategory::query()->create($data); $state['created_categories_count']++; $this->pushSample($state['sample_created_categories'], ['category_id'=>$existing->id,'category_path'=>$path], 20); } $parentId=$existing->id; $created=$existing; }
+        return $created ?: PartCategory::query()->where('category_path',$fullPath)->firstOrFail();
+    }
+
+    private function hideCategoryDisplaySplitOldCategory(int $categoryId): bool { $data=[]; foreach (['active','is_active','visible','is_visible','show_in_menu'] as $col) if (Schema::hasColumn('part_categories',$col)) $data[$col]=false; if (Schema::hasColumn('part_categories','status')) $data['status']='inactive'; if ($data===[]) return false; PartCategory::query()->whereKey($categoryId)->update($data); return true; }
+    private function categoryDisplaySplitVisibilityColumns(): array { return array_values(array_filter(['active','is_active','visible','is_visible','show_in_menu','status'], fn ($c) => Schema::hasColumn('part_categories',$c))); }
+    private function categoryDisplaySplitRunCacheKey(string $runId): string { return 'category_display_splits_fix_autorun_'.$runId; }
+    private function putCategoryDisplaySplitRun(array $state): void { Cache::put($this->categoryDisplaySplitRunCacheKey($state['run_id']), $state, now()->addDay()); }
+    private function categoryDisplaySplitInitialState(string $runId, array $groups, int $batchSize, bool $ignoreEbayMapping, bool $copyMappings, array $warnings): array { return ['ok'=>true,'local_update'=>true,'ovoko_write'=>false,'allegro_write'=>false,'ebay_write'=>false,'copy_mappings'=>$copyMappings,'ignore_ebay_mapping'=>$ignoreEbayMapping,'run_id'=>$runId,'status'=>'running','batch_size'=>$batchSize,'processed_groups_count'=>0,'total_groups_count'=>count($groups),'created_categories_count'=>0,'moved_products_count'=>0,'reparented_children_count'=>0,'hidden_old_categories_count'=>0,'skipped_groups_count'=>0,'failed_count'=>0,'sample_created_categories'=>[],'sample_moved_products'=>[],'sample_reparented_children'=>[],'sample_hidden_old_categories'=>[],'sample_skipped_groups'=>[],'sample_errors'=>[],'warnings'=>$warnings,'groups'=>$groups,'created_at'=>now()->toISOString(),'updated_at'=>now()->toISOString()]; }
+    private function categoryDisplaySplitPublicStateWithNextUrl(array $state, Request $request): array { $public=$this->categoryDisplaySplitPublicState($state); if (($public['status'] ?? '') === 'running') $public['next_url']=url('/tools/run-category-display-splits-fix-autorun').'?token='.urlencode((string)$request->query('token')).'&run_id='.urlencode((string)$public['run_id']); return $public; }
+    private function categoryDisplaySplitPublicState(array $state): array { unset($state['groups'], $state['batch_size']); $state['warnings']=array_values(array_unique($state['warnings'] ?? [])); return $state; }
 
 
     private function cleanCategoryMappingId(mixed $value): string
