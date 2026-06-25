@@ -1,5 +1,6 @@
 @php
     $categories = $categories ?? [];
+    $suggestions = $suggestions ?? [];
 @endphp
 
 @once
@@ -166,6 +167,18 @@
             opacity: 0.75 !important;
             box-shadow: none !important;
         }
+
+        .gps-category-picker__suggestions {
+            border-bottom: 1px solid rgb(229 231 235);
+            margin-bottom: 0.75rem;
+            padding-bottom: 0.75rem;
+        }
+
+        .gps-category-picker__score {
+            color: rgb(37 99 235);
+            font-size: 0.75rem;
+            font-weight: 700;
+        }
     </style>
 @endonce
 
@@ -173,6 +186,7 @@
     class="gps-category-picker"
     x-data="{
         categories: @js($categories),
+        suggestions: @js($suggestions),
         currentParent: null,
         stack: [],
         search: '',
@@ -273,6 +287,25 @@
                     this.isSaving = false;
                 });
         },
+        selectSuggestion(suggestion) {
+            if (! suggestion?.category_id || this.isSaving) {
+                return;
+            }
+
+            this.isSaving = true;
+
+            this.$wire.selectSuggestedPartCategory(suggestion.category_id)
+                .then((saved) => {
+                    if (saved === true) {
+                        this.selectedId = null;
+                        this.selectedName = '';
+                        this.closeCategoryPicker();
+                    }
+                })
+                .finally(() => {
+                    this.isSaving = false;
+                });
+        },
         closeCategoryPicker() {
             if (typeof this.$wire.unmountFormComponentAction === 'function') {
                 this.$wire.unmountFormComponentAction(false, true);
@@ -319,6 +352,21 @@
     </div>
 
     <div class="gps-category-picker__content">
+        <div class="gps-category-picker__section gps-category-picker__suggestions" x-show="suggestions.length > 0" x-cloak>
+            <p class="gps-category-picker__hint">Proponowane</p>
+
+            <template x-for="suggestion in suggestions.slice(0, 5)" :key="`suggested-${suggestion.category_id}`">
+                <button type="button" class="gps-category-picker__row" x-on:click="selectSuggestion(suggestion)">
+                    <span>
+                        <strong x-text="suggestion.category_name"></strong>
+                        <small x-text="suggestion.category_path"></small>
+                        <small x-text="`Dopasowania: ${suggestion.matched_parts_count}; frazy: ${(suggestion.matched_terms || []).join(', ')}`"></small>
+                    </span>
+                    <span class="gps-category-picker__score" x-text="Math.round(suggestion.score)"></span>
+                </button>
+            </template>
+        </div>
+
         <template x-if="search.trim().length >= 2">
             <div class="gps-category-picker__section">
                 <p class="gps-category-picker__hint">Wyniki wyszukiwania</p>

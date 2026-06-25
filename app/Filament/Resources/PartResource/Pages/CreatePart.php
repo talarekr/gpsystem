@@ -3,6 +3,9 @@
 namespace App\Filament\Resources\PartResource\Pages;
 
 use App\Filament\Resources\PartResource;
+use App\Models\PartCategory;
+use App\Services\PartCategorySuggestionService;
+use Filament\Notifications\Notification;
 use Filament\Resources\Pages\CreateRecord;
 
 class CreatePart extends CreateRecord
@@ -29,5 +32,32 @@ class CreatePart extends CreateRecord
     protected function getCreateFormAction(): \Filament\Actions\Action
     {
         return parent::getCreateFormAction()->label('Dodaj część');
+    }
+
+    public function setPartCategoryFromPicker(mixed $categoryId = null): bool
+    {
+        if (blank($categoryId)) {
+            Notification::make()->title('Nie wybrano kategorii')->danger()->send();
+
+            return false;
+        }
+
+        $category = PartCategory::query()->withCount('children')->find($categoryId);
+
+        if (! $category || $category->children_count > 0) {
+            Notification::make()->title('Wybierz kategorię końcową')->danger()->send();
+
+            return false;
+        }
+
+        $this->data['category_id'] = $category->getKey();
+        $this->data['marketplace_category_mappings_state'] = app(PartCategorySuggestionService::class)->marketplaceMappingsForCategory($category->getKey());
+
+        return true;
+    }
+
+    public function selectSuggestedPartCategory(mixed $categoryId = null): bool
+    {
+        return $this->setPartCategoryFromPicker($categoryId);
     }
 }

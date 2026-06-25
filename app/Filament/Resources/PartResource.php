@@ -121,7 +121,7 @@ class PartResource extends Resource
                         Forms\Components\TextInput::make('name')->label('Tytuł produktu')->required()->maxLength(255)->live(onBlur: true)->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))->columnSpanFull(),
                         Forms\Components\TextInput::make('part_number')->label('Główny kod części')->maxLength(255)->live(onBlur: true)->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))->columnSpanFull(),
                         Forms\Components\Hidden::make('sku'),
-                        Forms\Components\Select::make('category_id')->label('Kategoria')->placeholder('Kategoria')->relationship('category', 'name')->searchable()->preload()->native(false)->suffixAction(self::categoryTreeAction())->columnSpanFull(),
+                        Forms\Components\Select::make('category_id')->label('Kategoria')->placeholder('Kategoria')->relationship('category', 'name')->searchable()->preload()->native(false)->live()->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set): null => self::refreshMarketplaceMappings($get, $set))->suffixAction(self::categoryTreeAction())->columnSpanFull(),
                         Forms\Components\Select::make('condition_notes')->label('Jakość')->placeholder('Jakość')->options(['Używany' => 'Używany', 'Nowy' => 'Nowy', 'Uszkodzony' => 'Uszkodzony', 'Regenerowany' => 'Regenerowany'])->default('Używany')->native(false)->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])->columnSpan(6),
                         Forms\Components\Select::make('part_position')->label('Pozycja części (strona zabudowy)')->placeholder('Wybierz')->options(['Wszystkie' => 'Wszystkie', 'Lewa strona' => 'Lewa strona', 'Środek' => 'Środek', 'Prawa strona' => 'Prawa strona', 'Komplet' => 'Komplet', 'Tył strona lewa' => 'Tył strona lewa', 'Tył strona prawa' => 'Tył strona prawa', 'Przód strona lewa' => 'Przód strona lewa', 'Przód strona prawa' => 'Przód strona prawa', 'Przód' => 'Przód', 'Tył' => 'Tył'])->default(null)->native(false)->dehydrated(false)->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])->columnSpan(6),
                         Forms\Components\Select::make(self::ADMIN_STEERING_FORM_STATE)->label('Kierownica po stronie')->placeholder('Kierownica po stronie')->options(self::ADMIN_STEERING_OPTIONS)->default(self::EXPECTED_LEFT_STEERING_VALUE)->native(false)->dehydrated(false)->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])->columnSpan(6),
@@ -131,6 +131,13 @@ class PartResource extends Resource
                         Forms\Components\Hidden::make('category_confidence'),
                         Forms\Components\Hidden::make('category_suggestion_reason'),
                         Forms\Components\Hidden::make('category_needs_review'),
+                        Forms\Components\Hidden::make('category_suggestions')->dehydrated(false)->default([]),
+                        Forms\Components\Hidden::make('marketplace_category_mappings_state')->dehydrated(false)->default([]),
+                        Forms\Components\Placeholder::make('marketplace_category_mapping_status')
+                            ->label('Mapowania marketplace dla kategorii')
+                            ->content(fn (Forms\Get $get): HtmlString => new HtmlString(self::marketplaceMappingStatusHtml((array) ($get('marketplace_category_mappings_state') ?? []))))
+                            ->visible(fn (Forms\Get $get): bool => filled($get('category_id')))
+                            ->columnSpanFull(),
                         Forms\Components\Toggle::make('needs_listing')->label('Część do wystawienia')->helperText('Zaznacz, aby pokazać część w roboczej kolejce Części do wystawienia.')->default(false)->inline(false)->columnSpanFull(),
                     ]),
 
@@ -308,28 +315,52 @@ class PartResource extends Resource
 
     public static function refreshCategorySuggestion(Forms\Get $get, Forms\Set $set, ?Part $record = null): null
     {
-        $suggestion = app(PartCategorySuggestionService::class)->suggestionForInput([
-            'name' => $get('name'),
-            'sku' => $get('sku'),
-            'part_number' => $get('part_number'),
-            'oem_number' => $get('oem_number'),
-            'manufacturer_code' => $get('manufacturer_code'),
-        ], $record?->id);
+        $result = app(PartCategorySuggestionService::class)->suggestCategoryFromTitle((string) $get('name'), $record?->id);
+        $top = $result['suggestions'][0] ?? null;
 
-        if (! $suggestion['category_id']) {
+        $set('category_suggestions', $result['suggestions'] ?? []);
+
+        if (! $top) {
             return null;
         }
 
-        $set('suggested_category_id', $suggestion['category_id']);
-        $set('category_confidence', $suggestion['confidence']);
-        $set('category_suggestion_reason', $suggestion['reason']);
-        $set('category_needs_review', ! $suggestion['auto_fill']);
+        $set('suggested_category_id', $top['category_id']);
+        $set('category_confidence', min(100, (int) round(((float) $top['score']) * 5)));
+        $set('category_suggestion_reason', 'Sugestia z podobnych części: '.$top['matched_parts_count'].' dopasowań.');
+        $set('category_needs_review', ! (bool) $result['auto_select']);
 
-        if (! $get('category_id') && $suggestion['auto_fill']) {
-            $set('category_id', $suggestion['category_id']);
+        if (! $get('category_id') && $result['auto_select']) {
+            $set('category_id', $result['selected_category_id']);
+            $set('marketplace_category_mappings_state', $result['marketplace_mappings'] ?? []);
         }
 
         return null;
+    }
+
+    public static function refreshMarketplaceMappings(Forms\Get $get, Forms\Set $set): null
+    {
+        $categoryId = $get('category_id');
+        $set('marketplace_category_mappings_state', filled($categoryId) ? app(PartCategorySuggestionService::class)->marketplaceMappingsForCategory((int) $categoryId) : []);
+
+        return null;
+    }
+
+    public static function marketplaceMappingStatusHtml(array $state): string
+    {
+        if ($state === []) {
+            return '<span class="text-gray-500">Brak wybranej kategorii albo brak odczytanych mapowań.</span>';
+        }
+
+        return collect($state)->map(function (array $mapping): string {
+            $label = e($mapping['label'] ?? 'Marketplace');
+            if (($mapping['status'] ?? null) !== 'mapped') {
+                return '<div>⚠️ '.$label.': brak mapowania dla finalnej kategorii.</div>';
+            }
+
+            $external = e(trim((string) ($mapping['external_category_path'] ?? $mapping['external_category_name'] ?? $mapping['external_category_id'] ?? '')));
+
+            return '<div>✅ '.$label.': '.$external.'</div>';
+        })->implode('');
     }
 
 
@@ -449,7 +480,7 @@ class PartResource extends Resource
     public static function categoryTreeAction(): Action
     {
         return Action::make('chooseCategoryFromTree')
-            ->label('')
+            ->label(fn (Forms\Get $get): string => count((array) ($get('category_suggestions') ?? [])) > 0 ? (string) count((array) ($get('category_suggestions') ?? [])) : '')
             ->icon('heroicon-m-bars-3')
             ->tooltip('Wybierz kategorię z drzewa')
             ->modalHeading('Kategorie')
@@ -462,7 +493,10 @@ class PartResource extends Resource
                     ->hiddenLabel()
                     ->dehydrated(false)
                     ->view('filament.forms.category-picker')
-                    ->viewData(fn (): array => ['categories' => self::categoryPickerCategories()]),
+                    ->viewData(fn (Forms\Get $get): array => [
+                        'categories' => self::categoryPickerCategories(),
+                        'suggestions' => array_values((array) ($get('category_suggestions') ?? [])),
+                    ]),
             ]);
     }
 

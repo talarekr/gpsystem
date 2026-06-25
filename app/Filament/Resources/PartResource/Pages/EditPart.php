@@ -124,6 +124,7 @@ class EditPart extends EditRecord
             $this->record->forceFill(['category_id' => $category->getKey()])->save();
             $this->record->refresh();
             $this->data['category_id'] = $category->getKey();
+            $this->data['marketplace_category_mappings_state'] = app(\App\Services\PartCategorySuggestionService::class)->marketplaceMappingsForCategory($category->getKey());
 
             Notification::make()
                 ->title('Kategoria części została zapisana')
@@ -147,6 +148,11 @@ class EditPart extends EditRecord
 
             return false;
         }
+    }
+
+    public function selectSuggestedPartCategory(mixed $categoryId = null): bool
+    {
+        return $this->setPartCategoryFromPicker($categoryId);
     }
 
     protected function getHeaderActions(): array
