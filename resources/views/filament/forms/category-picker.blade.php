@@ -22,7 +22,7 @@
             align-items: center !important;
             justify-content: center !important;
             line-height: 1 !important;
-            transform: translateY(calc(-50% - 1px)) !important;
+            transform: translateY(calc(-50% - 3px)) !important;
         }
     </style>
 @endonce
