@@ -2740,6 +2740,7 @@ HTML);
             'candidate_count' => count($candidates),
             'safe_to_hide_count' => count($visibilityColumns) > 0 ? count($candidates) : 0,
             'blocked_count' => count($visibilityColumns) > 0 ? 0 : count($candidates),
+            'hide_method' => $this->categoryDisplaySplitHideMethod(),
             'visibility_columns_detected' => $visibilityColumns,
             'available_part_categories_columns' => Schema::hasTable('part_categories') ? Schema::getColumnListing('part_categories') : [],
             'sample_candidates' => array_slice($candidates, 0, max(1, min(500, (int) $request->query('sample_limit', 100)))),
@@ -2766,7 +2767,80 @@ HTML);
                 else { $failed++; }
             } catch (Throwable $e) { $failed++; $warnings[] = 'hide_failed:'.$candidate['id'].':'.$e->getMessage(); }
         }
+        Cache::forget(\App\Services\Storefront\CategoryTreeService::CACHE_KEY);
         return response()->json(['ok' => $failed === 0, 'local_update' => true, 'ovoko_write' => false, 'allegro_write' => false, 'ebay_write' => false, 'hidden_count' => $hidden, 'failed_count' => $failed, 'sample_hidden' => $sample, 'warnings' => array_values(array_unique($warnings))]);
+    }
+
+    public function debugCategoryDisplayNames(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+        $ids = collect(explode(',', (string) $request->query('category_ids', '')))->map(fn ($id) => (int) trim($id))->filter()->unique()->values()->all();
+        $rows = PartCategory::query()->whereIn('id', $ids)->get()->keyBy('id');
+        $items = collect($ids)->map(function (int $id) use ($rows): array {
+            $category = $rows->get($id);
+            if (! $category) return ['id' => $id, 'found' => false];
+            $name = (string) $category->name;
+            $path = (string) ($category->category_path ?? '');
+            $clean = $this->proposedCleanCategoryDisplayName($name, $path);
+            $nameHasSeparator = str_contains($name, '—');
+            return [
+                'id' => (int) $category->id,
+                'found' => true,
+                'name' => $name,
+                'category_path' => $path,
+                'slug' => $category->slug,
+                'parent_id' => $category->parent_id,
+                'frontend_display_title' => $name,
+                'frontend_children_section_title' => $name,
+                'name_contains_separator_dash' => $nameHasSeparator,
+                'proposed_clean_name' => $clean,
+                'problem_source' => $clean !== $name ? 'db_name_contains_display_path' : 'not_detected_in_db_name_check_frontend_rendering',
+            ];
+        })->all();
+
+        return response()->json(['ok' => true, 'read_only' => true, 'items' => $items]);
+    }
+
+    public function dryRunCleanCategoryDisplayNames(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+        $analysis = $this->categoryDisplayNameCleanCandidates();
+
+        return response()->json([
+            'ok' => true,
+            'dry_run' => true,
+            'local_update' => false,
+            'ovoko_write' => false,
+            'allegro_write' => false,
+            'ebay_write' => false,
+            'candidate_count' => count($analysis['candidates']),
+            'conflict_count' => count($analysis['conflicts']),
+            'sample_candidates' => array_slice($analysis['candidates'], 0, max(1, min(500, (int) $request->query('sample_limit', 100)))),
+            'sample_conflicts' => array_slice($analysis['conflicts'], 0, max(1, min(500, (int) $request->query('sample_limit', 100)))),
+        ]);
+    }
+
+    public function cleanCategoryDisplayNames(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+        if ((string) $request->query('confirm') !== '1') return response()->json(['ok' => false, 'error_message' => 'confirm=1 required'], 422);
+        $analysis = $this->categoryDisplayNameCleanCandidates();
+        $updated = 0; $failed = 0; $sample = []; $conflicts = $analysis['conflicts']; $warnings = ['local_only_name_updates_no_path_slug_parent_products_mappings_marketplace_writes'];
+        $conflictIds = collect($conflicts)->pluck('id')->flip();
+        foreach ($analysis['candidates'] as $candidate) {
+            if ($conflictIds->has($candidate['id'])) continue;
+            try {
+                PartCategory::query()->whereKey($candidate['id'])->update(['name' => $candidate['proposed_clean_name']]);
+                $updated++;
+                $this->pushSample($sample, $candidate, 100);
+            } catch (Throwable $e) {
+                $failed++;
+                $conflicts[] = $candidate + ['reason' => 'update_failed_or_unique_constraint', 'error' => $e->getMessage()];
+            }
+        }
+        Cache::forget(\App\Services\Storefront\CategoryTreeService::CACHE_KEY);
+
+        return response()->json(['ok' => $failed === 0, 'local_update' => true, 'ovoko_write' => false, 'allegro_write' => false, 'ebay_write' => false, 'updated_count' => $updated, 'failed_count' => $failed, 'conflict_count' => count($conflicts), 'sample_updated' => $sample, 'sample_conflicts' => array_slice($conflicts, 0, 100), 'warnings' => $warnings]);
     }
 
     private function buildCategoryDisplaySplitFixGroups(array &$warnings): array
@@ -2844,7 +2918,7 @@ HTML);
 
     private function categoryDisplaySplitHideMethod(): ?string
     {
-        foreach (['active','is_active','is_visible','visible','show_in_menu'] as $col) if (Schema::hasColumn('part_categories', $col)) return $col.'=false';
+        foreach (['is_visible','active','is_active','visible','show_in_menu'] as $col) if (Schema::hasColumn('part_categories', $col)) return $col.'=false';
         if (Schema::hasColumn('part_categories', 'status')) return 'status='.$this->categoryDisplaySplitInactiveStatusValue();
         return null;
     }
@@ -2856,8 +2930,43 @@ HTML);
         return in_array('hidden', $values, true) ? 'hidden' : 'inactive';
     }
 
-    private function hideCategoryDisplaySplitOldCategory(int $categoryId): bool { $data=[]; foreach (['active','is_active','visible','is_visible','show_in_menu'] as $col) if (Schema::hasColumn('part_categories',$col)) $data[$col]=false; if (Schema::hasColumn('part_categories','status')) $data['status']=$this->categoryDisplaySplitInactiveStatusValue(); if ($data===[]) return false; PartCategory::query()->whereKey($categoryId)->update($data); return true; }
-    private function categoryDisplaySplitVisibilityColumns(): array { return array_values(array_filter(['active','is_active','visible','is_visible','show_in_menu','status'], fn ($c) => Schema::hasColumn('part_categories',$c))); }
+    private function hideCategoryDisplaySplitOldCategory(int $categoryId): bool { $data=[]; foreach (['is_visible','active','is_active','visible','show_in_menu'] as $col) if (Schema::hasColumn('part_categories',$col)) $data[$col]=false; if ($data===[] && Schema::hasColumn('part_categories','status')) $data['status']=$this->categoryDisplaySplitInactiveStatusValue(); if ($data===[]) return false; PartCategory::query()->whereKey($categoryId)->update($data); return true; }
+    private function categoryDisplaySplitVisibilityColumns(): array { return array_values(array_filter(['is_visible','active','is_active','visible','show_in_menu','status'], fn ($c) => Schema::hasColumn('part_categories',$c))); }
+    private function proposedCleanCategoryDisplayName(string $name, ?string $categoryPath): string
+    {
+        $name = trim($name);
+        $categoryPath = trim((string) $categoryPath);
+        if ($name === '') return $name;
+        if (str_contains($name, '—')) {
+            [$short, $suffix] = array_map('trim', explode('—', $name, 2));
+            if ($short !== '' && ($categoryPath === '' || $this->normalizeCanonicalCategoryDisplayPath($suffix) === $this->normalizeCanonicalCategoryDisplayPath($categoryPath) || str_contains($this->normalizeCanonicalCategoryDisplayPath($suffix), $this->normalizeCanonicalCategoryDisplayPath($short)))) return $short;
+        }
+        if ($categoryPath !== '') {
+            $patterns = [' — '.$categoryPath, ' - '.$categoryPath, ' – '.$categoryPath];
+            foreach ($patterns as $pattern) {
+                if (str_ends_with($name, $pattern)) return trim(substr($name, 0, -strlen($pattern)));
+            }
+        }
+        return $name;
+    }
+    private function categoryDisplayNameCleanCandidates(): array
+    {
+        if (! Schema::hasTable('part_categories')) return ['candidates' => [], 'conflicts' => []];
+        $rows = PartCategory::query()->select($this->safeSelectColumns('part_categories', ['id','name','category_path','slug','parent_id']))->get();
+        $existing = $rows->mapWithKeys(fn ($cat) => [mb_strtolower(trim((string) $cat->name)) => (int) $cat->id]);
+        $candidates = []; $conflicts = []; $proposedOwners = [];
+        foreach ($rows as $cat) {
+            $current = (string) $cat->name; $clean = $this->proposedCleanCategoryDisplayName($current, (string) ($cat->category_path ?? ''));
+            if ($clean === '' || $clean === $current) continue;
+            $item = ['id' => (int) $cat->id, 'current_name' => $current, 'category_path' => (string) ($cat->category_path ?? ''), 'proposed_clean_name' => $clean];
+            $owner = $existing[mb_strtolower($clean)] ?? null;
+            if ($owner && $owner !== (int) $cat->id) $conflicts[] = $item + ['conflicting_category_id' => $owner, 'reason' => 'clean_name_already_exists'];
+            elseif (isset($proposedOwners[mb_strtolower($clean)])) $conflicts[] = $item + ['conflicting_category_id' => $proposedOwners[mb_strtolower($clean)], 'reason' => 'duplicate_proposed_clean_name_in_batch'];
+            else $candidates[] = $item;
+            $proposedOwners[mb_strtolower($clean)] ??= (int) $cat->id;
+        }
+        return ['candidates' => $candidates, 'conflicts' => $conflicts];
+    }
     private function categoryDisplaySplitRunCacheKey(string $runId): string { return 'category_display_splits_fix_autorun_'.$runId; }
     private function putCategoryDisplaySplitRun(array $state): void { Cache::put($this->categoryDisplaySplitRunCacheKey($state['run_id']), $state, now()->addDay()); }
     private function categoryDisplaySplitInitialState(string $runId, array $groups, int $batchSize, bool $ignoreEbayMapping, bool $copyMappings, array $warnings): array { return ['ok'=>true,'local_update'=>true,'ovoko_write'=>false,'allegro_write'=>false,'ebay_write'=>false,'copy_mappings'=>$copyMappings,'ignore_ebay_mapping'=>$ignoreEbayMapping,'run_id'=>$runId,'status'=>'running','batch_size'=>$batchSize,'processed_groups_count'=>0,'total_groups_count'=>count($groups),'created_categories_count'=>0,'moved_products_count'=>0,'reparented_children_count'=>0,'hidden_old_categories_count'=>0,'skipped_groups_count'=>0,'failed_count'=>0,'sample_created_categories'=>[],'sample_moved_products'=>[],'sample_reparented_children'=>[],'sample_hidden_old_categories'=>[],'sample_skipped_groups'=>[],'sample_errors'=>[],'warnings'=>$warnings,'groups'=>$groups,'created_at'=>now()->toISOString(),'updated_at'=>now()->toISOString()]; }

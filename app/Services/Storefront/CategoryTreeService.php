@@ -7,6 +7,7 @@ use App\Models\PartCategory;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class CategoryTreeService
@@ -34,6 +35,7 @@ class CategoryTreeService
                 ->where(function ($query): void {
                     $query->where('source_system', 'woo')->orWhereNull('source_system');
                 })
+                ->when(Schema::hasColumn('part_categories', 'is_visible'), fn ($query) => $query->where('is_visible', true))
                 ->orderByRaw("case when source_system = 'woo' then 0 else 1 end")
                 ->ordered()
                 ->get();
@@ -95,6 +97,7 @@ class CategoryTreeService
         $lastSegment = collect(explode('/', $path))->filter()->last();
 
         return $this->all()->first(function (PartCategory $category) use ($path, $lastSegment): bool {
+            if (Schema::hasColumn('part_categories', 'is_visible') && ! (bool) $category->is_visible) return false;
             return $category->full_slug_path === $path
                 || $category->category_path === $path
                 || $category->slug === $path

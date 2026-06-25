@@ -17,7 +17,7 @@ class PartCategory extends Model
 
     protected function casts(): array
     {
-        return ['legacy_payload' => 'array'];
+        return ['legacy_payload' => 'array', 'is_visible' => 'boolean'];
     }
 
     public function parent(): BelongsTo

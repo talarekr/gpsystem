@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Storefront\Concerns;
 use App\Models\Part;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 
 trait BuildsStorefrontQueries
 {
@@ -47,7 +48,10 @@ trait BuildsStorefrontQueries
 
         $category = trim($request->string('category')->toString());
         if ($category !== '') {
-            $query->whereHas('category', fn (Builder $categoryQuery) => $categoryQuery->where('slug', $category)->orWhere('name', 'like', '%'.$category.'%'));
+            $query->whereHas('category', function (Builder $categoryQuery) use ($category): void {
+                if (Schema::hasColumn('part_categories', 'is_visible')) $categoryQuery->where('is_visible', true);
+                $categoryQuery->where(fn (Builder $inner) => $inner->where('slug', $category)->orWhere('name', 'like', '%'.$category.'%'));
+            });
         }
 
         match ($request->string('sort')->toString()) {
