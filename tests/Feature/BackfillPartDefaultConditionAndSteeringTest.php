@@ -40,11 +40,12 @@ class BackfillPartDefaultConditionAndSteeringTest extends TestCase
             ->assertJsonPath('total_matching_parts_count', 1)
             ->assertJsonPath('items.0.part_id', $part->id)
             ->assertJsonPath('items.0.action', 'would_update')
-            ->assertJsonPath('items.0.new_quality', 'Używany')
-            ->assertJsonPath('items.0.new_steering_side', 'po lewej');
+            ->assertJsonPath('items.0.new_quality', null)
+            ->assertJsonPath('items.0.new_steering_side', 'po lewej')
+            ->assertJsonPath('items.0.current_steering_side_admin_visible', false);
     }
 
-    public function test_confirm_fills_only_empty_condition_notes_and_steering_side(): void
+    public function test_confirm_fills_only_empty_steering_side_and_leaves_quality_unchanged(): void
     {
         $part = Part::query()->create(['name' => 'To fill', 'vehicle_snapshot' => ['make' => 'BMW', 'steering_side' => null], 'needs_listing' => true, 'needs_review' => false]);
 
@@ -54,11 +55,12 @@ class BackfillPartDefaultConditionAndSteeringTest extends TestCase
             ->assertJsonPath('local_update', true)
             ->assertJsonPath('parts_changed', true)
             ->assertJsonPath('updated_parts_count', 1)
-            ->assertJsonPath('quality_updated_count', 1)
-            ->assertJsonPath('steering_updated_count', 1);
+            ->assertJsonPath('quality_updated_count', 0)
+            ->assertJsonPath('steering_updated_count', 1)
+            ->assertJsonPath('fixed_steering_count', 1);
 
         $part->refresh();
-        $this->assertSame('Używany', $part->condition_notes);
+        $this->assertNull($part->condition_notes);
         $this->assertSame('po lewej', $part->vehicle_snapshot['steering_side']);
         $this->assertSame('BMW', $part->vehicle_snapshot['make']);
     }
@@ -80,7 +82,7 @@ class BackfillPartDefaultConditionAndSteeringTest extends TestCase
             ->assertJsonMissing(['reason' => "SQLSTATE[42S22]: Column not found: 1054 Unknown column 'key' in 'WHERE'"]);
 
         $part->refresh();
-        $this->assertSame('Używany', $part->condition_notes);
+        $this->assertNull($part->condition_notes);
         $this->assertSame('po lewej', $part->vehicle_snapshot['steering_side']);
         $this->assertTrue(
             collect($queries)->contains(fn (string $sql): bool => str_contains($sql, '"id" = ?') || str_contains($sql, '`id` = ?')),
@@ -117,7 +119,9 @@ class BackfillPartDefaultConditionAndSteeringTest extends TestCase
             ->assertOk()
             ->assertJsonPath('total_matching_parts_count', PartResource::adminPartsToListQuery()->count())
             ->assertJsonPath('diagnostics.current_filter_used', 'PartResource::adminPartsToListQuery(): parts.needs_listing = true')
-            ->assertJsonPath('diagnostics.admin_to_publish_filter_used', 'PartResource::adminPartsToListQuery(): parts.needs_listing = true');
+            ->assertJsonPath('diagnostics.admin_to_publish_filter_used', 'PartResource::adminPartsToListQuery(): parts.needs_listing = true')
+            ->assertJsonPath('diagnostics.admin_steering_field_path', 'vehicle_snapshot.steering_side')
+            ->assertJsonPath('diagnostics.expected_left_steering_value', 'po lewej');
     }
 
     public function test_endpoint_excludes_parts_outside_to_publish_scope(): void
@@ -157,6 +161,34 @@ class BackfillPartDefaultConditionAndSteeringTest extends TestCase
         $this->assertSame('Audi', $part->vehicle_snapshot['make']);
         $this->assertSame($listingBefore, DB::table('marketplace_listings')->get()->toJson());
         $this->assertSame($mappingBefore, DB::table('marketplace_category_mappings')->get()->toJson());
+    }
+
+
+    public function test_dry_run_treats_admin_invisible_steering_as_missing_even_when_quality_is_ok(): void
+    {
+        $part = Part::query()->create(['name' => 'Quality ok steering missing', 'condition_notes' => 'Używany', 'vehicle_snapshot' => [], 'needs_listing' => true, 'needs_review' => false]);
+
+        $this->getJson($this->url.'&dry_run=1&confirm=0&diagnostics=1')
+            ->assertOk()
+            ->assertJsonPath('quality_ok_count', 1)
+            ->assertJsonPath('steering_admin_visible_count', 0)
+            ->assertJsonPath('would_fix_steering_count', 1)
+            ->assertJsonPath('fixed_steering_count', 0)
+            ->assertJsonPath('items.0.part_id', $part->id);
+    }
+
+    public function test_left_side_legacy_label_is_admin_visible_and_not_rewritten(): void
+    {
+        $part = Part::query()->create(['name' => 'Legacy left', 'condition_notes' => 'Używany', 'vehicle_snapshot' => ['steering_side' => 'Lewa strona'], 'needs_listing' => true, 'needs_review' => false]);
+
+        $this->getJson($this->url.'&dry_run=0&confirm=1')
+            ->assertOk()
+            ->assertJsonPath('updated_parts_count', 0)
+            ->assertJsonPath('steering_admin_visible_count', 1)
+            ->assertJsonPath('skipped_steering_already_visible_count', 1);
+
+        $part->refresh();
+        $this->assertSame('Lewa strona', $part->vehicle_snapshot['steering_side']);
     }
 
     public function test_marketplace_write_flags_are_always_false(): void
