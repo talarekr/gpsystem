@@ -93,6 +93,60 @@ class OvokoProductSyncController extends Controller
         ]);
     }
 
+    public function debugProductsByCategory(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+
+        $categoryId = (int) $request->query('category_id', 0);
+
+        if ($categoryId < 1) {
+            return response()->json(['ok' => false, 'error_message' => 'category_id is required.'], 422);
+        }
+
+        $category = PartCategory::query()->find($categoryId);
+
+        if (! $category instanceof PartCategory) {
+            return response()->json([
+                'ok' => false,
+                'error_message' => 'Category not found.',
+                'category_id' => $categoryId,
+                'direct_products_count' => 0,
+                'descendant_products_count' => 0,
+                'direct_products' => [],
+                'descendant_products' => [],
+                'read_only' => true,
+                'products_changed' => false,
+                'categories_changed' => false,
+                'marketplace_api_writes' => false,
+                'offers_changed' => false,
+                'mappings_changed' => false,
+            ], 404);
+        }
+
+        $descendantIds = $this->localCategoryDescendantIds($categoryId);
+        $directProducts = Part::query()->where('category_id', $categoryId)->orderBy('id')->get();
+        $descendantProducts = $descendantIds === []
+            ? collect()
+            : Part::query()->with('category:id,name,category_path,full_slug_path')->whereIn('category_id', $descendantIds)->orderBy('category_id')->orderBy('id')->get();
+
+        return response()->json([
+            'ok' => true,
+            'category_id' => (int) $category->id,
+            'category_name' => $category->name,
+            'category_path' => $category->category_path ?: $category->full_slug_path ?: $category->name,
+            'direct_products_count' => $directProducts->count(),
+            'descendant_products_count' => $descendantProducts->count(),
+            'direct_products' => $directProducts->map(fn (Part $part): array => $this->debugProductRow($part))->all(),
+            'descendant_products' => $descendantProducts->map(fn (Part $part): array => $this->debugProductRow($part, true))->all(),
+            'read_only' => true,
+            'products_changed' => false,
+            'categories_changed' => false,
+            'marketplace_api_writes' => false,
+            'offers_changed' => false,
+            'mappings_changed' => false,
+        ]);
+    }
+
     private function categoryIdsFromRequest(Request $request): array
     {
         return collect(explode(',', (string) $request->query('category_ids', '')))
@@ -3364,6 +3418,48 @@ HTML);
     private function suspectedImportArtifactReason(?string $name, ?string $path): ?string { $n=$this->normalizeCategoryPathForSlashDetection($name); $p=$this->normalizeCategoryPathForSlashDetection($path); if (preg_match('/(^| > )(c|fap|dpf|karoserii|moduły|moduly|sterowniki|sterownik|komputery)( > |$)/u', $p)) return 'suspicious_fragment_category_after_import_split'; if (str_contains($p, ' / ') || preg_match('/(^| > )[^>]+\/[^>]+( > |$)/u', $p)) return 'contains_slash_path_may_need_original_woo_comparison'; if (mb_strlen($n) <= 2 || in_array($n, ['c','fap','dpf','karoserii','moduły','moduly','sterowniki'], true)) return 'suspicious_short_or_fragment_name'; return null; }
 
     private function pushSample(array &$items, array $item, int $limit): void { if (count($items) < $limit) $items[] = $item; }
+    private function debugProductRow(Part $part, bool $includeCategory = false): array
+    {
+        $row = [
+            'id' => (int) $part->id,
+            'title' => $part->name,
+            'name' => $part->name,
+            'sku' => $part->sku,
+            'internal_code' => $part->sku,
+            'main_code' => $part->part_number ?: $part->manufacturer_code,
+            'oem' => $part->oem_number,
+            'category_id' => $part->category_id ? (int) $part->category_id : null,
+            'edit_url' => '/admin/parts/'.((int) $part->id).'/edit',
+        ];
+
+        if ($includeCategory) {
+            $category = $part->category;
+            $row['category_name'] = $category?->name;
+            $row['category_path'] = $category?->category_path ?: $category?->full_slug_path ?: $category?->name;
+        }
+
+        return $row;
+    }
+
+    private function localCategoryDescendantIds(int $categoryId): array
+    {
+        $all = [];
+        $current = [$categoryId];
+
+        while ($current !== []) {
+            $children = PartCategory::query()
+                ->whereIn('parent_id', $current)
+                ->pluck('id')
+                ->map(fn ($id) => (int) $id)
+                ->all();
+            $children = array_values(array_diff($children, $all));
+            $all = array_values(array_unique(array_merge($all, $children)));
+            $current = $children;
+        }
+
+        return $all;
+    }
+
     private function validToken(Request $request): bool { return hash_equals(self::TOKEN, (string) $request->query('token', '')); }
     private function invalidTokenResponse(): JsonResponse { return response()->json(['ok' => false, 'error_message' => 'Invalid diagnostics token.'], 403); }
     private function emptyDryRunSummary(string $mode, int $page, int $limit): array { return ['ok' => true, 'dry_run' => true, 'local_update_only' => false, 'ovoko_write' => false, 'mode' => $mode, 'page' => $page, 'limit' => $limit, 'local_candidate_parts_count' => 0, 'already_has_ovoko_listing_count' => 0, 'missing_ovoko_listing_candidate_count' => 0, 'would_create_ovoko_count' => 0, 'blocked_count' => 0, 'warning_count' => 0, 'sample_would_create' => [], 'sample_already_listed' => [], 'sample_blocked' => [], 'sample_already_listed_blocked' => [], 'sample_missing_listing_blocked' => [], 'sample_create_missing_blocked' => [], 'sample_payloads' => [], 'required_fields' => self::REQUIRED_FIELDS, 'blockers' => [], 'top_blockers_already_listed' => [], 'top_blockers_missing_listing' => [], 'warnings' => ['dry_run_only_no_ovoko_or_other_marketplace_writes' => 1]]; }
