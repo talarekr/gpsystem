@@ -58,6 +58,7 @@ use App\Http\Controllers\Tools\ExportAllegroOfferIdCoverageController;
 use App\Http\Controllers\Tools\CheckAllegroOfferIdCoverageController;
 use App\Http\Controllers\Tools\CheckAllegroLocalIdSourcesController;
 use App\Http\Controllers\Tools\SuggestAllegroCategoryMappingsFromLegacyCsvController;
+use App\Http\Controllers\Tools\SuggestOvokoCategoryMappingsFromLocalTreeController;
 use App\Http\Controllers\Tools\CheckAllegroProductMappingCandidatesController;
 use App\Http\Controllers\Tools\ExportAllegroProductMappingCandidatesController;
 use App\Http\Controllers\Tools\CheckAdminPartsTableUiController;
@@ -257,6 +258,7 @@ Route::get('/tools/check-allegro-oauth-readiness', CheckAllegroOAuthReadinessCon
 Route::get('/tools/check-allegro-product-mapping-candidates', CheckAllegroProductMappingCandidatesController::class)->name('tools.check-allegro-product-mapping-candidates');
 Route::get('/tools/export-allegro-product-mapping-candidates', ExportAllegroProductMappingCandidatesController::class)->name('tools.export-allegro-product-mapping-candidates');
 Route::get('/tools/suggest-allegro-category-mappings-from-legacy-csv', SuggestAllegroCategoryMappingsFromLegacyCsvController::class)->name('tools.suggest-allegro-category-mappings-from-legacy-csv');
+Route::get('/tools/suggest-ovoko-category-mappings-from-local-tree', SuggestOvokoCategoryMappingsFromLocalTreeController::class)->name('tools.suggest-ovoko-category-mappings-from-local-tree');
 Route::get('/tools/apply-allegro-category-mappings-from-legacy-csv', [SuggestAllegroCategoryMappingsFromLegacyCsvController::class, 'apply'])->name('tools.apply-allegro-category-mappings-from-legacy-csv');
 Route::get('/tools/allegro-legacy-category-mapping-runner', [SuggestAllegroCategoryMappingsFromLegacyCsvController::class, 'runner'])->name('tools.allegro-legacy-category-mapping-runner');
 Route::get('/tools/run-allegro-legacy-category-mapping-batch', [SuggestAllegroCategoryMappingsFromLegacyCsvController::class, 'batch'])->name('tools.run-allegro-legacy-category-mapping-batch');
