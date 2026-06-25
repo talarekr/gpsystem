@@ -151,6 +151,7 @@ Route::get('/kategoria-produktu/{path}', [CategoryController::class, 'show'])->w
 
 Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/warsztat', [WorkshopQuickPartController::class, 'createAuthenticated'])->name('workshop.quick-part-create');
+    Route::get('/warsztat/storage-locations', [WorkshopQuickPartController::class, 'storageLocationAutocomplete'])->name('workshop.storage-locations.autocomplete');
     Route::post('/warsztat', [WorkshopQuickPartController::class, 'storeAuthenticated'])->name('workshop.quick-part-create.store');
 
     Route::get('/admin/allegro/oauth/redirect', [AllegroOAuthController::class, 'redirect'])->name('admin.allegro.oauth.redirect');

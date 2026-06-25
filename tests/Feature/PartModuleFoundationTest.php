@@ -254,6 +254,41 @@ class PartModuleFoundationTest extends TestCase
         $this->assertTrue($unknown->category_needs_review);
     }
 
+    public function test_part_form_hides_sku_field_and_sets_create_defaults_for_condition_and_steering_side(): void
+    {
+        $source = file_get_contents(app_path('Filament/Resources/PartResource.php'));
+
+        $this->assertStringNotContainsString("TextInput::make('sku')->label('SKU / kod wewnętrzny')", $source);
+        $this->assertStringContainsString("Hidden::make('sku')", $source);
+        $this->assertStringContainsString("->label('Jakość')", $source);
+        $this->assertStringContainsString("->default('Używany')", $source);
+        $this->assertStringContainsString("->label('Kierownica po stronie')", $source);
+        $this->assertStringContainsString("->default('po lewej')", $source);
+    }
+
+    public function test_part_edit_preserves_existing_condition_and_steering_side_values_in_form_configuration(): void
+    {
+        $source = file_get_contents(app_path('Filament/Resources/PartResource.php'));
+
+        $this->assertStringNotContainsString("condition_notes' => 'Używany'", $source);
+        $this->assertStringContainsString("->default('Używany')", $source);
+        $this->assertStringContainsString("->default('po lewej')", $source);
+    }
+
+    public function test_part_storage_location_picker_hides_allegro_import_description(): void
+    {
+        $location = StorageLocation::query()->create([
+            'name' => '2D3',
+            'description' => StorageLocation::ALLEGRO_IMPORT_DESCRIPTION,
+        ]);
+
+        $method = new \ReflectionMethod(PartResource::class, 'storageLocationLabel');
+        $method->setAccessible(true);
+
+        $this->assertSame('2D3', $method->invoke(null, $location));
+        $this->assertStringNotContainsString(StorageLocation::ALLEGRO_IMPORT_DESCRIPTION, $method->invoke(null, $location));
+    }
+
     public function test_part_navigation_counts_use_real_parts_and_needs_listing_queue(): void
     {
         Part::query()->create(['name' => 'Część bez wystawienia']);

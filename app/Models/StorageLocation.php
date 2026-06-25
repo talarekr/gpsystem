@@ -23,6 +23,18 @@ class StorageLocation extends Model
         return $this->hasMany(Part::class);
     }
 
+    public static function normalizeName(string $name): string
+    {
+        $collapsed = preg_replace('/\s+/u', ' ', trim($name)) ?? trim($name);
+
+        return mb_strtolower($collapsed);
+    }
+
+    public static function displayName(string $name): string
+    {
+        return preg_replace('/\s+/u', ' ', trim($name)) ?? trim($name);
+    }
+
     public function publicDescription(): ?string
     {
         if ($this->description === self::ALLEGRO_IMPORT_DESCRIPTION) {

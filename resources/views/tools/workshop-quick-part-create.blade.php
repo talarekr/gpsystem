@@ -29,6 +29,9 @@
         .errors { background:#fef3f2; color:var(--danger); border:1px solid #fecdca; border-radius:16px; padding:12px 14px; margin:0 0 16px; font-weight:700; }
         .hint { color:var(--muted); font-size:15px; margin-top:8px; }
         .upload-message { margin:12px 0 0; padding:12px 14px; border-radius:16px; background:#eef4ff; color:#1849a9; font-weight:800; }
+        .autocomplete { position:relative; }
+        .autocomplete-results { position:absolute; z-index:10; left:0; right:0; top:calc(100% + 6px); display:grid; gap:4px; margin:0; padding:8px; list-style:none; border:2px solid var(--border); border-radius:16px; background:#fff; box-shadow:0 12px 28px rgba(16,24,40,.16); }
+        .autocomplete-results button { width:100%; min-height:46px; justify-content:flex-start; border-radius:12px; background:#f9fafb; color:var(--text); }
         .scan-status { margin:10px 0 0; padding:10px 12px; border-radius:14px; background:#ecfdf3; color:#027a48; font-weight:800; }
         .scan-status.error { background:#fef3f2; color:var(--danger); }
         .ocr-modal { position:fixed; inset:0; z-index:20; background:#000; color:#fff; display:grid; grid-template-rows:auto 1fr auto; }
@@ -93,7 +96,12 @@
                 <section class="section">
                     <h2>2. Magazyn / miejsce składowania</h2>
                     <label for="storage_location">Magazyn / miejsce składowania</label>
-                    <input id="storage_location" name="storage_location" type="text" value="{{ old('storage_location') }}" placeholder="np. A1-P2, Regał 3 / Półka 4, Hala B / Kosz 12" required>
+                    <div class="autocomplete">
+                        <input id="storage_location" name="storage_location" type="text" value="{{ old('storage_location') }}" placeholder="np. A1-P2, Regał 3 / Półka 4, Hala B / Kosz 12" autocomplete="off" aria-autocomplete="list" aria-controls="storageLocationResults" required>
+                        <input id="storage_location_id" name="storage_location_id" type="hidden" value="{{ old('storage_location_id') }}">
+                        <ul id="storageLocationResults" class="autocomplete-results hidden" role="listbox"></ul>
+                    </div>
+                    <p id="storageLocationHint" class="hint" aria-live="polite">Po wpisaniu minimum 3 znaków podpowiemy istniejące miejsca. Jeśli brak dopasowania, formularz utworzy nowe miejsce składowania.</p>
                 </section>
                 <section class="section">
                     <h2>3. Główny kod części</h2>
@@ -147,6 +155,11 @@
     const photosInput = document.getElementById('photos');
     const thumbs = document.getElementById('thumbs');
     const form = document.getElementById('quickPartForm');
+    const storageInput = document.getElementById('storage_location');
+    const storageIdInput = document.getElementById('storage_location_id');
+    const storageResults = document.getElementById('storageLocationResults');
+    const storageHint = document.getElementById('storageLocationHint');
+    const storageAutocompleteUrl = @json(route('workshop.storage-locations.autocomplete'));
     const saveBtn = document.getElementById('saveBtn');
     const saveText = document.getElementById('saveText');
     const saveSpinner = document.getElementById('saveSpinner');
@@ -342,6 +355,35 @@
             ocrScanBtn.disabled = false; ocrScanBtn.textContent = 'Skanuj';
         }
     });
+
+    const collapseWhitespace = value => value.trim().replace(/\s+/g, ' ');
+    let storageAbortController = null;
+    const hideStorageResults = () => storageResults?.classList.add('hidden');
+    const renderStorageResults = locations => {
+        if (!storageResults) return;
+        storageResults.innerHTML = '';
+        if (!locations.length) { hideStorageResults(); if (storageHint && collapseWhitespace(storageInput?.value || '').length >= 3) storageHint.textContent = 'Utworzy nowe miejsce składowania, jeśli nie istnieje zgodne po normalizacji.'; return; }
+        locations.forEach(location => {
+            const item = document.createElement('li');
+            const button = document.createElement('button');
+            button.type = 'button'; button.role = 'option'; button.textContent = location.name;
+            button.addEventListener('click', () => { storageInput.value = location.name; storageIdInput.value = location.id; hideStorageResults(); if (storageHint) storageHint.textContent = 'Wybrano istniejące miejsce składowania.'; });
+            item.append(button); storageResults.append(item);
+        });
+        storageResults.classList.remove('hidden');
+    };
+    storageInput?.addEventListener('input', async () => {
+        storageIdInput.value = '';
+        const query = collapseWhitespace(storageInput.value);
+        if (query.length < 3) { hideStorageResults(); if (storageHint) storageHint.textContent = 'Po wpisaniu minimum 3 znaków podpowiemy istniejące miejsca. Jeśli brak dopasowania, formularz utworzy nowe miejsce składowania.'; return; }
+        storageAbortController?.abort(); storageAbortController = new AbortController();
+        try {
+            const response = await fetch(`${storageAutocompleteUrl}?q=${encodeURIComponent(query)}`, { headers: { Accept: 'application/json' }, signal: storageAbortController.signal });
+            const payload = await response.json();
+            renderStorageResults(payload.data || []);
+        } catch (error) { if (error.name !== 'AbortError') hideStorageResults(); }
+    });
+    document.addEventListener('click', event => { if (!storageResults?.contains(event.target) && event.target !== storageInput) hideStorageResults(); });
 
     const syncInput = () => { if (photosInput) photosInput.files = files.files; };
     const revokeObjectUrls = () => { while (objectUrls.length) URL.revokeObjectURL(objectUrls.pop()); };
