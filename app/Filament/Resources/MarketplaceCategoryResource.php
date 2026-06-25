@@ -5,6 +5,8 @@ namespace App\Filament\Resources;
 use App\Filament\Resources\MarketplaceCategoryResource\Pages;
 use App\Models\MarketplaceCategoryMapping;
 use App\Models\PartCategory;
+use App\Services\Marketplace\LocalCategoryDeleteSafetyService;
+use Filament\Forms\Components\Checkbox;
 use Filament\Forms;
 use Filament\Forms\Components\Grid;
 use Filament\Forms\Components\Placeholder;
@@ -13,12 +15,15 @@ use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Forms\Form;
+use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\HtmlString;
 
 class MarketplaceCategoryResource extends Resource
@@ -78,7 +83,59 @@ class MarketplaceCategoryResource extends Resource
                 SelectFilter::make('used')->options(['used_by_parts'=>'used_by_parts','unused'=>'unused'])->query(fn (Builder $query, array $data): Builder => ($data['value']??null)==='used_by_parts' ? $query->has('parts') : ((($data['value']??null)==='unused') ? $query->doesntHave('parts') : $query)),
                 SelectFilter::make('leaf')->options(['leaf'=>'leaf','parent'=>'parent'])->query(fn (Builder $query, array $data): Builder => ($data['value']??null)==='leaf' ? $query->doesntHave('children') : ((($data['value']??null)==='parent') ? $query->has('children') : $query)),
             ])
-            ->actions([Tables\Actions\EditAction::make()->label('Edytuj')])
+            ->actions([
+                Tables\Actions\EditAction::make()->label('Edytuj'),
+                Tables\Actions\Action::make('deleteLocalCategory')
+                    ->label('Usuń kategorię')
+                    ->modalHeading('Usuń kategorię')
+                    ->modalSubmitActionLabel('Usuń kategorię')
+                    ->color('danger')
+                    ->icon('heroicon-o-trash')
+                    ->form([
+                        Checkbox::make('confirm')
+                            ->label('Potwierdzam lokalny hard delete PartCategory bez usuwania ofert, produktów, dzieci, mappingów i bez cascade delete.')
+                            ->accepted()
+                            ->required(),
+                    ])
+                    ->modalContent(fn (PartCategory $record) => view('filament.resources.marketplace-categories.delete-safety-preview', [
+                        'safety' => app(LocalCategoryDeleteSafetyService::class)->inspect((int) $record->id),
+                    ]))
+                    ->modalSubmitAction(fn ($action, PartCategory $record) => $action->disabled(! (app(LocalCategoryDeleteSafetyService::class)->inspect((int) $record->id)['can_delete'] ?? false)))
+                    ->action(function (PartCategory $record): void {
+                        $service = app(LocalCategoryDeleteSafetyService::class);
+                        $safety = $service->inspect((int) $record->id);
+
+                        if (! ($safety['can_delete'] ?? false)) {
+                            Notification::make()
+                                ->title('Usunięcie kategorii jest zablokowane')
+                                ->body(collect($safety['blockers'] ?? [])->implode(', ') ?: 'Brak pozytywnej walidacji bezpieczeństwa.')
+                                ->danger()
+                                ->send();
+
+                            return;
+                        }
+
+                        $categoryId = (int) $record->id;
+                        $name = (string) $record->name;
+                        $path = $record->category_path ?: $record->full_slug_path ?: $record->name;
+                        $cacheCleared = $service->hardDelete($record);
+
+                        Log::info('marketplace_categories.local_category_hard_deleted_from_list', [
+                            'user_id' => Auth::id(),
+                            'category_id' => $categoryId,
+                            'name' => $name,
+                            'category_path' => $path,
+                            'counts_before_delete' => $safety['counts'] ?? [],
+                            'cache_keys_cleared' => $cacheCleared,
+                        ]);
+
+                        Notification::make()
+                            ->title('Kategoria została usunięta')
+                            ->body('Wyczyszczono cache: '.implode(', ', $cacheCleared))
+                            ->success()
+                            ->send();
+                    }),
+            ])
             ->paginated([25, 50, 100]);
     }
 
