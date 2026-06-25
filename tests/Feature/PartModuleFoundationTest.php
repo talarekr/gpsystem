@@ -39,6 +39,25 @@ class PartModuleFoundationTest extends TestCase
         $this->assertSame('PLN', $part->currency);
     }
 
+    public function test_part_category_picker_hides_uncategorized_option_and_keeps_real_categories(): void
+    {
+        PartCategory::query()->create(['id' => 10, 'name' => 'Bez kategorii', 'sort_order' => 1]);
+        $parent = PartCategory::query()->create(['id' => 20, 'name' => 'Silnik', 'sort_order' => 2]);
+        PartCategory::query()->create(['id' => 21, 'parent_id' => $parent->id, 'name' => 'Alternatory', 'sort_order' => 1]);
+
+        $categories = PartResource::categoryPickerCategories();
+        $renderedPicker = view('filament.forms.category-picker', ['categories' => $categories])->render();
+
+        $this->assertStringNotContainsString('Bez kategorii', $renderedPicker);
+        $this->assertStringContainsString('Alternatory', $renderedPicker);
+
+        $alternators = collect($categories)->firstWhere('name', 'Alternatory');
+
+        $this->assertNotNull($alternators);
+        $this->assertSame(21, $alternators['id']);
+        $this->assertFalse($alternators['has_children']);
+    }
+
     public function test_part_name_is_required_by_database(): void
     {
         $this->expectException(\Illuminate\Database\QueryException::class);

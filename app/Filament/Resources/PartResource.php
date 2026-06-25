@@ -419,6 +419,10 @@ class PartResource extends Resource
     {
         $categories = PartCategory::query()
             ->select(['id', 'parent_id', 'name', 'full_slug_path', 'sort_order', 'woo_product_count'])
+            ->where(function (Builder $query): void {
+                $query->whereNull('name')
+                    ->orWhereRaw('LOWER(TRIM(name)) <> ?', ['bez kategorii']);
+            })
             ->ordered()
             ->get();
 
