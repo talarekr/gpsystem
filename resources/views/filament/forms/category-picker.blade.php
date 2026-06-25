@@ -8,16 +8,16 @@
         .gps-category-picker-modal.fi-modal-window {
             display: flex !important;
             flex-direction: column !important;
-            height: 100vh !important;
-            max-height: 100vh !important;
+            height: calc(100vh - 40px) !important;
+            max-height: calc(100vh - 40px) !important;
             min-height: 0 !important;
         }
 
         @supports (height: 100dvh) {
             .fi-modal-window.gps-category-picker-modal,
             .gps-category-picker-modal.fi-modal-window {
-                height: 100dvh !important;
-                max-height: 100dvh !important;
+                height: calc(100dvh - 40px) !important;
+                max-height: calc(100dvh - 40px) !important;
             }
         }
 
@@ -43,17 +43,32 @@
             transform: translateY(calc(-50% - 3px)) !important;
         }
 
-        .fi-modal-window.gps-category-picker-modal .fi-modal-footer .fi-color-gray,
-        .gps-category-picker-modal.fi-modal-window .fi-modal-footer .fi-color-gray {
+        .fi-modal-window.gps-category-picker-modal .fi-modal-footer,
+        .gps-category-picker-modal.fi-modal-window .fi-modal-footer {
             display: none !important;
         }
 
         .fi-modal-window.gps-category-picker-modal .fi-modal-content,
         .gps-category-picker-modal.fi-modal-window .fi-modal-content {
             display: flex !important;
+            flex: 1 1 auto !important;
             flex-direction: column !important;
             min-height: 0 !important;
             overflow: hidden !important;
+        }
+
+        .fi-modal-window.gps-category-picker-modal .fi-modal-content > form,
+        .gps-category-picker-modal.fi-modal-window .fi-modal-content > form,
+        .fi-modal-window.gps-category-picker-modal .fi-modal-content .fi-fo-component-ctn,
+        .gps-category-picker-modal.fi-modal-window .fi-modal-content .fi-fo-component-ctn,
+        .fi-modal-window.gps-category-picker-modal .fi-modal-content .fi-fo-field-wrp,
+        .gps-category-picker-modal.fi-modal-window .fi-modal-content .fi-fo-field-wrp,
+        .fi-modal-window.gps-category-picker-modal .fi-modal-content .fi-fo-field-wrp > div,
+        .gps-category-picker-modal.fi-modal-window .fi-modal-content .fi-fo-field-wrp > div {
+            display: flex !important;
+            flex: 1 1 auto !important;
+            flex-direction: column !important;
+            min-height: 0 !important;
         }
 
         .gps-category-picker {
