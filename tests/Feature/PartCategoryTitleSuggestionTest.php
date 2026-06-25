@@ -147,6 +147,58 @@ class PartCategoryTitleSuggestionTest extends TestCase
         $this->assertDatabaseHas('parts', ['id' => $part->id, 'price' => '1.00', 'quantity' => 1]);
     }
 
+
+    public function test_radiator_hose_compound_title_suggests_category_from_two_token_phrases(): void
+    {
+        $hose = $this->category(70, 'Przewód / Wąż chłodnicy');
+        $this->part('Wąż chłodnicy', $hose->id);
+        $this->part('Przewód chłodnicy', $hose->id);
+
+        $result = app(PartCategorySuggestionService::class)->suggestCategoryFromTitle('wąż przewód chłodnicy');
+
+        $this->assertSame($hose->id, $result['suggestions'][0]['category_id']);
+        $this->assertContains('waz przewod chlodnicy', $result['diagnostics']['search_phrases']);
+        $this->assertContains('waz chlodnicy', $result['diagnostics']['search_phrases']);
+        $this->assertContains('przewod chlodnicy', $result['diagnostics']['search_phrases']);
+    }
+
+    public function test_full_vehicle_oem_hose_title_filters_noise_and_suggests_radiator_hose(): void
+    {
+        $hose = $this->category(71, 'Przewód / Wąż chłodnicy');
+        $this->part('Wąż chłodnicy', $hose->id);
+        $this->part('Przewód chłodnicy', $hose->id);
+
+        $result = app(PartCategorySuggestionService::class)->suggestCategoryFromTitle('AUDI A4 B6 2.0alt WĄŻ PRZEWÓD CHŁODNICY 8E0121049');
+
+        $this->assertSame($hose->id, $result['suggestions'][0]['category_id']);
+        $this->assertContains('waz przewod chlodnicy', $result['diagnostics']['search_phrases']);
+        $this->assertContains('waz chlodnicy', $result['diagnostics']['search_phrases']);
+        $this->assertContains('przewod chlodnicy', $result['diagnostics']['search_phrases']);
+        $this->assertContains('8e0121049', $result['diagnostics']['noise_tokens_removed']);
+    }
+
+    public function test_debug_part_category_suggestion_endpoint_is_read_only_and_returns_diagnostics(): void
+    {
+        $hose = $this->category(72, 'Przewód / Wąż chłodnicy');
+        $this->part('Wąż chłodnicy', $hose->id);
+        $this->part('Przewód chłodnicy', $hose->id);
+        $beforeParts = DB::table('parts')->get()->map(fn ($row) => (array) $row)->all();
+        $beforeMappings = DB::table('marketplace_category_mappings')->get()->map(fn ($row) => (array) $row)->all();
+
+        $response = $this->getJson('/tools/debug-part-category-suggestion?token=gps_images_import_2026&title='.urlencode('wąż przewód chłodnicy').'&include_rejected=1&limit=50');
+
+        $response->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('read_only', true)
+            ->assertJsonPath('parts_changed', false)
+            ->assertJsonPath('mappings_changed', false)
+            ->assertJsonFragment(['waz chlodnicy'])
+            ->assertJsonFragment(['why_included_or_rejected' => 'Uwzględniono: dopasowana mocna fraza rzeczowa waz chlodnicy.']);
+        $this->assertNotEmpty($response->json('matched_parts') ?: $response->json('rejected_parts'));
+        $this->assertSame($beforeParts, DB::table('parts')->get()->map(fn ($row) => (array) $row)->all());
+        $this->assertSame($beforeMappings, DB::table('marketplace_category_mappings')->get()->map(fn ($row) => (array) $row)->all());
+    }
+
     private function category(int $id, string $name): PartCategory
     {
         return PartCategory::query()->create(['id' => $id, 'name' => $name, 'category_path' => $name]);

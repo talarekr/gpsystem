@@ -36,6 +36,7 @@ use App\Http\Controllers\Tools\MarketplaceCategoryTreeImportController;
 use App\Http\Controllers\Tools\EbayListingDryRunController;
 use App\Http\Controllers\Tools\CheckOvokoMappingController;
 use App\Http\Controllers\Tools\DebugOvokoPartMatchController;
+use App\Http\Controllers\Tools\DebugPartCategorySuggestionController;
 use App\Http\Controllers\Tools\DeleteAllegroGearboxesDryRunController;
 use App\Http\Controllers\Tools\DeleteAllegroGearboxesLiveController;
 use App\Http\Controllers\Tools\PurgeAllegroGearboxesDryRunController;
@@ -179,6 +180,7 @@ Route::post('/tools/workshop/quick-part-create', [WorkshopQuickPartController::c
 Route::get('/tools/check-orders-flow', CheckOrdersFlowController::class)->name('tools.check-orders-flow');
 Route::get('/tools/check-ovoko-mapping', CheckOvokoMappingController::class)->name('tools.check-ovoko-mapping');
 Route::get('/tools/debug-ovoko-part-match', DebugOvokoPartMatchController::class)->name('tools.debug-ovoko-part-match');
+Route::get('/tools/debug-part-category-suggestion', DebugPartCategorySuggestionController::class)->name('tools.debug-part-category-suggestion');
 Route::get('/tools/debug-category-marketplace-mappings', DebugCategoryMarketplaceMappingsController::class)->name('tools.debug-category-marketplace-mappings');
 Route::get('/tools/check-ovoko-api-settings', CheckOvokoApiSettingsController::class)->name('tools.check-ovoko-api-settings');
 Route::get('/tools/check-marketplace-api-readiness', [MarketplaceApiFoundationController::class, 'readiness'])->name('tools.check-marketplace-api-readiness');

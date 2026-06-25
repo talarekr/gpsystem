@@ -10,26 +10,35 @@ use Illuminate\Support\Str;
 
 class PartCategorySuggestionService
 {
+    private const DEFAULT_MIN_SCORE = 3.5;
+
     /** @return array<string, mixed> */
-    public function suggestCategoryFromTitle(string $title, ?int $ignorePartId = null, int $limit = 3): array
+    public function suggestCategoryFromTitle(string $title, ?int $ignorePartId = null, int $limit = 3, ?float $minScore = null, bool $includeRejected = false): array
     {
-        $limit = max(1, min(5, $limit));
+        $limit = max(1, min(50, $limit));
+        $minScore ??= self::DEFAULT_MIN_SCORE;
         $analysis = $this->analyzeTitle($title);
+        $thresholds = ['min_part_score' => $minScore, 'min_important_overlap' => 1, 'auto_select_confidence' => 78, 'auto_select_min_parts' => 2, 'auto_select_score_ratio' => 1.55];
 
         if ($analysis['important_tokens'] === []) {
-            return $this->emptyResponse('Brak wystarczających znaczących tokenów części w tytule.', $analysis);
+            return $this->emptyResponse('Brak wystarczających znaczących tokenów części w tytule.', $analysis, [], [], [], $thresholds);
         }
 
-        $candidates = $this->candidateParts($analysis, $ignorePartId);
+        $candidates = $this->candidateParts($analysis, $ignorePartId, max(120, $limit * 12));
         if ($candidates->isEmpty()) {
-            return $this->emptyResponse('Brak podobnych części z finalną kategorią.', $analysis);
+            return $this->emptyResponse('Brak podobnych części z finalną kategorią.', $analysis, [], [], [], $thresholds);
         }
 
         $documentFrequency = $this->documentFrequency($candidates);
         $matchedParts = [];
+        $rejectedParts = [];
+        $rejectionReasons = [];
+        $rawCandidateParts = [];
         $categories = [];
 
         foreach ($candidates as $part) {
+            $rawCandidateParts[] = $this->partDiagnosticPayload($part, ['score' => 0, 'matched_terms' => [], 'matched_ngrams' => []], 'Surowy kandydat znaleziony po frazie lub tokenie wyszukiwania.');
+
             if (! $part->category) {
                 continue;
             }
@@ -43,19 +52,20 @@ class PartCategorySuggestionService
             ])));
 
             $scoreData = $this->scorePart($analysis, $partAnalysis, $documentFrequency, max(1, $candidates->count()));
-            if ($scoreData['score'] < 3.5 || $scoreData['important_overlap'] < 1) {
+            $included = $scoreData['score'] >= $minScore && $scoreData['important_overlap'] >= 1;
+            $why = $included
+                ? $this->includedReason($scoreData)
+                : $this->rejectedReason($scoreData, $minScore);
+
+            if (! $included) {
+                $payload = $this->partDiagnosticPayload($part, $scoreData, $why);
+                $rejectedParts[] = $payload;
+                $rejectionReasons[$why] = ($rejectionReasons[$why] ?? 0) + 1;
                 continue;
             }
 
             $categoryId = (int) $part->category_id;
-            $matchedParts[] = [
-                'id' => $part->id,
-                'title' => $part->name,
-                'category_id' => $categoryId,
-                'score' => round($scoreData['score'], 2),
-                'matched_terms' => $scoreData['matched_terms'],
-                'matched_ngrams' => $scoreData['matched_ngrams'],
-            ];
+            $matchedParts[] = $this->partDiagnosticPayload($part, $scoreData, $why);
 
             $categories[$categoryId] ??= [
                 'category' => $part->category,
@@ -85,7 +95,7 @@ class PartCategorySuggestionService
         })->sortByDesc('score')->values();
 
         if ($suggestions->isEmpty()) {
-            return $this->emptyResponse('Brak punktowanych dopasowań kategorii.', $analysis, $matchedParts);
+            return $this->emptyResponse('Brak punktowanych dopasowań kategorii.', $analysis, $rawCandidateParts, $matchedParts, $includeRejected ? $rejectedParts : [], $thresholds, $rejectionReasons);
         }
 
         $top = $suggestions->first();
@@ -100,7 +110,7 @@ class PartCategorySuggestionService
             'selected_category_id' => $selected,
             'suggestions' => $suggestions->take($limit)->values()->all(),
             'marketplace_mappings' => $selected ? $this->marketplaceMappingsForCategory($selected) : null,
-            'diagnostics' => $this->diagnostics($analysis, $matchedParts, $suggestions->all(), $reason, $confidence),
+            'diagnostics' => $this->diagnostics($analysis, $rawCandidateParts, $matchedParts, $suggestions->all(), $includeRejected ? $rejectedParts : [], $rejectionReasons, $thresholds, $reason, $confidence, $auto, $suggestions->take($limit)->values()->all()),
         ];
     }
 
@@ -142,7 +152,7 @@ class PartCategorySuggestionService
             if (strlen($token) >= 2) $important[] = $token;
         }
         $candidateTerms = $this->candidateTerms($important, false);
-        $searchPhrases = array_values(array_unique(array_merge($candidateTerms, $oem)));
+        $searchPhrases = array_values(array_unique(array_merge($candidateTerms, $this->localizedPhrases($candidateTerms), $oem)));
         return ['normalized_title'=>$normalized, 'tokens'=>$tokens, 'important_tokens'=>$important, 'noise_tokens_removed'=>array_values(array_unique($noise)), 'oem_tokens'=>$oem, 'candidate_terms'=>$candidateTerms, 'search_phrases'=>$searchPhrases];
     }
 
@@ -158,7 +168,7 @@ class PartCategorySuggestionService
         $state = ['sprawny','sprawna','nowy','nowa','uzywany','uzywana','oryginal','oryginalny','oryginalna','kompletny','kompletna','komplet'];
         if (in_array($token, $brandsModels, true) || in_array($token, $state, true)) return 'low_weight';
         if (preg_match('/^(19|20)\d{2}$/', $token)) return 'year';
-        if (preg_match('/^\d+[.,]?\d*$/', $token)) return 'capacity_or_number';
+        if (preg_match('/^\d+(?:[a-z]{1,4})?$/', $token) || preg_match('/^\d+[.,]?\d*[a-z]{0,4}$/', $token)) return 'capacity_or_number';
         if (preg_match('/^[a-z0-9]{8,}$/', $token)) return 'oem';
         if (preg_match('/^(b\d|[0-9][a-z]|[a-z][0-9])$/', $token)) return 'generation';
         return null;
@@ -173,24 +183,35 @@ class PartCategorySuggestionService
         for ($n = min(5, $count); $n >= 2; $n--) {
             for ($i = 0; $i <= $count - $n; $i++) $terms[] = implode(' ', array_slice($tokens, $i, $n));
         }
+        for ($i = 0; $i < $count; $i++) {
+            for ($j = $i + 1; $j < $count; $j++) $terms[] = $tokens[$i].' '.$tokens[$j];
+        }
         if ($withSingles) foreach ($tokens as $token) if (strlen($token) >= 3) $terms[] = $token;
         return array_values(array_unique($terms));
     }
 
-    private function candidateParts(array $analysis, ?int $ignorePartId): Collection
+    private function candidateParts(array $analysis, ?int $ignorePartId, int $limit = 120): Collection
     {
-        $phrases = array_slice($analysis['search_phrases'], 0, 18);
+        $phrases = array_slice($analysis['search_phrases'], 0, 40);
+        $tokens = array_slice($analysis['important_tokens'], 0, 8);
+
         return Part::query()->with('category:id,name,parent_id,category_path,full_slug_path')
             ->select(['id','category_id','name','sku','part_number','oem_number','manufacturer_code'])
             ->whereNotNull('category_id')
             ->when($ignorePartId, fn ($query) => $query->whereKeyNot($ignorePartId))
-            ->where(function ($query) use ($phrases): void {
+            ->where(function ($query) use ($phrases, $tokens): void {
                 foreach ($phrases as $phrase) {
                     if (strlen($phrase) < 3) continue;
                     $like = '%'.$phrase.'%';
                     $query->orWhere('name', 'like', $like)->orWhere('sku', 'like', $like)->orWhere('part_number', 'like', $like)->orWhere('oem_number', 'like', $like)->orWhere('manufacturer_code', 'like', $like);
                 }
-            })->latest('id')->limit(120)->get();
+                foreach ($tokens as $token) {
+                    if (strlen($token) < 3) continue;
+                    foreach ($this->localizedPhrases([$token]) as $variant) {
+                        $query->orWhere('name', 'like', '%'.$variant.'%');
+                    }
+                }
+            })->latest('id')->limit($limit)->get();
     }
 
     private function documentFrequency(Collection $parts): array
@@ -210,10 +231,15 @@ class PartCategorySuggestionService
         $inputTerms = $this->candidateTerms($input['important_tokens'], false);
         $partPhrase = ' '.implode(' ', $part['important_tokens']).' ';
         $ngrams = [];
-        foreach ($inputTerms as $term) if (substr_count($term, ' ') >= 1 && str_contains($partPhrase, ' '.$term.' ')) { $ngrams[] = $term; $score += 4 + substr_count($term, ' '); }
+        foreach ($inputTerms as $term) {
+            if (substr_count($term, ' ') >= 1 && str_contains($partPhrase, ' '.$term.' ')) {
+                $ngrams[] = $term;
+                $score += substr_count($term, ' ') >= 2 ? 8 : 7;
+            }
+        }
         $oemOverlap = array_intersect($input['oem_tokens'], $part['oem_tokens']);
         if ($oemOverlap && $overlap) $score += 2;
-        return ['score'=>$score, 'important_overlap'=>count($overlap), 'matched_terms'=>$overlap, 'matched_ngrams'=>array_slice($ngrams, 0, 5)];
+        return ['score'=>$score, 'important_overlap'=>count($overlap), 'matched_terms'=>$overlap, 'matched_ngrams'=>array_slice(array_values(array_unique($ngrams)), 0, 8)];
     }
 
     private function confidence(array $top, ?array $second): int
@@ -223,11 +249,70 @@ class PartCategorySuggestionService
         return max(0, min(100, $base));
     }
 
-    private function diagnostics(array $analysis, array $matchedParts, array $matchedCategories, string $reason, int $confidence): array
+    private function diagnostics(array $analysis, array $rawCandidateParts, array $matchedParts, array $matchedCategories, array $rejectedParts, array $rejectionReasons, array $thresholds, string $reason, int $confidence, bool $autoSelect = false, array $suggestions = []): array
     {
-        return ['normalized_title'=>$analysis['normalized_title'], 'noise_tokens_removed'=>$analysis['noise_tokens_removed'], 'candidate_terms'=>$analysis['candidate_terms'], 'search_phrases'=>$analysis['search_phrases'], 'matched_parts'=>$matchedParts, 'matched_categories'=>$matchedCategories, 'auto_select_reason'=>$reason, 'confidence'=>$confidence];
+        return [
+            'ok' => true,
+            'read_only' => true,
+            'normalized_title'=>$analysis['normalized_title'],
+            'noise_tokens_removed'=>$analysis['noise_tokens_removed'],
+            'candidate_terms'=>$analysis['candidate_terms'],
+            'search_phrases'=>$analysis['search_phrases'],
+            'raw_candidate_parts'=>$rawCandidateParts,
+            'matched_parts'=>$matchedParts,
+            'matched_categories'=>$matchedCategories,
+            'rejected_parts'=>$rejectedParts,
+            'rejection_reasons'=>$rejectionReasons,
+            'thresholds'=>$thresholds,
+            'auto_select'=>$autoSelect,
+            'auto_select_reason'=>$reason,
+            'confidence'=>$confidence,
+            'suggestions'=>$suggestions,
+        ];
+    }
+
+    private function localizedPhrases(array $phrases): array
+    {
+        $map = ['waz' => 'wąż', 'przewod' => 'przewód', 'chlodnicy' => 'chłodnicy', 'chlodnica' => 'chłodnica', 'czastek' => 'cząstek', 'stalych' => 'stałych', 'podnosnik' => 'podnośnik'];
+        return array_values(array_unique(array_filter(array_map(function (string $phrase) use ($map): string {
+            $tokens = explode(' ', $phrase);
+            return implode(' ', array_map(fn (string $token): string => $map[$token] ?? $token, $tokens));
+        }, $phrases), fn (string $phrase): bool => $phrase !== '')));
+    }
+
+    private function partDiagnosticPayload(Part $part, array $scoreData, string $why): array
+    {
+        $category = $part->category;
+        return [
+            'part_id' => $part->id,
+            'title' => $part->name,
+            'name' => $part->name,
+            'sku' => $part->sku,
+            'main_code' => $part->part_number ?: $part->oem_number ?: $part->manufacturer_code,
+            'category_id' => $part->category_id,
+            'category_name' => $category?->name,
+            'category_path' => $category ? $this->categoryPath($category) : null,
+            'score' => round((float) ($scoreData['score'] ?? 0), 2),
+            'matched_tokens' => $scoreData['matched_terms'] ?? [],
+            'matched_phrases' => $scoreData['matched_ngrams'] ?? [],
+            'matched_terms' => $scoreData['matched_terms'] ?? [],
+            'matched_ngrams' => $scoreData['matched_ngrams'] ?? [],
+            'why_included_or_rejected' => $why,
+        ];
+    }
+
+    private function includedReason(array $scoreData): string
+    {
+        if (($scoreData['matched_ngrams'] ?? []) !== []) return 'Uwzględniono: dopasowana mocna fraza rzeczowa '.implode(', ', $scoreData['matched_ngrams']).'.';
+        return 'Uwzględniono: wystarczające pokrycie tokenów nazwy części.';
+    }
+
+    private function rejectedReason(array $scoreData, float $minScore): string
+    {
+        if (($scoreData['important_overlap'] ?? 0) < 1) return 'Odrzucono: brak wspólnych istotnych tokenów nazwy części.';
+        return 'Odrzucono: wynik '.round((float) ($scoreData['score'] ?? 0), 2).' poniżej progu '.$minScore.'.';
     }
 
     private function categoryPath(PartCategory $category): string { return $category->category_path ?: $category->full_slug_path ?: $category->name; }
-    private function emptyResponse(string $reason, array $analysis = [], array $matchedParts = []): array { return ['auto_select'=>false,'selected_category_id'=>null,'suggestions'=>[],'marketplace_mappings'=>null,'diagnostics'=>$this->diagnostics($analysis + ['normalized_title'=>'','noise_tokens_removed'=>[],'candidate_terms'=>[],'search_phrases'=>[]], $matchedParts, [], $reason, 0)]; }
+    private function emptyResponse(string $reason, array $analysis = [], array $rawCandidateParts = [], array $matchedParts = [], array $rejectedParts = [], array $thresholds = [], array $rejectionReasons = []): array { return ['auto_select'=>false,'selected_category_id'=>null,'suggestions'=>[],'marketplace_mappings'=>null,'diagnostics'=>$this->diagnostics($analysis + ['normalized_title'=>'','noise_tokens_removed'=>[],'candidate_terms'=>[],'search_phrases'=>[]], $rawCandidateParts, $matchedParts, [], $rejectedParts, $rejectionReasons, $thresholds, $reason, 0, false, [])]; }
 }
