@@ -2,9 +2,10 @@
     $categories = $categories ?? [];
 @endphp
 
-<script>
-    window.gpsCategoryPicker = (categories) => ({
-        categories,
+<div
+    class="gps-category-picker"
+    x-data="{
+        categories: @js($categories),
         currentParent: null,
         stack: [],
         search: '',
@@ -143,12 +144,7 @@
                 .sort((a, b) => Number(a.has_children) - Number(b.has_children) || a.path.localeCompare(b.path, 'pl'))
                 .slice(0, 25);
         },
-    });
-</script>
-
-<div
-    class="gps-category-picker"
-    x-data="gpsCategoryPicker(@js($categories))"
+    }"
 >
     <div class="gps-category-picker__search">
         <input
