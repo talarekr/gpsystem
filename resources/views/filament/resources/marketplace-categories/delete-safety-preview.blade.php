@@ -1,6 +1,7 @@
 @php
     $category = $safety['local_category'] ?? [];
     $counts = $safety['counts'] ?? [];
+    $countSources = $safety['count_sources'] ?? [];
     $samples = $safety['samples'] ?? [];
     $mappings = $safety['mappings'] ?? [];
 @endphp
@@ -20,8 +21,24 @@
     </div>
 
     <div>
-        <strong>sample product_ids:</strong>
-        <span>{{ collect($samples['product_ids'] ?? [])->implode(', ') ?: '—' }}</span>
+        <strong>źródła liczników:</strong>
+        <div class="ml-3">products_count: {{ $countSources['products_count'] ?? '—' }}</div>
+        <div class="ml-3">descendants_products_count: {{ $countSources['descendants_products_count'] ?? '—' }}</div>
+        <div class="ml-3">woo_product_count: {{ $countSources['woo_product_count'] ?? '—' }}</div>
+    </div>
+
+    <div>
+        <strong>produkty blokujące hard delete (sample):</strong>
+        @forelse (($samples['blocking_products'] ?? []) as $product)
+            <div class="ml-3">
+                #{{ $product['product_id'] }}
+                — {{ $product['title'] ?: '—' }}
+                — current category_id: {{ $product['current_category_id'] ?? '—' }}
+                — <a class="text-primary-600 underline" href="{{ $product['edit_url'] }}">/admin/parts/{{ $product['product_id'] }}/edit</a>
+            </div>
+        @empty
+            <span>—</span>
+        @endforelse
     </div>
 
     <div>
