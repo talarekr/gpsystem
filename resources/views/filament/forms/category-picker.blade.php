@@ -33,7 +33,7 @@
         .fi-modal-window.gps-category-picker-modal .fi-modal-footer .gps-category-picker__actions,
         .gps-category-picker-modal.fi-modal-window .fi-modal-footer .gps-category-picker__actions {
             display: flex !important;
-            justify-content: flex-end !important;
+            justify-content: center !important;
             width: 100% !important;
         }
 
@@ -190,8 +190,9 @@
                 });
         },
         closeCategoryPicker() {
-            const modal = this.$root.closest('.fi-modal-window');
-            const closeButton = modal?.querySelector('.fi-modal-header :where(.fi-modal-close-btn, .fi-modal-close-button, [aria-label=\'Close\'], [aria-label=\'Zamknij\'])');
+            const modal = this.$root.closest('.fi-modal-window') || this.$root.closest('[role=\'dialog\']');
+            const closeButton = modal?.querySelector('.fi-modal-header :where(.fi-modal-close-btn, .fi-modal-close-button, [aria-label*=\'Close\'], [aria-label*=\'Zamknij\'])')
+                || modal?.querySelector(':where(.fi-modal-close-btn, .fi-modal-close-button, [aria-label*=\'Close\'], [aria-label*=\'Zamknij\'])');
 
             closeButton?.click();
         },
