@@ -21,6 +21,8 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvController extends Controller
 
         $sampleLimit = max(0, min(500, (int) $request->query('sample_limit', 100)));
         $recordLimit = max(1, min(10000, (int) $request->query('record_limit', 5000)));
+        $offset = max(0, (int) $request->query('offset', 0));
+        $batchSize = $request->query('batch_size') !== null ? max(1, min(1000, (int) $request->query('batch_size'))) : null;
         $minProducts = max(1, (int) $request->query('min_products', 1));
         $onlyMissingAllegro = $request->boolean('only_missing_allegro', true);
         $onlyPublic = $request->boolean('only_public', true);
@@ -46,12 +48,21 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvController extends Controller
             $stats = ['total_legacy_rows' => 0, 'rows_with_allegro_category_id' => 0, 'matched_products_count' => 0, 'unmatched_products_count' => 0];
 
             foreach ($this->readRows($csvPath, $diagnostics) as $row) {
-                if ($diagnostics['csv_rows_read'] >= $recordLimit) {
+                if ($stats['total_legacy_rows'] >= $recordLimit) {
                     $this->addDiagnosticError($diagnostics, 'record_limit_reached', "Stopped after {$recordLimit} CSV rows.");
                     break;
                 }
 
+                $rowIndex = $stats['total_legacy_rows'];
                 $stats['total_legacy_rows']++;
+                if ($rowIndex < $offset) {
+                    $diagnostics['csv_rows_skipped_by_offset']++;
+                    continue;
+                }
+                if ($batchSize !== null && $diagnostics['csv_rows_read'] >= $batchSize) {
+                    break;
+                }
+
                 $diagnostics['csv_rows_read']++;
 
                 $wooProductId = trim((string) ($row['woo_product_id'] ?? ''));
@@ -144,7 +155,7 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvController extends Controller
                 'ok' => true,
                 'dry_run' => $request->boolean('dry_run', true),
                 'csv_path' => $csvPath,
-                'parameters' => compact('sampleLimit','recordLimit','minProducts','onlyMissingAllegro','onlyPublic','leafOnly','categoryId','confidenceFilter'),
+                'parameters' => compact('sampleLimit','recordLimit','offset','batchSize','minProducts','onlyMissingAllegro','onlyPublic','leafOnly','categoryId','confidenceFilter'),
                 'possible_match_fields_checked' => $this->possibleMatchFields(),
                 'matched_products_count' => $stats['matched_products_count'],
                 'unmatched_products_count' => $stats['unmatched_products_count'],
@@ -159,6 +170,242 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvController extends Controller
 
             return response()->json($this->criticalPayload($diagnostics, $e->getMessage()));
         }
+    }
+
+
+
+
+    public function runner(Request $request)
+    {
+        if (! hash_equals(self::TOKEN, (string) $request->query('token', ''))) {
+            return response('Invalid diagnostics token.', 403);
+        }
+
+        return response($this->runnerHtml((string) $request->query('token')), 200)->header('Content-Type', 'text/html; charset=UTF-8');
+    }
+
+    public function batch(Request $request)
+    {
+        if (! hash_equals(self::TOKEN, (string) $request->query('token', ''))) {
+            return response()->json(['ok' => false, 'error_message' => 'Invalid diagnostics token.'], 403);
+        }
+
+        try {
+            $offset = max(0, (int) $request->query('offset', 0));
+            $batchSize = max(1, min(1000, (int) $request->query('batch_size', 100)));
+            $recordLimit = max(1, min(10000, (int) $request->query('record_limit', 5000)));
+            $confirm = $request->boolean('confirm', false);
+            $result = $this->evaluateApplyRequest($request, ['offset' => $offset, 'batch_size' => $batchSize, 'record_limit' => $recordLimit]);
+            $processedRows = (int) data_get($result, 'diagnostics.csv_rows_read', 0);
+            $nextOffset = min($recordLimit, $offset + $processedRows);
+            $done = $nextOffset >= $recordLimit || $processedRows < $batchSize;
+
+            return response()->json($this->applyFlags($confirm, (int) ($result['created_count'] ?? 0) > 0) + $result + [
+                'ok' => true,
+                'offset' => $offset,
+                'batch_size' => $batchSize,
+                'processed_rows' => $processedRows,
+                'next_offset' => $nextOffset,
+                'done' => $done,
+                'batch_number' => intdiv($offset, $batchSize) + 1,
+            ]);
+        } catch (Throwable $e) {
+            return response()->json($this->applyFlags($request->boolean('confirm', false), false) + [
+                'ok' => false,
+                'dry_run' => ! $request->boolean('confirm', false),
+                'error' => $e->getMessage(),
+                'errors_count' => 1,
+                'items' => [],
+            ]);
+        }
+    }
+
+    public function apply(Request $request)
+    {
+        if (! hash_equals(self::TOKEN, (string) $request->query('token', ''))) {
+            return response()->json(['ok' => false, 'error_message' => 'Invalid diagnostics token.'], 403);
+        }
+
+        try {
+            return response()->json($this->evaluateApplyRequest($request));
+        } catch (Throwable $e) {
+            return response()->json($this->applyFlags($request->boolean('confirm', false), false) + [
+                'ok' => false,
+                'dry_run' => ! $request->boolean('confirm', false),
+                'error' => $e->getMessage(),
+                'errors_count' => 1,
+                'items' => [],
+            ]);
+        }
+    }
+
+    private function evaluateApplyRequest(Request $request, array $overrides = []): array
+    {
+        $confirm = $request->boolean('confirm', false);
+        $dryRun = ! $confirm;
+        $onlyMissingAllegro = $request->boolean('only_missing_allegro', true);
+        $excludeUncategorized = $request->boolean('exclude_uncategorized', true);
+        $minMatchedProducts = max(1, (int) $request->query('min_matched_products', 1));
+        $minSuggestedShare = max(0, min(1, (float) $request->query('min_suggested_share', 0.9)));
+        $confidenceFilter = $request->query('confidence');
+
+        $internalQuery = array_merge($request->query(), $overrides);
+        $internalQuery['only_missing_allegro'] = 0;
+        $internalQuery['min_products'] = 1;
+        unset($internalQuery['confidence']);
+        $internalRequest = Request::create('/tools/suggest-allegro-category-mappings-from-legacy-csv', 'GET', $internalQuery);
+        $payload = $this->__invoke($internalRequest)->getData(true);
+
+        if (! ($payload['ok'] ?? false)) {
+            return $this->applyFlags($confirm, false) + $payload;
+        }
+
+        $items = [];
+        $created = 0;
+        foreach (($payload['suggested_mappings'] ?? []) as $mapping) {
+            $item = $this->applyItem($mapping, $onlyMissingAllegro, $excludeUncategorized, $minMatchedProducts, $minSuggestedShare, $confidenceFilter);
+
+            if ($confirm && $item['action'] === 'would_create') {
+                if (! $this->hasAllegroMapping((int) $item['local_category_id'])) {
+                    $this->createAllegroMapping($item);
+                    $item['action'] = 'created';
+                    $created++;
+                } else {
+                    $item['action'] = 'skipped_existing_mapping';
+                }
+            }
+
+            $item['status'] = $item['action'] === 'created' ? 'created' : (str_starts_with((string) $item['action'], 'skipped_') ? 'skipped' : 'pending');
+            $item['reason'] = $item['action'];
+            $items[] = $item;
+        }
+
+        $counts = $this->actionCounts($items);
+
+        return $this->applyFlags($confirm, $created > 0) + [
+            'ok' => true,
+            'dry_run' => $dryRun,
+            'csv_path' => $payload['csv_path'] ?? null,
+            'parameters' => [
+                'only_missing_allegro' => $onlyMissingAllegro,
+                'only_public' => $request->boolean('only_public', true),
+                'leaf_only' => $request->boolean('leaf_only', true),
+                'exclude_uncategorized' => $excludeUncategorized,
+                'min_matched_products' => $minMatchedProducts,
+                'min_suggested_share' => $minSuggestedShare,
+                'confidence' => $confidenceFilter,
+            ],
+            'matched_products_count' => $payload['matched_products_count'] ?? 0,
+            'unmatched_products_count' => $payload['unmatched_products_count'] ?? 0,
+            'suggested_mapping_count' => $payload['suggested_mapping_count'] ?? 0,
+            'would_create_count' => $dryRun ? $counts['would_create_count'] : 0,
+            'created_count' => $dryRun ? 0 : $created,
+            'skipped_count' => $counts['skipped_count'],
+            'skipped_uncategorized_count' => $counts['skipped_uncategorized_count'],
+            'skipped_existing_mapping_count' => $counts['skipped_existing_mapping_count'],
+            'skipped_low_confidence_count' => $counts['skipped_low_confidence_count'],
+            'skipped_low_share_count' => $counts['skipped_low_share_count'],
+            'errors_count' => count(data_get($payload, 'diagnostics.errors_sample', [])),
+            'items' => $items,
+            'diagnostics' => $payload['diagnostics'] ?? [],
+        ];
+    }
+
+    private function applyItem(array $mapping, bool $onlyMissingAllegro, bool $excludeUncategorized, int $minMatchedProducts, float $minSuggestedShare, ?string $confidenceFilter): array
+    {
+        $item = [
+            'local_category_id' => $mapping['local_category_id'] ?? null,
+            'local_category_name' => $mapping['local_category_name'] ?? null,
+            'category_path' => $mapping['category_path'] ?? null,
+            'suggested_allegro_category_id' => $mapping['suggested_allegro_category_id'] ?? null,
+            'suggested_allegro_category_name' => $mapping['suggested_allegro_category_name'] ?? null,
+            'matched_products_count' => $mapping['matched_products_count'] ?? 0,
+            'suggested_count' => $mapping['suggested_count'] ?? 0,
+            'suggested_share' => $mapping['suggested_share'] ?? 0.0,
+            'confidence' => $mapping['confidence'] ?? null,
+            'action' => 'would_create',
+        ];
+
+        if (($item['suggested_allegro_category_id'] ?? null) === null || (string) $item['suggested_allegro_category_id'] === '') $item['action'] = 'skipped_no_allegro_category';
+        elseif ($excludeUncategorized && ((int) $item['local_category_id'] === 20 || (string) $item['local_category_name'] === 'Bez kategorii')) $item['action'] = 'skipped_uncategorized';
+        elseif ($onlyMissingAllegro && $this->hasAllegroMapping((int) $item['local_category_id'])) $item['action'] = 'skipped_existing_mapping';
+        elseif ((int) $item['matched_products_count'] < $minMatchedProducts) $item['action'] = 'skipped_low_confidence';
+        elseif ((float) $item['suggested_share'] < $minSuggestedShare) $item['action'] = 'skipped_low_share';
+        elseif ($confidenceFilter !== null && $confidenceFilter !== '' && (string) $item['confidence'] !== (string) $confidenceFilter) $item['action'] = 'skipped_low_confidence';
+
+        return $item;
+    }
+
+    private function createAllegroMapping(array $item): void
+    {
+        $now = now();
+        $row = [
+            'local_category_id' => (int) $item['local_category_id'],
+            'channel' => 'allegro',
+            'external_category_id' => (string) $item['suggested_allegro_category_id'],
+            'external_category_name' => $item['suggested_allegro_category_name'],
+            'local_category_name' => $item['local_category_name'],
+            'local_category_path' => $item['category_path'],
+            'source' => 'legacy_csv_offer_id_match',
+            'confidence' => $item['confidence'],
+            'metadata' => json_encode(['matched_products_count' => $item['matched_products_count'], 'suggested_count' => $item['suggested_count'], 'suggested_share' => $item['suggested_share']]),
+            'imported_at' => $now,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ];
+        $row = array_filter($row, fn ($value, $column) => Schema::hasColumn('marketplace_category_mappings', $column), ARRAY_FILTER_USE_BOTH);
+        DB::table('marketplace_category_mappings')->insert($row);
+    }
+
+
+    private function actionCounts(array $items): array
+    {
+        $counts = ['would_create_count'=>0,'skipped_count'=>0,'skipped_uncategorized_count'=>0,'skipped_existing_mapping_count'=>0,'skipped_low_confidence_count'=>0,'skipped_low_share_count'=>0];
+        foreach ($items as $item) {
+            $action = (string) ($item['action'] ?? '');
+            if ($action === 'would_create') $counts['would_create_count']++;
+            if (str_starts_with($action, 'skipped_')) $counts['skipped_count']++;
+            if (isset($counts[$action.'_count'])) $counts[$action.'_count']++;
+        }
+        return $counts;
+    }
+
+    private function runnerHtml(string $token): string
+    {
+        $tokenJson = json_encode($token);
+        return <<<HTML
+<!doctype html><html lang="pl"><head><meta charset="utf-8"><title>Allegro legacy category mapping runner</title><style>body{font-family:system-ui,Arial,sans-serif;margin:24px;color:#111}label{display:block;margin:8px 0}input{margin-left:8px}button{margin:8px 6px 8px 0;padding:8px 12px}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}.card{border:1px solid #ddd;border-radius:6px;padding:8px;background:#fafafa}progress{width:100%;height:24px}table{border-collapse:collapse;width:100%;margin-top:16px}th,td{border:1px solid #ddd;padding:6px;text-align:left}th{background:#f3f3f3}pre{background:#111;color:#eee;padding:12px;overflow:auto}</style></head><body>
+<h1>Allegro legacy category mapping runner</h1>
+<p>Local-only runner. Nie woła Allegro/Ovoko/eBay API i przetwarza CSV partiami przez endpoint batch.</p>
+<section><h2>Parametry</h2>
+<label>batch_size <input id="batch_size" type="number" value="100" min="1" max="1000"></label>
+<label>offset/start <input id="offset" type="number" value="0" min="0"></label>
+<label>record_limit <input id="record_limit" type="number" value="5000" min="1" max="10000"></label>
+<label>sample_limit <input id="sample_limit" type="number" value="100" min="0" max="500"></label>
+<label><input id="only_missing_allegro" type="checkbox" checked> only_missing_allegro</label>
+<label><input id="only_public" type="checkbox" checked> only_public</label>
+<label><input id="leaf_only" type="checkbox" checked> leaf_only</label>
+<label><input id="exclude_uncategorized" type="checkbox" checked> exclude_uncategorized</label>
+<label>min_suggested_share <input id="min_suggested_share" type="number" value="0.9" min="0" max="1" step="0.01"></label>
+<label>min_matched_products <input id="min_matched_products" type="number" value="1" min="1"></label>
+<label>confidence <input id="confidence" placeholder="opcjonalnie, np. high"></label>
+<button onclick="start(false)">Start dry-run</button><button onclick="start(true)">Start confirm local mappings</button><button onclick="stopRunner()">Stop</button></section>
+<h2>Postęp</h2><progress id="progress" value="0" max="100"></progress><p id="progressText">processed_rows: 0 / 5000, batch: 0</p><div class="cards" id="cards"></div><h2>Ostatnia partia</h2><table><thead><tr><th>local_category_id</th><th>local_category_name</th><th>suggested_allegro_category_id</th><th>suggested_allegro_category_name</th><th>matched_products_count</th><th>suggested_share</th><th>confidence</th><th>action</th><th>status/reason</th></tr></thead><tbody id="rows"></tbody></table><h2>JSON / error</h2><pre id="out"></pre>
+<script>
+const token = {$tokenJson}; let running=false, totals={}, batchNumber=0;
+function v(id){return document.getElementById(id).value} function c(id){return document.getElementById(id).checked?'1':'0'} function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
+function params(confirm){let p=new URLSearchParams({token,offset:v('offset'),batch_size:v('batch_size'),record_limit:v('record_limit'),sample_limit:v('sample_limit'),dry_run:confirm?'0':'1',only_missing_allegro:c('only_missing_allegro'),only_public:c('only_public'),leaf_only:c('leaf_only'),exclude_uncategorized:c('exclude_uncategorized'),min_suggested_share:v('min_suggested_share'),min_matched_products:v('min_matched_products')}); if(confirm)p.set('confirm','1'); if(v('confidence'))p.set('confidence',v('confidence')); return p;}
+function addTotals(d){['matched_products_count','unmatched_products_count','suggested_mapping_count','would_create_count','created_count','skipped_uncategorized_count','skipped_existing_mapping_count','skipped_low_confidence_count','skipped_low_share_count','errors_count'].forEach(k=>totals[k]=(totals[k]||0)+(Number(d[k]||0)));}
+function render(d){addTotals(d); let limit=Number(v('record_limit')); let processed=Number(d.next_offset||0); document.getElementById('offset').value=processed; document.getElementById('progress').value=Math.min(100, Math.round(processed*100/limit)); document.getElementById('progressText').textContent=`processed_rows: ${processed} / ${limit}, batch: ${d.batch_number||batchNumber}`; document.getElementById('cards').innerHTML=Object.entries(totals).map(([k,val])=>`<div class="card"><b>${k}</b><br>${val}</div>`).join(''); document.getElementById('rows').innerHTML=(d.items||[]).map(i=>`<tr><td>${i.local_category_id??''}</td><td>${i.local_category_name??''}</td><td>${i.suggested_allegro_category_id??''}</td><td>${i.suggested_allegro_category_name??''}</td><td>${i.matched_products_count??0}</td><td>${i.suggested_share??''}</td><td>${i.confidence??''}</td><td>${i.action??''}</td><td>${i.status??''}${i.reason?' / '+i.reason:''}</td></tr>`).join(''); document.getElementById('out').textContent=JSON.stringify(d,null,2);}
+async function start(confirm){running=true; totals={}; batchNumber=0; while(running){batchNumber++; let res=await fetch('/tools/run-allegro-legacy-category-mapping-batch?'+params(confirm)); let d=await res.json(); render(d); if(!res.ok||!d.ok){running=false; break;} if(d.done){running=false; break;} await sleep(300);} }
+function stopRunner(){running=false;}
+</script></body></html>
+HTML;
+    }
+
+    private function applyFlags(bool $confirm, bool $mappingsChanged): array
+    {
+        return ['read_only'=>! $confirm,'local_update'=>$confirm && $mappingsChanged,'ovoko_write'=>false,'allegro_write'=>false,'ebay_write'=>false,'products_changed'=>false,'offers_changed'=>false,'mappings_changed'=>$mappingsChanged];
     }
 
     private function buildSuggestions(array $groups, array $allegroNames, int $minProducts, ?string $confidenceFilter): array
@@ -197,6 +444,7 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvController extends Controller
             'csv_found' => $csvPath !== null,
             'csv_rows_read' => 0,
             'csv_rows_skipped' => 0,
+            'csv_rows_skipped_by_offset' => 0,
             'invalid_json_count' => 0,
             'allegro_category_id_from_json_count' => 0,
             'allegro_category_id_from_regex_count' => 0,
