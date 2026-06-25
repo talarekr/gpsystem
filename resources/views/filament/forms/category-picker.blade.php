@@ -29,6 +29,49 @@
         .gps-category-picker-modal.fi-modal-window .fi-modal-footer .fi-color-gray {
             display: none !important;
         }
+
+        .fi-modal-window.gps-category-picker-modal .fi-modal-footer .gps-category-picker__actions,
+        .gps-category-picker-modal.fi-modal-window .fi-modal-footer .gps-category-picker__actions {
+            display: flex !important;
+            justify-content: flex-end !important;
+            width: 100% !important;
+        }
+
+        .gps-category-picker__submit {
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            min-height: 2.5rem !important;
+            border: 1px solid rgb(37 99 235) !important;
+            border-radius: 0.5rem !important;
+            background: rgb(37 99 235) !important;
+            padding: 0.5rem 1rem !important;
+            color: #fff !important;
+            font-weight: 600 !important;
+            line-height: 1.25rem !important;
+            text-decoration: none !important;
+            box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05) !important;
+            transition: background-color 150ms ease, border-color 150ms ease, box-shadow 150ms ease, opacity 150ms ease !important;
+        }
+
+        .gps-category-picker__submit:hover:not(:disabled) {
+            border-color: rgb(29 78 216) !important;
+            background: rgb(29 78 216) !important;
+        }
+
+        .gps-category-picker__submit:focus-visible {
+            outline: 2px solid rgb(96 165 250) !important;
+            outline-offset: 2px !important;
+        }
+
+        .gps-category-picker__submit:disabled {
+            cursor: not-allowed !important;
+            border-color: rgb(209 213 219) !important;
+            background: rgb(229 231 235) !important;
+            color: rgb(107 114 128) !important;
+            opacity: 0.75 !important;
+            box-shadow: none !important;
+        }
     </style>
 @endonce
 
@@ -139,9 +182,18 @@
             this.isSaving = true;
 
             this.$wire.setPartCategoryFromPicker(this.selectedId)
+                .then(() => {
+                    this.closeCategoryPicker();
+                })
                 .finally(() => {
                     this.isSaving = false;
                 });
+        },
+        closeCategoryPicker() {
+            const modal = this.$root.closest('.fi-modal-window');
+            const closeButton = modal?.querySelector('.fi-modal-header :where(.fi-modal-close-btn, .fi-modal-close-button, [aria-label=\'Close\'], [aria-label=\'Zamknij\'])');
+
+            closeButton?.click();
         },
         back() {
             this.stack.pop();
@@ -237,7 +289,7 @@
     <div class="gps-category-picker__actions" x-ref="actions">
         <button
             type="button"
-            class="fi-btn fi-btn-size-md fi-color-primary"
+            class="gps-category-picker__submit fi-btn fi-btn-size-md fi-color-primary"
             x-bind:disabled="! canSave() || isSaving"
             x-on:click="saveSelectedCategory()"
         >
