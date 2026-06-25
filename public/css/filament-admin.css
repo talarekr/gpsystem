@@ -1704,6 +1704,19 @@ body.fi-body :where(
     flex-direction: column !important;
 }
 
+.fi-modal-window.gps-category-picker-modal,
+.gps-category-picker-modal.fi-modal-window {
+    min-height: 0 !important;
+}
+
+@supports (height: 100dvh) {
+    .fi-modal-window.gps-category-picker-modal,
+    .gps-category-picker-modal.fi-modal-window {
+        height: 100dvh !important;
+        max-height: 100dvh !important;
+    }
+}
+
 .fi-modal-window.gps-category-picker-modal .fi-modal-content,
 .gps-category-picker-modal.fi-modal-window .fi-modal-content,
 .fi-modal-window.gps-vehicle-picker-modal .fi-modal-content,
@@ -1761,10 +1774,17 @@ body.fi-body :where(
 
 .gps-category-picker {
     display: flex;
+    flex: 1 1 auto;
     flex-direction: column;
     gap: 0.75rem;
     height: 100%;
+    max-height: 100%;
     min-height: 0;
+}
+
+.gps-category-picker__search,
+.gps-category-picker__selected {
+    flex: 0 0 auto;
 }
 
 .gps-category-picker__content {
