@@ -30,14 +30,35 @@
             display: none !important;
         }
 
-        .gps-category-picker__actions {
-            position: sticky !important;
-            bottom: 0 !important;
-            z-index: 10 !important;
+        .fi-modal-window.gps-category-picker-modal .fi-modal-content,
+        .gps-category-picker-modal.fi-modal-window .fi-modal-content {
             display: flex !important;
+            flex-direction: column !important;
+            min-height: 0 !important;
+            overflow: hidden !important;
+        }
+
+        .gps-category-picker {
+            display: flex !important;
+            flex-direction: column !important;
+            min-height: 0 !important;
+            height: 100% !important;
+        }
+
+        .gps-category-picker__content {
+            flex: 1 1 auto !important;
+            min-height: 0 !important;
+            overflow-y: auto !important;
+            padding-bottom: 1rem !important;
+        }
+
+        .gps-category-picker__actions {
+            flex: 0 0 auto !important;
+            display: flex !important;
+            align-items: center !important;
             justify-content: center !important;
             width: 100% !important;
-            margin-top: 1rem !important;
+            margin-top: 0 !important;
             border-top: 1px solid rgb(229 231 235) !important;
             background: rgb(255 255 255) !important;
             padding: 1rem 0 0 !important;
@@ -235,35 +256,36 @@
         <span x-text="selectedName || selectedCategory()?.name"></span>
     </div>
 
-    <template x-if="search.trim().length >= 2">
-        <div class="gps-category-picker__section">
-            <p class="gps-category-picker__hint">Wyniki wyszukiwania</p>
+    <div class="gps-category-picker__content">
+        <template x-if="search.trim().length >= 2">
+            <div class="gps-category-picker__section">
+                <p class="gps-category-picker__hint">Wyniki wyszukiwania</p>
 
-            <template x-for="category in searchResults()" :key="`search-${category.id}`">
-                <button type="button" class="gps-category-picker__row" x-bind:class="{ 'is-selected': String(selectedId) === String(category.id) }" x-on:click="choose(category)">
-                    <span>
-                        <strong x-text="category.name"></strong>
-                        <small x-text="category.path"></small>
-                    </span>
-                    <span class="gps-category-picker__arrow" x-show="category.has_children" aria-hidden="true">›</span>
-                    <span class="gps-category-picker__select-label" x-show="! category.has_children">Wybierz</span>
-                </button>
-            </template>
+                <template x-for="category in searchResults()" :key="`search-${category.id}`">
+                    <button type="button" class="gps-category-picker__row" x-bind:class="{ 'is-selected': String(selectedId) === String(category.id) }" x-on:click="choose(category)">
+                        <span>
+                            <strong x-text="category.name"></strong>
+                            <small x-text="category.path"></small>
+                        </span>
+                        <span class="gps-category-picker__arrow" x-show="category.has_children" aria-hidden="true">›</span>
+                        <span class="gps-category-picker__select-label" x-show="! category.has_children">Wybierz</span>
+                    </button>
+                </template>
 
-            <p class="gps-category-picker__empty" x-show="searchResults().length === 0">Brak pasujących kategorii.</p>
-        </div>
-    </template>
+                <p class="gps-category-picker__empty" x-show="searchResults().length === 0">Brak pasujących kategorii.</p>
+            </div>
+        </template>
 
-    <div class="gps-category-picker__section" x-show="search.trim().length < 2">
-        <div class="gps-category-picker__nav">
+        <div class="gps-category-picker__section" x-show="search.trim().length < 2">
+            <div class="gps-category-picker__nav">
             <button type="button" class="gps-category-picker__back" x-show="currentParent !== null" x-on:click="back()">← Wstecz</button>
             <button type="button" class="gps-category-picker__crumb" x-show="currentParent !== null" x-on:click="resetTree()">Kategorie</button>
             <template x-for="category in breadcrumb()" :key="`crumb-${category.id}`">
                 <span class="gps-category-picker__crumb-current" x-text="`/ ${category.name}`"></span>
             </template>
-        </div>
+            </div>
 
-        <template x-for="category in currentChildren()" :key="category.id">
+            <template x-for="category in currentChildren()" :key="category.id">
             <div
                 role="button"
                 tabindex="0"
@@ -285,9 +307,10 @@
                 >›</button>
                 <span class="gps-category-picker__select-label" x-show="! category.has_children">Wybierz</span>
             </div>
-        </template>
+            </template>
 
-        <p class="gps-category-picker__empty" x-show="currentChildren().length === 0">Brak podkategorii.</p>
+            <p class="gps-category-picker__empty" x-show="currentChildren().length === 0">Brak podkategorii.</p>
+        </div>
     </div>
 
     <div class="gps-category-picker__actions" x-ref="actions">
