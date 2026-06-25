@@ -15,11 +15,11 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvControllerTest extends TestCase
         $imports = storage_path('app/imports');
         if (! is_dir($imports)) mkdir($imports, 0777, true);
         file_put_contents($imports.'/woo_allegro_legacy_mapping.csv', implode("\n", [
-            'woo_product_id,allegro_offer_id,raw_allegro_meta_json',
-            '501,9001,"{""_allegro_category_id"":""123""}"',
-            '502,9002,"{""_allegro_category_id"":""123""}"',
-            '503,9003,"{""_allegro_category_id"":""999""}"',
-            '999,9004,"{""_allegro_category_id"":""123""}"',
+            'woo_product_id,sku,allegro_offer_id,raw_allegro_meta_json',
+            '501,SKU-501,9001,"{""_allegro_category_id"":""123""}"',
+            '502,SKU-502,9002,"{""_allegro_category_id"":""123""}"',
+            '503,SKU-503,9003,"{""_allegro_category_id"":""999""}"',
+            '999,SKU-999,9004,"{""_allegro_category_id"":""123""}"',
         ]));
 
         DB::table('part_categories')->insert(['id' => 31, 'name' => 'Silniki', 'category_path' => 'Części > Silnik > Silniki', 'is_visible' => true, 'created_at' => now(), 'updated_at' => now()]);
@@ -46,8 +46,52 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvControllerTest extends TestCase
             ->assertJsonPath('suggested_mappings.0.suggested_allegro_category_id', '123')
             ->assertJsonPath('suggested_mappings.0.suggested_allegro_category_name', 'Części samochodowe')
             ->assertJsonPath('suggested_mappings.0.suggested_count', 2)
-            ->assertJsonPath('suggested_mappings.0.confidence', 'low');
+            ->assertJsonPath('suggested_mappings.0.confidence', 'low')
+            ->assertJsonPath('diagnostics.allegro_category_id_from_json_count', 4)
+            ->assertJsonPath('diagnostics.allegro_offer_id_from_column_count', 4);
 
         $this->assertDatabaseCount('marketplace_category_mappings', 0);
     }
+    public function test_recovers_allegro_ids_from_broken_csv_json_and_matches_by_sku(): void
+    {
+        $imports = storage_path('app/imports');
+        if (! is_dir($imports)) mkdir($imports, 0777, true);
+        file_put_contents($imports.'/woo_allegro_legacy_mapping.csv', implode("\n", [
+            'woo_product_id,sku,allegro_offer_id,raw_allegro_meta_json',
+            '999,SKU-FALLBACK,,{"_allegro_offer_id":"OFFER-9","_allegro_category_id":"123","other":"comma,split"}',
+        ]));
+
+        DB::table('part_categories')->insert(['id' => 31, 'name' => 'Silniki', 'category_path' => 'Części > Silnik > Silniki', 'is_visible' => true, 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('marketplace_categories')->insert(['channel' => 'allegro', 'external_category_id' => '123', 'name' => 'Części samochodowe', 'active' => true, 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('parts')->insert([
+            'id' => 101,
+            'source_system' => 'manual',
+            'external_id' => 'different',
+            'sku' => 'SKU-FALLBACK',
+            'name' => 'Engine A',
+            'category_id' => 31,
+            'price' => 1,
+            'quantity' => 1,
+            'status' => 'ready',
+            'is_visible_storefront' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->getJson('/tools/suggest-allegro-category-mappings-from-legacy-csv?token=gps_images_import_2026&only_public=1&only_missing_allegro=1&leaf_only=1')
+            ->assertOk()
+            ->assertJsonPath('read_only', true)
+            ->assertJsonPath('matched_products_count', 1)
+            ->assertJsonPath('unmatched_products_count', 0)
+            ->assertJsonPath('rows_with_allegro_category_id', 1)
+            ->assertJsonPath('diagnostics.invalid_json_count', 0)
+            ->assertJsonPath('diagnostics.allegro_category_id_from_regex_count', 1)
+            ->assertJsonPath('diagnostics.allegro_offer_id_from_regex_count', 1)
+            ->assertJsonPath('diagnostics.count_parts_with_sku_matching_sample', 1)
+            ->assertJsonPath('diagnostics.product_match_attempts_sample.0.matched_by', 'sku')
+            ->assertJsonPath('suggested_mappings.0.sample_products.0.allegro_offer_id', 'OFFER-9');
+
+        $this->assertDatabaseCount('marketplace_category_mappings', 0);
+    }
+
 }
