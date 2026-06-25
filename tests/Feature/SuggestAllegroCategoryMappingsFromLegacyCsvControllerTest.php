@@ -122,9 +122,14 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvControllerTest extends TestCase
             ->assertJsonPath('matched_products_count', 2)
             ->assertJsonPath('suggested_mapping_count', 1)
             ->assertJsonPath('diagnostics.sample_allegro_offer_ids.0', 'AL-1001')
-            ->assertJsonPath('diagnostics.local_offer_match_strategy_used', 'marketplace_listings.offer_id')
+            ->assertJsonPath('diagnostics.local_offer_match_strategy_used', 'marketplace_listings.external_offer_id')
             ->assertJsonPath('diagnostics.count_offer_table_matches_sample', 2)
-            ->assertJsonPath('diagnostics.product_match_attempts_sample.0.matched_by', 'marketplace_listings.offer_id')
+            ->assertJsonPath('diagnostics.offer_table_raw_match_count', 2)
+            ->assertJsonPath('diagnostics.offer_table_part_found_count', 2)
+            ->assertJsonPath('diagnostics.offer_table_accepted_count', 2)
+            ->assertJsonPath('diagnostics.sample_offer_table_matches.0.offer_id_column', 'external_offer_id')
+            ->assertJsonPath('diagnostics.sample_offer_table_matches.0.accepted', true)
+            ->assertJsonPath('diagnostics.product_match_attempts_sample.0.matched_by', 'marketplace_listings.external_offer_id')
             ->assertJsonPath('diagnostics.product_match_attempts_sample.0.matched_part_id', 101)
             ->assertJsonPath('diagnostics.product_match_attempts_sample.0.matched_category_id', 31);
 
