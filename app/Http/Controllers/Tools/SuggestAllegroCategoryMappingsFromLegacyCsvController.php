@@ -272,7 +272,6 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvController extends Controller
         }
 
         $items = [];
-        $created = 0;
         foreach (($payload['suggested_mappings'] ?? []) as $mapping) {
             $item = $this->applyItem($mapping, $onlyMissingAllegro, $excludeUncategorized, $minMatchedProducts, $minSuggestedShare, $confidenceFilter);
 
@@ -280,7 +279,6 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvController extends Controller
                 if (! $this->hasAllegroMapping((int) $item['local_category_id'])) {
                     $this->createAllegroMapping($item);
                     $item['action'] = 'created';
-                    $created++;
                 } else {
                     $item['action'] = 'skipped_existing_mapping';
                 }
@@ -293,7 +291,7 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvController extends Controller
 
         $counts = $this->actionCounts($items);
 
-        return $this->applyFlags($confirm, $created > 0) + [
+        return $this->applyFlags($confirm, $counts['created_count'] > 0) + [
             'ok' => true,
             'dry_run' => $dryRun,
             'csv_path' => $payload['csv_path'] ?? null,
@@ -309,8 +307,8 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvController extends Controller
             'matched_products_count' => $payload['matched_products_count'] ?? 0,
             'unmatched_products_count' => $payload['unmatched_products_count'] ?? 0,
             'suggested_mapping_count' => $payload['suggested_mapping_count'] ?? 0,
-            'would_create_count' => $dryRun ? $counts['would_create_count'] : 0,
-            'created_count' => $dryRun ? 0 : $created,
+            'would_create_count' => $counts['would_create_count'],
+            'created_count' => $counts['created_count'],
             'skipped_count' => $counts['skipped_count'],
             'skipped_uncategorized_count' => $counts['skipped_uncategorized_count'],
             'skipped_existing_mapping_count' => $counts['skipped_existing_mapping_count'],
@@ -371,13 +369,39 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvController extends Controller
 
     private function actionCounts(array $items): array
     {
-        $counts = ['would_create_count'=>0,'skipped_count'=>0,'skipped_uncategorized_count'=>0,'skipped_existing_mapping_count'=>0,'skipped_low_confidence_count'=>0,'skipped_low_share_count'=>0];
+        $counts = [
+            'would_create_count' => 0,
+            'created_count' => 0,
+            'skipped_count' => 0,
+            'skipped_uncategorized_count' => 0,
+            'skipped_existing_mapping_count' => 0,
+            'skipped_low_confidence_count' => 0,
+            'skipped_low_share_count' => 0,
+        ];
+
         foreach ($items as $item) {
             $action = (string) ($item['action'] ?? '');
-            if ($action === 'would_create') $counts['would_create_count']++;
-            if (str_starts_with($action, 'skipped_')) $counts['skipped_count']++;
-            if (isset($counts[$action.'_count'])) $counts[$action.'_count']++;
+
+            if ($action === 'would_create') {
+                $counts['would_create_count']++;
+                continue;
+            }
+
+            if ($action === 'created') {
+                $counts['created_count']++;
+                continue;
+            }
+
+            if (str_starts_with($action, 'skipped_')) {
+                $counts['skipped_count']++;
+
+                $specificCountKey = $action.'_count';
+                if (array_key_exists($specificCountKey, $counts)) {
+                    $counts[$specificCountKey]++;
+                }
+            }
         }
+
         return $counts;
     }
 

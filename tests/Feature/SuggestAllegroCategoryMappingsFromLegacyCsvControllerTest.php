@@ -268,6 +268,46 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvControllerTest extends TestCase
         $this->assertDatabaseCount('marketplace_category_mappings', 0);
     }
 
+    public function test_allegro_legacy_category_mapping_batch_dry_run_counts_would_create_items_once(): void
+    {
+        $imports = storage_path('app/imports');
+        if (! is_dir($imports)) mkdir($imports, 0777, true);
+
+        $csvRows = ['woo_product_id,sku,allegro_offer_id,raw_allegro_meta_json'];
+        $categories = [];
+        $parts = [];
+
+        for ($i = 1; $i <= 10; $i++) {
+            $productId = 500 + $i;
+            $categoryId = 100 + $i;
+            $csvRows[] = $productId.',SKU-'.$productId.',AL-'.$productId.',"{""_allegro_category_id"":""123""}"';
+            $categories[] = ['id' => $categoryId, 'name' => 'Kategoria '.$i, 'category_path' => 'Części > Kategoria '.$i, 'is_visible' => true, 'created_at' => now(), 'updated_at' => now()];
+            $parts[] = ['id' => 200 + $i, 'source_system' => 'woo', 'external_id' => (string) $productId, 'sku' => 'SKU-'.$productId, 'name' => 'Part '.$i, 'category_id' => $categoryId, 'price' => 1, 'quantity' => 1, 'status' => 'ready', 'is_visible_storefront' => true, 'created_at' => now(), 'updated_at' => now()];
+        }
+
+        file_put_contents($imports.'/woo_allegro_legacy_mapping.csv', implode("\n", $csvRows));
+
+        DB::table('part_categories')->insert($categories);
+        DB::table('marketplace_categories')->insert(['channel' => 'allegro', 'external_category_id' => '123', 'name' => 'Części samochodowe', 'active' => true, 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('parts')->insert($parts);
+
+        $this->getJson('/tools/run-allegro-legacy-category-mapping-batch?token=gps_images_import_2026&offset=0&batch_size=10&record_limit=100&dry_run=1&only_missing_allegro=1&only_public=1&leaf_only=1&exclude_uncategorized=1&min_suggested_share=0.9&min_matched_products=1')
+            ->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('dry_run', true)
+            ->assertJsonPath('read_only', true)
+            ->assertJsonPath('local_update', false)
+            ->assertJsonPath('mappings_changed', false)
+            ->assertJsonPath('matched_products_count', 10)
+            ->assertJsonPath('suggested_mapping_count', 10)
+            ->assertJsonCount(10, 'items')
+            ->assertJsonPath('would_create_count', 10)
+            ->assertJsonPath('created_count', 0)
+            ->assertJsonPath('skipped_count', 0);
+
+        $this->assertDatabaseCount('marketplace_category_mappings', 0);
+    }
+
     public function test_allegro_legacy_category_mapping_batch_excludes_uncategorized(): void
     {
         $this->seedApplyFixture(20, 'Bez kategorii');
