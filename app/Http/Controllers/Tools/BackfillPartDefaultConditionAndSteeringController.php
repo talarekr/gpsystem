@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Tools;
 
+use App\Filament\Resources\PartResource;
 use App\Http\Controllers\Controller;
 use App\Models\Part;
 use Illuminate\Database\Eloquent\Builder;
@@ -118,9 +119,10 @@ class BackfillPartDefaultConditionAndSteeringController extends Controller
 
     private function scopedQuery(string $scope): Builder
     {
-        return Part::query()
-            ->when($scope === 'to_publish', fn (Builder $query) => $query->where('needs_listing', true)->where(fn (Builder $query) => $query->where('needs_review', false)->orWhereNull('needs_review')))
-            ->where(fn (Builder $query) => $query->whereNull('source_system')->orWhereIn('source_system', ['local', 'manual', 'workshop', 'workshop_quick_create']));
+        return match ($scope) {
+            'to_publish' => PartResource::adminPartsToListQuery(),
+            default => Part::query()->whereRaw('1 = 0'),
+        };
     }
 
     private function isMissing(mixed $value): bool
@@ -131,6 +133,33 @@ class BackfillPartDefaultConditionAndSteeringController extends Controller
     private function item(int $partId, mixed $currentQuality, mixed $newQuality, mixed $currentSteering, mixed $newSteering, string $action, string $reason): array
     {
         return ['part_id' => $partId, 'current_quality' => $currentQuality, 'new_quality' => $newQuality, 'current_steering_side' => $currentSteering, 'new_steering_side' => $newSteering, 'action' => $action, 'reason' => $reason];
+    }
+
+    private function countsBy(string $column): array
+    {
+        if (! Schema::hasTable('parts') || ! Schema::hasColumn('parts', $column)) {
+            return [];
+        }
+
+        return Part::query()
+            ->selectRaw($column.' as value, count(*) as aggregate')
+            ->groupBy($column)
+            ->orderBy($column)
+            ->get()
+            ->mapWithKeys(fn ($row): array => [(string) ($row->value ?? 'NULL') => (int) $row->aggregate])
+            ->all();
+    }
+
+    private function countsWithoutMarketplaceListings(): array
+    {
+        if (! Schema::hasTable('parts') || ! Schema::hasTable('marketplace_listings')) {
+            return [];
+        }
+
+        return [
+            'total' => Part::query()->whereDoesntHave('marketplaceListings')->count(),
+            'admin_to_publish' => PartResource::adminPartsToListQuery()->whereDoesntHave('marketplaceListings')->count(),
+        ];
     }
 
     private function basePayload(string $scope, bool $onlyMissing, bool $readOnly, bool $withDiagnostics, ?string $diagnosticReason = null): array
@@ -163,7 +192,26 @@ class BackfillPartDefaultConditionAndSteeringController extends Controller
         ];
 
         if ($withDiagnostics) {
-            $payload['diagnostics'] = ['reason' => $diagnosticReason, 'to_publish_filter' => 'parts.needs_listing = true AND (parts.needs_review = false OR parts.needs_review IS NULL)', 'parts_columns' => Schema::getColumnListing('parts'), 'available_statuses' => Part::query()->select('status')->distinct()->pluck('status')->values()];
+            $adminToPublishQuery = Schema::hasTable('parts') ? PartResource::adminPartsToListQuery() : Part::query()->whereRaw('1 = 0');
+            $matchingQuery = $diagnosticReason === null ? $this->scopedQuery($scope) : Part::query()->whereRaw('1 = 0');
+
+            $payload['diagnostics'] = [
+                'reason' => $diagnosticReason,
+                'current_filter_used' => $scope === 'to_publish' ? 'PartResource::adminPartsToListQuery(): parts.needs_listing = true' : 'unsupported_scope',
+                'admin_to_publish_filter_used' => 'PartResource::adminPartsToListQuery(): parts.needs_listing = true',
+                'admin_to_publish_route_name' => 'filament.admin.resources.parts.to-list',
+                'admin_to_publish_page' => 'App\\Filament\\Resources\\PartResource\\Pages\\PartsToList',
+                'total_parts_count' => Schema::hasTable('parts') ? Part::query()->count() : 0,
+                'total_matching_parts_count' => (clone $matchingQuery)->count(),
+                'counts_by_status' => $this->countsBy('status'),
+                'counts_by_needs_listing' => $this->countsBy('needs_listing'),
+                'counts_by_needs_review' => $this->countsBy('needs_review'),
+                'counts_without_marketplace_listings' => $this->countsWithoutMarketplaceListings(),
+                'sample_matching_part_ids' => (clone $matchingQuery)->orderBy('id')->limit(10)->pluck('id')->values(),
+                'sample_admin_to_publish_part_ids' => (clone $adminToPublishQuery)->orderBy('id')->limit(10)->pluck('id')->values(),
+                'parts_columns' => Schema::getColumnListing('parts'),
+                'available_statuses' => Part::query()->select('status')->distinct()->pluck('status')->values(),
+            ];
         }
 
         return $payload;

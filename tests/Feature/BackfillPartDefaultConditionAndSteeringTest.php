@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Filament\Resources\PartResource;
 use App\Models\MarketplaceListing;
 use App\Models\Part;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -77,10 +78,22 @@ class BackfillPartDefaultConditionAndSteeringTest extends TestCase
         $this->assertSame('po prawej', $part->vehicle_snapshot['steering_side']);
     }
 
+    public function test_to_publish_scope_uses_same_query_as_admin_parts_to_list(): void
+    {
+        Part::query()->create(['name' => 'Outside', 'needs_listing' => false, 'needs_review' => false]);
+        Part::query()->create(['name' => 'Review but in admin to-list', 'needs_listing' => true, 'needs_review' => true]);
+        Part::query()->create(['name' => 'Normal to-list', 'needs_listing' => true, 'needs_review' => false]);
+
+        $this->getJson($this->url.'&dry_run=1&confirm=0&diagnostics=1')
+            ->assertOk()
+            ->assertJsonPath('total_matching_parts_count', PartResource::adminPartsToListQuery()->count())
+            ->assertJsonPath('diagnostics.current_filter_used', 'PartResource::adminPartsToListQuery(): parts.needs_listing = true')
+            ->assertJsonPath('diagnostics.admin_to_publish_filter_used', 'PartResource::adminPartsToListQuery(): parts.needs_listing = true');
+    }
+
     public function test_endpoint_excludes_parts_outside_to_publish_scope(): void
     {
         Part::query()->create(['name' => 'Outside', 'needs_listing' => false, 'needs_review' => false]);
-        Part::query()->create(['name' => 'Review', 'needs_listing' => true, 'needs_review' => true]);
 
         $this->getJson($this->url.'&dry_run=0&confirm=1')
             ->assertOk()

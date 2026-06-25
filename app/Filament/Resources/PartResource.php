@@ -604,13 +604,18 @@ class PartResource extends Resource
         return Part::query()->where('needs_review', true)->count();
     }
 
+    public static function adminPartsToListQuery(): Builder
+    {
+        return Part::query()->where('needs_listing', true);
+    }
+
     public static function getPartsToListNavigationCount(): int
     {
         if (! Schema::hasTable('parts')) {
             return 0;
         }
 
-        return Part::query()->where('needs_listing', true)->count();
+        return static::adminPartsToListQuery()->count();
     }
 
     public static function getNavigationItems(): array
