@@ -28,6 +28,7 @@ class SuggestOvokoCategoryMappingsFromLocalTreeController extends Controller
             'min_score' => max(0.0, min(1.0, (float) $request->query('min_score', 0.85))),
             'category_id' => $request->query('category_id'),
             'include_existing' => $request->boolean('include_existing', false),
+            'exclude_uncategorized' => $request->boolean('exclude_uncategorized', true),
             'diagnostics' => $request->boolean('diagnostics', false),
         ];
         $diagnostics = ['ovoko_table_used' => null, 'ovoko_rows_loaded' => 0, 'ovoko_leaf_rows_loaded' => 0, 'local_categories_checked' => 0, 'filters' => $filters, 'errors_sample' => []];
@@ -35,6 +36,12 @@ class SuggestOvokoCategoryMappingsFromLocalTreeController extends Controller
         try {
             [$ovokoRows, $diagnostics] = $this->loadOvokoRows($diagnostics);
             $localRows = $this->loadLocalRows($filters);
+            $excludedUncategorizedCount = 0;
+            if ($filters['exclude_uncategorized']) {
+                $beforeCount = $localRows->count();
+                $localRows = $localRows->reject(fn (object $local): bool => $this->isUncategorizedLocalCategory($local))->values();
+                $excludedUncategorizedCount = $beforeCount - $localRows->count();
+            }
             $diagnostics['local_categories_checked'] = $localRows->count();
 
             $items = [];
@@ -51,7 +58,7 @@ class SuggestOvokoCategoryMappingsFromLocalTreeController extends Controller
                 }
             }
 
-            $summary = $this->summary($items);
+            $summary = $this->summary($items) + ['excluded_uncategorized_count' => $excludedUncategorizedCount];
 
             return response()->json($this->flags() + [
                 'ok' => true,
@@ -63,7 +70,7 @@ class SuggestOvokoCategoryMappingsFromLocalTreeController extends Controller
         } catch (Throwable $e) {
             $diagnostics['errors_sample'][] = ['type' => 'critical_error', 'message' => $e->getMessage()];
 
-            return response()->json($this->flags() + ['ok' => false, 'items' => [], 'summary' => $this->summary([]) + ['total_matching_count' => 0], 'diagnostics' => $diagnostics]);
+            return response()->json($this->flags() + ['ok' => false, 'items' => [], 'summary' => $this->summary([]) + ['excluded_uncategorized_count' => 0, 'total_matching_count' => 0], 'diagnostics' => $diagnostics]);
         }
     }
 
@@ -146,6 +153,27 @@ class SuggestOvokoCategoryMappingsFromLocalTreeController extends Controller
         $words = array_map(fn ($w) => rtrim($w, 'yiuaeow'), array_filter(explode(' ', trim($v))));
         sort($words);
         return implode(' ', $words);
+    }
+
+    private function isUncategorizedLocalCategory(object $local): bool
+    {
+        if ((int) ($local->id ?? 0) === 20) {
+            return true;
+        }
+
+        $uncategorized = $this->normalize('Bez kategorii');
+        $name = $this->normalize((string) ($local->name ?? ''));
+        $path = trim((string) ($local->category_path ?? ($local->full_slug_path ?? '')));
+
+        if ($name === $uncategorized || $path === 'Bez kategorii' || $this->normalize($path) === $uncategorized) {
+            return true;
+        }
+
+        if (property_exists($local, 'public_name') && $this->normalize((string) ($local->public_name ?? '')) === $uncategorized) {
+            return true;
+        }
+
+        return false;
     }
 
     private function aliasMatch(string $a, string $b): bool
