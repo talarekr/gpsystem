@@ -337,7 +337,7 @@ class PartModuleFoundationTest extends TestCase
             'needs_review' => false,
         ]);
 
-        PartImage::query()->create(['part_id' => $part->id, 'path' => 'parts/photos/front.jpg', 'sort_order' => 1]);
+        $frontImage = PartImage::query()->create(['part_id' => $part->id, 'path' => 'parts/photos/front.jpg', 'sort_order' => 1]);
         PartImage::query()->create(['part_id' => $part->id, 'path' => 'parts/photos/side.jpg', 'sort_order' => 2]);
 
         $expectedImagePaths = ['parts/photos/front.jpg', 'parts/photos/side.jpg'];
@@ -350,9 +350,10 @@ class PartModuleFoundationTest extends TestCase
             ->assertDontSee('Przetwórz zdjęcia produktu');
 
         Livewire::test(EditPart::class, ['record' => $part->getRouteKey()])
-            ->assertFormSet(['part_photo_paths' => $expectedImagePaths])
+            ->assertFormSet(['part_photo_paths' => []])
             ->assertSee($expectedImagePaths[0])
             ->assertSee($expectedImagePaths[1])
+            ->assertSee('Usuń zdjęcie części')
             ->assertSee(route('storefront.product', $part->slug))
             ->assertSeeHtml('target="_blank"')
             ->assertDontSee('Przetwórz zdjęcia produktu')
@@ -361,6 +362,14 @@ class PartModuleFoundationTest extends TestCase
             ->assertHasNoFormErrors();
 
         $this->assertSame($expectedImagePaths, PartResource::partImagePaths($part->fresh('images')));
+
+        Livewire::test(EditPart::class, ['record' => $part->getRouteKey()])
+            ->call('deletePartImage', $frontImage->getKey())
+            ->assertHasNoErrors();
+
+        $this->assertSame(['parts/photos/side.jpg'], PartResource::partImagePaths($part->fresh('images')));
+        $this->assertDatabaseMissing('part_images', ['id' => $frontImage->getKey()]);
+        $this->assertDatabaseHas('part_images', ['part_id' => $part->getKey(), 'path' => 'parts/photos/side.jpg']);
         $this->assertSame(route('storefront.product', $part->slug), PartResource::publicProductUrl($part->fresh()));
 
         $draftPart = Part::query()->create(['name' => 'Robocza część', 'slug' => null, 'quantity' => 0, 'status' => 'draft']);
