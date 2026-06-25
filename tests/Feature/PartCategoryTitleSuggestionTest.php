@@ -199,6 +199,43 @@ class PartCategoryTitleSuggestionTest extends TestCase
         $this->assertSame($beforeMappings, DB::table('marketplace_category_mappings')->get()->map(fn ($row) => (array) $row)->all());
     }
 
+
+    public function test_radiator_hose_full_candidate_scores_and_keeps_chlodnicy(): void
+    {
+        $hose = $this->category(86, 'Przewód / Wąż chłodnicy');
+        $this->part('AUDI A4 B6 B7 WĄŻ PRZEWÓD CHŁODNICY 8E0121049', $hose->id);
+        $this->part('SEAT EXEO 3R 1.8T CFM AVANT PRZEWÓD WĄŻ CHŁODNICY WODY 8E0121049', $hose->id);
+        $this->part('AUDI A4 przewód klimatyzacji wąż', $this->category(87, 'Przewód klimatyzacji')->id);
+
+        $result = app(PartCategorySuggestionService::class)->suggestCategoryFromTitle('wąż przewód chłodnicy', limit: 3, includeRejected: true);
+        $diagnostics = $result['diagnostics'];
+
+        $this->assertNotContains('chlodnicy', $diagnostics['noise_tokens_removed']);
+        $this->assertContains('waz przewod chlodnicy', $diagnostics['candidate_terms']);
+        $this->assertContains('waz chlodnicy', $diagnostics['search_phrases']);
+        $this->assertContains('przewod chlodnicy', $diagnostics['search_phrases']);
+        $this->assertSame($hose->id, $result['suggestions'][0]['category_id']);
+        $matched = collect($diagnostics['raw_candidate_parts'])->firstWhere('title', 'AUDI A4 B6 B7 WĄŻ PRZEWÓD CHŁODNICY 8E0121049');
+        $this->assertGreaterThan(0, $matched['score']);
+        $this->assertContains('waz', $matched['matched_tokens']);
+        $this->assertContains('przewod', $matched['matched_tokens']);
+        $this->assertContains('chlodnicy', $matched['matched_tokens']);
+        $this->assertNotEmpty($matched['matched_ngrams']);
+    }
+
+    public function test_air_conditioning_hose_does_not_choose_radiator_hose(): void
+    {
+        $radiator = $this->category(88, 'Przewód / Wąż chłodnicy');
+        $ac = $this->category(89, 'Przewód klimatyzacji');
+        $this->part('Wąż przewód chłodnicy wody', $radiator->id);
+        $this->part('Przewód wąż klimatyzacji Audi A4', $ac->id);
+        $this->part('Wąż klimatyzacji przewód klimatyzacji', $ac->id);
+
+        $result = app(PartCategorySuggestionService::class)->suggestCategoryFromTitle('wąż przewód klimatyzacji');
+
+        $this->assertSame($ac->id, $result['suggestions'][0]['category_id']);
+    }
+
     private function category(int $id, string $name): PartCategory
     {
         return PartCategory::query()->create(['id' => $id, 'name' => $name, 'category_path' => $name]);
