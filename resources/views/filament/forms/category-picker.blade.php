@@ -11,49 +11,8 @@
         search: '',
         selectedId: null,
         selectedName: '',
-        lastEventName: '',
-        init() {
-            this.selectedId = this.hiddenInput()?.value || null;
-            this.selectedName = this.nameFor(this.selectedId);
-        },
-        hiddenInput() {
-            return this.$root.closest('form')?.querySelector('input[name$=\'[selected_category_id]\']') ?? null;
-        },
-        livewireStatePath() {
-            const input = this.hiddenInput();
-
-            if (! input?.name) {
-                return 'selected_category_id';
-            }
-
-            return input.name
-                .replace(/\]/g, '')
-                .replace(/\[/g, '.')
-                .replace(/^data\./, 'data.');
-        },
-        syncSelectedCategory(id, eventName) {
-            const input = this.hiddenInput();
-            const statePath = this.livewireStatePath();
-
-            if (input) {
-                input.value = id;
-                input.dispatchEvent(new Event('input', { bubbles: true }));
-                input.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-
-            if (this.$wire?.set) {
-                this.$wire.set(statePath, id);
-            }
-
-            console.debug('gps-category-picker:selected', {
-                alpine_selected_id: this.selectedId,
-                hidden_input_selected_category_id: input?.value ?? null,
-                livewire_state_path: statePath,
-                livewire_set_value: id,
-                selected_category_name: this.selectedName,
-                event: eventName,
-            });
-        },
+        isSaving: false,
+        init() {},
         children(parentId = null) {
             return this.categories.filter((category) => category.parent_id === parentId);
         },
@@ -80,14 +39,23 @@
             this.stack.push(category.id);
             this.currentParent = category.id;
         },
-        choose(category, eventName = 'category-row-click') {
+        choose(category) {
             const id = category?.id ?? category;
 
             this.selectedId = id;
             this.selectedName = this.nameFor(id);
-            this.lastEventName = eventName;
+        },
+        saveSelectedCategory() {
+            if (! this.selectedId || this.isSaving) {
+                return;
+            }
 
-            this.syncSelectedCategory(id, eventName);
+            this.isSaving = true;
+
+            this.$wire.setPartCategoryFromPicker(this.selectedId)
+                .finally(() => {
+                    this.isSaving = false;
+                });
         },
         back() {
             this.stack.pop();
@@ -123,7 +91,6 @@
     <div class="gps-category-picker__selected" x-show="selectedId" x-cloak>
         <strong>Wybrano:</strong>
         <span x-text="selectedName || selectedCategory()?.name"></span>
-        <small x-text="`selected_category_id=${selectedId}; selected_category_name=${selectedName || selectedCategory()?.name}; event=${lastEventName}`"></small>
     </div>
 
     <template x-if="search.trim().length >= 2">
@@ -131,7 +98,7 @@
             <p class="gps-category-picker__hint">Wyniki wyszukiwania</p>
 
             <template x-for="category in searchResults()" :key="`search-${category.id}`">
-                <button type="button" class="gps-category-picker__row" x-bind:class="{ 'is-selected': String(selectedId) === String(category.id) }" x-on:click="choose(category, 'search-result-click')">
+                <button type="button" class="gps-category-picker__row" x-bind:class="{ 'is-selected': String(selectedId) === String(category.id) }" x-on:click="choose(category)">
                     <span>
                         <strong x-text="category.name"></strong>
                         <small x-text="category.path"></small>
@@ -159,9 +126,9 @@
                 tabindex="0"
                 class="gps-category-picker__row"
                 x-bind:class="{ 'is-selected': String(selectedId) === String(category.id) }"
-                x-on:click="choose(category, 'category-row-click')"
-                x-on:keydown.enter.prevent="choose(category, 'category-row-enter')"
-                x-on:keydown.space.prevent="choose(category, 'category-row-space')"
+                x-on:click="choose(category)"
+                x-on:keydown.enter.prevent="choose(category)"
+                x-on:keydown.space.prevent="choose(category)"
             >
                 <span>
                     <strong x-text="category.name"></strong>
@@ -178,5 +145,18 @@
         </template>
 
         <p class="gps-category-picker__empty" x-show="currentChildren().length === 0">Brak podkategorii.</p>
+    </div>
+
+    <div class="gps-category-picker__actions">
+        <button
+            type="button"
+            class="fi-btn fi-btn-size-md fi-color-primary"
+            x-bind:disabled="! selectedId || isSaving"
+            x-on:click="saveSelectedCategory()"
+        >
+            <span x-show="! isSaving">Ustaw kategorię</span>
+            <span x-show="isSaving">Zapisywanie...</span>
+        </button>
+        <p class="gps-category-picker__empty" x-show="! selectedId">Wybierz kategorię przed zapisaniem.</p>
     </div>
 </div>

@@ -3,10 +3,13 @@
 namespace App\Filament\Resources\PartResource\Pages;
 
 use App\Filament\Resources\PartResource;
+use App\Models\PartCategory;
 use App\Services\Images\PartImagePresentationService;
 use Filament\Actions;
 use Filament\Notifications\Notification;
+use Illuminate\Support\Facades\Log;
 use Filament\Resources\Pages\EditRecord;
+use Throwable;
 
 class EditPart extends EditRecord
 {
@@ -38,6 +41,60 @@ class EditPart extends EditRecord
     protected function afterSave(): void
     {
         PartResource::syncPartImages($this->record, $this->partPhotoPaths);
+    }
+
+    public function setPartCategoryFromPicker(mixed $categoryId = null): void
+    {
+        if (blank($categoryId)) {
+            Notification::make()
+                ->title('Nie wybrano kategorii')
+                ->body('Kliknij docelową kategorię w panelu, a następnie ponownie użyj przycisku „Ustaw kategorię”.')
+                ->danger()
+                ->send();
+
+            return;
+        }
+
+        $category = PartCategory::query()->find($categoryId);
+
+        if (! $category) {
+            Log::warning('Admin part category picker received an invalid category id.', [
+                'part_id' => $this->record?->getKey(),
+                'category_id' => $categoryId,
+            ]);
+
+            Notification::make()
+                ->title('Nie znaleziono wybranej kategorii')
+                ->body('Odśwież stronę i spróbuj ponownie. Jeśli problem wróci, sprawdź logi aplikacji.')
+                ->danger()
+                ->send();
+
+            return;
+        }
+
+        try {
+            $this->record->forceFill(['category_id' => $category->getKey()])->save();
+            $this->record->refresh();
+            $this->data['category_id'] = $category->getKey();
+
+            Notification::make()
+                ->title('Kategoria części została zapisana')
+                ->body('Nowa kategoria: '.$category->name)
+                ->success()
+                ->send();
+        } catch (Throwable $exception) {
+            Log::error('Admin part category picker failed to save part category.', [
+                'part_id' => $this->record?->getKey(),
+                'category_id' => $category->getKey(),
+                'exception' => $exception,
+            ]);
+
+            Notification::make()
+                ->title('Nie udało się zapisać kategorii')
+                ->body('Zmiana nie została zapisana. Szczegóły błędu zapisano w logach aplikacji.')
+                ->danger()
+                ->send();
+        }
     }
 
     protected function getHeaderActions(): array
