@@ -1717,8 +1717,6 @@ body.fi-body :where(
     }
 }
 
-.fi-modal-window.gps-category-picker-modal .fi-modal-content,
-.gps-category-picker-modal.fi-modal-window .fi-modal-content,
 .fi-modal-window.gps-vehicle-picker-modal .fi-modal-content,
 .gps-vehicle-picker-modal.fi-modal-window .fi-modal-content {
     flex: 1 1 auto !important;
@@ -1730,8 +1728,12 @@ body.fi-body :where(
 .fi-modal-window.gps-category-picker-modal .fi-modal-content,
 .gps-category-picker-modal.fi-modal-window .fi-modal-content {
     display: flex !important;
+    flex: 1 1 auto !important;
     flex-direction: column !important;
-    overflow: hidden !important;
+    min-height: 0 !important;
+    overflow-x: visible !important;
+    overflow-y: visible !important;
+    padding-top: 0.75rem !important;
 }
 
 .fi-modal-window.gps-category-picker-modal .fi-modal-header,
@@ -1780,16 +1782,16 @@ body.fi-body :where(
 .gps-category-picker-modal.fi-modal-window {
     display: flex !important;
     flex-direction: column !important;
-    height: calc(100vh - 40px) !important;
-    max-height: calc(100vh - 40px) !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
     min-height: 0 !important;
 }
 
 @supports (height: 100dvh) {
     .fi-modal-window.gps-category-picker-modal,
     .gps-category-picker-modal.fi-modal-window {
-        height: calc(100dvh - 40px) !important;
-        max-height: calc(100dvh - 40px) !important;
+        height: 100dvh !important;
+        max-height: 100dvh !important;
     }
 }
 
@@ -1799,7 +1801,8 @@ body.fi-body :where(
     flex: 1 1 auto !important;
     flex-direction: column !important;
     min-height: 0 !important;
-    overflow: hidden !important;
+    overflow-x: visible !important;
+    overflow-y: visible !important;
 }
 
 .fi-modal-window.gps-category-picker-modal .fi-modal-content > form,
