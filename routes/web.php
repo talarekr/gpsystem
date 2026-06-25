@@ -259,6 +259,7 @@ Route::get('/tools/check-allegro-product-mapping-candidates', CheckAllegroProduc
 Route::get('/tools/export-allegro-product-mapping-candidates', ExportAllegroProductMappingCandidatesController::class)->name('tools.export-allegro-product-mapping-candidates');
 Route::get('/tools/suggest-allegro-category-mappings-from-legacy-csv', SuggestAllegroCategoryMappingsFromLegacyCsvController::class)->name('tools.suggest-allegro-category-mappings-from-legacy-csv');
 Route::get('/tools/suggest-ovoko-category-mappings-from-local-tree', SuggestOvokoCategoryMappingsFromLocalTreeController::class)->name('tools.suggest-ovoko-category-mappings-from-local-tree');
+Route::get('/tools/apply-ovoko-category-mappings-from-local-tree', [SuggestOvokoCategoryMappingsFromLocalTreeController::class, 'apply'])->name('tools.apply-ovoko-category-mappings-from-local-tree');
 Route::get('/tools/apply-allegro-category-mappings-from-legacy-csv', [SuggestAllegroCategoryMappingsFromLegacyCsvController::class, 'apply'])->name('tools.apply-allegro-category-mappings-from-legacy-csv');
 Route::get('/tools/allegro-legacy-category-mapping-runner', [SuggestAllegroCategoryMappingsFromLegacyCsvController::class, 'runner'])->name('tools.allegro-legacy-category-mapping-runner');
 Route::get('/tools/run-allegro-legacy-category-mapping-batch', [SuggestAllegroCategoryMappingsFromLegacyCsvController::class, 'batch'])->name('tools.run-allegro-legacy-category-mapping-batch');
