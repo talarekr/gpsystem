@@ -46,21 +46,63 @@
             return this.stack.map((id) => this.categories.find((category) => String(category.id) === String(id))).filter(Boolean);
         },
         open(category) {
-            if (! category.has_children) {
+            if (! category?.has_children) {
                 return;
             }
 
             this.stack.push(category.id);
             this.currentParent = category.id;
         },
-        choose(category) {
-            const id = category?.id ?? category;
+        openFromSearch(category) {
+            if (! category?.has_children) {
+                return;
+            }
 
-            this.selectedId = id;
-            this.selectedName = this.nameFor(id);
+            this.stack = this.ancestorIds(category);
+            this.currentParent = category.id;
+            this.search = '';
+        },
+        ancestorIds(category) {
+            const ids = [];
+            let parentId = category?.parent_id ?? null;
+
+            while (parentId !== null) {
+                const parent = this.categories.find((item) => String(item.id) === String(parentId));
+
+                if (! parent) {
+                    break;
+                }
+
+                ids.unshift(parent.id);
+                parentId = parent.parent_id;
+            }
+
+            ids.push(category.id);
+
+            return ids;
+        },
+        choose(category) {
+            if (! category || category.has_children) {
+                this.openFromSearch(category);
+                return;
+            }
+
+            this.selectedId = category.id;
+            this.selectedName = category.path || category.name;
+        },
+        activate(category) {
+            if (category?.has_children) {
+                this.open(category);
+                return;
+            }
+
+            this.choose(category);
+        },
+        canSave() {
+            return Boolean(this.selectedId && this.selectedCategory() && ! this.selectedCategory().has_children);
         },
         saveSelectedCategory() {
-            if (! this.selectedId || this.isSaving) {
+            if (! this.canSave() || this.isSaving) {
                 return;
             }
 
@@ -102,7 +144,7 @@
         >
     </div>
 
-    <div class="gps-category-picker__selected" x-show="selectedId" x-cloak>
+    <div class="gps-category-picker__selected" x-show="canSave()" x-cloak>
         <strong>Wybrano:</strong>
         <span x-text="selectedName || selectedCategory()?.name"></span>
     </div>
@@ -117,7 +159,8 @@
                         <strong x-text="category.name"></strong>
                         <small x-text="category.path"></small>
                     </span>
-                    <span class="gps-category-picker__select-label">Wybierz</span>
+                    <span class="gps-category-picker__arrow" x-show="category.has_children" aria-hidden="true">›</span>
+                    <span class="gps-category-picker__select-label" x-show="! category.has_children">Wybierz</span>
                 </button>
             </template>
 
@@ -140,9 +183,9 @@
                 tabindex="0"
                 class="gps-category-picker__row"
                 x-bind:class="{ 'is-selected': String(selectedId) === String(category.id) }"
-                x-on:click="choose(category)"
-                x-on:keydown.enter.prevent="choose(category)"
-                x-on:keydown.space.prevent="choose(category)"
+                x-on:click="activate(category)"
+                x-on:keydown.enter.prevent="activate(category)"
+                x-on:keydown.space.prevent="activate(category)"
             >
                 <span>
                     <strong x-text="category.name"></strong>
@@ -165,12 +208,12 @@
         <button
             type="button"
             class="fi-btn fi-btn-size-md fi-color-primary"
-            x-bind:disabled="! selectedId || isSaving"
+            x-bind:disabled="! canSave() || isSaving"
             x-on:click="saveSelectedCategory()"
         >
             <span x-show="! isSaving">Ustaw kategorię</span>
             <span x-show="isSaving">Zapisywanie...</span>
         </button>
-        <p class="gps-category-picker__empty" x-show="! selectedId">Wybierz kategorię przed zapisaniem.</p>
+        <p class="gps-category-picker__empty" x-show="! canSave()">Wybierz kategorię końcową przed zapisaniem.</p>
     </div>
 </div>
