@@ -59,6 +59,7 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvController extends Controller
                 $allegroOfferId = $this->extractAllegroOfferId($row, $diagnostics);
 
                 $this->addSample($diagnostics['sample_woo_product_ids'], $wooProductId);
+                $this->addSample($diagnostics['sample_allegro_offer_ids'], $allegroOfferId);
                 if ($csvSku === '') {
                     $diagnostics['sku_empty_count']++;
                 } else {
@@ -80,7 +81,7 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvController extends Controller
                 }
 
                 try {
-                    $part = $this->findPart($wooProductId, $csvSku, $onlyPublic, $diagnostics);
+                    $part = $this->findPart($wooProductId, $csvSku, $allegroOfferId, $onlyPublic, $diagnostics);
                 } catch (Throwable $e) {
                     $part = null;
                     $this->addDiagnosticError($diagnostics, 'product_lookup_failed', $e->getMessage(), ['woo_product_id' => $wooProductId]);
@@ -182,7 +183,7 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvController extends Controller
     }
 
     private function flags(): array { return ['read_only'=>true,'local_update'=>false,'ovoko_write'=>false,'allegro_write'=>false,'ebay_write'=>false,'products_changed'=>false,'offers_changed'=>false,'mappings_changed'=>false]; }
-    private function possibleMatchFields(): array { return ['parts.source_system=woo + parts.external_id','parts.external_id','parts.legacy_payload.woo_product_id','parts.legacy_payload.id','parts.legacy_payload.product_id','parts.sku','parts.oem_number','parts.part_number','parts.legacy_payload.sku']; }
+    private function possibleMatchFields(): array { return ['local offer/listing tables allegro offer id -> part_id/product_id','parts.allegro_offer_id','parts.offer_id','parts.marketplace_offer_id','parts.external_offer_id','parts.legacy_payload.allegro_offer_id','parts.legacy_payload._allegro_offer_id','parts.raw_allegro_meta_json._allegro_offer_id','parts.source_system=woo + parts.external_id','parts.external_id','parts.legacy_payload.woo_product_id','parts.legacy_payload.id','parts.legacy_payload.product_id','parts.sku','parts.oem_number','parts.part_number','parts.legacy_payload.sku']; }
     private function resolveCsvPath(): ?string { $preferred = storage_path('app/imports/woo_allegro_legacy_mapping.csv'); if (is_file($preferred)) return $preferred; foreach (glob(storage_path('app/imports/*.csv')) ?: [] as $path) if (str_contains(strtolower(basename($path)), 'allegro')) return $path; return null; }
 
     private function emptyDiagnostics(?string $csvPath): array
@@ -205,6 +206,16 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvController extends Controller
             'unmatched_products_count' => 0,
             'sample_woo_product_ids' => [],
             'sample_skus' => [],
+            'sample_allegro_offer_ids' => [],
+            'local_offer_tables_checked' => [],
+            'local_offer_match_strategy_used' => null,
+            'no_offer_id_storage_found' => false,
+            'count_offer_table_matches_sample' => 0,
+            'count_parts_with_allegro_offer_id_matching_sample' => 0,
+            'count_parts_with_offer_id_matching_sample' => 0,
+            'count_parts_with_marketplace_offer_id_matching_sample' => 0,
+            'count_parts_with_external_offer_id_matching_sample' => 0,
+            'count_parts_with_raw_allegro_meta_json_offer_id_matching_sample' => 0,
             'product_match_attempts_sample' => [],
             'count_parts_with_external_id_matching_sample' => 0,
             'count_parts_with_legacy_payload_woo_product_id_matching_sample' => 0,
@@ -358,15 +369,32 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvController extends Controller
         $sample[] = $value;
     }
 
-    private function findPart(string $wooProductId, string $sku, bool $onlyPublic, array &$diagnostics): ?object
+    private function findPart(string $wooProductId, string $sku, string $allegroOfferId, bool $onlyPublic, array &$diagnostics): ?object
     {
         if (! Schema::hasTable('parts')) return null;
         $categoryNameSelect = Schema::hasColumn('part_categories', 'name') ? 'part_categories.name as category_name' : DB::raw('NULL as category_name');
         $categoryPathSelect = Schema::hasColumn('part_categories', 'category_path') ? 'part_categories.category_path' : DB::raw('NULL as category_path');
-        $q = DB::table('parts')->leftJoin('part_categories', 'parts.category_id', '=', 'part_categories.id')->select('parts.id','parts.external_id','parts.sku','parts.name','parts.category_id','parts.legacy_payload',$categoryNameSelect,$categoryPathSelect);
+        $legacyPayloadSelect = Schema::hasColumn('parts', 'legacy_payload') ? 'parts.legacy_payload' : DB::raw('NULL as legacy_payload');
+        $q = DB::table('parts')->leftJoin('part_categories', 'parts.category_id', '=', 'part_categories.id')->select('parts.id','parts.external_id','parts.sku','parts.name','parts.category_id',$legacyPayloadSelect,$categoryNameSelect,$categoryPathSelect);
         if ($onlyPublic && Schema::hasColumn('parts', 'is_visible_storefront')) $q->where('parts.is_visible_storefront', true);
 
-        $attempt = ['woo_product_id' => $wooProductId !== '' ? $wooProductId : null, 'sku' => $sku !== '' ? $sku : null, 'matched_by' => null, 'match_count' => 0];
+        $attempt = ['woo_product_id' => $wooProductId !== '' ? $wooProductId : null, 'allegro_offer_id' => $allegroOfferId !== '' ? $allegroOfferId : null, 'sku' => $sku !== '' ? $sku : null, 'matched_by' => null, 'matched_part_id' => null, 'matched_category_id' => null, 'match_count' => 0];
+
+        if ($allegroOfferId !== '') {
+            $part = $this->findPartByOfferTable($q, $allegroOfferId, $attempt, $diagnostics);
+            if ($part) return $part;
+            if ($this->hasAmbiguousOfferMatch($diagnostics, $allegroOfferId)) return null;
+
+            $part = $this->findPartByOfferColumns($q, $allegroOfferId, $attempt, $diagnostics);
+            if ($part) return $part;
+            if ($this->hasAmbiguousOfferMatch($diagnostics, $allegroOfferId)) return null;
+
+            $part = $this->findPartByOfferJson($q, $allegroOfferId, $attempt, $diagnostics);
+            if ($part) return $part;
+            if ($this->hasAmbiguousOfferMatch($diagnostics, $allegroOfferId)) return null;
+
+            $diagnostics['no_offer_id_storage_found'] = ! $this->hasLocalOfferIdStorage($diagnostics);
+        }
 
         if ($wooProductId !== '') {
             $externalMatches = (clone $q)->where(fn($w) => $w->where(fn($x) => $x->where('parts.source_system','woo')->where('parts.external_id',$wooProductId))->orWhere('parts.external_id',$wooProductId))->limit(2)->get();
@@ -374,29 +402,21 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvController extends Controller
             if ($externalMatches->count() === 1) {
                 $attempt['matched_by'] = 'external_id';
                 $attempt['match_count'] = 1;
-                $this->addMatchAttemptSample($diagnostics, $attempt);
-
-                return $externalMatches->first();
+                return $this->matchedPart($externalMatches->first(), 'external_id', $attempt, $diagnostics);
             }
 
-            $wooPayloadMatches = (clone $q)->where('parts.legacy_payload->woo_product_id', $wooProductId)->limit(2)->get();
-            $diagnostics['count_parts_with_legacy_payload_woo_product_id_matching_sample'] += $wooPayloadMatches->count();
-            if ($wooPayloadMatches->count() === 1) {
-                $attempt['matched_by'] = 'legacy_payload.woo_product_id';
-                $attempt['match_count'] = 1;
-                $this->addMatchAttemptSample($diagnostics, $attempt);
+            if (Schema::hasColumn('parts', 'legacy_payload')) {
+                $wooPayloadMatches = (clone $q)->where('parts.legacy_payload->woo_product_id', $wooProductId)->limit(2)->get();
+                $diagnostics['count_parts_with_legacy_payload_woo_product_id_matching_sample'] += $wooPayloadMatches->count();
+                if ($wooPayloadMatches->count() === 1) {
+                    return $this->matchedPart($wooPayloadMatches->first(), 'legacy_payload.woo_product_id', $attempt + ['match_count' => 1], $diagnostics);
+                }
 
-                return $wooPayloadMatches->first();
-            }
-
-            $idPayloadMatches = (clone $q)->where(function($w) use ($wooProductId) { foreach (['id','product_id'] as $key) $w->orWhere("parts.legacy_payload->$key", $wooProductId); })->limit(2)->get();
-            $diagnostics['count_parts_with_legacy_payload_id_matching_sample'] += $idPayloadMatches->count();
-            if ($idPayloadMatches->count() === 1) {
-                $attempt['matched_by'] = 'legacy_payload.id';
-                $attempt['match_count'] = 1;
-                $this->addMatchAttemptSample($diagnostics, $attempt);
-
-                return $idPayloadMatches->first();
+                $idPayloadMatches = (clone $q)->where(function($w) use ($wooProductId) { foreach (['id','product_id'] as $key) $w->orWhere("parts.legacy_payload->$key", $wooProductId); })->limit(2)->get();
+                $diagnostics['count_parts_with_legacy_payload_id_matching_sample'] += $idPayloadMatches->count();
+                if ($idPayloadMatches->count() === 1) {
+                    return $this->matchedPart($idPayloadMatches->first(), 'legacy_payload.id', $attempt + ['match_count' => 1], $diagnostics);
+                }
             }
         }
 
@@ -405,15 +425,11 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvController extends Controller
                 if (Schema::hasColumn('parts', 'sku')) $w->orWhere('parts.sku', $sku);
                 if (Schema::hasColumn('parts', 'oem_number')) $w->orWhere('parts.oem_number', $sku);
                 if (Schema::hasColumn('parts', 'part_number')) $w->orWhere('parts.part_number', $sku);
-                $w->orWhere('parts.legacy_payload->sku', $sku);
+                if (Schema::hasColumn('parts', 'legacy_payload')) $w->orWhere('parts.legacy_payload->sku', $sku);
             })->limit(2)->get();
             $diagnostics['count_parts_with_sku_matching_sample'] += $skuMatches->count();
             if ($skuMatches->count() === 1) {
-                $attempt['matched_by'] = 'sku';
-                $attempt['match_count'] = 1;
-                $this->addMatchAttemptSample($diagnostics, $attempt);
-
-                return $skuMatches->first();
+                return $this->matchedPart($skuMatches->first(), 'sku', $attempt + ['match_count' => 1], $diagnostics);
             }
         }
 
@@ -429,6 +445,137 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvController extends Controller
         }
 
         $diagnostics['product_match_attempts_sample'][] = $attempt;
+    }
+
+    private function findPartByOfferTable($baseQuery, string $offerId, array $attempt, array &$diagnostics): ?object
+    {
+        foreach (['offers','marketplace_offers','marketplace_listings','allegro_offers','part_marketplace_offers','product_marketplace_offers','marketplace_products','marketplace_product_offers'] as $table) {
+            $checked = ['table' => $table, 'exists' => Schema::hasTable($table), 'offer_id_columns' => [], 'relation_columns' => [], 'channel_columns' => []];
+            if (! $checked['exists']) {
+                $diagnostics['local_offer_tables_checked'][] = $checked;
+                continue;
+            }
+
+            $offerColumns = array_values(array_filter(['allegro_offer_id','offer_id','external_offer_id','marketplace_offer_id','external_id'], fn ($column) => Schema::hasColumn($table, $column)));
+            $relationColumns = array_values(array_filter(['part_id','product_id'], fn ($column) => Schema::hasColumn($table, $column)));
+            $channelColumns = array_values(array_filter(['channel','marketplace','source'], fn ($column) => Schema::hasColumn($table, $column)));
+            $checked['offer_id_columns'] = $offerColumns;
+            $checked['relation_columns'] = $relationColumns;
+            $checked['channel_columns'] = $channelColumns;
+            $diagnostics['local_offer_tables_checked'][] = $checked;
+
+            if ($offerColumns === [] || $relationColumns === []) continue;
+
+            $ids = DB::table($table)
+                ->where(function ($q) use ($table, $offerColumns, $offerId) {
+                    foreach ($offerColumns as $column) $q->orWhere("{$table}.{$column}", $offerId);
+                })
+                ->when($channelColumns !== [], function ($q) use ($table, $channelColumns) {
+                    $q->where(function ($w) use ($table, $channelColumns) {
+                        foreach ($channelColumns as $column) $w->orWhereIn("{$table}.{$column}", ['allegro', 'Allegro']);
+                    });
+                })
+                ->limit(3)
+                ->get()
+                ->flatMap(fn ($row) => collect($relationColumns)->map(fn ($column) => $row->{$column} ?? null))
+                ->filter(fn ($id) => $id !== null && $id !== '')
+                ->unique()
+                ->values();
+
+            $diagnostics['count_offer_table_matches_sample'] += $ids->count();
+            if ($ids->count() > 1) {
+                $this->addDiagnosticError($diagnostics, 'ambiguous_allegro_offer_id', 'More than one local product matched the Allegro offer ID.', ['allegro_offer_id' => $offerId, 'table' => $table, 'matched_ids' => $ids->all()]);
+                $this->addMatchAttemptSample($diagnostics, $attempt + ['matched_by' => 'ambiguous', 'match_count' => $ids->count()]);
+                return null;
+            }
+            if ($ids->count() === 1) {
+                $matches = (clone $baseQuery)->where('parts.id', $ids->first())->limit(2)->get();
+                if ($matches->count() === 1) return $this->matchedPart($matches->first(), "{$table}.offer_id", $attempt + ['match_count' => 1], $diagnostics);
+            }
+        }
+
+        return null;
+    }
+
+    private function findPartByOfferColumns($baseQuery, string $offerId, array $attempt, array &$diagnostics): ?object
+    {
+        foreach (['allegro_offer_id','offer_id','marketplace_offer_id','external_offer_id'] as $column) {
+            if (! Schema::hasColumn('parts', $column)) continue;
+            $matches = (clone $baseQuery)->where("parts.{$column}", $offerId)->limit(2)->get();
+            $diagnostics["count_parts_with_{$column}_matching_sample"] += $matches->count();
+            if ($matches->count() > 1) {
+                $this->addDiagnosticError($diagnostics, 'ambiguous_allegro_offer_id', 'More than one part matched the Allegro offer ID column.', ['allegro_offer_id' => $offerId, 'column' => "parts.{$column}"]);
+                $this->addMatchAttemptSample($diagnostics, $attempt + ['matched_by' => 'ambiguous', 'match_count' => $matches->count()]);
+                return null;
+            }
+            if ($matches->count() === 1) return $this->matchedPart($matches->first(), "parts.{$column}", $attempt + ['match_count' => 1], $diagnostics);
+        }
+
+        return null;
+    }
+
+    private function findPartByOfferJson($baseQuery, string $offerId, array $attempt, array &$diagnostics): ?object
+    {
+        $jsonPaths = [];
+        if (Schema::hasColumn('parts', 'legacy_payload')) {
+            $jsonPaths[] = ['parts.legacy_payload->allegro_offer_id', 'legacy_payload.allegro_offer_id', null];
+            $jsonPaths[] = ['parts.legacy_payload->_allegro_offer_id', 'legacy_payload._allegro_offer_id', null];
+        }
+        if (Schema::hasColumn('parts', 'raw_allegro_meta_json')) {
+            $jsonPaths[] = ['parts.raw_allegro_meta_json->_allegro_offer_id', 'raw_allegro_meta_json._allegro_offer_id', 'count_parts_with_raw_allegro_meta_json_offer_id_matching_sample'];
+        }
+
+        foreach ($jsonPaths as [$path, $name, $counter]) {
+            $matches = (clone $baseQuery)->where($path, $offerId)->limit(2)->get();
+            if ($counter) $diagnostics[$counter] += $matches->count();
+            if ($matches->count() > 1) {
+                $this->addDiagnosticError($diagnostics, 'ambiguous_allegro_offer_id', 'More than one part matched the Allegro offer ID JSON path.', ['allegro_offer_id' => $offerId, 'json_path' => $name]);
+                $this->addMatchAttemptSample($diagnostics, $attempt + ['matched_by' => 'ambiguous', 'match_count' => $matches->count()]);
+                return null;
+            }
+            if ($matches->count() === 1) return $this->matchedPart($matches->first(), $name, $attempt + ['match_count' => 1], $diagnostics);
+        }
+
+        return null;
+    }
+
+    private function matchedPart(object $part, string $matchedBy, array $attempt, array &$diagnostics): object
+    {
+        $diagnostics['local_offer_match_strategy_used'] ??= $matchedBy;
+        $attempt['matched_by'] = $matchedBy;
+        $attempt['matched_part_id'] = (int) $part->id;
+        $attempt['matched_category_id'] = $part->category_id !== null ? (int) $part->category_id : null;
+        $attempt['match_count'] = $attempt['match_count'] ?: 1;
+        $this->addMatchAttemptSample($diagnostics, $attempt);
+
+        return $part;
+    }
+
+    private function hasLocalOfferIdStorage(array $diagnostics): bool
+    {
+        foreach ($diagnostics['local_offer_tables_checked'] as $checked) {
+            if (($checked['exists'] ?? false) && ($checked['offer_id_columns'] ?? []) !== [] && ($checked['relation_columns'] ?? []) !== []) {
+                return true;
+            }
+        }
+
+        foreach (['allegro_offer_id','offer_id','marketplace_offer_id','external_offer_id','legacy_payload','raw_allegro_meta_json'] as $column) {
+            if (Schema::hasColumn('parts', $column)) return true;
+        }
+
+        return false;
+    }
+
+    private function hasAmbiguousOfferMatch(array $diagnostics, string $offerId): bool
+    {
+        foreach ($diagnostics['errors_sample'] as $error) {
+            if (($error['type'] ?? null) === 'ambiguous_allegro_offer_id'
+                && (string) data_get($error, 'context.allegro_offer_id') === $offerId) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function categoryHasChildren(int $id): bool { return Schema::hasTable('part_categories') && Schema::hasColumn('part_categories', 'parent_id') && DB::table('part_categories')->where('parent_id', $id)->exists(); }
