@@ -134,16 +134,9 @@
             this.isSaving = true;
 
             this.$wire.setPartCategoryFromPicker(this.selectedId)
-                .then(() => this.closePicker())
                 .finally(() => {
                     this.isSaving = false;
                 });
-        },
-        closePicker() {
-            const modal = this.$root.closest('.fi-modal-window');
-            const closeButton = modal?.querySelector('.fi-modal-close-btn, .fi-modal-close-button, [aria-label="Close"], [aria-label="Zamknij"]');
-
-            closeButton?.click();
         },
         back() {
             this.stack.pop();
@@ -243,8 +236,9 @@
             x-bind:disabled="! canSave() || isSaving"
             x-on:click="saveSelectedCategory()"
         >
-            <span x-show="! isSaving">Wybierz</span>
+            <span x-show="! isSaving">Ustaw kategorię</span>
             <span x-show="isSaving">Zapisywanie...</span>
         </button>
+        <p class="gps-category-picker__empty" x-show="! canSave()">Wybierz kategorię końcową przed zapisaniem.</p>
     </div>
 </div>
