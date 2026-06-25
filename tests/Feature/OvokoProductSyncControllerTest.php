@@ -703,4 +703,34 @@ class OvokoProductSyncControllerTest extends TestCase
         $this->assertDatabaseHas('part_categories', ['id' => 953, 'parent_id' => 950]);
     }
 
+    public function test_category_display_split_debug_resolves_existing_target_by_duplicate_name_before_run(): void
+    {
+        DB::table('marketplace_categories')->insert([
+            'channel' => 'ovoko',
+            'external_category_id' => 'ov-606',
+            'level' => 1,
+            'name' => 'Skrzynia rozdzielcza / Reduktor',
+            'full_path' => 'Skrzynia rozdzielcza / Reduktor',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        DB::table('part_categories')->insert([
+            ['id' => 606, 'name' => 'Skrzynia rozdzielcza / Reduktor', 'category_path' => null, 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 607, 'name' => 'Skrzynia rozdzielcza', 'category_path' => 'Skrzynia rozdzielcza', 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 608, 'parent_id' => 607, 'name' => 'Reduktor', 'category_path' => 'Skrzynia rozdzielcza > Reduktor', 'created_at' => now(), 'updated_at' => now()],
+        ]);
+
+        $response = $this->getJson('/tools/debug-category-display-splits-fix-autorun?token=gps_images_import_2026');
+
+        $response->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('estimated_duplicate_name_would_be_reused_count', 1)
+            ->assertJsonPath('estimated_real_create_categories_count', 0)
+            ->assertJsonPath('sample_group.target_exists_locally', true)
+            ->assertJsonPath('sample_group.target_create_needed', false)
+            ->assertJsonPath('sample_group.target_local_category_id', 606)
+            ->assertJsonMissing(['type' => 'create_target_category'])
+            ->assertJsonFragment(['type' => 'reuse_existing_target', 'target_category_id' => 606]);
+    }
+
 }
