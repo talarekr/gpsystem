@@ -90,8 +90,10 @@
         },
         mountActionsInModalFooter() {
             const actions = this.$refs.actions;
-            const modal = this.$root.closest('.fi-modal-window');
+            const modal = this.categoryPickerModal();
             const footer = modal?.querySelector('.fi-modal-footer');
+
+            this.markCategoryPickerCloseButton(modal);
 
             if (! actions || ! footer || footer.contains(actions)) {
                 return;
@@ -99,6 +101,16 @@
 
             footer.prepend(actions);
             actions.classList.add('is-in-modal-footer');
+        },
+        categoryPickerModal() {
+            return this.$root.closest('.fi-modal-window') || this.$root.closest('[role=\'dialog\']');
+        },
+        markCategoryPickerCloseButton(modal = this.categoryPickerModal()) {
+            const closeButton = modal?.querySelector('.fi-modal-header :where(.fi-modal-close-btn, .fi-modal-close-button, [aria-label*=\'Close\'], [aria-label*=\'Zamknij\'])');
+
+            closeButton?.setAttribute('data-category-picker-close', '');
+
+            return closeButton;
         },
         children(parentId = null) {
             return this.categories.filter((category) => category.parent_id === parentId);
@@ -181,20 +193,23 @@
 
             this.isSaving = true;
 
+            const closeButton = this.markCategoryPickerCloseButton();
+
             this.$wire.setPartCategoryFromPicker(this.selectedId)
-                .then(() => {
-                    this.closeCategoryPicker();
+                .then((saved) => {
+                    if (saved === true) {
+                        this.closeCategoryPicker(closeButton);
+                    }
                 })
                 .finally(() => {
                     this.isSaving = false;
                 });
         },
-        closeCategoryPicker() {
-            const modal = this.$root.closest('.fi-modal-window') || this.$root.closest('[role=\'dialog\']');
-            const closeButton = modal?.querySelector('.fi-modal-header :where(.fi-modal-close-btn, .fi-modal-close-button, [aria-label*=\'Close\'], [aria-label*=\'Zamknij\'])')
-                || modal?.querySelector(':where(.fi-modal-close-btn, .fi-modal-close-button, [aria-label*=\'Close\'], [aria-label*=\'Zamknij\'])');
+        closeCategoryPicker(closeButton = null) {
+            const modal = this.categoryPickerModal();
+            const pickerCloseButton = closeButton || modal?.querySelector('[data-category-picker-close]') || this.markCategoryPickerCloseButton(modal);
 
-            closeButton?.click();
+            pickerCloseButton?.click();
         },
         back() {
             this.stack.pop();
