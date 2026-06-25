@@ -64,6 +64,7 @@ use App\Http\Controllers\Tools\CheckCatalogSearchController;
 use App\Http\Controllers\Tools\CheckCatalogRenderController;
 use App\Http\Controllers\Tools\CheckCatalogViewController;
 use App\Http\Controllers\Tools\CheckDomainHardcodedLinksController;
+use App\Http\Controllers\Tools\DebugCategoryMarketplaceMappingsController;
 use App\Http\Controllers\Tools\CheckEbayLegacyCategoryMappingsController;
 use App\Http\Controllers\Tools\CheckEbayLegacyShippingMappingsController;
 use App\Http\Controllers\Tools\EbayLegacyCategoryMappingImportController;
@@ -169,6 +170,7 @@ Route::post('/tools/workshop/quick-part-create', [WorkshopQuickPartController::c
 Route::get('/tools/check-orders-flow', CheckOrdersFlowController::class)->name('tools.check-orders-flow');
 Route::get('/tools/check-ovoko-mapping', CheckOvokoMappingController::class)->name('tools.check-ovoko-mapping');
 Route::get('/tools/debug-ovoko-part-match', DebugOvokoPartMatchController::class)->name('tools.debug-ovoko-part-match');
+Route::get('/tools/debug-category-marketplace-mappings', DebugCategoryMarketplaceMappingsController::class)->name('tools.debug-category-marketplace-mappings');
 Route::get('/tools/check-ovoko-api-settings', CheckOvokoApiSettingsController::class)->name('tools.check-ovoko-api-settings');
 Route::get('/tools/check-marketplace-api-readiness', [MarketplaceApiFoundationController::class, 'readiness'])->name('tools.check-marketplace-api-readiness');
 Route::get('/tools/test-marketplace-api-connection', [MarketplaceApiFoundationController::class, 'testConnection'])->name('tools.test-marketplace-api-connection');
