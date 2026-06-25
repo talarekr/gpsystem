@@ -35,7 +35,7 @@ class CategoryTreeService
                 ->where(function ($query): void {
                     $query->where('source_system', 'woo')->orWhereNull('source_system');
                 })
-                ->when(Schema::hasColumn('part_categories', 'is_visible'), fn ($query) => $query->where('is_visible', true))
+                ->visibleForPublic()
                 ->orderByRaw("case when source_system = 'woo' then 0 else 1 end")
                 ->ordered()
                 ->get();
