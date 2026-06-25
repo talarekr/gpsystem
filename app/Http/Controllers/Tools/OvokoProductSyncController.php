@@ -10,6 +10,7 @@ use App\Models\Part;
 use App\Models\PartCategory;
 use App\Services\Marketplace\Api\MarketplaceApiManager;
 use App\Services\Marketplace\Api\OvokoApiClient;
+use App\Services\Storefront\CategoryTreeService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -2271,6 +2272,7 @@ HTML, 200, ['Content-Type' => 'text/html; charset=UTF-8']);
             'canonical_ok_count' => 0, 'split_display_vs_ovoko_count' => 0, 'duplicate_has_existing_canonical_target_count' => 0, 'needs_canonical_target_create_count' => 0,
             'front_visible_problem_count' => 0, 'with_products_count' => 0, 'with_children_count' => 0, 'with_marketplace_mapping_count' => 0,
             'safe_to_hide_empty_count' => 0, 'move_products_candidate_count' => 0, 'manual_review_count' => 0,
+            'hidden_by_is_visible_count' => 0, 'hidden_split_count' => 0, 'visible_split_count' => 0,
             'sample_canonical_ok' => [], 'sample_split_display_vs_ovoko' => [], 'sample_front_visible_problems' => [], 'sample_move_products_candidates' => [], 'sample_safe_to_hide_empty' => [], 'sample_manual_review' => [],
             'warnings' => ['read_only_no_part_categories_products_marketplace_mappings_or_marketplace_writes'],
         ];
@@ -2340,14 +2342,20 @@ HTML, 200, ['Content-Type' => 'text/html; charset=UTF-8']);
             $hasActiveChildren = $this->hasActiveChildren($cat->id, $localRows);
             $frontReason = $this->frontVisibleReason($productsCount, $childrenCount, $isActive, $isVisible, $showInMenu);
             $frontVisible = $frontReason !== 'unknown';
+            if (Schema::hasColumn('part_categories', 'is_visible') && $isVisible === false) {
+                $frontReason = 'hidden_by_is_visible';
+                $frontVisible = false;
+                $result['hidden_by_is_visible_count']++;
+            }
             $suggested = $hasMapping ? 'manual_review' : ($productsCount > 0 ? 'move_products_to_canonical_target' : ($childrenCount > 0 ? 'manual_review' : ($targetExists ? 'hide_empty' : 'create_canonical_target_later')));
             if ($hasMapping) $suggested = 'manual_review';
             if ($productsCount > 0 && $suggested === 'hide_empty') $suggested = 'move_products_to_canonical_target';
             $confidence = $targetExists ? 'high' : 'medium';
 
-            $sample = ['local_category_id' => $cat->id, 'local_category_name' => $cat->name, 'local_category_path' => $path, 'woo_match' => (bool) $woo, 'woo_term_id' => $woo['term_id'] ?? ($cat->external_id ?: null), 'woo_full_path' => $woo['full_path'] ?? null, 'local_products_count' => $productsCount, 'descendants_products_count' => $descendantsProductsCount, 'children_count' => $childrenCount, 'is_active' => $isActive, 'is_visible' => $isVisible, 'show_in_menu' => $showInMenu, 'has_active_children' => $hasActiveChildren, 'front_visible_reason' => $frontReason, 'has_marketplace_mapping' => $hasMapping, 'has_ebay_mapping' => $hasEbay, 'has_allegro_mapping' => $hasAllegro, 'has_ovoko_mapping' => $hasOvoko, 'proposed_ovoko_category_id' => (string) ($target['external_category_id'] ?? $target['id'] ?? ''), 'proposed_ovoko_path' => $target['full_path'] ?? null, 'target_exists_locally' => $targetExists, 'proposed_target_local_category_id' => $targetLocal['model']->id ?? null, 'proposed_target_local_path' => $targetLocal['path'] ?? null, 'canonical_status' => 'split_display_vs_ovoko', 'suggested_action' => $suggested, 'confidence' => $confidence, 'reason' => 'local_display_segments_rejoined_with_slash_match_ovoko_full_path'];
+            $sample = ['local_category_id' => $cat->id, 'local_category_name' => $cat->name, 'local_category_path' => $path, 'woo_match' => (bool) $woo, 'woo_term_id' => $woo['term_id'] ?? ($cat->external_id ?: null), 'woo_full_path' => $woo['full_path'] ?? null, 'local_products_count' => $productsCount, 'descendants_products_count' => $descendantsProductsCount, 'children_count' => $childrenCount, 'is_active' => $isActive, 'is_visible' => $isVisible, 'show_in_menu' => $showInMenu, 'has_active_children' => $hasActiveChildren, 'front_visible' => $frontVisible, 'front_visible_reason' => $frontReason, 'has_marketplace_mapping' => $hasMapping, 'has_ebay_mapping' => $hasEbay, 'has_allegro_mapping' => $hasAllegro, 'has_ovoko_mapping' => $hasOvoko, 'proposed_ovoko_category_id' => (string) ($target['external_category_id'] ?? $target['id'] ?? ''), 'proposed_ovoko_path' => $target['full_path'] ?? null, 'target_exists_locally' => $targetExists, 'proposed_target_local_category_id' => $targetLocal['model']->id ?? null, 'proposed_target_local_path' => $targetLocal['path'] ?? null, 'canonical_status' => 'split_display_vs_ovoko', 'suggested_action' => $suggested, 'confidence' => $confidence, 'reason' => 'local_display_segments_rejoined_with_slash_match_ovoko_full_path'];
 
             $result['split_display_vs_ovoko_count']++;
+            $result[$frontVisible ? 'visible_split_count' : 'hidden_split_count']++;
             if ($targetExists) $result['duplicate_has_existing_canonical_target_count']++; else $result['needs_canonical_target_create_count']++;
             if ($frontVisible) $result['front_visible_problem_count']++;
             if ($productsCount > 0) $result['with_products_count']++;
@@ -2767,22 +2775,35 @@ HTML);
                 else { $failed++; }
             } catch (Throwable $e) { $failed++; $warnings[] = 'hide_failed:'.$candidate['id'].':'.$e->getMessage(); }
         }
-        Cache::forget(\App\Services\Storefront\CategoryTreeService::CACHE_KEY);
-        return response()->json(['ok' => $failed === 0, 'local_update' => true, 'ovoko_write' => false, 'allegro_write' => false, 'ebay_write' => false, 'hidden_count' => $hidden, 'failed_count' => $failed, 'sample_hidden' => $sample, 'warnings' => array_values(array_unique($warnings))]);
+        $cleared = $this->clearCategoryCaches();
+        return response()->json(['ok' => $failed === 0, 'local_update' => true, 'ovoko_write' => false, 'allegro_write' => false, 'ebay_write' => false, 'hidden_count' => $hidden, 'failed_count' => $failed, 'hide_method' => $this->categoryDisplaySplitHideMethod(), 'cache_cleared' => $cleared, 'sample_hidden' => $sample, 'warnings' => array_values(array_unique($warnings))]);
     }
 
     public function debugCategoryDisplayNames(Request $request): JsonResponse
     {
         if (! $this->validToken($request)) return $this->invalidTokenResponse();
         $ids = collect(explode(',', (string) $request->query('category_ids', '')))->map(fn ($id) => (int) trim($id))->filter()->unique()->values()->all();
-        $rows = PartCategory::query()->whereIn('id', $ids)->get()->keyBy('id');
-        $items = collect($ids)->map(function (int $id) use ($rows): array {
+        $search = trim((string) $request->query('search', ''));
+        $query = PartCategory::query();
+        if ($ids !== []) $query->whereIn('id', $ids);
+        if ($search !== '') $query->where(fn ($q) => $q->where('name', 'like', "%{$search}%")->orWhere('category_path', 'like', "%{$search}%"));
+        $rows = $query->limit($search !== '' ? 100 : max(1, count($ids)))->get()->keyBy('id');
+        $inputIds = $ids !== [] ? $ids : $rows->keys()->map(fn ($id) => (int) $id)->all();
+        $items = collect($inputIds)->map(function (int $id) use ($rows): array {
             $category = $rows->get($id);
             if (! $category) return ['id' => $id, 'found' => false];
             $name = (string) $category->name;
             $path = (string) ($category->category_path ?? '');
             $clean = $this->proposedCleanCategoryDisplayName($name, $path);
             $nameHasSeparator = str_contains($name, '—');
+            $isHidden = Schema::hasColumn('part_categories', 'is_visible') && ! (bool) $category->is_visible;
+            $labels = [
+                'frontend_menu_label' => $name,
+                'frontend_children_label' => $name,
+                'frontend_breadcrumb_label' => $name,
+                'frontend_h1_title' => $name,
+                'mapper_label' => $name,
+            ];
             return [
                 'id' => (int) $category->id,
                 'found' => true,
@@ -2790,15 +2811,58 @@ HTML);
                 'category_path' => $path,
                 'slug' => $category->slug,
                 'parent_id' => $category->parent_id,
-                'frontend_display_title' => $name,
-                'frontend_children_section_title' => $name,
+                ...$labels,
+                'any_label_contains_separator_dash' => collect($labels)->contains(fn ($label) => str_contains($label, '—')),
+                'db_name_has_separator' => $nameHasSeparator,
+                'frontend_appends_path' => false,
                 'name_contains_separator_dash' => $nameHasSeparator,
                 'proposed_clean_name' => $clean,
                 'problem_source' => $clean !== $name ? 'db_name_contains_display_path' : 'not_detected_in_db_name_check_frontend_rendering',
+                'proposed_fix' => $isHidden ? 'hidden_category_should_not_render' : ($clean !== $name ? 'clean_db_name' : 'fix_frontend_rendering'),
             ];
         })->all();
 
+        return response()->json(['ok' => true, 'read_only' => true, 'search' => $search ?: null, 'items' => $items]);
+    }
+
+    public function debugCategoryVisibilityUsage(Request $request, CategoryTreeService $categoryTree): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+        $ids = collect(explode(',', (string) $request->query('category_ids', '')))->map(fn ($id) => (int) trim($id))->filter()->unique()->values()->all();
+        $rows = PartCategory::query()->whereIn('id', $ids)->withCount(['children', 'parts'])->get()->keyBy('id');
+        $publicAll = $categoryTree->all();
+        $mapperDefault = PartCategory::query()->visibleForPublic()->pluck('id')->map(fn ($id) => (int) $id)->flip();
+        $mapperHidden = PartCategory::query()->pluck('id')->map(fn ($id) => (int) $id)->flip();
+        $items = collect($ids)->map(function (int $id) use ($rows, $publicAll, $mapperDefault, $mapperHidden, $categoryTree): array {
+            $category = $rows->get($id);
+            if (! $category) return ['id' => $id, 'found' => false, 'reason' => 'not_found'];
+            $inPublic = $publicAll->has($id);
+            $isVisible = Schema::hasColumn('part_categories', 'is_visible') ? (bool) $category->is_visible : true;
+            $descendantsProducts = $this->descendantsProductsCountForCategory($id);
+            return [
+                'id' => $id,
+                'name' => $category->name,
+                'category_path' => $category->category_path,
+                'is_visible' => $isVisible,
+                'products_count' => (int) ($category->parts_count ?? 0),
+                'children_count' => (int) ($category->children_count ?? 0),
+                'descendants_products_count' => $descendantsProducts,
+                'appears_in_public_tree' => $inPublic,
+                'appears_in_public_children_list' => $inPublic,
+                'appears_in_public_breadcrumb' => $inPublic && $categoryTree->ancestors($category)->every(fn ($ancestor) => $publicAll->has((int) $ancestor->id)),
+                'appears_in_mapper_tree_default' => $mapperDefault->has($id),
+                'appears_in_mapper_tree_show_hidden' => $mapperHidden->has($id),
+                'reason' => ! $isVisible ? 'hidden_by_is_visible' : ($inPublic ? 'visible_public_category' : 'not_in_public_tree_no_products_or_filtered'),
+            ];
+        })->all();
         return response()->json(['ok' => true, 'read_only' => true, 'items' => $items]);
+    }
+
+    public function clearCategoryTreeCache(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+        if ((string) $request->query('confirm') !== '1') return response()->json(['ok' => false, 'error_message' => 'confirm=1 required'], 422);
+        return response()->json(['ok' => true, 'cleared' => $this->clearCategoryCaches(), 'warnings' => []]);
     }
 
     public function dryRunCleanCategoryDisplayNames(Request $request): JsonResponse
@@ -3097,6 +3161,33 @@ HTML);
             if (str_starts_with((string) $info['path'], $prefix)) $total += (int) ($partsCounts[$id] ?? 0);
         }
         return $total;
+    }
+
+    private function descendantsProductsCountForCategory(int $categoryId): int
+    {
+        if (! Schema::hasTable('part_categories') || ! Schema::hasTable('parts')) return 0;
+        $childrenByParent = PartCategory::query()->select(['id', 'parent_id'])->get()->groupBy('parent_id');
+        $ids = [];
+        $walk = function (int $id) use (&$walk, &$ids, $childrenByParent): void {
+            foreach ($childrenByParent->get($id, collect()) as $child) {
+                $childId = (int) $child->id;
+                $ids[] = $childId;
+                $walk($childId);
+            }
+        };
+        $walk($categoryId);
+        if ($ids === []) return 0;
+        return (int) DB::table('parts')->whereIn('category_id', array_values(array_unique($ids)))->count();
+    }
+
+    private function clearCategoryCaches(): array
+    {
+        $cleared = [CategoryTreeService::CACHE_KEY];
+        Cache::forget(CategoryTreeService::CACHE_KEY);
+        if (function_exists('opcache_reset')) @opcache_reset();
+        try { Artisan::call('view:clear'); $cleared[] = 'laravel.views'; } catch (Throwable) {}
+        try { Artisan::call('cache:clear'); $cleared[] = 'laravel.cache'; } catch (Throwable) {}
+        return array_values(array_unique($cleared));
     }
 
     private function categoryBooleanColumnValue(PartCategory $category, array $columns, ?bool $default): ?bool

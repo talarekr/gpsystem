@@ -54,4 +54,13 @@ class PartCategory extends Model
     {
         return $query->where('source_system', 'woo');
     }
+
+    public function scopeVisibleForPublic(Builder $query): Builder
+    {
+        if (\Illuminate\Support\Facades\Schema::hasColumn($this->getTable(), 'is_visible')) {
+            $query->where('is_visible', true);
+        }
+
+        return $query;
+    }
 }

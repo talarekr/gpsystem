@@ -196,6 +196,8 @@ Route::get('/tools/dry-run-plan-fix-category-display-splits', [OvokoProductSyncC
 Route::get('/tools/dry-run-hide-empty-category-display-splits', [OvokoProductSyncController::class, 'dryRunHideEmptyCategoryDisplaySplits'])->name('tools.dry-run-hide-empty-category-display-splits');
 Route::get('/tools/hide-empty-category-display-splits', [OvokoProductSyncController::class, 'hideEmptyCategoryDisplaySplits'])->name('tools.hide-empty-category-display-splits');
 Route::get('/tools/debug-category-display-names', [OvokoProductSyncController::class, 'debugCategoryDisplayNames'])->name('tools.debug-category-display-names');
+Route::get('/tools/debug-category-visibility-usage', [OvokoProductSyncController::class, 'debugCategoryVisibilityUsage'])->name('tools.debug-category-visibility-usage');
+Route::get('/tools/clear-category-tree-cache', [OvokoProductSyncController::class, 'clearCategoryTreeCache'])->name('tools.clear-category-tree-cache');
 Route::get('/tools/dry-run-clean-category-display-names', [OvokoProductSyncController::class, 'dryRunCleanCategoryDisplayNames'])->name('tools.dry-run-clean-category-display-names');
 Route::get('/tools/clean-category-display-names', [OvokoProductSyncController::class, 'cleanCategoryDisplayNames'])->name('tools.clean-category-display-names');
 Route::get('/tools/dry-run-verify-woo-ebay-mapping-for-category-splits', [OvokoProductSyncController::class, 'dryRunVerifyWooEbayMappingForCategorySplits'])->name('tools.dry-run-verify-woo-ebay-mapping-for-category-splits');

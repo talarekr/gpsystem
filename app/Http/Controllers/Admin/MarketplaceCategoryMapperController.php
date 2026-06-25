@@ -13,6 +13,7 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\View\View;
 
 class MarketplaceCategoryMapperController extends Controller
@@ -44,10 +45,15 @@ class MarketplaceCategoryMapperController extends Controller
     {
         $q = trim((string) $request->query('q', ''));
         $parentId = $request->query('parent_id');
+        $showHidden = $request->boolean('show_hidden', false);
 
         $categories = PartCategory::query()
-            ->select(['id', 'parent_id', 'name', 'category_path', 'full_slug_path', 'woo_product_count'])
-            ->withCount(['children', 'parts'])
+            ->select(array_values(array_filter(['id', 'parent_id', 'name', 'category_path', 'full_slug_path', 'woo_product_count', Schema::hasColumn('part_categories', 'is_visible') ? 'is_visible' : null])))
+            ->withCount([
+                'children as visible_children_count' => fn ($query) => $showHidden ? $query : $query->visibleForPublic(),
+                'parts',
+            ])
+            ->when(! $showHidden, fn ($query) => $query->visibleForPublic())
             ->when($q !== '', fn ($query) => $query->where(fn ($sub) => $sub->where('name', 'like', "%{$q}%")->orWhere('category_path', 'like', "%{$q}%")->orWhere('full_slug_path', 'like', "%{$q}%")))
             ->when($q === '', fn ($query) => filled($parentId) ? $query->where('parent_id', $parentId) : $query->whereNull('parent_id'))
             ->limit($q !== '' ? 50 : 200)
@@ -58,11 +64,12 @@ class MarketplaceCategoryMapperController extends Controller
             'parent_id' => $category->parent_id ? (string) $category->parent_id : null,
             'name' => $category->name,
             'path' => $category->category_path ?: $this->localPath($category),
-            'has_children' => $category->children_count > 0,
+            'has_children' => $category->visible_children_count > 0,
             'products_count' => $category->woo_product_count ?? $category->parts_count,
+            'is_visible' => Schema::hasColumn('part_categories', 'is_visible') ? (bool) $category->is_visible : true,
         ])->all();
 
-        return response()->json(['items' => $this->sortTreeItems($items, true)]);
+        return response()->json(['items' => $this->sortTreeItems($items, true), 'show_hidden' => $showHidden]);
     }
 
     public function channelTree(Request $request, string $channel): JsonResponse
