@@ -117,6 +117,12 @@ class StorageLocationModuleFoundationTest extends TestCase
             ->assertCanSeeTableRecords(StorageLocation::query()->where('name', '1K3-1')->get());
 
         Livewire::test(ViewStorageLocation::class, ['record' => StorageLocation::query()->first()->getRouteKey()])
+            ->assertSee('ID')
+            ->assertSee('Nazwa')
+            ->assertSee('Aktywne')
+            ->assertDontSee('Opis')
+            ->assertDontSee('Utworzono')
+            ->assertDontSee('Zaktualizowano')
             ->assertSee('Części w tym miejscu')
             ->assertDontSee('Moduł części zostanie dodany w kolejnym etapie.');
     }

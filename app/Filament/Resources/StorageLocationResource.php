@@ -140,17 +140,6 @@ class StorageLocationResource extends Resource
                                 Infolists\Components\IconEntry::make('is_active')
                                     ->label('Aktywne')
                                     ->boolean(),
-                                Infolists\Components\TextEntry::make('description')
-                                    ->label('Opis')
-                                    ->state(fn (StorageLocation $record): ?string => $record->publicDescription())
-                                    ->placeholder('—')
-                                    ->columnSpanFull(),
-                                Infolists\Components\TextEntry::make('created_at')
-                                    ->label('Utworzono')
-                                    ->dateTime('Y-m-d H:i'),
-                                Infolists\Components\TextEntry::make('updated_at')
-                                    ->label('Zaktualizowano')
-                                    ->dateTime('Y-m-d H:i'),
                             ]),
                     ]),
             ]);
