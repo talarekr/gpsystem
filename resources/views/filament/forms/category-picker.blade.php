@@ -18,6 +18,10 @@
             right: 1rem !important;
             bottom: auto !important;
             margin: 0 !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            line-height: 1 !important;
             transform: translateY(-50%) !important;
         }
     </style>
