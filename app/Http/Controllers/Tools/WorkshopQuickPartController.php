@@ -86,6 +86,8 @@ class WorkshopQuickPartController extends Controller
             'storage_location_id' => ['nullable', 'integer', 'exists:storage_locations,id'],
             'part_number' => ['required', 'string', 'max:255'],
             'internal_note' => ['nullable', 'string', 'max:5000'],
+            'condition_notes' => ['nullable', 'string', 'max:255'],
+            'steering_side' => ['nullable', 'string', 'max:255'],
             'send_email_copy' => ['nullable', 'boolean'],
         ], [
             'photos.required' => 'Dodaj minimum jedno zdjęcie części.',
@@ -97,6 +99,13 @@ class WorkshopQuickPartController extends Controller
         ]);
 
         $part = DB::transaction(function () use ($request, $validated, $partImageUploadService): Part {
+            $conditionNotes = $request->has('condition_notes')
+                ? ($validated['condition_notes'] ?? null)
+                : 'Używany';
+            $steeringSide = $request->has('steering_side')
+                ? ($validated['steering_side'] ?? null)
+                : 'po lewej';
+
             $location = $this->resolveStorageLocation(
                 StorageLocation::displayName($validated['storage_location']),
                 isset($validated['storage_location_id']) ? (int) $validated['storage_location_id'] : null,
@@ -107,12 +116,17 @@ class WorkshopQuickPartController extends Controller
                 'part_number' => trim($validated['part_number']),
                 'storage_location_id' => $location->id,
                 'description' => filled($validated['internal_note'] ?? null) ? trim($validated['internal_note']) : null,
+                'condition_notes' => filled($conditionNotes) ? trim($conditionNotes) : null,
                 'quantity' => 1,
                 'status' => 'draft',
                 'is_visible_storefront' => false,
                 'needs_listing' => true,
                 'needs_review' => false,
             ]);
+
+            if (filled($steeringSide)) {
+                $part->forceFill(['vehicle_snapshot' => ['steering_side' => trim($steeringSide)]])->saveQuietly();
+            }
 
             $partImageUploadService->attachUploadedImages(
                 part: $part,
