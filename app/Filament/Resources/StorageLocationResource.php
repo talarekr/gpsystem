@@ -4,6 +4,7 @@ namespace App\Filament\Resources;
 
 use App\Enums\UserRole;
 use App\Filament\Resources\StorageLocationResource\Pages;
+use App\Filament\Resources\StorageLocationResource\RelationManagers\PartsRelationManager;
 use App\Models\StorageLocation;
 use Filament\Forms;
 use Filament\Forms\Components\Section;
@@ -16,7 +17,6 @@ use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\HtmlString;
 
 class StorageLocationResource extends Resource
 {
@@ -80,6 +80,7 @@ class StorageLocationResource extends Resource
                     ->weight('semibold'),
                 Tables\Columns\TextColumn::make('description')
                     ->label('Opis')
+                    ->state(fn (StorageLocation $record): ?string => $record->publicDescription())
                     ->searchable()
                     ->wrap()
                     ->placeholder('—'),
@@ -141,6 +142,7 @@ class StorageLocationResource extends Resource
                                     ->boolean(),
                                 Infolists\Components\TextEntry::make('description')
                                     ->label('Opis')
+                                    ->state(fn (StorageLocation $record): ?string => $record->publicDescription())
                                     ->placeholder('—')
                                     ->columnSpanFull(),
                                 Infolists\Components\TextEntry::make('created_at')
@@ -151,16 +153,14 @@ class StorageLocationResource extends Resource
                                     ->dateTime('Y-m-d H:i'),
                             ]),
                     ]),
-                InfolistSection::make('Części w tym miejscu')
-                    ->icon('heroicon-o-cube')
-                    ->extraAttributes(['class' => 'gps-car-form-section'])
-                    ->schema([
-                        Infolists\Components\TextEntry::make('parts_placeholder')
-                            ->label('')
-                            ->state(static fn (): HtmlString => new HtmlString('<div class="gps-storage-parts-placeholder">Moduł części zostanie dodany w kolejnym etapie.</div>'))
-                            ->html(),
-                    ]),
             ]);
+    }
+
+    public static function getRelations(): array
+    {
+        return [
+            PartsRelationManager::class,
+        ];
     }
 
     public static function canViewAny(): bool
