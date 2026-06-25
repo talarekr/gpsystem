@@ -2945,50 +2945,144 @@ HTML);
         return response()->json(['ok' => $blocked === 0, 'local_update' => true, 'ovoko_write' => false, 'allegro_write' => false, 'ebay_write' => false, 'products_changed' => false, 'mappings_changed' => false, 'hidden_count' => $hidden, 'blocked_count' => $blocked, 'hide_method' => $this->categoryDisplaySplitHideMethod(), 'cache_cleared' => $this->clearCategoryCaches(), 'sample_hidden' => $sampleHidden, 'sample_blocked' => $sampleBlocked]);
     }
 
-    public function debugCategoryDisplayNames(Request $request): JsonResponse
+    public function debugCategoryDisplayNames(Request $request, CategoryTreeService $categoryTree): JsonResponse
     {
         if (! $this->validToken($request)) return $this->invalidTokenResponse();
         $ids = collect(explode(',', (string) $request->query('category_ids', '')))->map(fn ($id) => (int) trim($id))->filter()->unique()->values()->all();
         $search = trim((string) $request->query('search', ''));
-        $query = PartCategory::query();
+        $sampleLimit = max(1, min(500, (int) $request->query('sample_limit', $search !== '' ? 100 : max(1, count($ids)))));
+        $items = $this->publicCategoryLabelAuditItems($categoryTree, $search, false, $sampleLimit, $ids);
+
+        return response()->json([
+            'ok' => true,
+            'read_only' => true,
+            'search' => $search ?: null,
+            'note' => 'Shows actual public category labels from the storefront category tree/menu renderers; admin/debug-only path labels are not treated as public problems.',
+            'items' => $items,
+        ]);
+    }
+
+    public function debugPublicCategoryLabels(Request $request, CategoryTreeService $categoryTree): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+        $search = trim((string) $request->query('search', ''));
+        $onlyProblems = (string) $request->query('only_problems', '') === '1';
+        $includeHidden = (string) $request->query('include_hidden', '') === '1';
+        $sampleLimit = max(1, min(1000, (int) $request->query('sample_limit', 100)));
+        $scanLimit = $onlyProblems ? max($sampleLimit, 5000) : $sampleLimit;
+        $items = $this->publicCategoryLabelAuditItems($categoryTree, $search, $includeHidden, $scanLimit, []);
+        if ($onlyProblems) $items = array_values(array_filter($items, fn (array $item): bool => ($item['problem_fields'] ?? []) !== []));
+
+        return response()->json([
+            'ok' => true,
+            'read_only' => true,
+            'local_update' => false,
+            'products_changed' => false,
+            'cache_cleared' => false,
+            'ovoko_write' => false,
+            'allegro_write' => false,
+            'ebay_write' => false,
+            'search' => $search ?: null,
+            'only_problems' => $onlyProblems,
+            'include_hidden' => $includeHidden,
+            'sample_limit' => $sampleLimit,
+            'problem_count' => count(array_filter($items, fn (array $item): bool => ($item['problem_fields'] ?? []) !== [])),
+            'items' => array_slice($items, 0, $sampleLimit),
+        ]);
+    }
+
+    private function publicCategoryLabelAuditItems(CategoryTreeService $categoryTree, string $search, bool $includeHidden, int $sampleLimit, array $ids = []): array
+    {
+        $query = PartCategory::query()->withCount(['children', 'parts']);
+        if (! $includeHidden) $query->visibleForPublic();
         if ($ids !== []) $query->whereIn('id', $ids);
         if ($search !== '') $query->where(fn ($q) => $q->where('name', 'like', "%{$search}%")->orWhere('category_path', 'like', "%{$search}%"));
-        $rows = $query->limit($search !== '' ? 100 : max(1, count($ids)))->get()->keyBy('id');
-        $inputIds = $ids !== [] ? $ids : $rows->keys()->map(fn ($id) => (int) $id)->all();
-        $items = collect($inputIds)->map(function (int $id) use ($rows): array {
-            $category = $rows->get($id);
-            if (! $category) return ['id' => $id, 'found' => false];
+        $limit = $ids !== [] ? max($sampleLimit, count($ids)) : $sampleLimit;
+        $rows = $query->ordered()->limit($limit)->get();
+        $publicAll = $categoryTree->all();
+
+        return $rows->map(function (PartCategory $category) use ($categoryTree, $publicAll): array {
             $name = (string) $category->name;
             $path = (string) ($category->category_path ?? '');
-            $clean = $this->proposedCleanCategoryDisplayName($name, $path);
-            $nameHasSeparator = str_contains($name, '—');
-            $isHidden = Schema::hasColumn('part_categories', 'is_visible') && ! (bool) $category->is_visible;
-            $labels = [
-                'frontend_menu_label' => $name,
-                'frontend_children_label' => $name,
-                'frontend_breadcrumb_label' => $name,
-                'frontend_h1_title' => $name,
-                'mapper_label' => $name,
+            $appears = $publicAll->has((int) $category->id);
+            $isVisible = Schema::hasColumn('part_categories', 'is_visible') ? (bool) $category->is_visible : true;
+            $labels = $this->publicCategoryLabelsForAudit($category, $categoryTree, $appears);
+            $publicLabelFields = [
+                'frontend_left_menu_label',
+                'frontend_megamenu_group_heading_label',
+                'frontend_megamenu_child_link_label',
+                'frontend_breadcrumb_label',
+                'frontend_h1_label',
+                'public_category_tree_label',
             ];
+            $problemFields = [];
+            $labelDiff = [];
+            foreach ($publicLabelFields as $field) {
+                $label = $labels[$field] ?? null;
+                if ($label === null) continue;
+                $hasPath = $this->labelContainsCategoryPath((string) $label, $path);
+                $bad = ((string) $label !== $name) || (str_contains((string) $label, ' — ') && $hasPath) || $hasPath;
+                if ($bad) {
+                    $problemFields[] = $field;
+                    $labelDiff[$field] = ['actual' => $label, 'expected' => $name];
+                }
+            }
+            $containsPath = collect($labels)->contains(fn ($label): bool => is_string($label) && $this->labelContainsCategoryPath($label, $path));
+            $containsDash = collect($labels)->contains(fn ($label): bool => is_string($label) && str_contains($label, ' — '));
             return [
                 'id' => (int) $category->id,
-                'found' => true,
                 'name' => $name,
                 'category_path' => $path,
-                'slug' => $category->slug,
-                'parent_id' => $category->parent_id,
+                'is_visible' => $isVisible,
+                'products_count' => (int) ($category->parts_count ?? 0),
+                'children_count' => (int) ($category->children_count ?? 0),
+                'descendants_products_count' => $this->descendantsProductsCountForCategory((int) $category->id),
+                'appears_in_public_tree' => $appears,
                 ...$labels,
-                'any_label_contains_separator_dash' => collect($labels)->contains(fn ($label) => str_contains($label, '—')),
-                'db_name_has_separator' => $nameHasSeparator,
-                'frontend_appends_path' => false,
-                'name_contains_separator_dash' => $nameHasSeparator,
-                'proposed_clean_name' => $clean,
-                'problem_source' => $clean !== $name ? 'db_name_contains_display_path' : 'not_detected_in_db_name_check_frontend_rendering',
-                'proposed_fix' => $isHidden ? 'hidden_category_should_not_render' : ($clean !== $name ? 'clean_db_name' : 'fix_frontend_rendering'),
+                'mapper_label' => $name,
+                'expected_public_label' => $name,
+                'contains_dash_separator' => $containsDash,
+                'contains_category_path' => $containsPath,
+                'label_diff' => $labelDiff,
+                'problem_fields' => $problemFields,
+                'source' => $this->publicCategoryLabelSources(),
+                'source_helper_view' => $this->publicCategoryLabelSources(),
+                'proposed_fix' => $problemFields === [] ? 'no_problem' : (! $isVisible || ! $appears ? 'hidden_category_should_not_render' : ($this->proposedCleanCategoryDisplayName($name, $path) !== $name ? 'clean_db_name' : 'use_category_name_in_public_renderer')),
             ];
-        })->all();
+        })->values()->all();
+    }
 
-        return response()->json(['ok' => true, 'read_only' => true, 'search' => $search ?: null, 'items' => $items]);
+    private function publicCategoryLabelsForAudit(PartCategory $category, CategoryTreeService $categoryTree, bool $appears): array
+    {
+        $name = (string) $category->name;
+        return [
+            'frontend_left_menu_label' => $appears ? $name : null,
+            'frontend_megamenu_group_heading_label' => $appears && $category->parent_id === null ? $name : null,
+            'frontend_megamenu_child_link_label' => $appears && $category->parent_id !== null ? $name : null,
+            'frontend_breadcrumb_label' => $appears ? $name : null,
+            'frontend_h1_label' => $appears ? $name : null,
+            'frontend_go_to_category_label' => $appears && $category->parent_id === null ? 'Przejdź do kategorii' : null,
+            'public_category_tree_label' => $appears ? (string) ($categoryTree->all()->get((int) $category->id)?->name ?? $name) : null,
+        ];
+    }
+
+    private function labelContainsCategoryPath(string $label, string $categoryPath): bool
+    {
+        $path = trim($categoryPath);
+        return $path !== '' && $label !== $path && str_contains($label, $path);
+    }
+
+    private function publicCategoryLabelSources(): array
+    {
+        return [
+            'left_menu' => 'resources/views/storefront/partials/category-sidebar.blade.php and resources/views/storefront/partials/category-tree.blade.php',
+            'megamenu_group_heading' => 'resources/views/storefront/partials/category-menu.blade.php root heading',
+            'megamenu_child_link' => 'resources/views/storefront/partials/category-menu.blade.php child/grandchild links',
+            'breadcrumb' => 'resources/views/storefront/partials/category-breadcrumbs.blade.php',
+            'h1_title' => 'resources/views/storefront/categories/show.blade.php and app/Http/Controllers/Storefront/CategoryController.php',
+            'go_to_category' => 'resources/views/storefront/partials/category-menu.blade.php static CTA text',
+            'public_category_tree_response' => 'App\\Services\\Storefront\\CategoryTreeService::tree()',
+        ];
     }
 
     public function debugCategoryVisibilityUsage(Request $request, CategoryTreeService $categoryTree): JsonResponse

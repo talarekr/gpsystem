@@ -200,6 +200,7 @@ Route::get('/tools/dry-run-hide-empty-category-display-splits', [OvokoProductSyn
 Route::get('/tools/hide-empty-category-display-splits', [OvokoProductSyncController::class, 'hideEmptyCategoryDisplaySplits'])->name('tools.hide-empty-category-display-splits');
 Route::get('/tools/hide-empty-public-categories', [OvokoProductSyncController::class, 'hideEmptyPublicCategories'])->name('tools.hide-empty-public-categories');
 Route::get('/tools/debug-category-display-names', [OvokoProductSyncController::class, 'debugCategoryDisplayNames'])->name('tools.debug-category-display-names');
+Route::get('/tools/debug-public-category-labels', [OvokoProductSyncController::class, 'debugPublicCategoryLabels'])->name('tools.debug-public-category-labels');
 Route::get('/tools/debug-category-visibility-usage', [OvokoProductSyncController::class, 'debugCategoryVisibilityUsage'])->name('tools.debug-category-visibility-usage');
 Route::get('/tools/clear-category-tree-cache', [OvokoProductSyncController::class, 'clearCategoryTreeCache'])->name('tools.clear-category-tree-cache');
 Route::get('/tools/dry-run-clean-category-display-names', [OvokoProductSyncController::class, 'dryRunCleanCategoryDisplayNames'])->name('tools.dry-run-clean-category-display-names');
