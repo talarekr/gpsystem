@@ -171,4 +171,31 @@ class StorefrontCategorySidebarTest extends TestCase
         $response->assertDontSee('Pusty korzeń');
     }
 
+    public function test_category_public_labels_hide_imported_path_suffixes(): void
+    {
+        Cache::flush();
+
+        $root = PartCategory::query()->create([
+            'name' => 'Drzwi i inne elementy',
+            'slug' => 'drzwi-i-inne-elementy',
+            'full_slug_path' => 'drzwi-i-inne-elementy',
+        ]);
+
+        $category = PartCategory::query()->create([
+            'parent_id' => $root->id,
+            'name' => 'Zamek drzwi przednich — Drzwi i inne elementy > Zamek drzwi przednich',
+            'slug' => 'zamek-drzwi-przednich',
+            'full_slug_path' => 'drzwi-i-inne-elementy/zamek-drzwi-przednich',
+            'category_path' => 'Drzwi i inne elementy > Zamek drzwi przednich',
+            'woo_product_count' => 2,
+        ]);
+
+        $response = $this->get(route('storefront.category', ['path' => $category->full_slug_path]));
+
+        $response->assertOk();
+        $response->assertSee('<h1 id="category-title">Zamek drzwi przednich</h1>', false);
+        $response->assertSee('>Zamek drzwi przednich</span>', false);
+        $response->assertDontSee('Zamek drzwi przednich — Drzwi i inne elementy');
+    }
+
 }

@@ -68,6 +68,47 @@ class PartCategory extends Model
         return $query;
     }
 
+    public function publicDisplayName(): string
+    {
+        $name = trim((string) $this->name);
+        $categoryPath = trim((string) ($this->category_path ?? ''));
+
+        if ($name === '') {
+            return $name;
+        }
+
+        foreach ([' — ', ' – ', ' - '] as $separator) {
+            if (! str_contains($name, $separator)) {
+                continue;
+            }
+
+            [$shortName, $suffix] = array_map('trim', explode($separator, $name, 2));
+
+            if ($shortName === '') {
+                continue;
+            }
+
+            if ($categoryPath === '' || $this->normalizeCategoryDisplayText($suffix) === $this->normalizeCategoryDisplayText($categoryPath)) {
+                return $shortName;
+            }
+        }
+
+        return $name;
+    }
+
+    public function getPublicNameAttribute(): string
+    {
+        return $this->publicDisplayName();
+    }
+
+    private function normalizeCategoryDisplayText(string $value): string
+    {
+        $value = mb_strtolower(trim($value));
+        $value = preg_replace('/\s+/', ' ', $value) ?? $value;
+
+        return str_replace([' / ', '/', ' > '], '>', $value);
+    }
+
     public function isSystemUncategorized(): bool
     {
         return mb_strtolower(trim((string) $this->name)) === 'bez kategorii';

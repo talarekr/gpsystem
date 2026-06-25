@@ -21,7 +21,7 @@
                             aria-selected="{{ $root->id === $activeRootId ? 'true' : 'false' }}"
                             role="listitem"
                         >
-                            <span>{{ $root->name }}</span>
+                            <span>{{ $root->public_name }}</span>
                             <span aria-hidden="true">›</span>
                         </button>
                     @endforeach
@@ -39,7 +39,7 @@
                         <div class="sf-category-menu__branch-head">
                             <div>
                                 <span>Wybrana kategoria</span>
-                                <h3>{{ $root->name }}</h3>
+                                <h3>{{ $root->public_name }}</h3>
                             </div>
                             <a href="{{ $categoryTreeService->url($root) }}">Zobacz wszystkie</a>
                         </div>
@@ -49,12 +49,12 @@
                                 @foreach($root->children as $child)
                                     <section class="sf-category-menu__section">
                                         <a class="sf-category-menu__section-title" href="{{ $categoryTreeService->url($child) }}">
-                                            {{ $child->name }}
+                                            {{ $child->public_name }}
                                         </a>
                                         @if($child->children->isNotEmpty())
                                             <ul>
                                                 @foreach($child->children->take($visibleGrandchildren) as $grandchild)
-                                                    <li><a href="{{ $categoryTreeService->url($grandchild) }}">{{ $grandchild->name }}</a></li>
+                                                    <li><a href="{{ $categoryTreeService->url($grandchild) }}">{{ $grandchild->public_name }}</a></li>
                                                 @endforeach
                                                 @if($child->children->count() > $visibleGrandchildren)
                                                     <li><a class="sf-category-menu__more" href="{{ $categoryTreeService->url($child) }}">Pokaż więcej</a></li>
@@ -81,17 +81,17 @@
             <a class="sf-category-menu__catalog-link" href="{{ route('storefront.catalog') }}">Wszystkie części</a>
             @foreach($roots as $root)
                 <details class="sf-category-menu__mobile-root">
-                    <summary>{{ $root->name }}</summary>
+                    <summary>{{ $root->public_name }}</summary>
                     <a class="sf-category-menu__mobile-all" href="{{ $categoryTreeService->url($root) }}">Zobacz wszystkie w kategorii</a>
                     @if($root->children->isNotEmpty())
                         <ul>
                             @foreach($root->children as $child)
                                 <li>
-                                    <a href="{{ $categoryTreeService->url($child) }}">{{ $child->name }}</a>
+                                    <a href="{{ $categoryTreeService->url($child) }}">{{ $child->public_name }}</a>
                                     @if($child->children->isNotEmpty())
                                         <ul>
                                             @foreach($child->children->take($visibleGrandchildren) as $grandchild)
-                                                <li><a href="{{ $categoryTreeService->url($grandchild) }}">{{ $grandchild->name }}</a></li>
+                                                <li><a href="{{ $categoryTreeService->url($grandchild) }}">{{ $grandchild->public_name }}</a></li>
                                             @endforeach
                                             @if($child->children->count() > $visibleGrandchildren)
                                                 <li><a class="sf-category-menu__more" href="{{ $categoryTreeService->url($child) }}">Pokaż więcej</a></li>
