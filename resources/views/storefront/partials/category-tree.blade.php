@@ -25,13 +25,13 @@
         <li class="@class(['is-active' => $isActive, 'is-ancestor' => $isAncestor, 'is-branch' => $isOpen])" data-category-tree-item>
             <div class="sf-category-tree__row">
                 @if($hasChildren)
-                    <button class="sf-category-tree__toggle" type="button" aria-expanded="{{ $isOpen ? 'true' : 'false' }}" aria-label="{{ $isOpen ? 'Zwiń' : 'Rozwiń' }} {{ $treeCategory->name }}" data-category-tree-toggle>{{ $isOpen ? '−' : '+' }}</button>
+                    <button class="sf-category-tree__toggle" type="button" aria-expanded="{{ $isOpen ? 'true' : 'false' }}" aria-label="{{ $isOpen ? 'Zwiń' : 'Rozwiń' }} {{ $treeCategory->public_name }}" data-category-tree-toggle>{{ $isOpen ? '−' : '+' }}</button>
                 @else
                     <span class="sf-category-tree__toggle sf-category-tree__toggle--empty" aria-hidden="true"></span>
                 @endif
 
                 <a @class(['sf-category-tree__link', 'sf-category-tree__link--active' => $isCurrentUrl]) href="{{ $categoryUrl }}" @if($isCurrentUrl) aria-current="page" @endif>
-                    <span class="sf-category-tree__label">{{ $treeCategory->name }}</span>
+                    <span class="sf-category-tree__label">{{ $treeCategory->public_name }}</span>
                 </a>
             </div>
             @if($hasChildren)

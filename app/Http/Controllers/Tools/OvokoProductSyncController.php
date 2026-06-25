@@ -3017,7 +3017,8 @@ HTML);
         $publicAll = $categoryTree->all();
 
         return $rows->map(function (PartCategory $category) use ($categoryTree, $publicAll): array {
-            $name = (string) $category->name;
+            $dbName = (string) $category->name;
+            $name = $category->publicDisplayName();
             $path = (string) ($category->category_path ?? '');
             $appears = $publicAll->has((int) $category->id);
             $isVisible = Schema::hasColumn('part_categories', 'is_visible') ? (bool) $category->is_visible : true;
@@ -3054,7 +3055,7 @@ HTML);
                 'descendants_products_count' => $this->descendantsProductsCountForCategory((int) $category->id),
                 'appears_in_public_tree' => $appears,
                 ...$labels,
-                'mapper_label' => $name,
+                'mapper_label' => $dbName,
                 'expected_public_label' => $name,
                 'contains_dash_separator' => $containsDash,
                 'contains_category_path' => $containsPath,
@@ -3062,14 +3063,14 @@ HTML);
                 'problem_fields' => $problemFields,
                 'source' => $this->publicCategoryLabelSources(),
                 'source_helper_view' => $this->publicCategoryLabelSources(),
-                'proposed_fix' => $problemFields === [] ? 'no_problem' : (! $isVisible || ! $appears ? 'hidden_category_should_not_render' : ($this->proposedCleanCategoryDisplayName($name, $path) !== $name ? 'clean_db_name' : 'use_category_name_in_public_renderer')),
+                'proposed_fix' => $problemFields === [] ? 'no_problem' : (! $isVisible || ! $appears ? 'hidden_category_should_not_render' : ($this->proposedCleanCategoryDisplayName($dbName, $path) !== $dbName ? 'clean_db_name' : 'use_category_name_in_public_renderer')),
             ];
         })->values()->all();
     }
 
     private function publicCategoryLabelsForAudit(PartCategory $category, CategoryTreeService $categoryTree, bool $appears): array
     {
-        $name = (string) $category->name;
+        $name = $category->publicDisplayName();
         return [
             'frontend_left_menu_label' => $appears ? $name : null,
             'frontend_megamenu_group_heading_label' => $appears && $category->parent_id === null ? $name : null,
@@ -3077,7 +3078,7 @@ HTML);
             'frontend_breadcrumb_label' => $appears ? $name : null,
             'frontend_h1_label' => $appears ? $name : null,
             'frontend_go_to_category_label' => $appears && $category->parent_id === null ? 'Przejdź do kategorii' : null,
-            'public_category_tree_label' => $appears ? (string) ($categoryTree->all()->get((int) $category->id)?->name ?? $name) : null,
+            'public_category_tree_label' => $appears ? (string) ($categoryTree->all()->get((int) $category->id)?->public_name ?? $name) : null,
         ];
     }
 

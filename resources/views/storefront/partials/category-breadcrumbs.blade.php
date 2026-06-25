@@ -6,7 +6,7 @@
 <nav class="sf-breadcrumbs" aria-label="Breadcrumb">
     <a href="{{ route('storefront.home') }}">Strona główna</a><span>/</span>
     @foreach($categoryAncestors as $ancestor)
-        <a href="{{ $categoryTreeService->url($ancestor) }}">{{ $ancestor->name }}</a><span>/</span>
+        <a href="{{ $categoryTreeService->url($ancestor) }}">{{ $ancestor->public_name }}</a><span>/</span>
     @endforeach
-    <span>{{ $category->name }}</span>
+    <span>{{ $category->public_name }}</span>
 </nav>

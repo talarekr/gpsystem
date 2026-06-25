@@ -32,7 +32,7 @@
                     }
                 @endphp
                 <option value="{{ $rootUrl }}" @selected($activeRoot?->id === $rootCategory->id)>
-                    {{ $rootCategory->name ?? 'Kategoria' }}
+                    {{ $rootCategory->public_name ?? 'Kategoria' }}
                 </option>
             @endforeach
         </select>
