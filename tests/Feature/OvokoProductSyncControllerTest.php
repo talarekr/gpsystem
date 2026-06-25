@@ -661,4 +661,46 @@ class OvokoProductSyncControllerTest extends TestCase
         $this->assertDatabaseCount('marketplace_category_mappings', 0);
     }
 
+
+    public function test_category_display_split_autorun_reuses_existing_canonical_target_and_is_idempotent(): void
+    {
+        DB::table('marketplace_categories')->insert([
+            'channel' => 'ovoko',
+            'external_category_id' => 'ov-existing',
+            'level' => 1,
+            'name' => 'Elementy przedniej części nadwozia / karoserii',
+            'full_path' => 'Elementy przedniej części nadwozia / karoserii',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        DB::table('part_categories')->insert([
+            ['id' => 950, 'external_id' => 'ov-existing', 'name' => 'Elementy przedniej części nadwozia / karoserii', 'category_path' => 'Elementy przedniej części nadwozia / karoserii', 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 951, 'name' => 'Elementy przedniej części nadwozia', 'category_path' => 'Elementy przedniej części nadwozia', 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 952, 'parent_id' => 951, 'name' => 'karoserii', 'category_path' => 'Elementy przedniej części nadwozia > karoserii', 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 953, 'parent_id' => 952, 'name' => 'Maski', 'category_path' => 'Elementy przedniej części nadwozia > karoserii > Maski', 'created_at' => now(), 'updated_at' => now()],
+        ]);
+        DB::table('parts')->insert(['id' => 9500, 'sku' => 'GPS-9500', 'name' => 'Maska', 'price' => 100, 'currency' => 'PLN', 'quantity' => 1, 'status' => 'ready', 'category_id' => 952, 'created_at' => now(), 'updated_at' => now()]);
+
+        $start = $this->getJson('/tools/start-category-display-splits-fix-autorun?token=gps_images_import_2026&confirm=1&batch_size=10');
+        $runId = $start->json('run_id');
+        $firstRun = $this->getJson('/tools/run-category-display-splits-fix-autorun?token=gps_images_import_2026&run_id='.$runId);
+        $secondRun = $this->getJson('/tools/run-category-display-splits-fix-autorun?token=gps_images_import_2026&run_id='.$runId);
+
+        $firstRun->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('status', 'complete')
+            ->assertJsonPath('failed_count', 0)
+            ->assertJsonPath('created_categories_count', 0)
+            ->assertJsonPath('moved_products_count', 1)
+            ->assertJsonPath('reparented_children_count', 1);
+        $secondRun->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('status', 'complete')
+            ->assertJsonPath('failed_count', 0);
+
+        $this->assertDatabaseCount('part_categories', 4);
+        $this->assertDatabaseHas('parts', ['id' => 9500, 'category_id' => 950]);
+        $this->assertDatabaseHas('part_categories', ['id' => 953, 'parent_id' => 950]);
+    }
+
 }
