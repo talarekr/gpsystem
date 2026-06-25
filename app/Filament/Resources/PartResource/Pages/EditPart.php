@@ -48,7 +48,7 @@ class EditPart extends EditRecord
         if (blank($categoryId)) {
             Notification::make()
                 ->title('Nie wybrano kategorii')
-                ->body('Kliknij docelową kategorię w panelu, a następnie ponownie użyj przycisku „Ustaw kategorię”.')
+                ->body('Kliknij docelową kategorię w panelu, a następnie ponownie użyj przycisku „Wybierz”.')
                 ->danger()
                 ->send();
 
