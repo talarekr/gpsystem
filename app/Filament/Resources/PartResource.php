@@ -420,6 +420,11 @@ class PartResource extends Resource
             ->action(function (array $data, Forms\Set $set, ?Part $record): void {
                 $categoryId = $data['selected_category_id'] ?? null;
 
+                Log::debug('Admin part category picker submit received selected category state.', [
+                    'part_id' => $record?->getKey(),
+                    'selected_category_id' => $categoryId,
+                ]);
+
                 if (blank($categoryId)) {
                     Notification::make()
                         ->title('Nie wybrano kategorii')
@@ -446,6 +451,12 @@ class PartResource extends Resource
 
                     return;
                 }
+
+                Log::debug('Admin part category picker resolved selected category.', [
+                    'part_id' => $record?->getKey(),
+                    'selected_category_id' => $category->getKey(),
+                    'selected_category_name' => $category->name,
+                ]);
 
                 $set('category_id', $category->getKey());
 
