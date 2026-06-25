@@ -4,6 +4,7 @@ namespace App\Filament\Resources\PartResource\Pages;
 
 use App\Filament\Resources\PartResource;
 use App\Models\PartCategory;
+use App\Services\Images\PartImagePresentationService;
 use Filament\Actions;
 use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\Log;
@@ -117,6 +118,24 @@ class EditPart extends EditRecord
     protected function getHeaderActions(): array
     {
         return [
+            Actions\Action::make('processPartImages')
+                ->label('Przetwórz zdjęcia produktu')
+                ->icon('heroicon-o-photo')
+                ->action(function (): void {
+                    $processed = 0;
+
+                    foreach ($this->record->images as $image) {
+                        if (! $image->path) {
+                            continue;
+                        }
+
+                        $image->legacy_payload = app(PartImagePresentationService::class)->process($image, true);
+                        $image->saveQuietly();
+                        $processed++;
+                    }
+
+                    Notification::make()->title("Przetworzono zdjęcia: {$processed}")->success()->send();
+                }),
             Actions\Action::make('markListingReady')
                 ->label('Oznacz jako gotowe')
                 ->icon('heroicon-o-check-circle')
@@ -131,13 +150,7 @@ class EditPart extends EditRecord
                         ->success()
                         ->send();
                 }),
-            Actions\Action::make('storefrontPreview')
-                ->label('Podgląd')
-                ->icon('heroicon-o-arrow-top-right-on-square')
-                ->color('gray')
-                ->url(fn (): ?string => PartResource::storefrontProductUrl($this->record))
-                ->openUrlInNewTab()
-                ->visible(fn (): bool => PartResource::canOpenStorefrontProduct($this->record)),
+            Actions\ViewAction::make()->label('Podgląd'),
             Actions\DeleteAction::make()->label('Usuń'),
         ];
     }

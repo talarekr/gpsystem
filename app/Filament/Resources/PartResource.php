@@ -78,7 +78,7 @@ class PartResource extends Resource
                             ->label('Zdjęcia części')
                             ->hiddenLabel()
                             ->dehydrated(false)
-                            ->visibleOn(['view', 'edit'])
+                            ->visibleOn('view')
                             ->view('filament.resources.parts.part-images-gallery')
                             ->viewData(fn (?Part $record): array => ['part' => $record])
                             ->columnSpanFull(),
@@ -505,25 +505,6 @@ class PartResource extends Resource
             ->get()
             ->mapWithKeys(fn (PartCategory $category): array => [$category->id => trim($category->name.' '.($category->full_slug_path ? '('.$category->full_slug_path.')' : ''))])
             ->all();
-    }
-
-
-    public static function storefrontProductUrl(Part $part): ?string
-    {
-        if (! $part->slug) {
-            return null;
-        }
-
-        return route('storefront.product', $part->slug);
-    }
-
-    public static function canOpenStorefrontProduct(Part $part): bool
-    {
-        return filled(self::storefrontProductUrl($part))
-            && ! (bool) $part->needs_listing
-            && ! (bool) $part->needs_review
-            && (int) $part->quantity > 0
-            && ! in_array($part->status, ['sold', 'archived'], true);
     }
 
     public static function syncPartImages(Part $part, mixed $paths): void
