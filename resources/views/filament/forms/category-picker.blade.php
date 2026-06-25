@@ -24,6 +24,11 @@
             line-height: 1 !important;
             transform: translateY(calc(-50% - 3px)) !important;
         }
+
+        .fi-modal-window.gps-category-picker-modal .fi-modal-footer .fi-color-gray,
+        .gps-category-picker-modal.fi-modal-window .fi-modal-footer .fi-color-gray {
+            display: none !important;
+        }
     </style>
 @endonce
 
@@ -236,9 +241,8 @@
             x-bind:disabled="! canSave() || isSaving"
             x-on:click="saveSelectedCategory()"
         >
-            <span x-show="! isSaving">Ustaw kategorię</span>
+            <span x-show="! isSaving">Wybierz</span>
             <span x-show="isSaving">Zapisywanie...</span>
         </button>
-        <p class="gps-category-picker__empty" x-show="! canSave()">Wybierz kategorię końcową przed zapisaniem.</p>
     </div>
 </div>
