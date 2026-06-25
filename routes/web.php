@@ -203,6 +203,8 @@ Route::get('/tools/debug-category-display-names', [OvokoProductSyncController::c
 Route::get('/tools/debug-public-category-labels', [OvokoProductSyncController::class, 'debugPublicCategoryLabels'])->name('tools.debug-public-category-labels');
 Route::get('/tools/debug-category-visibility-usage', [OvokoProductSyncController::class, 'debugCategoryVisibilityUsage'])->name('tools.debug-category-visibility-usage');
 Route::get('/tools/clear-category-tree-cache', [OvokoProductSyncController::class, 'clearCategoryTreeCache'])->name('tools.clear-category-tree-cache');
+Route::get('/tools/dry-run-clean-category-db-names', [OvokoProductSyncController::class, 'dryRunCleanCategoryDbNames'])->name('tools.dry-run-clean-category-db-names');
+Route::get('/tools/clean-category-db-names', [OvokoProductSyncController::class, 'cleanCategoryDbNames'])->name('tools.clean-category-db-names');
 Route::get('/tools/dry-run-clean-category-display-names', [OvokoProductSyncController::class, 'dryRunCleanCategoryDisplayNames'])->name('tools.dry-run-clean-category-display-names');
 Route::get('/tools/clean-category-display-names', [OvokoProductSyncController::class, 'cleanCategoryDisplayNames'])->name('tools.clean-category-display-names');
 Route::get('/tools/dry-run-verify-woo-ebay-mapping-for-category-splits', [OvokoProductSyncController::class, 'dryRunVerifyWooEbayMappingForCategorySplits'])->name('tools.dry-run-verify-woo-ebay-mapping-for-category-splits');
