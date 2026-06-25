@@ -10,6 +10,7 @@ use App\Models\Part;
 use App\Models\PartCategory;
 use App\Services\Marketplace\Api\MarketplaceApiManager;
 use App\Services\Marketplace\Api\OvokoApiClient;
+use App\Services\Marketplace\LocalCategoryDeleteSafetyService;
 use App\Services\Storefront\CategoryTreeService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
@@ -31,6 +32,76 @@ class OvokoProductSyncController extends Controller
         'part_number', 'name', 'description', 'price', 'currency', 'quantity', 'storage_location',
         'images', 'public_image_urls', 'ovoko_category_mapping', 'condition',
     ];
+
+
+    public function dryRunDeleteLocalCategories(Request $request, LocalCategoryDeleteSafetyService $service): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+
+        $categoryIds = $this->categoryIdsFromRequest($request);
+
+        return response()->json([
+            'ok' => true,
+            'dry_run' => true,
+            'requested_category_ids' => $categoryIds,
+            'items' => $service->analyzeMany($categoryIds),
+            'local_delete' => false,
+            'ovoko_write' => false,
+            'allegro_write' => false,
+            'ebay_write' => false,
+            'products_changed' => false,
+            'mappings_changed' => false,
+        ]);
+    }
+
+    public function deleteLocalCategories(Request $request, LocalCategoryDeleteSafetyService $service): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+
+        $categoryIds = $this->categoryIdsFromRequest($request);
+
+        if ($request->query('confirm') !== '1') {
+            return response()->json([
+                'ok' => false,
+                'requested_category_ids' => $categoryIds,
+                'blockers' => ['confirm_1_required'],
+                'local_delete' => false,
+                'ovoko_write' => false,
+                'allegro_write' => false,
+                'ebay_write' => false,
+                'products_changed' => false,
+                'mappings_changed' => false,
+            ], 422);
+        }
+
+        $result = $service->deleteMany($categoryIds, $request->user()?->id);
+
+        return response()->json([
+            'ok' => true,
+            'requested_category_ids' => $categoryIds,
+            'deleted_count' => count($result['deleted']),
+            'deleted_items' => $result['deleted'],
+            'blocked_count' => count($result['blocked']),
+            'blocked_items' => $result['blocked'],
+            'local_delete' => true,
+            'ovoko_write' => false,
+            'allegro_write' => false,
+            'ebay_write' => false,
+            'products_changed' => false,
+            'mappings_changed' => false,
+            'cache_cleared' => $result['cache_cleared'],
+        ]);
+    }
+
+    private function categoryIdsFromRequest(Request $request): array
+    {
+        return collect(explode(',', (string) $request->query('category_ids', '')))
+            ->map(fn (string $id): int => (int) trim($id))
+            ->filter(fn (int $id): bool => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+    }
 
     public function dryRun(Request $request): JsonResponse
     {
