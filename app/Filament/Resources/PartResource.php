@@ -51,6 +51,8 @@ class PartResource extends Resource
             ->extraAttributes(['class' => 'gps-part-form'])
             ->schema([
                 Section::make('Zdjęcie kodu części')
+                    // Temporarily disabled: keep the code-photo upload configuration and stored data intact for a possible future return.
+                    ->hidden()
                     ->collapsible()
                     ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--code-photo'])
                     ->schema([

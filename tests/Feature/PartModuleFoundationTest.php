@@ -351,6 +351,7 @@ class PartModuleFoundationTest extends TestCase
 
         Livewire::test(EditPart::class, ['record' => $part->getRouteKey()])
             ->assertFormSet(['part_photo_paths' => []])
+            ->assertDontSee('Zdjęcie kodu części')
             ->assertSee($expectedImagePaths[0])
             ->assertSee($expectedImagePaths[1])
             ->assertSee('Usuń zdjęcie części')
