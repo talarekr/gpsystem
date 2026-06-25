@@ -10,8 +10,11 @@
         stack: [],
         search: '',
         selectedId: null,
+        selectedName: '',
+        lastEventName: '',
         init() {
             this.selectedId = this.hiddenInput()?.value || null;
+            this.selectedName = this.nameFor(this.selectedId);
         },
         hiddenInput() {
             return this.$root.closest('form')?.querySelector('input[name$=\'[selected_category_id]\']') ?? null;
@@ -25,20 +28,30 @@
         currentCategory() {
             return this.categories.find((category) => String(category.id) === String(this.currentParent));
         },
+        selectedCategory() {
+            return this.categories.find((category) => String(category.id) === String(this.selectedId));
+        },
+        nameFor(id) {
+            return this.categories.find((category) => String(category.id) === String(id))?.path || '';
+        },
         breadcrumb() {
             return this.stack.map((id) => this.categories.find((category) => String(category.id) === String(id))).filter(Boolean);
         },
         open(category) {
-            if (category.has_children) {
-                this.stack.push(category.id);
-                this.currentParent = category.id;
+            if (! category.has_children) {
                 return;
             }
 
-            this.choose(category.id);
+            this.stack.push(category.id);
+            this.currentParent = category.id;
         },
-        choose(id) {
+        choose(category, eventName = 'category-row-click') {
+            const id = category?.id ?? category;
+
             this.selectedId = id;
+            this.selectedName = this.nameFor(id);
+            this.lastEventName = eventName;
+
             const input = this.hiddenInput();
 
             if (input) {
@@ -46,6 +59,12 @@
                 input.dispatchEvent(new Event('input', { bubbles: true }));
                 input.dispatchEvent(new Event('change', { bubbles: true }));
             }
+
+            console.debug('gps-category-picker:selected', {
+                selected_category_id: this.selectedId,
+                selected_category_name: this.selectedName,
+                event: this.lastEventName,
+            });
         },
         back() {
             this.stack.pop();
@@ -78,12 +97,18 @@
         >
     </div>
 
+    <div class="gps-category-picker__selected" x-show="selectedId" x-cloak>
+        <strong>Wybrano:</strong>
+        <span x-text="selectedName || selectedCategory()?.name"></span>
+        <small x-text="`selected_category_id=${selectedId}; selected_category_name=${selectedName || selectedCategory()?.name}; event=${lastEventName}`"></small>
+    </div>
+
     <template x-if="search.trim().length >= 2">
         <div class="gps-category-picker__section">
             <p class="gps-category-picker__hint">Wyniki wyszukiwania</p>
 
             <template x-for="category in searchResults()" :key="`search-${category.id}`">
-                <button type="button" class="gps-category-picker__row" x-bind:class="{ 'is-selected': String(selectedId) === String(category.id) }" x-on:click="choose(category.id)">
+                <button type="button" class="gps-category-picker__row" x-bind:class="{ 'is-selected': String(selectedId) === String(category.id) }" x-on:click="choose(category, 'search-result-click')">
                     <span>
                         <strong x-text="category.name"></strong>
                         <small x-text="category.path"></small>
@@ -106,12 +131,27 @@
         </div>
 
         <template x-for="category in currentChildren()" :key="category.id">
-            <button type="button" class="gps-category-picker__row" x-bind:class="{ 'is-selected': String(selectedId) === String(category.id) }" x-on:click="open(category)">
+            <div
+                role="button"
+                tabindex="0"
+                class="gps-category-picker__row"
+                x-bind:class="{ 'is-selected': String(selectedId) === String(category.id) }"
+                x-on:click="choose(category, 'category-row-click')"
+                x-on:keydown.enter.prevent="choose(category, 'category-row-enter')"
+                x-on:keydown.space.prevent="choose(category, 'category-row-space')"
+            >
                 <span>
                     <strong x-text="category.name"></strong>
                 </span>
-                <span class="gps-category-picker__arrow" x-text="category.has_children ? '›' : 'Wybierz'"></span>
-            </button>
+                <button
+                    type="button"
+                    class="gps-category-picker__arrow"
+                    x-show="category.has_children"
+                    x-on:click.stop="open(category)"
+                    x-bind:aria-label="`Pokaż podkategorie: ${category.name}`"
+                >›</button>
+                <span class="gps-category-picker__select-label" x-show="! category.has_children">Wybierz</span>
+            </div>
         </template>
 
         <p class="gps-category-picker__empty" x-show="currentChildren().length === 0">Brak podkategorii.</p>
