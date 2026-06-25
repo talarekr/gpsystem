@@ -17,16 +17,13 @@ use Filament\Forms\Components\Section;
 use Filament\Forms\Components\Actions\Action;
 use Filament\Forms\Form;
 use Filament\Navigation\NavigationItem;
-use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\HtmlString;
-use Throwable;
 
 class PartResource extends Resource
 {
@@ -405,96 +402,17 @@ class PartResource extends Resource
             ->icon('heroicon-m-bars-3')
             ->tooltip('Wybierz kategorię z drzewa')
             ->modalHeading('Kategorie')
-            ->modalSubmitActionLabel('Ustaw kategorię')
+            ->modalSubmitAction(false)
             ->modalCancelActionLabel('Zamknij')
             ->extraModalWindowAttributes(['class' => 'gps-category-picker-modal'])
             ->slideOver()
             ->form([
-                Forms\Components\Hidden::make('selected_category_id')->live(),
                 Forms\Components\ViewField::make('category_picker')
                     ->hiddenLabel()
                     ->dehydrated(false)
                     ->view('filament.forms.category-picker')
                     ->viewData(fn (): array => ['categories' => self::categoryPickerCategories()]),
-            ])
-            ->action(function (array $data, Forms\Set $set, ?Part $record): void {
-                $categoryId = $data['selected_category_id'] ?? null;
-
-                Log::debug('Admin part category picker submit received selected category state.', [
-                    'part_id' => $record?->getKey(),
-                    'action_state_path' => 'selected_category_id',
-                    'selected_category_id' => $categoryId,
-                    'action_data' => $data,
-                ]);
-
-                if (blank($categoryId)) {
-                    Notification::make()
-                        ->title('Nie wybrano kategorii')
-                        ->body('Kliknij docelową kategorię w panelu, a następnie ponownie użyj przycisku „Ustaw kategorię”.')
-                        ->danger()
-                        ->send();
-
-                    return;
-                }
-
-                $category = PartCategory::query()->find($categoryId);
-
-                if (! $category) {
-                    Log::warning('Admin part category picker received an invalid category id.', [
-                        'part_id' => $record?->getKey(),
-                        'category_id' => $categoryId,
-                    ]);
-
-                    Notification::make()
-                        ->title('Nie znaleziono wybranej kategorii')
-                        ->body('Odśwież stronę i spróbuj ponownie. Jeśli problem wróci, sprawdź logi aplikacji.')
-                        ->danger()
-                        ->send();
-
-                    return;
-                }
-
-                Log::debug('Admin part category picker resolved selected category.', [
-                    'part_id' => $record?->getKey(),
-                    'selected_category_id' => $category->getKey(),
-                    'selected_category_name' => $category->name,
-                ]);
-
-                $set('category_id', $category->getKey());
-
-                if (! $record?->exists) {
-                    Notification::make()
-                        ->title('Kategoria ustawiona w formularzu')
-                        ->body('Zapisz część, aby utrwalić zmianę.')
-                        ->success()
-                        ->send();
-
-                    return;
-                }
-
-                try {
-                    $record->forceFill(['category_id' => $category->getKey()])->save();
-                    $record->refresh();
-
-                    Notification::make()
-                        ->title('Kategoria części została zapisana')
-                        ->body('Nowa kategoria: '.$category->name)
-                        ->success()
-                        ->send();
-                } catch (Throwable $exception) {
-                    Log::error('Admin part category picker failed to save part category.', [
-                        'part_id' => $record->getKey(),
-                        'category_id' => $category->getKey(),
-                        'exception' => $exception,
-                    ]);
-
-                    Notification::make()
-                        ->title('Nie udało się zapisać kategorii')
-                        ->body('Zmiana nie została zapisana. Szczegóły błędu zapisano w logach aplikacji.')
-                        ->danger()
-                        ->send();
-                }
-            });
+            ]);
     }
 
     public static function categoryPickerCategories(): array
