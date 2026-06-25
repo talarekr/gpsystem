@@ -180,6 +180,8 @@ Route::get('/tools/check-marketplace-stock-readiness', [MarketplaceApiFoundation
 Route::get('/tools/check-marketplace-linking-health', [MarketplaceApiFoundationController::class, 'linkingHealth'])->name('tools.check-marketplace-linking-health');
 Route::get('/tools/test-ovoko-api-connection', TestOvokoApiConnectionController::class)->name('tools.test-ovoko-api-connection');
 Route::get('/tools/check-ovoko-price-import', [OvokoPriceImportController::class, 'check'])->name('tools.check-ovoko-price-import');
+Route::get('/tools/dry-run-delete-local-categories', [OvokoProductSyncController::class, 'dryRunDeleteLocalCategories'])->name('tools.dry-run-delete-local-categories');
+Route::get('/tools/delete-local-categories', [OvokoProductSyncController::class, 'deleteLocalCategories'])->name('tools.delete-local-categories');
 Route::get('/tools/dry-run-ovoko-product-sync', [OvokoProductSyncController::class, 'dryRun'])->name('tools.dry-run-ovoko-product-sync');
 Route::get('/tools/check-ovoko-product-sync-readiness', [OvokoProductSyncController::class, 'readiness'])->name('tools.check-ovoko-product-sync-readiness');
 Route::get('/tools/check-ovoko-category-data-sources', [OvokoProductSyncController::class, 'categoryDataSources'])->name('tools.check-ovoko-category-data-sources');
