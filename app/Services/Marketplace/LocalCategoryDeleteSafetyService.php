@@ -35,7 +35,8 @@ class LocalCategoryDeleteSafetyService
             ],
             'samples' => [
                 'product_ids' => $analysis['sample_product_ids'],
-                'blocking_products' => [],
+                'direct_products' => $analysis['direct_products'],
+                'blocking_products' => $analysis['direct_products'],
                 'children' => $analysis['children_sample'],
             ],
             'mappings' => [
@@ -80,6 +81,7 @@ class LocalCategoryDeleteSafetyService
                 'children_count' => 0,
                 'descendants_products_count' => 0,
                 'sample_product_ids' => [],
+                'direct_products' => [],
                 'children_sample' => [],
                 'has_marketplace_mapping' => false,
                 'has_ovoko_mapping' => false,
@@ -123,6 +125,7 @@ class LocalCategoryDeleteSafetyService
             'children_count' => $childrenCount,
             'descendants_products_count' => $descendantsProductsCount,
             'sample_product_ids' => Part::query()->where('category_id', $category->id)->limit(20)->pluck('id')->map(fn ($id) => (int) $id)->all(),
+            'direct_products' => $this->productRows(Part::query()->where('category_id', $category->id)->limit(20)->get()),
             'children_sample' => $children->map(fn (PartCategory $child): array => [
                 'id' => (int) $child->id,
                 'name' => $child->name,
@@ -211,6 +214,28 @@ class LocalCategoryDeleteSafetyService
         try { Artisan::call('cache:clear'); } catch (Throwable) {}
 
         return self::CACHE_KEYS;
+    }
+
+
+    /**
+     * @param \Illuminate\Support\Collection<int, Part> $parts
+     * @return array<int, array<string, mixed>>
+     */
+    private function productRows(\Illuminate\Support\Collection $parts): array
+    {
+        return $parts->map(fn (Part $part): array => [
+            'id' => (int) $part->id,
+            'product_id' => (int) $part->id,
+            'title' => $part->name,
+            'name' => $part->name,
+            'sku' => $part->sku,
+            'internal_code' => $part->sku,
+            'main_code' => $part->part_number ?: $part->manufacturer_code,
+            'oem' => $part->oem_number,
+            'category_id' => $part->category_id ? (int) $part->category_id : null,
+            'current_category_id' => $part->category_id ? (int) $part->category_id : null,
+            'edit_url' => '/admin/parts/'.((int) $part->id).'/edit',
+        ])->all();
     }
 
     private function hasChannel(array $channels, string $needle): bool
