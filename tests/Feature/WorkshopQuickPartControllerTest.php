@@ -9,6 +9,7 @@ use App\Models\StorageLocation;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Schema;
@@ -94,6 +95,93 @@ class WorkshopQuickPartControllerTest extends TestCase
             Storage::disk('public')->assertExists($image->path);
         }
     }
+
+    public function test_workshop_creation_without_quality_saves_used_default(): void
+    {
+        Storage::fake('public');
+
+        $this->post('/tools/workshop/quick-part-create?token='.self::TOKEN, [
+            'photos' => [UploadedFile::fake()->image('front.jpg')],
+            'storage_location' => 'A1-P2',
+            'part_number' => 'DEFAULT-QUALITY',
+        ])->assertRedirect('/tools/workshop/quick-part-create?token='.self::TOKEN);
+
+        $this->assertSame('Używany', Part::query()->where('part_number', 'DEFAULT-QUALITY')->firstOrFail()->condition_notes);
+    }
+
+    public function test_workshop_creation_without_steering_side_saves_left_default(): void
+    {
+        Storage::fake('public');
+
+        $this->post('/tools/workshop/quick-part-create?token='.self::TOKEN, [
+            'photos' => [UploadedFile::fake()->image('front.jpg')],
+            'storage_location' => 'A1-P2',
+            'part_number' => 'DEFAULT-STEERING',
+        ])->assertRedirect('/tools/workshop/quick-part-create?token='.self::TOKEN);
+
+        $part = Part::query()->where('part_number', 'DEFAULT-STEERING')->firstOrFail();
+
+        $this->assertSame('po lewej', $part->vehicle_snapshot['steering_side'] ?? null);
+    }
+
+    public function test_workshop_creation_respects_explicit_quality_and_steering_side(): void
+    {
+        Storage::fake('public');
+
+        $this->post('/tools/workshop/quick-part-create?token='.self::TOKEN, [
+            'photos' => [UploadedFile::fake()->image('front.jpg')],
+            'storage_location' => 'A1-P2',
+            'part_number' => 'EXPLICIT-DEFAULTS',
+            'condition_notes' => 'Nowy',
+            'steering_side' => 'po prawej',
+        ])->assertRedirect('/tools/workshop/quick-part-create?token='.self::TOKEN);
+
+        $part = Part::query()->where('part_number', 'EXPLICIT-DEFAULTS')->firstOrFail();
+
+        $this->assertSame('Nowy', $part->condition_notes);
+        $this->assertSame('po prawej', $part->vehicle_snapshot['steering_side'] ?? null);
+    }
+
+    public function test_workshop_creation_default_fields_do_not_write_marketplace_or_external_apis(): void
+    {
+        Storage::fake('public');
+        Http::fake();
+
+        $beforeListings = Schema::hasTable('marketplace_listings') ? DB::table('marketplace_listings')->count() : null;
+        $beforeProducts = Schema::hasTable('products') ? DB::table('products')->count() : null;
+        $beforeOffers = Schema::hasTable('offers') ? DB::table('offers')->count() : null;
+        $beforeMappings = Schema::hasTable('marketplace_category_mappings') ? DB::table('marketplace_category_mappings')->count() : null;
+
+        $this->post('/tools/workshop/quick-part-create?token='.self::TOKEN, [
+            'photos' => [UploadedFile::fake()->image('front.jpg')],
+            'storage_location' => 'NOAPI-DEFAULTS',
+            'part_number' => 'NOAPI-DEFAULTS-ID',
+        ])->assertRedirect('/tools/workshop/quick-part-create?token='.self::TOKEN);
+
+        $this->assertDatabaseHas('parts', [
+            'part_number' => 'NOAPI-DEFAULTS-ID',
+            'condition_notes' => 'Używany',
+        ]);
+
+        if ($beforeListings !== null) {
+            $this->assertSame($beforeListings, DB::table('marketplace_listings')->count());
+        }
+
+        if ($beforeProducts !== null) {
+            $this->assertSame($beforeProducts, DB::table('products')->count());
+        }
+
+        if ($beforeOffers !== null) {
+            $this->assertSame($beforeOffers, DB::table('offers')->count());
+        }
+
+        if ($beforeMappings !== null) {
+            $this->assertSame($beforeMappings, DB::table('marketplace_category_mappings')->count());
+        }
+
+        Http::assertNothingSent();
+    }
+
     public function test_workshop_storage_autocomplete_returns_existing_locations_after_minimum_three_characters_without_import_description(): void
     {
         $this->actingAs(User::factory()->create());
