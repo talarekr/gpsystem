@@ -87,21 +87,25 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvController extends Controller
                     $this->addDiagnosticError($diagnostics, 'product_lookup_failed', $e->getMessage(), ['woo_product_id' => $wooProductId]);
                 }
 
-                if (! $part || ! $part->category_id) {
+                $rejectedReason = $this->partRejectedReason($part, $onlyPublic, $leafOnly, $onlyMissingAllegro);
+                if ($rejectedReason !== null) {
                     $stats['unmatched_products_count']++;
                     $diagnostics['unmatched_products_count']++;
+                    $this->annotateLastMatchAttempt($diagnostics, $allegroOfferId, $rejectedReason);
+                    $this->annotateOfferTableSample($diagnostics, $allegroOfferId, false, $rejectedReason);
+                    if ($this->lastAttemptIsOfferTable($diagnostics, $allegroOfferId)) $this->incrementOfferTableRejectionCounter($diagnostics, $rejectedReason);
                     continue;
                 }
 
                 if ($categoryId !== null && (string) $part->category_id !== (string) $categoryId) {
+                    $this->annotateLastMatchAttempt($diagnostics, $allegroOfferId, 'category_filter_mismatch');
+                    $this->annotateOfferTableSample($diagnostics, $allegroOfferId, false, 'category_filter_mismatch');
                     continue;
                 }
-                if ($leafOnly && $this->categoryHasChildren((int) $part->category_id)) {
-                    continue;
-                }
-                if ($onlyMissingAllegro && $this->hasAllegroMapping((int) $part->category_id)) {
-                    continue;
-                }
+
+                $this->annotateLastMatchAttempt($diagnostics, $allegroOfferId, null);
+                $this->annotateOfferTableSample($diagnostics, $allegroOfferId, true, null);
+                if ($this->lastAttemptIsOfferTable($diagnostics, $allegroOfferId)) $diagnostics['offer_table_accepted_count']++;
 
                 $stats['matched_products_count']++;
                 $diagnostics['matched_products_count']++;
@@ -211,6 +215,16 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvController extends Controller
             'local_offer_match_strategy_used' => null,
             'no_offer_id_storage_found' => false,
             'count_offer_table_matches_sample' => 0,
+            'sample_offer_table_matches' => [],
+            'offer_table_raw_match_count' => 0,
+            'offer_table_part_found_count' => 0,
+            'offer_table_part_missing_count' => 0,
+            'offer_table_part_without_category_count' => 0,
+            'offer_table_category_missing_count' => 0,
+            'offer_table_rejected_not_public_count' => 0,
+            'offer_table_rejected_not_leaf_count' => 0,
+            'offer_table_rejected_existing_allegro_mapping_count' => 0,
+            'offer_table_accepted_count' => 0,
             'count_parts_with_allegro_offer_id_matching_sample' => 0,
             'count_parts_with_offer_id_matching_sample' => 0,
             'count_parts_with_marketplace_offer_id_matching_sample' => 0,
@@ -376,9 +390,7 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvController extends Controller
         $categoryPathSelect = Schema::hasColumn('part_categories', 'category_path') ? 'part_categories.category_path' : DB::raw('NULL as category_path');
         $legacyPayloadSelect = Schema::hasColumn('parts', 'legacy_payload') ? 'parts.legacy_payload' : DB::raw('NULL as legacy_payload');
         $q = DB::table('parts')->leftJoin('part_categories', 'parts.category_id', '=', 'part_categories.id')->select('parts.id','parts.external_id','parts.sku','parts.name','parts.category_id',$legacyPayloadSelect,$categoryNameSelect,$categoryPathSelect);
-        if ($onlyPublic && Schema::hasColumn('parts', 'is_visible_storefront')) $q->where('parts.is_visible_storefront', true);
-
-        $attempt = ['woo_product_id' => $wooProductId !== '' ? $wooProductId : null, 'allegro_offer_id' => $allegroOfferId !== '' ? $allegroOfferId : null, 'sku' => $sku !== '' ? $sku : null, 'matched_by' => null, 'matched_part_id' => null, 'matched_category_id' => null, 'match_count' => 0];
+        $attempt = ['woo_product_id' => $wooProductId !== '' ? $wooProductId : null, 'allegro_offer_id' => $allegroOfferId !== '' ? $allegroOfferId : null, 'sku' => $sku !== '' ? $sku : null, 'matched_by' => null, 'matched_part_id' => null, 'matched_category_id' => null, 'matched_offer_table' => null, 'matched_offer_row_id' => null, 'raw_offer_table_match_count' => 0, 'rejected_reason' => null, 'match_count' => 0];
 
         if ($allegroOfferId !== '') {
             $part = $this->findPartByOfferTable($q, $allegroOfferId, $attempt, $diagnostics);
@@ -452,7 +464,7 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvController extends Controller
         foreach (['offers','marketplace_offers','marketplace_listings','allegro_offers','part_marketplace_offers','product_marketplace_offers','marketplace_products','marketplace_product_offers'] as $table) {
             $checked = ['table' => $table, 'exists' => Schema::hasTable($table), 'offer_id_columns' => [], 'relation_columns' => [], 'channel_columns' => []];
             if (! $checked['exists']) {
-                $diagnostics['local_offer_tables_checked'][] = $checked;
+                $this->addOfferTableChecked($diagnostics, $checked);
                 continue;
             }
 
@@ -462,35 +474,51 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvController extends Controller
             $checked['offer_id_columns'] = $offerColumns;
             $checked['relation_columns'] = $relationColumns;
             $checked['channel_columns'] = $channelColumns;
-            $diagnostics['local_offer_tables_checked'][] = $checked;
+            $this->addOfferTableChecked($diagnostics, $checked);
 
             if ($offerColumns === [] || $relationColumns === []) continue;
 
-            $ids = DB::table($table)
+            $rows = DB::table($table)
                 ->where(function ($q) use ($table, $offerColumns, $offerId) {
                     foreach ($offerColumns as $column) $q->orWhere("{$table}.{$column}", $offerId);
                 })
                 ->when($channelColumns !== [], function ($q) use ($table, $channelColumns) {
                     $q->where(function ($w) use ($table, $channelColumns) {
-                        foreach ($channelColumns as $column) $w->orWhereIn("{$table}.{$column}", ['allegro', 'Allegro']);
+                        foreach ($channelColumns as $column) $w->orWhereIn("{$table}.{$column}", ['allegro', 'Allegro', 'ALLEGRO']);
                     });
                 })
                 ->limit(3)
-                ->get()
-                ->flatMap(fn ($row) => collect($relationColumns)->map(fn ($column) => $row->{$column} ?? null))
-                ->filter(fn ($id) => $id !== null && $id !== '')
-                ->unique()
-                ->values();
+                ->get();
 
+            $diagnostics['offer_table_raw_match_count'] += $rows->count();
+            $ids = collect();
+            $matchedOfferRow = null;
+            $matchedOfferColumn = null;
+            foreach ($rows as $row) {
+                $offerColumn = collect($offerColumns)->first(fn ($column) => (string) ($row->{$column} ?? '') === $offerId) ?? $offerColumns[0];
+                $relationColumn = collect($relationColumns)->first(fn ($column) => ($row->{$column} ?? null) !== null && ($row->{$column} ?? '') !== '');
+                $partId = $relationColumn ? ($row->{$relationColumn} ?? null) : null;
+                if ($partId === null || $partId === '') {
+                    $diagnostics['offer_table_part_missing_count']++;
+                } else {
+                    $ids->push($partId);
+                    $matchedOfferRow ??= $row;
+                    $matchedOfferColumn ??= $offerColumn;
+                    $this->addOfferTableMatchSample($diagnostics, $offerId, $table, $offerColumn, $row, $partId);
+                }
+            }
+
+            $ids = $ids->unique()->values();
             $diagnostics['count_offer_table_matches_sample'] += $ids->count();
+            $attempt['raw_offer_table_match_count'] += $rows->count();
             if ($ids->count() > 1) {
                 $this->addDiagnosticError($diagnostics, 'ambiguous_allegro_offer_id', 'More than one local product matched the Allegro offer ID.', ['allegro_offer_id' => $offerId, 'table' => $table, 'matched_ids' => $ids->all()]);
-                $this->addMatchAttemptSample($diagnostics, $attempt + ['matched_by' => 'ambiguous', 'match_count' => $ids->count()]);
+                $this->addMatchAttemptSample($diagnostics, $attempt + ['matched_by' => 'ambiguous', 'matched_offer_table' => $table, 'match_count' => $ids->count()]);
                 return null;
             }
             if ($ids->count() === 1) {
                 $matches = (clone $baseQuery)->where('parts.id', $ids->first())->limit(2)->get();
-                if ($matches->count() === 1) return $this->matchedPart($matches->first(), "{$table}.offer_id", $attempt + ['match_count' => 1], $diagnostics);
+                if ($matches->count() === 1) return $this->matchedPart($matches->first(), "{$table}.{$matchedOfferColumn}", $attempt + ['match_count' => 1, 'matched_offer_table' => $table, 'matched_offer_row_id' => $matchedOfferRow->id ?? null], $diagnostics);
             }
         }
 
@@ -576,6 +604,119 @@ class SuggestAllegroCategoryMappingsFromLegacyCsvController extends Controller
         }
 
         return false;
+    }
+
+
+    private function addOfferTableChecked(array &$diagnostics, array $checked): void
+    {
+        foreach ($diagnostics['local_offer_tables_checked'] as $existing) {
+            if (($existing['table'] ?? null) === $checked['table']) return;
+        }
+        $diagnostics['local_offer_tables_checked'][] = $checked;
+    }
+
+    private function addOfferTableMatchSample(array &$diagnostics, string $offerId, string $table, string $offerColumn, object $row, $partId): void
+    {
+        if (count($diagnostics['sample_offer_table_matches']) >= 20) return;
+
+        $part = DB::table('parts')->where('id', $partId)->first();
+        $category = ($part && $part->category_id !== null && Schema::hasTable('part_categories'))
+            ? DB::table('part_categories')->where('id', $part->category_id)->first()
+            : null;
+
+        if ($part) {
+            $diagnostics['offer_table_part_found_count']++;
+            if ($part->category_id === null) $diagnostics['offer_table_part_without_category_count']++;
+        } else {
+            $diagnostics['offer_table_part_missing_count']++;
+        }
+        if ($part && $part->category_id !== null && ! $category) $diagnostics['offer_table_category_missing_count']++;
+
+        $categoryId = $part->category_id ?? null;
+        $diagnostics['sample_offer_table_matches'][] = [
+            'csv_allegro_offer_id' => $offerId,
+            'table' => $table,
+            'offer_id_column' => $offerColumn,
+            'matched_offer_row_id' => $row->id ?? null,
+            'external_offer_id' => $row->external_offer_id ?? ($row->offer_id ?? ($row->allegro_offer_id ?? null)),
+            'marketplace' => $row->marketplace ?? ($row->channel ?? ($row->source ?? null)),
+            'part_id' => $row->part_id ?? null,
+            'product_id' => $row->product_id ?? null,
+            'part_exists' => $part !== null,
+            'matched_part_id' => $part ? (int) $part->id : null,
+            'part_category_id' => $categoryId !== null ? (int) $categoryId : null,
+            'category_exists' => $category !== null,
+            'category_is_public' => $this->categoryIsPublic($category),
+            'category_children_count' => $categoryId !== null ? $this->categoryChildrenCount((int) $categoryId) : null,
+            'category_has_allegro_mapping' => $categoryId !== null ? $this->hasAllegroMapping((int) $categoryId) : null,
+            'accepted' => null,
+            'rejected_reason' => null,
+        ];
+    }
+
+    private function partRejectedReason(?object $part, bool $onlyPublic, bool $leafOnly, bool $onlyMissingAllegro): ?string
+    {
+        if (! $part) return 'part_missing';
+        if (! $part->category_id) return 'part_without_category';
+        $category = Schema::hasTable('part_categories') ? DB::table('part_categories')->where('id', $part->category_id)->first() : null;
+        if (! $category) return 'category_missing';
+        if ($onlyPublic && ! $this->categoryIsPublic($category)) return 'not_public';
+        if ($leafOnly && $this->categoryChildrenCount((int) $part->category_id) > 0) return 'not_leaf';
+        if ($onlyMissingAllegro && $this->hasAllegroMapping((int) $part->category_id)) return 'existing_allegro_mapping';
+        return null;
+    }
+
+    private function categoryIsPublic(?object $category): bool
+    {
+        if (! $category) return false;
+        foreach (['is_visible', 'is_public', 'active'] as $column) {
+            if (property_exists($category, $column)) return (bool) $category->{$column};
+        }
+        return true;
+    }
+
+    private function categoryChildrenCount(int $id): int
+    {
+        return Schema::hasTable('part_categories') && Schema::hasColumn('part_categories', 'parent_id') ? DB::table('part_categories')->where('parent_id', $id)->count() : 0;
+    }
+
+    private function annotateLastMatchAttempt(array &$diagnostics, string $offerId, ?string $reason): void
+    {
+        for ($i = count($diagnostics['product_match_attempts_sample']) - 1; $i >= 0; $i--) {
+            if ((string) ($diagnostics['product_match_attempts_sample'][$i]['allegro_offer_id'] ?? '') === $offerId) {
+                $diagnostics['product_match_attempts_sample'][$i]['rejected_reason'] = $reason;
+                return;
+            }
+        }
+    }
+
+    private function annotateOfferTableSample(array &$diagnostics, string $offerId, bool $accepted, ?string $reason): void
+    {
+        foreach ($diagnostics['sample_offer_table_matches'] as &$sample) {
+            if ((string) ($sample['csv_allegro_offer_id'] ?? '') === $offerId && $sample['accepted'] === null) {
+                $sample['accepted'] = $accepted;
+                $sample['rejected_reason'] = $reason;
+                return;
+            }
+        }
+    }
+
+
+    private function lastAttemptIsOfferTable(array $diagnostics, string $offerId): bool
+    {
+        for ($i = count($diagnostics['product_match_attempts_sample']) - 1; $i >= 0; $i--) {
+            $attempt = $diagnostics['product_match_attempts_sample'][$i];
+            if ((string) ($attempt['allegro_offer_id'] ?? '') === $offerId) {
+                return ! empty($attempt['matched_offer_table']);
+            }
+        }
+        return false;
+    }
+
+    private function incrementOfferTableRejectionCounter(array &$diagnostics, string $reason): void
+    {
+        $map = ['not_public' => 'offer_table_rejected_not_public_count', 'not_leaf' => 'offer_table_rejected_not_leaf_count', 'existing_allegro_mapping' => 'offer_table_rejected_existing_allegro_mapping_count'];
+        if (isset($map[$reason])) $diagnostics[$map[$reason]]++;
     }
 
     private function categoryHasChildren(int $id): bool { return Schema::hasTable('part_categories') && Schema::hasColumn('part_categories', 'parent_id') && DB::table('part_categories')->where('parent_id', $id)->exists(); }
