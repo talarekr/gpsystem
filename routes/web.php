@@ -57,6 +57,7 @@ use App\Http\Controllers\Tools\CheckAllegroOAuthReadinessController;
 use App\Http\Controllers\Tools\ExportAllegroOfferIdCoverageController;
 use App\Http\Controllers\Tools\CheckAllegroOfferIdCoverageController;
 use App\Http\Controllers\Tools\CheckAllegroLocalIdSourcesController;
+use App\Http\Controllers\Tools\SuggestAllegroCategoryMappingsFromLegacyCsvController;
 use App\Http\Controllers\Tools\CheckAllegroProductMappingCandidatesController;
 use App\Http\Controllers\Tools\ExportAllegroProductMappingCandidatesController;
 use App\Http\Controllers\Tools\CheckAdminPartsTableUiController;
@@ -255,6 +256,7 @@ Route::get('/tools/check-allegro-api-settings', [MarketplaceApiSettingsDiagnosti
 Route::get('/tools/check-allegro-oauth-readiness', CheckAllegroOAuthReadinessController::class)->name('tools.check-allegro-oauth-readiness');
 Route::get('/tools/check-allegro-product-mapping-candidates', CheckAllegroProductMappingCandidatesController::class)->name('tools.check-allegro-product-mapping-candidates');
 Route::get('/tools/export-allegro-product-mapping-candidates', ExportAllegroProductMappingCandidatesController::class)->name('tools.export-allegro-product-mapping-candidates');
+Route::get('/tools/suggest-allegro-category-mappings-from-legacy-csv', SuggestAllegroCategoryMappingsFromLegacyCsvController::class)->name('tools.suggest-allegro-category-mappings-from-legacy-csv');
 Route::get('/tools/check-allegro-local-id-sources', CheckAllegroLocalIdSourcesController::class)->name('tools.check-allegro-local-id-sources');
 Route::get('/tools/check-allegro-offer-id-coverage', CheckAllegroOfferIdCoverageController::class)->name('tools.check-allegro-offer-id-coverage');
 Route::get('/tools/refresh-allegro-active-offer-links-dry-run', RefreshAllegroActiveOfferLinksDryRunController::class)->name('tools.refresh-allegro-active-offer-links-dry-run');
