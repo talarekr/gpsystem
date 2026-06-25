@@ -422,7 +422,9 @@ class PartResource extends Resource
 
                 Log::debug('Admin part category picker submit received selected category state.', [
                     'part_id' => $record?->getKey(),
+                    'action_state_path' => 'selected_category_id',
                     'selected_category_id' => $categoryId,
+                    'action_data' => $data,
                 ]);
 
                 if (blank($categoryId)) {
