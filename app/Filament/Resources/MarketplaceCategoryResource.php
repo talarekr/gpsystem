@@ -8,6 +8,8 @@ use App\Models\PartCategory;
 use App\Services\Marketplace\LocalCategoryDeleteSafetyService;
 use Filament\Forms\Components\Checkbox;
 use Filament\Forms;
+use Filament\Forms\Components\Actions;
+use Filament\Forms\Components\Actions\Action;
 use Filament\Forms\Components\Grid;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Section;
@@ -22,9 +24,12 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\HtmlString;
+use Illuminate\Validation\ValidationException;
 
 class MarketplaceCategoryResource extends Resource
 {
@@ -43,11 +48,25 @@ class MarketplaceCategoryResource extends Resource
             Section::make('Kategoria lokalna')->schema([
                 Grid::make(3)->schema([
                     Placeholder::make('local_category_id')->label('local_category_id')->content(fn (PartCategory $record): int => $record->id),
-                    Placeholder::make('name')->label('name')->content(fn (PartCategory $record): ?string => $record->name),
+                    Placeholder::make('name')->label('Obecny name')->content(fn (PartCategory $record): ?string => $record->name),
+                    TextInput::make('local_category_name')
+                        ->label('Local category name')
+                        ->helperText('Zmienia tylko lokalną nazwę kategorii w GP System. Nie zmienia marketplace ani produktów.')
+                        ->default(fn (PartCategory $record): ?string => $record->name)
+                        ->maxLength(255)
+                        ->required()
+                        ->dehydrated(false),
+                    Actions::make([
+                        Action::make('saveLocalCategoryName')
+                            ->label('Zapisz nazwę lokalną')
+                            ->color('primary')
+                            ->action(fn (PartCategory $record, Forms\Get $get) => static::saveLocalCategoryName($record, $get('local_category_name'))),
+                    ]),
                     Placeholder::make('slug')->label('slug')->content(fn (PartCategory $record): ?string => $record->slug),
-                    Placeholder::make('path')->label('path')->content(fn (PartCategory $record): ?string => $record->category_path ?: $record->full_slug_path),
+                    Placeholder::make('path')->label('Aktualny path')->content(fn (PartCategory $record): ?string => $record->category_path ?: $record->full_slug_path),
                     Placeholder::make('old_category_id')->label('old_category_id / external_id')->content(fn (PartCategory $record): ?string => $record->external_id),
-                    Placeholder::make('parts_count')->label('parts_count')->content(fn (PartCategory $record): int => $record->parts()->count()),
+                    Placeholder::make('parts_count')->label('products_count')->content(fn (PartCategory $record): int => $record->parts()->count()),
+                    Placeholder::make('children_count')->label('children_count')->content(fn (PartCategory $record): int => $record->children()->count()),
                     Placeholder::make('legacy_source')->label('legacy source')->content(fn (PartCategory $record): ?string => $record->source_system),
                 ]),
             ]),
@@ -57,6 +76,84 @@ class MarketplaceCategoryResource extends Resource
             static::mappingSection('eBay FR', 'ebay_fr', true),
             static::mappingSection('eBay generic', 'ebay', true),
         ]);
+    }
+
+
+    public static function saveLocalCategoryName(PartCategory $record, mixed $value): void
+    {
+        $newName = trim((string) ($value ?? ''));
+
+        if ($newName === '') {
+            throw ValidationException::withMessages([
+                'local_category_name' => 'Nazwa kategorii jest wymagana.',
+            ]);
+        }
+
+        if (mb_strlen($newName) > 255) {
+            throw ValidationException::withMessages([
+                'local_category_name' => 'Nazwa kategorii może mieć maksymalnie 255 znaków.',
+            ]);
+        }
+
+        $exists = PartCategory::query()
+            ->where('name', $newName)
+            ->whereKeyNot($record->getKey())
+            ->exists();
+
+        if ($exists) {
+            throw ValidationException::withMessages([
+                'local_category_name' => 'Taka nazwa kategorii już istnieje. Zmień nazwę inaczej albo użyj public display helpera.',
+            ]);
+        }
+
+        $oldName = (string) $record->name;
+        $productsCount = $record->parts()->count();
+        $childrenCount = $record->children()->count();
+
+        if ($oldName !== $newName) {
+            $record->forceFill(['name' => $newName])->save();
+        }
+
+        $cacheCleared = static::clearLocalCategoryNameCaches();
+
+        Log::info('marketplace_categories.local_category_name_updated', [
+            'user_id' => Auth::id(),
+            'marketplace_category_id' => $record->id,
+            'local_category_id' => $record->id,
+            'old_name' => $oldName,
+            'new_name' => $newName,
+            'products_count' => $productsCount,
+            'children_count' => $childrenCount,
+            'cache_keys_cleared' => $cacheCleared,
+            'local_update' => true,
+            'products_changed' => false,
+            'children_changed' => false,
+            'mappings_changed' => false,
+            'ovoko_write' => false,
+            'allegro_write' => false,
+            'ebay_write' => false,
+            'marketplace_writes' => false,
+            'offers_changed' => false,
+        ]);
+
+        Notification::make()
+            ->title('Lokalna nazwa kategorii została zaktualizowana.')
+            ->body('Wyczyszczono cache: '.implode(', ', $cacheCleared))
+            ->success()
+            ->send();
+    }
+
+    private static function clearLocalCategoryNameCaches(): array
+    {
+        $keys = ['storefront.category_tree.v2', 'storefront.category_tree.v1', 'marketplace_mapper.local_tree'];
+
+        foreach ($keys as $key) {
+            Cache::forget($key);
+        }
+
+        Artisan::call('view:clear');
+
+        return array_merge($keys, ['view:clear']);
     }
 
     public static function table(Table $table): Table
