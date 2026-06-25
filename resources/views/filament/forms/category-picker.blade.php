@@ -19,6 +19,41 @@
         hiddenInput() {
             return this.$root.closest('form')?.querySelector('input[name$=\'[selected_category_id]\']') ?? null;
         },
+        livewireStatePath() {
+            const input = this.hiddenInput();
+
+            if (! input?.name) {
+                return 'selected_category_id';
+            }
+
+            return input.name
+                .replace(/\]/g, '')
+                .replace(/\[/g, '.')
+                .replace(/^data\./, 'data.');
+        },
+        syncSelectedCategory(id, eventName) {
+            const input = this.hiddenInput();
+            const statePath = this.livewireStatePath();
+
+            if (input) {
+                input.value = id;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+
+            if (this.$wire?.set) {
+                this.$wire.set(statePath, id);
+            }
+
+            console.debug('gps-category-picker:selected', {
+                alpine_selected_id: this.selectedId,
+                hidden_input_selected_category_id: input?.value ?? null,
+                livewire_state_path: statePath,
+                livewire_set_value: id,
+                selected_category_name: this.selectedName,
+                event: eventName,
+            });
+        },
         children(parentId = null) {
             return this.categories.filter((category) => category.parent_id === parentId);
         },
@@ -52,19 +87,7 @@
             this.selectedName = this.nameFor(id);
             this.lastEventName = eventName;
 
-            const input = this.hiddenInput();
-
-            if (input) {
-                input.value = id;
-                input.dispatchEvent(new Event('input', { bubbles: true }));
-                input.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-
-            console.debug('gps-category-picker:selected', {
-                selected_category_id: this.selectedId,
-                selected_category_name: this.selectedName,
-                event: this.lastEventName,
-            });
+            this.syncSelectedCategory(id, eventName);
         },
         back() {
             this.stack.pop();
