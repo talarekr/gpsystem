@@ -22,7 +22,7 @@
                         type="button"
                         wire:click="deletePartImage({{ $image->getKey() }})"
                         wire:confirm="Usunąć to zdjęcie części?"
-                        class="absolute right-1 top-1 inline-flex h-7 w-7 items-center justify-center rounded-full bg-danger-600 text-sm font-bold leading-none text-white shadow transition hover:bg-danger-500 focus:outline-none focus:ring-2 focus:ring-danger-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900"
+                        class="absolute right-1 top-1 z-10 inline-flex h-7 w-7 items-center justify-center rounded-full bg-primary-600 text-sm font-bold leading-none text-white shadow-sm ring-1 ring-white/80 transition hover:bg-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-2 focus:ring-offset-white dark:bg-primary-500 dark:hover:bg-primary-400 dark:focus:ring-primary-500 dark:focus:ring-offset-gray-900"
                         aria-label="Usuń zdjęcie części"
                         title="Usuń zdjęcie części"
                     >
