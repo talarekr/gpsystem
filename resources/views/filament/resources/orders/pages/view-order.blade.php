@@ -170,9 +170,9 @@
         .gps-order-status-changed-at { color: #64748b; font-size: 11px; line-height: 1.35; margin-top: 7px; }
         .gps-order-detail-section-title { color: #0f172a; font-size: 17px; font-weight: 800; margin: 0 0 14px; }
         .gps-order-detail-products { display: grid; gap: 12px; }
-        .gps-order-detail-product { display: flex; align-items: center; gap: 12px; min-width: 0; }
+        .gps-order-detail-product { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
         .gps-order-detail-thumb, .gps-order-detail-placeholder { width: 54px; height: 54px; border-radius: 12px; object-fit: cover; background: #f1f5f9; display: grid; place-items: center; color: #94a3b8; overflow: hidden; flex: 0 0 54px; }
-        .gps-order-detail-product-info { min-width: 0; }
+        .gps-order-detail-product-info { display: grid; gap: 2px; min-width: 0; }
         .gps-order-detail-item-name { color: #0f172a; font-size: 13px; font-weight: 400; line-height: 1.45; overflow-wrap: anywhere; }
         .gps-order-detail-link { color: #0f172a; text-decoration: underline; text-decoration-color: rgba(15, 23, 42, .28); text-underline-offset: 3px; transition: color .15s ease, text-decoration-color .15s ease; }
         .gps-order-detail-link:hover { color: #1d4ed8; text-decoration-color: currentColor; }
