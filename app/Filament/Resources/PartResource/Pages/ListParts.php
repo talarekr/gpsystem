@@ -177,9 +177,19 @@ class ListParts extends Page
         return Car::query()->orderBy('make')->orderBy('model')->limit(300)->get()->mapWithKeys(fn (Car $car): array => [$car->id => PartResource::carLabel($car)])->all();
     }
 
+    protected function basePartsQuery(): Builder
+    {
+        return PartResource::adminAllPartsQuery();
+    }
+
+    public function getListContextBadge(): ?string
+    {
+        return null;
+    }
+
     protected function getPartsQuery(): Builder
     {
-        $query = PartResource::adminAllPartsQuery()->with([
+        $query = $this->basePartsQuery()->with([
             'images:id,part_id,path,sort_order,is_primary',
             'marketplaceListings:id,part_id,marketplace,external_offer_id,price,currency,status,sync_status,match_status,last_error,url,last_api_status,last_seen_at,not_seen_in_active_api_at',
             'storageLocation:id,name,description',
