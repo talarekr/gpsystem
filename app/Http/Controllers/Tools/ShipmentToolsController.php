@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Tools;
 use App\Models\Order;
 use App\Models\Shipment;
 use App\Services\Shipments\ShipmentLabelService;
+use App\Support\AllegroShipmentPreviewBuilder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 
@@ -35,6 +36,15 @@ class ShipmentToolsController
         $result = $confirm ? $service->confirm($carrier, $order, $shipment) : $service->preview($carrier, $order, $shipment);
 
         return response()->json($result, $confirm && (($result['validation']['missing'] ?? []) !== []) ? 422 : 200, [], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+
+    public function allegroPreview(Request $request, AllegroShipmentPreviewBuilder $builder)
+    {
+        $orderId = $request->integer('order_id') ?: $request->integer('order');
+        $order = $orderId ? Order::query()->with('items')->find($orderId) : Order::query()->where('marketplace', 'allegro')->latest('id')->first();
+        $result = $builder->build($order);
+
+        return response()->json($result, ($result['error'] ?? null) ? 404 : 200, [], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     }
 
     public function download(Shipment $shipment)
