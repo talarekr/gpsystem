@@ -2139,3 +2139,50 @@ button.gps-category-picker__arrow:hover {
     cursor: not-allowed;
     opacity: 0.55;
 }
+
+/* Orders list density aligned with the compact admin parts table. */
+.fi-ta-table:has(.gps-order-col) {
+    font-size: 13px;
+}
+
+.fi-ta-table:has(.gps-order-col) thead {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.fi-ta-table:has(.gps-order-col) thead th {
+    color: #475569;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.fi-ta-table:has(.gps-order-col) tbody tr {
+    border-color: #eef2f7;
+}
+
+.fi-ta-table:has(.gps-order-col) tbody tr:hover {
+    background: rgba(148, 163, 184, .10);
+}
+
+.fi-ta-table:has(.gps-order-col) th.gps-order-col,
+.fi-ta-table:has(.gps-order-col) td.gps-order-col {
+    padding: 10px 16px !important;
+    vertical-align: middle;
+}
+
+.fi-ta-table:has(.gps-order-col) td.gps-order-col,
+.fi-ta-table:has(.gps-order-col) td.gps-order-col * {
+    font-size: 13px;
+    line-height: 1.3;
+}
+
+.fi-ta-table:has(.gps-order-col) td.gps-order-col * {
+    font-weight: 400;
+}
+
+.fi-ta-table:has(.gps-order-col) td.gps-order-col-number,
+.fi-ta-table:has(.gps-order-col) td.gps-order-col-number * {
+    color: #334155;
+    font-weight: 700;
+}
