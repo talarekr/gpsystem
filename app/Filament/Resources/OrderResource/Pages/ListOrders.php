@@ -4,6 +4,8 @@ namespace App\Filament\Resources\OrderResource\Pages;
 
 use App\Filament\Resources\OrderResource;
 use App\Models\Order;
+use App\Services\Admin\LocalOrderStatusUpdater;
+use Filament\Notifications\Notification;
 use Filament\Resources\Pages\Page;
 use Filament\Support\Enums\MaxWidth;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -86,6 +88,27 @@ class ListOrders extends Page
             ->orderBy('source_batch')
             ->pluck('source_batch', 'source_batch')
             ->all();
+    }
+
+
+    public function updateOrderStatus(int $orderId, string $status, LocalOrderStatusUpdater $updater): void
+    {
+        $order = Order::query()->findOrFail($orderId);
+
+        try {
+            $updater->update($order, $status);
+
+            Notification::make()
+                ->title('Status zamówienia został zapisany lokalnie.')
+                ->success()
+                ->send();
+        } catch (\InvalidArgumentException $exception) {
+            Notification::make()
+                ->title('Nie zapisano statusu')
+                ->body($exception->getMessage())
+                ->danger()
+                ->send();
+        }
     }
 
     public function getOrdersProperty(): LengthAwarePaginator

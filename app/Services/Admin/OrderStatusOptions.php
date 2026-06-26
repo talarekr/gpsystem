@@ -7,9 +7,9 @@ use App\Models\Order;
 class OrderStatusOptions
 {
     /**
-     * UI-only status definitions for /admin/orders cards.
-     * Persisting and marketplace synchronization should be implemented later
-     * with a dedicated mapper per marketplace/source.
+     * Local admin status definitions for /admin/orders list and detail cards.
+     * These options are persisted only to the local orders.status column and
+     * are not synchronized back to marketplaces.
      */
     private const OPTIONS = [
         'allegro' => [
