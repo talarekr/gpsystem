@@ -15,7 +15,6 @@
     $selectedStatus = OrderStatusOptions::selectedValueForOrder($order);
     $total = OrderResource::formatOrderTotal($order);
     $viewUrl = OrderResource::getUrl('view', ['record' => $order]);
-    $editUrl = OrderResource::getUrl('edit', ['record' => $order]);
 
     $items = $order->items;
     $firstItem = $items->first();
@@ -310,6 +309,11 @@
             white-space: nowrap;
         }
 
+        .gps-admin-order-card__payment-paid {
+            color: #16a34a;
+            font-weight: 600;
+        }
+
         .gps-admin-order-card__total {
             color: #0f172a;
             font-size: 15px;
@@ -407,7 +411,7 @@
             <div class="gps-admin-order-card__section gps-admin-order-col gps-admin-order-col-shipping">
                 @if($shippingPaymentLines !== [])
                     @foreach($shippingPaymentLines as $index => $line)
-                        <div class="{{ $index === 0 ? 'gps-admin-order-card__value' : 'gps-admin-order-card__muted' }}">{{ $line }}</div>
+                        <div class="{{ $index === 0 ? 'gps-admin-order-card__value' : 'gps-admin-order-card__muted' }} {{ $line === 'Zapłacono' ? 'gps-admin-order-card__payment-paid' : '' }}">{{ $line }}</div>
                     @endforeach
                 @elseif($shipment)
                     <div class="gps-admin-order-card__value">{{ $carrier ?: '—' }}</div>
@@ -422,7 +426,6 @@
                 @endif
                 <div class="gps-admin-order-card__actions">
                     <a class="gps-admin-order-card__action" href="{{ $viewUrl }}">Szczegóły</a>
-                    <a class="gps-admin-order-card__action" href="{{ $editUrl }}">Zmień status</a>
                 </div>
             </div>
         </div>
