@@ -34,6 +34,26 @@
     $paymentProvider = trim((string) (data_get($order->raw_payload, 'payment.provider') ?: data_get($order->raw_payload, 'payment_provider')));
     $isPaid = Str::contains(Str::lower($paymentStatus), ['zapłac', 'paid', 'completed', 'finished', 'settled']);
     $statusChangedAt = $order->status_changed_at ? $order->status_changed_at->format('Y-m-d H:i') : null;
+    $formatMoney = fn ($amount, ?string $moneyCurrency = null): string => $amount !== null
+        ? number_format((float) $amount, 2, ',', ' ').' '.($moneyCurrency ?: $currency)
+        : '—';
+    $productLines = $order->items->map(fn ($item): string => $formatMoney($item->line_total, $item->currency ?: $currency));
+    $shippingAmountCandidates = [
+        data_get($order->raw_payload, 'summary.delivery.amount'),
+        data_get($order->raw_payload, 'summary.delivery.value'),
+        data_get($order->raw_payload, 'pricingSummary.deliveryCost.amount'),
+        data_get($order->raw_payload, 'pricingSummary.deliveryCost.value'),
+        data_get($order->raw_payload, 'deliveryCost.amount'),
+        data_get($order->raw_payload, 'deliveryCost.value'),
+        data_get($order->raw_payload, 'shipping_price.seller.amount'),
+        data_get($order->raw_payload, 'shipping_price.buyer.amount'),
+        data_get($order->raw_payload, 'delivery_amount'),
+    ];
+    $rawShippingAmount = collect($shippingAmountCandidates)->first(fn ($value) => $value !== null && $value !== '' && is_numeric($value));
+    $hasLocalShippingTotal = $order->shipping_total !== null && (float) $order->shipping_total > 0;
+    $shippingTotal = $rawShippingAmount !== null
+        ? $formatMoney($rawShippingAmount)
+        : ($hasLocalShippingTotal ? $formatMoney($order->shipping_total) : '—');
     $technicalItems = array_filter([
         'Status marketplace' => $order->marketplace_status,
         'TEST IMPORT' => $order->test_import ? 'Tak' : null,
@@ -77,20 +97,19 @@
         .gps-order-status-select::-ms-expand { display: none; }
         .gps-order-status-changed-at { color: #64748b; font-size: 11px; line-height: 1.35; margin-top: 7px; }
         .gps-order-detail-section-title { color: #0f172a; font-size: 17px; font-weight: 800; margin: 0 0 14px; }
-        .gps-order-detail-items { display: grid; gap: 12px; }
-        .gps-order-detail-item { display: grid; grid-template-columns: 74px minmax(0, 1fr) auto; gap: 16px; align-items: center; border: 1px solid #e2e8f0; border-radius: 18px; padding: 14px; background: #fff; }
-        .gps-order-detail-thumb, .gps-order-detail-placeholder { width: 74px; height: 74px; border-radius: 14px; object-fit: cover; background: #f1f5f9; display: grid; place-items: center; color: #94a3b8; overflow: hidden; }
-        .gps-order-detail-item-name { color: #0f172a; font-size: 15px; font-weight: 800; }
-        .gps-order-detail-tags { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 8px; }
-        .gps-order-detail-tag { background: #f1f5f9; border-radius: 999px; color: #475569; font-size: 12px; font-weight: 700; padding: 5px 9px; }
-        .gps-order-detail-price { text-align: right; color: #0f172a; font-size: 15px; font-weight: 800; white-space: nowrap; }
+        .gps-order-detail-products { display: grid; gap: 12px; }
+        .gps-order-detail-product { display: flex; align-items: center; gap: 12px; min-width: 0; }
+        .gps-order-detail-thumb, .gps-order-detail-placeholder { width: 54px; height: 54px; border-radius: 12px; object-fit: cover; background: #f1f5f9; display: grid; place-items: center; color: #94a3b8; overflow: hidden; flex: 0 0 54px; }
+        .gps-order-detail-product-info { min-width: 0; }
+        .gps-order-detail-item-name { color: #0f172a; font-size: 13px; font-weight: 400; line-height: 1.45; overflow-wrap: anywhere; }
+        .gps-order-detail-product-price-list { display: grid; gap: 6px; }
         .gps-order-detail-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
         .gps-order-paid { color: #15803d; }
         .gps-order-tech summary { cursor: pointer; color: #334155; font-weight: 800; }
         .gps-order-tech dl { display: grid; grid-template-columns: max-content minmax(0,1fr); gap: 8px 16px; margin-top: 14px; }
         .gps-order-tech dt { color: #64748b; font-size: 12px; font-weight: 700; } .gps-order-tech dd { color: #0f172a; font-size: 13px; margin: 0; overflow-wrap: anywhere; }
         @media (max-width: 1000px) { .gps-order-detail-summary, .gps-order-detail-two { grid-template-columns: 1fr; } .gps-order-detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-        @media (max-width: 700px) { .gps-order-detail-grid, .gps-order-detail-item { grid-template-columns: 1fr; } .gps-order-detail-price { text-align: left; } }
+        @media (max-width: 700px) { .gps-order-detail-grid { grid-template-columns: 1fr; } }
     </style>
 
     <div class="gps-order-detail">
@@ -123,40 +142,55 @@
             </div>
         </section>
 
-        <section class="gps-order-detail-card">
-            <h2 class="gps-order-detail-section-title">Sprzedana część</h2>
-            <div class="gps-order-detail-items">
-                @forelse ($order->items as $item)
-                    @php
-                        $thumb = \App\Support\OrderItemThumbnailDiagnostics::resolve($order, $item);
-                        $thumbPart = $thumb['thumbnail_part'] ?? null;
-                        $partId = $thumb['resolved_part_id'] ?? $item->part_id;
-                        $lineTotal = $item->line_total !== null ? number_format((float) $item->line_total, 2, ',', ' ').' '.($item->currency ?: $currency) : '—';
-                        $unitPrice = $item->unit_price !== null ? number_format((float) $item->unit_price, 2, ',', ' ').' '.($item->currency ?: $currency) : null;
-                    @endphp
-                    <article class="gps-order-detail-item">
-                        @if ($thumbPart instanceof Part && $thumb['thumbnail_source'] === 'admin_parts_thumbnail')
-                            @include('filament.resources.parts.table-image', ['part' => $thumbPart])
-                        @elseif ($thumb['thumbnail_url'])
-                            <img class="gps-order-detail-thumb" src="{{ $thumb['thumbnail_url'] }}" alt="{{ $thumb['display_name'] }}">
-                        @else
-                            <div class="gps-order-detail-placeholder"><x-heroicon-o-photo class="h-7 w-7" /></div>
-                        @endif
-                        <div>
-                            <div class="gps-order-detail-item-name">{{ $thumb['display_name'] }}</div>
-                            <div class="gps-order-detail-tags">
-                                <span class="gps-order-detail-tag">Magazyn: {{ $thumb['storage_location'] }}</span>
-                                @if ($partId)<span class="gps-order-detail-tag">ID części: #{{ $partId }}</span>@endif
-                                @if ($item->sku)<span class="gps-order-detail-tag">SKU: {{ $item->sku }}</span>@endif
-                                @if ($item->part_number)<span class="gps-order-detail-tag">Numer: {{ $item->part_number }}</span>@endif
-                                <span class="gps-order-detail-tag">Ilość: {{ $item->quantity ?: 1 }}</span>
-                            </div>
+        <section>
+            <h2 class="gps-order-detail-section-title">Produkt</h2>
+            <div class="gps-order-detail-card gps-order-detail-summary">
+                <div class="gps-order-detail-grid">
+                    <div class="gps-order-detail-fact">
+                        <div class="gps-order-detail-label">Produkt</div>
+                        <div class="gps-order-detail-products">
+                            @forelse ($order->items as $item)
+                                @php
+                                    $thumb = \App\Support\OrderItemThumbnailDiagnostics::resolve($order, $item);
+                                    $thumbPart = $thumb['thumbnail_part'] ?? null;
+                                @endphp
+                                <div class="gps-order-detail-product">
+                                    @if ($thumbPart instanceof Part && $thumb['thumbnail_source'] === 'admin_parts_thumbnail')
+                                        @include('filament.resources.parts.table-image', ['part' => $thumbPart])
+                                    @elseif ($thumb['thumbnail_url'])
+                                        <img class="gps-order-detail-thumb" src="{{ $thumb['thumbnail_url'] }}" alt="{{ $thumb['display_name'] }}">
+                                    @else
+                                        <div class="gps-order-detail-placeholder"><x-heroicon-o-photo class="h-7 w-7" /></div>
+                                    @endif
+                                    <div class="gps-order-detail-product-info">
+                                        <div class="gps-order-detail-item-name">{{ $thumb['display_name'] }}</div>
+                                        <div class="gps-order-detail-muted">Magazyn: {{ $thumb['storage_location'] }}</div>
+                                    </div>
+                                </div>
+                            @empty
+                                <div class="gps-order-detail-muted">Brak pozycji zamówienia.</div>
+                            @endforelse
                         </div>
-                        <div class="gps-order-detail-price">{{ $lineTotal }}@if ($unitPrice)<div class="gps-order-detail-muted">{{ $unitPrice }} / szt.</div>@endif</div>
-                    </article>
-                @empty
-                    <div class="gps-order-detail-muted">Brak pozycji zamówienia.</div>
-                @endforelse
+                    </div>
+                    <div class="gps-order-detail-fact">
+                        <div class="gps-order-detail-label">Cena za produkt</div>
+                        <div class="gps-order-detail-value gps-order-detail-product-price-list">
+                            @forelse ($productLines as $line)
+                                <div>{{ $line }}</div>
+                            @empty
+                                <div>—</div>
+                            @endforelse
+                        </div>
+                    </div>
+                    <div class="gps-order-detail-fact">
+                        <div class="gps-order-detail-label">Koszt wysyłki</div>
+                        <div class="gps-order-detail-value">{{ $shippingTotal }}</div>
+                    </div>
+                    <div class="gps-order-detail-fact">
+                        <div class="gps-order-detail-label">Suma z kosztami wysyłki</div>
+                        <div class="gps-order-detail-value">{{ $total }}</div>
+                    </div>
+                </div>
             </div>
         </section>
 
