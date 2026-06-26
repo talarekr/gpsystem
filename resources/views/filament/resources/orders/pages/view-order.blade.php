@@ -16,7 +16,7 @@
     $total = OrderResource::formatOrderTotal($order);
     $currency = $order->currency ?: 'PLN';
     $customerDisplay = \App\Support\OrderCustomerDisplay::forOrder($order);
-    $shippingPaymentLines = app(\App\Support\OrderShippingPaymentDisplayResolver::class)->resolve($order);
+    $shippingPaymentLines = app(\App\Support\OrderShippingPaymentDisplayResolver::class)->resolve($order, includeAmount: true);
     $paymentLabel = $shippingPaymentLines['payment'] ?? null;
     $deliveryLabel = $shippingPaymentLines['delivery'] ?? $order->delivery_method;
     $shipment = $order->shipments->first();
@@ -29,10 +29,11 @@
         trim(implode(' ', array_filter([trim((string) $order->postal_code), trim((string) $order->city)]))),
         trim((string) $order->country),
     ], fn ($value) => $value !== ''));
-    $paymentStatus = trim((string) ($paymentLabel ?: $order->payment_status));
+    $paymentStatus = trim((string) $paymentLabel);
     $paymentType = trim((string) (data_get($order->raw_payload, 'payment.type') ?: data_get($order->raw_payload, 'payment_type') ?: data_get($order->raw_payload, 'payment_method')));
     $paymentProvider = trim((string) (data_get($order->raw_payload, 'payment.provider') ?: data_get($order->raw_payload, 'payment_provider')));
     $isPaid = Str::contains(Str::lower($paymentStatus), ['zapłac', 'paid', 'completed', 'finished', 'settled']);
+    $statusChangedAt = $order->status_changed_at ? $order->status_changed_at->format('Y-m-d H:i') : null;
     $technicalItems = array_filter([
         'Status marketplace' => $order->marketplace_status,
         'TEST IMPORT' => $order->test_import ? 'Tak' : null,
@@ -74,6 +75,7 @@
             text-transform: uppercase;
         }
         .gps-order-status-select::-ms-expand { display: none; }
+        .gps-order-status-changed-at { color: #64748b; font-size: 11px; line-height: 1.35; margin-top: 7px; }
         .gps-order-detail-section-title { color: #0f172a; font-size: 17px; font-weight: 800; margin: 0 0 14px; }
         .gps-order-detail-items { display: grid; gap: 12px; }
         .gps-order-detail-item { display: grid; grid-template-columns: 74px minmax(0, 1fr) auto; gap: 16px; align-items: center; border: 1px solid #e2e8f0; border-radius: 18px; padding: 14px; background: #fff; }
@@ -101,10 +103,13 @@
                             <option value="{{ $value }}" @selected($selectedStatus === $value)>{{ $label }}</option>
                         @endforeach
                     </select>
+                    @if ($statusChangedAt)
+                        <div class="gps-order-status-changed-at">Ostatnia zmiana: {{ $statusChangedAt }}</div>
+                    @endif
                 </div>
                 <div class="gps-order-detail-fact">
                     <div class="gps-order-detail-label">Status płatności</div>
-                    <div class="gps-order-detail-value {{ $paymentStatus === 'Zapłacono' ? 'gps-order-paid' : '' }}">{{ $paymentStatus !== '' ? $paymentStatus : '—' }}</div>
+                    <div class="gps-order-detail-value {{ $isPaid ? 'gps-order-paid' : '' }}">{{ $paymentStatus !== '' ? $paymentStatus : '—' }}</div>
                 </div>
                 <div class="gps-order-detail-fact">
                     <div class="gps-order-detail-label">Numer zamówienia</div>

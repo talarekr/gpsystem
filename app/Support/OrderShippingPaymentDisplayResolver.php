@@ -7,22 +7,22 @@ use Illuminate\Support\Str;
 
 class OrderShippingPaymentDisplayResolver
 {
-    public function resolve(Order $order): array
+    public function resolve(Order $order, bool $includeAmount = false): array
     {
         $marketplace = Str::lower(trim((string) $order->marketplace));
 
         return match ($marketplace) {
-            'allegro' => $this->resolveAllegro($order),
+            'allegro' => $this->resolveAllegro($order, $includeAmount),
             'ebay', 'ebay_de', 'ebay_fr' => $this->resolveEbay($order),
             'ovoko' => $this->resolveOvoko($order),
             default => $this->resolveLocal($order),
         };
     }
 
-    private function resolveAllegro(Order $order): array
+    private function resolveAllegro(Order $order, bool $includeAmount): array
     {
         return $this->compactLines(
-            $this->allegroPaymentLabel($order),
+            $this->allegroPaymentLabel($order, $includeAmount),
             $this->firstFilled([
                 data_get($order->raw_payload, 'delivery.method.name'),
                 data_get($order->raw_payload, 'delivery.method.id'),
@@ -62,17 +62,19 @@ class OrderShippingPaymentDisplayResolver
         return $this->compactLines(null, $order->delivery_method);
     }
 
-    private function allegroPaymentLabel(Order $order): ?string
+    private function allegroPaymentLabel(Order $order, bool $includeAmount): ?string
     {
         $type = Str::upper(trim((string) data_get($order->raw_payload, 'payment.type')));
         if ($type === 'CASH_ON_DELIVERY') {
             $amount = $this->cashOnDeliveryAmount($order);
 
-            return $amount !== null ? 'Pobranie · '.$amount : 'Pobranie';
+            return $includeAmount && $amount !== null ? 'Pobranie · '.$amount : 'Pobranie';
         }
 
         if ($this->hasConfirmedOnlinePayment($order)) {
-            return 'Zapłacono';
+            $amount = $includeAmount ? $this->paidAmount($order) : null;
+
+            return $amount !== null ? 'Zapłacono · '.$amount : 'Zapłacono';
         }
 
         return $type !== '' || $this->firstFilled([$order->payment_status, data_get($order->raw_payload, 'payment')]) !== null ? 'Oczekuje' : null;
@@ -154,6 +156,38 @@ class OrderShippingPaymentDisplayResolver
             data_get($order->raw_payload, 'payment.amount.currency'),
             data_get($order->raw_payload, 'summary.totalToPay.currency'),
             data_get($order->raw_payload, 'totalToPay.currency'),
+            $order->currency,
+        ]) ?? 'PLN';
+
+        return number_format($amount, 2, ',', ' ').' '.Str::upper($currency);
+    }
+
+    private function paidAmount(Order $order): ?string
+    {
+        $amount = $this->firstNumeric([
+            data_get($order->raw_payload, 'payment.paidAmount.amount'),
+            data_get($order->raw_payload, 'payment.paidAmount'),
+            data_get($order->raw_payload, 'summary.paidAmount.amount'),
+            data_get($order->raw_payload, 'summary.paidAmount'),
+            data_get($order->raw_payload, 'summary.totalToPay.amount'),
+            data_get($order->raw_payload, 'summary.totalToPay'),
+            data_get($order->raw_payload, 'totalToPay.amount'),
+            data_get($order->raw_payload, 'totalToPay'),
+            data_get($order->raw_payload, 'payment.amount.amount'),
+            data_get($order->raw_payload, 'payment.amount'),
+            $order->total,
+        ]);
+
+        if ($amount === null) {
+            return null;
+        }
+
+        $currency = $this->firstFilled([
+            data_get($order->raw_payload, 'payment.paidAmount.currency'),
+            data_get($order->raw_payload, 'summary.paidAmount.currency'),
+            data_get($order->raw_payload, 'summary.totalToPay.currency'),
+            data_get($order->raw_payload, 'totalToPay.currency'),
+            data_get($order->raw_payload, 'payment.amount.currency'),
             $order->currency,
         ]) ?? 'PLN';
 

@@ -3,6 +3,7 @@
 namespace App\Services\Admin;
 
 use App\Models\Order;
+use Illuminate\Support\Facades\Schema;
 use InvalidArgumentException;
 
 class LocalOrderStatusUpdater
@@ -16,7 +17,13 @@ class LocalOrderStatusUpdater
             throw new InvalidArgumentException('Wybrany status nie jest dostępny dla tego kanału sprzedaży.');
         }
 
-        $order->forceFill(['status' => $status])->save();
+        $updates = ['status' => $status];
+
+        if ($order->status !== $status && Schema::hasColumn($order->getTable(), 'status_changed_at')) {
+            $updates['status_changed_at'] = now();
+        }
+
+        $order->forceFill($updates)->save();
 
         return $order->refresh();
     }
