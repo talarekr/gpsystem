@@ -232,6 +232,77 @@ class ShipmentToolsControllerTest extends TestCase
             ->assertJsonMissingPath('payload_preview');
     }
 
+
+    public function test_allegro_shipment_preview_applies_inpost_size_code_dimensions_label_limit_and_weight_warning(): void
+    {
+        config([
+            'services.shipments.sender.name' => 'GPS Sender',
+            'services.shipments.sender.address' => 'Nadawcza 1',
+            'services.shipments.sender.postal_code' => '08-460',
+            'services.shipments.sender.city' => 'Sobolew',
+            'services.shipments.sender.country' => 'PL',
+            'services.shipments.sender.phone' => '+48123123123',
+            'services.shipments.sender.email' => 'sender@example.test',
+        ]);
+
+        $order = Order::query()->create($this->orderAttributes([
+            'id' => 53,
+            'marketplace' => 'allegro',
+            'marketplace_order_id' => 'checkout-inpost',
+            'raw_payload' => [
+                'buyer' => ['id' => '104446741', 'email' => 'abc+123@allegromail.pl'],
+                'delivery' => [
+                    'method' => ['id' => 'method-inpost', 'name' => 'Allegro Paczkomaty InPost'],
+                    'shippingCarrierCode' => 'INPOST',
+                    'address' => ['firstName' => 'Jan', 'lastName' => 'Kupujący', 'street' => 'Odbiorcza 2', 'zipCode' => '00-001', 'city' => 'Warszawa', 'countryCode' => 'PL', 'phoneNumber' => '500600700'],
+                    'pickupPoint' => ['id' => 'ADA01N'],
+                ],
+                'payment' => ['type' => 'CASH_ON_DELIVERY'],
+                'summary' => ['totalToPay' => ['amount' => '60.00', 'currency' => 'PLN']],
+            ],
+        ]));
+
+        $response = $this->getJson('/tools/debug-allegro-shipment-preview?order_id='.$order->id.'&size_code=A&weight=26&label_reference=Client:104446741-extra');
+
+        $response->assertOk()
+            ->assertJsonPath('audit.parcel_size_options.family', 'inpost')
+            ->assertJsonPath('audit.parcel_size_options.options.0.code', 'A')
+            ->assertJsonPath('audit.parcel_size_options.weight_limit_kg', 25)
+            ->assertJsonPath('payload_preview.body.input.packages.0.length.value', 64)
+            ->assertJsonPath('payload_preview.body.input.packages.0.width.value', 38)
+            ->assertJsonPath('payload_preview.body.input.packages.0.height.value', 8)
+            ->assertJsonPath('payload_preview.body.input.packages.0.weight.value', '26')
+            ->assertJsonPath('payload_preview.body.input.packages.0.textOnLabel', 'Client:104446741-e')
+            ->assertJsonPath('warnings.0', 'Waga przekracza limit 25 kg dla InPost/Paczkomat.');
+    }
+
+    public function test_allegro_shipment_preview_resolves_orlen_sizes_and_manual_fallback(): void
+    {
+        $orlenOrder = Order::query()->create($this->orderAttributes([
+            'id' => 54,
+            'marketplace' => 'allegro',
+            'raw_payload' => ['delivery' => ['method' => ['name' => 'Allegro Automat ORLEN Paczka']]],
+        ]));
+        $manualOrder = Order::query()->create($this->orderAttributes([
+            'id' => 55,
+            'marketplace' => 'allegro',
+            'raw_payload' => ['delivery' => ['method' => ['name' => 'Kurier lokalny']]],
+        ]));
+
+        $this->getJson('/tools/debug-allegro-shipment-preview?order_id='.$orlenOrder->id.'&size_code=S&weight=2')
+            ->assertOk()
+            ->assertJsonPath('audit.parcel_size_options.family', 'orlen_allegro_one')
+            ->assertJsonPath('audit.parcel_size_options.options.0.code', 'S')
+            ->assertJsonPath('payload_preview.body.input.packages.0.height.value', 8);
+
+        $this->getJson('/tools/debug-allegro-shipment-preview?order_id='.$manualOrder->id.'&length=10&width=20&height=30&weight=2')
+            ->assertOk()
+            ->assertJsonPath('audit.parcel_size_options.mode', 'manual')
+            ->assertJsonPath('payload_preview.body.input.packages.0.length.value', '10')
+            ->assertJsonPath('payload_preview.body.input.packages.0.width.value', '20')
+            ->assertJsonPath('payload_preview.body.input.packages.0.height.value', '30');
+    }
+
     public function test_ovoko_shipment_preview_is_read_only_and_builds_import_post_data_payload(): void
     {
         $order = Order::query()->create($this->orderAttributes([

@@ -7,6 +7,8 @@ use Illuminate\Support\Str;
 
 class AllegroShipmentPreviewBuilder
 {
+    public function __construct(private readonly AllegroShipmentParcelSizeOptions $parcelSizeOptions) {}
+
     public function build(?Order $order, array $input = []): array
     {
         if (! $order) {
@@ -36,8 +38,11 @@ class AllegroShipmentPreviewBuilder
         $pickupPoint = $this->pickupPoint($payload);
         $delivery = $this->delivery($payload, $order);
         $sender = $this->sender();
+        $parcelOptions = $this->parcelSizeOptions->resolve($delivery['name'] ?? null, $delivery['id'] ?? null, $delivery['shippingCarrierCode'] ?? null);
+        $input = $this->normalizeParcelInput($input, $parcelOptions);
         $parcel = $this->parcel($order, $input);
         $cod = $this->cod($payload, $order, $currency);
+        $warnings = $this->warnings($input, $parcelOptions);
 
         $missing = array_values(array_unique(array_merge(
             $this->missing($orderData, 'order', ['marketplace_order_id']),
@@ -77,8 +82,12 @@ class AllegroShipmentPreviewBuilder
                 'sender' => $sender,
                 'cash_on_delivery' => $cod,
                 'parcel' => $parcel,
+                'parcel_size_options' => $parcelOptions,
+                'warnings' => $warnings,
+                'subtotal_note' => 'audit.order.subtotal comes from orders.subtotal. Shipment payload uses subtotal only as the current insurance fallback; cashOnDelivery uses Allegro payment/summary total or order total.',
                 'local_data_sources' => ['orders.*', 'orders.raw_payload.delivery.*', 'config services.shipments.sender.* / SHIPMENT_SENDER_*'],
             ],
+            'warnings' => $warnings,
             'payload_preview' => [
                 'endpoint' => 'POST /shipment-management/shipments/create-commands',
                 'will_send' => false,
@@ -176,7 +185,37 @@ class AllegroShipmentPreviewBuilder
 
     private function parcel(Order $order, array $input = []): array
     {
-        return ['type' => $input['package_type'] ?? 'PACKAGE', 'length' => ['value' => $input['length'] ?? null, 'unit' => 'CENTIMETER'], 'width' => ['value' => $input['width'] ?? null, 'unit' => 'CENTIMETER'], 'height' => ['value' => $input['height'] ?? null, 'unit' => 'CENTIMETER'], 'weight' => ['value' => $input['weight'] ?? null, 'unit' => 'KILOGRAMS'], 'textOnLabel' => $input['label_reference'] ?? ($order->order_number ?: $order->marketplace_order_id)];
+        return ['type' => $input['package_type'] ?? 'PACKAGE', 'length' => ['value' => $input['length'] ?? null, 'unit' => 'CENTIMETER'], 'width' => ['value' => $input['width'] ?? null, 'unit' => 'CENTIMETER'], 'height' => ['value' => $input['height'] ?? null, 'unit' => 'CENTIMETER'], 'weight' => ['value' => $input['weight'] ?? null, 'unit' => 'KILOGRAMS'], 'textOnLabel' => Str::limit($input['label_reference'] ?? $this->defaultLabelReference($order), 20, '')];
+    }
+
+    private function normalizeParcelInput(array $input, array $options): array
+    {
+        $dimensions = $this->parcelSizeOptions->dimensionsForCode($input['size_code'] ?? null);
+
+        if (($options['mode'] ?? null) === 'size_code' && $dimensions) {
+            $input = array_merge($input, $dimensions);
+        }
+
+        return $input;
+    }
+
+    private function warnings(array $input, array $options): array
+    {
+        $warnings = [];
+        $limit = $options['weight_limit_kg'] ?? null;
+        if ($limit && is_numeric($input['weight'] ?? null) && (float) $input['weight'] > (float) $limit) {
+            $warnings[] = 'Waga przekracza limit '.$limit.' kg dla InPost/Paczkomat.';
+        }
+
+        return $warnings;
+    }
+
+    public function defaultLabelReference(Order $order): string
+    {
+        $clientId = data_get($order->raw_payload, 'buyer.id') ?: data_get($order->raw_payload, 'buyer.login');
+        $reference = filled($clientId) ? 'Client:'.$clientId : ($order->order_number ?: $order->marketplace_order_id ?: (string) $order->id);
+
+        return Str::limit((string) $reference, 20, '');
     }
 
     private function cod(array $payload, Order $order, string $currency): array
