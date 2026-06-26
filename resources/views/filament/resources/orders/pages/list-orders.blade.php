@@ -200,7 +200,13 @@
             min-height: 34px;
             border: 1px solid #cbd5e1;
             border-radius: 10px;
-            background: #f8fafc;
+            appearance: none;
+            -webkit-appearance: none;
+            background-color: #f8fafc;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M6 8l4 4 4-4' stroke='%23334155' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 8px center;
+            background-size: 14px 14px;
             padding: 6px 28px 6px 10px;
             color: #0f172a;
             font-size: 12px;
@@ -212,6 +218,10 @@
         .gps-order-status-select:disabled {
             cursor: default;
             opacity: 1;
+        }
+
+        .gps-order-status-select::-ms-expand {
+            display: none;
         }
 
         .gps-order-total {
