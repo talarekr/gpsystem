@@ -110,6 +110,7 @@ use App\Http\Controllers\Tools\CheckAdminMarketplaceStatusUiController;
 use App\Http\Controllers\Tools\SetFrontendMaintenanceController;
 use App\Http\Controllers\Tools\DeleteTestMarketplaceOrdersController;
 use App\Http\Controllers\Tools\ImportMarketplaceOrdersController;
+use App\Http\Controllers\Tools\ShipmentToolsController;
 use App\Services\ImportMigration\WooProductImport;
 use App\Support\ImportMigration\ManualImportFileResolver;
 use App\Support\ImportMigration\WooProductImportRunRepository;
@@ -2497,3 +2498,8 @@ if (! function_exists('woo_import_write_fatal_error_diagnostic')) {
         }
     }
 }
+
+
+Route::get('/tools/create-order-shipment', [ShipmentToolsController::class, 'create'])->name('tools.create-order-shipment');
+Route::get('/tools/download-shipment-label/{shipment}', [ShipmentToolsController::class, 'download'])->name('tools.download-shipment-label');
+Route::delete('/tools/delete-test-shipment/{shipment}', [ShipmentToolsController::class, 'deleteTest'])->name('tools.delete-test-shipment');

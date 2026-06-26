@@ -48,4 +48,9 @@ class Order extends Model
     {
         return $this->belongsTo(User::class, 'customer_id');
     }
+
+    public function shipments(): HasMany
+    {
+        return $this->hasMany(Shipment::class);
+    }
 }
