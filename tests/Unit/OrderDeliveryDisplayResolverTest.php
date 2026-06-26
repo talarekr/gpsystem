@@ -40,4 +40,32 @@ class OrderDeliveryDisplayResolverTest extends TestCase
             'Przesyłka: Allegro AD02NEFYK6',
         ], app(OrderDeliveryDisplayResolver::class)->resolve($order));
     }
+
+    public function test_ebay_delivery_uses_fulfillment_instruction_shipping_data(): void
+    {
+        $order = new Order([
+            'marketplace' => 'ebay',
+            'currency' => 'EUR',
+            'raw_payload' => [
+                'fulfillmentStartInstructions' => [[
+                    'minEstimatedDeliveryDate' => '2026-06-25T00:00:00.000Z',
+                    'maxEstimatedDeliveryDate' => '2026-06-28T00:00:00.000Z',
+                    'shippingStep' => [
+                        'shippingCarrierCode' => 'DHL',
+                        'shippingServiceCode' => 'DE_DHLPaket',
+                    ],
+                ]],
+                'pricingSummary' => ['deliveryCost' => ['value' => '50.00', 'currency' => 'EUR']],
+            ],
+        ]);
+        $order->setRelation('items', collect());
+
+        $this->assertSame([
+            'DHL',
+            'DE_DHLPaket',
+            'Przewidywana dostawa: 2026-06-25 – 2026-06-28',
+            'Koszt dostawy: 50,00 EUR',
+        ], app(OrderDeliveryDisplayResolver::class)->resolve($order));
+    }
+
 }
