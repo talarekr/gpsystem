@@ -181,24 +181,9 @@
         $deliveryCityLine,
         $deliveryPhone,
     ], fn ($value) => filled($value)));
-    $invoiceCompany = $firstFilled([
-        data_get($order->invoice_data, 'company.name'),
-        data_get($order->invoice_data, 'companyName'),
-        data_get($order->invoice_data, 'company_name'),
-        data_get($order->invoice_data, 'name'),
-        $order->company_name,
-    ]);
-    $invoiceNip = $firstFilled([
-        data_get($order->invoice_data, 'company.taxId'),
-        data_get($order->invoice_data, 'taxId'),
-        data_get($order->invoice_data, 'tax_id'),
-        data_get($order->invoice_data, 'nip'),
-        $order->nip,
-    ]);
-    $hasInvoiceData = filled($invoiceCompany) || filled($invoiceNip) || filled($order->invoice_data);
-    $invoiceLines = $hasInvoiceData
-        ? array_values(array_filter(['FAKTURA', $invoiceCompany, $invoiceNip ? 'NIP: '.$invoiceNip : null], fn ($value) => filled($value)))
-        : ['BEZ FAKTURY'];
+    $invoiceDisplay = app(\App\Support\OrderInvoiceDisplayResolver::class)->resolve($order);
+    $invoiceLines = $invoiceDisplay['lines'];
+    $hasInvoiceData = $invoiceDisplay['has_invoice'];
     $technicalItems = array_filter([
         'Status marketplace' => $order->marketplace_status,
         'TEST IMPORT' => $order->test_import ? 'Tak' : null,
@@ -218,6 +203,9 @@
         .gps-order-detail-fact { min-width: 0; }
         .gps-order-detail-label { border-bottom: 1px solid #e2e8f0; color: #475569; font-size: 12px; font-weight: 800; letter-spacing: .03em; margin-bottom: 12px; padding-bottom: 9px; text-transform: uppercase; }
         .gps-order-detail-value { color: #0f172a; font-size: 13px; font-weight: 400; line-height: 1.45; overflow-wrap: anywhere; }
+        .gps-order-invoice-upload { border-top: 1px solid #e2e8f0; display: grid; gap: 8px; margin-top: 12px; padding-top: 12px; }
+        .gps-order-invoice-upload input { display: block; margin-top: 6px; max-width: 100%; }
+        .gps-order-invoice-upload button { background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 10px; color: #64748b; cursor: not-allowed; font-size: 12px; font-weight: 700; padding: 7px 10px; width: fit-content; }
         .gps-order-detail-date { color: #64748b; font-size: 12px; line-height: 1.45; }
         .gps-order-detail-source-row { color: #475569; font-size: 13px; line-height: 1.45; margin-top: 3px; }
         .gps-order-status-select {
@@ -395,6 +383,18 @@
                         @foreach ($invoiceLines as $line)
                             <div>{{ $line }}</div>
                         @endforeach
+
+                        @if ($hasInvoiceData)
+                            <div class="gps-order-invoice-upload">
+                                <label>
+                                    <span>PDF faktury</span>
+                                    <input type="file" accept="application/pdf,.pdf" onchange="this.closest('.gps-order-invoice-upload').querySelector('[data-invoice-file-name]').textContent = this.files.length ? this.files[0].name : 'Nie wybrano pliku';">
+                                </label>
+                                <small data-invoice-file-name>Nie wybrano pliku</small>
+                                <small>Przygotowane tylko jako UI wyboru pliku PDF. Lokalny upload i wysyłka do Allegro API nie są jeszcze aktywne.</small>
+                                <button type="button" disabled>Wyślij fakturę do Allegro</button>
+                            </div>
+                        @endif
                     </div>
                 </div>
             </div>
