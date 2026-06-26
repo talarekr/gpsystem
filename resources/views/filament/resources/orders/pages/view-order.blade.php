@@ -146,19 +146,37 @@
         $order->email,
     ], fn ($value) => filled($value)));
     $deliveryLines = app(\App\Support\OrderDeliveryDisplayResolver::class)->resolve($order);
+    $fullName = fn ($firstName, $lastName): string => trim(implode(' ', array_filter([
+        trim((string) $firstName),
+        trim((string) $lastName),
+    ], fn ($value) => $value !== '')));
     $deliveryRecipient = $firstFilled([
-        data_get($order->raw_payload, 'delivery.address.fullName'),
+        $fullName(
+            data_get($order->raw_payload, 'delivery.address.firstName'),
+            data_get($order->raw_payload, 'delivery.address.lastName'),
+        ),
         data_get($order->raw_payload, 'delivery.address.name'),
+        data_get($order->raw_payload, 'delivery.address.fullName'),
+        $fullName(
+            data_get($order->raw_payload, 'buyer.firstName'),
+            data_get($order->raw_payload, 'buyer.lastName'),
+        ),
+        data_get($order->raw_payload, 'buyer.fullName'),
+        data_get($order->raw_payload, 'buyer.name'),
+        $order->customer_name,
         data_get($order->raw_payload, 'shippingAddress.fullName'),
         data_get($order->raw_payload, 'shippingAddress.name'),
-        $order->customer_name,
         $customerDisplay['name'],
     ]);
+    $addressCityLine = trim(implode(' ', array_filter([
+        trim((string) $order->postal_code),
+        trim((string) $order->city),
+        trim((string) $order->country),
+    ], fn ($value) => $value !== '')));
     $addressLines = array_values(array_filter([
         $deliveryRecipient,
         trim((string) $order->address_line1),
-        trim(implode(' ', array_filter([trim((string) $order->postal_code), trim((string) $order->city)]))),
-        trim((string) $order->country),
+        $addressCityLine,
         $deliveryPhone,
     ], fn ($value) => filled($value)));
     $invoiceCompany = $firstFilled([
