@@ -382,8 +382,9 @@
                 $marketplace = $order->marketplace ?: 'Sklep';
                 $statusOptions = OrderStatusOptions::optionsForOrder($order);
                 $selectedStatus = OrderStatusOptions::selectedValueForOrder($order);
-                $buyerName = $order->customer_name ?: $order->company_name ?: $order->email ?: '—';
-                $phone = $order->phone ?: '—';
+                $customerDisplay = \App\Support\OrderCustomerDisplay::forOrder($order);
+                $buyerName = $customerDisplay['name'] ?: '—';
+                $phone = $customerDisplay['phone'];
                 $total = OrderResource::formatOrderTotal($order);
                 $orderedAt = $order->ordered_at ? $order->ordered_at->format('Y-m-d H:i') : '—';
                 $firstItem = $order->items->first();
@@ -437,7 +438,9 @@
 
                     <div class="gps-order-col gps-order-col-buyer">
                         <div class="gps-order-value">{{ $buyerName }}</div>
-                        <div class="gps-order-muted">{{ $phone }}</div>
+                        @if ($phone !== '')
+                            <div class="gps-order-muted">{{ $phone }}</div>
+                        @endif
                     </div>
 
                     <div class="gps-order-col gps-order-col-status">

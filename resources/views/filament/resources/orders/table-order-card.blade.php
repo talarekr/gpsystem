@@ -6,8 +6,9 @@
     $displayNumber = OrderResource::displayOrderNumber($order);
     $fullNumber = trim((string) ($order->marketplace_order_id ?: $order->order_number ?: $displayNumber));
     $marketplace = trim((string) $order->marketplace) ?: 'sklep';
-    $buyerName = trim((string) ($order->customer_name ?: $order->company_name ?: '—'));
-    $phone = trim((string) $order->phone);
+    $customerDisplay = \App\Support\OrderCustomerDisplay::forOrder($order);
+    $buyerName = $customerDisplay['name'] ?: '—';
+    $phone = $customerDisplay['phone'];
     $email = trim((string) $order->email);
     $orderedAt = $order->ordered_at ? $order->ordered_at->format('Y-m-d H:i') : '—';
     $statusOptions = OrderStatusOptions::optionsForOrder($order);

@@ -1,6 +1,7 @@
 @php
-    $buyerName = trim((string) ($order->customer_name ?: $order->company_name ?: '—'));
-    $phone = trim((string) $order->phone);
+    $customerDisplay = \App\Support\OrderCustomerDisplay::forOrder($order);
+    $buyerName = $customerDisplay['name'] ?: '—';
+    $phone = $customerDisplay['phone'];
 @endphp
 
 <div class="gps-admin-order-buyer">
