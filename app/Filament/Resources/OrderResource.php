@@ -33,12 +33,21 @@ class OrderResource extends Resource
     {
         return $table->columns([
             Tables\Columns\TextColumn::make('order_number')->label('Numer zamówienia')->searchable()->sortable()->weight('bold'),
+            Tables\Columns\TextColumn::make('marketplace')->label('Marketplace')->badge()->placeholder('Sklep')->sortable(),
+            Tables\Columns\TextColumn::make('marketplace_status')->label('Status marketplace')->badge()->toggleable(),
+            Tables\Columns\IconColumn::make('test_import')->label('TEST IMPORT')->boolean(),
+            Tables\Columns\TextColumn::make('source_batch')->label('Batch')->toggleable(isToggledHiddenByDefault: true),
             Tables\Columns\TextColumn::make('created_at')->label('Data')->dateTime('Y-m-d H:i')->sortable(),
             Tables\Columns\TextColumn::make('customer_name')->label('Klient')->searchable(),
             Tables\Columns\TextColumn::make('email')->label('E-mail')->searchable(),
             Tables\Columns\TextColumn::make('phone')->label('Telefon')->searchable(),
             Tables\Columns\TextColumn::make('status')->label('Status')->formatStateUsing(fn (string $state): string => Order::statusOptions()[$state] ?? $state)->badge(),
             Tables\Columns\TextColumn::make('total')->label('Kwota')->money('PLN')->sortable(),
+        ])->filters([
+            Tables\Filters\SelectFilter::make('marketplace')->label('Marketplace')->options(['allegro' => 'Allegro', 'ebay' => 'eBay', 'ovoko' => 'Ovoko']),
+            Tables\Filters\SelectFilter::make('status')->label('Status')->options(Order::statusOptions()),
+            Tables\Filters\TernaryFilter::make('test_import')->label('TEST IMPORT'),
+            Tables\Filters\SelectFilter::make('source_batch')->label('Batch źródłowy')->options(fn (): array => Order::query()->whereNotNull('source_batch')->distinct()->pluck('source_batch', 'source_batch')->all()),
         ])->actions([
             Tables\Actions\ViewAction::make()->label('Szczegóły'),
             Tables\Actions\EditAction::make()->label('Zmień status'),
@@ -50,8 +59,15 @@ class OrderResource extends Resource
         return $infolist->schema([
             Infolists\Components\Section::make('Dane klienta')->columns(3)->schema([
                 Infolists\Components\TextEntry::make('order_number')->label('Numer'),
+                Infolists\Components\TextEntry::make('marketplace')->label('Marketplace')->badge()->placeholder('Sklep'),
+                Infolists\Components\TextEntry::make('marketplace_order_id')->label('ID marketplace')->placeholder('—'),
+                Infolists\Components\TextEntry::make('marketplace_status')->label('Status marketplace')->badge()->placeholder('—'),
+                Infolists\Components\IconEntry::make('test_import')->label('TEST IMPORT')->boolean(),
+                Infolists\Components\TextEntry::make('source_batch')->label('Batch')->placeholder('—'),
                 Infolists\Components\TextEntry::make('status')->label('Status')->formatStateUsing(fn (string $state): string => Order::statusOptions()[$state] ?? $state)->badge(),
                 Infolists\Components\TextEntry::make('total')->label('Suma')->money('PLN'),
+                Infolists\Components\TextEntry::make('payment_status')->label('Płatność')->placeholder('—'),
+                Infolists\Components\TextEntry::make('delivery_method')->label('Dostawa')->placeholder('—'),
                 Infolists\Components\TextEntry::make('customer_name')->label('Klient'),
                 Infolists\Components\TextEntry::make('email')->label('E-mail'),
                 Infolists\Components\TextEntry::make('phone')->label('Telefon'),
