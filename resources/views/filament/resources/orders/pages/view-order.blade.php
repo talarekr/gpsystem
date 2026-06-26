@@ -38,6 +38,52 @@
         ? number_format((float) $amount, 2, ',', ' ').' '.($moneyCurrency ?: $currency)
         : '—';
     $productLines = $order->items->map(fn ($item): string => $formatMoney($item->line_total, $item->currency ?: $currency));
+    $publicProductUrl = function ($item): ?string {
+        $part = $item->part ?: $item->marketplaceListing?->part;
+
+        return $part instanceof Part ? \App\Filament\Resources\PartResource::publicProductUrl($part) : null;
+    };
+    $normalizeOfferId = function (mixed $value): ?string {
+        $value = trim((string) $value);
+
+        return preg_match('/^\d+$/', $value) === 1 ? $value : null;
+    };
+    $allegroOfferId = function ($item) use ($order, $normalizeOfferId): ?string {
+        $marketplace = Str::lower(trim((string) ($item->marketplace ?: $order->marketplace)));
+        $listing = $item->marketplaceListing;
+
+        if ($listing && Str::lower(trim((string) $listing->marketplace)) === 'allegro') {
+            $id = $normalizeOfferId($listing->external_offer_id) ?: $normalizeOfferId($listing->external_listing_id);
+
+            if ($id !== null) {
+                return $id;
+            }
+        }
+
+        if ($marketplace !== 'allegro') {
+            return null;
+        }
+
+        foreach ([
+            $item->offer_id,
+            data_get($item->raw_payload, 'offer.id'),
+            data_get($item->raw_payload, 'offerId'),
+            data_get($item->raw_payload, 'offer_id'),
+            data_get($item->raw_payload, 'id'),
+            data_get($item->meta, 'offer.id'),
+            data_get($item->meta, 'offerId'),
+            data_get($item->meta, 'offer_id'),
+        ] as $candidate) {
+            $id = $normalizeOfferId($candidate);
+
+            if ($id !== null) {
+                return $id;
+            }
+        }
+
+        return null;
+    };
+    $allegroOfferUrl = fn (string $offerId): string => 'https://allegro.pl/oferta/'.$offerId;
     $shippingTotalData = app(\App\Support\OrderShippingTotalDisplayResolver::class)->resolve($order);
     $shippingTotal = $shippingTotalData !== null
         ? $formatMoney($shippingTotalData['amount'], $shippingTotalData['currency'])
@@ -57,6 +103,7 @@
         .gps-order-detail-summary { display: block; }
         .gps-order-detail-muted { color: #64748b; font-size: 13px; line-height: 1.45; }
         .gps-order-detail-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 28px; align-items: start; }
+        .gps-order-detail-product-grid { grid-template-columns: minmax(0, 3fr) repeat(3, minmax(0, 1fr)); }
         .gps-order-detail-fact { min-width: 0; }
         .gps-order-detail-label { border-bottom: 1px solid #e2e8f0; color: #475569; font-size: 12px; font-weight: 800; letter-spacing: .03em; margin-bottom: 12px; padding-bottom: 9px; text-transform: uppercase; }
         .gps-order-detail-value { color: #0f172a; font-size: 13px; font-weight: 400; line-height: 1.45; overflow-wrap: anywhere; }
@@ -90,13 +137,15 @@
         .gps-order-detail-thumb, .gps-order-detail-placeholder { width: 54px; height: 54px; border-radius: 12px; object-fit: cover; background: #f1f5f9; display: grid; place-items: center; color: #94a3b8; overflow: hidden; flex: 0 0 54px; }
         .gps-order-detail-product-info { min-width: 0; }
         .gps-order-detail-item-name { color: #0f172a; font-size: 13px; font-weight: 400; line-height: 1.45; overflow-wrap: anywhere; }
+        .gps-order-detail-link { color: #0f172a; text-decoration: underline; text-decoration-color: rgba(15, 23, 42, .28); text-underline-offset: 3px; transition: color .15s ease, text-decoration-color .15s ease; }
+        .gps-order-detail-link:hover { color: #1d4ed8; text-decoration-color: currentColor; }
         .gps-order-detail-product-price-list { display: grid; gap: 6px; }
         .gps-order-detail-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
         .gps-order-paid { color: #15803d; }
         .gps-order-tech summary { cursor: pointer; color: #334155; font-weight: 800; }
         .gps-order-tech dl { display: grid; grid-template-columns: max-content minmax(0,1fr); gap: 8px 16px; margin-top: 14px; }
         .gps-order-tech dt { color: #64748b; font-size: 12px; font-weight: 700; } .gps-order-tech dd { color: #0f172a; font-size: 13px; margin: 0; overflow-wrap: anywhere; }
-        @media (max-width: 1000px) { .gps-order-detail-summary, .gps-order-detail-two { grid-template-columns: 1fr; } .gps-order-detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        @media (max-width: 1000px) { .gps-order-detail-summary, .gps-order-detail-two { grid-template-columns: 1fr; } .gps-order-detail-grid, .gps-order-detail-product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         @media (max-width: 700px) { .gps-order-detail-grid { grid-template-columns: 1fr; } }
     </style>
 
@@ -130,10 +179,8 @@
             </div>
         </section>
 
-        <section>
-            <h2 class="gps-order-detail-section-title">Produkt</h2>
-            <div class="gps-order-detail-card gps-order-detail-summary">
-                <div class="gps-order-detail-grid">
+        <section class="gps-order-detail-card gps-order-detail-summary">
+            <div class="gps-order-detail-grid gps-order-detail-product-grid">
                     <div class="gps-order-detail-fact">
                         <div class="gps-order-detail-label">Produkt</div>
                         <div class="gps-order-detail-products">
@@ -141,6 +188,8 @@
                                 @php
                                     $thumb = \App\Support\OrderItemThumbnailDiagnostics::resolve($order, $item);
                                     $thumbPart = $thumb['thumbnail_part'] ?? null;
+                                    $productUrl = $publicProductUrl($item);
+                                    $offerId = $allegroOfferId($item);
                                 @endphp
                                 <div class="gps-order-detail-product">
                                     @if ($thumbPart instanceof Part && $thumb['thumbnail_source'] === 'admin_parts_thumbnail')
@@ -151,8 +200,17 @@
                                         <div class="gps-order-detail-placeholder"><x-heroicon-o-photo class="h-7 w-7" /></div>
                                     @endif
                                     <div class="gps-order-detail-product-info">
-                                        <div class="gps-order-detail-item-name">{{ $thumb['display_name'] }}</div>
+                                        <div class="gps-order-detail-item-name">
+                                            @if ($productUrl)
+                                                <a class="gps-order-detail-link" href="{{ $productUrl }}" target="_blank" rel="noopener noreferrer">{{ $thumb['display_name'] }}</a>
+                                            @else
+                                                {{ $thumb['display_name'] }}
+                                            @endif
+                                        </div>
                                         <div class="gps-order-detail-muted">Magazyn: {{ $thumb['storage_location'] }}</div>
+                                        @if ($offerId)
+                                            <div class="gps-order-detail-muted">Allegro: <a class="gps-order-detail-link" href="{{ $allegroOfferUrl($offerId) }}" target="_blank" rel="noopener noreferrer">{{ $offerId }}</a></div>
+                                        @endif
                                     </div>
                                 </div>
                             @empty
@@ -179,7 +237,6 @@
                         <div class="gps-order-detail-value">{{ $total }}</div>
                     </div>
                 </div>
-            </div>
         </section>
 
         <div class="gps-order-detail-two">
