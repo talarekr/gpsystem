@@ -145,22 +145,7 @@
         $customerDisplay['phone'],
         $order->email,
     ], fn ($value) => filled($value)));
-    $deliveryDeadline = $firstFilled([
-        data_get($order->raw_payload, 'delivery.time.from'),
-        data_get($order->raw_payload, 'delivery.time.to'),
-        data_get($order->raw_payload, 'delivery.deadline'),
-        data_get($order->raw_payload, 'shipment.deadline'),
-        data_get($order->raw_payload, 'shipping_deadline'),
-        data_get($order->raw_payload, 'dispatch_time'),
-    ]);
-    $deliveryLines = array_values(array_filter([
-        $deliveryDeadline,
-        $deliveryMethod,
-        $deliveryType !== '' ? Str::headline(str_replace(['_', '-'], ' ', $deliveryType)) : null,
-        $shippingTotal !== '—' ? $shippingTotal : null,
-        $carrier,
-        $shipment?->tracking_number ? 'Nr przesyłki: '.$shipment->tracking_number : null,
-    ], fn ($value) => filled($value)));
+    $deliveryLines = app(\App\Support\OrderDeliveryDisplayResolver::class)->resolve($order);
     $deliveryRecipient = $firstFilled([
         data_get($order->raw_payload, 'delivery.address.fullName'),
         data_get($order->raw_payload, 'delivery.address.name'),
