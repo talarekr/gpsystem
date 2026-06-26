@@ -35,9 +35,10 @@
             display: inline-flex;
             align-items: center;
             max-width: 100%;
-            border-radius: 999px;
-            padding: 2px 7px;
-            background: #f8fafc;
+            border: 0;
+            border-radius: 0;
+            padding: 0;
+            background: transparent;
             font-size: 12px;
             font-weight: 700;
             line-height: 1.25;
