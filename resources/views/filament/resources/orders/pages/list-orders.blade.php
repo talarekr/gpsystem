@@ -130,6 +130,11 @@
             overflow-wrap: anywhere;
         }
 
+        .gps-order-payment-paid {
+            color: #16a34a;
+            font-weight: 600;
+        }
+
         .gps-order-badges,
         .gps-order-actions {
             display: flex;
@@ -373,7 +378,7 @@
             <div>Kwota</div>
             <div>Klient</div>
             <div>Status</div>
-            <div>Kurier</div>
+            <div>Kurier i płatność</div>
         </div>
 
         @forelse ($orders as $order)
@@ -455,7 +460,7 @@
                     <div class="gps-order-col gps-order-col-shipping">
                         @if ($shippingPaymentLines !== [])
                             @foreach ($shippingPaymentLines as $index => $line)
-                                <div class="{{ $index === 0 ? 'gps-order-value' : 'gps-order-muted' }}">{{ $line }}</div>
+                                <div class="{{ $index === 0 ? 'gps-order-value' : 'gps-order-muted' }} {{ $line === 'Zapłacono' ? 'gps-order-payment-paid' : '' }}">{{ $line }}</div>
                             @endforeach
                         @elseif ($shipment || $carrier)
                             <div class="gps-order-value">{{ $carrier ?: '—' }}</div>
@@ -471,7 +476,6 @@
 
                         <div class="gps-order-actions">
                             <a class="gps-order-action" href="{{ OrderResource::getUrl('view', ['record' => $order]) }}">Szczegóły</a>
-                            <a class="gps-order-action" href="{{ OrderResource::getUrl('edit', ['record' => $order]) }}">Zmień status</a>
                         </div>
                     </div>
                 </div>
