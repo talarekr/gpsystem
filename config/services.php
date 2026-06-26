@@ -20,4 +20,35 @@ return [
         'credentials_path' => env('GOOGLE_TRANSLATE_CREDENTIALS', env('GOOGLE_APPLICATION_CREDENTIALS')),
         'timeout' => env('GOOGLE_TRANSLATE_TIMEOUT', 10),
     ],
+
+    'shipments' => [
+        'sender' => [
+            'name' => env('SHIPMENT_SENDER_NAME'),
+            'address' => env('SHIPMENT_SENDER_ADDRESS'),
+            'postal_code' => env('SHIPMENT_SENDER_POSTAL_CODE'),
+            'city' => env('SHIPMENT_SENDER_CITY'),
+            'country' => env('SHIPMENT_SENDER_COUNTRY', 'PL'),
+            'phone' => env('SHIPMENT_SENDER_PHONE'),
+            'email' => env('SHIPMENT_SENDER_EMAIL'),
+        ],
+    ],
+
+    'dhl' => [
+        'endpoint' => env('DHL_API_ENDPOINT'),
+        'login' => env('DHL_API_LOGIN'),
+        'password' => env('DHL_API_PASSWORD'),
+        'account_number' => env('DHL_ACCOUNT_NUMBER'),
+        'default_service' => env('DHL_DEFAULT_SERVICE', 'AH'),
+        'test_mode' => env('DHL_TEST_MODE', true),
+    ],
+
+    'dpd' => [
+        'endpoint' => env('DPD_API_ENDPOINT'),
+        'login' => env('DPD_API_LOGIN'),
+        'password' => env('DPD_API_PASSWORD'),
+        'account_number' => env('DPD_ACCOUNT_NUMBER'),
+        'default_service' => env('DPD_DEFAULT_SERVICE', 'CLASSIC'),
+        'test_mode' => env('DPD_TEST_MODE', true),
+    ],
+
 ];
