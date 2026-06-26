@@ -11,6 +11,7 @@ use Filament\Infolists\Infolist;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 class OrderResource extends Resource
 {
@@ -43,7 +44,8 @@ class OrderResource extends Resource
             Tables\Filters\SelectFilter::make('status')->label('Status')->options(Order::statusOptions()),
             Tables\Filters\TernaryFilter::make('test_import')->label('TEST IMPORT'),
             Tables\Filters\SelectFilter::make('source_batch')->label('Batch źródłowy')->options(fn (): array => Order::query()->whereNotNull('source_batch')->distinct()->pluck('source_batch', 'source_batch')->all()),
-        ])->defaultSort('ordered_at', 'desc');
+        ])->defaultSort('ordered_at', 'desc')
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with(['items', 'shipments']));
     }
 
 
