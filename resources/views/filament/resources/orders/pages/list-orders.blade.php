@@ -72,12 +72,12 @@
         .gps-admin-orders-grid {
             display: grid;
             grid-template-columns:
-                minmax(320px, 1.6fr)
-                minmax(170px, 0.9fr)
-                minmax(120px, 0.65fr)
-                minmax(170px, 0.9fr)
-                minmax(130px, 0.7fr)
-                minmax(180px, 0.9fr);
+                minmax(430px, 2fr)
+                minmax(170px, 0.85fr)
+                minmax(120px, 0.6fr)
+                minmax(170px, 0.85fr)
+                minmax(130px, 0.65fr)
+                minmax(180px, 0.85fr);
             gap: 20px;
             width: 100%;
             align-items: center;
@@ -170,15 +170,16 @@
 
         .gps-order-part-thumb,
         .gps-order-part-placeholder {
-            flex: 0 0 64px;
-            width: 64px;
-            height: 64px;
-            border-radius: 12px;
+            flex: 0 0 120px;
+            width: 120px;
+            height: 100px;
+            border-radius: 14px;
+            background: #f1f5f9;
         }
 
         .gps-order-part-thumb {
+            display: block;
             object-fit: cover;
-            background: #f1f5f9;
         }
 
         .gps-order-part-placeholder {
