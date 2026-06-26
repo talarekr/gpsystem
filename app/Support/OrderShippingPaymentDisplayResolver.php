@@ -66,7 +66,9 @@ class OrderShippingPaymentDisplayResolver
     {
         $type = Str::upper(trim((string) data_get($order->raw_payload, 'payment.type')));
         if ($type === 'CASH_ON_DELIVERY') {
-            return 'Pobranie';
+            $amount = $this->cashOnDeliveryAmount($order);
+
+            return $amount !== null ? 'Pobranie · '.$amount : 'Pobranie';
         }
 
         if ($this->hasConfirmedOnlinePayment($order)) {
@@ -126,6 +128,38 @@ class OrderShippingPaymentDisplayResolver
             || (is_numeric($paidAmount) && (float) $paidAmount > 0);
     }
 
+    private function cashOnDeliveryAmount(Order $order): ?string
+    {
+        $amount = $this->firstNumeric([
+            data_get($order->raw_payload, 'payment.cashOnDelivery.amount'),
+            data_get($order->raw_payload, 'payment.cashOnDelivery.value'),
+            data_get($order->raw_payload, 'payment.cod.amount'),
+            data_get($order->raw_payload, 'payment.cod.value'),
+            data_get($order->raw_payload, 'payment.amount.amount'),
+            data_get($order->raw_payload, 'payment.amount'),
+            data_get($order->raw_payload, 'summary.totalToPay.amount'),
+            data_get($order->raw_payload, 'summary.totalToPay'),
+            data_get($order->raw_payload, 'totalToPay.amount'),
+            data_get($order->raw_payload, 'totalToPay'),
+            $order->total,
+        ]);
+
+        if ($amount === null) {
+            return null;
+        }
+
+        $currency = $this->firstFilled([
+            data_get($order->raw_payload, 'payment.cashOnDelivery.currency'),
+            data_get($order->raw_payload, 'payment.cod.currency'),
+            data_get($order->raw_payload, 'payment.amount.currency'),
+            data_get($order->raw_payload, 'summary.totalToPay.currency'),
+            data_get($order->raw_payload, 'totalToPay.currency'),
+            $order->currency,
+        ]) ?? 'PLN';
+
+        return number_format($amount, 2, ',', ' ').' '.Str::upper($currency);
+    }
+
     private function ovokoDeliveryTypeLabel(?string $type): ?string
     {
         return match (Str::lower(trim((string) $type))) {
@@ -174,6 +208,25 @@ class OrderShippingPaymentDisplayResolver
             $value = $this->blankToNull($value);
             if ($value !== null) {
                 return $value;
+            }
+        }
+
+        return null;
+    }
+
+    private function firstNumeric(array $values): ?float
+    {
+        foreach ($values as $value) {
+            if (is_array($value)) {
+                continue;
+            }
+
+            if (is_string($value)) {
+                $value = str_replace([' ', ','], ['', '.'], $value);
+            }
+
+            if (is_numeric($value)) {
+                return (float) $value;
             }
         }
 
