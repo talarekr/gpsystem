@@ -52,15 +52,16 @@
         .gps-admin-orders-grid {
             display: grid;
             grid-template-columns:
-                minmax(180px, 1.15fr)
-                minmax(130px, 0.8fr)
-                minmax(190px, 1fr)
-                minmax(130px, 0.75fr)
-                minmax(280px, 1.45fr)
-                minmax(190px, 0.95fr);
+                minmax(0, 1.15fr)
+                minmax(0, 0.8fr)
+                minmax(0, 1fr)
+                minmax(0, 0.75fr)
+                minmax(0, 1.45fr)
+                minmax(0, 0.95fr);
             gap: 20px;
             align-items: center;
             width: 100%;
+            min-width: 0;
         }
 
         .gps-admin-orders-header {
@@ -70,6 +71,11 @@
             letter-spacing: .02em;
             line-height: 1.2;
             text-transform: uppercase;
+        }
+
+        .gps-admin-orders-header > div,
+        .gps-admin-order-col {
+            min-width: 0;
         }
 
         .fi-ta-table:has(.gps-admin-order-card) tbody tr,
@@ -119,7 +125,9 @@
         .gps-admin-order-card__section {
             display: grid;
             min-width: 0;
+            max-width: 100%;
             gap: 7px;
+            align-content: start;
         }
 
         .gps-admin-order-card__value {
@@ -152,7 +160,9 @@
         .gps-admin-order-card__badge {
             display: inline-flex;
             max-width: 100%;
+            min-width: 0;
             align-items: center;
+            overflow-wrap: anywhere;
             border-radius: 999px;
             background: #f1f5f9;
             padding: 3px 8px;
@@ -233,7 +243,7 @@
 
 <article class="gps-admin-order-card" title="{{ $fullNumber }}">
     <div class="gps-admin-orders-grid">
-    <section class="gps-admin-order-card__section">
+    <section class="gps-admin-order-card__section gps-admin-order-col gps-admin-order-col-number">
         <div class="gps-admin-order-card__value gps-admin-order-card__number" title="{{ $fullNumber }}">{{ $displayNumber }}</div>
         <div class="gps-admin-order-card__badges">
             <span class="gps-admin-order-card__badge gps-admin-order-card__badge--marketplace">{{ $marketplace }}</span>
@@ -243,26 +253,26 @@
         </div>
     </section>
 
-    <section class="gps-admin-order-card__section">
+    <section class="gps-admin-order-card__section gps-admin-order-col gps-admin-order-col-status">
         <div class="gps-admin-order-card__value">{{ $statusLabel }}</div>
         @if($marketplaceStatus !== '')
             <div><span class="gps-admin-order-card__badge gps-admin-order-card__badge--status">{{ $marketplaceStatus }}</span></div>
         @endif
     </section>
 
-    <section class="gps-admin-order-card__section" title="{{ $email }}">
+    <section class="gps-admin-order-card__section gps-admin-order-col gps-admin-order-col-buyer" title="{{ $email }}">
         <div class="gps-admin-order-card__value gps-admin-order-card__buyer-name">{{ $buyerName }}</div>
         @if($phone !== '')
             <div class="gps-admin-order-card__muted">{{ $phone }}</div>
         @endif
     </section>
 
-    <section class="gps-admin-order-card__section">
+    <section class="gps-admin-order-card__section gps-admin-order-col gps-admin-order-col-amount">
         <div class="gps-admin-order-card__total">{{ $total }}</div>
         <div class="gps-admin-order-card__muted">{{ $orderedAt }}</div>
     </section>
 
-    <section class="gps-admin-order-card__section">
+    <section class="gps-admin-order-card__section gps-admin-order-col gps-admin-order-col-item">
         @if($firstItemName !== '')
             <div class="gps-admin-order-card__part-name" title="{{ $firstItemName }}">{{ $firstItemName }}</div>
             @if($itemsCount > 1)
@@ -273,7 +283,7 @@
         @endif
     </section>
 
-    <section class="gps-admin-order-card__section">
+    <section class="gps-admin-order-card__section gps-admin-order-col gps-admin-order-col-shipping">
         @if($shipment)
             <div class="gps-admin-order-card__value">{{ $carrier ?: '—' }}</div>
             @if($trackingNumber !== '')
