@@ -10,6 +10,8 @@ class ViewOrder extends ViewRecord
 {
     protected static string $resource = OrderResource::class;
 
+    protected static string $view = 'filament.resources.orders.pages.view-order';
+
     protected function getHeaderActions(): array
     {
         return [Actions\EditAction::make()->label('Zmień status')];
