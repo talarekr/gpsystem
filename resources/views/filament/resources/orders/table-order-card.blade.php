@@ -1,17 +1,17 @@
 @php
     use App\Filament\Resources\OrderResource;
-    use App\Models\Order;
     use App\Models\Shipment;
+    use App\Services\Admin\OrderStatusOptions;
 
     $displayNumber = OrderResource::displayOrderNumber($order);
     $fullNumber = trim((string) ($order->marketplace_order_id ?: $order->order_number ?: $displayNumber));
     $marketplace = trim((string) $order->marketplace) ?: 'sklep';
-    $marketplaceStatus = trim((string) $order->marketplace_status);
     $buyerName = trim((string) ($order->customer_name ?: $order->company_name ?: '—'));
     $phone = trim((string) $order->phone);
     $email = trim((string) $order->email);
     $orderedAt = $order->ordered_at ? $order->ordered_at->format('Y-m-d H:i') : '—';
-    $statusLabel = Order::statusOptions()[$order->status] ?? $order->status;
+    $statusOptions = OrderStatusOptions::optionsForOrder($order);
+    $selectedStatus = OrderStatusOptions::selectedValueForOrder($order);
     $total = OrderResource::formatOrderTotal($order);
     $viewUrl = OrderResource::getUrl('view', ['record' => $order]);
     $editUrl = OrderResource::getUrl('edit', ['record' => $order]);
@@ -232,6 +232,26 @@
         .gps-admin-order-card__badge--status { background: #e0f2fe; color: #075985; }
         .gps-admin-order-card__badge--local { background: #dcfce7; color: #166534; }
 
+        .gps-admin-order-card__status-select {
+            width: 100%;
+            max-width: 160px;
+            min-height: 34px;
+            border: 1px solid #cbd5e1;
+            border-radius: 10px;
+            background: #f8fafc;
+            padding: 6px 28px 6px 10px;
+            color: #0f172a;
+            font-size: 12px;
+            font-weight: 800;
+            line-height: 1.2;
+            text-transform: uppercase;
+        }
+
+        .gps-admin-order-card__status-select:disabled {
+            cursor: default;
+            opacity: 1;
+        }
+
         .gps-admin-order-card__source-row {
             color: #64748b;
             font-size: 12px;
@@ -348,10 +368,11 @@
             </div>
 
             <div class="gps-admin-order-card__section gps-admin-order-col gps-admin-order-col-status">
-                <div class="gps-admin-order-card__value">{{ $statusLabel }}</div>
-                @if($marketplaceStatus !== '')
-                    <div><span class="gps-admin-order-card__badge gps-admin-order-card__badge--status">{{ $marketplaceStatus }}</span></div>
-                @endif
+                <select class="gps-admin-order-card__status-select" aria-label="Status zamówienia" disabled>
+                    @foreach ($statusOptions as $value => $label)
+                        <option value="{{ $value }}" @selected($selectedStatus === $value)>{{ $label }}</option>
+                    @endforeach
+                </select>
             </div>
 
             <div class="gps-admin-order-card__section gps-admin-order-col gps-admin-order-col-buyer" title="{{ $email }}">
