@@ -14,7 +14,7 @@ class Order extends Model
     public const STATUSES = ['new', 'processing', 'completed', 'cancelled'];
 
     protected $fillable = [
-        'order_number', 'customer_id', 'marketplace', 'marketplace_order_id', 'marketplace_status', 'ordered_at', 'status', 'currency', 'subtotal', 'shipping_total', 'payment_status', 'delivery_method', 'total',
+        'order_number', 'customer_id', 'marketplace', 'marketplace_order_id', 'marketplace_status', 'ordered_at', 'status', 'status_changed_at', 'currency', 'subtotal', 'shipping_total', 'payment_status', 'delivery_method', 'total',
         'customer_name', 'email', 'phone', 'company_name', 'nip', 'address_line1', 'postal_code',
         'city', 'country', 'invoice_data', 'raw_payload', 'imported_at', 'test_import', 'source_batch', 'notes', 'meta',
     ];
@@ -26,6 +26,7 @@ class Order extends Model
             'shipping_total' => 'decimal:2',
             'total' => 'decimal:2',
             'ordered_at' => 'datetime',
+            'status_changed_at' => 'datetime',
             'invoice_data' => 'array',
             'raw_payload' => 'array',
             'imported_at' => 'datetime',
