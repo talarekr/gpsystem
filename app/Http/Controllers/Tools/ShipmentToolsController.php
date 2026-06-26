@@ -13,7 +13,22 @@ class ShipmentToolsController
     public function create(Request $request, ShipmentLabelService $service)
     {
         $carrier = strtolower((string) $request->query('carrier', 'dhl'));
-        $order = Order::query()->find($request->integer('order')) ?: Order::query()->latest('id')->first();
+        $orderId = $request->integer('order_id') ?: $request->integer('order');
+        $order = $orderId ? Order::query()->find($orderId) : Order::query()->latest('id')->first();
+        if ($orderId && ! $order) {
+            return response()->json([
+                'ok' => false,
+                'error' => 'Order not found.',
+                'requested_order_id' => $orderId,
+                'safety_flags' => [
+                    'read_only' => true, 'shipment_created' => false, 'label_created' => false, 'pickup_ordered' => false,
+                    'emails_sent' => false, 'marketplace_status_changed' => false, 'marketplace_tracking_uploaded' => false,
+                    'products_changed' => false, 'parts_changed' => false, 'offers_changed' => false, 'listings_changed' => false,
+                    'stock_changed' => false, 'prices_changed' => false, 'mappings_changed' => false, 'allegro_write' => false,
+                    'ovoko_write' => false, 'ebay_write' => false,
+                ],
+            ], 404, [], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        }
         $shipment = $request->integer('shipment') ? Shipment::query()->find($request->integer('shipment')) : null;
         $confirm = $request->boolean('confirm');
 

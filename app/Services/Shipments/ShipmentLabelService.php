@@ -101,6 +101,7 @@ class ShipmentLabelService
             'mode' => $confirm ? 'confirm' : 'dry-run',
             'validation' => ['ok' => $missing === [], 'missing' => $missing],
             'configuration' => ['ok' => count(array_filter($this->missing($this->carrierConfig($carrier), $carrier, ['account_number', 'login']))) === 0],
+            'debug' => $this->debugConfiguration($carrier, $sender, $receiver),
             'sender_snapshot' => $sender,
             'receiver_snapshot' => $receiver,
             'parcel_snapshot' => $parcel,
@@ -121,16 +122,95 @@ class ShipmentLabelService
 
     protected function receiverSnapshot(?Order $order): array
     {
+        $address = $order?->address_line1;
+        $postalCode = $order?->postal_code;
+        $city = $order?->city;
+        $country = $order?->country ?: 'PL';
+        $parse = $this->parseImportedReceiverAddress($address, $postalCode, $city, $country);
+
+        if ($parse['used']) {
+            $address = $parse['address'];
+            $postalCode = $parse['postal_code'];
+            $city = $parse['city'];
+            $country = $parse['country'];
+        }
+
         return [
-            'name' => $order?->company_name ?: $order?->customer_name, 'address' => $order?->address_line1,
-            'postal_code' => $order?->postal_code, 'city' => $order?->city, 'country' => $order?->country ?: 'PL',
+            'name' => $order?->company_name ?: $order?->customer_name, 'address' => $address,
+            'postal_code' => $postalCode, 'city' => $city, 'country' => $country,
             'phone' => $order?->phone, 'email' => $order?->email,
+            'debug' => [
+                'receiver_address_source' => $parse['source'],
+                'receiver_address_parse_used' => $parse['used'],
+                'receiver_address_parse_warning' => $parse['warning'],
+            ],
         ];
+    }
+
+    protected function parseImportedReceiverAddress(?string $address, ?string $postalCode, ?string $city, ?string $country): array
+    {
+        $result = ['used' => false, 'source' => 'order.address_line1', 'warning' => null, 'address' => $address, 'postal_code' => $postalCode, 'city' => $city, 'country' => $country ?: 'PL'];
+        $needsFallback = filled($address) && (blank($postalCode) || $postalCode === '-' || blank($city) || $city === '-');
+        if (! $needsFallback || ! str_contains((string) $address, ',')) {
+            return $result;
+        }
+
+        $segments = array_values(array_filter(array_map(fn ($part) => trim((string) $part), explode(',', (string) $address)), fn ($part) => $part !== ''));
+        if (count($segments) < 3) {
+            $result['warning'] = 'Address fallback skipped: not enough comma-separated segments.';
+            return $result;
+        }
+
+        $last = array_pop($segments);
+        if (! preg_match('/^([A-Z]{2})-(\d{2}-\d{3})$/i', $last, $matches)) {
+            $result['warning'] = 'Address fallback skipped: last segment is not COUNTRY-POSTAL_CODE.';
+            return $result;
+        }
+
+        $parsedCity = array_pop($segments);
+        $parsedAddress = trim(implode(' ', $segments));
+        if ($parsedAddress === '' || $parsedCity === '') {
+            $result['warning'] = 'Address fallback skipped: parsed street or city is empty.';
+            return $result;
+        }
+
+        return ['used' => true, 'source' => 'order.address_line1_fallback', 'warning' => null, 'address' => $parsedAddress, 'postal_code' => $matches[2], 'city' => $parsedCity, 'country' => strtoupper($matches[1])];
     }
 
     protected function carrierConfig(string $carrier): array
     {
-        return ['account_number' => config("services.$carrier.account_number"), 'login' => config("services.$carrier.login"), 'password' => config("services.$carrier.password"), 'endpoint' => config("services.$carrier.endpoint")];
+        return ['account_number' => config("services.$carrier.account_number"), 'login' => config("services.$carrier.login"), 'password' => config("services.$carrier.password"), 'endpoint' => config("services.$carrier.endpoint"), 'label_type' => config("services.$carrier.label_type"), 'drop_off_type' => config("services.$carrier.drop_off_type")];
+    }
+
+
+    protected function debugConfiguration(string $carrier, array $sender, array $receiver): array
+    {
+        $config = $this->carrierConfig($carrier);
+
+        return [
+            'env_keys_expected' => [
+                'sender' => ['SHIPMENT_SENDER_NAME/SENDER_NAME', 'SHIPMENT_SENDER_ADDRESS/SENDER_ADDRESS', 'SHIPMENT_SENDER_POSTAL_CODE/SENDER_POSTAL_CODE', 'SHIPMENT_SENDER_CITY/SENDER_CITY', 'SHIPMENT_SENDER_COUNTRY/SENDER_COUNTRY', 'SHIPMENT_SENDER_PHONE/SENDER_PHONE', 'SHIPMENT_SENDER_EMAIL/SENDER_EMAIL'],
+                'dhl' => ['DHL_API_LOGIN/DHL24_LOGIN/DHL24_USERNAME', 'DHL_API_PASSWORD/DHL24_PASSWORD', 'DHL_ACCOUNT_NUMBER/DHL24_ACCOUNT_NUMBER', 'DHL_API_ENDPOINT/DHL24_WSDL', 'DHL_LABEL_TYPE/DHL24_LABEL_TYPE', 'DHL_DROP_OFF_TYPE/DHL24_DEFAULT_DROP_OFF_TYPE'],
+            ],
+            'config_paths_checked' => ['services.shipments.sender.*', "services.$carrier.login", "services.$carrier.password", "services.$carrier.account_number", "services.$carrier.endpoint", "services.$carrier.label_type", "services.$carrier.drop_off_type"],
+            'sender_config_present' => collect(['name', 'address', 'postal_code', 'city', 'phone', 'email'])->every(fn ($key) => filled($sender[$key] ?? null)),
+            'sender_name_present' => filled($sender['name'] ?? null),
+            'sender_address_present' => filled($sender['address'] ?? null),
+            'sender_postal_code_present' => filled($sender['postal_code'] ?? null),
+            'sender_city_present' => filled($sender['city'] ?? null),
+            'sender_phone_present' => filled($sender['phone'] ?? null),
+            'sender_email_present' => filled($sender['email'] ?? null),
+            'dhl_login_present' => filled($config['login'] ?? null),
+            'dhl_password_present' => filled($config['password'] ?? null),
+            'dhl_account_number_present' => filled($config['account_number'] ?? null),
+            'dhl_wsdl_present' => filled($config['endpoint'] ?? null),
+            'dhl_label_type' => $config['label_type'] ?? null,
+            'dhl_drop_off_type' => $config['drop_off_type'] ?? null,
+            'config_cache_hint' => app()->configurationIsCached() ? 'Configuration is cached; run php artisan config:clear && php artisan config:cache after .env changes.' : 'Configuration is not cached in this runtime.',
+            'receiver_address_source' => $receiver['debug']['receiver_address_source'] ?? null,
+            'receiver_address_parse_used' => $receiver['debug']['receiver_address_parse_used'] ?? false,
+            'receiver_address_parse_warning' => $receiver['debug']['receiver_address_parse_warning'] ?? null,
+        ];
     }
 
     protected function missing(array $data, string $prefix, array $keys): array
