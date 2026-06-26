@@ -1,6 +1,7 @@
 @php
     use App\Filament\Resources\OrderResource;
     use App\Models\Order;
+    use App\Services\Admin\OrderStatusOptions;
 
     $orders = $this->orders;
 @endphp
@@ -193,6 +194,26 @@
 
         .gps-order-badge--status { background: #e0f2fe; color: #075985; }
 
+        .gps-order-status-select {
+            width: 100%;
+            max-width: 150px;
+            min-height: 34px;
+            border: 1px solid #cbd5e1;
+            border-radius: 10px;
+            background: #f8fafc;
+            padding: 6px 28px 6px 10px;
+            color: #0f172a;
+            font-size: 12px;
+            font-weight: 800;
+            line-height: 1.2;
+            text-transform: uppercase;
+        }
+
+        .gps-order-status-select:disabled {
+            cursor: default;
+            opacity: 1;
+        }
+
         .gps-order-total {
             color: #1e293b;
             font-size: 13px;
@@ -354,8 +375,8 @@
             @php
                 $displayNumber = OrderResource::displayOrderNumber($order);
                 $marketplace = $order->marketplace ?: 'Sklep';
-                $statusLabel = Order::statusOptions()[$order->status] ?? ($order->status ?: '—');
-                $marketplaceStatus = $order->marketplace_status ?: null;
+                $statusOptions = OrderStatusOptions::optionsForOrder($order);
+                $selectedStatus = OrderStatusOptions::selectedValueForOrder($order);
                 $buyerName = $order->customer_name ?: $order->company_name ?: $order->email ?: '—';
                 $phone = $order->phone ?: '—';
                 $total = OrderResource::formatOrderTotal($order);
@@ -406,10 +427,11 @@
                     </div>
 
                     <div class="gps-order-col gps-order-col-status">
-                        <div class="gps-order-value">{{ $statusLabel }}</div>
-                        @if ($marketplaceStatus)
-                            <div class="gps-order-badges"><span class="gps-order-badge gps-order-badge--status">{{ $marketplaceStatus }}</span></div>
-                        @endif
+                        <select class="gps-order-status-select" aria-label="Status zamówienia" disabled>
+                            @foreach ($statusOptions as $value => $label)
+                                <option value="{{ $value }}" @selected($selectedStatus === $value)>{{ $label }}</option>
+                            @endforeach
+                        </select>
                     </div>
 
                     <div class="gps-order-col gps-order-col-buyer">
