@@ -43,47 +43,84 @@
 
         return $part instanceof Part ? \App\Filament\Resources\PartResource::publicProductUrl($part) : null;
     };
-    $normalizeOfferId = function (mixed $value): ?string {
-        $value = trim((string) $value);
-
-        return preg_match('/^\d+$/', $value) === 1 ? $value : null;
-    };
-    $allegroOfferId = function ($item) use ($order, $normalizeOfferId): ?string {
-        $marketplace = Str::lower(trim((string) ($item->marketplace ?: $order->marketplace)));
-        $listing = $item->marketplaceListing;
-
-        if ($listing && Str::lower(trim((string) $listing->marketplace)) === 'allegro') {
-            $id = $normalizeOfferId($listing->external_offer_id) ?: $normalizeOfferId($listing->external_listing_id);
-
-            if ($id !== null) {
-                return $id;
-            }
-        }
-
-        if ($marketplace !== 'allegro') {
+    $normalizeMarketplaceId = function (mixed $value): ?string {
+        if (! is_scalar($value)) {
             return null;
         }
 
-        foreach ([
-            $item->offer_id,
-            data_get($item->raw_payload, 'offer.id'),
-            data_get($item->raw_payload, 'offerId'),
-            data_get($item->raw_payload, 'offer_id'),
-            data_get($item->raw_payload, 'id'),
-            data_get($item->meta, 'offer.id'),
-            data_get($item->meta, 'offerId'),
-            data_get($item->meta, 'offer_id'),
-        ] as $candidate) {
-            $id = $normalizeOfferId($candidate);
+        $value = trim((string) $value);
 
-            if ($id !== null) {
-                return $id;
+        return $value !== '' && ! preg_match('/\s/', $value) ? $value : null;
+    };
+    $normalizeNumericOfferId = function (mixed $value) use ($normalizeMarketplaceId): ?string {
+        $value = $normalizeMarketplaceId($value);
+
+        return $value !== null && preg_match('/^\d+$/', $value) === 1 ? $value : null;
+    };
+    $storedMarketplaceUrl = function (mixed $source): ?string {
+        foreach (['url', 'listing_url', 'external_url', 'shop_url', 'link'] as $field) {
+            $url = trim((string) data_get($source, $field));
+
+            if ($url !== '' && filter_var($url, FILTER_VALIDATE_URL)) {
+                return $url;
+            }
+        }
+
+        foreach (['raw_payload', 'meta'] as $payloadField) {
+            $payload = data_get($source, $payloadField);
+
+            foreach (['url', 'listing_url', 'external_url', 'shop_url', 'link'] as $field) {
+                $url = trim((string) data_get($payload, $field));
+
+                if ($url !== '' && filter_var($url, FILTER_VALIDATE_URL)) {
+                    return $url;
+                }
             }
         }
 
         return null;
     };
-    $allegroOfferUrl = fn (string $offerId): string => 'https://allegro.pl/oferta/'.$offerId;
+    $marketplaceOfferLine = function ($item) use ($order, $normalizeMarketplaceId, $normalizeNumericOfferId, $storedMarketplaceUrl): ?array {
+        $listing = $item->marketplaceListing;
+        $marketplace = Str::lower(trim((string) ($listing?->marketplace ?: $item->marketplace ?: $order->marketplace)));
+        $marketplace = match (true) {
+            str_starts_with($marketplace, 'allegro') => 'allegro',
+            str_starts_with($marketplace, 'ovoko') => 'ovoko',
+            str_starts_with($marketplace, 'ebay') => 'ebay',
+            default => $marketplace,
+        };
+
+        if (! in_array($marketplace, ['allegro', 'ovoko', 'ebay'], true)) {
+            return null;
+        }
+
+        $idNormalizer = $marketplace === 'ovoko' ? $normalizeMarketplaceId : $normalizeNumericOfferId;
+        $id = $listing ? ($idNormalizer($listing->external_offer_id) ?: $idNormalizer($listing->external_listing_id)) : null;
+
+        foreach (['offer_id', 'listing_id', 'external_offer_id', 'external_listing_id', 'marketplace_item_id'] as $field) {
+            $id ??= $idNormalizer($item->{$field} ?? null);
+        }
+
+        foreach ([$item->raw_payload, $item->meta] as $payload) {
+            foreach (['offer.id', 'listing.id', 'item.id', 'offerId', 'listingId', 'offer_id', 'listing_id', 'external_offer_id', 'external_listing_id', 'marketplace_item_id', 'id'] as $field) {
+                $id ??= $idNormalizer(data_get($payload, $field));
+            }
+        }
+
+        if ($id === null) {
+            return null;
+        }
+
+        $url = $listing ? $storedMarketplaceUrl($listing) : null;
+        $url ??= $storedMarketplaceUrl($item);
+        $url ??= match ($marketplace) {
+            'allegro' => 'https://allegro.pl/oferta/'.$id,
+            'ebay' => 'https://www.ebay.com/itm/'.$id,
+            default => null,
+        };
+
+        return ['marketplace' => $marketplace, 'id' => $id, 'url' => $url];
+    };
     $shippingTotalData = app(\App\Support\OrderShippingTotalDisplayResolver::class)->resolve($order);
     $shippingTotal = $shippingTotalData !== null
         ? $formatMoney($shippingTotalData['amount'], $shippingTotalData['currency'])
@@ -189,7 +226,7 @@
                                     $thumb = \App\Support\OrderItemThumbnailDiagnostics::resolve($order, $item);
                                     $thumbPart = $thumb['thumbnail_part'] ?? null;
                                     $productUrl = $publicProductUrl($item);
-                                    $offerId = $allegroOfferId($item);
+                                    $offerLine = $marketplaceOfferLine($item);
                                 @endphp
                                 <div class="gps-order-detail-product">
                                     @if ($thumbPart instanceof Part && $thumb['thumbnail_source'] === 'admin_parts_thumbnail')
@@ -208,8 +245,15 @@
                                             @endif
                                         </div>
                                         <div class="gps-order-detail-muted">Magazyn: {{ $thumb['storage_location'] }}</div>
-                                        @if ($offerId)
-                                            <div class="gps-order-detail-muted">@include('filament.resources.orders.partials.source-wordmark', ['marketplace' => 'allegro']) <a class="gps-order-detail-link" href="{{ $allegroOfferUrl($offerId) }}" target="_blank" rel="noopener noreferrer">{{ $offerId }}</a></div>
+                                        @if ($offerLine)
+                                            <div class="gps-order-detail-muted">
+                                                @include('filament.resources.orders.partials.source-wordmark', ['marketplace' => $offerLine['marketplace']])
+                                                @if ($offerLine['url'])
+                                                    <a class="gps-order-detail-link" href="{{ $offerLine['url'] }}" target="_blank" rel="noopener noreferrer">{{ $offerLine['id'] }}</a>
+                                                @else
+                                                    {{ $offerLine['id'] }}
+                                                @endif
+                                            </div>
                                         @endif
                                     </div>
                                 </div>
