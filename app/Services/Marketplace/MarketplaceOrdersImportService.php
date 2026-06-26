@@ -4,6 +4,7 @@ namespace App\Services\Marketplace;
 
 use App\Models\MarketplaceAccount;
 use App\Models\Order;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -101,7 +102,7 @@ class MarketplaceOrdersImportService
         } elseif ($marketplace === 'ebay') {
             $response = Http::withToken((string) ($credentials['access_token'] ?? ''))->withHeaders(['X-EBAY-C-MARKETPLACE-ID' => (string) (($account->api_settings ?? [])['marketplace_id'] ?? 'EBAY_DE')])->acceptJson()->timeout(25)->get($base.'/sell/fulfillment/v1/order', $query);
         } else {
-            $response = Http::asForm()->acceptJson()->timeout(25)->post($base.'/v2/get/orders?'.http_build_query($query), Arr::only($credentials, ['username', 'password', 'user_token']));
+            return $this->fetchOvokoOrders($base, $credentials, $options, $result);
         }
 
         $payload = is_array($response->json()) ? $response->json() : [];
@@ -113,8 +114,73 @@ class MarketplaceOrdersImportService
         return array_values(array_filter($payload['checkoutForms'] ?? $payload['orders'] ?? $payload['data'] ?? $payload['list'] ?? [], 'is_array'));
     }
 
+    private function fetchOvokoOrders(string $base, array $credentials, array $options, array &$result): array
+    {
+        $dateFrom = $this->dateString($options['date_from'] ?? null) ?? Carbon::today()->toDateString();
+        $dateTo = $this->dateString($options['date_to'] ?? null) ?? Carbon::today()->toDateString();
+        $endpointPath = '/v2/get/orders/'.$dateFrom.'/'.$dateTo;
+        $endpoint = $base.$endpointPath;
+        $authFields = Arr::only($credentials, ['username', 'password', 'user_token']);
+
+        $response = Http::asForm()->acceptJson()->timeout(25)->post($endpoint, $authFields);
+        $json = $response->json();
+        $payload = is_array($json) ? $json : [];
+        $list = $payload['list'] ?? null;
+        $orders = is_array($list) ? array_values(array_filter($list, 'is_array')) : [];
+        $statusCode = $payload['status_code'] ?? null;
+        $msg = $payload['msg'] ?? ($payload['message'] ?? null);
+
+        $result['api_http_status'] = $response->status();
+        $result['ovoko_status_code'] = $statusCode;
+        $result['ovoko_msg'] = $msg;
+
+        if ($options['include_debug'] ?? false) {
+            $result['debug'] = [
+                'api_base_url' => $base,
+                'endpoint_path' => $endpointPath,
+                'request_method' => 'POST',
+                'request_params_sanitized' => ['auth_fields' => array_keys($authFields), 'content_type' => 'form-data'],
+                'date_from_used' => $dateFrom,
+                'date_to_used' => $dateTo,
+                'api_http_status' => $response->status(),
+                'ovoko_status_code' => $statusCode,
+                'ovoko_msg' => $msg,
+                'raw_response_type' => is_array($json) ? 'json_object' : gettype($json),
+                'raw_response_keys' => array_values(array_slice(array_keys($payload), 0, 30)),
+                'raw_list_count' => is_array($list) ? count($list) : null,
+                'mapper_source_key' => 'list',
+                'mapper_items_count' => count($orders),
+                'sample_raw_order_sanitized' => array_map(fn (array $order): array => $this->sanitizePayload($order), array_slice($orders, 0, 2)),
+                'empty_response_reason' => is_array($list) && count($list) === 0 ? 'status_code_R200_but_list_empty' : null,
+            ];
+        }
+
+        if (! $response->successful()) {
+            $result['errors'][] = ['marketplace' => 'ovoko', 'http_status' => $response->status(), 'message' => 'Read-only order endpoint returned non-success HTTP status.'];
+            return [];
+        }
+        if ($statusCode !== 'R200') {
+            $result['warnings'][] = ['marketplace' => 'ovoko', 'code' => 'ovoko_non_success_status_code', 'ovoko_status_code' => $statusCode, 'ovoko_msg' => $msg];
+            return [];
+        }
+        if (! array_key_exists('list', $payload) || ! is_array($list)) {
+            $result['warnings'][] = ['marketplace' => 'ovoko', 'code' => 'ovoko_unrecognized_response_shape', 'ovoko_status_code' => $statusCode, 'ovoko_msg' => $msg];
+            return [];
+        }
+        if (count($list) > 0 && count($orders) === 0) {
+            $result['warnings'][] = ['marketplace' => 'ovoko', 'code' => 'ovoko_mapper_detected_unparsed_items'];
+        } elseif ($orders === []) {
+            $result['warnings'][] = ['marketplace' => 'ovoko', 'code' => 'ovoko_empty_orders_response', 'ovoko_status_code' => $statusCode, 'ovoko_msg' => $msg];
+        }
+
+        return $orders;
+    }
+
     private function normalizeOrder(string $marketplace, array $raw): array
     {
+        if ($marketplace === 'ovoko') {
+            return $this->normalizeOvokoOrder($raw);
+        }
         $buyer = $raw['buyer'] ?? $raw['buyerInfo'] ?? [];
         $delivery = $raw['delivery'] ?? $raw['fulfillmentStartInstructions'][0]['shippingStep'] ?? [];
         $address = $delivery['address'] ?? $raw['shippingAddress'] ?? [];
@@ -141,6 +207,52 @@ class MarketplaceOrdersImportService
             'payment_status' => (string) ($raw['payment']['status'] ?? $raw['paymentSummary']['payments'][0]['paymentStatus'] ?? ''),
             'delivery_method' => (string) ($delivery['method']['name'] ?? $delivery['shippingCarrierCode'] ?? $raw['delivery_method'] ?? ''),
             'items' => array_values(array_filter($items, 'is_array')),
+            'raw_payload' => $raw,
+        ];
+    }
+
+    private function normalizeOvokoOrder(array $raw): array
+    {
+        $items = array_values(array_filter($raw['item_list'] ?? [], 'is_array'));
+        $currency = (string) ($raw['currency'] ?? $raw['total_price_currency'] ?? $raw['price_currency'] ?? 'EUR');
+        return [
+            'marketplace' => 'ovoko',
+            'marketplace_order_id' => (string) ($raw['order_id'] ?? ''),
+            'marketplace_status' => (string) ($raw['order_status'] ?? ''),
+            'ordered_at' => $this->validDateString($raw['order_date'] ?? null),
+            'buyer_name' => (string) ($raw['client_name'] ?? ''),
+            'buyer_email' => (string) ($raw['client_email'] ?? ''),
+            'buyer_phone' => (string) ($raw['client_phone'] ?? ''),
+            'delivery_name' => (string) ($raw['client_name'] ?? ''),
+            'delivery_address' => (string) ($raw['client_address'] ?? $raw['shipping_address'] ?? $raw['delivery_address'] ?? ''),
+            'delivery_postcode' => (string) ($raw['client_postcode'] ?? $raw['shipping_postcode'] ?? $raw['delivery_postcode'] ?? ''),
+            'delivery_city' => (string) ($raw['client_city'] ?? $raw['shipping_city'] ?? $raw['delivery_city'] ?? ''),
+            'delivery_country' => (string) ($raw['client_country'] ?? $raw['shipping_country'] ?? $raw['delivery_country'] ?? ''),
+            'invoice_data' => $raw['invoice'] ?? $raw['company'] ?? null,
+            'currency' => $currency,
+            'total_amount' => (float) ($raw['total_price'] ?? $raw['total_amount'] ?? 0),
+            'delivery_amount' => (float) ($raw['shipping_price'] ?? $raw['delivery_amount'] ?? 0),
+            'payment_status' => (string) ($raw['payment_status'] ?? ''),
+            'payment_method' => (string) ($raw['payment_type'] ?? $raw['payment_method'] ?? ''),
+            'delivery_method' => (string) ($raw['shipping_method'] ?? $raw['delivery_method'] ?? ''),
+            'items' => array_map(fn (array $item, int $idx): array => $this->normalizeOvokoItem($item, (string) ($raw['order_id'] ?? ''), $idx, $currency), $items, array_keys($items)),
+            'raw_payload' => $raw,
+        ];
+    }
+
+    private function normalizeOvokoItem(array $raw, string $orderId, int $idx, string $currency): array
+    {
+        $title = (string) ($raw['title'] ?? $raw['name'] ?? $raw['part_name'] ?? 'Ovoko item');
+        $price = $this->amountValue($raw['price'] ?? $raw['unit_price'] ?? $raw['total_price'] ?? 0);
+        $id = (string) ($raw['item_id'] ?? $raw['id'] ?? $raw['part_id'] ?? $raw['ovoko_part_id'] ?? '');
+        if ($id === '') $id = hash('sha256', $orderId.'|'.$idx.'|'.$title.'|'.$price);
+        return $raw + [
+            'marketplace_item_id' => $id,
+            'title' => $title,
+            'quantity' => (int) ($raw['quantity'] ?? $raw['qty'] ?? 1),
+            'price' => $price,
+            'currency' => (string) ($raw['currency'] ?? $currency),
+            'raw_payload' => $raw,
         ];
     }
 
@@ -191,6 +303,41 @@ class MarketplaceOrdersImportService
         return strtotime($value) === false ? null : $value;
     }
 
+    private function dateString(mixed $value): ?string
+    {
+        if (! is_string($value) || trim($value) === '') return null;
+        try {
+            return Carbon::parse($value)->toDateString();
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    private function sanitizePayload(array $payload): array
+    {
+        $secretKeys = ['password', 'token', 'user_token', 'access_token', 'refresh_token', 'authorization'];
+        $sanitized = [];
+        foreach ($payload as $key => $value) {
+            $lower = strtolower((string) $key);
+            if (in_array($lower, $secretKeys, true) || str_contains($lower, 'token') || str_contains($lower, 'password')) {
+                $sanitized[$key] = '[redacted]';
+            } elseif (is_array($value)) {
+                $sanitized[$key] = $this->sanitizePayload($value);
+            } else {
+                $sanitized[$key] = $value;
+            }
+        }
+        return $sanitized;
+    }
+
+    private function amountValue(mixed $value): float
+    {
+        if (is_array($value)) {
+            return (float) ($value['amount'] ?? $value['value'] ?? 0);
+        }
+        return is_numeric($value) ? (float) $value : 0.0;
+    }
+
     private function upsertOrder(array $n, array $raw, array &$result): void
     {
         DB::transaction(function () use ($n, $raw, &$result): void {
@@ -212,13 +359,13 @@ class MarketplaceOrdersImportService
 
     private function upsertItem(Order $order, array $raw, int $idx, array &$result): void
     {
-        $id = (string) ($raw['id'] ?? $raw['lineItemId'] ?? $raw['item_id'] ?? $idx);
+        $id = (string) ($raw['marketplace_item_id'] ?? $raw['id'] ?? $raw['lineItemId'] ?? $raw['item_id'] ?? $idx);
         $price = $raw['price'] ?? $raw['unitPrice'] ?? $raw['lineItemCost'] ?? [];
         $qty = (int) ($raw['quantity'] ?? $raw['quantityPurchased'] ?? 1);
-        $unit = (float) ($price['amount'] ?? $price['value'] ?? $raw['unit_price'] ?? 0);
+        $unit = $this->amountValue($price ?: ($raw['unit_price'] ?? 0));
         $item = $order->items()->firstOrNew(['marketplace' => $order->marketplace, 'marketplace_order_id' => $order->marketplace_order_id, 'marketplace_item_id' => $id]);
         $created = ! $item->exists;
-        $item->fill(['product_name' => (string) ($raw['offer']['name'] ?? $raw['title'] ?? $raw['legacyItemId'] ?? 'Marketplace item'), 'sku' => (string) ($raw['offer']['external']['id'] ?? $raw['sku'] ?? ''), 'offer_id' => (string) ($raw['offer']['id'] ?? $raw['legacyItemId'] ?? ''), 'external_product_id' => (string) ($raw['productId'] ?? ''), 'unit_price' => $unit, 'quantity' => max(1, $qty), 'line_total' => (float) ($raw['total_price'] ?? ($unit * max(1, $qty))), 'currency' => (string) ($price['currency'] ?? $order->currency), 'raw_payload' => $raw])->save();
+        $item->fill(['product_name' => (string) ($raw['offer']['name'] ?? $raw['title'] ?? $raw['name'] ?? $raw['legacyItemId'] ?? 'Marketplace item'), 'sku' => (string) ($raw['offer']['external']['id'] ?? $raw['sku'] ?? ''), 'offer_id' => (string) ($raw['offer']['id'] ?? $raw['part_id'] ?? $raw['ovoko_part_id'] ?? $raw['legacyItemId'] ?? ''), 'external_product_id' => (string) ($raw['productId'] ?? ''), 'unit_price' => $unit, 'quantity' => max(1, $qty), 'line_total' => $this->amountValue($raw['total_price'] ?? ($unit * max(1, $qty))), 'currency' => (string) ($raw['currency'] ?? (is_array($price) ? ($price['currency'] ?? null) : null) ?? $order->currency), 'raw_payload' => $raw['raw_payload'] ?? $raw])->save();
         $created ? $result['items_created']++ : $result['items_updated']++;
     }
 
@@ -227,5 +374,5 @@ class MarketplaceOrdersImportService
     private function localStatus(string $status): string { return str_contains(strtolower($status), 'cancel') ? 'cancelled' : (str_contains(strtolower($status), 'complete') ? 'completed' : 'new'); }
     private function emptySummary(array $o, bool $dry): array { return ['ok'=>true,'marketplace'=>$o['marketplace'] ?? 'all','dry_run'=>$dry,'date_from'=>$o['date_from'] ?? null,'date_to'=>$o['date_to'] ?? null,'orders_fetched'=>0,'orders_created'=>0,'orders_updated'=>0,'orders_skipped'=>0,'items_created'=>0,'items_updated'=>0,'errors'=>[],'warnings'=>[],'marketplaces'=>[],'safety_flags'=>$this->flags($dry)]; }
     private function emptyMarketplaceSummary(string $m, array $o, bool $dry): array { return ['marketplace'=>$m,'dry_run'=>$dry,'date_from'=>$o['date_from'] ?? null,'date_to'=>$o['date_to'] ?? null,'orders_fetched'=>0,'orders_created'=>0,'orders_updated'=>0,'orders_skipped'=>0,'items_created'=>0,'items_updated'=>0,'errors'=>[],'warnings'=>[],'would_import'=>[],'safety_flags'=>$this->flags($dry)]; }
-    private function flags(bool $dry): array { return ['read_only'=>$dry,'orders_changed'=>! $dry,'products_changed'=>false,'offers_changed'=>false,'mappings_changed'=>false,'parts_changed'=>false,'allegro_write'=>false,'ovoko_write'=>false,'ebay_write'=>false]; }
+    private function flags(bool $dry): array { return ['read_only'=>$dry,'orders_changed'=>! $dry,'products_changed'=>false,'parts_changed'=>false,'offers_changed'=>false,'listings_changed'=>false,'stock_changed'=>false,'prices_changed'=>false,'mappings_changed'=>false,'allegro_write'=>false,'ovoko_write'=>false,'ebay_write'=>false]; }
 }
