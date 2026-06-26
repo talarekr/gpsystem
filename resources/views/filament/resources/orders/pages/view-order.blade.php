@@ -38,22 +38,10 @@
         ? number_format((float) $amount, 2, ',', ' ').' '.($moneyCurrency ?: $currency)
         : '—';
     $productLines = $order->items->map(fn ($item): string => $formatMoney($item->line_total, $item->currency ?: $currency));
-    $shippingAmountCandidates = [
-        data_get($order->raw_payload, 'summary.delivery.amount'),
-        data_get($order->raw_payload, 'summary.delivery.value'),
-        data_get($order->raw_payload, 'pricingSummary.deliveryCost.amount'),
-        data_get($order->raw_payload, 'pricingSummary.deliveryCost.value'),
-        data_get($order->raw_payload, 'deliveryCost.amount'),
-        data_get($order->raw_payload, 'deliveryCost.value'),
-        data_get($order->raw_payload, 'shipping_price.seller.amount'),
-        data_get($order->raw_payload, 'shipping_price.buyer.amount'),
-        data_get($order->raw_payload, 'delivery_amount'),
-    ];
-    $rawShippingAmount = collect($shippingAmountCandidates)->first(fn ($value) => $value !== null && $value !== '' && is_numeric($value));
-    $hasLocalShippingTotal = $order->shipping_total !== null && (float) $order->shipping_total > 0;
-    $shippingTotal = $rawShippingAmount !== null
-        ? $formatMoney($rawShippingAmount)
-        : ($hasLocalShippingTotal ? $formatMoney($order->shipping_total) : '—');
+    $shippingTotalData = app(\App\Support\OrderShippingTotalDisplayResolver::class)->resolve($order);
+    $shippingTotal = $shippingTotalData !== null
+        ? $formatMoney($shippingTotalData['amount'], $shippingTotalData['currency'])
+        : '—';
     $technicalItems = array_filter([
         'Status marketplace' => $order->marketplace_status,
         'TEST IMPORT' => $order->test_import ? 'Tak' : null,
