@@ -209,7 +209,7 @@
                                         </div>
                                         <div class="gps-order-detail-muted">Magazyn: {{ $thumb['storage_location'] }}</div>
                                         @if ($offerId)
-                                            <div class="gps-order-detail-muted">Allegro: <a class="gps-order-detail-link" href="{{ $allegroOfferUrl($offerId) }}" target="_blank" rel="noopener noreferrer">{{ $offerId }}</a></div>
+                                            <div class="gps-order-detail-muted">@include('filament.resources.orders.partials.source-wordmark', ['marketplace' => 'allegro']) <a class="gps-order-detail-link" href="{{ $allegroOfferUrl($offerId) }}" target="_blank" rel="noopener noreferrer">{{ $offerId }}</a></div>
                                         @endif
                                     </div>
                                 </div>
@@ -233,7 +233,7 @@
                         <div class="gps-order-detail-value">{{ $shippingTotal }}</div>
                     </div>
                     <div class="gps-order-detail-fact">
-                        <div class="gps-order-detail-label">Suma z kosztami wysyłki</div>
+                        <div class="gps-order-detail-label">Suma</div>
                         <div class="gps-order-detail-value">{{ $total }}</div>
                     </div>
                 </div>
