@@ -32,71 +32,17 @@ class OrderResource extends Resource
     public static function table(Table $table): Table
     {
         return $table->columns([
-            Tables\Columns\ViewColumn::make('order_number')
-                ->label('Numer zamówienia')
-                ->view('filament.resources.orders.table-order-number')
+            Tables\Columns\ViewColumn::make('order_card')
+                ->label('Zamówienie')
+                ->view('filament.resources.orders.table-order-card')
                 ->viewData(fn (Order $record): array => ['order' => $record])
-                ->searchable()
-                ->sortable()
-                ->extraHeaderAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-number'])
-                ->extraCellAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-number']),
-            Tables\Columns\TextColumn::make('ordered_at')
-                ->label('Data sprzedaży')
-                ->dateTime('Y-m-d H:i')
-                ->placeholder('—')
-                ->sortable()
-                ->extraHeaderAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-date'])
-                ->extraCellAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-date']),
-            Tables\Columns\TextColumn::make('marketplace')
-                ->label('Marketplace')
-                ->badge()
-                ->placeholder('sklep')
-                ->sortable()
-                ->size('xs')
-                ->extraHeaderAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-marketplace'])
-                ->extraCellAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-marketplace']),
-            Tables\Columns\TextColumn::make('marketplace_status')
-                ->label('Status marketplace')
-                ->badge()
-                ->placeholder('—')
-                ->size('xs')
-                ->extraHeaderAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-marketplace-status'])
-                ->extraCellAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-marketplace-status']),
-            Tables\Columns\TextColumn::make('total')
-                ->label('Kwota')
-                ->state(fn (Order $record): string => self::formatOrderTotal($record))
-                ->sortable()
-                ->alignEnd()
-                ->extraHeaderAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-total'])
-                ->extraCellAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-total']),
-            Tables\Columns\ViewColumn::make('buyer_details')
-                ->label('Dane kupującego')
-                ->view('filament.resources.orders.table-buyer')
-                ->viewData(fn (Order $record): array => ['order' => $record])
-                ->searchable(['customer_name', 'phone', 'company_name'])
-                ->extraHeaderAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-buyer'])
-                ->extraCellAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-buyer']),
-            Tables\Columns\TextColumn::make('status')
-                ->label('Status')
-                ->formatStateUsing(fn (string $state): string => Order::statusOptions()[$state] ?? $state)
-                ->badge()
-                ->size('xs')
-                ->extraHeaderAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-status'])
-                ->extraCellAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-status']),
-            Tables\Columns\TextColumn::make('source_batch')->label('Batch')->toggleable(isToggledHiddenByDefault: true)
-                ->extraHeaderAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-source-batch'])
-                ->extraCellAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-source-batch']),
-            Tables\Columns\TextColumn::make('email')->label('E-mail')->searchable()->toggleable(isToggledHiddenByDefault: true)
-                ->extraHeaderAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-email'])
-                ->extraCellAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-email']),
+                ->searchable(['order_number', 'marketplace_order_id', 'customer_name', 'phone', 'company_name', 'email'])
+                ->sortable(['ordered_at']),
         ])->filters([
-            Tables\Filters\SelectFilter::make('marketplace')->label('Marketplace')->options(['allegro' => 'Allegro', 'ebay' => 'eBay', 'ovoko' => 'Ovoko']),
+            Tables\Filters\SelectFilter::make('marketplace')->label('Marketplace')->options(['allegro' => 'Allegro', 'ebay' => 'eBay', 'ovoko' => 'Ovoko', 'sklep' => 'Sklep']),
             Tables\Filters\SelectFilter::make('status')->label('Status')->options(Order::statusOptions()),
             Tables\Filters\TernaryFilter::make('test_import')->label('TEST IMPORT'),
             Tables\Filters\SelectFilter::make('source_batch')->label('Batch źródłowy')->options(fn (): array => Order::query()->whereNotNull('source_batch')->distinct()->pluck('source_batch', 'source_batch')->all()),
-        ])->actions([
-            Tables\Actions\ViewAction::make()->label('Szczegóły'),
-            Tables\Actions\EditAction::make()->label('Zmień status'),
         ])->defaultSort('ordered_at', 'desc');
     }
 
