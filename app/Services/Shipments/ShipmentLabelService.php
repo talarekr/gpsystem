@@ -70,6 +70,7 @@ class ShipmentLabelService
         $missing = $this->missing($sender, 'sender', ['name', 'address', 'postal_code', 'city', 'country', 'phone', 'email']);
         $missing = array_merge($missing, $this->missing($receiver, 'receiver', ['name', 'address', 'postal_code', 'city', 'country', 'phone', 'email']));
         $missing = array_merge($missing, $this->missing($this->carrierConfig($carrier), $carrier, ['account_number', 'login']));
+        $invalid = $this->invalid($sender, 'sender');
 
         $request = [
             'carrier' => $carrier,
@@ -99,7 +100,7 @@ class ShipmentLabelService
         return [
             'carrier' => $carrier,
             'mode' => $confirm ? 'confirm' : 'dry-run',
-            'validation' => ['ok' => $missing === [], 'missing' => $missing],
+            'validation' => ['ok' => $missing === [] && $invalid === [], 'missing' => $missing, 'invalid' => $invalid],
             'configuration' => ['ok' => count(array_filter($this->missing($this->carrierConfig($carrier), $carrier, ['account_number', 'login']))) === 0],
             'debug' => $this->debugConfiguration($carrier, $sender, $receiver),
             'sender_snapshot' => $sender,
@@ -142,14 +143,27 @@ class ShipmentLabelService
             'debug' => [
                 'receiver_address_source' => $parse['source'],
                 'receiver_address_parse_used' => $parse['used'],
+                'receiver_address_parse_pattern' => $parse['pattern'],
                 'receiver_address_parse_warning' => $parse['warning'],
+                'receiver_country_detected_from_address' => $parse['country_detected_from_address'],
             ],
         ];
     }
 
     protected function parseImportedReceiverAddress(?string $address, ?string $postalCode, ?string $city, ?string $country): array
     {
-        $result = ['used' => false, 'source' => 'order.address_line1', 'warning' => null, 'address' => $address, 'postal_code' => $postalCode, 'city' => $city, 'country' => $country ?: 'PL'];
+        $result = [
+            'used' => false,
+            'source' => 'order.address_line1',
+            'pattern' => null,
+            'warning' => null,
+            'address' => $address,
+            'postal_code' => $postalCode,
+            'city' => $city,
+            'country' => $country ?: 'PL',
+            'country_detected_from_address' => false,
+        ];
+
         $needsFallback = filled($address) && (blank($postalCode) || $postalCode === '-' || blank($city) || $city === '-');
         if (! $needsFallback || ! str_contains((string) $address, ',')) {
             return $result;
@@ -162,19 +176,32 @@ class ShipmentLabelService
         }
 
         $last = array_pop($segments);
-        if (! preg_match('/^([A-Z]{2})-(\d{2}-\d{3})$/i', $last, $matches)) {
+        if (! preg_match('/^([A-Z]{2})-([A-Z0-9][A-Z0-9 -]{1,15})$/i', $last, $matches)) {
             $result['warning'] = 'Address fallback skipped: last segment is not COUNTRY-POSTAL_CODE.';
             return $result;
         }
 
         $parsedCity = array_pop($segments);
+        $pattern = count($segments) === 2 && preg_match('/^\d+[\pL\pN\s\/-]*$/u', $segments[1])
+            ? 'street_number_city_country_postal'
+            : 'address_city_country_postal';
         $parsedAddress = trim(implode(' ', $segments));
         if ($parsedAddress === '' || $parsedCity === '') {
             $result['warning'] = 'Address fallback skipped: parsed street or city is empty.';
             return $result;
         }
 
-        return ['used' => true, 'source' => 'order.address_line1_fallback', 'warning' => null, 'address' => $parsedAddress, 'postal_code' => $matches[2], 'city' => $parsedCity, 'country' => strtoupper($matches[1])];
+        return [
+            'used' => true,
+            'source' => 'order.address_line1_fallback',
+            'pattern' => $pattern,
+            'warning' => null,
+            'address' => $parsedAddress,
+            'postal_code' => trim($matches[2]),
+            'city' => $parsedCity,
+            'country' => strtoupper($matches[1]),
+            'country_detected_from_address' => true,
+        ];
     }
 
     protected function carrierConfig(string $carrier): array
@@ -209,13 +236,37 @@ class ShipmentLabelService
             'config_cache_hint' => app()->configurationIsCached() ? 'Configuration is cached; run php artisan config:clear && php artisan config:cache after .env changes.' : 'Configuration is not cached in this runtime.',
             'receiver_address_source' => $receiver['debug']['receiver_address_source'] ?? null,
             'receiver_address_parse_used' => $receiver['debug']['receiver_address_parse_used'] ?? false,
+            'receiver_address_parse_pattern' => $receiver['debug']['receiver_address_parse_pattern'] ?? null,
             'receiver_address_parse_warning' => $receiver['debug']['receiver_address_parse_warning'] ?? null,
+            'receiver_country_detected_from_address' => $receiver['debug']['receiver_country_detected_from_address'] ?? false,
         ];
     }
 
     protected function missing(array $data, string $prefix, array $keys): array
     {
         return collect($keys)->filter(fn ($key) => blank($data[$key] ?? null))->map(fn ($key) => "$prefix.$key")->values()->all();
+    }
+
+    protected function invalid(array $sender, string $prefix): array
+    {
+        return $this->isInvalidSenderPhone($sender['phone'] ?? null) ? ["$prefix.phone"] : [];
+    }
+
+    protected function isInvalidSenderPhone(mixed $phone): bool
+    {
+        $value = trim((string) $phone);
+        if ($value === '') {
+            return false;
+        }
+
+        $normalized = Str::upper(preg_replace('/[^\pL\pN]+/u', '', $value) ?? '');
+        if (in_array($normalized, ['TELEFON', 'PHONE', 'TEL', '123', '123456', '000000000'], true)) {
+            return true;
+        }
+
+        $digits = preg_replace('/\D+/', '', $value) ?? '';
+
+        return strlen($digits) < 7 || preg_match('/^(\d)\1+$/', $digits) === 1;
     }
 
     protected function createCarrierShipment(string $carrier, array $payload): array
