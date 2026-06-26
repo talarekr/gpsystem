@@ -3,19 +3,23 @@
 namespace App\Filament\Resources\PartResource\Pages;
 
 use App\Filament\Resources\PartResource;
+use Filament\Actions;
+use Filament\Resources\Pages\ListRecords;
 use Illuminate\Database\Eloquent\Builder;
 
-class PartsToList extends ListParts
+class PartsToList extends ListRecords
 {
+    protected static string $resource = PartResource::class;
+
     protected static ?string $title = 'Części do wystawienia';
 
-    protected function basePartsQuery(): Builder
+    protected function getHeaderActions(): array
     {
-        return PartResource::adminPartsToListQuery();
+        return [Actions\CreateAction::make()->label('Dodaj część')];
     }
 
-    public function getListContextBadge(): ?string
+    protected function getTableQuery(): ?Builder
     {
-        return 'Do wystawienia';
+        return PartResource::adminPartsToListQuery();
     }
 }
