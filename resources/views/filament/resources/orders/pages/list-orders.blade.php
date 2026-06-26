@@ -354,7 +354,7 @@
 
     <div class="gps-orders-list">
         <div class="gps-orders-list-header gps-admin-orders-grid">
-            <div>Sprzedana część</div>
+            <div>Produkt</div>
             <div>Numer zamówienia</div>
             <div>Kwota</div>
             <div>Klient</div>
