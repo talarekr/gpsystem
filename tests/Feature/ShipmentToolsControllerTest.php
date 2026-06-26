@@ -152,6 +152,63 @@ class ShipmentToolsControllerTest extends TestCase
         ], $overrides));
     }
 
+
+    public function test_allegro_shipment_preview_is_read_only_and_builds_create_command_payload(): void
+    {
+        config([
+            'services.shipments.sender.name' => 'GPS Sender',
+            'services.shipments.sender.address' => 'Nadawcza 1',
+            'services.shipments.sender.postal_code' => '08-460',
+            'services.shipments.sender.city' => 'Sobolew',
+            'services.shipments.sender.country' => 'PL',
+            'services.shipments.sender.phone' => '+48123123123',
+            'services.shipments.sender.email' => 'sender@example.test',
+        ]);
+
+        $order = Order::query()->create($this->orderAttributes([
+            'id' => 50,
+            'marketplace' => 'allegro',
+            'marketplace_order_id' => 'checkout-123',
+            'customer_name' => 'Jan Kupujący',
+            'email' => 'masked@allegromail.pl',
+            'phone' => '500600700',
+            'address_line1' => 'Odbiorcza 2',
+            'postal_code' => '00-001',
+            'city' => 'Warszawa',
+            'country' => 'PL',
+            'currency' => 'PLN',
+            'total' => 123.45,
+            'raw_payload' => [
+                'buyer' => ['email' => 'abc+123@allegromail.pl'],
+                'delivery' => [
+                    'method' => ['id' => 'method-1', 'name' => 'Allegro Paczkomaty InPost'],
+                    'shippingCarrierCode' => 'INPOST',
+                    'cost' => ['amount' => '12.34', 'currency' => 'PLN'],
+                    'address' => ['firstName' => 'Jan', 'lastName' => 'Kupujący', 'street' => 'Odbiorcza 2', 'zipCode' => '00-001', 'city' => 'Warszawa', 'countryCode' => 'PL', 'phoneNumber' => '500600700'],
+                    'pickupPoint' => ['id' => 'ADA01N', 'name' => 'Paczkomat ADA01N', 'address' => ['street' => 'Punktowa 3']],
+                ],
+                'payment' => ['type' => 'CASH_ON_DELIVERY'],
+                'summary' => ['totalToPay' => ['amount' => '123.45', 'currency' => 'PLN']],
+            ],
+        ]));
+
+        $response = $this->getJson('/tools/debug-allegro-shipment-preview?order_id='.$order->id);
+
+        $response->assertOk()
+            ->assertJsonPath('read_only', true)
+            ->assertJsonPath('allegro_write', false)
+            ->assertJsonPath('shipment_created', false)
+            ->assertJsonPath('label_created', false)
+            ->assertJsonPath('pickup_ordered', false)
+            ->assertJsonPath('marketplace_write', false)
+            ->assertJsonPath('audit.order.marketplace_order_id', 'checkout-123')
+            ->assertJsonPath('audit.pickup_point.id', 'ADA01N')
+            ->assertJsonPath('audit.delivery_method.is_pickup_point', true)
+            ->assertJsonPath('payload_preview.endpoint', 'POST /shipment-management/shipments/create-commands')
+            ->assertJsonPath('payload_preview.will_send', false)
+            ->assertJsonPath('payload_preview.body.input.receiver.point', 'ADA01N');
+    }
+
     private function orderAttributes(array $overrides = []): array
     {
         return array_merge([
