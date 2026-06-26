@@ -8,7 +8,6 @@
     $order = $record;
     $order->loadMissing(['items.part.images', 'items.part.storageLocation', 'items.marketplaceListing.part.images', 'items.marketplaceListing.part.storageLocation', 'shipments']);
 
-    $displayNumber = OrderResource::displayOrderNumber($order);
     $externalOrderId = trim((string) ($order->marketplace_order_id ?: $order->order_number));
     $marketplace = trim((string) $order->marketplace) ?: 'Sklep';
     $orderedAt = $order->ordered_at ? $order->ordered_at->format('Y-m-d H:i') : '—';
@@ -47,7 +46,6 @@
         .gps-order-detail { display: grid; gap: 18px; }
         .gps-order-detail-card { background: #fff; border: 1px solid rgba(148, 163, 184, .22); border-radius: 22px; box-shadow: 0 14px 36px rgba(15, 23, 42, .06); padding: 22px; width: 100%; }
         .gps-order-detail-summary { display: block; }
-        .gps-order-detail-title { color: #0f172a; font-size: 24px; font-weight: 800; letter-spacing: -.02em; margin: 0 0 22px; }
         .gps-order-detail-muted { color: #64748b; font-size: 13px; line-height: 1.45; }
         .gps-order-detail-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 28px; align-items: start; }
         .gps-order-detail-fact { min-width: 0; }
@@ -55,7 +53,27 @@
         .gps-order-detail-value { color: #0f172a; font-size: 13px; font-weight: 400; line-height: 1.45; overflow-wrap: anywhere; }
         .gps-order-detail-date { color: #64748b; font-size: 12px; line-height: 1.45; }
         .gps-order-detail-source-row { color: #475569; font-size: 13px; line-height: 1.45; margin-top: 3px; }
-        .gps-order-status-select { width: 100%; max-width: 190px; appearance: none; border: 1px solid #cbd5e1; border-radius: 999px; background: #fff; color: #0f172a; font-weight: 800; font-size: 13px; padding: 8px 34px 8px 14px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M6 8l4 4 4-4' stroke='%23334155' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; background-size: 16px; }
+        .gps-order-status-select {
+            width: 100%;
+            max-width: 150px;
+            min-height: 34px;
+            border: 1px solid #cbd5e1;
+            border-radius: 10px;
+            appearance: none;
+            -webkit-appearance: none;
+            background-color: #fff;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M6 8l4 4 4-4' stroke='%23334155' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 8px center;
+            background-size: 14px 14px;
+            padding: 6px 28px 6px 10px;
+            color: #0f172a;
+            font-size: 12px;
+            font-weight: 400;
+            line-height: 1.2;
+            text-transform: uppercase;
+        }
+        .gps-order-status-select::-ms-expand { display: none; }
         .gps-order-detail-section-title { color: #0f172a; font-size: 17px; font-weight: 800; margin: 0 0 14px; }
         .gps-order-detail-items { display: grid; gap: 12px; }
         .gps-order-detail-item { display: grid; grid-template-columns: 74px minmax(0, 1fr) auto; gap: 16px; align-items: center; border: 1px solid #e2e8f0; border-radius: 18px; padding: 14px; background: #fff; }
@@ -75,7 +93,6 @@
 
     <div class="gps-order-detail">
         <section class="gps-order-detail-card gps-order-detail-summary">
-            <h1 class="gps-order-detail-title">Zamówienie #{{ $order->id }}</h1>
             <div class="gps-order-detail-grid">
                 <div class="gps-order-detail-fact">
                     <div class="gps-order-detail-label">Status</div>
