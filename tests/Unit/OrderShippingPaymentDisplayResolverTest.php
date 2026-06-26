@@ -24,6 +24,24 @@ class OrderShippingPaymentDisplayResolverTest extends TestCase
         $this->assertSame('Pobranie', $lines['payment']);
     }
 
+
+    public function test_allegro_cash_on_delivery_listing_and_detail_share_payment_logic_with_detail_amount(): void
+    {
+        $order = new Order([
+            'marketplace' => 'allegro',
+            'currency' => 'PLN',
+            'total' => '60.00',
+            'raw_payload' => [
+                'payment' => ['type' => 'CASH_ON_DELIVERY'],
+            ],
+        ]);
+
+        $resolver = app(OrderShippingPaymentDisplayResolver::class);
+
+        $this->assertSame('Pobranie', $resolver->resolve($order)['payment']);
+        $this->assertSame('Pobranie · 60,00 PLN', $resolver->resolve($order, includeAmount: true)['payment']);
+    }
+
     public function test_allegro_cash_on_delivery_detail_includes_local_total_when_snapshot_amount_is_missing(): void
     {
         $order = new Order([

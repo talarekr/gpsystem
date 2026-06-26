@@ -440,8 +440,8 @@
 
                     <div class="gps-order-col gps-order-col-shipping">
                         @if ($shippingPaymentLines !== [])
-                            @foreach ($shippingPaymentLines as $index => $line)
-                                <div class="{{ $index === 0 ? 'gps-order-value' : 'gps-order-muted' }} {{ $line === 'Zapłacono' ? 'gps-order-payment-paid' : '' }}">{{ $line }}</div>
+                            @foreach ($shippingPaymentLines as $line)
+                                <div class="{{ $loop->first ? 'gps-order-value' : 'gps-order-muted' }} {{ $line === 'Zapłacono' ? 'gps-order-payment-paid' : '' }}">{{ $line }}</div>
                             @endforeach
                         @elseif ($shipment || $carrier)
                             <div class="gps-order-value">{{ $carrier ?: '—' }}</div>
