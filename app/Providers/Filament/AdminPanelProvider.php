@@ -69,6 +69,7 @@ class AdminPanelProvider extends PanelProvider
             ->path('admin')
             ->login()
             ->brandName('GPS Product Hub')
+            ->breadcrumbs(false)
             ->renderHook(
                 'panels::head.end',
                 fn (): string => Blade::render('@include(\'filament.admin-ui-refinements\')'),
