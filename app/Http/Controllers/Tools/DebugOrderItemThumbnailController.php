@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Tools;
 
 use App\Http\Controllers\Controller;
+use App\Models\MarketplaceListing;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Part;
@@ -67,8 +68,8 @@ class DebugOrderItemThumbnailController extends Controller
     private function itemPayload(Order $order, OrderItem $item): array
     {
         $debug = OrderItemThumbnailDiagnostics::resolve($order, $item);
-        $listing = $item->marketplaceListing;
-        $part = $item->part ?: $listing?->part;
+        $listing = $debug['listing_id'] ? MarketplaceListing::query()->with(['part.images', 'part.storageLocation'])->find($debug['listing_id']) : null;
+        $part = $debug['part_id'] ? Part::query()->with(['images', 'storageLocation'])->find($debug['part_id']) : null;
         $firstImage = $part?->primaryImage();
 
         return [
