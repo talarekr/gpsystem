@@ -98,7 +98,7 @@ class ListOrders extends Page
         $sortDirection = strtolower($this->sortDirection) === 'asc' ? 'asc' : 'desc';
 
         return Order::query()
-            ->with(['items', 'shipments'])
+            ->with(['items.part.images', 'items.part.storageLocation', 'items.marketplaceListing.part.images', 'items.marketplaceListing.part.storageLocation', 'shipments'])
             ->when(filled($this->search), function (Builder $query): void {
                 $search = trim($this->search);
 
