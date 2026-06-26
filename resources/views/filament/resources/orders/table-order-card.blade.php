@@ -410,8 +410,8 @@
 
             <div class="gps-admin-order-card__section gps-admin-order-col gps-admin-order-col-shipping">
                 @if($shippingPaymentLines !== [])
-                    @foreach($shippingPaymentLines as $index => $line)
-                        <div class="{{ $index === 0 ? 'gps-admin-order-card__value' : 'gps-admin-order-card__muted' }} {{ $line === 'Zapłacono' ? 'gps-admin-order-card__payment-paid' : '' }}">{{ $line }}</div>
+                    @foreach($shippingPaymentLines as $line)
+                        <div class="{{ $loop->first ? 'gps-admin-order-card__value' : 'gps-admin-order-card__muted' }} {{ $line === 'Zapłacono' ? 'gps-admin-order-card__payment-paid' : '' }}">{{ $line }}</div>
                     @endforeach
                 @elseif($shipment)
                     <div class="gps-admin-order-card__value">{{ $carrier ?: '—' }}</div>

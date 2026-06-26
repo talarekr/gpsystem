@@ -227,10 +227,10 @@ class OrderShippingPaymentDisplayResolver
 
     private function compactLines(?string $payment, ?string $delivery): array
     {
-        return array_values(array_filter([
+        return array_filter([
             'payment' => $this->blankToNull($payment),
             'delivery' => $this->blankToNull($delivery),
-        ], fn (?string $value): bool => $value !== null));
+        ], fn (?string $value): bool => $value !== null);
     }
 
     private function firstFilled(array $values): ?string
