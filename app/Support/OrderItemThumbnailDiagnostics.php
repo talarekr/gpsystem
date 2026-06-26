@@ -3,6 +3,7 @@
 namespace App\Support;
 
 use App\Models\Order;
+use App\Models\MarketplaceListing;
 use App\Models\OrderItem;
 use Illuminate\Support\Arr;
 
@@ -43,7 +44,7 @@ class OrderItemThumbnailDiagnostics
         $listingPart = null;
 
         if ($item !== null) {
-            $listing = $item->relationLoaded('marketplaceListing') ? $item->marketplaceListing : $item->marketplaceListing()->first();
+            $listing = self::resolveListing($order, $item);
             $localPart = $item->relationLoaded('part') ? $item->part : $item->part()->first();
         }
 
@@ -98,10 +99,85 @@ class OrderItemThumbnailDiagnostics
             'storage_location_source' => $storageLocationSource,
             'local_part_id' => $localPart?->id,
             'marketplace_listing_part_id' => $listingPart?->id,
+            'resolved_listing_external_offer_id' => $listing?->external_offer_id,
+            'resolved_listing_external_listing_id' => $listing?->external_listing_id,
+            'resolved_listing_sku' => $listing?->sku,
+            'resolved_listing_title' => $listing?->title,
             'local_part_image_url_present' => filled($localPartImageUrl),
             'marketplace_listing_part_image_url_present' => filled($listingPartImageUrl),
             'marketplace_snapshot_image_url_present' => filled($snapshotImageUrl),
         ];
+    }
+
+
+    private static function resolveListing(?Order $order, OrderItem $item): ?MarketplaceListing
+    {
+        if (self::marketplace($order, $item) === 'ovoko') {
+            $listing = self::resolveOvokoListingByExternalOfferId($order, $item);
+
+            if ($listing !== null) {
+                return $listing;
+            }
+        }
+
+        return $item->relationLoaded('marketplaceListing')
+            ? $item->marketplaceListing
+            : $item->marketplaceListing()->first();
+    }
+
+    private static function resolveOvokoListingByExternalOfferId(?Order $order, OrderItem $item): ?MarketplaceListing
+    {
+        $externalOfferIds = self::ovokoExternalOfferIdCandidates($order, $item);
+
+        if ($externalOfferIds === []) {
+            return null;
+        }
+
+        $orderSql = 'CASE external_offer_id '.implode(' ', array_fill(0, count($externalOfferIds), 'WHEN ? THEN ?')).' ELSE '.count($externalOfferIds).' END';
+        $orderBindings = [];
+        foreach ($externalOfferIds as $index => $externalOfferId) {
+            $orderBindings[] = $externalOfferId;
+            $orderBindings[] = $index;
+        }
+
+        return MarketplaceListing::query()
+            ->with(['part.images', 'part.storageLocation'])
+            ->where('marketplace', 'ovoko')
+            ->whereIn('external_offer_id', $externalOfferIds)
+            ->orderByRaw($orderSql, $orderBindings)
+            ->first();
+    }
+
+    /** @return array<int, string> */
+    private static function ovokoExternalOfferIdCandidates(?Order $order, OrderItem $item): array
+    {
+        $values = [$item->marketplace_item_id];
+
+        foreach ([$item->raw_payload, $item->meta, $order?->raw_payload] as $payload) {
+            $rawItems = data_get($payload, 'item_list');
+
+            if (! is_array($rawItems)) {
+                continue;
+            }
+
+            foreach ($rawItems as $rawItem) {
+                if (is_array($rawItem)) {
+                    $values[] = $rawItem['id'] ?? null;
+                }
+            }
+        }
+
+        return array_values(array_unique(array_filter(
+            array_map(fn ($value): string => trim((string) $value), $values),
+            fn (string $value): bool => $value !== ''
+        )));
+    }
+
+    private static function marketplace(?Order $order, OrderItem $item): ?string
+    {
+        $marketplace = $item->marketplace ?: $order?->marketplace;
+
+        return is_string($marketplace) ? strtolower($marketplace) : null;
     }
 
     public static function attribute(array $debug): string
