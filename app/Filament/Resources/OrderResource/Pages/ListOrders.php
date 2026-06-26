@@ -5,7 +5,9 @@ namespace App\Filament\Resources\OrderResource\Pages;
 use App\Filament\Resources\OrderResource;
 use App\Models\Order;
 use Filament\Resources\Pages\Page;
+use Filament\Support\Enums\MaxWidth;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Builder;
 use Livewire\Attributes\Url;
 use Livewire\WithPagination;
@@ -37,6 +39,21 @@ class ListOrders extends Page
     public string $sortDirection = 'desc';
 
     public int $perPage = 10;
+
+    public function getTitle(): string|Htmlable
+    {
+        return '';
+    }
+
+    public function getHeading(): string|Htmlable
+    {
+        return '';
+    }
+
+    public function getMaxContentWidth(): MaxWidth|string|null
+    {
+        return MaxWidth::Full;
+    }
 
     public function updating(string $property): void
     {
