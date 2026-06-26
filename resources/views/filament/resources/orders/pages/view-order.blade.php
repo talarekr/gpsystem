@@ -24,11 +24,6 @@
     $deliveryMethod = trim((string) ($deliveryLabel ?: $carrier ?: $order->delivery_method));
     $deliveryType = trim((string) data_get($order->raw_payload, 'delivery.type', data_get($order->raw_payload, 'delivery_type', data_get($order->raw_payload, 'shipping_type'))));
     $deliveryPhone = trim((string) (data_get($order->raw_payload, 'delivery.address.phoneNumber') ?: data_get($order->raw_payload, 'delivery.address.phone') ?: $order->phone));
-    $addressParts = array_values(array_filter([
-        trim((string) $order->address_line1),
-        trim(implode(' ', array_filter([trim((string) $order->postal_code), trim((string) $order->city)]))),
-        trim((string) $order->country),
-    ], fn ($value) => $value !== ''));
     $paymentStatus = trim((string) $paymentLabel);
     $paymentType = trim((string) (data_get($order->raw_payload, 'payment.type') ?: data_get($order->raw_payload, 'payment_type') ?: data_get($order->raw_payload, 'payment_method')));
     $paymentProvider = trim((string) (data_get($order->raw_payload, 'payment.provider') ?: data_get($order->raw_payload, 'payment_provider')));
@@ -125,6 +120,80 @@
     $shippingTotal = $shippingTotalData !== null
         ? $formatMoney($shippingTotalData['amount'], $shippingTotalData['currency'])
         : '—';
+    $firstFilled = function (array $values): string {
+        foreach ($values as $value) {
+            $value = trim((string) $value);
+
+            if ($value !== '' && $value !== '-') {
+                return $value;
+            }
+        }
+
+        return '';
+    };
+    $buyerMarketplaceId = $firstFilled([
+        data_get($order->raw_payload, 'buyer.id'),
+        data_get($order->raw_payload, 'buyer.login'),
+        data_get($order->raw_payload, 'buyer.username'),
+        data_get($order->raw_payload, 'client_id'),
+        data_get($order->raw_payload, 'client_login'),
+        $order->customer_id,
+    ]);
+    $buyerLines = array_values(array_filter([
+        $customerDisplay['name'] !== '—' ? $customerDisplay['name'] : null,
+        $buyerMarketplaceId !== '' ? 'Client:'.$buyerMarketplaceId : null,
+        $customerDisplay['phone'],
+        $order->email,
+    ], fn ($value) => filled($value)));
+    $deliveryDeadline = $firstFilled([
+        data_get($order->raw_payload, 'delivery.time.from'),
+        data_get($order->raw_payload, 'delivery.time.to'),
+        data_get($order->raw_payload, 'delivery.deadline'),
+        data_get($order->raw_payload, 'shipment.deadline'),
+        data_get($order->raw_payload, 'shipping_deadline'),
+        data_get($order->raw_payload, 'dispatch_time'),
+    ]);
+    $deliveryLines = array_values(array_filter([
+        $deliveryDeadline,
+        $deliveryMethod,
+        $deliveryType !== '' ? Str::headline(str_replace(['_', '-'], ' ', $deliveryType)) : null,
+        $shippingTotal !== '—' ? $shippingTotal : null,
+        $carrier,
+        $shipment?->tracking_number ? 'Nr przesyłki: '.$shipment->tracking_number : null,
+    ], fn ($value) => filled($value)));
+    $deliveryRecipient = $firstFilled([
+        data_get($order->raw_payload, 'delivery.address.fullName'),
+        data_get($order->raw_payload, 'delivery.address.name'),
+        data_get($order->raw_payload, 'shippingAddress.fullName'),
+        data_get($order->raw_payload, 'shippingAddress.name'),
+        $order->customer_name,
+        $customerDisplay['name'],
+    ]);
+    $addressLines = array_values(array_filter([
+        $deliveryRecipient,
+        trim((string) $order->address_line1),
+        trim(implode(' ', array_filter([trim((string) $order->postal_code), trim((string) $order->city)]))),
+        trim((string) $order->country),
+        $deliveryPhone,
+    ], fn ($value) => filled($value)));
+    $invoiceCompany = $firstFilled([
+        data_get($order->invoice_data, 'company.name'),
+        data_get($order->invoice_data, 'companyName'),
+        data_get($order->invoice_data, 'company_name'),
+        data_get($order->invoice_data, 'name'),
+        $order->company_name,
+    ]);
+    $invoiceNip = $firstFilled([
+        data_get($order->invoice_data, 'company.taxId'),
+        data_get($order->invoice_data, 'taxId'),
+        data_get($order->invoice_data, 'tax_id'),
+        data_get($order->invoice_data, 'nip'),
+        $order->nip,
+    ]);
+    $hasInvoiceData = filled($invoiceCompany) || filled($invoiceNip) || filled($order->invoice_data);
+    $invoiceLines = $hasInvoiceData
+        ? array_values(array_filter(['FAKTURA', $invoiceCompany, $invoiceNip ? 'NIP: '.$invoiceNip : null], fn ($value) => filled($value)))
+        : ['BEZ FAKTURY'];
     $technicalItems = array_filter([
         'Status marketplace' => $order->marketplace_status,
         'TEST IMPORT' => $order->test_import ? 'Tak' : null,
@@ -283,22 +352,48 @@
                 </div>
         </section>
 
-        <div class="gps-order-detail-two">
-            <section class="gps-order-detail-card"><h2 class="gps-order-detail-section-title">Klient</h2><div class="gps-order-detail-grid">
-                <div class="gps-order-detail-fact"><div class="gps-order-detail-label">Nazwa</div><div class="gps-order-detail-value">{{ $customerDisplay['name'] ?: '—' }}</div></div>
-                @if ($customerDisplay['phone'] !== '')<div class="gps-order-detail-fact"><div class="gps-order-detail-label">Telefon</div><div class="gps-order-detail-value">{{ $customerDisplay['phone'] }}</div></div>@endif
-                @if (filled($order->email))<div class="gps-order-detail-fact"><div class="gps-order-detail-label">E-mail</div><div class="gps-order-detail-value">{{ $order->email }}</div></div>@endif
-                @if (filled($order->company_name))<div class="gps-order-detail-fact"><div class="gps-order-detail-label">Firma</div><div class="gps-order-detail-value">{{ $order->company_name }}</div></div>@endif
-            </div></section>
-
-            <section class="gps-order-detail-card"><h2 class="gps-order-detail-section-title">Dostawa</h2><div class="gps-order-detail-grid">
-                @if ($deliveryMethod !== '')<div class="gps-order-detail-fact"><div class="gps-order-detail-label">Metoda</div><div class="gps-order-detail-value">{{ $deliveryMethod }}</div></div>@endif
-                @if ($deliveryType !== '')<div class="gps-order-detail-fact"><div class="gps-order-detail-label">Typ</div><div class="gps-order-detail-value">{{ Str::headline(str_replace(['_', '-'], ' ', $deliveryType)) }}</div></div>@endif
-                @if ($addressParts !== [])<div class="gps-order-detail-fact"><div class="gps-order-detail-label">Adres</div><div class="gps-order-detail-value">{!! implode('<br>', array_map('e', $addressParts)) !!}</div></div>@endif
-                @if ($deliveryPhone !== '')<div class="gps-order-detail-fact"><div class="gps-order-detail-label">Telefon</div><div class="gps-order-detail-value">{{ $deliveryPhone }}</div></div>@endif
-                @if (filled($order->notes))<div class="gps-order-detail-fact"><div class="gps-order-detail-label">Uwagi</div><div class="gps-order-detail-value">{{ $order->notes }}</div></div>@endif
-            </div></section>
-        </div>
+        <section class="gps-order-detail-card gps-order-detail-summary">
+            <div class="gps-order-detail-grid">
+                <div class="gps-order-detail-fact">
+                    <div class="gps-order-detail-label">Kupujący</div>
+                    <div class="gps-order-detail-value">
+                        @forelse ($buyerLines as $line)
+                            <div>{{ $line }}</div>
+                        @empty
+                            <div>—</div>
+                        @endforelse
+                    </div>
+                </div>
+                <div class="gps-order-detail-fact">
+                    <div class="gps-order-detail-label">Dostawa</div>
+                    <div class="gps-order-detail-value">
+                        @forelse ($deliveryLines as $line)
+                            <div>{{ $line }}</div>
+                        @empty
+                            <div>—</div>
+                        @endforelse
+                    </div>
+                </div>
+                <div class="gps-order-detail-fact">
+                    <div class="gps-order-detail-label">Adres dostawy</div>
+                    <div class="gps-order-detail-value">
+                        @forelse ($addressLines as $line)
+                            <div>{{ $line }}</div>
+                        @empty
+                            <div>—</div>
+                        @endforelse
+                    </div>
+                </div>
+                <div class="gps-order-detail-fact">
+                    <div class="gps-order-detail-label">Faktura</div>
+                    <div class="gps-order-detail-value">
+                        @foreach ($invoiceLines as $line)
+                            <div>{{ $line }}</div>
+                        @endforeach
+                    </div>
+                </div>
+            </div>
+        </section>
 
         <section class="gps-order-detail-card"><h2 class="gps-order-detail-section-title">Płatność</h2><div class="gps-order-detail-grid">
             @if ($paymentStatus !== '')<div class="gps-order-detail-fact"><div class="gps-order-detail-label">Status</div><div class="gps-order-detail-value {{ $isPaid ? 'gps-order-paid' : '' }}">{{ $paymentStatus }}</div></div>@endif
