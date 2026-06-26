@@ -12,6 +12,7 @@ use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\HtmlString;
 
 class OrderResource extends Resource
 {
@@ -34,7 +35,7 @@ class OrderResource extends Resource
     {
         return $table->columns([
             Tables\Columns\ViewColumn::make('order_card')
-                ->label('Zamówienie')
+                ->label(new HtmlString('<div class="gps-admin-orders-grid gps-admin-orders-header"><div>Numer zamówienia</div><div>Status</div><div>Klient</div><div>Kwota</div><div>Sprzedana część</div><div>Kurier</div></div>'))
                 ->view('filament.resources.orders.table-order-card')
                 ->viewData(fn (Order $record): array => ['order' => $record])
                 ->searchable(['order_number', 'marketplace_order_id', 'customer_name', 'phone', 'company_name', 'email'])
