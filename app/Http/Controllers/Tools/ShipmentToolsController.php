@@ -43,7 +43,22 @@ class ShipmentToolsController
     {
         $orderId = $request->integer('order_id') ?: $request->integer('order');
         $order = $orderId ? Order::query()->with('items')->find($orderId) : Order::query()->where('marketplace', 'allegro')->latest('id')->first();
-        $result = $builder->build($order);
+        $input = $request->only(['weight', 'length', 'width', 'height', 'package_type', 'label_reference', 'size_code']);
+        if (! array_key_exists('weight', $input)) {
+            $input['weight'] = 2;
+        }
+        if (! array_key_exists('label_reference', $input) && $order) {
+            $input['label_reference'] = $builder->defaultLabelReference($order);
+        }
+        $result = $builder->build($order, $input);
+
+        if (! $request->expectsJson() && ! $request->wantsJson()) {
+            return response()->view('tools.allegro-shipment-preview-form', [
+                'order' => $order,
+                'result' => $result,
+                'input' => $input,
+            ], ($result['error'] ?? null) === 'Order not found.' ? 404 : 200);
+        }
 
         return response()->json($result, ($result['error'] ?? null) === 'Order not found.' ? 404 : 200, [], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     }
