@@ -400,6 +400,7 @@
                 $carrier = $shipment?->carrier ?: $order->delivery_method;
                 $trackingNumber = $shipment?->tracking_number;
                 $shipmentStatus = $shipment?->shipment_status;
+                $shippingPaymentLines = app(\App\Support\OrderShippingPaymentDisplayResolver::class)->resolve($order);
             @endphp
 
             <div class="gps-order-card">
@@ -452,7 +453,11 @@
                     </div>
 
                     <div class="gps-order-col gps-order-col-shipping">
-                        @if ($shipment || $carrier)
+                        @if ($shippingPaymentLines !== [])
+                            @foreach ($shippingPaymentLines as $index => $line)
+                                <div class="{{ $index === 0 ? 'gps-order-value' : 'gps-order-muted' }}">{{ $line }}</div>
+                            @endforeach
+                        @elseif ($shipment || $carrier)
                             <div class="gps-order-value">{{ $carrier ?: '—' }}</div>
                             @if ($trackingNumber)
                                 <div class="gps-order-muted">{{ $trackingNumber }}</div>
@@ -461,7 +466,7 @@
                                 <div class="gps-order-badges"><span class="gps-order-badge">{{ $shipmentStatus }}</span></div>
                             @endif
                         @else
-                            <div class="gps-order-muted">Brak przesyłki</div>
+                            <div class="gps-order-muted">Brak danych dostawy</div>
                         @endif
 
                         <div class="gps-order-actions">
