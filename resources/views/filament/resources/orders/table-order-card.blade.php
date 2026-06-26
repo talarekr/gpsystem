@@ -229,10 +229,49 @@
             line-height: 1.2;
         }
 
-        .gps-admin-order-card__badge--marketplace { background: #dbeafe; color: #1e40af; }
         .gps-admin-order-card__badge--status { background: #e0f2fe; color: #075985; }
         .gps-admin-order-card__badge--local { background: #dcfce7; color: #166534; }
-        .gps-admin-order-card__badge--test { background: #fef3c7; color: #92400e; font-weight: 700; letter-spacing: .035em; }
+
+        .gps-admin-order-card__source-row {
+            color: #64748b;
+            font-size: 12px;
+            line-height: 1.25;
+            white-space: nowrap;
+        }
+
+        .gps-order-source {
+            display: inline-flex;
+            align-items: center;
+            max-width: 100%;
+            border-radius: 999px;
+            padding: 2px 7px;
+            background: #f8fafc;
+            font-size: 12px;
+            font-weight: 700;
+            line-height: 1.25;
+            vertical-align: baseline;
+        }
+
+        .gps-order-source--allegro {
+            color: #ff5a00;
+            font-family: "Open Sans", Arial, sans-serif;
+        }
+
+        .gps-order-source--ovoko {
+            color: #FF7A00;
+            font-family: Inter, Arial, Helvetica, sans-serif;
+        }
+
+        .gps-order-source--ebay {
+            font-family: "Market Sans", Arial, "Helvetica Neue", sans-serif;
+            letter-spacing: -.02em;
+        }
+
+        .gps-order-source--local {
+            color: #334155;
+            font-family: inherit;
+            font-weight: 600;
+        }
 
         .gps-admin-order-card__muted {
             overflow: hidden;
@@ -303,12 +342,8 @@
         <div class="gps-admin-orders-grid gps-admin-order-card-grid">
             <div class="gps-admin-order-card__section gps-admin-order-col gps-admin-order-col-number">
                 <div class="gps-admin-order-card__value gps-admin-order-card__number" title="{{ $fullNumber }}">{{ $displayNumber }}</div>
-                <div class="gps-admin-order-card__badges">
-                    <span class="gps-admin-order-card__badge gps-admin-order-card__badge--marketplace">{{ $marketplace }}</span>
-                    @if($order->test_import)
-                        <span class="gps-admin-order-card__badge gps-admin-order-card__badge--test">TEST</span>
-                    @endif
-                </div>
+                <div class="gps-admin-order-card__muted">{{ $orderedAt }}</div>
+                <div class="gps-admin-order-card__source-row">Źródło: @include('filament.resources.orders.partials.source-wordmark', ['marketplace' => $marketplace])</div>
             </div>
 
             <div class="gps-admin-order-card__section gps-admin-order-col gps-admin-order-col-status">
@@ -327,7 +362,6 @@
 
             <div class="gps-admin-order-card__section gps-admin-order-col gps-admin-order-col-amount">
                 <div class="gps-admin-order-card__total">{{ $total }}</div>
-                <div class="gps-admin-order-card__muted">{{ $orderedAt }}</div>
             </div>
 
             <div class="gps-admin-order-card__section gps-admin-order-col gps-admin-order-col-item">
