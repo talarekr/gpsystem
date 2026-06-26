@@ -72,12 +72,12 @@
         .gps-admin-orders-grid {
             display: grid;
             grid-template-columns:
-                minmax(0, 1.15fr)
-                minmax(0, 0.8fr)
-                minmax(0, 1fr)
-                minmax(0, 0.75fr)
-                minmax(0, 1.45fr)
-                minmax(0, 0.95fr);
+                minmax(320px, 1.6fr)
+                minmax(170px, 0.9fr)
+                minmax(120px, 0.65fr)
+                minmax(170px, 0.9fr)
+                minmax(130px, 0.7fr)
+                minmax(180px, 0.9fr);
             gap: 20px;
             width: 100%;
             align-items: center;
@@ -108,15 +108,18 @@
         }
 
         .gps-order-value {
-            color: #0f172a;
-            font-size: 14px;
-            font-weight: 700;
+            color: #1e293b;
+            font-size: 13px;
+            font-weight: 400;
+            line-height: 1.35;
             overflow-wrap: anywhere;
         }
 
         .gps-order-number {
-            font-size: 16px;
-            font-weight: 800;
+            color: #1e293b;
+            font-size: 13px;
+            font-weight: 500;
+            line-height: 1.35;
         }
 
         .gps-order-muted {
@@ -151,10 +154,44 @@
         .gps-order-badge--status { background: #e0f2fe; color: #075985; }
 
         .gps-order-total {
-            font-size: 16px;
-            font-weight: 900;
-            color: #111827;
+            color: #1e293b;
+            font-size: 13px;
+            font-weight: 500;
+            line-height: 1.35;
             white-space: nowrap;
+        }
+
+        .gps-order-sold-part {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-width: 0;
+        }
+
+        .gps-order-part-thumb,
+        .gps-order-part-placeholder {
+            flex: 0 0 64px;
+            width: 64px;
+            height: 64px;
+            border-radius: 12px;
+        }
+
+        .gps-order-part-thumb {
+            object-fit: cover;
+            background: #f1f5f9;
+        }
+
+        .gps-order-part-placeholder {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #f8fafc, #e2e8f0);
+            color: #94a3b8;
+            border: 1px solid #e2e8f0;
+        }
+
+        .gps-order-part-info {
+            min-width: 0;
         }
 
         .gps-order-action {
@@ -260,11 +297,11 @@
 
     <div class="gps-orders-list">
         <div class="gps-orders-list-header gps-admin-orders-grid">
+            <div>Sprzedana część</div>
             <div>Numer zamówienia</div>
             <div>Status</div>
             <div>Klient</div>
             <div>Kwota</div>
-            <div>Sprzedana część</div>
             <div>Kurier</div>
         </div>
 
@@ -280,7 +317,11 @@
                 $orderedAt = $order->ordered_at ? $order->ordered_at->format('Y-m-d H:i') : '—';
                 $firstItem = $order->items->first();
                 $itemsCount = $order->items->count();
-                $firstItemName = $firstItem?->product_name ?: $firstItem?->name ?: $firstItem?->sku ?: $firstItem?->part_number;
+                $soldPart = $firstItem?->part ?: $firstItem?->marketplaceListing?->part;
+                $soldListing = $firstItem?->marketplaceListing;
+                $firstItemName = $soldPart?->name ?: $soldListing?->title ?: $firstItem?->product_name ?: 'Brak danych';
+                $storageLocation = $soldPart?->storageLocation?->name ?: 'Brak lokalizacji';
+                $partImageUrl = $soldPart?->adminTableImageUrl();
                 $shipment = $order->shipments->first();
                 $carrier = $shipment?->carrier ?: $order->delivery_method;
                 $trackingNumber = $shipment?->tracking_number;
@@ -289,6 +330,26 @@
 
             <div class="gps-order-card">
                 <div class="gps-admin-orders-grid">
+                    <div class="gps-order-col gps-order-col-item">
+                        <div class="gps-order-sold-part">
+                            @if ($partImageUrl)
+                                <img class="gps-order-part-thumb" src="{{ $partImageUrl }}" alt="{{ $firstItemName }}">
+                            @else
+                                <div class="gps-order-part-placeholder" aria-hidden="true">
+                                    <x-heroicon-o-photo class="h-7 w-7" />
+                                </div>
+                            @endif
+
+                            <div class="gps-order-part-info">
+                                <div class="gps-order-value">{{ $firstItemName }}</div>
+                                <div class="gps-order-muted">Magazyn: {{ $storageLocation }}</div>
+                                @if ($itemsCount > 1)
+                                    <div class="gps-order-muted">+ {{ $itemsCount - 1 }} więcej</div>
+                                @endif
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="gps-order-col gps-order-col-number">
                         <div class="gps-order-value gps-order-number">{{ $displayNumber }}</div>
                         <div class="gps-order-badges">
@@ -314,17 +375,6 @@
                     <div class="gps-order-col gps-order-col-amount">
                         <div class="gps-order-total">{{ $total }}</div>
                         <div class="gps-order-muted">{{ $orderedAt }}</div>
-                    </div>
-
-                    <div class="gps-order-col gps-order-col-item">
-                        @if ($firstItemName)
-                            <div class="gps-order-value">{{ $firstItemName }}</div>
-                            @if ($itemsCount > 1)
-                                <div class="gps-order-muted">+ {{ $itemsCount - 1 }} więcej</div>
-                            @endif
-                        @else
-                            <div class="gps-order-muted">Brak danych</div>
-                        @endif
                     </div>
 
                     <div class="gps-order-col gps-order-col-shipping">
