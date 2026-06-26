@@ -1,0 +1,358 @@
+@php
+    use App\Filament\Resources\OrderResource;
+    use App\Models\Order;
+
+    $orders = $this->orders;
+@endphp
+
+<x-filament-panels::page>
+    <style>
+        .gps-orders-toolbar {
+            display: grid;
+            grid-template-columns: minmax(240px, 1fr) repeat(5, minmax(140px, auto));
+            gap: 12px;
+            align-items: end;
+            margin-bottom: 20px;
+        }
+
+        .gps-orders-field {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            min-width: 0;
+        }
+
+        .gps-orders-field label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #64748b;
+        }
+
+        .gps-orders-field input,
+        .gps-orders-field select {
+            width: 100%;
+            border: 1px solid #d1d5db;
+            border-radius: 10px;
+            background: #fff;
+            padding: 9px 12px;
+            font-size: 14px;
+            color: #0f172a;
+        }
+
+        .gps-orders-filter-summary {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 40px;
+            border-radius: 10px;
+            background: #eff6ff;
+            color: #1d4ed8;
+            font-weight: 700;
+            padding: 0 12px;
+            white-space: nowrap;
+        }
+
+        .gps-orders-reset-button {
+            min-height: 40px;
+            border-radius: 10px;
+            border: 1px solid #d1d5db;
+            padding: 0 14px;
+            font-weight: 700;
+            color: #334155;
+            background: #fff;
+        }
+
+        .gps-orders-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            width: 100%;
+        }
+
+        .gps-admin-orders-grid {
+            display: grid;
+            grid-template-columns:
+                minmax(0, 1.15fr)
+                minmax(0, 0.8fr)
+                minmax(0, 1fr)
+                minmax(0, 0.75fr)
+                minmax(0, 1.45fr)
+                minmax(0, 0.95fr);
+            gap: 20px;
+            width: 100%;
+            align-items: center;
+        }
+
+        .gps-orders-list-header {
+            padding: 0 18px 4px;
+            color: #64748b;
+            font-size: 12px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: .04em;
+        }
+
+        .gps-order-card {
+            width: 100%;
+            min-height: 140px;
+            display: block;
+            border: 1px solid #e5e7eb;
+            border-radius: 18px;
+            background: #fff;
+            box-shadow: 0 10px 24px rgba(15, 23, 42, .06);
+            padding: 18px;
+        }
+
+        .gps-order-col {
+            min-width: 0;
+        }
+
+        .gps-order-value {
+            color: #0f172a;
+            font-size: 14px;
+            font-weight: 700;
+            overflow-wrap: anywhere;
+        }
+
+        .gps-order-number {
+            font-size: 16px;
+            font-weight: 800;
+        }
+
+        .gps-order-muted {
+            color: #64748b;
+            font-size: 13px;
+            margin-top: 5px;
+            overflow-wrap: anywhere;
+        }
+
+        .gps-order-badges,
+        .gps-order-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 8px;
+        }
+
+        .gps-order-badge {
+            display: inline-flex;
+            align-items: center;
+            border-radius: 999px;
+            background: #e2e8f0;
+            color: #334155;
+            font-size: 11px;
+            font-weight: 800;
+            line-height: 1;
+            padding: 6px 8px;
+        }
+
+        .gps-order-badge--marketplace { background: #dbeafe; color: #1e40af; }
+        .gps-order-badge--test { background: #fef3c7; color: #92400e; letter-spacing: .035em; }
+        .gps-order-badge--status { background: #e0f2fe; color: #075985; }
+
+        .gps-order-total {
+            font-size: 16px;
+            font-weight: 900;
+            color: #111827;
+            white-space: nowrap;
+        }
+
+        .gps-order-action {
+            border-radius: 999px;
+            border: 1px solid #bfdbfe;
+            color: #1d4ed8;
+            font-size: 12px;
+            font-weight: 800;
+            padding: 7px 10px;
+            text-decoration: none;
+            white-space: nowrap;
+        }
+
+        .gps-order-empty {
+            border: 1px dashed #cbd5e1;
+            border-radius: 18px;
+            padding: 32px;
+            text-align: center;
+            color: #64748b;
+            background: #fff;
+        }
+
+        .gps-orders-pagination {
+            margin-top: 18px;
+        }
+
+        @media (max-width: 1200px) {
+            .gps-orders-toolbar,
+            .gps-admin-orders-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+
+            .gps-orders-list-header {
+                display: none;
+            }
+        }
+
+        @media (max-width: 700px) {
+            .gps-orders-toolbar,
+            .gps-admin-orders-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+
+    <div class="gps-orders-toolbar">
+        <div class="gps-orders-field">
+            <label for="orders-search">Szukaj</label>
+            <input id="orders-search" type="search" wire:model.live.debounce.500ms="search" placeholder="Numer, klient, telefon, e-mail...">
+        </div>
+
+        <div class="gps-orders-field">
+            <label for="orders-marketplace">Marketplace</label>
+            <select id="orders-marketplace" wire:model.live="marketplace">
+                <option value="">Wszystkie</option>
+                <option value="allegro">Allegro</option>
+                <option value="ebay">eBay</option>
+                <option value="ovoko">Ovoko</option>
+                <option value="sklep">Sklep</option>
+            </select>
+        </div>
+
+        <div class="gps-orders-field">
+            <label for="orders-status">Status</label>
+            <select id="orders-status" wire:model.live="status">
+                <option value="">Wszystkie</option>
+                @foreach (Order::statusOptions() as $value => $label)
+                    <option value="{{ $value }}">{{ $label }}</option>
+                @endforeach
+            </select>
+        </div>
+
+        <div class="gps-orders-field">
+            <label for="orders-test">TEST IMPORT</label>
+            <select id="orders-test" wire:model.live="testImport">
+                <option value="">Wszystkie</option>
+                <option value="1">Tylko TEST</option>
+                <option value="0">Bez TEST</option>
+            </select>
+        </div>
+
+        <div class="gps-orders-field">
+            <label for="orders-batch">Batch</label>
+            <select id="orders-batch" wire:model.live="sourceBatch">
+                <option value="">Wszystkie</option>
+                @foreach ($this->sourceBatchOptions as $value => $label)
+                    <option value="{{ $value }}">{{ $label }}</option>
+                @endforeach
+            </select>
+        </div>
+
+        <div class="gps-orders-field">
+            <label for="orders-sort">Sortowanie</label>
+            <select id="orders-sort" wire:model.live="sortDirection">
+                <option value="desc">Sprzedaż: najnowsze</option>
+                <option value="asc">Sprzedaż: najstarsze</option>
+            </select>
+        </div>
+
+        <div class="gps-orders-filter-summary">Filtry: {{ $this->activeFiltersCount }}</div>
+        <button class="gps-orders-reset-button" type="button" wire:click="resetFilters">Wyczyść filtry</button>
+    </div>
+
+    <div class="gps-orders-list">
+        <div class="gps-orders-list-header gps-admin-orders-grid">
+            <div>Numer zamówienia</div>
+            <div>Status</div>
+            <div>Klient</div>
+            <div>Kwota</div>
+            <div>Sprzedana część</div>
+            <div>Kurier</div>
+        </div>
+
+        @forelse ($orders as $order)
+            @php
+                $displayNumber = OrderResource::displayOrderNumber($order);
+                $marketplace = $order->marketplace ?: 'Sklep';
+                $statusLabel = Order::statusOptions()[$order->status] ?? ($order->status ?: '—');
+                $marketplaceStatus = $order->marketplace_status ?: null;
+                $buyerName = $order->customer_name ?: $order->company_name ?: $order->email ?: '—';
+                $phone = $order->phone ?: '—';
+                $total = OrderResource::formatOrderTotal($order);
+                $orderedAt = $order->ordered_at ? $order->ordered_at->format('Y-m-d H:i') : '—';
+                $firstItem = $order->items->first();
+                $itemsCount = $order->items->count();
+                $firstItemName = $firstItem?->product_name ?: $firstItem?->name ?: $firstItem?->sku ?: $firstItem?->part_number;
+                $shipment = $order->shipments->first();
+                $carrier = $shipment?->carrier ?: $order->delivery_method;
+                $trackingNumber = $shipment?->tracking_number;
+                $shipmentStatus = $shipment?->shipment_status;
+            @endphp
+
+            <div class="gps-order-card">
+                <div class="gps-admin-orders-grid">
+                    <div class="gps-order-col gps-order-col-number">
+                        <div class="gps-order-value gps-order-number">{{ $displayNumber }}</div>
+                        <div class="gps-order-badges">
+                            <span class="gps-order-badge gps-order-badge--marketplace">{{ $marketplace }}</span>
+                            @if ($order->test_import)
+                                <span class="gps-order-badge gps-order-badge--test">TEST</span>
+                            @endif
+                        </div>
+                    </div>
+
+                    <div class="gps-order-col gps-order-col-status">
+                        <div class="gps-order-value">{{ $statusLabel }}</div>
+                        @if ($marketplaceStatus)
+                            <div class="gps-order-badges"><span class="gps-order-badge gps-order-badge--status">{{ $marketplaceStatus }}</span></div>
+                        @endif
+                    </div>
+
+                    <div class="gps-order-col gps-order-col-buyer">
+                        <div class="gps-order-value">{{ $buyerName }}</div>
+                        <div class="gps-order-muted">{{ $phone }}</div>
+                    </div>
+
+                    <div class="gps-order-col gps-order-col-amount">
+                        <div class="gps-order-total">{{ $total }}</div>
+                        <div class="gps-order-muted">{{ $orderedAt }}</div>
+                    </div>
+
+                    <div class="gps-order-col gps-order-col-item">
+                        @if ($firstItemName)
+                            <div class="gps-order-value">{{ $firstItemName }}</div>
+                            @if ($itemsCount > 1)
+                                <div class="gps-order-muted">+ {{ $itemsCount - 1 }} więcej</div>
+                            @endif
+                        @else
+                            <div class="gps-order-muted">Brak danych</div>
+                        @endif
+                    </div>
+
+                    <div class="gps-order-col gps-order-col-shipping">
+                        @if ($shipment || $carrier)
+                            <div class="gps-order-value">{{ $carrier ?: '—' }}</div>
+                            @if ($trackingNumber)
+                                <div class="gps-order-muted">{{ $trackingNumber }}</div>
+                            @endif
+                            @if ($shipmentStatus)
+                                <div class="gps-order-badges"><span class="gps-order-badge">{{ $shipmentStatus }}</span></div>
+                            @endif
+                        @else
+                            <div class="gps-order-muted">Brak przesyłki</div>
+                        @endif
+
+                        <div class="gps-order-actions">
+                            <a class="gps-order-action" href="{{ OrderResource::getUrl('view', ['record' => $order]) }}">Szczegóły</a>
+                            <a class="gps-order-action" href="{{ OrderResource::getUrl('edit', ['record' => $order]) }}">Zmień status</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        @empty
+            <div class="gps-order-empty">Brak zamówień pasujących do wybranych kryteriów.</div>
+        @endforelse
+    </div>
+
+    <div class="gps-orders-pagination">
+        {{ $orders->links() }}
+    </div>
+</x-filament-panels::page>

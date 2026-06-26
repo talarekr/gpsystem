@@ -9,10 +9,7 @@ use Filament\Forms\Form;
 use Filament\Infolists;
 use Filament\Infolists\Infolist;
 use Filament\Resources\Resource;
-use Filament\Tables;
 use Filament\Tables\Table;
-use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\HtmlString;
 
 class OrderResource extends Resource
 {
@@ -33,23 +30,8 @@ class OrderResource extends Resource
 
     public static function table(Table $table): Table
     {
-        return $table->columns([
-            Tables\Columns\ViewColumn::make('order_card')
-                ->label(new HtmlString('<div class="gps-admin-orders-grid gps-admin-orders-header"><div>Numer zamówienia</div><div>Status</div><div>Klient</div><div>Kwota</div><div>Sprzedana część</div><div>Kurier</div></div>'))
-                ->view('filament.resources.orders.table-order-card')
-                ->extraCellAttributes(['class' => 'gps-admin-orders-view-column'])
-                ->viewData(fn (Order $record): array => ['order' => $record])
-                ->searchable(['order_number', 'marketplace_order_id', 'customer_name', 'phone', 'company_name', 'email'])
-                ->sortable(['ordered_at']),
-        ])->filters([
-            Tables\Filters\SelectFilter::make('marketplace')->label('Marketplace')->options(['allegro' => 'Allegro', 'ebay' => 'eBay', 'ovoko' => 'Ovoko', 'sklep' => 'Sklep']),
-            Tables\Filters\SelectFilter::make('status')->label('Status')->options(Order::statusOptions()),
-            Tables\Filters\TernaryFilter::make('test_import')->label('TEST IMPORT'),
-            Tables\Filters\SelectFilter::make('source_batch')->label('Batch źródłowy')->options(fn (): array => Order::query()->whereNotNull('source_batch')->distinct()->pluck('source_batch', 'source_batch')->all()),
-        ])->defaultSort('ordered_at', 'desc')
-            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with(['items', 'shipments']));
+        return $table;
     }
-
 
     public static function displayOrderNumber(Order $order): string
     {
