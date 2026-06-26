@@ -10,6 +10,13 @@
 
     $externalOrderId = trim((string) ($order->marketplace_order_id ?: $order->order_number));
     $marketplace = trim((string) $order->marketplace) ?: 'Sklep';
+    $marketplaceKey = Str::lower($marketplace);
+    $shipmentPreviewUrl = match ($marketplaceKey) {
+        'allegro' => route('tools.debug-allegro-shipment-preview', ['token' => 'gps_images_import_2026', 'order_id' => $order->id]),
+        'ovoko' => route('tools.debug-ovoko-shipment-preview', ['token' => 'gps_images_import_2026', 'order_id' => $order->id]),
+        default => null,
+    };
+    $shipmentRequiredFields = ['Waga', 'Długość', 'Szerokość', 'Wysokość', 'Typ paczki / gabaryt', 'Opis na etykiecie / referencja'];
     $orderedAt = $order->ordered_at ? $order->ordered_at->format('Y-m-d H:i') : '—';
     $statusOptions = OrderStatusOptions::optionsForOrder($order);
     $selectedStatus = OrderStatusOptions::selectedValueForOrder($order);
@@ -213,6 +220,10 @@
         .gps-order-detail-product-price-list { display: grid; gap: 6px; }
         .gps-order-detail-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
         .gps-order-paid { color: #15803d; }
+        .gps-order-shipment-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+        .gps-order-shipment-button { background: #0f172a; border-radius: 12px; color: #fff; display: inline-flex; font-size: 13px; font-weight: 800; padding: 10px 14px; text-decoration: none; }
+        .gps-order-shipment-fields { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+        .gps-order-shipment-field { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 999px; color: #334155; font-size: 12px; font-weight: 700; padding: 6px 9px; }
         .gps-order-tech summary { cursor: pointer; color: #334155; font-weight: 800; }
         .gps-order-tech dl { display: grid; grid-template-columns: max-content minmax(0,1fr); gap: 8px 16px; margin-top: 14px; }
         .gps-order-tech dt { color: #64748b; font-size: 12px; font-weight: 700; } .gps-order-tech dd { color: #0f172a; font-size: 13px; margin: 0; overflow-wrap: anywhere; }
@@ -367,6 +378,44 @@
                                 <button type="button" disabled>Wyślij fakturę do Allegro</button>
                             </div>
                         @endif
+                    </div>
+                </div>
+            </div>
+        </section>
+
+
+        <section class="gps-order-detail-card">
+            <h2 class="gps-order-detail-section-title">Przesyłka</h2>
+            <div class="gps-order-detail-two">
+                <div class="gps-order-detail-fact">
+                    <div class="gps-order-detail-label">Flow marketplace</div>
+                    <div class="gps-order-detail-value">
+                        @if ($marketplaceKey === 'allegro')
+                            Allegro shipment-management: dry-run payloadu, potem osobno utworzenie przesyłki, etykieta i pickup.
+                        @elseif ($marketplaceKey === 'ovoko')
+                            Ovoko/RRR: dry-run danych paczki do crm/importPostData, potem osobno pobranie etykiety.
+                        @elseif ($marketplaceKey === 'ebay')
+                            Przesyłka eBay będzie obsługiwana osobno przez DHL/API.
+                        @else
+                            Brak aktywnego flow przesyłek marketplace dla tego źródła.
+                        @endif
+                    </div>
+                    @if ($shipmentPreviewUrl)
+                        <div class="gps-order-shipment-actions">
+                            <a class="gps-order-shipment-button" href="{{ $shipmentPreviewUrl }}" target="_blank" rel="noopener noreferrer">
+                                {{ $marketplaceKey === 'allegro' ? 'Dodaj przesyłkę Allegro' : 'Przygotuj przesyłkę Ovoko' }}
+                            </a>
+                        </div>
+                        <div class="gps-order-detail-muted">Przycisk prowadzi wyłącznie do read-only preview/formularza dry-run. Nie wykonuje API write, nie tworzy przesyłki, nie pobiera etykiety i nie zamawia pickup.</div>
+                    @endif
+                </div>
+                <div class="gps-order-detail-fact">
+                    <div class="gps-order-detail-label">Pola formularza paczki</div>
+                    <div class="gps-order-detail-value">Read-only prefill: odbiorca, adres, telefon, e-mail, metoda dostawy, koszt dostawy, pobranie/kwota pobrania i numer referencyjny.</div>
+                    <div class="gps-order-shipment-fields">
+                        @foreach ($shipmentRequiredFields as $field)
+                            <span class="gps-order-shipment-field">{{ $field }}</span>
+                        @endforeach
                     </div>
                 </div>
             </div>

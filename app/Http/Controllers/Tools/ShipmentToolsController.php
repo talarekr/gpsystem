@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Tools;
 
 use App\Models\Order;
 use App\Models\Shipment;
+use App\Services\Marketplace\Shipments\OvokoShipmentAdapter;
 use App\Services\Shipments\ShipmentLabelService;
 use App\Support\AllegroShipmentPreviewBuilder;
 use Illuminate\Http\Request;
@@ -44,7 +45,47 @@ class ShipmentToolsController
         $order = $orderId ? Order::query()->with('items')->find($orderId) : Order::query()->where('marketplace', 'allegro')->latest('id')->first();
         $result = $builder->build($order);
 
-        return response()->json($result, ($result['error'] ?? null) ? 404 : 200, [], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        return response()->json($result, ($result['error'] ?? null) === 'Order not found.' ? 404 : 200, [], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+
+    public function ovokoPreview(Request $request, OvokoShipmentAdapter $adapter)
+    {
+        $orderId = $request->integer('order_id') ?: $request->integer('order');
+        $order = $orderId ? Order::query()->with('items')->find($orderId) : Order::query()->where('marketplace', 'ovoko')->latest('id')->first();
+
+        if (! $order) {
+            return response()->json([
+                'ok' => false,
+                'read_only' => true,
+                'ovoko_write' => false,
+                'package_data_sent' => false,
+                'label_downloaded' => false,
+                'pickup_ordered' => false,
+                'marketplace_write' => false,
+                'will_send' => false,
+                'error' => 'Order not found.',
+            ], 404, [], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        }
+
+        if (! $adapter->supports($order)) {
+            return response()->json([
+                'ok' => false,
+                'read_only' => true,
+                'ovoko_write' => false,
+                'package_data_sent' => false,
+                'label_downloaded' => false,
+                'pickup_ordered' => false,
+                'marketplace_write' => false,
+                'will_send' => false,
+                'error' => 'order_not_ovoko',
+                'order' => ['id' => $order->id, 'marketplace' => $order->marketplace, 'marketplace_order_id' => $order->marketplace_order_id],
+            ], 200, [], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        }
+
+        $input = $request->only(['weight', 'length', 'width', 'height', 'package_type', 'label_reference']);
+        $result = $adapter->preview($order, $input)->toArray();
+
+        return response()->json($result, 200, [], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     }
 
     public function download(Shipment $shipment)

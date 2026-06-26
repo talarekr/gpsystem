@@ -7,10 +7,14 @@ use Illuminate\Support\Str;
 
 class AllegroShipmentPreviewBuilder
 {
-    public function build(?Order $order): array
+    public function build(?Order $order, array $input = []): array
     {
         if (! $order) {
             return $this->notFound();
+        }
+
+        if (Str::lower((string) $order->marketplace) !== 'allegro') {
+            return $this->notAllegro($order);
         }
 
         $payload = $order->raw_payload ?? [];
@@ -32,7 +36,7 @@ class AllegroShipmentPreviewBuilder
         $pickupPoint = $this->pickupPoint($payload);
         $delivery = $this->delivery($payload, $order);
         $sender = $this->sender();
-        $parcel = $this->parcel($order);
+        $parcel = $this->parcel($order, $input);
         $cod = $this->cod($payload, $order, $currency);
 
         $missing = array_values(array_unique(array_merge(
@@ -47,14 +51,24 @@ class AllegroShipmentPreviewBuilder
         }
 
         return [
-            'ok' => $missing === [] && Str::lower((string) $order->marketplace) === 'allegro',
+            'ok' => $missing === [],
             'read_only' => true,
             'allegro_write' => false,
             'shipment_created' => false,
             'label_created' => false,
             'pickup_ordered' => false,
             'marketplace_write' => false,
-            'validation' => ['ok' => $missing === [] && Str::lower((string) $order->marketplace) === 'allegro', 'missing' => $missing],
+            'will_send' => false,
+            'capabilities' => [
+                'can_create_shipment' => true,
+                'can_download_label' => true,
+                'can_order_pickup' => true,
+                'requires_package_dimensions' => true,
+                'requires_weight' => true,
+                'flow' => 'allegro_shipment_management',
+            ],
+            'required_fields' => ['weight', 'length', 'width', 'height', 'package_type', 'label_reference'],
+            'validation' => ['ok' => $missing === [], 'missing' => $missing],
             'audit' => [
                 'order' => $orderData,
                 'receiver' => $receiver,
@@ -87,7 +101,31 @@ class AllegroShipmentPreviewBuilder
 
     private function notFound(): array
     {
-        return ['ok' => false, 'read_only' => true, 'allegro_write' => false, 'shipment_created' => false, 'label_created' => false, 'pickup_ordered' => false, 'marketplace_write' => false, 'error' => 'Order not found.'];
+        return ['ok' => false, 'read_only' => true, 'allegro_write' => false, 'shipment_created' => false, 'label_created' => false, 'pickup_ordered' => false, 'marketplace_write' => false, 'will_send' => false, 'error' => 'Order not found.'];
+    }
+
+    private function notAllegro(Order $order): array
+    {
+        return [
+            'ok' => false,
+            'read_only' => true,
+            'allegro_write' => false,
+            'shipment_created' => false,
+            'label_created' => false,
+            'pickup_ordered' => false,
+            'marketplace_write' => false,
+            'will_send' => false,
+            'error' => 'order_not_allegro',
+            'order' => [
+                'id' => $order->id,
+                'marketplace' => $order->marketplace,
+                'marketplace_order_id' => $order->marketplace_order_id,
+            ],
+            'capabilities' => Str::lower((string) $order->marketplace) === 'ebay' ? [
+                'supported' => false,
+                'reason' => 'eBay shipment flow will be handled separately via DHL/API.',
+            ] : ['supported' => false, 'reason' => 'Allegro preview accepts only Allegro orders.'],
+        ];
     }
 
     private function receiver(Order $order, array $payload): array
@@ -136,9 +174,9 @@ class AllegroShipmentPreviewBuilder
         ], fn ($v) => filled($v));
     }
 
-    private function parcel(Order $order): array
+    private function parcel(Order $order, array $input = []): array
     {
-        return ['type' => 'PACKAGE', 'length' => ['value' => null, 'unit' => 'CENTIMETER'], 'width' => ['value' => null, 'unit' => 'CENTIMETER'], 'height' => ['value' => null, 'unit' => 'CENTIMETER'], 'weight' => ['value' => null, 'unit' => 'KILOGRAMS'], 'textOnLabel' => $order->order_number ?: $order->marketplace_order_id];
+        return ['type' => $input['package_type'] ?? 'PACKAGE', 'length' => ['value' => $input['length'] ?? null, 'unit' => 'CENTIMETER'], 'width' => ['value' => $input['width'] ?? null, 'unit' => 'CENTIMETER'], 'height' => ['value' => $input['height'] ?? null, 'unit' => 'CENTIMETER'], 'weight' => ['value' => $input['weight'] ?? null, 'unit' => 'KILOGRAMS'], 'textOnLabel' => $input['label_reference'] ?? ($order->order_number ?: $order->marketplace_order_id)];
     }
 
     private function cod(array $payload, Order $order, string $currency): array

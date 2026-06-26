@@ -209,6 +209,75 @@ class ShipmentToolsControllerTest extends TestCase
             ->assertJsonPath('payload_preview.body.input.receiver.point', 'ADA01N');
     }
 
+
+    public function test_allegro_shipment_preview_rejects_non_allegro_orders_without_payload(): void
+    {
+        $order = Order::query()->create($this->orderAttributes([
+            'id' => 51,
+            'marketplace' => 'ovoko',
+            'marketplace_order_id' => 'ovoko-123',
+        ]));
+
+        $response = $this->getJson('/tools/debug-allegro-shipment-preview?order_id='.$order->id);
+
+        $response->assertOk()
+            ->assertJsonPath('ok', false)
+            ->assertJsonPath('error', 'order_not_allegro')
+            ->assertJsonPath('read_only', true)
+            ->assertJsonPath('allegro_write', false)
+            ->assertJsonPath('shipment_created', false)
+            ->assertJsonPath('label_created', false)
+            ->assertJsonPath('pickup_ordered', false)
+            ->assertJsonPath('marketplace_write', false)
+            ->assertJsonMissingPath('payload_preview');
+    }
+
+    public function test_ovoko_shipment_preview_is_read_only_and_builds_import_post_data_payload(): void
+    {
+        $order = Order::query()->create($this->orderAttributes([
+            'id' => 52,
+            'marketplace' => 'ovoko',
+            'marketplace_order_id' => 'RRR-555',
+            'customer_name' => 'Ona Kupująca',
+            'email' => 'buyer@example.test',
+            'phone' => '+37060000000',
+            'address_line1' => 'Street 9',
+            'postal_code' => 'LT-01001',
+            'city' => 'Vilnius',
+            'country' => 'LT',
+            'currency' => 'EUR',
+            'payment_status' => 'paid',
+            'delivery_method' => 'DPD Courier',
+            'raw_payload' => [
+                'shipping_provider' => 'DPD',
+                'delivery_type' => 'courier',
+                'payment_type' => 'prepaid',
+                'payment_method' => 'card',
+            ],
+        ]));
+
+        $response = $this->getJson('/tools/debug-ovoko-shipment-preview?order_id='.$order->id.'&weight=2.5&length=40&width=30&height=20&package_type=box&label_reference=REF-555');
+
+        $response->assertOk()
+            ->assertJsonPath('read_only', true)
+            ->assertJsonPath('ovoko_write', false)
+            ->assertJsonPath('package_data_sent', false)
+            ->assertJsonPath('label_downloaded', false)
+            ->assertJsonPath('pickup_ordered', false)
+            ->assertJsonPath('marketplace_write', false)
+            ->assertJsonPath('will_send', false)
+            ->assertJsonPath('capabilities.flow', 'ovoko_package_data_then_label')
+            ->assertJsonPath('audit.delivery_type', 'courier')
+            ->assertJsonPath('audit.shipping_provider', 'DPD')
+            ->assertJsonPath('audit.payment_type', 'prepaid')
+            ->assertJsonPath('audit.payment_method', 'card')
+            ->assertJsonPath('payload_preview.endpoint', 'crm/importPostData')
+            ->assertJsonPath('payload_preview.will_send', false)
+            ->assertJsonPath('payload_preview.body.package.weight', '2.5')
+            ->assertJsonPath('label_preview.endpoint', 'get/print_shipping_label/{order_id}')
+            ->assertJsonPath('label_preview.will_download', false);
+    }
+
     private function orderAttributes(array $overrides = []): array
     {
         return array_merge([
