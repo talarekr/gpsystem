@@ -125,7 +125,10 @@ class OrderItemThumbnailDiagnosticsTest extends TestCase
         $debug = \App\Support\OrderItemThumbnailDiagnostics::resolve($order, $item);
 
         $this->assertSame($part->adminTableImageUrl(), $debug['thumbnail_url']);
-        $this->assertStringContainsString('/storage/parts/photos/presentation/product/part.jpg', $debug['thumbnail_url']);
+        $this->assertStringContainsString('/storage/parts/photos/imported/part/base.jpg', $debug['thumbnail_url']);
+        $this->assertSame($part->adminTableImageUrl(), $debug['admin_parts_mechanism_url']);
+        $this->assertSame($debug['admin_parts_mechanism_url'], $debug['final_thumbnail_url']);
+        $this->assertTrue($debug['admin_parts_mechanism_url_matches_final_thumbnail_url']);
         $this->assertSame('admin_parts_thumbnail', $debug['thumbnail_source']);
         $this->assertTrue($debug['admin_parts_thumbnail_url_present']);
         $this->assertSame($part->id, $debug['thumbnail_part_id']);

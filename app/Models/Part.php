@@ -336,24 +336,12 @@ class Part extends Model
 
     public function adminTableImageUrl(): ?string
     {
-        $listingImage = $this->listingImage();
-
-        if ($listingImage && $this->adminTableShouldUseProductVariant($listingImage)) {
-            return $listingImage->productUrl();
-        }
-
-        return $listingImage?->listingUrl() ?? $this->primaryImageUrl();
+        return $this->listingImage()?->absolutePublicUrl() ?? $this->primaryImageUrl();
     }
 
     public function adminTableImageVariantSource(): string
     {
-        $listingImage = $this->listingImage();
-
-        if ($listingImage && $this->adminTableShouldUseProductVariant($listingImage)) {
-            return 'product';
-        }
-
-        return $listingImage?->hasListingPresentationVariant() ? 'presentation' : ($this->primaryImageUrl() ? 'primary' : 'fallback');
+        return $this->listingImage()?->absolutePublicUrl() ? 'original' : ($this->primaryImageUrl() ? 'primary' : 'fallback');
     }
 
     private function adminTableShouldUseProductVariant(PartImage $image): bool
