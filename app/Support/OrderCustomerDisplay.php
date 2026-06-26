@@ -30,6 +30,24 @@ class OrderCustomerDisplay
             ];
         }
 
+        if (in_array($marketplace, ['ebay', 'ebay_de', 'ebay_fr'], true)) {
+            return [
+                'name' => self::firstFilled([
+                    data_get($order->raw_payload, 'fulfillmentStartInstructions.0.shippingStep.shipTo.fullName'),
+                    data_get($order->raw_payload, 'fulfillmentStartInstructions.0.shippingStep.shipTo.companyName'),
+                    data_get($order->raw_payload, 'buyer.fullName'),
+                    data_get($order->raw_payload, 'buyer.name'),
+                    $fallbackName,
+                ]),
+                'phone' => self::firstFilled([
+                    data_get($order->raw_payload, 'fulfillmentStartInstructions.0.shippingStep.shipTo.primaryPhone.phoneNumber'),
+                    data_get($order->raw_payload, 'fulfillmentStartInstructions.0.shippingStep.shipTo.primaryPhone.number'),
+                    data_get($order->raw_payload, 'fulfillmentStartInstructions.0.shippingStep.shipTo.phoneNumber'),
+                    $order->phone,
+                ]),
+            ];
+        }
+
         if ($marketplace === 'allegro') {
             $buyerFirstLast = self::joinName([
                 data_get($order->raw_payload, 'buyer.firstName'),

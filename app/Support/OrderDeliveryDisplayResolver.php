@@ -15,6 +15,7 @@ class OrderDeliveryDisplayResolver
 
         return match ($marketplace) {
             'allegro' => $this->resolveAllegro($order),
+            'ebay', 'ebay_de', 'ebay_fr' => $this->resolveEbay($order),
             default => $this->resolveFallback($order),
         };
     }
@@ -60,6 +61,33 @@ class OrderDeliveryDisplayResolver
         ]);
     }
 
+    private function resolveEbay(Order $order): array
+    {
+        $payload = $order->raw_payload ?? [];
+        $instruction = data_get($payload, 'fulfillmentStartInstructions.0', []);
+        $shippingStep = data_get($instruction, 'shippingStep', []);
+        $shippingTotal = app(OrderShippingTotalDisplayResolver::class)->resolve($order);
+
+        return $this->compactLines([
+            $this->firstFilled([
+                data_get($shippingStep, 'shippingCarrierCode'),
+                data_get($payload, 'shippingCarrierCode'),
+                data_get($payload, 'shipping.carrierCode'),
+                $order->delivery_method,
+            ]),
+            $this->firstFilled([
+                data_get($shippingStep, 'shippingServiceCode'),
+                data_get($payload, 'shippingServiceCode'),
+                data_get($payload, 'shipping.serviceCode'),
+            ]),
+            $this->dateOnlyRangeLine('Przewidywana dostawa',
+                $this->firstFilled([data_get($instruction, 'minEstimatedDeliveryDate'), data_get($payload, 'minEstimatedDeliveryDate')]),
+                $this->firstFilled([data_get($instruction, 'maxEstimatedDeliveryDate'), data_get($payload, 'maxEstimatedDeliveryDate')]),
+            ),
+            $shippingTotal !== null ? 'Koszt dostawy: '.$this->money($shippingTotal['amount'], $shippingTotal['currency']) : null,
+        ]);
+    }
+
     private function resolveFallback(Order $order): array
     {
         $shipment = $order->relationLoaded('shipments') ? $order->shipments->first() : null;
@@ -85,6 +113,19 @@ class OrderDeliveryDisplayResolver
         return $label.': '.$this->formatDate($to ?? $from);
     }
 
+    private function dateOnlyRangeLine(string $label, ?string $from, ?string $to): ?string
+    {
+        if ($from === null && $to === null) {
+            return null;
+        }
+
+        if ($from !== null && $to !== null && $from !== $to) {
+            return $label.': '.$this->formatDateOnly($from).' – '.$this->formatDateOnly($to);
+        }
+
+        return $label.': '.$this->formatDateOnly($to ?? $from);
+    }
+
     private function deadlineLine(string $label, string $prefix, ?string $value): ?string
     {
         return $value === null ? null : $label.': '.$prefix.' '.$this->formatDate($value);
@@ -101,6 +142,15 @@ class OrderDeliveryDisplayResolver
         return str_contains($value, 'T') || preg_match('/\d{1,2}:\d{2}/', $value) === 1
             ? $date->format('Y-m-d H:i')
             : $date->toDateString();
+    }
+
+    private function formatDateOnly(string $value): string
+    {
+        try {
+            return Carbon::parse($value)->toDateString();
+        } catch (\Throwable) {
+            return trim($value);
+        }
     }
 
     private function isCashOnDelivery(array $payload): bool

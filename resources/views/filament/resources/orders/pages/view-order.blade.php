@@ -152,35 +152,7 @@
         $order->email,
     ], fn ($value) => filled($value)));
     $deliveryLines = app(\App\Support\OrderDeliveryDisplayResolver::class)->resolve($order);
-    $deliveryAddressFirstLast = $joinFilled([
-        data_get($order->raw_payload, 'delivery.address.firstName'),
-        data_get($order->raw_payload, 'delivery.address.lastName'),
-    ]);
-    $buyerFirstLast = $joinFilled([
-        data_get($order->raw_payload, 'buyer.firstName'),
-        data_get($order->raw_payload, 'buyer.lastName'),
-    ]);
-    $deliveryRecipient = $firstFilled([
-        $deliveryAddressFirstLast,
-        data_get($order->raw_payload, 'delivery.address.name'),
-        data_get($order->raw_payload, 'delivery.address.fullName'),
-        $buyerFirstLast,
-        data_get($order->raw_payload, 'buyer.fullName'),
-        data_get($order->raw_payload, 'buyer.name'),
-        $order->customer_name,
-        $customerDisplay['name'],
-    ]);
-    $deliveryCityLine = $joinFilled([
-        $order->postal_code,
-        $order->city,
-        $order->country,
-    ]);
-    $addressLines = array_values(array_filter([
-        $deliveryRecipient,
-        trim((string) $order->address_line1),
-        $deliveryCityLine,
-        $deliveryPhone,
-    ], fn ($value) => filled($value)));
+    $addressLines = app(\App\Support\OrderShippingAddressDisplayResolver::class)->resolve($order);
     $invoiceDisplay = app(\App\Support\OrderInvoiceDisplayResolver::class)->resolve($order);
     $invoiceLines = $invoiceDisplay['lines'];
     $hasInvoiceData = $invoiceDisplay['has_invoice'];
