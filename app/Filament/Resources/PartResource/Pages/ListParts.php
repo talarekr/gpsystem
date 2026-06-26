@@ -10,6 +10,7 @@ use Filament\Actions;
 use Filament\Resources\Pages\Page;
 use Filament\Support\Enums\MaxWidth;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Pagination\LengthAwarePaginator as LaravelLengthAwarePaginator;
 use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Builder;
 use Livewire\Attributes\Url;
@@ -95,7 +96,8 @@ class ListParts extends Page
     #[Url(as: 'sort')]
     public string $sort = 'id_desc';
 
-    public int $perPage = 25;
+    #[Url(as: 'per_page')]
+    public string $perPage = '25';
 
     public function getTitle(): string|Htmlable { return ''; }
     public function getHeading(): string|Htmlable { return ''; }
@@ -131,7 +133,38 @@ class ListParts extends Page
 
     public function getPartsProperty(): LengthAwarePaginator
     {
-        return $this->getPartsQuery()->paginate($this->perPage);
+        $perPage = $this->normalizedPerPage();
+
+        if ($perPage === 'all') {
+            $items = $this->getPartsQuery()->get();
+
+            return new LaravelLengthAwarePaginator(
+                $items,
+                $items->count(),
+                max($items->count(), 1),
+                1,
+                ['path' => request()->url(), 'query' => request()->query()]
+            );
+        }
+
+        return $this->getPartsQuery()->paginate($perPage)->withQueryString();
+    }
+
+
+    public function getPerPageOptionsProperty(): array
+    {
+        return [
+            '25' => '25',
+            '50' => '50',
+            '100' => '100',
+            '250' => '250',
+            'all' => 'Wszystkie',
+        ];
+    }
+
+    protected function normalizedPerPage(): int|string
+    {
+        return array_key_exists($this->perPage, $this->perPageOptions) ? $this->perPage : '25';
     }
 
     public function getStorageLocationOptionsProperty(): array
