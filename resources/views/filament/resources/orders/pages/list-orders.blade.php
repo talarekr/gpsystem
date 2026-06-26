@@ -75,9 +75,9 @@
             grid-template-columns:
                 minmax(430px, 2fr)
                 minmax(170px, 0.85fr)
-                minmax(120px, 0.6fr)
-                minmax(170px, 0.85fr)
                 minmax(130px, 0.65fr)
+                minmax(170px, 0.85fr)
+                minmax(120px, 0.6fr)
                 minmax(180px, 0.85fr);
             gap: 20px;
             width: 100%;
@@ -370,9 +370,9 @@
         <div class="gps-orders-list-header gps-admin-orders-grid">
             <div>Sprzedana część</div>
             <div>Numer zamówienia</div>
-            <div>Status</div>
-            <div>Klient</div>
             <div>Kwota</div>
+            <div>Klient</div>
+            <div>Status</div>
             <div>Kurier</div>
         </div>
 
@@ -431,12 +431,8 @@
                         <div class="gps-order-source-row">Źródło: @include('filament.resources.orders.partials.source-wordmark', ['marketplace' => $marketplace])</div>
                     </div>
 
-                    <div class="gps-order-col gps-order-col-status">
-                        <select class="gps-order-status-select" aria-label="Status zamówienia">
-                            @foreach ($statusOptions as $value => $label)
-                                <option value="{{ $value }}" @selected($selectedStatus === $value)>{{ $label }}</option>
-                            @endforeach
-                        </select>
+                    <div class="gps-order-col gps-order-col-amount">
+                        <div class="gps-order-total">{{ $total }}</div>
                     </div>
 
                     <div class="gps-order-col gps-order-col-buyer">
@@ -444,8 +440,12 @@
                         <div class="gps-order-muted">{{ $phone }}</div>
                     </div>
 
-                    <div class="gps-order-col gps-order-col-amount">
-                        <div class="gps-order-total">{{ $total }}</div>
+                    <div class="gps-order-col gps-order-col-status">
+                        <select class="gps-order-status-select" aria-label="Status zamówienia">
+                            @foreach ($statusOptions as $value => $label)
+                                <option value="{{ $value }}" @selected($selectedStatus === $value)>{{ $label }}</option>
+                            @endforeach
+                        </select>
                     </div>
 
                     <div class="gps-order-col gps-order-col-shipping">
