@@ -10,10 +10,10 @@
     <style>
         .gps-orders-toolbar {
             display: grid;
-            grid-template-columns: minmax(240px, 1fr) repeat(5, minmax(140px, auto));
+            grid-template-columns: minmax(260px, 1fr) repeat(3, minmax(140px, 180px)) auto auto;
             gap: 12px;
             align-items: end;
-            margin-bottom: 20px;
+            margin-bottom: 12px;
         }
 
         .gps-orders-field {
@@ -335,25 +335,6 @@
             <select id="orders-status" wire:model.live="status">
                 <option value="">Wszystkie</option>
                 @foreach (Order::statusOptions() as $value => $label)
-                    <option value="{{ $value }}">{{ $label }}</option>
-                @endforeach
-            </select>
-        </div>
-
-        <div class="gps-orders-field">
-            <label for="orders-test">TEST IMPORT</label>
-            <select id="orders-test" wire:model.live="testImport">
-                <option value="">Wszystkie</option>
-                <option value="1">Tylko TEST</option>
-                <option value="0">Bez TEST</option>
-            </select>
-        </div>
-
-        <div class="gps-orders-field">
-            <label for="orders-batch">Batch</label>
-            <select id="orders-batch" wire:model.live="sourceBatch">
-                <option value="">Wszystkie</option>
-                @foreach ($this->sourceBatchOptions as $value => $label)
                     <option value="{{ $value }}">{{ $label }}</option>
                 @endforeach
             </select>
