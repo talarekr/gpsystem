@@ -9,6 +9,7 @@ use App\Models\Part;
 use App\Models\PartImage;
 use App\Models\StorageLocation;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class OrderItemThumbnailDiagnosticsTest extends TestCase
@@ -72,4 +73,55 @@ class OrderItemThumbnailDiagnosticsTest extends TestCase
             ->assertJsonPath('items.0.image_resolution.resolved_thumbnail_url_present', true)
             ->assertJsonPath('items.0.ovoko_mapping_diagnostics.matched_local_part.part_id', $part->id);
     }
+
+    public function test_order_thumbnail_prefers_listing_presentation_variant_over_admin_table_fallback(): void
+    {
+        Storage::fake('public');
+        Storage::disk('public')->put('parts/photos/imported/part/base.jpg', 'base');
+        Storage::disk('public')->put('parts/photos/presentation/listing/part.jpg', 'listing');
+        Storage::disk('public')->put('parts/photos/presentation/product/part.jpg', 'product');
+
+        $part = Part::query()->create(['name' => 'Presentation part']);
+        $image = PartImage::query()->create([
+            'part_id' => $part->id,
+            'path' => 'parts/photos/imported/part/base.jpg',
+            'is_primary' => true,
+        ]);
+        $image->forceFill([
+            'legacy_payload' => [
+                'presentation' => [
+                    'listing_path' => 'parts/photos/presentation/listing/part.jpg',
+                    'product_path' => 'parts/photos/presentation/product/part.jpg',
+                ],
+            ],
+        ])->saveQuietly();
+
+        $order = Order::query()->create([
+            'order_number' => 'ORDER-PRESENTATION',
+            'subtotal' => 10,
+            'total' => 10,
+            'customer_name' => 'Test',
+            'email' => 'test@example.com',
+            'phone' => '123',
+            'address_line1' => 'Street',
+            'postal_code' => '00-000',
+            'city' => 'Warszawa',
+        ]);
+        $item = OrderItem::query()->create([
+            'order_id' => $order->id,
+            'part_id' => $part->id,
+            'product_name' => 'Presentation part',
+            'unit_price' => 10,
+            'quantity' => 1,
+            'line_total' => 10,
+            'raw_payload' => ['image_url' => 'https://example.test/snapshot.jpg'],
+        ]);
+
+        $debug = \App\Support\OrderItemThumbnailDiagnostics::resolve($order, $item);
+
+        $this->assertSame($part->listingImageUrl(), $debug['thumbnail_url']);
+        $this->assertStringContainsString('/storage/parts/photos/presentation/listing/part.jpg', $debug['thumbnail_url']);
+        $this->assertSame('local_part_presentation', $debug['thumbnail_source']);
+    }
+
 }

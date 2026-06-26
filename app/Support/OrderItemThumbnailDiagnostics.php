@@ -2,9 +2,10 @@
 
 namespace App\Support;
 
-use App\Models\Order;
 use App\Models\MarketplaceListing;
+use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\Part;
 use Illuminate\Support\Arr;
 
 class OrderItemThumbnailDiagnostics
@@ -53,6 +54,8 @@ class OrderItemThumbnailDiagnostics
         }
         $part = $localPart ?: $listingPart;
 
+        $localPartPresentationImageUrl = self::listingPresentationThumbnailUrl($localPart);
+        $listingPartPresentationImageUrl = self::listingPresentationThumbnailUrl($listingPart);
         $localPartImageUrl = $localPart?->adminTableImageUrl();
         $listingPartImageUrl = $listingPart?->adminTableImageUrl();
         $snapshotImageUrl = self::snapshotImageUrl($item);
@@ -60,7 +63,13 @@ class OrderItemThumbnailDiagnostics
         $thumbnailUrl = null;
         $thumbnailSource = 'placeholder';
 
-        if ($localPartImageUrl) {
+        if ($localPartPresentationImageUrl) {
+            $thumbnailUrl = $localPartPresentationImageUrl;
+            $thumbnailSource = 'local_part_presentation';
+        } elseif ($listingPartPresentationImageUrl) {
+            $thumbnailUrl = $listingPartPresentationImageUrl;
+            $thumbnailSource = 'marketplace_listing_part_presentation';
+        } elseif ($localPartImageUrl) {
             $thumbnailUrl = $localPartImageUrl;
             $thumbnailSource = 'local_part';
         } elseif ($listingPartImageUrl) {
@@ -103,12 +112,19 @@ class OrderItemThumbnailDiagnostics
             'resolved_listing_external_listing_id' => $listing?->external_listing_id,
             'resolved_listing_sku' => $listing?->sku,
             'resolved_listing_title' => $listing?->title,
+            'local_part_presentation_image_url_present' => filled($localPartPresentationImageUrl),
+            'marketplace_listing_part_presentation_image_url_present' => filled($listingPartPresentationImageUrl),
             'local_part_image_url_present' => filled($localPartImageUrl),
             'marketplace_listing_part_image_url_present' => filled($listingPartImageUrl),
             'marketplace_snapshot_image_url_present' => filled($snapshotImageUrl),
         ];
     }
 
+
+    private static function listingPresentationThumbnailUrl(?Part $part): ?string
+    {
+        return $part?->listingImage()?->listingPresentationUrl();
+    }
 
     private static function resolveListing(?Order $order, OrderItem $item): ?MarketplaceListing
     {
@@ -186,7 +202,8 @@ class OrderItemThumbnailDiagnostics
             'thumbnail_source', 'order_item_id', 'marketplace', 'marketplace_order_id', 'offer_id', 'sku',
             'external_product_id', 'marketplace_item_id', 'listing_found', 'listing_id', 'part_found',
             'part_id', 'part_has_images', 'first_image_path_present', 'resolved_thumbnail_url_present',
-            'storage_location_present',
+            'storage_location_present', 'local_part_presentation_image_url_present',
+            'marketplace_listing_part_presentation_image_url_present',
         ]), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
     }
 }
