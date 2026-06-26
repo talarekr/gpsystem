@@ -61,11 +61,11 @@
         .gps-admin-order-card-grid {
             display: grid;
             grid-template-columns:
-                minmax(0, 1.15fr)
-                minmax(0, 0.8fr)
-                minmax(0, 1fr)
-                minmax(0, 0.75fr)
                 minmax(0, 1.45fr)
+                minmax(0, 1.15fr)
+                minmax(0, 0.75fr)
+                minmax(0, 1fr)
+                minmax(0, 0.8fr)
                 minmax(0, 0.95fr);
             gap: 20px;
             align-items: center;
@@ -79,11 +79,11 @@
             width: 100%;
             max-width: none;
             grid-template-columns:
-                minmax(0, 1.15fr)
-                minmax(0, 0.8fr)
-                minmax(0, 1fr)
-                minmax(0, 0.75fr)
                 minmax(0, 1.45fr)
+                minmax(0, 1.15fr)
+                minmax(0, 0.75fr)
+                minmax(0, 1fr)
+                minmax(0, 0.8fr)
                 minmax(0, 0.95fr);
             gap: 20px;
             align-items: center;
@@ -366,31 +366,6 @@
 <div class="gps-admin-order-card-wrapper">
     <div class="gps-admin-order-card" title="{{ $fullNumber }}">
         <div class="gps-admin-orders-grid gps-admin-order-card-grid">
-            <div class="gps-admin-order-card__section gps-admin-order-col gps-admin-order-col-number">
-                <div class="gps-admin-order-card__value gps-admin-order-card__number" title="{{ $fullNumber }}">{{ $displayNumber }}</div>
-                <div class="gps-admin-order-card__muted">{{ $orderedAt }}</div>
-                <div class="gps-admin-order-card__source-row">Źródło: @include('filament.resources.orders.partials.source-wordmark', ['marketplace' => $marketplace])</div>
-            </div>
-
-            <div class="gps-admin-order-card__section gps-admin-order-col gps-admin-order-col-status">
-                <select class="gps-admin-order-card__status-select" aria-label="Status zamówienia">
-                    @foreach ($statusOptions as $value => $label)
-                        <option value="{{ $value }}" @selected($selectedStatus === $value)>{{ $label }}</option>
-                    @endforeach
-                </select>
-            </div>
-
-            <div class="gps-admin-order-card__section gps-admin-order-col gps-admin-order-col-buyer" title="{{ $email }}">
-                <div class="gps-admin-order-card__value gps-admin-order-card__buyer-name">{{ $buyerName }}</div>
-                @if($phone !== '')
-                    <div class="gps-admin-order-card__muted">{{ $phone }}</div>
-                @endif
-            </div>
-
-            <div class="gps-admin-order-card__section gps-admin-order-col gps-admin-order-col-amount">
-                <div class="gps-admin-order-card__total">{{ $total }}</div>
-            </div>
-
             <div class="gps-admin-order-card__section gps-admin-order-col gps-admin-order-col-item">
                 @if($firstItemName !== '')
                     <div class="gps-admin-order-card__part-name" title="{{ $firstItemName }}">{{ $firstItemName }}</div>
@@ -400,6 +375,31 @@
                 @else
                     <div class="gps-admin-order-card__muted">Brak danych</div>
                 @endif
+            </div>
+
+            <div class="gps-admin-order-card__section gps-admin-order-col gps-admin-order-col-number">
+                <div class="gps-admin-order-card__value gps-admin-order-card__number" title="{{ $fullNumber }}">{{ $displayNumber }}</div>
+                <div class="gps-admin-order-card__muted">{{ $orderedAt }}</div>
+                <div class="gps-admin-order-card__source-row">Źródło: @include('filament.resources.orders.partials.source-wordmark', ['marketplace' => $marketplace])</div>
+            </div>
+
+            <div class="gps-admin-order-card__section gps-admin-order-col gps-admin-order-col-amount">
+                <div class="gps-admin-order-card__total">{{ $total }}</div>
+            </div>
+
+            <div class="gps-admin-order-card__section gps-admin-order-col gps-admin-order-col-buyer" title="{{ $email }}">
+                <div class="gps-admin-order-card__value gps-admin-order-card__buyer-name">{{ $buyerName }}</div>
+                @if($phone !== '')
+                    <div class="gps-admin-order-card__muted">{{ $phone }}</div>
+                @endif
+            </div>
+
+            <div class="gps-admin-order-card__section gps-admin-order-col gps-admin-order-col-status">
+                <select class="gps-admin-order-card__status-select" aria-label="Status zamówienia">
+                    @foreach ($statusOptions as $value => $label)
+                        <option value="{{ $value }}" @selected($selectedStatus === $value)>{{ $label }}</option>
+                    @endforeach
+                </select>
             </div>
 
             <div class="gps-admin-order-card__section gps-admin-order-col gps-admin-order-col-shipping">
