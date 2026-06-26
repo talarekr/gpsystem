@@ -2139,3 +2139,85 @@ button.gps-category-picker__arrow:hover {
     cursor: not-allowed;
     opacity: 0.55;
 }
+
+/* Orders list typography: match the 13px regular text used by the parts listing. */
+.gps-admin-orders-table.gps-admin-order-cell,
+.gps-admin-orders-table.gps-admin-order-cell .fi-ta-text,
+.gps-admin-orders-table.gps-admin-order-cell .fi-ta-text-item,
+.gps-admin-orders-table.gps-admin-order-cell .fi-badge,
+.gps-admin-orders-table.gps-admin-order-cell .fi-badge span,
+.gps-admin-order-number,
+.gps-admin-order-number__value,
+.gps-admin-order-buyer,
+.gps-admin-order-buyer__name,
+.gps-admin-order-buyer__phone {
+    color: #1e293b;
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 1.35;
+}
+
+.gps-admin-order-col-number {
+    min-width: 9rem;
+}
+
+.gps-admin-order-col-date {
+    min-width: 8.5rem;
+    white-space: nowrap;
+}
+
+.gps-admin-order-col-marketplace,
+.gps-admin-order-col-marketplace-status,
+.gps-admin-order-col-status,
+.gps-admin-order-col-email {
+    white-space: nowrap;
+}
+
+.gps-admin-order-col-total {
+    min-width: 7rem;
+    white-space: nowrap;
+}
+
+.gps-admin-order-col-buyer {
+    min-width: 11rem;
+}
+
+.gps-admin-order-number {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    max-width: 14rem;
+}
+
+.gps-admin-order-number__value {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.gps-admin-order-number__test-badge {
+    flex: 0 0 auto;
+    border-radius: 999px;
+    background: #fef3c7;
+    padding: 0.08rem 0.32rem;
+    color: #92400e;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.035em;
+    line-height: 1.2;
+}
+
+.gps-admin-order-buyer {
+    display: grid;
+    gap: 0.12rem;
+}
+
+.gps-admin-order-buyer__name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.gps-admin-order-buyer__phone {
+    white-space: nowrap;
+}

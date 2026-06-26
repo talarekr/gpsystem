@@ -32,17 +32,63 @@ class OrderResource extends Resource
     public static function table(Table $table): Table
     {
         return $table->columns([
-            Tables\Columns\TextColumn::make('order_number')->label('Numer zamówienia')->searchable()->sortable()->weight('bold'),
-            Tables\Columns\TextColumn::make('marketplace')->label('Marketplace')->badge()->placeholder('Sklep')->sortable(),
-            Tables\Columns\TextColumn::make('marketplace_status')->label('Status marketplace')->badge()->toggleable(),
-            Tables\Columns\IconColumn::make('test_import')->label('TEST IMPORT')->boolean(),
-            Tables\Columns\TextColumn::make('source_batch')->label('Batch')->toggleable(isToggledHiddenByDefault: true),
-            Tables\Columns\TextColumn::make('created_at')->label('Data')->dateTime('Y-m-d H:i')->sortable(),
-            Tables\Columns\TextColumn::make('customer_name')->label('Klient')->searchable(),
-            Tables\Columns\TextColumn::make('email')->label('E-mail')->searchable(),
-            Tables\Columns\TextColumn::make('phone')->label('Telefon')->searchable(),
-            Tables\Columns\TextColumn::make('status')->label('Status')->formatStateUsing(fn (string $state): string => Order::statusOptions()[$state] ?? $state)->badge(),
-            Tables\Columns\TextColumn::make('total')->label('Kwota')->money('PLN')->sortable(),
+            Tables\Columns\ViewColumn::make('order_number')
+                ->label('Numer zamówienia')
+                ->view('filament.resources.orders.table-order-number')
+                ->viewData(fn (Order $record): array => ['order' => $record])
+                ->searchable()
+                ->sortable()
+                ->extraHeaderAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-number'])
+                ->extraCellAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-number']),
+            Tables\Columns\TextColumn::make('ordered_at')
+                ->label('Data sprzedaży')
+                ->dateTime('Y-m-d H:i')
+                ->placeholder('—')
+                ->sortable()
+                ->extraHeaderAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-date'])
+                ->extraCellAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-date']),
+            Tables\Columns\TextColumn::make('marketplace')
+                ->label('Marketplace')
+                ->badge()
+                ->placeholder('sklep')
+                ->sortable()
+                ->size('xs')
+                ->extraHeaderAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-marketplace'])
+                ->extraCellAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-marketplace']),
+            Tables\Columns\TextColumn::make('marketplace_status')
+                ->label('Status marketplace')
+                ->badge()
+                ->placeholder('—')
+                ->size('xs')
+                ->extraHeaderAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-marketplace-status'])
+                ->extraCellAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-marketplace-status']),
+            Tables\Columns\TextColumn::make('total')
+                ->label('Kwota')
+                ->state(fn (Order $record): string => self::formatOrderTotal($record))
+                ->sortable()
+                ->alignEnd()
+                ->extraHeaderAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-total'])
+                ->extraCellAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-total']),
+            Tables\Columns\ViewColumn::make('buyer_details')
+                ->label('Dane kupującego')
+                ->view('filament.resources.orders.table-buyer')
+                ->viewData(fn (Order $record): array => ['order' => $record])
+                ->searchable(['customer_name', 'phone', 'company_name'])
+                ->extraHeaderAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-buyer'])
+                ->extraCellAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-buyer']),
+            Tables\Columns\TextColumn::make('status')
+                ->label('Status')
+                ->formatStateUsing(fn (string $state): string => Order::statusOptions()[$state] ?? $state)
+                ->badge()
+                ->size('xs')
+                ->extraHeaderAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-status'])
+                ->extraCellAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-status']),
+            Tables\Columns\TextColumn::make('source_batch')->label('Batch')->toggleable(isToggledHiddenByDefault: true)
+                ->extraHeaderAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-source-batch'])
+                ->extraCellAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-source-batch']),
+            Tables\Columns\TextColumn::make('email')->label('E-mail')->searchable()->toggleable(isToggledHiddenByDefault: true)
+                ->extraHeaderAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-email'])
+                ->extraCellAttributes(['class' => 'gps-admin-orders-table gps-admin-order-cell gps-admin-order-col-email']),
         ])->filters([
             Tables\Filters\SelectFilter::make('marketplace')->label('Marketplace')->options(['allegro' => 'Allegro', 'ebay' => 'eBay', 'ovoko' => 'Ovoko']),
             Tables\Filters\SelectFilter::make('status')->label('Status')->options(Order::statusOptions()),
@@ -51,7 +97,34 @@ class OrderResource extends Resource
         ])->actions([
             Tables\Actions\ViewAction::make()->label('Szczegóły'),
             Tables\Actions\EditAction::make()->label('Zmień status'),
-        ])->defaultSort('created_at', 'desc');
+        ])->defaultSort('ordered_at', 'desc');
+    }
+
+
+    public static function displayOrderNumber(Order $order): string
+    {
+        $number = trim((string) ($order->marketplace_order_id ?: $order->order_number));
+
+        if ($number === '') {
+            return '—';
+        }
+
+        $marketplace = trim((string) $order->marketplace);
+
+        if ($marketplace !== '') {
+            $number = preg_replace('/^'.preg_quote($marketplace, '/').'-/i', '', $number) ?? $number;
+        }
+
+        return $number;
+    }
+
+    public static function formatOrderTotal(Order $order): string
+    {
+        if ($order->total === null) {
+            return '—';
+        }
+
+        return number_format((float) $order->total, 2, ',', ' ').' '.($order->currency ?: 'PLN');
     }
 
     public static function infolist(Infolist $infolist): Infolist
