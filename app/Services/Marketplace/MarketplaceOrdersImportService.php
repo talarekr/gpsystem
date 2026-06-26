@@ -72,6 +72,9 @@ class MarketplaceOrdersImportService
             foreach ($orders as $raw) {
                 $normalized = $this->normalizeOrder($marketplace, $raw);
                 if (($normalized['marketplace_order_id'] ?? '') === '') { $result['orders_skipped']++; continue; }
+                if (($normalized['ordered_at'] ?? null) === null) {
+                    $result['warnings'][] = ['marketplace' => $marketplace, 'code' => 'missing_ordered_at', 'marketplace_order_id' => $normalized['marketplace_order_id']];
+                }
                 if ($dryRun) { $result['would_import'][] = Arr::only($normalized, ['marketplace','marketplace_order_id','marketplace_status','ordered_at','buyer_name','total_amount','currency']); continue; }
                 $this->upsertOrder($normalized, $raw, $result);
             }
@@ -122,7 +125,7 @@ class MarketplaceOrdersImportService
             'marketplace' => $marketplace,
             'marketplace_order_id' => (string) ($raw['id'] ?? $raw['orderId'] ?? $raw['order_id'] ?? ''),
             'marketplace_status' => (string) ($raw['status'] ?? $raw['orderFulfillmentStatus'] ?? ''),
-            'ordered_at' => $raw['boughtAt'] ?? $raw['creationDate'] ?? $raw['created_at'] ?? null,
+            'ordered_at' => $this->orderedAt($marketplace, $raw, array_values(array_filter($items, 'is_array'))),
             'buyer_name' => trim((string) ($buyer['login'] ?? $buyer['username'] ?? $buyer['fullName'] ?? $buyer['name'] ?? $raw['buyer_name'] ?? 'Marketplace buyer')),
             'buyer_email' => (string) ($buyer['email'] ?? $raw['buyer_email'] ?? ''),
             'buyer_phone' => (string) ($buyer['phoneNumber'] ?? $buyer['phone'] ?? $address['phoneNumber'] ?? ''),
@@ -139,6 +142,53 @@ class MarketplaceOrdersImportService
             'delivery_method' => (string) ($delivery['method']['name'] ?? $delivery['shippingCarrierCode'] ?? $raw['delivery_method'] ?? ''),
             'items' => array_values(array_filter($items, 'is_array')),
         ];
+    }
+
+
+    private function orderedAt(string $marketplace, array $raw, array $items): ?string
+    {
+        $orderLevelKeys = $marketplace === 'allegro'
+            ? ['boughtAt', 'orderedAt', 'purchasedAt', 'createdAt', 'creationDate', 'created_at', 'checkoutCompletedAt']
+            : ['boughtAt', 'orderedAt', 'purchasedAt', 'creationDate', 'createdAt', 'created_at'];
+
+        foreach ($orderLevelKeys as $key) {
+            $value = $this->validDateString($raw[$key] ?? null);
+            if ($value !== null) {
+                return $value;
+            }
+        }
+
+        if ($marketplace === 'allegro') {
+            $boughtAt = [];
+            foreach ($items as $item) {
+                $value = $this->validDateString($item['boughtAt'] ?? null);
+                if ($value !== null) {
+                    $boughtAt[] = $value;
+                }
+            }
+            if ($boughtAt !== []) {
+                sort($boughtAt);
+                return $boughtAt[0];
+            }
+
+            foreach (['updatedAt', 'revision'] as $key) {
+                $value = $this->validDateString($raw[$key] ?? null);
+                if ($value !== null) {
+                    return $value;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private function validDateString(mixed $value): ?string
+    {
+        if (! is_string($value) || trim($value) === '') {
+            return null;
+        }
+
+        return strtotime($value) === false ? null : $value;
     }
 
     private function upsertOrder(array $n, array $raw, array &$result): void
