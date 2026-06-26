@@ -170,16 +170,20 @@
 
         .gps-order-part-thumb,
         .gps-order-part-placeholder {
-            flex: 0 0 120px;
-            width: 120px;
-            height: 100px;
-            border-radius: 14px;
+            flex: 0 0 150px;
+            width: 150px;
+            height: 112px;
+            border-radius: 6px;
             background: #f1f5f9;
         }
 
         .gps-order-part-thumb {
             display: block;
             object-fit: cover;
+        }
+
+        .gps-order-sold-part .gps-admin-part-thumb {
+            flex: 0 0 150px;
         }
 
         .gps-order-part-placeholder {
@@ -323,6 +327,7 @@
                 $storageLocation = $thumbnailDebug['storage_location'];
                 $partImageUrl = $thumbnailDebug['thumbnail_url'];
                 $thumbnailSource = $thumbnailDebug['thumbnail_source'];
+                $thumbnailPart = $thumbnailDebug['thumbnail_part'] ?? null;
                 $thumbnailDebugAttribute = \App\Support\OrderItemThumbnailDiagnostics::attribute($thumbnailDebug);
                 $shipment = $order->shipments->first();
                 $carrier = $shipment?->carrier ?: $order->delivery_method;
@@ -334,7 +339,9 @@
                 <div class="gps-admin-orders-grid">
                     <div class="gps-order-col gps-order-col-item">
                         <div class="gps-order-sold-part" @if (config('app.debug')) data-thumbnail-debug="{!! $thumbnailDebugAttribute !!}" @endif>
-                            @if ($partImageUrl)
+                            @if ($thumbnailPart instanceof \App\Models\Part && $thumbnailSource === 'admin_parts_thumbnail')
+                                @include('filament.resources.parts.table-image', ['part' => $thumbnailPart])
+                            @elseif ($partImageUrl)
                                 <img class="gps-order-part-thumb" src="{{ $partImageUrl }}" alt="{{ $firstItemName }}">
                             @else
                                 <div class="gps-order-part-placeholder" aria-hidden="true" @if (config('app.debug')) title="{!! $thumbnailDebugAttribute !!}" @endif>

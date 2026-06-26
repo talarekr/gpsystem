@@ -66,15 +66,16 @@ class OrderItemThumbnailDiagnosticsTest extends TestCase
             ->assertJsonPath('items.0.listing_resolution.listing_id', $listing->id)
             ->assertJsonPath('items.0.part_resolution.part_found', true)
             ->assertJsonPath('items.0.part_resolution.part_id', $part->id)
-            ->assertJsonPath('items.0.final_thumbnail_source', 'marketplace_listing_part')
+            ->assertJsonPath('items.0.final_thumbnail_source', 'admin_parts_thumbnail')
             ->assertJsonPath('items.0.final_display_name_source', 'marketplace_listing_part')
             ->assertJsonPath('items.0.final_storage_location_source', 'marketplace_listing_part')
             ->assertJsonPath('items.0.storage_location_resolution.storage_location', 'HGF5636')
             ->assertJsonPath('items.0.image_resolution.resolved_thumbnail_url_present', true)
+            ->assertJsonPath('items.0.image_resolution.admin_parts_thumbnail_url_present', true)
             ->assertJsonPath('items.0.ovoko_mapping_diagnostics.matched_local_part.part_id', $part->id);
     }
 
-    public function test_order_thumbnail_prefers_listing_presentation_variant_over_admin_table_fallback(): void
+    public function test_order_thumbnail_uses_same_admin_parts_thumbnail_url_for_local_part(): void
     {
         Storage::fake('public');
         Storage::disk('public')->put('parts/photos/imported/part/base.jpg', 'base');
@@ -92,6 +93,10 @@ class OrderItemThumbnailDiagnosticsTest extends TestCase
                 'presentation' => [
                     'listing_path' => 'parts/photos/presentation/listing/part.jpg',
                     'product_path' => 'parts/photos/presentation/product/part.jpg',
+                    'metrics' => [
+                        'listing' => ['fill_ratio' => ['width_ratio' => 0.50, 'height_ratio' => 0.50, 'dominant_ratio' => 0.70]],
+                        'product' => ['fill_ratio' => ['width_ratio' => 0.90, 'height_ratio' => 0.90, 'dominant_ratio' => 0.95]],
+                    ],
                 ],
             ],
         ])->saveQuietly();
@@ -119,9 +124,11 @@ class OrderItemThumbnailDiagnosticsTest extends TestCase
 
         $debug = \App\Support\OrderItemThumbnailDiagnostics::resolve($order, $item);
 
-        $this->assertSame($part->listingImageUrl(), $debug['thumbnail_url']);
-        $this->assertStringContainsString('/storage/parts/photos/presentation/listing/part.jpg', $debug['thumbnail_url']);
-        $this->assertSame('local_part_presentation', $debug['thumbnail_source']);
+        $this->assertSame($part->adminTableImageUrl(), $debug['thumbnail_url']);
+        $this->assertStringContainsString('/storage/parts/photos/presentation/product/part.jpg', $debug['thumbnail_url']);
+        $this->assertSame('admin_parts_thumbnail', $debug['thumbnail_source']);
+        $this->assertTrue($debug['admin_parts_thumbnail_url_present']);
+        $this->assertSame($part->id, $debug['thumbnail_part_id']);
     }
 
 }

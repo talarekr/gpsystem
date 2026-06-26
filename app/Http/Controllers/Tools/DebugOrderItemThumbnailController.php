@@ -105,6 +105,8 @@ class DebugOrderItemThumbnailController extends Controller
                 'first_image_id' => $firstImage?->id,
                 'first_image_path' => $firstImage?->path,
                 'first_image_path_present' => $debug['first_image_path_present'],
+                'admin_parts_thumbnail_url_present' => $debug['admin_parts_thumbnail_url_present'],
+                'admin_parts_thumbnail_part_id' => $debug['thumbnail_part_id'],
                 'local_part_image_url_present' => $debug['local_part_image_url_present'],
                 'marketplace_listing_part_image_url_present' => $debug['marketplace_listing_part_image_url_present'],
                 'marketplace_snapshot_image_url_present' => $debug['marketplace_snapshot_image_url_present'],
