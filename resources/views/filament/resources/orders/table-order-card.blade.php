@@ -49,6 +49,13 @@
             width: 100%;
         }
 
+        .gps-admin-order-card-wrapper,
+        .gps-admin-order-card,
+        .gps-admin-order-card > .gps-admin-orders-grid {
+            width: 100%;
+            max-width: none;
+        }
+
         .gps-admin-orders-grid {
             display: grid;
             grid-template-columns:
@@ -61,6 +68,7 @@
             gap: 20px;
             align-items: center;
             width: 100%;
+            max-width: none;
             min-width: 0;
         }
 
@@ -90,6 +98,16 @@
             background: transparent;
         }
 
+        .gps-admin-orders-view-column,
+        .gps-admin-orders-view-column > *,
+        .gps-admin-orders-view-column .fi-ta-text,
+        .gps-admin-orders-view-column .fi-ta-text-item,
+        .gps-admin-orders-view-column .fi-ta-col-wrp,
+        .fi-ta-cell:has(.gps-admin-order-card),
+        .fi-ta-cell:has(.gps-admin-order-card) > *,
+        .fi-ta-cell:has(.gps-admin-order-card) .fi-ta-text,
+        .fi-ta-cell:has(.gps-admin-order-card) .fi-ta-text-item,
+        .fi-ta-cell:has(.gps-admin-order-card) .fi-ta-col-wrp,
         .fi-ta-table:has(.gps-admin-order-card) tbody td > .fi-ta-col-wrp,
         .fi-ta-table:has(.gps-admin-order-card) tbody td .fi-ta-text,
         .fi-ta-table:has(.gps-admin-order-card) tbody td .fi-ta-text-item {
@@ -99,6 +117,8 @@
         }
 
         .gps-admin-order-card {
+            display: block;
+            width: 100%;
             min-height: 140px;
             padding: 16px 18px;
             border: 1px solid #e2e8f0;
@@ -241,8 +261,9 @@
     </style>
 @endonce
 
-<article class="gps-admin-order-card" title="{{ $fullNumber }}">
-    <div class="gps-admin-orders-grid">
+<div class="gps-admin-order-card-wrapper">
+    <article class="gps-admin-order-card" title="{{ $fullNumber }}">
+        <div class="gps-admin-orders-grid">
     <section class="gps-admin-order-card__section gps-admin-order-col gps-admin-order-col-number">
         <div class="gps-admin-order-card__value gps-admin-order-card__number" title="{{ $fullNumber }}">{{ $displayNumber }}</div>
         <div class="gps-admin-order-card__badges">
@@ -300,5 +321,6 @@
             <a class="gps-admin-order-card__action" href="{{ $editUrl }}">Zmień status</a>
         </div>
     </section>
-    </div>
-</article>
+        </div>
+    </article>
+</div>

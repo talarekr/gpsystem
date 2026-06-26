@@ -37,6 +37,7 @@ class OrderResource extends Resource
             Tables\Columns\ViewColumn::make('order_card')
                 ->label(new HtmlString('<div class="gps-admin-orders-grid gps-admin-orders-header"><div>Numer zamówienia</div><div>Status</div><div>Klient</div><div>Kwota</div><div>Sprzedana część</div><div>Kurier</div></div>'))
                 ->view('filament.resources.orders.table-order-card')
+                ->extraCellAttributes(['class' => 'gps-admin-orders-view-column'])
                 ->viewData(fn (Order $record): array => ['order' => $record])
                 ->searchable(['order_number', 'marketplace_order_id', 'customer_name', 'phone', 'company_name', 'email'])
                 ->sortable(['ordered_at']),
