@@ -431,7 +431,7 @@
                     </div>
 
                     <div class="gps-order-col gps-order-col-status">
-                        <select class="gps-order-status-select" aria-label="Status zamówienia">
+                        <select class="gps-order-status-select" aria-label="Status zamówienia" wire:change="updateOrderStatus({{ $order->id }}, $event.target.value)">
                             @foreach ($statusOptions as $value => $label)
                                 <option value="{{ $value }}" @selected($selectedStatus === $value)>{{ $label }}</option>
                             @endforeach

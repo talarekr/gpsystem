@@ -46,15 +46,16 @@
     <style>
         .gps-order-detail { display: grid; gap: 18px; }
         .gps-order-detail-card { background: #fff; border: 1px solid rgba(148, 163, 184, .22); border-radius: 22px; box-shadow: 0 14px 36px rgba(15, 23, 42, .06); padding: 22px; width: 100%; }
-        .gps-order-detail-summary { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(260px, .9fr); gap: 24px; align-items: start; }
-        .gps-order-detail-title { color: #0f172a; font-size: 24px; font-weight: 800; letter-spacing: -.02em; margin: 0; }
+        .gps-order-detail-summary { display: block; }
+        .gps-order-detail-title { color: #0f172a; font-size: 24px; font-weight: 800; letter-spacing: -.02em; margin: 0 0 22px; }
         .gps-order-detail-muted { color: #64748b; font-size: 13px; line-height: 1.45; }
-        .gps-order-detail-source { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 7px; }
-        .gps-order-detail-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
-        .gps-order-detail-fact { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 16px; padding: 13px 14px; }
-        .gps-order-detail-label { color: #64748b; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
-        .gps-order-detail-value { color: #0f172a; font-size: 14px; font-weight: 700; margin-top: 4px; overflow-wrap: anywhere; }
-        .gps-order-status-select { width: 100%; appearance: none; border: 1px solid #cbd5e1; border-radius: 999px; background: #fff; color: #0f172a; font-weight: 800; font-size: 13px; padding: 8px 34px 8px 14px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M6 8l4 4 4-4' stroke='%23334155' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; background-size: 16px; }
+        .gps-order-detail-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 28px; align-items: start; }
+        .gps-order-detail-fact { min-width: 0; }
+        .gps-order-detail-label { border-bottom: 1px solid #e2e8f0; color: #475569; font-size: 12px; font-weight: 800; letter-spacing: .03em; margin-bottom: 12px; padding-bottom: 9px; text-transform: uppercase; }
+        .gps-order-detail-value { color: #0f172a; font-size: 13px; font-weight: 400; line-height: 1.45; overflow-wrap: anywhere; }
+        .gps-order-detail-date { color: #64748b; font-size: 12px; line-height: 1.45; }
+        .gps-order-detail-source-row { color: #475569; font-size: 13px; line-height: 1.45; margin-top: 3px; }
+        .gps-order-status-select { width: 100%; max-width: 190px; appearance: none; border: 1px solid #cbd5e1; border-radius: 999px; background: #fff; color: #0f172a; font-weight: 800; font-size: 13px; padding: 8px 34px 8px 14px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M6 8l4 4 4-4' stroke='%23334155' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; background-size: 16px; }
         .gps-order-detail-section-title { color: #0f172a; font-size: 17px; font-weight: 800; margin: 0 0 14px; }
         .gps-order-detail-items { display: grid; gap: 12px; }
         .gps-order-detail-item { display: grid; grid-template-columns: 74px minmax(0, 1fr) auto; gap: 16px; align-items: center; border: 1px solid #e2e8f0; border-radius: 18px; padding: 14px; background: #fff; }
@@ -74,19 +75,29 @@
 
     <div class="gps-order-detail">
         <section class="gps-order-detail-card gps-order-detail-summary">
-            <div>
-                <h1 class="gps-order-detail-title">Zamówienie #{{ $order->id }}</h1>
-                <div class="gps-order-detail-source">
-                    @include('filament.resources.orders.partials.source-wordmark', ['marketplace' => $marketplace])
-                    @if ($externalOrderId !== '')<span class="gps-order-detail-muted">· {{ $externalOrderId }}</span>@endif
-                </div>
-                <div class="gps-order-detail-muted">{{ $orderedAt }}</div>
-            </div>
+            <h1 class="gps-order-detail-title">Zamówienie #{{ $order->id }}</h1>
             <div class="gps-order-detail-grid">
-                <div class="gps-order-detail-fact"><div class="gps-order-detail-label">Status</div><select class="gps-order-status-select" aria-label="Status zamówienia">@foreach ($statusOptions as $value => $label)<option value="{{ $value }}" @selected($selectedStatus === $value)>{{ $label }}</option>@endforeach</select></div>
-                <div class="gps-order-detail-fact"><div class="gps-order-detail-label">Kwota</div><div class="gps-order-detail-value">{{ $total }}</div></div>
-                @if ($paymentStatus !== '')<div class="gps-order-detail-fact"><div class="gps-order-detail-label">Płatność</div><div class="gps-order-detail-value {{ $isPaid ? 'gps-order-paid' : '' }}">{{ $paymentStatus }}</div></div>@endif
-                @if ($deliveryMethod !== '')<div class="gps-order-detail-fact"><div class="gps-order-detail-label">Dostawa</div><div class="gps-order-detail-value">{{ $deliveryMethod }}</div></div>@endif
+                <div class="gps-order-detail-fact">
+                    <div class="gps-order-detail-label">Status</div>
+                    <select class="gps-order-status-select" aria-label="Status zamówienia" wire:change="updateOrderStatus($event.target.value)">
+                        @foreach ($statusOptions as $value => $label)
+                            <option value="{{ $value }}" @selected($selectedStatus === $value)>{{ $label }}</option>
+                        @endforeach
+                    </select>
+                </div>
+                <div class="gps-order-detail-fact">
+                    <div class="gps-order-detail-label">Status płatności</div>
+                    <div class="gps-order-detail-value {{ $paymentStatus === 'Zapłacono' ? 'gps-order-paid' : '' }}">{{ $paymentStatus !== '' ? $paymentStatus : '—' }}</div>
+                </div>
+                <div class="gps-order-detail-fact">
+                    <div class="gps-order-detail-label">Numer zamówienia</div>
+                    <div class="gps-order-detail-value">{{ $externalOrderId !== '' ? $externalOrderId : '—' }}</div>
+                </div>
+                <div class="gps-order-detail-fact">
+                    <div class="gps-order-detail-label">Data i kanał sprzedaży</div>
+                    <div class="gps-order-detail-date">{{ $orderedAt }}</div>
+                    <div class="gps-order-detail-source-row">Źródło: @include('filament.resources.orders.partials.source-wordmark', ['marketplace' => $marketplace])</div>
+                </div>
             </div>
         </section>
 
