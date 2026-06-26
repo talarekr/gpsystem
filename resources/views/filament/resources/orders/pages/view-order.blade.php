@@ -131,6 +131,12 @@
 
         return '';
     };
+    $joinFilled = function (array $values): string {
+        return trim(implode(' ', array_filter(array_map(
+            fn (mixed $value): string => trim((string) $value),
+            $values,
+        ), fn (string $value): bool => $value !== '' && $value !== '-')));
+    };
     $buyerMarketplaceId = $firstFilled([
         data_get($order->raw_payload, 'buyer.id'),
         data_get($order->raw_payload, 'buyer.login'),
@@ -146,19 +152,33 @@
         $order->email,
     ], fn ($value) => filled($value)));
     $deliveryLines = app(\App\Support\OrderDeliveryDisplayResolver::class)->resolve($order);
+    $deliveryAddressFirstLast = $joinFilled([
+        data_get($order->raw_payload, 'delivery.address.firstName'),
+        data_get($order->raw_payload, 'delivery.address.lastName'),
+    ]);
+    $buyerFirstLast = $joinFilled([
+        data_get($order->raw_payload, 'buyer.firstName'),
+        data_get($order->raw_payload, 'buyer.lastName'),
+    ]);
     $deliveryRecipient = $firstFilled([
-        data_get($order->raw_payload, 'delivery.address.fullName'),
+        $deliveryAddressFirstLast,
         data_get($order->raw_payload, 'delivery.address.name'),
-        data_get($order->raw_payload, 'shippingAddress.fullName'),
-        data_get($order->raw_payload, 'shippingAddress.name'),
+        data_get($order->raw_payload, 'delivery.address.fullName'),
+        $buyerFirstLast,
+        data_get($order->raw_payload, 'buyer.fullName'),
+        data_get($order->raw_payload, 'buyer.name'),
         $order->customer_name,
         $customerDisplay['name'],
+    ]);
+    $deliveryCityLine = $joinFilled([
+        $order->postal_code,
+        $order->city,
+        $order->country,
     ]);
     $addressLines = array_values(array_filter([
         $deliveryRecipient,
         trim((string) $order->address_line1),
-        trim(implode(' ', array_filter([trim((string) $order->postal_code), trim((string) $order->city)]))),
-        trim((string) $order->country),
+        $deliveryCityLine,
         $deliveryPhone,
     ], fn ($value) => filled($value)));
     $invoiceCompany = $firstFilled([
