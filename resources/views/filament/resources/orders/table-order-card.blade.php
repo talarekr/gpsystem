@@ -37,9 +37,39 @@
         }
 
         .fi-ta-table:has(.gps-admin-order-card) thead th {
+            padding: 0 18px 8px !important;
             color: #475569;
             font-size: 12px;
             font-weight: 600;
+        }
+
+        .fi-ta-table:has(.gps-admin-order-card) thead th .fi-ta-header-cell-label,
+        .fi-ta-table:has(.gps-admin-order-card) thead th .fi-ta-header-cell-label > span {
+            display: block;
+            width: 100%;
+        }
+
+        .gps-admin-orders-grid {
+            display: grid;
+            grid-template-columns:
+                minmax(180px, 1.15fr)
+                minmax(130px, 0.8fr)
+                minmax(190px, 1fr)
+                minmax(130px, 0.75fr)
+                minmax(280px, 1.45fr)
+                minmax(190px, 0.95fr);
+            gap: 20px;
+            align-items: center;
+            width: 100%;
+        }
+
+        .gps-admin-orders-header {
+            color: #475569;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: .02em;
+            line-height: 1.2;
+            text-transform: uppercase;
         }
 
         .fi-ta-table:has(.gps-admin-order-card) tbody tr,
@@ -63,11 +93,7 @@
         }
 
         .gps-admin-order-card {
-            display: grid;
-            grid-template-columns: minmax(180px, 1.2fr) minmax(120px, .8fr) minmax(180px, 1fr) minmax(130px, .8fr) minmax(260px, 1.4fr) minmax(160px, .9fr);
             min-height: 140px;
-            gap: 16px;
-            align-items: start;
             padding: 16px 18px;
             border: 1px solid #e2e8f0;
             border-radius: 10px;
@@ -80,6 +106,10 @@
             transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
         }
 
+        .gps-admin-order-card .gps-admin-orders-grid {
+            align-items: start;
+        }
+
         .gps-admin-order-card:hover {
             border-color: #cbd5e1;
             background: #fbfdff;
@@ -90,15 +120,6 @@
             display: grid;
             min-width: 0;
             gap: 7px;
-        }
-
-        .gps-admin-order-card__label {
-            color: #94a3b8;
-            font-size: 10px;
-            font-weight: 700;
-            letter-spacing: .055em;
-            line-height: 1.2;
-            text-transform: uppercase;
         }
 
         .gps-admin-order-card__value {
@@ -193,23 +214,26 @@
         }
 
         @media (max-width: 1280px) {
-            .gps-admin-order-card {
+            .gps-admin-orders-grid {
                 grid-template-columns: repeat(3, minmax(0, 1fr));
             }
         }
 
         @media (max-width: 760px) {
-            .gps-admin-order-card {
+            .gps-admin-orders-grid {
                 grid-template-columns: 1fr;
-                min-height: 140px;
+            }
+
+            .gps-admin-orders-header {
+                display: none;
             }
         }
     </style>
 @endonce
 
 <article class="gps-admin-order-card" title="{{ $fullNumber }}">
+    <div class="gps-admin-orders-grid">
     <section class="gps-admin-order-card__section">
-        <div class="gps-admin-order-card__label">Numer zamówienia</div>
         <div class="gps-admin-order-card__value gps-admin-order-card__number" title="{{ $fullNumber }}">{{ $displayNumber }}</div>
         <div class="gps-admin-order-card__badges">
             <span class="gps-admin-order-card__badge gps-admin-order-card__badge--marketplace">{{ $marketplace }}</span>
@@ -220,7 +244,6 @@
     </section>
 
     <section class="gps-admin-order-card__section">
-        <div class="gps-admin-order-card__label">Status</div>
         <div class="gps-admin-order-card__value">{{ $statusLabel }}</div>
         @if($marketplaceStatus !== '')
             <div><span class="gps-admin-order-card__badge gps-admin-order-card__badge--status">{{ $marketplaceStatus }}</span></div>
@@ -228,7 +251,6 @@
     </section>
 
     <section class="gps-admin-order-card__section" title="{{ $email }}">
-        <div class="gps-admin-order-card__label">Klient</div>
         <div class="gps-admin-order-card__value gps-admin-order-card__buyer-name">{{ $buyerName }}</div>
         @if($phone !== '')
             <div class="gps-admin-order-card__muted">{{ $phone }}</div>
@@ -236,13 +258,11 @@
     </section>
 
     <section class="gps-admin-order-card__section">
-        <div class="gps-admin-order-card__label">Kwota</div>
         <div class="gps-admin-order-card__total">{{ $total }}</div>
         <div class="gps-admin-order-card__muted">{{ $orderedAt }}</div>
     </section>
 
     <section class="gps-admin-order-card__section">
-        <div class="gps-admin-order-card__label">Sprzedana część</div>
         @if($firstItemName !== '')
             <div class="gps-admin-order-card__part-name" title="{{ $firstItemName }}">{{ $firstItemName }}</div>
             @if($itemsCount > 1)
@@ -254,7 +274,6 @@
     </section>
 
     <section class="gps-admin-order-card__section">
-        <div class="gps-admin-order-card__label">Kurier</div>
         @if($shipment)
             <div class="gps-admin-order-card__value">{{ $carrier ?: '—' }}</div>
             @if($trackingNumber !== '')
@@ -271,4 +290,5 @@
             <a class="gps-admin-order-card__action" href="{{ $editUrl }}">Zmień status</a>
         </div>
     </section>
+    </div>
 </article>
