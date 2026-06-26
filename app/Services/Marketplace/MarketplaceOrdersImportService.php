@@ -71,12 +71,12 @@ class MarketplaceOrdersImportService
             $orders = $this->fetchOrders($marketplace, $options, $result);
             $result['orders_fetched'] = count($orders);
             foreach ($orders as $raw) {
-                $normalized = $this->normalizeOrder($marketplace, $raw);
+                $normalized = $this->normalizeOrder($marketplace, $raw, $result);
                 if (($normalized['marketplace_order_id'] ?? '') === '') { $result['orders_skipped']++; continue; }
                 if (($normalized['ordered_at'] ?? null) === null) {
                     $result['warnings'][] = ['marketplace' => $marketplace, 'code' => 'missing_ordered_at', 'marketplace_order_id' => $normalized['marketplace_order_id']];
                 }
-                if ($dryRun) { $result['would_import'][] = Arr::only($normalized, ['marketplace','marketplace_order_id','marketplace_status','ordered_at','buyer_name','total_amount','currency']); continue; }
+                if ($dryRun) { $result['would_import'][] = Arr::only($normalized, ['marketplace','marketplace_order_id','marketplace_status','ordered_at','buyer_name','total_amount','delivery_amount','currency']); continue; }
                 $this->upsertOrder($normalized, $raw, $result);
             }
         } catch (Throwable $e) {
@@ -176,10 +176,10 @@ class MarketplaceOrdersImportService
         return $orders;
     }
 
-    private function normalizeOrder(string $marketplace, array $raw): array
+    private function normalizeOrder(string $marketplace, array $raw, array &$result): array
     {
         if ($marketplace === 'ovoko') {
-            return $this->normalizeOvokoOrder($raw);
+            return $this->normalizeOvokoOrder($raw, $result);
         }
         $buyer = $raw['buyer'] ?? $raw['buyerInfo'] ?? [];
         $delivery = $raw['delivery'] ?? $raw['fulfillmentStartInstructions'][0]['shippingStep'] ?? [];
@@ -211,10 +211,28 @@ class MarketplaceOrdersImportService
         ];
     }
 
-    private function normalizeOvokoOrder(array $raw): array
+    private function normalizeOvokoOrder(array $raw, array &$result): array
     {
         $items = array_values(array_filter($raw['item_list'] ?? [], 'is_array'));
-        $currency = (string) ($raw['currency'] ?? $raw['total_price_currency'] ?? $raw['price_currency'] ?? 'EUR');
+        $hasTotal = array_key_exists('total_price', $raw) || array_key_exists('total_amount', $raw);
+        $hasDelivery = array_key_exists('shipping_price', $raw) || array_key_exists('delivery_amount', $raw);
+        $total = $this->ovokoAmount($raw['total_price'] ?? ($raw['total_amount'] ?? null), ['buyer', 'seller'], 'total_price', $hasTotal);
+        $delivery = $this->ovokoAmount($raw['shipping_price'] ?? ($raw['delivery_amount'] ?? null), ['buyer', 'seller'], 'shipping_price', $hasDelivery);
+        $currency = (string) ($total['currency'] ?? $raw['currency'] ?? $raw['total_price_currency'] ?? $raw['price_currency'] ?? 'EUR');
+
+        foreach ([['total', $total], ['delivery', $delivery]] as [$kind, $amount]) {
+            if (! $amount['resolved']) {
+                $result['warnings'][] = [
+                    'marketplace' => 'ovoko',
+                    'code' => 'ovoko_amount_unresolved',
+                    'marketplace_order_id' => (string) ($raw['order_id'] ?? ''),
+                    'amount_kind' => $kind,
+                    'amount_source' => $amount['amount_source'],
+                    'currency_source' => $amount['currency_source'],
+                ];
+            }
+        }
+
         return [
             'marketplace' => 'ovoko',
             'marketplace_order_id' => (string) ($raw['order_id'] ?? ''),
@@ -230,20 +248,33 @@ class MarketplaceOrdersImportService
             'delivery_country' => (string) ($raw['client_country'] ?? $raw['shipping_country'] ?? $raw['delivery_country'] ?? ''),
             'invoice_data' => $raw['invoice'] ?? $raw['company'] ?? null,
             'currency' => $currency,
-            'total_amount' => (float) ($raw['total_price'] ?? $raw['total_amount'] ?? 0),
-            'delivery_amount' => (float) ($raw['shipping_price'] ?? $raw['delivery_amount'] ?? 0),
+            'total_amount' => $total['amount'],
+            'delivery_amount' => $delivery['amount'],
             'payment_status' => (string) ($raw['payment_status'] ?? ''),
             'payment_method' => (string) ($raw['payment_type'] ?? $raw['payment_method'] ?? ''),
             'delivery_method' => (string) ($raw['shipping_method'] ?? $raw['delivery_method'] ?? ''),
-            'items' => array_map(fn (array $item, int $idx): array => $this->normalizeOvokoItem($item, (string) ($raw['order_id'] ?? ''), $idx, $currency), $items, array_keys($items)),
+            'items' => array_map(fn (array $item, int $idx): array => $this->normalizeOvokoItem($item, (string) ($raw['order_id'] ?? ''), $idx, $currency, $result), $items, array_keys($items)),
             'raw_payload' => $raw,
         ];
     }
 
-    private function normalizeOvokoItem(array $raw, string $orderId, int $idx, string $currency): array
+    private function normalizeOvokoItem(array $raw, string $orderId, int $idx, string $currency, array &$result): array
     {
         $title = (string) ($raw['title'] ?? $raw['name'] ?? $raw['part_name'] ?? 'Ovoko item');
-        $price = $this->amountValue($raw['price'] ?? $raw['unit_price'] ?? $raw['total_price'] ?? 0);
+        $hasPrice = array_key_exists('sell_price', $raw) || array_key_exists('price', $raw) || array_key_exists('unit_price', $raw) || array_key_exists('total_price', $raw);
+        $priceAmount = $this->ovokoAmount($raw['sell_price'] ?? ($raw['price'] ?? ($raw['unit_price'] ?? ($raw['total_price'] ?? null))), ['buyer', 'seller'], 'item_list.sell_price', $hasPrice);
+        if (! $priceAmount['resolved']) {
+            $result['warnings'][] = [
+                'marketplace' => 'ovoko',
+                'code' => 'ovoko_amount_unresolved',
+                'marketplace_order_id' => $orderId,
+                'amount_kind' => 'item_price',
+                'item_index' => $idx,
+                'amount_source' => $priceAmount['amount_source'],
+                'currency_source' => $priceAmount['currency_source'],
+            ];
+        }
+        $price = $priceAmount['amount'];
         $id = (string) ($raw['item_id'] ?? $raw['id'] ?? $raw['part_id'] ?? $raw['ovoko_part_id'] ?? '');
         if ($id === '') $id = hash('sha256', $orderId.'|'.$idx.'|'.$title.'|'.$price);
         return $raw + [
@@ -251,7 +282,7 @@ class MarketplaceOrdersImportService
             'title' => $title,
             'quantity' => (int) ($raw['quantity'] ?? $raw['qty'] ?? 1),
             'price' => $price,
-            'currency' => (string) ($raw['currency'] ?? $currency),
+            'currency' => (string) ($priceAmount['currency'] ?? $raw['currency'] ?? $currency),
             'raw_payload' => $raw,
         ];
     }
@@ -328,6 +359,45 @@ class MarketplaceOrdersImportService
             }
         }
         return $sanitized;
+    }
+
+    private function ovokoAmount(mixed $value, array $preferredSides, string $field, bool $inputPresent = true): array
+    {
+        if (is_array($value)) {
+            foreach ($preferredSides as $side) {
+                if (isset($value[$side]) && is_array($value[$side])) {
+                    $amount = $value[$side]['amount'] ?? $value[$side]['value'] ?? null;
+                    if (is_numeric($amount)) {
+                        return [
+                            'resolved' => true,
+                            'amount' => (float) $amount,
+                            'currency' => isset($value[$side]['currency']) ? (string) $value[$side]['currency'] : null,
+                            'amount_source' => $field.'.'.$side.'.amount',
+                            'currency_source' => isset($value[$side]['currency']) ? $field.'.'.$side.'.currency' : null,
+                        ];
+                    }
+                }
+            }
+
+            $amount = $value['amount'] ?? $value['value'] ?? null;
+            if (is_numeric($amount)) {
+                return [
+                    'resolved' => true,
+                    'amount' => (float) $amount,
+                    'currency' => isset($value['currency']) ? (string) $value['currency'] : null,
+                    'amount_source' => $field.'.amount',
+                    'currency_source' => isset($value['currency']) ? $field.'.currency' : null,
+                ];
+            }
+
+            return ['resolved' => ! $inputPresent, 'amount' => 0.0, 'currency' => null, 'amount_source' => $field, 'currency_source' => null];
+        }
+
+        if (is_numeric($value)) {
+            return ['resolved' => true, 'amount' => (float) $value, 'currency' => null, 'amount_source' => $field, 'currency_source' => null];
+        }
+
+        return ['resolved' => ! $inputPresent, 'amount' => 0.0, 'currency' => null, 'amount_source' => $field, 'currency_source' => null];
     }
 
     private function amountValue(mixed $value): float
