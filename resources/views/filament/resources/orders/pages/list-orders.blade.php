@@ -296,50 +296,6 @@
         <button class="gps-orders-reset-button" type="button" wire:click="resetFilters">Wyczyść filtry</button>
     </div>
 
-    @php
-        $marketplaceSnapshotImageUrl = function ($item): ?string {
-            $payloads = [$item?->meta, $item?->raw_payload];
-            $paths = [
-                'image_url',
-                'image',
-                'thumbnail',
-                'thumbnail_url',
-                'picture',
-                'picture.url',
-                'photo',
-                'photo.url',
-                'offer.image',
-                'offer.image.url',
-                'offer.thumbnail',
-                'offer.thumbnail_url',
-                'offer.primaryImage.url',
-                'offer.images.0.url',
-                'images.0.url',
-                'images.0',
-                'photos.0.url',
-                'photos.0',
-                'gallery.0.url',
-                'gallery.0',
-            ];
-
-            foreach ($payloads as $payload) {
-                if (! is_array($payload)) {
-                    continue;
-                }
-
-                foreach ($paths as $path) {
-                    $candidate = data_get($payload, $path);
-
-                    if (is_string($candidate) && filter_var($candidate, FILTER_VALIDATE_URL)) {
-                        return $candidate;
-                    }
-                }
-            }
-
-            return null;
-        };
-    @endphp
-
     <div class="gps-orders-list">
         <div class="gps-orders-list-header gps-admin-orders-grid">
             <div>Sprzedana część</div>
@@ -362,33 +318,12 @@
                 $orderedAt = $order->ordered_at ? $order->ordered_at->format('Y-m-d H:i') : '—';
                 $firstItem = $order->items->first();
                 $itemsCount = $order->items->count();
-                $localPart = $firstItem?->part;
-                $soldListing = $firstItem?->marketplaceListing;
-                $listingPart = $soldListing?->part;
-                $soldPart = $localPart ?: $listingPart;
-                $firstItemName = $soldPart?->name ?: $soldListing?->title ?: $firstItem?->product_name ?: 'Brak danych';
-                $storageLocation = $soldPart?->storageLocation?->name ?: 'Brak lokalizacji';
-                $partImageUrl = null;
-                $thumbnailSource = 'placeholder';
-
-                $localPartImageUrl = $localPart?->adminTableImageUrl();
-                $listingPartImageUrl = $listingPart?->adminTableImageUrl();
-                $snapshotImageUrl = $marketplaceSnapshotImageUrl($firstItem);
-
-                if ($localPartImageUrl) {
-                    $partImageUrl = $localPartImageUrl;
-                    $thumbnailSource = 'local_part';
-                } elseif ($listingPartImageUrl) {
-                    $partImageUrl = $listingPartImageUrl;
-                    $thumbnailSource = 'marketplace_listing_part';
-                } elseif ($snapshotImageUrl) {
-                    $partImageUrl = $snapshotImageUrl;
-                    $thumbnailSource = 'marketplace_snapshot';
-                }
-
-                // Debug helper for verification only; intentionally not rendered as a persistent UI label.
-                // Possible values: local_part, marketplace_listing_part, marketplace_snapshot, placeholder.
-                $thumbnail_source = $thumbnailSource;
+                $thumbnailDebug = \App\Support\OrderItemThumbnailDiagnostics::resolve($order, $firstItem);
+                $firstItemName = $thumbnailDebug['display_name'];
+                $storageLocation = $thumbnailDebug['storage_location'];
+                $partImageUrl = $thumbnailDebug['thumbnail_url'];
+                $thumbnailSource = $thumbnailDebug['thumbnail_source'];
+                $thumbnailDebugAttribute = \App\Support\OrderItemThumbnailDiagnostics::attribute($thumbnailDebug);
                 $shipment = $order->shipments->first();
                 $carrier = $shipment?->carrier ?: $order->delivery_method;
                 $trackingNumber = $shipment?->tracking_number;
@@ -398,11 +333,11 @@
             <div class="gps-order-card">
                 <div class="gps-admin-orders-grid">
                     <div class="gps-order-col gps-order-col-item">
-                        <div class="gps-order-sold-part">
+                        <div class="gps-order-sold-part" @if (config('app.debug')) data-thumbnail-debug="{!! $thumbnailDebugAttribute !!}" @endif>
                             @if ($partImageUrl)
                                 <img class="gps-order-part-thumb" src="{{ $partImageUrl }}" alt="{{ $firstItemName }}">
                             @else
-                                <div class="gps-order-part-placeholder" aria-hidden="true">
+                                <div class="gps-order-part-placeholder" aria-hidden="true" @if (config('app.debug')) title="{!! $thumbnailDebugAttribute !!}" @endif>
                                     <x-heroicon-o-photo class="h-7 w-7" />
                                 </div>
                             @endif

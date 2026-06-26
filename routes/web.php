@@ -24,6 +24,7 @@ use App\Http\Controllers\Storefront\PrivacyPolicyController;
 use App\Http\Controllers\Storefront\SearchController;
 use App\Http\Controllers\Storefront\TermsController;
 use App\Http\Controllers\Tools\CheckOrdersFlowController;
+use App\Http\Controllers\Tools\DebugOrderItemThumbnailController;
 use App\Http\Controllers\Tools\WorkshopQuickPartController;
 use App\Http\Controllers\Tools\BackfillPartDefaultConditionAndSteeringController;
 use App\Http\Controllers\Tools\BackfillPartMarketplacePricesController;
@@ -322,6 +323,7 @@ Route::get('/tools/check-google-translate-readiness', [GoogleTranslateDiagnostic
 Route::get('/tools/test-google-translate', [GoogleTranslateDiagnosticsController::class, 'test'])->name('tools.test-google-translate');
 Route::get('/tools/dry-run-product-translation', [GoogleTranslateDiagnosticsController::class, 'dryRunProduct'])->name('tools.dry-run-product-translation');
 Route::get('/tools/import-marketplace-orders', ImportMarketplaceOrdersController::class)->name('tools.import-marketplace-orders');
+Route::get('/tools/debug-order-item-thumbnail', DebugOrderItemThumbnailController::class)->name('tools.debug-order-item-thumbnail');
 Route::get('/tools/delete-test-marketplace-orders', DeleteTestMarketplaceOrdersController::class)->name('tools.delete-test-marketplace-orders');
 Route::get('/tools/ovoko-orders-dry-run', OvokoOrdersDryRunController::class)->name('tools.ovoko-orders-dry-run');
 Route::get('/tools/import-ovoko-orders-dry-run', ImportOvokoOrdersDryRunController::class)->name('tools.import-ovoko-orders-dry-run');
