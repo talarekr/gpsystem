@@ -75,7 +75,7 @@ class ImportMarketplaceOrdersControllerTest extends TestCase
         $this->assertDatabaseCount('orders', 0);
     }
 
-    public function test_ovoko_dry_run_maps_nested_buyer_amounts_without_array_casting(): void
+    public function test_ovoko_dry_run_prefers_nested_seller_amounts_without_array_casting(): void
     {
         Http::fake([
             'ovoko.example.test/v2/get/orders/2026-06-01/2026-06-26' => Http::response([
@@ -128,11 +128,15 @@ class ImportMarketplaceOrdersControllerTest extends TestCase
             ->assertJsonPath('marketplaces.ovoko.api_http_status', 200)
             ->assertJsonPath('marketplaces.ovoko.ovoko_status_code', 'R200')
             ->assertJsonPath('marketplaces.ovoko.orders_fetched', 2)
-            ->assertJsonPath('marketplaces.ovoko.would_import.0.total_amount', 224.64)
-            ->assertJsonPath('marketplaces.ovoko.would_import.0.delivery_amount', 106.99)
-            ->assertJsonPath('marketplaces.ovoko.would_import.0.currency', 'EUR')
+            ->assertJsonPath('marketplaces.ovoko.would_import.0.total_amount', 954.72)
+            ->assertJsonPath('marketplaces.ovoko.would_import.0.delivery_amount', 454.71)
+            ->assertJsonPath('marketplaces.ovoko.would_import.0.currency', 'PLN')
+            ->assertJsonPath('marketplaces.ovoko.would_import.0.amount_source', 'seller')
+            ->assertJsonPath('marketplaces.ovoko.would_import.0.delivery_amount_source', 'seller')
             ->assertJsonPath('marketplaces.ovoko.would_import.1.total_amount', 125.0)
+            ->assertJsonPath('marketplaces.ovoko.would_import.1.delivery_amount', 0.0)
             ->assertJsonPath('marketplaces.ovoko.would_import.1.currency', 'PLN')
+            ->assertJsonPath('marketplaces.ovoko.would_import.1.amount_source', 'seller')
             ->assertJsonPath('marketplaces.ovoko.safety_flags.read_only', true)
             ->assertJsonPath('marketplaces.ovoko.safety_flags.orders_changed', false)
             ->assertJsonPath('marketplaces.ovoko.safety_flags.ovoko_write', false);

@@ -76,7 +76,7 @@ class MarketplaceOrdersImportService
                 if (($normalized['ordered_at'] ?? null) === null) {
                     $result['warnings'][] = ['marketplace' => $marketplace, 'code' => 'missing_ordered_at', 'marketplace_order_id' => $normalized['marketplace_order_id']];
                 }
-                if ($dryRun) { $result['would_import'][] = Arr::only($normalized, ['marketplace','marketplace_order_id','marketplace_status','ordered_at','buyer_name','total_amount','delivery_amount','currency']); continue; }
+                if ($dryRun) { $result['would_import'][] = Arr::only($normalized, ['marketplace','marketplace_order_id','marketplace_status','ordered_at','buyer_name','total_amount','delivery_amount','currency','amount_source','total_amount_source','delivery_amount_source']); continue; }
                 $this->upsertOrder($normalized, $raw, $result);
             }
         } catch (Throwable $e) {
@@ -216,8 +216,8 @@ class MarketplaceOrdersImportService
         $items = array_values(array_filter($raw['item_list'] ?? [], 'is_array'));
         $hasTotal = array_key_exists('total_price', $raw) || array_key_exists('total_amount', $raw);
         $hasDelivery = array_key_exists('shipping_price', $raw) || array_key_exists('delivery_amount', $raw);
-        $total = $this->ovokoAmount($raw['total_price'] ?? ($raw['total_amount'] ?? null), ['buyer', 'seller'], 'total_price', $hasTotal);
-        $delivery = $this->ovokoAmount($raw['shipping_price'] ?? ($raw['delivery_amount'] ?? null), ['buyer', 'seller'], 'shipping_price', $hasDelivery);
+        $total = $this->ovokoAmount($raw['total_price'] ?? ($raw['total_amount'] ?? null), ['seller', 'buyer'], 'total_price', $hasTotal);
+        $delivery = $this->ovokoAmount($raw['shipping_price'] ?? ($raw['delivery_amount'] ?? null), ['seller', 'buyer'], 'shipping_price', $hasDelivery);
         $currency = (string) ($total['currency'] ?? $raw['currency'] ?? $raw['total_price_currency'] ?? $raw['price_currency'] ?? 'EUR');
 
         foreach ([['total', $total], ['delivery', $delivery]] as [$kind, $amount]) {
@@ -250,6 +250,9 @@ class MarketplaceOrdersImportService
             'currency' => $currency,
             'total_amount' => $total['amount'],
             'delivery_amount' => $delivery['amount'],
+            'amount_source' => $total['amount_source'],
+            'total_amount_source' => $total['amount_source'],
+            'delivery_amount_source' => $delivery['amount_source'],
             'payment_status' => (string) ($raw['payment_status'] ?? ''),
             'payment_method' => (string) ($raw['payment_type'] ?? $raw['payment_method'] ?? ''),
             'delivery_method' => (string) ($raw['shipping_method'] ?? $raw['delivery_method'] ?? ''),
@@ -262,7 +265,7 @@ class MarketplaceOrdersImportService
     {
         $title = (string) ($raw['title'] ?? $raw['name'] ?? $raw['part_name'] ?? 'Ovoko item');
         $hasPrice = array_key_exists('sell_price', $raw) || array_key_exists('price', $raw) || array_key_exists('unit_price', $raw) || array_key_exists('total_price', $raw);
-        $priceAmount = $this->ovokoAmount($raw['sell_price'] ?? ($raw['price'] ?? ($raw['unit_price'] ?? ($raw['total_price'] ?? null))), ['buyer', 'seller'], 'item_list.sell_price', $hasPrice);
+        $priceAmount = $this->ovokoAmount($raw['sell_price'] ?? ($raw['price'] ?? ($raw['unit_price'] ?? ($raw['total_price'] ?? null))), ['seller', 'buyer'], 'item_list.sell_price', $hasPrice);
         if (! $priceAmount['resolved']) {
             $result['warnings'][] = [
                 'marketplace' => 'ovoko',
@@ -283,6 +286,7 @@ class MarketplaceOrdersImportService
             'quantity' => (int) ($raw['quantity'] ?? $raw['qty'] ?? 1),
             'price' => $price,
             'currency' => (string) ($priceAmount['currency'] ?? $raw['currency'] ?? $currency),
+            'amount_source' => $priceAmount['amount_source'],
             'raw_payload' => $raw,
         ];
     }
@@ -372,7 +376,7 @@ class MarketplaceOrdersImportService
                             'resolved' => true,
                             'amount' => (float) $amount,
                             'currency' => isset($value[$side]['currency']) ? (string) $value[$side]['currency'] : null,
-                            'amount_source' => $field.'.'.$side.'.amount',
+                            'amount_source' => $side,
                             'currency_source' => isset($value[$side]['currency']) ? $field.'.'.$side.'.currency' : null,
                         ];
                     }
@@ -385,7 +389,7 @@ class MarketplaceOrdersImportService
                     'resolved' => true,
                     'amount' => (float) $amount,
                     'currency' => isset($value['currency']) ? (string) $value['currency'] : null,
-                    'amount_source' => $field.'.amount',
+                    'amount_source' => 'scalar',
                     'currency_source' => isset($value['currency']) ? $field.'.currency' : null,
                 ];
             }
@@ -394,7 +398,7 @@ class MarketplaceOrdersImportService
         }
 
         if (is_numeric($value)) {
-            return ['resolved' => true, 'amount' => (float) $value, 'currency' => null, 'amount_source' => $field, 'currency_source' => null];
+            return ['resolved' => true, 'amount' => (float) $value, 'currency' => null, 'amount_source' => 'scalar', 'currency_source' => null];
         }
 
         return ['resolved' => ! $inputPresent, 'amount' => 0.0, 'currency' => null, 'amount_source' => $field, 'currency_source' => null];
