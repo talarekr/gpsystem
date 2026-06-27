@@ -3,9 +3,12 @@
 namespace App\Http\Controllers\Tools;
 
 use App\Http\Controllers\Controller;
+use App\Models\MarketplaceCategory;
+use App\Models\MarketplaceCategoryMapping;
 use App\Models\Part;
 use App\Services\Marketplace\MarketplaceListingReadinessService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\View\View;
@@ -129,6 +132,60 @@ class PartMarketplaceReadinessController extends Controller
         $channel = (string) $request->query('channel', 'ebay_de');
         $result = $this->readinessService->prepareEbayTranslations($part, $channel);
         return response()->json($result + ['part_id' => $part->id]);
+    }
+
+
+    public function prepareEbayAll(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+        $part = Part::query()->find((int) $request->query('part_id'));
+        if (! $part) return response()->json(['ok' => false, 'blockers' => ['part_not_found']], 404);
+
+        $results = [
+            'ebay_de' => $this->readinessService->prepareEbayTranslations($part, 'ebay_de'),
+            'ebay_fr' => $this->readinessService->prepareEbayTranslations($part, 'ebay_fr'),
+        ];
+
+        return response()->json([
+            'ok' => collect($results)->every(fn (array $result): bool => (bool) ($result['ok'] ?? false)),
+            'part_id' => $part->id,
+            'message' => 'Aukcja przygotowana',
+            'channels' => $results,
+            'will_make_marketplace_request' => false,
+            'publish' => false,
+        ]);
+    }
+
+    public function storeCategoryMapping(Request $request): RedirectResponse
+    {
+        $data = $request->validate([
+            'part_id' => ['required', 'integer', 'exists:parts,id'],
+            'channel' => ['required', 'in:allegro_main,ovoko,ebay_de,ebay_fr'],
+            'external_category_id' => ['required', 'string', 'max:255'],
+        ]);
+
+        $part = Part::query()->findOrFail((int) $data['part_id']);
+        $category = MarketplaceCategory::query()
+            ->where('channel', $data['channel'])
+            ->where('external_category_id', $data['external_category_id'])
+            ->firstOrFail();
+
+        MarketplaceCategoryMapping::query()->updateOrCreate(
+            ['local_category_id' => $part->category_id, 'channel' => $data['channel']],
+            [
+                'external_category_id' => $category->external_category_id,
+                'external_category_name' => $category->name,
+                'external_category_path' => $category->full_path,
+                'local_category_name' => $part->category?->name,
+                'local_category_path' => $part->category?->full_slug_path ?: $part->category?->name,
+                'source' => 'manual_part_edit_marketplace_preparation',
+                'confidence' => 1,
+                'is_blocked' => false,
+                'imported_at' => now(),
+            ]
+        );
+
+        return back()->with('status', 'Kategoria marketplace zapisana lokalnie.');
     }
 
     public function payload(Request $request): JsonResponse

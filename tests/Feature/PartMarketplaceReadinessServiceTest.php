@@ -93,6 +93,71 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $this->assertSame('Uzupełnij braki', $presentation['message']);
         $this->assertTrue($presentation['safe_preview_only']);
     }
+    public function test_marketplace_preparation_panel_renders_three_operational_cards_without_old_technical_copy(): void
+    {
+        $category = PartCategory::query()->create(['name' => 'Alternatory']);
+        $part = Part::query()->create([
+            'name' => 'Alternator BMW',
+            'description' => 'Opis alternatora.',
+            'category_id' => $category->id,
+            'price' => 100,
+            'ovoko_price' => 120,
+            'quantity' => 1,
+            'vehicle_snapshot' => ['make' => 'BMW'],
+            'review_metadata' => ['marketplace_translations' => [
+                'ebay_de' => ['title' => 'Generator BMW', 'description' => 'Deutsche Beschreibung.'],
+                'ebay_fr' => ['title' => 'Alternateur BMW', 'description' => 'Description française.'],
+            ]],
+        ]);
+
+        foreach ([
+            'allegro_main' => ['261054', 'Alternator', 'Motoryzacja / Części / Alternatory'],
+            'ovoko' => ['252', 'Alternator', 'Części / Alternator'],
+            'ebay_de' => ['177697', 'Lichtmaschine', 'Auto & Motorrad / Lichtmaschinen'],
+        ] as $channel => [$id, $name, $path]) {
+            MarketplaceCategoryMapping::query()->create(['local_category_id' => $category->id, 'channel' => $channel, 'external_category_id' => $id, 'external_category_name' => $name, 'external_category_path' => $path]);
+            \App\Models\MarketplaceCategory::query()->create(['channel' => $channel, 'external_category_id' => $id, 'name' => $name, 'full_path' => $path, 'level' => 1, 'active' => true]);
+        }
+
+        $html = view('filament.resources.parts.marketplace-readiness-cards', ['part' => $part])->render();
+
+        $this->assertStringContainsString('data-marketplace-card="allegro"', $html);
+        $this->assertStringContainsString('data-marketplace-card="ovoko"', $html);
+        $this->assertStringContainsString('data-marketplace-card="ebay"', $html);
+        $this->assertStringNotContainsString('To jest podgląd przygotowania produktu', $html);
+        $this->assertStringNotContainsString('Przygotuj eBay DE', $html);
+        $this->assertStringNotContainsString('Przygotuj eBay FR', $html);
+        $this->assertStringContainsString('Motoryzacja / Części / Alternatory', $html);
+        $this->assertStringContainsString('Drzewo kategorii Allegro', $html);
+        $this->assertStringContainsString('Drzewo kategorii Ovoko', $html);
+        $this->assertStringContainsString('Drzewo kategorii eBay', $html);
+        $this->assertStringContainsString('Przygotuj', $html);
+        $this->assertStringContainsString('Aukcja przygotowana', $html);
+        $this->assertStringContainsString('Podgląd aukcji', $html);
+        $this->assertStringContainsString('Szczegóły techniczne', $html);
+    }
+
+    public function test_manual_marketplace_category_selection_updates_local_mapping_without_listing_write(): void
+    {
+        $category = PartCategory::query()->create(['name' => 'Alternatory']);
+        $part = Part::query()->create(['name' => 'Alternator BMW', 'category_id' => $category->id, 'quantity' => 1]);
+        \App\Models\MarketplaceCategory::query()->create(['channel' => 'ovoko', 'external_category_id' => '252', 'name' => 'Alternator', 'full_path' => 'Części / Alternator', 'level' => 1, 'active' => true]);
+
+        $this->post(route('tools.part-marketplace-category-mapping.store'), [
+            'part_id' => $part->id,
+            'channel' => 'ovoko',
+            'external_category_id' => '252',
+        ])->assertRedirect();
+
+        $this->assertDatabaseHas('marketplace_category_mappings', [
+            'local_category_id' => $category->id,
+            'channel' => 'ovoko',
+            'external_category_id' => '252',
+            'source' => 'manual_part_edit_marketplace_preparation',
+        ]);
+        $this->assertDatabaseCount('marketplace_listings', 0);
+    }
+
     public function test_marketplace_readiness_payload_uses_admin_image_order_and_includes_ovoko_dimensions_warning_only(): void
     {
         $category = PartCategory::query()->create(['name' => 'Lampy']);

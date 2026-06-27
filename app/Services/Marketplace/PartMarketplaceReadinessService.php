@@ -88,15 +88,14 @@ class PartMarketplaceReadinessService
     private function categoryPresentation(?MarketplaceCategoryMapping $mapping, string $label): array
     {
         if (! $mapping) {
-            return ['label' => 'Kategoria', 'value' => 'Brak mapowania '.$label, 'mapped' => false];
+            return ['value' => 'Brak wybranej kategorii '.$label, 'mapped' => false, 'id' => null];
         }
 
-        $parts = array_filter([
-            $mapping->external_category_path ?: $mapping->external_category_name,
-            $mapping->external_category_id ? 'ID: '.$mapping->external_category_id : null,
-        ]);
-
-        return ['label' => 'Kategoria', 'value' => implode(' · ', $parts), 'mapped' => ! $mapping->is_blocked];
+        return [
+            'value' => $mapping->external_category_path ?: ($mapping->external_category_name ?: 'Wybrana kategoria '.$label),
+            'mapped' => ! $mapping->is_blocked,
+            'id' => $mapping->external_category_id,
+        ];
     }
 
     /** @return array<int, string> */
