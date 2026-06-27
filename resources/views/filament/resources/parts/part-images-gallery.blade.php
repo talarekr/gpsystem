@@ -9,10 +9,44 @@
 @if ($images->isEmpty())
     <div class="text-sm text-gray-500 dark:text-gray-400">Brak zdjęć części.</div>
 @else
-    <div class="grid gap-3 {{ $editable ? 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6' }}">
+    <div
+        class="grid gap-3 {{ $editable ? 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6' }}"
+        @if ($editable)
+            x-data="{ draggingId: null }"
+            x-on:dragover.prevent
+            x-on:drop.prevent="
+                draggingId = null;
+                $wire.reorderPartImages(Array.from($el.querySelectorAll('[data-part-image-id]')).map((item) => item.dataset.partImageId));
+            "
+        @endif
+    >
         @foreach ($images as $index => $image)
             @php($src = $image->absolutePublicUrl())
-            <div class="relative inline-flex w-fit overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900">
+            <div
+                class="relative inline-flex w-fit overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900 {{ $editable ? 'cursor-move' : '' }}"
+                @if ($editable)
+                    data-part-image-id="{{ $image->getKey() }}"
+                    draggable="true"
+                    x-on:dragstart="draggingId = $el.dataset.partImageId; $event.dataTransfer.effectAllowed = 'move';"
+                    x-on:dragend="draggingId = null"
+                    x-on:dragover.prevent="
+                        if (! draggingId || draggingId === $el.dataset.partImageId) {
+                            return;
+                        }
+
+                        const dragging = $root.querySelector(`[data-part-image-id='${draggingId}']`);
+
+                        if (! dragging) {
+                            return;
+                        }
+
+                        const rect = $el.getBoundingClientRect();
+                        const insertAfter = $event.clientX > rect.left + (rect.width / 2);
+
+                        $el.parentNode.insertBefore(dragging, insertAfter ? $el.nextSibling : $el);
+                    "
+                @endif
+            >
                 <a href="{{ $src }}" target="_blank" rel="noopener noreferrer" class="block transition hover:opacity-90" title="Otwórz zdjęcie w nowej karcie">
                     <img src="{{ $src }}" alt="{{ $image->alt_text ?: ($part?->name ?? 'Zdjęcie części') }}" class="{{ $thumbnailClasses }}" loading="lazy">
                 </a>

@@ -542,6 +542,37 @@ class PartModuleFoundationTest extends TestCase
         $this->assertDatabaseHas('part_images', ['id' => $front->getKey(), 'sort_order' => 1, 'is_primary' => false]);
     }
 
+    public function test_admin_can_reorder_existing_part_images_by_drag_drop_and_marketplace_preview_uses_saved_order(): void
+    {
+        $this->actingAsWarehouseUser();
+
+        $part = Part::query()->create([
+            'name' => 'Sortowane zdjęcia drag',
+            'description' => 'Opis części.',
+            'price' => 100,
+            'quantity' => 1,
+        ]);
+        $a = PartImage::query()->create(['part_id' => $part->id, 'path' => 'parts/photos/a.jpg', 'sort_order' => 0, 'is_primary' => true]);
+        $b = PartImage::query()->create(['part_id' => $part->id, 'path' => 'parts/photos/b.jpg', 'sort_order' => 1, 'is_primary' => false]);
+        $c = PartImage::query()->create(['part_id' => $part->id, 'path' => 'parts/photos/c.jpg', 'sort_order' => 2, 'is_primary' => false]);
+
+        Livewire::test(EditPart::class, ['record' => $part->getRouteKey()])
+            ->call('reorderPartImages', [$c->getKey(), $a->getKey(), $b->getKey()])
+            ->assertHasNoErrors();
+
+        $this->assertDatabaseHas('part_images', ['id' => $c->getKey(), 'sort_order' => 0, 'is_primary' => true]);
+        $this->assertDatabaseHas('part_images', ['id' => $a->getKey(), 'sort_order' => 1, 'is_primary' => false]);
+        $this->assertDatabaseHas('part_images', ['id' => $b->getKey(), 'sort_order' => 2, 'is_primary' => false]);
+        $this->assertSame(['parts/photos/c.jpg', 'parts/photos/a.jpg', 'parts/photos/b.jpg'], PartResource::partImagePaths($part->fresh('images')));
+
+        $readiness = app(\App\Services\Marketplace\MarketplaceListingReadinessService::class)->checkPartReadiness($part->fresh(), 'storefront');
+
+        $this->assertSame(
+            ['c.jpg', 'a.jpg', 'b.jpg'],
+            array_map('basename', $readiness['prepared_payload_preview_safe']['image_urls']),
+        );
+    }
+
     public function test_ovoko_dimensions_fields_are_fillable_and_visible_in_admin_form_source(): void
     {
         $part = Part::query()->create([

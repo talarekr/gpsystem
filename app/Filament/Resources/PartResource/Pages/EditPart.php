@@ -9,8 +9,9 @@ use App\Services\Marketplace\PreparePartMarketplaceListingService;
 use App\Services\Marketplace\PublishPartToMarketplacesService;
 use Filament\Actions;
 use Filament\Notifications\Notification;
-use Illuminate\Support\Facades\Log;
 use Filament\Resources\Pages\EditRecord;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 class EditPart extends EditRecord
@@ -88,12 +89,7 @@ class EditPart extends EditRecord
         [$moved] = array_splice($ordered, $currentIndex, 1);
         array_splice($ordered, $targetIndex, 0, [$moved]);
 
-        foreach ($ordered as $index => $image) {
-            $image->forceFill([
-                'sort_order' => $index,
-                'is_primary' => $index === 0,
-            ])->save();
-        }
+        $this->persistPartImageOrder(collect($ordered)->pluck('id')->all());
 
         $this->record->refresh();
         $this->record->load('images');
@@ -102,6 +98,68 @@ class EditPart extends EditRecord
             ->title('Kolejność zdjęć została zapisana')
             ->success()
             ->send();
+    }
+
+    /**
+     * @param  array<int, mixed>  $orderedImageIds
+     */
+    public function reorderPartImages(array $orderedImageIds): void
+    {
+        $orderedImageIds = array_values(array_map('intval', $orderedImageIds));
+        $requestedOrder = $orderedImageIds;
+
+        if ($orderedImageIds === []) {
+            return;
+        }
+
+        $currentImageIds = $this->record->images()
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->pluck('id')
+            ->map(fn (mixed $id): int => (int) $id)
+            ->all();
+
+        sort($orderedImageIds);
+        $sortedCurrentImageIds = $currentImageIds;
+        sort($sortedCurrentImageIds);
+
+        if ($orderedImageIds !== $sortedCurrentImageIds) {
+            Notification::make()
+                ->title('Nie zapisano kolejności zdjęć')
+                ->body('Lista zdjęć jest nieaktualna. Odśwież stronę i spróbuj ponownie.')
+                ->danger()
+                ->send();
+
+            return;
+        }
+
+        $this->persistPartImageOrder($requestedOrder);
+
+        $this->record->refresh();
+        $this->record->load('images');
+
+        Notification::make()
+            ->title('Kolejność zdjęć została zapisana')
+            ->success()
+            ->send();
+    }
+
+    /**
+     * @param  array<int, int>  $orderedImageIds
+     */
+    private function persistPartImageOrder(array $orderedImageIds): void
+    {
+        DB::transaction(function () use ($orderedImageIds): void {
+            foreach (array_values($orderedImageIds) as $index => $imageId) {
+                PartImage::query()
+                    ->where('part_id', $this->record->getKey())
+                    ->whereKey($imageId)
+                    ->update([
+                        'sort_order' => $index,
+                        'is_primary' => $index === 0,
+                    ]);
+            }
+        });
     }
 
     public function deletePartImage(int $imageId): void
