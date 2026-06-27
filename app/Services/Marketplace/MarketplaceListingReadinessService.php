@@ -14,7 +14,7 @@ class MarketplaceListingReadinessService
 {
     public const CHANNELS = ['storefront', 'allegro_main', 'ovoko', 'ebay_de', 'ebay_fr'];
 
-    public function __construct(private readonly TranslationService $translationService) {}
+    public function __construct(private readonly TranslationService $translationService, private readonly EbayDescriptionTemplateRenderer $ebayDescriptionTemplateRenderer) {}
 
     /** @return array<string, mixed> */
     public function checkPartReadiness(Part $part, string $channel): array
@@ -182,7 +182,7 @@ class MarketplaceListingReadinessService
     private function checkEbayAccount(?MarketplaceAccount $account, array &$blockers, array &$warnings): void { if (! $account || ! ($account->api_enabled ?? false)) $blockers[] = 'eBay API/settings are not configured or not enabled.'; else $this->checkAccount($account, $blockers, $warnings, 'eBay API/settings are not configured or not enabled.'); }
     private function isGoogleTranslateConfigured(): bool { try { return $this->translationService->isGoogleTranslateConfigured(); } catch (\Throwable) { return false; } }
     private function targetLanguageForChannel(string $channel): ?string { try { return $this->translationService->targetLanguageForChannel($channel); } catch (\Throwable) { return null; } }
-    private function ebayTemplateExists(string $channel): bool { try { return filled(config('marketplace.ebay.templates.'.$channel)) || view()->exists('marketplace.ebay.templates.'.$channel); } catch (\Throwable) { return false; } }
+    private function ebayTemplateExists(string $channel): bool { try { return $this->ebayDescriptionTemplateRenderer->isAvailable($channel) || filled(config('marketplace.ebay.templates.'.$channel)) || view()->exists('marketplace.ebay.templates.'.$channel); } catch (\Throwable) { return false; } }
     private function ebayBusinessPoliciesReady(?MarketplaceAccount $account): bool { $settings = is_array($account?->api_settings) ? $account->api_settings : []; return filled(Arr::get($settings, 'business_policies.payment')) && filled(Arr::get($settings, 'business_policies.fulfillment')) && filled(Arr::get($settings, 'business_policies.return')); }
 
     private function ebayCategoryMapping(Part $part, string $channel): ?MarketplaceCategoryMapping
@@ -199,7 +199,21 @@ class MarketplaceListingReadinessService
     }
     private function hasActiveListing(Part $part, ?string $marketplace, string $channel): bool { if (! $marketplace || ! Schema::hasTable('marketplace_listings')) return false; return MarketplaceListing::query()->where('part_id', $part->id)->where('marketplace', $marketplace)->whereNotNull('external_offer_id')->whereNotIn('status', ['ended', 'deleted', 'archived', 'inactive'])->exists(); }
     /** @return array<string, mixed> */
-    private function safePayloadPreview(Part $part, string $channel, ?float $price, ?MarketplaceCategoryMapping $categoryMapping = null): array { return ['dry_run' => true, 'channel' => $channel, 'sku' => $part->sku ?? null, 'title' => $part->name ?? null, 'description_present' => filled(strip_tags((string) (($part->description ?? null) ?: ($part->short_description ?? null)))), 'condition_notes_present' => filled($part->condition_notes ?? null), 'price_pln' => $price, 'quantity' => $part->quantity ?? null, 'currency' => 'PLN', 'dimensions' => $this->dimensionsPayload($part), 'image_urls' => $this->imagesFor($part)->take(5)->map(fn ($image) => method_exists($image, 'listingUrl') ? $image->listingUrl() : null)->filter()->values()->all(), 'category_id' => $categoryMapping?->external_category_id ?? ($part->category_id ?? null), 'category_mapping_source' => $categoryMapping ? 'marketplace_category_mappings' : null, 'category_mapping_channel' => $categoryMapping?->channel, 'local_category_id' => $part->category_id ?? null, 'vehicle' => ['car_id' => $part->car_id ?? null, 'snapshot_present' => is_array($part->vehicle_snapshot ?? null)], 'will_make_marketplace_request' => false]; }
+    private function safePayloadPreview(Part $part, string $channel, ?float $price, ?MarketplaceCategoryMapping $categoryMapping = null): array
+    {
+        $preview = ['dry_run' => true, 'channel' => $channel, 'sku' => $part->sku ?? null, 'title' => $part->name ?? null, 'description_present' => filled(strip_tags((string) (($part->description ?? null) ?: ($part->short_description ?? null)))), 'condition_notes_present' => filled($part->condition_notes ?? null), 'price_pln' => $price, 'quantity' => $part->quantity ?? null, 'currency' => 'PLN', 'dimensions' => $this->dimensionsPayload($part), 'image_urls' => $this->imagesFor($part)->take(5)->map(fn ($image) => method_exists($image, 'listingUrl') ? $image->listingUrl() : null)->filter()->values()->all(), 'category_id' => $categoryMapping?->external_category_id ?? ($part->category_id ?? null), 'category_mapping_source' => $categoryMapping ? 'marketplace_category_mappings' : null, 'category_mapping_channel' => $categoryMapping?->channel, 'local_category_id' => $part->category_id ?? null, 'vehicle' => ['car_id' => $part->car_id ?? null, 'snapshot_present' => is_array($part->vehicle_snapshot ?? null)], 'will_make_marketplace_request' => false];
+
+        if (str_starts_with($channel, 'ebay_')) {
+            $rendered = $this->ebayTemplateExists($channel) ? $this->ebayDescriptionTemplateRenderer->render($channel, $part) : '';
+            $preview['description_template_present'] = $this->ebayTemplateExists($channel);
+            $preview['description_template_channel'] = $channel;
+            $preview['description_rendered_present'] = filled(trim($rendered));
+            $preview['description_template_asset_urls'] = $this->ebayDescriptionTemplateRenderer->assetUrls();
+            $preview['description_rendered_html'] = $rendered;
+        }
+
+        return $preview;
+    }
     /** @return array<string, mixed> */
     private function unsupportedChannelResult(Part $part, string $channel): array { return ['channel' => $channel, 'can_prepare' => false, 'can_publish_later' => false, 'required_fields' => [], 'missing_fields' => ['channel'], 'warnings' => [], 'blockers' => ['Unsupported marketplace readiness channel.'], 'prepared_payload_preview_safe' => ['dry_run' => true, 'channel' => $channel, 'part_id' => $part->id, 'will_make_marketplace_request' => false], 'price_source' => 'none', 'local_price' => null, 'marketplace_price' => null, 'currency' => 'PLN', 'images_count' => 0, 'has_required_images' => false, 'category_ready' => false, 'vehicle_ready' => false, 'description_ready' => false, 'title_ready' => filled($part->name ?? null), 'stock_ready' => false, 'external_mapping_exists' => false, 'notes' => ['dry_run_only' => 'Readiness does not publish, update, delete, sync prices, sync stock, or import orders.']]; }
 }

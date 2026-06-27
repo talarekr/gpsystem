@@ -132,4 +132,62 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $this->assertNotContains('height_cm', $withWarning['missing_fields']);
     }
 
+
+    public function test_ebay_de_fr_description_templates_render_and_readiness_preview_without_marketplace_write(): void
+    {
+        $category = PartCategory::query()->create(['name' => 'Alternatory']);
+        $part = Part::query()->create([
+            'name' => 'Alternator 06H903017J',
+            'description' => 'Sprawdzony alternator.',
+            'category_id' => $category->id,
+            'part_number' => '06H903017J',
+            'oem_number' => 'OEM-123',
+            'manufacturer_code' => 'MFR-123',
+            'price' => 100,
+            'quantity' => 1,
+            'condition_notes' => 'Używany / sprawdzony',
+            'vehicle_snapshot' => ['make' => 'Audi', 'model' => 'A4', 'production_year' => '2018', 'engine_code' => 'CNCD', 'steering_side' => 'left'],
+        ]);
+
+        DB::table('part_images')->insert(['part_id' => $part->id, 'path' => 'parts/photos/alternator.jpg', 'sort_order' => 1, 'is_primary' => true, 'created_at' => now(), 'updated_at' => now()]);
+
+        foreach (['ebay_de', 'ebay_fr'] as $channel) {
+            MarketplaceCategoryMapping::query()->create(['local_category_id' => $category->id, 'channel' => $channel, 'external_category_id' => '123']);
+            \App\Models\MarketplaceAccount::query()->create(['marketplace' => $channel, 'name' => $channel, 'code' => $channel, 'status' => 'active', 'api_enabled' => true, 'api_settings' => []]);
+        }
+
+        $renderer = app(\App\Services\Marketplace\EbayDescriptionTemplateRenderer::class);
+        $this->assertTrue($renderer->isAvailable('ebay_de'));
+        $this->assertTrue($renderer->isAvailable('ebay_fr'));
+
+        $deHtml = $renderer->render('ebay_de', $part->fresh());
+        $this->assertStringContainsString('Schneller weltweiter Versand', $deHtml);
+        $this->assertStringContainsString('Beschreibung', $deHtml);
+        $this->assertStringContainsString('Spezifikationen', $deHtml);
+        $this->assertStringContainsString('Kaufen Sie mit Vertrauen', $deHtml);
+        $this->assertStringNotContainsString('/wp-content/uploads/', $deHtml);
+        $this->assertStringContainsString('/ebay-template/assets/icon-shipping.png', $deHtml);
+
+        $frHtml = $renderer->render('ebay_fr', $part->fresh());
+        $this->assertStringContainsString('Livraison rapide dans le monde entier', $frHtml);
+        $this->assertStringContainsString('Description', $frHtml);
+        $this->assertStringContainsString('Spécifications', $frHtml);
+        $this->assertStringContainsString('Achetez en toute confiance', $frHtml);
+        $this->assertStringNotContainsString('/wp-content/uploads/', $frHtml);
+
+        foreach (['ebay_de', 'ebay_fr'] as $channel) {
+            $readiness = app(\App\Services\Marketplace\MarketplaceListingReadinessService::class)->checkPartReadiness($part->fresh(), $channel);
+            $preview = $readiness['prepared_payload_preview_safe'];
+
+            $this->assertNotContains('description_template', $readiness['missing_fields']);
+            $this->assertContains('business_policies', $readiness['missing_fields']);
+            $this->assertContains('eBay business policies are missing: payment, fulfillment/shipping, or return.', $readiness['blockers']);
+            $this->assertFalse($preview['will_make_marketplace_request']);
+            $this->assertTrue($preview['description_template_present']);
+            $this->assertSame($channel, $preview['description_template_channel']);
+            $this->assertTrue($preview['description_rendered_present']);
+            $this->assertArrayHasKey('icon_shipping', $preview['description_template_asset_urls']);
+        }
+    }
+
 }
