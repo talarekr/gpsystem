@@ -3,7 +3,6 @@
 namespace App\Services\Marketplace;
 
 use App\Models\Part;
-use Illuminate\Support\Facades\URL;
 use Illuminate\Support\HtmlString;
 
 class EbayDescriptionTemplateRenderer
@@ -58,7 +57,7 @@ class EbayDescriptionTemplateRenderer
 
     public function assetUrl(string $filename): string
     {
-        return URL::route('ebay-template.asset', ['filename' => $filename]);
+        return 'https://gpswiss.pl/ebay-template/assets/'.$filename;
     }
 
     /** @return array<string, string> */
