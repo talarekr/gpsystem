@@ -209,6 +209,19 @@ class PartResource extends Resource
                     ->description('Diagnostyka dry-run: sprawdza dane lokalnie i pokazuje braki. Nie publikuje ofert, nie edytuje live ofert, nie wysyła cen/stanów i nie importuje zamówień.')
                     ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--marketplace-preparation'])
                     ->schema([
+                        Forms\Components\ViewField::make('marketplace_readiness_cards')
+                            ->label('Status gotowości')
+                            ->hiddenLabel()
+                            ->dehydrated(false)
+                            ->visible(fn (?Part $record): bool => $record !== null && $record->exists)
+                            ->view('filament.resources.parts.marketplace-readiness-cards')
+                            ->viewData(fn (?Part $record): array => ['part' => $record])
+                            ->columnSpanFull(),
+                        Forms\Components\Placeholder::make('marketplace_readiness_empty')
+                            ->hiddenLabel()
+                            ->content('Zapisz część, aby zobaczyć podgląd gotowości Allegro / Ovoko / eBay.')
+                            ->visible(fn (?Part $record): bool => $record === null || ! $record->exists)
+                            ->columnSpanFull(),
                         Forms\Components\Actions::make([
                             self::marketplaceReadinessLinkAction('checkAllegroReadiness', 'Sprawdź Allegro', 'allegro_main'),
                             self::marketplaceReadinessLinkAction('checkOvokoReadiness', 'Sprawdź Ovoko', 'ovoko'),
