@@ -1,5 +1,12 @@
-@php($gpsAdminTopbarUser = auth()->user())
-@if($gpsAdminTopbarUser?->canAccessPanel(\Filament\Facades\Filament::getCurrentPanel()))
+@php
+    $gpsAdminTopbarUser = auth()->user();
+    $gpsAdminTopbarPanel = \Filament\Facades\Filament::getCurrentPanel();
+    $gpsAdminTopbarShouldRender = filled($gpsAdminTopbarUser)
+        && filled($gpsAdminTopbarPanel)
+        && (! request()->is('admin/login'))
+        && $gpsAdminTopbarUser->canAccessPanel($gpsAdminTopbarPanel);
+@endphp
+@if($gpsAdminTopbarShouldRender)
 @php
     use App\Filament\Resources\PartResource;
     use App\Filament\Resources\OrderResource;

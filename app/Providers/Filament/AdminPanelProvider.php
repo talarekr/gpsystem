@@ -3,7 +3,6 @@
 namespace App\Providers\Filament;
 
 use App\Filament\Pages\AllegroIntegration;
-use App\Filament\Pages\Auth\Login;
 use App\Filament\Pages\Analytics;
 use App\Filament\Pages\Dashboard;
 use App\Filament\Pages\ErrorCenter;
@@ -68,7 +67,7 @@ class AdminPanelProvider extends PanelProvider
             ->default()
             ->id('admin')
             ->path('admin')
-            ->login(Login::class)
+            ->login()
             ->brandName('GP Swiss')
             ->breadcrumbs(false)
             ->renderHook(
