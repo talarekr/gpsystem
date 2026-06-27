@@ -7,7 +7,9 @@ use App\Models\Part;
 use App\Services\Marketplace\MarketplaceListingReadinessService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\View\View;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -51,37 +53,72 @@ class PartMarketplaceReadinessController extends Controller
         $failedStage = 'load_part';
 
         try {
-            $part = Part::query()->find((int) $request->query('part_id'));
+            $data = $this->buildEbayPreviewData($request);
 
-            if (! $part) {
-                return response()->json([
-                    'ok' => false,
-                    'blocker' => 'part_not_found',
-                    'blockers' => ['part_not_found'],
-                ], 404);
-            }
-
-            $channel = (string) $request->query('channel', 'ebay_de');
-
-            if (! in_array($channel, ['ebay_de', 'ebay_fr'], true)) {
-                $channel = 'ebay_de';
-            }
-
-            $failedStage = $this->failedStageForChannel($channel);
-            $readiness = $this->readinessService->checkPartReadiness($part, $channel);
-            $preview = $readiness['prepared_payload_preview_safe'] ?? [];
-            $preview['will_make_marketplace_request'] = false;
-
-            return view('admin.marketplace.ebay-listing-preview', [
-                'part' => $part,
-                'channel' => $channel,
-                'readiness' => $readiness,
-                'preview' => $preview,
-                'html' => (string) ($preview['description_rendered_html'] ?? ''),
+            return view('admin.marketplace.ebay-listing-preview', $data + [
+                'htmlPreviewUrl' => route('tools.ebay-listing-preview-html', [
+                    'token' => (string) $request->query('token'),
+                    'part_id' => $data['part']->id,
+                    'channel' => $data['channel'],
+                ]),
             ]);
+        } catch (HttpResponseException $e) {
+            throw $e;
         } catch (\Throwable $e) {
             return $this->safeExceptionResponse($e, (int) $request->query('part_id'), $failedStage);
         }
+    }
+
+    public function ebayPreviewHtml(Request $request): Response|JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+
+        $failedStage = 'load_part';
+
+        try {
+            $data = $this->buildEbayPreviewData($request);
+
+            return response((string) $data['html'], 200)
+                ->header('Content-Type', 'text/html; charset=UTF-8')
+                ->header('Content-Security-Policy', "default-src 'none'; img-src https://gpswiss.pl data:; style-src 'unsafe-inline';")
+                ->header('Referrer-Policy', 'no-referrer');
+        } catch (HttpResponseException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            return $this->safeExceptionResponse($e, (int) $request->query('part_id'), $failedStage);
+        }
+    }
+
+    /** @return array{part: Part, channel: string, readiness: array<string, mixed>, preview: array<string, mixed>, html: string} */
+    private function buildEbayPreviewData(Request $request): array
+    {
+        $part = Part::query()->find((int) $request->query('part_id'));
+
+        if (! $part) {
+            abort(response()->json([
+                'ok' => false,
+                'blocker' => 'part_not_found',
+                'blockers' => ['part_not_found'],
+            ], 404));
+        }
+
+        $channel = (string) $request->query('channel', 'ebay_de');
+
+        if (! in_array($channel, ['ebay_de', 'ebay_fr'], true)) {
+            $channel = 'ebay_de';
+        }
+
+        $readiness = $this->readinessService->checkPartReadiness($part, $channel);
+        $preview = $readiness['prepared_payload_preview_safe'] ?? [];
+        $preview['will_make_marketplace_request'] = false;
+
+        return [
+            'part' => $part,
+            'channel' => $channel,
+            'readiness' => $readiness,
+            'preview' => $preview,
+            'html' => (string) ($preview['description_rendered_html'] ?? ''),
+        ];
     }
 
     public function prepareEbay(Request $request): JsonResponse

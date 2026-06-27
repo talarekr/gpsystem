@@ -86,7 +86,7 @@
             <h2>Wyrenderowany HTML opisu</h2>
             <p><code>description_rendered_html</code> — źródło treści, która trafi do <code>offer.listingDescription</code>.</p>
             @if (filled(trim($html)))
-                <iframe class="preview-frame" sandbox srcdoc="{{ $html }}"></iframe>
+                <iframe class="preview-frame" sandbox="allow-same-origin" referrerpolicy="no-referrer" src="{{ $htmlPreviewUrl }}"></iframe>
             @else
                 <div class="empty">Brak wyrenderowanego szablonu/opisu eBay dla tego podglądu.</div>
             @endif

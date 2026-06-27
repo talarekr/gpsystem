@@ -68,8 +68,19 @@ class EbayAdminListingPreviewTest extends TestCase
         $response->assertSee('259264220013');
         $response->assertSee('259264151013');
         $response->assertSee('description_rendered_html', false);
-        $response->assertSee('Schneller weltweiter Versand');
-        $response->assertSee('/ebay-template/assets/icon-shipping.png', false);
+        $response->assertSee('sandbox="allow-same-origin"', false);
+        $response->assertDontSee('allow-scripts', false);
+        $response->assertSee('/tools/ebay-listing-preview-html', false);
+
+        $htmlResponse = $this->get('/tools/ebay-listing-preview-html?token=gps_images_import_2026&part_id='.$part->id.'&channel=ebay_de')
+            ->assertOk();
+
+        $htmlResponse->assertHeader('Content-Security-Policy', "default-src 'none'; img-src https://gpswiss.pl data:; style-src 'unsafe-inline';");
+        $htmlResponse->assertHeader('Referrer-Policy', 'no-referrer');
+        $htmlResponse->assertSee('Schneller weltweiter Versand');
+        $htmlResponse->assertDontSee('allow-scripts', false);
+        $htmlResponse->assertSee('src="https://gpswiss.pl/ebay-template/assets/icon-shipping.png"', false);
+        $htmlResponse->assertSee('src="https://gpswiss.pl/ebay-template/assets/europe-map.png"', false);
 
         $this->assertDatabaseMissing('marketplace_listings', ['part_id' => $part->id]);
     }
