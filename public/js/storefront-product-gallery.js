@@ -66,62 +66,7 @@
             thumbsTrack.scrollBy({ top: offset * step, left: 0, behavior: 'smooth' });
         }
 
-        function updateHeaderOffset() {
-            var safeGap = 10;
-            var headerSelectors = [
-                '.sf-top',
-                '.sf-top__inner',
-                '.sf-top__links',
-                '.sf-language',
-                '.sf-language-select',
-                '.sf-main-row',
-                '.sf-logo',
-                '.sf-search',
-                '.sf-search input',
-                '.sf-search button',
-                '.sf-profile',
-                '.sf-profile > summary',
-                '.sf-cart',
-                '.sf-nav',
-                '.sf-nav__inner',
-                '.sf-nav__links',
-                '.sf-menu',
-                '.sf-category-menu',
-                '.sf-phones'
-            ];
-            var headerParts = [];
-
-            headerSelectors.forEach(function (selector) {
-                Array.prototype.forEach.call(document.querySelectorAll(selector), function (element) {
-                    if (headerParts.indexOf(element) === -1) {
-                        headerParts.push(element);
-                    }
-                });
-            });
-
-            var offset = headerParts.reduce(function (bottom, element) {
-                var styles = window.getComputedStyle(element);
-
-                if (styles.display === 'none' || styles.visibility === 'hidden') {
-                    return bottom;
-                }
-
-                var rect = element.getBoundingClientRect();
-
-                if (rect.width <= 0 || rect.height <= 0) {
-                    return bottom;
-                }
-
-                return Math.max(bottom, rect.bottom);
-            }, 0);
-            var offsetValue = Math.max(0, Math.ceil(offset + safeGap)) + 'px';
-
-            document.documentElement.style.setProperty('--storefront-header-offset', offsetValue);
-            lightbox.style.setProperty('--storefront-header-offset', offsetValue);
-        }
-
         function openLightbox() {
-            updateHeaderOffset();
             setActive(currentIndex);
             lightbox.hidden = false;
             lightbox.setAttribute('aria-hidden', 'false');
@@ -137,6 +82,10 @@
             lightbox.setAttribute('aria-hidden', 'true');
             document.body.classList.remove('sf-lightbox-open');
             openButton.focus({ preventScroll: true });
+        }
+
+        if (lightbox.hidden) {
+            document.body.classList.remove('sf-lightbox-open');
         }
 
         thumbs.forEach(function (thumb, index) {
@@ -189,12 +138,6 @@
                 showOffset(-1);
             } else if (event.key === 'ArrowRight') {
                 showOffset(1);
-            }
-        });
-
-        window.addEventListener('resize', function () {
-            if (!lightbox.hidden) {
-                updateHeaderOffset();
             }
         });
     }
