@@ -450,9 +450,9 @@
 
 /* Product lightbox: keep the overlay full-screen, but place the image dialog below the storefront header. */
 :root {
-    --sf-lightbox-top-gap: 130px;
+    --sf-lightbox-top-gap: 180px;
     --sf-lightbox-bottom-gap: 24px;
-    --sf-lightbox-image-gap: 190px;
+    --sf-lightbox-image-gap: 240px;
 }
 
 .sf-lightbox {
@@ -480,9 +480,9 @@
     width: auto;
     height: auto;
     min-height: 0;
-    margin: var(--sf-lightbox-top-gap) auto var(--sf-lightbox-bottom-gap);
+    margin: var(--sf-lightbox-top-gap) auto var(--sf-lightbox-bottom-gap) !important;
     max-width: min(1100px, calc(100vw - 48px));
-    max-height: calc(100vh - 160px);
+    max-height: calc(100vh - var(--sf-lightbox-top-gap) - var(--sf-lightbox-bottom-gap)) !important;
     background: #f7f8fb;
     border-radius: 16px;
     box-shadow: 0 28px 70px #0008;
@@ -491,11 +491,11 @@
 .sf-lightbox__image,
 .sf-lightbox__dialog img {
     display: block;
-    width: auto;
-    height: auto;
+    width: auto !important;
+    height: auto !important;
     max-width: 100%;
-    max-height: calc(100vh - var(--sf-lightbox-image-gap));
-    object-fit: contain;
+    max-height: calc(100vh - var(--sf-lightbox-image-gap)) !important;
+    object-fit: contain !important;
     padding: 18px;
 }
 
@@ -506,21 +506,21 @@
 
 @media (max-width: 767px) {
     :root {
-        --sf-lightbox-top-gap: 110px;
+        --sf-lightbox-top-gap: 170px;
         --sf-lightbox-bottom-gap: 16px;
-        --sf-lightbox-image-gap: 150px;
+        --sf-lightbox-image-gap: 220px;
     }
 
     .sf-lightbox__dialog {
-        margin: var(--sf-lightbox-top-gap) auto var(--sf-lightbox-bottom-gap);
+        margin: var(--sf-lightbox-top-gap) auto var(--sf-lightbox-bottom-gap) !important;
         max-width: calc(100vw - 24px);
-        max-height: calc(100vh - 130px);
+        max-height: calc(100vh - var(--sf-lightbox-top-gap) - var(--sf-lightbox-bottom-gap)) !important;
         border-radius: 12px;
     }
 
     .sf-lightbox__image,
     .sf-lightbox__dialog img {
-        max-height: calc(100vh - var(--sf-lightbox-image-gap));
+        max-height: calc(100vh - var(--sf-lightbox-image-gap)) !important;
         padding: 14px;
     }
 }
