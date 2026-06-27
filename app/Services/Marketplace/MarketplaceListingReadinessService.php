@@ -67,7 +67,12 @@ class MarketplaceListingReadinessService
             $this->checkAccount($account, $blockers, $warnings, 'Allegro OAuth/account is not configured or not enabled.');
             if (! $categoryReady) { $missing[] = 'allegro_category_mapping'; $blockers[] = 'Allegro category or local category mapping is missing.'; }
             if (! $descriptionReady) { $missing[] = 'description'; $warnings[] = 'Allegro description should be prepared before publishing later.'; }
-            $warnings[] = 'Allegro category parameter requirements are not fetched in this step; only local diagnostics are performed.';
+            if ($categoryReady) {
+                $allegroParameters = app(AllegroOfferParametersBuilder::class)->build($part);
+                foreach (($allegroParameters['blockers'] ?? []) as $blocker) { $blockers[] = $blocker; $missing[] = $blocker; }
+                if (($allegroParameters['missing_required_parameters'] ?? []) !== []) { $missing[] = 'allegro_required_category_parameters'; $blockers[] = 'allegro_required_category_parameters_missing'; }
+                $notes['allegro_parameters'] = $allegroParameters;
+            }
         } elseif ($channel === 'ovoko') {
             $required = ['title', 'ovoko_price_pln', 'quantity', 'images', 'vehicle', 'ovoko_category_mapping', 'description_or_condition'];
             $this->checkAccount($account, $blockers, $warnings, 'Ovoko API credentials/account are not configured or not enabled.');

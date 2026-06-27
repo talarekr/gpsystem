@@ -25,6 +25,7 @@
                     'ebay_de' => route('tools.prepare-ebay-listing-translations', ['token' => 'gps_images_import_2026', 'part_id' => $part->id, 'channel' => 'ebay_de']),
                     'ebay_fr' => route('tools.prepare-ebay-listing-translations', ['token' => 'gps_images_import_2026', 'part_id' => $part->id, 'channel' => 'ebay_fr']),
                 ] : [];
+                $allegroPreviewUrl = $part ? route('tools.allegro-listing-preview', ['token' => 'gps_images_import_2026', 'part_id' => $part->id]) : null;
                 $ebayPreviewUrls = $part ? [
                     'ebay_de' => route('tools.ebay-listing-preview', ['token' => 'gps_images_import_2026', 'part_id' => $part->id, 'channel' => 'ebay_de']),
                     'ebay_fr' => route('tools.ebay-listing-preview', ['token' => 'gps_images_import_2026', 'part_id' => $part->id, 'channel' => 'ebay_fr']),
@@ -70,6 +71,10 @@
                         <a href="{{ $prepareUrl }}" target="_blank" rel="noopener noreferrer" class="inline-flex w-full items-center justify-center rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-primary-500">
                             Przygotuj
                         </a>
+                    @endif
+
+                    @if ($key === 'allegro')
+                        <a href="{{ $allegroPreviewUrl ?? '#' }}" target="_blank" rel="noopener noreferrer" class="inline-flex w-full items-center justify-center rounded-lg border border-primary-200 bg-white px-3 py-2 text-sm font-semibold text-primary-700 shadow-sm hover:bg-primary-50 dark:border-primary-700 dark:bg-gray-900 dark:text-primary-300">Podgląd aukcji Allegro</a>
                     @endif
 
                     @if ($key === 'ebay')

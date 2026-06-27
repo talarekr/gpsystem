@@ -12,6 +12,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Response;
 use Illuminate\Support\Facades\Schema;
+use App\Services\Marketplace\AllegroOfferParametersBuilder;
 
 class MarketplaceListingDryRunController extends Controller
 {
@@ -154,7 +155,15 @@ class MarketplaceListingDryRunController extends Controller
         if (! $mapping) $blockers[] = 'missing_category_mapping';
         elseif ($mapping->is_blocked) $blockers[] = 'blocked_category';
         elseif (blank($mapping->external_category_id)) $blockers[] = 'missing_external_category_id';
-        if ($channel === 'allegro_main' && ! $mapping) $blockers[] = 'allegro_category_mapping_required_no_guessing';
+        $allegroParameters = null;
+        if ($channel === 'allegro_main') {
+            if (! $mapping) $blockers[] = 'allegro_category_mapping_required_no_guessing';
+            else {
+                $allegroParameters = app(AllegroOfferParametersBuilder::class)->build($part, $mapping);
+                foreach (($allegroParameters['blockers'] ?? []) as $b) $blockers[] = $b;
+                if (($allegroParameters['missing_required_parameters'] ?? []) !== []) $blockers[] = 'allegro_required_category_parameters_missing';
+            }
+        }
         if ($channel === 'ovoko' && blank($part->car_id) && ! is_array($part->vehicle_snapshot)) $warnings[] = 'missing_donor_vehicle_data';
         if ($channel === 'ovoko' && ! $this->hasCompleteDimensions($part)) $warnings[] = 'missing_ovoko_dimensions';
 
@@ -169,7 +178,7 @@ class MarketplaceListingDryRunController extends Controller
             'part' => ['name' => $part->name, 'part_number' => $part->part_number, 'sku' => $part->sku, 'status' => $part->status, 'quantity' => $part->quantity, 'needs_listing' => (bool) $part->needs_listing, 'needs_review' => (bool) ($part->needs_review ?? false)],
             'visibility' => ['storefront_visible' => $visible, 'blocked_reason' => $visible ? null : 'storefront_not_visible'],
             'price' => $channel === 'ovoko' ? ['ovoko_price' => $price, 'currency' => 'PLN'] : ['allegro_price' => $price, 'fallback_price' => is_numeric($part->price) ? (float) $part->price : null, 'currency' => 'PLN'],
-            'category' => ['local_category_id' => $part->category_id, 'local_category_path' => $part->category?->category_path ?? $part->category?->name, 'marketplace_category_mapping_exists' => (bool) $mapping, 'external_category_id' => $mapping?->external_category_id, 'is_blocked' => (bool) ($mapping?->is_blocked ?? false), 'block_reason' => $mapping?->block_reason],
+            'category' => ['local_category_id' => $part->category_id, 'local_category_path' => $part->category?->category_path ?? $part->category?->name, 'marketplace_category_mapping_exists' => (bool) $mapping, 'external_category_id' => $mapping?->external_category_id, 'mapping_source' => $mapping?->source, 'is_blocked' => (bool) ($mapping?->is_blocked ?? false), 'block_reason' => $mapping?->block_reason],
             'images' => $images,
             'description' => ['has_name' => filled($part->name), 'has_description' => $description !== '', 'description_length' => mb_strlen($description)],
             'existing_listing' => $existing,
@@ -177,6 +186,8 @@ class MarketplaceListingDryRunController extends Controller
             'can_update' => $ready && $existing['exists'],
             'blockers' => $blockers,
             'warnings' => array_values(array_unique($warnings)),
+            'allegro_parameters' => $allegroParameters,
+            'will_make_marketplace_request' => false,
         ];
     }
 
@@ -201,7 +212,8 @@ class MarketplaceListingDryRunController extends Controller
             return $common + ['title' => $part->name, 'donor_vehicle' => ['car_id' => $part->car_id, 'snapshot' => $part->vehicle_snapshot]];
         }
 
-        return $common + ['name' => $part->name, 'stock' => ['available' => (int) $part->quantity, 'quantity' => (int) $part->quantity], 'parameters' => [], 'shipping' => $this->accountSetting($channel, 'shipping'), 'payment' => $this->accountSetting($channel, 'payment'), 'return' => $this->accountSetting($channel, 'return')];
+        $allegro = $readiness['allegro_parameters'] ?? app(AllegroOfferParametersBuilder::class)->build($part);
+        return $common + ['name' => $part->name, 'stock' => ['available' => (int) $part->quantity, 'quantity' => (int) $part->quantity], 'parameters' => $allegro['allegro_offer_parameters'] ?? [], 'productSet' => [['product' => ['parameters' => $allegro['allegro_product_parameters'] ?? []]]], 'allegro_parameters_diagnostics' => $allegro, 'will_make_marketplace_request' => false, 'shipping' => $this->accountSetting($channel, 'shipping'), 'payment' => $this->accountSetting($channel, 'payment'), 'return' => $this->accountSetting($channel, 'return')];
     }
 
     private function coverageFor(Request $request, string $channel): array
