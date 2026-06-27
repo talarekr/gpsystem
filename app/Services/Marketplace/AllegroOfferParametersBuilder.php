@@ -19,7 +19,7 @@ class AllegroOfferParametersBuilder
             $required = (bool) ($def['required'] ?? false);
             $resolved = $this->resolve($part, $mapping, $def);
             if ($resolved['value'] === null) {
-                $row = ['id' => (string) ($def['id'] ?? ''), 'name' => (string) ($def['name'] ?? ''), 'source' => $resolved['source'], 'source_value' => $resolved['source_value']];
+                $row = $this->diagnosticRow($def, $resolved);
                 if ($required) $missing[] = $row; else $unmapped[] = $row;
                 $diag[] = $row;
                 continue;
@@ -28,7 +28,7 @@ class AllegroOfferParametersBuilder
             if (($resolved['type'] ?? '') === 'dictionary') $payload['valuesIds'] = (array) $resolved['value']; else $payload['values'] = (array) $resolved['value'];
             if (($def['options']['describesProduct'] ?? false) === true) $product[] = $payload; else $offer[] = $payload;
             if (! $required) $optional[] = ['id' => (string) $def['id'], 'name' => (string) ($def['name'] ?? '')];
-            $diag[] = ['id' => (string) $def['id'], 'name' => (string) ($def['name'] ?? ''), 'source' => $resolved['source'], 'source_value' => $resolved['source_value'], 'resolved_value' => $resolved['label'] ?? $resolved['value']];
+            $diag[] = $this->diagnosticRow($def, $resolved) + ['resolved_value' => $resolved['label'] ?? $resolved['value']];
         }
         return $this->result($offer, $product, $missing, $optional, $unmapped, $diag, $definitionsResult);
     }
@@ -41,7 +41,14 @@ class AllegroOfferParametersBuilder
         if ($name === 'stan') return $this->resolveValue('Używany', 'fixed_business_rule', $def);
         if ($name === 'jakoscczescizgodniezgvo') return $this->resolveValue('O - oryginał z logo producenta pojazdu (OE)', 'fixed_business_rule', $def);
         if ($name === 'stronazabudowy') return $this->resolveValue($this->partPosition($part), 'part', $def);
-        return ['value' => null, 'source' => 'not_resolved', 'source_value' => null];
+        if ($this->isPartManufacturerParameter($def, $name)) {
+            $manufacturer = $this->partManufacturer($part);
+            return $this->resolveValue($manufacturer['value'], $manufacturer['source'], $def);
+        }
+        if ($this->isCatalogPartNumberParameter($def, $name) || (string) ($def['id'] ?? '') === '227345') {
+            return $this->resolveValue($this->catalogPartNumber($part), 'part.part_number', $def);
+        }
+        return ['value' => null, 'source' => 'not_resolved', 'source_value' => null, 'reason' => 'no_source'];
     }
 
     private function configuredMapping(Part $part, ?MarketplaceCategoryMapping $mapping, array $def): ?array
@@ -77,7 +84,60 @@ class AllegroOfferParametersBuilder
         foreach (($def['dictionary'] ?? []) as $allowed) {
             if ((string) ($allowed['id'] ?? '') === (string) $value || $this->matchesDictionaryLabel($allowed['value'] ?? '', $value)) return ['type' => 'dictionary', 'value' => [(string) $allowed['id']], 'label' => $allowed['value'] ?? null, 'source' => $source, 'source_value' => $sourceValue];
         }
-        return ['value' => null, 'source' => $source, 'source_value' => $sourceValue];
+        return ['value' => null, 'source' => $source, 'source_value' => $sourceValue, 'reason' => 'no_allowed_value_match', 'allowed_values_sample' => array_slice(array_map(fn ($allowed): array => ['id' => (string) ($allowed['id'] ?? ''), 'value' => (string) ($allowed['value'] ?? '')], $def['dictionary'] ?? []), 0, 10)];
+    }
+
+    private function diagnosticRow(array $def, array $resolved): array
+    {
+        $row = [
+            'id' => (string) ($def['id'] ?? ''),
+            'name' => (string) ($def['name'] ?? ''),
+            'source' => $resolved['source'] ?? 'not_resolved',
+            'source_value' => $resolved['source_value'] ?? null,
+            'reason' => $resolved['reason'] ?? null,
+            'allowed_values_sample' => $resolved['allowed_values_sample'] ?? null,
+            'type' => (string) ($def['type'] ?? ''),
+            'required' => (bool) ($def['required'] ?? false),
+            'describesProduct' => (bool) ($def['options']['describesProduct'] ?? false),
+        ];
+
+        if ($row['reason'] === null) unset($row['reason']);
+        if ($row['allowed_values_sample'] === null) unset($row['allowed_values_sample']);
+
+        return $row;
+    }
+
+    private function isPartManufacturerParameter(array $def, string $normalizedName): bool
+    {
+        return (string) ($def['id'] ?? '') === '127415' || in_array($normalizedName, ['producentczesci', 'producent', 'marka', 'manufacturer', 'brand'], true);
+    }
+
+    private function isCatalogPartNumberParameter(array $def, string $normalizedName): bool
+    {
+        return (string) ($def['id'] ?? '') === '215858' || in_array($normalizedName, ['numerkatalogowyczesci', 'numerczesci', 'manufacturerpartnumber', 'mpn'], true);
+    }
+
+    private function partManufacturer(Part $part): array
+    {
+        foreach (['manufacturer', 'brand', 'manufacturer_name', 'part_manufacturer', 'legacy_payload.manufacturer', 'legacy_payload.brand', 'legacy_payload.manufacturer_name', 'review_metadata.manufacturer', 'review_metadata.brand'] as $field) {
+            $value = data_get($part, $field);
+            if (filled($value)) return ['value' => $value, 'source' => 'part.'.$field];
+        }
+
+        $vehicleMake = data_get($part->vehicle_snapshot, 'make');
+        if (filled($vehicleMake)) return ['value' => $vehicleMake, 'source' => 'vehicle_snapshot.make'];
+
+        return ['value' => null, 'source' => 'not_resolved'];
+    }
+
+    private function catalogPartNumber(Part $part): mixed
+    {
+        foreach (['part_number', 'manufacturer_code', 'oem_number', 'sku', 'legacy_payload.part_number', 'legacy_payload.manufacturer_code', 'legacy_payload.oem_number'] as $field) {
+            $value = data_get($part, $field);
+            if (filled($value)) return $value;
+        }
+
+        return null;
     }
 
     private function matchesDictionaryLabel(mixed $allowed, mixed $value): bool
