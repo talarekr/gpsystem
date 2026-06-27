@@ -7,14 +7,14 @@ use Illuminate\Support\Facades\Http;
 
 class NbpExchangeRateService
 {
-    private const CACHE_KEY = 'marketplace.exchange_rates.nbp.table_a.eur_pln';
+    private const CACHE_KEY = 'nbp_table_a_eur_rate';
     private const TABLE_A_EUR_URL = 'https://api.nbp.pl/api/exchangerates/rates/a/eur/?format=json';
 
     public function eurPln(): array
     {
         $cached = Cache::get(self::CACHE_KEY);
         if (is_array($cached) && is_numeric($cached['rate'] ?? null)) {
-            return $cached + ['ok' => true, 'source' => 'nbp', 'cached' => true, 'warning' => null];
+            return $cached + ['ok' => true, 'source' => 'NBP_TABLE_A', 'cached' => true, 'warning' => null];
         }
 
         try {
@@ -32,9 +32,10 @@ class NbpExchangeRateService
             $data = [
                 'ok' => true,
                 'rate' => round((float) $rate, 6),
-                'source' => 'nbp',
+                'source' => 'NBP_TABLE_A',
                 'cached' => false,
                 'effective_date' => $payload['rates'][0]['effectiveDate'] ?? null,
+                'table_no' => $payload['rates'][0]['no'] ?? null,
                 'fetched_at' => now()->toISOString(),
                 'warning' => null,
             ];
@@ -52,7 +53,7 @@ class NbpExchangeRateService
         return [
             'ok' => false,
             'rate' => null,
-            'source' => 'nbp',
+            'source' => 'NBP_TABLE_A',
             'cached' => false,
             'effective_date' => null,
             'fetched_at' => null,
