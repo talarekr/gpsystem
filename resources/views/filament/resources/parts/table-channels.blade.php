@@ -48,6 +48,10 @@
             white-space: nowrap;
         }
 
+        .gps-admin-channels .part-channel-label.is-storefront-label {
+            color: #000;
+        }
+
         .gps-admin-channels .part-channel-price {
             flex: 0 1 auto;
             min-width: 0;
@@ -96,7 +100,7 @@
     @else
         @foreach ($rows as $row)
             <div class="part-channel-row">
-                <span class="part-channel-label">
+                <span class="part-channel-label {{ ($row['key'] ?? '') === 'storefront' ? 'is-storefront-label' : '' }}">
                     @if (in_array($row['key'] ?? '', ['allegro', 'ovoko', 'ebay'], true))
                         @include('filament.resources.orders.partials.source-wordmark', ['marketplace' => $row['key']])
                     @else
