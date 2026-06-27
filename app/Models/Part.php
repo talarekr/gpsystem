@@ -445,6 +445,10 @@ class Part extends Model
             return $query;
         }
 
+        if ($this->looksLikePartNumberQuery($value)) {
+            return $query->partNumberSearch($value);
+        }
+
         $tokens = preg_split('/\s+/u', $value) ?: [];
         $tokens = array_values(array_unique(array_filter($tokens, static fn (string $token): bool => $token !== '')));
 
@@ -463,23 +467,13 @@ class Part extends Model
             'part_number',
             'oem_number',
             'manufacturer_code',
-            'short_description',
-            'description',
-            'vehicle_snapshot',
-            'legacy_payload',
         ], $token, true, 'parts');
 
         $carColumns = $this->existingColumns('cars', [
             'make',
             'model',
             'model_variant',
-            'fuel_type',
             'engine_code',
-            'engine_capacity_cm3',
-            'gearbox_type',
-            'gearbox_code',
-            'body_type',
-            'drivetrain',
         ]);
 
         if ($carColumns !== []) {
@@ -487,6 +481,19 @@ class Part extends Model
                 $this->applyCaseInsensitiveLike($carQuery, $carColumns, $token, true, 'cars');
             });
         }
+    }
+
+    private function looksLikePartNumberQuery(string $value): bool
+    {
+        $value = trim($value);
+
+        if ($value === '' || preg_match('/\s/u', $value)) {
+            return false;
+        }
+
+        $normalized = preg_replace('/[^A-Za-z0-9]/', '', $value) ?? '';
+
+        return strlen($normalized) >= 3 && preg_match('/\d/', $normalized) === 1;
     }
 
     public function scopePartNumberSearch(Builder $query, ?string $value): Builder
