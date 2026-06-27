@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages\Marketplace;
 
+use App\Enums\UserRole;
 use App\Models\MarketplaceListing;
 use App\Models\User;
 use Filament\Actions\Action;
@@ -10,6 +11,7 @@ use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rules\Password;
+use Spatie\Permission\Models\Role;
 
 class MarketplaceOverview extends Page
 {
@@ -54,11 +56,14 @@ class MarketplaceOverview extends Page
                         ->unique(table: User::class, column: 'email'),
                 ])
                 ->action(function (array $data): void {
-                    User::query()->create([
+                    $user = User::query()->create([
                         'name' => trim((string) $data['login']),
                         'email' => trim((string) $data['email']),
                         'password' => Hash::make((string) $data['password']),
                     ]);
+
+                    Role::findOrCreate(UserRole::Viewer->value, 'web');
+                    $user->assignRole(UserRole::Viewer->value);
 
                     Notification::make()
                         ->title('Dodano użytkownika marketplace.')
