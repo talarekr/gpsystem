@@ -20,6 +20,8 @@ class CreatePart extends CreateRecord
         unset($data['part_photo_paths']);
 
         $data['quantity'] = 1;
+        $data['condition_notes'] = PartResource::defaultConditionValue($data['condition_notes'] ?? null);
+        $data = PartResource::applyAdminSteeringFormStateToData($data);
 
         return $data;
     }
