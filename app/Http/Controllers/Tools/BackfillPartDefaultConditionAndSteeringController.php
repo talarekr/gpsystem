@@ -28,7 +28,9 @@ class BackfillPartDefaultConditionAndSteeringController extends Controller
         $offset = max(0, (int) $request->query('offset', 0));
         $withDiagnostics = $request->boolean('diagnostics', false);
 
-        $scopeAvailable = $scope === 'to_publish' && Schema::hasColumn('parts', 'needs_listing');
+        $scopeAvailable = Schema::hasTable('parts') && (
+            $scope === 'all' || ($scope === 'to_publish' && Schema::hasColumn('parts', 'needs_listing'))
+        );
         if (! $scopeAvailable) {
             return response()->json($this->basePayload($scope, $onlyMissing, $readOnly, $withDiagnostics, 'scope_to_publish_filter_not_found'));
         }
@@ -55,6 +57,7 @@ class BackfillPartDefaultConditionAndSteeringController extends Controller
                 $currentQuality = $part->condition_notes;
                 $qualityOk = ! $this->isMissing($currentQuality);
                 $qualityOkCount += $qualityOk ? 1 : 0;
+                $shouldFixQuality = ! $qualityOk;
                 $vehicleSnapshot = is_array($part->vehicle_snapshot) ? $part->vehicle_snapshot : [];
                 $currentSteering = $vehicleSnapshot['steering_side'] ?? null;
                 $adminSteeringValue = PartResource::adminSteeringFormValue($currentSteering);
@@ -62,7 +65,7 @@ class BackfillPartDefaultConditionAndSteeringController extends Controller
                 $steeringAdminVisibleCount += $steeringAdminVisible ? 1 : 0;
                 $shouldFixSteering = ! $steeringAdminVisible && ($this->isMissing($currentSteering) || ! $onlyMissing);
 
-                if (! $shouldFixSteering) {
+                if (! $shouldFixQuality && ! $shouldFixSteering) {
                     $skippedAlreadySetCount++;
                     $skippedSteeringAlreadyVisibleCount += $steeringAdminVisible ? 1 : 0;
                     $items[] = $this->item($part->id, $currentQuality, null, $currentSteering, null, $adminSteeringValue, 'skipped_already_set', $steeringAdminVisible ? 'steering_side_admin_visible' : 'steering_side_non_empty_not_admin_visible_only_missing_enabled');
@@ -70,32 +73,41 @@ class BackfillPartDefaultConditionAndSteeringController extends Controller
                 }
 
                 $wouldUpdatePartsCount++;
-                $steeringWouldUpdateCount++;
+                $qualityWouldUpdateCount += $shouldFixQuality ? 1 : 0;
+                $steeringWouldUpdateCount += $shouldFixSteering ? 1 : 0;
 
                 if ($readOnly) {
-                    $items[] = $this->item($part->id, $currentQuality, null, $currentSteering, PartResource::expectedLeftSteeringValue(), $adminSteeringValue, 'would_update', 'dry_run_or_missing_confirm');
+                    $items[] = $this->item($part->id, $currentQuality, $shouldFixQuality ? PartResource::DEFAULT_CONDITION_VALUE : null, $currentSteering, $shouldFixSteering ? PartResource::expectedLeftSteeringValue() : null, $adminSteeringValue, 'would_update', 'dry_run_or_missing_confirm');
                     continue;
                 }
 
                 $result = DB::transaction(function () use ($part, $onlyMissing): array {
                     $lockedPart = Part::query()->lockForUpdate()->findOrFail($part->id);
+                    $lockedCurrentQuality = $lockedPart->condition_notes;
+                    $lockedShouldFixQuality = $this->isMissing($lockedCurrentQuality);
                     $lockedVehicleSnapshot = is_array($lockedPart->vehicle_snapshot) ? $lockedPart->vehicle_snapshot : [];
                     $lockedCurrentSteering = $lockedVehicleSnapshot['steering_side'] ?? null;
                     $lockedAdminSteeringValue = PartResource::adminSteeringFormValue($lockedCurrentSteering);
                     $lockedShouldFixSteering = $lockedAdminSteeringValue === null && ($this->isMissing($lockedCurrentSteering) || ! $onlyMissing);
 
-                    if (! $lockedShouldFixSteering) {
-                        return ['updated' => false, 'steering_updated' => false];
+                    if (! $lockedShouldFixQuality && ! $lockedShouldFixSteering) {
+                        return ['updated' => false, 'quality_updated' => false, 'steering_updated' => false];
                     }
 
-                    $lockedVehicleSnapshot['steering_side'] = PartResource::expectedLeftSteeringValue();
+                    $updates = ['updated_at' => now()];
 
-                    DB::table('parts')->where('id', $lockedPart->id)->update([
-                        'vehicle_snapshot' => json_encode($lockedVehicleSnapshot, JSON_UNESCAPED_UNICODE),
-                        'updated_at' => now(),
-                    ]);
+                    if ($lockedShouldFixQuality) {
+                        $updates['condition_notes'] = PartResource::DEFAULT_CONDITION_VALUE;
+                    }
 
-                    return ['updated' => true, 'steering_updated' => true];
+                    if ($lockedShouldFixSteering) {
+                        $lockedVehicleSnapshot['steering_side'] = PartResource::expectedLeftSteeringValue();
+                        $updates['vehicle_snapshot'] = json_encode($lockedVehicleSnapshot, JSON_UNESCAPED_UNICODE);
+                    }
+
+                    DB::table('parts')->where('id', $lockedPart->id)->update($updates);
+
+                    return ['updated' => true, 'quality_updated' => $lockedShouldFixQuality, 'steering_updated' => $lockedShouldFixSteering];
                 });
 
                 if (! $result['updated']) {
@@ -105,8 +117,9 @@ class BackfillPartDefaultConditionAndSteeringController extends Controller
                 }
 
                 $updatedPartsCount++;
-                $steeringUpdatedCount++;
-                $items[] = $this->item($part->id, $currentQuality, null, $currentSteering, PartResource::expectedLeftSteeringValue(), $adminSteeringValue, 'updated', 'local_admin_steering_backfilled');
+                $qualityUpdatedCount += $result['quality_updated'] ? 1 : 0;
+                $steeringUpdatedCount += $result['steering_updated'] ? 1 : 0;
+                $items[] = $this->item($part->id, $currentQuality, $result['quality_updated'] ? PartResource::DEFAULT_CONDITION_VALUE : null, $currentSteering, $result['steering_updated'] ? PartResource::expectedLeftSteeringValue() : null, $adminSteeringValue, 'updated', 'local_admin_defaults_backfilled');
             } catch (\Throwable $e) {
                 $errorsCount++;
                 $items[] = $this->item($part->id, $part->condition_notes, null, is_array($part->vehicle_snapshot) ? ($part->vehicle_snapshot['steering_side'] ?? null) : null, null, null, 'error', $e->getMessage());
@@ -131,7 +144,7 @@ class BackfillPartDefaultConditionAndSteeringController extends Controller
             'skipped_already_set_count' => $skippedAlreadySetCount,
             'skipped_out_of_scope_count' => 0,
             'errors_count' => $errorsCount,
-            'parts_changed' => ! $readOnly && $steeringUpdatedCount > 0,
+            'parts_changed' => ! $readOnly && ($qualityUpdatedCount > 0 || $steeringUpdatedCount > 0),
             'items' => $items,
         ]);
 
@@ -150,6 +163,7 @@ class BackfillPartDefaultConditionAndSteeringController extends Controller
     private function scopedQuery(string $scope): Builder
     {
         return match ($scope) {
+            'all' => Part::query(),
             'to_publish' => PartResource::adminPartsToListQuery(),
             default => Part::query()->whereRaw('1 = 0'),
         };
@@ -236,7 +250,7 @@ class BackfillPartDefaultConditionAndSteeringController extends Controller
                 'admin_steering_form_state' => PartResource::ADMIN_STEERING_FORM_STATE,
                 'admin_steering_options' => PartResource::adminSteeringOptions(),
                 'expected_left_steering_value' => PartResource::expectedLeftSteeringValue(),
-                'current_filter_used' => $scope === 'to_publish' ? 'PartResource::adminPartsToListQuery(): parts.needs_listing = true' : 'unsupported_scope',
+                'current_filter_used' => $scope === 'all' ? 'Part::query(): all local parts' : ($scope === 'to_publish' ? 'PartResource::adminPartsToListQuery(): parts.needs_listing = true' : 'unsupported_scope'),
                 'admin_to_publish_filter_used' => 'PartResource::adminPartsToListQuery(): parts.needs_listing = true',
                 'admin_to_publish_route_name' => 'filament.admin.resources.parts.to-list',
                 'admin_to_publish_page' => 'App\\Filament\\Resources\\PartResource\\Pages\\PartsToList',

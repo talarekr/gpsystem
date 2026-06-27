@@ -19,7 +19,14 @@ class EditPart extends EditRecord
 
     protected function mutateFormDataBeforeFill(array $data): array
     {
-        $data[PartResource::ADMIN_STEERING_FORM_STATE] = PartResource::adminSteeringFormValue($this->record->vehicle_snapshot['steering_side'] ?? null);
+        if (PartResource::isMissingAdminDefaultValue($data['condition_notes'] ?? null)) {
+            $data['condition_notes'] = PartResource::DEFAULT_CONDITION_VALUE;
+        }
+
+        $currentSteering = $this->record->vehicle_snapshot['steering_side'] ?? null;
+        $data[PartResource::ADMIN_STEERING_FORM_STATE] = PartResource::isMissingAdminDefaultValue($currentSteering)
+            ? PartResource::EXPECTED_LEFT_STEERING_VALUE
+            : PartResource::adminSteeringFormValue($currentSteering);
 
         // Existing images are rendered by the edit gallery; keep FileUpload empty so it only adds new photos.
         $data['part_photo_paths'] = [];
@@ -31,6 +38,9 @@ class EditPart extends EditRecord
     {
         $this->partPhotoPaths = array_values(array_filter((array) ($data['part_photo_paths'] ?? []), fn (mixed $path): bool => filled($path)));
         unset($data['part_photo_paths']);
+
+        $data['condition_notes'] = PartResource::defaultConditionValue($data['condition_notes'] ?? null);
+        $data = PartResource::applyAdminSteeringFormStateToData($data, $this->record);
 
         return $data;
     }

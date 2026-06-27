@@ -29,6 +29,7 @@ class PartResource extends Resource
 {
     public const ADMIN_STEERING_FIELD_PATH = 'vehicle_snapshot.steering_side';
     public const ADMIN_STEERING_FORM_STATE = 'steering_side';
+    public const DEFAULT_CONDITION_VALUE = 'Używany';
     public const EXPECTED_LEFT_STEERING_VALUE = 'po lewej';
     public const EXPECTED_RIGHT_STEERING_VALUE = 'po prawej';
     public const ADMIN_STEERING_OPTIONS = [
@@ -122,7 +123,7 @@ class PartResource extends Resource
                         Forms\Components\TextInput::make('part_number')->label('Główny kod części')->maxLength(255)->live(debounce: 500)->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))->columnSpanFull(),
                         Forms\Components\Hidden::make('sku'),
                         Forms\Components\Select::make('category_id')->label('Kategoria')->placeholder('Kategoria')->relationship('category', 'name')->required()->searchable()->preload()->native(false)->live()->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set): null => self::refreshMarketplaceMappings($get, $set))->suffixAction(self::categoryTreeAction())->columnSpanFull(),
-                        Forms\Components\Select::make('condition_notes')->label('Jakość')->placeholder('Jakość')->options(['Używany' => 'Używany', 'Nowy' => 'Nowy', 'Uszkodzony' => 'Uszkodzony', 'Regenerowany' => 'Regenerowany'])->default('Używany')->native(false)->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])->columnSpan(6),
+                        Forms\Components\Select::make('condition_notes')->label('Jakość')->placeholder('Jakość')->options(['Używany' => 'Używany', 'Nowy' => 'Nowy', 'Uszkodzony' => 'Uszkodzony', 'Regenerowany' => 'Regenerowany'])->default(self::DEFAULT_CONDITION_VALUE)->native(false)->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])->columnSpan(6),
                         Forms\Components\Select::make('part_position')->label('Pozycja części (strona zabudowy)')->placeholder('Wybierz')->options(['Wszystkie' => 'Wszystkie', 'Lewa strona' => 'Lewa strona', 'Środek' => 'Środek', 'Prawa strona' => 'Prawa strona', 'Komplet' => 'Komplet', 'Tył strona lewa' => 'Tył strona lewa', 'Tył strona prawa' => 'Tył strona prawa', 'Przód strona lewa' => 'Przód strona lewa', 'Przód strona prawa' => 'Przód strona prawa', 'Przód' => 'Przód', 'Tył' => 'Tył'])->default(null)->native(false)->dehydrated(false)->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])->columnSpan(6),
                         Forms\Components\Select::make(self::ADMIN_STEERING_FORM_STATE)->label('Kierownica po stronie')->placeholder('Kierownica po stronie')->options(self::ADMIN_STEERING_OPTIONS)->default(self::EXPECTED_LEFT_STEERING_VALUE)->native(false)->dehydrated(false)->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])->columnSpan(6),
                         Forms\Components\Select::make('storage_location_id')->label('Magazyn')->placeholder('Wpisz min. 3 znaki')->searchable()->searchDebounce(400)->getSearchResultsUsing(fn (string $search): array => self::storageLocationSearchResults($search))->getOptionLabelUsing(fn ($value): ?string => self::storageLocationOptionLabel($value))->native(false)->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])->columnSpan(6),
@@ -229,6 +230,34 @@ class PartResource extends Resource
             ]);
     }
 
+
+
+    public static function isMissingAdminDefaultValue(mixed $value): bool
+    {
+        return $value === null || trim((string) $value) === '';
+    }
+
+    public static function defaultConditionValue(mixed $value): string
+    {
+        return self::isMissingAdminDefaultValue($value) ? self::DEFAULT_CONDITION_VALUE : (string) $value;
+    }
+
+    public static function applyAdminSteeringFormStateToData(array $data, ?Part $record = null): array
+    {
+        $selectedSteeringSide = $data[self::ADMIN_STEERING_FORM_STATE] ?? null;
+        unset($data[self::ADMIN_STEERING_FORM_STATE]);
+
+        $vehicleSnapshot = is_array($record?->vehicle_snapshot ?? null) ? $record->vehicle_snapshot : [];
+
+        if (filled($selectedSteeringSide)) {
+            $vehicleSnapshot['steering_side'] = (string) $selectedSteeringSide;
+            $data['vehicle_snapshot'] = $vehicleSnapshot;
+        } elseif ($record === null) {
+            $data['vehicle_snapshot'] = array_replace($vehicleSnapshot, ['steering_side' => self::EXPECTED_LEFT_STEERING_VALUE]);
+        }
+
+        return $data;
+    }
 
     public static function adminSteeringOptions(): array
     {

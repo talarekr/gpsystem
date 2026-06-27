@@ -40,12 +40,12 @@ class BackfillPartDefaultConditionAndSteeringTest extends TestCase
             ->assertJsonPath('total_matching_parts_count', 1)
             ->assertJsonPath('items.0.part_id', $part->id)
             ->assertJsonPath('items.0.action', 'would_update')
-            ->assertJsonPath('items.0.new_quality', null)
+            ->assertJsonPath('items.0.new_quality', 'Używany')
             ->assertJsonPath('items.0.new_steering_side', 'po lewej')
             ->assertJsonPath('items.0.current_steering_side_admin_visible', false);
     }
 
-    public function test_confirm_fills_only_empty_steering_side_and_leaves_quality_unchanged(): void
+    public function test_confirm_fills_only_empty_quality_and_steering_side(): void
     {
         $part = Part::query()->create(['name' => 'To fill', 'vehicle_snapshot' => ['make' => 'BMW', 'steering_side' => null], 'needs_listing' => true, 'needs_review' => false]);
 
@@ -55,12 +55,12 @@ class BackfillPartDefaultConditionAndSteeringTest extends TestCase
             ->assertJsonPath('local_update', true)
             ->assertJsonPath('parts_changed', true)
             ->assertJsonPath('updated_parts_count', 1)
-            ->assertJsonPath('quality_updated_count', 0)
+            ->assertJsonPath('quality_updated_count', 1)
             ->assertJsonPath('steering_updated_count', 1)
             ->assertJsonPath('fixed_steering_count', 1);
 
         $part->refresh();
-        $this->assertNull($part->condition_notes);
+        $this->assertSame('Używany', $part->condition_notes);
         $this->assertSame('po lewej', $part->vehicle_snapshot['steering_side']);
         $this->assertSame('BMW', $part->vehicle_snapshot['make']);
     }
@@ -82,7 +82,7 @@ class BackfillPartDefaultConditionAndSteeringTest extends TestCase
             ->assertJsonMissing(['reason' => "SQLSTATE[42S22]: Column not found: 1054 Unknown column 'key' in 'WHERE'"]);
 
         $part->refresh();
-        $this->assertNull($part->condition_notes);
+        $this->assertSame('Używany', $part->condition_notes);
         $this->assertSame('po lewej', $part->vehicle_snapshot['steering_side']);
         $this->assertTrue(
             collect($queries)->contains(fn (string $sql): bool => str_contains($sql, '"id" = ?') || str_contains($sql, '`id` = ?')),
