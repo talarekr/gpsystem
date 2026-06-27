@@ -16,7 +16,6 @@
         <div class="title">
             <a class="back-link" href="/admin">← Powrót</a>
             <h1>Mapper kategorii marketplace</h1>
-            <p>Obsługa wybiera kategorie z drzew. Identyfikatory techniczne zapisują się automatycznie w lokalnych mapowaniach.</p>
             <label style="display:inline-flex;gap:8px;align-items:center;margin-top:10px;font-weight:700"><input type="checkbox" x-model="showHidden" @change="reloadLocal()"> Pokaż ukryte lokalne kategorie</label>
         </div>
         <div class="summary">
@@ -39,7 +38,7 @@
                 <div class="list">
                     <template x-for="item in column.items" :key="column.code+'-'+item.id">
                         <button type="button" class="row" :class="{'is-selected': isSelected(column.code,item)}" @click="choose(column,item)">
-                            <span><strong x-text="item.name"></strong><small x-text="item.products_count !== undefined && item.products_count !== null ? item.products_count+' produktów' : item.path"></small><small x-show="column.code !== 'local' && item.id" style="font-size:11px;opacity:.65" x-text="'ID: '+item.id"></small></span>
+                            <span><strong x-text="item.name"></strong><small x-show="column.code !== 'local'" x-text="item.path"></small><small x-show="column.code !== 'local' && item.id" style="font-size:11px;opacity:.65" x-text="'ID: '+item.id"></small></span>
                             <span x-text="item.has_children ? '›' : 'Wybierz'"></span>
                         </button>
                     </template>
