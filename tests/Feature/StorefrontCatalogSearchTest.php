@@ -68,23 +68,45 @@ class StorefrontCatalogSearchTest extends TestCase
         $response->assertSee('Druga widoczna część');
     }
 
-    public function test_catalog_q_search_matches_legacy_payload_and_vehicle_snapshot(): void
+    public function test_catalog_q_text_search_does_not_match_legacy_payload_or_vehicle_snapshot(): void
     {
         Part::query()->create([
             'name' => 'Sterownik silnika',
             'quantity' => 1,
             'status' => 'published',
-            'vehicle_snapshot' => ['make' => 'Mercedes', 'model' => 'C Klasa', 'engine_code' => 'OM651'],
+            'vehicle_snapshot' => ['make' => 'Audi', 'model' => 'A4'],
             'legacy_payload' => ['attributes' => ['vehicle_model' => 'Audi A4', 'oem_number' => '8K0907063']],
         ]);
 
-        Part::query()->create(['name' => 'Zacisk hamulcowy', 'quantity' => 1, 'status' => 'published']);
+        Part::query()->create(['name' => 'Zacisk hamulcowy Audi', 'quantity' => 1, 'status' => 'published']);
 
         $response = $this->get('/czesci?q=audi');
 
         $response->assertOk();
-        $response->assertSee('Sterownik silnika');
-        $response->assertDontSee('Zacisk hamulcowy');
+        $response->assertSee('Zacisk hamulcowy Audi');
+        $response->assertDontSee('Sterownik silnika');
+    }
+
+    public function test_catalog_q_part_like_search_uses_part_number_search_and_does_not_return_full_list(): void
+    {
+        Part::query()->create(['name' => 'Pasujący sterownik LED', 'part_number' => 'A2479069901', 'quantity' => 1, 'status' => 'published']);
+        Part::query()->create(['name' => 'Niepasujący sterownik', 'part_number' => 'A2470000000', 'quantity' => 1, 'status' => 'published']);
+
+        $response = $this->get('/czesci?q=A2479069901');
+
+        $response->assertOk();
+        $response->assertSee('Pasujący sterownik LED');
+        $response->assertDontSee('Niepasujący sterownik');
+    }
+
+    public function test_catalog_q_unknown_part_like_search_returns_no_results(): void
+    {
+        Part::query()->create(['name' => 'Widoczna część katalogowa', 'part_number' => 'ABC999', 'quantity' => 1, 'status' => 'published']);
+
+        $response = $this->get('/czesci?q=NO-SUCH-PART-XYZ-999');
+
+        $response->assertOk();
+        $response->assertDontSee('Widoczna część katalogowa');
     }
 
     public function test_catalog_part_number_search_uses_fast_indexable_number_columns(): void
