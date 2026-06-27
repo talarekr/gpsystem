@@ -73,4 +73,39 @@ class EbayAdminListingPreviewTest extends TestCase
 
         $this->assertDatabaseMissing('marketplace_listings', ['part_id' => $part->id]);
     }
+
+    public function test_ebay_preview_includes_full_translated_vehicle_diagnostics_without_marketplace_write(): void
+    {
+        Cache::put('nbp_table_a_eur_rate', ['rate' => 4.30, 'effective_date' => '2026-06-27', 'table_no' => '123/A/NBP/2026']);
+
+        $part = Part::query()->create([
+            'name' => 'Część Maserati',
+            'description' => 'Opis',
+            'price' => 100,
+            'quantity' => 1,
+            'condition_notes' => 'Używany',
+            'vehicle_snapshot' => [
+                'make' => 'Maserati', 'model' => 'Levante', 'model_variant' => 'Levante', 'production_year' => 2016,
+                'body_type' => 'SUV', 'fuel_type' => 'Benzyna', 'engine_capacity_cm3' => 2979, 'color' => 'Szary',
+                'drivetrain' => 'AWD', 'steering_side' => 'Lewa strona', 'gearbox_type' => 'Automatyczny',
+            ],
+        ]);
+        DB::table('part_images')->insert(['part_id' => $part->id, 'path' => 'parts/photos/vehicle-preview.jpg', 'sort_order' => 1, 'is_primary' => true, 'created_at' => now(), 'updated_at' => now()]);
+
+        $de = $this->get('/tools/ebay-listing-preview?token=gps_images_import_2026&part_id='.$part->id.'&channel=ebay_de')->assertOk();
+        $de->assertSee('Fahrzeugdaten');
+        $de->assertSee('Maserati Levante Levante (2016)');
+        $de->assertSee('2016 · SUV · Benzin · 2979 cm³ · Grau · AWD · Linkslenker · Automatik');
+        $de->assertSee('vehicle_source');
+        $de->assertSee('vehicle_snapshot');
+        $de->assertSee('Tłumaczenia nieprzygotowane — użyj przycisku Przygotuj.', false);
+        $de->assertSee('will_make_marketplace_request=false', false);
+
+        $fr = $this->get('/tools/ebay-listing-preview?token=gps_images_import_2026&part_id='.$part->id.'&channel=ebay_fr')->assertOk();
+        $fr->assertSee('Données du véhicule');
+        $fr->assertSee('2016 · SUV · Essence · 2979 cm³ · Gris · AWD · Volant à gauche · Automatique');
+
+        $this->assertDatabaseMissing('marketplace_listings', ['part_id' => $part->id]);
+    }
+
 }

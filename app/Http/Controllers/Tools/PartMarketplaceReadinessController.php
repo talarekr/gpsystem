@@ -84,6 +84,16 @@ class PartMarketplaceReadinessController extends Controller
         }
     }
 
+    public function prepareEbay(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+        $part = Part::query()->find((int) $request->query('part_id'));
+        if (! $part) return response()->json(['ok' => false, 'blockers' => ['part_not_found']], 404);
+        $channel = (string) $request->query('channel', 'ebay_de');
+        $result = $this->readinessService->prepareEbayTranslations($part, $channel);
+        return response()->json($result + ['part_id' => $part->id]);
+    }
+
     public function payload(Request $request): JsonResponse
     {
         if (! $this->validToken($request)) return $this->invalidTokenResponse();

@@ -14,9 +14,14 @@
     $shippingResolution = $preview['shipping_policy_resolution'] ?? [];
     $exchangeRate = $preview['exchange_rate'] ?? [];
     $ready = (bool) ($readiness['can_prepare'] ?? false);
+    $diagnostics = $preview['diagnostics'] ?? [];
+    $translationStatus = $preview['translation_status'] ?? 'not_prepared';
 @endphp
 <div class="wrap">
     <div class="notice">To jest tylko podgląd. Nie wystawia oferty i nie wykonuje żadnego zapisu do marketplace.</div>
+    @if (($translationStatus ?? 'not_prepared') !== 'prepared')
+        <div class="notice blocked">Tłumaczenia nieprzygotowane — użyj przycisku Przygotuj. Podgląd pokazuje fallback i nie wywołuje Google API.</div>
+    @endif
     @if (! $ready)
         <div class="notice blocked">Aukcja nie jest gotowa do wystawienia. Sprawdź missing_fields, warnings i blockers poniżej.</div>
     @endif
@@ -34,6 +39,8 @@
                 <div class="k">Dry-run</div><div class="v"><span class="pill ok">dry_run={{ ($preview['dry_run'] ?? false) ? 'true' : 'false' }}</span></div>
                 <div class="k">Marketplace request</div><div class="v"><span class="pill ok">will_make_marketplace_request=false</span></div>
                 <div class="k">Waluta</div><div class="v">{{ $preview['currency'] ?? $readiness['currency'] ?? 'EUR' }}</div>
+                <div class="k">Status tłumaczeń</div><div class="v">{{ $translationStatus }} / {{ $preview['translation_language'] ?? '—' }}</div>
+                <div class="k">Vehicle source</div><div class="v">{{ $diagnostics['vehicle_source'] ?? 'none' }} (present={{ ($diagnostics['vehicle_present'] ?? false) ? 'true' : 'false' }})</div>
                 <div class="k">Cena źródłowa PLN</div><div class="v">{{ $preview['price_source_pln'] ?? $preview['price_pln'] ?? '—' }}</div>
                 <div class="k">Cena EUR</div><div class="v">{{ $preview['price_eur'] ?? '—' }}</div>
                 <div class="k">Kurs NBP</div><div class="v">{{ $exchangeRate['rate'] ?? '—' }} @if(!empty($exchangeRate['effective_date']))({{ $exchangeRate['effective_date'] }})@endif</div>
@@ -62,6 +69,10 @@
             <p><strong>blockers</strong></p>
             <ul>@forelse (($readiness['blockers'] ?? []) as $item)<li>{{ $item }}</li>@empty<li>brak</li>@endforelse</ul>
 
+            <h2 style="margin-top:20px">diagnostics</h2>
+            <pre class="json">{{ json_encode($diagnostics, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) }}</pre>
+            <h2 style="margin-top:20px">vehicle</h2>
+            <pre class="json">{{ json_encode($preview['vehicle'] ?? [], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) }}</pre>
             <h2 style="margin-top:20px">shipping_policy_resolution</h2>
             <pre class="json">{{ json_encode($shippingResolution, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) }}</pre>
             <h2 style="margin-top:20px">business_policies</h2>
