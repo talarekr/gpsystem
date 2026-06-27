@@ -18,6 +18,10 @@
                 $category = $presentation['category'] ?? ['value' => 'Brak mapowania', 'mapped' => false];
                 $missing = $presentation['missing'] ?? [];
                 $prepareUrl = $part ? route('tools.check-part-marketplace-preparation-payload', ['token' => 'gps_images_import_2026', 'part_id' => $part->id, 'channel' => $channels[$key]]) : null;
+                $ebayPreviewUrls = $part ? [
+                    'ebay_de' => route('tools.ebay-listing-preview', ['token' => 'gps_images_import_2026', 'part_id' => $part->id, 'channel' => 'ebay_de']),
+                    'ebay_fr' => route('tools.ebay-listing-preview', ['token' => 'gps_images_import_2026', 'part_id' => $part->id, 'channel' => 'ebay_fr']),
+                ] : [];
             @endphp
 
             <div class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900">
@@ -53,6 +57,17 @@
                     <a href="{{ $prepareUrl }}" target="_blank" rel="noopener noreferrer" class="inline-flex w-full items-center justify-center rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-primary-500">
                         Przygotuj
                     </a>
+
+                    @if ($key === 'ebay')
+                        <div class="grid gap-2 sm:grid-cols-2">
+                            <a href="{{ $ebayPreviewUrls['ebay_de'] ?? '#' }}" target="_blank" rel="noopener noreferrer" class="inline-flex w-full items-center justify-center rounded-lg border border-primary-200 bg-white px-3 py-2 text-sm font-semibold text-primary-700 shadow-sm hover:bg-primary-50 dark:border-primary-700 dark:bg-gray-900 dark:text-primary-300">
+                                Podgląd aukcji eBay DE
+                            </a>
+                            <a href="{{ $ebayPreviewUrls['ebay_fr'] ?? '#' }}" target="_blank" rel="noopener noreferrer" class="inline-flex w-full items-center justify-center rounded-lg border border-primary-200 bg-white px-3 py-2 text-sm font-semibold text-primary-700 shadow-sm hover:bg-primary-50 dark:border-primary-700 dark:bg-gray-900 dark:text-primary-300">
+                                Podgląd aukcji eBay FR
+                            </a>
+                        </div>
+                    @endif
 
                     <div class="rounded-lg {{ $ready ? 'bg-success-50 text-success-800 dark:bg-success-950 dark:text-success-200' : 'bg-gray-50 text-gray-800 dark:bg-gray-800 dark:text-gray-200' }} p-3">
                         <div class="font-medium">{{ $presentation['message'] ?? ($ready ? 'Produkt gotowy' : 'Uzupełnij braki') }}</div>

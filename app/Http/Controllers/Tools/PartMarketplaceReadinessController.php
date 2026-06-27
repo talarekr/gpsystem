@@ -7,6 +7,7 @@ use App\Models\Part;
 use App\Services\Marketplace\MarketplaceListingReadinessService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\View\View;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -37,6 +38,47 @@ class PartMarketplaceReadinessController extends Controller
             $result = $this->readinessService->checkAll($part);
 
             return response()->json(['ok' => true, 'part_id' => $part->id, 'part_name' => $part->name] + $result);
+        } catch (\Throwable $e) {
+            return $this->safeExceptionResponse($e, (int) $request->query('part_id'), $failedStage);
+        }
+    }
+
+
+    public function ebayPreview(Request $request): View|JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+
+        $failedStage = 'load_part';
+
+        try {
+            $part = Part::query()->find((int) $request->query('part_id'));
+
+            if (! $part) {
+                return response()->json([
+                    'ok' => false,
+                    'blocker' => 'part_not_found',
+                    'blockers' => ['part_not_found'],
+                ], 404);
+            }
+
+            $channel = (string) $request->query('channel', 'ebay_de');
+
+            if (! in_array($channel, ['ebay_de', 'ebay_fr'], true)) {
+                $channel = 'ebay_de';
+            }
+
+            $failedStage = $this->failedStageForChannel($channel);
+            $readiness = $this->readinessService->checkPartReadiness($part, $channel);
+            $preview = $readiness['prepared_payload_preview_safe'] ?? [];
+            $preview['will_make_marketplace_request'] = false;
+
+            return view('admin.marketplace.ebay-listing-preview', [
+                'part' => $part,
+                'channel' => $channel,
+                'readiness' => $readiness,
+                'preview' => $preview,
+                'html' => (string) ($preview['description_rendered_html'] ?? ''),
+            ]);
         } catch (\Throwable $e) {
             return $this->safeExceptionResponse($e, (int) $request->query('part_id'), $failedStage);
         }
