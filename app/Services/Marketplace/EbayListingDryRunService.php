@@ -18,6 +18,7 @@ class EbayListingDryRunService
         private readonly EbayDescriptionTemplateService $templateService,
         private readonly GoogleTranslateService $translateService,
         private readonly NbpExchangeRateService $exchangeRateService,
+        private readonly EbayItemSpecificsService $itemSpecificsService,
     ) {}
 
     public function readiness(int $partId, string $channel): array
@@ -87,7 +88,7 @@ class EbayListingDryRunService
         $translation = $this->translation($channel, $preview);
         if ($translation['required'] && ! $translation['available']) $blockers[] = 'Google Translate is required for FR preview but is not available.';
 
-        $aspectDiagnostics = $this->aspectsWithDiagnostics($part);
+        $aspectDiagnostics = $part ? $this->itemSpecificsService->build($part, $channel, $mapping) : ['aspects' => [], 'item_specifics' => [], 'item_specifics_source' => 'part_missing', 'warnings' => []];
         $warnings = array_merge($warnings, $aspectDiagnostics['warnings']);
 
         $existing = $this->existingListing($part, $channel);
@@ -109,7 +110,8 @@ class EbayListingDryRunService
             'translation' => $translation,
             'translated_specification_values' => $preview['translated_specification_values'] ?? [],
             'untranslated_technical_values' => $preview['untranslated_technical_values'] ?? [],
-            'aspects_source' => $aspectDiagnostics['aspects_source'],
+            'aspects_source' => $aspectDiagnostics['item_specifics_source'] ?? ($aspectDiagnostics['aspects_source'] ?? null),
+            'item_specifics' => $aspectDiagnostics['item_specifics'] ?? [],
             'existing_listing' => $existing,
             'compatibility' => $this->listingCompatibilitySummary($part, $channel, $mapping?->external_category_id, $marketplaceId),
             'blockers' => array_values(array_unique($blockers)),
@@ -172,7 +174,8 @@ class EbayListingDryRunService
         $short = (string) ($preview['short_inventory_description'] ?? Str::limit(strip_tags((string) ($part?->description ?? '')), 400, ''));
         $html = (string) ($preview['listing_description_html'] ?? '');
         $priceEur = $ready['price']['estimated_price_eur'] ?? null;
-        $aspectDiagnostics = $this->aspectsWithDiagnostics($part);
+        $mapping = $part && Schema::hasTable('marketplace_category_mappings') ? MarketplaceCategoryMapping::query()->where('local_category_id', $part->category_id)->where('channel', $channel)->first() : null;
+        $aspectDiagnostics = $part ? $this->itemSpecificsService->build($part, $channel, $mapping) : ['aspects' => [], 'item_specifics' => [], 'item_specifics_source' => 'part_missing', 'warnings' => []];
         $warnings = array_values(array_unique(array_merge($ready['warnings'] ?? [], $aspectDiagnostics['warnings'])));
 
         return [
@@ -192,7 +195,8 @@ class EbayListingDryRunService
             'listing_description_html_length' => Str::length($html),
             'translated_specification_values' => $preview['translated_specification_values'] ?? [],
             'untranslated_technical_values' => $preview['untranslated_technical_values'] ?? [],
-            'aspects_source' => $aspectDiagnostics['aspects_source'],
+            'aspects_source' => $aspectDiagnostics['item_specifics_source'] ?? ($aspectDiagnostics['aspects_source'] ?? null),
+            'item_specifics' => $aspectDiagnostics['item_specifics'] ?? [],
             'compatibility' => $ready['compatibility'] ?? $this->listingCompatibilitySummary($part, $channel, $ready['category']['external_category_id'] ?? null, $ready['marketplace_id'] ?? null),
             'blockers' => $ready['blockers'] ?? [],
             'warnings' => $warnings,

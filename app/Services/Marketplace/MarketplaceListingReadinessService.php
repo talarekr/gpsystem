@@ -14,7 +14,7 @@ class MarketplaceListingReadinessService
 {
     public const CHANNELS = ['storefront', 'allegro_main', 'ovoko', 'ebay_de', 'ebay_fr'];
 
-    public function __construct(private readonly TranslationService $translationService, private readonly EbayDescriptionTemplateRenderer $ebayDescriptionTemplateRenderer, private readonly NbpExchangeRateService $exchangeRateService) {}
+    public function __construct(private readonly TranslationService $translationService, private readonly EbayDescriptionTemplateRenderer $ebayDescriptionTemplateRenderer, private readonly NbpExchangeRateService $exchangeRateService, private readonly EbayItemSpecificsService $ebayItemSpecificsService) {}
 
     /** @return array<string, mixed> */
     public function checkPartReadiness(Part $part, string $channel): array
@@ -153,6 +153,7 @@ class MarketplaceListingReadinessService
             if (($result['ok'] ?? false) && filled($result['translated_text'] ?? null)) { $translated[$key] = (string) $result['translated_text']; $translatedFields[] = $key; }
             else { $translated[$key] = (string) $value; $untranslatedFields[] = $key; $blockers = array_merge($blockers, (array) ($result['blockers'] ?? ['translation_failed'])); }
         }
+        $itemSpecifics = $this->ebayItemSpecificsService->fallbackSpecifics($part, $channel, $this->ebayCategoryMapping($part, $channel));
         $metadata = is_array($part->review_metadata) ? $part->review_metadata : [];
         Arr::set($metadata, 'marketplace_prepared_translations.'.$channel, [
             'status' => $blockers === [] ? 'prepared' : 'failed',
@@ -162,9 +163,10 @@ class MarketplaceListingReadinessService
             'untranslated_fields' => $untranslatedFields,
             'prepared_at' => now()->toIso8601String(),
             'vehicle_source' => $vehicle['source'],
+            'item_specifics' => $itemSpecifics,
         ]);
         $part->forceFill(['review_metadata' => $metadata])->save();
-        return ['ok' => $blockers === [], 'channel' => $channel, 'translation_status' => $blockers === [] ? 'prepared' : 'failed', 'translation_language' => $language, 'translated_fields' => $translatedFields, 'untranslated_fields' => $untranslatedFields, 'blockers' => array_values(array_unique($blockers)), 'will_make_marketplace_request' => false];
+        return ['ok' => $blockers === [], 'channel' => $channel, 'translation_status' => $blockers === [] ? 'prepared' : 'failed', 'translation_language' => $language, 'translated_fields' => $translatedFields, 'untranslated_fields' => $untranslatedFields, 'item_specifics_translated_fields' => array_keys($itemSpecifics), 'blockers' => array_values(array_unique($blockers)), 'will_make_marketplace_request' => false];
     }
 
     public function checkAll(Part $part): array
@@ -342,7 +344,13 @@ class MarketplaceListingReadinessService
     private function safePayloadPreview(Part $part, string $channel, ?float $price, ?MarketplaceCategoryMapping $categoryMapping = null, ?array $ebayPrice = null): array
     {
         $translation = $this->preparedTranslation($part, $channel);
+        $itemSpecifics = str_starts_with($channel, 'ebay_') ? $this->ebayItemSpecificsService->build($part, $channel, $categoryMapping, $translation) : null;
         $preview = ['dry_run' => true, 'channel' => $channel, 'sku' => $part->sku ?? null, 'title' => $part->name ?? null, 'description_present' => filled(strip_tags((string) (($part->description ?? null) ?: ($part->short_description ?? null)))), 'condition_notes_present' => filled($part->condition_notes ?? null), 'price_pln' => $price, 'quantity' => $part->quantity ?? null, 'currency' => 'PLN', 'dimensions' => $this->dimensionsPayload($part), 'image_urls' => $this->imagesFor($part)->take(5)->map(fn ($image) => method_exists($image, 'listingUrl') ? $image->listingUrl() : null)->filter()->values()->all(), 'category_id' => $categoryMapping?->external_category_id ?? ($part->category_id ?? null), 'category_mapping_source' => $categoryMapping ? 'marketplace_category_mappings' : null, 'category_mapping_channel' => $categoryMapping?->channel, 'local_category_id' => $part->category_id ?? null, 'vehicle' => $this->vehiclePayload($part, $channel), 'diagnostics' => $this->diagnosticsPayload($part, $channel, $translation), 'translation_status' => $translation['status'], 'translation_language' => $translation['language'], 'translated_fields' => $translation['translated_fields'], 'untranslated_fields' => $translation['untranslated_fields'], 'will_make_marketplace_request' => false];
+
+        if ($itemSpecifics) {
+            $preview = array_merge($preview, $itemSpecifics);
+            $preview['diagnostics'] = array_merge($preview['diagnostics'], array_intersect_key($itemSpecifics, array_flip(['item_specifics_present','item_specifics_count','item_specifics_source','item_specifics_missing_required','item_specifics_unmapped_fields','item_specifics_translation_status','item_specifics_translated_fields'])));
+        }
 
         if (str_starts_with($channel, 'ebay_')) {
             $preview['price_source_pln'] = $price;
@@ -360,6 +368,7 @@ class MarketplaceListingReadinessService
             $preview['shipping_policy_resolution'] = $businessPolicies['shipping_policy_resolution'];
             $preview['business_policies'] = $businessPolicies['business_policies'];
             $preview['description_rendered_html'] = $rendered;
+            $preview['diagnostics']['specification_rows_count'] = substr_count($rendered, '<tr><td');
         }
 
         return $preview;
@@ -367,12 +376,27 @@ class MarketplaceListingReadinessService
     private function preparedTranslation(Part $part, string $channel): array
     {
         $data = data_get(is_array($part->review_metadata) ? $part->review_metadata : [], 'marketplace_prepared_translations.'.$channel, []);
-        return is_array($data) ? ['status' => $data['status'] ?? 'not_prepared', 'language' => $data['language'] ?? strtolower((string) $this->targetLanguageForChannel($channel)), 'fields' => is_array($data['fields'] ?? null) ? $data['fields'] : [], 'translated_fields' => $data['translated_fields'] ?? [], 'untranslated_fields' => $data['untranslated_fields'] ?? []] : ['status' => 'not_prepared', 'language' => strtolower((string) $this->targetLanguageForChannel($channel)), 'fields' => [], 'translated_fields' => [], 'untranslated_fields' => []];
+        return is_array($data) ? ['status' => $data['status'] ?? 'not_prepared', 'language' => $data['language'] ?? strtolower((string) $this->targetLanguageForChannel($channel)), 'fields' => is_array($data['fields'] ?? null) ? $data['fields'] : [], 'item_specifics' => is_array($data['item_specifics'] ?? null) ? $data['item_specifics'] : [], 'translated_fields' => $data['translated_fields'] ?? [], 'untranslated_fields' => $data['untranslated_fields'] ?? []] : ['status' => 'not_prepared', 'language' => strtolower((string) $this->targetLanguageForChannel($channel)), 'fields' => [], 'item_specifics' => [], 'translated_fields' => [], 'untranslated_fields' => []];
     }
     private function renderDataFromTranslation(array $translation, ?Part $part = null, ?string $channel = null): array { $fields = $translation['fields'] ?? []; if (! is_array($fields)) return []; $data = []; foreach ($fields as $key => $value) { $data[str_replace('vehicle.', '', $key)] = $value; } if ($part && $channel) foreach (($this->vehiclePayload($part, $channel)['attributes'] ?? []) as $key => $value) { $data[$key] ??= $value; } if (($translation['status'] ?? null) !== 'prepared') $data['translation_fallback_notice'] = 'Tłumaczenia nieprzygotowane — użyj przycisku Przygotuj.'; return $data; }
     private function diagnosticsPayload(Part $part, string $channel, array $translation): array { $vehicle = $this->vehiclePayload($part, $channel, false); return ['vehicle_source' => $vehicle['source'], 'vehicle_present' => $vehicle['present'], 'vehicle_fields_present' => $vehicle['fields_present'], 'vehicle_fields_missing' => $vehicle['fields_missing'], 'translation_status' => $translation['status'], 'translation_language' => $translation['language'], 'translated_fields' => $translation['translated_fields'], 'untranslated_fields' => $translation['untranslated_fields']]; }
-    private function vehiclePayload(Part $part, string $channel, bool $translated = true): array { $src = $part->relationLoaded('car') && $part->car ? 'car' : (is_array($part->vehicle_snapshot ?? null) ? 'vehicle_snapshot' : 'none'); $v = $src === 'car' ? $part->car->only(['make','model','model_variant','production_year','body_type','fuel_type','engine_capacity_cm3','color','drivetrain','steering_side','gearbox_type','engine_code','engine_power_kw','color_code']) : (is_array($part->vehicle_snapshot ?? null) ? $part->vehicle_snapshot : []); $lang = strtolower((string) $this->targetLanguageForChannel($channel)); foreach (['fuel_type','color','steering_side','gearbox_type','body_type','drivetrain'] as $k) if ($translated && isset($v[$k])) $v[$k] = $this->localVehicleTranslation((string) $v[$k], $lang) ?? $v[$k]; $expected = ['make','model','model_variant','production_year','body_type','fuel_type','engine_capacity_cm3','color','drivetrain','steering_side','gearbox_type']; $present = array_values(array_filter($expected, fn($k) => filled($v[$k] ?? null))); $title = trim(implode(' ', array_filter([$v['make'] ?? null, $v['model'] ?? null, $v['model_variant'] ?? null]))).(filled($v['production_year'] ?? null) ? ' ('.$v['production_year'].')' : ''); return ['source'=>$src,'present'=>$src !== 'none','car_id'=>$part->car_id ?? null,'snapshot_present'=>is_array($part->vehicle_snapshot ?? null),'title'=>trim($title),'attributes'=>$v,'attributes_source'=>$src === 'car' ? ($part->car?->only($expected) ?? []) : $v,'summary'=>implode(' · ', array_values(array_filter([$v['production_year'] ?? null,$v['body_type'] ?? null,$v['fuel_type'] ?? null,filled($v['engine_capacity_cm3'] ?? null) ? $v['engine_capacity_cm3'].' cm³' : null,$v['color'] ?? null,$v['drivetrain'] ?? null,$v['steering_side'] ?? null,$v['gearbox_type'] ?? null]))),'fields_present'=>$present,'fields_missing'=>array_values(array_diff($expected,$present))]; }
-    private function localVehicleTranslation(string $value, string $language): ?string { $n = Str::lower(trim($value)); $map = ['de'=>['benzyna'=>'Benzin','szary'=>'Grau','lewa strona'=>'Linkslenker','po lewej'=>'Linkslenker','automatyczny'=>'Automatik','automatyczna'=>'Automatik'],'fr'=>['benzyna'=>'Essence','szary'=>'Gris','lewa strona'=>'Volant à gauche','po lewej'=>'Volant à gauche','automatyczny'=>'Automatique','automatyczna'=>'Automatique']]; return $map[$language][$n] ?? null; }
+    private function vehiclePayload(Part $part, string $channel, bool $translated = true): array
+    {
+        $expected = ['make','model','model_variant','production_year','first_registration_year','steering_side','mileage_km','fuel_type','engine_power_kw','engine_capacity_cm3','engine_code','drivetrain','gearbox_type','gearbox_code','body_type','color_code','color','interior'];
+        $src = $part->car_id && $part->car ? 'car' : (is_array($part->vehicle_snapshot ?? null) ? 'vehicle_snapshot' : 'none');
+        $v = $src === 'car'
+            ? $part->car->only($expected)
+            : ($src === 'vehicle_snapshot' ? array_intersect_key($part->vehicle_snapshot, array_flip($expected)) : []);
+        $lang = strtolower((string) $this->targetLanguageForChannel($channel));
+        foreach (['fuel_type','color','steering_side','gearbox_type','body_type','drivetrain'] as $k) {
+            if ($translated && isset($v[$k])) $v[$k] = $this->localVehicleTranslation((string) $v[$k], $lang) ?? $v[$k];
+        }
+        $present = array_values(array_filter($expected, fn($k) => filled($v[$k] ?? null)));
+        $title = trim(implode(' ', array_filter([$v['make'] ?? null, $v['model'] ?? null, $v['model_variant'] ?? null]))).(filled($v['production_year'] ?? null) ? ' ('.$v['production_year'].')' : '');
+
+        return ['source'=>$src,'present'=>$src !== 'none','car_id'=>$part->car_id ?? null,'snapshot_present'=>is_array($part->vehicle_snapshot ?? null),'title'=>trim($title),'attributes'=>$v,'attributes_source'=>$src === 'car' ? ($part->car?->only($expected) ?? []) : $v,'summary'=>implode(' · ', array_values(array_filter([$v['production_year'] ?? null,$v['body_type'] ?? null,$v['fuel_type'] ?? null,filled($v['engine_capacity_cm3'] ?? null) ? $v['engine_capacity_cm3'].' cm³' : null,$v['color'] ?? null,$v['drivetrain'] ?? null,$v['steering_side'] ?? null,$v['gearbox_type'] ?? null]))),'fields_present'=>$present,'fields_missing'=>array_values(array_diff($expected,$present))];
+    }
+    private function localVehicleTranslation(string $value, string $language): ?string { $n = Str::lower(trim($value)); $map = ['de'=>['benzyna'=>'Benzin','szary'=>'Grau','lewa strona'=>'Linkslenker','po lewej'=>'Linkslenker','automatyczny'=>'Automatik','automatyczna'=>'Automatik','używany'=>'Gebraucht','używana'=>'Gebraucht'],'fr'=>['benzyna'=>'Essence','szary'=>'Gris','lewa strona'=>'Volant à gauche','po lewej'=>'Volant à gauche','automatyczny'=>'Automatique','automatyczna'=>'Automatique','używany'=>'Occasion','używana'=>'Occasion']]; return $map[$language][$n] ?? null; }
 
     /** @return array<string, mixed> */
     private function unsupportedChannelResult(Part $part, string $channel): array { return ['channel' => $channel, 'can_prepare' => false, 'can_publish_later' => false, 'required_fields' => [], 'missing_fields' => ['channel'], 'warnings' => [], 'blockers' => ['Unsupported marketplace readiness channel.'], 'prepared_payload_preview_safe' => ['dry_run' => true, 'channel' => $channel, 'part_id' => $part->id, 'will_make_marketplace_request' => false], 'price_source' => 'none', 'local_price' => null, 'marketplace_price' => null, 'currency' => 'PLN', 'images_count' => 0, 'has_required_images' => false, 'category_ready' => false, 'vehicle_ready' => false, 'description_ready' => false, 'title_ready' => filled($part->name ?? null), 'stock_ready' => false, 'external_mapping_exists' => false, 'notes' => ['dry_run_only' => 'Readiness does not publish, update, delete, sync prices, sync stock, or import orders.']]; }

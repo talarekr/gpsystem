@@ -71,6 +71,9 @@
 
             <h2 style="margin-top:20px">diagnostics</h2>
             <pre class="json">{{ json_encode($diagnostics, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) }}</pre>
+
+            <h2 style="margin-top:20px">Artikelmerkmale / Item specifics</h2>
+            <pre class="json">{{ json_encode($preview['item_specifics'] ?? [], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) }}</pre>
             <h2 style="margin-top:20px">vehicle</h2>
             <pre class="json">{{ json_encode($preview['vehicle'] ?? [], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) }}</pre>
             <h2 style="margin-top:20px">shipping_policy_resolution</h2>
