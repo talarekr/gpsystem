@@ -37,7 +37,6 @@ class EbayDescriptionTemplateRenderer
             'descriptionBlock' => new HtmlString($this->descriptionBlock($part, $data)),
             'specificationRows' => new HtmlString($this->specificationRows($channel, $part, $data)),
             'sameVehicleCta' => new HtmlString($this->sameVehicleCta($data)),
-            'vehicleBlock' => new HtmlString($this->vehicleBlock($channel, $part, $data)),
             'translationFallbackNotice' => (string) ($data['translation_fallback_notice'] ?? ''),
         ])->render();
     }
@@ -47,12 +46,12 @@ class EbayDescriptionTemplateRenderer
     {
         return match ($channel) {
             'ebay_fr' => [
-                'shipping' => 'Livraison rapide dans le monde entier', 'returns' => 'Retour sous 30 jours', 'packaging' => 'Emballage sécurisé', 'original' => 'Pièce d’origine 100 %', 'description' => 'Description', 'specifications' => 'Spécifications', 'europe_delivery_title' => 'Nous livrons dans toute l’Europe', 'europe_delivery_text' => 'Nous expédions vers tous les pays européens – rapidement, de manière fiable et sécurisée.', 'delivery_time' => 'Délai de livraison 2–5 jours', 'trust_title' => 'Achetez en toute confiance', 'trust_subtitle' => 'Pièces d’occasion vérifiées | Contrôlées avec soin | Emballées professionnellement', 'not_specified' => 'Non indiqué',
-                'part_number' => 'Numéro de pièce', 'oem_code' => 'Code fabricant / OEM', 'manufacturer' => 'Fabricant / marque', 'vehicle_model' => 'Modèle du véhicule', 'year' => 'Année', 'engine' => 'Moteur', 'steering_side' => 'Côté conducteur', 'condition' => 'État / qualité', 'vehicle_data' => 'Données du véhicule',
+                'shipping' => 'Livraison rapide dans le monde entier', 'returns' => 'Retour sous 30 jours', 'packaging' => 'Emballage sécurisé', 'original' => 'Pièce d’origine 100 %', 'description' => 'Description', 'specifications' => 'Informations détaillées', 'europe_delivery_title' => 'Nous livrons dans toute l’Europe', 'europe_delivery_text' => 'Nous expédions vers tous les pays européens – rapidement, de manière fiable et sécurisée.', 'delivery_time' => 'Délai de livraison 2–5 jours', 'trust_title' => 'Achetez en toute confiance', 'trust_subtitle' => 'Pièces d’occasion vérifiées | Contrôlées avec soin | Emballées professionnellement', 'not_specified' => 'Non indiqué',
+                'part_number' => 'Numéro de pièce', 'oem_code' => 'Code fabricant / OEM', 'manufacturer' => 'Marque', 'vehicle_model' => 'Modèle du véhicule', 'year' => 'Année de production', 'engine' => 'Moteur', 'steering_side' => 'Côté du volant', 'condition' => 'État / Qualité', 'model_variant' => 'Variante du modèle', 'first_registration_year' => 'Première immatriculation', 'mileage_km' => 'Kilométrage', 'fuel_type' => 'Type de carburant', 'engine_power_kw' => 'Puissance moteur', 'engine_capacity_cm3' => 'Cylindrée', 'engine_code' => 'Code moteur', 'drivetrain' => 'Transmission', 'gearbox_type' => 'Type de boîte de vitesses', 'gearbox_code' => 'Code de boîte de vitesses', 'body_type' => 'Type de carrosserie', 'color_code' => 'Code couleur', 'color' => 'Couleur', 'interior' => 'Intérieur',
             ],
             default => [
                 'shipping' => 'Schneller weltweiter Versand', 'returns' => '30 Tage Rückgabe', 'packaging' => 'Sichere Verpackung', 'original' => '100% Originalteil', 'description' => 'Beschreibung', 'specifications' => 'Spezifikationen', 'europe_delivery_title' => 'Wir liefern in ganz Europa', 'europe_delivery_text' => 'Wir versenden in alle europäischen Länder – schnell, zuverlässig und sicher.', 'delivery_time' => 'Lieferzeit 2–5 Tage', 'trust_title' => 'Kaufen Sie mit Vertrauen', 'trust_subtitle' => 'Geprüfte gebrauchte Teile | Sorgfältig kontrolliert | Professionell verpackt', 'not_specified' => 'Nicht angegeben',
-                'part_number' => 'Teilenummer', 'oem_code' => 'Hersteller-/OEM-Code', 'manufacturer' => 'Hersteller / Marke', 'vehicle_model' => 'Fahrzeugmodell', 'year' => 'Baujahr', 'engine' => 'Motor', 'steering_side' => 'Lenkradseite', 'condition' => 'Zustand / Qualität', 'vehicle_data' => 'Fahrzeugdaten',
+                'part_number' => 'Teilenummer', 'oem_code' => 'Hersteller-/OEM-Code', 'manufacturer' => 'Hersteller / Marke', 'vehicle_model' => 'Fahrzeugmodell', 'year' => 'Baujahr', 'engine' => 'Motor', 'steering_side' => 'Lenkradseite', 'condition' => 'Zustand / Qualität', 'model_variant' => 'Modellvariante', 'first_registration_year' => 'Erstzulassung', 'mileage_km' => 'Kilometerstand', 'fuel_type' => 'Kraftstoffart', 'engine_power_kw' => 'Motorleistung', 'engine_capacity_cm3' => 'Hubraum', 'engine_code' => 'Motorcode', 'drivetrain' => 'Antrieb', 'gearbox_type' => 'Getriebeart', 'gearbox_code' => 'Getriebecode', 'body_type' => 'Karosserietyp', 'color_code' => 'Farbcode', 'color' => 'Farbe', 'interior' => 'Innenraum',
             ],
         };
     }
@@ -80,35 +79,71 @@ class EbayDescriptionTemplateRenderer
     private function specificationRows(string $channel, Part $part, array $data): string
     {
         $labels = $this->labelsForChannel($channel);
-        $vehicle = is_array($part->vehicle_snapshot) ? $part->vehicle_snapshot : [];
+        $vehicle = $this->vehicleAttributes($part, $data);
         $specs = [
             $labels['part_number'] => $data['part_number'] ?? $part->part_number ?? null,
             $labels['oem_code'] => $data['oem_code'] ?? $part->oem_number ?? $part->manufacturer_code ?? null,
-            $labels['manufacturer'] => $data['manufacturer'] ?? $vehicle['make'] ?? null,
-            $labels['vehicle_model'] => $data['vehicle_model'] ?? $vehicle['model'] ?? null,
-            $labels['year'] => $data['year'] ?? $vehicle['production_year'] ?? null,
-            $labels['engine'] => $data['engine'] ?? $vehicle['engine_code'] ?? $vehicle['engine_capacity_cm3'] ?? null,
+            $labels['manufacturer'] => $data['make'] ?? $data['manufacturer'] ?? $vehicle['make'] ?? null,
+            $labels['vehicle_model'] => $data['model'] ?? $data['vehicle_model'] ?? $vehicle['model'] ?? null,
+            $labels['model_variant'] => $data['model_variant'] ?? $vehicle['model_variant'] ?? null,
+            $labels['year'] => $data['production_year'] ?? $data['year'] ?? $vehicle['production_year'] ?? null,
+            $labels['first_registration_year'] => $data['first_registration_year'] ?? $vehicle['first_registration_year'] ?? null,
             $labels['steering_side'] => $data['steering_side'] ?? $vehicle['steering_side'] ?? null,
+            $labels['mileage_km'] => $this->withUnit($data['mileage_km'] ?? $vehicle['mileage_km'] ?? null, 'km'),
+            $labels['fuel_type'] => $data['fuel_type'] ?? $vehicle['fuel_type'] ?? null,
+            $labels['engine_power_kw'] => $this->withUnit($data['engine_power_kw'] ?? $vehicle['engine_power_kw'] ?? null, 'kW'),
+            $labels['engine_capacity_cm3'] => $this->withUnit($data['engine_capacity_cm3'] ?? $vehicle['engine_capacity_cm3'] ?? null, 'cm³'),
+            $labels['engine_code'] => $data['engine_code'] ?? $vehicle['engine_code'] ?? null,
+            $labels['drivetrain'] => $data['drivetrain'] ?? $vehicle['drivetrain'] ?? null,
+            $labels['gearbox_type'] => $data['gearbox_type'] ?? $vehicle['gearbox_type'] ?? null,
+            $labels['gearbox_code'] => $data['gearbox_code'] ?? $vehicle['gearbox_code'] ?? null,
+            $labels['body_type'] => $data['body_type'] ?? $vehicle['body_type'] ?? null,
+            $labels['color_code'] => $data['color_code'] ?? $vehicle['color_code'] ?? null,
+            $labels['color'] => $data['color'] ?? $vehicle['color'] ?? null,
+            $labels['interior'] => $data['interior'] ?? $vehicle['interior'] ?? null,
             $labels['condition'] => $data['condition'] ?? $part->condition_notes ?? null,
         ];
 
         $rows = '';
         foreach ($specs as $label => $value) {
             if (blank($value)) continue;
-            $rows .= $this->specificationRow($label, (string) $value);
+            $rows .= $this->specificationRow($label, $this->localizedValue($channel, (string) $value));
         }
 
         return $rows !== '' ? $rows : $this->specificationRow($labels['not_specified'], $labels['not_specified']);
     }
 
-    private function vehicleBlock(string $channel, Part $part, array $data): string
+    /** @param array<string, mixed> $data @return array<string, mixed> */
+    private function vehicleAttributes(Part $part, array $data): array
     {
-        $labels = $this->labelsForChannel($channel);
-        $snapshot = is_array($part->vehicle_snapshot ?? null) ? $part->vehicle_snapshot : [];
-        $title = trim(implode(' ', array_filter([$snapshot['make'] ?? null, $snapshot['model'] ?? null, $snapshot['model_variant'] ?? null]))).(filled($snapshot['production_year'] ?? null) ? ' ('.$snapshot['production_year'].')' : '');
-        $summary = implode(' · ', array_values(array_filter([$snapshot['production_year'] ?? null, $snapshot['body_type'] ?? null, $data['fuel_type'] ?? $snapshot['fuel_type'] ?? null, filled($snapshot['engine_capacity_cm3'] ?? null) ? $snapshot['engine_capacity_cm3'].' cm³' : null, $data['color'] ?? $snapshot['color'] ?? null, $snapshot['drivetrain'] ?? null, $data['steering_side'] ?? $snapshot['steering_side'] ?? null, $data['gearbox_type'] ?? $snapshot['gearbox_type'] ?? null])));
-        if ($title === '' && $summary === '') return '';
-        return '<div style="border:1px solid #dbe3ef;border-radius:8px;overflow:hidden;background:#ffffff;margin:0 0 22px;"><div style="background:#06275d;color:#ffffff;padding:15px 17px;font-size:18px;font-weight:900;letter-spacing:.2px;text-align:center;">'.e($labels['vehicle_data']).'</div><div style="padding:20px 22px;text-align:center;"><div style="color:#06275d;font-size:20px;font-weight:900;margin-bottom:8px;">'.e($title).'</div><div style="color:#111827;font-size:16px;line-height:1.7;">'.e($summary).'</div></div></div>';
+        $vehicle = $part->car_id && $part->car
+            ? $part->car->only(['make','model','model_variant','production_year','first_registration_year','steering_side','mileage_km','fuel_type','engine_power_kw','engine_capacity_cm3','engine_code','drivetrain','gearbox_type','gearbox_code','body_type','color_code','color','interior'])
+            : (is_array($part->vehicle_snapshot ?? null) ? $part->vehicle_snapshot : []);
+
+        foreach ($data as $key => $value) {
+            if (array_key_exists($key, $vehicle)) {
+                $vehicle[$key] = $value;
+            }
+        }
+
+        return $vehicle;
+    }
+
+    private function withUnit(mixed $value, string $unit): ?string
+    {
+        if (blank($value)) return null;
+        $text = trim((string) $value);
+        return str_contains($text, $unit) ? $text : $text.' '.$unit;
+    }
+
+    private function localizedValue(string $channel, string $value): string
+    {
+        $map = [
+            'ebay_de' => ['Benzyna' => 'Benzin', 'Szary' => 'Grau', 'Lewa strona' => 'Linkslenker', 'po lewej' => 'Linkslenker', 'Automatyczny' => 'Automatik', 'Używany' => 'Gebraucht'],
+            'ebay_fr' => ['Benzyna' => 'Essence', 'Szary' => 'Gris', 'Lewa strona' => 'Volant à gauche', 'po lewej' => 'Volant à gauche', 'Automatyczny' => 'Automatique', 'Używany' => 'Occasion'],
+        ];
+
+        return $map[$channel][$value] ?? $value;
     }
 
     private function specificationRow(string $label, string $value): string
