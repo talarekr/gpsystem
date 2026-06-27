@@ -445,38 +445,48 @@ class Part extends Model
             return $query;
         }
 
-        return $query->where(function (Builder $query) use ($value): void {
-            $this->applyCaseInsensitiveLike($query, [
-                'name',
-                'sku',
-                'part_number',
-                'oem_number',
-                'manufacturer_code',
-                'short_description',
-                'description',
-                'vehicle_snapshot',
-                'legacy_payload',
-            ], $value, false, 'parts');
+        $tokens = preg_split('/\s+/u', $value) ?: [];
+        $tokens = array_values(array_unique(array_filter($tokens, static fn (string $token): bool => $token !== '')));
 
-            $carColumns = $this->existingColumns('cars', [
-                'make',
-                'model',
-                'model_variant',
-                'fuel_type',
-                'engine_code',
-                'engine_capacity_cm3',
-                'gearbox_type',
-                'gearbox_code',
-                'body_type',
-                'drivetrain',
-            ]);
-
-            if ($carColumns !== []) {
-                $query->orWhereHas('car', function (Builder $carQuery) use ($value, $carColumns): void {
-                    $this->applyCaseInsensitiveLike($carQuery, $carColumns, $value, false, 'cars');
-                });
+        return $query->where(function (Builder $query) use ($tokens): void {
+            foreach ($tokens as $token) {
+                $query->where(fn (Builder $tokenQuery) => $this->applyStorefrontSearchToken($tokenQuery, $token));
             }
         });
+    }
+
+    private function applyStorefrontSearchToken(Builder $query, string $token): void
+    {
+        $this->applyCaseInsensitiveLike($query, [
+            'name',
+            'sku',
+            'part_number',
+            'oem_number',
+            'manufacturer_code',
+            'short_description',
+            'description',
+            'vehicle_snapshot',
+            'legacy_payload',
+        ], $token, true, 'parts');
+
+        $carColumns = $this->existingColumns('cars', [
+            'make',
+            'model',
+            'model_variant',
+            'fuel_type',
+            'engine_code',
+            'engine_capacity_cm3',
+            'gearbox_type',
+            'gearbox_code',
+            'body_type',
+            'drivetrain',
+        ]);
+
+        if ($carColumns !== []) {
+            $query->orWhereHas('car', function (Builder $carQuery) use ($token, $carColumns): void {
+                $this->applyCaseInsensitiveLike($carQuery, $carColumns, $token, true, 'cars');
+            });
+        }
     }
 
     public function scopePartNumberSearch(Builder $query, ?string $value): Builder
