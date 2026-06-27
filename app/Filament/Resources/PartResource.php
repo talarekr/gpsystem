@@ -119,7 +119,7 @@ class PartResource extends Resource
                     ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--part-info'])
                     ->schema([
                         Forms\Components\TextInput::make('name')->label('Tytuł produktu')->required()->maxLength(255)->live(onBlur: true)->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))->columnSpanFull(),
-                        Forms\Components\TextInput::make('part_number')->label('Główny kod części')->maxLength(255)->live(onBlur: true)->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))->columnSpanFull(),
+                        Forms\Components\TextInput::make('part_number')->label('Główny kod części')->maxLength(255)->live(debounce: 500)->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))->columnSpanFull(),
                         Forms\Components\Hidden::make('sku'),
                         Forms\Components\Select::make('category_id')->label('Kategoria')->placeholder('Kategoria')->relationship('category', 'name')->required()->searchable()->preload()->native(false)->live()->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set): null => self::refreshMarketplaceMappings($get, $set))->suffixAction(self::categoryTreeAction())->columnSpanFull(),
                         Forms\Components\Select::make('condition_notes')->label('Jakość')->placeholder('Jakość')->options(['Używany' => 'Używany', 'Nowy' => 'Nowy', 'Uszkodzony' => 'Uszkodzony', 'Regenerowany' => 'Regenerowany'])->default('Używany')->native(false)->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])->columnSpan(6),
@@ -201,6 +201,10 @@ class PartResource extends Resource
                             ->minValue(0)
                             ->readOnly(),
                         Forms\Components\Hidden::make('currency')->default('PLN'),
+                        Forms\Components\Placeholder::make('marketplace_price_links')
+                            ->hiddenLabel()
+                            ->content(fn (Forms\Get $get): HtmlString => new HtmlString(self::marketplacePriceLinksHtml($get)))
+                            ->columnSpanFull(),
                     ]),
 
                 Section::make('Przygotowanie do wystawienia na marketplace')
@@ -694,6 +698,33 @@ class PartResource extends Resource
         }
 
         return '<span class="gps-selected-vehicle gps-selected-vehicle--empty">Nie wybrano samochodu.</span>';
+    }
+
+    public static function marketplacePriceLinksHtml(Forms\Get $get): string
+    {
+        $query = trim((string) ($get('part_number') ?: $get('name') ?: ''));
+
+        return view('filament.resources.parts.marketplace-price-links', [
+            'query' => $query,
+            'links' => self::marketplacePriceSearchLinks($query),
+        ])->render();
+    }
+
+    public static function marketplacePriceSearchLinks(string $query): array
+    {
+        $query = trim($query);
+
+        if ($query === '') {
+            return [];
+        }
+
+        $encoded = rawurlencode($query);
+
+        return [
+            'allegro' => 'https://allegro.pl/listing?string='.$encoded,
+            'ovoko' => 'https://www.ovoko.pl/pl/search?q='.$encoded,
+            'ebay' => 'https://www.ebay.com/sch/i.html?_nkw='.$encoded,
+        ];
     }
 
     public static function adminAllPartsQuery(): Builder
