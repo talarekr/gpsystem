@@ -6,7 +6,6 @@ use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceCategoryMapping;
 use App\Models\MarketplaceListing;
 use App\Models\Part;
-use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
@@ -86,7 +85,11 @@ class MarketplaceListingReadinessService
             else { $notes['ebay_category_mapping'] = ['source' => 'marketplace_category_mappings', 'channel' => $categoryMapping->channel, 'external_category_id' => $categoryMapping->external_category_id]; }
             if (! $this->isGoogleTranslateConfigured()) { $missing[] = 'translation_credentials'; $warnings[] = 'Google Translate credentials are not configured for later title/description/condition translation dry-runs.'; }
             if (! $this->ebayTemplateExists($channel)) { $missing[] = 'description_template'; $blockers[] = 'eBay description template for '.$channel.' is missing.'; }
-            if (! $this->ebayBusinessPoliciesReady($account)) { $missing[] = 'business_policies'; $blockers[] = 'eBay business policies are missing: payment, fulfillment/shipping, or return.'; }
+            $businessPolicies = $this->resolveEbayBusinessPolicies($account, $categoryMapping, $part, $channel);
+            foreach ($businessPolicies['missing'] as $policyMissing) { $missing[] = $policyMissing; }
+            foreach ($businessPolicies['blockers'] as $policyBlocker) { $blockers[] = $policyBlocker; }
+            $notes['shipping_policy_resolution'] = $businessPolicies['shipping_policy_resolution'];
+            $notes['business_policies'] = $businessPolicies['business_policies'];
             $notes['translation'] = ['source_language' => 'PL', 'target_language' => $this->targetLanguageForChannel($channel), 'fields' => ['title', 'description', 'condition_notes']];
         }
 
@@ -186,8 +189,76 @@ class MarketplaceListingReadinessService
     private function isGoogleTranslateConfigured(): bool { try { return $this->translationService->isGoogleTranslateConfigured(); } catch (\Throwable) { return false; } }
     private function targetLanguageForChannel(string $channel): ?string { try { return $this->translationService->targetLanguageForChannel($channel); } catch (\Throwable) { return null; } }
     private function ebayTemplateExists(string $channel): bool { try { return $this->ebayDescriptionTemplateRenderer->isAvailable($channel) || filled(config('marketplace.ebay.templates.'.$channel)) || view()->exists('marketplace.ebay.templates.'.$channel); } catch (\Throwable) { return false; } }
-    private function ebayBusinessPoliciesReady(?MarketplaceAccount $account): bool { $settings = is_array($account?->api_settings) ? $account->api_settings : []; return filled(Arr::get($settings, 'business_policies.payment')) && filled(Arr::get($settings, 'business_policies.fulfillment')) && filled(Arr::get($settings, 'business_policies.return')); }
 
+
+    /** @return array<string, mixed> */
+    private function resolveEbayBusinessPolicies(?MarketplaceAccount $account, ?MarketplaceCategoryMapping $mapping, Part $part, string $channel): array
+    {
+        $settings = is_array($account?->api_settings) ? $account->api_settings : [];
+        $config = is_array($account?->config) ? $account->config : [];
+        $paymentPolicyId = $this->policyId($settings, 'payment');
+        $returnPolicyId = $this->policyId($settings, 'return');
+        $merchantLocationKey = $this->merchantLocationKey($settings, $config);
+        $shippingGroup = filled($mapping?->shipping_group) ? (string) $mapping->shipping_group : null;
+        $fulfillmentPolicyId = filled($mapping?->fulfillment_policy_id) ? (string) $mapping->fulfillment_policy_id : null;
+        $fulfillmentPolicyName = $this->fulfillmentPolicyName($fulfillmentPolicyId, $shippingGroup);
+        $categoryName = $part->relationLoaded('category') ? ($part->category?->name ?? $mapping?->local_category_name) : $mapping?->local_category_name;
+        $availablePolicyMapping = $this->availableShippingPolicyMapping($channel);
+        $missing = [];
+        $blockers = [];
+
+        if (blank($shippingGroup)) {
+            $missing[] = 'category_shipping_group';
+            $blockers[] = 'category_shipping_group';
+        }
+
+        if (blank($fulfillmentPolicyId)) {
+            $missing[] = 'shipping_policy_mapping';
+            $blockers[] = 'shipping_policy_mapping';
+        }
+
+        if (blank($paymentPolicyId)) {
+            $missing[] = 'payment_policy';
+            $blockers[] = 'payment_policy';
+        }
+
+        if (blank($returnPolicyId)) {
+            $missing[] = 'return_policy';
+            $blockers[] = 'return_policy';
+        }
+
+        return [
+            'missing' => $missing,
+            'blockers' => $blockers,
+            'shipping_policy_resolution' => [
+                'local_category_id' => $part->category_id ?? null,
+                'local_category_name' => $categoryName,
+                'shipping_group' => $shippingGroup,
+                'shipping_group_source' => $shippingGroup ? 'marketplace_category_mappings.shipping_group' : null,
+                'selected_fulfillment_policy_id' => $fulfillmentPolicyId,
+                'selected_fulfillment_policy_name' => $fulfillmentPolicyName,
+                'available_policy_mapping' => $availablePolicyMapping,
+                'missing' => array_values(array_intersect($missing, ['category_shipping_group', 'shipping_policy_mapping'])),
+            ],
+            'business_policies' => [
+                'selected_fulfillment_policy_id' => $fulfillmentPolicyId,
+                'selected_fulfillment_policy_name' => $fulfillmentPolicyName,
+                'selected_payment_policy_id' => $paymentPolicyId,
+                'selected_payment_policy_name' => $this->policyName($settings, 'payment', $paymentPolicyId),
+                'selected_return_policy_id' => $returnPolicyId,
+                'selected_return_policy_name' => $this->policyName($settings, 'return', $returnPolicyId),
+                'merchant_location_key' => $merchantLocationKey,
+                'missing' => $missing,
+            ],
+        ];
+    }
+
+    private function policyId(array $settings, string $type): ?string { foreach (["{$type}_policy_id", "default_{$type}_policy_id", "ebay_{$type}_policy_id"] as $key) if (filled($settings[$key] ?? null)) return (string) $settings[$key]; $policies = is_array($settings['business_policies'] ?? null) ? $settings['business_policies'] : []; return filled($policies[$type] ?? null) ? (string) $policies[$type] : null; }
+    private function policyName(array $settings, string $type, ?string $id): ?string { if (blank($id)) return null; $policies = is_array($settings[$type.'_policies'] ?? null) ? $settings[$type.'_policies'] : []; foreach ($policies as $policy) if (is_array($policy) && (string) ($policy['id'] ?? '') === (string) $id) return $policy['name'] ?? null; return null; }
+    private function merchantLocationKey(array $settings, array $config): ?string { foreach (['merchant_location_key', 'location_key', 'inventory_location_key'] as $key) if (filled($settings[$key] ?? null)) return (string) $settings[$key]; foreach (['merchant_location_key', 'location_key', 'inventory_location_key'] as $key) if (filled($config[$key] ?? null)) return (string) $config[$key]; return null; }
+    /** @return array<string, string> */
+    private function availableShippingPolicyMapping(string $channel): array { return $channel === 'ebay_fr' ? ['fr_55_eur' => '260547694013', 'fr_70_eur' => '260547464013', 'fr_130_eur' => '260547754013'] : ['de_30_eur' => '259264150013', 'de_50_eur' => '259677066013', 'de_130_eur' => '259636579013']; }
+    private function fulfillmentPolicyName(?string $policyId, ?string $shippingGroup): ?string { if (blank($policyId)) return null; return match ((string) $policyId) { '259264150013' => 'Wysyłka 30 euro', '259677066013' => 'Wysyłka 50 euro', '259636579013' => 'Wysyłka 130 euro', '260547694013' => 'Wysyłka FR 55 euro', '260547464013' => 'Wysyłka FR 70 euro', '260547754013' => 'Wysyłka FR 130 euro', default => $shippingGroup, }; }
 
     /** @return array<string, mixed> */
     private function resolveEbayPrice(?float $sourcePricePln): array
@@ -239,6 +310,9 @@ class MarketplaceListingReadinessService
             $preview['description_template_channel'] = $channel;
             $preview['description_rendered_present'] = filled(trim($rendered));
             $preview['description_template_asset_urls'] = $this->ebayDescriptionTemplateRenderer->assetUrls();
+            $businessPolicies = $this->resolveEbayBusinessPolicies($this->accountFor($channel), $categoryMapping, $part, $channel);
+            $preview['shipping_policy_resolution'] = $businessPolicies['shipping_policy_resolution'];
+            $preview['business_policies'] = $businessPolicies['business_policies'];
             $preview['description_rendered_html'] = $rendered;
         }
 
