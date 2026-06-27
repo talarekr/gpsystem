@@ -120,6 +120,25 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', [HomeController::class, 'index'])->name('storefront.home');
+Route::get('/admin/brand/logo.png', function () {
+    $candidates = [
+        storage_path('app/imports/logo.png'),
+        base_path('app/storage/app/imports/logo.png'),
+        dirname(base_path()).'/public_html/storage/brand/logo.png',
+        public_path('storage/brand/logo.png'),
+    ];
+
+    foreach ($candidates as $path) {
+        if (is_file($path)) {
+            return response()->file($path, [
+                'Cache-Control' => 'public, max-age=3600',
+                'Content-Type' => 'image/png',
+            ]);
+        }
+    }
+
+    abort(404);
+})->name('admin.brand.logo');
 Route::get('/sklep', fn (Request $request) => redirect()->route('storefront.catalog', $request->query(), 301))->name('storefront.shop.legacy');
 Route::get('/czesci', [CatalogController::class, 'index'])->name('storefront.catalog');
 Route::get('/szukaj', [SearchController::class, 'index'])->name('storefront.search');

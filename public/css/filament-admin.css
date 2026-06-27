@@ -367,7 +367,8 @@ body,
 }
 
 .gps-admin-topbar__brand { gap: 0.625rem; color: var(--gps-admin-navy); font-weight: 800; text-decoration: none; white-space: nowrap; }
-.gps-admin-topbar__brand-mark { display: inline-flex; width: 2.35rem; height: 2.35rem; align-items: center; justify-content: center; border-radius: 0.75rem; background: var(--gps-admin-navy); color: #fff; font-size: 0.78rem; letter-spacing: 0.04em; }
+.gps-admin-topbar__brand-mark { display: inline-flex; width: 3.2rem; height: 2.35rem; align-items: center; justify-content: center; overflow: hidden; border-radius: 0.75rem; background: #fff; }
+.gps-admin-topbar__brand-mark img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
 .gps-admin-topbar__brand-name { font-size: 1rem; }
 
 .gps-admin-search { position: relative; width: min(46rem, 100%); min-width: 12rem; }
