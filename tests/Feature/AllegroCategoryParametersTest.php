@@ -141,6 +141,77 @@ class AllegroCategoryParametersTest extends TestCase
         $this->assertArrayNotHasKey('token', $result);
     }
 
+
+    public function test_part_manufacturer_prefers_part_brand_over_vehicle_make(): void
+    {
+        $part = Part::query()->create(['name' => 'Część', 'category_id' => 77, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'vehicle_snapshot' => ['make' => 'Maserati'], 'is_visible_storefront' => true]);
+        $part->setAttribute('brand', 'Bosch');
+
+        $result = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, null, ['ok' => true, 'source' => 'cache', 'parameters' => [
+            ['id' => '127415', 'name' => 'Producent części', 'type' => 'string', 'required' => true, 'options' => ['describesProduct' => true]],
+        ]]);
+
+        $this->assertSame([['id' => '127415', 'values' => ['Bosch']]], $result['product_parameters']);
+        $this->assertSame([], $result['missing_required_parameters']);
+        $this->assertSame('part.brand', $result['parameter_source_diagnostics'][0]['source']);
+    }
+
+    public function test_part_manufacturer_falls_back_to_vehicle_snapshot_make_and_text_values(): void
+    {
+        $part = Part::query()->create(['name' => 'Część Maserati', 'category_id' => 77, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'vehicle_snapshot' => ['make' => 'Maserati'], 'is_visible_storefront' => true]);
+
+        $result = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, null, ['ok' => true, 'source' => 'cache', 'parameters' => [
+            ['id' => '127415', 'name' => 'Producent części', 'type' => 'string', 'required' => true, 'options' => ['describesProduct' => true]],
+        ]]);
+
+        $this->assertSame([['id' => '127415', 'values' => ['Maserati']]], $result['product_parameters']);
+        $this->assertSame('vehicle_snapshot.make', $result['parameter_source_diagnostics'][0]['source']);
+        $this->assertSame('Maserati', $result['parameter_source_diagnostics'][0]['source_value']);
+        $this->assertFalse($result['will_make_marketplace_request']);
+    }
+
+    public function test_part_manufacturer_dictionary_uses_matching_values_id(): void
+    {
+        $part = Part::query()->create(['name' => 'Część Maserati', 'category_id' => 77, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'vehicle_snapshot' => ['make' => 'Maserati'], 'is_visible_storefront' => true]);
+
+        $result = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, null, ['ok' => true, 'source' => 'cache', 'parameters' => [
+            ['id' => '127415', 'name' => 'Producent części', 'type' => 'dictionary', 'required' => true, 'dictionary' => [['id' => 'maserati-id', 'value' => 'Maserati']], 'options' => ['describesProduct' => false]],
+        ]]);
+
+        $this->assertSame([['id' => '127415', 'valuesIds' => ['maserati-id']]], $result['offer_parameters']);
+        $this->assertSame([], $result['missing_required_parameters']);
+    }
+
+    public function test_part_catalog_number_uses_real_part_number_and_describes_product_section(): void
+    {
+        $part = Part::query()->create(['name' => 'Część Maserati', 'part_number' => '06H903017J', 'category_id' => 77, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'vehicle_snapshot' => ['make' => 'Maserati'], 'is_visible_storefront' => true]);
+
+        $result = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, null, ['ok' => true, 'source' => 'cache', 'parameters' => [
+            ['id' => '215858', 'name' => 'Numer katalogowy części', 'type' => 'string', 'required' => true, 'options' => ['describesProduct' => true]],
+        ]]);
+
+        $this->assertSame([['id' => '215858', 'values' => ['06H903017J']]], $result['product_parameters']);
+        $this->assertSame([], $result['offer_parameters']);
+        $this->assertSame([], $result['missing_required_parameters']);
+        $this->assertSame('part.part_number', $result['parameter_source_diagnostics'][0]['source']);
+    }
+
+    public function test_required_allegro_part_manufacturer_and_catalog_number_clear_missing_parameters_without_writes(): void
+    {
+        Http::fake();
+        $part = Part::query()->create(['name' => 'Część Maserati', 'part_number' => '06H903017J', 'category_id' => 77, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'vehicle_snapshot' => ['make' => 'Maserati'], 'is_visible_storefront' => true]);
+
+        $result = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, null, ['ok' => true, 'source' => 'cache', 'parameters' => [
+            ['id' => '127415', 'name' => 'Producent części', 'type' => 'string', 'required' => true, 'options' => ['describesProduct' => true]],
+            ['id' => '215858', 'name' => 'Numer katalogowy części', 'type' => 'string', 'required' => true, 'options' => ['describesProduct' => true]],
+        ]]);
+
+        $this->assertSame([], $result['missing_required_parameters']);
+        $this->assertFalse($result['will_make_marketplace_request']);
+        Http::assertNothingSent();
+        $this->assertDatabaseCount('marketplace_listings', 0);
+    }
+
     private function parametersPayload(bool $requireSide = false): array
     {
         return ['parameters' => [
