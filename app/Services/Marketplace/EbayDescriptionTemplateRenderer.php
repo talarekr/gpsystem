@@ -37,6 +37,8 @@ class EbayDescriptionTemplateRenderer
             'descriptionBlock' => new HtmlString($this->descriptionBlock($part, $data)),
             'specificationRows' => new HtmlString($this->specificationRows($channel, $part, $data)),
             'sameVehicleCta' => new HtmlString($this->sameVehicleCta($data)),
+            'vehicleBlock' => new HtmlString($this->vehicleBlock($channel, $part, $data)),
+            'translationFallbackNotice' => (string) ($data['translation_fallback_notice'] ?? ''),
         ])->render();
     }
 
@@ -46,11 +48,11 @@ class EbayDescriptionTemplateRenderer
         return match ($channel) {
             'ebay_fr' => [
                 'shipping' => 'Livraison rapide dans le monde entier', 'returns' => 'Retour sous 30 jours', 'packaging' => 'Emballage sécurisé', 'original' => 'Pièce d’origine 100 %', 'description' => 'Description', 'specifications' => 'Spécifications', 'europe_delivery_title' => 'Nous livrons dans toute l’Europe', 'europe_delivery_text' => 'Nous expédions vers tous les pays européens – rapidement, de manière fiable et sécurisée.', 'delivery_time' => 'Délai de livraison 2–5 jours', 'trust_title' => 'Achetez en toute confiance', 'trust_subtitle' => 'Pièces d’occasion vérifiées | Contrôlées avec soin | Emballées professionnellement', 'not_specified' => 'Non indiqué',
-                'part_number' => 'Numéro de pièce', 'oem_code' => 'Code fabricant / OEM', 'manufacturer' => 'Fabricant / marque', 'vehicle_model' => 'Modèle du véhicule', 'year' => 'Année', 'engine' => 'Moteur', 'steering_side' => 'Côté conducteur', 'condition' => 'État / qualité',
+                'part_number' => 'Numéro de pièce', 'oem_code' => 'Code fabricant / OEM', 'manufacturer' => 'Fabricant / marque', 'vehicle_model' => 'Modèle du véhicule', 'year' => 'Année', 'engine' => 'Moteur', 'steering_side' => 'Côté conducteur', 'condition' => 'État / qualité', 'vehicle_data' => 'Données du véhicule',
             ],
             default => [
                 'shipping' => 'Schneller weltweiter Versand', 'returns' => '30 Tage Rückgabe', 'packaging' => 'Sichere Verpackung', 'original' => '100% Originalteil', 'description' => 'Beschreibung', 'specifications' => 'Spezifikationen', 'europe_delivery_title' => 'Wir liefern in ganz Europa', 'europe_delivery_text' => 'Wir versenden in alle europäischen Länder – schnell, zuverlässig und sicher.', 'delivery_time' => 'Lieferzeit 2–5 Tage', 'trust_title' => 'Kaufen Sie mit Vertrauen', 'trust_subtitle' => 'Geprüfte gebrauchte Teile | Sorgfältig kontrolliert | Professionell verpackt', 'not_specified' => 'Nicht angegeben',
-                'part_number' => 'Teilenummer', 'oem_code' => 'Hersteller-/OEM-Code', 'manufacturer' => 'Hersteller / Marke', 'vehicle_model' => 'Fahrzeugmodell', 'year' => 'Baujahr', 'engine' => 'Motor', 'steering_side' => 'Lenkradseite', 'condition' => 'Zustand / Qualität',
+                'part_number' => 'Teilenummer', 'oem_code' => 'Hersteller-/OEM-Code', 'manufacturer' => 'Hersteller / Marke', 'vehicle_model' => 'Fahrzeugmodell', 'year' => 'Baujahr', 'engine' => 'Motor', 'steering_side' => 'Lenkradseite', 'condition' => 'Zustand / Qualität', 'vehicle_data' => 'Fahrzeugdaten',
             ],
         };
     }
@@ -75,7 +77,6 @@ class EbayDescriptionTemplateRenderer
         return $plain === '' ? '' : '<p style="margin:0;color:#1f2937;font-size:16px;line-height:1.7;text-align:center;">'.e($plain).'</p>';
     }
 
-    /** @param array<string, mixed> $data */
     private function specificationRows(string $channel, Part $part, array $data): string
     {
         $labels = $this->labelsForChannel($channel);
@@ -98,6 +99,16 @@ class EbayDescriptionTemplateRenderer
         }
 
         return $rows !== '' ? $rows : $this->specificationRow($labels['not_specified'], $labels['not_specified']);
+    }
+
+    private function vehicleBlock(string $channel, Part $part, array $data): string
+    {
+        $labels = $this->labelsForChannel($channel);
+        $snapshot = is_array($part->vehicle_snapshot ?? null) ? $part->vehicle_snapshot : [];
+        $title = trim(implode(' ', array_filter([$snapshot['make'] ?? null, $snapshot['model'] ?? null, $snapshot['model_variant'] ?? null]))).(filled($snapshot['production_year'] ?? null) ? ' ('.$snapshot['production_year'].')' : '');
+        $summary = implode(' · ', array_values(array_filter([$snapshot['production_year'] ?? null, $snapshot['body_type'] ?? null, $data['fuel_type'] ?? $snapshot['fuel_type'] ?? null, filled($snapshot['engine_capacity_cm3'] ?? null) ? $snapshot['engine_capacity_cm3'].' cm³' : null, $data['color'] ?? $snapshot['color'] ?? null, $snapshot['drivetrain'] ?? null, $data['steering_side'] ?? $snapshot['steering_side'] ?? null, $data['gearbox_type'] ?? $snapshot['gearbox_type'] ?? null])));
+        if ($title === '' && $summary === '') return '';
+        return '<div style="border:1px solid #dbe3ef;border-radius:8px;overflow:hidden;background:#ffffff;margin:0 0 22px;"><div style="background:#06275d;color:#ffffff;padding:15px 17px;font-size:18px;font-weight:900;letter-spacing:.2px;text-align:center;">'.e($labels['vehicle_data']).'</div><div style="padding:20px 22px;text-align:center;"><div style="color:#06275d;font-size:20px;font-weight:900;margin-bottom:8px;">'.e($title).'</div><div style="color:#111827;font-size:16px;line-height:1.7;">'.e($summary).'</div></div></div>';
     }
 
     private function specificationRow(string $label, string $value): string

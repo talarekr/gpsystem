@@ -89,7 +89,7 @@ class Part extends Model
         $this->vehicle_snapshot = $car ? [
             'make'=>$car->make,'model'=>$car->model,'model_variant'=>$car->model_variant,'production_year'=>$car->production_year,
             'fuel_type'=>$car->fuel_type,'gearbox_type'=>$car->gearbox_type,'engine_capacity_cm3'=>$car->engine_capacity_cm3,
-            'engine_code'=>$car->engine_code,'color'=>$car->color,'steering_side'=>$car->steering_side,
+            'engine_code'=>$car->engine_code,'color'=>$car->color,'color_code'=>$car->color_code,'drivetrain'=>$car->drivetrain,'body_type'=>$car->body_type,'steering_side'=>$car->steering_side,
         ] : null;
     }
 

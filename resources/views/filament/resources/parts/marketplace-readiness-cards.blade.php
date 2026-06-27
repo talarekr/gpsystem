@@ -18,6 +18,13 @@
                 $category = $presentation['category'] ?? ['value' => 'Brak mapowania', 'mapped' => false];
                 $missing = $presentation['missing'] ?? [];
                 $prepareUrl = $part ? route('tools.check-part-marketplace-preparation-payload', ['token' => 'gps_images_import_2026', 'part_id' => $part->id, 'channel' => $channels[$key]]) : null;
+                if ($key === 'ebay' && $part) {
+                    $prepareUrl = route('tools.prepare-ebay-listing-translations', ['token' => 'gps_images_import_2026', 'part_id' => $part->id, 'channel' => 'ebay_de']);
+                }
+                $ebayPrepareUrls = $part ? [
+                    'ebay_de' => route('tools.prepare-ebay-listing-translations', ['token' => 'gps_images_import_2026', 'part_id' => $part->id, 'channel' => 'ebay_de']),
+                    'ebay_fr' => route('tools.prepare-ebay-listing-translations', ['token' => 'gps_images_import_2026', 'part_id' => $part->id, 'channel' => 'ebay_fr']),
+                ] : [];
                 $ebayPreviewUrls = $part ? [
                     'ebay_de' => route('tools.ebay-listing-preview', ['token' => 'gps_images_import_2026', 'part_id' => $part->id, 'channel' => 'ebay_de']),
                     'ebay_fr' => route('tools.ebay-listing-preview', ['token' => 'gps_images_import_2026', 'part_id' => $part->id, 'channel' => 'ebay_fr']),
@@ -54,9 +61,16 @@
                         </div>
                     @endif
 
-                    <a href="{{ $prepareUrl }}" target="_blank" rel="noopener noreferrer" class="inline-flex w-full items-center justify-center rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-primary-500">
-                        Przygotuj
-                    </a>
+                    @if ($key === 'ebay')
+                        <div class="grid gap-2 sm:grid-cols-2">
+                            <a href="{{ $ebayPrepareUrls['ebay_de'] ?? '#' }}" target="_blank" rel="noopener noreferrer" class="inline-flex w-full items-center justify-center rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-primary-500">Przygotuj eBay DE</a>
+                            <a href="{{ $ebayPrepareUrls['ebay_fr'] ?? '#' }}" target="_blank" rel="noopener noreferrer" class="inline-flex w-full items-center justify-center rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-primary-500">Przygotuj eBay FR</a>
+                        </div>
+                    @else
+                        <a href="{{ $prepareUrl }}" target="_blank" rel="noopener noreferrer" class="inline-flex w-full items-center justify-center rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-primary-500">
+                            Przygotuj
+                        </a>
+                    @endif
 
                     @if ($key === 'ebay')
                         <div class="grid gap-2 sm:grid-cols-2">
