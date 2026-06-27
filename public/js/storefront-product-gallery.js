@@ -66,7 +66,19 @@
             thumbsTrack.scrollBy({ top: offset * step, left: 0, behavior: 'smooth' });
         }
 
+        function updateHeaderOffset() {
+            var headerParts = Array.prototype.slice.call(document.querySelectorAll('.sf-top, .sf-main-row, .sf-nav'));
+            var offset = headerParts.reduce(function (bottom, element) {
+                var rect = element.getBoundingClientRect();
+
+                return Math.max(bottom, rect.bottom);
+            }, 0);
+
+            document.documentElement.style.setProperty('--storefront-header-offset', Math.max(0, Math.ceil(offset)) + 'px');
+        }
+
         function openLightbox() {
+            updateHeaderOffset();
             setActive(currentIndex);
             lightbox.hidden = false;
             lightbox.setAttribute('aria-hidden', 'false');
@@ -134,6 +146,12 @@
                 showOffset(-1);
             } else if (event.key === 'ArrowRight') {
                 showOffset(1);
+            }
+        });
+
+        window.addEventListener('resize', function () {
+            if (!lightbox.hidden) {
+                updateHeaderOffset();
             }
         });
     }
