@@ -9,6 +9,8 @@
     }
 
     $editUrl = $part ? \App\Filament\Resources\PartResource::getUrl('edit', ['record' => $part]) : null;
+    $storageLocation = ($part instanceof \App\Models\Part && $part->relationLoaded('storageLocation')) ? $part->storageLocation : null;
+    $storageName = $part instanceof \App\Models\Part ? ($storageLocation?->name ?: 'Brak lokalizacji') : '—';
 @endphp
 
 <div class="gps-admin-part-cell gps-admin-part-title">
@@ -16,5 +18,6 @@
         <span>—</span>
     @else
         <a href="{{ $editUrl }}">{{ $part->name ?: 'Część #'.$part->id }}</a>
+        <small>Magazyn: {{ $storageName }}</small>
     @endif
 </div>
