@@ -62,8 +62,8 @@ class MarketplaceOverview extends Page
                         'password' => Hash::make((string) $data['password']),
                     ]);
 
-                    $viewerRole = Role::findOrCreate(UserRole::Viewer->value, 'web');
-                    $user->assignRole($viewerRole);
+                    Role::findOrCreate(UserRole::Viewer->value, 'web');
+                    $user->assignRole(UserRole::Viewer->value);
 
                     Notification::make()
                         ->title('Dodano użytkownika marketplace.')
