@@ -6,6 +6,7 @@ use App\Filament\Resources\PartResource;
 use App\Models\PartCategory;
 use App\Models\PartImage;
 use App\Services\Marketplace\PreparePartMarketplaceListingService;
+use App\Services\Marketplace\PublishPartToMarketplacesService;
 use Filament\Actions;
 use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\Log;
@@ -175,27 +176,27 @@ class EditPart extends EditRecord
                 ->color('success')
                 ->requiresConfirmation()
                 ->visible(fn (): bool => (bool) $this->record->needs_listing)
-                ->action(function (PreparePartMarketplaceListingService $prepareService): void {
+                ->action(function (PublishPartToMarketplacesService $publishService): void {
                     $this->save(false, false);
                     $this->record->refresh();
 
-                    $blockers = $prepareService->localPublishBlockers($this->record);
+                    $enabled = (bool) config('marketplace.publish_enabled', false);
+                    $result = $enabled
+                        ? $publishService->confirm($this->record, 'all', dryRun: false, confirm: true)
+                        : $publishService->preview($this->record, 'all', includePayload: true);
 
-                    if ($blockers !== []) {
+                    if (! $enabled || ($result['blocked'] ?? false) || ! ($result['readiness_ok'] ?? false)) {
+                        $messages = collect($result['channels'] ?? [])->flatMap(fn (array $channel): array => $channel['errors'] ?? $channel['readiness']['blockers'] ?? [])->filter()->values()->all();
                         Notification::make()
-                            ->title('Uzupełnij wymagane dane przed wystawieniem części.')
-                            ->body(implode(' | ', $blockers))
+                            ->title($enabled ? 'Nie udało się wystawić części.' : 'Realne wystawianie marketplace jest wyłączone — wykonano tylko preview.')
+                            ->body($messages === [] ? 'MARKETPLACE_PUBLISH_ENABLED=false albo readiness wymaga uzupełnienia.' : implode(' | ', $messages))
                             ->danger()
                             ->send();
-
                         return;
                     }
 
-                    $prepareService->preview($this->record, dryRun: true);
-                    $prepareService->markLocallyListed($this->record);
-
                     Notification::make()
-                        ->title('Część zapisana i zdjęta z kolejki do wystawienia. Marketplace: przygotowano lokalną walidację, bez wysyłki ofert.')
+                        ->title('Część zapisana i wystawiona w wymaganych kanałach.')
                         ->success()
                         ->send();
                 }),
