@@ -54,6 +54,7 @@ use App\Http\Controllers\Tools\OvokoPriceImportController;
 use App\Http\Controllers\Tools\OvokoProductSyncController;
 use App\Http\Controllers\Tools\OvokoStockReconciliationController;
 use App\Http\Controllers\Tools\PartMarketplaceReadinessController;
+use App\Http\Controllers\Tools\MarketplacePublishPartController;
 use App\Http\Controllers\Tools\ImportOvokoOrdersDryRunController;
 use App\Http\Controllers\Tools\CheckPartNumberPerformanceController;
 use App\Http\Controllers\Tools\CheckPartsToListController;
@@ -371,6 +372,8 @@ Route::get('/tools/dry-run-marketplace-listing-coverage', [MarketplaceListingDry
 Route::get('/tools/dry-run-marketplace-listing-coverage-all', [MarketplaceListingDryRunController::class, 'coverageAll'])->name('tools.dry-run-marketplace-listing-coverage-all');
 Route::get('/tools/export-marketplace-listing-coverage', [MarketplaceListingDryRunController::class, 'export'])->name('tools.export-marketplace-listing-coverage');
 Route::get('/tools/check-part-marketplace-preparation-payload', [PartMarketplaceReadinessController::class, 'payload'])->name('tools.check-part-marketplace-preparation-payload');
+Route::get('/tools/marketplace-publish-part-preview', [MarketplacePublishPartController::class, 'preview'])->name('tools.marketplace-publish-part-preview');
+Route::get('/tools/marketplace-publish-part-confirm', [MarketplacePublishPartController::class, 'confirm'])->name('tools.marketplace-publish-part-confirm');
 Route::get('/tools/check-admin-parts-table-ui', CheckAdminPartsTableUiController::class)->name('tools.check-admin-parts-table-ui');
 Route::get('/tools/check-storefront-visibility', CheckStorefrontVisibilityController::class)->name('tools.check-storefront-visibility');
 Route::get('/tools/mark-gps-gmail-to-list-dry-run', MarkGpsGmailToListDryRunController::class)->name('tools.mark-gps-gmail-to-list-dry-run');
