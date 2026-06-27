@@ -67,14 +67,57 @@
         }
 
         function updateHeaderOffset() {
-            var headerParts = Array.prototype.slice.call(document.querySelectorAll('.sf-top, .sf-main-row, .sf-nav'));
+            var safeGap = 10;
+            var headerSelectors = [
+                '.sf-top',
+                '.sf-top__inner',
+                '.sf-top__links',
+                '.sf-language',
+                '.sf-language-select',
+                '.sf-main-row',
+                '.sf-logo',
+                '.sf-search',
+                '.sf-search input',
+                '.sf-search button',
+                '.sf-profile',
+                '.sf-profile > summary',
+                '.sf-cart',
+                '.sf-nav',
+                '.sf-nav__inner',
+                '.sf-nav__links',
+                '.sf-menu',
+                '.sf-category-menu',
+                '.sf-phones'
+            ];
+            var headerParts = [];
+
+            headerSelectors.forEach(function (selector) {
+                Array.prototype.forEach.call(document.querySelectorAll(selector), function (element) {
+                    if (headerParts.indexOf(element) === -1) {
+                        headerParts.push(element);
+                    }
+                });
+            });
+
             var offset = headerParts.reduce(function (bottom, element) {
+                var styles = window.getComputedStyle(element);
+
+                if (styles.display === 'none' || styles.visibility === 'hidden') {
+                    return bottom;
+                }
+
                 var rect = element.getBoundingClientRect();
+
+                if (rect.width <= 0 || rect.height <= 0) {
+                    return bottom;
+                }
 
                 return Math.max(bottom, rect.bottom);
             }, 0);
+            var offsetValue = Math.max(0, Math.ceil(offset + safeGap)) + 'px';
 
-            document.documentElement.style.setProperty('--storefront-header-offset', Math.max(0, Math.ceil(offset)) + 'px');
+            document.documentElement.style.setProperty('--storefront-header-offset', offsetValue);
+            lightbox.style.setProperty('--storefront-header-offset', offsetValue);
         }
 
         function openLightbox() {
