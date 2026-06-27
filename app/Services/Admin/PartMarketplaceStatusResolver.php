@@ -40,9 +40,9 @@ class PartMarketplaceStatusResolver
 
         return [
             $this->row('storefront', 'Sklep', $part->price, 'zł', $storefrontVisible, null, null, $storefrontVisible ? 'Widoczny w sklepie' : 'Niewidoczny w sklepie'),
+            $this->row('allegro', 'Allegro', $part->allegro_price, 'zł', $allegroListed, $this->externalOfferId($allegro), $this->allegroUrl($allegro), $this->allegroTitle($allegro, $allegroListed)),
             $this->row('ovoko', 'Ovoko', $part->ovoko_price, 'zł', $ovoko !== null, $this->externalOfferId($ovoko), $this->listingUrl($ovoko), $ovoko ? 'Oferta Ovoko wystawiona lokalnie' : 'Brak lokalnej oferty Ovoko'),
             $this->row('ebay', 'eBay', $part->ebay_price, 'zł', $ebay !== null, $this->externalOfferId($ebay), $this->listingUrl($ebayUrlListing), $ebay ? 'Oferta eBay wystawiona lokalnie' : 'Brak lokalnej oferty eBay', $ebayMarkets ?: null),
-            $this->row('allegro', 'Allegro', $part->allegro_price, 'zł', $allegroListed, $this->externalOfferId($allegro), $this->allegroUrl($allegro), $this->allegroTitle($allegro, $allegroListed)),
         ];
     }
 

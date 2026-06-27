@@ -72,12 +72,14 @@ class PartModuleFoundationTest extends TestCase
         $rows = app(\App\Services\Admin\PartMarketplaceStatusResolver::class)
             ->rowsForPart($part->fresh('marketplaceListings'));
 
+        $this->assertSame(['Sklep', 'Allegro', 'Ovoko', 'eBay'], collect($rows)->pluck('label')->all());
+
         $pricesByKey = collect($rows)->pluck('price', 'key');
 
         $this->assertSame('1 250,00 zł', $pricesByKey['storefront']);
+        $this->assertSame('1 250,00 zł', $pricesByKey['allegro']);
         $this->assertSame('1 300,00 zł', $pricesByKey['ovoko']);
         $this->assertSame('1 562,50 zł', $pricesByKey['ebay']);
-        $this->assertSame('1 250,00 zł', $pricesByKey['allegro']);
     }
 
     public function test_part_can_be_created_with_required_fields_and_safe_defaults(): void
