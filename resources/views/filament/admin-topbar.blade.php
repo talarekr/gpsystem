@@ -7,7 +7,6 @@
 
     $partsIndexUrl = PartResource::getUrl('index');
     $ordersUrl = class_exists(OrderResource::class) ? OrderResource::getUrl('index') : '#';
-    $messagesUrl = '#';
     $ordersCount = 0;
 
     if (Schema::hasTable('orders')) {
@@ -17,7 +16,7 @@
             $ordersCount = 0;
         }
     }
-    $messagesCount = 0;
+    $adminLogoUrl = route('admin.brand.logo');
 @endphp
 
 <div class="gps-admin-topbar" data-gps-admin-topbar>
@@ -26,9 +25,11 @@
             <span></span><span></span><span></span>
         </button>
 
-        <a class="gps-admin-topbar__brand" href="{{ url('/admin') }}" aria-label="GPS Product Hub">
-            <span class="gps-admin-topbar__brand-mark">GPS</span>
-            <span class="gps-admin-topbar__brand-name">GPS Product Hub</span>
+        <a class="gps-admin-topbar__brand" href="{{ url('/admin') }}" aria-label="GP Swiss">
+            <span class="gps-admin-topbar__brand-mark">
+                <img src="{{ $adminLogoUrl }}" alt="" loading="eager">
+            </span>
+            <span class="gps-admin-topbar__brand-name">GP Swiss</span>
         </a>
     </div>
 
@@ -46,12 +47,5 @@
         <a class="gps-admin-topbar__action" href="{{ $ordersUrl }}" title="Zamówienia">
             <span aria-hidden="true">📋</span><span>Zamówienia</span><strong>{{ $ordersCount }}</strong>
         </a>
-        <a class="gps-admin-topbar__action" href="{{ $messagesUrl }}" title="Wiadomości">
-            <span aria-hidden="true">✉️</span><span>Wiadomości</span><strong>{{ $messagesCount }}</strong>
-        </a>
-        <span class="gps-admin-topbar__user" title="{{ auth()->user()?->email }}">
-            <span>{{ mb_substr(auth()->user()?->name ?: auth()->user()?->email ?: 'U', 0, 1) }}</span>
-            <strong>{{ auth()->user()?->name ?: 'Konto' }}</strong>
-        </span>
     </div>
 </div>
