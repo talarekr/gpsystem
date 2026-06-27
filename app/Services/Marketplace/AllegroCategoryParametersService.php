@@ -13,8 +13,8 @@ class AllegroCategoryParametersService
     {
         if ($categoryId === '') return ['ok' => false, 'source' => 'none', 'blocker' => 'allegro_category_mapping_missing', 'parameters' => []];
         if (Schema::hasTable('allegro_category_parameters_cache') && ! $refresh) {
-            $row = DB::table('allegro_category_parameters_cache')->where('category_id', $categoryId)->first();
-            if ($row) return ['ok' => true, 'source' => 'cache', 'parameters' => $this->parameters((array) json_decode($row->raw_response, true))];
+            $row = DB::table('allegro_category_parameters_cache')->where($this->cacheKeyColumn(), $categoryId)->first();
+            if ($row) return ['ok' => true, 'source' => 'cache', 'endpoint' => 'GET /sale/categories/{categoryId}/parameters', 'parameters' => $this->parameters((array) json_decode($row->raw_response, true))];
         }
         $account = Schema::hasTable('marketplace_accounts') ? MarketplaceAccount::query()->where('code', 'allegro_main')->first() : null;
         $token = (string) data_get($account, 'api_credentials.access_token');
@@ -27,10 +27,11 @@ class AllegroCategoryParametersService
         }
         $payload = $response->json();
         if (Schema::hasTable('allegro_category_parameters_cache')) {
-            DB::table('allegro_category_parameters_cache')->updateOrInsert(['category_id' => $categoryId], ['raw_response' => json_encode($payload), 'fetched_at' => now(), 'created_at' => now(), 'updated_at' => now()]);
+            DB::table('allegro_category_parameters_cache')->updateOrInsert([$this->cacheKeyColumn() => $categoryId], ['raw_response' => json_encode($payload), 'fetched_at' => now(), 'created_at' => now(), 'updated_at' => now()]);
         }
         return ['ok' => true, 'source' => 'api', 'endpoint' => 'GET /sale/categories/{categoryId}/parameters', 'parameters' => $this->parameters($payload)];
     }
 
     private function parameters(array $payload): array { return array_values(array_filter($payload['parameters'] ?? [], 'is_array')); }
+    private function cacheKeyColumn(): string { return Schema::hasColumn('allegro_category_parameters_cache', 'allegro_category_id') ? 'allegro_category_id' : 'category_id'; }
 }
