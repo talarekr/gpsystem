@@ -395,6 +395,8 @@ Route::get('/tools/allegro-listing-preview', [MarketplaceListingDryRunController
 Route::get('/tools/ebay-listing-preview', [PartMarketplaceReadinessController::class, 'ebayPreview'])->name('tools.ebay-listing-preview');
 Route::get('/tools/ebay-listing-preview-html', [PartMarketplaceReadinessController::class, 'ebayPreviewHtml'])->name('tools.ebay-listing-preview-html');
 Route::get('/tools/prepare-ebay-listing-translations', [PartMarketplaceReadinessController::class, 'prepareEbay'])->name('tools.prepare-ebay-listing-translations');
+Route::get('/tools/prepare-ebay-listing-translations-all', [PartMarketplaceReadinessController::class, 'prepareEbayAll'])->name('tools.prepare-ebay-listing-translations-all');
+Route::post('/tools/part-marketplace-category-mapping', [PartMarketplaceReadinessController::class, 'storeCategoryMapping'])->name('tools.part-marketplace-category-mapping.store');
 Route::get('/tools/marketplace-publish-part-preview', [MarketplacePublishPartController::class, 'preview'])->name('tools.marketplace-publish-part-preview');
 Route::get('/tools/marketplace-publish-part-confirm', [MarketplacePublishPartController::class, 'confirm'])->name('tools.marketplace-publish-part-confirm');
 Route::get('/tools/check-admin-parts-table-ui', CheckAdminPartsTableUiController::class)->name('tools.check-admin-parts-table-ui');

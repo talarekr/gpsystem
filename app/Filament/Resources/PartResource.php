@@ -207,10 +207,9 @@ class PartResource extends Resource
                             ->columnSpanFull(),
                     ]),
 
-                Section::make('Przygotowanie do wystawienia na marketplace')
+                Section::make('Praktyczne przygotowanie produktu')
                     ->collapsible()
                     ->collapsed()
-                    ->description('Praktyczny panel przygotowania produktu. Działa wyłącznie jako lokalny preview/readiness — bez wystawiania ofert i bez zapisu do marketplace.')
                     ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--marketplace-preparation'])
                     ->schema([
                         Forms\Components\ViewField::make('marketplace_readiness_cards')
@@ -225,10 +224,6 @@ class PartResource extends Resource
                             ->hiddenLabel()
                             ->content('Zapisz część, aby zobaczyć podgląd gotowości Allegro / Ovoko / eBay.')
                             ->visible(fn (?Part $record): bool => $record === null || ! $record->exists)
-                            ->columnSpanFull(),
-                        Forms\Components\Placeholder::make('marketplace_preparation_note')
-                            ->hiddenLabel()
-                            ->content('Każdy przycisk Przygotuj uruchamia tylko bezpieczny preview/readiness dla wybranego marketplace. Nie wykonuje marketplace API write.')
                             ->columnSpanFull(),
                     ]),
 
