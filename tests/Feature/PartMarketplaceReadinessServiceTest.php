@@ -7,6 +7,7 @@ use App\Models\Part;
 use App\Models\PartCategory;
 use App\Services\Marketplace\PartMarketplaceReadinessService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
@@ -151,9 +152,11 @@ class PartMarketplaceReadinessServiceTest extends TestCase
 
         DB::table('part_images')->insert(['part_id' => $part->id, 'path' => 'parts/photos/alternator.jpg', 'sort_order' => 1, 'is_primary' => true, 'created_at' => now(), 'updated_at' => now()]);
 
+        Cache::put('nbp_table_a_eur_rate', ['rate' => 4.30, 'effective_date' => '2026-06-26', 'table_no' => '123/A/NBP/2026', 'fetched_at' => now()->toISOString()], now()->addHours(12));
+
         foreach (['ebay_de', 'ebay_fr'] as $channel) {
             MarketplaceCategoryMapping::query()->create(['local_category_id' => $category->id, 'channel' => $channel, 'external_category_id' => '123']);
-            \App\Models\MarketplaceAccount::query()->create(['marketplace' => $channel, 'name' => $channel, 'code' => $channel, 'status' => 'active', 'api_enabled' => true, 'api_settings' => []]);
+            \App\Models\MarketplaceAccount::query()->create(['marketplace' => $channel, 'name' => $channel, 'code' => $channel, 'status' => 'active', 'api_enabled' => true, 'api_settings' => ['merchant_location_key' => 'gpswiss']]);
         }
 
         $renderer = app(\App\Services\Marketplace\EbayDescriptionTemplateRenderer::class);
@@ -180,14 +183,92 @@ class PartMarketplaceReadinessServiceTest extends TestCase
             $preview = $readiness['prepared_payload_preview_safe'];
 
             $this->assertNotContains('description_template', $readiness['missing_fields']);
-            $this->assertContains('business_policies', $readiness['missing_fields']);
-            $this->assertContains('eBay business policies are missing: payment, fulfillment/shipping, or return.', $readiness['blockers']);
+            $this->assertContains('category_shipping_group', $readiness['missing_fields']);
+            $this->assertNotContains('payment_policy', $readiness['missing_fields']);
+            $this->assertNotContains('return_policy', $readiness['missing_fields']);
             $this->assertFalse($preview['will_make_marketplace_request']);
             $this->assertTrue($preview['description_template_present']);
             $this->assertSame($channel, $preview['description_template_channel']);
             $this->assertTrue($preview['description_rendered_present']);
             $this->assertArrayHasKey('icon_shipping', $preview['description_template_asset_urls']);
         }
+    }
+
+
+    public function test_ebay_shipping_groups_business_policies_and_eur_price_preview(): void
+    {
+        Cache::put('nbp_table_a_eur_rate', ['rate' => 4.30, 'effective_date' => '2026-06-26', 'table_no' => '123/A/NBP/2026', 'fetched_at' => now()->toISOString()], now()->addHours(12));
+        \App\Models\MarketplaceAccount::query()->create(['marketplace' => 'ebay_de', 'name' => 'eBay DE', 'code' => 'ebay_de', 'status' => 'active', 'api_enabled' => true, 'api_settings' => ['merchant_location_key' => 'gpswiss']]);
+
+        foreach ([
+            'de_30_eur' => '259264150013',
+            'de_50_eur' => '259677066013',
+            'de_130_eur' => '259636579013',
+        ] as $group => $policyId) {
+            $category = PartCategory::query()->create(['name' => 'Kategoria '.$group]);
+            $part = Part::query()->create(['name' => 'Część '.$group, 'description' => 'Opis', 'category_id' => $category->id, 'ebay_price' => 2.5, 'quantity' => 1]);
+            DB::table('part_images')->insert(['part_id' => $part->id, 'path' => 'parts/photos/'.$group.'.jpg', 'sort_order' => 1, 'is_primary' => true, 'created_at' => now(), 'updated_at' => now()]);
+            MarketplaceCategoryMapping::query()->create(['local_category_id' => $category->id, 'channel' => 'ebay_de', 'external_category_id' => '123', 'shipping_group' => $group]);
+
+            $readiness = app(\App\Services\Marketplace\MarketplaceListingReadinessService::class)->checkPartReadiness($part->fresh(), 'ebay_de');
+            $preview = $readiness['prepared_payload_preview_safe'];
+
+            $this->assertSame($policyId, $preview['shipping_policy_resolution']['selected_fulfillment_policy_id']);
+            $this->assertSame($policyId, $preview['business_policies']['selected_fulfillment_policy_id']);
+            $this->assertSame('259264220013', $preview['business_policies']['selected_payment_policy_id']);
+            $this->assertSame('259264151013', $preview['business_policies']['selected_return_policy_id']);
+            $this->assertSame(2.5, $preview['price_source_pln']);
+            $this->assertSame(0.58, $preview['price_eur']);
+            $this->assertSame('EUR', $preview['currency']);
+            $this->assertFalse($preview['will_make_marketplace_request']);
+            $this->assertNotContains('payment_policy', $readiness['missing_fields']);
+            $this->assertNotContains('return_policy', $readiness['missing_fields']);
+            $this->assertNotContains('business_policies', $readiness['missing_fields']);
+        }
+    }
+
+    public function test_ebay_shipping_group_and_exchange_rate_blockers_are_specific(): void
+    {
+        Cache::forget('nbp_table_a_eur_rate');
+        \Illuminate\Support\Facades\Http::fake(['api.nbp.pl/*' => \Illuminate\Support\Facades\Http::response([], 503)]);
+        \App\Models\MarketplaceAccount::query()->create(['marketplace' => 'ebay_de', 'name' => 'eBay DE', 'code' => 'ebay_de', 'status' => 'active', 'api_enabled' => true, 'api_settings' => ['merchant_location_key' => 'gpswiss']]);
+        $category = PartCategory::query()->create(['name' => 'Bez grupy']);
+        $part = Part::query()->create(['name' => 'Część', 'description' => 'Opis', 'category_id' => $category->id, 'price' => 0, 'quantity' => 1]);
+        DB::table('part_images')->insert(['part_id' => $part->id, 'path' => 'parts/photos/no-rate.jpg', 'sort_order' => 1, 'is_primary' => true, 'created_at' => now(), 'updated_at' => now()]);
+        MarketplaceCategoryMapping::query()->create(['local_category_id' => $category->id, 'channel' => 'ebay_de', 'external_category_id' => '123']);
+
+        $readiness = app(\App\Services\Marketplace\MarketplaceListingReadinessService::class)->checkPartReadiness($part->fresh(), 'ebay_de');
+
+        $this->assertContains('category_shipping_group', $readiness['missing_fields']);
+        $this->assertContains('exchange_rate', $readiness['missing_fields']);
+        $this->assertContains('price_source_pln', $readiness['missing_fields']);
+        $this->assertFalse($readiness['prepared_payload_preview_safe']['will_make_marketplace_request']);
+
+        Cache::put('nbp_table_a_eur_rate', ['rate' => 4.30, 'effective_date' => '2026-06-26', 'table_no' => '123/A/NBP/2026', 'fetched_at' => now()->toISOString()], now()->addHours(12));
+        $category2 = PartCategory::query()->create(['name' => 'Zła grupa']);
+        $part2 = Part::query()->create(['name' => 'Część 2', 'description' => 'Opis', 'category_id' => $category2->id, 'ebay_price' => 2.5, 'quantity' => 1]);
+        DB::table('part_images')->insert(['part_id' => $part2->id, 'path' => 'parts/photos/bad-group.jpg', 'sort_order' => 1, 'is_primary' => true, 'created_at' => now(), 'updated_at' => now()]);
+        MarketplaceCategoryMapping::query()->create(['local_category_id' => $category2->id, 'channel' => 'ebay_de', 'external_category_id' => '123', 'shipping_group' => 'unknown_group']);
+
+        $readiness2 = app(\App\Services\Marketplace\MarketplaceListingReadinessService::class)->checkPartReadiness($part2->fresh(), 'ebay_de');
+        $this->assertContains('shipping_policy_mapping', $readiness2['missing_fields']);
+    }
+
+    public function test_ebay_fr_preview_uses_eur_conversion(): void
+    {
+        Cache::put('nbp_table_a_eur_rate', ['rate' => 4.30, 'effective_date' => '2026-06-26', 'table_no' => '123/A/NBP/2026', 'fetched_at' => now()->toISOString()], now()->addHours(12));
+        \App\Models\MarketplaceAccount::query()->create(['marketplace' => 'ebay_fr', 'name' => 'eBay FR', 'code' => 'ebay_fr', 'status' => 'active', 'api_enabled' => true, 'api_settings' => ['merchant_location_key' => 'gpswiss']]);
+        $category = PartCategory::query()->create(['name' => 'FR']);
+        $part = Part::query()->create(['name' => 'Część FR', 'description' => 'Opis', 'category_id' => $category->id, 'ebay_price' => 2.5, 'quantity' => 1]);
+        DB::table('part_images')->insert(['part_id' => $part->id, 'path' => 'parts/photos/fr.jpg', 'sort_order' => 1, 'is_primary' => true, 'created_at' => now(), 'updated_at' => now()]);
+        MarketplaceCategoryMapping::query()->create(['local_category_id' => $category->id, 'channel' => 'ebay_fr', 'external_category_id' => '123', 'shipping_group' => 'fr_55_eur']);
+
+        $preview = app(\App\Services\Marketplace\MarketplaceListingReadinessService::class)->checkPartReadiness($part->fresh(), 'ebay_fr')['prepared_payload_preview_safe'];
+
+        $this->assertSame('EUR', $preview['currency']);
+        $this->assertSame(0.58, $preview['price_eur']);
+        $this->assertTrue($preview['description_template_present']);
+        $this->assertFalse($preview['will_make_marketplace_request']);
     }
 
 }

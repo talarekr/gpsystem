@@ -6,7 +6,6 @@ use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceCategoryMapping;
 use App\Models\MarketplaceListing;
 use App\Models\Part;
-use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
@@ -14,7 +13,11 @@ class MarketplaceListingReadinessService
 {
     public const CHANNELS = ['storefront', 'allegro_main', 'ovoko', 'ebay_de', 'ebay_fr'];
 
-    public function __construct(private readonly TranslationService $translationService, private readonly EbayDescriptionTemplateRenderer $ebayDescriptionTemplateRenderer) {}
+    public function __construct(
+        private readonly TranslationService $translationService,
+        private readonly EbayDescriptionTemplateRenderer $ebayDescriptionTemplateRenderer,
+        private readonly NbpExchangeRateService $exchangeRateService,
+    ) {}
 
     /** @return array<string, mixed> */
     public function checkPartReadiness(Part $part, string $channel): array
@@ -39,9 +42,13 @@ class MarketplaceListingReadinessService
         $imagesCount = $images->count();
         $hasActiveListing = $marketplace ? $this->hasActiveListing($part, $marketplace, $channel) : false;
         $categoryMapping = str_starts_with($channel, 'ebay_') ? $this->ebayCategoryMapping($part, $channel) : null;
+        $shippingPolicyResolution = str_starts_with($channel, 'ebay_') ? $this->resolveEbayShippingPolicy($part, $channel, $categoryMapping) : null;
+        $businessPolicies = str_starts_with($channel, 'ebay_') ? $this->resolveEbayBusinessPolicies($account, $channel, $shippingPolicyResolution) : null;
+        $exchangeRate = str_starts_with($channel, 'ebay_') ? $this->exchangeRateService->eurPln() : null;
+        $priceEur = str_starts_with($channel, 'ebay_') ? $this->convertPlnToEur($price, $exchangeRate) : null;
 
         $this->requireFilled($part->name ?? null, 'title', $missing, $blockers);
-        $this->requirePositive($price, 'price', $missing, $blockers);
+        $this->requirePositive($price, str_starts_with($channel, 'ebay_') ? 'price_source_pln' : 'price', $missing, $blockers);
         $this->requirePositive($part->quantity ?? null, 'quantity', $missing, $blockers);
         if ($imagesCount < 1) {
             $missing[] = 'images';
@@ -83,7 +90,10 @@ class MarketplaceListingReadinessService
             else { $notes['ebay_category_mapping'] = ['source' => 'marketplace_category_mappings', 'channel' => $categoryMapping->channel, 'external_category_id' => $categoryMapping->external_category_id]; }
             if (! $this->isGoogleTranslateConfigured()) { $missing[] = 'translation_credentials'; $warnings[] = 'Google Translate credentials are not configured for later title/description/condition translation dry-runs.'; }
             if (! $this->ebayTemplateExists($channel)) { $missing[] = 'description_template'; $blockers[] = 'eBay description template for '.$channel.' is missing.'; }
-            if (! $this->ebayBusinessPoliciesReady($account)) { $missing[] = 'business_policies'; $blockers[] = 'eBay business policies are missing: payment, fulfillment/shipping, or return.'; }
+            foreach ($shippingPolicyResolution['missing'] ?? [] as $key => $message) { $missing[] = $key; $blockers[] = $message; }
+            foreach ($businessPolicies['missing'] ?? [] as $key => $message) { $missing[] = $key; $blockers[] = $message; }
+            if (! is_array($exchangeRate) || ! is_numeric($exchangeRate['rate'] ?? null) || (float) $exchangeRate['rate'] <= 0) { $missing[] = 'exchange_rate'; $blockers[] = 'Brak kursu EUR z NBP'; }
+            if ($price !== null && $priceEur !== null && $priceEur <= 0) { $missing[] = 'price_eur'; $blockers[] = 'eBay EUR price must be greater than zero.'; }
             $notes['translation'] = ['source_language' => 'PL', 'target_language' => $this->targetLanguageForChannel($channel), 'fields' => ['title', 'description', 'condition_notes']];
         }
 
@@ -99,11 +109,11 @@ class MarketplaceListingReadinessService
             'missing_fields' => $missing,
             'warnings' => $warnings,
             'blockers' => $blockers,
-            'prepared_payload_preview_safe' => $this->safePayloadPreview($part, $channel, $price, $categoryMapping),
+            'prepared_payload_preview_safe' => $this->safePayloadPreview($part, $channel, $price, $categoryMapping, $shippingPolicyResolution, $businessPolicies, $exchangeRate, $priceEur),
             'price_source' => $this->priceSource($channel),
             'local_price' => is_numeric($part->price ?? null) ? (float) $part->price : null,
             'marketplace_price' => $price,
-            'currency' => 'PLN',
+            'currency' => str_starts_with($channel, 'ebay_') ? 'EUR' : 'PLN',
             'images_count' => $imagesCount,
             'has_required_images' => $imagesCount > 0,
             'category_ready' => $categoryReady,
@@ -183,7 +193,52 @@ class MarketplaceListingReadinessService
     private function isGoogleTranslateConfigured(): bool { try { return $this->translationService->isGoogleTranslateConfigured(); } catch (\Throwable) { return false; } }
     private function targetLanguageForChannel(string $channel): ?string { try { return $this->translationService->targetLanguageForChannel($channel); } catch (\Throwable) { return null; } }
     private function ebayTemplateExists(string $channel): bool { try { return $this->ebayDescriptionTemplateRenderer->isAvailable($channel) || filled(config('marketplace.ebay.templates.'.$channel)) || view()->exists('marketplace.ebay.templates.'.$channel); } catch (\Throwable) { return false; } }
-    private function ebayBusinessPoliciesReady(?MarketplaceAccount $account): bool { $settings = is_array($account?->api_settings) ? $account->api_settings : []; return filled(Arr::get($settings, 'business_policies.payment')) && filled(Arr::get($settings, 'business_policies.fulfillment')) && filled(Arr::get($settings, 'business_policies.return')); }
+
+    private function resolveEbayShippingPolicy(Part $part, string $channel, ?MarketplaceCategoryMapping $mapping): array
+    {
+        $group = $mapping?->shipping_group;
+        $policies = (array) config("product-hub.ebay_business_policies.$channel.fulfillment_by_shipping_group", []);
+        $policy = filled($group) ? ($policies[$group] ?? null) : null;
+        $missing = [];
+        if (! $mapping || blank($group)) $missing['category_shipping_group'] = 'Brakuje grupy wysyłkowej dla kategorii';
+        elseif (! $policy) $missing['shipping_policy_mapping'] = 'Brakuje mapowania grupy wysyłkowej na eBay fulfillment policy';
+
+        return [
+            'local_category_id' => $part->category_id ?? null,
+            'local_category_name' => $part->category?->name,
+            'shipping_group' => $group,
+            'shipping_group_source' => $mapping ? 'marketplace_category_mappings.shipping_group' : null,
+            'selected_fulfillment_policy_id' => $policy['id'] ?? $mapping?->fulfillment_policy_id,
+            'selected_fulfillment_policy_name' => $policy['name'] ?? null,
+            'available_policy_mapping' => collect($policies)->map(fn ($p) => $p['id'] ?? null)->all(),
+            'missing' => $missing,
+        ];
+    }
+
+    private function resolveEbayBusinessPolicies(?MarketplaceAccount $account, string $channel, ?array $shipping): array
+    {
+        $settings = is_array($account?->api_settings) ? $account->api_settings : [];
+        $payment = data_get($settings, 'business_policies.payment') ?: config("product-hub.ebay_business_policies.$channel.payment.id");
+        $return = data_get($settings, 'business_policies.return') ?: config("product-hub.ebay_business_policies.$channel.return.id");
+        $location = data_get($settings, 'merchant_location_key') ?: data_get($settings, 'location.merchant_location_key');
+        $missing = [];
+        if (blank($payment)) $missing['payment_policy'] = 'Brakuje eBay payment policy';
+        if (blank($return)) $missing['return_policy'] = 'Brakuje eBay return policy';
+        if (blank($location)) $missing['merchant_location_key'] = 'Brakuje merchant location key';
+        return [
+            'selected_fulfillment_policy_id' => $shipping['selected_fulfillment_policy_id'] ?? null,
+            'selected_fulfillment_policy_name' => $shipping['selected_fulfillment_policy_name'] ?? null,
+            'selected_payment_policy_id' => $payment,
+            'selected_payment_policy_name' => config("product-hub.ebay_business_policies.$channel.payment.name"),
+            'selected_return_policy_id' => $return,
+            'selected_return_policy_name' => config("product-hub.ebay_business_policies.$channel.return.name"),
+            'merchant_location_key' => $location,
+            'missing' => $missing,
+        ];
+    }
+
+    private function convertPlnToEur(?float $price, ?array $rate): ?float { return $price !== null && is_numeric($rate['rate'] ?? null) && (float) $rate['rate'] > 0 ? round($price / (float) $rate['rate'], 2) : null; }
+    private function exchangeRatePreview(?array $rate): ?array { if (! $rate) return null; return ['source' => 'NBP_TABLE_A', 'currency' => 'EUR', 'rate' => $rate['rate'] ?? null, 'effective_date' => $rate['effective_date'] ?? null, 'table_no' => $rate['table_no'] ?? null, 'fetched_at' => $rate['fetched_at'] ?? null]; }
 
     private function ebayCategoryMapping(Part $part, string $channel): ?MarketplaceCategoryMapping
     {
@@ -199,9 +254,9 @@ class MarketplaceListingReadinessService
     }
     private function hasActiveListing(Part $part, ?string $marketplace, string $channel): bool { if (! $marketplace || ! Schema::hasTable('marketplace_listings')) return false; return MarketplaceListing::query()->where('part_id', $part->id)->where('marketplace', $marketplace)->whereNotNull('external_offer_id')->whereNotIn('status', ['ended', 'deleted', 'archived', 'inactive'])->exists(); }
     /** @return array<string, mixed> */
-    private function safePayloadPreview(Part $part, string $channel, ?float $price, ?MarketplaceCategoryMapping $categoryMapping = null): array
+    private function safePayloadPreview(Part $part, string $channel, ?float $price, ?MarketplaceCategoryMapping $categoryMapping = null, ?array $shippingPolicyResolution = null, ?array $businessPolicies = null, ?array $exchangeRate = null, ?float $priceEur = null): array
     {
-        $preview = ['dry_run' => true, 'channel' => $channel, 'sku' => $part->sku ?? null, 'title' => $part->name ?? null, 'description_present' => filled(strip_tags((string) (($part->description ?? null) ?: ($part->short_description ?? null)))), 'condition_notes_present' => filled($part->condition_notes ?? null), 'price_pln' => $price, 'quantity' => $part->quantity ?? null, 'currency' => 'PLN', 'dimensions' => $this->dimensionsPayload($part), 'image_urls' => $this->imagesFor($part)->take(5)->map(fn ($image) => method_exists($image, 'listingUrl') ? $image->listingUrl() : null)->filter()->values()->all(), 'category_id' => $categoryMapping?->external_category_id ?? ($part->category_id ?? null), 'category_mapping_source' => $categoryMapping ? 'marketplace_category_mappings' : null, 'category_mapping_channel' => $categoryMapping?->channel, 'local_category_id' => $part->category_id ?? null, 'vehicle' => ['car_id' => $part->car_id ?? null, 'snapshot_present' => is_array($part->vehicle_snapshot ?? null)], 'will_make_marketplace_request' => false];
+        $preview = ['dry_run' => true, 'channel' => $channel, 'sku' => $part->sku ?? null, 'title' => $part->name ?? null, 'description_present' => filled(strip_tags((string) (($part->description ?? null) ?: ($part->short_description ?? null)))), 'condition_notes_present' => filled($part->condition_notes ?? null), 'price_pln' => $price, 'price_source_pln' => str_starts_with($channel, 'ebay_') ? $price : null, 'price_eur' => $priceEur, 'exchange_rate' => $this->exchangeRatePreview($exchangeRate), 'quantity' => $part->quantity ?? null, 'currency' => str_starts_with($channel, 'ebay_') ? 'EUR' : 'PLN', 'dimensions' => $this->dimensionsPayload($part), 'image_urls' => $this->imagesFor($part)->take(5)->map(fn ($image) => method_exists($image, 'listingUrl') ? $image->listingUrl() : null)->filter()->values()->all(), 'category_id' => $categoryMapping?->external_category_id ?? ($part->category_id ?? null), 'category_mapping_source' => $categoryMapping ? 'marketplace_category_mappings' : null, 'category_mapping_channel' => $categoryMapping?->channel, 'local_category_id' => $part->category_id ?? null, 'vehicle' => ['car_id' => $part->car_id ?? null, 'snapshot_present' => is_array($part->vehicle_snapshot ?? null)], 'will_make_marketplace_request' => false];
 
         if (str_starts_with($channel, 'ebay_')) {
             $rendered = $this->ebayTemplateExists($channel) ? $this->ebayDescriptionTemplateRenderer->render($channel, $part) : '';
@@ -210,6 +265,8 @@ class MarketplaceListingReadinessService
             $preview['description_rendered_present'] = filled(trim($rendered));
             $preview['description_template_asset_urls'] = $this->ebayDescriptionTemplateRenderer->assetUrls();
             $preview['description_rendered_html'] = $rendered;
+            $preview['shipping_policy_resolution'] = $shippingPolicyResolution;
+            $preview['business_policies'] = $businessPolicies;
         }
 
         return $preview;

@@ -47,6 +47,30 @@ return [
         ],
     ],
 
+    'ebay_business_policies' => [
+        'ebay_de' => [
+            'payment' => ['id' => '259264220013', 'name' => 'Payments'],
+            'return' => ['id' => '259264151013', 'name' => 'Returns'],
+            'fulfillment_by_shipping_group' => [
+                'de_30_eur' => ['id' => '259264150013', 'name' => 'Wysyłka 30 euro'],
+                'de_50_eur' => ['id' => '259677066013', 'name' => 'Wysyłka 50 euro'],
+                'de_130_eur' => ['id' => '259636579013', 'name' => 'Wysyłka 130 euro'],
+            ],
+        ],
+        'ebay_fr' => [
+            'payment' => ['id' => '259264220013', 'name' => 'Payments'],
+            'return' => ['id' => '259264151013', 'name' => 'Returns'],
+            'fulfillment_by_shipping_group' => [
+                'fr_55_eur' => ['id' => '260547694013', 'name' => 'Wysyłka 55 euro'],
+                'fr_70_eur' => ['id' => '260547464013', 'name' => 'Wysyłka 70 euro'],
+                'fr_130_eur' => ['id' => '260547754013', 'name' => 'Wysyłka 130 euro'],
+                'de_30_eur' => ['id' => '259264150013', 'name' => 'Wysyłka 30 euro'],
+                'de_50_eur' => ['id' => '259677066013', 'name' => 'Wysyłka 50 euro'],
+                'de_130_eur' => ['id' => '259636579013', 'name' => 'Wysyłka 130 euro'],
+            ],
+        ],
+    ],
+
     'admin_navigation' => [
         'dashboard' => 'Strona główna',
         'analytics' => 'Analityka',
