@@ -7,6 +7,7 @@ use App\Filament\Resources\PartResource;
 use App\Filament\Resources\PartResource\Pages\EditPart;
 use App\Filament\Resources\PartResource\Pages\ViewPart;
 use App\Models\Car;
+use App\Models\MarketplaceListing;
 use App\Models\Part;
 use App\Models\PartCategory;
 use App\Models\PartImage;
@@ -48,6 +49,35 @@ class PartModuleFoundationTest extends TestCase
     public function test_part_marketplace_price_search_links_are_disabled_without_query(): void
     {
         $this->assertSame([], PartResource::marketplacePriceSearchLinks(''));
+    }
+
+    public function test_admin_part_channel_prices_use_part_form_price_fields_not_marketplace_listing_prices_or_fallbacks(): void
+    {
+        $part = Part::query()->create([
+            'name' => 'Część #5502',
+            'price' => 1250,
+            'ovoko_price' => 1300,
+            'quantity' => 1,
+            'status' => 'ready',
+        ]);
+
+        MarketplaceListing::query()->create([
+            'part_id' => $part->id,
+            'marketplace' => 'ovoko',
+            'external_offer_id' => 'OVOKO-5502',
+            'price' => 1250,
+            'currency' => 'PLN',
+        ]);
+
+        $rows = app(\App\Services\Admin\PartMarketplaceStatusResolver::class)
+            ->rowsForPart($part->fresh('marketplaceListings'));
+
+        $pricesByKey = collect($rows)->pluck('price', 'key');
+
+        $this->assertSame('1 250,00 zł', $pricesByKey['storefront']);
+        $this->assertSame('1 300,00 zł', $pricesByKey['ovoko']);
+        $this->assertSame('1 562,50 zł', $pricesByKey['ebay']);
+        $this->assertSame('1 250,00 zł', $pricesByKey['allegro']);
     }
 
     public function test_part_can_be_created_with_required_fields_and_safe_defaults(): void

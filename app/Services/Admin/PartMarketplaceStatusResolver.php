@@ -28,10 +28,6 @@ class PartMarketplaceStatusResolver
             && ! in_array($part->status, ['sold', 'archived'], true)
             && (int) $part->quantity > 0;
 
-        $ebayPrice = is_numeric($part->ebay_price)
-            ? $part->ebay_price
-            : (is_numeric($part->price) ? ((float) $part->price * 1.25) : null);
-        $ebayCalc = ! is_numeric($part->ebay_price) && is_numeric($part->price);
         $ebayMarkets = $ebayListings
             ->pluck('marketplace')
             ->map(fn (string $marketplace): string => match ($marketplace) {
@@ -44,9 +40,9 @@ class PartMarketplaceStatusResolver
 
         return [
             $this->row('storefront', 'Sklep', $part->price, 'zł', $storefrontVisible, null, null, $storefrontVisible ? 'Widoczny w sklepie' : 'Niewidoczny w sklepie'),
-            $this->row('ovoko', 'Ovoko', $ovoko?->price, 'zł', $ovoko !== null, $this->externalOfferId($ovoko), $this->listingUrl($ovoko), $ovoko ? 'Oferta Ovoko wystawiona lokalnie' : 'Brak lokalnej oferty Ovoko'),
-            $this->row('ebay', 'eBay', $ebayPrice, 'zł', $ebay !== null, $this->externalOfferId($ebay), $this->listingUrl($ebayUrlListing), $ebay ? 'Oferta eBay wystawiona lokalnie' : 'Brak lokalnej oferty eBay', $ebayCalc ? 'calc' : ($ebayMarkets ?: null)),
-            $this->row('allegro', 'Allegro', is_numeric($part->allegro_price) ? $part->allegro_price : $part->price, 'zł', $allegroListed, $this->externalOfferId($allegro), $this->allegroUrl($allegro), $this->allegroTitle($allegro, $allegroListed)),
+            $this->row('ovoko', 'Ovoko', $part->ovoko_price, 'zł', $ovoko !== null, $this->externalOfferId($ovoko), $this->listingUrl($ovoko), $ovoko ? 'Oferta Ovoko wystawiona lokalnie' : 'Brak lokalnej oferty Ovoko'),
+            $this->row('ebay', 'eBay', $part->ebay_price, 'zł', $ebay !== null, $this->externalOfferId($ebay), $this->listingUrl($ebayUrlListing), $ebay ? 'Oferta eBay wystawiona lokalnie' : 'Brak lokalnej oferty eBay', $ebayMarkets ?: null),
+            $this->row('allegro', 'Allegro', $part->allegro_price, 'zł', $allegroListed, $this->externalOfferId($allegro), $this->allegroUrl($allegro), $this->allegroTitle($allegro, $allegroListed)),
         ];
     }
 
