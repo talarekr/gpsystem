@@ -122,7 +122,7 @@ class PartResource extends Resource
                         Forms\Components\TextInput::make('name')->label('Tytuł produktu')->required()->maxLength(255)->live(onBlur: true)->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))->columnSpanFull(),
                         Forms\Components\TextInput::make('part_number')->label('Główny kod części')->maxLength(255)->live(debounce: 500)->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))->columnSpanFull(),
                         Forms\Components\Hidden::make('sku'),
-                        Forms\Components\Select::make('category_id')->label('Kategoria')->placeholder('Kategoria')->relationship('category', 'name')->required()->searchable()->preload()->native(false)->live()->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set): null => self::refreshMarketplaceMappings($get, $set))->suffixAction(self::categoryTreeAction())->columnSpanFull(),
+                        Forms\Components\Select::make('category_id')->label('Kategoria')->placeholder('Kategoria')->relationship('category', 'name')->required()->searchable()->preload()->native(false)->live()->suffixAction(self::categoryTreeAction())->columnSpanFull(),
                         Forms\Components\Select::make('condition_notes')->label('Jakość')->placeholder('Jakość')->options(['Używany' => 'Używany', 'Nowy' => 'Nowy', 'Uszkodzony' => 'Uszkodzony', 'Regenerowany' => 'Regenerowany'])->default(self::DEFAULT_CONDITION_VALUE)->native(false)->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])->columnSpan(6),
                         Forms\Components\Select::make('part_position')->label('Pozycja części (strona zabudowy)')->placeholder('Wybierz')->options(['Wszystkie' => 'Wszystkie', 'Lewa strona' => 'Lewa strona', 'Środek' => 'Środek', 'Prawa strona' => 'Prawa strona', 'Komplet' => 'Komplet', 'Tył strona lewa' => 'Tył strona lewa', 'Tył strona prawa' => 'Tył strona prawa', 'Przód strona lewa' => 'Przód strona lewa', 'Przód strona prawa' => 'Przód strona prawa', 'Przód' => 'Przód', 'Tył' => 'Tył'])->default(null)->native(false)->dehydrated(false)->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])->columnSpan(6),
                         Forms\Components\Select::make(self::ADMIN_STEERING_FORM_STATE)->label('Kierownica po stronie')->placeholder('Kierownica po stronie')->options(self::ADMIN_STEERING_OPTIONS)->default(self::EXPECTED_LEFT_STEERING_VALUE)->native(false)->dehydrated(false)->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])->columnSpan(6),
@@ -134,12 +134,6 @@ class PartResource extends Resource
                         Forms\Components\Hidden::make('category_needs_review'),
                         Forms\Components\Hidden::make('category_suggestions')->dehydrated(false)->default([]),
                         Forms\Components\Hidden::make('marketplace_category_mappings_state')->dehydrated(false)->default([]),
-                        Forms\Components\Placeholder::make('marketplace_category_mapping_status')
-                            ->label('Mapowania marketplace dla kategorii')
-                            ->content(fn (Forms\Get $get): HtmlString => new HtmlString(self::marketplaceMappingStatusHtml((array) ($get('marketplace_category_mappings_state') ?? []))))
-                            ->visible(fn (Forms\Get $get): bool => filled($get('category_id')))
-                            ->columnSpanFull(),
-                        Forms\Components\Toggle::make('needs_listing')->label('Część do wystawienia')->helperText('Zaznacz, aby pokazać część w roboczej kolejce Części do wystawienia.')->default(false)->inline(false)->columnSpanFull(),
                     ]),
 
                 Section::make('Informacje o samochodzie')
