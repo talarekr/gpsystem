@@ -36,6 +36,20 @@ class PartModuleFoundationTest extends TestCase
         ]));
     }
 
+    public function test_part_marketplace_price_search_links_use_encoded_query(): void
+    {
+        $links = PartResource::marketplacePriceSearchLinks('HED 123');
+
+        $this->assertSame('https://allegro.pl/listing?string=HED%20123', $links['allegro']);
+        $this->assertSame('https://www.ovoko.pl/pl/search?q=HED%20123', $links['ovoko']);
+        $this->assertSame('https://www.ebay.com/sch/i.html?_nkw=HED%20123', $links['ebay']);
+    }
+
+    public function test_part_marketplace_price_search_links_are_disabled_without_query(): void
+    {
+        $this->assertSame([], PartResource::marketplacePriceSearchLinks(''));
+    }
+
     public function test_part_can_be_created_with_required_fields_and_safe_defaults(): void
     {
         $part = Part::query()->create(['name' => 'Reflektor lewy']);
