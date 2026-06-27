@@ -191,6 +191,71 @@ class BackfillPartDefaultConditionAndSteeringTest extends TestCase
         $this->assertSame('Lewa strona', $part->vehicle_snapshot['steering_side']);
     }
 
+
+    public function test_default_run_keeps_batch_limit_but_process_all_scans_every_matching_part(): void
+    {
+        for ($i = 1; $i <= 1005; $i++) {
+            Part::query()->create([
+                'name' => 'Batch part '.$i,
+                'condition_notes' => $i <= 1000 ? 'Używany' : null,
+                'vehicle_snapshot' => ['steering_side' => $i <= 1000 ? 'po lewej' : null],
+                'needs_listing' => true,
+                'needs_review' => false,
+            ]);
+        }
+
+        $this->getJson($this->url.'&scope=all&dry_run=1&confirm=0')
+            ->assertOk()
+            ->assertJsonPath('process_all', false)
+            ->assertJsonPath('total_matching_parts_count', 1005)
+            ->assertJsonPath('processed_parts_count', 1000)
+            ->assertJsonPath('would_update_parts_count', 0);
+
+        $this->getJson($this->url.'&scope=all&dry_run=1&confirm=0&process_all=1&batch_size=200')
+            ->assertOk()
+            ->assertJsonPath('process_all', true)
+            ->assertJsonPath('total_matching_parts_count', 1005)
+            ->assertJsonPath('processed_parts_count', 1005)
+            ->assertJsonPath('would_update_parts_count', 5)
+            ->assertJsonPath('quality_would_update_count', 5)
+            ->assertJsonPath('steering_would_update_count', 5)
+            ->assertJsonPath('items_truncated', true)
+            ->assertJsonPath('items_limit', 100)
+            ->assertJsonCount(100, 'items');
+    }
+
+    public function test_process_all_confirm_updates_later_chunks_without_overwriting_existing_values(): void
+    {
+        for ($i = 1; $i <= 1005; $i++) {
+            Part::query()->create([
+                'name' => 'Confirm all part '.$i,
+                'condition_notes' => $i <= 1000 ? 'Nowy' : null,
+                'vehicle_snapshot' => ['steering_side' => $i <= 1000 ? 'po prawej' : null],
+                'needs_listing' => true,
+                'needs_review' => false,
+            ]);
+        }
+
+        $this->getJson($this->url.'&scope=all&dry_run=0&confirm=1&process_all=1&batch_size=200')
+            ->assertOk()
+            ->assertJsonPath('process_all', true)
+            ->assertJsonPath('processed_parts_count', 1005)
+            ->assertJsonPath('updated_parts_count', 5)
+            ->assertJsonPath('quality_updated_count', 5)
+            ->assertJsonPath('steering_updated_count', 5)
+            ->assertJsonPath('products_changed', false)
+            ->assertJsonPath('offers_changed', false)
+            ->assertJsonPath('mappings_changed', false)
+            ->assertJsonPath('ovoko_write', false)
+            ->assertJsonPath('allegro_write', false)
+            ->assertJsonPath('ebay_write', false);
+
+        $this->assertSame(1000, Part::query()->where('condition_notes', 'Nowy')->count());
+        $this->assertSame(5, Part::query()->where('condition_notes', 'Używany')->count());
+        $this->assertSame(1000, Part::query()->where('vehicle_snapshot->steering_side', 'po prawej')->count());
+        $this->assertSame(5, Part::query()->where('vehicle_snapshot->steering_side', 'po lewej')->count());
+    }
+
     public function test_marketplace_write_flags_are_always_false(): void
     {
         Part::query()->create(['name' => 'Flags', 'needs_listing' => true, 'needs_review' => false]);

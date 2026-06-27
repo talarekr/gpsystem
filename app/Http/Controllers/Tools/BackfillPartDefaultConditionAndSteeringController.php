@@ -26,20 +26,21 @@ class BackfillPartDefaultConditionAndSteeringController extends Controller
         $readOnly = $dryRun || ! $confirm;
         $batchSize = max(1, min(5000, (int) $request->query('batch_size', 1000)));
         $offset = max(0, (int) $request->query('offset', 0));
+        $processAll = $request->boolean('process_all', false);
+        $itemsLimit = $processAll ? 100 : null;
         $withDiagnostics = $request->boolean('diagnostics', false);
 
         $scopeAvailable = Schema::hasTable('parts') && (
             $scope === 'all' || ($scope === 'to_publish' && Schema::hasColumn('parts', 'needs_listing'))
         );
         if (! $scopeAvailable) {
-            return response()->json($this->basePayload($scope, $onlyMissing, $readOnly, $withDiagnostics, 'scope_to_publish_filter_not_found'));
+            return response()->json($this->basePayload($scope, $onlyMissing, $readOnly, $withDiagnostics, 'scope_to_publish_filter_not_found', $processAll, $itemsLimit));
         }
 
         $matchingQuery = $this->scopedQuery($scope);
         $totalMatchingPartsCount = (clone $matchingQuery)->count();
-        $parts = (clone $matchingQuery)->orderBy('id')->offset($offset)->limit($batchSize)->get();
-
         $items = [];
+        $processedPartsCount = 0;
         $wouldUpdatePartsCount = 0;
         $updatedPartsCount = 0;
         $qualityOkCount = 0;
@@ -52,7 +53,8 @@ class BackfillPartDefaultConditionAndSteeringController extends Controller
         $skippedSteeringAlreadyVisibleCount = 0;
         $errorsCount = 0;
 
-        foreach ($parts as $part) {
+        $processPart = function (Part $part) use (&$items, &$processedPartsCount, &$wouldUpdatePartsCount, &$updatedPartsCount, &$qualityOkCount, &$qualityWouldUpdateCount, &$qualityUpdatedCount, &$steeringWouldUpdateCount, &$steeringUpdatedCount, &$steeringAdminVisibleCount, &$skippedAlreadySetCount, &$skippedSteeringAlreadyVisibleCount, &$errorsCount, $onlyMissing, $readOnly, $itemsLimit): void {
+            $processedPartsCount++;
             try {
                 $currentQuality = $part->condition_notes;
                 $qualityOk = ! $this->isMissing($currentQuality);
@@ -68,8 +70,8 @@ class BackfillPartDefaultConditionAndSteeringController extends Controller
                 if (! $shouldFixQuality && ! $shouldFixSteering) {
                     $skippedAlreadySetCount++;
                     $skippedSteeringAlreadyVisibleCount += $steeringAdminVisible ? 1 : 0;
-                    $items[] = $this->item($part->id, $currentQuality, null, $currentSteering, null, $adminSteeringValue, 'skipped_already_set', $steeringAdminVisible ? 'steering_side_admin_visible' : 'steering_side_non_empty_not_admin_visible_only_missing_enabled');
-                    continue;
+                    $this->appendItem($items, $itemsLimit, $this->item($part->id, $currentQuality, null, $currentSteering, null, $adminSteeringValue, 'skipped_already_set', $steeringAdminVisible ? 'steering_side_admin_visible' : 'steering_side_non_empty_not_admin_visible_only_missing_enabled'));
+                    return;
                 }
 
                 $wouldUpdatePartsCount++;
@@ -77,8 +79,8 @@ class BackfillPartDefaultConditionAndSteeringController extends Controller
                 $steeringWouldUpdateCount += $shouldFixSteering ? 1 : 0;
 
                 if ($readOnly) {
-                    $items[] = $this->item($part->id, $currentQuality, $shouldFixQuality ? PartResource::DEFAULT_CONDITION_VALUE : null, $currentSteering, $shouldFixSteering ? PartResource::expectedLeftSteeringValue() : null, $adminSteeringValue, 'would_update', 'dry_run_or_missing_confirm');
-                    continue;
+                    $this->appendItem($items, $itemsLimit, $this->item($part->id, $currentQuality, $shouldFixQuality ? PartResource::DEFAULT_CONDITION_VALUE : null, $currentSteering, $shouldFixSteering ? PartResource::expectedLeftSteeringValue() : null, $adminSteeringValue, 'would_update', 'dry_run_or_missing_confirm'));
+                    return;
                 }
 
                 $result = DB::transaction(function () use ($part, $onlyMissing): array {
@@ -112,24 +114,38 @@ class BackfillPartDefaultConditionAndSteeringController extends Controller
 
                 if (! $result['updated']) {
                     $skippedAlreadySetCount++;
-                    $items[] = $this->item($part->id, $currentQuality, null, $currentSteering, null, $adminSteeringValue, 'skipped_already_set', 'steering_side_admin_visible_after_lock');
-                    continue;
+                    $this->appendItem($items, $itemsLimit, $this->item($part->id, $currentQuality, null, $currentSteering, null, $adminSteeringValue, 'skipped_already_set', 'steering_side_admin_visible_after_lock'));
+                    return;
                 }
 
                 $updatedPartsCount++;
                 $qualityUpdatedCount += $result['quality_updated'] ? 1 : 0;
                 $steeringUpdatedCount += $result['steering_updated'] ? 1 : 0;
-                $items[] = $this->item($part->id, $currentQuality, $result['quality_updated'] ? PartResource::DEFAULT_CONDITION_VALUE : null, $currentSteering, $result['steering_updated'] ? PartResource::expectedLeftSteeringValue() : null, $adminSteeringValue, 'updated', 'local_admin_defaults_backfilled');
+                $this->appendItem($items, $itemsLimit, $this->item($part->id, $currentQuality, $result['quality_updated'] ? PartResource::DEFAULT_CONDITION_VALUE : null, $currentSteering, $result['steering_updated'] ? PartResource::expectedLeftSteeringValue() : null, $adminSteeringValue, 'updated', 'local_admin_defaults_backfilled'));
             } catch (\Throwable $e) {
                 $errorsCount++;
-                $items[] = $this->item($part->id, $part->condition_notes, null, is_array($part->vehicle_snapshot) ? ($part->vehicle_snapshot['steering_side'] ?? null) : null, null, null, 'error', $e->getMessage());
+                $this->appendItem($items, $itemsLimit, $this->item($part->id, $part->condition_notes, null, is_array($part->vehicle_snapshot) ? ($part->vehicle_snapshot['steering_side'] ?? null) : null, null, null, 'error', $e->getMessage()));
+            }
+        };
+
+        if ($processAll) {
+            (clone $matchingQuery)->chunkById($batchSize, function ($parts) use ($processPart): void {
+                foreach ($parts as $part) {
+                    $processPart($part);
+                }
+            });
+        } else {
+            $parts = (clone $matchingQuery)->orderBy('id')->offset($offset)->limit($batchSize)->get();
+
+            foreach ($parts as $part) {
+                $processPart($part);
             }
         }
 
-        $payload = $this->basePayload($scope, $onlyMissing, $readOnly, $withDiagnostics);
+        $payload = $this->basePayload($scope, $onlyMissing, $readOnly, $withDiagnostics, null, $processAll, $itemsLimit);
         $resultPayload = array_merge($payload, [
             'total_matching_parts_count' => $totalMatchingPartsCount,
-            'processed_parts_count' => $parts->count(),
+            'processed_parts_count' => $processedPartsCount,
             'would_update_parts_count' => $wouldUpdatePartsCount,
             'updated_parts_count' => $updatedPartsCount,
             'quality_ok_count' => $qualityOkCount,
@@ -145,6 +161,8 @@ class BackfillPartDefaultConditionAndSteeringController extends Controller
             'skipped_out_of_scope_count' => 0,
             'errors_count' => $errorsCount,
             'parts_changed' => ! $readOnly && ($qualityUpdatedCount > 0 || $steeringUpdatedCount > 0),
+            'items_truncated' => $itemsLimit !== null && $processedPartsCount > count($items),
+            'items_limit' => $itemsLimit,
             'items' => $items,
         ]);
 
@@ -172,6 +190,13 @@ class BackfillPartDefaultConditionAndSteeringController extends Controller
     private function isMissing(mixed $value): bool
     {
         return $value === null || trim((string) $value) === '' || mb_strtolower(trim((string) $value)) === 'do uzupełnienia';
+    }
+
+    private function appendItem(array &$items, ?int $itemsLimit, array $item): void
+    {
+        if ($itemsLimit === null || count($items) < $itemsLimit) {
+            $items[] = $item;
+        }
     }
 
     private function item(int $partId, mixed $currentQuality, mixed $newQuality, mixed $currentSteering, mixed $newSteering, mixed $adminVisibleSteeringValue, string $action, string $reason): array
@@ -206,7 +231,7 @@ class BackfillPartDefaultConditionAndSteeringController extends Controller
         ];
     }
 
-    private function basePayload(string $scope, bool $onlyMissing, bool $readOnly, bool $withDiagnostics, ?string $diagnosticReason = null): array
+    private function basePayload(string $scope, bool $onlyMissing, bool $readOnly, bool $withDiagnostics, ?string $diagnosticReason = null, bool $processAll = false, ?int $itemsLimit = null): array
     {
         $payload = [
             'ok' => $diagnosticReason === null,
@@ -214,6 +239,7 @@ class BackfillPartDefaultConditionAndSteeringController extends Controller
             'local_update' => ! $readOnly,
             'scope' => $scope,
             'only_missing' => $onlyMissing,
+            'process_all' => $processAll,
             'total_matching_parts_count' => 0,
             'processed_parts_count' => 0,
             'would_update_parts_count' => 0,
@@ -237,6 +263,8 @@ class BackfillPartDefaultConditionAndSteeringController extends Controller
             'ovoko_write' => false,
             'allegro_write' => false,
             'ebay_write' => false,
+            'items_truncated' => false,
+            'items_limit' => $itemsLimit,
             'items' => [],
         ];
 
