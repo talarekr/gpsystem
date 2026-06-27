@@ -96,7 +96,14 @@
     @else
         @foreach ($rows as $row)
             <div class="part-channel-row">
-                <span class="part-channel-label">{{ $row['label'] }}:</span>
+                <span class="part-channel-label">
+                    @if (in_array($row['key'] ?? '', ['allegro', 'ovoko', 'ebay'], true))
+                        @include('filament.resources.orders.partials.source-wordmark', ['marketplace' => $row['key']])
+                    @else
+                        {{ $row['label'] }}
+                    @endif
+                    :
+                </span>
                 <span class="part-channel-price">{{ $row['price'] }}</span>
                 <span
                     class="part-channel-status {{ $row['listed'] ? 'is-listed' : 'is-not-listed' }}"
