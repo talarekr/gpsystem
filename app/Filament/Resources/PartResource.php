@@ -128,6 +128,15 @@ class PartResource extends Resource
                         Forms\Components\Select::make('part_position')->label('Pozycja części (strona zabudowy)')->placeholder('Wybierz')->options(['Wszystkie' => 'Wszystkie', 'Lewa strona' => 'Lewa strona', 'Środek' => 'Środek', 'Prawa strona' => 'Prawa strona', 'Komplet' => 'Komplet', 'Tył strona lewa' => 'Tył strona lewa', 'Tył strona prawa' => 'Tył strona prawa', 'Przód strona lewa' => 'Przód strona lewa', 'Przód strona prawa' => 'Przód strona prawa', 'Przód' => 'Przód', 'Tył' => 'Tył'])->default(null)->native(false)->dehydrated(false)->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])->columnSpan(6),
                         Forms\Components\Select::make(self::ADMIN_STEERING_FORM_STATE)->label('Kierownica po stronie')->placeholder('Kierownica po stronie')->options(self::ADMIN_STEERING_OPTIONS)->default(self::EXPECTED_LEFT_STEERING_VALUE)->native(false)->dehydrated(false)->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])->columnSpan(6),
                         Forms\Components\Select::make('storage_location_id')->label('Magazyn')->placeholder('Wpisz min. 3 znaki')->searchable()->searchDebounce(400)->getSearchResultsUsing(fn (string $search): array => self::storageLocationSearchResults($search))->getOptionLabelUsing(fn ($value): ?string => self::storageLocationOptionLabel($value))->native(false)->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])->columnSpan(6),
+                        Section::make('Wymiary')
+                            ->columns(4)
+                            ->schema([
+                                Forms\Components\TextInput::make('weight_kg')->label('Waga, kg')->numeric()->minValue(0)->step('0.001'),
+                                Forms\Components\TextInput::make('length_cm')->label('Długość, cm')->numeric()->minValue(0)->step('0.01'),
+                                Forms\Components\TextInput::make('width_cm')->label('Szerokość, cm')->numeric()->minValue(0)->step('0.01'),
+                                Forms\Components\TextInput::make('height_cm')->label('Wysokość, cm')->numeric()->minValue(0)->step('0.01'),
+                            ])
+                            ->columnSpanFull(),
                         Forms\Components\RichEditor::make('description')->label('Opis')->placeholder('Opis')->columnSpanFull(),
                         Forms\Components\Hidden::make('suggested_category_id'),
                         Forms\Components\Hidden::make('category_confidence'),

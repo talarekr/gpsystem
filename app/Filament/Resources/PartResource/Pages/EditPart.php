@@ -65,6 +65,45 @@ class EditPart extends EditRecord
         $this->data['part_photo_paths'] = [];
     }
 
+    public function movePartImage(int $imageId, string $direction): void
+    {
+        $images = $this->record->images()
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->get();
+
+        $currentIndex = $images->search(fn (PartImage $image): bool => (int) $image->getKey() === $imageId);
+
+        if ($currentIndex === false) {
+            return;
+        }
+
+        $targetIndex = $direction === 'left' ? $currentIndex - 1 : $currentIndex + 1;
+
+        if (! $images->has($targetIndex)) {
+            return;
+        }
+
+        $ordered = $images->values()->all();
+        [$moved] = array_splice($ordered, $currentIndex, 1);
+        array_splice($ordered, $targetIndex, 0, [$moved]);
+
+        foreach ($ordered as $index => $image) {
+            $image->forceFill([
+                'sort_order' => $index,
+                'is_primary' => $index === 0,
+            ])->save();
+        }
+
+        $this->record->refresh();
+        $this->record->load('images');
+
+        Notification::make()
+            ->title('Kolejność zdjęć została zapisana')
+            ->success()
+            ->send();
+    }
+
     public function deletePartImage(int $imageId): void
     {
         $image = PartImage::query()

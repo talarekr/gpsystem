@@ -524,4 +524,39 @@ class PartModuleFoundationTest extends TestCase
 
         return $user;
     }
+    public function test_admin_can_move_existing_part_images_and_primary_follows_first_sort_order(): void
+    {
+        $this->actingAsWarehouseUser();
+
+        $part = Part::query()->create(['name' => 'Sortowane zdjęcia', 'quantity' => 1]);
+        $front = PartImage::query()->create(['part_id' => $part->id, 'path' => 'parts/photos/front.jpg', 'sort_order' => 0, 'is_primary' => true]);
+        $side = PartImage::query()->create(['part_id' => $part->id, 'path' => 'parts/photos/side.jpg', 'sort_order' => 1, 'is_primary' => false]);
+
+        Livewire::test(EditPart::class, ['record' => $part->getRouteKey()])
+            ->assertSee('Główne')
+            ->call('movePartImage', $side->getKey(), 'left')
+            ->assertHasNoErrors();
+
+        $this->assertSame(['parts/photos/side.jpg', 'parts/photos/front.jpg'], PartResource::partImagePaths($part->fresh('images')));
+        $this->assertDatabaseHas('part_images', ['id' => $side->getKey(), 'sort_order' => 0, 'is_primary' => true]);
+        $this->assertDatabaseHas('part_images', ['id' => $front->getKey(), 'sort_order' => 1, 'is_primary' => false]);
+    }
+
+    public function test_ovoko_dimensions_fields_are_fillable_and_visible_in_admin_form_source(): void
+    {
+        $part = Part::query()->create([
+            'name' => 'Część z wymiarami',
+            'weight_kg' => 2.345,
+            'length_cm' => 40.50,
+            'width_cm' => 30.25,
+            'height_cm' => 20.75,
+        ]);
+
+        $this->assertSame('2.345', (string) $part->fresh()->weight_kg);
+        $source = file_get_contents(app_path('Filament/Resources/PartResource.php'));
+        $this->assertStringContainsString("Section::make('Wymiary')", $source);
+        $this->assertStringContainsString("->label('Waga, kg')", $source);
+        $this->assertLessThan(strpos($source, "RichEditor::make('description')"), strpos($source, "Section::make('Wymiary')"));
+    }
+
 }
