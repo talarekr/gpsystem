@@ -1,3 +1,5 @@
+@php($gpsAdminTopbarUser = auth()->user())
+@if($gpsAdminTopbarUser?->canAccessPanel(\Filament\Facades\Filament::getCurrentPanel()))
 @php
     use App\Filament\Resources\PartResource;
     use App\Filament\Resources\OrderResource;
@@ -49,3 +51,5 @@
         </a>
     </div>
 </div>
+
+@endif
