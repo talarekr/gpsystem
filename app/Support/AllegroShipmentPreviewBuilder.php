@@ -185,7 +185,14 @@ class AllegroShipmentPreviewBuilder
 
     private function parcel(Order $order, array $input = []): array
     {
-        return ['type' => $input['package_type'] ?? 'PACKAGE', 'length' => ['value' => $input['length'] ?? null, 'unit' => 'CENTIMETER'], 'width' => ['value' => $input['width'] ?? null, 'unit' => 'CENTIMETER'], 'height' => ['value' => $input['height'] ?? null, 'unit' => 'CENTIMETER'], 'weight' => ['value' => $input['weight'] ?? null, 'unit' => 'KILOGRAMS'], 'textOnLabel' => Str::limit($input['label_reference'] ?? $this->defaultLabelReference($order), 20, '')];
+        return [
+            'type' => $input['package_type'] ?? 'PACKAGE',
+            'length' => ['value' => $this->numericPayloadValue($input['length'] ?? null), 'unit' => 'CENTIMETER'],
+            'width' => ['value' => $this->numericPayloadValue($input['width'] ?? null), 'unit' => 'CENTIMETER'],
+            'height' => ['value' => $this->numericPayloadValue($input['height'] ?? null), 'unit' => 'CENTIMETER'],
+            'weight' => ['value' => $this->numericPayloadValue($input['weight'] ?? null), 'unit' => 'KILOGRAMS'],
+            'textOnLabel' => Str::limit($input['label_reference'] ?? $this->defaultLabelReference($order), 20, ''),
+        ];
     }
 
     private function normalizeParcelInput(array $input, array $options): array
@@ -225,6 +232,7 @@ class AllegroShipmentPreviewBuilder
         return ['is_cod' => $isCod, 'amount' => $isCod ? $amount : null, 'currency' => $currency];
     }
 
+    private function numericPayloadValue(mixed $value): int|float|null { if (! is_numeric($value)) return null; $number = (float) $value; return floor($number) === $number ? (int) $number : $number; }
     private function money(mixed $amount, string $currency): ?array { return is_numeric($amount) ? ['amount' => number_format((float) $amount, 2, '.', ''), 'currency' => $currency] : null; }
     private function firstFilled(array $values): ?string { foreach ($values as $v) { if (is_scalar($v) && trim((string) $v) !== '' && trim((string) $v) !== '-') return trim((string) $v); } return null; }
     private function firstNumeric(array $values): ?float { foreach ($values as $v) { if (is_numeric($v)) return (float) $v; } return null; }

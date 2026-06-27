@@ -271,7 +271,7 @@ class ShipmentToolsControllerTest extends TestCase
             ->assertJsonPath('payload_preview.body.input.packages.0.length.value', 64)
             ->assertJsonPath('payload_preview.body.input.packages.0.width.value', 38)
             ->assertJsonPath('payload_preview.body.input.packages.0.height.value', 8)
-            ->assertJsonPath('payload_preview.body.input.packages.0.weight.value', '26')
+            ->assertJsonPath('payload_preview.body.input.packages.0.weight.value', 26)
             ->assertJsonPath('payload_preview.body.input.packages.0.textOnLabel', 'Client:104446741-e')
             ->assertJsonPath('warnings.0', 'Waga przekracza limit 25 kg dla InPost/Paczkomat.');
     }
@@ -295,12 +295,13 @@ class ShipmentToolsControllerTest extends TestCase
             ->assertJsonPath('audit.parcel_size_options.options.0.code', 'S')
             ->assertJsonPath('payload_preview.body.input.packages.0.height.value', 8);
 
-        $this->getJson('/tools/debug-allegro-shipment-preview?order_id='.$manualOrder->id.'&length=10&width=20&height=30&weight=2')
+        $this->getJson('/tools/debug-allegro-shipment-preview?order_id='.$manualOrder->id.'&length=10&width=20&height=30&weight=2.5')
             ->assertOk()
             ->assertJsonPath('audit.parcel_size_options.mode', 'manual')
-            ->assertJsonPath('payload_preview.body.input.packages.0.length.value', '10')
-            ->assertJsonPath('payload_preview.body.input.packages.0.width.value', '20')
-            ->assertJsonPath('payload_preview.body.input.packages.0.height.value', '30');
+            ->assertJsonPath('payload_preview.body.input.packages.0.length.value', 10)
+            ->assertJsonPath('payload_preview.body.input.packages.0.width.value', 20)
+            ->assertJsonPath('payload_preview.body.input.packages.0.height.value', 30)
+            ->assertJsonPath('payload_preview.body.input.packages.0.weight.value', 2.5);
     }
 
     public function test_ovoko_shipment_preview_is_read_only_and_builds_import_post_data_payload(): void
