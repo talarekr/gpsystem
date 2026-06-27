@@ -11,37 +11,44 @@ class StorefrontCatalogSearchTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_catalog_q_search_matches_vehicle_make_case_insensitively(): void
+    public function test_catalog_q_text_search_matches_product_name_case_insensitively(): void
     {
-        $audi = Car::query()->create(['make' => 'Audi', 'model' => 'A6', 'model_variant' => 'C7', 'engine_code' => 'CDUC']);
-        $bmw = Car::query()->create(['make' => 'BMW', 'model' => '3']);
+        Part::query()->create(['name' => 'Pompa paliwa Audi A4 quattro', 'quantity' => 1, 'status' => 'published']);
+        Part::query()->create(['name' => 'Lampa BMW', 'quantity' => 1, 'status' => 'published']);
 
-        Part::query()->create(['name' => 'Pompa paliwa quattro', 'car_id' => $audi->id, 'quantity' => 1, 'status' => 'published']);
-        Part::query()->create(['name' => 'Lampa BMW', 'car_id' => $bmw->id, 'quantity' => 1, 'status' => 'published']);
-
-        $response = $this->get('/czesci?q=AUDi');
+        $response = $this->get('/czesci?q=AUDi+a4');
 
         $response->assertOk();
-        $response->assertSee('Pompa paliwa quattro');
+        $response->assertSee('Pompa paliwa Audi A4 quattro');
         $response->assertDontSee('Lampa BMW');
     }
 
-    public function test_catalog_q_search_matches_vehicle_make_and_model_tokens(): void
+    public function test_catalog_q_text_search_requires_all_tokens_in_product_name(): void
     {
-        $a4 = Car::query()->create(['make' => 'Audi', 'model' => 'A4']);
-        $a6 = Car::query()->create(['make' => 'Audi', 'model' => 'A6']);
-        $bmw = Car::query()->create(['make' => 'BMW', 'model' => '4']);
-
-        Part::query()->create(['name' => 'Lampa przednia', 'car_id' => $a4->id, 'quantity' => 1, 'status' => 'published']);
-        Part::query()->create(['name' => 'Lampa tylna', 'car_id' => $a6->id, 'quantity' => 1, 'status' => 'published']);
-        Part::query()->create(['name' => 'Lampa BMW', 'car_id' => $bmw->id, 'quantity' => 1, 'status' => 'published']);
+        Part::query()->create(['name' => 'Lampa Audi A4 przednia', 'quantity' => 1, 'status' => 'published']);
+        Part::query()->create(['name' => 'Lampa Audi A6 tylna', 'quantity' => 1, 'status' => 'published']);
+        Part::query()->create(['name' => 'Lampa BMW seria 4', 'quantity' => 1, 'status' => 'published']);
 
         $response = $this->get('/czesci?q=audi+a4');
 
         $response->assertOk();
-        $response->assertSee('Lampa przednia');
-        $response->assertDontSee('Lampa tylna');
-        $response->assertDontSee('Lampa BMW');
+        $response->assertSee('Lampa Audi A4 przednia');
+        $response->assertDontSee('Lampa Audi A6 tylna');
+        $response->assertDontSee('Lampa BMW seria 4');
+    }
+
+    public function test_catalog_q_text_search_does_not_match_vehicle_data_when_name_does_not_match(): void
+    {
+        $a4 = Car::query()->create(['make' => 'Audi', 'model' => 'A4']);
+
+        Part::query()->create(['name' => 'Lampa przednia', 'car_id' => $a4->id, 'quantity' => 1, 'status' => 'published']);
+        Part::query()->create(['name' => 'Lampa Audi A4 prawa', 'quantity' => 1, 'status' => 'published']);
+
+        $response = $this->get('/czesci?q=audi+a4');
+
+        $response->assertOk();
+        $response->assertSee('Lampa Audi A4 prawa');
+        $response->assertDontSee('Lampa przednia');
     }
 
     public function test_catalog_q_search_matches_part_number_fields(): void
@@ -78,12 +85,12 @@ class StorefrontCatalogSearchTest extends TestCase
             'legacy_payload' => ['attributes' => ['vehicle_model' => 'Audi A4', 'oem_number' => '8K0907063']],
         ]);
 
-        Part::query()->create(['name' => 'Zacisk hamulcowy Audi', 'quantity' => 1, 'status' => 'published']);
+        Part::query()->create(['name' => 'Zacisk hamulcowy Audi A4', 'quantity' => 1, 'status' => 'published']);
 
-        $response = $this->get('/czesci?q=audi');
+        $response = $this->get('/czesci?q=audi+a4');
 
         $response->assertOk();
-        $response->assertSee('Zacisk hamulcowy Audi');
+        $response->assertSee('Zacisk hamulcowy Audi A4');
         $response->assertDontSee('Sterownik silnika');
     }
 
@@ -97,6 +104,16 @@ class StorefrontCatalogSearchTest extends TestCase
         $response->assertOk();
         $response->assertSee('Pasujący sterownik LED');
         $response->assertDontSee('Niepasujący sterownik');
+    }
+
+    public function test_catalog_q_unknown_text_search_returns_no_results(): void
+    {
+        Part::query()->create(['name' => 'Widoczna część katalogowa', 'quantity' => 1, 'status' => 'published']);
+
+        $response = $this->get('/czesci?q=nieistniejaca+fraza');
+
+        $response->assertOk();
+        $response->assertDontSee('Widoczna część katalogowa');
     }
 
     public function test_catalog_q_unknown_part_like_search_returns_no_results(): void

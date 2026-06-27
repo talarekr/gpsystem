@@ -454,33 +454,14 @@ class Part extends Model
 
         return $query->where(function (Builder $query) use ($tokens): void {
             foreach ($tokens as $token) {
-                $query->where(fn (Builder $tokenQuery) => $this->applyStorefrontSearchToken($tokenQuery, $token));
+                $query->where(fn (Builder $tokenQuery) => $this->applyStorefrontTitleSearchToken($tokenQuery, $token));
             }
         });
     }
 
-    private function applyStorefrontSearchToken(Builder $query, string $token): void
+    private function applyStorefrontTitleSearchToken(Builder $query, string $token): void
     {
-        $this->applyCaseInsensitiveLike($query, [
-            'name',
-            'sku',
-            'part_number',
-            'oem_number',
-            'manufacturer_code',
-        ], $token, true, 'parts');
-
-        $carColumns = $this->existingColumns('cars', [
-            'make',
-            'model',
-            'model_variant',
-            'engine_code',
-        ]);
-
-        if ($carColumns !== []) {
-            $query->orWhereHas('car', function (Builder $carQuery) use ($token, $carColumns): void {
-                $this->applyCaseInsensitiveLike($carQuery, $carColumns, $token, true, 'cars');
-            });
-        }
+        $this->applyCaseInsensitiveLike($query, ['name'], $token);
     }
 
     private function looksLikePartNumberQuery(string $value): bool
