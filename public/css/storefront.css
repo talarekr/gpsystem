@@ -524,3 +524,6 @@
         padding: 14px;
     }
 }
+
+/* Diagnostic marker: confirms the deployed storefront CSS includes the 2026-06-27 lightbox asset check. */
+.sf-css-debug-20260627-lightbox-fix { --loaded: 1; }
