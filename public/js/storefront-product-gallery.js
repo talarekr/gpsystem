@@ -19,6 +19,8 @@
             return;
         }
 
+        lightbox.classList.add('sf-lightbox');
+
         var images = thumbs.length ? thumbs.map(function (thumb) {
             return {
                 product: thumb.dataset.productSrc,
