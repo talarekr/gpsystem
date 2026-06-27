@@ -11,7 +11,7 @@ return new class extends Migration
         if (! Schema::hasTable('allegro_category_parameters_cache')) {
             Schema::create('allegro_category_parameters_cache', function (Blueprint $table): void {
                 $table->id();
-                $table->string('category_id')->unique();
+                $table->string('allegro_category_id')->unique();
                 $table->json('raw_response');
                 $table->timestamp('fetched_at')->nullable();
                 $table->timestamps();
@@ -27,7 +27,8 @@ return new class extends Migration
                 $table->string('source_field')->nullable();
                 $table->string('fixed_value_id')->nullable();
                 $table->string('fixed_value_label')->nullable();
-                $table->boolean('is_required_override')->nullable();
+                $table->boolean('enabled')->default(true);
+                $table->json('metadata')->nullable();
                 $table->timestamps();
                 $table->unique(['local_category_id', 'allegro_category_id', 'parameter_id'], 'allegro_parameter_mappings_unique');
             });

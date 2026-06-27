@@ -391,6 +391,7 @@ Route::get('/tools/dry-run-marketplace-listing-coverage', [MarketplaceListingDry
 Route::get('/tools/dry-run-marketplace-listing-coverage-all', [MarketplaceListingDryRunController::class, 'coverageAll'])->name('tools.dry-run-marketplace-listing-coverage-all');
 Route::get('/tools/export-marketplace-listing-coverage', [MarketplaceListingDryRunController::class, 'export'])->name('tools.export-marketplace-listing-coverage');
 Route::get('/tools/check-part-marketplace-preparation-payload', [PartMarketplaceReadinessController::class, 'payload'])->name('tools.check-part-marketplace-preparation-payload');
+Route::get('/tools/allegro-listing-preview', [MarketplaceListingDryRunController::class, 'allegroPreview'])->name('tools.allegro-listing-preview');
 Route::get('/tools/ebay-listing-preview', [PartMarketplaceReadinessController::class, 'ebayPreview'])->name('tools.ebay-listing-preview');
 Route::get('/tools/ebay-listing-preview-html', [PartMarketplaceReadinessController::class, 'ebayPreviewHtml'])->name('tools.ebay-listing-preview-html');
 Route::get('/tools/prepare-ebay-listing-translations', [PartMarketplaceReadinessController::class, 'prepareEbay'])->name('tools.prepare-ebay-listing-translations');

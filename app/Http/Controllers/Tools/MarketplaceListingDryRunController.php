@@ -70,6 +70,25 @@ class MarketplaceListingDryRunController extends Controller
         ]);
     }
 
+
+    public function allegroPreview(Request $request)
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+
+        $part = $this->part((int) $request->query('part_id'));
+        if (! $part) return response()->json(['ok' => false, 'blockers' => ['part_not_found'], 'part_id' => (int) $request->query('part_id')], 404);
+
+        $readiness = $this->readinessFor($part, 'allegro_main');
+        $payload = $this->payloadFor($part, 'allegro_main', $readiness);
+        $payload['will_make_marketplace_request'] = false;
+
+        return view('admin.marketplace.allegro-listing-preview', [
+            'part' => $part,
+            'readiness' => $readiness,
+            'preview' => $payload,
+        ]);
+    }
+
     public function coverage(Request $request): JsonResponse
     {
         if (! $this->validToken($request)) return $this->invalidTokenResponse();
