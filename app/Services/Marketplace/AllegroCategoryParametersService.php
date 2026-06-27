@@ -6,6 +6,7 @@ use App\Models\MarketplaceAccount;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
+use Throwable;
 
 class AllegroCategoryParametersService
 {
@@ -13,8 +14,12 @@ class AllegroCategoryParametersService
     {
         if ($categoryId === '') return ['ok' => false, 'source' => 'none', 'blocker' => 'allegro_category_mapping_missing', 'parameters' => []];
         if (Schema::hasTable('allegro_category_parameters_cache') && ! $refresh) {
-            $row = DB::table('allegro_category_parameters_cache')->where($this->cacheKeyColumn(), $categoryId)->first();
-            if ($row) return ['ok' => true, 'source' => 'cache', 'endpoint' => 'GET /sale/categories/{categoryId}/parameters', 'parameters' => $this->parameters((array) json_decode($row->raw_response, true))];
+            try {
+                $row = DB::table('allegro_category_parameters_cache')->where($this->cacheKeyColumn(), $categoryId)->first();
+                if ($row) return ['ok' => true, 'source' => 'cache', 'endpoint' => 'GET /sale/categories/{categoryId}/parameters', 'parameters' => $this->parameters((array) json_decode($row->raw_response, true))];
+            } catch (Throwable $exception) {
+                return $this->cacheError($exception);
+            }
         }
         $account = Schema::hasTable('marketplace_accounts') ? MarketplaceAccount::query()->where('code', 'allegro_main')->first() : null;
         $token = (string) data_get($account, 'api_credentials.access_token');
@@ -27,11 +32,16 @@ class AllegroCategoryParametersService
         }
         $payload = $response->json();
         if (Schema::hasTable('allegro_category_parameters_cache')) {
-            DB::table('allegro_category_parameters_cache')->updateOrInsert([$this->cacheKeyColumn() => $categoryId], ['raw_response' => json_encode($payload), 'fetched_at' => now(), 'created_at' => now(), 'updated_at' => now()]);
+            try {
+                DB::table('allegro_category_parameters_cache')->updateOrInsert([$this->cacheKeyColumn() => $categoryId], ['raw_response' => json_encode($payload), 'fetched_at' => now(), 'created_at' => now(), 'updated_at' => now()]);
+            } catch (Throwable $exception) {
+                return $this->cacheError($exception);
+            }
         }
         return ['ok' => true, 'source' => 'api', 'endpoint' => 'GET /sale/categories/{categoryId}/parameters', 'parameters' => $this->parameters($payload)];
     }
 
     private function parameters(array $payload): array { return array_values(array_filter($payload['parameters'] ?? [], 'is_array')); }
     private function cacheKeyColumn(): string { return Schema::hasColumn('allegro_category_parameters_cache', 'allegro_category_id') ? 'allegro_category_id' : 'category_id'; }
+    private function cacheError(Throwable $exception): array { return ['ok' => false, 'source' => 'cache', 'blocker' => 'allegro_category_parameters_cache_error', 'cache_error' => class_basename($exception), 'parameters' => []]; }
 }
