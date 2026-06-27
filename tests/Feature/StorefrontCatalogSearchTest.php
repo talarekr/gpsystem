@@ -26,6 +26,48 @@ class StorefrontCatalogSearchTest extends TestCase
         $response->assertDontSee('Lampa BMW');
     }
 
+    public function test_catalog_q_search_matches_vehicle_make_and_model_tokens(): void
+    {
+        $a4 = Car::query()->create(['make' => 'Audi', 'model' => 'A4']);
+        $a6 = Car::query()->create(['make' => 'Audi', 'model' => 'A6']);
+        $bmw = Car::query()->create(['make' => 'BMW', 'model' => '4']);
+
+        Part::query()->create(['name' => 'Lampa przednia', 'car_id' => $a4->id, 'quantity' => 1, 'status' => 'published']);
+        Part::query()->create(['name' => 'Lampa tylna', 'car_id' => $a6->id, 'quantity' => 1, 'status' => 'published']);
+        Part::query()->create(['name' => 'Lampa BMW', 'car_id' => $bmw->id, 'quantity' => 1, 'status' => 'published']);
+
+        $response = $this->get('/czesci?q=audi+a4');
+
+        $response->assertOk();
+        $response->assertSee('Lampa przednia');
+        $response->assertDontSee('Lampa tylna');
+        $response->assertDontSee('Lampa BMW');
+    }
+
+    public function test_catalog_q_search_matches_part_number_fields(): void
+    {
+        Part::query()->create(['name' => 'Pasujący moduł', 'part_number' => '6864719', 'quantity' => 1, 'status' => 'published']);
+        Part::query()->create(['name' => 'Inny moduł', 'part_number' => 'ABC999', 'quantity' => 1, 'status' => 'published']);
+
+        $response = $this->get('/czesci?q=6864719');
+
+        $response->assertOk();
+        $response->assertSee('Pasujący moduł');
+        $response->assertDontSee('Inny moduł');
+    }
+
+    public function test_catalog_without_q_keeps_standard_listing(): void
+    {
+        Part::query()->create(['name' => 'Pierwsza widoczna część', 'quantity' => 1, 'status' => 'published']);
+        Part::query()->create(['name' => 'Druga widoczna część', 'quantity' => 1, 'status' => 'published']);
+
+        $response = $this->get('/czesci');
+
+        $response->assertOk();
+        $response->assertSee('Pierwsza widoczna część');
+        $response->assertSee('Druga widoczna część');
+    }
+
     public function test_catalog_q_search_matches_legacy_payload_and_vehicle_snapshot(): void
     {
         Part::query()->create([
