@@ -52,10 +52,6 @@
                 </a>
 
                 @if ($editable)
-                    <div class="absolute bottom-1 left-1 z-10 flex gap-1">
-                        <button type="button" wire:click="movePartImage({{ $image->getKey() }}, 'left')" @disabled($index === 0) class="inline-flex h-7 w-7 items-center justify-center rounded-full border border-gray-200 bg-white/90 text-sm font-bold shadow-sm disabled:cursor-not-allowed disabled:opacity-40" aria-label="Przesuń zdjęcie w lewo" title="Przesuń w lewo">←</button>
-                        <button type="button" wire:click="movePartImage({{ $image->getKey() }}, 'right')" @disabled($index === $images->count() - 1) class="inline-flex h-7 w-7 items-center justify-center rounded-full border border-gray-200 bg-white/90 text-sm font-bold shadow-sm disabled:cursor-not-allowed disabled:opacity-40" aria-label="Przesuń zdjęcie w prawo" title="Przesuń w prawo">→</button>
-                    </div>
                     <div class="absolute left-1 top-1 z-10 rounded-full bg-white/90 px-2 py-1 text-xs font-semibold text-gray-700 shadow-sm">{{ $index === 0 ? 'Główne' : $index + 1 }}</div>
                     <button
                         type="button"
