@@ -482,3 +482,54 @@ body.sf-lightbox-open .sf-nav {
     pointer-events: none;
     z-index: 0;
 }
+
+/* Defensive storefront chrome hiding while the product lightbox is open. */
+body.sf-lightbox-open .sf-storefront-header,
+body.sf-lightbox-open .sf-storefront-header *,
+body.sf-lightbox-open .sf-top,
+body.sf-lightbox-open .sf-top *,
+body.sf-lightbox-open .sf-top__inner,
+body.sf-lightbox-open .sf-top__links,
+body.sf-lightbox-open .sf-language,
+body.sf-lightbox-open .sf-language-select,
+body.sf-lightbox-open .sf-main-row,
+body.sf-lightbox-open .sf-main-row *,
+body.sf-lightbox-open .sf-logo,
+body.sf-lightbox-open .sf-logo img,
+body.sf-lightbox-open .sf-search,
+body.sf-lightbox-open .sf-search *,
+body.sf-lightbox-open .sf-profile,
+body.sf-lightbox-open .sf-profile *,
+body.sf-lightbox-open .sf-account,
+body.sf-lightbox-open .sf-account *,
+body.sf-lightbox-open .sf-cart,
+body.sf-lightbox-open .sf-cart *,
+body.sf-lightbox-open .sf-nav,
+body.sf-lightbox-open .sf-nav *,
+body.sf-lightbox-open .sf-nav__inner,
+body.sf-lightbox-open .sf-nav__links,
+body.sf-lightbox-open .sf-menu,
+body.sf-lightbox-open .sf-menu *,
+body.sf-lightbox-open .sf-category-menu,
+body.sf-lightbox-open .sf-category-menu *,
+body.sf-lightbox-open .sf-phones,
+body.sf-lightbox-open .sf-phones *,
+body.sf-lightbox-open .sf-storefront-header img {
+    visibility: hidden !important;
+    pointer-events: none !important;
+    z-index: 0 !important;
+}
+
+body.sf-lightbox-open .sf-lightbox {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 2147483647 !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
+}
+
+body.sf-lightbox-open .sf-lightbox,
+body.sf-lightbox-open .sf-lightbox * {
+    visibility: visible !important;
+    pointer-events: auto !important;
+}

@@ -1,3 +1,4 @@
+<div class="sf-storefront-header" aria-label="Nagłówek sklepu">
 <header class="sf-top">
     <div class="sf-container sf-top__inner">
         <div class="sf-top__links">
@@ -65,3 +66,4 @@
     </div>
     <span class="sf-phones">📞 <a href="tel:+48504266984">+48 504 266 984</a>&nbsp;&nbsp; <a href="tel:+48579152665">+48 579 152 665</a></span>
 </div></nav>
+</div>
