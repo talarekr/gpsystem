@@ -5,6 +5,7 @@ namespace App\Filament\Resources\PartResource\Pages;
 use App\Filament\Resources\PartResource;
 use App\Models\PartCategory;
 use App\Models\PartImage;
+use App\Services\Marketplace\PreparePartMarketplaceListingService;
 use Filament\Actions;
 use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\Log;
@@ -169,16 +170,32 @@ class EditPart extends EditRecord
     {
         return [
             Actions\Action::make('markListingReady')
-                ->label('Oznacz jako gotowe')
+                ->label('Zapisz i wystaw')
                 ->icon('heroicon-o-check-circle')
                 ->color('success')
                 ->requiresConfirmation()
                 ->visible(fn (): bool => (bool) $this->record->needs_listing)
-                ->action(function (): void {
-                    $this->record->update(['needs_listing' => false]);
+                ->action(function (PreparePartMarketplaceListingService $prepareService): void {
+                    $this->save(false, false);
+                    $this->record->refresh();
+
+                    $blockers = $prepareService->localPublishBlockers($this->record);
+
+                    if ($blockers !== []) {
+                        Notification::make()
+                            ->title('Uzupełnij wymagane dane przed wystawieniem części.')
+                            ->body(implode(' | ', $blockers))
+                            ->danger()
+                            ->send();
+
+                        return;
+                    }
+
+                    $prepareService->preview($this->record, dryRun: true);
+                    $prepareService->markLocallyListed($this->record);
 
                     Notification::make()
-                        ->title('Część oznaczona jako gotowa')
+                        ->title('Część zapisana i zdjęta z kolejki do wystawienia. Marketplace: przygotowano lokalną walidację, bez wysyłki ofert.')
                         ->success()
                         ->send();
                 }),

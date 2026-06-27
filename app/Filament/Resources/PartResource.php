@@ -8,6 +8,7 @@ use App\Models\Car;
 use App\Models\Part;
 use App\Models\PartCategory;
 use App\Models\PartImage;
+use App\Services\Marketplace\PreparePartMarketplaceListingService;
 use App\Services\Parts\PartImageUploadService;
 use App\Models\StorageLocation;
 use App\Services\PartCategorySuggestionService;
@@ -666,12 +667,19 @@ class PartResource extends Resource
                 ->color('gray')
                 ->url(fn (Part $record): string => static::getUrl('view', ['record' => $record])),
             Tables\Actions\Action::make('mark_listing_ready')
-                ->label('Oznacz jako gotowe')
+                ->label('Zapisz i wystaw')
                 ->icon('heroicon-o-check-circle')
                 ->color('success')
                 ->requiresConfirmation()
                 ->visible(fn (Part $record): bool => (bool) $record->needs_listing)
-                ->action(fn (Part $record) => $record->update(['needs_listing' => false])),
+                ->action(function (Part $record, PreparePartMarketplaceListingService $prepareService): void {
+                    if ($prepareService->localPublishBlockers($record) !== []) {
+                        return;
+                    }
+
+                    $prepareService->preview($record, dryRun: true);
+                    $prepareService->markLocallyListed($record);
+                }),
         ])->defaultSort('id', 'desc');
     }
 
