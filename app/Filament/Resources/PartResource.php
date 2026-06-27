@@ -749,7 +749,7 @@ class PartResource extends Resource
 
         return [
             'allegro' => 'https://allegro.pl/listing?string='.$encoded,
-            'ovoko' => 'https://www.ovoko.pl/pl/search?q='.$encoded,
+            'ovoko' => 'https://ovoko.pl/szukaj?q='.$encoded,
             'ebay' => 'https://www.ebay.com/sch/i.html?_nkw='.$encoded,
         ];
     }
