@@ -7,6 +7,7 @@ use App\Models\Part;
 use App\Models\PartCategory;
 use App\Services\Marketplace\PartMarketplaceReadinessService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
@@ -156,6 +157,8 @@ class PartMarketplaceReadinessServiceTest extends TestCase
             \App\Models\MarketplaceAccount::query()->create(['marketplace' => $channel, 'name' => $channel, 'code' => $channel, 'status' => 'active', 'api_enabled' => true, 'api_settings' => []]);
         }
 
+        Cache::put('nbp_table_a_eur_rate', ['rate' => 4.30, 'effective_date' => '2026-06-27', 'table_no' => '123/A/NBP/2026']);
+
         $renderer = app(\App\Services\Marketplace\EbayDescriptionTemplateRenderer::class);
         $this->assertTrue($renderer->isAvailable('ebay_de'));
         $this->assertTrue($renderer->isAvailable('ebay_fr'));
@@ -188,6 +191,83 @@ class PartMarketplaceReadinessServiceTest extends TestCase
             $this->assertTrue($preview['description_rendered_present']);
             $this->assertArrayHasKey('icon_shipping', $preview['description_template_asset_urls']);
         }
+    }
+
+
+    public function test_ebay_de_preview_converts_source_pln_price_to_eur_with_nbp_rate(): void
+    {
+        Cache::put('nbp_table_a_eur_rate', ['rate' => 4.30, 'effective_date' => '2026-06-27', 'table_no' => '123/A/NBP/2026']);
+        $part = $this->ebayReadinessPart(['ebay_price' => 2.5, 'price' => 100]);
+
+        $readiness = app(\App\Services\Marketplace\MarketplaceListingReadinessService::class)->checkPartReadiness($part->fresh(), 'ebay_de');
+        $preview = $readiness['prepared_payload_preview_safe'];
+
+        $this->assertSame(2.5, $preview['price_source_pln']);
+        $this->assertSame(0.58, $preview['price_eur']);
+        $this->assertSame('EUR', $preview['currency']);
+        $this->assertSame('EUR', $readiness['currency']);
+        $this->assertSame(4.3, $preview['exchange_rate']['rate']);
+        $this->assertSame('NBP_TABLE_A', $preview['exchange_rate']['source']);
+        $this->assertTrue($preview['description_template_present']);
+        $this->assertFalse($preview['will_make_marketplace_request']);
+    }
+
+    public function test_ebay_fr_preview_uses_eur_currency(): void
+    {
+        Cache::put('nbp_table_a_eur_rate', ['rate' => 4.30, 'effective_date' => '2026-06-27']);
+        $part = $this->ebayReadinessPart(['ebay_price' => 2.5], 'ebay_fr');
+
+        $readiness = app(\App\Services\Marketplace\MarketplaceListingReadinessService::class)->checkPartReadiness($part->fresh(), 'ebay_fr');
+
+        $this->assertSame('EUR', $readiness['currency']);
+        $this->assertSame('EUR', $readiness['prepared_payload_preview_safe']['currency']);
+        $this->assertSame(0.58, $readiness['prepared_payload_preview_safe']['price_eur']);
+        $this->assertFalse($readiness['prepared_payload_preview_safe']['will_make_marketplace_request']);
+    }
+
+    public function test_ebay_readiness_blocks_when_nbp_rate_is_unavailable(): void
+    {
+        Cache::forget('nbp_table_a_eur_rate');
+        \Illuminate\Support\Facades\Http::fake(['api.nbp.pl/*' => \Illuminate\Support\Facades\Http::response([], 500)]);
+        $part = $this->ebayReadinessPart(['ebay_price' => 2.5]);
+
+        $readiness = app(\App\Services\Marketplace\MarketplaceListingReadinessService::class)->checkPartReadiness($part->fresh(), 'ebay_de');
+
+        $this->assertFalse($readiness['can_prepare']);
+        $this->assertContains('exchange_rate', $readiness['missing_fields']);
+        $this->assertContains('Brak kursu EUR z NBP.', $readiness['blockers']);
+        $this->assertFalse($readiness['prepared_payload_preview_safe']['will_make_marketplace_request']);
+    }
+
+    public function test_ebay_readiness_blocks_when_source_pln_price_is_zero(): void
+    {
+        Cache::put('nbp_table_a_eur_rate', ['rate' => 4.30, 'effective_date' => '2026-06-27']);
+        $part = $this->ebayReadinessPart(['ebay_price' => 0, 'price' => 0]);
+
+        $readiness = app(\App\Services\Marketplace\MarketplaceListingReadinessService::class)->checkPartReadiness($part->fresh(), 'ebay_de');
+
+        $this->assertFalse($readiness['can_prepare']);
+        $this->assertContains('ebay_price_pln', $readiness['missing_fields']);
+        $this->assertContains('price_eur', $readiness['missing_fields']);
+        $this->assertFalse($readiness['prepared_payload_preview_safe']['will_make_marketplace_request']);
+    }
+
+    private function ebayReadinessPart(array $attributes = [], string $channel = 'ebay_de'): Part
+    {
+        $category = PartCategory::query()->create(['name' => 'eBay test category']);
+        $part = Part::query()->create(array_merge([
+            'name' => 'eBay test part',
+            'description' => 'Opis testowy.',
+            'category_id' => $category->id,
+            'price' => 100,
+            'quantity' => 1,
+            'condition_notes' => 'Używany',
+        ], $attributes));
+
+        DB::table('part_images')->insert(['part_id' => $part->id, 'path' => 'parts/photos/ebay.jpg', 'sort_order' => 1, 'is_primary' => true, 'created_at' => now(), 'updated_at' => now()]);
+        MarketplaceCategoryMapping::query()->create(['local_category_id' => $category->id, 'channel' => $channel, 'external_category_id' => '123']);
+
+        return $part;
     }
 
 }

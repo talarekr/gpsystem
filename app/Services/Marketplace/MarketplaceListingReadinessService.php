@@ -14,7 +14,7 @@ class MarketplaceListingReadinessService
 {
     public const CHANNELS = ['storefront', 'allegro_main', 'ovoko', 'ebay_de', 'ebay_fr'];
 
-    public function __construct(private readonly TranslationService $translationService, private readonly EbayDescriptionTemplateRenderer $ebayDescriptionTemplateRenderer) {}
+    public function __construct(private readonly TranslationService $translationService, private readonly EbayDescriptionTemplateRenderer $ebayDescriptionTemplateRenderer, private readonly NbpExchangeRateService $exchangeRateService) {}
 
     /** @return array<string, mixed> */
     public function checkPartReadiness(Part $part, string $channel): array
@@ -35,13 +35,14 @@ class MarketplaceListingReadinessService
         $marketplace = $this->marketplaceCode($channel);
         $account = $this->accountFor($channel);
         $price = $this->priceFor($part, $channel);
+        $ebayPrice = str_starts_with($channel, 'ebay_') ? $this->resolveEbayPrice($price) : null;
         $images = $this->imagesFor($part);
         $imagesCount = $images->count();
         $hasActiveListing = $marketplace ? $this->hasActiveListing($part, $marketplace, $channel) : false;
         $categoryMapping = str_starts_with($channel, 'ebay_') ? $this->ebayCategoryMapping($part, $channel) : null;
 
         $this->requireFilled($part->name ?? null, 'title', $missing, $blockers);
-        $this->requirePositive($price, 'price', $missing, $blockers);
+        $this->requirePositive($price, str_starts_with($channel, 'ebay_') ? 'ebay_price_pln' : 'price', $missing, $blockers);
         $this->requirePositive($part->quantity ?? null, 'quantity', $missing, $blockers);
         if ($imagesCount < 1) {
             $missing[] = 'images';
@@ -75,8 +76,10 @@ class MarketplaceListingReadinessService
             if (! $descriptionReady && blank($part->condition_notes ?? null)) { $missing[] = 'description_or_condition'; $warnings[] = 'Ovoko description or condition notes are missing.'; }
             if (! $this->hasCompleteDimensions($part)) { $warnings[] = 'Ovoko dimensions are incomplete (weight_kg, length_cm, width_cm, height_cm).'; }
         } else {
-            $required = ['title', 'ebay_price_pln', 'quantity', 'images', 'ebay_category_mapping', 'translation_credentials', 'description_template', 'business_policies', 'marketplace_country'];
+            $required = ['title', 'ebay_price_pln', 'exchange_rate', 'price_eur', 'quantity', 'images', 'ebay_category_mapping', 'translation_credentials', 'description_template', 'business_policies', 'marketplace_country'];
             $this->checkEbayAccount($account, $blockers, $warnings);
+            if (! ($ebayPrice['exchange_rate_available'] ?? false)) { $missing[] = 'exchange_rate'; $blockers[] = 'Brak kursu EUR z NBP.'; }
+            if (! is_numeric($ebayPrice['price_eur'] ?? null) || (float) $ebayPrice['price_eur'] <= 0) { $missing[] = 'price_eur'; $blockers[] = 'eBay EUR price must be greater than zero.'; }
             if (! $categoryMapping) { $missing[] = 'ebay_category_mapping'; $blockers[] = 'ebay_category_mapping_missing'; }
             elseif ($categoryMapping->is_blocked) { $missing[] = 'ebay_category_mapping'; $blockers[] = 'ebay_category_blocked'; }
             elseif (blank($categoryMapping->external_category_id)) { $missing[] = 'ebay_category_mapping'; $blockers[] = 'ebay_category_mapping_missing'; }
@@ -99,11 +102,11 @@ class MarketplaceListingReadinessService
             'missing_fields' => $missing,
             'warnings' => $warnings,
             'blockers' => $blockers,
-            'prepared_payload_preview_safe' => $this->safePayloadPreview($part, $channel, $price, $categoryMapping),
+            'prepared_payload_preview_safe' => $this->safePayloadPreview($part, $channel, $price, $categoryMapping, $ebayPrice),
             'price_source' => $this->priceSource($channel),
             'local_price' => is_numeric($part->price ?? null) ? (float) $part->price : null,
-            'marketplace_price' => $price,
-            'currency' => 'PLN',
+            'marketplace_price' => $ebayPrice['price_eur'] ?? $price,
+            'currency' => str_starts_with($channel, 'ebay_') ? 'EUR' : 'PLN',
             'images_count' => $imagesCount,
             'has_required_images' => $imagesCount > 0,
             'category_ready' => $categoryReady,
@@ -185,6 +188,28 @@ class MarketplaceListingReadinessService
     private function ebayTemplateExists(string $channel): bool { try { return $this->ebayDescriptionTemplateRenderer->isAvailable($channel) || filled(config('marketplace.ebay.templates.'.$channel)) || view()->exists('marketplace.ebay.templates.'.$channel); } catch (\Throwable) { return false; } }
     private function ebayBusinessPoliciesReady(?MarketplaceAccount $account): bool { $settings = is_array($account?->api_settings) ? $account->api_settings : []; return filled(Arr::get($settings, 'business_policies.payment')) && filled(Arr::get($settings, 'business_policies.fulfillment')) && filled(Arr::get($settings, 'business_policies.return')); }
 
+
+    /** @return array<string, mixed> */
+    private function resolveEbayPrice(?float $sourcePricePln): array
+    {
+        $conversion = $this->exchangeRateService->eurPln();
+        $rate = is_numeric($conversion['rate'] ?? null) ? (float) $conversion['rate'] : null;
+        $priceEur = $sourcePricePln !== null && $sourcePricePln > 0 && $rate !== null && $rate > 0 ? round($sourcePricePln / $rate, 2) : null;
+
+        return [
+            'price_source_pln' => $sourcePricePln,
+            'price_eur' => $priceEur,
+            'exchange_rate_available' => $rate !== null && $rate > 0,
+            'exchange_rate' => $rate === null ? null : [
+                'source' => 'NBP_TABLE_A',
+                'currency' => 'EUR',
+                'rate' => $rate,
+                'effective_date' => $conversion['effective_date'] ?? null,
+                'table_no' => $conversion['table_no'] ?? null,
+            ],
+        ];
+    }
+
     private function ebayCategoryMapping(Part $part, string $channel): ?MarketplaceCategoryMapping
     {
         if (! Schema::hasTable('marketplace_category_mappings') || blank($part->category_id ?? null)) {
@@ -199,11 +224,16 @@ class MarketplaceListingReadinessService
     }
     private function hasActiveListing(Part $part, ?string $marketplace, string $channel): bool { if (! $marketplace || ! Schema::hasTable('marketplace_listings')) return false; return MarketplaceListing::query()->where('part_id', $part->id)->where('marketplace', $marketplace)->whereNotNull('external_offer_id')->whereNotIn('status', ['ended', 'deleted', 'archived', 'inactive'])->exists(); }
     /** @return array<string, mixed> */
-    private function safePayloadPreview(Part $part, string $channel, ?float $price, ?MarketplaceCategoryMapping $categoryMapping = null): array
+    private function safePayloadPreview(Part $part, string $channel, ?float $price, ?MarketplaceCategoryMapping $categoryMapping = null, ?array $ebayPrice = null): array
     {
         $preview = ['dry_run' => true, 'channel' => $channel, 'sku' => $part->sku ?? null, 'title' => $part->name ?? null, 'description_present' => filled(strip_tags((string) (($part->description ?? null) ?: ($part->short_description ?? null)))), 'condition_notes_present' => filled($part->condition_notes ?? null), 'price_pln' => $price, 'quantity' => $part->quantity ?? null, 'currency' => 'PLN', 'dimensions' => $this->dimensionsPayload($part), 'image_urls' => $this->imagesFor($part)->take(5)->map(fn ($image) => method_exists($image, 'listingUrl') ? $image->listingUrl() : null)->filter()->values()->all(), 'category_id' => $categoryMapping?->external_category_id ?? ($part->category_id ?? null), 'category_mapping_source' => $categoryMapping ? 'marketplace_category_mappings' : null, 'category_mapping_channel' => $categoryMapping?->channel, 'local_category_id' => $part->category_id ?? null, 'vehicle' => ['car_id' => $part->car_id ?? null, 'snapshot_present' => is_array($part->vehicle_snapshot ?? null)], 'will_make_marketplace_request' => false];
 
         if (str_starts_with($channel, 'ebay_')) {
+            $preview['price_source_pln'] = $price;
+            $preview['price_pln'] = $price;
+            $preview['price_eur'] = $ebayPrice['price_eur'] ?? null;
+            $preview['currency'] = 'EUR';
+            $preview['exchange_rate'] = $ebayPrice['exchange_rate'] ?? null;
             $rendered = $this->ebayTemplateExists($channel) ? $this->ebayDescriptionTemplateRenderer->render($channel, $part) : '';
             $preview['description_template_present'] = $this->ebayTemplateExists($channel);
             $preview['description_template_channel'] = $channel;
