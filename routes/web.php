@@ -391,6 +391,7 @@ Route::get('/tools/dry-run-marketplace-listing-coverage', [MarketplaceListingDry
 Route::get('/tools/dry-run-marketplace-listing-coverage-all', [MarketplaceListingDryRunController::class, 'coverageAll'])->name('tools.dry-run-marketplace-listing-coverage-all');
 Route::get('/tools/export-marketplace-listing-coverage', [MarketplaceListingDryRunController::class, 'export'])->name('tools.export-marketplace-listing-coverage');
 Route::get('/tools/check-part-marketplace-preparation-payload', [PartMarketplaceReadinessController::class, 'payload'])->name('tools.check-part-marketplace-preparation-payload');
+Route::get('/tools/ebay-listing-preview', [PartMarketplaceReadinessController::class, 'ebayPreview'])->name('tools.ebay-listing-preview');
 Route::get('/tools/marketplace-publish-part-preview', [MarketplacePublishPartController::class, 'preview'])->name('tools.marketplace-publish-part-preview');
 Route::get('/tools/marketplace-publish-part-confirm', [MarketplacePublishPartController::class, 'confirm'])->name('tools.marketplace-publish-part-confirm');
 Route::get('/tools/check-admin-parts-table-ui', CheckAdminPartsTableUiController::class)->name('tools.check-admin-parts-table-ui');
