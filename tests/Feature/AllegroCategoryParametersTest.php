@@ -5,10 +5,13 @@ namespace Tests\Feature;
 use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceCategoryMapping;
 use App\Models\Part;
+use App\Services\Marketplace\AllegroCategoryParametersService;
 use App\Services\Marketplace\MarketplaceListingReadinessService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
 class AllegroCategoryParametersTest extends TestCase
@@ -62,6 +65,80 @@ class AllegroCategoryParametersTest extends TestCase
 
         Http::assertNothingSent();
         $this->assertSame('cache', $result['prepared_payload_preview_safe']['parameter_definitions_source']);
+    }
+
+
+    public function test_fix_migration_backfills_old_category_id_not_null_cache_schema(): void
+    {
+        Schema::dropIfExists('allegro_category_parameters_cache');
+        Schema::create('allegro_category_parameters_cache', function (Blueprint $table): void {
+            $table->id();
+            $table->string('category_id');
+            $table->json('raw_response');
+            $table->timestamp('fetched_at')->nullable();
+            $table->timestamps();
+        });
+        DB::table('allegro_category_parameters_cache')->insert(['category_id' => '261054', 'raw_response' => json_encode($this->parametersPayload()), 'fetched_at' => now(), 'created_at' => now(), 'updated_at' => now()]);
+
+        (require database_path('migrations/2026_06_27_000003_fix_allegro_category_parameters_cache_schema.php'))->up();
+
+        $this->assertTrue(Schema::hasColumn('allegro_category_parameters_cache', 'allegro_category_id'));
+        $this->assertFalse(Schema::hasColumn('allegro_category_parameters_cache', 'category_id'));
+        $this->assertDatabaseHas('allegro_category_parameters_cache', ['allegro_category_id' => '261054']);
+    }
+
+    public function test_fix_migration_removes_legacy_category_id_when_allegro_category_id_already_exists(): void
+    {
+        Schema::dropIfExists('allegro_category_parameters_cache');
+        Schema::create('allegro_category_parameters_cache', function (Blueprint $table): void {
+            $table->id();
+            $table->string('allegro_category_id')->nullable();
+            $table->string('category_id');
+            $table->json('raw_response');
+            $table->timestamp('fetched_at')->nullable();
+            $table->timestamps();
+        });
+        DB::table('allegro_category_parameters_cache')->insert(['allegro_category_id' => '261054', 'category_id' => '261054', 'raw_response' => json_encode($this->parametersPayload()), 'fetched_at' => now(), 'created_at' => now(), 'updated_at' => now()]);
+
+        (require database_path('migrations/2026_06_27_000003_fix_allegro_category_parameters_cache_schema.php'))->up();
+
+        $this->assertTrue(Schema::hasColumn('allegro_category_parameters_cache', 'allegro_category_id'));
+        $this->assertFalse(Schema::hasColumn('allegro_category_parameters_cache', 'category_id'));
+        $this->assertDatabaseHas('allegro_category_parameters_cache', ['allegro_category_id' => '261054']);
+    }
+
+    public function test_cache_insert_uses_allegro_category_id_for_category_261054(): void
+    {
+        Http::fake(['https://api.allegro.pl/sale/categories/261054/parameters' => Http::response($this->parametersPayload(), 200)]);
+        MarketplaceAccount::query()->create(['code' => 'allegro_main', 'marketplace' => 'allegro', 'name' => 'Allegro', 'status' => 'active', 'api_base_url' => 'https://api.allegro.pl', 'api_credentials' => ['access_token' => 'token']]);
+
+        $result = app(AllegroCategoryParametersService::class)->definitions('261054');
+
+        $this->assertTrue($result['ok']);
+        $this->assertDatabaseHas('allegro_category_parameters_cache', ['allegro_category_id' => '261054']);
+        Http::assertSent(fn ($request) => $request->method() === 'GET');
+        Http::assertNotSent(fn ($request) => in_array($request->method(), ['POST', 'PUT', 'PATCH'], true));
+    }
+
+    public function test_cache_schema_error_returns_safe_blocker_instead_of_query_exception(): void
+    {
+        Schema::dropIfExists('allegro_category_parameters_cache');
+        Schema::create('allegro_category_parameters_cache', function (Blueprint $table): void {
+            $table->id();
+            $table->string('allegro_category_id')->unique();
+            $table->string('category_id');
+            $table->json('raw_response');
+            $table->timestamp('fetched_at')->nullable();
+            $table->timestamps();
+        });
+        Http::fake(['https://api.allegro.pl/sale/categories/261054/parameters' => Http::response($this->parametersPayload(), 200)]);
+        MarketplaceAccount::query()->create(['code' => 'allegro_main', 'marketplace' => 'allegro', 'name' => 'Allegro', 'status' => 'active', 'api_base_url' => 'https://api.allegro.pl', 'api_credentials' => ['access_token' => 'token']]);
+
+        $result = app(AllegroCategoryParametersService::class)->definitions('261054');
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('allegro_category_parameters_cache_error', $result['blocker']);
+        $this->assertArrayNotHasKey('token', $result);
     }
 
     private function parametersPayload(bool $requireSide = false): array
