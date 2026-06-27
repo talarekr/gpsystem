@@ -316,28 +316,21 @@ body,
 :root {
     --gps-admin-topbar-height: 4rem;
     --gps-admin-sidebar-collapsed-width: 4.75rem;
-    --gps-admin-content-max-width: 80rem;
 }
 
 .gps-admin-topbar {
     position: fixed;
     inset: 0 0 auto 0;
     z-index: 60;
+    display: grid;
+    grid-template-columns: auto minmax(18rem, 1fr) auto;
+    align-items: center;
+    gap: 1rem;
     min-height: var(--gps-admin-topbar-height);
     padding: 0.625rem clamp(0.875rem, 2vw, 1.5rem);
     border-bottom: 1px solid var(--gps-admin-border);
     background: #fff;
     box-shadow: 0 1px 2px rgba(11, 31, 58, 0.05), 0 8px 22px rgba(11, 31, 58, 0.04);
-}
-
-.gps-admin-topbar__inner {
-    display: grid;
-    grid-template-columns: auto minmax(18rem, 1fr) auto;
-    align-items: center;
-    gap: 1rem;
-    width: 100%;
-    max-width: var(--gps-admin-content-max-width);
-    margin-inline: auto;
 }
 
 .gps-admin-topbar__left,
@@ -375,7 +368,7 @@ body,
 
 .gps-admin-topbar__brand { gap: 0.625rem; color: var(--gps-admin-navy); font-weight: 800; text-decoration: none; white-space: nowrap; }
 .gps-admin-topbar__brand-mark { display: inline-flex; width: 3.2rem; height: 2.35rem; align-items: center; justify-content: center; overflow: hidden; border-radius: 0.75rem; background: #fff; }
-.gps-admin-topbar__brand-mark img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center; }
+.gps-admin-topbar__brand-mark img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
 .gps-admin-topbar__brand-name { font-size: 1rem; }
 
 .gps-admin-search { position: relative; width: min(46rem, 100%); min-width: 12rem; }
@@ -421,7 +414,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 }
 
 @media (max-width: 900px) {
-    .gps-admin-topbar__inner { grid-template-columns: 1fr auto; gap: 0.65rem; }
+    .gps-admin-topbar { grid-template-columns: 1fr auto; gap: 0.65rem; }
     .gps-admin-topbar__center { grid-column: 1 / -1; order: 3; }
     .gps-admin-topbar__brand-name, .gps-admin-topbar__action span:not(:first-child), .gps-admin-topbar__user strong { display: none; }
     :root { --gps-admin-topbar-height: 7.25rem; }
