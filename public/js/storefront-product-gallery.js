@@ -1,6 +1,41 @@
 (function () {
     'use strict';
 
+    // Runtime lightbox diagnostics: header selector is `.sf-storefront-header`,
+    // lightbox selector is `[data-gallery-lightbox]`, and the inline fallback
+    // removes the header from layout independently from z-index stacking.
+    function hideStorefrontHeaderForLightbox() {
+        var header = document.querySelector('.sf-storefront-header');
+
+        if (!header) {
+            return;
+        }
+
+        if (!Object.prototype.hasOwnProperty.call(header.dataset, 'lightboxPreviousDisplay')) {
+            header.dataset.lightboxPreviousDisplay = header.style.display || '';
+        }
+
+        if (!Object.prototype.hasOwnProperty.call(header.dataset, 'lightboxPreviousPointerEvents')) {
+            header.dataset.lightboxPreviousPointerEvents = header.style.pointerEvents || '';
+        }
+
+        header.style.display = 'none';
+        header.style.pointerEvents = 'none';
+    }
+
+    function restoreStorefrontHeaderAfterLightbox() {
+        var header = document.querySelector('.sf-storefront-header');
+
+        if (!header) {
+            return;
+        }
+
+        header.style.display = header.dataset.lightboxPreviousDisplay || '';
+        header.style.pointerEvents = header.dataset.lightboxPreviousPointerEvents || '';
+        delete header.dataset.lightboxPreviousDisplay;
+        delete header.dataset.lightboxPreviousPointerEvents;
+    }
+
     function initGallery(gallery) {
         var mainImage = gallery.querySelector('[data-gallery-main]');
         var openButton = gallery.querySelector('[data-gallery-open]');
@@ -73,6 +108,7 @@
             lightbox.hidden = false;
             lightbox.setAttribute('aria-hidden', 'false');
             document.body.classList.add('sf-lightbox-open');
+            hideStorefrontHeaderForLightbox();
             var closeButton = lightbox.querySelector('.sf-lightbox__close');
             if (closeButton) {
                 closeButton.focus({ preventScroll: true });
@@ -83,11 +119,13 @@
             lightbox.hidden = true;
             lightbox.setAttribute('aria-hidden', 'true');
             document.body.classList.remove('sf-lightbox-open');
+            restoreStorefrontHeaderAfterLightbox();
             openButton.focus({ preventScroll: true });
         }
 
         if (lightbox.hidden) {
             document.body.classList.remove('sf-lightbox-open');
+            restoreStorefrontHeaderAfterLightbox();
         }
 
         thumbs.forEach(function (thumb, index) {
