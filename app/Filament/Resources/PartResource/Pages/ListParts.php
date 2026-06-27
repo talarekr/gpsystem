@@ -6,6 +6,8 @@ use App\Filament\Resources\PartResource;
 use App\Models\Car;
 use App\Models\Part;
 use App\Models\StorageLocation;
+use App\Services\Marketplace\PreparePartMarketplaceListingService;
+use Filament\Notifications\Notification;
 use Filament\Actions;
 use Filament\Resources\Pages\Page;
 use Filament\Support\Enums\MaxWidth;
@@ -123,7 +125,37 @@ class ListParts extends Page
 
     public function markListingReady(int $partId): void
     {
-        Part::query()->whereKey($partId)->where('needs_listing', true)->update(['needs_listing' => false]);
+        $part = Part::query()->whereKey($partId)->where('needs_listing', true)->first();
+
+        if (! $part) {
+            return;
+        }
+
+        $prepareService = app(PreparePartMarketplaceListingService::class);
+        $blockers = $prepareService->localPublishBlockers($part);
+
+        if ($blockers !== []) {
+            Notification::make()
+                ->title('Uzupełnij wymagane dane przed wystawieniem części.')
+                ->body(implode(' | ', $blockers))
+                ->danger()
+                ->send();
+
+            return;
+        }
+
+        $prepareService->preview($part, dryRun: true);
+        $prepareService->markLocallyListed($part);
+
+        Notification::make()
+            ->title('Część zapisana i zdjęta z kolejki do wystawienia. Marketplace: przygotowano lokalną walidację, bez wysyłki ofert.')
+            ->success()
+            ->send();
+    }
+
+    public function getShowListingReadyActionProperty(): bool
+    {
+        return false;
     }
 
     public function getActiveFiltersCountProperty(): int
@@ -177,9 +209,15 @@ class ListParts extends Page
         return Car::query()->orderBy('make')->orderBy('model')->limit(300)->get()->mapWithKeys(fn (Car $car): array => [$car->id => PartResource::carLabel($car)])->all();
     }
 
+
+    protected function getPartsBaseQuery(): Builder
+    {
+        return PartResource::adminAllPartsQuery();
+    }
+
     protected function getPartsQuery(): Builder
     {
-        $query = PartResource::adminAllPartsQuery()->with([
+        $query = $this->getPartsBaseQuery()->with([
             'images:id,part_id,path,sort_order,is_primary',
             'marketplaceListings:id,part_id,marketplace,external_offer_id,price,currency,status,sync_status,match_status,last_error,url,last_api_status,last_seen_at,not_seen_in_active_api_at',
             'storageLocation:id,name,description',
