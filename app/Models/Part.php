@@ -452,16 +452,29 @@ class Part extends Model
         $tokens = preg_split('/\s+/u', $value) ?: [];
         $tokens = array_values(array_unique(array_filter($tokens, static fn (string $token): bool => $token !== '')));
 
-        return $query->where(function (Builder $query) use ($tokens): void {
-            foreach ($tokens as $token) {
-                $query->where(fn (Builder $tokenQuery) => $this->applyStorefrontTitleSearchToken($tokenQuery, $token));
-            }
-        });
+        if ($tokens === []) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        // Storefront text q version: name_only_text_q.
+        // Text search intentionally filters only parts.name and combines tokens with AND.
+        foreach ($tokens as $token) {
+            $this->applyStorefrontNameSearchToken($query, $token);
+        }
+
+        return $query;
     }
 
-    private function applyStorefrontTitleSearchToken(Builder $query, string $token): void
+    private function applyStorefrontNameSearchToken(Builder $query, string $token): void
     {
-        $this->applyCaseInsensitiveLike($query, ['name'], $token);
+        $grammar = $query->getQuery()->getGrammar();
+        $driver = $query->getConnection()->getDriverName();
+        $wrapped = $grammar->wrap('parts.name');
+        $cast = in_array($driver, ['mysql', 'mariadb'], true)
+            ? "CAST($wrapped AS CHAR)"
+            : "CAST($wrapped AS TEXT)";
+
+        $query->whereRaw("LOWER(COALESCE($cast, '')) LIKE ?", ['%'.mb_strtolower($token).'%']);
     }
 
     private function looksLikePartNumberQuery(string $value): bool
