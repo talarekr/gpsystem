@@ -156,6 +156,7 @@ class MarketplaceListingDryRunController extends Controller
         elseif (blank($mapping->external_category_id)) $blockers[] = 'missing_external_category_id';
         if ($channel === 'allegro_main' && ! $mapping) $blockers[] = 'allegro_category_mapping_required_no_guessing';
         if ($channel === 'ovoko' && blank($part->car_id) && ! is_array($part->vehicle_snapshot)) $warnings[] = 'missing_donor_vehicle_data';
+        if ($channel === 'ovoko' && ! $this->hasCompleteDimensions($part)) $warnings[] = 'missing_ovoko_dimensions';
 
         $blockers = array_values(array_unique($blockers));
         $ready = $blockers === [];
@@ -189,6 +190,8 @@ class MarketplaceListingDryRunController extends Controller
             'price' => ['amount' => $channel === 'ovoko' ? $readiness['price']['ovoko_price'] : $readiness['price']['allegro_price'], 'currency' => 'PLN'],
             'quantity' => (int) $part->quantity,
             'images' => $readiness['images']['public_urls_sample'],
+            'image_urls' => $readiness['images']['public_urls_sample'],
+            'dimensions' => $this->dimensionsPayload($part),
             'description' => $description,
             'existing_listing' => $readiness['existing_listing'],
             'local_mapping' => ['part_id' => $part->id, 'marketplace_listing_id' => $readiness['existing_listing']['marketplace_listing_id']],
@@ -250,6 +253,8 @@ class MarketplaceListingDryRunController extends Controller
         return $query->orderBy('id');
     }
 
+    private function hasCompleteDimensions(Part $part): bool { foreach (['weight_kg', 'length_cm', 'width_cm', 'height_cm'] as $field) { if (! is_numeric($part->{$field} ?? null) || (float) $part->{$field} <= 0) return false; } return true; }
+    private function dimensionsPayload(Part $part): array { return ['weight_kg' => is_numeric($part->weight_kg ?? null) ? (float) $part->weight_kg : null, 'length_cm' => is_numeric($part->length_cm ?? null) ? (float) $part->length_cm : null, 'width_cm' => is_numeric($part->width_cm ?? null) ? (float) $part->width_cm : null, 'height_cm' => is_numeric($part->height_cm ?? null) ? (float) $part->height_cm : null]; }
     private function plannedAction(array $readiness): string { if (($readiness['blockers'] ?? []) !== []) return 'blocked'; return ($readiness['existing_listing']['exists'] ?? false) ? 'update' : 'create'; }
     private function channel(Request $request): string { return (string) $request->query('channel', 'ovoko'); }
     private function validToken(Request $request): bool { return hash_equals(self::TOKEN, (string) $request->query('token', '')); }

@@ -92,4 +92,44 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $this->assertSame('Uzupełnij braki', $presentation['message']);
         $this->assertTrue($presentation['safe_preview_only']);
     }
+    public function test_marketplace_readiness_payload_uses_admin_image_order_and_includes_ovoko_dimensions_warning_only(): void
+    {
+        $category = PartCategory::query()->create(['name' => 'Lampy']);
+        $part = Part::query()->create([
+            'name' => 'Lampa prawa',
+            'description' => 'Opis lampy.',
+            'category_id' => $category->id,
+            'price' => 100,
+            'ovoko_price' => 120,
+            'quantity' => 1,
+            'vehicle_snapshot' => ['make' => 'BMW'],
+            'weight_kg' => 1.5,
+            'length_cm' => 50,
+            'width_cm' => 25,
+            'height_cm' => 20,
+        ]);
+
+        DB::table('part_images')->insert([
+            ['part_id' => $part->id, 'path' => 'parts/photos/second.jpg', 'sort_order' => 20, 'is_primary' => false, 'created_at' => now(), 'updated_at' => now()],
+            ['part_id' => $part->id, 'path' => 'parts/photos/first.jpg', 'sort_order' => 10, 'is_primary' => true, 'created_at' => now(), 'updated_at' => now()],
+        ]);
+
+        MarketplaceCategoryMapping::query()->create(['local_category_id' => $category->id, 'channel' => 'ovoko', 'external_category_id' => 'OV-1']);
+
+        $readiness = app(\App\Services\Marketplace\MarketplaceListingReadinessService::class)->checkPartReadiness($part->fresh(), 'ovoko');
+
+        $this->assertSame([
+            'first.jpg',
+            'second.jpg',
+        ], array_map('basename', $readiness['prepared_payload_preview_safe']['image_urls']));
+        $this->assertSame(['weight_kg' => 1.5, 'length_cm' => 50.0, 'width_cm' => 25.0, 'height_cm' => 20.0], $readiness['prepared_payload_preview_safe']['dimensions']);
+        $this->assertNotContains('weight_kg', $readiness['missing_fields']);
+        $this->assertNotContains('Ovoko dimensions are incomplete (weight_kg, length_cm, width_cm, height_cm).', $readiness['warnings']);
+
+        $part->forceFill(['height_cm' => null])->save();
+        $withWarning = app(\App\Services\Marketplace\MarketplaceListingReadinessService::class)->checkPartReadiness($part->fresh(), 'ovoko');
+        $this->assertContains('Ovoko dimensions are incomplete (weight_kg, length_cm, width_cm, height_cm).', $withWarning['warnings']);
+        $this->assertNotContains('height_cm', $withWarning['missing_fields']);
+    }
+
 }
