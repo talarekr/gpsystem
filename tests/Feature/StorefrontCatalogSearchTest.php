@@ -51,6 +51,42 @@ class StorefrontCatalogSearchTest extends TestCase
         $response->assertDontSee('Lampa przednia');
     }
 
+
+    public function test_catalog_q_audi_a4_contains_only_matching_name_tokens(): void
+    {
+        Part::query()->create(['name' => 'AUDI A4 LAMPA PRAWA', 'quantity' => 1, 'status' => 'published']);
+        Part::query()->create(['name' => 'BMW E90 LAMPA PRAWA', 'quantity' => 1, 'status' => 'published']);
+
+        $response = $this->get('/czesci?q=audi+a4');
+
+        $response->assertOk();
+        $response->assertSee('AUDI A4 LAMPA PRAWA');
+        $response->assertDontSee('BMW E90 LAMPA PRAWA');
+    }
+
+    public function test_catalog_q_unknown_letters_only_text_search_returns_no_results(): void
+    {
+        Part::query()->create(['name' => 'AUDI A4 LAMPA PRAWA', 'quantity' => 1, 'status' => 'published']);
+        Part::query()->create(['name' => 'BMW E90 LAMPA PRAWA', 'quantity' => 1, 'status' => 'published']);
+
+        $response = $this->get('/czesci?q=nieistniejacafraza');
+
+        $response->assertOk();
+        $response->assertDontSee('AUDI A4 LAMPA PRAWA');
+        $response->assertDontSee('BMW E90 LAMPA PRAWA');
+    }
+
+    public function test_search_storefront_text_query_adds_and_name_where_clauses(): void
+    {
+        $query = Part::query()->searchStorefront('audi a4');
+        $sql = $query->toSql();
+
+        $this->assertStringContainsString('parts.name', $sql);
+        $this->assertSame(['%audi%', '%a4%'], $query->getBindings());
+        $this->assertSame(2, substr_count(strtolower($sql), ' like '));
+        $this->assertStringNotContainsString(' or ', strtolower($sql));
+    }
+
     public function test_catalog_q_search_matches_part_number_fields(): void
     {
         Part::query()->create(['name' => 'Pasujący moduł', 'part_number' => '6864719', 'quantity' => 1, 'status' => 'published']);
