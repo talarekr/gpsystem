@@ -148,6 +148,81 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $this->assertNotSame('Uzupełnij braki', $presentation['message']);
         $this->assertTrue($presentation['safe_preview_only']);
     }
+
+    public function test_marketplace_category_field_uses_short_visible_label_with_full_title(): void
+    {
+        $category = PartCategory::query()->create(['name' => 'Elektronika']);
+        $part = Part::query()->create(['name' => 'Moduł kierownicy', 'category_id' => $category->id, 'quantity' => 1]);
+        $longName = 'Część elektroniczna układu kierowniczego bardzo długa';
+        $fullPath = 'Ovoko / Kierownica / '.$longName;
+
+        MarketplaceCategoryMapping::query()->create([
+            'local_category_id' => $category->id,
+            'channel' => 'ovoko',
+            'external_category_id' => 'OV-LONG',
+            'external_category_name' => $longName,
+            'external_category_path' => $fullPath,
+        ]);
+
+        $result = app(PartMarketplaceReadinessService::class)->check($part->fresh());
+        $html = view('filament.resources.parts.marketplace-readiness-cards', ['part' => $part->fresh()])->render();
+
+        $this->assertSame($longName, $result['ovoko']['presentation']['category']['display_name']);
+        $this->assertSame('Część elektroniczna...', $result['ovoko']['presentation']['category']['short_display_name']);
+        $this->assertStringContainsString('>Część elektroniczna...</span>', $html);
+        $this->assertStringNotContainsString('>'.$longName.'</span>', $html);
+        $this->assertStringContainsString('title="Ovoko / Kierownica / Część elektroniczna układu kierowniczego bardzo długa"', $html);
+        $this->assertStringContainsString('data-shared-category-trigger', $html);
+        $this->assertStringContainsString('heroicon-m-bars-3', $html);
+        $this->assertFalse($result['ovoko']['will_make_marketplace_request']);
+        $this->assertDatabaseCount('marketplace_listings', 0);
+    }
+
+    public function test_marketplace_category_field_keeps_short_two_word_names_unsuffixed(): void
+    {
+        $category = PartCategory::query()->create(['name' => 'Nadwozie']);
+        $part = Part::query()->create(['name' => 'Atrapa', 'category_id' => $category->id, 'quantity' => 1]);
+
+        MarketplaceCategoryMapping::query()->create([
+            'local_category_id' => $category->id,
+            'channel' => 'allegro_main',
+            'external_category_id' => 'ALG-GRILLE',
+            'external_category_name' => 'Atrapy chłodnicy',
+            'external_category_path' => 'Motoryzacja / Atrapy chłodnicy',
+        ]);
+
+        $result = app(PartMarketplaceReadinessService::class)->check($part->fresh());
+
+        $this->assertSame('Atrapy chłodnicy', $result['allegro']['presentation']['category']['short_display_name']);
+        $this->assertFalse($result['allegro']['will_make_marketplace_request']);
+        $this->assertDatabaseCount('marketplace_listings', 0);
+    }
+
+    public function test_ebay_long_path_uses_only_shortened_leaf_as_visible_category_label(): void
+    {
+        $category = PartCategory::query()->create(['name' => 'Elektronika']);
+        $part = Part::query()->create(['name' => 'Sterownik', 'category_id' => $category->id, 'quantity' => 1]);
+        $path = 'Vehicle Parts & Accessories / Car Parts / Steering Systems / Electronic Steering Control Modules';
+
+        MarketplaceCategoryMapping::query()->create([
+            'local_category_id' => $category->id,
+            'channel' => 'ebay_de',
+            'external_category_id' => 'EB-LONG',
+            'external_category_path' => $path,
+        ]);
+
+        $result = app(PartMarketplaceReadinessService::class)->check($part->fresh());
+        $html = view('filament.resources.parts.marketplace-readiness-cards', ['part' => $part->fresh()])->render();
+
+        $this->assertSame('Electronic Steering Control Modules', $result['ebay']['presentation']['category']['display_name']);
+        $this->assertSame('Electronic Steering...', $result['ebay']['presentation']['category']['short_display_name']);
+        $this->assertStringContainsString('>Electronic Steering...</span>', $html);
+        $this->assertStringNotContainsString('>Vehicle Parts &amp; Accessories / Car Parts / Steering Systems / Electronic Steering Control Modules</span>', $html);
+        $this->assertStringContainsString('title="Vehicle Parts &amp; Accessories / Car Parts / Steering Systems / Electronic Steering Control Modules"', $html);
+        $this->assertFalse($result['ebay']['will_make_marketplace_request']);
+        $this->assertDatabaseCount('marketplace_listings', 0);
+    }
+
     public function test_marketplace_preparation_panel_renders_three_operational_cards_without_old_technical_copy(): void
     {
         $category = PartCategory::query()->create(['name' => 'Alternatory']);

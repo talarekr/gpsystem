@@ -128,6 +128,7 @@ class PartCategoryPickerUiTest extends TestCase
         $editPage = file_get_contents(app_path('Filament/Resources/PartResource/Pages/EditPart.php'));
         $categoryPicker = file_get_contents(resource_path('views/filament/forms/category-picker.blade.php'));
         $marketplaceField = file_get_contents(resource_path('views/filament/resources/parts/marketplace-category-field.blade.php'));
+        $shell = file_get_contents(resource_path('views/filament/forms/category-field-shell.blade.php'));
 
         $this->assertStringContainsString("Action::make('chooseCategoryFromTree')", $resource);
         $this->assertStringContainsString("->extraModalWindowAttributes(['class' => 'gps-category-picker-modal'])", $resource);
@@ -143,6 +144,10 @@ class PartCategoryPickerUiTest extends TestCase
         $this->assertStringContainsString('x-text="`/ ${category.name}`"', $categoryPicker);
         $this->assertStringContainsString('x-bind:aria-label="`Pokaż podkategorie: ${category.name}`"', $categoryPicker);
         $this->assertStringContainsString('x-data="{ categoryDrawerOpen: false }"', $marketplaceField);
+        $this->assertStringContainsString('short_display_name', $marketplaceField);
+        $this->assertStringContainsString('min-h-10 min-w-0', $shell);
+        $this->assertStringContainsString('overflow-hidden truncate whitespace-nowrap', $shell);
+        $this->assertStringContainsString('text-ellipsis whitespace-nowrap', $shell);
         $this->assertStringContainsString('this.$refs.marketplaceForm.submit();', $categoryPicker);
     }
 
@@ -151,8 +156,14 @@ class PartCategoryPickerUiTest extends TestCase
         $marketplaceField = file_get_contents(resource_path('views/filament/resources/parts/marketplace-category-field.blade.php'));
         $categoryPicker = file_get_contents(resource_path('views/filament/forms/category-picker.blade.php'));
 
+        $shell = file_get_contents(resource_path('views/filament/forms/category-field-shell.blade.php'));
+
         $this->assertStringContainsString('categoryDrawerOpen', $marketplaceField);
         $this->assertStringContainsString('x-data="{ categoryDrawerOpen: false }"', $marketplaceField);
+        $this->assertStringContainsString('short_display_name', $marketplaceField);
+        $this->assertStringContainsString('min-h-10 min-w-0', $shell);
+        $this->assertStringContainsString('overflow-hidden truncate whitespace-nowrap', $shell);
+        $this->assertStringContainsString('text-ellipsis whitespace-nowrap', $shell);
         $drawerShell = file_get_contents(resource_path('views/filament/forms/category-drawer-shell.blade.php'));
 
         $this->assertStringContainsString('data-marketplace-category-tree', $drawerShell);

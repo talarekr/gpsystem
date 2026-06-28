@@ -125,12 +125,36 @@ class PartMarketplaceReadinessService
         return [
             'value' => $value ?: 'Wybierz kategorię',
             'display_name' => $displayName ?: ($value ?: 'Wybierz kategorię'),
+            'short_display_name' => $this->shortCategoryDisplayName($displayName ?: ($value ?: 'Wybierz kategorię')),
             'leaf_name' => $displayName ?: null,
             'mapped' => ! $mapping->is_blocked,
             'id' => $categoryId,
             'source' => $mapping->source ?: 'inherited_from_local_category',
             'manual_override' => $mapping->source === 'manual_part_edit_marketplace_preparation',
         ];
+    }
+
+
+    private function shortCategoryDisplayName(?string $name): ?string
+    {
+        if (blank($name)) {
+            return $name;
+        }
+
+        $name = trim((string) $name);
+        $words = preg_split('/\s+/u', $name, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+        if (count($words) <= 2 && mb_strlen($name) <= 28) {
+            return $name;
+        }
+
+        $prefix = implode(' ', array_slice($words, 0, 2));
+
+        if (blank($prefix)) {
+            $prefix = mb_substr($name, 0, 24);
+        }
+
+        return rtrim($prefix, ' .,;:-').'...';
     }
 
     private function marketplaceCategory(MarketplaceCategoryMapping $mapping): ?MarketplaceCategory
