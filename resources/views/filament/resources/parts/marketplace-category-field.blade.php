@@ -43,7 +43,7 @@
     ])
 
     <template x-teleport="body">
-        <div>
+        <div class="fixed inset-0 z-40 pointer-events-none" data-marketplace-category-drawer-portal>
             @include('filament.forms.category-drawer-shell', [
                 'fieldId' => $fieldId,
                 'heading' => 'Kategorie',
