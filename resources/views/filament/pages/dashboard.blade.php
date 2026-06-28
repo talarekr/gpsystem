@@ -125,7 +125,7 @@
                 @foreach ($this->salesRangeTabs() as $rangeKey => $rangeLabel)
                     <a
                         href="{{ request()->fullUrlWithQuery(['sales_range' => $rangeKey]) }}"
-                        @class(['gps-sales-analytics__range', 'is-active' => $salesAnalytics['range']['key'] === $rangeKey])
+                        class="gps-sales-analytics__range{{ $salesAnalytics['range']['key'] === $rangeKey ? ' is-active' : '' }}"
                     >
                         {{ $rangeLabel }}
                     </a>
