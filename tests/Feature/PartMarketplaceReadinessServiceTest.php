@@ -156,6 +156,14 @@ class PartMarketplaceReadinessServiceTest extends TestCase
 
         $html = view('filament.resources.parts.marketplace-readiness-cards', ['part' => $part])->render();
 
+        $shellBlade = file_get_contents(resource_path('views/filament/forms/category-field-shell.blade.php'));
+        $triggerBlade = file_get_contents(resource_path('views/filament/forms/partials/category-drawer-trigger.blade.php'));
+
+        $this->assertStringContainsString("@include('filament.forms.partials.category-drawer-trigger'", $shellBlade);
+        $this->assertStringContainsString('heroicon-m-bars-3', $triggerBlade);
+        $this->assertStringContainsString('data-shared-category-trigger', $triggerBlade);
+        $this->assertStringNotContainsString('☰', $shellBlade);
+        $this->assertStringNotContainsString('gps-marketplace-category-trigger', $html);
         $this->assertStringContainsString('gps-shared-category-field fi-input-wrp', $html);
         $this->assertStringContainsString('gps-shared-category-field__legend', $html);
         $this->assertStringContainsString('>Kategoria</legend>', $html);
