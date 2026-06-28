@@ -15,6 +15,60 @@ class PartMarketplaceReadinessServiceTest extends TestCase
 {
     use RefreshDatabase;
 
+
+    public function test_part_resource_marketplace_section_has_sales_channels_title_and_is_expanded_by_default(): void
+    {
+        $resource = file_get_contents(app_path('Filament/Resources/PartResource.php'));
+
+        $this->assertStringContainsString("Section::make('Kanały sprzedaży')", $resource);
+        $this->assertStringNotContainsString("Section::make('Praktyczne przygotowanie produktu')", $resource);
+        $this->assertStringNotContainsString("->collapsed()", substr($resource, strpos($resource, "Section::make('Kanały sprzedaży')"), 400));
+    }
+
+    public function test_ebay_prepared_translations_hide_static_translation_missing_items(): void
+    {
+        $category = PartCategory::query()->create(['name' => 'Alternatory']);
+        $part = Part::query()->create([
+            'name' => 'Alternator BMW',
+            'description' => 'Opis alternatora.',
+            'category_id' => $category->id,
+            'price' => 100,
+            'quantity' => 1,
+            'vehicle_snapshot' => ['make' => 'BMW'],
+            'review_metadata' => ['marketplace_prepared_translations' => [
+                'ebay_de' => ['status' => 'prepared'],
+                'ebay_fr' => ['status' => 'prepared'],
+            ]],
+        ]);
+        DB::table('part_images')->insert(['part_id' => $part->id, 'path' => 'parts/photos/ready.jpg', 'sort_order' => 1, 'is_primary' => true, 'created_at' => now(), 'updated_at' => now()]);
+        MarketplaceCategoryMapping::query()->create(['local_category_id' => $category->id, 'channel' => 'ebay_de', 'external_category_id' => '177697']);
+
+        $result = app(PartMarketplaceReadinessService::class)->check($part->fresh());
+        $html = view('filament.resources.parts.marketplace-readiness-cards', ['part' => $part->fresh()])->render();
+
+        $this->assertSame('ready', $result['ebay']['status']);
+        $this->assertNotContains('tłumaczenie eBay DE', $result['ebay']['presentation']['missing']);
+        $this->assertNotContains('tłumaczenie eBay FR', $result['ebay']['presentation']['missing']);
+        $this->assertStringContainsString('Aukcja przygotowana', $html);
+        $this->assertStringNotContainsString('tłumaczenie eBay DE', $html);
+        $this->assertStringNotContainsString('tłumaczenie eBay FR', $html);
+        $this->assertDatabaseCount('marketplace_listings', 0);
+    }
+
+    public function test_ebay_readiness_shows_only_real_missing_items_when_blocked(): void
+    {
+        $part = Part::query()->create(['name' => 'Niekompletna część', 'quantity' => 1]);
+
+        $result = app(PartMarketplaceReadinessService::class)->check($part);
+        $html = view('filament.resources.parts.marketplace-readiness-cards', ['part' => $part])->render();
+
+        $this->assertContains('zdjęcia', $result['ebay']['presentation']['missing']);
+        $this->assertStringContainsString('zdjęcia', $html);
+        $this->assertStringContainsString('tłumaczenie eBay DE', $html);
+        $this->assertStringContainsString('tłumaczenie eBay FR', $html);
+        $this->assertDatabaseCount('marketplace_listings', 0);
+    }
+
     public function test_complete_part_returns_ready_without_marketplace_write_intent(): void
     {
         $category = PartCategory::query()->create(['name' => 'Skrzynie biegów']);
@@ -127,7 +181,8 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $this->assertStringNotContainsString('To jest podgląd przygotowania produktu', $html);
         $this->assertStringNotContainsString('Przygotuj eBay DE', $html);
         $this->assertStringNotContainsString('Przygotuj eBay FR', $html);
-        $this->assertStringContainsString('Motoryzacja / Części / Alternatory', $html);
+        $this->assertStringContainsString('Alternatory', $html);
+        $this->assertStringNotContainsString('>Motoryzacja / Części / Alternatory</button>', $html);
         $this->assertStringContainsString('data-category-chooser-field', $html);
         $this->assertStringContainsString('data-shared-category-input', $html);
         $this->assertStringContainsString('data-category-drawer-trigger', $html);
@@ -143,7 +198,7 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $this->assertStringContainsString('Przygotuj', $html);
         $this->assertStringContainsString('Aukcja przygotowana', $html);
         $this->assertStringContainsString('Podgląd aukcji', $html);
-        $this->assertStringContainsString('Szczegóły techniczne', $html);
+        $this->assertStringNotContainsString('Szczegóły techniczne', $html);
     }
 
     public function test_marketplace_category_field_matches_shared_category_field_structure_and_fallbacks(): void
@@ -182,9 +237,10 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $this->assertStringContainsString('data-category-drawer-id="marketplace-category-drawer-ebay-de-', $html);
         $this->assertStringNotContainsString('data-category-drawer-toggle', $html);
         $this->assertStringNotContainsString('peer-checked', $html);
-        $this->assertStringContainsString('Auto &amp; Motorrad / Lichtmaschinen', $html);
+        $this->assertStringContainsString('Lichtmaschinen', $html);
+        $this->assertStringNotContainsString('>Auto &amp; Motorrad / Lichtmaschinen</button>', $html);
         $this->assertStringNotContainsString('Wybrana kategoria eBay', $html);
-        $this->assertStringContainsString('Tryb lokalny: bez publish i bez marketplace API write.', $html);
+        $this->assertStringNotContainsString('Tryb lokalny: bez publish i bez marketplace API write.', $html);
         $this->assertDatabaseCount('marketplace_listings', 0);
     }
 
@@ -366,7 +422,7 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $this->assertStringContainsString('data-marketplace-category-tree="ebay_de"', $html);
         $this->assertStringNotContainsString('data-marketplace-category-tree="ebay"', $html);
         $this->assertStringNotContainsString('Wybrana kategoria eBay', $html);
-        $this->assertStringContainsString('Szczegóły techniczne', $html);
+        $this->assertStringNotContainsString('Szczegóły techniczne', $html);
         $this->assertDatabaseCount('marketplace_listings', 0);
     }
 
@@ -395,7 +451,8 @@ class PartMarketplaceReadinessServiceTest extends TestCase
 
         $this->assertSame('ready', $result['ebay']['status']);
         $this->assertSame('Auto & Motorrad / Lichtmaschinen', $result['ebay']['presentation']['category']['value']);
-        $this->assertStringContainsString('Auto &amp; Motorrad / Lichtmaschinen', $html);
+        $this->assertStringContainsString('Lichtmaschine', $html);
+        $this->assertStringNotContainsString('>Auto &amp; Motorrad / Lichtmaschinen</button>', $html);
         $this->assertStringNotContainsString('>Wybierz kategorię<', $html);
         $this->assertStringContainsString('data-marketplace-category-tree="ebay_de"', $html);
         $this->assertStringNotContainsString('data-marketplace-category-tree="ebay"', $html);

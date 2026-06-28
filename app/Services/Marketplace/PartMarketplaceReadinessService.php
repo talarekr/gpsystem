@@ -102,8 +102,16 @@ class PartMarketplaceReadinessService
             $value = $label.' ID: '.$categoryId;
         }
 
+        $displayName = $mapping->external_category_name ?: ($category?->name ?: null);
+        if (blank($displayName) && filled($value)) {
+            $segments = preg_split('/\s*(?:>|\/)\s*/u', (string) $value, -1, PREG_SPLIT_NO_EMPTY);
+            $displayName = $segments ? trim((string) end($segments)) : null;
+        }
+
         return [
             'value' => $value ?: 'Wybierz kategorię',
+            'display_name' => $displayName ?: ($value ?: 'Wybierz kategorię'),
+            'leaf_name' => $displayName ?: null,
             'mapped' => ! $mapping->is_blocked,
             'id' => $categoryId,
         ];
@@ -124,10 +132,19 @@ class PartMarketplaceReadinessService
     /** @return array<int, string> */
     private function missingEbayTranslations(Part $part): array
     {
-        $translations = (array) (data_get($part->review_metadata, 'marketplace_translations') ?: data_get($part->legacy_payload, 'marketplace_translations') ?: []);
+        $metadata = (array) ($part->review_metadata ?: []);
+        $translations = (array) (data_get($metadata, 'marketplace_translations') ?: data_get($part->legacy_payload, 'marketplace_translations') ?: []);
 
         return collect(['de' => 'tłumaczenie eBay DE', 'fr' => 'tłumaczenie eBay FR'])
-            ->filter(fn (string $label, string $locale): bool => blank(data_get($translations, 'ebay_'.$locale.'.title')) || blank(data_get($translations, 'ebay_'.$locale.'.description')))
+            ->filter(function (string $label, string $locale) use ($translations, $metadata): bool {
+                $channel = 'ebay_'.$locale;
+
+                if (data_get($metadata, 'marketplace_prepared_translations.'.$channel.'.status') === 'prepared') {
+                    return false;
+                }
+
+                return blank(data_get($translations, $channel.'.title')) || blank(data_get($translations, $channel.'.description'));
+            })
             ->values()
             ->all();
     }
