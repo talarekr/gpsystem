@@ -9,7 +9,9 @@
         .gps-sold-parts-header { padding: 0 18px 4px; color: #64748b; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
         .gps-sold-part-card { border: 1px solid #e5e7eb; border-radius: 18px; background: #fff; box-shadow: 0 10px 24px rgba(15, 23, 42, .06); padding: 18px; }
         .gps-sold-part-item { display: flex; align-items: center; gap: 12px; min-width: 0; }
-        .gps-sold-part-placeholder { flex: 0 0 120px; width: 120px; height: 90px; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; background: linear-gradient(135deg, #f8fafc, #e2e8f0); color: #94a3b8; border: 1px solid #e2e8f0; }
+        .gps-sold-part-thumb, .gps-sold-part-placeholder { flex: 0 0 120px; width: 120px; height: 90px; }
+        .gps-sold-part-thumb { display: block; object-fit: cover; border-radius: 6px; background: #f1f5f9; }
+        .gps-sold-part-placeholder { display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; background: linear-gradient(135deg, #f8fafc, #e2e8f0); color: #94a3b8; border: 1px solid #e2e8f0; }
         .gps-sold-part-info, .gps-sold-part-col { min-width: 0; }
         .gps-sold-part-value { color: #1e293b; font-size: 13px; font-weight: 500; line-height: 1.35; overflow-wrap: anywhere; }
         .gps-sold-part-muted { color: #64748b; font-size: 12px; margin-top: 5px; overflow-wrap: anywhere; }
@@ -38,17 +40,16 @@
                 <div class="gps-sold-parts-grid">
                     <div class="gps-sold-part-col">
                         <div class="gps-sold-part-item">
-                            @if ($row['part'] instanceof \App\Models\Part)
+                            @if (($row['thumbnail_source'] ?? null) === 'admin_parts_thumbnail' && $row['part'] instanceof \App\Models\Part)
                                 @include('filament.resources.parts.table-image', ['part' => $row['part']])
+                            @elseif (! empty($row['thumbnail_url']))
+                                <img class="gps-sold-part-thumb" src="{{ $row['thumbnail_url'] }}" alt="{{ $row['name'] }}" loading="lazy">
                             @else
                                 <div class="gps-sold-part-placeholder" aria-hidden="true"><x-heroicon-o-photo class="h-7 w-7" /></div>
                             @endif
                             <div class="gps-sold-part-info">
                                 <div class="gps-sold-part-value">{{ $row['name'] }}</div>
-                                <div class="gps-sold-part-muted">Magazyn: {{ $row['part'] instanceof \App\Models\Part ? ($row['part']->storageLocation?->name ?: 'Brak lokalizacji') : 'Brak lokalizacji' }}</div>
-                                <div class="gps-sold-part-muted">SKU: {{ $row['sku'] ?: '—' }}</div>
-                                <div class="gps-sold-part-muted">OEM / nr części: {{ $row['oem'] ?: '—' }}</div>
-                                <div class="gps-sold-part-muted">Ilość: {{ $row['quantity'] ?: 1 }}</div>
+                                <div class="gps-sold-part-muted">Magazyn: {{ $row['storage_location'] ?? 'Brak lokalizacji' }}</div>
                             </div>
                         </div>
                     </div>

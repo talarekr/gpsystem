@@ -101,6 +101,7 @@ class OrderItemThumbnailDiagnostics
             'admin_parts_mechanism_url' => $adminPartsMechanismUrl,
             'final_thumbnail_url' => $thumbnailUrl,
             'admin_parts_mechanism_url_matches_final_thumbnail_url' => filled($adminPartsMechanismUrl) && $adminPartsMechanismUrl === $thumbnailUrl,
+            'part' => $part,
             'thumbnail_part' => $thumbnailSource === 'admin_parts_thumbnail' && $part ? $part : null,
             'thumbnail_part_id' => $thumbnailSource === 'admin_parts_thumbnail' && $part ? $part->id : null,
             'admin_parts_thumbnail_url_present' => filled($localPartImageUrl) || filled($listingPartImageUrl),
