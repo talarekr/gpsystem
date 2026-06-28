@@ -217,7 +217,7 @@ class PartResource extends Resource
                             ->dehydrated(false)
                             ->visible(fn (?Part $record): bool => $record !== null && $record->exists)
                             ->view('filament.resources.parts.marketplace-readiness-cards')
-                            ->viewData(fn (?Part $record): array => ['part' => $record])
+                            ->viewData(fn (?Part $record, Forms\Get $get): array => ['part' => $record, 'categoryId' => $get('category_id')])
                             ->columnSpanFull(),
                         Forms\Components\Placeholder::make('marketplace_readiness_empty')
                             ->hiddenLabel()

@@ -12,13 +12,27 @@ class PartMarketplaceReadinessService
     public function __construct(private readonly MarketplaceListingReadinessService $listingReadinessService) {}
 
     /** @return array<string, array<string, mixed>> */
-    public function check(Part $part): array
+    public function check(Part $part, mixed $categoryId = null): array
     {
+        $part = $this->partForCategory($part, $categoryId);
+
         return [
             'allegro' => $this->forMarketplace($part, 'allegro', 'allegro_main', ['allegro_main', 'allegro']),
             'ovoko' => $this->forMarketplace($part, 'ovoko', 'ovoko', ['ovoko']),
             'ebay' => $this->forMarketplace($part, 'eBay', 'ebay_de', ['ebay_de', 'ebay'], true),
         ];
+    }
+
+    private function partForCategory(Part $part, mixed $categoryId = null): Part
+    {
+        if (blank($categoryId) || (string) $part->category_id === (string) $categoryId) {
+            return $part;
+        }
+
+        $preview = clone $part;
+        $preview->category_id = $categoryId;
+
+        return $preview;
     }
 
     /** @param array<int, string> $mappingChannels @return array<string, mixed> */
