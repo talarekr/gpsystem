@@ -495,7 +495,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 .gps-shop-events__list { display: grid; gap: 0.45rem; margin-top: 1rem; }
 .gps-shop-events__item { display: flex; flex-direction: row; gap: 0.75rem; align-items: center; justify-content: space-between; min-width: 0; border: 1px solid #e2e8f0; border-left: 4px solid #94a3b8; border-radius: 0.8rem; background: #fff; padding: 0.32rem 0.75rem; box-shadow: 0 1px 2px rgba(11, 31, 58, 0.035); }
 .gps-shop-events__item--success { border-left-color: #16a34a; }
-.gps-shop-events__item--warning { border-left-color: #d97706; }
+.gps-shop-events__item--warning { border-left-color: #86cfa3; }
 .gps-shop-events__item--danger { border-left-color: #dc2626; }
 .gps-shop-events__time { color: #475569; white-space: nowrap; }
 .gps-shop-events__summary { display: flex; flex-wrap: wrap; gap: 0.45rem 0.8rem; margin-top: 0.35rem; color: #64748b; font-size: 0.82rem; }
@@ -517,8 +517,8 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 .gps-shop-events__body p { margin: 0.3rem 0 0; color: #475569; font-size: 0.88rem; line-height: 1.45; }
 .gps-shop-events__meta { margin-top: 0.45rem; color: #64748b; font-size: 0.8rem; }
 .gps-shop-events__meta strong { color: #334155; }
-.gps-shop-events__open { flex-shrink: 0; align-self: center; border: 1px solid #cfd9e7; border-radius: 0.7rem; color: var(--gps-admin-navy); padding: 0.32rem 0.65rem; font-size: 0.8rem; font-weight: 400; text-decoration: none; }
-.gps-shop-events__open:hover { background: #edf3f8; }
+.gps-shop-events__open { flex-shrink: 0; align-self: center; border: 0; border-radius: 999px; color: #2f6f4f; padding: 0.28rem 0.55rem; font-size: 0.8rem; font-weight: 700; text-decoration: none; }
+.gps-shop-events__open:hover { background: #edf8f1; color: #22543b; text-decoration: underline; }
 .gps-shop-events__more-wrap { display: flex; justify-content: center; margin-top: 0.75rem; }
 .gps-shop-events__more { border: 1px solid #dbe3ee; border-radius: 999px; background: #f8fafc; color: #405f82; padding: 0.38rem 0.72rem; font-size: 0.82rem; font-weight: 700; text-decoration: none; }
 .gps-shop-events__more:hover { border-color: #405f82; background: #edf3f8; color: var(--gps-admin-navy); }
