@@ -335,6 +335,7 @@
                 .then((saved) => {
                     if (saved === true) {
                         this.closeCategoryPicker();
+                        this.closeActiveFilamentCategoryPickerModal();
                         this.selectedId = null;
                         this.selectedName = '';
                     }
@@ -376,6 +377,12 @@
             }
 
             this.$dispatch('close-modal', { id: 'form-component-action' });
+        },
+        closeActiveFilamentCategoryPickerModal() {
+            const modal = this.$el.closest('.gps-category-picker-modal');
+            const closeButton = modal?.querySelector('.fi-modal-header button');
+
+            closeButton?.click();
         },
         back() {
             this.stack.pop();
