@@ -152,7 +152,6 @@
             <aside class="gps-sales-card gps-sales-card--channels" aria-label="Sprzedaż per kanał">
                 <div class="gps-sales-card__heading">
                     <span>Kanały</span>
-                    <small>zamówienia / wartość</small>
                 </div>
 
                 <div class="gps-sales-channels">
@@ -166,7 +165,7 @@
                                 </div>
                                 @if ($channel['key'] === 'ebay')
                                     <p>{{ $this->formatEur($channel['sales_eur'] ?? 0) }}</p>
-                                    <small>{{ $this->formatPln($channel['sales_pln']) }} @if (($channel['exchange_rate'] ?? null) === null) · kurs do podłączenia @endif</small>
+                                    <small>{{ $this->formatPln($channel['sales_pln']) }} @if (($channel['exchange_rate_unavailable'] ?? false) === true) · kurs niedostępny @endif</small>
                                 @else
                                     <p>{{ $this->formatPln($channel['sales_pln']) }}</p>
                                 @endif

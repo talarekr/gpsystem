@@ -4,13 +4,15 @@ namespace App\Services\Admin;
 
 use App\Models\LocalSale;
 use App\Models\Order;
+use App\Services\Marketplace\NbpExchangeRateService;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Schema;
 
 class SalesAnalyticsService
 {
+    public function __construct(private readonly NbpExchangeRateService $exchangeRateService) {}
+
     /**
      * @return array<string, string>
      */
@@ -84,37 +86,87 @@ class SalesAnalyticsService
      */
     private function onlineChannels(CarbonInterface $startsAt, CarbonInterface $endsAt): array
     {
-        $shopOrdersCount = 0;
-        $shopSalesPln = 0.0;
+        $channels = [
+            'ebay' => ['key' => 'ebay', 'label' => 'eBay', 'badge' => 'eB', 'orders_count' => 0, 'sales_eur' => 0.0, 'exchange_rate' => null, 'sales_pln' => 0.0],
+            'ovoko' => ['key' => 'ovoko', 'label' => 'Ovoko', 'badge' => 'Ov', 'orders_count' => 0, 'sales_pln' => 0.0],
+            'allegro' => ['key' => 'allegro', 'label' => 'Allegro', 'badge' => 'Al', 'orders_count' => 0, 'sales_pln' => 0.0],
+            'shop' => ['key' => 'shop', 'label' => 'Sklep', 'badge' => 'Sk', 'orders_count' => 0, 'sales_pln' => 0.0],
+        ];
 
-        if (Schema::hasTable('orders')) {
-            $shopOrdersCount = $this->shopOrdersQuery($startsAt, $endsAt, ['new', 'processing'])->count();
-            $shopSalesPln = (float) $this->shopOrdersQuery($startsAt, $endsAt, ['new', 'processing', 'completed'])->sum('total');
+        if (! Schema::hasTable('orders')) {
+            return array_values($channels);
         }
 
-        // eBay ma przygotowane pola EUR i kursu, ale na tym etapie nie pobieramy kursów z zewnętrznych API.
-        return [
-            ['key' => 'ebay', 'label' => 'eBay', 'badge' => 'eB', 'orders_count' => 0, 'sales_eur' => 0.0, 'exchange_rate' => null, 'sales_pln' => 0.0, 'note' => 'Oczekuje na integrację odczytu eBay.'],
-            ['key' => 'ovoko', 'label' => 'Ovoko', 'badge' => 'Ov', 'orders_count' => 0, 'sales_pln' => 0.0, 'note' => 'Oczekuje na integrację odczytu Ovoko.'],
-            ['key' => 'allegro', 'label' => 'Allegro', 'badge' => 'Al', 'orders_count' => 0, 'sales_pln' => 0.0, 'note' => 'Oczekuje na integrację odczytu Allegro.'],
-            ['key' => 'shop', 'label' => 'Sklep', 'badge' => 'Sk', 'orders_count' => $shopOrdersCount, 'sales_pln' => $shopSalesPln],
-        ];
+        $eurRateData = $this->exchangeRateService->eurPln();
+        $eurRate = is_numeric($eurRateData['rate'] ?? null) ? (float) $eurRateData['rate'] : null;
+        $channels['ebay']['exchange_rate'] = $eurRate;
+        if ($eurRate === null) {
+            $channels['ebay']['exchange_rate_unavailable'] = true;
+        }
+
+        $orders = Order::query()
+            ->with('items:id,order_id,marketplace,currency')
+            ->whereBetween('created_at', [$startsAt, $endsAt])
+            ->whereIn('status', ['new', 'processing', 'completed'])
+            ->get(['id', 'marketplace', 'currency', 'total', 'meta']);
+
+        foreach ($orders as $order) {
+            $channel = $this->normalizeChannel($this->orderSource($order));
+
+            if (! array_key_exists($channel, $channels)) {
+                $channel = 'shop';
+            }
+
+            $total = (float) $order->total;
+            $currency = strtoupper((string) ($order->currency ?: 'PLN'));
+            $channels[$channel]['orders_count']++;
+
+            if ($channel === 'ebay' && $currency === 'EUR') {
+                $channels[$channel]['sales_eur'] += $total;
+                if ($eurRate !== null) {
+                    $channels[$channel]['sales_pln'] += $total * $eurRate;
+                }
+
+                continue;
+            }
+
+            $channels[$channel]['sales_pln'] += $total;
+            if ($channel === 'ebay' && $currency === 'PLN' && $eurRate !== null) {
+                $channels[$channel]['sales_eur'] += $total / $eurRate;
+            }
+        }
+
+        return array_values($channels);
     }
 
-    /**
-     * @param array<int, string> $statuses
-     */
-    private function shopOrdersQuery(CarbonInterface $startsAt, CarbonInterface $endsAt, array $statuses): Builder
+    private function orderSource(Order $order): ?string
     {
-        return Order::query()
-            ->whereBetween('created_at', [$startsAt, $endsAt])
-            ->whereIn('status', $statuses)
-            ->where(function (Builder $query): void {
-                $query
-                    ->where('meta->source', 'storefront')
-                    ->orWhere('meta->channel', 'sklep')
-                    ->orWhereNull('meta');
-            });
+        if (filled($order->marketplace)) {
+            return (string) $order->marketplace;
+        }
+
+        $metaSource = data_get($order->meta, 'source') ?: data_get($order->meta, 'channel');
+        if (filled($metaSource)) {
+            return (string) $metaSource;
+        }
+
+        $itemMarketplace = $order->items->first(fn ($item) => filled($item->marketplace))?->marketplace;
+
+        return filled($itemMarketplace) ? (string) $itemMarketplace : null;
+    }
+
+    private function normalizeChannel(?string $source): string
+    {
+        $source = str($source ?? '')->lower()->trim()->toString();
+
+        return match (true) {
+            $source === '', in_array($source, ['sklep', 'local', 'store', 'storefront', 'shop'], true) => 'shop',
+            in_array($source, ['sprzedaż lokalna', 'sprzedaz lokalna', 'local_sale', 'local sale'], true) => 'local_sale',
+            str_starts_with($source, 'allegro') => 'allegro',
+            str_starts_with($source, 'ovoko') => 'ovoko',
+            str_starts_with($source, 'ebay') => 'ebay',
+            default => 'shop',
+        };
     }
 
     /**
