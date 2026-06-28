@@ -46,13 +46,9 @@
                 <article class="{{ $itemClass }}">
                     <div class="gps-shop-events__line">
                         <span class="gps-shop-events__time">{{ $event['time'] }}</span>
-                        <span class="gps-shop-events__separator" aria-hidden="true">—</span>
                         <span class="gps-shop-events__source">@include('filament.resources.orders.partials.source-wordmark', ['marketplace' => $event['channel']])</span>
-                        <span class="gps-shop-events__separator" aria-hidden="true">—</span>
                         <span class="gps-shop-events__reference">{{ $event['title'] }}@if ($event['extra']) <span class="gps-shop-events__extra">{{ $event['extra'] }}</span>@endif</span>
-                        <span class="gps-shop-events__separator" aria-hidden="true">—</span>
                         <span class="gps-shop-events__storage">Magazyn: {{ $event['storage'] }}</span>
-                        <span class="gps-shop-events__separator" aria-hidden="true">—</span>
                         <span class="gps-shop-events__amount">{{ $event['amount'] }}</span>
                     </div>
                     @if ($event['url'])
