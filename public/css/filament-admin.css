@@ -689,7 +689,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     color: #334155;
     padding: 0.45rem 0.75rem;
     font-size: 0.85rem;
-    font-weight: 750;
+    font-weight: 400;
     line-height: 1.15;
     text-decoration: none;
     white-space: nowrap;
