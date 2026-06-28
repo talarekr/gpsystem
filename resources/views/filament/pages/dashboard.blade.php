@@ -26,11 +26,11 @@
                 @php($tabCount = $shopEventTabCounts[$tabKey] ?? 0)
                 <a
                     href="{{ request()->fullUrlWithQuery(['shop_event_tab' => $tabKey]) }}"
-                    @class(['gps-shop-events__tab', 'is-active' => $this->activeShopEventTab() === $tabKey])
+                    class="gps-shop-events__tab{{ $this->activeShopEventTab() === $tabKey ? ' is-active' : '' }}"
                 >
                     <span>{{ $tabLabel }}</span>
                     @if ($tabCount > 0)
-                        <span @class(['gps-shop-events__tab-count', 'gps-shop-events__tab-count--action' => $tabKey === 'requires_action'])>{{ $tabCount }}</span>
+                        <span class="gps-shop-events__tab-count{{ $tabKey === 'requires_action' ? ' gps-shop-events__tab-count--action' : '' }}">{{ $tabCount }}</span>
                     @endif
                 </a>
             @endforeach
