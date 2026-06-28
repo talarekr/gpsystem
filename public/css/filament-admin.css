@@ -764,7 +764,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     margin: 0.32rem 0 0.18rem;
     color: var(--gps-admin-navy);
     font-size: clamp(1.08rem, 1.35vw, 1.35rem);
-    font-weight: 850;
+    font-weight: 500;
     line-height: 1.08;
 }
 
@@ -777,6 +777,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 
 .gps-sales-metric--total strong {
     font-size: clamp(1.12rem, 1.45vw, 1.42rem);
+    font-weight: 500;
 }
 
 .gps-sales-channels {
@@ -808,14 +809,20 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     font-weight: 500;
 }
 
+.gps-sales-channel__wordmark {
+    font-weight: 500;
+}
+
 .gps-sales-channel__wordmark--allegro {
     color: #ff5a00;
-    font-family: "Open Sans", Arial, sans-serif;
+    font-family: "Market Sans", Arial, "Helvetica Neue", sans-serif;
+    letter-spacing: -.02em;
 }
 
 .gps-sales-channel__wordmark--ovoko {
     color: #FF7A00;
-    font-family: Inter, Arial, Helvetica, sans-serif;
+    font-family: "Market Sans", Arial, "Helvetica Neue", sans-serif;
+    letter-spacing: -.02em;
 }
 
 .gps-sales-channel__wordmark--ebay {
@@ -825,7 +832,8 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 
 .gps-sales-channel__wordmark--shop {
     color: #334155;
-    font-family: inherit;
+    font-family: "Market Sans", Arial, "Helvetica Neue", sans-serif;
+    letter-spacing: -.02em;
 }
 
 .gps-sales-channel__topline span,
