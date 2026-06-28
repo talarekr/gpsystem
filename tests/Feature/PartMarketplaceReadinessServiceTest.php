@@ -312,7 +312,8 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $this->assertStringContainsString('x-on:click.prevent.stop="categoryDrawerOpen = true"', $html);
         $this->assertStringContainsString('data-category-drawer', $html);
         $this->assertStringContainsString('x-teleport="body"', $html);
-        $this->assertStringContainsString('fixed inset-y-0 right-0 z-50 w-full max-w-xl flex-col bg-white p-6 shadow-xl dark:bg-gray-900 gps-category-picker-modal', $html);
+        $this->assertStringContainsString('fixed inset-y-0 right-0 z-50 w-full max-w-xl flex-col bg-white p-6 shadow-xl dark:bg-gray-900 gps-category-picker-modal gps-marketplace-category-drawer', $html);
+        $this->assertStringNotContainsString('left-0', $html);
         $this->assertStringContainsString('data-category-drawer-id="marketplace-category-drawer-ebay-de-', $html);
         $this->assertStringNotContainsString('data-category-drawer-toggle', $html);
         $this->assertStringNotContainsString('peer-checked', $html);

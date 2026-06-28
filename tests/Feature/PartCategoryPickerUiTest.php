@@ -167,6 +167,9 @@ class PartCategoryPickerUiTest extends TestCase
         $drawerShell = file_get_contents(resource_path('views/filament/forms/category-drawer-shell.blade.php'));
 
         $this->assertStringContainsString('data-marketplace-category-tree', $drawerShell);
+        $this->assertStringContainsString('fixed inset-y-0 right-0 z-50 w-full max-w-xl flex-col', $drawerShell);
+        $this->assertStringContainsString('gps-marketplace-category-drawer', $drawerShell);
+        $this->assertStringNotContainsString('left-0', $drawerShell);
         $this->assertStringContainsString('x-on:close-category-drawer.window', $drawerShell);
         $this->assertStringContainsString('$event.detail.drawerId === @js($drawerId)', $drawerShell);
         $this->assertStringContainsString('this.$refs.marketplaceForm.submit();', $categoryPicker);
