@@ -23,8 +23,8 @@ abstract class BaseMarketplacePublishAdapter implements MarketplacePublishAdapte
         return new MarketplacePublishPreviewResult($this->channel(), [
             'channel' => $this->channel(),
             'marketplace' => $this->marketplace(),
-            'success' => (bool) ($readiness['can_prepare'] ?? false),
-            'blocked' => ! (bool) ($readiness['can_prepare'] ?? false),
+            'success' => (bool) ($readiness['can_publish_later'] ?? false),
+            'blocked' => ! (bool) ($readiness['can_publish_later'] ?? false),
             'errors' => $readiness['blockers'] ?? [],
             'warnings' => $readiness['warnings'] ?? [],
             'external_listing_id' => null,
@@ -50,7 +50,7 @@ abstract class BaseMarketplacePublishAdapter implements MarketplacePublishAdapte
         }
 
         $readiness = $this->readinessService->checkPartReadiness($part, $this->channel());
-        if (! (bool) ($readiness['can_prepare'] ?? false)) {
+        if (! (bool) ($readiness['can_publish_later'] ?? false)) {
             return new MarketplacePublishResult($this->channel(), [
                 'channel' => $this->channel(), 'marketplace' => $this->marketplace(), 'success' => false,
                 'status' => 'blocked_readiness', 'external_listing_id' => null, 'errors' => $readiness['blockers'] ?? [],
