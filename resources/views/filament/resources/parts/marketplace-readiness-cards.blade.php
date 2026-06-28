@@ -61,13 +61,6 @@
                         @endif
                     </div>
 
-                    <details class="text-xs text-gray-500 dark:text-gray-400">
-                        <summary>Szczegóły techniczne</summary>
-                        <div class="mt-2 space-y-1">
-                            <div>Tryb lokalny: bez publish i bez marketplace API write.</div>
-                            <div>Kanał techniczny: {{ $channels[$key] }}</div>
-                        </div>
-                    </details>
                 </div>
             </div>
         @endforeach

@@ -207,9 +207,8 @@ class PartResource extends Resource
                             ->columnSpanFull(),
                     ]),
 
-                Section::make('Praktyczne przygotowanie produktu')
+                Section::make('Kanały sprzedaży')
                     ->collapsible()
-                    ->collapsed()
                     ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--marketplace-preparation'])
                     ->schema([
                         Forms\Components\ViewField::make('marketplace_readiness_cards')
