@@ -3,6 +3,8 @@
 namespace App\Filament\Resources\PartResource\Pages;
 
 use App\Filament\Resources\PartResource;
+use App\Models\MarketplaceCategory;
+use App\Models\MarketplaceCategoryMapping;
 use App\Models\PartCategory;
 use App\Models\PartImage;
 use App\Services\Marketplace\PreparePartMarketplaceListingService;
@@ -19,6 +21,8 @@ class EditPart extends EditRecord
     protected static string $resource = PartResource::class;
 
     protected array $partPhotoPaths = [];
+
+    protected array $marketplaceCategorySelections = [];
 
     protected function mutateFormDataBeforeFill(array $data): array
     {
@@ -40,7 +44,8 @@ class EditPart extends EditRecord
     protected function mutateFormDataBeforeSave(array $data): array
     {
         $this->partPhotoPaths = array_values(array_filter((array) ($data['part_photo_paths'] ?? []), fn (mixed $path): bool => filled($path)));
-        unset($data['part_photo_paths']);
+        $this->marketplaceCategorySelections = (array) ($data['marketplace_category_selections'] ?? []);
+        unset($data['part_photo_paths'], $data['marketplace_category_selections']);
 
         $data['condition_notes'] = PartResource::defaultConditionValue($data['condition_notes'] ?? null);
         $data = PartResource::applyAdminSteeringFormStateToData($data, $this->record);
@@ -50,6 +55,8 @@ class EditPart extends EditRecord
 
     protected function afterSave(): void
     {
+        $this->syncSelectedMarketplaceCategories();
+
         if ($this->partPhotoPaths === []) {
             return;
         }
@@ -188,6 +195,49 @@ class EditPart extends EditRecord
             ->send();
     }
 
+
+    private function syncSelectedMarketplaceCategories(): void
+    {
+        if ($this->marketplaceCategorySelections === [] || blank($this->record->category_id)) {
+            return;
+        }
+
+        foreach ($this->marketplaceCategorySelections as $channel => $selection) {
+            $externalCategoryId = data_get($selection, 'id');
+
+            if (blank($externalCategoryId) || ! in_array($channel, ['allegro_main', 'ovoko', 'ebay_de'], true)) {
+                continue;
+            }
+
+            $category = MarketplaceCategory::query()
+                ->where('channel', $channel)
+                ->where('external_category_id', $externalCategoryId)
+                ->first();
+
+            if (! $category) {
+                continue;
+            }
+
+            MarketplaceCategoryMapping::query()->updateOrCreate(
+                ['local_category_id' => $this->record->category_id, 'channel' => $channel],
+                [
+                    'external_category_id' => $category->external_category_id,
+                    'external_category_name' => $category->name,
+                    'external_category_path' => $category->full_path,
+                    'local_category_name' => $this->record->category?->name,
+                    'local_category_path' => $this->record->category?->full_slug_path ?: $this->record->category?->name,
+                    'source' => 'manual_part_edit_marketplace_preparation',
+                    'confidence' => 1,
+                    'is_blocked' => false,
+                    'imported_at' => now(),
+                ]
+            );
+        }
+
+        $this->marketplaceCategorySelections = [];
+        $this->data['marketplace_category_selections'] = [];
+    }
+
     public function setPartCategoryFromPicker(mixed $categoryId = null): bool
     {
         if (blank($categoryId)) {
@@ -230,14 +280,12 @@ class EditPart extends EditRecord
         }
 
         try {
-            $this->record->forceFill(['category_id' => $category->getKey()])->save();
-            $this->record->refresh();
             $this->data['category_id'] = $category->getKey();
             $this->data['marketplace_category_mappings_state'] = app(\App\Services\PartCategorySuggestionService::class)->marketplaceMappingsForCategory($category->getKey());
 
             Notification::make()
-                ->title('Kategoria części została zapisana')
-                ->body('Nowa kategoria: '.$category->name)
+                ->title('Kategoria części została ustawiona')
+                ->body('Nowa kategoria zostanie zapisana po kliknięciu głównego przycisku „Zapisz”.')
                 ->success()
                 ->send();
 

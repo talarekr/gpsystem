@@ -6,6 +6,7 @@
     $hiddenFields = $hiddenFields ?? [];
     $saveField = $saveField ?? 'category_id';
     $pickerId = $pickerId ?? ('gps-category-picker-'.uniqid());
+    $selectionChannel = $selectionChannel ?? null;
     $lazyChildrenUrl = $lazyChildrenUrl ?? null;
     $lazyChannel = $lazyChannel ?? null;
 @endphp
@@ -197,6 +198,7 @@
         suggestions: @js($suggestions),
         lazyChildrenUrl: @js($lazyChildrenUrl),
         lazyChannel: @js($lazyChannel),
+        selectionChannel: @js($selectionChannel),
         loadedParents: {},
         isLoadingChildren: false,
         currentParent: null,
@@ -323,9 +325,25 @@
 
             this.isSaving = true;
 
-            if (this.$refs.marketplaceForm) {
-                this.$refs.marketplaceCategoryId.value = this.selectedId;
-                this.$refs.marketplaceForm.submit();
+            const selected = this.selectedCategory();
+
+            if (this.selectionChannel) {
+                const payload = {
+                    id: this.selectedId,
+                    label: selected?.name || this.selectedName || String(this.selectedId),
+                    title: selected?.path || this.selectedName || selected?.name || String(this.selectedId),
+                    channel: this.selectionChannel,
+                };
+
+                if (this.$wire) {
+                    this.$wire.set(`data.marketplace_category_selections.${this.selectionChannel}`, payload);
+                }
+
+                this.$dispatch('marketplace-category-selected', payload);
+                this.selectedId = null;
+                this.selectedName = '';
+                this.isSaving = false;
+
                 return;
             }
 
@@ -498,7 +516,7 @@
             x-on:click="saveSelectedCategory()"
         >
             <span x-show="! isSaving">Wybierz</span>
-            <span x-show="isSaving">Zapisywanie...</span>
+            <span x-show="isSaving">Ustawianie...</span>
         </button>
     </div>
 </div>
