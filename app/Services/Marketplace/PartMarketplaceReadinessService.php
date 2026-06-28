@@ -2,6 +2,7 @@
 
 namespace App\Services\Marketplace;
 
+use App\Models\MarketplaceCategory;
 use App\Models\MarketplaceCategoryMapping;
 use App\Models\Part;
 use Illuminate\Support\Facades\Schema;
@@ -91,11 +92,33 @@ class PartMarketplaceReadinessService
             return ['value' => 'Wybierz kategorię', 'mapped' => false, 'id' => null];
         }
 
+        $category = $this->marketplaceCategory($mapping);
+        $categoryId = filled($mapping->external_category_id) ? (string) $mapping->external_category_id : null;
+        $value = $mapping->external_category_path
+            ?: ($mapping->external_category_name
+                ?: ($category?->full_path ?: ($category?->name ?: null)));
+
+        if (blank($value) && filled($categoryId)) {
+            $value = $label.' ID: '.$categoryId;
+        }
+
         return [
-            'value' => $mapping->external_category_path ?: ($mapping->external_category_name ?: 'Wybierz kategorię'),
+            'value' => $value ?: 'Wybierz kategorię',
             'mapped' => ! $mapping->is_blocked,
-            'id' => $mapping->external_category_id,
+            'id' => $categoryId,
         ];
+    }
+
+    private function marketplaceCategory(MarketplaceCategoryMapping $mapping): ?MarketplaceCategory
+    {
+        if (! Schema::hasTable('marketplace_categories') || blank($mapping->external_category_id)) {
+            return null;
+        }
+
+        return MarketplaceCategory::query()
+            ->where('channel', $mapping->channel)
+            ->where('external_category_id', $mapping->external_category_id)
+            ->first();
     }
 
     /** @return array<int, string> */
@@ -116,12 +139,21 @@ class PartMarketplaceReadinessService
             return null;
         }
 
-        return MarketplaceCategoryMapping::query()
+        $mappings = MarketplaceCategoryMapping::query()
             ->where('local_category_id', $part->category_id)
             ->whereIn('channel', $channels)
             ->whereNotNull('external_category_id')
             ->orderBy('is_blocked')
-            ->first();
+            ->get();
+
+        foreach ($channels as $channel) {
+            $mapping = $mappings->first(fn (MarketplaceCategoryMapping $mapping): bool => $mapping->channel === $channel);
+            if ($mapping) {
+                return $mapping;
+            }
+        }
+
+        return null;
     }
 
     /** @return array<int, string> */

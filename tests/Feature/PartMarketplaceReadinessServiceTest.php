@@ -346,7 +346,7 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $this->assertStringNotContainsString('parent_external_id', file_get_contents(app_path('Http/Controllers/Tools/PartMarketplaceReadinessController.php')));
     }
 
-    public function test_marketplace_category_field_shows_neutral_fallback_without_category_name(): void
+    public function test_ebay_card_shows_id_fallback_when_mapping_exists_without_category_name(): void
     {
         $category = PartCategory::query()->create(['name' => 'Alternatory']);
         $part = Part::query()->create(['name' => 'Alternator BMW', 'category_id' => $category->id, 'quantity' => 1]);
@@ -355,9 +355,44 @@ class PartMarketplaceReadinessServiceTest extends TestCase
 
         $html = view('filament.resources.parts.marketplace-readiness-cards', ['part' => $part])->render();
 
-        $this->assertStringContainsString('Wybierz kategorię', $html);
+        $this->assertStringContainsString('eBay ID: 177697', $html);
+        $this->assertStringNotContainsString('>Wybierz kategorię<', $html);
+        $this->assertStringContainsString('data-marketplace-category-tree="ebay_de"', $html);
+        $this->assertStringNotContainsString('data-marketplace-category-tree="ebay"', $html);
         $this->assertStringNotContainsString('Wybrana kategoria eBay', $html);
         $this->assertStringContainsString('Szczegóły techniczne', $html);
+        $this->assertDatabaseCount('marketplace_listings', 0);
+    }
+
+    public function test_ebay_card_uses_ebay_de_mapping_and_local_category_path_for_presentation(): void
+    {
+        $category = PartCategory::query()->create(['name' => 'Alternatory']);
+        $part = Part::query()->create([
+            'name' => 'Alternator BMW',
+            'description' => 'Opis alternatora.',
+            'category_id' => $category->id,
+            'price' => 100,
+            'quantity' => 1,
+            'vehicle_snapshot' => ['make' => 'BMW'],
+            'review_metadata' => ['marketplace_translations' => [
+                'ebay_de' => ['title' => 'Generator BMW', 'description' => 'Deutsche Beschreibung.'],
+                'ebay_fr' => ['title' => 'Alternateur BMW', 'description' => 'Description française.'],
+            ]],
+        ]);
+
+        DB::table('part_images')->insert(['part_id' => $part->id, 'path' => 'parts/photos/ebay-ready.jpg', 'sort_order' => 1, 'is_primary' => true, 'created_at' => now(), 'updated_at' => now()]);
+        MarketplaceCategoryMapping::query()->create(['local_category_id' => $category->id, 'channel' => 'ebay_de', 'external_category_id' => '177697']);
+        \App\Models\MarketplaceCategory::query()->create(['channel' => 'ebay_de', 'external_category_id' => '177697', 'name' => 'Lichtmaschine', 'full_path' => 'Auto & Motorrad / Lichtmaschinen', 'level' => 1, 'active' => true]);
+
+        $result = app(PartMarketplaceReadinessService::class)->check($part->fresh());
+        $html = view('filament.resources.parts.marketplace-readiness-cards', ['part' => $part->fresh()])->render();
+
+        $this->assertSame('ready', $result['ebay']['status']);
+        $this->assertSame('Auto & Motorrad / Lichtmaschinen', $result['ebay']['presentation']['category']['value']);
+        $this->assertStringContainsString('Auto &amp; Motorrad / Lichtmaschinen', $html);
+        $this->assertStringNotContainsString('>Wybierz kategorię<', $html);
+        $this->assertStringContainsString('data-marketplace-category-tree="ebay_de"', $html);
+        $this->assertStringNotContainsString('data-marketplace-category-tree="ebay"', $html);
         $this->assertDatabaseCount('marketplace_listings', 0);
     }
 
