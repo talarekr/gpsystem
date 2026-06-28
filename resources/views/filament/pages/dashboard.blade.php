@@ -61,7 +61,7 @@
                             <span class="gps-shop-events__separator" aria-hidden="true">—</span>
                             <span class="gps-shop-events__source">@include('filament.resources.orders.partials.source-wordmark', ['marketplace' => $event['channel']])</span>
                             <span class="gps-shop-events__separator" aria-hidden="true">—</span>
-                            <span>Numer zamówienia: {{ $event['reference'] }}</span>
+                            <span class="gps-shop-events__reference">Numer zamówienia: {{ $event['reference'] }}</span>
                             <span class="gps-shop-events__separator" aria-hidden="true">—</span>
                             <span>{{ $event['amount'] }}</span>
                         </div>
