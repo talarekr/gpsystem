@@ -2286,10 +2286,7 @@ button.gps-category-picker__arrow:hover {
 }
 
 .fi-main:has(.gps-part-edit-layout-action) .fi-header {
-    display: grid !important;
-    grid-template-columns: minmax(0, 1fr) auto !important;
     align-items: center !important;
-    column-gap: 1rem !important;
 }
 
 .fi-main:has(.gps-part-edit-layout-action) .fi-header-heading {
@@ -2298,23 +2295,14 @@ button.gps-category-picker__arrow:hover {
 }
 
 /* Static EditPart-only hook: scoped through .gps-part-edit-layout-action, which is
-   emitted only by EditPart header/footer actions. The live audit showed the header
-   and form ended at the same x-coordinate, while .fi-header .fi-ac started after the
-   title column and then overflowed to the right. In Filament's flex header, the title
-   content kept its intrinsic width and the action wrapper used auto-start alignment,
-   so there was no remaining flex space to move the full action group left before the
-   buttons were laid out. The scoped grid above makes the title column shrinkable
-   (minmax(0, 1fr)) and lets the actions column be sized from its content; the rules
-   below then pin .fi-ac to the grid/header end instead of relying on the overflowing
-   flex auto margin. */
+   emitted only by EditPart header/footer actions. Keep the standard Filament header
+   but prevent its actions wrappers from painting or reserving a trailing white strip. */
 .fi-main:has(.gps-part-edit-layout-action) .fi-header-actions,
 .fi-main:has(.gps-part-edit-layout-action) .fi-header .fi-ac {
     display: flex !important;
     flex: 0 1 auto !important;
     flex-wrap: wrap !important;
     justify-content: flex-end !important;
-    justify-self: end !important;
-    align-self: center !important;
     max-width: 100% !important;
     min-width: 0 !important;
     width: auto !important;
@@ -2322,11 +2310,6 @@ button.gps-category-picker__arrow:hover {
     margin-right: 0 !important;
     padding-left: 0 !important;
     padding-right: 0 !important;
-    position: static !important;
-    inset: auto !important;
-    right: auto !important;
-    transform: none !important;
-    translate: none !important;
     overflow: visible !important;
     background: transparent !important;
 }
