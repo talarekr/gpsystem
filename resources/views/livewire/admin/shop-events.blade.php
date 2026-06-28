@@ -8,7 +8,6 @@
             </span>
             <div>
                 <h2 id="gps-shop-events-title">Dziennik obsługi</h2>
-                <p>Najważniejsze zdarzenia wymagające uwagi obsługi sklepu.</p>
             </div>
         </div>
 
