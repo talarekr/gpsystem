@@ -6,14 +6,12 @@ use App\Filament\Resources\OrderResource;
 use App\Filament\Resources\PartResource;
 use App\Models\Order;
 use App\Models\ShopEvent;
-use App\Services\Admin\SalesAnalyticsService;
 use Filament\Pages\Dashboard as BaseDashboard;
 use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Schema;
-use NumberFormatter;
 
 class Dashboard extends BaseDashboard
 {
@@ -38,50 +36,6 @@ class Dashboard extends BaseDashboard
     public function ordersUrl(): string
     {
         return OrderResource::getUrl('index');
-    }
-
-    /**
-     * @return array<string, string>
-     */
-    public function salesRangeTabs(): array
-    {
-        return app(SalesAnalyticsService::class)->ranges();
-    }
-
-    public function activeSalesRange(): string
-    {
-        $range = request()->query('sales_range', 'last_30_days');
-
-        return array_key_exists($range, $this->salesRangeTabs()) ? $range : 'last_30_days';
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    public function salesAnalytics(): array
-    {
-        return app(SalesAnalyticsService::class)->dashboardData($this->activeSalesRange());
-    }
-
-    public function formatPln(float|int $amount): string
-    {
-        return $this->formatCurrency((float) $amount, 'PLN', 'pl_PL');
-    }
-
-    public function formatEur(float|int $amount): string
-    {
-        return $this->formatCurrency((float) $amount, 'EUR', 'pl_PL');
-    }
-
-    private function formatCurrency(float $amount, string $currency, string $locale): string
-    {
-        if (class_exists(NumberFormatter::class)) {
-            $formatter = new NumberFormatter($locale, NumberFormatter::CURRENCY);
-
-            return $formatter->formatCurrency($amount, $currency) ?: number_format($amount, 2, ',', ' ') . ' ' . $currency;
-        }
-
-        return number_format($amount, 2, ',', ' ') . ' ' . $currency;
     }
 
     /**
