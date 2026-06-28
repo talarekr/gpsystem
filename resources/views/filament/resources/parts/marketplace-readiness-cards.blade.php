@@ -1,5 +1,5 @@
 @php
-    $readiness = $part ? app(\App\Services\Marketplace\PartMarketplaceReadinessService::class)->check($part) : [];
+    $readiness = $part ? app(\App\Services\Marketplace\PartMarketplaceReadinessService::class)->check($part, $categoryId ?? null) : [];
     $labels = ['allegro' => 'Allegro', 'ovoko' => 'Ovoko', 'ebay' => 'eBay'];
     $channels = ['allegro' => 'allegro_main', 'ovoko' => 'ovoko', 'ebay' => 'ebay_de'];
     $mappingChannels = ['allegro' => 'allegro_main', 'ovoko' => 'ovoko', 'ebay' => 'ebay_de'];
