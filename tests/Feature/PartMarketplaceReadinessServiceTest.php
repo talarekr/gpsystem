@@ -365,6 +365,26 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $this->assertStringNotContainsString('fi-modal-window-ctn', $html);
     }
 
+
+    public function test_marketplace_category_drawer_keeps_panel_clicks_inside_and_parent_navigation_separate_from_final_pick(): void
+    {
+        $drawerShellBlade = file_get_contents(resource_path('views/filament/forms/category-drawer-shell.blade.php'));
+        $categoryPickerBlade = file_get_contents(resource_path('views/filament/forms/category-picker.blade.php'));
+
+        $this->assertStringContainsString('gps-marketplace-category-drawer pointer-events-auto', $drawerShellBlade);
+        $this->assertStringContainsString('x-on:click.stop', $drawerShellBlade);
+        $this->assertStringContainsString('x-on:click="categoryDrawerOpen = false"', $drawerShellBlade);
+
+        $this->assertStringContainsString('if (category?.has_children) {', $categoryPickerBlade);
+        $this->assertStringContainsString('this.open(category);', $categoryPickerBlade);
+        $this->assertMatchesRegularExpression('/activate\(category\) \{\s*if \(category\?\.has_children\) \{\s*this\.open\(category\);\s*return;\s*}\s*this\.choose\(category\);\s*}/s', $categoryPickerBlade);
+        $this->assertMatchesRegularExpression('/open\(category\) \{\s*if \(! category\?\.has_children\) \{\s*return;\s*}\s*this\.stack\.push\(category\.id\);\s*this\.currentParent = category\.id;\s*this\.ensureChildren\(category\.id\);\s*}/s', $categoryPickerBlade);
+        $this->assertStringContainsString('x-on:click.stop="open(category)"', $categoryPickerBlade);
+        $this->assertStringContainsString('type="button"', $categoryPickerBlade);
+        $this->assertStringContainsString('x-on:click="saveSelectedCategory()"', $categoryPickerBlade);
+        $this->assertStringNotContainsString('x-on:click="saveSelectedCategory(category)"', $categoryPickerBlade);
+    }
+
     public function test_marketplace_picker_keeps_separate_tree_sources_for_supported_channels(): void
     {
         $category = PartCategory::query()->create(['name' => 'Alternatory']);

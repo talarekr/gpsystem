@@ -29,7 +29,7 @@
 ></div>
 <aside
     id="{{ $fieldId }}"
-    class="fixed inset-y-0 right-0 left-auto z-50 ml-auto w-full max-w-xl flex-col bg-white p-6 shadow-xl dark:bg-gray-900 gps-marketplace-category-drawer"
+    class="fixed inset-y-0 right-0 left-auto z-50 ml-auto w-full max-w-xl flex-col bg-white p-6 shadow-xl dark:bg-gray-900 gps-marketplace-category-drawer pointer-events-auto"
     style="top: 0; right: 0; bottom: 0; left: auto; height: 100dvh; max-height: 100dvh; width: min(100vw, 420px); max-width: 440px;"
     data-category-drawer
     data-category-drawer-id="{{ $fieldId }}"
@@ -39,6 +39,7 @@
     x-transition
     x-bind:class="categoryDrawerOpen ? 'flex' : 'hidden'"
     x-on:close-category-drawer.window="if (! $event.detail?.drawerId || $event.detail.drawerId === @js($drawerId)) categoryDrawerOpen = false"
+    x-on:click.stop
     role="dialog"
     aria-modal="true"
     aria-labelledby="{{ $fieldId }}-heading"
