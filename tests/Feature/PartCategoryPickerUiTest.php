@@ -43,9 +43,6 @@ class PartCategoryPickerUiTest extends TestCase
 
         $this->assertStringContainsString('type="button"', $html);
         $this->assertStringContainsString('x-on:click="saveSelectedCategory()"', $html);
-        $this->assertStringContainsString('closeFilamentCategoryModalViaCloseButton()', $html);
-        $this->assertStringContainsString(".querySelector?.('.fi-modal-header :is(.fi-modal-close-btn, .fi-modal-close-button, [aria-label=\"Close\"], [aria-label=\"Zamknij\"])')", $html);
-        $this->assertStringContainsString('closeButton.click();', $html);
         $this->assertStringContainsString("this.\$dispatch('close-category-drawer', { drawerId: this.drawerId });", $html);
         $this->assertStringContainsString('categoryDrawerOpen = false', $html);
         $this->assertMatchesRegularExpression('/closeCategoryPicker\(\);\s*this\.selectedId = null;/s', $html);

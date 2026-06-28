@@ -363,10 +363,6 @@
                 });
         },
         closeCategoryPicker() {
-            if (this.closeFilamentCategoryModalViaCloseButton()) {
-                return;
-            }
-
             this.$dispatch('close-category-drawer', { drawerId: this.drawerId });
 
             if (typeof categoryDrawerOpen !== 'undefined') {
@@ -380,24 +376,6 @@
             }
 
             this.$dispatch('close-modal', { id: 'form-component-action' });
-        },
-        closeFilamentCategoryModalViaCloseButton() {
-            if (this.$refs.marketplaceForm) {
-                return false;
-            }
-
-            const picker = this.$root;
-            const modalWindow = picker?.closest?.('.gps-category-picker-modal');
-            const closeButton = modalWindow
-                ?.querySelector?.('.fi-modal-header :is(.fi-modal-close-btn, .fi-modal-close-button, [aria-label="Close"], [aria-label="Zamknij"])');
-
-            if (! closeButton) {
-                return false;
-            }
-
-            closeButton.click();
-
-            return true;
         },
         back() {
             this.stack.pop();
