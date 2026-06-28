@@ -6,8 +6,11 @@
     $hiddenFields = $hiddenFields ?? [];
     $saveField = $saveField ?? 'category_id';
     $pickerId = $pickerId ?? ('gps-category-picker-'.uniqid());
+    $lazyLoadOnInit = $lazyLoadOnInit ?? false;
     $lazyChildrenUrl = $lazyChildrenUrl ?? null;
     $lazyChannel = $lazyChannel ?? null;
+    $lazyParentKey = $lazyParentKey ?? 'parent_id';
+    $lazySearchMinLength = $lazySearchMinLength ?? 2;
     $drawerId = $drawerId ?? null;
     $marketplaceSelectionChannel = $marketplaceSelectionChannel ?? null;
 @endphp
