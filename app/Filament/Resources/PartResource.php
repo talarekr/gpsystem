@@ -139,7 +139,6 @@ class PartResource extends Resource
                         Forms\Components\Hidden::make('category_needs_review'),
                         Forms\Components\Hidden::make('category_suggestions')->dehydrated(false)->default([]),
                         Forms\Components\Hidden::make('marketplace_category_mappings_state')->dehydrated(false)->default([]),
-                        Forms\Components\Hidden::make('marketplace_category_selections')->default([]),
                     ]),
 
                 Section::make('Informacje o samochodzie')

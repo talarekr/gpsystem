@@ -11,7 +11,6 @@
     'saveField' => 'category_id',
     'pickerId' => null,
     'treeAttribute' => null,
-    'selectionChannel' => null,
 ])
 
 <div
@@ -50,6 +49,5 @@
         'hiddenFields' => $hiddenFields,
         'saveField' => $saveField,
         'pickerId' => $pickerId,
-        'selectionChannel' => $selectionChannel,
     ])
 </aside>
