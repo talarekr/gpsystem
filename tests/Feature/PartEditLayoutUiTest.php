@@ -41,10 +41,11 @@ class PartEditLayoutUiTest extends TestCase
         $this->assertStringContainsString('--gps-part-edit-card-max-width: 54rem;', $css);
         $this->assertStringContainsString('.gps-part-form / .fi-section (about 54rem wide, right edge around x=1210)', $css);
         $this->assertStringContainsString('.fi-header / .fi-form are wider page wrappers (right edge around x=1291)', $css);
-        $this->assertStringContainsString('relying on a fixed pixel offset', $css);
+        $this->assertStringContainsString('use a relative right offset on .fi-ac itself instead', $css);
         $this->assertStringContainsString('.fi-main:has(.gps-part-edit-layout-action) .fi-header .fi-ac {', $css);
         $this->assertStringContainsString('max-width: min(100%, var(--gps-part-edit-card-max-width)) !important;', $css);
-        $this->assertStringContainsString('margin-right: calc((100% - min(100%, var(--gps-part-edit-card-max-width))) / 2) !important;', $css);
+        $this->assertStringContainsString('position: relative !important;', $css);
+        $this->assertStringContainsString('right: calc((100% - min(100%, var(--gps-part-edit-card-max-width))) / 2) !important;', $css);
         $this->assertStringContainsString('do not resize or reposition .fi-header, .fi-form, the edit', $css);
         $this->assertStringNotContainsString('.fi-main:has(.gps-part-edit-layout-action) :where(.fi-header, form, form .fi-form-actions) {', $css);
         $this->assertStringNotContainsString('--gps-part-edit-form-container-max-width', $css);
