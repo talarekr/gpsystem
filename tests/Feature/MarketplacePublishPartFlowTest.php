@@ -68,11 +68,34 @@ class MarketplacePublishPartFlowTest extends TestCase
         $response = $this->getJson('/tools/marketplace-publish-part-confirm?token=gps_images_import_2026&part_id='.$part->id.'&channels=all&dry_run=0&confirm=1')
             ->assertOk();
 
+        $this->assertContains('allegro', $response->json('ready_channels'));
         $this->assertContains('ovoko', $response->json('ready_channels'));
+        $this->assertContains('allegro', $response->json('published_channels'));
+        $this->assertContains('ovoko', $response->json('published_channels'));
         $this->assertArrayHasKey('ebay', $response->json('skipped_channels'));
         $this->assertSame('skipped_blocked_readiness', $response->json('channels.ebay.status'));
         $this->assertFalse((bool) $response->json('channels.ebay.write'));
+        $this->assertDatabaseHas('marketplace_listings', ['part_id' => $part->id, 'marketplace' => 'allegro']);
         $this->assertDatabaseHas('marketplace_listings', ['part_id' => $part->id, 'marketplace' => 'ovoko']);
+        $this->assertDatabaseMissing('marketplace_listings', ['part_id' => $part->id, 'marketplace' => 'ebay_de']);
+    }
+
+
+    public function test_publish_report_includes_per_channel_ready_and_skipped_without_sending_blocked_channel(): void
+    {
+        config(['marketplace.publish_enabled' => true]);
+        $category = PartCategory::query()->create(['name' => 'Alternatory']);
+        $part = $this->completeLocalPart(['category_id' => $category->id]);
+
+        MarketplaceCategoryMapping::query()->create(['local_category_id' => $category->id, 'channel' => 'allegro_main', 'external_category_id' => '261054']);
+        MarketplaceCategoryMapping::query()->create(['local_category_id' => $category->id, 'channel' => 'ovoko', 'external_category_id' => '252']);
+
+        $result = app(PublishPartToMarketplacesService::class)->confirm($part, 'all', dryRun: false, confirm: true);
+
+        $this->assertSame(['allegro', 'ovoko'], $result['ready_channels']);
+        $this->assertArrayHasKey('ebay', $result['skipped_channels']);
+        $this->assertSame('skipped_blocked_readiness', $result['channels']['ebay']['status']);
+        $this->assertFalse($result['channels']['ebay']['write']);
         $this->assertDatabaseMissing('marketplace_listings', ['part_id' => $part->id, 'marketplace' => 'ebay_de']);
     }
 
