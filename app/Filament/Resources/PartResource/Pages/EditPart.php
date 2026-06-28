@@ -384,7 +384,9 @@ class EditPart extends EditRecord
             ->color('success')
             ->requiresConfirmation()
             ->visible(fn (): bool => (bool) $this->record->needs_listing)
-            ->extraAttributes(['class' => 'gps-part-edit-layout-action gps-part-edit-layout-action--publish'])
+            ->extraAttributes([
+                'class' => 'gps-part-edit-layout-action gps-part-edit-layout-action--publish' . (str_ends_with($name, 'Footer') ? ' gps-part-edit-footer-action' : ''),
+            ])
             ->action(function (PublishPartToMarketplacesService $publishService): void {
                 $this->save(false, false);
                 $this->record->refresh();
