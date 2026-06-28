@@ -771,7 +771,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 
 .gps-sales-metric__value {
     display: block;
-    margin: 3px 0 0;
+    margin: 8px 0 0;
     color: var(--gps-admin-navy);
     font-family: inherit;
     font-size: 0.9rem;
