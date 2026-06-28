@@ -27,7 +27,7 @@
 
             <div class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900" data-marketplace-card="{{ $key }}">
                 <div class="flex items-start justify-between gap-3">
-                    <h3 class="text-base font-semibold text-gray-950 dark:text-white">{{ $labels[$key] }}</h3>
+                    <h3 class="text-base font-semibold text-gray-950 dark:text-white">@include('filament.resources.orders.partials.source-wordmark', ['marketplace' => $key])</h3>
                 </div>
 
                 <div class="mt-4 space-y-4 text-sm">
