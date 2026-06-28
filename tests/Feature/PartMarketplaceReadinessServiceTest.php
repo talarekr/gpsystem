@@ -144,6 +144,44 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $this->assertStringContainsString('Szczegóły techniczne', $html);
     }
 
+    public function test_marketplace_category_field_matches_shared_category_field_structure_and_fallbacks(): void
+    {
+        $category = PartCategory::query()->create(['name' => 'Alternatory']);
+        $part = Part::query()->create(['name' => 'Alternator BMW', 'category_id' => $category->id, 'quantity' => 1]);
+
+        MarketplaceCategoryMapping::query()->create(['local_category_id' => $category->id, 'channel' => 'ebay_de', 'external_category_id' => '177697']);
+        \App\Models\MarketplaceCategory::query()->create(['channel' => 'ebay_de', 'external_category_id' => '177697', 'name' => 'Lichtmaschine', 'full_path' => 'Auto & Motorrad / Lichtmaschinen', 'level' => 1, 'active' => true]);
+
+        $html = view('filament.resources.parts.marketplace-readiness-cards', ['part' => $part])->render();
+
+        $this->assertStringContainsString('gps-shared-category-field fi-input-wrp', $html);
+        $this->assertStringContainsString('gps-shared-category-field__legend', $html);
+        $this->assertStringContainsString('>Kategoria</legend>', $html);
+        $this->assertStringNotContainsString('fi-fo-field-wrp-label inline-flex items-center gap-x-3', $html);
+        $this->assertStringNotContainsString('rounded-r-lg border-l border-gray-200', $html);
+        $this->assertStringContainsString('data-category-drawer-trigger', $html);
+        $this->assertStringContainsString('data-category-drawer', $html);
+        $this->assertStringContainsString('Auto &amp; Motorrad / Lichtmaschinen', $html);
+        $this->assertStringNotContainsString('Wybrana kategoria eBay', $html);
+        $this->assertStringContainsString('Tryb lokalny: bez publish i bez marketplace API write.', $html);
+        $this->assertDatabaseCount('marketplace_listings', 0);
+    }
+
+    public function test_marketplace_category_field_shows_neutral_fallback_without_category_name(): void
+    {
+        $category = PartCategory::query()->create(['name' => 'Alternatory']);
+        $part = Part::query()->create(['name' => 'Alternator BMW', 'category_id' => $category->id, 'quantity' => 1]);
+
+        MarketplaceCategoryMapping::query()->create(['local_category_id' => $category->id, 'channel' => 'ebay_de', 'external_category_id' => '177697']);
+
+        $html = view('filament.resources.parts.marketplace-readiness-cards', ['part' => $part])->render();
+
+        $this->assertStringContainsString('Wybierz kategorię', $html);
+        $this->assertStringNotContainsString('Wybrana kategoria eBay', $html);
+        $this->assertStringContainsString('Szczegóły techniczne', $html);
+        $this->assertDatabaseCount('marketplace_listings', 0);
+    }
+
     public function test_manual_marketplace_category_selection_updates_local_mapping_without_listing_write(): void
     {
         $category = PartCategory::query()->create(['name' => 'Alternatory']);
