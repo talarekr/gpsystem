@@ -416,6 +416,10 @@ body,
 
 
 @media (min-width: 1024px) {
+    :root {
+        --sidebar-width: 19rem;
+    }
+
     .gps-admin-topbar {
         padding-right: max(
             var(--gps-admin-topbar-inline-padding),
