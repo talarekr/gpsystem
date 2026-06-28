@@ -8,6 +8,7 @@
     $pickerId = $pickerId ?? ('gps-category-picker-'.uniqid());
     $lazyChildrenUrl = $lazyChildrenUrl ?? null;
     $lazyChannel = $lazyChannel ?? null;
+    $drawerId = $drawerId ?? null;
 @endphp
 
 @once
@@ -205,6 +206,7 @@
         selectedId: null,
         selectedName: '',
         isSaving: false,
+        drawerId: @js($drawerId),
         init() {},
         async ensureChildren(parentId = null) {
             if (! this.lazyChildrenUrl) {
@@ -361,6 +363,8 @@
                 });
         },
         closeCategoryPicker() {
+            this.$dispatch('close-category-drawer', { drawerId: this.drawerId });
+
             if (typeof categoryDrawerOpen !== 'undefined') {
                 categoryDrawerOpen = false;
             }
