@@ -20,6 +20,13 @@ class PartMarketplaceReadinessController extends Controller
 {
     private const TOKEN = 'gps_images_import_2026';
 
+    /**
+     * Some imported marketplace trees (notably older eBay imports) mark root
+     * categories with sentinel parent values instead of SQL NULL. Treat them
+     * as roots when the drawer asks for the first lazy level.
+     */
+    private const ROOT_PARENT_EXTERNAL_CATEGORY_IDS = ['', '0', 'root', 'ROOT'];
+
     public function __construct(private readonly MarketplaceListingReadinessService $readinessService) {}
 
     public function check(Request $request): JsonResponse
@@ -169,12 +176,17 @@ class PartMarketplaceReadinessController extends Controller
         $channel = (string) $data['channel'];
         $parentId = $data['parent_external_category_id'] ?? null;
 
+        $rootMode = ! filled($parentId);
+
         $query = MarketplaceCategory::query()
             ->where('channel', $channel)
             ->when(
-                filled($parentId),
+                ! $rootMode,
                 fn ($query) => $query->where('parent_external_category_id', (string) $parentId),
-                fn ($query) => $query->whereNull('parent_external_category_id')
+                fn ($query) => $query->where(function ($query): void {
+                    $query->whereNull('parent_external_category_id')
+                        ->orWhereIn('parent_external_category_id', self::ROOT_PARENT_EXTERNAL_CATEGORY_IDS);
+                })
             )
             ->orderBy('name')
             ->orderBy('external_category_id');
@@ -195,9 +207,11 @@ class PartMarketplaceReadinessController extends Controller
             'ok' => true,
             'channel' => $channel,
             'parent_external_category_id' => filled($parentId) ? (string) $parentId : null,
+            'root_mode' => $rootMode,
+            'count' => $children->count(),
             'children' => $children->map(fn (MarketplaceCategory $category): array => [
                 'id' => (string) $category->external_category_id,
-                'parent_id' => filled($category->parent_external_category_id) ? (string) $category->parent_external_category_id : null,
+                'parent_id' => filled($category->parent_external_category_id) && ! in_array((string) $category->parent_external_category_id, self::ROOT_PARENT_EXTERNAL_CATEGORY_IDS, true) ? (string) $category->parent_external_category_id : null,
                 'name' => $category->name ?: ($category->full_path ?: $category->external_category_id),
                 'path' => $category->full_path ?: ($category->name ?: $category->external_category_id),
                 'full_slug_path' => $category->full_path,

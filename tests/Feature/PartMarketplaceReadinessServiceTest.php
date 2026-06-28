@@ -240,6 +240,51 @@ class PartMarketplaceReadinessServiceTest extends TestCase
     }
 
 
+
+    public function test_ebay_de_category_children_endpoint_returns_roots_from_local_db_and_diagnostics(): void
+    {
+        \App\Models\MarketplaceCategory::query()->create(['channel' => 'ebay_de', 'external_category_id' => '6000', 'parent_external_category_id' => '0', 'name' => 'Vehicle Parts & Accessories', 'full_path' => 'Vehicle Parts & Accessories', 'level' => 0, 'active' => true]);
+        \App\Models\MarketplaceCategory::query()->create(['channel' => 'ebay_de', 'external_category_id' => '6030', 'parent_external_category_id' => '6000', 'name' => 'Car & Truck Parts', 'full_path' => 'Vehicle Parts & Accessories / Car & Truck Parts', 'level' => 1, 'active' => true]);
+        \App\Models\MarketplaceCategory::query()->create(['channel' => 'ebay_fr', 'external_category_id' => '7000', 'name' => 'FR root', 'full_path' => 'FR root', 'level' => 0, 'active' => true]);
+
+        $this->getJson(route('tools.marketplace-category-children', ['token' => 'gps_images_import_2026', 'channel' => 'ebay_de']))
+            ->assertOk()
+            ->assertJsonPath('channel', 'ebay_de')
+            ->assertJsonPath('parent_external_category_id', null)
+            ->assertJsonPath('root_mode', true)
+            ->assertJsonPath('count', 1)
+            ->assertJsonPath('source', 'local_db_only')
+            ->assertJsonPath('will_make_marketplace_request', false)
+            ->assertJsonPath('publish', false)
+            ->assertJsonPath('children.0.id', '6000')
+            ->assertJsonPath('children.0.parent_id', null)
+            ->assertJsonPath('children.0.has_children', true)
+            ->assertJsonMissing(['id' => '6030'])
+            ->assertJsonMissing(['id' => '7000']);
+
+        $this->getJson(route('tools.marketplace-category-children', ['token' => 'gps_images_import_2026', 'channel' => 'ebay_de', 'parent_external_category_id' => '6000']))
+            ->assertOk()
+            ->assertJsonPath('root_mode', false)
+            ->assertJsonPath('count', 1)
+            ->assertJsonPath('children.0.id', '6030')
+            ->assertJsonPath('children.0.parent_id', '6000');
+
+        $this->assertDatabaseCount('marketplace_listings', 0);
+    }
+
+    public function test_marketplace_readiness_cards_render_headers_with_existing_wordmark_partial(): void
+    {
+        $category = PartCategory::query()->create(['name' => 'Alternatory']);
+        $part = Part::query()->create(['name' => 'Alternator BMW', 'category_id' => $category->id, 'quantity' => 1]);
+
+        $html = view('filament.resources.parts.marketplace-readiness-cards', ['part' => $part])->render();
+
+        $this->assertStringContainsString('gps-order-source gps-order-source--allegro', $html);
+        $this->assertStringContainsString('gps-order-source gps-order-source--ovoko', $html);
+        $this->assertStringContainsString('gps-order-source gps-order-source--ebay', $html);
+        $this->assertStringContainsString('<span style="color:#0064D2">e</span><span style="color:#E53238">B</span><span style="color:#F5AF02">a</span><span style="color:#86B817">y</span>', $html);
+    }
+
     public function test_marketplace_category_children_endpoint_returns_only_one_local_db_level(): void
     {
         \App\Models\MarketplaceCategory::query()->create(['channel' => 'allegro_main', 'external_category_id' => 'root-moto', 'name' => 'Motoryzacja', 'full_path' => 'Motoryzacja', 'level' => 0, 'active' => true]);
