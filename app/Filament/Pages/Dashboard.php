@@ -92,6 +92,7 @@ class Dashboard extends BaseDashboard
         return [
             'all' => 'Wszystkie',
             'requires_action' => 'Wymaga reakcji',
+            'orders' => 'Zamówienia',
             'messages' => 'Wiadomości',
             'returns_complaints' => 'Zwroty/Reklamacje',
         ];
@@ -123,17 +124,17 @@ class Dashboard extends BaseDashboard
      */
     public function shopEvents(): Collection
     {
-        $tab = $this->activeShopEventTab();
-        $events = in_array($tab, ['messages', 'returns_complaints'], true) && Schema::hasTable('shop_events')
-            ? $this->shopEventQuery($tab)
+        $events = Schema::hasTable('shop_events')
+            ? $this->shopEventQuery($this->activeShopEventTab())
                 ->orderByRaw('COALESCE(occurred_at, created_at) DESC')
                 ->limit(15)
                 ->get()
             : new Collection();
 
         return $events
-            ->merge($this->orderShopEvents($tab))
+            ->merge($this->orderShopEvents($this->activeShopEventTab()))
             ->sortByDesc(fn (ShopEvent $event): int => ($event->occurred_at ?: $event->created_at)?->getTimestamp() ?? 0)
+            ->take(15)
             ->values();
     }
 
@@ -149,9 +150,11 @@ class Dashboard extends BaseDashboard
         $query = ShopEvent::query()->whereIn('event_type', $this->supportShopEventTypes());
 
         match ($tab) {
+            'requires_action' => $query->where('requires_action', true),
+            'orders' => $query->whereIn('event_type', $this->orderShopEventTypes()),
             'messages' => $query->whereIn('event_type', $this->messageShopEventTypes()),
             'returns_complaints' => $query->whereIn('event_type', $this->returnComplaintShopEventTypes()),
-            default => $query->whereRaw('1 = 0'),
+            default => null,
         };
 
         return $query;
@@ -160,17 +163,11 @@ class Dashboard extends BaseDashboard
 
     private function orderShopEventsCount(string $tab): int
     {
-        if (! in_array($tab, ['all', 'requires_action'], true) || ! Schema::hasTable('orders')) {
+        if (! in_array($tab, ['all', 'requires_action', 'orders'], true) || ! Schema::hasTable('orders')) {
             return 0;
         }
 
-        $query = $this->newOrdersQuery();
-
-        if ($tab === 'requires_action') {
-            $this->onlyDelayedNewOrders($query);
-        }
-
-        return (int) $query->count();
+        return (int) Order::query()->where('status', 'new')->count();
     }
 
     /**
@@ -178,91 +175,42 @@ class Dashboard extends BaseDashboard
      */
     private function orderShopEvents(string $tab): Collection
     {
-        if (! in_array($tab, ['all', 'requires_action'], true) || ! Schema::hasTable('orders')) {
+        if (! in_array($tab, ['all', 'requires_action', 'orders'], true) || ! Schema::hasTable('orders')) {
             return new Collection();
         }
 
-        $query = $this->newOrdersQuery()->with('items');
-
-        if ($tab === 'requires_action') {
-            $this->onlyDelayedNewOrders($query);
-        }
-
-        return $query
-            ->orderByRaw('COALESCE(ordered_at, created_at) DESC')
+        return Order::query()
+            ->where('status', 'new')
+            ->latest()
+            ->limit(15)
             ->get()
             ->map(fn (Order $order): ShopEvent => $this->orderToShopEvent($order));
     }
 
     private function orderToShopEvent(Order $order): ShopEvent
     {
-        $orderedAt = $order->ordered_at ?: $order->created_at;
         $event = new ShopEvent([
-            'source' => $this->normalizeOrderSource($order),
+            'source' => 'storefront',
             'event_type' => 'order',
-            'title' => OrderResource::displayOrderNumber($order),
-            'description' => null,
-            'occurred_at' => $orderedAt,
+            'title' => 'Nowe zamówienie sklep ' . $order->order_number,
+            'description' => trim(sprintf('Status: %s. Klient: %s.', $order->status, $order->customer_name ?: '—')),
+            'occurred_at' => $order->created_at,
             'is_read' => false,
-            'requires_action' => $orderedAt ? $orderedAt->lessThanOrEqualTo(now()->subDay()) : false,
+            'requires_action' => true,
             'severity' => 'warning',
-            'customer_name' => null,
-            'external_reference' => OrderResource::displayOrderNumber($order),
+            'customer_name' => $order->customer_name,
+            'external_reference' => $order->order_number,
             'url' => OrderResource::getUrl('view', ['record' => $order]),
             'payload' => [
                 'order_id' => $order->id,
-                'order_number' => OrderResource::displayOrderNumber($order),
+                'order_number' => $order->order_number,
                 'status' => $order->status,
-                'total' => OrderResource::formatOrderTotal($order),
             ],
         ]);
         $event->created_at = $order->created_at;
         $event->updated_at = $order->updated_at;
 
         return $event;
-    }
-
-    private function newOrdersQuery(): Builder
-    {
-        return Order::query()->where('status', 'new');
-    }
-
-    private function onlyDelayedNewOrders(Builder $query): void
-    {
-        $query->where(function (Builder $query): void {
-            $query->where('ordered_at', '<=', now()->subDay())
-                ->orWhere(function (Builder $query): void {
-                    $query->whereNull('ordered_at')
-                        ->where('created_at', '<=', now()->subDay());
-                });
-        });
-    }
-
-    private function normalizeOrderSource(Order $order): string
-    {
-        $source = $this->normalizeSourceValue($order->marketplace);
-        $source ??= $this->normalizeSourceValue(data_get($order->meta, 'source'));
-        $source ??= $this->normalizeSourceValue(data_get($order->meta, 'channel'));
-        $source ??= $this->normalizeSourceValue($order->items->pluck('marketplace')->first(fn ($marketplace): bool => filled($marketplace)));
-
-        return $source ?: 'storefront';
-    }
-
-    private function normalizeSourceValue(mixed $source): ?string
-    {
-        $source = strtolower(trim((string) $source));
-
-        if ($source === '') {
-            return null;
-        }
-
-        return match (true) {
-            str_starts_with($source, 'allegro') => 'allegro',
-            str_starts_with($source, 'ovoko') => 'ovoko',
-            str_starts_with($source, 'ebay') => 'ebay',
-            in_array($source, ['sklep', 'shop', 'store', 'storefront'], true) => 'storefront',
-            default => $source,
-        };
     }
 
     /**

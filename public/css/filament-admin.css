@@ -492,7 +492,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 .gps-shop-events__tab-count--action { background: #fee2e2; color: #991b1b; }
 
 .gps-shop-events__empty { margin-top: 1rem; border: 1px dashed #cbd5e1; border-radius: 0.95rem; background: #f8fafc; padding: 1.2rem; color: #64748b; font-weight: 700; text-align: center; }
-.gps-shop-events__list { display: grid; gap: 0.75rem; margin-top: 1rem; max-height: 26rem; overflow-y: auto; padding-right: 0.25rem; }
+.gps-shop-events__list { display: grid; gap: 0.75rem; margin-top: 1rem; }
 .gps-shop-events__item { display: grid; grid-template-columns: 5.25rem minmax(0, 1fr) auto; gap: 0.85rem; align-items: flex-start; border: 1px solid #e2e8f0; border-left: 4px solid #94a3b8; border-radius: 0.95rem; background: #fff; padding: 0.9rem; box-shadow: 0 1px 2px rgba(11, 31, 58, 0.035); }
 .gps-shop-events__item--success { border-left-color: #16a34a; }
 .gps-shop-events__item--warning { border-left-color: #d97706; }
@@ -509,8 +509,6 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 .gps-shop-events__body p { margin: 0.3rem 0 0; color: #475569; font-size: 0.88rem; line-height: 1.45; }
 .gps-shop-events__meta { margin-top: 0.45rem; color: #64748b; font-size: 0.8rem; }
 .gps-shop-events__meta strong { color: #334155; }
-.gps-shop-events__order-line { display: flex; flex-wrap: wrap; gap: 0.55rem; align-items: center; color: #334155; font-size: 0.9rem; }
-.gps-shop-events__order-line strong { color: #0f172a; font-weight: 850; }
 .gps-shop-events__open { align-self: center; border: 1px solid #cfd9e7; border-radius: 0.7rem; color: var(--gps-admin-navy); padding: 0.45rem 0.65rem; font-size: 0.8rem; font-weight: 800; text-decoration: none; }
 .gps-shop-events__open:hover { background: #edf3f8; }
 
