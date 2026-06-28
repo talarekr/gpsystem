@@ -373,8 +373,11 @@
                 categoryDrawerOpen = false;
             }
 
+            // The main part category picker is a Filament form-component action slide-over.
+            // Its open state lives in Livewire's mounted form-component action state,
+            // not in the Alpine drawer state used by marketplace category pickers.
             if (typeof this.$wire.unmountFormComponentAction === 'function') {
-                this.$wire.unmountFormComponentAction(false, true);
+                this.$wire.unmountFormComponentAction(false, false);
             }
         },
         back() {

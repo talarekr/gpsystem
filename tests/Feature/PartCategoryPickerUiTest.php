@@ -22,6 +22,7 @@ class PartCategoryPickerUiTest extends TestCase
         Livewire::test(EditPart::class, ['record' => $part->getRouteKey()])
             ->call('setPartCategoryFromPicker', $newCategory->id)
             ->assertSet('data.category_id', $newCategory->id)
+            ->assertSet('mountedFormComponentActions', [])
             ->assertDispatched('close-modal', id: 'form-component-action');
 
         $this->assertDatabaseHas('parts', [
@@ -47,10 +48,34 @@ class PartCategoryPickerUiTest extends TestCase
         $this->assertStringContainsString("const filamentFormComponentActionModalId = 'form-component-action';", $html);
         $this->assertStringContainsString("this.\$dispatch('close-modal', { id: filamentFormComponentActionModalId });", $html);
         $this->assertStringContainsString("window.dispatchEvent(new CustomEvent('close-modal', { detail: { id: filamentFormComponentActionModalId } }));", $html);
+        $this->assertStringContainsString('this.$wire.unmountFormComponentAction(false, false);', $html);
         $this->assertStringContainsString('categoryDrawerOpen = false', $html);
         $this->assertMatchesRegularExpression('/closeCategoryPicker\(\);\s*this\.selectedId = null;/s', $html);
         $this->assertStringNotContainsString('.fi-modal-header button', $html);
         $this->assertStringNotContainsString('$refs.marketplaceForm.submit();\n                this.closeCategoryPicker();', $html);
+    }
+
+    public function test_main_part_category_picker_uses_filament_form_component_action_close_path_without_touching_rendering(): void
+    {
+        $resource = file_get_contents(app_path('Filament/Resources/PartResource.php'));
+        $editPage = file_get_contents(app_path('Filament/Resources/PartResource/Pages/EditPart.php'));
+        $categoryPicker = file_get_contents(resource_path('views/filament/forms/category-picker.blade.php'));
+        $marketplaceField = file_get_contents(resource_path('views/filament/resources/parts/marketplace-category-field.blade.php'));
+
+        $this->assertStringContainsString("Action::make('chooseCategoryFromTree')", $resource);
+        $this->assertStringContainsString("->extraModalWindowAttributes(['class' => 'gps-category-picker-modal'])", $resource);
+        $this->assertStringContainsString('->slideOver()', $resource);
+        $this->assertStringContainsString("->view('filament.forms.category-picker')", $resource);
+
+        $this->assertStringContainsString('$this->unmountFormComponentAction(false, false);', $editPage);
+        $this->assertStringContainsString("\$this->dispatch('close-modal', id: 'form-component-action');", $editPage);
+        $this->assertStringContainsString('this.$wire.unmountFormComponentAction(false, false);', $categoryPicker);
+        $this->assertStringNotContainsString('.fi-modal-header button', $categoryPicker);
+
+        $this->assertStringContainsString('x-text="`/ ${category.name}`"', $categoryPicker);
+        $this->assertStringContainsString('x-bind:aria-label="`Pokaż podkategorie: ${category.name}`"', $categoryPicker);
+        $this->assertStringContainsString('x-data="{ categoryDrawerOpen: false }"', $marketplaceField);
+        $this->assertStringContainsString('this.$refs.marketplaceForm.submit();', $categoryPicker);
     }
 
     public function test_marketplace_category_field_and_sales_channels_picker_submit_flow_are_unchanged(): void
