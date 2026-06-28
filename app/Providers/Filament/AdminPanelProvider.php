@@ -99,21 +99,23 @@ class AdminPanelProvider extends PanelProvider
                 NavigationGroup::make('Zamówienia')
                     ->icon('heroicon-o-clipboard-document-list')
                     ->collapsible(false),
-                NavigationGroup::make('Samochody')
-                    ->icon('heroicon-o-truck')
-                    ->collapsible(false),
                 NavigationGroup::make('Części')
                     ->icon('heroicon-o-cog-6-tooth')
                     ->collapsible(false),
-                NavigationGroup::make('Magazynowanie')
+                NavigationGroup::make('Samochody')
+                    ->icon('heroicon-o-truck')
+                    ->collapsible(false),
+                NavigationGroup::make('Magazyn')
                     ->icon('heroicon-o-building-office-2')
                     ->collapsible(false),
                 NavigationGroup::make('Kategorie - mapowania...')
                     ->icon('heroicon-o-tag')
                     ->collapsible(false),
                 NavigationGroup::make('Wiadomości E-mail')
+                    ->icon('heroicon-o-envelope')
                     ->collapsible(false),
                 NavigationGroup::make('Przesyłki')
+                    ->icon('heroicon-o-paper-airplane')
                     ->collapsible(false),
                 NavigationGroup::make('Administracja marketplace')
                     ->icon('heroicon-o-globe-alt')
@@ -123,7 +125,7 @@ class AdminPanelProvider extends PanelProvider
                     ->collapsible(false),
             ])
             ->navigationItems([
-                NavigationItem::make('Kategorie - mapowanie kategorii')
+                NavigationItem::make('Mapowanie')
                     ->group('Kategorie - mapowania...')
                     ->sort(10)
                     ->url(fn (): string => route('admin.marketplace-category-mapper.index'))

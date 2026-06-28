@@ -7,8 +7,8 @@ class StockLocations extends OperationalPlaceholderPage
     protected static bool $shouldRegisterNavigation = false;
 
     protected static ?string $navigationIcon = 'heroicon-o-building-office-2';
-    protected static ?string $navigationLabel = 'Magazynowanie';
-    protected static ?string $title = 'Magazynowanie';
+    protected static ?string $navigationLabel = 'Magazyn';
+    protected static ?string $title = 'Magazyn';
     protected static ?int $navigationSort = 50;
 
     public function getPlaceholderDescription(): string

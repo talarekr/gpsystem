@@ -17,7 +17,7 @@ class EmailTemplateResource extends Resource
 {
     protected static ?string $model = EmailTemplate::class;
     protected static ?string $navigationGroup = 'Wiadomości E-mail';
-    protected static ?string $navigationIcon = 'heroicon-o-envelope';
+    protected static ?string $navigationIcon = null;
     protected static ?string $navigationLabel = 'Wiadomości E-mail';
     protected static ?string $modelLabel = 'szablon e-mail';
     protected static ?string $pluralModelLabel = 'Wiadomości E-mail';

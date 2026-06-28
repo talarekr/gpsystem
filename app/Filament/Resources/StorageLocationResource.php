@@ -22,9 +22,9 @@ class StorageLocationResource extends Resource
 {
     protected static ?string $model = StorageLocation::class;
 
-    protected static ?string $navigationGroup = 'Magazynowanie';
+    protected static ?string $navigationGroup = 'Magazyn';
 
-    // The Magazynowanie navigation group owns the sidebar icon; child resource items stay iconless.
+    // The Magazyn navigation group owns the sidebar icon; child resource items stay iconless.
     protected static ?string $navigationIcon = null;
 
     protected static ?string $navigationLabel = 'Miejsca składowania';

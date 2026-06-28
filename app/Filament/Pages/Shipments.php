@@ -11,7 +11,7 @@ use Filament\Pages\Page;
 class Shipments extends Page
 {
     protected static ?string $navigationGroup = 'Przesyłki';
-    protected static ?string $navigationIcon = 'heroicon-o-paper-airplane';
+    protected static ?string $navigationIcon = null;
     protected static ?string $navigationLabel = 'Przesyłki';
     protected static ?string $title = 'Przesyłki';
     protected static ?int $navigationSort = 70;
