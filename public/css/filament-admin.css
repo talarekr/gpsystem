@@ -2262,24 +2262,27 @@ button.gps-category-picker__arrow:hover {
     white-space: nowrap;
 }
 
-/* Part edit page: align Filament header/actions to the rendered form container without changing the form width.
-   Rendered DOM audit (Filament edit record): .fi-header is a sibling before the edit <form>,
-   .fi-form and .fi-form-actions are inside that form, and Filament centers the page content with
-   .fi-page > .mx-auto / max-width utilities. The form itself must not get an extra max-width/padding layer. */
+/* Part edit page scoped layout hook.
+   Rendered DOM/computed-style audit (Filament edit record): .fi-page contains a centered
+   .mx-auto page wrapper, then .fi-header followed by the edit <form>. Inside the form,
+   .fi-form and .fi-form-actions are siblings. The real form edge is the page/form container,
+   not the .fi-header itself. Previous CSS added another padded/max-width layer to the
+   standard header and footer actions, so their content edges could not match the form edge.
+   Keep one scoped container rule for header, form, and bottom actions: width: 100%,
+   max-width: var(--gps-admin-content-max-width) = 80rem, margin-left/right: auto,
+   padding-left/right: 0. */
 .fi-main:has(.gps-part-edit-layout-action) {
     --gps-part-edit-form-container-max-width: var(--gps-admin-content-max-width);
-    --gps-part-edit-form-container-padding: var(--gps-admin-content-inline-padding);
 }
 
-.fi-main:has(.gps-part-edit-layout-action) .fi-header,
-.fi-main:has(.gps-part-edit-layout-action) form .fi-form-actions {
+.fi-main:has(.gps-part-edit-layout-action) :where(.fi-header, form, form .fi-form-actions) {
     box-sizing: border-box;
     width: 100% !important;
     max-width: var(--gps-part-edit-form-container-max-width) !important;
     margin-left: auto !important;
     margin-right: auto !important;
-    padding-left: var(--gps-part-edit-form-container-padding) !important;
-    padding-right: var(--gps-part-edit-form-container-padding) !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
 }
 
 .fi-main:has(.gps-part-edit-layout-action) .fi-header {
