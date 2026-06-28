@@ -307,4 +307,34 @@ class PartCategoryPickerUiTest extends TestCase
         $this->assertStringContainsString("'categories' => []", $marketplaceField);
     }
 
+    public function test_category_picker_lazy_children_cache_prefetch_and_loading_state_are_frontend_only(): void
+    {
+        $categoryPicker = file_get_contents(resource_path('views/filament/forms/category-picker.blade.php'));
+
+        $this->assertStringContainsString('childrenCache: {}', $categoryPicker);
+        $this->assertStringContainsString('cacheKey(parentId = null)', $categoryPicker);
+        $this->assertStringContainsString("return `${this.lazyChannel || 'part'}:${parentKey}`;", $categoryPicker);
+        $this->assertStringContainsString('if (this.childrenCache[key]) {', $categoryPicker);
+        $this->assertStringContainsString('return this.childrenCache[key];', $categoryPicker);
+        $this->assertStringContainsString('if (this.inFlightChildren[key])', $categoryPicker);
+        $this->assertStringContainsString('this.childrenCache[key] = children;', $categoryPicker);
+        $this->assertStringContainsString('pendingParent: null', $categoryPicker);
+        $this->assertStringContainsString('Ładowanie podkategorii...', $categoryPicker);
+        $this->assertStringContainsString('this.pendingParent = category.id;', $categoryPicker);
+        $this->assertStringContainsString('this.currentParent = category.id;', $categoryPicker);
+    }
+
+    public function test_category_picker_prefetch_is_limited_and_does_not_run_for_search_results(): void
+    {
+        $categoryPicker = file_get_contents(resource_path('views/filament/forms/category-picker.blade.php'));
+
+        $this->assertStringContainsString('prefetchLimit: 12', $categoryPicker);
+        $this->assertStringContainsString('prefetchConcurrency: 2', $categoryPicker);
+        $this->assertStringContainsString('.slice(0, this.prefetchLimit)', $categoryPicker);
+        $this->assertStringContainsString('this.activePrefetches < this.prefetchConcurrency', $categoryPicker);
+        $this->assertStringContainsString('this.search.trim().length >= 2', $categoryPicker);
+        $this->assertStringContainsString("url.searchParams.set('q', term);", $categoryPicker);
+        $this->assertStringNotContainsString('parent_ids[]', $categoryPicker);
+    }
+
 }

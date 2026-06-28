@@ -204,7 +204,15 @@
         lazyChannel: @js($lazyChannel),
         lazyLoadOnInit: @js($lazyLoadOnInit),
         loadedParents: {},
+        childrenCache: {},
+        loadingParents: {},
+        inFlightChildren: {},
         isLoadingChildren: false,
+        pendingParent: null,
+        prefetchLimit: 12,
+        prefetchConcurrency: 2,
+        prefetchQueue: [],
+        activePrefetches: 0,
         currentParent: null,
         stack: [],
         search: '',
@@ -215,20 +223,41 @@
         marketplaceSelectionChannel: @js($marketplaceSelectionChannel),
         init() {
             if (this.lazyLoadOnInit) {
-                this.ensureChildren(null);
+                this.ensureChildren(null).then((children) => this.prefetchVisibleChildren(children || []));
             }
         },
-        async ensureChildren(parentId = null) {
+        cacheKey(parentId = null) {
+            const parentKey = parentId === null ? '__root__' : String(parentId);
+            return `${this.lazyChannel || 'part'}:${parentKey}`;
+        },
+        mergeCategories(children = []) {
+            const existingIds = new Set(this.categories.map((category) => String(category.id)));
+            children.forEach((category) => {
+                if (! existingIds.has(String(category.id))) {
+                    this.categories.push(category);
+                    existingIds.add(String(category.id));
+                }
+            });
+        },
+        async ensureChildren(parentId = null, options = {}) {
             if (! this.lazyChildrenUrl) {
-                return;
+                return this.children(parentId);
             }
 
-            const key = parentId === null ? '__root__' : String(parentId);
-            if (this.loadedParents[key] || this.isLoadingChildren) {
-                return;
+            const key = this.cacheKey(parentId);
+            if (this.childrenCache[key]) {
+                return this.childrenCache[key];
+            }
+            if (this.inFlightChildren[key]) {
+                return this.inFlightChildren[key];
             }
 
-            this.isLoadingChildren = true;
+            const showLoading = options.showLoading !== false;
+            if (showLoading) {
+                this.loadingParents[key] = true;
+                this.isLoadingChildren = true;
+            }
+
             const url = new URL(this.lazyChildrenUrl, window.location.origin);
             if (this.lazyChannel) {
                 url.searchParams.set('channel', this.lazyChannel);
@@ -237,29 +266,38 @@
                 url.searchParams.set(this.lazyChannel ? 'parent_external_category_id' : 'parent_id', parentId);
             }
 
-            try {
-                const response = await fetch(url.toString(), { headers: { 'Accept': 'application/json' } });
-                if (! response.ok) {
-                    return;
-                }
-                const payload = await response.json();
-                if (payload.search === true) {
-                    return payload.children || [];
-                }
-                const existingIds = new Set(this.categories.map((category) => String(category.id)));
-                (payload.children || []).forEach((category) => {
-                    if (! existingIds.has(String(category.id))) {
-                        this.categories.push(category);
-                        existingIds.add(String(category.id));
+            this.inFlightChildren[key] = fetch(url.toString(), { headers: { 'Accept': 'application/json' } })
+                .then(async (response) => {
+                    if (! response.ok) {
+                        return [];
                     }
+
+                    const payload = await response.json();
+                    if (payload.search === true) {
+                        return payload.children || [];
+                    }
+
+                    const children = payload.children || [];
+                    this.childrenCache[key] = children;
+                    this.mergeCategories(children);
+                    this.loadedParents[key] = true;
+
+                    return children;
+                })
+                .finally(() => {
+                    delete this.inFlightChildren[key];
+                    delete this.loadingParents[key];
+                    this.isLoadingChildren = Object.keys(this.loadingParents).length > 0;
                 });
-                this.loadedParents[key] = true;
-                return payload.children || [];
-            } finally {
-                this.isLoadingChildren = false;
-            }
+
+            return this.inFlightChildren[key];
         },
         children(parentId = null) {
+            const key = this.cacheKey(parentId);
+            if (this.childrenCache[key]) {
+                return this.childrenCache[key];
+            }
+
             return this.categories.filter((category) => category.parent_id === parentId);
         },
         currentChildren() {
@@ -282,9 +320,25 @@
                 return;
             }
 
-            this.stack.push(category.id);
-            this.currentParent = category.id;
-            this.ensureChildren(category.id);
+            const key = this.cacheKey(category.id);
+            if (this.childrenCache[key]) {
+                this.stack.push(category.id);
+                this.currentParent = category.id;
+                this.prefetchVisibleChildren(this.childrenCache[key]);
+                return;
+            }
+
+            this.pendingParent = category.id;
+            this.ensureChildren(category.id, { showLoading: true }).then((children) => {
+                if (String(this.pendingParent) !== String(category.id)) {
+                    return;
+                }
+
+                this.stack.push(category.id);
+                this.currentParent = category.id;
+                this.pendingParent = null;
+                this.prefetchVisibleChildren(children || []);
+            });
         },
         openFromSearch(category) {
             if (! category?.has_children) {
@@ -431,7 +485,39 @@
         resetTree() {
             this.stack = [];
             this.currentParent = null;
-            this.ensureChildren(null);
+            this.pendingParent = null;
+            this.ensureChildren(null).then((children) => this.prefetchVisibleChildren(children || []));
+        },
+        prefetchVisibleChildren(categories = this.currentChildren()) {
+            if (! this.lazyChildrenUrl || this.search.trim().length >= 2) {
+                return;
+            }
+
+            categories
+                .filter((category) => category?.has_children)
+                .slice(0, this.prefetchLimit)
+                .forEach((category) => this.queuePrefetch(category.id));
+
+            this.runPrefetchQueue();
+        },
+        queuePrefetch(parentId) {
+            const key = this.cacheKey(parentId);
+            if (this.childrenCache[key] || this.inFlightChildren[key] || this.prefetchQueue.some((item) => String(item) === String(parentId))) {
+                return;
+            }
+
+            this.prefetchQueue.push(parentId);
+        },
+        runPrefetchQueue() {
+            while (this.activePrefetches < this.prefetchConcurrency && this.prefetchQueue.length > 0) {
+                const parentId = this.prefetchQueue.shift();
+                this.activePrefetches++;
+                this.ensureChildren(parentId, { showLoading: false })
+                    .finally(() => {
+                        this.activePrefetches--;
+                        this.runPrefetchQueue();
+                    });
+            }
         },
         async fetchSearchResults() {
             if (! this.lazyChildrenUrl) {
@@ -476,7 +562,7 @@
                 .slice(0, 25);
         },
     }"
-    x-effect="if (typeof categoryDrawerOpen !== 'undefined' && categoryDrawerOpen) ensureChildren(null); if (search.trim().length >= 2) fetchSearchResults()"
+    x-effect="if (typeof categoryDrawerOpen !== 'undefined' && categoryDrawerOpen) ensureChildren(null).then((children) => prefetchVisibleChildren(children || [])); if (search.trim().length >= 2) fetchSearchResults()"
 >
 
     <div class="gps-category-picker__search">
@@ -561,8 +647,8 @@
             </div>
             </template>
 
-            <p class="gps-category-picker__empty" x-show="isLoadingChildren">Ładowanie kategorii...</p>
-            <p class="gps-category-picker__empty" x-show="! isLoadingChildren && currentChildren().length === 0">Brak podkategorii.</p>
+            <p class="gps-category-picker__empty" x-show="pendingParent !== null || isLoadingChildren">Ładowanie podkategorii...</p>
+            <p class="gps-category-picker__empty" x-show="pendingParent === null && ! isLoadingChildren && currentChildren().length === 0">Brak podkategorii.</p>
         </div>
     </div>
 
