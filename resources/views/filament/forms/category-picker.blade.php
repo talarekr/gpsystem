@@ -199,6 +199,7 @@
         suggestions: @js($suggestions),
         lazyChildrenUrl: @js($lazyChildrenUrl),
         lazyChannel: @js($lazyChannel),
+        lazyLoadOnInit: @js($lazyLoadOnInit),
         loadedParents: {},
         isLoadingChildren: false,
         currentParent: null,
@@ -209,7 +210,11 @@
         isSaving: false,
         drawerId: @js($drawerId),
         marketplaceSelectionChannel: @js($marketplaceSelectionChannel),
-        init() {},
+        init() {
+            if (this.lazyLoadOnInit) {
+                this.ensureChildren(null);
+            }
+        },
         async ensureChildren(parentId = null) {
             if (! this.lazyChildrenUrl) {
                 return;
@@ -222,9 +227,11 @@
 
             this.isLoadingChildren = true;
             const url = new URL(this.lazyChildrenUrl, window.location.origin);
-            url.searchParams.set('channel', this.lazyChannel);
+            if (this.lazyChannel) {
+                url.searchParams.set('channel', this.lazyChannel);
+            }
             if (parentId !== null) {
-                url.searchParams.set('parent_external_category_id', parentId);
+                url.searchParams.set(this.lazyChannel ? 'parent_external_category_id' : 'parent_id', parentId);
             }
 
             try {
@@ -233,6 +240,9 @@
                     return;
                 }
                 const payload = await response.json();
+                if (payload.search === true) {
+                    return payload.children || [];
+                }
                 const existingIds = new Set(this.categories.map((category) => String(category.id)));
                 (payload.children || []).forEach((category) => {
                     if (! existingIds.has(String(category.id))) {
@@ -241,6 +251,7 @@
                     }
                 });
                 this.loadedParents[key] = true;
+                return payload.children || [];
             } finally {
                 this.isLoadingChildren = false;
             }
@@ -419,6 +430,36 @@
             this.currentParent = null;
             this.ensureChildren(null);
         },
+        async fetchSearchResults() {
+            if (! this.lazyChildrenUrl) {
+                return;
+            }
+
+            const term = this.search.trim();
+            if (term.length < 2) {
+                return;
+            }
+
+            const url = new URL(this.lazyChildrenUrl, window.location.origin);
+            if (this.lazyChannel) {
+                url.searchParams.set('channel', this.lazyChannel);
+            }
+            url.searchParams.set('q', term);
+
+            const response = await fetch(url.toString(), { headers: { 'Accept': 'application/json' } });
+            if (! response.ok) {
+                return;
+            }
+
+            const payload = await response.json();
+            const existingIds = new Set(this.categories.map((category) => String(category.id)));
+            (payload.children || []).forEach((category) => {
+                if (! existingIds.has(String(category.id))) {
+                    this.categories.push(category);
+                    existingIds.add(String(category.id));
+                }
+            });
+        },
         searchResults() {
             const term = this.search.trim().toLowerCase();
 
@@ -432,7 +473,7 @@
                 .slice(0, 25);
         },
     }"
-    x-effect="if (typeof categoryDrawerOpen !== 'undefined' && categoryDrawerOpen) ensureChildren(null)"
+    x-effect="if (typeof categoryDrawerOpen !== 'undefined' && categoryDrawerOpen) ensureChildren(null); if (search.trim().length >= 2) fetchSearchResults()"
 >
 
     <div class="gps-category-picker__search">
