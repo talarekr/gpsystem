@@ -156,10 +156,15 @@
                 <div class="gps-sales-channels">
                     @foreach ($salesAnalytics['channels'] as $channel)
                         <article class="gps-sales-channel gps-sales-channel--{{ $channel['key'] }}">
-                            <div class="gps-sales-channel__badge" aria-hidden="true">{{ $channel['badge'] }}</div>
                             <div class="gps-sales-channel__body">
                                 <div class="gps-sales-channel__topline">
-                                    <strong>{{ $channel['label'] }}</strong>
+                                    <strong class="gps-sales-channel__wordmark gps-sales-channel__wordmark--{{ $channel['key'] }}">
+                                        @if ($channel['key'] === 'ebay')
+                                            <span style="color:#0064D2">e</span><span style="color:#E53238">B</span><span style="color:#F5AF02">a</span><span style="color:#86B817">y</span>
+                                        @else
+                                            {{ $channel['label'] }}
+                                        @endif
+                                    </strong>
                                     <span>{{ $channel['orders_count'] }} zam.</span>
                                 </div>
                                 @if ($channel['key'] === 'ebay')
