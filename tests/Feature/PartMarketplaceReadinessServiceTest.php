@@ -131,6 +131,8 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $this->assertStringContainsString('data-category-chooser-field', $html);
         $this->assertStringContainsString('data-shared-category-input', $html);
         $this->assertStringContainsString('data-category-drawer-trigger', $html);
+        $this->assertStringContainsString('type="button"', $html);
+        $this->assertStringContainsString('x-on:click.prevent.stop="categoryDrawerOpen = true"', $html);
         $this->assertStringContainsString('data-category-drawer', $html);
         $this->assertStringContainsString('data-marketplace-category-tree="allegro_main"', $html);
         $this->assertStringContainsString('data-marketplace-category-tree="ovoko"', $html);
@@ -160,11 +162,31 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $this->assertStringNotContainsString('fi-fo-field-wrp-label inline-flex items-center gap-x-3', $html);
         $this->assertStringNotContainsString('rounded-r-lg border-l border-gray-200', $html);
         $this->assertStringContainsString('data-category-drawer-trigger', $html);
+        $this->assertStringContainsString('type="button"', $html);
+        $this->assertStringContainsString('x-on:click.prevent.stop="categoryDrawerOpen = true"', $html);
         $this->assertStringContainsString('data-category-drawer', $html);
+        $this->assertStringContainsString('data-category-drawer-id="marketplace-category-drawer-ebay-de-', $html);
+        $this->assertStringNotContainsString('data-category-drawer-toggle', $html);
+        $this->assertStringNotContainsString('peer-checked', $html);
         $this->assertStringContainsString('Auto &amp; Motorrad / Lichtmaschinen', $html);
         $this->assertStringNotContainsString('Wybrana kategoria eBay', $html);
         $this->assertStringContainsString('Tryb lokalny: bez publish i bez marketplace API write.', $html);
         $this->assertDatabaseCount('marketplace_listings', 0);
+    }
+
+    public function test_marketplace_category_drawers_have_unique_channel_ids(): void
+    {
+        $category = PartCategory::query()->create(['name' => 'Alternatory']);
+        $part = Part::query()->create(['name' => 'Alternator BMW', 'category_id' => $category->id, 'quantity' => 1]);
+
+        $html = view('filament.resources.parts.marketplace-readiness-cards', ['part' => $part])->render();
+
+        $this->assertStringContainsString('id="marketplace-category-drawer-allegro-main-'.$part->id.'"', $html);
+        $this->assertStringContainsString('id="marketplace-category-drawer-ovoko-'.$part->id.'"', $html);
+        $this->assertStringContainsString('id="marketplace-category-drawer-ebay-de-'.$part->id.'"', $html);
+        $this->assertSame(1, substr_count($html, 'id="marketplace-category-drawer-allegro-main-'.$part->id.'"'));
+        $this->assertSame(1, substr_count($html, 'id="marketplace-category-drawer-ovoko-'.$part->id.'"'));
+        $this->assertSame(1, substr_count($html, 'id="marketplace-category-drawer-ebay-de-'.$part->id.'"'));
     }
 
     public function test_marketplace_category_field_shows_neutral_fallback_without_category_name(): void
