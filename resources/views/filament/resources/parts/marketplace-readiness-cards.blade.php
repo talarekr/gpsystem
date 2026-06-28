@@ -50,7 +50,7 @@
                     </button>
 
                     <template x-if="preparedStatusChecked">
-                        <div x-bind:class="prepareReady ? 'flex min-h-10 items-center justify-center rounded-lg border border-success-500 bg-transparent px-3 py-2 text-center text-sm font-medium text-success-700 dark:border-success-400 dark:text-success-300' : 'flex min-h-10 items-center justify-center rounded-lg border border-danger-500 bg-transparent px-3 py-2 text-center text-sm font-medium text-danger-700 dark:border-danger-400 dark:text-danger-300'" x-bind:data-marketplace-prepare-result="prepareReady ? 'ready' : 'blocked'" x-text="prepareReady ? 'Gotowe' : prepareMessage"></div>
+                        <div class="flex min-h-10 items-center justify-center rounded-lg bg-transparent px-3 py-2 text-center text-sm font-medium" x-bind:style="prepareReady ? 'border: 1px solid rgb(var(--success-500)); color: rgb(var(--success-700));' : 'border: 1px solid rgb(var(--danger-500)); color: rgb(var(--danger-700));'" x-bind:data-marketplace-prepare-result="prepareReady ? 'ready' : 'blocked'" x-text="prepareReady ? 'Gotowe' : prepareMessage"></div>
                     </template>
 
                 </div>
