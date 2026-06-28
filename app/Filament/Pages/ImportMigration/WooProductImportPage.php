@@ -15,6 +15,7 @@ class WooProductImportPage extends Page
     protected static ?string $navigationLabel = 'Import produktów Woo';
     protected static ?string $title = 'Import migracyjny — produkty Woo';
     protected static ?string $navigationIcon = null;
+    protected static bool $shouldRegisterNavigation = false;
     protected static ?int $navigationSort = 121;
     protected static string $view = 'filament.pages.import-migration.woo-product-import';
 

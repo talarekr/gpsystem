@@ -102,11 +102,14 @@ class AdminPanelProvider extends PanelProvider
                 NavigationGroup::make('Części')
                     ->icon('heroicon-o-cog-6-tooth')
                     ->collapsible(false),
-                NavigationGroup::make('Samochody')
-                    ->icon('heroicon-o-truck')
+                NavigationGroup::make('Przesyłki')
+                    ->icon('heroicon-o-paper-airplane')
                     ->collapsible(false),
                 NavigationGroup::make('Magazyn')
                     ->icon('heroicon-o-building-office-2')
+                    ->collapsible(false),
+                NavigationGroup::make('Samochody')
+                    ->icon('heroicon-o-truck')
                     ->collapsible(false),
                 NavigationGroup::make('Kategorie - mapowania...')
                     ->icon('heroicon-o-tag')
@@ -114,14 +117,8 @@ class AdminPanelProvider extends PanelProvider
                 NavigationGroup::make('Wiadomości E-mail')
                     ->icon('heroicon-o-envelope')
                     ->collapsible(false),
-                NavigationGroup::make('Przesyłki')
-                    ->icon('heroicon-o-paper-airplane')
-                    ->collapsible(false),
                 NavigationGroup::make('Administracja marketplace')
                     ->icon('heroicon-o-globe-alt')
-                    ->collapsible(false),
-                NavigationGroup::make('Ustawienia i integracje')
-                    ->icon('heroicon-o-arrow-up-tray')
                     ->collapsible(false),
             ])
             ->navigationItems([
