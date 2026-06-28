@@ -332,9 +332,9 @@
             this.$wire.setPartCategoryFromPicker(this.selectedId)
                 .then((saved) => {
                     if (saved === true) {
+                        this.closeCategoryPicker();
                         this.selectedId = null;
                         this.selectedName = '';
-                        this.closeCategoryPicker();
                     }
                 })
                 .finally(() => {
@@ -351,9 +351,9 @@
             this.$wire.selectSuggestedPartCategory(suggestion.category_id)
                 .then((saved) => {
                     if (saved === true) {
+                        this.closeCategoryPicker();
                         this.selectedId = null;
                         this.selectedName = '';
-                        this.closeCategoryPicker();
                     }
                 })
                 .finally(() => {
@@ -361,6 +361,10 @@
                 });
         },
         closeCategoryPicker() {
+            if (typeof categoryDrawerOpen !== 'undefined') {
+                categoryDrawerOpen = false;
+            }
+
             if (typeof this.$wire.unmountFormComponentAction === 'function') {
                 this.$wire.unmountFormComponentAction(false, true);
 
