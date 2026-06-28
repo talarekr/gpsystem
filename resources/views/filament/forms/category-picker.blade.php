@@ -9,6 +9,7 @@
     $lazyChildrenUrl = $lazyChildrenUrl ?? null;
     $lazyChannel = $lazyChannel ?? null;
     $drawerId = $drawerId ?? null;
+    $marketplaceSelectionChannel = $marketplaceSelectionChannel ?? null;
 @endphp
 
 @once
@@ -207,6 +208,7 @@
         selectedName: '',
         isSaving: false,
         drawerId: @js($drawerId),
+        marketplaceSelectionChannel: @js($marketplaceSelectionChannel),
         init() {},
         async ensureChildren(parentId = null) {
             if (! this.lazyChildrenUrl) {
@@ -325,9 +327,24 @@
 
             this.isSaving = true;
 
-            if (this.$refs.marketplaceForm) {
-                this.$refs.marketplaceCategoryId.value = this.selectedId;
-                this.$refs.marketplaceForm.submit();
+            if (this.marketplaceSelectionChannel) {
+                const selected = this.selectedCategory();
+
+                this.$wire.setMarketplaceCategoryFromPicker(
+                    this.marketplaceSelectionChannel,
+                    this.selectedId,
+                    selected?.name || this.selectedName,
+                    selected?.path || this.selectedName
+                ).then((saved) => {
+                    if (saved === true) {
+                        this.closeCategoryPicker();
+                        this.selectedId = null;
+                        this.selectedName = '';
+                    }
+                }).finally(() => {
+                    this.isSaving = false;
+                });
+
                 return;
             }
 
@@ -417,15 +434,6 @@
     }"
     x-effect="if (typeof categoryDrawerOpen !== 'undefined' && categoryDrawerOpen) ensureChildren(null)"
 >
-    @if ($saveUrl)
-        <form x-ref="marketplaceForm" method="{{ $saveMethod }}" action="{{ $saveUrl }}" class="hidden" data-marketplace-category-local-form>
-            @csrf
-            @foreach ($hiddenFields as $name => $value)
-                <input type="hidden" name="{{ $name }}" value="{{ $value }}">
-            @endforeach
-            <input x-ref="marketplaceCategoryId" type="hidden" name="{{ $saveField }}" value="">
-        </form>
-    @endif
 
     <div class="gps-category-picker__search">
         <input

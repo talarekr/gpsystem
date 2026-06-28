@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\PartResource\Pages;
 
 use App\Filament\Resources\PartResource;
+use App\Models\MarketplaceCategory;
 use App\Models\PartCategory;
 use App\Models\PartImage;
 use App\Services\Marketplace\PreparePartMarketplaceListingService;
@@ -19,6 +20,8 @@ class EditPart extends EditRecord
 
     protected array $partPhotoPaths = [];
 
+    protected array $marketplaceCategorySelections = [];
+
     protected function mutateFormDataBeforeFill(array $data): array
     {
         if (PartResource::isMissingAdminDefaultValue($data['condition_notes'] ?? null)) {
@@ -32,6 +35,7 @@ class EditPart extends EditRecord
 
         // Existing images are rendered by the edit gallery; keep FileUpload empty so it only adds new photos.
         $data['part_photo_paths'] = [];
+        $data['marketplace_category_selections'] = [];
 
         return $data;
     }
@@ -39,7 +43,8 @@ class EditPart extends EditRecord
     protected function mutateFormDataBeforeSave(array $data): array
     {
         $this->partPhotoPaths = array_values(array_filter((array) ($data['part_photo_paths'] ?? []), fn (mixed $path): bool => filled($path)));
-        unset($data['part_photo_paths']);
+        $this->marketplaceCategorySelections = (array) ($data['marketplace_category_selections'] ?? []);
+        unset($data['part_photo_paths'], $data['marketplace_category_selections']);
 
         $data['condition_notes'] = PartResource::defaultConditionValue($data['condition_notes'] ?? null);
         $data = PartResource::applyAdminSteeringFormStateToData($data, $this->record);
@@ -49,20 +54,20 @@ class EditPart extends EditRecord
 
     protected function afterSave(): void
     {
-        if ($this->partPhotoPaths === []) {
-            return;
+        $this->persistMarketplaceCategorySelections();
+
+        if ($this->partPhotoPaths !== []) {
+            $this->record->load('images');
+
+            PartResource::syncPartImages($this->record, array_merge(
+                PartResource::partImagePaths($this->record),
+                $this->partPhotoPaths,
+            ));
+
+            $this->record->refresh();
+            $this->record->load('images');
+            $this->data['part_photo_paths'] = [];
         }
-
-        $this->record->load('images');
-
-        PartResource::syncPartImages($this->record, array_merge(
-            PartResource::partImagePaths($this->record),
-            $this->partPhotoPaths,
-        ));
-
-        $this->record->refresh();
-        $this->record->load('images');
-        $this->data['part_photo_paths'] = [];
     }
 
     public function movePartImage(int $imageId, string $direction): void
@@ -185,6 +190,88 @@ class EditPart extends EditRecord
             ->title('Zdjęcie części zostało usunięte')
             ->success()
             ->send();
+    }
+
+    public function setMarketplaceCategoryFromPicker(string $channel, mixed $categoryId = null, ?string $categoryName = null, ?string $categoryPath = null): bool
+    {
+        if (! in_array($channel, ['allegro_main', 'ovoko', 'ebay_de', 'ebay_fr'], true) || blank($categoryId)) {
+            Notification::make()->title('Nie wybrano kategorii marketplace')->danger()->send();
+
+            return false;
+        }
+
+        $category = MarketplaceCategory::query()
+            ->where('channel', $channel)
+            ->where('external_category_id', (string) $categoryId)
+            ->first();
+
+        $overrideKey = $this->marketplaceCategoryOverrideKey($channel);
+        $selection = [
+            'channel' => $channel,
+            'external_category_id' => (string) ($category?->external_category_id ?? $categoryId),
+            'external_category_name' => $category?->name ?: $categoryName,
+            'external_category_path' => $category?->full_path ?: $categoryPath ?: $categoryName,
+            'source' => 'manual_part_edit_marketplace_preparation',
+        ];
+
+        $this->data['marketplace_category_selections'] = array_replace(
+            (array) ($this->data['marketplace_category_selections'] ?? []),
+            [$overrideKey => $selection],
+        );
+
+        Notification::make()
+            ->title('Kategoria marketplace została wybrana')
+            ->body('Zmiana zostanie zapisana dopiero po użyciu głównego przycisku „Zapisz”.')
+            ->success()
+            ->send();
+
+        return true;
+    }
+
+    private function persistMarketplaceCategorySelections(): void
+    {
+        $selections = array_filter($this->marketplaceCategorySelections, fn (mixed $selection): bool => is_array($selection) && filled($selection['external_category_id'] ?? null));
+
+        if ($selections === []) {
+            return;
+        }
+
+        $metadata = (array) ($this->record->review_metadata ?: []);
+        $metadata['marketplace_category_overrides'] ??= [];
+
+        foreach ($selections as $key => $selection) {
+            if (! in_array($key, ['allegro', 'ovoko', 'ebay'], true)) {
+                continue;
+            }
+
+            $metadata['marketplace_category_overrides'][$key] = [
+                'channel' => (string) ($selection['channel'] ?? match ($key) {
+                    'allegro' => 'allegro_main',
+                    'ovoko' => 'ovoko',
+                    'ebay' => 'ebay_de',
+                }),
+                'external_category_id' => (string) $selection['external_category_id'],
+                'external_category_name' => $selection['external_category_name'] ?? null,
+                'external_category_path' => $selection['external_category_path'] ?? null,
+                'source' => 'manual_part_edit_marketplace_preparation',
+                'selected_at' => now()->toISOString(),
+            ];
+        }
+
+        $this->record->forceFill(['review_metadata' => $metadata])->save();
+        $this->record->refresh();
+        $this->data['marketplace_category_selections'] = [];
+        $this->marketplaceCategorySelections = [];
+    }
+
+    private function marketplaceCategoryOverrideKey(string $channel): string
+    {
+        return match ($channel) {
+            'allegro_main' => 'allegro',
+            'ovoko' => 'ovoko',
+            'ebay_de', 'ebay_fr' => 'ebay',
+            default => $channel,
+        };
     }
 
     public function setPartCategoryFromPicker(mixed $categoryId = null): bool

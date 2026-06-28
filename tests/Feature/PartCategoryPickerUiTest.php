@@ -97,6 +97,85 @@ class PartCategoryPickerUiTest extends TestCase
         $this->assertDatabaseCount('marketplace_listings', 0);
     }
 
+
+    public function test_marketplace_category_picker_selects_local_form_state_without_submit_endpoint_or_part_save(): void
+    {
+        $category = PartCategory::query()->create(['name' => 'Alternatory']);
+        $part = Part::query()->create(['name' => 'Robocza część', 'category_id' => $category->id]);
+        \App\Models\MarketplaceCategory::query()->create([
+            'channel' => 'ovoko',
+            'external_category_id' => '252',
+            'name' => 'Alternator',
+            'full_path' => 'Części / Alternator',
+            'level' => 1,
+            'active' => true,
+        ]);
+
+        Livewire::test(EditPart::class, ['record' => $part->getRouteKey()])
+            ->call('setMarketplaceCategoryFromPicker', 'ovoko', '252', 'Alternator', 'Części / Alternator')
+            ->assertSet('data.marketplace_category_selections.ovoko.external_category_id', '252')
+            ->assertSee('Alternator');
+
+        $part->refresh();
+
+        $this->assertNull(data_get($part->review_metadata, 'marketplace_category_overrides.ovoko'));
+        $this->assertDatabaseMissing('marketplace_category_mappings', [
+            'local_category_id' => $category->id,
+            'channel' => 'ovoko',
+            'external_category_id' => '252',
+        ]);
+        $this->assertDatabaseCount('marketplace_listings', 0);
+    }
+
+    public function test_marketplace_category_picker_ui_has_no_hidden_mapping_form_submit(): void
+    {
+        $html = view('filament.resources.parts.marketplace-category-field', [
+            'part' => Part::query()->make(['id' => 123]),
+            'key' => 'ovoko',
+            'labels' => ['ovoko' => 'Ovoko'],
+            'category' => ['value' => null],
+            'mappingChannels' => ['ovoko' => 'ovoko'],
+            'marketplaceCategorySelections' => [],
+        ])->render();
+
+        $this->assertStringContainsString('type="button"', $html);
+        $this->assertStringContainsString('marketplaceSelectionChannel: ', $html);
+        $this->assertStringContainsString('ovoko', $html);
+        $this->assertStringContainsString('setMarketplaceCategoryFromPicker', $html);
+        $this->assertStringNotContainsString('data-marketplace-category-local-form', $html);
+        $this->assertStringNotContainsString('tools/part-marketplace-category-mapping', $html);
+        $this->assertStringNotContainsString('marketplaceForm.submit()', $html);
+    }
+
+    public function test_main_save_persists_marketplace_category_override_per_part_only(): void
+    {
+        $category = PartCategory::query()->create(['name' => 'Alternatory']);
+        $part = Part::query()->create(['name' => 'Robocza część', 'category_id' => $category->id]);
+        \App\Models\MarketplaceCategory::query()->create([
+            'channel' => 'ovoko',
+            'external_category_id' => '252',
+            'name' => 'Alternator',
+            'full_path' => 'Części / Alternator',
+            'level' => 1,
+            'active' => true,
+        ]);
+
+        Livewire::test(EditPart::class, ['record' => $part->getRouteKey()])
+            ->call('setMarketplaceCategoryFromPicker', 'ovoko', '252', 'Alternator', 'Części / Alternator')
+            ->call('save');
+
+        $part->refresh();
+
+        $this->assertSame('252', data_get($part->review_metadata, 'marketplace_category_overrides.ovoko.external_category_id'));
+        $this->assertSame('manual_part_edit_marketplace_preparation', data_get($part->review_metadata, 'marketplace_category_overrides.ovoko.source'));
+        $this->assertDatabaseMissing('marketplace_category_mappings', [
+            'local_category_id' => $category->id,
+            'channel' => 'ovoko',
+            'external_category_id' => '252',
+        ]);
+        $this->assertDatabaseCount('marketplace_listings', 0);
+    }
+
     public function test_main_part_category_picker_button_is_non_submit_and_closes_drawer_before_resetting_selection(): void
     {
         $html = view('filament.forms.category-picker', [
@@ -148,7 +227,7 @@ class PartCategoryPickerUiTest extends TestCase
         $this->assertStringContainsString('min-h-10 min-w-0', $shell);
         $this->assertStringContainsString('overflow-hidden truncate whitespace-nowrap', $shell);
         $this->assertStringContainsString('text-ellipsis whitespace-nowrap', $shell);
-        $this->assertStringContainsString('this.$refs.marketplaceForm.submit();', $categoryPicker);
+        $this->assertStringNotContainsString('this.$refs.marketplaceForm.submit();', $categoryPicker);
     }
 
     public function test_marketplace_category_field_and_sales_channels_picker_submit_flow_are_unchanged(): void
@@ -172,7 +251,7 @@ class PartCategoryPickerUiTest extends TestCase
         $this->assertStringNotContainsString('left-0', $drawerShell);
         $this->assertStringContainsString('x-on:close-category-drawer.window', $drawerShell);
         $this->assertStringContainsString('$event.detail.drawerId === @js($drawerId)', $drawerShell);
-        $this->assertStringContainsString('this.$refs.marketplaceForm.submit();', $categoryPicker);
+        $this->assertStringNotContainsString('this.$refs.marketplaceForm.submit();', $categoryPicker);
         $this->assertStringContainsString("return;\n            }\n\n            this.$wire.setPartCategoryFromPicker", str_replace("\r\n", "\n", $categoryPicker));
     }
 }
