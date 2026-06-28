@@ -159,7 +159,11 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $shellBlade = file_get_contents(resource_path('views/filament/forms/category-field-shell.blade.php'));
         $triggerBlade = file_get_contents(resource_path('views/filament/forms/partials/category-drawer-trigger.blade.php'));
 
+        $drawerShellBlade = file_get_contents(resource_path('views/filament/forms/category-drawer-shell.blade.php'));
+
         $this->assertStringContainsString("@include('filament.forms.partials.category-drawer-trigger'", $shellBlade);
+        $this->assertStringContainsString("@include('filament.forms.category-picker'", $drawerShellBlade);
+        $this->assertStringContainsString('fixed inset-y-0 right-0 z-50 w-full max-w-xl flex-col', $drawerShellBlade);
         $this->assertStringContainsString('heroicon-m-bars-3', $triggerBlade);
         $this->assertStringContainsString('data-shared-category-trigger', $triggerBlade);
         $this->assertStringNotContainsString('☰', $shellBlade);
@@ -173,6 +177,8 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $this->assertStringContainsString('type="button"', $html);
         $this->assertStringContainsString('x-on:click.prevent.stop="categoryDrawerOpen = true"', $html);
         $this->assertStringContainsString('data-category-drawer', $html);
+        $this->assertStringContainsString('x-teleport="body"', $html);
+        $this->assertStringContainsString('fixed inset-y-0 right-0 z-50 w-full max-w-xl flex-col bg-white p-6 shadow-xl dark:bg-gray-900 gps-category-picker-modal', $html);
         $this->assertStringContainsString('data-category-drawer-id="marketplace-category-drawer-ebay-de-', $html);
         $this->assertStringNotContainsString('data-category-drawer-toggle', $html);
         $this->assertStringNotContainsString('peer-checked', $html);
