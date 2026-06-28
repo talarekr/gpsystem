@@ -23,21 +23,14 @@
 
         <nav class="gps-shop-events__tabs" aria-label="Filtry dziennika obsługi">
             @foreach ($this->shopEventTabs() as $tabKey => $tabLabel)
-                @php
-                    $tabCount = $shopEventTabCounts[$tabKey] ?? 0;
-                    $tabClass = 'gps-shop-events__tab';
-                    if ($this->activeShopEventTab() === $tabKey) {
-                        $tabClass .= ' is-active';
-                    }
-                    $tabCountClass = 'gps-shop-events__tab-count';
-                    if ($tabKey === 'requires_action') {
-                        $tabCountClass .= ' gps-shop-events__tab-count--action';
-                    }
-                @endphp
-                <a href="{{ request()->fullUrlWithQuery(['shop_event_tab' => $tabKey]) }}" class="{{ $tabClass }}">
+                @php($tabCount = $shopEventTabCounts[$tabKey] ?? 0)
+                <a
+                    href="{{ request()->fullUrlWithQuery(['shop_event_tab' => $tabKey]) }}"
+                    class="gps-shop-events__tab{{ $this->activeShopEventTab() === $tabKey ? ' is-active' : '' }}"
+                >
                     <span>{{ $tabLabel }}</span>
                     @if ($tabCount > 0)
-                        <span class="{{ $tabCountClass }}">{{ $tabCount }}</span>
+                        <span class="gps-shop-events__tab-count{{ $tabKey === 'requires_action' ? ' gps-shop-events__tab-count--action' : '' }}">{{ $tabCount }}</span>
                     @endif
                 </a>
             @endforeach
@@ -50,43 +43,35 @@
         @else
             <div class="gps-shop-events__list">
                 @foreach ($shopEvents as $event)
-                    @php
-                        $eventUrl = $event->dashboardUrl();
-                        $itemClass = 'gps-shop-events__item gps-shop-events__item--' . ($event->severity ?: 'info');
-                    @endphp
-                    <article class="{{ $itemClass }}">
+                    @php($eventUrl = $event->dashboardUrl())
+                    <article class="gps-shop-events__item gps-shop-events__item--{{ $event->severity ?: 'info' }}">
                         <div class="gps-shop-events__time">{{ $event->occurredAtForHumans() }}</div>
                         <div class="gps-shop-events__body">
-                            @if ($event->event_type === 'order')
-                                <div class="gps-shop-events__order-line">
-                                    <span class="gps-shop-events__badge gps-shop-events__badge--source">{{ $event->sourceLabel() }}</span>
-                                    <strong>{{ $event->external_reference ?: $event->title }}</strong>
-                                    <span>{{ data_get($event->payload, 'total', '—') }}</span>
-                                </div>
-                            @else
-                                <div class="gps-shop-events__badges">
-                                    <span class="gps-shop-events__badge gps-shop-events__badge--source">{{ $event->sourceLabel() }}</span>
-                                    <span class="gps-shop-events__badge gps-shop-events__badge--type">{{ $event->typeLabel() }}</span>
-                                    @if ($event->requires_action)
-                                        <span class="gps-shop-events__badge gps-shop-events__badge--action">Wymaga reakcji</span>
-                                    @endif
-                                </div>
-                                <h3>
-                                    @if ($eventUrl)
-                                        <a href="{{ $eventUrl }}">{{ $event->title }}</a>
-                                    @else
-                                        {{ $event->title }}
-                                    @endif
-                                </h3>
-                                @if ($event->description)
-                                    <p>{{ \Illuminate\Support\Str::limit($event->description, 180) }}</p>
+                            <div class="gps-shop-events__badges">
+                                <span class="gps-shop-events__badge gps-shop-events__badge--source">{{ $event->sourceLabel() }}</span>
+                                <span class="gps-shop-events__badge gps-shop-events__badge--type">{{ $event->typeLabel() }}</span>
+                                @if ($event->requires_action)
+                                    <span class="gps-shop-events__badge gps-shop-events__badge--action">Wymaga reakcji</span>
+                                @endif
+                            </div>
+                            <h3>
+                                @if ($eventUrl)
+                                    <a href="{{ $eventUrl }}">{{ $event->title }}</a>
+                                @else
+                                    {{ $event->title }}
+                                @endif
+                            </h3>
+                            @if ($event->description)
+                                <p>{{ \Illuminate\Support\Str::limit($event->description, 180) }}</p>
+                            @endif
+                            <div class="gps-shop-events__meta">
+                                @if ($event->customer_name)
+                                    <span>Klient: <strong>{{ $event->customer_name }}</strong></span>
                                 @endif
                                 @if ($event->external_reference)
-                                    <div class="gps-shop-events__meta">
-                                        <span>Nr ref.: <strong>{{ $event->external_reference }}</strong></span>
-                                    </div>
+                                    <span>Nr ref.: <strong>{{ $event->external_reference }}</strong></span>
                                 @endif
-                            @endif
+                            </div>
                         </div>
                         @if ($eventUrl)
                             <a class="gps-shop-events__open" href="{{ $eventUrl }}">Otwórz</a>
@@ -123,13 +108,10 @@
 
             <nav class="gps-sales-analytics__ranges" aria-label="Zakres analityki sprzedaży">
                 @foreach ($this->salesRangeTabs() as $rangeKey => $rangeLabel)
-                    @php
-                        $rangeClass = 'gps-sales-analytics__range';
-                        if ($salesAnalytics['range']['key'] === $rangeKey) {
-                            $rangeClass .= ' is-active';
-                        }
-                    @endphp
-                    <a href="{{ request()->fullUrlWithQuery(['sales_range' => $rangeKey]) }}" class="{{ $rangeClass }}">
+                    <a
+                        href="{{ request()->fullUrlWithQuery(['sales_range' => $rangeKey]) }}"
+                        @class(['gps-sales-analytics__range', 'is-active' => $salesAnalytics['range']['key'] === $rangeKey])
+                    >
                         {{ $rangeLabel }}
                     </a>
                 @endforeach
