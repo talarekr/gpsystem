@@ -1,6 +1,11 @@
 @php
     $categories = $categories ?? [];
     $suggestions = $suggestions ?? [];
+    $saveUrl = $saveUrl ?? null;
+    $saveMethod = strtoupper((string) ($saveMethod ?? 'POST'));
+    $hiddenFields = $hiddenFields ?? [];
+    $saveField = $saveField ?? 'category_id';
+    $pickerId = $pickerId ?? ('gps-category-picker-'.uniqid());
 @endphp
 
 @once
@@ -183,6 +188,7 @@
 @endonce
 
 <div
+    id="{{ $pickerId }}"
     class="gps-category-picker"
     x-data="{
         categories: @js($categories),
@@ -275,6 +281,12 @@
 
             this.isSaving = true;
 
+            if (this.$refs.marketplaceForm) {
+                this.$refs.marketplaceCategoryId.value = this.selectedId;
+                this.$refs.marketplaceForm.submit();
+                return;
+            }
+
             this.$wire.setPartCategoryFromPicker(this.selectedId)
                 .then((saved) => {
                     if (saved === true) {
@@ -337,6 +349,16 @@
         },
     }"
 >
+    @if ($saveUrl)
+        <form x-ref="marketplaceForm" method="{{ $saveMethod }}" action="{{ $saveUrl }}" class="hidden" data-marketplace-category-local-form>
+            @csrf
+            @foreach ($hiddenFields as $name => $value)
+                <input type="hidden" name="{{ $name }}" value="{{ $value }}">
+            @endforeach
+            <input x-ref="marketplaceCategoryId" type="hidden" name="{{ $saveField }}" value="">
+        </form>
+    @endif
+
     <div class="gps-category-picker__search">
         <input
             type="search"
