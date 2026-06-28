@@ -43,50 +43,35 @@
         @else
             <div class="gps-shop-events__list">
                 @foreach ($shopEvents as $event)
-                    @php
-                        $eventUrl = $event->dashboardUrl();
-                        $isOrderEvent = $event->event_type === 'order';
-                        $sourceChannel = data_get($event->payload, 'source_channel');
-                        $orderTotal = data_get($event->payload, 'order_total', '—');
-                    @endphp
+                    @php($eventUrl = $event->dashboardUrl())
                     <article class="gps-shop-events__item gps-shop-events__item--{{ $event->severity ?: 'info' }}">
                         <div class="gps-shop-events__time">{{ $event->occurredAtForHumans() }}</div>
                         <div class="gps-shop-events__body">
-                            @if ($isOrderEvent)
-                                <div class="gps-shop-events__compact-row">
-                                    <span class="gps-shop-events__source">
-                                        @include('filament.resources.orders.partials.source-wordmark', ['marketplace' => $sourceChannel])
-                                    </span>
-                                    <strong class="gps-shop-events__reference">{{ $event->external_reference ?: '—' }}</strong>
-                                    <span class="gps-shop-events__amount">{{ $orderTotal }}</span>
-                                </div>
-                            @else
-                                <div class="gps-shop-events__badges">
-                                    <span class="gps-shop-events__badge gps-shop-events__badge--source">{{ $event->sourceLabel() }}</span>
-                                    <span class="gps-shop-events__badge gps-shop-events__badge--type">{{ $event->typeLabel() }}</span>
-                                    @if ($event->requires_action)
-                                        <span class="gps-shop-events__badge gps-shop-events__badge--action">Wymaga reakcji</span>
-                                    @endif
-                                </div>
-                                <h3>
-                                    @if ($eventUrl)
-                                        <a href="{{ $eventUrl }}">{{ $event->title }}</a>
-                                    @else
-                                        {{ $event->title }}
-                                    @endif
-                                </h3>
-                                @if ($event->description)
-                                    <p>{{ \Illuminate\Support\Str::limit($event->description, 180) }}</p>
+                            <div class="gps-shop-events__badges">
+                                <span class="gps-shop-events__badge gps-shop-events__badge--source">{{ $event->sourceLabel() }}</span>
+                                <span class="gps-shop-events__badge gps-shop-events__badge--type">{{ $event->typeLabel() }}</span>
+                                @if ($event->requires_action)
+                                    <span class="gps-shop-events__badge gps-shop-events__badge--action">Wymaga reakcji</span>
                                 @endif
-                                <div class="gps-shop-events__meta">
-                                    @if ($event->customer_name)
-                                        <span>Klient: <strong>{{ $event->customer_name }}</strong></span>
-                                    @endif
-                                    @if ($event->external_reference)
-                                        <span>Nr ref.: <strong>{{ $event->external_reference }}</strong></span>
-                                    @endif
-                                </div>
+                            </div>
+                            <h3>
+                                @if ($eventUrl)
+                                    <a href="{{ $eventUrl }}">{{ $event->title }}</a>
+                                @else
+                                    {{ $event->title }}
+                                @endif
+                            </h3>
+                            @if ($event->description)
+                                <p>{{ \Illuminate\Support\Str::limit($event->description, 180) }}</p>
                             @endif
+                            <div class="gps-shop-events__meta">
+                                @if ($event->customer_name)
+                                    <span>Klient: <strong>{{ $event->customer_name }}</strong></span>
+                                @endif
+                                @if ($event->external_reference)
+                                    <span>Nr ref.: <strong>{{ $event->external_reference }}</strong></span>
+                                @endif
+                            </div>
                         </div>
                         @if ($eventUrl)
                             <a class="gps-shop-events__open" href="{{ $eventUrl }}">Otwórz</a>
