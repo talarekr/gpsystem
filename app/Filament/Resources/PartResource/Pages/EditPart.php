@@ -259,6 +259,21 @@ class EditPart extends EditRecord
         }
     }
 
+    private function marketplacePublishMessage(string $message): string
+    {
+        return match ($message) {
+            'category_shipping_group' => 'Brak grupy wysyłkowej dla kategorii',
+            'shipping_policy_mapping' => 'Brak mapowania polityki wysyłki',
+            'payment_policy' => 'Brak polityki płatności',
+            'return_policy' => 'Brak polityki zwrotów',
+            'business_policies' => 'Brak ustawień polityk eBay',
+            'allegro_required_category_parameters_missing' => 'Brakuje wymaganych parametrów Allegro',
+            'prepared_translations' => 'Brak przygotowanego tłumaczenia eBay DE',
+            'publish_not_confirmed_or_disabled', 'marketplace_publish_disabled_or_not_confirmed' => 'Wystawianie marketplace jest wyłączone albo niepotwierdzone',
+            default => str_replace('_', ' ', $message),
+        };
+    }
+
     public function selectSuggestedPartCategory(mixed $categoryId = null): bool
     {
         return $this->setPartCategoryFromPicker($categoryId);
@@ -282,18 +297,39 @@ class EditPart extends EditRecord
                         ? $publishService->confirm($this->record, 'all', dryRun: false, confirm: true)
                         : $publishService->preview($this->record, 'all', includePayload: true);
 
-                    if (! $enabled || ($result['blocked'] ?? false) || ! ($result['readiness_ok'] ?? false)) {
-                        $messages = collect($result['channels'] ?? [])->flatMap(fn (array $channel): array => $channel['errors'] ?? $channel['readiness']['blockers'] ?? [])->filter()->values()->all();
+                    $published = $result['published_channels'] ?? $result['ready_channels'] ?? [];
+                    $skipped = $result['skipped_channels'] ?? [];
+                    $messages = collect($result['channels'] ?? [])->flatMap(fn (array $channel): array => $channel['errors'] ?? $channel['readiness']['blockers'] ?? [])->map(fn (mixed $message): string => $this->marketplacePublishMessage((string) $message))->filter()->values()->all();
+
+                    if (! $enabled) {
                         Notification::make()
-                            ->title($enabled ? 'Nie udało się wystawić części.' : 'Realne wystawianie marketplace jest wyłączone — wykonano tylko preview.')
-                            ->body($messages === [] ? 'MARKETPLACE_PUBLISH_ENABLED=false albo readiness wymaga uzupełnienia.' : implode(' | ', $messages))
+                            ->title('Realne wystawianie marketplace jest wyłączone — wykonano tylko preview.')
+                            ->body($messages === [] ? 'MARKETPLACE_PUBLISH_ENABLED=false. Nie wykonano żadnego zapisu do marketplace.' : implode(' | ', $messages))
+                            ->danger()
+                            ->send();
+                        return;
+                    }
+
+                    if ($published !== [] && $skipped !== []) {
+                        Notification::make()
+                            ->title('Część zapisana. Wystawiono gotowe kanały, a kanały z brakami pominięto.')
+                            ->body('Wystawione/przygotowane: '.implode(', ', $published).'. Pominięte: '.implode(', ', array_keys($skipped)).'. Powody: '.($messages === [] ? 'readiness wymaga uzupełnienia.' : implode(' | ', $messages)))
+                            ->warning()
+                            ->send();
+                        return;
+                    }
+
+                    if (($result['blocked'] ?? false) || $published === []) {
+                        Notification::make()
+                            ->title('Nie udało się wystawić części.')
+                            ->body($messages === [] ? 'Readiness wymaga uzupełnienia.' : implode(' | ', $messages))
                             ->danger()
                             ->send();
                         return;
                     }
 
                     Notification::make()
-                        ->title('Część zapisana i wystawiona w wymaganych kanałach.')
+                        ->title('Część zapisana i wystawiona w gotowych kanałach.')
                         ->success()
                         ->send();
                 }),

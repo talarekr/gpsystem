@@ -73,13 +73,13 @@ class PartMarketplaceReadinessService
         return [
             'status' => $status,
             'ready' => $status === 'ready',
-            'message' => $status === 'ready' ? 'Produkt gotowy' : 'Uzupełnij braki',
+            'message' => $status === 'ready' ? 'Gotowe' : ($missing[0] ?? 'Wymaga uzupełnienia'),
             'missing' => array_values(array_unique(array_filter($missing))),
             'category' => $this->categoryPresentation($mapping, $label),
             'requires_translations' => $requiresEbayTranslations,
             'translations' => $requiresEbayTranslations ? [
-                ['label' => 'eBay DE', 'ready' => ! in_array('tłumaczenie eBay DE', $missing, true)],
-                ['label' => 'eBay FR', 'ready' => ! in_array('tłumaczenie eBay FR', $missing, true)],
+                ['label' => 'eBay DE', 'ready' => ! in_array('Brak przygotowanego tłumaczenia eBay DE', $missing, true)],
+                ['label' => 'eBay FR', 'ready' => ! in_array('Brak przygotowanego tłumaczenia eBay FR', $missing, true)],
             ] : [],
             'safe_preview_only' => true,
         ];
@@ -135,7 +135,7 @@ class PartMarketplaceReadinessService
         $metadata = (array) ($part->review_metadata ?: []);
         $translations = (array) (data_get($metadata, 'marketplace_translations') ?: data_get($part->legacy_payload, 'marketplace_translations') ?: []);
 
-        return collect(['de' => 'tłumaczenie eBay DE', 'fr' => 'tłumaczenie eBay FR'])
+        return collect(['de' => 'Brak przygotowanego tłumaczenia eBay DE', 'fr' => 'Brak przygotowanego tłumaczenia eBay FR'])
             ->filter(function (string $label, string $locale) use ($translations, $metadata): bool {
                 $channel = 'ebay_'.$locale;
 
@@ -222,7 +222,10 @@ class PartMarketplaceReadinessService
             'allegro_price_pln' => 'cena Allegro', 'ovoko_price_pln' => 'cena Ovoko', 'ebay_price_pln' => 'cena eBay',
             'allegro_category_mapping' => 'mapowanie kategorii Allegro', 'ovoko_category_mapping' => 'mapowanie kategorii Ovoko', 'ebay_category_mapping' => 'mapowanie kategorii eBay',
             'description' => 'opis', 'description_or_condition' => 'opis albo stan / jakość', 'vehicle' => 'dane pojazdu',
-            'translation_credentials' => 'konfiguracja tłumaczeń', 'description_template' => 'szablon opisu eBay', 'business_policies' => 'polityki płatności/wysyłki/zwrotów eBay', 'marketplace_country' => 'kraj marketplace',
+            'translation_credentials' => 'konfiguracja tłumaczeń', 'description_template' => 'szablon opisu eBay', 'business_policies' => 'Brak ustawień polityk eBay', 'marketplace_country' => 'kraj marketplace',
+            'category_shipping_group' => 'Brak grupy wysyłkowej dla kategorii', 'shipping_policy_mapping' => 'Brak mapowania polityki wysyłki',
+            'payment_policy' => 'Brak polityki płatności', 'return_policy' => 'Brak polityki zwrotów',
+            'allegro_required_category_parameters_missing' => 'Brakuje wymaganych parametrów Allegro', 'prepared_translations' => 'Brak przygotowanego tłumaczenia eBay DE',
         ];
 
         return array_map(fn ($field): string => $map[(string) $field] ?? (string) $field, $fields);

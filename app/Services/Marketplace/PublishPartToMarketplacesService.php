@@ -36,17 +36,24 @@ class PublishPartToMarketplacesService
         if ($dryRun || ! $confirm || ! $enabled) return $base + ['part_id' => $part->id, 'blocked' => true, 'blockers' => ['marketplace_publish_disabled_or_not_confirmed'], 'channels' => [], 'readiness_ok' => false];
 
         $preview = $this->preview($part, $selected);
-        if (! $preview['readiness_ok']) return $base + ['part_id' => $part->id, 'blocked' => true, 'blockers' => ['readiness_failed'], 'channels' => $preview['channels'], 'readiness_ok' => false];
+        $ready = array_keys(array_filter($preview['channels'], fn (array $result): bool => (bool) ($result['success'] ?? false)));
+        $skipped = array_diff_key($preview['channels'], array_flip($ready));
 
-        $command = new MarketplacePublishCommand($dryRun, $confirm, $selected, $enabled);
+        if ($ready === []) {
+            return $base + ['part_id' => $part->id, 'blocked' => true, 'blockers' => ['readiness_failed'], 'channels' => $preview['channels'], 'ready_channels' => [], 'skipped_channels' => $this->skippedChannels($skipped), 'readiness_ok' => false];
+        }
+
+        $command = new MarketplacePublishCommand($dryRun, $confirm, $ready, $enabled);
         $results = [];
-        DB::transaction(function () use ($part, $selected, $command, &$results): void {
-            foreach ($selected as $channel) $results[$channel] = $this->adapter($channel)->publish($part, $command)->data;
-            if ($this->allSuccessful($results)) $this->prepareService->markLocallyListed($part);
+        DB::transaction(function () use ($part, $ready, $command, &$results, $skipped): void {
+            foreach ($ready as $channel) $results[$channel] = $this->adapter($channel)->publish($part, $command)->data;
+            foreach ($skipped as $channel => $data) $results[$channel] = $this->skippedResult($channel, $data);
+            if ($this->allSelectedSuccessful($results, $ready) && $skipped === []) $this->prepareService->markLocallyListed($part);
         });
 
-        $success = $this->allSuccessful($results);
-        return array_merge($base, ['part_id' => $part->id, 'blocked' => ! $success, 'channels' => $results, 'readiness_ok' => true, 'needs_listing_changed' => $success, 'products_changed' => $success, 'offers_changed' => collect($results)->contains(fn ($r) => (bool) ($r['write'] ?? false)), 'marketplace_write' => collect($results)->contains(fn ($r) => (bool) ($r['write'] ?? false)), 'allegro_write' => (bool) ($results['allegro']['write'] ?? false), 'ovoko_write' => (bool) ($results['ovoko']['write'] ?? false), 'ebay_write' => (bool) ($results['ebay']['write'] ?? false)]);
+        $published = array_values(array_filter($ready, fn (string $channel): bool => (bool) ($results[$channel]['success'] ?? false)));
+        $success = $published !== [];
+        return array_merge($base, ['part_id' => $part->id, 'blocked' => ! $success, 'channels' => $results, 'ready_channels' => $ready, 'published_channels' => $published, 'skipped_channels' => $this->skippedChannels($skipped), 'readiness_ok' => $skipped === [], 'needs_listing_changed' => $success && $skipped === [], 'products_changed' => $success && $skipped === [], 'offers_changed' => collect($results)->contains(fn ($r) => (bool) ($r['write'] ?? false)), 'marketplace_write' => collect($results)->contains(fn ($r) => (bool) ($r['write'] ?? false)), 'allegro_write' => (bool) ($results['allegro']['write'] ?? false), 'ovoko_write' => (bool) ($results['ovoko']['write'] ?? false), 'ebay_write' => (bool) ($results['ebay']['write'] ?? false)]);
     }
 
     public function normalizeChannels(array|string $channels): array
@@ -58,5 +65,8 @@ class PublishPartToMarketplacesService
 
     private function adapter(string $channel): object { return match ($channel) { 'allegro' => $this->allegro, 'ovoko' => $this->ovoko, 'ebay' => $this->ebay }; }
     private function allSuccessful(array $results): bool { return $results !== [] && collect($results)->every(fn ($r) => (bool) ($r['success'] ?? false)); }
+    private function allSelectedSuccessful(array $results, array $selected): bool { return $selected !== [] && collect($selected)->every(fn (string $channel): bool => (bool) ($results[$channel]['success'] ?? false)); }
+    private function skippedChannels(array $skipped): array { return collect($skipped)->map(fn (array $data): array => ['status' => 'blocked', 'reasons' => $data['errors'] ?? $data['readiness']['blockers'] ?? []])->all(); }
+    private function skippedResult(string $channel, array $data): array { return ['channel' => $data['channel'] ?? $channel, 'marketplace' => $data['marketplace'] ?? $channel, 'success' => false, 'blocked' => true, 'status' => 'skipped_blocked_readiness', 'errors' => $data['errors'] ?? $data['readiness']['blockers'] ?? [], 'warnings' => $data['warnings'] ?? [], 'write' => false, 'readiness' => $data['readiness'] ?? []]; }
     private function responseSkeleton(bool $dryRun, bool $confirm): array { return ['dry_run' => $dryRun, 'confirm' => $confirm, 'marketplace_publish_enabled' => (bool) config('marketplace.publish_enabled', false), 'marketplace_write' => false, 'allegro_write' => false, 'ovoko_write' => false, 'ebay_write' => false, 'products_changed' => false, 'offers_changed' => false, 'stock_changed' => false, 'prices_changed' => false, 'images_changed' => false, 'needs_listing_changed' => false]; }
 }

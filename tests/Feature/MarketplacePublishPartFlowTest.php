@@ -2,7 +2,9 @@
 
 namespace Tests\Feature;
 
+use App\Models\MarketplaceCategoryMapping;
 use App\Models\Part;
+use App\Models\PartCategory;
 use App\Services\Marketplace\PublishPartToMarketplacesService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -53,6 +55,27 @@ class MarketplacePublishPartFlowTest extends TestCase
         $this->assertDatabaseMissing('marketplace_listings', ['part_id' => $part->id]);
     }
 
+
+    public function test_confirm_publishes_ready_channels_and_skips_blocked_channels(): void
+    {
+        config(['marketplace.publish_enabled' => true]);
+        $category = PartCategory::query()->create(['name' => 'Alternatory']);
+        $part = $this->completeLocalPart(['category_id' => $category->id]);
+
+        MarketplaceCategoryMapping::query()->create(['local_category_id' => $category->id, 'channel' => 'ovoko', 'external_category_id' => '252', 'external_category_name' => 'Alternator', 'external_category_path' => 'Części / Alternator']);
+        MarketplaceCategoryMapping::query()->create(['local_category_id' => $category->id, 'channel' => 'allegro_main', 'external_category_id' => '261054', 'external_category_name' => 'Alternator', 'external_category_path' => 'Motoryzacja / Części / Alternatory']);
+
+        $response = $this->getJson('/tools/marketplace-publish-part-confirm?token=gps_images_import_2026&part_id='.$part->id.'&channels=all&dry_run=0&confirm=1')
+            ->assertOk();
+
+        $this->assertContains('ovoko', $response->json('ready_channels'));
+        $this->assertArrayHasKey('ebay', $response->json('skipped_channels'));
+        $this->assertSame('skipped_blocked_readiness', $response->json('channels.ebay.status'));
+        $this->assertFalse((bool) $response->json('channels.ebay.write'));
+        $this->assertDatabaseHas('marketplace_listings', ['part_id' => $part->id, 'marketplace' => 'ovoko']);
+        $this->assertDatabaseMissing('marketplace_listings', ['part_id' => $part->id, 'marketplace' => 'ebay_de']);
+    }
+
     public function test_channel_normalization_supports_all_and_explicit_channels(): void
     {
         $service = app(PublishPartToMarketplacesService::class);
@@ -61,14 +84,14 @@ class MarketplacePublishPartFlowTest extends TestCase
         $this->assertSame(['allegro', 'ebay'], $service->normalizeChannels('allegro,ebay,unknown'));
     }
 
-    private function completeLocalPart(): Part
+    private function completeLocalPart(array $overrides = []): Part
     {
-        $part = Part::query()->create([
+        $part = Part::query()->create(array_merge([
             'sku' => 'GPS-PUBLISH-1', 'name' => 'Kompletna część marketplace', 'description' => 'Pełny opis części.',
             'price' => 100, 'ovoko_price' => 120, 'quantity' => 1, 'status' => 'draft',
             'is_visible_storefront' => false, 'needs_listing' => true, 'needs_review' => false,
             'vehicle_snapshot' => ['make' => 'BMW', 'model' => '3'],
-        ]);
+        ], $overrides));
 
         DB::table('part_images')->insert(['part_id' => $part->id, 'path' => 'parts/photos/complete.jpg', 'sort_order' => 1, 'is_primary' => true, 'created_at' => now(), 'updated_at' => now()]);
 

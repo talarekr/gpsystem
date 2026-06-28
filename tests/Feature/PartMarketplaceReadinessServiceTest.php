@@ -47,11 +47,12 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $html = view('filament.resources.parts.marketplace-readiness-cards', ['part' => $part->fresh()])->render();
 
         $this->assertSame('ready', $result['ebay']['status']);
-        $this->assertNotContains('tłumaczenie eBay DE', $result['ebay']['presentation']['missing']);
-        $this->assertNotContains('tłumaczenie eBay FR', $result['ebay']['presentation']['missing']);
-        $this->assertStringContainsString('Aukcja przygotowana', $html);
-        $this->assertStringNotContainsString('tłumaczenie eBay DE', $html);
-        $this->assertStringNotContainsString('tłumaczenie eBay FR', $html);
+        $this->assertNotContains('Brak przygotowanego tłumaczenia eBay DE', $result['ebay']['presentation']['missing']);
+        $this->assertNotContains('Brak przygotowanego tłumaczenia eBay FR', $result['ebay']['presentation']['missing']);
+        $this->assertStringContainsString('data-marketplace-prepare-result="ready"', $html);
+        $this->assertStringContainsString('Gotowe', $html);
+        $this->assertStringNotContainsString('Brak przygotowanego tłumaczenia eBay DE', $html);
+        $this->assertStringNotContainsString('Brak przygotowanego tłumaczenia eBay FR', $html);
         $this->assertDatabaseCount('marketplace_listings', 0);
     }
 
@@ -64,8 +65,8 @@ class PartMarketplaceReadinessServiceTest extends TestCase
 
         $this->assertContains('zdjęcia', $result['ebay']['presentation']['missing']);
         $this->assertStringContainsString('zdjęcia', $html);
-        $this->assertStringContainsString('tłumaczenie eBay DE', $html);
-        $this->assertStringContainsString('tłumaczenie eBay FR', $html);
+        $this->assertStringContainsString('Brak przygotowanego tłumaczenia eBay DE', $html);
+        $this->assertStringContainsString('Brak przygotowanego tłumaczenia eBay FR', $html);
         $this->assertDatabaseCount('marketplace_listings', 0);
     }
 
@@ -144,7 +145,7 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $this->assertArrayNotHasKey('will_make_marketplace_request', $presentation);
         $this->assertArrayNotHasKey('source', $presentation);
         $this->assertSame(array_values(array_unique($presentation['missing'])), $presentation['missing']);
-        $this->assertSame('Uzupełnij braki', $presentation['message']);
+        $this->assertNotSame('Uzupełnij braki', $presentation['message']);
         $this->assertTrue($presentation['safe_preview_only']);
     }
     public function test_marketplace_preparation_panel_renders_three_operational_cards_without_old_technical_copy(): void
@@ -196,8 +197,11 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $this->assertStringNotContainsString('ID kategorii:', $html);
         $this->assertStringNotContainsString('>Gotowy</span>', $html);
         $this->assertStringContainsString('Przygotuj', $html);
-        $this->assertStringContainsString('Aukcja przygotowana', $html);
-        $this->assertStringContainsString('Podgląd aukcji', $html);
+        $this->assertStringContainsString('data-marketplace-prepare-result="ready"', $html);
+        $this->assertStringContainsString('Gotowe', $html);
+        $this->assertStringNotContainsString('Aukcja przygotowana', $html);
+        $this->assertStringNotContainsString('Uzupełnij braki', $html);
+        $this->assertStringNotContainsString('Podgląd aukcji', $html);
         $this->assertStringNotContainsString('Szczegóły techniczne', $html);
     }
 
