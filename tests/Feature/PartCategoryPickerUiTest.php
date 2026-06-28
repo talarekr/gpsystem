@@ -43,6 +43,7 @@ class PartCategoryPickerUiTest extends TestCase
 
         $this->assertStringContainsString('type="button"', $html);
         $this->assertStringContainsString('x-on:click="saveSelectedCategory()"', $html);
+        $this->assertStringContainsString("this.\$dispatch('close-category-drawer', { drawerId: this.drawerId });", $html);
         $this->assertStringContainsString('categoryDrawerOpen = false', $html);
         $this->assertMatchesRegularExpression('/closeCategoryPicker\(\);\s*this\.selectedId = null;/s', $html);
         $this->assertStringNotContainsString('$refs.marketplaceForm.submit();\n                this.closeCategoryPicker();', $html);
@@ -55,7 +56,11 @@ class PartCategoryPickerUiTest extends TestCase
 
         $this->assertStringContainsString('categoryDrawerOpen', $marketplaceField);
         $this->assertStringContainsString('x-data="{ categoryDrawerOpen: false }"', $marketplaceField);
-        $this->assertStringContainsString('data-marketplace-category-tree', file_get_contents(resource_path('views/filament/forms/category-drawer-shell.blade.php')));
+        $drawerShell = file_get_contents(resource_path('views/filament/forms/category-drawer-shell.blade.php'));
+
+        $this->assertStringContainsString('data-marketplace-category-tree', $drawerShell);
+        $this->assertStringContainsString('x-on:close-category-drawer.window', $drawerShell);
+        $this->assertStringContainsString('$event.detail.drawerId === @js($drawerId)', $drawerShell);
         $this->assertStringContainsString('this.$refs.marketplaceForm.submit();', $categoryPicker);
         $this->assertStringContainsString("return;\n            }\n\n            this.$wire.setPartCategoryFromPicker", str_replace("\r\n", "\n", $categoryPicker));
     }

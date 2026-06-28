@@ -11,7 +11,12 @@
     'saveField' => 'category_id',
     'pickerId' => null,
     'treeAttribute' => null,
+    'drawerId' => null,
 ])
+
+@php
+    $drawerId = $drawerId ?? $fieldId;
+@endphp
 
 <div
     id="{{ $fieldId }}-overlay"
@@ -20,6 +25,7 @@
     x-cloak
     x-show="categoryDrawerOpen"
     x-on:click="categoryDrawerOpen = false"
+    x-on:close-category-drawer.window="if (! $event.detail?.drawerId || $event.detail.drawerId === @js($drawerId)) categoryDrawerOpen = false"
 ></div>
 <aside
     id="{{ $fieldId }}"
@@ -31,6 +37,7 @@
     x-show="categoryDrawerOpen"
     x-transition
     x-bind:class="categoryDrawerOpen ? 'flex' : 'hidden'"
+    x-on:close-category-drawer.window="if (! $event.detail?.drawerId || $event.detail.drawerId === @js($drawerId)) categoryDrawerOpen = false"
     role="dialog"
     aria-modal="true"
     aria-labelledby="{{ $fieldId }}-heading"
@@ -49,5 +56,6 @@
         'hiddenFields' => $hiddenFields,
         'saveField' => $saveField,
         'pickerId' => $pickerId,
+        'drawerId' => $drawerId,
     ])
 </aside>
