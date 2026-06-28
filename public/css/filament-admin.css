@@ -90,8 +90,22 @@ body,
 }
 
 .fi-sidebar-item-button {
+    display: flex;
+    align-items: center;
     column-gap: 0.625rem;
     padding-inline: 0.75rem !important;
+}
+
+.fi-sidebar-item-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.fi-sidebar-item-badge {
+    flex-shrink: 0;
+    margin-left: auto;
 }
 
 .fi-sidebar-item-icon,
