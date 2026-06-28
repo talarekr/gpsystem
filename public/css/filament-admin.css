@@ -1646,6 +1646,25 @@ body.fi-body :where(
     display: none !important;
 }
 
+
+/* Marketplace category drawer used in Sales channels: pin the custom teleported panel to the right edge. */
+.gps-marketplace-category-drawer[data-category-drawer] {
+    position: fixed !important;
+    top: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    left: auto !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+}
+
+@supports (height: 100dvh) {
+    .gps-marketplace-category-drawer[data-category-drawer] {
+        height: 100dvh !important;
+        max-height: 100dvh !important;
+    }
+}
+
 /* Compact right-side category picker for the part form. */
 .fi-modal-window.gps-category-picker-modal,
 .gps-category-picker-modal.fi-modal-window {

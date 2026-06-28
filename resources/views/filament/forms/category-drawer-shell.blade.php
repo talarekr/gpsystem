@@ -29,7 +29,7 @@
 ></div>
 <aside
     id="{{ $fieldId }}"
-    class="fixed inset-y-0 right-0 z-50 w-full max-w-xl flex-col bg-white p-6 shadow-xl dark:bg-gray-900 gps-category-picker-modal"
+    class="fixed inset-y-0 right-0 z-50 w-full max-w-xl flex-col bg-white p-6 shadow-xl dark:bg-gray-900 gps-category-picker-modal gps-marketplace-category-drawer"
     data-category-drawer
     data-category-drawer-id="{{ $fieldId }}"
     @if ($treeAttribute) data-marketplace-category-tree="{{ $treeAttribute }}" @endif
