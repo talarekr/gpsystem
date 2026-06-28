@@ -792,10 +792,15 @@ class PartResource extends Resource
     {
         return [
             NavigationItem::make('Dodaj część')->group(static::getNavigationGroup())->sort(static::getNavigationSort())->url(static::getUrl('create'))->isActiveWhen(fn () => request()->routeIs('filament.admin.resources.parts.create')),
-            NavigationItem::make('Wszystkie części')->group(static::getNavigationGroup())->sort((static::getNavigationSort() ?? 20) + 1)->url(static::getUrl('index'))->badge((string) static::getAllPartsNavigationCount())->isActiveWhen(fn () => request()->routeIs('filament.admin.resources.parts.index')),
-            NavigationItem::make('Części do wystawienia')->group(static::getNavigationGroup())->sort((static::getNavigationSort() ?? 20) + 2)->url(static::getUrl('to-list'))->badge((string) static::getPartsToListNavigationCount())->isActiveWhen(fn () => request()->routeIs('filament.admin.resources.parts.to-list')),
-            NavigationItem::make('Do wyjaśnienia')->group(static::getNavigationGroup())->sort((static::getNavigationSort() ?? 20) + 3)->url(static::getUrl('needs-review'))->badge((string) static::getPartsNeedsReviewNavigationCount())->isActiveWhen(fn () => request()->routeIs('filament.admin.resources.parts.needs-review')),
+            NavigationItem::make(static::navigationLabelWithCount('Wszystkie części', static::getAllPartsNavigationCount()))->group(static::getNavigationGroup())->sort((static::getNavigationSort() ?? 20) + 1)->url(static::getUrl('index'))->isActiveWhen(fn () => request()->routeIs('filament.admin.resources.parts.index')),
+            NavigationItem::make(static::navigationLabelWithCount('Części do wystawienia', static::getPartsToListNavigationCount()))->group(static::getNavigationGroup())->sort((static::getNavigationSort() ?? 20) + 2)->url(static::getUrl('to-list'))->isActiveWhen(fn () => request()->routeIs('filament.admin.resources.parts.to-list')),
+            NavigationItem::make(static::navigationLabelWithCount('Do wyjaśnienia', static::getPartsNeedsReviewNavigationCount()))->group(static::getNavigationGroup())->sort((static::getNavigationSort() ?? 20) + 3)->url(static::getUrl('needs-review'))->isActiveWhen(fn () => request()->routeIs('filament.admin.resources.parts.needs-review')),
         ];
+    }
+
+    private static function navigationLabelWithCount(string $label, int $count): string
+    {
+        return sprintf('%s (%d)', $label, $count);
     }
 
     public static function canViewAny(): bool { return auth()->user()?->hasAnyRole(self::rolesWithViewAccess()) ?? false; }
