@@ -111,7 +111,7 @@ class AdminPanelProvider extends PanelProvider
                 NavigationGroup::make('Samochody')
                     ->icon('heroicon-o-truck')
                     ->collapsible(false),
-                NavigationGroup::make('Kategorie - mapowania...')
+                NavigationGroup::make('Kategorie')
                     ->icon('heroicon-o-tag')
                     ->collapsible(false),
                 NavigationGroup::make('Wiadomości E-mail')
@@ -123,7 +123,7 @@ class AdminPanelProvider extends PanelProvider
             ])
             ->navigationItems([
                 NavigationItem::make('Mapowanie')
-                    ->group('Kategorie - mapowania...')
+                    ->group('Kategorie')
                     ->sort(10)
                     ->url(fn (): string => route('admin.marketplace-category-mapper.index'))
                     ->isActiveWhen(fn (): bool => request()->routeIs('admin.marketplace-category-mapper.*')),
