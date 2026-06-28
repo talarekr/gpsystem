@@ -23,41 +23,22 @@
         ],
     ])
 
-    <div
-        id="{{ $fieldId }}-overlay"
-        class="fixed inset-0 z-40 bg-gray-950/50"
-        data-category-drawer-overlay
-        x-cloak
-        x-show="categoryDrawerOpen"
-        x-on:click="categoryDrawerOpen = false"
-    ></div>
-    <aside
-        id="{{ $fieldId }}"
-        class="fixed inset-y-0 right-0 z-50 w-full max-w-xl flex-col bg-white p-6 shadow-xl dark:bg-gray-900 gps-category-picker-modal"
-        data-category-drawer
-        data-category-drawer-id="{{ $fieldId }}"
-        data-marketplace-category-tree="{{ $channel }}"
-        x-cloak
-        x-show="categoryDrawerOpen"
-        x-transition
-        x-bind:class="categoryDrawerOpen ? 'flex' : 'hidden'"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="{{ $fieldId }}-heading"
-    >
-        <div class="mb-4 flex items-center justify-between gap-3">
-            <h3 id="{{ $fieldId }}-heading" class="text-lg font-semibold text-gray-950 dark:text-white">Kategorie</h3>
-            <button type="button" x-on:click.prevent.stop="categoryDrawerOpen = false" class="cursor-pointer rounded-lg px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800">Zamknij</button>
+    <template x-teleport="body">
+        <div>
+            @include('filament.forms.category-drawer-shell', [
+                'fieldId' => $fieldId,
+                'heading' => 'Kategorie',
+                'categories' => [],
+                'lazyChildrenUrl' => $childrenUrl,
+                'lazyChannel' => $channel,
+                'suggestions' => [],
+                'saveUrl' => route('tools.part-marketplace-category-mapping.store'),
+                'hiddenFields' => ['part_id' => $part?->id, 'channel' => $channel],
+                'saveField' => 'external_category_id',
+                'pickerId' => $pickerId,
+                'treeAttribute' => $channel,
+            ])
         </div>
-        @include('filament.forms.category-picker', [
-            'categories' => [],
-            'lazyChildrenUrl' => $childrenUrl,
-            'lazyChannel' => $channel,
-            'suggestions' => [],
-            'saveUrl' => route('tools.part-marketplace-category-mapping.store'),
-            'hiddenFields' => ['part_id' => $part?->id, 'channel' => $channel],
-            'saveField' => 'external_category_id',
-            'pickerId' => $pickerId,
-        ])
-    </aside>
+    </template>
+
 </div>
