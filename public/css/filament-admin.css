@@ -761,6 +761,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 
 .gps-sales-metric small {
     display: block;
+    margin-top: 3px;
     color: #64748b;
     font-family: inherit;
     font-size: 0.76rem;
@@ -770,7 +771,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 
 .gps-sales-metric__value {
     display: block;
-    margin: 0.08rem 0 0;
+    margin: 3px 0 0;
     color: var(--gps-admin-navy);
     font-family: inherit;
     font-size: 0.9rem;
@@ -841,6 +842,16 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 .gps-sales-channel p {
     margin: 0.08rem 0 0;
     color: var(--gps-admin-navy);
+    font-size: 0.9rem;
+    font-weight: 400;
+    line-height: 1.15;
+}
+
+.gps-sales-channel--ebay small {
+    display: block;
+    margin: 0.08rem 0 0;
+    color: var(--gps-admin-navy);
+    font-family: inherit;
     font-size: 0.9rem;
     font-weight: 400;
     line-height: 1.15;
