@@ -2294,9 +2294,18 @@ button.gps-category-picker__arrow:hover {
     line-height: 1.25 !important;
 }
 
+/* Static EditPart-only hook: scoped through .gps-part-edit-layout-action, which is
+   emitted only by EditPart header/footer actions. Keep the standard Filament header
+   but prevent its actions wrappers from painting or reserving a trailing white strip. */
 .fi-main:has(.gps-part-edit-layout-action) .fi-header-actions,
 .fi-main:has(.gps-part-edit-layout-action) .fi-header .fi-ac {
+    flex: 0 1 auto !important;
+    width: auto !important;
     margin-left: auto !important;
+    margin-right: 0 !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+    background: transparent !important;
     justify-content: flex-end !important;
 }
 
