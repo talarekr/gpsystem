@@ -54,7 +54,7 @@ return [
         'cars_create' => 'Dodaj samochód',
         'cars_index' => 'Wszystkie samochody',
         'product_command_center' => 'Części',
-        'stock_locations' => 'Magazynowanie',
+        'stock_locations' => 'Magazyn',
         'storage_locations' => 'Miejsca składowania',
         'orders' => 'Zamówienia',
         'shipments' => 'Przesyłki',
