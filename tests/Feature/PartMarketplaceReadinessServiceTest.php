@@ -44,7 +44,7 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         MarketplaceCategoryMapping::query()->create(['local_category_id' => $category->id, 'channel' => 'ebay_de', 'external_category_id' => '177697']);
 
         $result = app(PartMarketplaceReadinessService::class)->check($part->fresh());
-        $html = view('filament.resources.parts.marketplace-readiness-cards', ['part' => $part->fresh()])->render();
+        $html = view('filament.resources.parts.marketplace-readiness-cards', ['part' => $part->fresh(), 'preparedStatusChecked' => ['ebay']])->render();
 
         $this->assertSame('ready', $result['ebay']['status']);
         $this->assertNotContains('Brak przygotowanego tłumaczenia eBay DE', $result['ebay']['presentation']['missing']);
@@ -61,13 +61,51 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $part = Part::query()->create(['name' => 'Niekompletna część', 'quantity' => 1]);
 
         $result = app(PartMarketplaceReadinessService::class)->check($part);
-        $html = view('filament.resources.parts.marketplace-readiness-cards', ['part' => $part])->render();
+        $html = view('filament.resources.parts.marketplace-readiness-cards', ['part' => $part, 'preparedStatusChecked' => ['ebay']])->render();
 
         $this->assertContains('zdjęcia', $result['ebay']['presentation']['missing']);
         $this->assertStringContainsString('zdjęcia', $html);
         $this->assertStringContainsString('Brak przygotowanego tłumaczenia eBay DE', $html);
         $this->assertStringContainsString('Brak przygotowanego tłumaczenia eBay FR', $html);
         $this->assertDatabaseCount('marketplace_listings', 0);
+    }
+
+    public function test_marketplace_cards_do_not_show_price_error_or_red_frame_on_initial_render(): void
+    {
+        $part = Part::query()->create(['name' => 'Część bez ceny', 'price' => null, 'quantity' => 1]);
+
+        $html = view('filament.resources.parts.marketplace-readiness-cards', ['part' => $part])->render();
+
+        $this->assertStringContainsString('Przygotuj', $html);
+        $this->assertStringContainsString('x-data="{ preparedStatusChecked: false }"', $html);
+        $this->assertStringNotContainsString('data-marketplace-prepare-result="blocked"', $this->visibleInitialStatusHtml($html));
+        $this->assertStringNotContainsString('Uzupełnij cenę', $this->visibleInitialStatusHtml($html));
+    }
+
+    public function test_marketplace_card_shows_readable_price_error_after_prepare_click_state(): void
+    {
+        $part = Part::query()->create(['name' => 'Część bez ceny', 'price' => null, 'quantity' => 1]);
+
+        $html = view('filament.resources.parts.marketplace-readiness-cards', ['part' => $part, 'preparedStatusChecked' => ['allegro']])->render();
+
+        $this->assertStringContainsString('Uzupełnij cenę', $html);
+        $this->assertStringNotContainsString('allegro_price_pln', $html);
+    }
+
+    public function test_prepare_click_state_is_per_channel(): void
+    {
+        $part = Part::query()->create(['name' => 'Część bez ceny', 'price' => null, 'quantity' => 1]);
+
+        $html = view('filament.resources.parts.marketplace-readiness-cards', ['part' => $part, 'preparedStatusChecked' => ['allegro']])->render();
+
+        $this->assertStringContainsString('data-marketplace-card="allegro" x-data="{ preparedStatusChecked: true }"', $html);
+        $this->assertStringContainsString('data-marketplace-card="ovoko" x-data="{ preparedStatusChecked: false }"', $html);
+        $this->assertStringContainsString('data-marketplace-card="ebay" x-data="{ preparedStatusChecked: false }"', $html);
+    }
+
+    private function visibleInitialStatusHtml(string $html): string
+    {
+        return preg_replace('/<template x-if="preparedStatusChecked">.*?<\/template>/s', '', $html) ?: $html;
     }
 
     public function test_complete_part_returns_ready_without_marketplace_write_intent(): void
@@ -272,7 +310,7 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $this->assertStringNotContainsString('ID kategorii:', $html);
         $this->assertStringNotContainsString('>Gotowy</span>', $html);
         $this->assertStringContainsString('Przygotuj', $html);
-        $this->assertStringContainsString('data-marketplace-prepare-result="ready"', $html);
+        $this->assertStringContainsString('x-data="{ preparedStatusChecked: false }"', $html);
         $this->assertStringContainsString('Gotowe', $html);
         $this->assertStringNotContainsString('Aukcja przygotowana', $html);
         $this->assertStringNotContainsString('Uzupełnij braki', $html);
