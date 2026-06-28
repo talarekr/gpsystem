@@ -205,9 +205,10 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $this->assertStringContainsString('data-category-drawer', $html);
         $this->assertStringContainsString('gps-category-picker', $html);
         $this->assertStringContainsString('data-marketplace-category-tree="allegro_main"', $html);
-        $this->assertStringContainsString('parent_id&quot;:&quot;root-moto&quot;', $html);
-        $this->assertStringContainsString('parent_id&quot;:&quot;child-parts&quot;', $html);
-        $this->assertStringContainsString('has_children&quot;:true', $html);
+        $this->assertStringNotContainsString('parent_id&quot;:&quot;root-moto&quot;', $html);
+        $this->assertStringNotContainsString('parent_id&quot;:&quot;child-parts&quot;', $html);
+        $this->assertStringContainsString('lazyChildrenUrl', $html);
+        $this->assertStringContainsString('ensureChildren(null)', $html);
         $this->assertStringContainsString('currentChildren()', $html);
         $this->assertStringContainsString('x-on:click="activate(category)"', $html);
         $this->assertStringNotContainsString('data-flat-marketplace-category-list', $html);
@@ -232,10 +233,64 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $this->assertStringContainsString('data-marketplace-category-tree="allegro_main"', $html);
         $this->assertStringContainsString('data-marketplace-category-tree="ovoko"', $html);
         $this->assertStringContainsString('data-marketplace-category-tree="ebay_de"', $html);
-        $this->assertStringContainsString('Allegro root', $html);
-        $this->assertStringContainsString('Ovoko root', $html);
-        $this->assertStringContainsString('eBay root', $html);
+        $this->assertStringNotContainsString('Allegro root', $html);
+        $this->assertStringNotContainsString('Ovoko root', $html);
+        $this->assertStringNotContainsString('eBay root', $html);
         $this->assertStringNotContainsString('data-marketplace-category-tree="allegro"', $html);
+    }
+
+
+    public function test_marketplace_category_children_endpoint_returns_only_one_local_db_level(): void
+    {
+        \App\Models\MarketplaceCategory::query()->create(['channel' => 'allegro_main', 'external_category_id' => 'root-moto', 'name' => 'Motoryzacja', 'full_path' => 'Motoryzacja', 'level' => 0, 'active' => true]);
+        \App\Models\MarketplaceCategory::query()->create(['channel' => 'allegro_main', 'external_category_id' => 'child-parts', 'parent_external_category_id' => 'root-moto', 'name' => 'Części samochodowe', 'full_path' => 'Motoryzacja / Części samochodowe', 'level' => 1, 'active' => true]);
+        \App\Models\MarketplaceCategory::query()->create(['channel' => 'allegro_main', 'external_category_id' => 'leaf-alternators', 'parent_external_category_id' => 'child-parts', 'name' => 'Alternatory', 'full_path' => 'Motoryzacja / Części samochodowe / Alternatory', 'level' => 2, 'active' => true]);
+
+        $this->getJson(route('tools.marketplace-category-children', ['token' => 'gps_images_import_2026', 'channel' => 'allegro_main']))
+            ->assertOk()
+            ->assertJsonPath('source', 'local_db_only')
+            ->assertJsonPath('will_make_marketplace_request', false)
+            ->assertJsonPath('children.0.id', 'root-moto')
+            ->assertJsonPath('children.0.parent_id', null)
+            ->assertJsonPath('children.0.has_children', true)
+            ->assertJsonMissing(['id' => 'child-parts']);
+
+        $this->getJson(route('tools.marketplace-category-children', ['token' => 'gps_images_import_2026', 'channel' => 'allegro_main', 'parent_external_category_id' => 'root-moto']))
+            ->assertOk()
+            ->assertJsonPath('parent_external_category_id', 'root-moto')
+            ->assertJsonPath('children.0.id', 'child-parts')
+            ->assertJsonPath('children.0.parent_id', 'root-moto')
+            ->assertJsonPath('children.0.has_children', true)
+            ->assertJsonMissing(['id' => 'leaf-alternators']);
+
+        $this->assertDatabaseCount('marketplace_listings', 0);
+    }
+
+    public function test_marketplace_category_picker_initial_render_is_lazy_and_has_no_full_tree_json(): void
+    {
+        $category = PartCategory::query()->create(['name' => 'Alternatory']);
+        $part = Part::query()->create(['name' => 'Alternator BMW', 'category_id' => $category->id, 'quantity' => 1]);
+
+        foreach (range(1, 25) as $i) {
+            \App\Models\MarketplaceCategory::query()->create(['channel' => 'ebay_de', 'external_category_id' => 'eb-'.$i, 'name' => 'eBay category '.$i, 'full_path' => 'eBay category '.$i, 'level' => 0, 'active' => true]);
+        }
+
+        $html = view('filament.resources.parts.marketplace-readiness-cards', ['part' => $part])->render();
+
+        $this->assertStringContainsString('data-marketplace-category-tree="ebay_de"', $html);
+        $this->assertStringContainsString('lazyChildrenUrl', $html);
+        $this->assertStringNotContainsString('data-marketplace-category-tree="[{', $html);
+        $this->assertStringNotContainsString('eBay category 25', $html);
+        $this->assertLessThan(3, substr_count($html, 'eBay category'));
+    }
+
+    public function test_marketplace_categories_have_channel_parent_external_category_index_migration(): void
+    {
+        $migration = file_get_contents(database_path('migrations/2026_06_24_000000_create_marketplace_categories_table.php'));
+
+        $this->assertStringContainsString("$"."table->index(['channel', 'parent_external_category_id']);", $migration);
+        $this->assertStringContainsString('parent_external_category_id', file_get_contents(app_path('Http/Controllers/Tools/PartMarketplaceReadinessController.php')));
+        $this->assertStringNotContainsString('parent_external_id', file_get_contents(app_path('Http/Controllers/Tools/PartMarketplaceReadinessController.php')));
     }
 
     public function test_marketplace_category_field_shows_neutral_fallback_without_category_name(): void

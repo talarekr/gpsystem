@@ -1,17 +1,8 @@
 @php
-    use App\Models\MarketplaceCategory;
-
     $readiness = $part ? app(\App\Services\Marketplace\PartMarketplaceReadinessService::class)->check($part) : [];
     $labels = ['allegro' => 'Allegro', 'ovoko' => 'Ovoko', 'ebay' => 'eBay'];
     $channels = ['allegro' => 'allegro_main', 'ovoko' => 'ovoko', 'ebay' => 'ebay_de'];
     $mappingChannels = ['allegro' => 'allegro_main', 'ovoko' => 'ovoko', 'ebay' => 'ebay_de'];
-    $marketplaceTrees = MarketplaceCategory::query()
-        ->whereIn('channel', array_values($mappingChannels))
-        ->orderBy('channel')
-        ->orderBy('level')
-        ->orderBy('full_path')
-        ->get()
-        ->groupBy('channel');
 @endphp
 
 <div class="space-y-4" data-marketplace-preparation-panel>
@@ -32,7 +23,6 @@
                     'ebay_de' => route('tools.ebay-listing-preview', ['token' => 'gps_images_import_2026', 'part_id' => $part->id, 'channel' => 'ebay_de']),
                     'ebay_fr' => route('tools.ebay-listing-preview', ['token' => 'gps_images_import_2026', 'part_id' => $part->id, 'channel' => 'ebay_fr']),
                 ] : [];
-                $tree = $marketplaceTrees->get($mappingChannels[$key], collect());
             @endphp
 
             <div class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900" data-marketplace-card="{{ $key }}">
@@ -41,7 +31,7 @@
                 </div>
 
                 <div class="mt-4 space-y-4 text-sm">
-                    @include('filament.resources.parts.marketplace-category-field', compact('part', 'key', 'labels', 'category', 'tree', 'mappingChannels'))
+                    @include('filament.resources.parts.marketplace-category-field', compact('part', 'key', 'labels', 'category', 'mappingChannels'))
 
                     <a href="{{ $prepareUrl }}" target="_blank" rel="noopener noreferrer" class="inline-flex w-full items-center justify-center rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-primary-500">Przygotuj</a>
 
