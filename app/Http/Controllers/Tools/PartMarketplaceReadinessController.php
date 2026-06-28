@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Tools;
 use App\Http\Controllers\Controller;
 use App\Models\MarketplaceCategory;
 use App\Models\Part;
+use App\Models\PartCategory;
 use App\Services\Marketplace\MarketplaceListingReadinessService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -215,6 +216,71 @@ class PartMarketplaceReadinessController extends Controller
                 'path' => $category->full_path ?: ($category->name ?: $category->external_category_id),
                 'full_slug_path' => $category->full_path,
                 'has_children' => (bool) ($parentsWithChildren[(string) $category->external_category_id] ?? false),
+            ])->values(),
+            'source' => 'local_db_only',
+            'will_make_marketplace_request' => false,
+            'publish' => false,
+        ]);
+    }
+
+
+    public function partCategoryChildren(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+
+        $data = $request->validate([
+            'parent_id' => ['nullable', 'integer', 'exists:part_categories,id'],
+            'q' => ['nullable', 'string', 'min:2', 'max:120'],
+        ]);
+
+        $search = trim((string) ($data['q'] ?? ''));
+        $parentId = $data['parent_id'] ?? null;
+
+        $query = PartCategory::query()
+            ->select(['id', 'parent_id', 'name', 'category_path', 'full_slug_path', 'sort_order', 'woo_product_count'])
+            ->where(function ($query): void {
+                $query->whereNull('name')
+                    ->orWhereRaw('LOWER(TRIM(name)) <> ?', ['bez kategorii']);
+            });
+
+        if ($search !== '') {
+            $like = '%'.str_replace(['%', '_'], ['\%', '\_'], mb_strtolower($search)).'%';
+
+            $query->where(function ($query) use ($like): void {
+                $query->whereRaw('LOWER(name) like ?', [$like])
+                    ->orWhereRaw('LOWER(COALESCE(category_path, \'\')) like ?', [$like])
+                    ->orWhereRaw('LOWER(COALESCE(full_slug_path, \'\')) like ?', [$like]);
+            })->limit(25);
+        } else {
+            filled($parentId)
+                ? $query->where('parent_id', (int) $parentId)
+                : $query->whereNull('parent_id');
+        }
+
+        $children = $query->ordered()->get();
+        $childIds = $children->pluck('id')->map(fn ($id): int => (int) $id)->all();
+        $parentsWithChildren = $childIds === []
+            ? collect()
+            : PartCategory::query()
+                ->whereIn('parent_id', $childIds)
+                ->select('parent_id')
+                ->distinct()
+                ->pluck('parent_id')
+                ->mapWithKeys(fn ($id): array => [(string) $id => true]);
+
+        return response()->json([
+            'ok' => true,
+            'parent_id' => filled($parentId) ? (int) $parentId : null,
+            'search' => $search !== '',
+            'count' => $children->count(),
+            'children' => $children->map(fn (PartCategory $category): array => [
+                'id' => (int) $category->id,
+                'parent_id' => $category->parent_id ? (int) $category->parent_id : null,
+                'name' => $category->name,
+                'path' => $category->category_path ?: ($category->full_slug_path ?: $category->name),
+                'full_slug_path' => $category->full_slug_path,
+                'woo_product_count' => $category->woo_product_count,
+                'has_children' => (bool) ($parentsWithChildren[(string) $category->id] ?? false),
             ])->values(),
             'source' => 'local_db_only',
             'will_make_marketplace_request' => false,

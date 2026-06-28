@@ -254,4 +254,57 @@ class PartCategoryPickerUiTest extends TestCase
         $this->assertStringNotContainsString('this.$refs.marketplaceForm.submit();', $categoryPicker);
         $this->assertStringContainsString("return;\n            }\n\n            this.$wire.setPartCategoryFromPicker", str_replace("\r\n", "\n", $categoryPicker));
     }
+    public function test_main_part_category_picker_initial_render_is_lazy_and_does_not_embed_full_tree(): void
+    {
+        $resource = file_get_contents(app_path('Filament/Resources/PartResource.php'));
+        $categoryPicker = file_get_contents(resource_path('views/filament/forms/category-picker.blade.php'));
+
+        $this->assertStringContainsString("'categories' => []", $resource);
+        $this->assertStringContainsString("route('tools.part-category-children'", $resource);
+        $this->assertStringContainsString("'lazyLoadOnInit' => true", $resource);
+        $this->assertStringNotContainsString("'categories' => self::categoryPickerCategories()", $resource);
+        $this->assertStringContainsString('url.searchParams.set(this.lazyChannel ? \'parent_external_category_id\' : \'parent_id\', parentId);', $categoryPicker);
+        $this->assertStringContainsString('if (this.lazyLoadOnInit)', $categoryPicker);
+    }
+
+    public function test_part_category_children_endpoint_loads_only_roots_and_then_children_from_local_db(): void
+    {
+        $root = PartCategory::query()->create(['name' => 'Silnik', 'sort_order' => 1]);
+        $child = PartCategory::query()->create(['name' => 'Alternatory', 'parent_id' => $root->id, 'category_path' => 'Silnik / Alternatory']);
+        PartCategory::query()->create(['name' => 'Rozruszniki', 'parent_id' => $child->id, 'category_path' => 'Silnik / Alternatory / Rozruszniki']);
+        $otherRoot = PartCategory::query()->create(['name' => 'Karoseria', 'sort_order' => 2]);
+
+        $this->getJson('/tools/part-category-children?token=gps_images_import_2026')
+            ->assertOk()
+            ->assertJsonPath('source', 'local_db_only')
+            ->assertJsonPath('will_make_marketplace_request', false)
+            ->assertJsonPath('publish', false)
+            ->assertJsonCount(2, 'children')
+            ->assertJsonFragment(['id' => $root->id, 'parent_id' => null, 'has_children' => true])
+            ->assertJsonFragment(['id' => $otherRoot->id, 'parent_id' => null, 'has_children' => false])
+            ->assertJsonMissing(['id' => $child->id]);
+
+        $this->getJson('/tools/part-category-children?token=gps_images_import_2026&parent_id='.$root->id)
+            ->assertOk()
+            ->assertJsonCount(1, 'children')
+            ->assertJsonFragment(['id' => $child->id, 'parent_id' => $root->id, 'has_children' => true])
+            ->assertJsonMissing(['id' => $otherRoot->id]);
+    }
+
+    public function test_part_category_children_endpoint_search_is_limited_and_does_not_change_marketplace_picker_endpoint(): void
+    {
+        PartCategory::query()->create(['name' => 'Silnik']);
+        $leaf = PartCategory::query()->create(['name' => 'Alternator Bosch', 'category_path' => 'Silnik / Alternator Bosch']);
+
+        $this->getJson('/tools/part-category-children?token=gps_images_import_2026&q=alternator')
+            ->assertOk()
+            ->assertJsonPath('search', true)
+            ->assertJsonCount(1, 'children')
+            ->assertJsonFragment(['id' => $leaf->id, 'path' => 'Silnik / Alternator Bosch']);
+
+        $marketplaceField = file_get_contents(resource_path('views/filament/resources/parts/marketplace-category-field.blade.php'));
+        $this->assertStringContainsString("route('tools.marketplace-category-children'", $marketplaceField);
+        $this->assertStringContainsString("'categories' => []", $marketplaceField);
+    }
+
 }

@@ -514,7 +514,9 @@ class PartResource extends Resource
                     ->dehydrated(false)
                     ->view('filament.forms.category-picker')
                     ->viewData(fn (Forms\Get $get): array => [
-                        'categories' => self::categoryPickerCategories(),
+                        'categories' => [],
+                        'lazyChildrenUrl' => route('tools.part-category-children', ['token' => 'gps_images_import_2026']),
+                        'lazyLoadOnInit' => true,
                         'suggestions' => array_values((array) ($get('category_suggestions') ?? [])),
                     ]),
             ]);

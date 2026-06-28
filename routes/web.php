@@ -397,6 +397,7 @@ Route::get('/tools/ebay-listing-preview-html', [PartMarketplaceReadinessControll
 Route::get('/tools/prepare-ebay-listing-translations', [PartMarketplaceReadinessController::class, 'prepareEbay'])->name('tools.prepare-ebay-listing-translations');
 Route::get('/tools/prepare-ebay-listing-translations-all', [PartMarketplaceReadinessController::class, 'prepareEbayAll'])->name('tools.prepare-ebay-listing-translations-all');
 Route::get('/tools/marketplace-category-children', [PartMarketplaceReadinessController::class, 'categoryChildren'])->name('tools.marketplace-category-children');
+Route::get('/tools/part-category-children', [PartMarketplaceReadinessController::class, 'partCategoryChildren'])->name('tools.part-category-children');
 Route::post('/tools/part-marketplace-category-mapping', [PartMarketplaceReadinessController::class, 'storeCategoryMapping'])->name('tools.part-marketplace-category-mapping.store');
 Route::get('/tools/marketplace-publish-part-preview', [MarketplacePublishPartController::class, 'preview'])->name('tools.marketplace-publish-part-preview');
 Route::get('/tools/marketplace-publish-part-confirm', [MarketplacePublishPartController::class, 'confirm'])->name('tools.marketplace-publish-part-confirm');
