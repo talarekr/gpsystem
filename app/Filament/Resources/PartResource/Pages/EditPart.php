@@ -18,6 +18,8 @@ class EditPart extends EditRecord
 {
     protected static string $resource = PartResource::class;
 
+    protected static string $view = 'filament.resources.parts.pages.edit-part';
+
     protected array $partPhotoPaths = [];
 
     protected array $marketplaceCategorySelections = [];
