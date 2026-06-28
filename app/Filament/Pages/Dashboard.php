@@ -92,6 +92,7 @@ class Dashboard extends BaseDashboard
         return [
             'all' => 'Wszystkie',
             'requires_action' => 'Wymaga reakcji',
+            'orders' => 'Zamówienia',
             'messages' => 'Wiadomości',
             'returns_complaints' => 'Zwroty/Reklamacje',
         ];
@@ -123,27 +124,25 @@ class Dashboard extends BaseDashboard
      */
     public function shopEvents(): Collection
     {
-        $tab = $this->activeShopEventTab();
-
-        if (in_array($tab, ['all', 'requires_action'], true)) {
-            return $this->orderShopEvents($tab);
-        }
-
-        return Schema::hasTable('shop_events')
-            ? $this->shopEventQuery($tab)
+        $events = Schema::hasTable('shop_events')
+            ? $this->shopEventQuery($this->activeShopEventTab())
                 ->orderByRaw('COALESCE(occurred_at, created_at) DESC')
                 ->limit(15)
                 ->get()
             : new Collection();
+
+        return $events
+            ->merge($this->orderShopEvents($this->activeShopEventTab()))
+            ->sortByDesc(fn (ShopEvent $event): int => ($event->occurred_at ?: $event->created_at)?->getTimestamp() ?? 0)
+            ->take(15)
+            ->values();
     }
 
     private function shopEventCount(string $tab): int
     {
-        if (in_array($tab, ['all', 'requires_action'], true)) {
-            return $this->orderShopEventsCount($tab);
-        }
+        $count = Schema::hasTable('shop_events') ? (int) $this->shopEventQuery($tab)->count() : 0;
 
-        return Schema::hasTable('shop_events') ? (int) $this->shopEventQuery($tab)->count() : 0;
+        return $count + $this->orderShopEventsCount($tab);
     }
 
     private function shopEventQuery(string $tab): Builder
@@ -151,6 +150,8 @@ class Dashboard extends BaseDashboard
         $query = ShopEvent::query()->whereIn('event_type', $this->supportShopEventTypes());
 
         match ($tab) {
+            'requires_action' => $query->where('requires_action', true),
+            'orders' => $query->whereIn('event_type', $this->orderShopEventTypes()),
             'messages' => $query->whereIn('event_type', $this->messageShopEventTypes()),
             'returns_complaints' => $query->whereIn('event_type', $this->returnComplaintShopEventTypes()),
             default => null,
@@ -162,11 +163,11 @@ class Dashboard extends BaseDashboard
 
     private function orderShopEventsCount(string $tab): int
     {
-        if (! in_array($tab, ['all', 'requires_action'], true) || ! Schema::hasTable('orders')) {
+        if (! in_array($tab, ['all', 'requires_action', 'orders'], true) || ! Schema::hasTable('orders')) {
             return 0;
         }
 
-        return (int) $this->newOrdersQuery($tab)->count();
+        return (int) Order::query()->where('status', 'new')->count();
     }
 
     /**
@@ -174,50 +175,35 @@ class Dashboard extends BaseDashboard
      */
     private function orderShopEvents(string $tab): Collection
     {
-        if (! in_array($tab, ['all', 'requires_action'], true) || ! Schema::hasTable('orders')) {
+        if (! in_array($tab, ['all', 'requires_action', 'orders'], true) || ! Schema::hasTable('orders')) {
             return new Collection();
         }
 
-        return $this->newOrdersQuery($tab)
-            ->with('items:id,order_id,marketplace')
-            ->orderByRaw('COALESCE(ordered_at, created_at) DESC')
+        return Order::query()
+            ->where('status', 'new')
+            ->latest()
+            ->limit(15)
             ->get()
             ->map(fn (Order $order): ShopEvent => $this->orderToShopEvent($order));
     }
 
-    private function newOrdersQuery(string $tab): Builder
-    {
-        $query = Order::query()->where('status', 'new');
-
-        if ($tab === 'requires_action') {
-            $query->whereRaw('COALESCE(ordered_at, created_at) <= ?', [now()->subDay()]);
-        }
-
-        return $query;
-    }
-
     private function orderToShopEvent(Order $order): ShopEvent
     {
-        $source = $this->normalizeOrderChannel($this->orderSource($order));
-        $orderedAt = $order->ordered_at ?: $order->created_at;
-
         $event = new ShopEvent([
-            'source' => $source === 'shop' ? 'storefront' : $source,
+            'source' => 'storefront',
             'event_type' => 'order',
-            'title' => 'Nowe zamówienie ' . OrderResource::displayOrderNumber($order),
-            'description' => null,
-            'occurred_at' => $orderedAt,
+            'title' => 'Nowe zamówienie sklep ' . $order->order_number,
+            'description' => trim(sprintf('Status: %s. Klient: %s.', $order->status, $order->customer_name ?: '—')),
+            'occurred_at' => $order->created_at,
             'is_read' => false,
-            'requires_action' => $orderedAt !== null && $orderedAt->lte(now()->subDay()),
+            'requires_action' => true,
             'severity' => 'warning',
-            'customer_name' => null,
-            'external_reference' => OrderResource::displayOrderNumber($order),
+            'customer_name' => $order->customer_name,
+            'external_reference' => $order->order_number,
             'url' => OrderResource::getUrl('view', ['record' => $order]),
             'payload' => [
                 'order_id' => $order->id,
                 'order_number' => $order->order_number,
-                'source_channel' => $source,
-                'order_total' => OrderResource::formatOrderTotal($order),
                 'status' => $order->status,
             ],
         ]);
@@ -227,38 +213,9 @@ class Dashboard extends BaseDashboard
         return $event;
     }
 
-    private function orderSource(Order $order): ?string
-    {
-        if (filled($order->marketplace)) {
-            return (string) $order->marketplace;
-        }
-
-        $metaSource = data_get($order->meta, 'source') ?: data_get($order->meta, 'channel');
-        if (filled($metaSource)) {
-            return (string) $metaSource;
-        }
-
-        $itemMarketplace = $order->relationLoaded('items')
-            ? $order->items->first(fn ($item) => filled($item->marketplace))?->marketplace
-            : null;
-
-        return filled($itemMarketplace) ? (string) $itemMarketplace : null;
-    }
-
-    private function normalizeOrderChannel(?string $source): string
-    {
-        $source = str($source ?? '')->lower()->trim()->toString();
-
-        return match (true) {
-            $source === '', in_array($source, ['sklep', 'local', 'store', 'storefront', 'shop'], true) => 'shop',
-            in_array($source, ['sprzedaż lokalna', 'sprzedaz lokalna', 'local_sale', 'local sale'], true) => 'local_sale',
-            str_starts_with($source, 'allegro') => 'allegro',
-            str_starts_with($source, 'ovoko') => 'ovoko',
-            str_starts_with($source, 'ebay') => 'ebay',
-            default => 'shop',
-        };
-    }
-
+    /**
+     * @return array<int, string>
+     */
     private function supportShopEventTypes(): array
     {
         return array_merge(
