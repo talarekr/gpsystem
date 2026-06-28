@@ -6,6 +6,8 @@
     $hiddenFields = $hiddenFields ?? [];
     $saveField = $saveField ?? 'category_id';
     $pickerId = $pickerId ?? ('gps-category-picker-'.uniqid());
+    $lazyChildrenUrl = $lazyChildrenUrl ?? null;
+    $lazyChannel = $lazyChannel ?? null;
 @endphp
 
 @once
@@ -193,6 +195,10 @@
     x-data="{
         categories: @js($categories),
         suggestions: @js($suggestions),
+        lazyChildrenUrl: @js($lazyChildrenUrl),
+        lazyChannel: @js($lazyChannel),
+        loadedParents: {},
+        isLoadingChildren: false,
         currentParent: null,
         stack: [],
         search: '',
@@ -200,6 +206,41 @@
         selectedName: '',
         isSaving: false,
         init() {},
+        async ensureChildren(parentId = null) {
+            if (! this.lazyChildrenUrl) {
+                return;
+            }
+
+            const key = parentId === null ? '__root__' : String(parentId);
+            if (this.loadedParents[key] || this.isLoadingChildren) {
+                return;
+            }
+
+            this.isLoadingChildren = true;
+            const url = new URL(this.lazyChildrenUrl, window.location.origin);
+            url.searchParams.set('channel', this.lazyChannel);
+            if (parentId !== null) {
+                url.searchParams.set('parent_external_category_id', parentId);
+            }
+
+            try {
+                const response = await fetch(url.toString(), { headers: { 'Accept': 'application/json' } });
+                if (! response.ok) {
+                    return;
+                }
+                const payload = await response.json();
+                const existingIds = new Set(this.categories.map((category) => String(category.id)));
+                (payload.children || []).forEach((category) => {
+                    if (! existingIds.has(String(category.id))) {
+                        this.categories.push(category);
+                        existingIds.add(String(category.id));
+                    }
+                });
+                this.loadedParents[key] = true;
+            } finally {
+                this.isLoadingChildren = false;
+            }
+        },
         children(parentId = null) {
             return this.categories.filter((category) => category.parent_id === parentId);
         },
@@ -225,6 +266,7 @@
 
             this.stack.push(category.id);
             this.currentParent = category.id;
+            this.ensureChildren(category.id);
         },
         openFromSearch(category) {
             if (! category?.has_children) {
@@ -334,6 +376,7 @@
         resetTree() {
             this.stack = [];
             this.currentParent = null;
+            this.ensureChildren(null);
         },
         searchResults() {
             const term = this.search.trim().toLowerCase();
@@ -348,6 +391,7 @@
                 .slice(0, 25);
         },
     }"
+    x-effect="if (typeof categoryDrawerOpen !== 'undefined' && categoryDrawerOpen) ensureChildren(null)"
 >
     @if ($saveUrl)
         <form x-ref="marketplaceForm" method="{{ $saveMethod }}" action="{{ $saveUrl }}" class="hidden" data-marketplace-category-local-form>
@@ -441,7 +485,8 @@
             </div>
             </template>
 
-            <p class="gps-category-picker__empty" x-show="currentChildren().length === 0">Brak podkategorii.</p>
+            <p class="gps-category-picker__empty" x-show="isLoadingChildren">Ładowanie kategorii...</p>
+            <p class="gps-category-picker__empty" x-show="! isLoadingChildren && currentChildren().length === 0">Brak podkategorii.</p>
         </div>
     </div>
 

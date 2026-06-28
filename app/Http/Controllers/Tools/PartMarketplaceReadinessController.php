@@ -156,6 +156,59 @@ class PartMarketplaceReadinessController extends Controller
         ]);
     }
 
+
+    public function categoryChildren(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+
+        $data = $request->validate([
+            'channel' => ['required', 'in:allegro_main,ovoko,ebay_de,ebay_fr'],
+            'parent_external_category_id' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $channel = (string) $data['channel'];
+        $parentId = $data['parent_external_category_id'] ?? null;
+
+        $query = MarketplaceCategory::query()
+            ->where('channel', $channel)
+            ->when(
+                filled($parentId),
+                fn ($query) => $query->where('parent_external_category_id', (string) $parentId),
+                fn ($query) => $query->whereNull('parent_external_category_id')
+            )
+            ->orderBy('name')
+            ->orderBy('external_category_id');
+
+        $children = $query->get(['external_category_id', 'parent_external_category_id', 'name', 'full_path']);
+        $childIds = $children->pluck('external_category_id')->map(fn ($id): string => (string) $id)->all();
+        $parentsWithChildren = $childIds === []
+            ? collect()
+            : MarketplaceCategory::query()
+                ->where('channel', $channel)
+                ->whereIn('parent_external_category_id', $childIds)
+                ->select('parent_external_category_id')
+                ->distinct()
+                ->pluck('parent_external_category_id')
+                ->mapWithKeys(fn ($id): array => [(string) $id => true]);
+
+        return response()->json([
+            'ok' => true,
+            'channel' => $channel,
+            'parent_external_category_id' => filled($parentId) ? (string) $parentId : null,
+            'children' => $children->map(fn (MarketplaceCategory $category): array => [
+                'id' => (string) $category->external_category_id,
+                'parent_id' => filled($category->parent_external_category_id) ? (string) $category->parent_external_category_id : null,
+                'name' => $category->name ?: ($category->full_path ?: $category->external_category_id),
+                'path' => $category->full_path ?: ($category->name ?: $category->external_category_id),
+                'full_slug_path' => $category->full_path,
+                'has_children' => (bool) ($parentsWithChildren[(string) $category->external_category_id] ?? false),
+            ])->values(),
+            'source' => 'local_db_only',
+            'will_make_marketplace_request' => false,
+            'publish' => false,
+        ]);
+    }
+
     public function storeCategoryMapping(Request $request): RedirectResponse
     {
         $data = $request->validate([
