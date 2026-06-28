@@ -39,14 +39,15 @@ class PartEditLayoutUiTest extends TestCase
         $css = file_get_contents(public_path('css/filament-admin.css'));
 
         $this->assertStringContainsString('--gps-part-edit-form-container-max-width: var(--gps-admin-content-max-width);', $css);
-        $this->assertStringContainsString('--gps-part-edit-form-container-padding: var(--gps-admin-content-inline-padding);', $css);
-        $this->assertStringContainsString('Rendered DOM audit (Filament edit record): .fi-header is a sibling before the edit <form>', $css);
-        $this->assertStringContainsString('.fi-main:has(.gps-part-edit-layout-action) .fi-header,', $css);
-        $this->assertStringContainsString('.fi-main:has(.gps-part-edit-layout-action) form .fi-form-actions {', $css);
-        $this->assertStringNotContainsString('.fi-main:has(.gps-part-edit-layout-action) .fi-form,', $css);
+        $this->assertStringContainsString('Rendered DOM/computed-style audit (Filament edit record): .fi-page contains a centered', $css);
+        $this->assertStringContainsString('The real form edge is the page/form container', $css);
+        $this->assertStringContainsString('.fi-main:has(.gps-part-edit-layout-action) :where(.fi-header, form, form .fi-form-actions) {', $css);
+        $this->assertStringContainsString('max-width: var(--gps-admin-content-max-width) = 80rem', $css);
+        $this->assertStringContainsString('padding-left/right: 0', $css);
+        $this->assertStringNotContainsString('--gps-part-edit-form-container-padding', $css);
         $this->assertStringContainsString('max-width: var(--gps-part-edit-form-container-max-width) !important;', $css);
-        $this->assertStringContainsString('padding-left: var(--gps-part-edit-form-container-padding) !important;', $css);
-        $this->assertStringContainsString('padding-right: var(--gps-part-edit-form-container-padding) !important;', $css);
+        $this->assertStringContainsString('padding-left: 0 !important;', $css);
+        $this->assertStringContainsString('padding-right: 0 !important;', $css);
         $this->assertStringContainsString('justify-content: flex-end !important;', $css);
         $this->assertStringContainsString('justify-content: flex-start !important;', $css);
     }
