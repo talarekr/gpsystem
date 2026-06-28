@@ -750,22 +750,32 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     padding: 0.75rem;
 }
 
-.gps-sales-metric span,
+.gps-sales-metric > span:not(.gps-sales-metric__value) {
+    display: block;
+    color: #0f172a;
+    font-family: inherit;
+    font-size: 0.88rem;
+    font-weight: 400;
+    line-height: normal;
+}
+
 .gps-sales-metric small {
     display: block;
     color: #64748b;
-    font-size: 0.78rem;
+    font-family: inherit;
+    font-size: 0.76rem;
     font-weight: 400;
-    line-height: 1.25;
+    line-height: normal;
 }
 
 .gps-sales-metric__value {
     display: block;
-    margin: 0.32rem 0 0.18rem;
+    margin: 0.08rem 0 0;
     color: var(--gps-admin-navy);
-    font-size: clamp(1.08rem, 1.35vw, 1.35rem);
+    font-family: inherit;
+    font-size: 0.9rem;
     font-weight: 400;
-    line-height: 1.08;
+    line-height: 1.15;
 }
 
 .gps-sales-metric--total {
@@ -773,11 +783,6 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     background: #f8fbff;
     border-color: #d8e4f0;
     padding: 0.8rem 0.85rem;
-}
-
-.gps-sales-metric--total .gps-sales-metric__value {
-    font-size: clamp(1.12rem, 1.45vw, 1.42rem);
-    font-weight: 400;
 }
 
 .gps-sales-channels {
