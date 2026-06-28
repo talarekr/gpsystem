@@ -2263,25 +2263,19 @@ button.gps-category-picker__arrow:hover {
 }
 
 /* Part edit page scoped layout hook.
-   After syncing public CSS, the production layout still showed that styling Filament's
-   standard .fi-header-actions was not reliably targeting the real edit form container.
-   The EditPart page now renders its own .gps-part-edit-page-header directly above the
-   form, inside the same custom page wrapper as the form. The standard Filament header is
-   hidden only when this EditPart wrapper exists, and the custom header, form, and bottom
-   form actions share one centered 80rem container with no extra inline padding. */
-.fi-main:has(.gps-part-edit-page) {
+   Rendered DOM/computed-style audit (Filament edit record): .fi-page contains a centered
+   .mx-auto page wrapper, then .fi-header followed by the edit <form>. Inside the form,
+   .fi-form and .fi-form-actions are siblings. The real form edge is the page/form container,
+   not the .fi-header itself. Previous CSS added another padded/max-width layer to the
+   standard header and footer actions, so their content edges could not match the form edge.
+   Keep one scoped container rule for header, form, and bottom actions: width: 100%,
+   max-width: var(--gps-admin-content-max-width) = 80rem, margin-left/right: auto,
+   padding-left/right: 0. */
+.fi-main:has(.gps-part-edit-layout-action) {
     --gps-part-edit-form-container-max-width: var(--gps-admin-content-max-width);
 }
 
-.fi-main:has(.gps-part-edit-page) .fi-header {
-    display: none !important;
-}
-
-.gps-part-edit-page {
-    width: 100%;
-}
-
-.fi-main:has(.gps-part-edit-page) :where(.gps-part-edit-page-header, .gps-part-edit-page > form, .gps-part-edit-page > form .fi-form-actions) {
+.fi-main:has(.gps-part-edit-layout-action) :where(.fi-header, form, form .fi-form-actions) {
     box-sizing: border-box;
     width: 100% !important;
     max-width: var(--gps-part-edit-form-container-max-width) !important;
@@ -2291,29 +2285,22 @@ button.gps-category-picker__arrow:hover {
     padding-right: 0 !important;
 }
 
-.gps-part-edit-page-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-    margin-bottom: 1.5rem;
+.fi-main:has(.gps-part-edit-layout-action) .fi-header {
+    align-items: center !important;
 }
 
-.gps-part-edit-page-header__title {
-    color: var(--gps-admin-navy);
-    font-size: calc(1.5rem - 3px);
-    font-weight: 700;
-    line-height: 1.25;
-    margin: 0;
+.fi-main:has(.gps-part-edit-layout-action) .fi-header-heading {
+    font-size: calc(1.5rem - 3px) !important;
+    line-height: 1.25 !important;
 }
 
-.gps-part-edit-page-header__actions,
-.gps-part-edit-page-header__actions.fi-ac {
+.fi-main:has(.gps-part-edit-layout-action) .fi-header-actions,
+.fi-main:has(.gps-part-edit-layout-action) .fi-header .fi-ac {
     margin-left: auto !important;
     justify-content: flex-end !important;
 }
 
-.fi-main:has(.gps-part-edit-page) form .fi-form-actions,
-.fi-main:has(.gps-part-edit-page) form .fi-form-actions .fi-ac {
+.fi-main:has(.gps-part-edit-layout-action) form .fi-form-actions,
+.fi-main:has(.gps-part-edit-layout-action) form .fi-form-actions .fi-ac {
     justify-content: flex-start !important;
 }
