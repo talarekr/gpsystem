@@ -34,13 +34,10 @@
                 $showInitialStatus = $durablyPrepared && $ready;
                 $statusChecked = (bool) ($preparedStatusChecked[$key] ?? false);
                 $missingMessage = $humanizeMissing($missing[0] ?? null, $key);
-                $prepareUrl = $part ? route('tools.check-part-marketplace-preparation-payload', ['token' => 'gps_images_import_2026', 'part_id' => $part->id, 'channel' => $channels[$key]]) : null;
-                if ($key === 'ebay' && $part) {
-                    $prepareUrl = route('tools.prepare-ebay-listing-translations-all', ['token' => 'gps_images_import_2026', 'part_id' => $part->id]);
-                }
+                $prepareUrl = $part ? route('tools.prepare-part-marketplace-card', ['token' => 'gps_images_import_2026', 'part_id' => $part->id, 'channel' => $key]) : null;
             @endphp
 
-            <div class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900" data-marketplace-card="{{ $key }}" x-data="{ preparedStatusChecked: @js($statusChecked || $showInitialStatus) }">
+            <div class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900" data-marketplace-card="{{ $key }}" x-data="{ preparedStatusChecked: @js($statusChecked || $showInitialStatus), preparing: false, prepareReady: @js($ready), prepareMessage: @js($ready ? 'Gotowe' : $missingMessage), async prepareMarketplace() { if (! @js((bool) $prepareUrl) || this.preparing) return; this.preparing = true; try { const response = await fetch(@js($prepareUrl), { headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } }); const data = await response.json(); this.prepareReady = !!data.ready; this.prepareMessage = data.message || (this.prepareReady ? 'Gotowe' : 'Wymaga uzupełnienia'); } catch (error) { this.prepareReady = false; this.prepareMessage = 'Nie udało się przygotować kanału. Spróbuj ponownie.'; } finally { this.preparedStatusChecked = true; this.preparing = false; } } }">
                 <div class="flex items-start justify-between gap-3">
                     <h3 class="text-base font-semibold text-gray-950 dark:text-white">@include('filament.resources.orders.partials.source-wordmark', ['marketplace' => $key])</h3>
                 </div>
@@ -48,16 +45,12 @@
                 <div class="mt-4 space-y-4 text-sm">
                     @include('filament.resources.parts.marketplace-category-field', compact('part', 'key', 'labels', 'category', 'mappingChannels'))
 
-                    <a href="{{ $prepareUrl }}" target="_blank" rel="noopener noreferrer" x-on:click="preparedStatusChecked = true" class="inline-flex w-full items-center justify-center rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-primary-500">Przygotuj</a>
+                    <button type="button" x-on:click.prevent="prepareMarketplace()" x-bind:disabled="preparing" class="inline-flex w-full items-center justify-center rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-primary-500 disabled:cursor-wait disabled:opacity-70">
+                        <span x-text="preparing ? 'Przygotowuję...' : 'Przygotuj'"></span>
+                    </button>
 
                     <template x-if="preparedStatusChecked">
-                        @if ($ready)
-                            <div class="rounded-lg border border-success-200 bg-success-50/60 px-3 py-2 text-sm font-medium text-success-700 dark:border-success-700/60 dark:bg-success-900/10 dark:text-success-300" data-marketplace-prepare-result="ready">Gotowe</div>
-                        @else
-                            <div class="rounded-lg border border-danger-200 bg-danger-50/50 px-3 py-2 text-sm font-medium text-danger-700 dark:border-danger-700/60 dark:bg-danger-900/10 dark:text-danger-300" data-marketplace-prepare-result="blocked">
-                                {{ $missingMessage }}
-                            </div>
-                        @endif
+                        <div x-bind:class="prepareReady ? 'rounded-lg border border-success-400 bg-transparent px-3 py-2 text-sm font-medium text-success-700 dark:border-success-500 dark:text-success-300' : 'rounded-lg border border-danger-400 bg-transparent px-3 py-2 text-sm font-medium text-danger-700 dark:border-danger-500 dark:text-danger-300'" x-bind:data-marketplace-prepare-result="prepareReady ? 'ready' : 'blocked'" x-text="prepareReady ? 'Gotowe' : prepareMessage"></div>
                     </template>
 
                 </div>
