@@ -28,7 +28,7 @@ class PartMarketplaceReadinessService
             $readiness = $this->listingReadinessService->checkPartReadiness($part, $channel);
             $missing = $this->polishFields($this->locallyRequiredMissingFields((array) ($readiness['missing_fields'] ?? [])));
             $warnings = $this->polishWarnings((array) ($readiness['warnings'] ?? []));
-            $mapping = $this->categoryMapping($part, $mappingChannels);
+            $mapping = $this->categoryMapping($part, $mappingChannels, $channel);
             $translationMissing = $requiresEbayTranslations ? $this->missingEbayTranslations($part) : [];
 
             if (! $mapping) {
@@ -114,6 +114,8 @@ class PartMarketplaceReadinessService
             'leaf_name' => $displayName ?: null,
             'mapped' => ! $mapping->is_blocked,
             'id' => $categoryId,
+            'source' => $mapping->source ?: 'inherited_from_local_category',
+            'manual_override' => $mapping->source === 'manual_part_edit_marketplace_preparation',
         ];
     }
 
@@ -150,8 +152,12 @@ class PartMarketplaceReadinessService
     }
 
     /** @param array<int, string> $channels */
-    private function categoryMapping(Part $part, array $channels): ?MarketplaceCategoryMapping
+    private function categoryMapping(Part $part, array $channels, string $readinessChannel): ?MarketplaceCategoryMapping
     {
+        if ($override = $this->manualOverrideMapping($part, $readinessChannel)) {
+            return $override;
+        }
+
         if (! Schema::hasTable('marketplace_category_mappings') || blank($part->category_id ?? null)) {
             return null;
         }
@@ -171,6 +177,35 @@ class PartMarketplaceReadinessService
         }
 
         return null;
+    }
+
+
+    private function manualOverrideMapping(Part $part, string $readinessChannel): ?MarketplaceCategoryMapping
+    {
+        $key = match ($readinessChannel) {
+            'allegro_main' => 'allegro',
+            'ovoko' => 'ovoko',
+            'ebay_de', 'ebay_fr' => 'ebay',
+            default => $readinessChannel,
+        };
+
+        $override = data_get((array) ($part->review_metadata ?: []), 'marketplace_category_overrides.'.$key);
+
+        if (! is_array($override) || blank($override['external_category_id'] ?? null)) {
+            return null;
+        }
+
+        return new MarketplaceCategoryMapping([
+            'local_category_id' => $part->category_id,
+            'channel' => (string) ($override['channel'] ?? $readinessChannel),
+            'external_category_id' => (string) $override['external_category_id'],
+            'external_category_name' => $override['external_category_name'] ?? null,
+            'external_category_path' => $override['external_category_path'] ?? null,
+            'source' => 'manual_part_edit_marketplace_preparation',
+            'confidence' => 1,
+            'is_blocked' => false,
+            'metadata' => ['part_id' => $part->id, 'override_key' => $key],
+        ]);
     }
 
     /** @return array<int, string> */

@@ -475,12 +475,77 @@ class PartMarketplaceReadinessServiceTest extends TestCase
             'external_category_id' => '252',
         ])->assertRedirect();
 
-        $this->assertDatabaseHas('marketplace_category_mappings', [
+        $part->refresh();
+
+        $this->assertSame('252', data_get($part->review_metadata, 'marketplace_category_overrides.ovoko.external_category_id'));
+        $this->assertSame('manual_part_edit_marketplace_preparation', data_get($part->review_metadata, 'marketplace_category_overrides.ovoko.source'));
+        $this->assertDatabaseMissing('marketplace_category_mappings', [
             'local_category_id' => $category->id,
             'channel' => 'ovoko',
             'external_category_id' => '252',
             'source' => 'manual_part_edit_marketplace_preparation',
         ]);
+        $this->assertDatabaseCount('marketplace_listings', 0);
+    }
+
+    public function test_main_category_change_without_manual_overrides_refreshes_marketplace_categories_from_new_mappings(): void
+    {
+        [$oldCategory, $newCategory] = [
+            PartCategory::query()->create(['name' => 'Old']),
+            PartCategory::query()->create(['name' => 'New']),
+        ];
+        $part = Part::query()->create(['name' => 'Część', 'category_id' => $oldCategory->id, 'price' => 100, 'ovoko_price' => 100, 'quantity' => 1]);
+
+        foreach ([['allegro_main', 'ALG-OLD', 'ALG-NEW'], ['ovoko', 'OV-OLD', 'OV-NEW'], ['ebay_de', 'EB-OLD', 'EB-NEW']] as [$channel, $oldId, $newId]) {
+            MarketplaceCategoryMapping::query()->create(['local_category_id' => $oldCategory->id, 'channel' => $channel, 'external_category_id' => $oldId]);
+            MarketplaceCategoryMapping::query()->create(['local_category_id' => $newCategory->id, 'channel' => $channel, 'external_category_id' => $newId]);
+        }
+
+        $old = app(PartMarketplaceReadinessService::class)->check($part->fresh());
+        $part->update(['category_id' => $newCategory->id]);
+        $new = app(PartMarketplaceReadinessService::class)->check($part->fresh());
+
+        $this->assertSame('ALG-OLD', $old['allegro']['presentation']['category']['id']);
+        $this->assertSame('OV-OLD', $old['ovoko']['presentation']['category']['id']);
+        $this->assertSame('EB-OLD', $old['ebay']['presentation']['category']['id']);
+        $this->assertSame('ALG-NEW', $new['allegro']['presentation']['category']['id']);
+        $this->assertSame('OV-NEW', $new['ovoko']['presentation']['category']['id']);
+        $this->assertSame('EB-NEW', $new['ebay']['presentation']['category']['id']);
+        $this->assertFalse($new['allegro']['presentation']['category']['manual_override']);
+        $this->assertDatabaseMissing('marketplace_category_mappings', ['source' => 'manual_part_edit_marketplace_preparation']);
+        $this->assertDatabaseCount('marketplace_listings', 0);
+    }
+
+    public function test_manual_marketplace_category_overrides_survive_main_category_change_per_channel(): void
+    {
+        $oldCategory = PartCategory::query()->create(['name' => 'Old']);
+        $newCategory = PartCategory::query()->create(['name' => 'New']);
+        $part = Part::query()->create([
+            'name' => 'Część',
+            'category_id' => $oldCategory->id,
+            'price' => 100,
+            'ovoko_price' => 100,
+            'quantity' => 1,
+            'review_metadata' => ['marketplace_category_overrides' => [
+                'allegro' => ['channel' => 'allegro_main', 'external_category_id' => 'ALG-MANUAL', 'source' => 'manual_part_edit_marketplace_preparation'],
+                'ovoko' => ['channel' => 'ovoko', 'external_category_id' => 'OV-MANUAL', 'source' => 'manual_part_edit_marketplace_preparation'],
+                'ebay' => ['channel' => 'ebay_de', 'external_category_id' => 'EB-MANUAL', 'source' => 'manual_part_edit_marketplace_preparation'],
+            ]],
+        ]);
+
+        foreach ([['allegro_main', 'ALG-NEW'], ['ovoko', 'OV-NEW'], ['ebay_de', 'EB-NEW']] as [$channel, $newId]) {
+            MarketplaceCategoryMapping::query()->create(['local_category_id' => $newCategory->id, 'channel' => $channel, 'external_category_id' => $newId]);
+        }
+
+        $part->update(['category_id' => $newCategory->id]);
+        $result = app(PartMarketplaceReadinessService::class)->check($part->fresh());
+
+        $this->assertSame('ALG-MANUAL', $result['allegro']['presentation']['category']['id']);
+        $this->assertSame('OV-MANUAL', $result['ovoko']['presentation']['category']['id']);
+        $this->assertSame('EB-MANUAL', $result['ebay']['presentation']['category']['id']);
+        $this->assertTrue($result['allegro']['presentation']['category']['manual_override']);
+        $this->assertTrue($result['ovoko']['presentation']['category']['manual_override']);
+        $this->assertTrue($result['ebay']['presentation']['category']['manual_override']);
         $this->assertDatabaseCount('marketplace_listings', 0);
     }
 

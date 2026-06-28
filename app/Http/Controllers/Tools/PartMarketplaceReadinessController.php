@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Tools;
 
 use App\Http\Controllers\Controller;
 use App\Models\MarketplaceCategory;
-use App\Models\MarketplaceCategoryMapping;
 use App\Models\Part;
 use App\Services\Marketplace\MarketplaceListingReadinessService;
 use Illuminate\Http\JsonResponse;
@@ -237,22 +236,26 @@ class PartMarketplaceReadinessController extends Controller
             ->where('external_category_id', $data['external_category_id'])
             ->firstOrFail();
 
-        MarketplaceCategoryMapping::query()->updateOrCreate(
-            ['local_category_id' => $part->category_id, 'channel' => $data['channel']],
-            [
-                'external_category_id' => $category->external_category_id,
-                'external_category_name' => $category->name,
-                'external_category_path' => $category->full_path,
-                'local_category_name' => $part->category?->name,
-                'local_category_path' => $part->category?->full_slug_path ?: $part->category?->name,
-                'source' => 'manual_part_edit_marketplace_preparation',
-                'confidence' => 1,
-                'is_blocked' => false,
-                'imported_at' => now(),
-            ]
-        );
+        $overrideKey = match ($data['channel']) {
+            'allegro_main' => 'allegro',
+            'ovoko' => 'ovoko',
+            'ebay_de', 'ebay_fr' => 'ebay',
+        };
 
-        return back()->with('status', 'Kategoria marketplace zapisana lokalnie.');
+        $metadata = (array) ($part->review_metadata ?: []);
+        $metadata['marketplace_category_overrides'] ??= [];
+        $metadata['marketplace_category_overrides'][$overrideKey] = [
+            'channel' => $data['channel'],
+            'external_category_id' => (string) $category->external_category_id,
+            'external_category_name' => $category->name,
+            'external_category_path' => $category->full_path,
+            'source' => 'manual_part_edit_marketplace_preparation',
+            'selected_at' => now()->toISOString(),
+        ];
+
+        $part->forceFill(['review_metadata' => $metadata])->save();
+
+        return back()->with('status', 'Ręczna kategoria marketplace zapisana lokalnie dla tej części.');
     }
 
     public function payload(Request $request): JsonResponse
