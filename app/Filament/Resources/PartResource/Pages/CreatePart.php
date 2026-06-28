@@ -17,7 +17,7 @@ class CreatePart extends CreateRecord
     protected function mutateFormDataBeforeCreate(array $data): array
     {
         $this->partPhotoPaths = $data['part_photo_paths'] ?? [];
-        unset($data['part_photo_paths'], $data['marketplace_category_selections']);
+        unset($data['part_photo_paths']);
 
         $data['quantity'] = 1;
         $data['condition_notes'] = PartResource::defaultConditionValue($data['condition_notes'] ?? null);

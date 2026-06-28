@@ -17,8 +17,7 @@
     data-category-chooser-field
     data-marketplace-category-chooser="{{ $key }}"
     data-category-drawer-root="{{ $fieldId }}"
-    x-data="{ categoryDrawerOpen: false, categoryLabel: @js($categoryDisplayValue ?: $categoryValue), categoryTitle: @js(filled($categoryValue) ? (string) $categoryValue : 'Wybierz kategorię z drzewa '.$labels[$key]) }"
-    x-on:marketplace-category-selected.window="if ($event.detail?.channel === @js($channel)) { categoryLabel = $event.detail.label; categoryTitle = $event.detail.title || $event.detail.label; categoryDrawerOpen = false }"
+    x-data="{ categoryDrawerOpen: false }"
 >
     @include('filament.forms.category-field-shell', [
         'fieldId' => $fieldId,
@@ -28,8 +27,7 @@
         'triggerAttributes' => [
             'x-on:click.prevent.stop' => 'categoryDrawerOpen = true',
             'x-bind:aria-expanded' => 'categoryDrawerOpen.toString()',
-            'x-bind:title' => 'categoryTitle',
-            'x-text' => 'categoryLabel || \'Brak wybranej kategorii\'',
+            'title' => filled($categoryValue) ? (string) $categoryValue : 'Wybierz kategorię z drzewa '.$labels[$key],
         ],
     ])
 
@@ -42,12 +40,11 @@
                 'lazyChildrenUrl' => $childrenUrl,
                 'lazyChannel' => $channel,
                 'suggestions' => [],
-                'saveUrl' => null,
+                'saveUrl' => route('tools.part-marketplace-category-mapping.store'),
                 'hiddenFields' => ['part_id' => $part?->id, 'channel' => $channel],
                 'saveField' => 'external_category_id',
                 'pickerId' => $pickerId,
                 'treeAttribute' => $channel,
-                'selectionChannel' => $channel,
             ])
         </div>
     </template>
