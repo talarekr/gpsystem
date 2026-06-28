@@ -230,6 +230,7 @@ class EditPart extends EditRecord
 
         $this->data['category_id'] = $category->getKey();
         $this->data['marketplace_category_mappings_state'] = app(\App\Services\PartCategorySuggestionService::class)->marketplaceMappingsForCategory($category->getKey());
+        $this->unmountFormComponentAction(false, false);
         $this->dispatch('close-modal', id: 'form-component-action');
 
         Notification::make()
