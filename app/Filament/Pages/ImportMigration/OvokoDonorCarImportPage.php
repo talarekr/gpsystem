@@ -20,6 +20,7 @@ class OvokoDonorCarImportPage extends Page implements HasForms
     protected static ?string $navigationLabel = 'Import samochodów Ovoko';
     protected static ?string $title = 'Import migracyjny — samochody Ovoko';
     protected static ?string $navigationIcon = null;
+    protected static bool $shouldRegisterNavigation = false;
     protected static ?int $navigationSort = 120;
     protected static string $view = 'filament.pages.import-migration.ovoko-donor-car-import';
 
