@@ -189,6 +189,55 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $this->assertSame(1, substr_count($html, 'id="marketplace-category-drawer-ebay-de-'.$part->id.'"'));
     }
 
+    public function test_marketplace_picker_uses_hierarchical_children_in_shared_drawer_without_flattening_roots(): void
+    {
+        $category = PartCategory::query()->create(['name' => 'Alternatory']);
+        $part = Part::query()->create(['name' => 'Alternator BMW', 'category_id' => $category->id, 'quantity' => 1]);
+
+        \App\Models\MarketplaceCategory::query()->create(['channel' => 'allegro_main', 'external_category_id' => 'root-moto', 'name' => 'Motoryzacja', 'full_path' => 'Motoryzacja', 'level' => 0, 'active' => true]);
+        \App\Models\MarketplaceCategory::query()->create(['channel' => 'allegro_main', 'external_category_id' => 'child-parts', 'parent_external_category_id' => 'root-moto', 'name' => 'Części samochodowe', 'full_path' => 'Motoryzacja / Części samochodowe', 'level' => 1, 'active' => true]);
+        \App\Models\MarketplaceCategory::query()->create(['channel' => 'allegro_main', 'external_category_id' => 'leaf-alternators', 'parent_external_category_id' => 'child-parts', 'name' => 'Alternatory', 'full_path' => 'Motoryzacja / Części samochodowe / Alternatory', 'level' => 2, 'active' => true]);
+        \App\Models\MarketplaceCategory::query()->create(['channel' => 'ovoko', 'external_category_id' => 'ov-root', 'name' => 'Części', 'full_path' => 'Części', 'level' => 0, 'active' => true]);
+        \App\Models\MarketplaceCategory::query()->create(['channel' => 'ebay_de', 'external_category_id' => 'eb-root', 'name' => 'Auto & Motorrad', 'full_path' => 'Auto & Motorrad', 'level' => 0, 'active' => true]);
+
+        $html = view('filament.resources.parts.marketplace-readiness-cards', ['part' => $part])->render();
+
+        $this->assertStringContainsString('data-category-drawer', $html);
+        $this->assertStringContainsString('gps-category-picker', $html);
+        $this->assertStringContainsString('data-marketplace-category-tree="allegro_main"', $html);
+        $this->assertStringContainsString('parent_id&quot;:&quot;root-moto&quot;', $html);
+        $this->assertStringContainsString('parent_id&quot;:&quot;child-parts&quot;', $html);
+        $this->assertStringContainsString('has_children&quot;:true', $html);
+        $this->assertStringContainsString('currentChildren()', $html);
+        $this->assertStringContainsString('x-on:click="activate(category)"', $html);
+        $this->assertStringNotContainsString('data-flat-marketplace-category-list', $html);
+        $this->assertStringNotContainsString('fi-modal-window-ctn', $html);
+    }
+
+    public function test_marketplace_picker_keeps_separate_tree_sources_for_supported_channels(): void
+    {
+        $category = PartCategory::query()->create(['name' => 'Alternatory']);
+        $part = Part::query()->create(['name' => 'Alternator BMW', 'category_id' => $category->id, 'quantity' => 1]);
+
+        foreach ([
+            ['allegro_main', 'alg-root', 'Allegro root'],
+            ['ovoko', 'ov-root', 'Ovoko root'],
+            ['ebay_de', 'eb-root', 'eBay root'],
+        ] as [$channel, $id, $name]) {
+            \App\Models\MarketplaceCategory::query()->create(['channel' => $channel, 'external_category_id' => $id, 'name' => $name, 'full_path' => $name, 'level' => 0, 'active' => true]);
+        }
+
+        $html = view('filament.resources.parts.marketplace-readiness-cards', ['part' => $part])->render();
+
+        $this->assertStringContainsString('data-marketplace-category-tree="allegro_main"', $html);
+        $this->assertStringContainsString('data-marketplace-category-tree="ovoko"', $html);
+        $this->assertStringContainsString('data-marketplace-category-tree="ebay_de"', $html);
+        $this->assertStringContainsString('Allegro root', $html);
+        $this->assertStringContainsString('Ovoko root', $html);
+        $this->assertStringContainsString('eBay root', $html);
+        $this->assertStringNotContainsString('data-marketplace-category-tree="allegro"', $html);
+    }
+
     public function test_marketplace_category_field_shows_neutral_fallback_without_category_name(): void
     {
         $category = PartCategory::query()->create(['name' => 'Alternatory']);

@@ -3,14 +3,14 @@
     $fieldId = 'marketplace-category-drawer-'.str_replace(['_', '.'], '-', $channel).'-'.$part?->id;
     $pickerId = $fieldId.'-picker';
     $nodes = $tree->map(function ($node) use ($tree) {
-        $parent = $node->parent_external_id ?? null;
+        $parent = $node->parent_external_category_id ?? null;
         return [
             'id' => (string) $node->external_category_id,
             'parent_id' => filled($parent) ? (string) $parent : null,
             'name' => $node->name ?: ($node->full_path ?: $node->external_category_id),
             'path' => $node->full_path ?: ($node->name ?: $node->external_category_id),
             'full_slug_path' => $node->full_path,
-            'has_children' => $tree->contains(fn ($candidate) => (string) ($candidate->parent_external_id ?? '') === (string) $node->external_category_id),
+            'has_children' => $tree->contains(fn ($candidate) => (string) ($candidate->parent_external_category_id ?? '') === (string) $node->external_category_id),
         ];
     })->values()->all();
 @endphp
