@@ -316,44 +316,18 @@
         canSave() {
             return Boolean(this.selectedId && this.selectedCategory() && ! this.selectedCategory().has_children);
         },
-        selectedPayload(category) {
-            return {
-                id: category.id,
-                label: category.path || category.name,
-                name: category.name,
-                path: category.path || category.name,
-                channel: this.lazyChannel,
-                field: @js($saveField),
-            };
-        },
-        closeLocalDrawerAfterSelection() {
-            if (typeof categoryDrawerOpen !== 'undefined') {
-                categoryDrawerOpen = false;
-                this.$nextTick(() => {
-                    this.selectedId = null;
-                    this.selectedName = '';
-                });
-
-                return true;
-            }
-
-            return false;
-        },
         saveSelectedCategory() {
             if (! this.canSave() || this.isSaving) {
                 return;
             }
 
-            const category = this.selectedCategory();
-            const payload = this.selectedPayload(category);
+            this.isSaving = true;
 
-            this.$dispatch('category-selected', payload);
-
-            if (this.closeLocalDrawerAfterSelection()) {
+            if (this.$refs.marketplaceForm) {
+                this.$refs.marketplaceCategoryId.value = this.selectedId;
+                this.$refs.marketplaceForm.submit();
                 return;
             }
-
-            this.isSaving = true;
 
             this.$wire.setPartCategoryFromPicker(this.selectedId)
                 .then((saved) => {
@@ -377,10 +351,6 @@
             this.$wire.selectSuggestedPartCategory(suggestion.category_id)
                 .then((saved) => {
                     if (saved === true) {
-                        const category = this.categories.find((item) => String(item.id) === String(suggestion.category_id));
-                        if (category) {
-                            this.$dispatch('category-selected', this.selectedPayload(category));
-                        }
                         this.selectedId = null;
                         this.selectedName = '';
                         this.closeCategoryPicker();

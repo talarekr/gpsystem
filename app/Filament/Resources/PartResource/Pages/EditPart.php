@@ -12,6 +12,7 @@ use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class EditPart extends EditRecord
 {
@@ -228,16 +229,34 @@ class EditPart extends EditRecord
             return false;
         }
 
-        $this->data['category_id'] = $category->getKey();
-        $this->data['marketplace_category_mappings_state'] = app(\App\Services\PartCategorySuggestionService::class)->marketplaceMappingsForCategory($category->getKey());
+        try {
+            $this->record->forceFill(['category_id' => $category->getKey()])->save();
+            $this->record->refresh();
+            $this->data['category_id'] = $category->getKey();
+            $this->data['marketplace_category_mappings_state'] = app(\App\Services\PartCategorySuggestionService::class)->marketplaceMappingsForCategory($category->getKey());
 
-        Notification::make()
-            ->title('Kategoria części została ustawiona lokalnie')
-            ->body('Nowa kategoria zostanie zapisana po użyciu głównego przycisku „Zapisz”.')
-            ->success()
-            ->send();
+            Notification::make()
+                ->title('Kategoria części została zapisana')
+                ->body('Nowa kategoria: '.$category->name)
+                ->success()
+                ->send();
 
-        return true;
+            return true;
+        } catch (Throwable $exception) {
+            Log::error('Admin part category picker failed to save part category.', [
+                'part_id' => $this->record?->getKey(),
+                'category_id' => $category->getKey(),
+                'exception' => $exception,
+            ]);
+
+            Notification::make()
+                ->title('Nie udało się zapisać kategorii')
+                ->body('Zmiana nie została zapisana. Szczegóły błędu zapisano w logach aplikacji.')
+                ->danger()
+                ->send();
+
+            return false;
+        }
     }
 
     private function marketplacePublishMessage(string $message): string
