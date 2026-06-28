@@ -2262,16 +2262,15 @@ button.gps-category-picker__arrow:hover {
     white-space: nowrap;
 }
 
-/* Part edit page: use the rendered form width as the single layout container for title and actions. */
+/* Part edit page: align Filament header/actions to the rendered form container without changing the form width.
+   Rendered DOM audit (Filament edit record): .fi-header is a sibling before the edit <form>,
+   .fi-form and .fi-form-actions are inside that form, and Filament centers the page content with
+   .fi-page > .mx-auto / max-width utilities. The form itself must not get an extra max-width/padding layer. */
 .fi-main:has(.gps-part-edit-layout-action) {
     --gps-part-edit-form-container-max-width: var(--gps-admin-content-max-width);
     --gps-part-edit-form-container-padding: var(--gps-admin-content-inline-padding);
 }
 
-.fi-main:has(.gps-part-edit-layout-action) .fi-page,
-.fi-main:has(.gps-part-edit-layout-action) .fi-page > .mx-auto,
-.fi-main:has(.gps-part-edit-layout-action) .fi-page > form,
-.fi-main:has(.gps-part-edit-layout-action) .fi-form,
 .fi-main:has(.gps-part-edit-layout-action) .fi-header,
 .fi-main:has(.gps-part-edit-layout-action) form .fi-form-actions {
     box-sizing: border-box;
@@ -2279,13 +2278,6 @@ button.gps-category-picker__arrow:hover {
     max-width: var(--gps-part-edit-form-container-max-width) !important;
     margin-left: auto !important;
     margin-right: auto !important;
-}
-
-.fi-main:has(.gps-part-edit-layout-action) .fi-header,
-.fi-main:has(.gps-part-edit-layout-action) .fi-page > .mx-auto,
-.fi-main:has(.gps-part-edit-layout-action) .fi-page > form,
-.fi-main:has(.gps-part-edit-layout-action) .fi-form,
-.fi-main:has(.gps-part-edit-layout-action) form .fi-form-actions {
     padding-left: var(--gps-part-edit-form-container-padding) !important;
     padding-right: var(--gps-part-edit-form-container-padding) !important;
 }

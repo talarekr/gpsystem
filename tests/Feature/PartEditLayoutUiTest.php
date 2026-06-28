@@ -31,6 +31,7 @@ class PartEditLayoutUiTest extends TestCase
         $this->assertStringContainsString('gps-part-edit-layout-action gps-part-edit-layout-action--save', $editPage);
         $this->assertStringContainsString('gps-part-edit-layout-action gps-part-edit-layout-action--delete', $editPage);
         $this->assertStringContainsString('gps-part-edit-footer-action gps-part-edit-layout-action--cancel', $editPage);
+        $this->assertStringContainsString('gps-part-edit-layout-action', $editPage);
     }
 
     public function test_part_edit_header_form_and_footer_share_one_container_rule(): void
@@ -39,10 +40,10 @@ class PartEditLayoutUiTest extends TestCase
 
         $this->assertStringContainsString('--gps-part-edit-form-container-max-width: var(--gps-admin-content-max-width);', $css);
         $this->assertStringContainsString('--gps-part-edit-form-container-padding: var(--gps-admin-content-inline-padding);', $css);
-        $this->assertStringContainsString('.fi-main:has(.gps-part-edit-layout-action) .fi-page > .mx-auto,', $css);
+        $this->assertStringContainsString('Rendered DOM audit (Filament edit record): .fi-header is a sibling before the edit <form>', $css);
         $this->assertStringContainsString('.fi-main:has(.gps-part-edit-layout-action) .fi-header,', $css);
-        $this->assertStringContainsString('.fi-main:has(.gps-part-edit-layout-action) .fi-form,', $css);
         $this->assertStringContainsString('.fi-main:has(.gps-part-edit-layout-action) form .fi-form-actions {', $css);
+        $this->assertStringNotContainsString('.fi-main:has(.gps-part-edit-layout-action) .fi-form,', $css);
         $this->assertStringContainsString('max-width: var(--gps-part-edit-form-container-max-width) !important;', $css);
         $this->assertStringContainsString('padding-left: var(--gps-part-edit-form-container-padding) !important;', $css);
         $this->assertStringContainsString('padding-right: var(--gps-part-edit-form-container-padding) !important;', $css);
