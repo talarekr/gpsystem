@@ -2267,11 +2267,17 @@ button.gps-category-picker__arrow:hover {
    .gps-part-form / .fi-section (about 54rem wide, right edge around x=1210), while
    .fi-header / .fi-form are wider page wrappers (right edge around x=1291). Keep the
    reverted form/card layout intact and only pull the top header action group back to the
-   same centered 54rem content rail used by .gps-part-form. The previous margin-based
-   offset did not move the live header actions because Filament keeps .fi-ac pinned to
-   the end of the header layout; use a relative right offset on .fi-ac itself instead. */
+   same centered 54rem content rail used by .gps-part-form. Do not calculate the offset
+   from .fi-ac percentages: on .fi-ac, 100% resolves against the action group itself,
+   so the old right: calc(100% - min(100%, 54rem)) expression collapsed to 0px.
+   Instead, make the header a query container and use cqw units so the action group
+   offset is based on the real header/page-wrapper width. */
 .fi-main:has(.gps-part-edit-layout-action) {
     --gps-part-edit-card-max-width: 54rem;
+}
+
+.fi-main:has(.gps-part-edit-layout-action) .fi-header {
+    container-type: inline-size;
 }
 
 .fi-main:has(.gps-part-edit-layout-action) .fi-header-heading {
@@ -2294,7 +2300,8 @@ button.gps-category-picker__arrow:hover {
     margin-left: auto !important;
     margin-right: 0 !important;
     position: relative !important;
-    right: calc((100% - min(100%, var(--gps-part-edit-card-max-width))) / 2) !important;
+    right: auto !important;
+    transform: translateX(calc((min(100cqw, var(--gps-part-edit-card-max-width)) - 100cqw) / 2)) !important;
     padding-left: 0 !important;
     padding-right: 0 !important;
     overflow: visible !important;
