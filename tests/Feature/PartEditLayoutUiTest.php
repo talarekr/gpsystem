@@ -34,20 +34,20 @@ class PartEditLayoutUiTest extends TestCase
         $this->assertStringContainsString('gps-part-edit-layout-action', $editPage);
     }
 
-    public function test_part_edit_header_form_and_footer_share_one_container_rule(): void
+    public function test_part_edit_header_actions_align_to_card_rail_without_form_container_changes(): void
     {
         $css = file_get_contents(public_path('css/filament-admin.css'));
 
-        $this->assertStringContainsString('--gps-part-edit-form-container-max-width: var(--gps-admin-content-max-width);', $css);
-        $this->assertStringContainsString('Rendered DOM/computed-style audit (Filament edit record): .fi-page contains a centered', $css);
-        $this->assertStringContainsString('The real form edge is the page/form container', $css);
-        $this->assertStringContainsString('.fi-main:has(.gps-part-edit-layout-action) :where(.fi-header, form, form .fi-form-actions) {', $css);
-        $this->assertStringContainsString('max-width: var(--gps-admin-content-max-width) = 80rem', $css);
-        $this->assertStringContainsString('padding-left/right: 0', $css);
-        $this->assertStringNotContainsString('--gps-part-edit-form-container-padding', $css);
-        $this->assertStringContainsString('max-width: var(--gps-part-edit-form-container-max-width) !important;', $css);
-        $this->assertStringContainsString('padding-left: 0 !important;', $css);
-        $this->assertStringContainsString('padding-right: 0 !important;', $css);
+        $this->assertStringContainsString('--gps-part-edit-card-max-width: 54rem;', $css);
+        $this->assertStringContainsString('.gps-part-form / .fi-section (about 54rem wide, right edge around x=1210)', $css);
+        $this->assertStringContainsString('.fi-header / .fi-form are wider page wrappers (right edge around x=1291)', $css);
+        $this->assertStringContainsString('relying on a fixed pixel offset', $css);
+        $this->assertStringContainsString('.fi-main:has(.gps-part-edit-layout-action) .fi-header .fi-ac {', $css);
+        $this->assertStringContainsString('max-width: min(100%, var(--gps-part-edit-card-max-width)) !important;', $css);
+        $this->assertStringContainsString('margin-right: calc((100% - min(100%, var(--gps-part-edit-card-max-width))) / 2) !important;', $css);
+        $this->assertStringContainsString('do not resize or reposition .fi-header, .fi-form, the edit', $css);
+        $this->assertStringNotContainsString('.fi-main:has(.gps-part-edit-layout-action) :where(.fi-header, form, form .fi-form-actions) {', $css);
+        $this->assertStringNotContainsString('--gps-part-edit-form-container-max-width', $css);
         $this->assertStringContainsString('justify-content: flex-end !important;', $css);
         $this->assertStringContainsString('justify-content: flex-start !important;', $css);
     }

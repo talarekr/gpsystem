@@ -2263,30 +2263,15 @@ button.gps-category-picker__arrow:hover {
 }
 
 /* Part edit page scoped layout hook.
-   Rendered DOM/computed-style audit (Filament edit record): .fi-page contains a centered
-   .mx-auto page wrapper, then .fi-header followed by the edit <form>. Inside the form,
-   .fi-form and .fi-form-actions are siblings. The real form edge is the page/form container,
-   not the .fi-header itself. Previous CSS added another padded/max-width layer to the
-   standard header and footer actions, so their content edges could not match the form edge.
-   Keep one scoped container rule for header, form, and bottom actions: width: 100%,
-   max-width: var(--gps-admin-content-max-width) = 80rem, margin-left/right: auto,
-   padding-left/right: 0. */
+   Live measurement after reverting the form layout showed that the visual EditPart card is
+   .gps-part-form / .fi-section (about 54rem wide, right edge around x=1210), while
+   .fi-header / .fi-form are wider page wrappers (right edge around x=1291). Keep the
+   reverted form/card layout intact and only pull the top header action group back to the
+   same centered 54rem content rail used by .gps-part-form. The right margin is derived
+   from the header wrapper width minus that shared rail width, so it follows responsive
+   container sizing instead of relying on a fixed pixel offset. */
 .fi-main:has(.gps-part-edit-layout-action) {
-    --gps-part-edit-form-container-max-width: var(--gps-admin-content-max-width);
-}
-
-.fi-main:has(.gps-part-edit-layout-action) :where(.fi-header, form, form .fi-form-actions) {
-    box-sizing: border-box;
-    width: 100% !important;
-    max-width: var(--gps-part-edit-form-container-max-width) !important;
-    margin-left: auto !important;
-    margin-right: auto !important;
-    padding-left: 0 !important;
-    padding-right: 0 !important;
-}
-
-.fi-main:has(.gps-part-edit-layout-action) .fi-header {
-    align-items: center !important;
+    --gps-part-edit-card-max-width: 54rem;
 }
 
 .fi-main:has(.gps-part-edit-layout-action) .fi-header-heading {
@@ -2295,30 +2280,28 @@ button.gps-category-picker__arrow:hover {
 }
 
 /* Static EditPart-only hook: scoped through .gps-part-edit-layout-action, which is
-   emitted only by EditPart header/footer actions. Keep the standard Filament header
-   but prevent its actions wrappers from painting or reserving a trailing white strip. */
-.fi-main:has(.gps-part-edit-layout-action) .fi-header-actions,
+   emitted only by EditPart header/footer actions. Limit the adjustment to the top
+   Filament header actions; do not resize or reposition .fi-header, .fi-form, the edit
+   form, .gps-part-form, .fi-section, .fi-section-content, or field containers. */
 .fi-main:has(.gps-part-edit-layout-action) .fi-header .fi-ac {
     display: flex !important;
     flex: 0 1 auto !important;
     flex-wrap: wrap !important;
     justify-content: flex-end !important;
-    max-width: 100% !important;
+    max-width: min(100%, var(--gps-part-edit-card-max-width)) !important;
     min-width: 0 !important;
     width: auto !important;
     margin-left: auto !important;
-    margin-right: 0 !important;
+    margin-right: calc((100% - min(100%, var(--gps-part-edit-card-max-width))) / 2) !important;
     padding-left: 0 !important;
     padding-right: 0 !important;
     overflow: visible !important;
     background: transparent !important;
 }
 
-/* DevTools audit for EditPart showed .fi-header/.fi-form share the same right edge,
-   but the rendered action buttons were shifted outside .fi-header .fi-ac. Filament may
-   insert an inner action wrapper between .fi-ac and the buttons; normalize only that
-   immediate header-actions child so the child group remains right-aligned within .fi-ac
-   instead of carrying absolute/translated or over-wide layout state. */
+/* Filament may insert an inner action wrapper between .fi-ac and the buttons; normalize
+   only that immediate header-actions child so the buttons stay inside the adjusted
+   .fi-ac rail without changing action logic or order. */
 .fi-main:has(.gps-part-edit-layout-action) .fi-header .fi-ac > * {
     position: static !important;
     inset: auto !important;
