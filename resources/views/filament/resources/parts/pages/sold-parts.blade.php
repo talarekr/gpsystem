@@ -4,6 +4,7 @@
 
 <x-filament-panels::page>
     <style>
+        .gps-parts-toolbar{display:grid;grid-template-columns:minmax(280px,1fr);gap:12px;align-items:end;margin-bottom:16px}.gps-parts-field{display:flex;flex-direction:column;gap:6px;min-width:0}.gps-parts-field label{font-size:12px;font-weight:700;color:#64748b}.gps-parts-field input,.gps-parts-field select{width:100%;border:1px solid #d1d5db;border-radius:10px;background:#fff;padding:9px 12px;font-size:14px;color:#0f172a}
         .gps-sold-parts-list { display: flex; flex-direction: column; gap: 12px; width: 100%; }
         .gps-sold-parts-grid { display: grid; grid-template-columns: minmax(360px, 2fr) minmax(130px, .65fr) minmax(150px, .75fr) minmax(140px, .7fr) minmax(120px, .6fr) minmax(80px, .4fr) minmax(150px, .75fr); gap: 18px; align-items: center; width: 100%; }
         .gps-sold-parts-header { padding: 0 18px 4px; color: #64748b; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
@@ -23,6 +24,13 @@
         @media (max-width: 1200px) { .gps-sold-parts-grid { grid-template-columns: 1fr 1fr; } .gps-sold-parts-header { display: none; } }
         @media (max-width: 700px) { .gps-sold-parts-grid { grid-template-columns: 1fr; } }
     </style>
+
+    <div class="gps-parts-toolbar">
+        <div class="gps-parts-field">
+            <label for="sold-parts-search">Szukaj</label>
+            <input id="sold-parts-search" type="search" wire:model.live.debounce.500ms="search" placeholder="ID, nazwa, SKU, numer, OEM, zamówienie, źródło...">
+        </div>
+    </div>
 
     <div class="gps-sold-parts-list">
         <div class="gps-sold-parts-header gps-sold-parts-grid">

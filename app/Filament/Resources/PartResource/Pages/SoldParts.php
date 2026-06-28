@@ -12,6 +12,7 @@ use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Pagination\LengthAwarePaginator as LaravelLengthAwarePaginator;
 use Illuminate\Support\Collection;
+use Livewire\Attributes\Url;
 use Livewire\WithPagination;
 
 class SoldParts extends Page
@@ -23,6 +24,9 @@ class SoldParts extends Page
     protected static ?string $title = 'Sprzedane części';
 
     protected static string $view = 'filament.resources.parts.pages.sold-parts';
+
+    #[Url(as: 'search')]
+    public string $search = '';
 
     public int $perPage = 20;
 
@@ -41,10 +45,18 @@ class SoldParts extends Page
         return MaxWidth::Full;
     }
 
+    public function updating(string $property): void
+    {
+        if ($property !== 'page') {
+            $this->resetPage();
+        }
+    }
+
     public function getSoldPartsProperty(): LengthAwarePaginator
     {
         $rows = $this->orderItemRows()
             ->merge($this->localSaleRows())
+            ->when(filled($this->search), fn (Collection $rows): Collection => $this->filterRows($rows, trim($this->search)))
             ->sortByDesc(fn (array $row): int => $row['sold_at_sort'])
             ->values();
 
@@ -91,6 +103,15 @@ class SoldParts extends Page
                     'part_id' => $part?->id,
                     'part_url' => $part ? PartResource::getUrl('view', ['record' => $part]) : null,
                     'order_url' => $order ? \App\Filament\Resources\OrderResource::getUrl('view', ['record' => $order]) : null,
+                    'search_values' => $this->partSearchValues($part, [
+                        $item->product_name,
+                        $item->sku,
+                        $item->part_number,
+                        $item->marketplace,
+                        $item->marketplace_order_id,
+                        $order?->marketplace,
+                        $order ? \App\Filament\Resources\OrderResource::displayOrderNumber($order) : null,
+                    ]),
                 ];
             });
     }
@@ -123,7 +144,48 @@ class SoldParts extends Page
                     'storage_location' => $sale->part?->storageLocation?->name ?: 'Brak lokalizacji',
                     'part_url' => $sale->part ? PartResource::getUrl('view', ['record' => $sale->part]) : null,
                     'order_url' => null,
+                    'search_values' => $this->partSearchValues($sale->part, [
+                        $snapshot['id'] ?? null,
+                        $snapshot['name'] ?? null,
+                        $snapshot['sku'] ?? null,
+                        $snapshot['part_number'] ?? null,
+                        $snapshot['oem_number'] ?? null,
+                        $snapshot['manufacturer_code'] ?? null,
+                        'sprzedaż lokalna',
+                        'local sale',
+                        'lokalna',
+                        'Lokalna #'.$sale->id,
+                    ]),
                 ];
             });
+    }
+
+    private function filterRows(Collection $rows, string $search): Collection
+    {
+        $tokens = collect(preg_split('/\s+/', mb_strtolower($search)) ?: [])
+            ->filter()
+            ->values();
+
+        if ($tokens->isEmpty()) {
+            return $rows;
+        }
+
+        return $rows->filter(function (array $row) use ($tokens): bool {
+            $haystack = mb_strtolower(implode(' ', array_filter($row['search_values'] ?? [])));
+
+            return $tokens->every(fn (string $token): bool => str_contains($haystack, $token));
+        });
+    }
+
+    private function partSearchValues($part, array $fallbackValues = []): array
+    {
+        return array_values(array_filter(array_merge([
+            $part?->id,
+            $part?->name,
+            $part?->sku,
+            $part?->part_number,
+            $part?->oem_number,
+            $part?->manufacturer_code,
+        ], $fallbackValues), fn ($value): bool => filled($value)));
     }
 }
