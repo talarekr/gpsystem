@@ -2299,14 +2299,40 @@ button.gps-category-picker__arrow:hover {
    but prevent its actions wrappers from painting or reserving a trailing white strip. */
 .fi-main:has(.gps-part-edit-layout-action) .fi-header-actions,
 .fi-main:has(.gps-part-edit-layout-action) .fi-header .fi-ac {
+    display: flex !important;
     flex: 0 1 auto !important;
+    flex-wrap: wrap !important;
+    justify-content: flex-end !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
     width: auto !important;
     margin-left: auto !important;
     margin-right: 0 !important;
     padding-left: 0 !important;
     padding-right: 0 !important;
+    overflow: visible !important;
     background: transparent !important;
+}
+
+/* DevTools audit for EditPart showed .fi-header/.fi-form share the same right edge,
+   but the rendered action buttons were shifted outside .fi-header .fi-ac. Filament may
+   insert an inner action wrapper between .fi-ac and the buttons; normalize only that
+   immediate header-actions child so the child group remains right-aligned within .fi-ac
+   instead of carrying absolute/translated or over-wide layout state. */
+.fi-main:has(.gps-part-edit-layout-action) .fi-header .fi-ac > * {
+    position: static !important;
+    inset: auto !important;
+    display: flex !important;
+    flex: 0 1 auto !important;
+    flex-wrap: wrap !important;
     justify-content: flex-end !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    width: auto !important;
+    margin-left: auto !important;
+    margin-right: 0 !important;
+    transform: none !important;
+    translate: none !important;
 }
 
 .fi-main:has(.gps-part-edit-layout-action) form .fi-form-actions,
