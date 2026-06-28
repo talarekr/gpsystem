@@ -43,7 +43,11 @@
             @endforeach
         </nav>
 
-        @php($shopEvents = $this->shopEvents())
+        @php
+            $shopEvents = $this->shopEvents();
+            $showMoreShopEvents = in_array($activeShopEventTab, ['all', 'requires_action'], true)
+                && (($shopEventTabCounts[$activeShopEventTab] ?? 0) > 6);
+        @endphp
 
         @if ($shopEvents->isEmpty())
             <div class="gps-shop-events__empty">Brak nowych zdarzeń dla obsługi sklepu.</div>
@@ -52,13 +56,14 @@
                 @foreach ($shopEvents as $event)
                     @php($itemClass = 'gps-shop-events__item gps-shop-events__item--' . ($event['severity'] ?: 'info'))
                     <article class="{{ $itemClass }}">
-                        <div class="gps-shop-events__time">{{ $event['time'] }}</div>
-                        <div class="gps-shop-events__body">
-                            <span class="gps-shop-events__badge gps-shop-events__badge--source">{{ $event['channel'] }}</span>
-                            <div class="gps-shop-events__summary">
-                                <span>Nr ref.: <strong>{{ $event['reference'] }}</strong></span>
-                                <span>Kwota: <strong>{{ $event['amount'] }}</strong></span>
-                            </div>
+                        <div class="gps-shop-events__line">
+                            <span class="gps-shop-events__time">{{ $event['time'] }}</span>
+                            <span class="gps-shop-events__separator" aria-hidden="true">—</span>
+                            <span class="gps-shop-events__source">@include('filament.resources.orders.partials.source-wordmark', ['marketplace' => $event['channel']])</span>
+                            <span class="gps-shop-events__separator" aria-hidden="true">—</span>
+                            <span>Numer zamówienia: {{ $event['reference'] }}</span>
+                            <span class="gps-shop-events__separator" aria-hidden="true">—</span>
+                            <span>{{ $event['amount'] }}</span>
                         </div>
                         @if ($event['url'])
                             <a class="gps-shop-events__open" href="{{ $event['url'] }}">Otwórz</a>
@@ -66,6 +71,12 @@
                     </article>
                 @endforeach
             </div>
+
+            @if ($showMoreShopEvents)
+                <div class="gps-shop-events__more-wrap">
+                    <a class="gps-shop-events__more" href="{{ $this->newOrdersUrl() }}">Pokaż więcej</a>
+                </div>
+            @endif
         @endif
     </section>
     <section class="gps-quick-actions" aria-label="Szybkie akcje obsługi">

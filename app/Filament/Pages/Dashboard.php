@@ -39,6 +39,11 @@ class Dashboard extends BaseDashboard
         return OrderResource::getUrl('index');
     }
 
+    public function newOrdersUrl(): string
+    {
+        return OrderResource::getUrl('index', ['status' => 'new']);
+    }
+
     /**
      * @return array<string, string>
      */
@@ -137,6 +142,7 @@ class Dashboard extends BaseDashboard
         return $query
             ->with('items')
             ->orderByRaw('COALESCE(ordered_at, created_at) DESC')
+            ->limit(6)
             ->get()
             ->map(fn (Order $order): array => $this->orderToDashboardItem($order))
             ->values();
