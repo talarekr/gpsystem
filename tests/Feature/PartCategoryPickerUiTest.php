@@ -21,7 +21,8 @@ class PartCategoryPickerUiTest extends TestCase
 
         Livewire::test(EditPart::class, ['record' => $part->getRouteKey()])
             ->call('setPartCategoryFromPicker', $newCategory->id)
-            ->assertSet('data.category_id', $newCategory->id);
+            ->assertSet('data.category_id', $newCategory->id)
+            ->assertDispatched('close-modal', id: 'form-component-action');
 
         $this->assertDatabaseHas('parts', [
             'id' => $part->id,
@@ -43,9 +44,12 @@ class PartCategoryPickerUiTest extends TestCase
 
         $this->assertStringContainsString('type="button"', $html);
         $this->assertStringContainsString('x-on:click="saveSelectedCategory()"', $html);
-        $this->assertStringContainsString("this.\$dispatch('close-category-drawer', { drawerId: this.drawerId });", $html);
+        $this->assertStringContainsString("const filamentFormComponentActionModalId = 'form-component-action';", $html);
+        $this->assertStringContainsString("this.\$dispatch('close-modal', { id: filamentFormComponentActionModalId });", $html);
+        $this->assertStringContainsString("window.dispatchEvent(new CustomEvent('close-modal', { detail: { id: filamentFormComponentActionModalId } }));", $html);
         $this->assertStringContainsString('categoryDrawerOpen = false', $html);
         $this->assertMatchesRegularExpression('/closeCategoryPicker\(\);\s*this\.selectedId = null;/s', $html);
+        $this->assertStringNotContainsString('.fi-modal-header button', $html);
         $this->assertStringNotContainsString('$refs.marketplaceForm.submit();\n                this.closeCategoryPicker();', $html);
     }
 

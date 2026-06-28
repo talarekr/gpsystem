@@ -335,7 +335,6 @@
                 .then((saved) => {
                     if (saved === true) {
                         this.closeCategoryPicker();
-                        this.closeActiveFilamentCategoryPickerModal();
                         this.selectedId = null;
                         this.selectedName = '';
                     }
@@ -364,7 +363,11 @@
                 });
         },
         closeCategoryPicker() {
+            const filamentFormComponentActionModalId = 'form-component-action';
+
             this.$dispatch('close-category-drawer', { drawerId: this.drawerId });
+            this.$dispatch('close-modal', { id: filamentFormComponentActionModalId });
+            window.dispatchEvent(new CustomEvent('close-modal', { detail: { id: filamentFormComponentActionModalId } }));
 
             if (typeof categoryDrawerOpen !== 'undefined') {
                 categoryDrawerOpen = false;
@@ -372,17 +375,7 @@
 
             if (typeof this.$wire.unmountFormComponentAction === 'function') {
                 this.$wire.unmountFormComponentAction(false, true);
-
-                return;
             }
-
-            this.$dispatch('close-modal', { id: 'form-component-action' });
-        },
-        closeActiveFilamentCategoryPickerModal() {
-            const modal = this.$el.closest('.gps-category-picker-modal');
-            const closeButton = modal?.querySelector('.fi-modal-header button');
-
-            closeButton?.click();
         },
         back() {
             this.stack.pop();

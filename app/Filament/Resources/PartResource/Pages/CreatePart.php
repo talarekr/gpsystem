@@ -54,6 +54,7 @@ class CreatePart extends CreateRecord
 
         $this->data['category_id'] = $category->getKey();
         $this->data['marketplace_category_mappings_state'] = app(PartCategorySuggestionService::class)->marketplaceMappingsForCategory($category->getKey());
+        $this->dispatch('close-modal', id: 'form-component-action');
 
         return true;
     }
