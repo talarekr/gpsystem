@@ -101,7 +101,7 @@ class OrderResource extends Resource
                 ->sort(static::getNavigationSort())
                 ->url(static::getUrl('index', ['status' => 'new']))
                 ->isActiveWhen(fn (): bool => request()->routeIs('filament.admin.resources.orders.index') && request()->query('status') === 'new'),
-            NavigationItem::make(static::navigationLabelWithCount('Wszystkie', static::getAllOrdersNavigationCount()))
+            NavigationItem::make('Wszystkie')
                 ->group(static::getNavigationGroup())
                 ->sort((static::getNavigationSort() ?? 10) + 1)
                 ->url(static::getUrl('index'))

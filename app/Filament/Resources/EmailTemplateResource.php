@@ -16,6 +16,7 @@ use Illuminate\Support\HtmlString;
 class EmailTemplateResource extends Resource
 {
     protected static ?string $model = EmailTemplate::class;
+    protected static ?string $navigationGroup = 'Wiadomości E-mail';
     protected static ?string $navigationIcon = 'heroicon-o-envelope';
     protected static ?string $navigationLabel = 'Wiadomości E-mail';
     protected static ?string $modelLabel = 'szablon e-mail';

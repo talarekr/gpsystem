@@ -96,6 +96,9 @@ class AdminPanelProvider extends PanelProvider
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\\Filament\\Resources')
             ->navigationGroups([
                 // GPS Product Hub convention: icon-enabled groups own the icon; child pages/resources stay iconless.
+                NavigationGroup::make('Zamówienia')
+                    ->icon('heroicon-o-clipboard-document-list')
+                    ->collapsible(false),
                 NavigationGroup::make('Samochody')
                     ->icon('heroicon-o-truck')
                     ->collapsible(false),
@@ -104,6 +107,15 @@ class AdminPanelProvider extends PanelProvider
                     ->collapsible(false),
                 NavigationGroup::make('Magazynowanie')
                     ->icon('heroicon-o-building-office-2')
+                    ->collapsible(false),
+                NavigationGroup::make('Kategorie - mapowania...')
+                    ->icon('heroicon-o-tag')
+                    ->collapsible(false),
+                NavigationGroup::make('Wiadomości E-mail')
+                    ->icon('heroicon-o-envelope')
+                    ->collapsible(false),
+                NavigationGroup::make('Przesyłki')
+                    ->icon('heroicon-o-paper-airplane')
                     ->collapsible(false),
                 NavigationGroup::make('Administracja marketplace')
                     ->icon('heroicon-o-globe-alt')
@@ -114,8 +126,8 @@ class AdminPanelProvider extends PanelProvider
             ])
             ->navigationItems([
                 NavigationItem::make('Kategorie - mapowanie kategorii')
-                    ->icon('heroicon-o-tag')
-                    ->sort(45)
+                    ->group('Kategorie - mapowania...')
+                    ->sort(10)
                     ->url(fn (): string => route('admin.marketplace-category-mapper.index'))
                     ->isActiveWhen(fn (): bool => request()->routeIs('admin.marketplace-category-mapper.*')),
             ])
