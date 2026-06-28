@@ -2283,6 +2283,7 @@ button.gps-category-picker__arrow:hover {
 .fi-main:has(.gps-part-edit-layout-action) .fi-header-heading {
     font-size: calc(1.5rem - 3px) !important;
     line-height: 1.25 !important;
+    transform: translateX(calc((100cqw - min(100cqw, var(--gps-part-edit-card-max-width))) / 2)) !important;
 }
 
 /* Static EditPart-only hook: scoped through .gps-part-edit-layout-action, which is
