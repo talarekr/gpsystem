@@ -786,9 +786,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 }
 
 .gps-sales-channel {
-    display: grid;
-    grid-template-columns: 2rem minmax(0, 1fr);
-    gap: 0.6rem;
+    display: block;
     align-items: center;
     border: 1px solid #e2e8f0;
     border-radius: 0.8rem;
@@ -796,18 +794,6 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     padding: 0.6rem 0.7rem;
 }
 
-.gps-sales-channel__badge {
-    display: inline-flex;
-    width: 2rem;
-    height: 2rem;
-    align-items: center;
-    justify-content: center;
-    border-radius: 0.65rem;
-    background: #edf3f8;
-    color: var(--gps-admin-navy);
-    font-size: 0.68rem;
-    font-weight: 900;
-}
 
 .gps-sales-channel__topline {
     display: flex;
@@ -819,21 +805,41 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 .gps-sales-channel__topline strong {
     color: #0f172a;
     font-size: 0.88rem;
-    font-weight: 800;
+    font-weight: 500;
+}
+
+.gps-sales-channel__wordmark--allegro {
+    color: #ff5a00;
+    font-family: "Open Sans", Arial, sans-serif;
+}
+
+.gps-sales-channel__wordmark--ovoko {
+    color: #FF7A00;
+    font-family: Inter, Arial, Helvetica, sans-serif;
+}
+
+.gps-sales-channel__wordmark--ebay {
+    font-family: "Market Sans", Arial, "Helvetica Neue", sans-serif;
+    letter-spacing: -.02em;
+}
+
+.gps-sales-channel__wordmark--shop {
+    color: #334155;
+    font-family: inherit;
 }
 
 .gps-sales-channel__topline span,
 .gps-sales-channel small {
     color: #64748b;
     font-size: 0.76rem;
-    font-weight: 750;
+    font-weight: 500;
 }
 
 .gps-sales-channel p {
     margin: 0.08rem 0 0;
     color: var(--gps-admin-navy);
     font-size: 0.9rem;
-    font-weight: 850;
+    font-weight: 500;
     line-height: 1.15;
 }
 
