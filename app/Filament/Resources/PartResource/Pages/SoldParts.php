@@ -84,7 +84,7 @@ class SoldParts extends Page
                     'price' => $item->line_total ?? $item->unit_price,
                     'currency' => $item->currency ?: $order?->currency ?: 'PLN',
                     'quantity' => $item->quantity,
-                    'status' => $order?->status ?: '—',
+                    'part_id' => $item->part?->id ?: $item->part_id,
                     'part_url' => $item->part ? PartResource::getUrl('view', ['record' => $item->part]) : null,
                     'order_url' => $order ? \App\Filament\Resources\OrderResource::getUrl('view', ['record' => $order]) : null,
                 ];
@@ -116,7 +116,7 @@ class SoldParts extends Page
                     'price' => $sale->amount,
                     'currency' => $sale->currency ?: 'PLN',
                     'quantity' => $sale->quantity,
-                    'status' => 'sprzedaż lokalna',
+                    'part_id' => $sale->part?->id ?: $sale->part_id,
                     'part_url' => $sale->part ? PartResource::getUrl('view', ['record' => $sale->part]) : null,
                     'order_url' => null,
                 ];

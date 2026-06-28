@@ -5,7 +5,7 @@
 <x-filament-panels::page>
     <style>
         .gps-sold-parts-list { display: flex; flex-direction: column; gap: 12px; width: 100%; }
-        .gps-sold-parts-grid { display: grid; grid-template-columns: minmax(360px, 2fr) minmax(130px, .65fr) minmax(150px, .75fr) minmax(140px, .7fr) minmax(120px, .6fr) minmax(130px, .65fr) minmax(150px, .75fr); gap: 18px; align-items: center; width: 100%; }
+        .gps-sold-parts-grid { display: grid; grid-template-columns: minmax(360px, 2fr) minmax(130px, .65fr) minmax(150px, .75fr) minmax(140px, .7fr) minmax(120px, .6fr) minmax(80px, .4fr) minmax(150px, .75fr); gap: 18px; align-items: center; width: 100%; }
         .gps-sold-parts-header { padding: 0 18px 4px; color: #64748b; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
         .gps-sold-part-card { border: 1px solid #e5e7eb; border-radius: 18px; background: #fff; box-shadow: 0 10px 24px rgba(15, 23, 42, .06); padding: 18px; }
         .gps-sold-part-item { display: flex; align-items: center; gap: 12px; min-width: 0; }
@@ -29,7 +29,7 @@
             <div>Zamówienie / ref.</div>
             <div>Data sprzedaży</div>
             <div>Cena</div>
-            <div>Status</div>
+            <div>ID</div>
             <div>Linki</div>
         </div>
 
@@ -45,17 +45,18 @@
                             @endif
                             <div class="gps-sold-part-info">
                                 <div class="gps-sold-part-value">{{ $row['name'] }}</div>
+                                <div class="gps-sold-part-muted">Magazyn: {{ $row['part'] instanceof \App\Models\Part ? ($row['part']->storageLocation?->name ?: 'Brak lokalizacji') : 'Brak lokalizacji' }}</div>
                                 <div class="gps-sold-part-muted">SKU: {{ $row['sku'] ?: '—' }}</div>
                                 <div class="gps-sold-part-muted">OEM / nr części: {{ $row['oem'] ?: '—' }}</div>
                                 <div class="gps-sold-part-muted">Ilość: {{ $row['quantity'] ?: 1 }}</div>
                             </div>
                         </div>
                     </div>
-                    <div class="gps-sold-part-col"><div class="gps-sold-part-value">{{ $row['source'] ?: 'sklep' }}</div></div>
+                    <div class="gps-sold-part-col"><div class="gps-sold-part-value">@include('filament.resources.orders.partials.source-wordmark', ['marketplace' => $row['source'] ?: 'sklep'])</div></div>
                     <div class="gps-sold-part-col"><div class="gps-sold-part-value">{{ $row['reference'] }}</div></div>
                     <div class="gps-sold-part-col"><div class="gps-sold-part-value">{{ $row['sold_at'] ? $row['sold_at']->format('Y-m-d H:i') : '—' }}</div></div>
                     <div class="gps-sold-part-col"><div class="gps-sold-part-total">{{ number_format((float) $row['price'], 2, ',', ' ') }} {{ $row['currency'] }}</div></div>
-                    <div class="gps-sold-part-col"><div class="gps-sold-part-value">{{ $row['status'] }}</div></div>
+                    <div class="gps-sold-part-col"><div class="gps-sold-part-value">{{ $row['part_id'] ?: '—' }}</div></div>
                     <div class="gps-sold-part-col">
                         <div class="gps-sold-part-actions">
                             @if ($row['part_url'])<a class="gps-sold-part-action" href="{{ $row['part_url'] }}">Część</a>@endif
