@@ -352,65 +352,83 @@ class EditPart extends EditRecord
     protected function getHeaderActions(): array
     {
         return [
-            Actions\Action::make('markListingReady')
-                ->label('Zapisz i wystaw')
-                ->icon('heroicon-o-check-circle')
-                ->color('success')
-                ->requiresConfirmation()
-                ->visible(fn (): bool => (bool) $this->record->needs_listing)
-                ->action(function (PublishPartToMarketplacesService $publishService): void {
-                    $this->save(false, false);
-                    $this->record->refresh();
-
-                    $enabled = (bool) config('marketplace.publish_enabled', false);
-                    $result = $enabled
-                        ? $publishService->confirm($this->record, 'all', dryRun: false, confirm: true)
-                        : $publishService->preview($this->record, 'all', includePayload: true);
-
-                    $published = $result['published_channels'] ?? $result['ready_channels'] ?? [];
-                    $skipped = $result['skipped_channels'] ?? [];
-                    $messages = collect($result['channels'] ?? [])->flatMap(fn (array $channel): array => $channel['errors'] ?? $channel['readiness']['blockers'] ?? [])->map(fn (mixed $message): string => $this->marketplacePublishMessage((string) $message))->filter()->values()->all();
-
-                    if (! $enabled) {
-                        Notification::make()
-                            ->title('Realne wystawianie marketplace jest wyłączone — wykonano tylko preview.')
-                            ->body($messages === [] ? 'MARKETPLACE_PUBLISH_ENABLED=false. Nie wykonano żadnego zapisu do marketplace.' : implode(' | ', $messages))
-                            ->danger()
-                            ->send();
-                        return;
-                    }
-
-                    if ($published !== [] && $skipped !== []) {
-                        Notification::make()
-                            ->title('Część zapisana. Wystawiono gotowe kanały, a kanały z brakami pominięto.')
-                            ->body('Wystawione/przygotowane: '.implode(', ', $published).'. Pominięte: '.implode(', ', array_keys($skipped)).'. Powody: '.($messages === [] ? 'readiness wymaga uzupełnienia.' : implode(' | ', $messages)))
-                            ->warning()
-                            ->send();
-                        return;
-                    }
-
-                    if (($result['blocked'] ?? false) || $published === []) {
-                        Notification::make()
-                            ->title('Nie udało się wystawić części.')
-                            ->body($messages === [] ? 'Readiness wymaga uzupełnienia.' : implode(' | ', $messages))
-                            ->danger()
-                            ->send();
-                        return;
-                    }
-
-                    Notification::make()
-                        ->title('Część zapisana i wystawiona w gotowych kanałach.')
-                        ->success()
-                        ->send();
-                }),
-            Actions\Action::make('storefrontPreview')
-                ->label('Podgląd')
-                ->icon('heroicon-o-arrow-top-right-on-square')
-                ->color('gray')
-                ->url(fn (): ?string => PartResource::publicProductUrl($this->record))
-                ->openUrlInNewTab()
-                ->visible(fn (): bool => PartResource::publicProductUrl($this->record) !== null),
-            Actions\DeleteAction::make()->label('Usuń'),
+            $this->getSaveAndPublishAction('markListingReadyHeader'),
+            Actions\Action::make('saveHeader')
+                ->label('Zapisz')
+                ->icon('heroicon-o-check')
+                ->color('primary')
+                ->extraAttributes(['class' => 'gps-part-edit-layout-action gps-part-edit-layout-action--save'])
+                ->action(fn (): mixed => $this->save(false, false)),
+            Actions\DeleteAction::make()
+                ->label('Usuń')
+                ->extraAttributes(['class' => 'gps-part-edit-layout-action gps-part-edit-layout-action--delete']),
         ];
+    }
+
+    protected function getFormActions(): array
+    {
+        return [
+            $this->getSaveAndPublishAction('markListingReadyFooter'),
+            $this->getSaveFormAction()
+                ->extraAttributes(['class' => 'gps-part-edit-footer-action gps-part-edit-layout-action--save']),
+            $this->getCancelFormAction()
+                ->extraAttributes(['class' => 'gps-part-edit-footer-action gps-part-edit-layout-action--cancel']),
+        ];
+    }
+
+    private function getSaveAndPublishAction(string $name): Actions\Action
+    {
+        return Actions\Action::make($name)
+            ->label('Zapisz i wystaw')
+            ->icon('heroicon-o-check-circle')
+            ->color('success')
+            ->requiresConfirmation()
+            ->visible(fn (): bool => (bool) $this->record->needs_listing)
+            ->extraAttributes(['class' => 'gps-part-edit-layout-action gps-part-edit-layout-action--publish'])
+            ->action(function (PublishPartToMarketplacesService $publishService): void {
+                $this->save(false, false);
+                $this->record->refresh();
+
+                $enabled = (bool) config('marketplace.publish_enabled', false);
+                $result = $enabled
+                    ? $publishService->confirm($this->record, 'all', dryRun: false, confirm: true)
+                    : $publishService->preview($this->record, 'all', includePayload: true);
+
+                $published = $result['published_channels'] ?? $result['ready_channels'] ?? [];
+                $skipped = $result['skipped_channels'] ?? [];
+                $messages = collect($result['channels'] ?? [])->flatMap(fn (array $channel): array => $channel['errors'] ?? $channel['readiness']['blockers'] ?? [])->map(fn (mixed $message): string => $this->marketplacePublishMessage((string) $message))->filter()->values()->all();
+
+                if (! $enabled) {
+                    Notification::make()
+                        ->title('Realne wystawianie marketplace jest wyłączone — wykonano tylko preview.')
+                        ->body($messages === [] ? 'MARKETPLACE_PUBLISH_ENABLED=false. Nie wykonano żadnego zapisu do marketplace.' : implode(' | ', $messages))
+                        ->danger()
+                        ->send();
+                    return;
+                }
+
+                if ($published !== [] && $skipped !== []) {
+                    Notification::make()
+                        ->title('Część zapisana. Wystawiono gotowe kanały, a kanały z brakami pominięto.')
+                        ->body('Wystawione/przygotowane: '.implode(', ', $published).'. Pominięte: '.implode(', ', array_keys($skipped)).'. Powody: '.($messages === [] ? 'readiness wymaga uzupełnienia.' : implode(' | ', $messages)))
+                        ->warning()
+                        ->send();
+                    return;
+                }
+
+                if (($result['blocked'] ?? false) || $published === []) {
+                    Notification::make()
+                        ->title('Nie udało się wystawić części.')
+                        ->body($messages === [] ? 'Readiness wymaga uzupełnienia.' : implode(' | ', $messages))
+                        ->danger()
+                        ->send();
+                    return;
+                }
+
+                Notification::make()
+                    ->title('Część zapisana i wystawiona w gotowych kanałach.')
+                    ->success()
+                    ->send();
+            });
     }
 }

@@ -2261,3 +2261,29 @@ button.gps-category-picker__arrow:hover {
 .gps-admin-order-buyer__phone {
     white-space: nowrap;
 }
+
+.fi-main:has(.gps-part-edit-layout-action) .fi-page > .mx-auto,
+.fi-main:has(.gps-part-edit-layout-action) .fi-header {
+    width: 100% !important;
+    max-width: var(--gps-admin-content-max-width) !important;
+    margin-inline: auto !important;
+}
+
+.fi-main:has(.gps-part-edit-layout-action) .fi-header {
+    padding-inline: 0 !important;
+}
+
+.fi-main:has(.gps-part-edit-layout-action) .fi-header-heading {
+    font-size: calc(1.5rem - 3px) !important;
+    line-height: 1.25 !important;
+}
+
+.fi-main:has(.gps-part-edit-layout-action) .fi-header-actions,
+.fi-main:has(.gps-part-edit-layout-action) .fi-header .fi-ac {
+    justify-content: flex-end !important;
+}
+
+.fi-main:has(.gps-part-edit-layout-action) form .fi-form-actions,
+.fi-main:has(.gps-part-edit-layout-action) form .fi-form-actions .fi-ac {
+    justify-content: flex-start !important;
+}
