@@ -2262,23 +2262,36 @@ button.gps-category-picker__arrow:hover {
     white-space: nowrap;
 }
 
+/* Part edit page: use the rendered form width as the single layout container for title and actions. */
 .fi-main:has(.gps-part-edit-layout-action) {
-    --gps-part-edit-container-max-width: var(--gps-admin-content-max-width);
-    --gps-part-edit-container-padding: var(--gps-admin-content-inline-padding);
+    --gps-part-edit-form-container-max-width: var(--gps-admin-content-max-width);
+    --gps-part-edit-form-container-padding: var(--gps-admin-content-inline-padding);
 }
 
+.fi-main:has(.gps-part-edit-layout-action) .fi-page,
 .fi-main:has(.gps-part-edit-layout-action) .fi-page > .mx-auto,
+.fi-main:has(.gps-part-edit-layout-action) .fi-page > form,
+.fi-main:has(.gps-part-edit-layout-action) .fi-form,
 .fi-main:has(.gps-part-edit-layout-action) .fi-header,
 .fi-main:has(.gps-part-edit-layout-action) form .fi-form-actions {
     box-sizing: border-box;
     width: 100% !important;
-    max-width: var(--gps-part-edit-container-max-width) !important;
-    margin-inline: auto !important;
-    padding-inline: var(--gps-part-edit-container-padding) !important;
+    max-width: var(--gps-part-edit-form-container-max-width) !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
 }
 
-.fi-main:has(.gps-part-edit-layout-action) .fi-page > .mx-auto {
-    padding-inline: var(--gps-part-edit-container-padding) !important;
+.fi-main:has(.gps-part-edit-layout-action) .fi-header,
+.fi-main:has(.gps-part-edit-layout-action) .fi-page > .mx-auto,
+.fi-main:has(.gps-part-edit-layout-action) .fi-page > form,
+.fi-main:has(.gps-part-edit-layout-action) .fi-form,
+.fi-main:has(.gps-part-edit-layout-action) form .fi-form-actions {
+    padding-left: var(--gps-part-edit-form-container-padding) !important;
+    padding-right: var(--gps-part-edit-form-container-padding) !important;
+}
+
+.fi-main:has(.gps-part-edit-layout-action) .fi-header {
+    align-items: center !important;
 }
 
 .fi-main:has(.gps-part-edit-layout-action) .fi-header-heading {
@@ -2288,6 +2301,7 @@ button.gps-category-picker__arrow:hover {
 
 .fi-main:has(.gps-part-edit-layout-action) .fi-header-actions,
 .fi-main:has(.gps-part-edit-layout-action) .fi-header .fi-ac {
+    margin-left: auto !important;
     justify-content: flex-end !important;
 }
 
