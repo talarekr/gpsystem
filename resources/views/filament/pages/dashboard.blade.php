@@ -153,8 +153,10 @@
                     <span>Kanały</span>
                 </div>
 
+                @php($channelPresentationOrder = ['allegro' => 0, 'ovoko' => 1, 'ebay' => 2, 'shop' => 3])
+
                 <div class="gps-sales-channels">
-                    @foreach ($salesAnalytics['channels'] as $channel)
+                    @foreach (collect($salesAnalytics['channels'])->sortBy(fn ($channel) => $channelPresentationOrder[$channel['key']] ?? 99)->values() as $channel)
                         <article class="gps-sales-channel gps-sales-channel--{{ $channel['key'] }}">
                             <div class="gps-sales-channel__body">
                                 <div class="gps-sales-channel__topline">
