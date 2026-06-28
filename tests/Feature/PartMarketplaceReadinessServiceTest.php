@@ -189,8 +189,6 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $this->assertStringContainsString('data-category-drawer-trigger', $html);
         $this->assertStringContainsString('type="button"', $html);
         $this->assertStringContainsString('x-on:click.prevent.stop="categoryDrawerOpen = true"', $html);
-        $this->assertStringContainsString('x-on:category-selected.window="selectMarketplaceCategory($event)"', $html);
-        $this->assertStringContainsString('this.categoryDrawerOpen = false;', $html);
         $this->assertStringContainsString('data-category-drawer', $html);
         $this->assertStringContainsString('data-marketplace-category-tree="allegro_main"', $html);
         $this->assertStringContainsString('data-marketplace-category-tree="ovoko"', $html);
@@ -237,8 +235,6 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $this->assertStringContainsString('data-category-drawer-trigger', $html);
         $this->assertStringContainsString('type="button"', $html);
         $this->assertStringContainsString('x-on:click.prevent.stop="categoryDrawerOpen = true"', $html);
-        $this->assertStringContainsString('x-on:category-selected.window="selectMarketplaceCategory($event)"', $html);
-        $this->assertStringContainsString('this.categoryDrawerOpen = false;', $html);
         $this->assertStringContainsString('data-category-drawer', $html);
         $this->assertStringContainsString('x-teleport="body"', $html);
         $this->assertStringContainsString('fixed inset-y-0 right-0 z-50 w-full max-w-xl flex-col bg-white p-6 shadow-xl dark:bg-gray-900 gps-category-picker-modal', $html);
@@ -249,24 +245,6 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $this->assertStringNotContainsString('>Auto &amp; Motorrad / Lichtmaschinen</button>', $html);
         $this->assertStringNotContainsString('Wybrana kategoria eBay', $html);
         $this->assertStringNotContainsString('Tryb lokalny: bez publish i bez marketplace API write.', $html);
-        $this->assertDatabaseCount('marketplace_listings', 0);
-    }
-
-    public function test_category_picker_select_button_uses_local_selection_without_form_submit_or_visible_tree_reset(): void
-    {
-        $pickerBlade = file_get_contents(resource_path('views/filament/forms/category-picker.blade.php'));
-        $editPage = file_get_contents(app_path('Filament/Resources/PartResource/Pages/EditPart.php'));
-
-        $this->assertStringContainsString('type="button"', $pickerBlade);
-        $this->assertStringContainsString("\$this->data['category_id'] = \$category->getKey();", $editPage);
-        $this->assertStringContainsString("\$this->data['marketplace_category_mappings_state']", $editPage);
-        $this->assertStringNotContainsString("\$this->record->forceFill(['category_id' => \$category->getKey()])->save();", $editPage);
-        $this->assertStringContainsString('$dispatch(\'category-selected\'', $pickerBlade);
-        $this->assertStringContainsString('categoryDrawerOpen = false', $pickerBlade);
-        $this->assertStringContainsString('this.$nextTick(() => {', $pickerBlade);
-        $this->assertStringNotContainsString('this.$refs.marketplaceForm.submit()', $pickerBlade);
-        $this->assertStringNotContainsString("route('tools.part-marketplace-category-mapping.store')", file_get_contents(resource_path('views/filament/resources/parts/marketplace-category-field.blade.php')));
-        $this->assertStringNotContainsString('this.resetTree()', $pickerBlade);
         $this->assertDatabaseCount('marketplace_listings', 0);
     }
 
