@@ -20,7 +20,7 @@
 
 <div
     id="{{ $fieldId }}-overlay"
-    class="fixed inset-0 z-40 bg-gray-950/50"
+    class="fixed inset-0 z-40 bg-gray-950/50 pointer-events-auto"
     data-category-drawer-overlay
     x-cloak
     x-show="categoryDrawerOpen"
@@ -29,7 +29,8 @@
 ></div>
 <aside
     id="{{ $fieldId }}"
-    class="fixed inset-y-0 right-0 z-50 w-full max-w-xl flex-col bg-white p-6 shadow-xl dark:bg-gray-900 gps-category-picker-modal gps-marketplace-category-drawer"
+    class="fixed inset-y-0 right-0 left-auto z-50 ml-auto w-full max-w-xl flex-col bg-white p-6 shadow-xl dark:bg-gray-900 gps-marketplace-category-drawer"
+    style="top: 0; right: 0; bottom: 0; left: auto; height: 100dvh; max-height: 100dvh; width: min(100vw, 420px); max-width: 440px;"
     data-category-drawer
     data-category-drawer-id="{{ $fieldId }}"
     @if ($treeAttribute) data-marketplace-category-tree="{{ $treeAttribute }}" @endif
