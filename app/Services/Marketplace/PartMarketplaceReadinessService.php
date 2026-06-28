@@ -88,11 +88,11 @@ class PartMarketplaceReadinessService
     private function categoryPresentation(?MarketplaceCategoryMapping $mapping, string $label): array
     {
         if (! $mapping) {
-            return ['value' => 'Brak wybranej kategorii '.$label, 'mapped' => false, 'id' => null];
+            return ['value' => 'Wybierz kategorię', 'mapped' => false, 'id' => null];
         }
 
         return [
-            'value' => $mapping->external_category_path ?: ($mapping->external_category_name ?: 'Wybrana kategoria '.$label),
+            'value' => $mapping->external_category_path ?: ($mapping->external_category_name ?: 'Wybierz kategorię'),
             'mapped' => ! $mapping->is_blocked,
             'id' => $mapping->external_category_id,
         ];

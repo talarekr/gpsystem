@@ -15,18 +15,17 @@
 @endphp
 
 <div class="gps-marketplace-category-field fi-fo-field-wrp" data-category-chooser-field data-marketplace-category-chooser="{{ $key }}">
-    <label class="fi-fo-field-wrp-label inline-flex items-center gap-x-3" for="{{ $fieldId }}-toggle">
-        <span class="text-sm font-medium leading-6 text-gray-950 dark:text-white">Kategoria</span>
-    </label>
-
-    <div class="mt-2 flex min-h-10 items-center rounded-lg border border-gray-300 bg-white shadow-sm ring-1 ring-gray-950/10 dark:border-gray-600 dark:bg-gray-900 dark:ring-white/20" data-shared-category-input>
-        <button type="button" class="min-w-0 flex-1 truncate px-3 py-2 text-left text-sm text-gray-950 dark:text-white" onclick="document.getElementById('{{ $fieldId }}-toggle').checked = true">
-            {{ $category['value'] ?? 'Brak wybranej kategorii' }}
-        </button>
-        <label for="{{ $fieldId }}-toggle" class="inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-r-lg border-l border-gray-200 text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800" title="Wybierz kategorię z drzewa {{ $labels[$key] }}" data-category-drawer-trigger>
-            ☰
-        </label>
-    </div>
+    <fieldset class="gps-shared-category-field fi-input-wrp rounded-lg border border-gray-300 bg-white px-3 pb-1.5 pt-0 shadow-sm ring-1 ring-gray-950/10 transition duration-75 focus-within:border-primary-600 focus-within:ring-primary-600 dark:border-gray-600 dark:bg-gray-900 dark:ring-white/20 dark:focus-within:border-primary-500 dark:focus-within:ring-primary-500" data-shared-category-input>
+        <legend class="gps-shared-category-field__legend px-1 text-xs font-medium leading-4 text-gray-500 dark:text-gray-400">Kategoria</legend>
+        <div class="flex min-h-10 items-center gap-2">
+            <button type="button" class="min-w-0 flex-1 truncate py-1.5 text-left text-sm text-gray-950 outline-none dark:text-white" onclick="document.getElementById('{{ $fieldId }}-toggle').checked = true">
+                {{ $category['value'] ?? 'Brak wybranej kategorii' }}
+            </button>
+            <label for="{{ $fieldId }}-toggle" class="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-md text-gray-500 transition hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-600 dark:text-gray-400 dark:hover:text-gray-200" title="Wybierz kategorię z drzewa {{ $labels[$key] }}" data-category-drawer-trigger>
+                ☰
+            </label>
+        </div>
+    </fieldset>
 
     <input id="{{ $fieldId }}-toggle" type="checkbox" class="peer sr-only" data-category-drawer-toggle>
     <div class="fixed inset-0 z-40 hidden bg-gray-950/50 peer-checked:block" data-category-drawer-overlay>
