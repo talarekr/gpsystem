@@ -7,6 +7,7 @@ use App\Models\MarketplaceCategory;
 use App\Models\Part;
 use App\Models\PartCategory;
 use App\Services\Marketplace\MarketplaceListingReadinessService;
+use App\Services\Marketplace\PartMarketplaceReadinessService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -27,7 +28,10 @@ class PartMarketplaceReadinessController extends Controller
      */
     private const ROOT_PARENT_EXTERNAL_CATEGORY_IDS = ['', '0', 'root', 'ROOT'];
 
-    public function __construct(private readonly MarketplaceListingReadinessService $readinessService) {}
+    public function __construct(
+        private readonly MarketplaceListingReadinessService $readinessService,
+        private readonly PartMarketplaceReadinessService $cardReadinessService,
+    ) {}
 
     public function check(Request $request): JsonResponse
     {
@@ -163,6 +167,45 @@ class PartMarketplaceReadinessController extends Controller
         ]);
     }
 
+
+
+    public function prepareCard(Request $request): JsonResponse
+    {
+        if (! $this->validToken($request)) return $this->invalidTokenResponse();
+
+        $part = Part::query()->find((int) $request->query('part_id'));
+        if (! $part) return response()->json(['ok' => false, 'ready' => false, 'message' => 'Nie znaleziono części.', 'blockers' => ['part_not_found']], 404);
+
+        $key = (string) $request->query('channel', 'allegro');
+        if (! in_array($key, ['allegro', 'ovoko', 'ebay'], true)) {
+            return response()->json(['ok' => false, 'ready' => false, 'message' => 'Nieobsługiwany kanał sprzedaży.', 'blockers' => ['unsupported_channel']], 422);
+        }
+
+        if ($key === 'ebay') {
+            $ebayResults = [
+                'ebay_de' => $this->readinessService->prepareEbayTranslations($part, 'ebay_de'),
+                'ebay_fr' => $this->readinessService->prepareEbayTranslations($part, 'ebay_fr'),
+            ];
+        }
+
+        $card = $this->cardReadinessService->check($part)[$key] ?? [];
+        $presentation = (array) ($card['presentation'] ?? []);
+        $ready = (bool) ($presentation['ready'] ?? $card['ready'] ?? false);
+        $message = $ready ? 'Gotowe' : $this->humanReadablePrepareMessage((array) ($presentation['missing'] ?? $card['missing'] ?? []));
+
+        return response()->json([
+            'ok' => $ready,
+            'ready' => $ready,
+            'status' => $ready ? 'ready' : 'blocked',
+            'message' => $message,
+            'part_id' => $part->id,
+            'channel' => $key,
+            'will_make_marketplace_request' => false,
+            'publish' => false,
+            'marketplace_listings' => false,
+            'ebay_channels' => $key === 'ebay' ? ($ebayResults ?? []) : null,
+        ]);
+    }
 
     public function categoryChildren(Request $request): JsonResponse
     {
@@ -358,6 +401,25 @@ class PartMarketplaceReadinessController extends Controller
         } catch (\Throwable $e) {
             return $this->safeExceptionResponse($e, (int) $request->query('part_id'), $failedStage);
         }
+    }
+
+
+    /** @param array<int, string> $messages */
+    private function humanReadablePrepareMessage(array $messages): string
+    {
+        $message = (string) ($messages[0] ?? '');
+
+        return match ($message) {
+            'cena', 'cena Allegro', 'cena Ovoko' => 'Uzupełnij cenę',
+            'cena eBay' => 'Uzupełnij cenę eBay',
+            'mapowanie kategorii Allegro', 'mapowanie kategorii Ovoko', 'mapowanie kategorii eBay' => 'Wybierz kategorię',
+            'allegro_required_category_parameters_missing' => 'Brakuje wymaganych parametrów Allegro',
+            'prepared_translations', 'tłumaczenie eBay DE', 'Brak przygotowanego tłumaczenia eBay DE' => 'Brak przygotowanego tłumaczenia eBay DE',
+            'tłumaczenie eBay FR', 'Brak przygotowanego tłumaczenia eBay FR' => 'Brak przygotowanego tłumaczenia eBay FR',
+            'category_shipping_group', 'Brak grupy wysyłkowej dla kategorii' => 'Brak grupy wysyłkowej dla kategorii',
+            'shipping_policy_mapping', 'Brak mapowania polityki wysyłki' => 'Brak mapowania polityki wysyłki',
+            default => filled($message) ? $message : 'Wymaga uzupełnienia',
+        };
     }
 
     private function validToken(Request $request): bool
