@@ -54,6 +54,14 @@ class PartEditLayoutUiTest extends TestCase
         $this->assertStringNotContainsString('.fi-main:has(.gps-part-edit-layout-action) :where(.fi-header, form, form .fi-form-actions) {', $css);
         $this->assertStringNotContainsString('--gps-part-edit-form-container-max-width', $css);
         $this->assertStringContainsString('justify-content: flex-end !important;', $css);
+        $this->assertStringContainsString('transform: translateX(calc((min(100cqw, var(--gps-part-edit-card-max-width)) - 100cqw) / 2)) !important;', $css);
+        $this->assertStringContainsString('Bottom EditPart actions: keep the Filament form-actions wrapper at its native', $css);
+        $this->assertStringContainsString('.fi-main:has(.gps-part-edit-layout-action) form .fi-form-actions {', $css);
+        $this->assertStringContainsString('justify-content: center !important;', $css);
+        $this->assertStringContainsString('.fi-main:has(.gps-part-edit-layout-action) form .fi-form-actions .fi-ac {', $css);
         $this->assertStringContainsString('justify-content: flex-start !important;', $css);
+        $this->assertStringContainsString('width: min(100%, var(--gps-part-edit-card-max-width)) !important;', $css);
+        $this->assertStringContainsString('margin-left: auto !important;', $css);
+        $this->assertStringContainsString('margin-right: auto !important;', $css);
     }
 }

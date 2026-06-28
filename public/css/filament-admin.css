@@ -2327,7 +2327,19 @@ button.gps-category-picker__arrow:hover {
     translate: none !important;
 }
 
-.fi-main:has(.gps-part-edit-layout-action) form .fi-form-actions,
+/* Bottom EditPart actions: keep the Filament form-actions wrapper at its native
+   page width, but put the actual button rail on the same centered 54rem track as
+   .gps-part-form / .fi-section. This aligns the first footer button to the card's
+   left edge without moving or resizing the form, cards, sections, or top header
+   actions. */
+.fi-main:has(.gps-part-edit-layout-action) form .fi-form-actions {
+    justify-content: center !important;
+}
+
 .fi-main:has(.gps-part-edit-layout-action) form .fi-form-actions .fi-ac {
     justify-content: flex-start !important;
+    max-width: min(100%, var(--gps-part-edit-card-max-width)) !important;
+    width: min(100%, var(--gps-part-edit-card-max-width)) !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
 }
