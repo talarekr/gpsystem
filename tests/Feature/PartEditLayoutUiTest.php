@@ -45,6 +45,7 @@ class PartEditLayoutUiTest extends TestCase
         $this->assertStringContainsString('.fi-main:has(.gps-part-edit-layout-action) .fi-header .fi-ac {', $css);
         $this->assertStringContainsString('.fi-main:has(.gps-part-edit-layout-action) .fi-header {', $css);
         $this->assertStringContainsString('container-type: inline-size;', $css);
+        $this->assertStringContainsString('transform: translateX(calc((100cqw - min(100cqw, var(--gps-part-edit-card-max-width))) / 2)) !important;', $css);
         $this->assertStringContainsString('max-width: min(100%, var(--gps-part-edit-card-max-width)) !important;', $css);
         $this->assertStringContainsString('position: relative !important;', $css);
         $this->assertStringContainsString('right: auto !important;', $css);
