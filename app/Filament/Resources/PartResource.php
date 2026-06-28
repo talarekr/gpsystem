@@ -791,9 +791,10 @@ class PartResource extends Resource
     public static function getNavigationItems(): array
     {
         return [
-            NavigationItem::make('Dodaj część')->group(static::getNavigationGroup())->sort(static::getNavigationSort())->url(static::getUrl('create'))->isActiveWhen(fn () => request()->routeIs('filament.admin.resources.parts.create')),
-            NavigationItem::make(static::navigationLabelWithCount('Części', static::getAllPartsNavigationCount()))->group(static::getNavigationGroup())->sort((static::getNavigationSort() ?? 20) + 1)->url(static::getUrl('index'))->isActiveWhen(fn () => request()->routeIs('filament.admin.resources.parts.index')),
-            NavigationItem::make(static::navigationLabelWithCount('Do wystawienia', static::getPartsToListNavigationCount()))->group(static::getNavigationGroup())->sort((static::getNavigationSort() ?? 20) + 2)->url(static::getUrl('to-list'))->isActiveWhen(fn () => request()->routeIs('filament.admin.resources.parts.to-list')),
+            NavigationItem::make(static::navigationLabelWithCount('Części', static::getAllPartsNavigationCount()))->group(static::getNavigationGroup())->sort(static::getNavigationSort())->url(static::getUrl('index'))->isActiveWhen(fn () => request()->routeIs('filament.admin.resources.parts.index')),
+            NavigationItem::make(static::navigationLabelWithCount('Do wystawienia', static::getPartsToListNavigationCount()))->group(static::getNavigationGroup())->sort((static::getNavigationSort() ?? 20) + 1)->url(static::getUrl('to-list'))->isActiveWhen(fn () => request()->routeIs('filament.admin.resources.parts.to-list')),
+            NavigationItem::make('Dodaj część')->group(static::getNavigationGroup())->sort((static::getNavigationSort() ?? 20) + 2)->url(static::getUrl('create'))->isActiveWhen(fn () => request()->routeIs('filament.admin.resources.parts.create')),
+            NavigationItem::make('Sprzedane części')->group(static::getNavigationGroup())->sort((static::getNavigationSort() ?? 20) + 3)->url(static::getUrl('sold'))->isActiveWhen(fn () => request()->routeIs('filament.admin.resources.parts.sold')),
         ];
     }
 
@@ -811,5 +812,5 @@ class PartResource extends Resource
     public static function rolesWithViewAccess(): array { return array_map(fn (UserRole $role) => $role->value, UserRole::cases()); }
     public static function rolesWithWriteAccess(): array { return [UserRole::OwnerAdmin->value, UserRole::Manager->value, UserRole::WarehouseProductStaff->value, UserRole::PricingStaff->value]; }
     public static function rolesWithFullAccess(): array { return [UserRole::OwnerAdmin->value, UserRole::Manager->value]; }
-    public static function getPages(): array { return ['index' => Pages\ListParts::route('/'), 'create' => Pages\CreatePart::route('/create'), 'to-list' => Pages\PartsToList::route('/to-list'), 'needs-review' => Pages\PartsNeedsReview::route('/needs-review'), 'view' => Pages\ViewPart::route('/{record}'), 'edit' => Pages\EditPart::route('/{record}/edit')]; }
+    public static function getPages(): array { return ['index' => Pages\ListParts::route('/'), 'create' => Pages\CreatePart::route('/create'), 'to-list' => Pages\PartsToList::route('/to-list'), 'sold' => Pages\SoldParts::route('/sold'), 'needs-review' => Pages\PartsNeedsReview::route('/needs-review'), 'view' => Pages\ViewPart::route('/{record}'), 'edit' => Pages\EditPart::route('/{record}/edit')]; }
 }
