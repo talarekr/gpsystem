@@ -53,7 +53,7 @@
 
 <span class="gps-order-source gps-order-source--{{ $sourceClass }}" aria-label="Źródło: {{ $source === 'local' ? 'Sklep' : ($source === 'local_sale' ? 'Sprzedaż lokalna' : $source) }}">
     @if ($source === 'ebay')
-        <span style="color:#0064D2">e</span><span style="color:#E53238">B</span><span style="color:#F5AF02">a</span><span style="color:#86B817">y</span>
+        <span style="color:#E53238">e</span><span style="color:#0064D2">B</span><span style="color:#F5AF02">a</span><span style="color:#86B817">y</span>
     @elseif ($source === 'allegro')
         allegro
     @elseif ($source === 'ovoko')

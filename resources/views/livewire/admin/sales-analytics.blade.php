@@ -60,13 +60,7 @@
                         <div class="gps-sales-channel__body">
                             <div class="gps-sales-channel__topline">
                                 <span class="gps-sales-channel__wordmark gps-sales-channel__wordmark--{{ $channel['key'] }}">
-                                    @if ($channel['key'] === 'ebay')
-                                        <span style="color:#0064D2">e</span><span style="color:#E53238">B</span><span style="color:#F5AF02">a</span><span style="color:#86B817">y</span>
-                                    @elseif (in_array($channel['key'], ['allegro', 'ovoko'], true))
-                                        @include('filament.resources.orders.partials.source-wordmark', ['marketplace' => $channel['key']])
-                                    @else
-                                        {{ $channel['label'] }}
-                                    @endif
+                                    @include('filament.resources.orders.partials.source-wordmark', ['marketplace' => $channel['key']])
                                 </span>
                                 <span>{{ $channel['orders_count'] }} zam.</span>
                             </div>
