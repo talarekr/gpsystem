@@ -39,41 +39,10 @@
             <div class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900" data-marketplace-card="{{ $key }}">
                 <div class="flex items-start justify-between gap-3">
                     <h3 class="text-base font-semibold text-gray-950 dark:text-white">{{ $labels[$key] }}</h3>
-                    <span class="rounded-full px-2.5 py-1 text-xs font-medium {{ $ready ? 'bg-success-50 text-success-700 ring-1 ring-success-600/20' : 'bg-warning-50 text-warning-700 ring-1 ring-warning-600/20' }}">
-                        {{ $ready ? 'Gotowy' : 'Braki' }}
-                    </span>
                 </div>
 
                 <div class="mt-4 space-y-4 text-sm">
-                    <div class="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800">
-                        <div class="flex items-center justify-between gap-3">
-                            <div class="min-w-0">
-                                <div class="truncate font-medium text-gray-950 dark:text-white">{{ $category['value'] ?? 'Brak wybranej kategorii' }}</div>
-                                @if (! empty($category['id']))
-                                    <div class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">ID kategorii: {{ $category['id'] }}</div>
-                                @endif
-                            </div>
-                            <details class="relative shrink-0">
-                                <summary class="list-none rounded-lg border border-gray-300 bg-white px-2.5 py-2 text-gray-700 shadow-sm hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200" title="Zmień kategorię z drzewa {{ $labels[$key] }}">☰</summary>
-                                <div class="absolute right-0 z-10 mt-2 w-80 rounded-xl border border-gray-200 bg-white p-3 shadow-xl dark:border-gray-700 dark:bg-gray-900">
-                                    <div class="mb-2 font-medium">Drzewo kategorii {{ $labels[$key] }}</div>
-                                    <form method="POST" action="{{ route('tools.part-marketplace-category-mapping.store') }}" class="space-y-2">
-                                        @csrf
-                                        <input type="hidden" name="part_id" value="{{ $part?->id }}">
-                                        <input type="hidden" name="channel" value="{{ $mappingChannels[$key] }}">
-                                        <select name="external_category_id" class="w-full rounded-lg border-gray-300 text-sm dark:border-gray-700 dark:bg-gray-800">
-                                            @forelse ($tree as $node)
-                                                <option value="{{ $node->external_category_id }}">{{ str_repeat('— ', max(0, (int) $node->level)) }}{{ $node->name ?: $node->full_path }}</option>
-                                            @empty
-                                                <option value="">Brak pobranego drzewa kategorii</option>
-                                            @endforelse
-                                        </select>
-                                        <button type="submit" class="w-full rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white hover:bg-primary-500">Zapisz kategorię lokalnie</button>
-                                    </form>
-                                </div>
-                            </details>
-                        </div>
-                    </div>
+                    @include('filament.resources.parts.marketplace-category-field', compact('part', 'key', 'labels', 'category', 'tree', 'mappingChannels'))
 
                     <a href="{{ $prepareUrl }}" target="_blank" rel="noopener noreferrer" class="inline-flex w-full items-center justify-center rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-primary-500">Przygotuj</a>
 
