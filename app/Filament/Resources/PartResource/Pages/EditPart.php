@@ -11,6 +11,7 @@ use App\Services\Marketplace\PublishPartToMarketplacesService;
 use Filament\Actions;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
+use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -21,6 +22,16 @@ class EditPart extends EditRecord
     protected array $partPhotoPaths = [];
 
     protected array $marketplaceCategorySelections = [];
+
+    public function getTitle(): string|Htmlable
+    {
+        return '';
+    }
+
+    public function getHeading(): string|Htmlable
+    {
+        return '';
+    }
 
     protected function mutateFormDataBeforeFill(array $data): array
     {

@@ -34,6 +34,24 @@ class PartEditLayoutUiTest extends TestCase
         $this->assertStringContainsString('gps-part-edit-layout-action', $editPage);
     }
 
+    public function test_part_edit_page_suppresses_default_heading_without_custom_header_or_action_changes(): void
+    {
+        $editPage = file_get_contents(app_path('Filament/Resources/PartResource/Pages/EditPart.php'));
+
+        $this->assertStringContainsString('public function getTitle(): string|Htmlable', $editPage);
+        $this->assertStringContainsString('public function getHeading(): string|Htmlable', $editPage);
+        $this->assertStringNotContainsString('Edytuj część', $editPage);
+        $this->assertStringNotContainsString('getHeader()', $editPage);
+        $this->assertStringNotContainsString('resources/views/filament/resources/parts/pages/edit', $editPage);
+        $this->assertSame(1, substr_count($editPage, 'protected function getHeaderActions(): array'));
+        $this->assertSame(1, substr_count($editPage, 'protected function getFormActions(): array'));
+        $this->assertSame(2, substr_count($editPage, 'getSaveAndPublishAction('));
+        $this->assertStringContainsString("Actions\\Action::make('saveHeader')", $editPage);
+        $this->assertStringContainsString('Actions\\DeleteAction::make()', $editPage);
+        $this->assertStringContainsString('getSaveFormAction()', $editPage);
+        $this->assertStringContainsString('getCancelFormAction()', $editPage);
+    }
+
     public function test_part_edit_header_form_and_footer_share_one_container_rule(): void
     {
         $css = file_get_contents(public_path('css/filament-admin.css'));
