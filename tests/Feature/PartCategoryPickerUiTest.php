@@ -190,6 +190,9 @@ class PartCategoryPickerUiTest extends TestCase
 
         $this->assertStringContainsString('type="button"', $html);
         $this->assertStringContainsString('x-on:click="saveSelectedCategory()"', $html);
+        $this->assertSame(1, substr_count($html, '>Wybierz<'));
+        $this->assertStringContainsString('class="gps-category-picker__submit fi-btn fi-btn-size-md fi-color-primary"', $html);
+        $this->assertStringNotContainsString('gps-category-picker__select-label', $html);
         $this->assertStringContainsString("const filamentFormComponentActionModalId = 'form-component-action';", $html);
         $this->assertStringContainsString("this.\$dispatch('close-modal', { id: filamentFormComponentActionModalId });", $html);
         $this->assertStringContainsString("window.dispatchEvent(new CustomEvent('close-modal', { detail: { id: filamentFormComponentActionModalId } }));", $html);
@@ -199,6 +202,36 @@ class PartCategoryPickerUiTest extends TestCase
         $this->assertMatchesRegularExpression('/closeCategoryPicker\(\);\s*this\.selectedId = null;/s', $html);
         $this->assertStringNotContainsString('.fi-modal-header button', $html);
         $this->assertStringNotContainsString('$refs.marketplaceForm.submit();\n                this.closeCategoryPicker();', $html);
+    }
+
+    public function test_category_picker_rows_do_not_render_choose_label_but_keep_bottom_choose_button(): void
+    {
+        $html = view('filament.forms.category-picker', [
+            'categories' => [
+                [
+                    'id' => 1,
+                    'parent_id' => null,
+                    'name' => 'Silnik',
+                    'path' => 'Silnik',
+                    'has_children' => true,
+                ],
+                [
+                    'id' => 2,
+                    'parent_id' => 1,
+                    'name' => 'Alternatory',
+                    'path' => 'Silnik / Alternatory',
+                    'has_children' => false,
+                ],
+            ],
+        ])->render();
+
+        $this->assertStringContainsString('x-on:click="activate(category)"', $html);
+        $this->assertStringContainsString('this.open(category);', $html);
+        $this->assertStringContainsString('this.selectedId = category.id;', $html);
+        $this->assertStringContainsString('x-on:click="saveSelectedCategory()"', $html);
+        $this->assertSame(1, substr_count($html, '>Wybierz<'));
+        $this->assertStringNotContainsString('gps-category-picker__select-label', $html);
+        $this->assertStringNotContainsString('x-show="! category.has_children">Wybierz</span>', $html);
     }
 
     public function test_main_part_category_picker_uses_filament_form_component_action_close_path_without_touching_rendering(): void

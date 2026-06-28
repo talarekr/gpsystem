@@ -606,7 +606,6 @@
                             <small x-text="category.path"></small>
                         </span>
                         <span class="gps-category-picker__arrow" x-show="category.has_children" aria-hidden="true">›</span>
-                        <span class="gps-category-picker__select-label" x-show="! category.has_children">Wybierz</span>
                     </button>
                 </template>
 
@@ -643,7 +642,6 @@
                     x-on:click.stop="open(category)"
                     x-bind:aria-label="`Pokaż podkategorie: ${category.name}`"
                 >›</button>
-                <span class="gps-category-picker__select-label" x-show="! category.has_children">Wybierz</span>
             </div>
             </template>
 
