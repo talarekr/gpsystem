@@ -5,6 +5,7 @@ namespace App\Filament\Resources\PartResource\Pages;
 use App\Filament\Resources\PartResource;
 use App\Models\LocalSale;
 use App\Models\OrderItem;
+use App\Support\OrderItemThumbnailDiagnostics;
 use Filament\Resources\Pages\Page;
 use Filament\Support\Enums\MaxWidth;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -62,7 +63,7 @@ class SoldParts extends Page
     private function orderItemRows(): Collection
     {
         return OrderItem::query()
-            ->with(['order', 'part.images', 'part.storageLocation'])
+            ->with(['order', 'part.images', 'part.storageLocation', 'marketplaceListing.part.images', 'marketplaceListing.part.storageLocation'])
             ->whereHas('order', fn ($query) => $query->where('status', '!=', 'cancelled'))
             ->latest('id')
             ->limit(500)
@@ -71,21 +72,24 @@ class SoldParts extends Page
                 $order = $item->order;
                 $soldAt = $order?->ordered_at ?: $item->created_at;
 
+                $thumbnail = OrderItemThumbnailDiagnostics::resolve($order, $item);
+                $part = $thumbnail['part'] ?? null;
+
                 return [
                     'type' => 'order_item',
-                    'part' => $item->part,
-                    'name' => $item->part?->name ?: $item->product_name,
-                    'sku' => $item->part?->sku ?: $item->sku,
-                    'oem' => $item->part?->part_number ?: $item->part_number,
+                    'part' => $part,
+                    'name' => $part?->name ?: $item->product_name,
+                    'thumbnail_url' => $thumbnail['thumbnail_url'] ?? null,
+                    'thumbnail_source' => $thumbnail['thumbnail_source'] ?? 'placeholder',
+                    'storage_location' => $thumbnail['storage_location'] ?? 'Brak lokalizacji',
                     'source' => $item->marketplace ?: $order?->marketplace ?: 'sklep',
                     'reference' => $order ? \App\Filament\Resources\OrderResource::displayOrderNumber($order) : ($item->marketplace_order_id ?: '—'),
                     'sold_at' => $soldAt,
                     'sold_at_sort' => $soldAt?->getTimestamp() ?? 0,
                     'price' => $item->line_total ?? $item->unit_price,
                     'currency' => $item->currency ?: $order?->currency ?: 'PLN',
-                    'quantity' => $item->quantity,
-                    'part_id' => $item->part?->id ?: $item->part_id,
-                    'part_url' => $item->part ? PartResource::getUrl('view', ['record' => $item->part]) : null,
+                    'part_id' => $part?->id,
+                    'part_url' => $part ? PartResource::getUrl('view', ['record' => $part]) : null,
                     'order_url' => $order ? \App\Filament\Resources\OrderResource::getUrl('view', ['record' => $order]) : null,
                 ];
             });
@@ -107,16 +111,16 @@ class SoldParts extends Page
                     'type' => 'local_sale',
                     'part' => $sale->part,
                     'name' => $sale->part?->name ?: ($snapshot['name'] ?? '—'),
-                    'sku' => $sale->part?->sku ?: ($snapshot['sku'] ?? null),
-                    'oem' => $sale->part?->part_number ?: ($snapshot['part_number'] ?? null),
                     'source' => 'sprzedaż lokalna',
                     'reference' => 'Lokalna #'.$sale->id,
                     'sold_at' => $soldAt,
                     'sold_at_sort' => $soldAt?->getTimestamp() ?? 0,
                     'price' => $sale->amount,
                     'currency' => $sale->currency ?: 'PLN',
-                    'quantity' => $sale->quantity,
                     'part_id' => $sale->part?->id ?: $sale->part_id,
+                    'thumbnail_url' => $sale->part?->adminTableImageUrl(),
+                    'thumbnail_source' => $sale->part?->adminTableImageUrl() ? 'admin_parts_thumbnail' : 'placeholder',
+                    'storage_location' => $sale->part?->storageLocation?->name ?: 'Brak lokalizacji',
                     'part_url' => $sale->part ? PartResource::getUrl('view', ['record' => $sale->part]) : null,
                     'order_url' => null,
                 ];
