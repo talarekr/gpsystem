@@ -137,13 +137,10 @@
                     <div class="gps-sales-metric">
                         <span>Sprzedaż lokalna</span>
                         <span class="gps-sales-metric__value">{{ $this->formatPln($salesAnalytics['summary']['local_sales_pln']) }}</span>
-                        @php($localSalesCount = $salesAnalytics['summary']['local_sales_count'])
-                        <small>{{ $localSalesCount }} {{ $localSalesCount === 1 ? 'sprzedaż' : 'sprzedaży' }}</small>
                     </div>
                     <div class="gps-sales-metric gps-sales-metric--total">
                         <span>Sprzedaż łącznie</span>
                         <span class="gps-sales-metric__value">{{ $this->formatPln($salesAnalytics['summary']['total_sales_pln']) }}</span>
-                        <small>Online + lokalnie</small>
                     </div>
                 </div>
             </article>
