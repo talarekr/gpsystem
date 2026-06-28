@@ -12,6 +12,7 @@
     'pickerId' => null,
     'treeAttribute' => null,
     'drawerId' => null,
+    'marketplaceSelectionChannel' => null,
 ])
 
 @php
@@ -59,5 +60,6 @@
         'saveField' => $saveField,
         'pickerId' => $pickerId,
         'drawerId' => $drawerId,
+        'marketplaceSelectionChannel' => $marketplaceSelectionChannel,
     ])
 </aside>

@@ -139,6 +139,7 @@ class PartResource extends Resource
                         Forms\Components\Hidden::make('category_needs_review'),
                         Forms\Components\Hidden::make('category_suggestions')->dehydrated(false)->default([]),
                         Forms\Components\Hidden::make('marketplace_category_mappings_state')->dehydrated(false)->default([]),
+                        Forms\Components\Hidden::make('marketplace_category_selections')->default([]),
                     ]),
 
                 Section::make('Informacje o samochodzie')
@@ -217,7 +218,7 @@ class PartResource extends Resource
                             ->dehydrated(false)
                             ->visible(fn (?Part $record): bool => $record !== null && $record->exists)
                             ->view('filament.resources.parts.marketplace-readiness-cards')
-                            ->viewData(fn (?Part $record, Forms\Get $get): array => ['part' => $record, 'categoryId' => $get('category_id')])
+                            ->viewData(fn (?Part $record, Forms\Get $get): array => ['part' => $record, 'categoryId' => $get('category_id'), 'marketplaceCategorySelections' => (array) ($get('marketplace_category_selections') ?: [])])
                             ->columnSpanFull(),
                         Forms\Components\Placeholder::make('marketplace_readiness_empty')
                             ->hiddenLabel()

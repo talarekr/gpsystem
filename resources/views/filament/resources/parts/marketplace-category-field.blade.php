@@ -3,6 +3,16 @@
     $fieldId = 'marketplace-category-drawer-'.str_replace(['_', '.'], '-', $channel).'-'.$part?->id;
     $pickerId = $fieldId.'-picker';
     $childrenUrl = route('tools.marketplace-category-children', ['token' => 'gps_images_import_2026']);
+    $pendingSelection = $marketplaceCategorySelections[$key] ?? null;
+    if (is_array($pendingSelection) && filled($pendingSelection['external_category_id'] ?? null)) {
+        $category = [
+            'id' => (string) $pendingSelection['external_category_id'],
+            'value' => $pendingSelection['external_category_path'] ?? $pendingSelection['external_category_name'] ?? $pendingSelection['external_category_id'],
+            'display_name' => $pendingSelection['external_category_name'] ?? $pendingSelection['external_category_path'] ?? $pendingSelection['external_category_id'],
+            'manual_override' => true,
+        ];
+    }
+
     $categoryValue = $category['value'] ?? null;
     $categoryDisplayValue = $category['display_name'] ?? $category['leaf_name'] ?? null;
     $categoryFullValue = $categoryValue ?: $categoryDisplayValue;
@@ -51,11 +61,12 @@
                 'lazyChildrenUrl' => $childrenUrl,
                 'lazyChannel' => $channel,
                 'suggestions' => [],
-                'saveUrl' => route('tools.part-marketplace-category-mapping.store'),
-                'hiddenFields' => ['part_id' => $part?->id, 'channel' => $channel],
+                'saveUrl' => null,
+                'hiddenFields' => [],
                 'saveField' => 'external_category_id',
                 'pickerId' => $pickerId,
                 'treeAttribute' => $channel,
+                'marketplaceSelectionChannel' => $channel,
             ])
         </div>
     </template>

@@ -3,6 +3,7 @@
     $labels = ['allegro' => 'Allegro', 'ovoko' => 'Ovoko', 'ebay' => 'eBay'];
     $channels = ['allegro' => 'allegro_main', 'ovoko' => 'ovoko', 'ebay' => 'ebay_de'];
     $mappingChannels = ['allegro' => 'allegro_main', 'ovoko' => 'ovoko', 'ebay' => 'ebay_de'];
+    $marketplaceCategorySelections = $marketplaceCategorySelections ?? [];
 @endphp
 
 <div class="space-y-4" data-marketplace-preparation-panel>
