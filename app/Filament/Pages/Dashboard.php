@@ -9,9 +9,10 @@ use App\Models\ShopEvent;
 use Filament\Pages\Dashboard as BaseDashboard;
 use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 
 class Dashboard extends BaseDashboard
 {
@@ -46,7 +47,6 @@ class Dashboard extends BaseDashboard
         return [
             'all' => 'Wszystkie',
             'requires_action' => 'Wymaga reakcji',
-            'orders' => 'Zamówienia',
             'messages' => 'Wiadomości',
             'returns_complaints' => 'Zwroty/Reklamacje',
         ];
@@ -74,29 +74,38 @@ class Dashboard extends BaseDashboard
     }
 
     /**
-     * @return Collection<int, ShopEvent>
+     * @return Collection<int, array<string, string>>
      */
     public function shopEvents(): Collection
     {
-        $events = Schema::hasTable('shop_events')
-            ? $this->shopEventQuery($this->activeShopEventTab())
-                ->orderByRaw('COALESCE(occurred_at, created_at) DESC')
-                ->limit(15)
-                ->get()
-            : new Collection();
+        $tab = $this->activeShopEventTab();
 
-        return $events
-            ->merge($this->orderShopEvents($this->activeShopEventTab()))
-            ->sortByDesc(fn (ShopEvent $event): int => ($event->occurred_at ?: $event->created_at)?->getTimestamp() ?? 0)
-            ->take(15)
+        if (in_array($tab, ['all', 'requires_action'], true)) {
+            return $this->orderShopEvents($tab);
+        }
+
+        if (! Schema::hasTable('shop_events')) {
+            return collect();
+        }
+
+        return $this->shopEventQuery($tab)
+            ->orderByRaw('COALESCE(occurred_at, created_at) DESC')
+            ->get()
+            ->map(fn (ShopEvent $event): array => $this->shopEventToDashboardItem($event))
             ->values();
     }
 
     private function shopEventCount(string $tab): int
     {
-        $count = Schema::hasTable('shop_events') ? (int) $this->shopEventQuery($tab)->count() : 0;
+        if ($tab === 'all') {
+            return Schema::hasTable('orders') ? $this->newOrdersQuery()->count() : 0;
+        }
 
-        return $count + $this->orderShopEventsCount($tab);
+        if ($tab === 'requires_action') {
+            return Schema::hasTable('orders') ? $this->delayedNewOrdersQuery()->count() : 0;
+        }
+
+        return Schema::hasTable('shop_events') ? (int) $this->shopEventQuery($tab)->count() : 0;
     }
 
     private function shopEventQuery(string $tab): Builder
@@ -104,8 +113,6 @@ class Dashboard extends BaseDashboard
         $query = ShopEvent::query()->whereIn('event_type', $this->supportShopEventTypes());
 
         match ($tab) {
-            'requires_action' => $query->where('requires_action', true),
-            'orders' => $query->whereIn('event_type', $this->orderShopEventTypes()),
             'messages' => $query->whereIn('event_type', $this->messageShopEventTypes()),
             'returns_complaints' => $query->whereIn('event_type', $this->returnComplaintShopEventTypes()),
             default => null,
@@ -114,57 +121,103 @@ class Dashboard extends BaseDashboard
         return $query;
     }
 
-
-    private function orderShopEventsCount(string $tab): int
-    {
-        if (! in_array($tab, ['all', 'requires_action', 'orders'], true) || ! Schema::hasTable('orders')) {
-            return 0;
-        }
-
-        return (int) Order::query()->where('status', 'new')->count();
-    }
-
     /**
-     * @return Collection<int, ShopEvent>
+     * @return Collection<int, array<string, string>>
      */
     private function orderShopEvents(string $tab): Collection
     {
-        if (! in_array($tab, ['all', 'requires_action', 'orders'], true) || ! Schema::hasTable('orders')) {
-            return new Collection();
+        if (! Schema::hasTable('orders')) {
+            return collect();
         }
 
-        return Order::query()
-            ->where('status', 'new')
-            ->latest()
-            ->limit(15)
+        $query = $tab === 'requires_action'
+            ? $this->delayedNewOrdersQuery()
+            : $this->newOrdersQuery();
+
+        return $query
+            ->with('items')
+            ->orderByRaw('COALESCE(ordered_at, created_at) DESC')
             ->get()
-            ->map(fn (Order $order): ShopEvent => $this->orderToShopEvent($order));
+            ->map(fn (Order $order): array => $this->orderToDashboardItem($order))
+            ->values();
     }
 
-    private function orderToShopEvent(Order $order): ShopEvent
+    private function newOrdersQuery(): Builder
     {
-        $event = new ShopEvent([
-            'source' => 'storefront',
-            'event_type' => 'order',
-            'title' => 'Nowe zamówienie sklep ' . $order->order_number,
-            'description' => trim(sprintf('Status: %s. Klient: %s.', $order->status, $order->customer_name ?: '—')),
-            'occurred_at' => $order->created_at,
-            'is_read' => false,
-            'requires_action' => true,
-            'severity' => 'warning',
-            'customer_name' => $order->customer_name,
-            'external_reference' => $order->order_number,
-            'url' => OrderResource::getUrl('view', ['record' => $order]),
-            'payload' => [
-                'order_id' => $order->id,
-                'order_number' => $order->order_number,
-                'status' => $order->status,
-            ],
-        ]);
-        $event->created_at = $order->created_at;
-        $event->updated_at = $order->updated_at;
+        return Order::query()->where('status', 'new');
+    }
 
-        return $event;
+    private function delayedNewOrdersQuery(): Builder
+    {
+        return $this->newOrdersQuery()
+            ->whereRaw('COALESCE(ordered_at, created_at) <= ?', [now()->subDay()]);
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function orderToDashboardItem(Order $order): array
+    {
+        $date = $order->ordered_at ?: $order->created_at;
+
+        return [
+            'time' => $date?->format('Y-m-d H:i') ?? '—',
+            'channel' => $this->normalizeOrderChannel($order),
+            'reference' => OrderResource::displayOrderNumber($order),
+            'amount' => OrderResource::formatOrderTotal($order),
+            'url' => OrderResource::getUrl('view', ['record' => $order]),
+            'severity' => 'warning',
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function shopEventToDashboardItem(ShopEvent $event): array
+    {
+        $date = $event->occurred_at ?: $event->created_at;
+
+        return [
+            'time' => $date?->format('Y-m-d H:i') ?? '—',
+            'channel' => $event->sourceLabel(),
+            'reference' => $event->external_reference ?: $event->title,
+            'amount' => '—',
+            'url' => $event->dashboardUrl() ?: '',
+            'severity' => $event->severity ?: 'info',
+        ];
+    }
+
+    private function normalizeOrderChannel(Order $order): string
+    {
+        $source = $this->firstFilled([
+            $order->marketplace,
+            data_get($order->meta, 'source'),
+            data_get($order->meta, 'channel'),
+            $order->items->first(fn ($item): bool => filled($item->marketplace))?->marketplace,
+        ]);
+
+        return match (true) {
+            Str::contains(Str::lower($source), 'allegro') => 'Allegro',
+            Str::contains(Str::lower($source), 'ovoko') => 'Ovoko',
+            Str::contains(Str::lower($source), 'ebay') => 'eBay',
+            default => 'Sklep',
+        };
+    }
+
+    /**
+     * @param array<int, mixed> $values
+     */
+    private function firstFilled(array $values): string
+    {
+        foreach ($values as $value) {
+            $value = trim((string) $value);
+
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        return '';
     }
 
     /**
@@ -173,18 +226,9 @@ class Dashboard extends BaseDashboard
     private function supportShopEventTypes(): array
     {
         return array_merge(
-            $this->orderShopEventTypes(),
             $this->messageShopEventTypes(),
             $this->returnComplaintShopEventTypes(),
         );
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    private function orderShopEventTypes(): array
-    {
-        return ['order', 'payment'];
     }
 
     /**
