@@ -92,6 +92,21 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $this->assertStringNotContainsString('allegro_price_pln', $html);
     }
 
+    public function test_marketplace_prepare_status_box_uses_inline_alpine_colors_not_tailwind_border_colors(): void
+    {
+        $view = file_get_contents(resource_path('views/filament/resources/parts/marketplace-readiness-cards.blade.php'));
+
+        $this->assertStringNotContainsString('border-success-500', $view);
+        $this->assertStringNotContainsString('border-danger-500', $view);
+        $this->assertStringContainsString('x-bind:style="prepareReady', $view);
+        $this->assertStringContainsString('border: 1px solid rgb(var(--success-500)); color: rgb(var(--success-700));', $view);
+        $this->assertStringContainsString('border: 1px solid rgb(var(--danger-500)); color: rgb(var(--danger-700));', $view);
+        $this->assertStringContainsString("x-bind:data-marketplace-prepare-result=\"prepareReady ? 'ready' : 'blocked'\"", $view);
+        $this->assertStringContainsString('flex min-h-10 items-center justify-center rounded-lg bg-transparent px-3 py-2 text-center text-sm font-medium', $view);
+        $this->assertStringContainsString('<button type="button"', $view);
+        $this->assertStringNotContainsString('href="/tools', $view);
+    }
+
     public function test_prepare_click_state_is_per_channel(): void
     {
         $part = Part::query()->create(['name' => 'Część bez ceny', 'price' => null, 'quantity' => 1]);
