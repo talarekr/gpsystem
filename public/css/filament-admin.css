@@ -491,18 +491,17 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 
 .gps-shop-events__empty { margin-top: 1rem; border: 1px dashed #cbd5e1; border-radius: 0.95rem; background: #f8fafc; padding: 1.2rem; color: #64748b; font-weight: 700; text-align: center; }
 .gps-shop-events__list { display: grid; gap: 0.45rem; margin-top: 1rem; }
-.gps-shop-events__item { display: grid; grid-template-columns: minmax(0, 1fr) 4rem; gap: 0.75rem; align-items: center; min-width: 0; border: 1px solid #e2e8f0; border-left: 4px solid #94a3b8; border-radius: 0.8rem; background: #fff; color: #475569; padding: 0.32rem 0.75rem; box-shadow: 0 1px 2px rgba(11, 31, 58, 0.035); }
+.gps-shop-events__item { display: grid; grid-template-columns: minmax(0, 1fr) max-content; column-gap: 6px; align-items: center; min-width: 0; border: 1px solid #e2e8f0; border-left: 4px solid #94a3b8; border-radius: 0.8rem; background: #fff; color: #475569; padding: 0.32rem 0.75rem; box-shadow: 0 1px 2px rgba(11, 31, 58, 0.035); }
 .gps-shop-events__item--success { border-left-color: #16a34a; }
 .gps-shop-events__item--warning { border-left-color: #86cfa3; }
 .gps-shop-events__item--danger { border-left-color: #dc2626; }
 .gps-shop-events__time { color: #475569; white-space: nowrap; }
 .gps-shop-events__summary { display: flex; flex-wrap: wrap; gap: 0.45rem 0.8rem; margin-top: 0.35rem; color: #64748b; font-size: 0.82rem; }
-.gps-shop-events__line { display: grid; grid-template-columns: 8rem max-content 6.5rem max-content minmax(0, 6fr) max-content minmax(0, 2.2fr) max-content minmax(5.25rem, 1.2fr); min-width: 0; align-items: center; column-gap: 0.4rem; overflow: hidden; color: inherit; font-size: 0.84rem; font-weight: 400; white-space: nowrap; }
+.gps-shop-events__line { display: grid; grid-template-columns: 8rem 5.25rem minmax(0, 6fr) minmax(0, 2.2fr) minmax(5.25rem, 1.2fr); min-width: 0; align-items: center; column-gap: 0.35rem; overflow: hidden; color: inherit; font-size: 0.84rem; font-weight: 400; white-space: nowrap; }
 .gps-shop-events__line > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .gps-shop-events__reference { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gps-shop-events__storage { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gps-shop-events__amount { overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
-.gps-shop-events__separator { color: #94a3b8; }
 .gps-shop-events__source { display: inline-flex; align-items: center; min-width: 0; overflow: hidden; white-space: nowrap; }
 .gps-shop-events__source .gps-order-source { display: inline-flex; align-items: center; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; }
 .gps-shop-events__summary strong { color: #334155; }
