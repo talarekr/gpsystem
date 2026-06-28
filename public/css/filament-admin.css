@@ -486,7 +486,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 .gps-shop-events__tabs { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem; }
 .gps-shop-events__tab { display: inline-flex; align-items: center; gap: .38rem; border: 1px solid #dbe3ee; border-radius: 999px; background: #f8fafc; color: #334155; padding: 0.42rem 0.68rem; font-size: 0.85rem; font-weight: 400; text-decoration: none; }
 .gps-shop-events__tab:hover, .gps-shop-events__tab.is-active { border-color: #405f82; background: #edf3f8; color: var(--gps-admin-navy); }
-.gps-shop-events__tab-count { display: inline; min-width: 0; height: auto; padding: 0; color: #475569; font-size: .82rem; font-weight: 400; line-height: inherit; }
+.gps-shop-events__tab-count { display: inline-flex; min-width: 0; height: auto; align-items: center; padding: 0; color: #475569; font-size: .82rem; font-weight: 400; line-height: 1; }
 .gps-shop-events__tab-count--action { color: #dc2626; }
 
 .gps-shop-events__empty { margin-top: 1rem; border: 1px dashed #cbd5e1; border-radius: 0.95rem; background: #f8fafc; padding: 1.2rem; color: #64748b; font-weight: 700; text-align: center; }
@@ -515,8 +515,8 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 .gps-shop-events__body p { margin: 0.3rem 0 0; color: #475569; font-size: 0.88rem; line-height: 1.45; }
 .gps-shop-events__meta { margin-top: 0.45rem; color: #64748b; font-size: 0.8rem; }
 .gps-shop-events__meta strong { color: #334155; }
-.gps-shop-events__open { flex-shrink: 0; align-self: center; border: 0; color: #86cfa3; padding: 0.28rem 0.55rem; font-size: 0.8rem; font-weight: 700; text-decoration: none; }
-.gps-shop-events__open:hover { color: #6ab989; text-decoration: underline; }
+.gps-shop-events__open { flex-shrink: 0; align-self: center; border: 0; background: transparent; color: #475569; padding: 0.28rem 0.55rem; font-size: 0.8rem; font-weight: 700; text-decoration: none; }
+.gps-shop-events__open:hover { color: #334155; text-decoration: underline; }
 .gps-shop-events__more-wrap { display: flex; justify-content: center; margin-top: 0.75rem; }
 .gps-shop-events__more { border: 1px solid #dbe3ee; border-radius: 999px; background: #f8fafc; color: #405f82; padding: 0.38rem 0.72rem; font-size: 0.82rem; font-weight: 700; text-decoration: none; }
 .gps-shop-events__more:hover { border-color: #405f82; background: #edf3f8; color: var(--gps-admin-navy); }
