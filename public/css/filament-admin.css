@@ -493,7 +493,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 
 .gps-shop-events__empty { margin-top: 1rem; border: 1px dashed #cbd5e1; border-radius: 0.95rem; background: #f8fafc; padding: 1.2rem; color: #64748b; font-weight: 700; text-align: center; }
 .gps-shop-events__list { display: grid; gap: 0.45rem; margin-top: 1rem; }
-.gps-shop-events__item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.75rem; align-items: center; border: 1px solid #e2e8f0; border-left: 4px solid #94a3b8; border-radius: 0.8rem; background: #fff; padding: 0.58rem 0.75rem; box-shadow: 0 1px 2px rgba(11, 31, 58, 0.035); }
+.gps-shop-events__item { display: flex; flex-direction: row; gap: 0.75rem; align-items: center; justify-content: space-between; min-width: 0; border: 1px solid #e2e8f0; border-left: 4px solid #94a3b8; border-radius: 0.8rem; background: #fff; padding: 0.32rem 0.75rem; box-shadow: 0 1px 2px rgba(11, 31, 58, 0.035); }
 .gps-shop-events__item--success { border-left-color: #16a34a; }
 .gps-shop-events__item--warning { border-left-color: #d97706; }
 .gps-shop-events__item--danger { border-left-color: #dc2626; }
@@ -501,9 +501,10 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 .gps-shop-events__summary { display: flex; flex-wrap: wrap; gap: 0.45rem 0.8rem; margin-top: 0.35rem; color: #64748b; font-size: 0.82rem; }
 .gps-shop-events__line { display: flex; min-width: 0; flex-wrap: nowrap; align-items: center; gap: 0.4rem; overflow: hidden; color: #475569; font-size: 0.84rem; font-weight: 400; white-space: nowrap; }
 .gps-shop-events__line > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.gps-shop-events__reference { flex: 1 1 auto; white-space: nowrap; }
 .gps-shop-events__separator { flex: 0 0 auto; color: #94a3b8; }
-.gps-shop-events__source { display: inline-flex; flex: 0 0 auto; align-items: center; overflow: visible; }
-.gps-shop-events__source .gps-order-source { font-weight: 700; }
+.gps-shop-events__source { display: inline-flex; flex: 0 0 auto; align-items: center; min-width: 0; overflow: hidden; white-space: nowrap; }
+.gps-shop-events__source .gps-order-source { display: inline-flex; align-items: center; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; }
 .gps-shop-events__summary strong { color: #334155; }
 .gps-shop-events__badges, .gps-shop-events__meta { display: flex; flex-wrap: wrap; gap: 0.4rem; }
 .gps-shop-events__badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 0.18rem 0.52rem; font-size: 0.72rem; font-weight: 800; line-height: 1rem; }
@@ -516,7 +517,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 .gps-shop-events__body p { margin: 0.3rem 0 0; color: #475569; font-size: 0.88rem; line-height: 1.45; }
 .gps-shop-events__meta { margin-top: 0.45rem; color: #64748b; font-size: 0.8rem; }
 .gps-shop-events__meta strong { color: #334155; }
-.gps-shop-events__open { align-self: center; border: 1px solid #cfd9e7; border-radius: 0.7rem; color: var(--gps-admin-navy); padding: 0.45rem 0.65rem; font-size: 0.8rem; font-weight: 800; text-decoration: none; }
+.gps-shop-events__open { flex-shrink: 0; align-self: center; border: 1px solid #cfd9e7; border-radius: 0.7rem; color: var(--gps-admin-navy); padding: 0.32rem 0.65rem; font-size: 0.8rem; font-weight: 400; text-decoration: none; }
 .gps-shop-events__open:hover { background: #edf3f8; }
 .gps-shop-events__more-wrap { display: flex; justify-content: center; margin-top: 0.75rem; }
 .gps-shop-events__more { border: 1px solid #dbe3ee; border-radius: 999px; background: #f8fafc; color: #405f82; padding: 0.38rem 0.72rem; font-size: 0.82rem; font-weight: 700; text-decoration: none; }
@@ -524,9 +525,9 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 
 @media (max-width: 720px) {
     .gps-shop-events__header { flex-direction: column; }
-    .gps-shop-events__item { grid-template-columns: 1fr; }
-    .gps-shop-events__line { flex-wrap: wrap; white-space: normal; }
-    .gps-shop-events__open { justify-self: flex-start; }
+    .gps-shop-events__item { flex-direction: row; }
+    .gps-shop-events__line { flex-wrap: nowrap; white-space: nowrap; }
+    .gps-shop-events__open { justify-self: auto; }
 }
 
 .gps-quick-actions {
