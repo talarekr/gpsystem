@@ -366,19 +366,32 @@
             const filamentFormComponentActionModalId = 'form-component-action';
 
             this.$dispatch('close-category-drawer', { drawerId: this.drawerId });
-            this.$dispatch('close-modal', { id: filamentFormComponentActionModalId });
-            window.dispatchEvent(new CustomEvent('close-modal', { detail: { id: filamentFormComponentActionModalId } }));
 
             if (typeof categoryDrawerOpen !== 'undefined') {
                 categoryDrawerOpen = false;
             }
 
             // The main part category picker is a Filament form-component action slide-over.
-            // Its open state lives in Livewire's mounted form-component action state,
-            // not in the Alpine drawer state used by marketplace category pickers.
+            // Its open state, backdrop and focus trap are owned by Filament's modal action,
+            // so let Filament perform the full unmount/close cycle before emitting a final
+            // close-modal event on the next frame. Dispatching close-modal before the
+            // Livewire unmount completed removed the panel content while leaving Filament's
+            // modal overlay/focus state active until the next user focus event.
+            const finishFilamentClose = () => {
+                requestAnimationFrame(() => {
+                    this.$dispatch('close-modal', { id: filamentFormComponentActionModalId });
+                    window.dispatchEvent(new CustomEvent('close-modal', { detail: { id: filamentFormComponentActionModalId } }));
+                });
+            };
+
             if (typeof this.$wire.unmountFormComponentAction === 'function') {
-                this.$wire.unmountFormComponentAction(false, false);
+                Promise.resolve(this.$wire.unmountFormComponentAction(true, true))
+                    .then(finishFilamentClose);
+
+                return;
             }
+
+            finishFilamentClose();
         },
         back() {
             this.stack.pop();

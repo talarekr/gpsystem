@@ -48,8 +48,9 @@ class PartCategoryPickerUiTest extends TestCase
         $this->assertStringContainsString("const filamentFormComponentActionModalId = 'form-component-action';", $html);
         $this->assertStringContainsString("this.\$dispatch('close-modal', { id: filamentFormComponentActionModalId });", $html);
         $this->assertStringContainsString("window.dispatchEvent(new CustomEvent('close-modal', { detail: { id: filamentFormComponentActionModalId } }));", $html);
-        $this->assertStringContainsString('this.$wire.unmountFormComponentAction(false, false);', $html);
         $this->assertStringContainsString('categoryDrawerOpen = false', $html);
+        $this->assertStringContainsString('Promise.resolve(this.$wire.unmountFormComponentAction(true, true))', $html);
+        $this->assertMatchesRegularExpression('/Promise\.resolve\(this\.\$wire\.unmountFormComponentAction\(true, true\)\).*?\.then\(finishFilamentClose\)/s', $html);
         $this->assertMatchesRegularExpression('/closeCategoryPicker\(\);\s*this\.selectedId = null;/s', $html);
         $this->assertStringNotContainsString('.fi-modal-header button', $html);
         $this->assertStringNotContainsString('$refs.marketplaceForm.submit();\n                this.closeCategoryPicker();', $html);
@@ -67,9 +68,10 @@ class PartCategoryPickerUiTest extends TestCase
         $this->assertStringContainsString('->slideOver()', $resource);
         $this->assertStringContainsString("->view('filament.forms.category-picker')", $resource);
 
-        $this->assertStringContainsString('$this->unmountFormComponentAction(false, false);', $editPage);
+        $this->assertStringContainsString('$this->unmountFormComponentAction(true, true);', $editPage);
         $this->assertStringContainsString("\$this->dispatch('close-modal', id: 'form-component-action');", $editPage);
-        $this->assertStringContainsString('this.$wire.unmountFormComponentAction(false, false);', $categoryPicker);
+        $this->assertStringContainsString('this.$wire.unmountFormComponentAction(true, true)', $categoryPicker);
+        $this->assertStringContainsString('requestAnimationFrame(() =>', $categoryPicker);
         $this->assertStringNotContainsString('.fi-modal-header button', $categoryPicker);
 
         $this->assertStringContainsString('x-text="`/ ${category.name}`"', $categoryPicker);
