@@ -8,17 +8,20 @@ use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Infolists;
 use Filament\Infolists\Infolist;
+use Filament\Navigation\NavigationItem;
 use Filament\Resources\Resource;
 use Filament\Tables\Table;
+use Illuminate\Support\Facades\Schema;
 
 class OrderResource extends Resource
 {
     protected static ?string $model = Order::class;
     protected static ?string $navigationIcon = 'heroicon-o-clipboard-document-list';
+    protected static ?string $navigationGroup = 'Zamówienia';
     protected static ?string $navigationLabel = 'Zamówienia';
     protected static ?string $modelLabel = 'Zamówienie';
     protected static ?string $pluralModelLabel = 'Zamówienia';
-    protected static ?int $navigationSort = 60;
+    protected static ?int $navigationSort = 10;
 
     public static function form(Form $form): Form
     {
@@ -62,6 +65,53 @@ class OrderResource extends Resource
     public static function infolist(Infolist $infolist): Infolist
     {
         return $infolist->schema([]);
+    }
+
+
+    public static function getNewOrdersNavigationCount(): int
+    {
+        if (! Schema::hasTable('orders')) {
+            return 0;
+        }
+
+        return Order::query()->where('status', 'new')->count();
+    }
+
+    public static function getAllOrdersNavigationCount(): int
+    {
+        if (! Schema::hasTable('orders')) {
+            return 0;
+        }
+
+        return Order::query()->count();
+    }
+
+    /**
+     * @return array<int, NavigationItem>
+     */
+    public static function getNavigationItems(): array
+    {
+        if (! static::shouldRegisterNavigation() || ! static::canViewAny()) {
+            return [];
+        }
+
+        return [
+            NavigationItem::make(static::navigationLabelWithCount('Nowe', static::getNewOrdersNavigationCount()))
+                ->group(static::getNavigationGroup())
+                ->sort(static::getNavigationSort())
+                ->url(static::getUrl('index', ['status' => 'new']))
+                ->isActiveWhen(fn (): bool => request()->routeIs('filament.admin.resources.orders.index') && request()->query('status') === 'new'),
+            NavigationItem::make(static::navigationLabelWithCount('Wszystkie', static::getAllOrdersNavigationCount()))
+                ->group(static::getNavigationGroup())
+                ->sort((static::getNavigationSort() ?? 10) + 1)
+                ->url(static::getUrl('index'))
+                ->isActiveWhen(fn (): bool => request()->routeIs('filament.admin.resources.orders.index') && request()->query('status') !== 'new'),
+        ];
+    }
+
+    private static function navigationLabelWithCount(string $label, int $count): string
+    {
+        return sprintf('%s (%d)', $label, $count);
     }
 
     public static function getPages(): array

@@ -41,7 +41,7 @@ class PartResource extends Resource
     protected static ?string $model = Part::class;
     protected static ?string $navigationGroup = 'Części';
     protected static ?string $navigationIcon = null;
-    protected static ?string $navigationLabel = 'Wszystkie części';
+    protected static ?string $navigationLabel = 'Części';
     protected static ?int $navigationSort = 20;
     protected static ?string $modelLabel = 'część';
     protected static ?string $pluralModelLabel = 'części';
@@ -792,9 +792,8 @@ class PartResource extends Resource
     {
         return [
             NavigationItem::make('Dodaj część')->group(static::getNavigationGroup())->sort(static::getNavigationSort())->url(static::getUrl('create'))->isActiveWhen(fn () => request()->routeIs('filament.admin.resources.parts.create')),
-            NavigationItem::make(static::navigationLabelWithCount('Wszystkie części', static::getAllPartsNavigationCount()))->group(static::getNavigationGroup())->sort((static::getNavigationSort() ?? 20) + 1)->url(static::getUrl('index'))->isActiveWhen(fn () => request()->routeIs('filament.admin.resources.parts.index')),
-            NavigationItem::make(static::navigationLabelWithCount('Części do wystawienia', static::getPartsToListNavigationCount()))->group(static::getNavigationGroup())->sort((static::getNavigationSort() ?? 20) + 2)->url(static::getUrl('to-list'))->isActiveWhen(fn () => request()->routeIs('filament.admin.resources.parts.to-list')),
-            NavigationItem::make(static::navigationLabelWithCount('Do wyjaśnienia', static::getPartsNeedsReviewNavigationCount()))->group(static::getNavigationGroup())->sort((static::getNavigationSort() ?? 20) + 3)->url(static::getUrl('needs-review'))->isActiveWhen(fn () => request()->routeIs('filament.admin.resources.parts.needs-review')),
+            NavigationItem::make(static::navigationLabelWithCount('Części', static::getAllPartsNavigationCount()))->group(static::getNavigationGroup())->sort((static::getNavigationSort() ?? 20) + 1)->url(static::getUrl('index'))->isActiveWhen(fn () => request()->routeIs('filament.admin.resources.parts.index')),
+            NavigationItem::make(static::navigationLabelWithCount('Do wystawienia', static::getPartsToListNavigationCount()))->group(static::getNavigationGroup())->sort((static::getNavigationSort() ?? 20) + 2)->url(static::getUrl('to-list'))->isActiveWhen(fn () => request()->routeIs('filament.admin.resources.parts.to-list')),
         ];
     }
 

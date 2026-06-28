@@ -19,6 +19,7 @@ class Dashboard extends BaseDashboard
 {
     protected static string $view = 'filament.pages.dashboard';
     protected static ?string $navigationIcon = 'heroicon-o-home';
+    protected static bool $shouldRegisterNavigation = false;
     protected static ?string $navigationLabel = 'Strona główna';
     protected static ?string $title = '';
     protected static ?int $navigationSort = 10;
