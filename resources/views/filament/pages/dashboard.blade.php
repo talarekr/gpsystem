@@ -128,21 +128,21 @@
                 <div class="gps-sales-metrics">
                     <div class="gps-sales-metric">
                         <span>Sprzedaż online</span>
-                        <strong>{{ $this->formatPln($salesAnalytics['summary']['online_revenue_pln']) }}</strong>
+                        <span class="gps-sales-metric__value">{{ $this->formatPln($salesAnalytics['summary']['online_revenue_pln']) }}</span>
                     </div>
                     <div class="gps-sales-metric">
                         <span>Zamówienia</span>
-                        <strong>{{ $salesAnalytics['summary']['online_orders_count'] }}</strong>
+                        <span class="gps-sales-metric__value">{{ $salesAnalytics['summary']['online_orders_count'] }}</span>
                     </div>
                     <div class="gps-sales-metric">
                         <span>Sprzedaż lokalna</span>
-                        <strong>{{ $this->formatPln($salesAnalytics['summary']['local_sales_pln']) }}</strong>
+                        <span class="gps-sales-metric__value">{{ $this->formatPln($salesAnalytics['summary']['local_sales_pln']) }}</span>
                         @php($localSalesCount = $salesAnalytics['summary']['local_sales_count'])
                         <small>{{ $localSalesCount }} {{ $localSalesCount === 1 ? 'sprzedaż' : 'sprzedaży' }}</small>
                     </div>
                     <div class="gps-sales-metric gps-sales-metric--total">
                         <span>Sprzedaż łącznie</span>
-                        <strong>{{ $this->formatPln($salesAnalytics['summary']['total_sales_pln']) }}</strong>
+                        <span class="gps-sales-metric__value">{{ $this->formatPln($salesAnalytics['summary']['total_sales_pln']) }}</span>
                         <small>Online + lokalnie</small>
                     </div>
                 </div>
@@ -160,13 +160,15 @@
                         <article class="gps-sales-channel gps-sales-channel--{{ $channel['key'] }}">
                             <div class="gps-sales-channel__body">
                                 <div class="gps-sales-channel__topline">
-                                    <strong class="gps-sales-channel__wordmark gps-sales-channel__wordmark--{{ $channel['key'] }}">
+                                    <span class="gps-sales-channel__wordmark gps-sales-channel__wordmark--{{ $channel['key'] }}">
                                         @if ($channel['key'] === 'ebay')
                                             <span style="color:#0064D2">e</span><span style="color:#E53238">B</span><span style="color:#F5AF02">a</span><span style="color:#86B817">y</span>
+                                        @elseif (in_array($channel['key'], ['allegro', 'ovoko'], true))
+                                            @include('filament.resources.orders.partials.source-wordmark', ['marketplace' => $channel['key']])
                                         @else
                                             {{ $channel['label'] }}
                                         @endif
-                                    </strong>
+                                    </span>
                                     <span>{{ $channel['orders_count'] }} zam.</span>
                                 </div>
                                 @if ($channel['key'] === 'ebay')

@@ -725,14 +725,14 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     gap: 0.5rem;
     color: #0f172a;
     font-size: 0.98rem;
-    font-weight: 800;
+    font-weight: 400;
     line-height: 1.2;
 }
 
 .gps-sales-card__heading small {
     color: #64748b;
     font-size: 0.8rem;
-    font-weight: 700;
+    font-weight: 400;
     white-space: nowrap;
 }
 
@@ -755,16 +755,16 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     display: block;
     color: #64748b;
     font-size: 0.78rem;
-    font-weight: 750;
+    font-weight: 400;
     line-height: 1.25;
 }
 
-.gps-sales-metric strong {
+.gps-sales-metric__value {
     display: block;
     margin: 0.32rem 0 0.18rem;
     color: var(--gps-admin-navy);
     font-size: clamp(1.08rem, 1.35vw, 1.35rem);
-    font-weight: 500;
+    font-weight: 400;
     line-height: 1.08;
 }
 
@@ -775,9 +775,9 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     padding: 0.8rem 0.85rem;
 }
 
-.gps-sales-metric--total strong {
+.gps-sales-metric--total .gps-sales-metric__value {
     font-size: clamp(1.12rem, 1.45vw, 1.42rem);
-    font-weight: 500;
+    font-weight: 400;
 }
 
 .gps-sales-channels {
@@ -803,26 +803,16 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     gap: 0.45rem;
 }
 
-.gps-sales-channel__topline strong {
+.gps-sales-channel__wordmark {
     color: #0f172a;
     font-size: 0.88rem;
-    font-weight: 500;
+    font-weight: 400;
 }
 
-.gps-sales-channel__wordmark {
-    font-weight: 500;
-}
 
-.gps-sales-channel__wordmark--allegro {
-    color: #ff5a00;
-    font-family: "Market Sans", Arial, "Helvetica Neue", sans-serif;
-    letter-spacing: -.02em;
-}
-
+.gps-sales-channel__wordmark--allegro,
 .gps-sales-channel__wordmark--ovoko {
-    color: #FF7A00;
-    font-family: "Market Sans", Arial, "Helvetica Neue", sans-serif;
-    letter-spacing: -.02em;
+    color: inherit;
 }
 
 .gps-sales-channel__wordmark--ebay {
@@ -836,18 +826,18 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     letter-spacing: -.02em;
 }
 
-.gps-sales-channel__topline span,
+.gps-sales-channel__topline > span:not(.gps-sales-channel__wordmark),
 .gps-sales-channel small {
     color: #64748b;
     font-size: 0.76rem;
-    font-weight: 500;
+    font-weight: 400;
 }
 
 .gps-sales-channel p {
     margin: 0.08rem 0 0;
     color: var(--gps-admin-navy);
     font-size: 0.9rem;
-    font-weight: 500;
+    font-weight: 400;
     line-height: 1.15;
 }
 
