@@ -10,7 +10,6 @@
         ->orderBy('channel')
         ->orderBy('level')
         ->orderBy('full_path')
-        ->limit(900)
         ->get()
         ->groupBy('channel');
 @endphp
