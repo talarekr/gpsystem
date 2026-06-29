@@ -29,7 +29,7 @@ class DhlShipmentService
                 'street' => $senderAddress['street'],
                 'house_number' => $senderAddress['house_number'],
                 'apartment_number' => $senderAddress['apartment_number'],
-                'person_name' => config('services.shipments.sender.name'),
+                'person_name' => config('services.shipments.sender.contact_name', config('services.shipments.sender.name')),
                 'email' => config('services.shipments.sender.email'),
                 'phone' => config('services.shipments.sender.phone'),
             ],

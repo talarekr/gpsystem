@@ -23,12 +23,13 @@ return [
 
     'shipments' => [
         'sender' => [
-            'name' => env('SHIPMENT_SENDER_NAME', env('SENDER_NAME')),
-            'address' => env('SHIPMENT_SENDER_ADDRESS', env('SENDER_ADDRESS')),
-            'postal_code' => env('SHIPMENT_SENDER_POSTAL_CODE', env('SENDER_POSTAL_CODE')),
-            'city' => env('SHIPMENT_SENDER_CITY', env('SENDER_CITY')),
+            'name' => env('SHIPMENT_SENDER_NAME', env('SENDER_NAME', 'GREGOR SWISS')),
+            'address' => env('SHIPMENT_SENDER_ADDRESS', env('SENDER_ADDRESS', 'Milanowska 137')),
+            'postal_code' => env('SHIPMENT_SENDER_POSTAL_CODE', env('SENDER_POSTAL_CODE', '08-460')),
+            'city' => env('SHIPMENT_SENDER_CITY', env('SENDER_CITY', 'Sobolew')),
             'country' => env('SHIPMENT_SENDER_COUNTRY', env('SENDER_COUNTRY', 'PL')),
-            'phone' => env('SHIPMENT_SENDER_PHONE', env('SENDER_PHONE')),
+            'contact_name' => env('SHIPMENT_SENDER_CONTACT_NAME', env('SENDER_CONTACT_NAME', 'GRZEGORZ PACIOREK')),
+            'phone' => env('SHIPMENT_SENDER_PHONE', env('SENDER_PHONE', '579 152 665')),
             'email' => env('SHIPMENT_SENDER_EMAIL', env('SENDER_EMAIL')),
         ],
     ],
@@ -37,7 +38,7 @@ return [
         'endpoint' => env('DHL_API_ENDPOINT', env('DHL24_WSDL')),
         'login' => env('DHL_API_LOGIN', env('DHL24_LOGIN', env('DHL24_USERNAME'))),
         'password' => env('DHL_API_PASSWORD', env('DHL24_PASSWORD')),
-        'account_number' => env('DHL_ACCOUNT_NUMBER', env('DHL24_ACCOUNT_NUMBER')),
+        'account_number' => env('DHL_ACCOUNT_NUMBER', env('DHL24_ACCOUNT_NUMBER', '2520734')),
         'default_service' => env('DHL_DEFAULT_SERVICE', env('DHL24_DEFAULT_SERVICE_TYPE', 'AH')),
         'test_mode' => env('DHL_TEST_MODE', env('DHL24_MODE', 'test') !== 'production'),
         'label_type' => env('DHL_LABEL_TYPE', env('DHL24_LABEL_TYPE', 'LBLP')),
