@@ -289,6 +289,47 @@ class EbayApiClient extends AbstractMarketplaceApiClient
         return (string) $updated['access_token'];
     }
 
+
+    public function publishInventoryOffer(string $sku, array $inventoryPayload, array $offerPayload): array
+    {
+        $base = rtrim((string) $this->account?->api_base_url, '/');
+        $token = $this->accessToken();
+        $headers = ['X-EBAY-C-MARKETPLACE-ID' => (string) ($offerPayload['marketplaceId'] ?? $this->marketplaceId())];
+        $inventoryResponse = Http::withToken($token)->withHeaders($headers)->acceptJson()->asJson()->timeout(30)
+            ->put($base.'/sell/inventory/v1/inventory_item/'.rawurlencode($sku), $inventoryPayload);
+        if (! $inventoryResponse->successful()) return $this->writeResult('createOrReplaceInventoryItem', $inventoryResponse);
+
+        $offerResponse = Http::withToken($token)->withHeaders($headers)->acceptJson()->asJson()->timeout(30)
+            ->post($base.'/sell/inventory/v1/offer', $offerPayload);
+        if (! $offerResponse->successful()) return $this->writeResult('createOffer', $offerResponse) + ['inventory_http_status' => $inventoryResponse->status()];
+
+        $offerJson = $offerResponse->json();
+        $offerId = is_array($offerJson) ? (string) ($offerJson['offerId'] ?? '') : '';
+        if ($offerId === '') return ['ok' => false, 'step' => 'createOffer', 'http_status' => $offerResponse->status(), 'json' => is_array($offerJson) ? $offerJson : [], 'error' => 'eBay createOffer response did not contain offerId.'];
+
+        $publishResponse = Http::withToken($token)->withHeaders($headers)->acceptJson()->asJson()->timeout(30)
+            ->post($base.'/sell/inventory/v1/offer/'.rawurlencode($offerId).'/publish');
+        $publishJson = $publishResponse->json();
+
+        return [
+            'ok' => $publishResponse->successful(),
+            'step' => 'publishOffer',
+            'http_status' => $publishResponse->status(),
+            'inventory_http_status' => $inventoryResponse->status(),
+            'offer_http_status' => $offerResponse->status(),
+            'offer_id' => $offerId,
+            'listing_id' => is_array($publishJson) ? ($publishJson['listingId'] ?? null) : null,
+            'json' => is_array($publishJson) ? $publishJson : [],
+            'request_id' => $publishResponse->header('x-ebay-c-request-id') ?: $publishResponse->header('rlogid'),
+        ];
+    }
+
+    private function writeResult(string $step, $response): array
+    {
+        $json = $response->json();
+        return ['ok' => false, 'step' => $step, 'http_status' => $response->status(), 'json' => is_array($json) ? $json : [], 'request_id' => $response->header('x-ebay-c-request-id') ?: $response->header('rlogid')];
+    }
+
     protected function extractOffers(array $payload): array
     {
         $rows = $payload['inventoryItems'] ?? $payload['inventoryItem'] ?? [];

@@ -18,6 +18,7 @@ class PublishPartToMarketplacesService
         private readonly AllegroPublishAdapter $allegro,
         private readonly OvokoPublishAdapter $ovoko,
         private readonly EbayPublishAdapter $ebay,
+        private readonly MarketplacePublishGate $publishGate,
     ) {}
 
     public function preview(Part $part, array|string $channels = 'all', bool $includePayload = true): array
@@ -30,10 +31,10 @@ class PublishPartToMarketplacesService
 
     public function confirm(Part $part, array|string $channels, bool $dryRun, bool $confirm): array
     {
-        $enabled = (bool) config('marketplace.publish_enabled', false);
         $selected = $this->normalizeChannels($channels);
+        $enabled = collect($selected)->every(fn (string $channel): bool => $this->publishGate->allows($channel));
         $base = $this->responseSkeleton($dryRun, $confirm);
-        if ($dryRun || ! $confirm || ! $enabled) return $base + ['part_id' => $part->id, 'blocked' => true, 'blockers' => ['marketplace_publish_disabled_or_not_confirmed'], 'channels' => [], 'readiness_ok' => false];
+        if ($dryRun || ! $confirm || ! $enabled) return $base + ['part_id' => $part->id, 'blocked' => true, 'blockers' => $dryRun || ! $confirm ? ['marketplace_publish_not_confirmed'] : $this->blockingFlags($selected), 'channels' => [], 'publish_gates' => $this->publishGates($selected), 'readiness_ok' => false];
 
         $preview = $this->preview($part, $selected);
         $ready = array_keys(array_filter($preview['channels'], fn (array $result): bool => (bool) ($result['success'] ?? false)));
@@ -68,5 +69,7 @@ class PublishPartToMarketplacesService
     private function allSelectedSuccessful(array $results, array $selected): bool { return $selected !== [] && collect($selected)->every(fn (string $channel): bool => (bool) ($results[$channel]['success'] ?? false)); }
     private function skippedChannels(array $skipped): array { return collect($skipped)->map(fn (array $data): array => ['status' => 'blocked', 'reasons' => $data['errors'] ?? $data['readiness']['blockers'] ?? []])->all(); }
     private function skippedResult(string $channel, array $data): array { return ['channel' => $data['channel'] ?? $channel, 'marketplace' => $data['marketplace'] ?? $channel, 'success' => false, 'blocked' => true, 'status' => 'skipped_blocked_readiness', 'errors' => $data['errors'] ?? $data['readiness']['blockers'] ?? [], 'warnings' => $data['warnings'] ?? [], 'write' => false, 'readiness' => $data['readiness'] ?? []]; }
+    private function publishGates(array $channels): array { return collect($channels)->mapWithKeys(fn (string $channel): array => [$channel => $this->publishGate->decision($channel)])->all(); }
+    private function blockingFlags(array $channels): array { return collect($this->publishGates($channels))->flatMap(fn (array $gate): array => $gate['blocking_flags'] ?? [])->unique()->values()->all(); }
     private function responseSkeleton(bool $dryRun, bool $confirm): array { return ['dry_run' => $dryRun, 'confirm' => $confirm, 'marketplace_publish_enabled' => (bool) config('marketplace.publish_enabled', false), 'marketplace_write' => false, 'allegro_write' => false, 'ovoko_write' => false, 'ebay_write' => false, 'products_changed' => false, 'offers_changed' => false, 'stock_changed' => false, 'prices_changed' => false, 'images_changed' => false, 'needs_listing_changed' => false]; }
 }
