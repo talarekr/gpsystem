@@ -212,6 +212,63 @@ class AllegroCategoryParametersTest extends TestCase
         $this->assertDatabaseCount('marketplace_listings', 0);
     }
 
+
+    public function test_allegro_car_type_maps_body_type_to_vehicle_type_values_id(): void
+    {
+        $part = Part::query()->create(['name' => 'Część SUV', 'category_id' => 77, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'vehicle_snapshot' => ['body_type' => 'SUV'], 'is_visible_storefront' => true]);
+
+        $result = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, null, ['ok' => true, 'source' => 'cache', 'parameters' => [
+            ['id' => '129591', 'name' => 'Typ samochodu', 'type' => 'dictionary', 'required' => true, 'dictionary' => $this->carTypeDictionary(), 'options' => ['describesProduct' => false]],
+        ]]);
+
+        $this->assertSame([['id' => '129591', 'valuesIds' => ['129591_64']]], $result['offer_parameters']);
+        $this->assertSame([], $result['missing_required_parameters']);
+        $this->assertSame('SUV', $result['parameter_source_diagnostics'][0]['source_value']);
+        $this->assertSame('129591_64', $result['parameter_source_diagnostics'][0]['mapped_value_id']);
+        $this->assertSame('4x4/SUV', $result['parameter_source_diagnostics'][0]['mapped_label']);
+        $this->assertDatabaseHas('marketplace_sync_logs', ['marketplace' => 'allegro', 'action' => 'map_parameter:Typ samochodu', 'status' => 'success']);
+    }
+
+    public function test_allegro_car_type_leaves_unmapped_without_undefined_fallback(): void
+    {
+        $part = Part::query()->create(['name' => 'Część nietypowa', 'category_id' => 77, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'vehicle_snapshot' => ['body_type' => 'quad'], 'is_visible_storefront' => true]);
+
+        $result = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, null, ['ok' => true, 'source' => 'cache', 'parameters' => [
+            ['id' => '129591', 'name' => 'Typ samochodu', 'type' => 'dictionary', 'required' => true, 'dictionary' => $this->carTypeDictionary(), 'options' => ['describesProduct' => false]],
+        ]]);
+
+        $this->assertSame([], $result['offer_parameters']);
+        $this->assertSame('Typ samochodu', $result['missing_required_parameters'][0]['name']);
+        $this->assertSame('quad', $result['missing_required_parameters'][0]['source_value']);
+        $this->assertSame('no_car_type_mapping', $result['missing_required_parameters'][0]['reason']);
+        $this->assertArrayNotHasKey('mapped_value_id', $result['missing_required_parameters'][0]);
+    }
+
+    public function test_allegro_car_type_logs_once_per_build(): void
+    {
+        $part = Part::query()->create(['name' => 'Część sedan', 'category_id' => 77, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'vehicle_snapshot' => ['body_type' => 'sedan'], 'is_visible_storefront' => true]);
+
+        app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, null, ['ok' => true, 'source' => 'cache', 'parameters' => [
+            ['id' => '129591', 'name' => 'Typ samochodu', 'type' => 'dictionary', 'required' => false, 'dictionary' => $this->carTypeDictionary(), 'options' => ['describesProduct' => false]],
+            ['id' => '129591', 'name' => 'Typ samochodu', 'type' => 'dictionary', 'required' => false, 'dictionary' => $this->carTypeDictionary(), 'options' => ['describesProduct' => false]],
+        ]]);
+
+        $this->assertSame(1, DB::table('marketplace_sync_logs')->where('marketplace', 'allegro')->where('action', 'map_parameter:Typ samochodu')->count());
+    }
+
+    private function carTypeDictionary(): array
+    {
+        return [
+            ['id' => '129591_64', 'value' => '4x4/SUV'],
+            ['id' => '129591_8', 'value' => 'Autobusy'],
+            ['id' => '129591_16', 'value' => 'Niezdefiniowany'],
+            ['id' => '129591_4', 'value' => 'Samochody ciężarowe'],
+            ['id' => '129591_2', 'value' => 'Samochody dostawcze'],
+            ['id' => '129591_32', 'value' => 'Samochody kempingowe'],
+            ['id' => '129591_1', 'value' => 'Samochody osobowe'],
+        ];
+    }
+
     private function parametersPayload(bool $requireSide = false): array
     {
         return ['parameters' => [
