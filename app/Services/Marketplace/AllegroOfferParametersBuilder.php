@@ -10,8 +10,11 @@ use Illuminate\Support\Str;
 
 class AllegroOfferParametersBuilder
 {
+    private array $loggedCarTypeMappings = [];
+
     public function build(Part $part, ?MarketplaceCategoryMapping $mapping, array $definitionsResult): array
     {
+        $this->loggedCarTypeMappings = [];
         $offer = []; $product = []; $missing = []; $optional = []; $unmapped = []; $diag = [];
         $definitions = $definitionsResult['parameters'] ?? [];
         if (! ($definitionsResult['ok'] ?? false)) return $this->result([], [], [], [], [], [['source' => 'not_resolved', 'blocker' => $definitionsResult['blocker'] ?? 'allegro_category_parameters_unavailable']], $definitionsResult);
@@ -56,30 +59,77 @@ class AllegroOfferParametersBuilder
     private function resolveCarType(Part $part, array $def): array
     {
         $bodyType = $this->carBodyType($part);
+        $sourceValue = $bodyType['value'] ?? null;
+        $normalized = $this->norm($sourceValue);
         $allowed = array_map(fn ($allowed): array => ['id' => (string) ($allowed['id'] ?? ''), 'value' => (string) ($allowed['value'] ?? '')], $def['dictionary'] ?? []);
-        $vehicleKindTerms = ['osobowy', 'samochodosobowy', 'dostawczy', 'ciezarowy', 'ciężarowy', 'motocykl', 'autobus', 'przyczepa'];
-        $bodyTerms = ['suv', 'hatchback', 'kombi', 'sedan', 'coupe', 'coupé', 'kabriolet', 'cabrio', 'van', 'minivan', 'liftback'];
-        $allowedNorms = array_map(fn ($row): string => $this->norm($row['value']), $allowed);
-        $hasBodyValues = count(array_intersect($allowedNorms, array_map(fn ($v): string => $this->norm($v), $bodyTerms))) > 0;
-        $hasVehicleKindValues = count(array_intersect($allowedNorms, array_map(fn ($v): string => $this->norm($v), $vehicleKindTerms))) > 0;
+        $allowedById = collect($allowed)->keyBy('id');
 
-        app(ApiIntegrationLogger::class)->success('allegro', 'map_parameter:Typ samochodu', 'Allegro Typ samochodu mapping checked.', [
+        $mapping = $this->carTypeMapping($normalized);
+        $mappedId = $mapping['id'] ?? null;
+        $mappedLabel = $mappedId ? ($allowedById->get($mappedId)['value'] ?? ($mapping['label'] ?? null)) : null;
+
+        $context = [
             'request' => ['category_id' => (string) ($def['category_id'] ?? ''), 'parameter_id' => (string) ($def['id'] ?? ''), 'parameter_name' => (string) ($def['name'] ?? ''), 'required' => (bool) ($def['required'] ?? false)],
             'response' => ['allowed_values' => array_column($allowed, 'value', 'id')],
-            'meta' => ['mapping_source' => 'samochód → typ nadwozia', 'source_value' => $bodyType['value'] ?? null],
-        ]);
+            'meta' => [
+                'mapping_source' => 'samochód → typ nadwozia',
+                'source_value' => $sourceValue,
+                'normalized_value' => $normalized,
+                'mapped_value_id' => $mappedId,
+                'mapped_label' => $mappedLabel,
+            ],
+        ];
 
-        if (! $hasBodyValues || $hasVehicleKindValues) {
-            return ['value' => null, 'source' => $bodyType['source'] ?? 'car.body_type', 'source_value' => $bodyType['value'] ?? null, 'reason' => 'dictionary_does_not_match_body_type', 'allowed_values_sample' => array_slice($allowed, 0, 20)];
+        if (! $mappedId) {
+            $reason = blank($sourceValue) ? 'missing_source_value' : 'no_car_type_mapping';
+            $context['meta']['reason'] = $reason;
+            $this->logCarTypeMapping($def, $sourceValue, $context);
+
+            return ['value' => null, 'source' => $bodyType['source'] ?? 'car.body_type', 'source_value' => $sourceValue, 'normalized_value' => $normalized, 'reason' => $reason];
         }
 
-        $resolved = $this->resolveValue($bodyType['value'] ?? null, $bodyType['source'] ?? 'car.body_type', $def);
-        app(ApiIntegrationLogger::class)->success('allegro', 'map_parameter:Typ samochodu', 'Allegro Typ samochodu mapping result.', [
-            'request' => ['category_id' => (string) ($def['category_id'] ?? ''), 'parameter_id' => (string) ($def['id'] ?? ''), 'parameter_name' => (string) ($def['name'] ?? ''), 'required' => (bool) ($def['required'] ?? false)],
-            'response' => ['allowed_values' => array_column($allowed, 'value', 'id')],
-            'meta' => ['mapping_source' => 'samochód → typ nadwozia', 'source_value' => $bodyType['value'] ?? null, 'mapped_value' => $resolved['label'] ?? $resolved['value'] ?? null, 'missing_reason' => $resolved['reason'] ?? null],
-        ]);
-        return $resolved;
+        if (! $allowedById->has($mappedId)) {
+            $context['meta']['reason'] = 'mapped_value_not_allowed_for_category';
+            $this->logCarTypeMapping($def, $sourceValue, $context);
+
+            return ['value' => null, 'source' => $bodyType['source'] ?? 'car.body_type', 'source_value' => $sourceValue, 'normalized_value' => $normalized, 'reason' => 'mapped_value_not_allowed_for_category', 'mapped_value_id' => $mappedId, 'mapped_label' => $mappedLabel, 'allowed_values_sample' => array_slice($allowed, 0, 20)];
+        }
+
+        $this->logCarTypeMapping($def, $sourceValue, $context);
+
+        return ['type' => 'dictionary', 'value' => [$mappedId], 'label' => $mappedLabel, 'source' => $bodyType['source'] ?? 'car.body_type', 'source_value' => $sourceValue, 'normalized_value' => $normalized, 'mapped_value_id' => $mappedId, 'mapped_label' => $mappedLabel];
+    }
+
+    private function carTypeMapping(string $normalized): ?array
+    {
+        $map = [
+            '129591_64' => ['label' => '4x4/SUV', 'terms' => ['suv', '4x4', 'terenowy', 'offroad']],
+            '129591_1' => ['label' => 'Samochody osobowe', 'terms' => ['hatchback', 'sedan', 'kombi', 'coupe', 'cabrio', 'kabriolet', 'liftback', 'fastback', 'roadster', 'minivan', 'mpv', 'vanosobowy', 'samochodosobowy', 'osobowy', 'limuzyna']],
+            '129591_2' => ['label' => 'Samochody dostawcze', 'terms' => ['dostawczy', 'vandostawczy', 'furgon']],
+            '129591_4' => ['label' => 'Samochody ciężarowe', 'terms' => ['ciezarowy', 'truck']],
+            '129591_8' => ['label' => 'Autobusy', 'terms' => ['autobus', 'bus']],
+            '129591_32' => ['label' => 'Samochody kempingowe', 'terms' => ['kamper', 'kempingowy', 'camper']],
+        ];
+
+        foreach ($map as $id => $config) {
+            foreach ($config['terms'] as $term) {
+                $term = $this->norm($term);
+                if ($normalized === $term || ($term !== '' && str_contains($normalized, $term))) {
+                    return ['id' => $id, 'label' => $config['label']];
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private function logCarTypeMapping(array $def, mixed $sourceValue, array $context): void
+    {
+        $key = implode(':', [(string) ($def['category_id'] ?? ''), (string) ($def['id'] ?? ''), (string) $sourceValue, $context['meta']['reason'] ?? $context['meta']['mapped_value_id'] ?? 'none']);
+        if (isset($this->loggedCarTypeMappings[$key])) return;
+        $this->loggedCarTypeMappings[$key] = true;
+
+        app(ApiIntegrationLogger::class)->success('allegro', 'map_parameter:Typ samochodu', 'Allegro Typ samochodu mapping result.', $context);
     }
 
     private function carBodyType(Part $part): array
@@ -136,6 +186,9 @@ class AllegroOfferParametersBuilder
             'source' => $resolved['source'] ?? 'not_resolved',
             'source_value' => $resolved['source_value'] ?? null,
             'reason' => $resolved['reason'] ?? null,
+            'normalized_value' => $resolved['normalized_value'] ?? null,
+            'mapped_value_id' => $resolved['mapped_value_id'] ?? null,
+            'mapped_label' => $resolved['mapped_label'] ?? null,
             'allowed_values_sample' => $resolved['allowed_values_sample'] ?? null,
             'type' => (string) ($def['type'] ?? ''),
             'required' => (bool) ($def['required'] ?? false),
@@ -144,6 +197,9 @@ class AllegroOfferParametersBuilder
         ];
 
         if ($row['reason'] === null) unset($row['reason']);
+        if ($row['normalized_value'] === null) unset($row['normalized_value']);
+        if ($row['mapped_value_id'] === null) unset($row['mapped_value_id']);
+        if ($row['mapped_label'] === null) unset($row['mapped_label']);
         if ($row['allowed_values_sample'] === null) unset($row['allowed_values_sample']);
         if ($row['allowed_values'] === null) unset($row['allowed_values']);
 
