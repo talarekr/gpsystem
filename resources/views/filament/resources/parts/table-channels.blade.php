@@ -87,6 +87,32 @@
             color: #dc2626;
         }
 
+        .gps-admin-channels .part-channel-link {
+            display: inline-flex;
+            flex: 0 0 auto;
+            align-items: center;
+            justify-content: center;
+            width: 14px;
+            height: 14px;
+            color: #2563eb;
+            line-height: 1;
+            text-decoration: none;
+            vertical-align: middle;
+        }
+
+        .gps-admin-channels .part-channel-link:hover,
+        .gps-admin-channels .part-channel-link:focus-visible {
+            color: #1d4ed8;
+            text-decoration: none;
+        }
+
+        .gps-admin-channels .part-channel-link svg {
+            display: block;
+            width: 12px;
+            height: 12px;
+            stroke-width: 2;
+        }
+
     </style>
 @endonce
 
@@ -114,6 +140,21 @@
                     title="{{ $row['title'] }}"
                     aria-label="{{ $row['title'] }}"
                 >{{ $row['listed'] ? '✓' : '✕' }}</span>
+                @if ($row['listed'] && filled($row['url'] ?? null))
+                    <a
+                        class="part-channel-link"
+                        href="{{ $row['url'] }}"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Otwórz aukcję {{ $row['label'] }}"
+                        aria-label="Otwórz aukcję {{ $row['label'] }}"
+                    >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true" focusable="false">
+                            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                        </svg>
+                    </a>
+                @endif
             </div>
         @endforeach
     @endif
