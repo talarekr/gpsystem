@@ -8,9 +8,50 @@ use App\Services\Marketplace\Api\EbayApiClient;
 
 class EbayPublishAdapter extends BaseMarketplacePublishAdapter
 {
-    protected function channel(): string { return 'ebay_de'; }
-    protected function marketplace(): string { return 'ebay_de'; }
-    protected function accountCode(): string { return 'ebay_de'; }
+    private string $activeChannel = 'ebay_de';
+
+    protected function channel(): string { return $this->activeChannel; }
+    protected function marketplace(): string { return $this->activeChannel; }
+    protected function accountCode(): string { return $this->activeChannel; }
+
+    public function preview(Part $part): MarketplacePublishPreviewResult
+    {
+        return $this->withEbayChannels(fn (): MarketplacePublishPreviewResult => parent::preview($part), false);
+    }
+
+    public function publish(Part $part, MarketplacePublishCommand $command): MarketplacePublishResult
+    {
+        return $this->withEbayChannels(fn (): MarketplacePublishResult => parent::publish($part, $command), true);
+    }
+
+    private function withEbayChannels(callable $callback, bool $writeOperation): MarketplacePublishPreviewResult|MarketplacePublishResult
+    {
+        $results = [];
+        $original = $this->activeChannel;
+
+        foreach (['ebay_de', 'ebay_fr'] as $channel) {
+            $this->activeChannel = $channel;
+            $results[$channel] = $callback()->data;
+        }
+
+        $this->activeChannel = $original;
+        $success = collect($results)->every(fn (array $result): bool => (bool) ($result['success'] ?? false));
+        $payload = [
+            'channel' => 'ebay',
+            'marketplace' => 'ebay',
+            'success' => $success,
+            'blocked' => ! $success,
+            'errors' => collect($results)->flatMap(fn (array $result): array => $result['errors'] ?? [])->unique()->values()->all(),
+            'warnings' => collect($results)->flatMap(fn (array $result): array => $result['warnings'] ?? [])->unique()->values()->all(),
+            'write' => collect($results)->contains(fn (array $result): bool => (bool) ($result['write'] ?? false)),
+            'channels' => $results,
+            'ebay_channels' => array_keys($results),
+        ];
+
+        return $writeOperation
+            ? new MarketplacePublishResult('ebay', $payload + ['status' => $success ? 'published' : 'blocked'])
+            : new MarketplacePublishPreviewResult('ebay', $payload);
+    }
 
     protected function performLivePublish(Part $part, array $readiness, array $payload, ?MarketplaceAccount $account): array
     {
@@ -35,7 +76,7 @@ class EbayPublishAdapter extends BaseMarketplacePublishAdapter
         if ($listingDescription !== '') $offer['listingDescription'] = $listingDescription;
         $contentLanguage = $this->contentLanguage((string) $offer['marketplaceId']);
         $result = (new EbayApiClient($this->accountCode(), $account))->publishInventoryOffer($sku, $inventory, $offer, $contentLanguage);
-        return ['ok' => $result['ok'] ?? false, 'action' => 'publishOffer', 'http_status' => $result['http_status'] ?? null, 'offer_id' => $result['offer_id'] ?? null, 'listing_id' => $result['listing_id'] ?? null, 'external_inventory_id' => $sku, 'url' => isset($result['listing_id']) ? 'https://www.ebay.de/itm/'.$result['listing_id'] : null, 'request_id' => $result['request_id'] ?? null, 'request_summary' => $this->requestSummary($payload) + ['resolved_merchant_location_key' => $merchantLocationKey, 'merchantLocationKey' => $offer['merchantLocationKey'], 'aspects_diagnostics' => $aspectNormalization['diagnostics'], 'content_language' => $contentLanguage, 'marketplace_id' => $offer['marketplaceId'], 'inventory_description_source' => 'title', 'inventory_description_length' => mb_strlen($inventoryDescription), 'listing_description_length' => $listingDescription !== '' ? mb_strlen($listingDescription) : null], 'response_summary' => $this->responseSummary($result), 'json' => $result['json'] ?? [], 'error' => $this->ebayError($result), 'ui_error' => 'marketplace_api_error'];
+        return ['ok' => $result['ok'] ?? false, 'action' => 'publishOffer', 'http_status' => $result['http_status'] ?? null, 'offer_id' => $result['offer_id'] ?? null, 'listing_id' => $result['listing_id'] ?? null, 'external_inventory_id' => $sku, 'url' => isset($result['listing_id']) ? $this->listingUrl((string) $offer['marketplaceId'], (string) $result['listing_id']) : null, 'request_id' => $result['request_id'] ?? null, 'request_summary' => $this->requestSummary($payload) + ['resolved_merchant_location_key' => $merchantLocationKey, 'merchantLocationKey' => $offer['merchantLocationKey'], 'aspects_diagnostics' => $aspectNormalization['diagnostics'], 'content_language' => $contentLanguage, 'marketplace_id' => $offer['marketplaceId'], 'inventory_description_source' => 'title', 'inventory_description_length' => mb_strlen($inventoryDescription), 'listing_description_length' => $listingDescription !== '' ? mb_strlen($listingDescription) : null], 'response_summary' => $this->responseSummary($result), 'json' => $result['json'] ?? [], 'error' => $this->ebayError($result), 'ui_error' => 'marketplace_api_error'];
     }
 
     /**
@@ -144,6 +185,11 @@ class EbayPublishAdapter extends BaseMarketplacePublishAdapter
     private function plainText(string $value): string
     {
         return trim((string) preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags($value), ENT_QUOTES | ENT_HTML5, 'UTF-8')));
+    }
+
+    private function listingUrl(string $marketplaceId, string $listingId): string
+    {
+        return ($marketplaceId === 'EBAY_FR' ? 'https://www.ebay.fr/itm/' : 'https://www.ebay.de/itm/').$listingId;
     }
 
     private function contentLanguage(string $marketplaceId): string

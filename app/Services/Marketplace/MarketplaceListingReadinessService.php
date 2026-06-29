@@ -173,6 +173,7 @@ class MarketplaceListingReadinessService
             else { $translated[$key] = (string) $value; $untranslatedFields[] = $key; $blockers = array_merge($blockers, (array) ($result['blockers'] ?? ['translation_failed'])); }
         }
         $itemSpecifics = $this->ebayItemSpecificsService->fallbackSpecifics($part, $channel, $this->ebayCategoryMapping($part, $channel));
+        $part->refresh();
         $metadata = is_array($part->review_metadata) ? $part->review_metadata : [];
         Arr::set($metadata, 'marketplace_prepared_translations.'.$channel, [
             'status' => $blockers === [] ? 'prepared' : 'failed',
