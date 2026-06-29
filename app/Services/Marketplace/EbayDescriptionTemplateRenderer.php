@@ -79,7 +79,9 @@ class EbayDescriptionTemplateRenderer
     {
         return collect(self::ASSETS)->mapWithKeys(function (string $filename, string $key): array {
             $url = $this->assetUrl($filename);
-            $sourcePath = storage_path('app/imports/'.$filename);
+            $sourcePath = is_file(storage_path('app/imports/ebay-template/'.$filename))
+                ? storage_path('app/imports/ebay-template/'.$filename)
+                : storage_path('app/imports/'.$filename);
             Log::info('ebay_template_asset_url_generated', [
                 'asset_key' => $key,
                 'filename' => $filename,

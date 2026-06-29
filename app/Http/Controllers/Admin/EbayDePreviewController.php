@@ -53,6 +53,7 @@ class EbayDePreviewController extends Controller
         $imageUrls = $imageSelection['urls'];
         $renderData = $this->renderData($preparedFields, $part, $preparedReady);
         $listingDescription = $renderer->render(self::CHANNEL, $part, $renderData);
+        $listingDescriptionPreviewHtml = $this->listingDescriptionPreviewHtml($listingDescription);
         $assetDiagnostics = $this->assetDiagnostics($renderer, (bool) $request->boolean('check_assets'));
         $assetUrlWarning = collect($assetDiagnostics)->contains(fn (array $asset): bool => ! $asset['absolute_https'] || ! $asset['source_exists'] || (($asset['http_check']['ok'] ?? true) === false));
 
@@ -97,6 +98,7 @@ class EbayDePreviewController extends Controller
             'title' => ['value' => $title, 'source' => $preparedReady && filled($preparedFields['title'] ?? null) ? 'marketplace_prepared_translations.ebay_de.fields.title' : 'fallback: parts.name'],
             'description' => ['value' => $description, 'length' => Str::length($description), 'source' => $descriptionSource],
             'listingDescription' => $listingDescription,
+            'listingDescriptionPreviewHtml' => $listingDescriptionPreviewHtml,
             'inventoryPayload' => $inventoryPayload,
             'offerPayload' => $offerPayload,
             'images' => ['urls' => $imageUrls, 'selected' => $imageSelection['selected'], 'diagnostics' => $imageSelection['diagnostics']],
@@ -112,6 +114,13 @@ class EbayDePreviewController extends Controller
                 'readiness' => Arr::only($readiness, ['can_prepare', 'can_publish_later', 'missing_fields', 'warnings', 'blockers', 'prepared_payload_preview_safe']),
             ],
         ])->header('Content-Language', self::CONTENT_LANGUAGE);
+    }
+
+    private function listingDescriptionPreviewHtml(string $html): string
+    {
+        $html = (string) preg_replace('/<img\b(?![^>]*\breferrerpolicy=)/i', '<img referrerpolicy="no-referrer"', $html);
+
+        return '<meta name="referrer" content="no-referrer">'.$html;
     }
 
     private function preparedTranslation(Part $part): array
@@ -138,14 +147,16 @@ class EbayDePreviewController extends Controller
         $urls = $renderer->assetUrls();
         return collect(self::ASSETS)->map(function (string $filename, string $key) use ($urls, $withHttpChecks): array {
             $url = (string) ($urls[$key] ?? '');
-            $sourcePath = storage_path('app/imports/'.$filename);
+            [$selectedSourcePath, $selectedSourceVariant] = $this->selectedAssetSource($filename);
             $row = [
                 'key' => $key,
                 'filename' => $filename,
-                'source_path' => $sourcePath,
+                'selected_source_path' => $selectedSourcePath,
+                'selected_source_variant' => $selectedSourceVariant,
+                'source_path' => $selectedSourcePath,
                 'generated_url' => $url,
                 'absolute_https' => strtolower((string) parse_url($url, PHP_URL_SCHEME)) === 'https' && filled(parse_url($url, PHP_URL_HOST)),
-                'source_exists' => is_file($sourcePath),
+                'source_exists' => $selectedSourceVariant !== 'missing',
                 'http_check' => null,
             ];
             if ($withHttpChecks && $row['absolute_https']) {
@@ -153,6 +164,24 @@ class EbayDePreviewController extends Controller
             }
             return $row;
         })->values()->all();
+    }
+
+
+    /** @return array{0: string, 1: string} */
+    private function selectedAssetSource(string $filename): array
+    {
+        $candidates = [
+            'ebay_template_folder' => storage_path('app/imports/ebay-template/'.$filename),
+            'imports_root' => storage_path('app/imports/'.$filename),
+        ];
+
+        foreach ($candidates as $variant => $path) {
+            if (is_file($path)) {
+                return [$path, $variant];
+            }
+        }
+
+        return [$candidates['ebay_template_folder'], 'missing'];
     }
 
     private function inventoryDescription(string $title, string $sku): string
