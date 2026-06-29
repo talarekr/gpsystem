@@ -99,6 +99,28 @@ class MarketplacePublishPartFlowTest extends TestCase
         $this->assertDatabaseMissing('marketplace_listings', ['part_id' => $part->id, 'marketplace' => 'ebay_de']);
     }
 
+    public function test_confirm_explicit_single_channel_publishes_only_that_channel(): void
+    {
+        config(['marketplace.publish_enabled' => true]);
+        $category = PartCategory::query()->create(['name' => 'Alternatory']);
+        $part = $this->completeLocalPart(['category_id' => $category->id]);
+
+        MarketplaceCategoryMapping::query()->create(['local_category_id' => $category->id, 'channel' => 'allegro_main', 'external_category_id' => '261054']);
+        MarketplaceCategoryMapping::query()->create(['local_category_id' => $category->id, 'channel' => 'ovoko', 'external_category_id' => '252']);
+
+        $result = app(PublishPartToMarketplacesService::class)->confirm($part, ['allegro'], dryRun: false, confirm: true);
+
+        $this->assertSame(['allegro'], $result['ready_channels']);
+        $this->assertSame(['allegro'], $result['published_channels']);
+        $this->assertArrayHasKey('allegro', $result['channels']);
+        $this->assertArrayNotHasKey('ovoko', $result['channels']);
+        $this->assertArrayNotHasKey('ebay', $result['channels']);
+        $this->assertDatabaseHas('marketplace_listings', ['part_id' => $part->id, 'marketplace' => 'allegro']);
+        $this->assertDatabaseMissing('marketplace_listings', ['part_id' => $part->id, 'marketplace' => 'ovoko']);
+        $this->assertDatabaseMissing('marketplace_listings', ['part_id' => $part->id, 'marketplace' => 'ebay_de']);
+    }
+
+
     public function test_channel_normalization_supports_all_and_explicit_channels(): void
     {
         $service = app(PublishPartToMarketplacesService::class);
