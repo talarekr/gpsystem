@@ -2391,11 +2391,11 @@ button.gps-category-picker__arrow:hover {
 }
 
 body:has(.gps-admin-topbar) .fi-no-notifications {
-    top: calc(var(--gps-admin-topbar-height) + 1rem) !important;
+    top: calc(var(--gps-admin-topbar-height) + 2rem) !important;
 }
 
 @media (max-width: 900px) {
     body:has(.gps-admin-topbar) .fi-no-notifications {
-        top: calc(var(--gps-admin-topbar-height) + 0.75rem) !important;
+        top: calc(var(--gps-admin-topbar-height) + 1.5rem) !important;
     }
 }
