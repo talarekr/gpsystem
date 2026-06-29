@@ -263,9 +263,9 @@ class DhlShipmentService
     {
         $address = trim($address);
         if (preg_match('/^(.*?)[,\s]+(\d+[\pL\pN\/-]*)(?:\/(\d+[\pL\pN\/-]*))?$/u', $address, $matches)) {
-            return ['street' => trim($matches[1]), 'house_number' => $matches[2], 'apartment_number' => $matches[3] ?? null];
+            return ['street' => trim($matches[1]), 'house_number' => $matches[2], 'apartment_number' => $matches[3] ?? ''];
         }
-        return ['street' => $address, 'house_number' => '', 'apartment_number' => null];
+        return ['street' => $address, 'house_number' => '', 'apartment_number' => ''];
     }
 
     protected function postal(string $postal): string
