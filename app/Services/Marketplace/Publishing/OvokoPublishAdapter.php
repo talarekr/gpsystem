@@ -2,13 +2,10 @@
 
 namespace App\Services\Marketplace\Publishing;
 
-use App\Http\Controllers\OvokoPublicPhotoController;
 use App\Models\MarketplaceAccount;
 use App\Models\Part;
-use App\Models\PartImage;
 use App\Services\Marketplace\Api\OvokoApiClient;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Route;
 use Throwable;
 
 class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
@@ -62,8 +59,7 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
     {
         $settings = is_array($account->api_settings) ? $account->api_settings : [];
         $vehicle = is_array($payload['vehicle'] ?? null) ? $payload['vehicle'] : [];
-        $storagePhotoUrls = $this->publicImageUrls($payload['image_urls'] ?? []);
-        $ovokoPhotoUrls = $this->ovokoPublicPhotoUrls($payload, $storagePhotoUrls);
+        $ovokoPhotoUrls = $this->publicImageUrls($payload['image_urls'] ?? []);
 
         $fields = array_filter([
             'category_id' => $payload['category_id'] ?? null,
@@ -107,47 +103,17 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
         }, (array) $images)));
     }
 
-    /** @return array<int, string> */
-    private function ovokoPublicPhotoUrls(array $payload, array $fallbackUrls): array
-    {
-        $selected = data_get($payload, 'marketplace_image_diagnostics.selected_images');
-        if (! is_array($selected) || ! Route::has('marketplace.ovoko.photos.show')) {
-            return $fallbackUrls;
-        }
-
-        $urls = [];
-        foreach ($selected as $image) {
-            $partImageId = $image['part_image_id'] ?? null;
-            $sourcePath = is_string($image['selected_image_source_path'] ?? null) ? $image['selected_image_source_path'] : null;
-            if (! is_numeric($partImageId) || $sourcePath === null) {
-                continue;
-            }
-
-            $partImage = PartImage::query()->find((int) $partImageId);
-            if (! $partImage instanceof PartImage) {
-                continue;
-            }
-
-            $url = route('marketplace.ovoko.photos.show', [
-                'partImage' => $partImage->id,
-                'signature' => OvokoPublicPhotoController::signatureFor($partImage, $sourcePath),
-                'filename' => basename(parse_url($sourcePath, PHP_URL_PATH) ?: $sourcePath),
-            ], true);
-            $urls[] = preg_replace('/^http:\/\//i', 'https://', $url) ?: $url;
-        }
-
-        return $urls !== [] ? $urls : $fallbackUrls;
-    }
 
     private function formDiagnostics(array $fields): array
     {
         $photos = is_array($fields['photos[]'] ?? null) ? array_values($fields['photos[]']) : [];
 
         return [
-            'ovoko_form_encoding' => 'application/x-www-form-urlencoded; repeated array keys encoded manually in OvokoApiClient',
+            'ovoko_form_encoding' => 'application/x-www-form-urlencoded',
             'ovoko_photo_field_type' => get_debug_type($fields['photo'] ?? null),
             'ovoko_photos_field_encoding_shape' => is_array($fields['photos[]'] ?? null) ? 'repeated_photos_brackets' : get_debug_type($fields['photos[]'] ?? null),
-            'ovoko_photos_repeated_keys_preview' => array_map(fn (string $url): array => ['name' => 'photos[]', 'value_shape' => $this->safeUrlShape($url)], array_slice(array_filter($photos, 'is_string'), 0, 3)),
+            'ovoko_photos_are_repeated_keys' => is_array($fields['photos[]'] ?? null),
+            'ovoko_photos_repeated_keys_preview' => array_map(fn (string $url): array => ['name' => 'photos[]', 'value' => $url, 'value_shape' => $this->safeUrlShape($url)], array_slice(array_filter($photos, 'is_string'), 0, 3)),
         ];
     }
 
@@ -160,6 +126,8 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
         $firstPhotoPath = isset($photos[0]) && is_string($photos[0]) ? $this->urlPath($photos[0]) : null;
 
         return [
+            'final_photo_url' => is_string($photo) ? $photo : null,
+            'final_photos_urls' => array_values(array_filter($photos, 'is_string')),
             'photo_present' => filled($photo),
             'photo_shape' => get_debug_type($photo),
             'photo_scheme' => is_string($photo) ? parse_url($photo, PHP_URL_SCHEME) : null,
@@ -167,10 +135,10 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
             'photo_path' => is_string($photo) ? $this->urlPath($photo) : null,
             'photo_basename' => is_string($photo) ? basename($this->urlPath($photo)) : null,
             'photo_extension' => is_string($photo) ? pathinfo($this->urlPath($photo), PATHINFO_EXTENSION) ?: null : null,
-            'photo_path_has_expected_prefix' => is_string($photo) ? str_starts_with($this->urlPath($photo), '/storage/parts/photos/presentation/product/') : false,
+            'photo_path_has_expected_prefix' => is_string($photo) ? str_starts_with($this->urlPath($photo), '/storage/parts/photos/') : false,
             'photos_count' => count($photos),
             'first_photo_path' => $firstPhotoPath,
-            'first_photo_path_has_expected_prefix' => is_string($firstPhotoPath) ? str_starts_with($firstPhotoPath, '/storage/parts/photos/presentation/product/') : false,
+            'first_photo_path_has_expected_prefix' => is_string($firstPhotoPath) ? str_starts_with($firstPhotoPath, '/storage/parts/photos/') : false,
             'first_photo_matches_photo' => isset($photos[0]) && is_string($photo) && $photos[0] === $photo,
             'photo_http_status' => $photoCheck['photo_http_status'] ?? null,
             'photo_content_type' => $photoCheck['photo_content_type'] ?? null,
@@ -181,11 +149,7 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
             'photo_exact_url_check' => $photoCheck,
             'any_photo_accessible_publicly' => (bool) ($photoCheck['photo_accessible_publicly'] ?? false) || collect($checks)->contains(fn (array $check): bool => (bool) ($check['photo_accessible_publicly'] ?? false)),
             'photos_access_checks' => $checks,
-            'ovoko_photo_delivery_mode' => is_string($photo) && str_starts_with($this->urlPath($photo), '/marketplace/ovoko/photos/') ? 'ovoko_public_route' : 'storage_url',
-            'ovoko_public_photo_url' => is_string($photo) && str_starts_with($this->urlPath($photo), '/marketplace/ovoko/photos/') ? $photo : null,
-            'ovoko_public_photo_http_status' => is_string($photo) && str_starts_with($this->urlPath($photo), '/marketplace/ovoko/photos/') ? ($photoCheck['photo_http_status'] ?? null) : null,
-            'ovoko_public_photo_content_type' => is_string($photo) && str_starts_with($this->urlPath($photo), '/marketplace/ovoko/photos/') ? ($photoCheck['photo_content_type'] ?? null) : null,
-            'ovoko_public_photo_accessible_as_image' => is_string($photo) && str_starts_with($this->urlPath($photo), '/marketplace/ovoko/photos/') ? (bool) ($photoCheck['photo_accessible_publicly'] ?? false) : null,
+            'ovoko_photo_delivery_mode' => 'storage_url',
         ];
     }
 
@@ -234,7 +198,7 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
     private function safeUrlShape(string $url): array
     {
         $path = $this->urlPath($url);
-        return ['scheme' => parse_url($url, PHP_URL_SCHEME), 'host' => parse_url($url, PHP_URL_HOST), 'path' => $path, 'basename' => basename($path), 'path_extension' => pathinfo($path, PATHINFO_EXTENSION) ?: null, 'path_length' => strlen($path), 'path_has_expected_prefix' => str_starts_with($path, '/storage/parts/photos/presentation/product/')];
+        return ['scheme' => parse_url($url, PHP_URL_SCHEME), 'host' => parse_url($url, PHP_URL_HOST), 'path' => $path, 'basename' => basename($path), 'path_extension' => pathinfo($path, PATHINFO_EXTENSION) ?: null, 'path_length' => strlen($path), 'path_has_expected_prefix' => str_starts_with($path, '/storage/parts/photos/')];
     }
 
     private function urlPath(string $url): string
