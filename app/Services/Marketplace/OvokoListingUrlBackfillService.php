@@ -54,6 +54,11 @@ class OvokoListingUrlBackfillService
             $resolved = null;
             $source = 'skipped';
             $action = 'missing_shop_url';
+            $diagnostics = [
+                'rejected_local_url' => null,
+                'rejected_local_url_reason' => null,
+                'accepted_shop_url_host' => null,
+            ];
 
             if ($existingUrl !== null && ! $force) {
                 $action = 'skipped_has_url';
@@ -62,7 +67,7 @@ class OvokoListingUrlBackfillService
                 $action = 'missing_ovoko_id';
                 $summary['skipped']++;
             } else {
-                [$resolved, $source, $action] = $this->resolveShopUrl($listing, $ovokoId, $csvRows, $client);
+                [$resolved, $source, $action, $diagnostics] = $this->resolveShopUrl($listing, $ovokoId, $csvRows, $client);
 
                 if ($action === 'would_update') {
                     if ($apply) {
@@ -88,9 +93,12 @@ class OvokoListingUrlBackfillService
                 'marketplace_listing_id' => $listing->id,
                 'existing_ovoko_id' => $ovokoId ?? '',
                 'existing_url' => $existingUrl ?? '',
-                'resolved_shop_url' => $resolved ?? '',
+                'resolved_shop_url' => $resolved,
                 'source' => $source,
                 'action' => $action,
+                'rejected_local_url' => $diagnostics['rejected_local_url'],
+                'rejected_local_url_reason' => $diagnostics['rejected_local_url_reason'],
+                'accepted_shop_url_host' => $diagnostics['accepted_shop_url_host'],
             ];
         }
 
@@ -111,26 +119,55 @@ class OvokoListingUrlBackfillService
 
     private function resolveShopUrl(MarketplaceListing $listing, string $ovokoId, array $csvRows, mixed $client): array
     {
+        $diagnostics = [
+            'rejected_local_url' => null,
+            'rejected_local_url_reason' => null,
+            'accepted_shop_url_host' => null,
+        ];
+
         $local = $this->firstUrl($listing->raw_payload ?? []);
-        if ($local !== null) return [$local, 'local', 'would_update'];
+        if ($local !== null) {
+            $validation = $this->validateShopUrl($local);
+            if ($validation['valid']) {
+                $diagnostics['accepted_shop_url_host'] = $validation['host'];
+                return [$local, 'local', 'would_update', $diagnostics];
+            }
+
+            $diagnostics['rejected_local_url'] = $local;
+            $diagnostics['rejected_local_url_reason'] = $validation['reason'];
+        }
 
         if ($csvRows !== []) {
             $match = $this->matchCsv($csvRows, $listing, $ovokoId);
-            if (($match['ambiguous'] ?? false) === true) return [null, 'csv', 'ambiguous'];
-            if (($match['shop_url'] ?? null) !== null) return [$match['shop_url'], 'csv', 'would_update'];
+            if (($match['ambiguous'] ?? false) === true) return [null, 'csv', 'ambiguous', $diagnostics];
+            if (($match['shop_url'] ?? null) !== null) {
+                $validation = $this->validateShopUrl($match['shop_url']);
+                if ($validation['valid']) {
+                    $diagnostics['accepted_shop_url_host'] = $validation['host'];
+                    return [$match['shop_url'], 'csv', 'would_update', $diagnostics];
+                }
+
+                return [null, 'skipped/local_invalid', 'missing_shop_url', $diagnostics];
+            }
         }
 
         if ($client !== null && method_exists($client, 'fetchPartRawById')) {
             try {
                 $result = $client->fetchPartRawById($ovokoId);
                 $url = $this->firstUrl($result['raw'] ?? []) ?? $this->blankNull($result['normalized']['url'] ?? null);
-                if (($result['api_ok'] ?? false) && $url !== null) return [$url, 'ovoko_read_api', 'would_update'];
+                if (($result['api_ok'] ?? false) && $url !== null) {
+                    $validation = $this->validateShopUrl($url);
+                    if ($validation['valid']) {
+                        $diagnostics['accepted_shop_url_host'] = $validation['host'];
+                        return [$url, 'ovoko_read_api', 'would_update', $diagnostics];
+                    }
+                }
             } catch (\Throwable) {
                 // Read-only lookup failed; report missing_shop_url without writing or retrying through mutating endpoints.
             }
         }
 
-        return [null, $csvRows !== [] ? 'csv' : 'ovoko_read_api', 'missing_shop_url'];
+        return [null, $diagnostics['rejected_local_url'] !== null ? 'skipped/local_invalid' : ($csvRows !== [] ? 'csv' : 'ovoko_read_api'), 'missing_shop_url', $diagnostics];
     }
 
     private function loadCsv(string $path): array
@@ -164,6 +201,41 @@ class OvokoListingUrlBackfillService
             if (count($matches) === 1) return ['shop_url' => $this->blankNull($matches[0]['shop_url'] ?? null)];
         }
         return [];
+    }
+
+    private function validateShopUrl(string $url): array
+    {
+        $parts = parse_url($url);
+        $host = isset($parts['host']) ? strtolower($parts['host']) : null;
+        $path = $parts['path'] ?? '';
+
+        if (! in_array(strtolower((string) ($parts['scheme'] ?? '')), ['http', 'https'], true) || $host === null) {
+            return ['valid' => false, 'reason' => 'invalid_url', 'host' => $host];
+        }
+
+        if ($host === 'gpswiss.pl' && str_starts_with($path, '/storage/parts/photos/')) {
+            return ['valid' => false, 'reason' => 'image_url_not_listing_url', 'host' => $host];
+        }
+
+        if (preg_match('/\.(?:jpe?g|png|gif|webp|avif)(?:$|[?#])/i', $url) === 1) {
+            return ['valid' => false, 'reason' => 'image_url_not_listing_url', 'host' => $host];
+        }
+
+        if (! $this->isOvokoMarketplaceHost($host)) {
+            return ['valid' => false, 'reason' => 'invalid_host', 'host' => $host];
+        }
+
+        return ['valid' => true, 'reason' => null, 'host' => $host];
+    }
+
+    private function isOvokoMarketplaceHost(string $host): bool
+    {
+        return $host === 'ovoko.pl'
+            || str_ends_with($host, '.ovoko.pl')
+            || $host === 'ovoko.com'
+            || str_ends_with($host, '.ovoko.com')
+            || $host === 'rrr.lt'
+            || str_ends_with($host, '.rrr.lt');
     }
 
     private function firstUrl(mixed $payload): ?string
