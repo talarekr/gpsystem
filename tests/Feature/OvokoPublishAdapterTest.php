@@ -51,6 +51,10 @@ class OvokoPublishAdapterTest extends TestCase
                 && str_contains($body, 'quality=1')
                 && str_contains($body, 'status=1')
                 && str_contains($body, 'price=120')
+                && str_contains($body, 'manufacturer_code=3Q0919294F')
+                && preg_match('/(?:^|&)optional_codes=3Q0919294F(?:&|$)/', $body) === 1
+                && preg_match('/(?:^|&)optional_codes=OEM-OVOKO-1(?:&|$)/', $body) === 1
+                && preg_match('/(?:^|&)optional_codes=MFR-OVOKO-1(?:&|$)/', $body) === 1
                 && substr_count($body, 'photos%5B%5D=') === 1
                 && ! str_contains($body, 'photos%5B%5D%5B0%5D=')
                 && ! str_contains($body, '%2Fmarketplace%2Fovoko%2Fphotos%2F')
@@ -59,6 +63,11 @@ class OvokoPublishAdapterTest extends TestCase
                 && preg_match('/(?:^|&)photo=([^&]+)&photos%5B%5D=\1(?:&|$)/', $body) === 1;
         });
         $encodedLogs = json_encode(MarketplaceSyncLog::query()->pluck('payload')->all());
+        $this->assertStringContainsString('ovoko_part_codes', $encodedLogs);
+        $this->assertStringContainsString('ovoko_primary_part_code', $encodedLogs);
+        $this->assertStringContainsString('ovoko_part_codes_field_name', $encodedLogs);
+        $this->assertStringContainsString('ovoko_part_codes_encoding_shape', $encodedLogs);
+        $this->assertStringContainsString('part.part_number first', $encodedLogs);
         $this->assertStringNotContainsString('ovoko-user', $encodedLogs);
         $this->assertStringNotContainsString('ovoko-pass', $encodedLogs);
         $this->assertStringNotContainsString('ovoko-token', $encodedLogs);
@@ -151,7 +160,7 @@ class OvokoPublishAdapterTest extends TestCase
         MarketplaceCategoryMapping::query()->create(['local_category_id' => $category->id, 'channel' => 'ovoko', 'external_category_id' => '252']);
         MarketplaceAccount::query()->create(['marketplace' => 'ovoko', 'code' => 'ovoko_main', 'name' => 'Ovoko main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'live', 'api_credentials' => ['username' => 'ovoko-user', 'password' => 'ovoko-pass', 'user_token' => 'ovoko-token'], 'api_settings' => ['default_part_status' => 1]]);
         $car = Car::query()->create(['source_system' => 'ovoko', 'external_id' => 777, 'make' => 'BMW', 'model' => '3']);
-        $part = Part::query()->create(['sku' => 'GPS-OVOKO-1', 'name' => 'Kompletna część Ovoko', 'description' => 'Pełny opis części.', 'condition_notes' => 'używany', 'price' => 100, 'ovoko_price' => 120, 'quantity' => 1, 'category_id' => $category->id, 'car_id' => $car->id]);
+        $part = Part::query()->create(['sku' => 'GPS-OVOKO-1', 'name' => 'Kompletna część Ovoko', 'part_number' => '3Q0919294F', 'oem_number' => 'OEM-OVOKO-1', 'manufacturer_code' => 'MFR-OVOKO-1', 'description' => 'Pełny opis części.', 'condition_notes' => 'używany', 'price' => 100, 'ovoko_price' => 120, 'quantity' => 1, 'category_id' => $category->id, 'car_id' => $car->id]);
         DB::table('part_images')->insert(['part_id' => $part->id, 'path' => 'parts/photos/complete.jpg', 'sort_order' => 1, 'is_primary' => true, 'created_at' => now(), 'updated_at' => now()]);
         return $part;
     }

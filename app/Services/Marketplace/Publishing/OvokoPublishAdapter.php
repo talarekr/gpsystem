@@ -28,7 +28,8 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
         }
 
         $form = $this->importPartPayload($part, $readiness, $payload, $account);
-        $photoDiagnostics = $this->photoDiagnostics($form['fields'] ?? []) + $this->formDiagnostics($form['fields'] ?? []);
+        $formDiagnostics = $this->formDiagnostics($form['fields'] ?? []);
+        $photoDiagnostics = $this->photoDiagnostics($form['fields'] ?? []) + $formDiagnostics;
         if (($form['ok'] ?? false) === true && ! ($photoDiagnostics['any_photo_accessible_publicly'] ?? false)) {
             return ['ok' => false, 'status' => 'payload_invalid', 'action' => 'crm/importPart', 'error' => 'Ovoko photo is not publicly accessible.', 'ui_error' => 'Ovoko nie może pobrać zdjęcia części. Szczegóły są w Logach.', 'request_summary' => $this->requestSummary($payload) + ['ovoko_form_keys' => array_keys($form['fields'] ?? []), 'ovoko_photo' => $photoDiagnostics], 'response_summary' => ['ovoko_photo' => $photoDiagnostics]];
         }
@@ -46,13 +47,17 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
             'part_id_present' => filled($externalId),
             'response_top_level_keys' => $result['response_top_level_keys'] ?? [],
             'ovoko_photo' => $photoDiagnostics,
+            'ovoko_part_codes' => $formDiagnostics['ovoko_part_codes'] ?? [],
+            'ovoko_primary_part_code' => $formDiagnostics['ovoko_primary_part_code'] ?? null,
+            'ovoko_part_codes_field_name' => $formDiagnostics['ovoko_part_codes_field_name'] ?? null,
+            'ovoko_part_codes_encoding_shape' => $formDiagnostics['ovoko_part_codes_encoding_shape'] ?? null,
         ];
 
         if (! ($result['api_ok'] ?? false) || ! $externalId) {
-            return ['ok' => false, 'status' => 'api_error', 'action' => 'crm/importPart', 'http_status' => $result['http_status'] ?? null, 'error' => (string) ($result['message'] ?? 'Ovoko/RRR importPart failed.'), 'request_summary' => $this->requestSummary($payload) + ['ovoko_form_keys' => array_keys($form['fields']), 'ovoko_photo' => $photoDiagnostics], 'response_summary' => $summary];
+            return ['ok' => false, 'status' => 'api_error', 'action' => 'crm/importPart', 'http_status' => $result['http_status'] ?? null, 'error' => (string) ($result['message'] ?? 'Ovoko/RRR importPart failed.'), 'request_summary' => $this->requestSummary($payload) + ['ovoko_form_keys' => array_keys($form['fields']), 'ovoko_photo' => $photoDiagnostics] + $formDiagnostics, 'response_summary' => $summary];
         }
 
-        return ['ok' => true, 'status' => 'published', 'listing_status' => 'published', 'action' => 'crm/importPart', 'http_status' => $result['http_status'] ?? null, 'external_offer_id' => $externalId, 'external_listing_id' => $externalId, 'response_summary' => $summary];
+        return ['ok' => true, 'status' => 'published', 'listing_status' => 'published', 'action' => 'crm/importPart', 'http_status' => $result['http_status'] ?? null, 'external_offer_id' => $externalId, 'external_listing_id' => $externalId, 'request_summary' => $this->requestSummary($payload) + ['ovoko_form_keys' => array_keys($form['fields']), 'ovoko_photo' => $photoDiagnostics] + $formDiagnostics, 'response_summary' => $summary];
     }
 
     private function importPartPayload(Part $part, array $readiness, array $payload, MarketplaceAccount $account): array
@@ -60,6 +65,8 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
         $settings = is_array($account->api_settings) ? $account->api_settings : [];
         $vehicle = is_array($payload['vehicle'] ?? null) ? $payload['vehicle'] : [];
         $ovokoPhotoUrls = $this->publicImageUrls($payload['image_urls'] ?? []);
+
+        $partCodes = $this->ovokoPartCodes($part);
 
         $fields = array_filter([
             'category_id' => $payload['category_id'] ?? null,
@@ -70,7 +77,9 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
             'original_currency' => $readiness['currency'] ?? $payload['currency'] ?? 'PLN',
             'external_id' => $payload['sku'] ?? $part->sku ?? ('gps-part-'.$part->id),
             'visible_code' => $payload['sku'] ?? $part->sku ?? null,
-            'manufacturer_code' => $part->manufacturer_code ?? null,
+            'manufacturer_code' => $partCodes[0] ?? $part->manufacturer_code ?? null,
+            'other_code' => $part->oem_number ?? $part->manufacturer_code ?? null,
+            'optional_codes' => $partCodes,
             'notes' => trim(strip_tags((string) (($part->description ?? null) ?: ($part->short_description ?? null) ?: ($part->condition_notes ?? null)))) ?: null,
             'photo' => $ovokoPhotoUrls[0] ?? null,
             'photos[]' => $ovokoPhotoUrls,
@@ -107,14 +116,38 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
     private function formDiagnostics(array $fields): array
     {
         $photos = is_array($fields['photos[]'] ?? null) ? array_values($fields['photos[]']) : [];
+        $partCodes = is_array($fields['optional_codes'] ?? null) ? array_values($fields['optional_codes']) : [];
 
         return [
             'ovoko_form_encoding' => 'application/x-www-form-urlencoded',
+            'ovoko_part_codes' => $partCodes,
+            'ovoko_primary_part_code' => $partCodes[0] ?? null,
+            'ovoko_part_codes_field_name' => 'optional_codes',
+            'ovoko_part_codes_encoding_shape' => is_array($fields['optional_codes'] ?? null) ? 'repeated_optional_codes' : get_debug_type($fields['optional_codes'] ?? null),
+            'ovoko_part_codes_source' => 'part.part_number first, then part.oem_number and part.manufacturer_code',
             'ovoko_photo_field_type' => get_debug_type($fields['photo'] ?? null),
             'ovoko_photos_field_encoding_shape' => is_array($fields['photos[]'] ?? null) ? 'repeated_photos_brackets' : get_debug_type($fields['photos[]'] ?? null),
             'ovoko_photos_are_repeated_keys' => is_array($fields['photos[]'] ?? null),
             'ovoko_photos_repeated_keys_preview' => array_map(fn (string $url): array => ['name' => 'photos[]', 'value' => $url, 'value_shape' => $this->safeUrlShape($url)], array_slice(array_filter($photos, 'is_string'), 0, 3)),
         ];
+    }
+
+    /** @return array<int, string> */
+    private function ovokoPartCodes(Part $part): array
+    {
+        $codes = [];
+        foreach ([
+            'part_number' => $part->part_number ?? null,
+            'oem_number' => $part->oem_number ?? null,
+            'manufacturer_code' => $part->manufacturer_code ?? null,
+        ] as $value) {
+            $code = trim((string) $value);
+            if ($code !== '' && ! in_array($code, $codes, true)) {
+                $codes[] = $code;
+            }
+        }
+
+        return $codes;
     }
 
     private function photoDiagnostics(array $fields): array
