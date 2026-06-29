@@ -64,6 +64,8 @@ class Shipments extends Page
 
     public function createDhlShipment(DhlShipmentService $dhl): void
     {
+        $this->dhlForm = $dhl->normalizeForm($this->dhlForm ?? []);
+
         $this->validate($dhl->rules());
 
         try {
