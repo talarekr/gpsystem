@@ -153,13 +153,13 @@ class EbayListingDryRunService
             'selected_payment_policy_name' => $this->policyName($settings, 'payment', $paymentPolicyId),
             'selected_return_policy_id' => $returnPolicyId,
             'selected_return_policy_name' => $this->policyName($settings, 'return', $returnPolicyId),
-            'merchant_location_key' => $this->merchantLocationKey($settings),
+            'merchant_location_key' => $this->merchantLocationKey($settings, $channel),
             'missing' => array_values(array_unique($missing)),
         ];
     }
 
     private function policyName(array $settings, string $type, ?string $id): ?string { if (blank($id)) return null; $policies = is_array($settings[$type.'_policies'] ?? null) ? $settings[$type.'_policies'] : []; foreach ($policies as $policy) if (is_array($policy) && (string) ($policy['id'] ?? '') === (string) $id) return $policy['name'] ?? null; return null; }
-    private function merchantLocationKey(array $settings): ?string { foreach (['merchant_location_key', 'location_key', 'inventory_location_key'] as $key) if (filled($settings[$key] ?? null)) return (string) $settings[$key]; return null; }
+    private function merchantLocationKey(array $settings, ?string $channel = null): ?string { foreach (['merchant_location_key', 'merchantLocationKey', 'location_key', 'inventory_location_key'] as $key) if (filled($settings[$key] ?? null)) return (string) $settings[$key]; $defaults = array_merge((array) config('product-hub.ebay.default_location', []), (array) config('product-hub.ebay.accounts.'.($channel ?: 'ebay_de'), [])); foreach (['merchant_location_key', 'merchantLocationKey', 'location_key', 'inventory_location_key'] as $key) if (filled($defaults[$key] ?? null)) return (string) $defaults[$key]; return null; }
     private function fulfillmentPolicyName(?string $policyId, ?string $shippingGroup): ?string { if (blank($policyId)) return null; return match ((string) $policyId) { '259264150013' => 'Wysyłka 30 euro', '259677066013' => 'Wysyłka 50 euro', '259636579013' => 'Wysyłka 130 euro', '260547694013' => 'Wysyłka FR 55 euro', '260547464013' => 'Wysyłka FR 70 euro', '260547754013' => 'Wysyłka FR 130 euro', default => $shippingGroup, }; }
 
     public function dryRunPayload(int $partId, string $channel): array
@@ -191,7 +191,7 @@ class EbayListingDryRunService
                 'offer_publish' => ['would_send' => false, 'method' => 'POST', 'path' => '/sell/inventory/v1/offer/{offerId}/publish', 'dry_run_only' => true, 'publishable_payload_ready' => $publishable],
             ],
             'inventory_item_payload' => $publishable ? ['sku' => $sku, 'product' => ['title' => $title, 'description' => $short, 'imageUrls' => $imageUrls, 'aspects' => $aspectDiagnostics['aspects']], 'condition' => 'USED_EXCELLENT', 'availability' => ['shipToLocationAvailability' => ['quantity' => (int) ($part?->quantity ?? 0)]]] : null,
-            'offer_payload' => $publishable ? ['marketplaceId' => $ready['marketplace_id'], 'format' => 'FIXED_PRICE', 'availableQuantity' => (int) ($part?->quantity ?? 0), 'categoryId' => $ready['category']['external_category_id'], 'listingDescription' => $html, 'pricingSummary' => ['price' => ['value' => $priceEur, 'currency' => 'EUR']], 'listingPolicies' => ['fulfillmentPolicyId' => $ready['business_policies']['selected_fulfillment_policy_id'], 'paymentPolicyId' => $ready['business_policies']['selected_payment_policy_id'], 'returnPolicyId' => $ready['business_policies']['selected_return_policy_id']]] : null,
+            'offer_payload' => $publishable ? ['marketplaceId' => $ready['marketplace_id'], 'format' => 'FIXED_PRICE', 'availableQuantity' => (int) ($part?->quantity ?? 0), 'categoryId' => $ready['category']['external_category_id'], 'listingDescription' => $html, 'pricingSummary' => ['price' => ['value' => $priceEur, 'currency' => 'EUR']], 'merchantLocationKey' => $ready['business_policies']['merchant_location_key'] ?? null, 'listingPolicies' => ['fulfillmentPolicyId' => $ready['business_policies']['selected_fulfillment_policy_id'], 'paymentPolicyId' => $ready['business_policies']['selected_payment_policy_id'], 'returnPolicyId' => $ready['business_policies']['selected_return_policy_id']]] : null,
             'listing_description_html_length' => Str::length($html),
             'translated_specification_values' => $preview['translated_specification_values'] ?? [],
             'untranslated_technical_values' => $preview['untranslated_technical_values'] ?? [],

@@ -127,6 +127,9 @@ class EbayListingDryRunController extends Controller
             $settings['return_policy_id'] = $defaults['return_policy_id'];
             $settings['marketplace_id'] = $settings['marketplace_id'] ?? $defaults['marketplace_id'];
             $settings['site_id'] = $settings['site_id'] ?? $defaults['site_id'];
+            foreach ($this->locationDefaults($channel) as $key => $value) {
+                if (blank($settings[$key] ?? null)) $settings[$key] = $value;
+            }
             $account->api_settings = $settings;
             $account->save();
             $updated[$channel] = $this->policySettingsPayload($channel, $defaults);
@@ -141,6 +144,15 @@ class EbayListingDryRunController extends Controller
 
     private function validToken(Request $request): bool { return hash_equals(self::TOKEN, (string) $request->query('token', '')); }
 
+
+    private function locationDefaults(string $channel): array
+    {
+        return array_merge(
+            (array) config('product-hub.ebay.default_location', []),
+            (array) config("product-hub.ebay.accounts.{$channel}", [])
+        );
+    }
+
     private function policySettingsPayload(string $channel, array $defaults): array
     {
         $blockers = [];
@@ -152,6 +164,11 @@ class EbayListingDryRunController extends Controller
         $apiReturn = filled($settings['return_policy_id'] ?? null) ? (string) $settings['return_policy_id'] : null;
         $resolvedPayment = $this->service->resolvedPaymentPolicyId($settings);
         $resolvedReturn = $this->service->resolvedReturnPolicyId($settings);
+        $locationDefaults = $this->locationDefaults($channel);
+        $resolvedLocationKey = collect(['merchant_location_key', 'merchantLocationKey', 'location_key', 'inventory_location_key'])
+            ->map(fn (string $key) => filled($settings[$key] ?? null) ? (string) $settings[$key] : null)
+            ->filter()
+            ->first() ?: ($locationDefaults['merchant_location_key'] ?? null);
         if (! $account) $blockers[] = 'Marketplace account not found.';
         if ($account && $apiPayment === null) $blockers[] = 'api_settings.payment_policy_id is missing.';
         if ($account && $apiReturn === null) $blockers[] = 'api_settings.return_policy_id is missing.';
@@ -165,6 +182,10 @@ class EbayListingDryRunController extends Controller
             'resolved_return_policy_id' => $resolvedReturn,
             'default_payment_policy_id' => $defaults['payment_policy_id'],
             'default_return_policy_id' => $defaults['return_policy_id'],
+            'resolved_merchant_location_key' => $resolvedLocationKey,
+            'default_merchant_location_key' => $locationDefaults['merchant_location_key'] ?? null,
+            'default_inventory_location_key' => $locationDefaults['inventory_location_key'] ?? null,
+            'default_inventory_location_name' => $locationDefaults['inventory_location_name'] ?? null,
             'readiness_reads_same_values' => $apiPayment !== null && $apiReturn !== null && $resolvedPayment === $apiPayment && $resolvedReturn === $apiReturn,
             'blockers' => $blockers,
             'warnings' => $warnings,
