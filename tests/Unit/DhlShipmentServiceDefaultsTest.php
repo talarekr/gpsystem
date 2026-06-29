@@ -17,7 +17,7 @@ class DhlShipmentServiceDefaultsTest extends TestCase
             'country' => 'PL',
             'contact_name' => 'GRZEGORZ PACIOREK',
             'phone' => '579 152 665',
-            'email' => null,
+            'email' => 'gregor1142@gmail.com',
         ]);
 
         $defaults = app(DhlShipmentService::class)->defaults();
@@ -31,7 +31,7 @@ class DhlShipmentServiceDefaultsTest extends TestCase
         $this->assertSame('', $defaults['shipper']['apartment_number']);
         $this->assertSame('GRZEGORZ PACIOREK', $defaults['shipper']['person_name']);
         $this->assertSame('579 152 665', $defaults['shipper']['phone']);
-        $this->assertNull($defaults['shipper']['email']);
+        $this->assertSame('gregor1142@gmail.com', $defaults['shipper']['email']);
     }
     public function test_payload_sends_service_value_only_for_selected_insurance_and_cod(): void
     {
