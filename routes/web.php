@@ -49,6 +49,7 @@ use App\Http\Controllers\Tools\CheckPartImagePresentationController;
 use App\Http\Controllers\Tools\CheckProductImageController;
 use App\Http\Controllers\Tools\CheckStorefrontVisibilityController;
 use App\Http\Controllers\Tools\TestOvokoApiConnectionController;
+use App\Http\Controllers\Tools\FetchOvokoPartStatusDictionaryController;
 use App\Http\Controllers\Tools\OvokoOrdersDryRunController;
 use App\Http\Controllers\Tools\OvokoPriceImportController;
 use App\Http\Controllers\Tools\OvokoProductSyncController;
@@ -237,6 +238,7 @@ Route::get('/tools/check-marketplace-price-coverage', [MarketplaceApiFoundationC
 Route::get('/tools/check-marketplace-stock-readiness', [MarketplaceApiFoundationController::class, 'stockReadiness'])->name('tools.check-marketplace-stock-readiness');
 Route::get('/tools/check-marketplace-linking-health', [MarketplaceApiFoundationController::class, 'linkingHealth'])->name('tools.check-marketplace-linking-health');
 Route::get('/tools/test-ovoko-api-connection', TestOvokoApiConnectionController::class)->name('tools.test-ovoko-api-connection');
+Route::get('/tools/fetch-ovoko-part-status-dictionary', FetchOvokoPartStatusDictionaryController::class)->name('tools.fetch-ovoko-part-status-dictionary');
 Route::get('/tools/check-ovoko-price-import', [OvokoPriceImportController::class, 'check'])->name('tools.check-ovoko-price-import');
 Route::get('/tools/dry-run-delete-local-categories', [OvokoProductSyncController::class, 'dryRunDeleteLocalCategories'])->name('tools.dry-run-delete-local-categories');
 Route::get('/tools/debug-products-by-category', [OvokoProductSyncController::class, 'debugProductsByCategory'])->name('tools.debug-products-by-category');
