@@ -154,7 +154,6 @@ class PartMarketplaceReadinessController extends Controller
 
         $results = [
             'ebay_de' => $this->readinessService->prepareEbayTranslations($part, 'ebay_de'),
-            'ebay_fr' => $this->readinessService->prepareEbayTranslations($part, 'ebay_fr'),
         ];
 
         return response()->json([
@@ -184,7 +183,6 @@ class PartMarketplaceReadinessController extends Controller
         if ($key === 'ebay') {
             $ebayResults = [
                 'ebay_de' => $this->readinessService->prepareEbayTranslations($part, 'ebay_de'),
-                'ebay_fr' => $this->readinessService->prepareEbayTranslations($part, 'ebay_fr'),
             ];
         }
 
