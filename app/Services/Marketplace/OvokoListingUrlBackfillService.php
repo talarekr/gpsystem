@@ -81,6 +81,10 @@ class OvokoListingUrlBackfillService
                     $summary['ambiguous']++;
                 } else {
                     $summary['missing_shop_url']++;
+                    if (in_array(($diagnostics['ovoko_read_api_rejection_reason'] ?? null), ['part_detail_not_found_on_known_read_only_endpoints_csv_export_required', 'detail_id_mismatch'], true)) {
+                        $warning = 'Ovoko read-only API did not return a matching shop_url by part ID or external_id; backfilling older links requires a CSV export from Ovoko.';
+                        if (! in_array($warning, $warnings, true)) $warnings[] = $warning;
+                    }
                 }
             }
 
@@ -88,6 +92,9 @@ class OvokoListingUrlBackfillService
                 'local_part_id' => $listing->part_id,
                 'marketplace_listing_id' => $listing->id,
                 'existing_ovoko_id' => $ovokoId ?? '',
+                'requested_ovoko_id' => $diagnostics['requested_ovoko_id'],
+                'requested_external_id' => $diagnostics['requested_external_id'],
+                'lookup_by' => $diagnostics['lookup_by'],
                 'existing_url' => $existingUrl ?? '',
                 'resolved_shop_url' => $resolved,
                 'source' => $source,
@@ -102,6 +109,14 @@ class OvokoListingUrlBackfillService
                 'ovoko_read_api_shop_url_found' => $diagnostics['ovoko_read_api_shop_url_found'],
                 'ovoko_read_api_rejection_reason' => $diagnostics['ovoko_read_api_rejection_reason'],
                 'ovoko_read_api_request_fields' => $diagnostics['ovoko_read_api_request_fields'],
+                'returned_candidates_count' => $diagnostics['returned_candidates_count'],
+                'matched_candidate_index' => $diagnostics['matched_candidate_index'],
+                'matched_candidate_id' => $diagnostics['matched_candidate_id'],
+                'matched_candidate_external_id' => $diagnostics['matched_candidate_external_id'],
+                'matched_candidate_shop_url' => $diagnostics['matched_candidate_shop_url'],
+                'mismatch_sample_ids' => $diagnostics['mismatch_sample_ids'],
+                'returned_pagination' => $diagnostics['returned_pagination'],
+                'returned_pagination_count' => $diagnostics['returned_pagination_count'],
                 'ovoko_read_api_attempts' => $diagnostics['ovoko_read_api_attempts'],
                 'resolution_attempts' => $diagnostics['resolution_attempts'],
             ];
@@ -125,6 +140,10 @@ class OvokoListingUrlBackfillService
     private function resolveShopUrl(MarketplaceListing $listing, string $ovokoId, array $csvRows, mixed $client): array
     {
         $diagnostics = $this->emptyDiagnostics();
+        $externalId = $this->blankNull($listing->part?->external_id ?? null) ?? 'gps-part-'.(string) $listing->part_id;
+        $diagnostics['requested_ovoko_id'] = $ovokoId;
+        $diagnostics['requested_external_id'] = $externalId;
+        $diagnostics['lookup_by'] = $externalId !== null ? 'both' : 'ovoko_id';
 
         $local = $this->firstUrl($listing->raw_payload ?? []);
         if ($local !== null) {
@@ -139,17 +158,22 @@ class OvokoListingUrlBackfillService
             $diagnostics['rejected_local_url_reason'] = $validation['reason'];
         }
 
-        if ($client !== null && method_exists($client, 'fetchPartRawById')) {
+        if ($client !== null && (method_exists($client, 'fetchPartRawByLookup') || method_exists($client, 'fetchPartRawById'))) {
             $diagnostics['resolution_attempts'][] = 'ovoko_read_api';
             $diagnostics['ovoko_read_api_attempted'] = true;
 
             try {
-                $result = $client->fetchPartRawById($ovokoId);
+                $result = method_exists($client, 'fetchPartRawByLookup')
+                    ? $client->fetchPartRawByLookup($ovokoId, $externalId)
+                    : $client->fetchPartRawById($ovokoId);
                 $diagnostics['ovoko_read_api_endpoint'] = $result['endpoint_used'] ?? data_get($result, 'attempts.0.endpoint');
                 $diagnostics['ovoko_read_api_status'] = $result['api_status_code'] ?? $result['http_status'] ?? data_get($result, 'attempts.0.api_status_code') ?? data_get($result, 'attempts.0.http_status');
                 $diagnostics['ovoko_read_api_response_keys'] = $result['response_top_level_keys'] ?? data_get($result, 'attempts.0.top_level_keys') ?? [];
                 $diagnostics['ovoko_read_api_request_fields'] = $result['request_fields'] ?? data_get($result, 'attempts.0.request_fields') ?? [];
                 $diagnostics['ovoko_read_api_attempts'] = $result['attempts'] ?? [];
+                foreach (['returned_candidates_count','matched_candidate_index','matched_candidate_id','matched_candidate_external_id','matched_candidate_shop_url','mismatch_sample_ids','returned_pagination','returned_pagination_count'] as $key) {
+                    $diagnostics[$key] = $result[$key] ?? $diagnostics[$key];
+                }
 
                 $url = $this->firstUrl($result['raw'] ?? []) ?? $this->blankNull($result['normalized']['url'] ?? null);
                 $diagnostics['ovoko_read_api_shop_url_found'] = $url !== null;
@@ -202,6 +226,17 @@ class OvokoListingUrlBackfillService
             'ovoko_read_api_request_fields' => [],
             'ovoko_read_api_attempts' => [],
             'resolution_attempts' => [],
+            'requested_ovoko_id' => null,
+            'requested_external_id' => null,
+            'lookup_by' => null,
+            'returned_candidates_count' => 0,
+            'matched_candidate_index' => null,
+            'matched_candidate_id' => null,
+            'matched_candidate_external_id' => null,
+            'matched_candidate_shop_url' => null,
+            'mismatch_sample_ids' => [],
+            'returned_pagination' => null,
+            'returned_pagination_count' => null,
         ];
     }
 
