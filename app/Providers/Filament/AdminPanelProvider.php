@@ -4,6 +4,7 @@ namespace App\Providers\Filament;
 
 use App\Filament\Pages\AllegroIntegration;
 use App\Filament\Pages\Analytics;
+use App\Filament\Pages\CreateShipment;
 use App\Filament\Pages\Dashboard;
 use App\Filament\Pages\ErrorCenter;
 use App\Filament\Pages\Help;
@@ -140,6 +141,7 @@ class AdminPanelProvider extends PanelProvider
                 Readiness::class,
                 WooSyncPreparation::class,
                 Orders::class,
+                CreateShipment::class,
                 Shipments::class,
                 ErrorCenter::class,
                 AllegroIntegration::class,
