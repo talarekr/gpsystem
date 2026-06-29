@@ -14,6 +14,8 @@ use SoapFault;
 
 class DhlShipmentService
 {
+    private const DEFAULT_SENDER_EMAIL = 'gregor1142@gmail.com';
+
     public function defaults(?Order $order = null, ?Shipment $shipment = null): array
     {
         $senderAddress = $this->splitStreet((string) config('services.shipments.sender.address'));
@@ -31,7 +33,7 @@ class DhlShipmentService
                 'house_number' => $senderAddress['house_number'],
                 'apartment_number' => $senderAddress['apartment_number'],
                 'person_name' => config('services.shipments.sender.contact_name', config('services.shipments.sender.name')),
-                'email' => config('services.shipments.sender.email'),
+                'email' => config('services.shipments.sender.email') ?: self::DEFAULT_SENDER_EMAIL,
                 'phone' => config('services.shipments.sender.phone'),
             ],
             'receiver' => [
