@@ -71,6 +71,7 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
             'api_ok' => $apiOk,
             'endpoint_used' => $endpoint,
             'part_id' => $payload['part_id'] ?? null,
+            'shop_url' => $payload['shop_url'] ?? null,
             'message' => $payload['msg'] ?? $payload['message'] ?? null,
             'response_top_level_keys' => array_values(array_slice(array_keys($payload), 0, 30)),
             'payload' => $payload,
