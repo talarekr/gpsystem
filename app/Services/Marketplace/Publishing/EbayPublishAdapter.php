@@ -30,8 +30,9 @@ class EbayPublishAdapter extends BaseMarketplacePublishAdapter
         ];
         $merchantLocationKey = (string) ($policies['merchant_location_key'] ?? $this->settingForPolicy($settings, 'merchant_location_key') ?? '');
         $offer = ['sku' => $sku, 'marketplaceId' => (string) ($settings['marketplace_id'] ?? 'EBAY_DE'), 'format' => (string) ($settings['format'] ?? 'FIXED_PRICE'), 'listingDuration' => (string) ($settings['listing_duration'] ?? 'GTC'), 'availableQuantity' => (int) ($payload['quantity'] ?? $part->quantity ?? 1), 'categoryId' => (string) ($payload['category_id'] ?? ''), 'merchantLocationKey' => $merchantLocationKey, 'pricingSummary' => ['price' => ['value' => (string) ($payload['price_eur'] ?? $readiness['marketplace_price']), 'currency' => 'EUR']], 'listingPolicies' => ['fulfillmentPolicyId' => (string) ($policies['selected_fulfillment_policy_id'] ?? $this->settingForPolicy($settings, 'selected_fulfillment_policy_id') ?? ''), 'paymentPolicyId' => (string) ($policies['selected_payment_policy_id'] ?? $this->settingForPolicy($settings, 'selected_payment_policy_id') ?? ''), 'returnPolicyId' => (string) ($policies['selected_return_policy_id'] ?? $this->settingForPolicy($settings, 'selected_return_policy_id') ?? '')]];
-        $result = (new EbayApiClient('ebay_de', $account))->publishInventoryOffer($sku, $inventory, $offer);
-        return ['ok' => $result['ok'] ?? false, 'action' => 'publishOffer', 'http_status' => $result['http_status'] ?? null, 'offer_id' => $result['offer_id'] ?? null, 'listing_id' => $result['listing_id'] ?? null, 'external_inventory_id' => $sku, 'url' => isset($result['listing_id']) ? 'https://www.ebay.de/itm/'.$result['listing_id'] : null, 'request_id' => $result['request_id'] ?? null, 'request_summary' => $this->requestSummary($payload) + ['resolved_merchant_location_key' => $merchantLocationKey, 'merchantLocationKey' => $offer['merchantLocationKey'], 'aspects_diagnostics' => $aspectNormalization['diagnostics']], 'response_summary' => $this->responseSummary($result), 'json' => $result['json'] ?? [], 'error' => $this->ebayError($result), 'ui_error' => 'marketplace_api_error'];
+        $contentLanguage = $this->contentLanguage((string) $offer['marketplaceId']);
+        $result = (new EbayApiClient($this->accountCode(), $account))->publishInventoryOffer($sku, $inventory, $offer, $contentLanguage);
+        return ['ok' => $result['ok'] ?? false, 'action' => 'publishOffer', 'http_status' => $result['http_status'] ?? null, 'offer_id' => $result['offer_id'] ?? null, 'listing_id' => $result['listing_id'] ?? null, 'external_inventory_id' => $sku, 'url' => isset($result['listing_id']) ? 'https://www.ebay.de/itm/'.$result['listing_id'] : null, 'request_id' => $result['request_id'] ?? null, 'request_summary' => $this->requestSummary($payload) + ['resolved_merchant_location_key' => $merchantLocationKey, 'merchantLocationKey' => $offer['merchantLocationKey'], 'aspects_diagnostics' => $aspectNormalization['diagnostics'], 'content_language' => $contentLanguage, 'marketplace_id' => $offer['marketplaceId']], 'response_summary' => $this->responseSummary($result), 'json' => $result['json'] ?? [], 'error' => $this->ebayError($result), 'ui_error' => 'marketplace_api_error'];
     }
 
     /**
@@ -127,6 +128,14 @@ class EbayPublishAdapter extends BaseMarketplacePublishAdapter
         return [[], true, $shape];
     }
 
+
+    private function contentLanguage(string $marketplaceId): string
+    {
+        return match ($marketplaceId) {
+            'EBAY_FR' => 'fr-FR',
+            default => 'de-DE',
+        };
+    }
 
     private function skuFor(Part $part, array $payload): string
     {

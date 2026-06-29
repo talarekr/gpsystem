@@ -5,7 +5,6 @@ namespace App\Services\Marketplace\Publishing;
 use App\Models\MarketplaceAccount;
 use App\Models\Part;
 use App\Services\Marketplace\Api\OvokoApiClient;
-use Illuminate\Support\Arr;
 
 class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
 {
@@ -27,8 +26,9 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
         }
 
         $form = $this->importPartPayload($part, $readiness, $payload, $account);
+        $photoDiagnostics = $this->photoDiagnostics($form['fields'] ?? []);
         if (($form['ok'] ?? false) !== true) {
-            return ['ok' => false, 'status' => 'payload_invalid', 'action' => 'crm/importPart', 'error' => (string) ($form['error'] ?? 'Ovoko publish payload is incomplete.'), 'request_summary' => $this->requestSummary($payload) + ['ovoko_form_keys' => array_keys($form['fields'] ?? [])], 'response_summary' => ['missing' => $form['missing'] ?? []]];
+            return ['ok' => false, 'status' => 'payload_invalid', 'action' => 'crm/importPart', 'error' => (string) ($form['error'] ?? 'Ovoko publish payload is incomplete.'), 'request_summary' => $this->requestSummary($payload) + ['ovoko_form_keys' => array_keys($form['fields'] ?? []), 'ovoko_photo' => $photoDiagnostics], 'response_summary' => ['missing' => $form['missing'] ?? []]];
         }
 
         $result = (new OvokoApiClient('ovoko', $account))->importPart($form['fields']);
@@ -39,10 +39,11 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
             'message' => $result['message'] ?? null,
             'part_id_present' => filled($externalId),
             'response_top_level_keys' => $result['response_top_level_keys'] ?? [],
+            'ovoko_photo' => $photoDiagnostics,
         ];
 
         if (! ($result['api_ok'] ?? false) || ! $externalId) {
-            return ['ok' => false, 'status' => 'api_error', 'action' => 'crm/importPart', 'http_status' => $result['http_status'] ?? null, 'error' => (string) ($result['message'] ?? 'Ovoko/RRR importPart failed.'), 'request_summary' => $this->requestSummary($payload) + ['ovoko_form_keys' => array_keys($form['fields'])], 'response_summary' => $summary];
+            return ['ok' => false, 'status' => 'api_error', 'action' => 'crm/importPart', 'http_status' => $result['http_status'] ?? null, 'error' => (string) ($result['message'] ?? 'Ovoko/RRR importPart failed.'), 'request_summary' => $this->requestSummary($payload) + ['ovoko_form_keys' => array_keys($form['fields']), 'ovoko_photo' => $photoDiagnostics], 'response_summary' => $summary];
         }
 
         return ['ok' => true, 'status' => 'published', 'listing_status' => 'published', 'action' => 'crm/importPart', 'http_status' => $result['http_status'] ?? null, 'external_offer_id' => $externalId, 'external_listing_id' => $externalId, 'response_summary' => $summary];
@@ -63,8 +64,8 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
             'visible_code' => $payload['sku'] ?? $part->sku ?? null,
             'manufacturer_code' => $part->manufacturer_code ?? null,
             'notes' => trim(strip_tags((string) (($part->description ?? null) ?: ($part->short_description ?? null) ?: ($part->condition_notes ?? null)))) ?: null,
-            'photo' => Arr::first((array) ($payload['image_urls'] ?? [])),
-            'photos[]' => array_values((array) ($payload['image_urls'] ?? [])),
+            'photo' => $this->publicImageUrls($payload['image_urls'] ?? [])[0] ?? null,
+            'photos[]' => $this->publicImageUrls($payload['image_urls'] ?? []),
         ], fn ($value) => ! blank($value));
 
         $missing = [];
@@ -72,9 +73,40 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
         if (blank($fields['car_id'] ?? null)) $missing[] = 'Ovoko: wybrane auto nie ma RRR car_id';
         if (blank($fields['quality'] ?? null)) $missing[] = 'Ovoko: nie udało się zmapować quality z wartości '.($part->condition_notes ?? '');
         if (blank($fields['status'] ?? null)) $missing[] = 'Uzupełnij domyślny status części Ovoko w ustawieniach konta.';
+        if (blank($fields['photo'] ?? null)) $missing[] = 'Ovoko: zdjęcie części musi być publicznym URL-em HTTP/HTTPS. Szczegóły są w Logach.';
         if ($missing !== []) return ['ok' => false, 'fields' => $fields, 'missing' => $missing, 'error' => implode('; ', $missing)];
 
         return ['ok' => true, 'fields' => $fields];
+    }
+
+    /** @return array<int, string> */
+    private function publicImageUrls(mixed $images): array
+    {
+        return array_values(array_filter(array_map(function (mixed $image): ?string {
+            $url = null;
+            if (is_string($image)) $url = $image;
+            if (is_array($image) && is_string($image['url'] ?? null)) $url = $image['url'];
+            if (is_object($image) && is_string($image->url ?? null)) $url = $image->url;
+            $url = trim((string) $url);
+            if ($url === '') return null;
+            $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+            $host = (string) parse_url($url, PHP_URL_HOST);
+            return in_array($scheme, ['http', 'https'], true) && $host !== '' ? $url : null;
+        }, (array) $images)));
+    }
+
+    private function photoDiagnostics(array $fields): array
+    {
+        $photo = $fields['photo'] ?? null;
+        $photos = is_array($fields['photos[]'] ?? null) ? $fields['photos[]'] : [];
+        return [
+            'photo_present' => filled($photo),
+            'photo_shape' => get_debug_type($photo),
+            'photo_scheme' => is_string($photo) ? parse_url($photo, PHP_URL_SCHEME) : null,
+            'photo_host' => is_string($photo) ? parse_url($photo, PHP_URL_HOST) : null,
+            'photos_count' => count($photos),
+            'first_photo_matches_photo' => isset($photos[0]) && is_string($photo) && $photos[0] === $photo,
+        ];
     }
 
     private function ovokoCarId(Part $part, array $vehicle, array $settings): mixed
