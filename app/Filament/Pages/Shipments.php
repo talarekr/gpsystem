@@ -7,9 +7,15 @@ use App\Models\Shipment;
 use App\Services\Shipments\ShipmentLabelService;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
+use Livewire\Attributes\Url;
+use Livewire\WithPagination;
 
 class Shipments extends Page
 {
+    use WithPagination;
+
     protected static ?string $navigationGroup = 'Przesyłki';
     protected static ?string $navigationIcon = null;
     protected static ?string $navigationLabel = 'Przesyłki';
@@ -18,6 +24,23 @@ class Shipments extends Page
     protected static string $view = 'filament.pages.shipments';
 
     public ?array $preview = null;
+
+    #[Url(as: 'search')]
+    public string $search = '';
+
+    #[Url(as: 'carrier')]
+    public ?string $carrier = null;
+
+    #[Url(as: 'status')]
+    public ?string $status = null;
+
+    #[Url(as: 'per_page')]
+    public string $perPage = '25';
+
+    public function updating(string $property): void
+    {
+        if ($property !== 'page') $this->resetPage();
+    }
 
     public function generateLabel(string $carrier, ?int $shipmentId = null, bool $confirm = false): void
     {
@@ -32,13 +55,40 @@ class Shipments extends Page
             ->send();
     }
 
-    public function shipments()
+    public function getShipmentsProperty(): LengthAwarePaginator
     {
-        return Shipment::query()->with('order')->latest('id')->limit(50)->get();
+        return Shipment::query()
+            ->with('order:id,order_number,customer_name')
+            ->when(filled($this->search), function (Builder $query): void {
+                $search = trim($this->search);
+                $query->where(fn (Builder $query) => $query
+                    ->where('id', $search)
+                    ->orWhere('tracking_number', 'like', "%{$search}%")
+                    ->orWhereHas('order', fn (Builder $order) => $order->where('order_number', 'like', "%{$search}%")));
+            })
+            ->when(filled($this->carrier), fn (Builder $query) => $query->where('carrier', $this->carrier))
+            ->when(filled($this->status), fn (Builder $query) => $query->where('shipment_status', $this->status))
+            ->latest('id')
+            ->paginate($this->normalizedPerPage())
+            ->withQueryString();
     }
 
-    public function ordersWithoutShipment()
+    public function getOrdersWithoutShipmentProperty()
     {
-        return Order::query()->doesntHave('shipments')->latest('id')->limit(10)->get();
+        return Order::query()
+            ->whereDoesntHave('shipments')
+            ->latest('id')
+            ->limit(10)
+            ->get(['id', 'order_number', 'customer_name']);
+    }
+
+    public function getPerPageOptionsProperty(): array
+    {
+        return ['25' => '25', '50' => '50', '100' => '100'];
+    }
+
+    protected function normalizedPerPage(): int
+    {
+        return (int) (array_key_exists($this->perPage, $this->perPageOptions) ? $this->perPage : '25');
     }
 }
