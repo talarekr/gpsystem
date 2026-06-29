@@ -104,7 +104,7 @@ class DhlShipmentServiceDefaultsTest extends TestCase
 
         $defaults = app(DhlShipmentService::class)->defaults($order);
 
-        $this->assertSame('company', $defaults['receiver']['receiver_type']);
+        $this->assertSame('private', $defaults['receiver']['receiver_type']);
         $this->assertSame('STELLA SRL', $defaults['receiver']['name']);
         $this->assertSame('Via Bagnatica', $defaults['receiver']['street']);
         $this->assertSame('21', $defaults['receiver']['house_number']);
@@ -114,5 +114,9 @@ class DhlShipmentServiceDefaultsTest extends TestCase
         $this->assertSame('3487617910', $defaults['receiver']['phone']);
         $this->assertSame('STELLA SRL', $defaults['receiver']['person_name']);
         $this->assertNull($defaults['receiver']['email']);
+
+        $payload = app(DhlShipmentService::class)->payload($defaults);
+
+        $this->assertSame('C', $payload['shipment']['ship']['receiver']['address']['addressType']);
     }
 }
