@@ -60,6 +60,32 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
         return ['ok' => true, 'status' => 'ok', 'http_status' => $response->status()];
     }
 
+
+    public function createProductOffer(array $payload): array
+    {
+        $base = rtrim((string) $this->account?->api_base_url, '/');
+        $response = Http::withToken((string) $this->credentials()['access_token'])
+            ->accept('application/vnd.allegro.public.v1+json')
+            ->contentType('application/vnd.allegro.public.v1+json')
+            ->timeout(30)
+            ->post($base.'/sale/product-offers', $payload);
+        $json = $response->json();
+        return [
+            'ok' => $response->successful(),
+            'http_status' => $response->status(),
+            'offer_id' => is_array($json) ? ($json['id'] ?? data_get($json, 'offer.id')) : null,
+            'operation_location' => $response->header('Location'),
+            'json' => is_array($json) ? $json : [],
+            'request_id' => $response->header('trace-id') ?: $response->header('x-request-id'),
+        ];
+    }
+
+    public function productOfferOperationStatus(string $location): array
+    {
+        $response = Http::withToken((string) $this->credentials()['access_token'])->accept('application/vnd.allegro.public.v1+json')->timeout(20)->get($location);
+        return ['ok' => $response->successful(), 'http_status' => $response->status(), 'json' => is_array($response->json()) ? $response->json() : [], 'request_id' => $response->header('trace-id') ?: $response->header('x-request-id')];
+    }
+
     protected function requestSample(int $limit): array
     {
         $response = Http::withToken((string) $this->credentials()['access_token'])->accept('application/vnd.allegro.public.v1+json')->timeout(15)->get($this->endpointUsed($limit));
