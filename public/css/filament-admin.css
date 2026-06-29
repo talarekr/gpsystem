@@ -2390,12 +2390,15 @@ button.gps-category-picker__arrow:hover {
     margin-right: auto !important;
 }
 
-body:has(.gps-admin-topbar) .fi-no-notifications {
-    top: calc(var(--gps-admin-topbar-height) + 2rem) !important;
+/* Filament renders toast notifications inside the outer fixed .fi-no container
+   (not on the individual notification card). Override its inset-4/top utility so
+   toasts start below the custom sticky admin topbar. */
+body:has(.gps-admin-topbar) .fi-no {
+    top: calc(var(--gps-admin-topbar-height) + 2.5rem) !important;
 }
 
 @media (max-width: 900px) {
-    body:has(.gps-admin-topbar) .fi-no-notifications {
-        top: calc(var(--gps-admin-topbar-height) + 1.5rem) !important;
+    body:has(.gps-admin-topbar) .fi-no {
+        top: calc(var(--gps-admin-topbar-height) + 2rem) !important;
     }
 }
