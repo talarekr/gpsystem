@@ -2,7 +2,6 @@
     use App\Models\Shipment;
 
     $shipments = $this->shipments;
-    $ordersWithoutShipment = $this->ordersWithoutShipment;
     $dhlCountryOptions = $this->dhlCountryOptions;
 @endphp
 
@@ -12,7 +11,7 @@
         .gps-dhl-form{margin-bottom:22px}.gps-dhl-shell{border:1px solid #e5e7eb;border-radius:18px;background:#f8fafc;padding:14px;margin-bottom:14px}.gps-form-section{border:1px solid #e5e7eb;border-radius:16px;background:#fff;padding:14px;margin-bottom:14px;min-width:0}.gps-dhl-shell .gps-form-section{margin-bottom:0}.gps-form-section h3{font-size:15px;font-weight:900;color:#0f172a;margin-bottom:12px}.gps-subheading{font-size:12px;font-weight:900;color:#334155;margin:12px 0 8px;text-transform:uppercase;letter-spacing:.02em}.gps-party-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.gps-form-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.gps-form-grid-2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.gps-parcel-row{display:flex;gap:7px;align-items:end;flex-wrap:wrap}.gps-parcel-row .gps-field{flex:0 0 auto}.gps-parcel-qty{width:64px}.gps-parcel-type{width:112px}.gps-parcel-measure{width:74px}.gps-parcel-separator,.gps-parcel-unit{align-self:flex-end;display:inline-flex;align-items:center;height:40px;color:#64748b;font-size:13px;font-weight:900;padding:0 1px}.gps-parcel-checks{display:flex;gap:8px 10px;align-items:center;flex-wrap:wrap;padding-bottom:4px}.gps-parcel-checks .gps-checkbox-line{min-height:32px;white-space:nowrap}.gps-parcel-notes{display:grid;grid-template-columns:minmax(120px,1.05fr) minmax(120px,1.05fr) minmax(110px,.9fr) minmax(78px,.42fr) minmax(112px,.55fr);gap:8px;margin-top:10px}.gps-service-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}.gps-service-card{border:1px solid #e2e8f0;border-radius:14px;background:#f8fafc;padding:12px}.gps-product-note{color:#475569;font-size:13px;line-height:1.45}.gps-wide{grid-column:span 2}.gps-radio-group{display:flex;gap:22px;flex-wrap:wrap;align-items:center;min-height:40px}.gps-radio-option{display:inline-flex;align-items:center;gap:7px;color:#334155;font-size:13px;font-weight:700}.gps-radio-option input[type=radio]{appearance:auto;-webkit-appearance:radio;display:inline-block!important;position:static!important;width:16px!important;height:16px!important;margin:0!important;opacity:1!important;visibility:visible!important;border:1px solid #64748b;border-radius:50%;background:#fff;padding:0;accent-color:#1d4ed8}.gps-checks{display:flex;gap:10px 14px;flex-wrap:wrap}.gps-checks label,.gps-checkbox-line{font-size:13px;font-weight:400;color:#334155}.gps-checkbox-line{display:inline-flex;align-items:center;gap:7px;min-height:40px}.gps-special-services{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.gps-special-service{display:flex;align-items:center;gap:8px;flex-wrap:wrap;border:1px solid #e2e8f0;border-radius:12px;background:#fff;padding:9px 10px}.gps-special-service span{font-size:13px;font-weight:400;color:#334155}.gps-special-service input[type=text],.gps-special-service input[type=number]{flex:1 1 125px;min-width:110px;border:1px solid #d1d5db;border-radius:10px;background:#fff;padding:7px 10px;font-size:13px;color:#0f172a}.gps-action-bar{justify-content:flex-end;border:1px solid #e5e7eb;border-radius:16px;background:#fff;padding:12px}.gps-primary{background:#1d4ed8;color:#fff;border-color:#1d4ed8}@media(max-width:1200px){.gps-shipments-toolbar,.gps-shipments-grid,.gps-quick-grid{grid-template-columns:1fr 1fr}.gps-header{display:none}.gps-service-grid{grid-template-columns:1fr}}@media(max-width:900px){.gps-party-grid,.gps-form-grid,.gps-form-grid-2,.gps-parcel-notes,.gps-special-services{grid-template-columns:1fr}.gps-wide{grid-column:span 1}}@media(max-width:700px){.gps-shipments-toolbar,.gps-shipments-grid,.gps-quick-grid{grid-template-columns:1fr}.gps-parcel-row .gps-field,.gps-parcel-qty,.gps-parcel-type,.gps-parcel-measure{width:100%;flex:1 1 100%}.gps-parcel-separator,.gps-parcel-unit{display:none}.gps-action-bar{justify-content:flex-start}}
     </style>
 
-    <div class="gps-actions" style="margin-bottom:14px"><button type="button" wire:click="openDhlForm" class="gps-action gps-primary">Utwórz DHL</button><span class="gps-muted">createShipment DHL24 WebAPI v2; domyślnie REGULAR_PICKUP, bez automatycznego kuriera.</span></div>
+    <div class="gps-actions" style="margin-bottom:14px"><button type="button" wire:click="openDhlForm" class="gps-action gps-primary">Dodaj przesyłkę</button></div>
 
     @if($showDhlForm)
         <form wire:submit="createDhlShipment" class="gps-dhl-form">
@@ -108,30 +107,7 @@
 
     <div class="gps-pagination">{{ $shipments->links('vendor.pagination.gps-polish') }}</div>
 
-    <section class="gps-light-section">
-        <div class="gps-section-heading">
-            <h2>Szybkie akcje dla zamówień bez przesyłki</h2>
-            <p>Kontrolowany limit 10 najnowszych zamówień bez przesyłki.</p>
-        </div>
 
-        <div class="space-y-3">
-            <div class="gps-quick-grid gps-header"><div>Zamówienie</div><div>Klient</div><div>Akcje</div></div>
-            @forelse($ordersWithoutShipment as $order)
-                <div class="gps-card gps-quick-grid" wire:key="order-without-shipment-{{ $order->id }}">
-                    <div class="gps-title">{{ $order->order_number }}</div>
-                    <div>{{ $order->customer_name }}</div>
-                    <div class="gps-actions">
-                        <a class="gps-action" href="{{ route('tools.create-order-shipment', ['order' => $order->id, 'carrier' => 'dhl']) }}">Dry-run DHL</a>
-                        <a class="gps-action" href="{{ route('tools.create-order-shipment', ['order' => $order->id, 'carrier' => 'dpd']) }}">Dry-run DPD</a>
-                        <button type="button" class="gps-action" wire:click="openDhlForm({{ $order->id }})">Utwórz DHL</button>
-                        <a class="gps-action" href="{{ route('tools.create-order-shipment', ['order' => $order->id, 'carrier' => 'dpd', 'confirm' => 1]) }}">Confirm DPD</a>
-                    </div>
-                </div>
-            @empty
-                <div class="gps-empty">Brak zamówień bez przesyłki w bieżącym limicie.</div>
-            @endforelse
-        </div>
-    </section>
 
     @if($preview)
         <section class="gps-preview">
