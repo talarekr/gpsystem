@@ -19,6 +19,9 @@ class EbayDePreviewController extends Controller
     private const CHANNEL = 'ebay_de';
     private const MARKETPLACE_ID = 'EBAY_DE';
     private const CONTENT_LANGUAGE = 'de-DE';
+    private const ASSET_CHECK_METHOD = 'GET';
+    private const ASSET_CHECK_USER_AGENT = 'Mozilla/5.0 (compatible; GPSystem-eBayAssetPreview/1.0; +https://gpswiss.pl)';
+
     private const ASSETS = [
         'icon_shipping' => 'icon-shipping.png',
         'icon_returns' => 'icon-returns.png',
@@ -165,15 +168,67 @@ class EbayDePreviewController extends Controller
     private function httpCheck(string $url): array
     {
         try {
-            $response = Http::timeout(5)->connectTimeout(3)->withoutRedirecting()->head($url);
+            $response = Http::withUserAgent(self::ASSET_CHECK_USER_AGENT)
+                ->accept('image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8')
+                ->timeout(8)
+                ->connectTimeout(4)
+                ->withOptions([
+                    'allow_redirects' => [
+                        'max' => 5,
+                        'strict' => true,
+                        'referer' => false,
+                        'track_redirects' => true,
+                    ],
+                ])
+                ->get($url);
+
+            $contentType = (string) $response->header('content-type');
+            $isImage = Str::startsWith(strtolower($contentType), 'image/');
+            $redirectHistory = $this->redirectHistory($response->header('X-Guzzle-Redirect-History'));
+            $finalUrl = $redirectHistory === [] ? $url : (string) end($redirectHistory);
+
             return [
-                'ok' => $response->successful(),
-                'status' => $response->status(),
-                'content_type' => $response->header('content-type'),
-                'final_host' => parse_url($url, PHP_URL_HOST),
+                'ok' => $response->successful() && $isImage,
+                'check_method' => self::ASSET_CHECK_METHOD,
+                'user_agent' => self::ASSET_CHECK_USER_AGENT,
+                'response_status' => $response->status(),
+                'response_content_type' => $contentType !== '' ? $contentType : null,
+                'response_body_snippet' => $isImage ? null : $this->bodySnippet($response->body()),
+                'final_url' => $finalUrl,
+                'redirect_count' => count($redirectHistory),
             ];
         } catch (\Throwable $e) {
-            return ['ok' => false, 'status' => null, 'content_type' => null, 'final_host' => parse_url($url, PHP_URL_HOST), 'error' => $e->getMessage()];
+            return [
+                'ok' => false,
+                'check_method' => self::ASSET_CHECK_METHOD,
+                'user_agent' => self::ASSET_CHECK_USER_AGENT,
+                'response_status' => null,
+                'response_content_type' => null,
+                'response_body_snippet' => null,
+                'final_url' => $url,
+                'redirect_count' => 0,
+                'error' => $e->getMessage(),
+            ];
         }
+    }
+
+    private function redirectHistory(string|array|null $history): array
+    {
+        if ($history === null || $history === '') {
+            return [];
+        }
+
+        if (is_array($history)) {
+            return array_values(array_filter(array_map('strval', $history)));
+        }
+
+        return array_values(array_filter(array_map('trim', explode(',', $history))));
+    }
+
+    private function bodySnippet(string $body): string
+    {
+        $snippet = Str::limit(trim((string) preg_replace('/[[:^print:]]+/u', ' ', strip_tags($body))), 200, '');
+
+        return $snippet === '' ? '[empty body]' : $snippet;
     }
 }
