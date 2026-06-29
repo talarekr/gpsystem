@@ -128,13 +128,27 @@ class DhlShipmentService
             'dhlForm.service.shipment_date' => ['required', 'date'],
             'dhlForm.service.drop_off_type' => ['required', 'in:REGULAR_PICKUP,REQUEST_COURIER'],
             'dhlForm.service.label_type' => ['required', 'in:BLP,LBLP'],
-            'dhlForm.special_services.insurance_value' => ['nullable', 'numeric', 'min:0.01'],
-            'dhlForm.special_services.cod_value' => ['nullable', 'numeric', 'min:0.01'],
+            'dhlForm.special_services.insurance_value' => ['required_if:dhlForm.special_services.insurance,true,1', 'nullable', 'numeric', 'min:0.01'],
+            'dhlForm.special_services.cod_value' => ['required_if:dhlForm.special_services.cod,true,1', 'nullable', 'numeric', 'min:0.01'],
         ];
+    }
+
+    public function normalizeForm(array $form): array
+    {
+        foreach (['insurance_value', 'cod_value'] as $key) {
+            $value = data_get($form, 'special_services.'.$key);
+            if (is_string($value)) {
+                data_set($form, 'special_services.'.$key, str_replace(',', '.', trim($value)));
+            }
+        }
+
+        return $form;
     }
 
     public function create(array $form): Shipment
     {
+        $form = $this->normalizeForm($form);
+
         if ((bool) data_get($form, 'service.order_courier') === false) {
             data_set($form, 'service.drop_off_type', 'REGULAR_PICKUP');
         }
@@ -326,7 +340,7 @@ class DhlShipmentService
         $services = [];
         foreach ([['insurance', 'UBEZP', 'insurance_value'], ['cod', 'COD', 'cod_value']] as [$flag, $type, $valueKey]) {
             if (data_get($form, 'special_services.'.$flag)) {
-                $services[] = ['serviceType' => $type, 'serviceValue' => (float) data_get($form, 'special_services.'.$valueKey), ...($type === 'COD' ? ['collectOnDeliveryForm' => 'BANK_TRANSFER'] : [])];
+                $services[] = ['serviceType' => $type, 'serviceValue' => (float) str_replace(',', '.', (string) data_get($form, 'special_services.'.$valueKey)), ...($type === 'COD' ? ['collectOnDeliveryForm' => 'BANK_TRANSFER'] : [])];
             }
         }
         foreach (['pdi' => 'PDI', 'pod' => 'POD', 'rod' => 'ROD', 'sas' => 'SAS', 'odb' => 'ODB'] as $flag => $type) {

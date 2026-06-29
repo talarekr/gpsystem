@@ -33,4 +33,37 @@ class DhlShipmentServiceDefaultsTest extends TestCase
         $this->assertSame('579 152 665', $defaults['shipper']['phone']);
         $this->assertNull($defaults['shipper']['email']);
     }
+    public function test_payload_sends_service_value_only_for_selected_insurance_and_cod(): void
+    {
+        $service = app(DhlShipmentService::class);
+        $form = $service->defaults();
+        $form['special_services']['insurance'] = true;
+        $form['special_services']['insurance_value'] = '123,45';
+        $form['special_services']['cod'] = true;
+        $form['special_services']['cod_value'] = '67.89';
+        $form['special_services']['pdi'] = true;
+
+        $payload = $service->payload($form);
+
+        $this->assertSame([
+            ['serviceType' => 'UBEZP', 'serviceValue' => 123.45],
+            ['serviceType' => 'COD', 'serviceValue' => 67.89, 'collectOnDeliveryForm' => 'BANK_TRANSFER'],
+            ['serviceType' => 'PDI'],
+        ], $payload['shipment']['shipmentInfo']['specialServices']['item']);
+    }
+
+    public function test_payload_omits_unselected_insurance_and_cod_values(): void
+    {
+        $service = app(DhlShipmentService::class);
+        $form = $service->defaults();
+        $form['special_services']['insurance_value'] = '123,45';
+        $form['special_services']['cod_value'] = '67.89';
+        $form['special_services']['pod'] = true;
+
+        $payload = $service->payload($form);
+
+        $this->assertSame([
+            ['serviceType' => 'POD'],
+        ], $payload['shipment']['shipmentInfo']['specialServices']['item']);
+    }
 }
