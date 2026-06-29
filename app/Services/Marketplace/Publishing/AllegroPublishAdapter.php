@@ -61,11 +61,12 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
     private function normalizeImageUrls(mixed $images): array
     {
         return array_values(array_filter(array_map(function (mixed $image): ?string {
-            if (is_string($image)) return filled($image) ? $image : null;
-            if (is_array($image) && is_string($image['url'] ?? null)) return filled($image['url']) ? $image['url'] : null;
-            if (is_object($image) && is_string($image->url ?? null)) return filled($image->url) ? $image->url : null;
-
-            return null;
+            $url = null;
+            if (is_string($image)) $url = $image;
+            if (is_array($image) && is_string($image['url'] ?? null)) $url = $image['url'];
+            if (is_object($image) && is_string($image->url ?? null)) $url = $image->url;
+            $url = trim((string) $url);
+            return strtolower((string) parse_url($url, PHP_URL_SCHEME)) === 'https' && (string) parse_url($url, PHP_URL_HOST) !== '' ? $url : null;
         }, (array) $images)));
     }
 
