@@ -209,7 +209,7 @@ class DhlShipmentService
 
         return [
             'authData' => ['username' => config('services.dhl.login'), 'password' => config('services.dhl.password')],
-            'shipment' => [
+            'shipment' => $this->filled([
                 'shipmentInfo' => [
                     'dropOffType' => $dropOffType,
                     'serviceType' => data_get($form, 'service.service_type', 'AH'),
@@ -232,7 +232,7 @@ class DhlShipmentService
                 'reference' => data_get($form, 'parcel.reference'),
                 'ship' => ['shipper' => $this->party($form['shipper'] ?? [], false), 'receiver' => $this->party($form['receiver'] ?? [], true)],
                 'pieceList' => ['item' => [$this->piece($form['parcel'] ?? [])]],
-            ],
+            ]),
         ];
     }
 
@@ -352,6 +352,21 @@ class DhlShipmentService
             'receivedBy' => $response['receivedBy'] ?? null,
             'events' => $normalizedEvents,
         ];
+    }
+
+    protected function filled(array $payload): array
+    {
+        $result = [];
+        foreach ($payload as $key => $value) {
+            if (is_array($value)) {
+                $value = $this->filled($value);
+            }
+            if ($value === null || $value === '' || $value === []) {
+                continue;
+            }
+            $result[$key] = $value;
+        }
+        return $result;
     }
 
     protected function callCreateShipment(array $payload): array

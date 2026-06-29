@@ -10,6 +10,7 @@ use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Attributes\Url;
 use Livewire\WithPagination;
 
@@ -75,6 +76,7 @@ class Shipments extends Page
 
         try {
             $shipment = $dhl->create($this->dhlForm ?? []);
+            $this->afterDhlShipmentCreated($shipment);
             $this->showDhlForm = false;
             $this->preview = ['ok' => true, 'shipment_id' => $shipment->id, 'tracking_number' => $shipment->tracking_number, 'label_path' => $shipment->label_path, 'pickup_ordered' => false];
 
@@ -82,6 +84,19 @@ class Shipments extends Page
         } catch (\Throwable $exception) {
             Notification::make()->title('DHL odrzucił utworzenie przesyłki')->body($exception->getMessage())->danger()->send();
         }
+    }
+
+    protected function afterDhlShipmentCreated(Shipment $shipment): void
+    {
+        // Standalone Przesyłki → Dodaj deliberately stops here and never calls eBay.
+    }
+
+    public function downloadLabel(int $shipmentId)
+    {
+        $shipment = Shipment::query()->findOrFail($shipmentId);
+        abort_unless($shipment->label_path && Storage::disk('local')->exists($shipment->label_path), 404);
+
+        return Storage::disk('local')->download($shipment->label_path, 'dhl-'.$shipment->tracking_number.'.pdf');
     }
 
     public function generateLabel(string $carrier, ?int $shipmentId = null, bool $confirm = false): void

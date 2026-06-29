@@ -26,7 +26,9 @@
     $shippingPaymentLines = app(\App\Support\OrderShippingPaymentDisplayResolver::class)->resolve($order, includeAmount: true);
     $paymentLabel = $shippingPaymentLines['payment'] ?? null;
     $deliveryLabel = $shippingPaymentLines['delivery'] ?? $order->delivery_method;
-    $shipment = $order->shipments->first();
+    $shipment = $order->shipments->sortByDesc('id')->first();
+    $isEbayOrder = Str::startsWith($marketplaceKey, 'ebay');
+    $ebayFulfillment = (array) data_get($shipment?->response_payload, 'ebay_fulfillment', []);
     $carrier = $shipment ? (Shipment::CARRIERS[$shipment->carrier] ?? $shipment->carrier) : null;
     $deliveryMethod = trim((string) ($deliveryLabel ?: $carrier ?: $order->delivery_method));
     $deliveryType = trim((string) data_get($order->raw_payload, 'delivery.type', data_get($order->raw_payload, 'delivery_type', data_get($order->raw_payload, 'shipping_type'))));
@@ -386,39 +388,64 @@
 
         <section class="gps-order-detail-card">
             <h2 class="gps-order-detail-section-title">Przesyłka</h2>
-            <div class="gps-order-detail-two">
-                <div class="gps-order-detail-fact">
-                    <div class="gps-order-detail-label">Flow marketplace</div>
-                    <div class="gps-order-detail-value">
-                        @if ($marketplaceKey === 'allegro')
-                            Allegro shipment-management: dry-run payloadu, potem osobno utworzenie przesyłki, etykieta i pickup.
-                        @elseif ($marketplaceKey === 'ovoko')
-                            Ovoko/RRR: dry-run danych paczki do crm/importPostData, potem osobno pobranie etykiety.
-                        @elseif ($marketplaceKey === 'ebay')
-                            Przesyłka eBay będzie obsługiwana osobno przez DHL/API.
-                        @else
-                            Brak aktywnego flow przesyłek marketplace dla tego źródła.
+            @if ($isEbayOrder)
+                @if (! $shipment)
+                    <div class="gps-empty gps-empty-compact">Brak przesyłki dla tego zamówienia.</div>
+                    <div class="gps-order-shipment-actions">
+                        <a class="gps-order-shipment-button" href="{{ \App\Filament\Pages\CreateOrderShipment::getUrl(['order' => $order]) }}">Dodaj przesyłkę DHL</a>
+                    </div>
+                @else
+                    <div class="gps-order-detail-two">
+                        <div class="gps-order-detail-fact">
+                            <div class="gps-order-detail-label">Podsumowanie</div>
+                            <div class="gps-order-detail-value">
+                                <div>Przewoźnik: {{ $carrier ?: strtoupper($shipment->carrier ?: '—') }}</div>
+                                <div>Tracking: {{ $shipment->tracking_number ?: $shipment->carrier_shipment_id ?: '—' }}</div>
+                                <div>Status lokalny: {{ $shipment->shipment_status ?: '—' }}</div>
+                                <div>Utworzono: {{ $shipment->created_at?->format('Y-m-d H:i') ?: '—' }}</div>
+                                <div>eBay tracking: {{ ($ebayFulfillment['ok'] ?? false) ? 'wysłany' : (($ebayFulfillment['error'] ?? null) ? 'błąd: '.$ebayFulfillment['error'] : 'brak potwierdzenia') }}</div>
+                            </div>
+                            <div class="gps-order-shipment-actions">
+                                @if ($shipment->label_path)<a class="gps-order-shipment-button" href="{{ route('tools.download-shipment-label', $shipment) }}">Pobierz etykietę PDF</a>@endif
+                                <a class="gps-order-shipment-button" href="{{ \App\Filament\Pages\ShipmentDetails::getUrl(['shipment' => $shipment->id]) }}">Szczegóły</a>
+                            </div>
+                        </div>
+                        <div class="gps-order-detail-fact">
+                            <div class="gps-order-detail-label">Adres dostawy</div>
+                            <div class="gps-order-detail-value">
+                                <div>{{ $order->customer_name ?: $order->company_name ?: '—' }}</div>
+                                <div>{{ $order->address_line1 ?: '—' }}</div>
+                                <div>{{ trim(($order->postal_code ?? '').' '.($order->city ?? '')) ?: '—' }}</div>
+                                <div>{{ $order->country ?: '—' }}</div>
+                            </div>
+                        </div>
+                    </div>
+                @endif
+            @else
+                <div class="gps-order-detail-two">
+                    <div class="gps-order-detail-fact">
+                        <div class="gps-order-detail-label">Flow marketplace</div>
+                        <div class="gps-order-detail-value">
+                            @if ($marketplaceKey === 'allegro')
+                                Allegro shipment-management: dry-run payloadu, potem osobno utworzenie przesyłki, etykieta i pickup.
+                            @elseif ($marketplaceKey === 'ovoko')
+                                Ovoko/RRR: dry-run danych paczki do crm/importPostData, potem osobno pobranie etykiety.
+                            @else
+                                Brak aktywnego flow przesyłek marketplace dla tego źródła.
+                            @endif
+                        </div>
+                        @if ($shipmentPreviewUrl)
+                            <div class="gps-order-shipment-actions"><a class="gps-order-shipment-button" href="{{ $shipmentPreviewUrl }}" target="_blank" rel="noopener noreferrer">{{ $marketplaceKey === 'allegro' ? 'Dodaj przesyłkę Allegro' : 'Przygotuj przesyłkę Ovoko' }}</a></div>
+                            <div class="gps-order-detail-muted">Przycisk prowadzi wyłącznie do read-only preview/formularza dry-run.</div>
                         @endif
                     </div>
-                    @if ($shipmentPreviewUrl)
-                        <div class="gps-order-shipment-actions">
-                            <a class="gps-order-shipment-button" href="{{ $shipmentPreviewUrl }}" target="_blank" rel="noopener noreferrer">
-                                {{ $marketplaceKey === 'allegro' ? 'Dodaj przesyłkę Allegro' : 'Przygotuj przesyłkę Ovoko' }}
-                            </a>
-                        </div>
-                        <div class="gps-order-detail-muted">Przycisk prowadzi wyłącznie do read-only preview/formularza dry-run. Nie wykonuje API write, nie tworzy przesyłki, nie pobiera etykiety i nie zamawia pickup.</div>
-                    @endif
-                </div>
-                <div class="gps-order-detail-fact">
-                    <div class="gps-order-detail-label">Pola formularza paczki</div>
-                    <div class="gps-order-detail-value">Read-only prefill: odbiorca, adres, telefon, e-mail, metoda dostawy, koszt dostawy, pobranie/kwota pobrania i numer referencyjny.</div>
-                    <div class="gps-order-shipment-fields">
-                        @foreach ($shipmentRequiredFields as $field)
-                            <span class="gps-order-shipment-field">{{ $field }}</span>
-                        @endforeach
+                    <div class="gps-order-detail-fact">
+                        <div class="gps-order-detail-label">Pola formularza paczki</div>
+                        <div class="gps-order-detail-value">Read-only prefill: odbiorca, adres, telefon, e-mail, metoda dostawy, koszt dostawy, pobranie/kwota pobrania i numer referencyjny.</div>
+                        <div class="gps-order-shipment-fields">@foreach ($shipmentRequiredFields as $field)<span class="gps-order-shipment-field">{{ $field }}</span>@endforeach</div>
                     </div>
                 </div>
-            </div>
+            @endif
         </section>
 
         <section class="gps-order-detail-card"><h2 class="gps-order-detail-section-title">Płatność</h2><div class="gps-order-detail-grid">
