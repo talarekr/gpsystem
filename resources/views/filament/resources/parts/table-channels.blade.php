@@ -61,6 +61,16 @@
             text-overflow: clip;
         }
 
+        .gps-admin-channels .part-channel-value {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            flex: 0 1 auto;
+            min-width: 0;
+            white-space: nowrap;
+            overflow: hidden;
+        }
+
 
         .gps-admin-channels .part-channel-status {
             display: inline;
@@ -134,27 +144,29 @@
                     @endif
                     :
                 </span>
-                <span class="part-channel-price">{{ $row['price'] }}</span>
-                <span
-                    class="part-channel-status {{ $row['listed'] ? 'is-listed' : 'is-not-listed' }}"
-                    title="{{ $row['title'] }}"
-                    aria-label="{{ $row['title'] }}"
-                >{{ $row['listed'] ? '✓' : '✕' }}</span>
-                @if ($row['listed'] && filled($row['url'] ?? null))
-                    <a
-                        class="part-channel-link"
-                        href="{{ $row['url'] }}"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        title="Otwórz aukcję {{ $row['label'] }}"
-                        aria-label="Otwórz aukcję {{ $row['label'] }}"
-                    >
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true" focusable="false">
-                            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-                            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-                        </svg>
-                    </a>
-                @endif
+                <span class="part-channel-value">
+                    <span class="part-channel-price">{{ $row['price'] }}</span>
+                    <span
+                        class="part-channel-status {{ $row['listed'] ? 'is-listed' : 'is-not-listed' }}"
+                        title="{{ $row['title'] }}"
+                        aria-label="{{ $row['title'] }}"
+                    >{{ $row['listed'] ? '✓' : '✕' }}</span>
+                    @if ($row['listed'] && filled($row['url'] ?? null))
+                        <a
+                            class="part-channel-link"
+                            href="{{ $row['url'] }}"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Otwórz aukcję {{ $row['label'] }}"
+                            aria-label="Otwórz aukcję {{ $row['label'] }}"
+                        >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true" focusable="false">
+                                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                            </svg>
+                        </a>
+                    @endif
+                </span>
             </div>
         @endforeach
     @endif
