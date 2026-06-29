@@ -340,6 +340,7 @@ class EditPart extends EditRecord
             'allegro_required_category_parameters_missing' => 'Brakuje wymaganych parametrów Allegro',
             'prepared_translations' => 'Brak przygotowanego tłumaczenia eBay DE',
             'publish_not_confirmed_or_disabled', 'marketplace_publish_disabled_or_not_confirmed' => 'Wystawianie marketplace jest wyłączone albo niepotwierdzone',
+            'marketplace_api_error' => 'Szczegóły są w Logach.',
             default => str_replace('_', ' ', $message),
         };
     }
@@ -399,7 +400,12 @@ class EditPart extends EditRecord
         $published = $result['published_channels'] ?? $result['ready_channels'] ?? [];
         $skipped = $result['skipped_channels'] ?? [];
         $messages = collect($result['channels'] ?? [])->flatMap(fn (array $channel): array => $channel['errors'] ?? $channel['readiness']['blockers'] ?? [])->map(fn (mixed $message): string => $this->marketplacePublishMessage((string) $message))->filter()->values()->all();
-        $channelLabel = $singleChannel ? ucfirst($singleChannel) : null;
+        $channelLabel = $singleChannel ? match ($singleChannel) {
+            'allegro_main', 'allegro' => 'Allegro',
+            'ebay_de', 'ebay' => 'eBay',
+            'ovoko', 'ovoko_main' => 'Ovoko',
+            default => ucfirst($singleChannel),
+        } : null;
 
         if (! $enabled) {
             Notification::make()
