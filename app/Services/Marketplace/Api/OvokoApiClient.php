@@ -196,8 +196,13 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
 
     public function fetchPartRawById(string $id): array
     {
+        return $this->fetchPartRawByLookup($id, null);
+    }
+
+    public function fetchPartRawByLookup(string $id, ?string $externalId = null): array
+    {
         $mismatches = [];
-        $attempts = $this->comparePartDetailEndpoints($id);
+        $attempts = $this->comparePartDetailEndpoints($id, $externalId);
         foreach ($attempts as $candidate) {
             if (($candidate['api_ok'] ?? false) && ($candidate['matched_requested_id'] ?? false) && is_array($candidate['raw'] ?? null)) {
                 return [
@@ -214,6 +219,14 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
                     'matched_requested_id' => true,
                     'returned_raw_id' => $candidate['returned_raw_id'] ?? null,
                     'returned_external_id' => $candidate['returned_external_id'] ?? null,
+                    'returned_candidates_count' => $candidate['returned_candidates_count'] ?? 0,
+                    'matched_candidate_index' => $candidate['matched_candidate_index'] ?? null,
+                    'matched_candidate_id' => $candidate['returned_raw_id'] ?? null,
+                    'matched_candidate_external_id' => $candidate['returned_external_id'] ?? null,
+                    'matched_candidate_shop_url' => $candidate['returned_shop_url'] ?? null,
+                    'mismatch_sample_ids' => $candidate['mismatch_sample_ids'] ?? [],
+                    'returned_pagination' => $candidate['returned_pagination'] ?? null,
+                    'returned_pagination_count' => $candidate['returned_pagination_count'] ?? null,
                 ];
             }
             if (($candidate['api_ok'] ?? false) && is_array($candidate['raw'] ?? null)) {
@@ -226,7 +239,23 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
             }
         }
 
-        return ['api_ok' => false, 'error' => $mismatches === [] ? 'part_detail_not_found_on_known_read_only_endpoints' : 'detail_id_mismatch', 'matched_requested_id' => false, 'mismatches' => $mismatches, 'attempts' => $this->summarizePartDetailAttempts($attempts)];
+        $best = collect($attempts)->sortByDesc(fn (array $attempt): int => (int) ($attempt['returned_candidates_count'] ?? 0))->first() ?? [];
+
+        return [
+            'api_ok' => false,
+            'error' => $mismatches === [] ? 'part_detail_not_found_on_known_read_only_endpoints_csv_export_required' : 'detail_id_mismatch',
+            'matched_requested_id' => false,
+            'mismatches' => $mismatches,
+            'attempts' => $this->summarizePartDetailAttempts($attempts),
+            'returned_candidates_count' => $best['returned_candidates_count'] ?? 0,
+            'matched_candidate_index' => null,
+            'matched_candidate_id' => null,
+            'matched_candidate_external_id' => null,
+            'matched_candidate_shop_url' => null,
+            'mismatch_sample_ids' => $best['mismatch_sample_ids'] ?? [],
+            'returned_pagination' => $best['returned_pagination'] ?? null,
+            'returned_pagination_count' => $best['returned_pagination_count'] ?? null,
+        ];
     }
 
     private function summarizePartDetailAttempts(array $attempts): array
@@ -240,38 +269,50 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
             'matched_requested_id' => $attempt['matched_requested_id'] ?? false,
             'returned_raw_id' => $attempt['returned_raw_id'] ?? null,
             'returned_external_id' => $attempt['returned_external_id'] ?? null,
+            'returned_candidates_count' => $attempt['returned_candidates_count'] ?? 0,
+            'matched_candidate_index' => $attempt['matched_candidate_index'] ?? null,
+            'mismatch_sample_ids' => $attempt['mismatch_sample_ids'] ?? [],
+            'returned_pagination' => $attempt['returned_pagination'] ?? null,
+            'returned_pagination_count' => $attempt['returned_pagination_count'] ?? null,
             'returned_shop_url_present' => $this->stringOrNull($attempt['returned_shop_url'] ?? null) !== null,
             'top_level_keys' => $attempt['top_level_keys'] ?? [],
             'error' => $attempt['error'] ?? null,
         ], $attempts);
     }
 
-    public function comparePartDetailEndpoints(string $id): array
+    public function comparePartDetailEndpoints(string $id, ?string $externalId = null): array
     {
         $base = rtrim((string) $this->account?->api_base_url, '/');
         $encodedId = rawurlencode($id);
         $variants = [
-            ['endpoint' => $base.'/v2/get/parts/'.$encodedId, 'fields' => []],
             ['endpoint' => $base.'/v2/get/part/'.$encodedId, 'fields' => []],
             ['endpoint' => $base.'/get/part/'.$encodedId, 'fields' => []],
             ['endpoint' => $base.'/v2/get/parts', 'fields' => ['id' => $id]],
             ['endpoint' => $base.'/v2/get/parts', 'fields' => ['part_id' => $id]],
+            ['endpoint' => $base.'/v2/get/parts', 'fields' => ['part_ids' => [$id]]],
             ['endpoint' => $base.'/v2/get/parts', 'fields' => ['ids' => [$id]]],
         ];
+        if ($externalId !== null && $externalId !== '') {
+            $variants[] = ['endpoint' => $base.'/v2/get/parts', 'fields' => ['external_id' => $externalId]];
+            $variants[] = ['endpoint' => $base.'/v2/get/parts', 'fields' => ['visible_code' => $externalId]];
+        }
 
-        return array_map(fn (array $variant): array => $this->probePartDetailEndpoint($variant['endpoint'], $variant['fields'], $id), $variants);
+        return array_map(fn (array $variant): array => $this->probePartDetailEndpoint($variant['endpoint'], $variant['fields'], $id, $externalId), $variants);
     }
 
-    private function probePartDetailEndpoint(string $endpoint, array $fields, string $requestedId): array
+    private function probePartDetailEndpoint(string $endpoint, array $fields, string $requestedId, ?string $requestedExternalId): array
     {
         try {
             $response = Http::asForm()->acceptJson()->timeout(30)->post($endpoint, $this->authFields() + $fields);
             $json = $response->json();
             $payload = is_array($json) ? $json : [];
-            $row = $this->extractSingleOfferRow($payload);
+            $rows = $this->extractOfferRows($payload);
+            [$row, $matchedIndex] = $this->findMatchingOfferRow($rows, $requestedId, $requestedExternalId);
+            $diagnosticRow = is_array($row) ? $row : ($rows[0] ?? null);
             $normalized = is_array($row) ? $this->normalizeOffer($row) : [];
-            $rawId = is_array($row) ? $this->stringOrNull($row['id'] ?? $row['raw_id'] ?? null) : null;
-            $externalId = is_array($row) ? $this->firstString($row, ['external_id', 'external_offer_id', 'part_id', 'ovoko_part_id', 'rrr_id', 'id']) : null;
+            $rawId = is_array($diagnosticRow) ? $this->stringOrNull($diagnosticRow['id'] ?? $diagnosticRow['raw_id'] ?? null) : null;
+            $externalId = is_array($diagnosticRow) ? $this->firstString($diagnosticRow, ['external_id', 'external_offer_id', 'part_id', 'ovoko_part_id', 'rrr_id', 'id']) : null;
+            $pagination = is_array($payload['pagination'] ?? null) ? $payload['pagination'] : null;
 
             return [
                 'endpoint' => $endpoint,
@@ -279,28 +320,36 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
                 'http_status' => $response->status(),
                 'api_status_code' => $payload['status_code'] ?? null,
                 'api_ok' => $response->successful() && (($payload['status_code'] ?? null) === 'R200' || ($payload['status_code'] ?? null) === 200),
-                'matched_requested_id' => $this->matchesRequestedId($requestedId, $row ?? null, $normalized),
+                'matched_requested_id' => is_array($row),
                 'returned_raw_id' => $rawId,
                 'returned_external_id' => $externalId,
-                'returned_name' => is_array($row) ? ($row['name'] ?? $row['title'] ?? null) : null,
-                'returned_category_id' => is_array($row) ? ($row['category_id'] ?? $row['categoryId'] ?? $row['part_category_id'] ?? data_get($row, 'category.id') ?? null) : null,
-                'returned_shop_url' => is_array($row) ? ($row['shop_url'] ?? $row['url'] ?? $row['link'] ?? null) : null,
+                'returned_name' => is_array($diagnosticRow) ? ($diagnosticRow['name'] ?? $diagnosticRow['title'] ?? null) : null,
+                'returned_category_id' => is_array($diagnosticRow) ? ($diagnosticRow['category_id'] ?? $diagnosticRow['categoryId'] ?? $diagnosticRow['part_category_id'] ?? data_get($diagnosticRow, 'category.id') ?? null) : null,
+                'returned_shop_url' => is_array($diagnosticRow) ? ($diagnosticRow['shop_url'] ?? $diagnosticRow['url'] ?? $diagnosticRow['link'] ?? null) : null,
+                'returned_candidates_count' => count($rows),
+                'matched_candidate_index' => $matchedIndex,
+                'mismatch_sample_ids' => array_values(array_slice(array_map(fn (array $candidate): ?string => $this->firstString($candidate, ['id', 'external_id', 'part_id', 'ovoko_part_id', 'rrr_id']), $rows), 0, 5)),
+                'returned_pagination' => $pagination,
+                'returned_pagination_count' => is_numeric($pagination['total_count'] ?? null) ? (int) $pagination['total_count'] : (is_numeric($pagination['total'] ?? null) ? (int) $pagination['total'] : null),
                 'top_level_keys' => array_values(array_slice(array_keys($payload), 0, 30)),
                 'error' => $payload['msg'] ?? $payload['message'] ?? null,
                 'raw' => is_array($row) ? $row : null,
             ];
         } catch (\Throwable $e) {
-            return ['endpoint' => $endpoint, 'request_fields' => array_keys($fields), 'http_status' => null, 'api_status_code' => null, 'api_ok' => false, 'matched_requested_id' => false, 'returned_raw_id' => null, 'returned_external_id' => null, 'returned_name' => null, 'returned_category_id' => null, 'returned_shop_url' => null, 'top_level_keys' => [], 'error' => $e->getMessage(), 'raw' => null];
+            return ['endpoint' => $endpoint, 'request_fields' => array_keys($fields), 'http_status' => null, 'api_status_code' => null, 'api_ok' => false, 'matched_requested_id' => false, 'returned_raw_id' => null, 'returned_external_id' => null, 'returned_name' => null, 'returned_category_id' => null, 'returned_shop_url' => null, 'returned_candidates_count' => 0, 'matched_candidate_index' => null, 'mismatch_sample_ids' => [], 'returned_pagination' => null, 'returned_pagination_count' => null, 'top_level_keys' => [], 'error' => $e->getMessage(), 'raw' => null];
         }
     }
 
-    private function matchesRequestedId(string $requestedId, ?array $row, array $normalized): bool
+    private function matchesRequestedId(string $requestedId, ?string $requestedExternalId, ?array $row, array $normalized): bool
     {
         if (! is_array($row)) return false;
         foreach (['id', 'external_id', 'external_offer_id', 'part_id', 'ovoko_part_id', 'rrr_id'] as $key) {
             if ($this->stringOrNull($row[$key] ?? null) === $requestedId) return true;
+            if ($requestedExternalId !== null && $this->stringOrNull($row[$key] ?? null) === $requestedExternalId) return true;
         }
-        return $this->stringOrNull($normalized['external_offer_id'] ?? null) === $requestedId;
+        $normalizedId = $this->stringOrNull($normalized['external_offer_id'] ?? null);
+
+        return $normalizedId === $requestedId || ($requestedExternalId !== null && $normalizedId === $requestedExternalId);
     }
 
     private function firstString(array $row, array $keys): ?string
@@ -349,18 +398,29 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
         }, array_filter($rows, 'is_array')));
     }
 
-    private function extractSingleOfferRow(array $payload): ?array
+    private function extractOfferRows(array $payload): array
     {
         foreach (['data', 'part', 'item', 'offer'] as $key) {
             $value = $payload[$key] ?? null;
             if (is_array($value) && array_is_list($value)) {
-                $first = $value[0] ?? null;
-                if (is_array($first)) return $first;
+                return array_values(array_filter($value, 'is_array'));
             }
-            if (is_array($value)) return $value;
+            if (is_array($value)) return [$value];
         }
 
-        return null;
+        return [];
+    }
+
+    private function findMatchingOfferRow(array $rows, string $requestedId, ?string $requestedExternalId): array
+    {
+        foreach ($rows as $index => $row) {
+            $normalized = $this->normalizeOffer($row);
+            if ($this->matchesRequestedId($requestedId, $requestedExternalId, $row, $normalized)) {
+                return [$row, $index];
+            }
+        }
+
+        return [null, null];
     }
 
     private function rawCategoryFields(array $row): array

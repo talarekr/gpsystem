@@ -57,7 +57,36 @@ class BackfillOvokoListingUrlsCommandTest extends TestCase
 
         $this->assertDatabaseHas('marketplace_listings', ['id' => 501, 'url' => null]);
         $this->assertDatabaseMissing('marketplace_listings', ['id' => 501, 'url' => 'https://gpswiss.pl/storage/parts/photos/imported/7892/example.jpg']);
-        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/v2/get/parts/11700'));
+        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/v2/get/parts'));
+    }
+
+    public function test_dry_run_searches_list_payload_for_matching_ovoko_or_external_id(): void
+    {
+        MarketplaceAccount::query()->create(['marketplace' => 'ovoko', 'name' => 'Ovoko main', 'code' => 'ovoko_main', 'status' => 'active', 'api_base_url' => 'https://ovoko.example.test', 'api_credentials' => ['username' => 'u', 'password' => 'p', 'user_token' => 't']]);
+        DB::table('parts')->insert(['id' => 7892, 'external_id' => 'gps-part-7892', 'name' => 'PDC module', 'price' => 1, 'quantity' => 1, 'status' => 'ready', 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('marketplace_listings')->insert(['id' => 501, 'marketplace' => 'ovoko', 'part_id' => 7892, 'external_offer_id' => '11700', 'created_at' => now(), 'updated_at' => now()]);
+
+        Http::fake([
+            'https://ovoko.example.test/v2/get/part/11700' => Http::response(['status_code' => 'R404'], 200),
+            'https://ovoko.example.test/get/part/11700' => Http::response(['status_code' => 'R404'], 200),
+            'https://ovoko.example.test/v2/get/parts' => Http::response([
+                'status_code' => 'R200',
+                'pagination' => ['page' => 1, 'limit' => 100, 'total_count' => 2],
+                'data' => [
+                    ['id' => '3', 'external_id' => 'other', 'shop_url' => 'https://ovoko.pl/czesci-samochodowe/wrong-slug'],
+                    ['id' => '999', 'external_id' => 'gps-part-7892', 'shop_url' => 'https://ovoko.pl/czesci-samochodowe/right-slug'],
+                ],
+            ], 200),
+            'https://ovoko.example.test/*' => Http::response(['status_code' => 'R404'], 200),
+        ]);
+
+        $this->artisan('marketplace:backfill-ovoko-listing-urls', ['--dry-run' => true, '--part-id' => 7892])
+            ->expectsOutputToContain('would_update')
+            ->expectsOutputToContain('gps-part-7892')
+            ->expectsOutputToContain('right-slug')
+            ->assertExitCode(0);
+
+        $this->assertDatabaseHas('marketplace_listings', ['id' => 501, 'url' => null]);
     }
 
     public function test_apply_updates_from_csv_and_does_not_call_api(): void
