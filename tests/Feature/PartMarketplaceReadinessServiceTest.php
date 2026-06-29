@@ -908,6 +908,73 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $this->assertFalse($readiness['prepared_payload_preview_safe']['will_make_marketplace_request']);
     }
 
+    public function test_ebay_prepared_preview_uses_channel_translated_title_and_description_html(): void
+    {
+        Cache::put('nbp_table_a_eur_rate', ['rate' => 4.30, 'effective_date' => '2026-06-27']);
+        foreach (['ebay_de' => ['EBAY_DE', 'Deutscher Titel', 'Deutsche Beschreibung'], 'ebay_fr' => ['EBAY_FR', 'Titre français', 'Description française']] as $channel => [$marketplaceId, $title, $description]) {
+            $part = $this->ebayReadinessPart([
+                'name' => 'Polski tytuł',
+                'description' => 'Polski opis',
+                'review_metadata' => ['marketplace_prepared_translations' => [
+                    $channel => ['status' => 'prepared', 'language' => $channel === 'ebay_de' ? 'de' : 'fr', 'fields' => ['title' => $title, 'description' => $description]],
+                ]],
+            ], $channel);
+            \App\Models\MarketplaceAccount::query()->create(['marketplace' => $channel, 'name' => $channel, 'code' => $channel, 'status' => 'active', 'api_enabled' => true, 'api_settings' => ['marketplace_id' => $marketplaceId]]);
+
+            $readiness = app(\App\Services\Marketplace\MarketplaceListingReadinessService::class)->checkPartReadiness($part->fresh(), $channel);
+            $preview = $readiness['prepared_payload_preview_safe'];
+
+            $this->assertSame($title, $preview['title']);
+            $this->assertStringContainsString($title, $preview['description_rendered_html']);
+            $this->assertStringContainsString($description, $preview['description_rendered_html']);
+            $this->assertStringNotContainsString('Polski opis', $preview['description_rendered_html']);
+        }
+    }
+
+    public function test_ebay_renderer_uses_configured_https_asset_base_url(): void
+    {
+        config(['product-hub.ebay.template_asset_base_url' => 'https://cdn.example.test/ebay-assets/']);
+        $renderer = app(\App\Services\Marketplace\EbayDescriptionTemplateRenderer::class);
+
+        $this->assertSame('https://cdn.example.test/ebay-assets/icon-shipping.png', $renderer->assetUrls()['icon_shipping']);
+    }
+
+    public function test_ebay_inventory_description_fallbacks_are_channel_localized(): void
+    {
+        $adapter = new \App\Services\Marketplace\Publishing\EbayPublishAdapter('ebay_fr');
+        $method = new \ReflectionMethod($adapter, 'inventoryDescription');
+        $method->setAccessible(true);
+        $part = Part::query()->create(['name' => '', 'price' => 1, 'quantity' => 1]);
+
+        $this->assertSame('Pièce automobile GPS-1', $method->invoke($adapter, [], $part, 'GPS-1', 'EBAY_FR'));
+        $this->assertSame('Autoteil GPS-1', $method->invoke($adapter, [], $part, 'GPS-1', 'EBAY_DE'));
+        $this->assertSame('Description française', $method->invoke($adapter, ['description' => 'Description française', 'title' => 'Titre français'], $part, 'GPS-1', 'EBAY_FR'));
+    }
+
+    public function test_ebay_dry_run_uses_marketplace_image_selection_service_and_fr_requires_fr_marketplace_id(): void
+    {
+        Cache::put('nbp_table_a_eur_rate', ['rate' => 4.30, 'effective_date' => '2026-06-27']);
+        $this->app->instance(\App\Services\Marketplace\MarketplaceImageSelectionService::class, new class extends \App\Services\Marketplace\MarketplaceImageSelectionService {
+            public function selectForPart(\App\Models\Part $part, int $limit = 5, bool $withHttpChecks = false): array
+            {
+                return ['urls' => ['https://cdn.example.test/selected.jpg'], 'selected' => [], 'diagnostics' => ['selected_image_variant' => 'test_double']];
+            }
+        });
+
+        $part = $this->ebayReadinessPart(['ebay_price' => 10], 'ebay_fr');
+        \App\Models\MarketplaceAccount::query()->create([
+            'marketplace' => 'ebay_fr', 'name' => 'eBay FR', 'code' => 'ebay_fr', 'status' => 'active', 'api_enabled' => true, 'api_mode' => 'dry_run',
+            'api_credentials' => ['client_id' => 'id', 'client_secret' => 'secret', 'refresh_token' => 'token'],
+            'api_settings' => ['marketplace_id' => 'EBAY_DE', 'payment_policy_id' => 'p', 'return_policy_id' => 'r'],
+        ]);
+
+        $dryRun = app(\App\Services\Marketplace\EbayListingDryRunService::class)->readiness($part->id, 'ebay_fr');
+
+        $this->assertContains('Marketplace ID must be EBAY_FR for ebay_fr.', $dryRun['blockers']);
+        $this->assertSame(['https://cdn.example.test/selected.jpg'], $dryRun['images']['public_urls_sample']);
+        $this->assertSame('test_double', $dryRun['images']['selection_diagnostics']['selected_image_variant']);
+    }
+
     private function ebayReadinessPart(array $attributes = [], string $channel = 'ebay_de'): Part
     {
         $category = PartCategory::query()->create(['name' => 'eBay test category']);

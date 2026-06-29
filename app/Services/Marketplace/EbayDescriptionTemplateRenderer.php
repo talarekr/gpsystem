@@ -3,6 +3,7 @@
 namespace App\Services\Marketplace;
 
 use App\Models\Part;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\HtmlString;
 
 class EbayDescriptionTemplateRenderer
@@ -57,19 +58,45 @@ class EbayDescriptionTemplateRenderer
 
     public function assetUrl(string $filename): string
     {
-        return 'https://gpswiss.pl/ebay-template/assets/'.$filename;
+        $baseUrl = $this->assetBaseUrl();
+
+        return rtrim($baseUrl, '/').'/'.ltrim($filename, '/');
+    }
+
+    private function assetBaseUrl(): string
+    {
+        $configured = trim((string) config('product-hub.ebay.template_asset_base_url', ''));
+        $scheme = strtolower((string) parse_url($configured, PHP_URL_SCHEME));
+        $host = (string) parse_url($configured, PHP_URL_HOST);
+
+        return $configured !== '' && $scheme === 'https' && $host !== ''
+            ? rtrim($configured, '/')
+            : 'https://gpswiss.pl/ebay-template/assets';
     }
 
     /** @return array<string, string> */
     public function assetUrls(): array
     {
-        return collect(self::ASSETS)->mapWithKeys(fn (string $filename, string $key): array => [$key => $this->assetUrl($filename)])->all();
+        return collect(self::ASSETS)->mapWithKeys(function (string $filename, string $key): array {
+            $url = $this->assetUrl($filename);
+            $sourcePath = storage_path('app/imports/'.$filename);
+            Log::info('ebay_template_asset_url_generated', [
+                'asset_key' => $key,
+                'filename' => $filename,
+                'source_path' => $sourcePath,
+                'generated_url' => $url,
+                'absolute_https' => strtolower((string) parse_url($url, PHP_URL_SCHEME)) === 'https' && filled(parse_url($url, PHP_URL_HOST)),
+                'source_exists' => is_file($sourcePath),
+            ]);
+
+            return [$key => $url];
+        })->all();
     }
 
     /** @param array<string, mixed> $data */
     private function descriptionBlock(Part $part, array $data): string
     {
-        $value = (string) ($data['description_block'] ?? $part->description ?? $part->short_description ?? '');
+        $value = (string) ($data['description'] ?? $data['description_block'] ?? $part->description ?? $part->short_description ?? '');
         $plain = trim(strip_tags($value));
 
         return $plain === '' ? '' : '<p style="margin:0;color:#1f2937;font-size:16px;line-height:1.7;text-align:center;">'.e($plain).'</p>';

@@ -20,6 +20,7 @@ class EbayListingDryRunService
         private readonly NbpExchangeRateService $exchangeRateService,
         private readonly EbayItemSpecificsService $itemSpecificsService,
         private readonly EbaySkuResolver $skuResolver,
+        private readonly MarketplaceImageSelectionService $marketplaceImageSelectionService,
     ) {}
 
     public function readiness(int $partId, string $channel): array
@@ -33,7 +34,7 @@ class EbayListingDryRunService
         $account = isset(self::CHANNELS[$channel]) && Schema::hasTable('marketplace_accounts') ? MarketplaceAccount::query()->where('code', $channel)->first() : null;
         $settings = is_array($account?->api_settings) ? $account->api_settings : [];
         $credentials = is_array($account?->api_credentials) ? $account->api_credentials : [];
-        $marketplaceId = $settings['marketplace_id'] ?? (self::CHANNELS[$channel] ?? null);
+        $marketplaceId = $this->configuredMarketplaceId($settings, $channel);
         $mapping = $part && isset(self::CHANNELS[$channel]) && Schema::hasTable('marketplace_category_mappings')
             ? MarketplaceCategoryMapping::query()->where('local_category_id', $part->category_id)->where('channel', $channel)->first()
             : null;
@@ -43,6 +44,7 @@ class EbayListingDryRunService
         if ($account && $account->api_mode !== 'dry_run') $blockers[] = 'api_mode must be dry_run.';
         foreach (['client_id', 'client_secret', 'refresh_token'] as $key) if ($account && blank($credentials[$key] ?? null)) $blockers[] = "OAuth/API credential missing: {$key}.";
         if (blank($marketplaceId)) $blockers[] = 'Marketplace ID missing.';
+        if (isset(self::CHANNELS[$channel]) && $marketplaceId !== self::CHANNELS[$channel]) $blockers[] = 'Marketplace ID must be '.self::CHANNELS[$channel].' for '.$channel.'.';
         if ($part && ! $mapping) $blockers[] = 'Category mapping missing in marketplace_category_mappings.';
         if ($mapping?->is_blocked) $blockers[] = 'Category is blocked for this eBay channel.';
         if ($mapping && blank($mapping->external_category_id)) $blockers[] = 'External eBay category ID missing.';
@@ -50,7 +52,7 @@ class EbayListingDryRunService
         $paymentPolicyId = $this->resolvedPaymentPolicyId($settings);
         $returnPolicyId = $this->resolvedReturnPolicyId($settings);
         $shippingPolicyResolution = $this->shippingPolicyResolution($part, $mapping, $channel);
-        $businessPolicies = $this->businessPoliciesPayload($settings, $mapping, $paymentPolicyId, $returnPolicyId, $shippingPolicyResolution);
+        $businessPolicies = $this->businessPoliciesPayload($settings, $mapping, $paymentPolicyId, $returnPolicyId, $shippingPolicyResolution, $channel);
         foreach ($shippingPolicyResolution['missing'] as $missingPolicy) $blockers[] = $missingPolicy;
         foreach ($businessPolicies['missing'] as $missingPolicy) if (! in_array($missingPolicy, $shippingPolicyResolution['missing'], true)) $blockers[] = $missingPolicy;
 
@@ -84,7 +86,8 @@ class EbayListingDryRunService
         $warnings = array_merge($warnings, $template['warnings'] ?? []);
         $preview = $part && isset(self::CHANNELS[$channel]) ? $this->templateService->preview($part->id, $channel) : [];
 
-        $imageUrls = $part ? $part->images->map(fn ($image) => $image->listingUrl())->filter()->values() : collect();
+        $imageSelection = $part ? $this->marketplaceImageSelectionService->selectForPart($part, 5) : ['urls' => [], 'diagnostics' => []];
+        $imageUrls = collect($imageSelection['urls']);
         if ($part && $imageUrls->isEmpty()) $blockers[] = 'No public product images available.';
         $translation = $this->translation($channel, $preview);
         if ($translation['required'] && ! $translation['available']) $blockers[] = 'Google Translate is required for FR preview but is not available.';
@@ -107,7 +110,7 @@ class EbayListingDryRunService
             'price' => ['storefront_price_pln' => $storefrontPricePln, 'ebay_price_pln' => $ebayPricePln, 'ebay_price_source' => $ebayPriceSource, 'eur_rate' => $rate, 'estimated_price_eur' => $estimatedEur, 'currency' => 'EUR', 'conversion_source' => $rate === null ? null : 'nbp', 'conversion_fetched_at' => $conversion['fetched_at'] ?? null, 'conversion_effective_date' => $conversion['effective_date'] ?? null],
             'inventory' => ['quantity' => $part?->quantity, 'status' => $part?->status, 'needs_listing' => (bool) ($part?->needs_listing ?? false)],
             'template' => ['ok' => (bool) ($template['ok'] ?? false), 'html_length' => $template['html_length'] ?? 0, 'missing_assets' => $template['missing_assets'] ?? [], 'warnings' => $template['warnings'] ?? []],
-            'images' => ['count' => $part?->images->count() ?? 0, 'public_urls_sample' => $imageUrls->take(5)->all(), 'missing_public_images_count' => max(0, ($part?->images->count() ?? 0) - $imageUrls->count())],
+            'images' => ['count' => $part?->images->count() ?? 0, 'public_urls_sample' => $imageUrls->take(5)->all(), 'missing_public_images_count' => max(0, ($part?->images->count() ?? 0) - $imageUrls->count()), 'selection_diagnostics' => $imageSelection['diagnostics'] ?? []],
             'translation' => $translation,
             'translated_specification_values' => $preview['translated_specification_values'] ?? [],
             'untranslated_technical_values' => $preview['untranslated_technical_values'] ?? [],
@@ -141,7 +144,7 @@ class EbayListingDryRunService
         ];
     }
 
-    private function businessPoliciesPayload(array $settings, ?MarketplaceCategoryMapping $mapping, ?string $paymentPolicyId, ?string $returnPolicyId, array $shippingPolicyResolution): array
+    private function businessPoliciesPayload(array $settings, ?MarketplaceCategoryMapping $mapping, ?string $paymentPolicyId, ?string $returnPolicyId, array $shippingPolicyResolution, string $channel): array
     {
         $missing = $shippingPolicyResolution['missing'];
         if (blank($paymentPolicyId)) $missing[] = 'payment_policy';
@@ -170,7 +173,8 @@ class EbayListingDryRunService
         $preview = $part && isset(self::CHANNELS[$channel]) ? $this->templateService->preview($part->id, $channel) : [];
         $sku = $part ? $this->skuResolver->resolve($part) : 'GPS-'.$partId;
         $publishable = ($ready['ready'] ?? false) && ! ($ready['category']['is_blocked'] ?? false);
-        $imageUrls = $part ? $part->images->map(fn ($image) => $image->listingUrl())->filter()->values()->all() : [];
+        $imageSelection = $part ? $this->marketplaceImageSelectionService->selectForPart($part, 5) : ['urls' => [], 'diagnostics' => []];
+        $imageUrls = $imageSelection['urls'];
         $title = (string) ($preview['title'] ?? $part?->name ?? '');
         $short = (string) ($preview['short_inventory_description'] ?? Str::limit(strip_tags((string) ($part?->description ?? '')), 400, ''));
         $html = (string) ($preview['listing_description_html'] ?? '');
@@ -491,7 +495,14 @@ class EbayListingDryRunService
     {
         $account = isset(self::CHANNELS[$channel]) && Schema::hasTable('marketplace_accounts') ? MarketplaceAccount::query()->where('code', $channel)->first() : null;
         $settings = is_array($account?->api_settings) ? $account->api_settings : [];
-        return $settings['marketplace_id'] ?? (self::CHANNELS[$channel] ?? null);
+        return $this->configuredMarketplaceId($settings, $channel);
+    }
+
+    private function configuredMarketplaceId(array $settings, string $channel): ?string
+    {
+        if (! isset(self::CHANNELS[$channel])) return null;
+
+        return filled($settings['marketplace_id'] ?? null) ? (string) $settings['marketplace_id'] : null;
     }
 
     private function aspectsWithDiagnostics(?Part $part): array
