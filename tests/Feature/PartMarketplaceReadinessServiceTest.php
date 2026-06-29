@@ -17,7 +17,7 @@ class PartMarketplaceReadinessServiceTest extends TestCase
     use RefreshDatabase;
 
 
-    public function test_prepare_ebay_card_persists_de_and_fr_prepared_translations(): void
+    public function test_prepare_ebay_card_persists_only_de_prepared_translations(): void
     {
         $this->app->instance(GoogleTranslateService::class, new class extends GoogleTranslateService {
             public function translate(string $text, string $target, ?string $source = null): array
@@ -41,14 +41,13 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $this->getJson('/tools/prepare-part-marketplace-card?token=gps_images_import_2026&part_id='.$part->id.'&channel=ebay')
             ->assertOk()
             ->assertJsonPath('ebay_channels.ebay_de.translation_status', 'prepared')
-            ->assertJsonPath('ebay_channels.ebay_fr.translation_status', 'prepared');
+            ->assertJsonMissingPath('ebay_channels.ebay_fr');
 
         $prepared = $part->refresh()->review_metadata['marketplace_prepared_translations'] ?? [];
 
         $this->assertSame('prepared', $prepared['ebay_de']['status'] ?? null);
-        $this->assertSame('prepared', $prepared['ebay_fr']['status'] ?? null);
+        $this->assertArrayNotHasKey('ebay_fr', $prepared);
         $this->assertSame('de', $prepared['ebay_de']['language'] ?? null);
-        $this->assertSame('fr', $prepared['ebay_fr']['language'] ?? null);
     }
 
 
@@ -102,7 +101,7 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $this->assertContains('zdjęcia', $result['ebay']['presentation']['missing']);
         $this->assertStringContainsString('zdjęcia', $html);
         $this->assertStringContainsString('Brak przygotowanego tłumaczenia eBay DE', $html);
-        $this->assertStringContainsString('Brak przygotowanego tłumaczenia eBay FR', $html);
+        $this->assertStringNotContainsString('Brak przygotowanego tłumaczenia eBay FR', $html);
         $this->assertDatabaseCount('marketplace_listings', 0);
     }
 

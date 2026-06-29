@@ -39,7 +39,7 @@ class EbayPublishAdapter extends BaseMarketplacePublishAdapter
         $results = [];
         $original = $this->activeChannel;
 
-        foreach (['ebay_de', 'ebay_fr'] as $channel) {
+        foreach (['ebay_de'] as $channel) {
             $this->activeChannel = $channel;
             $results[$channel] = $callback()->data;
         }

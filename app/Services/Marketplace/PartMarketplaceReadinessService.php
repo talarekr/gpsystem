@@ -93,7 +93,6 @@ class PartMarketplaceReadinessService
             'requires_translations' => $requiresEbayTranslations,
             'translations' => $requiresEbayTranslations ? [
                 ['label' => 'eBay DE', 'ready' => ! in_array('Brak przygotowanego tłumaczenia eBay DE', $missing, true)],
-                ['label' => 'eBay FR', 'ready' => ! in_array('Brak przygotowanego tłumaczenia eBay FR', $missing, true)],
             ] : [],
             'safe_preview_only' => true,
         ];
@@ -175,7 +174,7 @@ class PartMarketplaceReadinessService
         $metadata = (array) ($part->review_metadata ?: []);
         $translations = (array) (data_get($metadata, 'marketplace_translations') ?: data_get($part->legacy_payload, 'marketplace_translations') ?: []);
 
-        return collect(['de' => 'Brak przygotowanego tłumaczenia eBay DE', 'fr' => 'Brak przygotowanego tłumaczenia eBay FR'])
+        return collect(['de' => 'Brak przygotowanego tłumaczenia eBay DE'])
             ->filter(function (string $label, string $locale) use ($translations, $metadata): bool {
                 $channel = 'ebay_'.$locale;
 
