@@ -53,6 +53,9 @@ class OvokoPublishAdapterTest extends TestCase
                 && str_contains($body, 'price=120')
                 && substr_count($body, 'photos%5B%5D=') === 1
                 && ! str_contains($body, 'photos%5B%5D%5B0%5D=')
+                && ! str_contains($body, '%2Fmarketplace%2Fovoko%2Fphotos%2F')
+                && str_contains($body, 'photo=https%3A%2F%2Fgpswiss.pl%2Fstorage%2Fparts%2Fphotos%2Fcomplete.jpg')
+                && str_contains($body, 'photos%5B%5D=https%3A%2F%2Fgpswiss.pl%2Fstorage%2Fparts%2Fphotos%2Fcomplete.jpg')
                 && preg_match('/(?:^|&)photo=([^&]+)&photos%5B%5D=\1(?:&|$)/', $body) === 1;
         });
         $encodedLogs = json_encode(MarketplaceSyncLog::query()->pluck('payload')->all());
