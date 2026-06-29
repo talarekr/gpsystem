@@ -30,7 +30,7 @@ return [
             'country' => env('SHIPMENT_SENDER_COUNTRY', 'PL'),
             'contact_name' => env('SHIPMENT_SENDER_CONTACT_NAME', 'GRZEGORZ PACIOREK'),
             'phone' => env('SHIPMENT_SENDER_PHONE', '579 152 665'),
-            'email' => env('SHIPMENT_SENDER_EMAIL', 'gregor1142@gmail.com'),
+            'email' => env('SHIPMENT_SENDER_EMAIL'),
         ],
     ],
 
