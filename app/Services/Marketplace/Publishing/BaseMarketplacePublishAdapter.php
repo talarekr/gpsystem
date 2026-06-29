@@ -42,6 +42,9 @@ abstract class BaseMarketplacePublishAdapter implements MarketplacePublishAdapte
         if (! (bool) ($readiness['can_publish_later'] ?? false)) return new MarketplacePublishResult($this->channel(), ['channel' => $this->channel(), 'marketplace' => $this->marketplace(), 'success' => false, 'status' => 'blocked_readiness', 'errors' => $readiness['blockers'] ?? [], 'warnings' => $readiness['warnings'] ?? [], 'write' => false]);
 
         $payload = $readiness['prepared_payload_preview_safe'] ?? [];
+        $imageSelection = app(\App\Services\Marketplace\MarketplaceImageSelectionService::class)->selectForPart($part, 5, true);
+        $payload['image_urls'] = $imageSelection['urls'];
+        $payload['marketplace_image_diagnostics'] = $imageSelection['diagnostics'];
         $account = MarketplaceAccount::query()->where('code', $this->accountCode())->first();
         $started = microtime(true);
         try { $result = $this->performLivePublish($part, $readiness, $payload, $account); }
@@ -60,5 +63,5 @@ abstract class BaseMarketplacePublishAdapter implements MarketplacePublishAdapte
 
     protected function blocked(string $reason, array $extra = []): MarketplacePublishResult { return new MarketplacePublishResult($this->channel(), array_merge(['channel' => $this->channel(), 'marketplace' => $this->marketplace(), 'success' => false, 'status' => 'blocked', 'blocked' => true, 'errors' => [$reason], 'warnings' => [], 'write' => false], $extra)); }
     protected function activeListing(Part $part): ?MarketplaceListing { return Schema::hasTable('marketplace_listings') ? MarketplaceListing::query()->where('part_id', $part->id)->where('marketplace', $this->marketplace())->where(function ($q) { $q->whereNotNull('external_listing_id')->orWhereNotNull('external_offer_id'); })->whereIn('status', ['published','active','ACTIVE'])->first() : null; }
-    protected function requestSummary(array $payload): array { return ['keys' => array_keys($payload), 'sku' => $payload['sku'] ?? null, 'title_present' => filled($payload['title'] ?? null), 'category_id' => $payload['category_id'] ?? null, 'images_count' => count((array) ($payload['image_urls'] ?? [])), 'price' => $payload['price_eur'] ?? $payload['price_pln'] ?? null, 'quantity' => $payload['quantity'] ?? null]; }
+    protected function requestSummary(array $payload): array { return ['keys' => array_keys($payload), 'sku' => $payload['sku'] ?? null, 'title_present' => filled($payload['title'] ?? null), 'category_id' => $payload['category_id'] ?? null, 'images_count' => count((array) ($payload['image_urls'] ?? [])), 'price' => $payload['price_eur'] ?? $payload['price_pln'] ?? null, 'quantity' => $payload['quantity'] ?? null, 'marketplace_images' => $payload['marketplace_image_diagnostics'] ?? null]; }
 }

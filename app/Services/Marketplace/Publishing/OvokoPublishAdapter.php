@@ -97,7 +97,7 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
             if ($url === '') return null;
             $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
             $host = (string) parse_url($url, PHP_URL_HOST);
-            return in_array($scheme, ['http', 'https'], true) && $host !== '' ? $url : null;
+            return $scheme === 'https' && $host !== '' ? $url : null;
         }, (array) $images)));
     }
 
