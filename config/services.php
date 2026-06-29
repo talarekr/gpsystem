@@ -23,14 +23,14 @@ return [
 
     'shipments' => [
         'sender' => [
-            'name' => env('SHIPMENT_SENDER_NAME', env('SENDER_NAME', 'GREGOR SWISS')),
-            'address' => env('SHIPMENT_SENDER_ADDRESS', env('SENDER_ADDRESS', 'Milanowska 137')),
-            'postal_code' => env('SHIPMENT_SENDER_POSTAL_CODE', env('SENDER_POSTAL_CODE', '08-460')),
-            'city' => env('SHIPMENT_SENDER_CITY', env('SENDER_CITY', 'Sobolew')),
-            'country' => env('SHIPMENT_SENDER_COUNTRY', env('SENDER_COUNTRY', 'PL')),
-            'contact_name' => env('SHIPMENT_SENDER_CONTACT_NAME', env('SENDER_CONTACT_NAME', 'GRZEGORZ PACIOREK')),
-            'phone' => env('SHIPMENT_SENDER_PHONE', env('SENDER_PHONE', '579 152 665')),
-            'email' => env('SHIPMENT_SENDER_EMAIL', env('SENDER_EMAIL')),
+            'name' => env('SHIPMENT_SENDER_NAME', 'GREGOR SWISS'),
+            'address' => env('SHIPMENT_SENDER_ADDRESS', 'Milanowska 137'),
+            'postal_code' => env('SHIPMENT_SENDER_POSTAL_CODE', '08-460'),
+            'city' => env('SHIPMENT_SENDER_CITY', 'Sobolew'),
+            'country' => env('SHIPMENT_SENDER_COUNTRY', 'PL'),
+            'contact_name' => env('SHIPMENT_SENDER_CONTACT_NAME', 'GRZEGORZ PACIOREK'),
+            'phone' => env('SHIPMENT_SENDER_PHONE', '579 152 665'),
+            'email' => env('SHIPMENT_SENDER_EMAIL'),
         ],
     ],
 
