@@ -1,0 +1,293 @@
+<?php
+
+namespace App\Services\Shipments;
+
+use App\Models\Order;
+use App\Models\Shipment;
+use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use RuntimeException;
+use SoapClient;
+use SoapFault;
+
+class DhlShipmentService
+{
+    public function defaults(?Order $order = null, ?Shipment $shipment = null): array
+    {
+        $senderAddress = $this->splitStreet((string) config('services.shipments.sender.address'));
+        $receiverAddress = $this->splitStreet((string) $order?->address_line1);
+        $reference = $order?->order_number ?: ($order ? 'ORDER-'.$order->id : ($shipment ? 'SHIPMENT-'.$shipment->id : ''));
+
+        return [
+            'order_id' => $order?->id,
+            'shipper' => [
+                'name' => config('services.shipments.sender.name'),
+                'country' => config('services.shipments.sender.country', 'PL'),
+                'postal_code' => config('services.shipments.sender.postal_code'),
+                'city' => config('services.shipments.sender.city'),
+                'street' => $senderAddress['street'],
+                'house_number' => $senderAddress['house_number'],
+                'apartment_number' => $senderAddress['apartment_number'],
+                'person_name' => config('services.shipments.sender.name'),
+                'email' => config('services.shipments.sender.email'),
+                'phone' => config('services.shipments.sender.phone'),
+            ],
+            'receiver' => [
+                'name' => $order?->company_name ?: $order?->customer_name,
+                'company' => $order?->company_name,
+                'country' => $order?->country ?: 'PL',
+                'postal_code' => $order?->postal_code,
+                'city' => $order?->city,
+                'street' => $receiverAddress['street'],
+                'house_number' => $receiverAddress['house_number'],
+                'apartment_number' => $receiverAddress['apartment_number'],
+                'person_name' => $order?->customer_name,
+                'email' => $order?->email,
+                'phone' => $order?->phone,
+            ],
+            'parcel' => [
+                'quantity' => 1,
+                'type' => 'PACKAGE',
+                'weight' => 1,
+                'length' => 40,
+                'width' => 30,
+                'height' => 20,
+                'non_standard' => false,
+                'content' => 'Części samochodowe',
+                'comment' => '',
+                'reference' => $reference,
+            ],
+            'service' => [
+                'service_type' => config('services.dhl.default_service', 'AH'),
+                'shipment_date' => now()->toDateString(),
+                'shipment_start_hour' => '12:00',
+                'shipment_end_hour' => '15:00',
+                'drop_off_type' => config('services.dhl.drop_off_type', 'REGULAR_PICKUP') === 'REQUEST_COURIER' ? 'REGULAR_PICKUP' : config('services.dhl.drop_off_type', 'REGULAR_PICKUP'),
+                'order_courier' => false,
+                'label_type' => config('services.dhl.label_type', 'LBLP'),
+            ],
+            'special_services' => [
+                'insurance' => false,
+                'insurance_value' => null,
+                'cod' => false,
+                'cod_value' => null,
+                'pdi' => false,
+                'pod' => false,
+                'rod' => false,
+                'sas' => false,
+                'odb' => false,
+            ],
+        ];
+    }
+
+    public function rules(): array
+    {
+        return [
+            'dhlForm.order_id' => ['nullable', 'integer', 'exists:orders,id'],
+            'dhlForm.shipper.name' => ['required', 'string', 'max:60'],
+            'dhlForm.shipper.country' => ['required', 'string', 'size:2'],
+            'dhlForm.shipper.postal_code' => ['required', 'string', 'max:10'],
+            'dhlForm.shipper.city' => ['required', 'string', 'max:17'],
+            'dhlForm.shipper.street' => ['required', 'string', 'max:35'],
+            'dhlForm.shipper.house_number' => ['required', 'string', 'max:10'],
+            'dhlForm.shipper.apartment_number' => ['nullable', 'string', 'max:10'],
+            'dhlForm.shipper.person_name' => ['nullable', 'string', 'max:50'],
+            'dhlForm.shipper.email' => ['nullable', 'email', 'max:60'],
+            'dhlForm.shipper.phone' => ['nullable', 'string', 'max:20'],
+            'dhlForm.receiver.name' => ['required', 'string', 'max:60'],
+            'dhlForm.receiver.country' => ['required', 'string', 'size:2'],
+            'dhlForm.receiver.postal_code' => ['required', 'string', 'max:10'],
+            'dhlForm.receiver.city' => ['required', 'string', 'max:17'],
+            'dhlForm.receiver.street' => ['required', 'string', 'max:35'],
+            'dhlForm.receiver.house_number' => ['required', 'string', 'max:10'],
+            'dhlForm.receiver.apartment_number' => ['nullable', 'string', 'max:10'],
+            'dhlForm.receiver.person_name' => ['nullable', 'string', 'max:50'],
+            'dhlForm.receiver.email' => ['nullable', 'email', 'max:60'],
+            'dhlForm.receiver.phone' => ['nullable', 'string', 'max:20'],
+            'dhlForm.parcel.quantity' => ['required', 'integer', 'min:1', 'max:99'],
+            'dhlForm.parcel.type' => ['required', 'in:PACKAGE,ENVELOPE,PALLET'],
+            'dhlForm.parcel.weight' => ['required_unless:dhlForm.parcel.type,ENVELOPE', 'numeric', 'min:0.1', 'max:999'],
+            'dhlForm.parcel.length' => ['required_unless:dhlForm.parcel.type,ENVELOPE', 'integer', 'min:1', 'max:999'],
+            'dhlForm.parcel.width' => ['required_unless:dhlForm.parcel.type,ENVELOPE', 'integer', 'min:1', 'max:999'],
+            'dhlForm.parcel.height' => ['required_unless:dhlForm.parcel.type,ENVELOPE', 'integer', 'min:1', 'max:999'],
+            'dhlForm.parcel.content' => ['required', 'string', 'max:30'],
+            'dhlForm.parcel.comment' => ['nullable', 'string', 'max:100'],
+            'dhlForm.parcel.reference' => ['nullable', 'string', 'max:200'],
+            'dhlForm.service.service_type' => ['required', 'in:AH,09,12,DW,SP,EK,PI,PR,CP,CM'],
+            'dhlForm.service.shipment_date' => ['required', 'date'],
+            'dhlForm.service.drop_off_type' => ['required', 'in:REGULAR_PICKUP,REQUEST_COURIER'],
+            'dhlForm.service.label_type' => ['required', 'in:BLP,LBLP'],
+            'dhlForm.special_services.insurance_value' => ['nullable', 'numeric', 'min:0.01'],
+            'dhlForm.special_services.cod_value' => ['nullable', 'numeric', 'min:0.01'],
+        ];
+    }
+
+    public function create(array $form): Shipment
+    {
+        if ((bool) data_get($form, 'service.order_courier') === false) {
+            data_set($form, 'service.drop_off_type', 'REGULAR_PICKUP');
+        }
+
+        $payload = $this->payload($form);
+        $response = $this->callCreateShipment($payload);
+        $waybill = (string) ($response['shipmentNotificationNumber'] ?? $response['wayBill'] ?? $response['tracking_number'] ?? '');
+        $labelContent = (string) ($response['labelContent'] ?? '');
+
+        if ($waybill === '' || $labelContent === '') {
+            throw new RuntimeException('DHL nie zwrócił numeru przesyłki lub zawartości etykiety PDF.');
+        }
+
+        $labelBinary = base64_decode($labelContent, true);
+        if ($labelBinary === false) {
+            throw new RuntimeException('DHL zwrócił niepoprawną etykietę base64.');
+        }
+
+        $path = 'shipments/labels/dhl/'.$waybill.'.pdf';
+        Storage::disk('local')->put($path, $labelBinary);
+
+        return Shipment::query()->create([
+            'order_id' => $form['order_id'] ?? null,
+            'carrier' => 'dhl',
+            'service_code' => data_get($form, 'service.service_type', 'AH'),
+            'shipment_status' => 'label_created',
+            'tracking_number' => $waybill,
+            'carrier_shipment_id' => $waybill,
+            'label_path' => $path,
+            'label_format' => $response['labelFormat'] ?? 'application/pdf',
+            'sender_snapshot' => $form['shipper'] ?? [],
+            'receiver_snapshot' => $form['receiver'] ?? [],
+            'parcel_snapshot' => $form['parcel'] ?? [],
+            'request_payload' => $this->sanitize($payload),
+            'response_payload' => $this->sanitize(Arr::except($response, ['labelContent'])),
+            'test_mode' => (bool) config('services.dhl.test_mode', true),
+        ]);
+    }
+
+    public function payload(array $form): array
+    {
+        $dropOffType = data_get($form, 'service.order_courier') ? 'REQUEST_COURIER' : 'REGULAR_PICKUP';
+
+        return [
+            'authData' => ['username' => config('services.dhl.login'), 'password' => config('services.dhl.password')],
+            'shipment' => [
+                'shipmentInfo' => [
+                    'dropOffType' => $dropOffType,
+                    'serviceType' => data_get($form, 'service.service_type', 'AH'),
+                    'billing' => [
+                        'shippingPaymentType' => 'SHIPPER',
+                        'billingAccountNumber' => config('services.dhl.account_number'),
+                        'paymentType' => 'BANK_TRANSFER',
+                    ],
+                    'specialServices' => $this->specialServices($form),
+                    'shipmentTime' => [
+                        'shipmentDate' => data_get($form, 'service.shipment_date'),
+                        'shipmentStartHour' => data_get($form, 'service.shipment_start_hour', '12:00'),
+                        'shipmentEndHour' => data_get($form, 'service.shipment_end_hour', '15:00'),
+                    ],
+                    'labelType' => data_get($form, 'service.label_type', 'LBLP'),
+                ],
+                'content' => data_get($form, 'parcel.content', 'Części samochodowe'),
+                'comment' => data_get($form, 'parcel.comment'),
+                'reference' => data_get($form, 'parcel.reference'),
+                'ship' => ['shipper' => $this->party($form['shipper'] ?? [], false), 'receiver' => $this->party($form['receiver'] ?? [], true)],
+                'pieceList' => ['item' => [$this->piece($form['parcel'] ?? [])]],
+            ],
+        ];
+    }
+
+    protected function callCreateShipment(array $payload): array
+    {
+        $endpoint = (string) config('services.dhl.endpoint');
+        if ($endpoint === '') {
+            $id = 'DHL-TEST-'.Str::upper(Str::random(10));
+            return ['shipmentNotificationNumber' => $id, 'labelType' => data_get($payload, 'shipment.shipmentInfo.labelType', 'LBLP'), 'labelFormat' => 'application/pdf', 'labelContent' => base64_encode("%PDF-1.4\n% GPS DHL test label {$id}\n")];
+        }
+
+        try {
+            $client = new SoapClient($endpoint, ['trace' => false, 'exceptions' => true]);
+            return (array) $client->__soapCall('createShipment', [$payload]);
+        } catch (SoapFault $exception) {
+            throw new RuntimeException('Błąd DHL createShipment: '.$exception->getMessage(), previous: $exception);
+        }
+    }
+
+    protected function party(array $data, bool $receiver): array
+    {
+        $address = [
+            'name' => $data['name'] ?? null,
+            'postalCode' => $this->postal((string) ($data['postal_code'] ?? '')),
+            'city' => $data['city'] ?? null,
+            'street' => $data['street'] ?? null,
+            'houseNumber' => $data['house_number'] ?? null,
+            'apartmentNumber' => $data['apartment_number'] ?? null,
+        ];
+        if ($receiver) {
+            $address = array_merge(['addressType' => filled($data['company'] ?? null) ? 'B' : 'C', 'country' => $data['country'] ?? 'PL'], $address);
+        }
+
+        return ['preaviso' => $this->contact($data), 'contact' => $this->contact($data), 'address' => $address];
+    }
+
+    protected function contact(array $data): array
+    {
+        return ['personName' => $data['person_name'] ?? $data['name'] ?? null, 'phoneNumber' => $this->phone((string) ($data['phone'] ?? '')), 'emailAddress' => $data['email'] ?? null];
+    }
+
+    protected function piece(array $parcel): array
+    {
+        $piece = ['type' => $parcel['type'] ?? 'PACKAGE', 'quantity' => (int) ($parcel['quantity'] ?? 1), 'nonStandard' => (bool) ($parcel['non_standard'] ?? false)];
+        if (($piece['type'] ?? null) !== 'ENVELOPE') {
+            $piece += ['weight' => (int) ceil((float) ($parcel['weight'] ?? 1)), 'width' => (int) ($parcel['width'] ?? 1), 'height' => (int) ($parcel['height'] ?? 1), 'length' => (int) ($parcel['length'] ?? 1)];
+        }
+        return $piece;
+    }
+
+    protected function specialServices(array $form): array
+    {
+        $services = [];
+        foreach ([['insurance', 'UBEZP', 'insurance_value'], ['cod', 'COD', 'cod_value']] as [$flag, $type, $valueKey]) {
+            if (data_get($form, 'special_services.'.$flag)) {
+                $services[] = ['serviceType' => $type, 'serviceValue' => (float) data_get($form, 'special_services.'.$valueKey), ...($type === 'COD' ? ['collectOnDeliveryForm' => 'BANK_TRANSFER'] : [])];
+            }
+        }
+        foreach (['pdi' => 'PDI', 'pod' => 'POD', 'rod' => 'ROD', 'sas' => 'SAS', 'odb' => 'ODB'] as $flag => $type) {
+            if (data_get($form, 'special_services.'.$flag)) {
+                $services[] = ['serviceType' => $type];
+            }
+        }
+        return $services === [] ? [] : ['item' => $services];
+    }
+
+    protected function splitStreet(string $address): array
+    {
+        $address = trim($address);
+        if (preg_match('/^(.*?)[,\s]+(\d+[\pL\pN\/-]*)(?:\/(\d+[\pL\pN\/-]*))?$/u', $address, $matches)) {
+            return ['street' => trim($matches[1]), 'house_number' => $matches[2], 'apartment_number' => $matches[3] ?? null];
+        }
+        return ['street' => $address, 'house_number' => '', 'apartment_number' => null];
+    }
+
+    protected function postal(string $postal): string
+    {
+        return preg_replace('/\D+/', '', $postal) ?: $postal;
+    }
+
+    protected function phone(string $phone): string
+    {
+        $digits = preg_replace('/\D+/', '', $phone) ?: '';
+        return strlen($digits) > 9 && str_starts_with($digits, '48') ? substr($digits, -9) : substr($digits, 0, 9);
+    }
+
+    protected function sanitize(array $payload): array
+    {
+        foreach ($payload as $key => $value) {
+            if (in_array(strtolower((string) $key), ['password', 'secret', 'token', 'api_key', 'labelcontent'], true)) {
+                $payload[$key] = '[redacted]';
+            } elseif (is_array($value)) {
+                $payload[$key] = $this->sanitize($value);
+            }
+        }
+        return $payload;
+    }
+}

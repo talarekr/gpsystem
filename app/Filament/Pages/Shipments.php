@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Models\Order;
 use App\Models\Shipment;
+use App\Services\Shipments\DhlShipmentService;
 use App\Services\Shipments\ShipmentLabelService;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
@@ -25,6 +26,10 @@ class Shipments extends Page
 
     public ?array $preview = null;
 
+    public ?array $dhlForm = null;
+
+    public bool $showDhlForm = false;
+
     #[Url(as: 'search')]
     public string $search = '';
 
@@ -40,6 +45,36 @@ class Shipments extends Page
     public function updating(string $property): void
     {
         if ($property !== 'page') $this->resetPage();
+    }
+
+    public function mount(DhlShipmentService $dhl): void
+    {
+        $this->dhlForm = $dhl->defaults();
+    }
+
+    public function openDhlForm(?int $orderId = null, ?int $shipmentId = null): void
+    {
+        $shipment = $shipmentId ? Shipment::query()->with('order')->find($shipmentId) : null;
+        $order = $orderId ? Order::query()->find($orderId) : $shipment?->order;
+
+        $this->dhlForm = app(DhlShipmentService::class)->defaults($order, $shipment);
+        $this->showDhlForm = true;
+        $this->preview = null;
+    }
+
+    public function createDhlShipment(DhlShipmentService $dhl): void
+    {
+        $this->validate($dhl->rules());
+
+        try {
+            $shipment = $dhl->create($this->dhlForm ?? []);
+            $this->showDhlForm = false;
+            $this->preview = ['ok' => true, 'shipment_id' => $shipment->id, 'tracking_number' => $shipment->tracking_number, 'label_path' => $shipment->label_path, 'pickup_ordered' => false];
+
+            Notification::make()->title('Utworzono przesyłkę DHL')->body('Numer listu: '.$shipment->tracking_number)->success()->send();
+        } catch (\Throwable $exception) {
+            Notification::make()->title('DHL odrzucił utworzenie przesyłki')->body($exception->getMessage())->danger()->send();
+        }
     }
 
     public function generateLabel(string $carrier, ?int $shipmentId = null, bool $confirm = false): void
@@ -79,7 +114,7 @@ class Shipments extends Page
             ->whereDoesntHave('shipments')
             ->latest('id')
             ->limit(10)
-            ->get(['id', 'order_number', 'customer_name']);
+            ->get(['id', 'order_number', 'customer_name', 'company_name', 'email', 'phone', 'address_line1', 'postal_code', 'city', 'country']);
     }
 
     public function getPerPageOptionsProperty(): array
