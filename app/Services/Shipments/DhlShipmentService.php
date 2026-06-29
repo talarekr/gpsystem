@@ -59,6 +59,11 @@ class DhlShipmentService
                 'width' => 30,
                 'height' => 20,
                 'non_standard' => false,
+                'volumetric' => false,
+                'euro_return' => false,
+                'half_pallet' => false,
+                'mpk' => '1142',
+                'dhl_option' => '',
                 'content' => 'Części samochodowe',
                 'comment' => '',
                 'reference' => $reference,
@@ -124,6 +129,12 @@ class DhlShipmentService
             'dhlForm.parcel.content' => ['required', 'string', 'max:30'],
             'dhlForm.parcel.comment' => ['nullable', 'string', 'max:100'],
             'dhlForm.parcel.reference' => ['nullable', 'string', 'max:200'],
+            'dhlForm.parcel.non_standard' => ['nullable', 'boolean'],
+            'dhlForm.parcel.volumetric' => ['nullable', 'boolean'],
+            'dhlForm.parcel.euro_return' => ['nullable', 'boolean'],
+            'dhlForm.parcel.half_pallet' => ['nullable', 'boolean'],
+            'dhlForm.parcel.mpk' => ['nullable', 'string', 'max:20'],
+            'dhlForm.parcel.dhl_option' => ['nullable', 'string', 'max:30'],
             'dhlForm.service.service_type' => ['required', 'in:AH,09,12,DW,SP,EK,PI,PR,CP,CM'],
             'dhlForm.service.shipment_date' => ['required', 'date'],
             'dhlForm.service.drop_off_type' => ['required', 'in:REGULAR_PICKUP,REQUEST_COURIER'],
@@ -135,6 +146,10 @@ class DhlShipmentService
 
     public function normalizeForm(array $form): array
     {
+        if (data_get($form, 'parcel.type') !== 'PALLET') {
+            data_set($form, 'parcel.euro_return', false);
+        }
+
         foreach (['insurance_value', 'cod_value'] as $key) {
             $value = data_get($form, 'special_services.'.$key);
             if (is_string($value)) {
@@ -202,6 +217,7 @@ class DhlShipmentService
                         'shippingPaymentType' => 'SHIPPER',
                         'billingAccountNumber' => config('services.dhl.account_number'),
                         'paymentType' => 'BANK_TRANSFER',
+                        'costsCenter' => data_get($form, 'parcel.mpk'),
                     ],
                     'specialServices' => $this->specialServices($form),
                     'shipmentTime' => [
@@ -328,10 +344,17 @@ class DhlShipmentService
 
     protected function piece(array $parcel): array
     {
-        $piece = ['type' => $parcel['type'] ?? 'PACKAGE', 'quantity' => (int) ($parcel['quantity'] ?? 1), 'nonStandard' => (bool) ($parcel['non_standard'] ?? false)];
-        if (($piece['type'] ?? null) !== 'ENVELOPE') {
+        $type = in_array(($parcel['type'] ?? null), ['ENVELOPE', 'PACKAGE', 'PALLET'], true) ? $parcel['type'] : 'PACKAGE';
+        $piece = ['type' => $type, 'quantity' => (int) ($parcel['quantity'] ?? 1), 'nonStandard' => (bool) ($parcel['non_standard'] ?? false)];
+
+        if ($type !== 'ENVELOPE') {
             $piece += ['weight' => (int) ceil((float) ($parcel['weight'] ?? 1)), 'width' => (int) ($parcel['width'] ?? 1), 'height' => (int) ($parcel['height'] ?? 1), 'length' => (int) ($parcel['length'] ?? 1)];
         }
+
+        if ($type === 'PALLET' && (bool) ($parcel['euro_return'] ?? false)) {
+            $piece['euroReturn'] = true;
+        }
+
         return $piece;
     }
 
