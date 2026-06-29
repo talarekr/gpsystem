@@ -10,6 +10,7 @@ use Throwable;
 class ApiIntegrationLogger
 {
     private const MAX_FIELD_LENGTH = 4096;
+    private const JWT_PATTERN = '/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/';
     private const SENSITIVE_KEYS = ['password', 'passwd', 'secret', 'token', 'access_token', 'refresh_token', 'authorization', 'authdata', 'api_key', 'apikey', 'labelcontent', 'card', 'payment'];
 
     public function record(array $data): void
@@ -69,7 +70,7 @@ class ApiIntegrationLogger
         }
 
         if (is_string($value)) {
-            return $this->truncate($value);
+            return $this->truncate($this->maskSecretsInString($value));
         }
 
         return $value;
@@ -83,6 +84,11 @@ class ApiIntegrationLogger
             }
         }
         return false;
+    }
+
+    private function maskSecretsInString(string $value): string
+    {
+        return preg_replace(self::JWT_PATTERN, '[masked_jwt]', $value) ?? $value;
     }
 
     private function truncate(string $value): string
