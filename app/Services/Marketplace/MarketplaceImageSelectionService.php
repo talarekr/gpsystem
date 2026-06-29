@@ -70,6 +70,11 @@ class MarketplaceImageSelectionService
             ->values();
     }
 
+    public function selectedSourcePathForImage(PartImage $image): ?string
+    {
+        return $this->selectForImage($image)['selected_image_source_path'] ?? null;
+    }
+
     /** @return array<string, mixed>|null */
     private function selectForImage(PartImage $image): ?array
     {
