@@ -237,6 +237,31 @@ class DhlShipmentService
     }
 
 
+    public function trackShipment(string $shipmentId): array
+    {
+        $shipmentId = trim($shipmentId);
+        if ($shipmentId === '') {
+            throw new RuntimeException('Brak numeru przesyłki DHL.');
+        }
+
+        $endpoint = (string) config('services.dhl.endpoint');
+        if ($endpoint === '') {
+            return ['shipmentId' => $shipmentId, 'receivedBy' => null, 'events' => []];
+        }
+
+        try {
+            $response = (array) (new SoapClient($endpoint, ['trace' => false, 'exceptions' => true]))
+                ->__soapCall('getTrackAndTraceInfo', [[
+                    'authData' => ['username' => config('services.dhl.login'), 'password' => config('services.dhl.password')],
+                    'shipmentId' => $shipmentId,
+                ]]);
+        } catch (SoapFault $exception) {
+            throw new RuntimeException('Błąd DHL getTrackAndTraceInfo: '.$exception->getMessage(), previous: $exception);
+        }
+
+        return $this->normalizeTrackingResponse($response, $shipmentId);
+    }
+
     public function countryOptions(): array
     {
         return Cache::remember('dhl.international_countries.v2', now()->addDay(), function (): array {
@@ -301,6 +326,31 @@ class DhlShipmentService
             'PT' => 'Portugalia',
             'SE' => 'Szwecja',
             'SK' => 'Słowacja',
+        ];
+    }
+
+    protected function normalizeTrackingResponse(array $response, string $fallbackShipmentId): array
+    {
+        $events = data_get($response, 'events.item', data_get($response, 'events', []));
+        if (is_object($events)) {
+            $events = [$events];
+        }
+
+        $normalizedEvents = [];
+        foreach ((array) $events as $event) {
+            $event = (array) $event;
+            $normalizedEvents[] = [
+                'status' => $event['status'] ?? null,
+                'description' => $event['description'] ?? null,
+                'timestamp' => $event['timestamp'] ?? null,
+                'terminal' => $event['terminal'] ?? null,
+            ];
+        }
+
+        return [
+            'shipmentId' => (string) ($response['shipmentId'] ?? $fallbackShipmentId),
+            'receivedBy' => $response['receivedBy'] ?? null,
+            'events' => $normalizedEvents,
         ];
     }
 
