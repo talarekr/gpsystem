@@ -18,7 +18,8 @@ class DhlShipmentService
     public function defaults(?Order $order = null, ?Shipment $shipment = null): array
     {
         $senderAddress = $this->splitStreet((string) config('services.shipments.sender.address'));
-        $receiverAddress = $this->splitStreet((string) $order?->address_line1);
+        $receiver = $this->receiverDefaults($order);
+        $receiverAddress = $this->splitStreet((string) ($receiver['address_line1'] ?? ''));
         $reference = $order?->order_number ?: ($order ? 'ORDER-'.$order->id : ($shipment ? 'SHIPMENT-'.$shipment->id : ''));
 
         return [
@@ -36,19 +37,19 @@ class DhlShipmentService
                 'phone' => config('services.shipments.sender.phone'),
             ],
             'receiver' => [
-                'receiver_type' => $order?->company_name ? 'company' : 'private',
+                'receiver_type' => $receiver['receiver_type'],
                 'short_name' => '',
-                'name' => $order?->company_name ?: $order?->customer_name,
+                'name' => $receiver['name'],
                 'sap_number' => '',
-                'country' => $order?->country ?: 'PL',
-                'postal_code' => $order?->postal_code,
-                'city' => $order?->city,
+                'country' => $receiver['country'],
+                'postal_code' => $receiver['postal_code'],
+                'city' => $receiver['city'],
                 'street' => $receiverAddress['street'],
                 'house_number' => $receiverAddress['house_number'],
                 'apartment_number' => $receiverAddress['apartment_number'],
-                'person_name' => $order?->customer_name,
-                'email' => $order?->email,
-                'phone' => $order?->phone,
+                'person_name' => $receiver['person_name'],
+                'email' => $receiver['email'],
+                'phone' => $receiver['phone'],
                 'neighbour_delivery' => false,
                 'save_to_address_book' => false,
             ],
@@ -89,6 +90,95 @@ class DhlShipmentService
                 'sas' => false,
                 'odb' => false,
             ],
+        ];
+    }
+
+    protected function receiverDefaults(?Order $order): array
+    {
+        if (! $order) {
+            return [
+                'receiver_type' => 'private',
+                'name' => null,
+                'address_line1' => null,
+                'postal_code' => null,
+                'city' => null,
+                'country' => 'PL',
+                'person_name' => null,
+                'email' => null,
+                'phone' => null,
+            ];
+        }
+
+        if (str_starts_with(Str::lower(trim((string) $order->marketplace)), 'ebay')) {
+            return $this->ebayShippingReceiverDefaults($order);
+        }
+
+        $name = $this->firstFilled([$order->company_name, $order->customer_name]);
+
+        return [
+            'receiver_type' => $order->company_name ? 'company' : 'private',
+            'name' => $name,
+            'address_line1' => $order->address_line1,
+            'postal_code' => $order->postal_code,
+            'city' => $order->city,
+            'country' => $order->country ?: 'PL',
+            'person_name' => $order->customer_name ?: $name,
+            'email' => $order->email,
+            'phone' => $order->phone,
+        ];
+    }
+
+    protected function ebayShippingReceiverDefaults(Order $order): array
+    {
+        $payload = $order->raw_payload ?? [];
+        $shipTo = $this->firstArray([
+            data_get($payload, 'fulfillmentStartInstructions.0.shippingStep.shipTo'),
+            data_get($payload, 'shipTo'),
+            data_get($payload, 'shippingAddress'),
+            data_get($payload, 'delivery.address'),
+            data_get($payload, 'shipping.address'),
+            data_get($payload, 'fulfillment.shippingStep.shipTo'),
+        ]) ?? [];
+        $contactAddress = $this->firstArray([
+            data_get($shipTo, 'contactAddress'),
+            data_get($shipTo, 'address'),
+            $shipTo,
+        ]) ?? [];
+        $company = $this->firstFilled([
+            data_get($shipTo, 'companyName'),
+            data_get($contactAddress, 'companyName'),
+            data_get($contactAddress, 'company'),
+        ]);
+        $name = $this->firstFilled([
+            $company,
+            data_get($shipTo, 'fullName'),
+            data_get($shipTo, 'name'),
+            data_get($contactAddress, 'fullName'),
+            data_get($contactAddress, 'name'),
+            $order->company_name,
+            $order->customer_name,
+        ]);
+        $addressLine1 = $this->joinFilled([
+            data_get($contactAddress, 'addressLine1'),
+            data_get($contactAddress, 'addressLine2'),
+        ]) ?: $order->address_line1;
+        $email = $this->realEmail($this->firstFilled([
+            data_get($shipTo, 'email'),
+            data_get($shipTo, 'emailAddress'),
+            data_get($contactAddress, 'email'),
+            data_get($contactAddress, 'emailAddress'),
+        ]));
+
+        return [
+            'receiver_type' => ($company || $this->looksLikeCompany($name)) ? 'company' : 'private',
+            'name' => $name,
+            'address_line1' => $addressLine1,
+            'postal_code' => $this->firstFilled([data_get($contactAddress, 'postalCode'), data_get($contactAddress, 'zipCode'), data_get($contactAddress, 'postcode'), $order->postal_code]),
+            'city' => $this->firstFilled([data_get($contactAddress, 'city'), $order->city]),
+            'country' => $this->firstFilled([data_get($contactAddress, 'countryCode'), data_get($contactAddress, 'country'), $order->country]) ?: 'PL',
+            'person_name' => $this->firstFilled([data_get($shipTo, 'fullName'), data_get($shipTo, 'name'), data_get($contactAddress, 'fullName'), data_get($contactAddress, 'name'), $name]),
+            'email' => $email,
+            'phone' => $this->firstFilled([data_get($shipTo, 'primaryPhone.phoneNumber'), data_get($shipTo, 'primaryPhone.number'), data_get($shipTo, 'phoneNumber'), data_get($shipTo, 'phone'), $order->phone]),
         ];
     }
 
@@ -502,6 +592,67 @@ class DhlShipmentService
             return ['street' => trim($matches[1]), 'house_number' => $matches[2], 'apartment_number' => $matches[3] ?? ''];
         }
         return ['street' => $address, 'house_number' => '', 'apartment_number' => ''];
+    }
+
+    protected function firstArray(array $values): ?array
+    {
+        foreach ($values as $value) {
+            if (is_array($value) && $value !== []) {
+                return $value;
+            }
+        }
+
+        return null;
+    }
+
+    protected function firstFilled(array $values): ?string
+    {
+        foreach ($values as $value) {
+            if (! is_scalar($value)) {
+                continue;
+            }
+
+            $value = trim((string) $value);
+            if ($value !== '' && $value !== '-' && Str::lower($value) !== 'null') {
+                return $value;
+            }
+        }
+
+        return null;
+    }
+
+    protected function joinFilled(array $values): ?string
+    {
+        $line = trim(implode(' ', array_filter(array_map(
+            fn (mixed $value): string => is_scalar($value) ? trim((string) $value) : '',
+            $values,
+        ), fn (string $value): bool => $value !== '' && $value !== '-')));
+
+        return $line !== '' ? $line : null;
+    }
+
+    protected function realEmail(?string $email): ?string
+    {
+        if (! $email || ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return null;
+        }
+
+        $normalized = Str::lower($email);
+
+        if (Str::contains($normalized, ['@example.invalid', 'marketplace-', 'invalid'])) {
+            return null;
+        }
+
+        return $email;
+    }
+
+    protected function looksLikeCompany(?string $name): bool
+    {
+        if (! $name) {
+            return false;
+        }
+
+        return Str::contains(Str::upper($name), [' SP. ', ' SPÓŁKA', ' S.A.', ' SA', ' SRL', ' S.R.L.', ' LTD', ' GMBH', ' SAS', ' SARL', ' BV', ' LLC', ' INC', ' COMPANY', ' CO.', ' AG']);
     }
 
     protected function postal(string $postal): string
