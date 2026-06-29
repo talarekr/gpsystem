@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Admin\ImportMigration\PartImagePresentationController;
 use App\Http\Controllers\Admin\LocalSaleController;
+use App\Http\Controllers\Admin\EbayDePreviewController;
 use App\Http\Controllers\Admin\MarketplaceCategoryMapperController;
 use App\Http\Controllers\Admin\Allegro\AllegroOAuthController;
 use App\Http\Controllers\Admin\Ebay\EbayOAuthController;
@@ -2183,6 +2184,7 @@ Route::get('/tools/post-domain-switch-check', PostDomainSwitchCheckController::c
 
 Route::middleware(Authenticate::class)->prefix('admin')->name('admin.')->group(function (): void {
     Route::get('/search/parts', PartSearchController::class)->name('search.parts');
+    Route::get('/tools/marketplace/ebay-de-preview/{part}', EbayDePreviewController::class)->name('tools.marketplace.ebay-de-preview');
     Route::post('/local-sales', [LocalSaleController::class, 'store'])->name('local-sales.store');
     Route::get('/marketplace-category-mapper', [MarketplaceCategoryMapperController::class, 'index'])->name('marketplace-category-mapper.index');
     Route::get('/marketplace-category-mapper/tree/local', [MarketplaceCategoryMapperController::class, 'localTree'])->name('marketplace-category-mapper.tree.local');
