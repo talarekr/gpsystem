@@ -16,8 +16,4 @@ class PartsToList extends ListParts
         return PartResource::adminPartsToListQuery();
     }
 
-    public function getShowListingReadyActionProperty(): bool
-    {
-        return true;
-    }
 }
