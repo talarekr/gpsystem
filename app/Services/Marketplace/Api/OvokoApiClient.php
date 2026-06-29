@@ -43,6 +43,39 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
         ];
     }
 
+
+    /**
+     * Create a CRM part in Ovoko/RRR using the documented /crm/importPart form endpoint.
+     * This method performs only stage-1 publish/import of a part; it does not import orders,
+     * update stock, sync prices, ship orders, end listings, or schedule background work.
+     */
+    public function importPart(array $fields, int $timeoutSeconds = 30): array
+    {
+        $endpoint = rtrim((string) $this->account?->api_base_url, '/').'/crm/importPart';
+        $form = $this->authFields() + $fields;
+
+        $response = Http::asForm()
+            ->acceptJson()
+            ->timeout(max(1, $timeoutSeconds))
+            ->post($endpoint, $form);
+
+        $json = $response->json();
+        $payload = is_array($json) ? $json : [];
+        $statusCode = $payload['status_code'] ?? null;
+        $apiOk = $response->successful() && ($statusCode === 'R200' || $statusCode === 200);
+
+        return [
+            'http_status' => $response->status(),
+            'api_status_code' => $statusCode,
+            'api_ok' => $apiOk,
+            'endpoint_used' => $endpoint,
+            'part_id' => $payload['part_id'] ?? null,
+            'message' => $payload['msg'] ?? $payload['message'] ?? null,
+            'response_top_level_keys' => array_values(array_slice(array_keys($payload), 0, 30)),
+            'payload' => $payload,
+        ];
+    }
+
     public function fetchPartsPage(int $page, int $limit, int $timeoutSeconds = 30): array
     {
         $page = max(1, $page);
