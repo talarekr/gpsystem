@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Car;
 use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceCategoryMapping;
 use App\Models\MarketplaceListing;
@@ -124,8 +125,9 @@ class OvokoPublishAdapterTest extends TestCase
     {
         $category = PartCategory::query()->create(['name' => 'Alternatory']);
         MarketplaceCategoryMapping::query()->create(['local_category_id' => $category->id, 'channel' => 'ovoko', 'external_category_id' => '252']);
-        MarketplaceAccount::query()->create(['marketplace' => 'ovoko', 'code' => 'ovoko_main', 'name' => 'Ovoko main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'live', 'api_credentials' => ['username' => 'ovoko-user', 'password' => 'ovoko-pass', 'user_token' => 'ovoko-token'], 'api_settings' => ['default_car_id' => 777, 'default_quality' => 1, 'default_part_status' => 1]]);
-        $part = Part::query()->create(['sku' => 'GPS-OVOKO-1', 'name' => 'Kompletna część Ovoko', 'description' => 'Pełny opis części.', 'price' => 100, 'ovoko_price' => 120, 'quantity' => 1, 'category_id' => $category->id, 'vehicle_snapshot' => ['make' => 'BMW', 'model' => '3']]);
+        MarketplaceAccount::query()->create(['marketplace' => 'ovoko', 'code' => 'ovoko_main', 'name' => 'Ovoko main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'live', 'api_credentials' => ['username' => 'ovoko-user', 'password' => 'ovoko-pass', 'user_token' => 'ovoko-token'], 'api_settings' => ['default_part_status' => 1]]);
+        $car = Car::query()->create(['source_system' => 'ovoko', 'external_id' => 777, 'make' => 'BMW', 'model' => '3']);
+        $part = Part::query()->create(['sku' => 'GPS-OVOKO-1', 'name' => 'Kompletna część Ovoko', 'description' => 'Pełny opis części.', 'condition_notes' => 'używany', 'price' => 100, 'ovoko_price' => 120, 'quantity' => 1, 'category_id' => $category->id, 'car_id' => $car->id]);
         DB::table('part_images')->insert(['part_id' => $part->id, 'path' => 'parts/photos/complete.jpg', 'sort_order' => 1, 'is_primary' => true, 'created_at' => now(), 'updated_at' => now()]);
         return $part;
     }

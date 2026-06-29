@@ -54,9 +54,9 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
         $vehicle = is_array($payload['vehicle'] ?? null) ? $payload['vehicle'] : [];
         $fields = array_filter([
             'category_id' => $payload['category_id'] ?? null,
-            'car_id' => $settings['default_car_id'] ?? $vehicle['car_id'] ?? null,
-            'quality' => $settings['default_quality'] ?? $settings['ovoko_default_quality'] ?? null,
-            'status' => $settings['default_part_status'] ?? $settings['ovoko_default_part_status'] ?? null,
+            'car_id' => $this->ovokoCarId($part, $vehicle, $settings),
+            'quality' => $payload['quality'] ?? $this->qualityFromPart($part) ?? $settings['default_quality'] ?? $settings['ovoko_default_quality'] ?? null,
+            'status' => $payload['status'] ?? $settings['default_part_status'] ?? $settings['ovoko_default_part_status'] ?? null,
             'price' => $readiness['marketplace_price'] ?? $payload['price_pln'] ?? null,
             'original_currency' => $readiness['currency'] ?? $payload['currency'] ?? 'PLN',
             'external_id' => $payload['sku'] ?? $part->sku ?? ('gps-part-'.$part->id),
@@ -68,9 +68,28 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
         ], fn ($value) => ! blank($value));
 
         $missing = [];
-        foreach (['category_id', 'car_id', 'quality', 'status'] as $key) if (blank($fields[$key] ?? null)) $missing[] = $key;
-        if ($missing !== []) return ['ok' => false, 'fields' => $fields, 'missing' => $missing, 'error' => 'Ovoko/RRR requires category_id, car_id, quality and status for /crm/importPart. Configure missing values in ovoko_main api_settings or prepared payload.'];
+        if (blank($fields['category_id'] ?? null)) $missing[] = 'Ovoko: brakuje category_id dla wybranej kategorii '.($payload['category_mapping_name'] ?? $payload['category_mapping_path'] ?? $payload['local_category_id'] ?? 'części');
+        if (blank($fields['car_id'] ?? null)) $missing[] = 'Ovoko: wybrane auto nie ma RRR car_id';
+        if (blank($fields['quality'] ?? null)) $missing[] = 'Ovoko: nie udało się zmapować quality z wartości '.($part->condition_notes ?? '');
+        if (blank($fields['status'] ?? null)) $missing[] = 'Ovoko: brakuje status/default_part_status';
+        if ($missing !== []) return ['ok' => false, 'fields' => $fields, 'missing' => $missing, 'error' => implode('; ', $missing)];
 
         return ['ok' => true, 'fields' => $fields];
+    }
+
+    private function ovokoCarId(Part $part, array $vehicle, array $settings): mixed
+    {
+        $part->loadMissing('car');
+        foreach ([$part->car?->external_id ?? null, data_get($part->car?->legacy_payload, 'ovoko_car_id'), data_get($part->car?->legacy_payload, 'rrr_car_id'), $vehicle['rrr_car_id'] ?? null, $vehicle['ovoko_car_id'] ?? null, $settings['default_car_id'] ?? null] as $value) {
+            if (! blank($value)) return $value;
+        }
+        return null;
+    }
+
+    private function qualityFromPart(Part $part): mixed
+    {
+        $value = mb_strtolower(trim((string) ($part->condition_notes ?? '')));
+        $map = ['używany' => 1, 'uzywany' => 1, 'używana' => 1, 'uzywana' => 1, 'used' => 1, 'nowy' => 2, 'nowa' => 2, 'new' => 2];
+        return $map[$value] ?? null;
     }
 }
