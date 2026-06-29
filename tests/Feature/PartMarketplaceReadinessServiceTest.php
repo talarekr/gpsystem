@@ -77,7 +77,7 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $html = view('filament.resources.parts.marketplace-readiness-cards', ['part' => $part])->render();
 
         $this->assertStringContainsString('Przygotuj', $html);
-        $this->assertStringContainsString('x-data="{ preparedStatusChecked: false }"', $html);
+        $this->assertStringContainsString('x-data="{ preparedStatusChecked: false,', $html);
         $this->assertStringNotContainsString('data-marketplace-prepare-result="blocked"', $this->visibleInitialStatusHtml($html));
         $this->assertStringNotContainsString('Uzupełnij cenę', $this->visibleInitialStatusHtml($html));
     }
@@ -113,10 +113,25 @@ class PartMarketplaceReadinessServiceTest extends TestCase
 
         $html = view('filament.resources.parts.marketplace-readiness-cards', ['part' => $part, 'preparedStatusChecked' => ['allegro']])->render();
 
-        $this->assertStringContainsString('data-marketplace-card="allegro" x-data="{ preparedStatusChecked: true }"', $html);
-        $this->assertStringContainsString('data-marketplace-card="ovoko" x-data="{ preparedStatusChecked: false }"', $html);
-        $this->assertStringContainsString('data-marketplace-card="ebay" x-data="{ preparedStatusChecked: false }"', $html);
+        $this->assertStringContainsString('data-marketplace-card="allegro" x-data="{ preparedStatusChecked: true,"', $html);
+        $this->assertStringContainsString('data-marketplace-card="ovoko" x-data="{ preparedStatusChecked: false,"', $html);
+        $this->assertStringContainsString('data-marketplace-card="ebay" x-data="{ preparedStatusChecked: false,"', $html);
     }
+
+    public function test_marketplace_card_publish_button_is_revealed_only_after_ready_preparation(): void
+    {
+        $part = Part::query()->create(['name' => 'Część bez ceny', 'price' => null, 'quantity' => 1]);
+
+        $html = view('filament.resources.parts.marketplace-readiness-cards', ['part' => $part, 'preparedStatusChecked' => ['allegro']])->render();
+
+        $this->assertStringContainsString('x-show="preparedStatusChecked && prepareReady"', $html);
+        $this->assertStringContainsString('$wire.publishMarketplaceChannel(\'allegro\')', $html);
+        $this->assertStringContainsString('$wire.publishMarketplaceChannel(\'ovoko\')', $html);
+        $this->assertStringContainsString('$wire.publishMarketplaceChannel(\'ebay\')', $html);
+        $this->assertStringContainsString('Wystaw', $html);
+        $this->assertStringContainsString('publishing || !prepareReady', $html);
+    }
+
 
     private function visibleInitialStatusHtml(string $html): string
     {
@@ -325,7 +340,7 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $this->assertStringNotContainsString('ID kategorii:', $html);
         $this->assertStringNotContainsString('>Gotowy</span>', $html);
         $this->assertStringContainsString('Przygotuj', $html);
-        $this->assertStringContainsString('x-data="{ preparedStatusChecked: false }"', $html);
+        $this->assertStringContainsString('x-data="{ preparedStatusChecked: false,', $html);
         $this->assertStringContainsString('Gotowe', $html);
         $this->assertStringNotContainsString('Aukcja przygotowana', $html);
         $this->assertStringNotContainsString('Uzupełnij braki', $html);

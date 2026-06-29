@@ -376,6 +376,66 @@ class EditPart extends EditRecord
         ];
     }
 
+    public function publishMarketplaceChannel(string $channel, PublishPartToMarketplacesService $publishService): void
+    {
+        if (! in_array($channel, PublishPartToMarketplacesService::CHANNELS, true)) {
+            Notification::make()->title('Nieobsługiwany kanał sprzedaży.')->danger()->send();
+            return;
+        }
+
+        $this->publishMarketplaceChannels($publishService, [$channel], $channel);
+    }
+
+    private function publishMarketplaceChannels(PublishPartToMarketplacesService $publishService, array|string $channels, ?string $singleChannel = null): void
+    {
+        $this->save(false, false);
+        $this->record->refresh();
+
+        $enabled = (bool) config('marketplace.publish_enabled', false);
+        $result = $enabled
+            ? $publishService->confirm($this->record, $channels, dryRun: false, confirm: true)
+            : $publishService->preview($this->record, $channels, includePayload: true);
+
+        $published = $result['published_channels'] ?? $result['ready_channels'] ?? [];
+        $skipped = $result['skipped_channels'] ?? [];
+        $messages = collect($result['channels'] ?? [])->flatMap(fn (array $channel): array => $channel['errors'] ?? $channel['readiness']['blockers'] ?? [])->map(fn (mixed $message): string => $this->marketplacePublishMessage((string) $message))->filter()->values()->all();
+        $channelLabel = $singleChannel ? ucfirst($singleChannel) : null;
+
+        if (! $enabled) {
+            Notification::make()
+                ->title('Realne wystawianie marketplace jest wyłączone — wykonano tylko preview.')
+                ->body($messages === [] ? 'MARKETPLACE_PUBLISH_ENABLED=false. Nie wykonano żadnego zapisu do marketplace.' : implode(' | ', $messages))
+                ->danger()
+                ->send();
+            return;
+        }
+
+        if ($published !== [] && $skipped !== []) {
+            Notification::make()
+                ->title($singleChannel ? 'Część zapisana. Wystawiono kanał '.$channelLabel.'.' : 'Część zapisana. Wystawiono gotowe kanały, a kanały z brakami pominięto.')
+                ->body('Wystawione/przygotowane: '.implode(', ', $published).'. Pominięte: '.implode(', ', array_keys($skipped)).'. Powody: '.($messages === [] ? 'readiness wymaga uzupełnienia.' : implode(' | ', $messages)))
+                ->warning()
+                ->send();
+            return;
+        }
+
+        if (($result['blocked'] ?? false) || $published === []) {
+            Notification::make()
+                ->title($singleChannel ? 'Nie udało się wystawić kanału '.$channelLabel.'.' : 'Nie udało się wystawić części.')
+                ->body($messages === [] ? 'Readiness wymaga uzupełnienia.' : implode(' | ', $messages))
+                ->danger()
+                ->send();
+            return;
+        }
+
+        Notification::make()
+            ->title($singleChannel ? 'Część zapisana i wystawiona w kanale '.$channelLabel.'.' : 'Część zapisana i wystawiona w gotowych kanałach.')
+            ->success()
+            ->send();
+
+        return;
+    }
+
     private function getSaveAndPublishAction(string $name): Actions\Action
     {
         return Actions\Action::make($name)
@@ -388,49 +448,7 @@ class EditPart extends EditRecord
                 'class' => 'gps-part-edit-layout-action gps-part-edit-layout-action--publish' . (str_ends_with($name, 'Footer') ? ' gps-part-edit-footer-action' : ''),
             ])
             ->action(function (PublishPartToMarketplacesService $publishService): void {
-                $this->save(false, false);
-                $this->record->refresh();
-
-                $enabled = (bool) config('marketplace.publish_enabled', false);
-                $result = $enabled
-                    ? $publishService->confirm($this->record, 'all', dryRun: false, confirm: true)
-                    : $publishService->preview($this->record, 'all', includePayload: true);
-
-                $published = $result['published_channels'] ?? $result['ready_channels'] ?? [];
-                $skipped = $result['skipped_channels'] ?? [];
-                $messages = collect($result['channels'] ?? [])->flatMap(fn (array $channel): array => $channel['errors'] ?? $channel['readiness']['blockers'] ?? [])->map(fn (mixed $message): string => $this->marketplacePublishMessage((string) $message))->filter()->values()->all();
-
-                if (! $enabled) {
-                    Notification::make()
-                        ->title('Realne wystawianie marketplace jest wyłączone — wykonano tylko preview.')
-                        ->body($messages === [] ? 'MARKETPLACE_PUBLISH_ENABLED=false. Nie wykonano żadnego zapisu do marketplace.' : implode(' | ', $messages))
-                        ->danger()
-                        ->send();
-                    return;
-                }
-
-                if ($published !== [] && $skipped !== []) {
-                    Notification::make()
-                        ->title('Część zapisana. Wystawiono gotowe kanały, a kanały z brakami pominięto.')
-                        ->body('Wystawione/przygotowane: '.implode(', ', $published).'. Pominięte: '.implode(', ', array_keys($skipped)).'. Powody: '.($messages === [] ? 'readiness wymaga uzupełnienia.' : implode(' | ', $messages)))
-                        ->warning()
-                        ->send();
-                    return;
-                }
-
-                if (($result['blocked'] ?? false) || $published === []) {
-                    Notification::make()
-                        ->title('Nie udało się wystawić części.')
-                        ->body($messages === [] ? 'Readiness wymaga uzupełnienia.' : implode(' | ', $messages))
-                        ->danger()
-                        ->send();
-                    return;
-                }
-
-                Notification::make()
-                    ->title('Część zapisana i wystawiona w gotowych kanałach.')
-                    ->success()
-                    ->send();
+                $this->publishMarketplaceChannels($publishService, 'all');
             });
     }
 }
