@@ -4,6 +4,8 @@ namespace App\Services\Marketplace;
 
 use App\Models\Part;
 use Illuminate\Support\HtmlString;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 class EbayDescriptionTemplateRenderer
 {
@@ -57,13 +59,35 @@ class EbayDescriptionTemplateRenderer
 
     public function assetUrl(string $filename): string
     {
-        return 'https://gpswiss.pl/ebay-template/assets/'.$filename;
+        $base = rtrim((string) config('product-hub.ebay.description_template_asset_base_url', ''), '/');
+        if ($base === '') {
+            $appUrl = rtrim((string) config('app.url'), '/');
+            $base = Str::startsWith($appUrl, 'https://') ? $appUrl.'/storage/imports/ebay-template' : 'https://gpsystem.thecamels.pl/storage/imports/ebay-template';
+        }
+
+        return $base.'/'.ltrim($filename, '/');
     }
 
     /** @return array<string, string> */
     public function assetUrls(): array
     {
         return collect(self::ASSETS)->mapWithKeys(fn (string $filename, string $key): array => [$key => $this->assetUrl($filename)])->all();
+    }
+
+    /** @return array<string, array<string, mixed>> */
+    public function assetDiagnostics(): array
+    {
+        return collect(self::ASSETS)->mapWithKeys(function (string $filename, string $key): array {
+            $source = 'storage/app/imports/ebay-template/'.$filename;
+            $url = $this->assetUrl($filename);
+
+            return [$key => [
+                'source_path' => $source,
+                'source_exists' => Storage::disk('local')->exists('imports/ebay-template/'.$filename) || Storage::disk('local')->exists('imports/'.$filename),
+                'generated_url' => $url,
+                'absolute_https' => Str::startsWith($url, 'https://'),
+            ]];
+        })->all();
     }
 
     /** @param array<string, mixed> $data */

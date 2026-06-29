@@ -40,6 +40,7 @@ return [
     ],
 
     'ebay' => [
+        'description_template_asset_base_url' => env('GPS_EBAY_TEMPLATE_ASSET_BASE_URL', rtrim((string) env('APP_URL', 'https://gpsystem.thecamels.pl'), '/').'/storage/imports/ebay-template'),
         'default_location' => [
             'merchant_location_key' => 'gpswiss-pl',
             'inventory_location_key' => 'gpswiss-pl',

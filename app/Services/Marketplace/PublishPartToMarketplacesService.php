@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\DB;
 
 class PublishPartToMarketplacesService
 {
-    public const CHANNELS = ['allegro', 'ovoko', 'ebay'];
+    public const CHANNELS = ['allegro', 'ovoko', 'ebay', 'ebay_de', 'ebay_fr'];
 
     public function __construct(
         private readonly PreparePartMarketplaceListingService $prepareService,
@@ -54,17 +54,18 @@ class PublishPartToMarketplacesService
 
         $published = array_values(array_filter($ready, fn (string $channel): bool => (bool) ($results[$channel]['success'] ?? false)));
         $success = $published !== [];
-        return array_merge($base, ['part_id' => $part->id, 'blocked' => ! $success, 'channels' => $results, 'ready_channels' => $ready, 'published_channels' => $published, 'skipped_channels' => $this->skippedChannels($skipped), 'readiness_ok' => $skipped === [], 'needs_listing_changed' => $success && $skipped === [], 'products_changed' => $success && $skipped === [], 'offers_changed' => collect($results)->contains(fn ($r) => (bool) ($r['write'] ?? false)), 'marketplace_write' => collect($results)->contains(fn ($r) => (bool) ($r['write'] ?? false)), 'allegro_write' => (bool) ($results['allegro']['write'] ?? false), 'ovoko_write' => (bool) ($results['ovoko']['write'] ?? false), 'ebay_write' => (bool) ($results['ebay']['write'] ?? false)]);
+        return array_merge($base, ['part_id' => $part->id, 'blocked' => ! $success, 'channels' => $results, 'ready_channels' => $ready, 'published_channels' => $published, 'skipped_channels' => $this->skippedChannels($skipped), 'readiness_ok' => $skipped === [], 'needs_listing_changed' => $success && $skipped === [], 'products_changed' => $success && $skipped === [], 'offers_changed' => collect($results)->contains(fn ($r) => (bool) ($r['write'] ?? false)), 'marketplace_write' => collect($results)->contains(fn ($r) => (bool) ($r['write'] ?? false)), 'allegro_write' => (bool) ($results['allegro']['write'] ?? false), 'ovoko_write' => (bool) ($results['ovoko']['write'] ?? false), 'ebay_write' => (bool) (($results['ebay_de']['write'] ?? false) || ($results['ebay_fr']['write'] ?? false) || ($results['ebay']['write'] ?? false))]);
     }
 
     public function normalizeChannels(array|string $channels): array
     {
         $value = is_array($channels) ? implode(',', $channels) : $channels;
-        if ($value === 'all' || blank($value)) return self::CHANNELS;
-        return array_values(array_intersect(self::CHANNELS, array_map('trim', explode(',', $value))));
+        if ($value === 'all' || blank($value)) return ['allegro', 'ovoko', 'ebay_de', 'ebay_fr'];
+        $mapped = collect(array_map('trim', explode(',', $value)))->flatMap(fn (string $channel): array => $channel === 'ebay' ? ['ebay_de', 'ebay_fr'] : [$channel])->all();
+        return array_values(array_intersect(self::CHANNELS, $mapped));
     }
 
-    private function adapter(string $channel): object { return match ($channel) { 'allegro' => $this->allegro, 'ovoko' => $this->ovoko, 'ebay' => $this->ebay }; }
+    private function adapter(string $channel): object { return match ($channel) { 'allegro' => $this->allegro, 'ovoko' => $this->ovoko, 'ebay', 'ebay_de', 'ebay_fr' => $this->ebay->forChannel($channel) }; }
     private function allSuccessful(array $results): bool { return $results !== [] && collect($results)->every(fn ($r) => (bool) ($r['success'] ?? false)); }
     private function allSelectedSuccessful(array $results, array $selected): bool { return $selected !== [] && collect($selected)->every(fn (string $channel): bool => (bool) ($results[$channel]['success'] ?? false)); }
     private function skippedChannels(array $skipped): array { return collect($skipped)->map(fn (array $data): array => ['status' => 'blocked', 'reasons' => $data['errors'] ?? $data['readiness']['blockers'] ?? []])->all(); }
