@@ -62,6 +62,7 @@ class ListStorageLocations extends Page
     protected function getLocationsQuery(): Builder
     {
         return StorageLocation::query()
+            ->withCount('parts')
             ->when(filled($this->search), function (Builder $query): void {
                 $search = trim($this->search);
                 $query->where(fn (Builder $query) => $query->where('name', 'like', "%{$search}%")->orWhere('id', $search));
