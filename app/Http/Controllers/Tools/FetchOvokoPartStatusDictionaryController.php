@@ -53,6 +53,7 @@ class FetchOvokoPartStatusDictionaryController extends Controller
             'configured_default_part_status' => $configuredDefault,
             'statuses' => [],
             'raw_top_level_keys' => [],
+            'list_items_safe_shape' => [],
             'http_status' => null,
             'api_status_code' => null,
             'api_status_message' => null,
@@ -93,6 +94,7 @@ class FetchOvokoPartStatusDictionaryController extends Controller
                 'statuses' => $statuses,
                 'status_count' => count($statuses),
                 'raw_top_level_keys' => array_values(array_slice(array_keys($payload), 0, 30)),
+                'list_items_safe_shape' => $this->safeListShape($payload),
             ]);
 
             $this->logDictionaryFetch($ok ? 'success' : 'warning', $message, $result);
@@ -132,21 +134,104 @@ class FetchOvokoPartStatusDictionaryController extends Controller
 
     private function extractStatuses(array $payload): array
     {
-        $items = $payload['list'] ?? $payload['data'] ?? $payload['statuses'] ?? $payload['part_status'] ?? [];
+        $items = $this->statusItems($payload);
         if (! is_array($items)) return [];
 
         $statuses = [];
         foreach ($items as $key => $item) {
             if (is_array($item)) {
-                $id = $item['id'] ?? $item['value'] ?? $item['status'] ?? $key;
-                $label = $item['label'] ?? $item['name'] ?? $item['title'] ?? $item['text'] ?? $item['translation'] ?? null;
+                $id = $item['id'] ?? $item['status_id'] ?? $item['status'] ?? $item['code'] ?? $item['value'] ?? $key;
+                $label = $this->extractLabel($item);
                 $statuses[] = ['id' => (string) $id, 'label' => filled($label) ? (string) $label : null];
                 continue;
             }
-            $statuses[] = ['id' => (string) $key, 'label' => filled($item) ? (string) $item : null];
+
+            $statuses[] = [
+                'id' => filled($item) ? (string) $item : (string) $key,
+                'label' => null,
+                'raw_scalar' => is_scalar($item) || $item === null ? $item : gettype($item),
+            ];
         }
 
         return array_values(array_filter($statuses, fn (array $status): bool => $status['id'] !== ''));
+    }
+
+    private function statusItems(array $payload): mixed
+    {
+        return $payload['list'] ?? $payload['data'] ?? $payload['statuses'] ?? $payload['part_status'] ?? [];
+    }
+
+    private function extractLabel(array $item): mixed
+    {
+        foreach (['name', 'label', 'title', 'value', 'text', 'pl', 'en', 'lt', 'ru'] as $key) {
+            if (filled($item[$key] ?? null) && is_scalar($item[$key])) return $item[$key];
+        }
+
+        foreach (['names', 'translations'] as $groupKey) {
+            $group = $item[$groupKey] ?? null;
+            if (! is_array($group)) continue;
+            foreach (['pl', 'en', 'lt', 'ru', 'name', 'label', 'title', 'value', 'text'] as $key) {
+                if (filled($group[$key] ?? null) && is_scalar($group[$key])) return $group[$key];
+            }
+            foreach ($group as $value) {
+                if (filled($value) && is_scalar($value)) return $value;
+            }
+        }
+
+        return null;
+    }
+
+    private function safeListShape(array $payload): array
+    {
+        $items = $this->statusItems($payload);
+        if (! is_array($items)) {
+            return ['list_type' => gettype($items), 'items' => []];
+        }
+
+        $shape = [];
+        foreach (array_slice($items, 0, 25, true) as $key => $item) {
+            if (! is_array($item)) {
+                $shape[] = [
+                    'list_key' => (string) $key,
+                    'item_type' => gettype($item),
+                    'raw_scalar' => is_scalar($item) || $item === null ? $item : null,
+                ];
+                continue;
+            }
+
+            $safe = ['list_key' => (string) $key, 'item_type' => 'array'];
+            foreach ($item as $itemKey => $value) {
+                if ($this->isSensitiveKey((string) $itemKey)) continue;
+                if (is_scalar($value) || $value === null) {
+                    $safe[(string) $itemKey] = $value;
+                    continue;
+                }
+                if (in_array((string) $itemKey, ['names', 'translations'], true) && is_array($value)) {
+                    $safe[(string) $itemKey] = $this->safeScalarArray($value);
+                    continue;
+                }
+                $safe[(string) $itemKey] = ['type' => gettype($value), 'keys' => is_array($value) ? array_values(array_slice(array_map('strval', array_keys($value)), 0, 20)) : []];
+            }
+            $safe['detected_label'] = $this->extractLabel($item);
+            $shape[] = $safe;
+        }
+
+        return $shape;
+    }
+
+    private function safeScalarArray(array $values): array
+    {
+        $safe = [];
+        foreach (array_slice($values, 0, 20, true) as $key => $value) {
+            if ($this->isSensitiveKey((string) $key)) continue;
+            $safe[(string) $key] = is_scalar($value) || $value === null ? $value : ['type' => gettype($value)];
+        }
+        return $safe;
+    }
+
+    private function isSensitiveKey(string $key): bool
+    {
+        return preg_match('/password|token|secret|credential|authorization|auth|api[_-]?key/i', $key) === 1;
     }
 
     private function logDictionaryFetch(string $status, string $message, array $result): void
@@ -170,6 +255,7 @@ class FetchOvokoPartStatusDictionaryController extends Controller
                 'statuses_safe' => $result['statuses'] ?? [],
                 'status_count' => $result['status_count'] ?? 0,
                 'raw_top_level_keys' => $result['raw_top_level_keys'] ?? [],
+                'list_items_safe_shape' => $result['list_items_safe_shape'] ?? [],
             ],
             'ovoko_write' => false,
             'local_update' => false,
