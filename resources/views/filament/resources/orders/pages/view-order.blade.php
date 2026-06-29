@@ -223,7 +223,6 @@
         .gps-order-detail-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
         .gps-order-paid { color: #15803d; }
         .gps-order-shipment-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
-        .gps-order-shipment-button { background: #0f172a; border-radius: 12px; color: #fff; display: inline-flex; font-size: 13px; font-weight: 800; padding: 10px 14px; text-decoration: none; }
         .gps-order-shipment-fields { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
         .gps-order-shipment-field { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 999px; color: #334155; font-size: 12px; font-weight: 700; padding: 6px 9px; }
         .gps-order-tech summary { cursor: pointer; color: #334155; font-weight: 800; }
@@ -392,7 +391,7 @@
                 @if (! $shipment)
                     <div class="gps-empty gps-empty-compact">Brak przesyłki dla tego zamówienia.</div>
                     <div class="gps-order-shipment-actions">
-                        <a class="gps-order-shipment-button" href="{{ \App\Filament\Pages\CreateOrderShipment::getUrl(['order' => $order]) }}">Dodaj przesyłkę DHL</a>
+                        <a class="fi-btn fi-color-primary fi-btn-color-primary fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-primary-500 focus-visible:ring-2 focus-visible:ring-primary-600 dark:bg-primary-500 dark:hover:bg-primary-400 dark:focus-visible:ring-primary-500" href="{{ \App\Filament\Pages\CreateOrderShipment::getUrl(['order' => $order]) }}">Dodaj przesyłkę DHL</a>
                     </div>
                 @else
                     <div class="gps-order-detail-two">
@@ -406,8 +405,8 @@
                                 <div>eBay tracking: {{ ($ebayFulfillment['ok'] ?? false) ? 'wysłany' : (($ebayFulfillment['error'] ?? null) ? 'błąd: '.$ebayFulfillment['error'] : 'brak potwierdzenia') }}</div>
                             </div>
                             <div class="gps-order-shipment-actions">
-                                @if ($shipment->label_path)<a class="gps-order-shipment-button" href="{{ route('tools.download-shipment-label', $shipment) }}">Pobierz etykietę PDF</a>@endif
-                                <a class="gps-order-shipment-button" href="{{ \App\Filament\Pages\ShipmentDetails::getUrl(['shipment' => $shipment->id]) }}">Szczegóły</a>
+                                @if ($shipment->label_path)<a class="fi-btn fi-color-primary fi-btn-color-primary fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-primary-500 focus-visible:ring-2 focus-visible:ring-primary-600 dark:bg-primary-500 dark:hover:bg-primary-400 dark:focus-visible:ring-primary-500" href="{{ route('tools.download-shipment-label', $shipment) }}">Pobierz etykietę PDF</a>@endif
+                                <a class="fi-btn fi-color-gray fi-btn-color-gray fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-gray-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-gray-500 focus-visible:ring-2 focus-visible:ring-gray-600 dark:bg-gray-500 dark:hover:bg-gray-400 dark:focus-visible:ring-gray-500" href="{{ \App\Filament\Pages\ShipmentDetails::getUrl(['shipment' => $shipment->id]) }}">Szczegóły</a>
                             </div>
                         </div>
                         <div class="gps-order-detail-fact">
@@ -435,7 +434,7 @@
                             @endif
                         </div>
                         @if ($shipmentPreviewUrl)
-                            <div class="gps-order-shipment-actions"><a class="gps-order-shipment-button" href="{{ $shipmentPreviewUrl }}" target="_blank" rel="noopener noreferrer">{{ $marketplaceKey === 'allegro' ? 'Dodaj przesyłkę Allegro' : 'Przygotuj przesyłkę Ovoko' }}</a></div>
+                            <div class="gps-order-shipment-actions"><a class="fi-btn fi-color-primary fi-btn-color-primary fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-primary-500 focus-visible:ring-2 focus-visible:ring-primary-600 dark:bg-primary-500 dark:hover:bg-primary-400 dark:focus-visible:ring-primary-500" href="{{ $shipmentPreviewUrl }}" target="_blank" rel="noopener noreferrer">{{ $marketplaceKey === 'allegro' ? 'Dodaj przesyłkę Allegro' : 'Przygotuj przesyłkę Ovoko' }}</a></div>
                             <div class="gps-order-detail-muted">Przycisk prowadzi wyłącznie do read-only preview/formularza dry-run.</div>
                         @endif
                     </div>

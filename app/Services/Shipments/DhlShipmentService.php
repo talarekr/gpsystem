@@ -144,13 +144,10 @@ class DhlShipmentService
             data_get($shipTo, 'address'),
             $shipTo,
         ]) ?? [];
-        $company = $this->firstFilled([
+        $name = $this->firstFilled([
             data_get($shipTo, 'companyName'),
             data_get($contactAddress, 'companyName'),
             data_get($contactAddress, 'company'),
-        ]);
-        $name = $this->firstFilled([
-            $company,
             data_get($shipTo, 'fullName'),
             data_get($shipTo, 'name'),
             data_get($contactAddress, 'fullName'),
@@ -170,7 +167,7 @@ class DhlShipmentService
         ]));
 
         return [
-            'receiver_type' => ($company || $this->looksLikeCompany($name)) ? 'company' : 'private',
+            'receiver_type' => 'private',
             'name' => $name,
             'address_line1' => $addressLine1,
             'postal_code' => $this->firstFilled([data_get($contactAddress, 'postalCode'), data_get($contactAddress, 'zipCode'), data_get($contactAddress, 'postcode'), $order->postal_code]),

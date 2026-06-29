@@ -3,7 +3,7 @@
                 <div class="gps-form-section">
                     <h3>Dane nadawcy</h3>
                     <div class="gps-form-grid-2">
-                        <div class="gps-field"><label>Kraj</label><input wire:model="dhlForm.shipper.country"></div>
+                        <div class="gps-field"><label>Kraj</label><select wire:model="dhlForm.shipper.country">@foreach ($dhlCountryOptions as $code => $label)<option value="{{ $code }}">{{ $label }}</option>@endforeach</select></div>
                         <div class="gps-field"><label>Nazwa</label><input wire:model="dhlForm.shipper.name"></div>
                     </div>
                     <h4 class="gps-subheading">Adres</h4>
