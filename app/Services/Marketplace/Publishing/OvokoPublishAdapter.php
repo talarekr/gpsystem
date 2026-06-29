@@ -5,6 +5,8 @@ namespace App\Services\Marketplace\Publishing;
 use App\Models\MarketplaceAccount;
 use App\Models\Part;
 use App\Services\Marketplace\Api\OvokoApiClient;
+use Illuminate\Support\Facades\Http;
+use Throwable;
 
 class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
 {
@@ -27,6 +29,10 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
 
         $form = $this->importPartPayload($part, $readiness, $payload, $account);
         $photoDiagnostics = $this->photoDiagnostics($form['fields'] ?? []);
+        if (($form['ok'] ?? false) === true && ! ($photoDiagnostics['any_photo_accessible_publicly'] ?? false)) {
+            return ['ok' => false, 'status' => 'payload_invalid', 'action' => 'crm/importPart', 'error' => 'Ovoko photo is not publicly accessible.', 'ui_error' => 'Ovoko nie może pobrać zdjęcia części. Szczegóły są w Logach.', 'request_summary' => $this->requestSummary($payload) + ['ovoko_form_keys' => array_keys($form['fields'] ?? []), 'ovoko_photo' => $photoDiagnostics], 'response_summary' => ['ovoko_photo' => $photoDiagnostics]];
+        }
+
         if (($form['ok'] ?? false) !== true) {
             return ['ok' => false, 'status' => 'payload_invalid', 'action' => 'crm/importPart', 'error' => (string) ($form['error'] ?? 'Ovoko publish payload is incomplete.'), 'request_summary' => $this->requestSummary($payload) + ['ovoko_form_keys' => array_keys($form['fields'] ?? []), 'ovoko_photo' => $photoDiagnostics], 'response_summary' => ['missing' => $form['missing'] ?? []]];
         }
@@ -99,14 +105,86 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
     {
         $photo = $fields['photo'] ?? null;
         $photos = is_array($fields['photos[]'] ?? null) ? $fields['photos[]'] : [];
+        $photoCheck = is_string($photo) ? $this->checkPhotoUrl($photo) : null;
+        $checks = array_map(fn (string $url): array => $this->checkPhotoUrl($url), array_slice(array_values(array_filter($photos, 'is_string')), 0, 2));
+        $firstPhotoPath = isset($photos[0]) && is_string($photos[0]) ? $this->urlPath($photos[0]) : null;
+
         return [
             'photo_present' => filled($photo),
             'photo_shape' => get_debug_type($photo),
             'photo_scheme' => is_string($photo) ? parse_url($photo, PHP_URL_SCHEME) : null,
             'photo_host' => is_string($photo) ? parse_url($photo, PHP_URL_HOST) : null,
+            'photo_path' => is_string($photo) ? $this->urlPath($photo) : null,
+            'photo_basename' => is_string($photo) ? basename($this->urlPath($photo)) : null,
+            'photo_extension' => is_string($photo) ? pathinfo($this->urlPath($photo), PATHINFO_EXTENSION) ?: null : null,
+            'photo_path_has_expected_prefix' => is_string($photo) ? str_starts_with($this->urlPath($photo), '/storage/parts/photos/presentation/product/') : false,
             'photos_count' => count($photos),
+            'first_photo_path' => $firstPhotoPath,
+            'first_photo_path_has_expected_prefix' => is_string($firstPhotoPath) ? str_starts_with($firstPhotoPath, '/storage/parts/photos/presentation/product/') : false,
             'first_photo_matches_photo' => isset($photos[0]) && is_string($photo) && $photos[0] === $photo,
+            'photo_http_status' => $photoCheck['photo_http_status'] ?? null,
+            'photo_content_type' => $photoCheck['photo_content_type'] ?? null,
+            'photo_content_length' => $photoCheck['photo_content_length'] ?? null,
+            'photo_final_url_host' => $photoCheck['photo_final_url_host'] ?? null,
+            'photo_redirect_count' => $photoCheck['photo_redirect_count'] ?? null,
+            'photo_accessible_publicly' => $photoCheck['photo_accessible_publicly'] ?? false,
+            'photo_exact_url_check' => $photoCheck,
+            'any_photo_accessible_publicly' => (bool) ($photoCheck['photo_accessible_publicly'] ?? false) || collect($checks)->contains(fn (array $check): bool => (bool) ($check['photo_accessible_publicly'] ?? false)),
+            'photos_access_checks' => $checks,
         ];
+    }
+
+    private function checkPhotoUrl(string $url): array
+    {
+        $base = [
+            'url_shape' => $this->safeUrlShape($url),
+            'photo_http_status' => null,
+            'photo_content_type' => null,
+            'photo_content_length' => null,
+            'photo_final_url_host' => parse_url($url, PHP_URL_HOST),
+            'photo_redirect_count' => 0,
+            'photo_accessible_publicly' => false,
+        ];
+
+        try {
+            $response = Http::timeout(5)->withOptions(['allow_redirects' => ['track_redirects' => true]])->head($url);
+            if (! $this->usablePhotoResponse($response)) {
+                $response = Http::timeout(6)->withHeaders(['Range' => 'bytes=0-1023'])->withOptions(['allow_redirects' => ['track_redirects' => true]])->get($url);
+            }
+
+            $status = $response->status();
+            $contentType = strtolower(trim(explode(';', (string) $response->header('Content-Type'))[0]));
+            $finalUrl = (string) ($response->handlerStats()['url'] ?? $url);
+            $redirectHistory = $response->header('X-Guzzle-Redirect-History');
+
+            return array_merge($base, [
+                'photo_http_status' => $status,
+                'photo_content_type' => $contentType ?: null,
+                'photo_content_length' => is_numeric($response->header('Content-Length')) ? (int) $response->header('Content-Length') : null,
+                'photo_final_url_host' => parse_url($finalUrl, PHP_URL_HOST) ?: $base['photo_final_url_host'],
+                'photo_redirect_count' => $redirectHistory ? count(array_filter(array_map('trim', explode(',', $redirectHistory)))) : 0,
+                'photo_accessible_publicly' => $status === 200 && str_starts_with($contentType, 'image/'),
+            ]);
+        } catch (Throwable $e) {
+            return array_merge($base, ['photo_error' => $e::class]);
+        }
+    }
+
+    private function usablePhotoResponse($response): bool
+    {
+        $contentType = strtolower((string) $response->header('Content-Type'));
+        return $response->status() === 200 && str_starts_with($contentType, 'image/');
+    }
+
+    private function safeUrlShape(string $url): array
+    {
+        $path = $this->urlPath($url);
+        return ['scheme' => parse_url($url, PHP_URL_SCHEME), 'host' => parse_url($url, PHP_URL_HOST), 'path' => $path, 'basename' => basename($path), 'path_extension' => pathinfo($path, PATHINFO_EXTENSION) ?: null, 'path_length' => strlen($path), 'path_has_expected_prefix' => str_starts_with($path, '/storage/parts/photos/presentation/product/')];
+    }
+
+    private function urlPath(string $url): string
+    {
+        return (string) parse_url($url, PHP_URL_PATH);
     }
 
     private function ovokoCarId(Part $part, array $vehicle, array $settings): mixed
