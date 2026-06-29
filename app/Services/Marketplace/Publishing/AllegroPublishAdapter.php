@@ -18,9 +18,44 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
         $settings = is_array($account->api_settings) ? $account->api_settings : [];
         $sku = $this->skuFor($part, $payload);
         $payload['sku'] = $sku;
-        $body = array_filter(['name' => (string) ($payload['title'] ?? $part->name), 'category' => ['id' => (string) ($payload['category_id'] ?? '')], 'productSet' => $settings['productSet'] ?? null, 'parameters' => $payload['allegro_offer_parameters'] ?? $payload['allegro_parameters']['offer_parameters'] ?? [], 'images' => array_map(fn ($url) => ['url' => $url], (array) ($payload['image_urls'] ?? [])), 'sellingMode' => $settings['sellingMode'] ?? ['format' => 'BUY_NOW', 'price' => ['amount' => (string) ($payload['price_pln'] ?? $readiness['marketplace_price']), 'currency' => 'PLN']], 'stock' => ['available' => (int) ($payload['quantity'] ?? $part->quantity ?? 1), 'unit' => 'UNIT'], 'publication' => ['status' => 'ACTIVE'], 'delivery' => $settings['delivery'] ?? null, 'payments' => $settings['payments'] ?? null, 'afterSalesServices' => $settings['afterSalesServices'] ?? null, 'location' => $settings['location'] ?? null, 'external' => ['id' => $sku]], fn ($v) => $v !== null && $v !== []);
+        $body = array_filter(['name' => (string) ($payload['title'] ?? $part->name), 'category' => ['id' => (string) ($payload['category_id'] ?? '')], 'productSet' => $settings['productSet'] ?? null, 'parameters' => $payload['allegro_offer_parameters'] ?? $payload['allegro_parameters']['offer_parameters'] ?? [], 'images' => $this->normalizeImageUrls($payload['image_urls'] ?? []), 'sellingMode' => $settings['sellingMode'] ?? ['format' => 'BUY_NOW', 'price' => ['amount' => (string) ($payload['price_pln'] ?? $readiness['marketplace_price']), 'currency' => 'PLN']], 'stock' => ['available' => (int) ($payload['quantity'] ?? $part->quantity ?? 1), 'unit' => 'UNIT'], 'publication' => ['status' => 'ACTIVE'], 'delivery' => $settings['delivery'] ?? null, 'payments' => $settings['payments'] ?? null, 'afterSalesServices' => $settings['afterSalesServices'] ?? null, 'location' => $settings['location'] ?? null, 'external' => ['id' => $sku]], fn ($v) => $v !== null && $v !== []);
         $result = (new AllegroApiClient('allegro_main', $account))->createProductOffer($body);
-        return ['ok' => $result['ok'] ?? false, 'action' => 'createProductOffer', 'http_status' => $result['http_status'] ?? null, 'offer_id' => $result['offer_id'] ?? null, 'external_listing_id' => $result['offer_id'] ?? null, 'listing_status' => ($result['http_status'] ?? null) === 202 ? 'publication_pending' : 'published', 'request_id' => $result['request_id'] ?? null, 'request_summary' => $this->requestSummary($payload), 'response_summary' => $this->responseSummary($result), 'json' => $result['json'] ?? [], 'error' => 'Allegro product-offers publish failed.'];
+        return ['ok' => $result['ok'] ?? false, 'action' => 'createProductOffer', 'http_status' => $result['http_status'] ?? null, 'offer_id' => $result['offer_id'] ?? null, 'external_listing_id' => $result['offer_id'] ?? null, 'listing_status' => ($result['http_status'] ?? null) === 202 ? 'publication_pending' : 'published', 'request_id' => $result['request_id'] ?? null, 'request_summary' => $this->requestSummary($payload, $body), 'response_summary' => $this->responseSummary($result), 'json' => $result['json'] ?? [], 'error' => 'Allegro product-offers publish failed.'];
+    }
+
+    /** @return array<int, string> */
+    private function normalizeImageUrls(mixed $images): array
+    {
+        return array_values(array_filter(array_map(function (mixed $image): ?string {
+            if (is_string($image)) return filled($image) ? $image : null;
+            if (is_array($image) && is_string($image['url'] ?? null)) return filled($image['url']) ? $image['url'] : null;
+            if (is_object($image) && is_string($image->url ?? null)) return filled($image->url) ? $image->url : null;
+
+            return null;
+        }, (array) $images)));
+    }
+
+    protected function requestSummary(array $payload, ?array $body = null): array
+    {
+        $summary = parent::requestSummary($payload);
+        $images = is_array($body) ? ($body['images'] ?? []) : $this->normalizeImageUrls($payload['image_urls'] ?? []);
+        $first = is_array($images) ? ($images[0] ?? null) : null;
+
+        return $summary + [
+            'images_count' => is_array($images) ? count($images) : 0,
+            'images_shape' => $this->imagesShape($images),
+            'first_image_type' => $first === null ? null : get_debug_type($first),
+        ];
+    }
+
+    private function imagesShape(mixed $images): string
+    {
+        if (! is_array($images)) return get_debug_type($images);
+        if ($images === []) return 'empty';
+        foreach ($images as $image) {
+            if (! is_string($image)) return 'mixed';
+        }
+        return 'strings';
     }
 
     private function skuFor(Part $part, array $payload): string
