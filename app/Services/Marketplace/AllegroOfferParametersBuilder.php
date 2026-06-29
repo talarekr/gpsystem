@@ -41,6 +41,7 @@ class AllegroOfferParametersBuilder
         if ($name === 'stan') return $this->resolveValue('Używany', 'fixed_business_rule', $def);
         if ($name === 'jakoscczescizgodniezgvo') return $this->resolveValue('O - oryginał z logo producenta pojazdu (OE)', 'fixed_business_rule', $def);
         if ($name === 'stronazabudowy') return $this->resolveValue($this->partPosition($part), 'part', $def);
+        if ($name === 'typsamochodu') return $this->resolveCarType($part, $def);
         if ($this->isPartManufacturerParameter($def, $name)) {
             $manufacturer = $this->partManufacturer($part);
             return $this->resolveValue($manufacturer['value'], $manufacturer['source'], $def);
@@ -49,6 +50,46 @@ class AllegroOfferParametersBuilder
             return $this->resolveValue($this->catalogPartNumber($part), 'part.part_number', $def);
         }
         return ['value' => null, 'source' => 'not_resolved', 'source_value' => null, 'reason' => 'no_source'];
+    }
+
+
+    private function resolveCarType(Part $part, array $def): array
+    {
+        $bodyType = $this->carBodyType($part);
+        $allowed = array_map(fn ($allowed): array => ['id' => (string) ($allowed['id'] ?? ''), 'value' => (string) ($allowed['value'] ?? '')], $def['dictionary'] ?? []);
+        $vehicleKindTerms = ['osobowy', 'samochodosobowy', 'dostawczy', 'ciezarowy', 'ciężarowy', 'motocykl', 'autobus', 'przyczepa'];
+        $bodyTerms = ['suv', 'hatchback', 'kombi', 'sedan', 'coupe', 'coupé', 'kabriolet', 'cabrio', 'van', 'minivan', 'liftback'];
+        $allowedNorms = array_map(fn ($row): string => $this->norm($row['value']), $allowed);
+        $hasBodyValues = count(array_intersect($allowedNorms, array_map(fn ($v): string => $this->norm($v), $bodyTerms))) > 0;
+        $hasVehicleKindValues = count(array_intersect($allowedNorms, array_map(fn ($v): string => $this->norm($v), $vehicleKindTerms))) > 0;
+
+        app(ApiIntegrationLogger::class)->success('allegro', 'map_parameter:Typ samochodu', 'Allegro Typ samochodu mapping checked.', [
+            'request' => ['category_id' => (string) ($def['category_id'] ?? ''), 'parameter_id' => (string) ($def['id'] ?? ''), 'parameter_name' => (string) ($def['name'] ?? ''), 'required' => (bool) ($def['required'] ?? false)],
+            'response' => ['allowed_values' => array_column($allowed, 'value', 'id')],
+            'meta' => ['mapping_source' => 'samochód → typ nadwozia', 'source_value' => $bodyType['value'] ?? null],
+        ]);
+
+        if (! $hasBodyValues || $hasVehicleKindValues) {
+            return ['value' => null, 'source' => $bodyType['source'] ?? 'car.body_type', 'source_value' => $bodyType['value'] ?? null, 'reason' => 'dictionary_does_not_match_body_type', 'allowed_values_sample' => array_slice($allowed, 0, 20)];
+        }
+
+        $resolved = $this->resolveValue($bodyType['value'] ?? null, $bodyType['source'] ?? 'car.body_type', $def);
+        app(ApiIntegrationLogger::class)->success('allegro', 'map_parameter:Typ samochodu', 'Allegro Typ samochodu mapping result.', [
+            'request' => ['category_id' => (string) ($def['category_id'] ?? ''), 'parameter_id' => (string) ($def['id'] ?? ''), 'parameter_name' => (string) ($def['name'] ?? ''), 'required' => (bool) ($def['required'] ?? false)],
+            'response' => ['allowed_values' => array_column($allowed, 'value', 'id')],
+            'meta' => ['mapping_source' => 'samochód → typ nadwozia', 'source_value' => $bodyType['value'] ?? null, 'mapped_value' => $resolved['label'] ?? $resolved['value'] ?? null, 'missing_reason' => $resolved['reason'] ?? null],
+        ]);
+        return $resolved;
+    }
+
+    private function carBodyType(Part $part): array
+    {
+        $part->loadMissing('car');
+        foreach (['car.body_type', 'vehicle_snapshot.body_type', 'legacy_payload.body_type', 'review_metadata.body_type'] as $field) {
+            $value = data_get($part, $field);
+            if (filled($value)) return ['value' => $value, 'source' => 'part.'.$field];
+        }
+        return ['value' => null, 'source' => 'not_resolved'];
     }
 
     private function configuredMapping(Part $part, ?MarketplaceCategoryMapping $mapping, array $def): ?array
@@ -99,10 +140,12 @@ class AllegroOfferParametersBuilder
             'type' => (string) ($def['type'] ?? ''),
             'required' => (bool) ($def['required'] ?? false),
             'describesProduct' => (bool) ($def['options']['describesProduct'] ?? false),
+            'allowed_values' => ($this->norm($def['name'] ?? '') === 'typsamochodu') ? array_column(array_map(fn ($allowed): array => ['id' => (string) ($allowed['id'] ?? ''), 'value' => (string) ($allowed['value'] ?? '')], $def['dictionary'] ?? []), 'value', 'id') : null,
         ];
 
         if ($row['reason'] === null) unset($row['reason']);
         if ($row['allowed_values_sample'] === null) unset($row['allowed_values_sample']);
+        if ($row['allowed_values'] === null) unset($row['allowed_values']);
 
         return $row;
     }
