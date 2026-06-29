@@ -2,6 +2,7 @@
 
 namespace Tests\Unit;
 
+use App\Models\Order;
 use App\Services\Shipments\DhlShipmentService;
 use Tests\TestCase;
 
@@ -65,5 +66,53 @@ class DhlShipmentServiceDefaultsTest extends TestCase
         $this->assertSame([
             ['serviceType' => 'POD'],
         ], $payload['shipment']['shipmentInfo']['specialServices']['item']);
+    }
+
+    public function test_ebay_defaults_use_shipping_address_instead_of_buyer_marketplace_contact(): void
+    {
+        $order = new Order([
+            'marketplace' => 'ebay',
+            'customer_name' => 'infn3202-uamtdrxai',
+            'email' => 'marketplace-abc@example.invalid',
+            'phone' => '-',
+            'address_line1' => '-',
+            'postal_code' => '-',
+            'city' => '-',
+            'country' => 'PL',
+            'raw_payload' => [
+                'buyer' => [
+                    'username' => 'infn3202-uamtdrxai',
+                    'email' => 'marketplace-abc@example.invalid',
+                ],
+                'fulfillmentStartInstructions' => [[
+                    'shippingStep' => [
+                        'shipTo' => [
+                            'fullName' => 'STELLA SRL',
+                            'primaryPhone' => ['phoneNumber' => '3487617910'],
+                            'contactAddress' => [
+                                'addressLine1' => 'Via Bagnatica 21',
+                                'city' => 'Brusaporto',
+                                'stateOrProvince' => 'BG',
+                                'postalCode' => '24060',
+                                'countryCode' => 'IT',
+                            ],
+                        ],
+                    ],
+                ]],
+            ],
+        ]);
+
+        $defaults = app(DhlShipmentService::class)->defaults($order);
+
+        $this->assertSame('company', $defaults['receiver']['receiver_type']);
+        $this->assertSame('STELLA SRL', $defaults['receiver']['name']);
+        $this->assertSame('Via Bagnatica', $defaults['receiver']['street']);
+        $this->assertSame('21', $defaults['receiver']['house_number']);
+        $this->assertSame('24060', $defaults['receiver']['postal_code']);
+        $this->assertSame('Brusaporto', $defaults['receiver']['city']);
+        $this->assertSame('IT', $defaults['receiver']['country']);
+        $this->assertSame('3487617910', $defaults['receiver']['phone']);
+        $this->assertSame('STELLA SRL', $defaults['receiver']['person_name']);
+        $this->assertNull($defaults['receiver']['email']);
     }
 }
