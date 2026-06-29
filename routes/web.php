@@ -150,9 +150,14 @@ Route::get('/ebay-template/assets/{filename}', function (string $filename) {
         abort(404);
     }
 
-    $path = storage_path('app/imports/'.$filename);
+    $candidates = [
+        storage_path('app/imports/ebay-template/'.$filename),
+        storage_path('app/imports/'.$filename),
+    ];
 
-    if (! is_file($path)) {
+    $path = collect($candidates)->first(fn (string $candidate): bool => is_file($candidate));
+
+    if (! $path) {
         abort(404);
     }
 
