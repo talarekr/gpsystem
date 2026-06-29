@@ -32,6 +32,7 @@
                 <div>{{ $shipment->tracking_number ?: '—' }}</div>
                 <div>@if($shipment->label_path)<a class="gps-action" href="{{ route('tools.download-shipment-label', $shipment) }}">Pobierz etykietę</a>@else <span class="gps-muted">—</span> @endif</div>
                 <div class="gps-actions">
+                    <a href="{{ \App\Filament\Pages\ShipmentDetails::getUrl(['shipment' => $shipment->id]) }}" class="gps-action">Szczegóły</a>
                     <button type="button" wire:click="generateLabel('dhl', {{ $shipment->id }}, false)" class="gps-action">Podgląd DHL</button>
                     <button type="button" wire:click="generateLabel('dpd', {{ $shipment->id }}, false)" class="gps-action">Podgląd DPD</button>
                     <button type="button" wire:click="openDhlForm(null, {{ $shipment->id }})" class="gps-action">Utwórz DHL</button>
