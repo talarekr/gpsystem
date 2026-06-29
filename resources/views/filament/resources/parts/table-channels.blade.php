@@ -29,10 +29,11 @@
         }
 
         .gps-admin-channels .part-channel-row {
-            display: flex;
+            display: grid;
+            grid-template-columns: minmax(58px, max-content) minmax(76px, max-content) 14px 14px;
             align-items: center;
             justify-content: flex-start;
-            gap: 15px;
+            column-gap: 5px;
             width: 100%;
             max-width: 100%;
             white-space: nowrap;
@@ -42,7 +43,7 @@
         }
 
         .gps-admin-channels .part-channel-label {
-            flex: 0 0 auto;
+            min-width: 58px;
             color: #475569;
             font-weight: 400;
             white-space: nowrap;
@@ -53,7 +54,6 @@
         }
 
         .gps-admin-channels .part-channel-price {
-            flex: 0 1 auto;
             min-width: 0;
             color: #1e293b;
             white-space: nowrap;
@@ -61,22 +61,10 @@
             text-overflow: clip;
         }
 
-        .gps-admin-channels .part-channel-value {
-            display: inline-flex;
-            align-items: center;
-            gap: 3px;
-            flex: 0 1 auto;
-            min-width: 0;
-            white-space: nowrap;
-            overflow: hidden;
-        }
-
-
         .gps-admin-channels .part-channel-status {
             display: inline;
-            flex: 0 0 auto;
-            width: auto;
-            min-width: 0;
+            width: 14px;
+            min-width: 14px;
             height: auto;
             padding: 0;
             margin: 0;
@@ -97,9 +85,17 @@
             color: #dc2626;
         }
 
+        .gps-admin-channels .part-channel-link-slot {
+            display: inline-flex;
+            width: 14px;
+            min-width: 14px;
+            height: 14px;
+            align-items: center;
+            justify-content: center;
+        }
+
         .gps-admin-channels .part-channel-link {
             display: inline-flex;
-            flex: 0 0 auto;
             align-items: center;
             justify-content: center;
             width: 14px;
@@ -132,18 +128,19 @@
             <span class="part-channel-label">—</span>
             <span class="part-channel-price">—</span>
             <span class="part-channel-status is-not-listed" title="Brak rekordu">✕</span>
+            <span class="part-channel-link-slot" aria-hidden="true"></span>
         </div>
     @else
         @foreach ($rows as $row)
             <div class="part-channel-row">
                 <span class="part-channel-label {{ ($row['key'] ?? '') === 'storefront' ? 'is-storefront-label' : '' }}">@if (in_array($row['key'] ?? '', ['allegro', 'ovoko', 'ebay'], true))@include('filament.resources.orders.partials.source-wordmark', ['marketplace' => $row['key']])@else{{ $row['label'] }}@endif:</span>
-                <span class="part-channel-value">
-                    <span class="part-channel-price">{{ $row['price'] }}</span>
-                    <span
-                        class="part-channel-status {{ $row['listed'] ? 'is-listed' : 'is-not-listed' }}"
-                        title="{{ $row['title'] }}"
-                        aria-label="{{ $row['title'] }}"
-                    >{{ $row['listed'] ? '✓' : '✕' }}</span>
+                <span class="part-channel-price">{{ $row['price'] }}</span>
+                <span
+                    class="part-channel-status {{ $row['listed'] ? 'is-listed' : 'is-not-listed' }}"
+                    title="{{ $row['title'] }}"
+                    aria-label="{{ $row['title'] }}"
+                >{{ $row['listed'] ? '✓' : '✕' }}</span>
+                <span class="part-channel-link-slot">
                     @if ($row['listed'] && filled($row['url'] ?? null))
                         <a
                             class="part-channel-link"
