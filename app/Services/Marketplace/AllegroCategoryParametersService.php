@@ -28,7 +28,8 @@ class AllegroCategoryParametersService
         $endpoint = $base.'/sale/categories/'.$categoryId.'/parameters';
         $response = Http::withToken($token)->accept('application/vnd.allegro.public.v1+json')->timeout(20)->get($endpoint);
         if (! $response->successful() || ! is_array($response->json())) {
-            return ['ok' => false, 'source' => 'api', 'blocker' => 'allegro_category_parameters_unavailable', 'http_status' => $response->status(), 'parameters' => []];
+            app(ApiIntegrationLogger::class)->error('allegro', 'GET /sale/categories/{categoryId}/parameters', 'Nie udało się pobrać parametrów kategorii Allegro '.$categoryId.'.', ['http_status' => $response->status(), 'request' => ['category_id' => $categoryId], 'response' => is_array($response->json()) ? $response->json() : ['body_present' => filled($response->body())]]);
+            return ['ok' => false, 'source' => 'api', 'blocker' => 'Brak parametrów Allegro dla category id '.$categoryId, 'http_status' => $response->status(), 'parameters' => []];
         }
         $payload = $response->json();
         if (Schema::hasTable('allegro_category_parameters_cache')) {

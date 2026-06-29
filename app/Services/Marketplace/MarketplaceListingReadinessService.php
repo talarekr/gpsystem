@@ -39,7 +39,12 @@ class MarketplaceListingReadinessService
         $images = $this->imagesFor($part);
         $imagesCount = $images->count();
         $hasActiveListing = $marketplace ? $this->hasActiveListing($part, $marketplace, $channel) : false;
-        $categoryMapping = str_starts_with($channel, 'ebay_') ? $this->ebayCategoryMapping($part, $channel) : ($channel === 'allegro_main' ? $this->allegroCategoryMapping($part) : null);
+        $categoryMapping = match (true) {
+            str_starts_with($channel, 'ebay_') => $this->ebayCategoryMapping($part, $channel),
+            $channel === 'allegro_main' => $this->allegroCategoryMapping($part),
+            $channel === 'ovoko' => $this->ovokoCategoryMapping($part),
+            default => null,
+        };
         $allegroParameters = null;
 
         $this->requireFilled($part->name ?? null, 'title', $missing, $blockers);
@@ -66,7 +71,7 @@ class MarketplaceListingReadinessService
         } elseif ($channel === 'allegro_main') {
             $required = ['title', 'allegro_price_pln', 'quantity', 'images', 'allegro_category_mapping', 'description'];
             $this->checkAccount($account, $blockers, $warnings, 'Allegro OAuth/account is not configured or not enabled.');
-            if (! $categoryReady) { $missing[] = 'allegro_category_mapping'; $blockers[] = 'Allegro category or local category mapping is missing.'; }
+            if (! $categoryMapping || blank($categoryMapping->external_category_id)) { $missing[] = 'allegro_category_mapping'; $blockers[] = 'Brakuje Allegro category id.'; }
             if (! $descriptionReady) { $missing[] = 'description'; $warnings[] = 'Allegro description should be prepared before publishing later.'; }
             if ($categoryMapping && filled($categoryMapping->external_category_id)) {
                 $definitions = $this->allegroCategoryParametersService->definitions((string) $categoryMapping->external_category_id);
@@ -81,7 +86,7 @@ class MarketplaceListingReadinessService
             $required = ['title', 'ovoko_price_pln', 'quantity', 'images', 'vehicle', 'ovoko_category_mapping', 'description_or_condition'];
             $this->checkAccount($account, $blockers, $warnings, 'Ovoko API credentials/account are not configured or not enabled.');
             if (! $vehicleReady) { $missing[] = 'vehicle'; $blockers[] = 'Vehicle data is required for Ovoko readiness.'; }
-            if (! $categoryReady) { $missing[] = 'ovoko_category_mapping'; $blockers[] = 'Ovoko/RRR category mapping is missing.'; }
+            if (! $categoryMapping || blank($categoryMapping->external_category_id)) { $missing[] = 'ovoko_category_mapping'; $blockers[] = 'Ovoko: brakuje category_id dla wybranej kategorii '.($part->category?->name ?? $part->category_id ?? 'części'); }
             if (! $descriptionReady && blank($part->condition_notes ?? null)) { $missing[] = 'description_or_condition'; $warnings[] = 'Ovoko description or condition notes are missing.'; }
             if (! $this->hasCompleteDimensions($part)) { $warnings[] = 'Ovoko dimensions are incomplete (weight_kg, length_cm, width_cm, height_cm).'; }
         } else {
@@ -338,21 +343,39 @@ class MarketplaceListingReadinessService
 
     private function allegroCategoryMapping(Part $part): ?MarketplaceCategoryMapping
     {
-        if (! Schema::hasTable('marketplace_category_mappings') || blank($part->category_id ?? null)) return null;
-        return MarketplaceCategoryMapping::query()->where('local_category_id', $part->category_id)->whereIn('channel', ['allegro_main', 'allegro'])->orderByRaw('case when channel = ? then 0 else 1 end', ['allegro_main'])->first();
+        return $this->categoryOverride($part, 'allegro', 'allegro_main') ?: $this->mappedCategory($part, ['allegro_main', 'allegro'], 'allegro_main');
+    }
+
+    private function ovokoCategoryMapping(Part $part): ?MarketplaceCategoryMapping
+    {
+        return $this->categoryOverride($part, 'ovoko', 'ovoko') ?: $this->mappedCategory($part, ['ovoko'], 'ovoko');
     }
 
     private function ebayCategoryMapping(Part $part, string $channel): ?MarketplaceCategoryMapping
     {
-        if (! Schema::hasTable('marketplace_category_mappings') || blank($part->category_id ?? null)) {
-            return null;
-        }
+        return $this->categoryOverride($part, 'ebay', $channel) ?: $this->mappedCategory($part, [$channel, 'ebay'], $channel);
+    }
 
-        return MarketplaceCategoryMapping::query()
-            ->where('local_category_id', $part->category_id)
-            ->whereIn('channel', [$channel, 'ebay'])
-            ->orderByRaw('case when channel = ? then 0 else 1 end', [$channel])
-            ->first();
+    private function mappedCategory(Part $part, array $channels, string $preferredChannel): ?MarketplaceCategoryMapping
+    {
+        if (! Schema::hasTable('marketplace_category_mappings') || blank($part->category_id ?? null)) return null;
+        return MarketplaceCategoryMapping::query()->where('local_category_id', $part->category_id)->whereIn('channel', $channels)->orderByRaw('case when channel = ? then 0 else 1 end', [$preferredChannel])->first();
+    }
+
+    private function categoryOverride(Part $part, string $key, string $fallbackChannel): ?MarketplaceCategoryMapping
+    {
+        $override = data_get(is_array($part->review_metadata) ? $part->review_metadata : [], 'marketplace_category_overrides.'.$key);
+        if (! is_array($override) || blank($override['external_category_id'] ?? null)) return null;
+        $mapping = new MarketplaceCategoryMapping();
+        $mapping->forceFill([
+            'local_category_id' => $part->category_id,
+            'channel' => (string) ($override['channel'] ?? $fallbackChannel),
+            'external_category_id' => (string) $override['external_category_id'],
+            'external_category_name' => $override['external_category_name'] ?? null,
+            'external_category_path' => $override['external_category_path'] ?? null,
+            'source' => $override['source'] ?? 'review_metadata.marketplace_category_overrides',
+        ]);
+        return $mapping;
     }
     private function hasActiveListing(Part $part, ?string $marketplace, string $channel): bool { if (! $marketplace || ! Schema::hasTable('marketplace_listings')) return false; return MarketplaceListing::query()->where('part_id', $part->id)->where('marketplace', $marketplace)->whereNotNull('external_offer_id')->whereNotIn('status', ['ended', 'deleted', 'archived', 'inactive'])->exists(); }
     /** @return array<string, mixed> */
@@ -360,7 +383,7 @@ class MarketplaceListingReadinessService
     {
         $translation = $this->preparedTranslation($part, $channel);
         $itemSpecifics = str_starts_with($channel, 'ebay_') ? $this->ebayItemSpecificsService->build($part, $channel, $categoryMapping, $translation) : null;
-        $preview = ['dry_run' => true, 'channel' => $channel, 'sku' => $part->sku ?? null, 'title' => $part->name ?? null, 'description_present' => filled(strip_tags((string) (($part->description ?? null) ?: ($part->short_description ?? null)))), 'condition_notes_present' => filled($part->condition_notes ?? null), 'price_pln' => $price, 'quantity' => $part->quantity ?? null, 'currency' => 'PLN', 'dimensions' => $this->dimensionsPayload($part), 'image_urls' => $this->imagesFor($part)->take(5)->map(fn ($image) => method_exists($image, 'listingUrl') ? $image->listingUrl() : null)->filter()->values()->all(), 'category_id' => $categoryMapping?->external_category_id ?? ($part->category_id ?? null), 'category_mapping_source' => $categoryMapping ? 'marketplace_category_mappings' : null, 'category_mapping_channel' => $categoryMapping?->channel, 'local_category_id' => $part->category_id ?? null, 'vehicle' => $this->vehiclePayload($part, $channel), 'diagnostics' => $this->diagnosticsPayload($part, $channel, $translation), 'translation_status' => $translation['status'], 'translation_language' => $translation['language'], 'translated_fields' => $translation['translated_fields'], 'untranslated_fields' => $translation['untranslated_fields'], 'will_make_marketplace_request' => false];
+        $preview = ['dry_run' => true, 'channel' => $channel, 'sku' => $part->sku ?? null, 'title' => $part->name ?? null, 'description_present' => filled(strip_tags((string) (($part->description ?? null) ?: ($part->short_description ?? null)))), 'condition_notes_present' => filled($part->condition_notes ?? null), 'price_pln' => $price, 'quantity' => $part->quantity ?? null, 'currency' => 'PLN', 'dimensions' => $this->dimensionsPayload($part), 'image_urls' => $this->imagesFor($part)->take(5)->map(fn ($image) => method_exists($image, 'listingUrl') ? $image->listingUrl() : null)->filter()->values()->all(), 'category_id' => $categoryMapping?->external_category_id ?? ($part->category_id ?? null), 'category_mapping_source' => $categoryMapping ? 'marketplace_category_mappings' : null, 'category_mapping_channel' => $categoryMapping?->channel, 'category_mapping_name' => $categoryMapping?->external_category_name, 'category_mapping_path' => $categoryMapping?->external_category_path, 'local_category_id' => $part->category_id ?? null, 'vehicle' => $this->vehiclePayload($part, $channel), 'diagnostics' => $this->diagnosticsPayload($part, $channel, $translation), 'translation_status' => $translation['status'], 'translation_language' => $translation['language'], 'translated_fields' => $translation['translated_fields'], 'untranslated_fields' => $translation['untranslated_fields'], 'will_make_marketplace_request' => false];
 
         if ($itemSpecifics) {
             $preview = array_merge($preview, $itemSpecifics);
