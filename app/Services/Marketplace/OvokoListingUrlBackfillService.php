@@ -54,11 +54,7 @@ class OvokoListingUrlBackfillService
             $resolved = null;
             $source = 'skipped';
             $action = 'missing_shop_url';
-            $diagnostics = [
-                'rejected_local_url' => null,
-                'rejected_local_url_reason' => null,
-                'accepted_shop_url_host' => null,
-            ];
+            $diagnostics = $this->emptyDiagnostics();
 
             if ($existingUrl !== null && ! $force) {
                 $action = 'skipped_has_url';
@@ -99,6 +95,15 @@ class OvokoListingUrlBackfillService
                 'rejected_local_url' => $diagnostics['rejected_local_url'],
                 'rejected_local_url_reason' => $diagnostics['rejected_local_url_reason'],
                 'accepted_shop_url_host' => $diagnostics['accepted_shop_url_host'],
+                'ovoko_read_api_attempted' => $diagnostics['ovoko_read_api_attempted'],
+                'ovoko_read_api_endpoint' => $diagnostics['ovoko_read_api_endpoint'],
+                'ovoko_read_api_status' => $diagnostics['ovoko_read_api_status'],
+                'ovoko_read_api_response_keys' => $diagnostics['ovoko_read_api_response_keys'],
+                'ovoko_read_api_shop_url_found' => $diagnostics['ovoko_read_api_shop_url_found'],
+                'ovoko_read_api_rejection_reason' => $diagnostics['ovoko_read_api_rejection_reason'],
+                'ovoko_read_api_request_fields' => $diagnostics['ovoko_read_api_request_fields'],
+                'ovoko_read_api_attempts' => $diagnostics['ovoko_read_api_attempts'],
+                'resolution_attempts' => $diagnostics['resolution_attempts'],
             ];
         }
 
@@ -119,14 +124,11 @@ class OvokoListingUrlBackfillService
 
     private function resolveShopUrl(MarketplaceListing $listing, string $ovokoId, array $csvRows, mixed $client): array
     {
-        $diagnostics = [
-            'rejected_local_url' => null,
-            'rejected_local_url_reason' => null,
-            'accepted_shop_url_host' => null,
-        ];
+        $diagnostics = $this->emptyDiagnostics();
 
         $local = $this->firstUrl($listing->raw_payload ?? []);
         if ($local !== null) {
+            $diagnostics['resolution_attempts'][] = 'local';
             $validation = $this->validateShopUrl($local);
             if ($validation['valid']) {
                 $diagnostics['accepted_shop_url_host'] = $validation['host'];
@@ -137,7 +139,38 @@ class OvokoListingUrlBackfillService
             $diagnostics['rejected_local_url_reason'] = $validation['reason'];
         }
 
+        if ($client !== null && method_exists($client, 'fetchPartRawById')) {
+            $diagnostics['resolution_attempts'][] = 'ovoko_read_api';
+            $diagnostics['ovoko_read_api_attempted'] = true;
+
+            try {
+                $result = $client->fetchPartRawById($ovokoId);
+                $diagnostics['ovoko_read_api_endpoint'] = $result['endpoint_used'] ?? data_get($result, 'attempts.0.endpoint');
+                $diagnostics['ovoko_read_api_status'] = $result['api_status_code'] ?? $result['http_status'] ?? data_get($result, 'attempts.0.api_status_code') ?? data_get($result, 'attempts.0.http_status');
+                $diagnostics['ovoko_read_api_response_keys'] = $result['response_top_level_keys'] ?? data_get($result, 'attempts.0.top_level_keys') ?? [];
+                $diagnostics['ovoko_read_api_request_fields'] = $result['request_fields'] ?? data_get($result, 'attempts.0.request_fields') ?? [];
+                $diagnostics['ovoko_read_api_attempts'] = $result['attempts'] ?? [];
+
+                $url = $this->firstUrl($result['raw'] ?? []) ?? $this->blankNull($result['normalized']['url'] ?? null);
+                $diagnostics['ovoko_read_api_shop_url_found'] = $url !== null;
+
+                if (($result['api_ok'] ?? false) && $url !== null) {
+                    $validation = $this->validateShopUrl($url);
+                    if ($validation['valid']) {
+                        $diagnostics['accepted_shop_url_host'] = $validation['host'];
+                        return [$url, 'ovoko_read_api', 'would_update', $diagnostics];
+                    }
+                    $diagnostics['ovoko_read_api_rejection_reason'] = $validation['reason'];
+                } elseif (! ($result['api_ok'] ?? false)) {
+                    $diagnostics['ovoko_read_api_rejection_reason'] = $result['error'] ?? 'api_not_ok';
+                }
+            } catch (\Throwable $exception) {
+                $diagnostics['ovoko_read_api_rejection_reason'] = $exception->getMessage();
+            }
+        }
+
         if ($csvRows !== []) {
+            $diagnostics['resolution_attempts'][] = 'csv';
             $match = $this->matchCsv($csvRows, $listing, $ovokoId);
             if (($match['ambiguous'] ?? false) === true) return [null, 'csv', 'ambiguous', $diagnostics];
             if (($match['shop_url'] ?? null) !== null) {
@@ -147,27 +180,29 @@ class OvokoListingUrlBackfillService
                     return [$match['shop_url'], 'csv', 'would_update', $diagnostics];
                 }
 
-                return [null, 'skipped/local_invalid', 'missing_shop_url', $diagnostics];
+                return [null, 'csv', 'missing_shop_url', $diagnostics];
             }
         }
 
-        if ($client !== null && method_exists($client, 'fetchPartRawById')) {
-            try {
-                $result = $client->fetchPartRawById($ovokoId);
-                $url = $this->firstUrl($result['raw'] ?? []) ?? $this->blankNull($result['normalized']['url'] ?? null);
-                if (($result['api_ok'] ?? false) && $url !== null) {
-                    $validation = $this->validateShopUrl($url);
-                    if ($validation['valid']) {
-                        $diagnostics['accepted_shop_url_host'] = $validation['host'];
-                        return [$url, 'ovoko_read_api', 'would_update', $diagnostics];
-                    }
-                }
-            } catch (\Throwable) {
-                // Read-only lookup failed; report missing_shop_url without writing or retrying through mutating endpoints.
-            }
-        }
+        return [null, $diagnostics['rejected_local_url'] !== null ? 'skipped/local_invalid' : ($diagnostics['ovoko_read_api_attempted'] ? 'ovoko_read_api' : ($csvRows !== [] ? 'csv' : 'skipped')), 'missing_shop_url', $diagnostics];
+    }
 
-        return [null, $diagnostics['rejected_local_url'] !== null ? 'skipped/local_invalid' : ($csvRows !== [] ? 'csv' : 'ovoko_read_api'), 'missing_shop_url', $diagnostics];
+    private function emptyDiagnostics(): array
+    {
+        return [
+            'rejected_local_url' => null,
+            'rejected_local_url_reason' => null,
+            'accepted_shop_url_host' => null,
+            'ovoko_read_api_attempted' => false,
+            'ovoko_read_api_endpoint' => null,
+            'ovoko_read_api_status' => null,
+            'ovoko_read_api_response_keys' => [],
+            'ovoko_read_api_shop_url_found' => false,
+            'ovoko_read_api_rejection_reason' => null,
+            'ovoko_read_api_request_fields' => [],
+            'ovoko_read_api_attempts' => [],
+            'resolution_attempts' => [],
+        ];
     }
 
     private function loadCsv(string $path): array

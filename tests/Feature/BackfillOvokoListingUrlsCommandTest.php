@@ -45,17 +45,19 @@ class BackfillOvokoListingUrlsCommandTest extends TestCase
             'updated_at' => now(),
         ]);
 
-        Http::fake();
+        MarketplaceAccount::query()->create(['marketplace' => 'ovoko', 'name' => 'Ovoko main', 'code' => 'ovoko_main', 'status' => 'active', 'api_base_url' => 'https://ovoko.example.test', 'api_credentials' => ['username' => 'u', 'password' => 'p', 'user_token' => 't']]);
+        Http::fake(['https://ovoko.example.test/*' => Http::response(['status_code' => 'R404', 'msg' => 'Not found'], 200)]);
 
         $this->artisan('marketplace:backfill-ovoko-listing-urls', ['--dry-run' => true, '--part-id' => 7892])
             ->expectsOutputToContain('missing_shop_url')
             ->expectsOutputToContain('skipped/local_invalid')
             ->expectsOutputToContain('image_url_not_listing_url')
+            ->expectsOutputToContain('ovoko_read_api')
             ->assertExitCode(0);
 
         $this->assertDatabaseHas('marketplace_listings', ['id' => 501, 'url' => null]);
         $this->assertDatabaseMissing('marketplace_listings', ['id' => 501, 'url' => 'https://gpswiss.pl/storage/parts/photos/imported/7892/example.jpg']);
-        Http::assertNothingSent();
+        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/v2/get/parts/11700'));
     }
 
     public function test_apply_updates_from_csv_and_does_not_call_api(): void

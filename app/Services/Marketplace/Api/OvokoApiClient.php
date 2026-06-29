@@ -197,7 +197,8 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
     public function fetchPartRawById(string $id): array
     {
         $mismatches = [];
-        foreach ($this->comparePartDetailEndpoints($id) as $candidate) {
+        $attempts = $this->comparePartDetailEndpoints($id);
+        foreach ($attempts as $candidate) {
             if (($candidate['api_ok'] ?? false) && ($candidate['matched_requested_id'] ?? false) && is_array($candidate['raw'] ?? null)) {
                 return [
                     'http_status' => $candidate['http_status'] ?? null,
@@ -207,6 +208,8 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
                     'raw' => $candidate['raw'],
                     'normalized' => $this->normalizeOffer($candidate['raw']),
                     'response_top_level_keys' => $candidate['top_level_keys'] ?? [],
+                    'request_fields' => $candidate['request_fields'] ?? [],
+                    'attempts' => $this->summarizePartDetailAttempts($attempts),
                     'error' => $candidate['error'] ?? null,
                     'matched_requested_id' => true,
                     'returned_raw_id' => $candidate['returned_raw_id'] ?? null,
@@ -223,7 +226,24 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
             }
         }
 
-        return ['api_ok' => false, 'error' => $mismatches === [] ? 'part_detail_not_found_on_known_read_only_endpoints' : 'detail_id_mismatch', 'matched_requested_id' => false, 'mismatches' => $mismatches];
+        return ['api_ok' => false, 'error' => $mismatches === [] ? 'part_detail_not_found_on_known_read_only_endpoints' : 'detail_id_mismatch', 'matched_requested_id' => false, 'mismatches' => $mismatches, 'attempts' => $this->summarizePartDetailAttempts($attempts)];
+    }
+
+    private function summarizePartDetailAttempts(array $attempts): array
+    {
+        return array_map(fn (array $attempt): array => [
+            'endpoint' => $attempt['endpoint'] ?? null,
+            'request_fields' => $attempt['request_fields'] ?? [],
+            'http_status' => $attempt['http_status'] ?? null,
+            'api_status_code' => $attempt['api_status_code'] ?? null,
+            'api_ok' => $attempt['api_ok'] ?? false,
+            'matched_requested_id' => $attempt['matched_requested_id'] ?? false,
+            'returned_raw_id' => $attempt['returned_raw_id'] ?? null,
+            'returned_external_id' => $attempt['returned_external_id'] ?? null,
+            'returned_shop_url_present' => $this->stringOrNull($attempt['returned_shop_url'] ?? null) !== null,
+            'top_level_keys' => $attempt['top_level_keys'] ?? [],
+            'error' => $attempt['error'] ?? null,
+        ], $attempts);
     }
 
     public function comparePartDetailEndpoints(string $id): array
