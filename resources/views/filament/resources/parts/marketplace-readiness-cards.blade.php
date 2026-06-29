@@ -50,7 +50,7 @@
                             <span x-text="preparing ? 'Przygotowuję...' : 'Przygotuj'"></span>
                         </button>
 
-                        <button type="button" x-cloak x-show="preparedStatusChecked && prepareReady" x-on:click.prevent="publishMarketplaceChannel()" x-bind:disabled="publishing || !prepareReady" class="inline-flex w-full items-center justify-center rounded-lg bg-success-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-success-500 disabled:cursor-wait disabled:opacity-70">
+                        <button type="button" x-cloak x-show="preparedStatusChecked && prepareReady" x-on:click.prevent="publishMarketplaceChannel()" x-bind:disabled="publishing || !prepareReady" class="inline-flex w-full items-center justify-center rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-primary-500 disabled:cursor-wait disabled:opacity-70">
                             <span x-text="publishing ? 'Wystawiam...' : 'Wystaw'"></span>
                         </button>
                     </div>

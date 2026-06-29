@@ -2389,3 +2389,13 @@ button.gps-category-picker__arrow:hover {
     margin-left: auto !important;
     margin-right: auto !important;
 }
+
+body:has(.gps-admin-topbar) .fi-no-notifications {
+    top: calc(var(--gps-admin-topbar-height) + 1rem) !important;
+}
+
+@media (max-width: 900px) {
+    body:has(.gps-admin-topbar) .fi-no-notifications {
+        top: calc(var(--gps-admin-topbar-height) + 0.75rem) !important;
+    }
+}
