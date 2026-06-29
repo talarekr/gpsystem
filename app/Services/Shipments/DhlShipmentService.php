@@ -4,6 +4,7 @@ namespace App\Services\Shipments;
 
 use App\Models\Order;
 use App\Models\Shipment;
+use App\Services\Marketplace\ApiIntegrationLogger;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
@@ -169,23 +170,49 @@ class DhlShipmentService
         }
 
         $payload = $this->payload($form);
-        $response = $this->callCreateShipment($payload);
+        $startedAt = microtime(true);
+        try {
+            $response = $this->callCreateShipment($payload);
+        } catch (RuntimeException $exception) {
+            app(ApiIntegrationLogger::class)->error('dhl', 'createShipment', $exception, [
+                'order_id' => $form['order_id'] ?? null,
+                'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+                'request' => $payload,
+            ]);
+            throw $exception;
+        }
         $waybill = (string) ($response['shipmentNotificationNumber'] ?? $response['wayBill'] ?? $response['tracking_number'] ?? '');
         $labelContent = (string) ($response['labelContent'] ?? '');
 
         if ($waybill === '' || $labelContent === '') {
-            throw new RuntimeException('DHL nie zwrócił numeru przesyłki lub zawartości etykiety PDF.');
+            $exception = new RuntimeException('DHL nie zwrócił numeru przesyłki lub zawartości etykiety PDF.');
+            app(ApiIntegrationLogger::class)->error('dhl', 'createShipment', $exception, [
+                'order_id' => $form['order_id'] ?? null,
+                'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+                'request' => $payload,
+                'response' => Arr::except($response, ['labelContent']),
+            ]);
+            throw $exception;
         }
 
         $labelBinary = base64_decode($labelContent, true);
         if ($labelBinary === false) {
-            throw new RuntimeException('DHL zwrócił niepoprawną etykietę base64.');
+            $exception = new RuntimeException('DHL zwrócił niepoprawną etykietę base64.');
+            app(ApiIntegrationLogger::class)->error('dhl', 'createShipment', $exception, [
+                'order_id' => $form['order_id'] ?? null,
+                'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+                'tracking_number' => $waybill,
+                'external_id' => $waybill,
+                'request' => $payload,
+                'response' => Arr::except($response, ['labelContent']),
+            ]);
+            throw $exception;
         }
 
         $path = 'shipments/labels/dhl/'.$waybill.'.pdf';
         Storage::disk('local')->put($path, $labelBinary);
 
-        return Shipment::query()->create([
+        $shipment = Shipment::query()->create([
             'order_id' => $form['order_id'] ?? null,
             'carrier' => 'dhl',
             'service_code' => data_get($form, 'service.service_type', 'AH'),
@@ -201,6 +228,18 @@ class DhlShipmentService
             'response_payload' => $this->sanitize(Arr::except($response, ['labelContent'])),
             'test_mode' => (bool) config('services.dhl.test_mode', true),
         ]);
+
+        app(ApiIntegrationLogger::class)->success('dhl', 'createShipment', 'DHL shipment created.', [
+            'order_id' => $shipment->order_id,
+            'shipment_id' => $shipment->id,
+            'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+            'tracking_number' => $waybill,
+            'external_id' => $waybill,
+            'request' => $payload,
+            'response' => Arr::except($response, ['labelContent']) + ['label_path' => $path],
+        ]);
+
+        return $shipment;
     }
 
     public function payload(array $form): array
@@ -249,6 +288,7 @@ class DhlShipmentService
             return ['shipmentId' => $shipmentId, 'receivedBy' => null, 'events' => []];
         }
 
+        $startedAt = microtime(true);
         try {
             $response = (array) (new SoapClient($endpoint, ['trace' => false, 'exceptions' => true]))
                 ->__soapCall('getTrackAndTraceInfo', [[
@@ -256,10 +296,26 @@ class DhlShipmentService
                     'shipmentId' => $shipmentId,
                 ]]);
         } catch (SoapFault $exception) {
-            throw new RuntimeException('Błąd DHL getTrackAndTraceInfo: '.$exception->getMessage(), previous: $exception);
+            $wrapped = new RuntimeException('Błąd DHL getTrackAndTraceInfo: '.$exception->getMessage(), previous: $exception);
+            app(ApiIntegrationLogger::class)->error('dhl', 'getTrackAndTraceInfo', $wrapped, [
+                'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+                'tracking_number' => $shipmentId,
+                'external_id' => $shipmentId,
+                'request' => ['shipmentId' => $shipmentId],
+            ]);
+            throw $wrapped;
         }
 
-        return $this->normalizeTrackingResponse($response, $shipmentId);
+        $normalized = $this->normalizeTrackingResponse($response, $shipmentId);
+        app(ApiIntegrationLogger::class)->success('dhl', 'getTrackAndTraceInfo', 'DHL tracking fetched.', [
+            'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+            'tracking_number' => $shipmentId,
+            'external_id' => $shipmentId,
+            'request' => ['shipmentId' => $shipmentId],
+            'response' => ['events_count' => count($normalized['events'] ?? []), 'receivedBy' => $normalized['receivedBy'] ?? null],
+        ]);
+
+        return $normalized;
     }
 
     public function countryOptions(): array

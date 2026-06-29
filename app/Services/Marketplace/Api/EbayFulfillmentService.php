@@ -5,6 +5,7 @@ namespace App\Services\Marketplace\Api;
 use App\Models\MarketplaceAccount;
 use App\Models\Order;
 use App\Models\Shipment;
+use App\Services\Marketplace\ApiIntegrationLogger;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 
@@ -28,6 +29,7 @@ class EbayFulfillmentService
         }
 
         $orderId = $this->externalOrderId($order);
+        $startedAt = microtime(true);
         $response = Http::withToken($token)
             ->withHeaders(['X-EBAY-C-MARKETPLACE-ID' => (string) data_get($account->api_settings, 'marketplace_id', $this->marketplaceId($order))])
             ->acceptJson()
@@ -36,8 +38,30 @@ class EbayFulfillmentService
             ->post(rtrim((string) $account->api_base_url, '/').'/sell/fulfillment/v1/order/'.rawurlencode($orderId).'/shipping_fulfillment', $payload);
 
         if ($response->status() !== 201) {
-            throw new RuntimeException('eBay odrzucił tracking fulfillment (HTTP '.$response->status().'): '.($response->body() ?: 'brak treści odpowiedzi'));
+            $exception = new RuntimeException('eBay odrzucił tracking fulfillment (HTTP '.$response->status().'): '.($response->body() ?: 'brak treści odpowiedzi'));
+            app(ApiIntegrationLogger::class)->error('ebay', 'createShippingFulfillment', $exception, [
+                'order_id' => $order->id,
+                'shipment_id' => $shipment->id,
+                'http_status' => $response->status(),
+                'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+                'external_id' => $orderId,
+                'tracking_number' => $payload['trackingNumber'] ?? null,
+                'request' => ['order_id' => $orderId, 'payload' => $payload],
+                'response' => ['body' => $response->body()],
+            ]);
+            throw $exception;
         }
+
+        app(ApiIntegrationLogger::class)->success('ebay', 'createShippingFulfillment', 'eBay shipping fulfillment created.', [
+            'order_id' => $order->id,
+            'shipment_id' => $shipment->id,
+            'http_status' => 201,
+            'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+            'external_id' => $orderId,
+            'tracking_number' => $payload['trackingNumber'] ?? null,
+            'request' => ['order_id' => $orderId, 'payload' => $payload],
+            'response' => ['location' => $response->header('Location')],
+        ]);
 
         return ['ok' => true, 'http_status' => 201, 'location' => $response->header('Location'), 'payload' => $payload];
     }
