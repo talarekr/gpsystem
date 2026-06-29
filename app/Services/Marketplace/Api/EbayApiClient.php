@@ -290,18 +290,19 @@ class EbayApiClient extends AbstractMarketplaceApiClient
     }
 
 
-    public function publishInventoryOffer(string $sku, array $inventoryPayload, array $offerPayload): array
+    public function publishInventoryOffer(string $sku, array $inventoryPayload, array $offerPayload, ?string $contentLanguage = null): array
     {
         $base = rtrim((string) $this->account?->api_base_url, '/');
         $token = $this->accessToken();
         $headers = ['X-EBAY-C-MARKETPLACE-ID' => (string) ($offerPayload['marketplaceId'] ?? $this->marketplaceId())];
+        if (filled($contentLanguage)) $headers['Content-Language'] = (string) $contentLanguage;
         $inventoryResponse = Http::withToken($token)->withHeaders($headers)->acceptJson()->asJson()->timeout(30)
             ->put($base.'/sell/inventory/v1/inventory_item/'.rawurlencode($sku), $inventoryPayload);
-        if (! $inventoryResponse->successful()) return $this->writeResult('createOrReplaceInventoryItem', $inventoryResponse);
+        if (! $inventoryResponse->successful()) return $this->writeResult('createOrReplaceInventoryItem', $inventoryResponse, $headers);
 
         $offerResponse = Http::withToken($token)->withHeaders($headers)->acceptJson()->asJson()->timeout(30)
             ->post($base.'/sell/inventory/v1/offer', $offerPayload);
-        if (! $offerResponse->successful()) return $this->writeResult('createOffer', $offerResponse) + ['inventory_http_status' => $inventoryResponse->status()];
+        if (! $offerResponse->successful()) return $this->writeResult('createOffer', $offerResponse, $headers) + ['inventory_http_status' => $inventoryResponse->status()];
 
         $offerJson = $offerResponse->json();
         $offerId = is_array($offerJson) ? (string) ($offerJson['offerId'] ?? '') : '';
@@ -321,13 +322,15 @@ class EbayApiClient extends AbstractMarketplaceApiClient
             'listing_id' => is_array($publishJson) ? ($publishJson['listingId'] ?? null) : null,
             'json' => is_array($publishJson) ? $publishJson : [],
             'request_id' => $publishResponse->header('x-ebay-c-request-id') ?: $publishResponse->header('rlogid'),
+            'content_language' => $headers['Content-Language'] ?? null,
+            'marketplace_id' => $headers['X-EBAY-C-MARKETPLACE-ID'],
         ];
     }
 
-    private function writeResult(string $step, $response): array
+    private function writeResult(string $step, $response, array $headers = []): array
     {
         $json = $response->json();
-        return ['ok' => false, 'step' => $step, 'http_status' => $response->status(), 'json' => is_array($json) ? $json : [], 'request_id' => $response->header('x-ebay-c-request-id') ?: $response->header('rlogid')];
+        return ['ok' => false, 'step' => $step, 'http_status' => $response->status(), 'json' => is_array($json) ? $json : [], 'request_id' => $response->header('x-ebay-c-request-id') ?: $response->header('rlogid'), 'content_language' => $headers['Content-Language'] ?? null, 'marketplace_id' => $headers['X-EBAY-C-MARKETPLACE-ID'] ?? null];
     }
 
     protected function extractOffers(array $payload): array

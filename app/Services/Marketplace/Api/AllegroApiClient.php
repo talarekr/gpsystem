@@ -61,6 +61,55 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
     }
 
 
+    /**
+     * Read-only lookup of seller sales settings required by /sale/product-offers.
+     * Allegro product-offers expects resource identifiers, not display names, for
+     * delivery.shippingRates.id and afterSalesServices.*.id.
+     */
+    public function resolveSalesSettingsByName(string $name): array
+    {
+        $base = rtrim((string) $this->account?->api_base_url, '/');
+        $token = (string) $this->credentials()['access_token'];
+        $endpoints = [
+            'shippingRates' => ['/sale/shipping-rates', ['shippingRates', 'rates']],
+            'returnPolicy' => ['/after-sales-service-conditions/return-policies', ['returnPolicies', 'returnPolicyList', 'policies']],
+            'impliedWarranty' => ['/after-sales-service-conditions/implied-warranties', ['impliedWarranties', 'impliedWarrantyList', 'warranties']],
+            'warranty' => ['/after-sales-service-conditions/warranties', ['warranties', 'warrantyList']],
+        ];
+
+        $resolved = [];
+        foreach ($endpoints as $key => [$path, $listKeys]) {
+            $response = Http::withToken($token)
+                ->accept('application/vnd.allegro.public.v1+json')
+                ->timeout(20)
+                ->get($base.$path);
+            $json = $response->json();
+            $rows = $this->extractSalesSettingsRows(is_array($json) ? $json : [], $listKeys);
+            $match = collect($rows)->first(fn (array $row) => strcasecmp(trim((string) ($row['name'] ?? '')), trim($name)) === 0);
+            $resolved[$key] = [
+                'http_status' => $response->status(),
+                'ok' => $response->successful(),
+                'searched_name' => $name,
+                'id' => is_array($match) ? ($match['id'] ?? null) : null,
+                'found' => is_array($match) && filled($match['id'] ?? null),
+                'reason' => $response->successful() ? (is_array($match) ? null : 'not_found') : 'read_failed',
+            ];
+        }
+
+        return $resolved;
+    }
+
+    private function extractSalesSettingsRows(array $payload, array $listKeys): array
+    {
+        foreach ($listKeys as $key) {
+            if (is_array($payload[$key] ?? null)) return array_values(array_filter($payload[$key], 'is_array'));
+        }
+
+        if (array_is_list($payload)) return array_values(array_filter($payload, 'is_array'));
+
+        return [];
+    }
+
     public function createProductOffer(array $payload): array
     {
         $base = rtrim((string) $this->account?->api_base_url, '/');

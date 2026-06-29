@@ -18,9 +18,43 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
         $settings = is_array($account->api_settings) ? $account->api_settings : [];
         $sku = $this->skuFor($part, $payload);
         $payload['sku'] = $sku;
-        $body = array_filter(['name' => (string) ($payload['title'] ?? $part->name), 'category' => ['id' => (string) ($payload['category_id'] ?? '')], 'productSet' => $settings['productSet'] ?? null, 'parameters' => $payload['allegro_offer_parameters'] ?? $payload['allegro_parameters']['offer_parameters'] ?? [], 'images' => $this->normalizeImageUrls($payload['image_urls'] ?? []), 'sellingMode' => $settings['sellingMode'] ?? ['format' => 'BUY_NOW', 'price' => ['amount' => (string) ($payload['price_pln'] ?? $readiness['marketplace_price']), 'currency' => 'PLN']], 'stock' => ['available' => (int) ($payload['quantity'] ?? $part->quantity ?? 1), 'unit' => 'UNIT'], 'publication' => ['status' => 'ACTIVE'], 'delivery' => $settings['delivery'] ?? null, 'payments' => $settings['payments'] ?? null, 'afterSalesServices' => $settings['afterSalesServices'] ?? null, 'location' => $settings['location'] ?? null, 'external' => ['id' => $sku]], fn ($v) => $v !== null && $v !== []);
-        $result = (new AllegroApiClient('allegro_main', $account))->createProductOffer($body);
-        return ['ok' => $result['ok'] ?? false, 'action' => 'createProductOffer', 'http_status' => $result['http_status'] ?? null, 'offer_id' => $result['offer_id'] ?? null, 'external_listing_id' => $result['offer_id'] ?? null, 'listing_status' => ($result['http_status'] ?? null) === 202 ? 'publication_pending' : 'published', 'request_id' => $result['request_id'] ?? null, 'request_summary' => $this->requestSummary($payload, $body), 'response_summary' => $this->responseSummary($result), 'json' => $result['json'] ?? [], 'error' => 'Allegro product-offers publish failed.'];
+        $client = new AllegroApiClient('allegro_main', $account);
+        $salesSettings = $client->resolveSalesSettingsByName((string) ($settings['sales_settings_name'] ?? 'GPSWISS'));
+        $delivery = $this->deliverySettings($settings, $salesSettings);
+        $afterSales = $this->afterSalesSettings($settings, $salesSettings);
+        $body = array_filter(['name' => (string) ($payload['title'] ?? $part->name), 'category' => ['id' => (string) ($payload['category_id'] ?? '')], 'productSet' => $settings['productSet'] ?? null, 'parameters' => $payload['allegro_offer_parameters'] ?? $payload['allegro_parameters']['offer_parameters'] ?? [], 'images' => $this->normalizeImageUrls($payload['image_urls'] ?? []), 'sellingMode' => $settings['sellingMode'] ?? ['format' => 'BUY_NOW', 'price' => ['amount' => (string) ($payload['price_pln'] ?? $readiness['marketplace_price']), 'currency' => 'PLN']], 'stock' => ['available' => (int) ($payload['quantity'] ?? $part->quantity ?? 1), 'unit' => 'UNIT'], 'publication' => ['status' => 'ACTIVE'], 'delivery' => $delivery, 'payments' => $settings['payments'] ?? null, 'afterSalesServices' => $afterSales, 'location' => $settings['location'] ?? null, 'external' => ['id' => $sku]], fn ($v) => $v !== null && $v !== []);
+        $result = $client->createProductOffer($body);
+        return ['ok' => $result['ok'] ?? false, 'action' => 'createProductOffer', 'http_status' => $result['http_status'] ?? null, 'offer_id' => $result['offer_id'] ?? null, 'external_listing_id' => $result['offer_id'] ?? null, 'listing_status' => ($result['http_status'] ?? null) === 202 ? 'publication_pending' : 'published', 'request_id' => $result['request_id'] ?? null, 'request_summary' => $this->requestSummary($payload, $body) + ['allegro_sales_settings' => $this->salesSettingsSummary($salesSettings)], 'response_summary' => $this->responseSummary($result), 'json' => $result['json'] ?? [], 'error' => 'Allegro product-offers publish failed.', 'ui_error' => 'Uzupełnij ustawienia sprzedaży Allegro GPSWISS. Szczegóły są w Logach.'];
+    }
+
+
+    private function deliverySettings(array $settings, array $salesSettings): ?array
+    {
+        $delivery = is_array($settings['delivery'] ?? null) ? $settings['delivery'] : [];
+        $id = $salesSettings['shippingRates']['id'] ?? data_get($delivery, 'shippingRates.id');
+        if (blank($id)) return $delivery ?: null;
+        $delivery['shippingRates'] = ['id' => (string) $id];
+        return $delivery;
+    }
+
+    private function afterSalesSettings(array $settings, array $salesSettings): ?array
+    {
+        $afterSales = is_array($settings['afterSalesServices'] ?? null) ? $settings['afterSalesServices'] : [];
+        foreach (['returnPolicy', 'impliedWarranty', 'warranty'] as $key) {
+            $id = $salesSettings[$key]['id'] ?? data_get($afterSales, $key.'.id');
+            if (filled($id)) $afterSales[$key] = ['id' => (string) $id];
+        }
+        return $afterSales ?: null;
+    }
+
+    private function salesSettingsSummary(array $salesSettings): array
+    {
+        return collect($salesSettings)->map(fn (array $row) => [
+            'searched_name' => $row['searched_name'] ?? 'GPSWISS',
+            'id' => $row['id'] ?? null,
+            'found' => (bool) ($row['found'] ?? false),
+            'reason' => $row['reason'] ?? null,
+        ])->all();
     }
 
     /** @return array<int, string> */
