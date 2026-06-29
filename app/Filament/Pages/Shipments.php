@@ -117,6 +117,11 @@ class Shipments extends Page
             ->get(['id', 'order_number', 'customer_name', 'company_name', 'email', 'phone', 'address_line1', 'postal_code', 'city', 'country']);
     }
 
+    public function getDhlCountryOptionsProperty(): array
+    {
+        return app(DhlShipmentService::class)->countryOptions();
+    }
+
     public function getPerPageOptionsProperty(): array
     {
         return ['25' => '25', '50' => '50', '100' => '100'];

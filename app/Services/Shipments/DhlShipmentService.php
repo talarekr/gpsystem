@@ -5,6 +5,7 @@ namespace App\Services\Shipments;
 use App\Models\Order;
 use App\Models\Shipment;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use RuntimeException;
@@ -34,8 +35,10 @@ class DhlShipmentService
                 'phone' => config('services.shipments.sender.phone'),
             ],
             'receiver' => [
+                'receiver_type' => $order?->company_name ? 'company' : 'private',
+                'short_name' => '',
                 'name' => $order?->company_name ?: $order?->customer_name,
-                'company' => $order?->company_name,
+                'sap_number' => '',
                 'country' => $order?->country ?: 'PL',
                 'postal_code' => $order?->postal_code,
                 'city' => $order?->city,
@@ -45,6 +48,8 @@ class DhlShipmentService
                 'person_name' => $order?->customer_name,
                 'email' => $order?->email,
                 'phone' => $order?->phone,
+                'neighbour_delivery' => false,
+                'save_to_address_book' => false,
             ],
             'parcel' => [
                 'quantity' => 1,
@@ -95,7 +100,10 @@ class DhlShipmentService
             'dhlForm.shipper.person_name' => ['nullable', 'string', 'max:50'],
             'dhlForm.shipper.email' => ['nullable', 'email', 'max:60'],
             'dhlForm.shipper.phone' => ['nullable', 'string', 'max:20'],
+            'dhlForm.receiver.receiver_type' => ['required', 'in:private,company'],
+            'dhlForm.receiver.short_name' => ['nullable', 'string', 'max:60'],
             'dhlForm.receiver.name' => ['required', 'string', 'max:60'],
+            'dhlForm.receiver.sap_number' => ['nullable', 'string', 'max:20'],
             'dhlForm.receiver.country' => ['required', 'string', 'size:2'],
             'dhlForm.receiver.postal_code' => ['required', 'string', 'max:10'],
             'dhlForm.receiver.city' => ['required', 'string', 'max:17'],
@@ -105,6 +113,8 @@ class DhlShipmentService
             'dhlForm.receiver.person_name' => ['nullable', 'string', 'max:50'],
             'dhlForm.receiver.email' => ['nullable', 'email', 'max:60'],
             'dhlForm.receiver.phone' => ['nullable', 'string', 'max:20'],
+            'dhlForm.receiver.neighbour_delivery' => ['nullable', 'boolean'],
+            'dhlForm.receiver.save_to_address_book' => ['nullable', 'boolean'],
             'dhlForm.parcel.quantity' => ['required', 'integer', 'min:1', 'max:99'],
             'dhlForm.parcel.type' => ['required', 'in:PACKAGE,ENVELOPE,PALLET'],
             'dhlForm.parcel.weight' => ['required_unless:dhlForm.parcel.type,ENVELOPE', 'numeric', 'min:0.1', 'max:999'],
@@ -196,6 +206,74 @@ class DhlShipmentService
         ];
     }
 
+
+    public function countryOptions(): array
+    {
+        return Cache::remember('dhl.international_countries.v2', now()->addDay(), function (): array {
+            return $this->fetchCountryOptionsFromDhl() ?: $this->fallbackCountryOptions();
+        });
+    }
+
+    protected function fetchCountryOptionsFromDhl(): array
+    {
+        $endpoint = (string) config('services.dhl.endpoint');
+        if ($endpoint === '' || blank(config('services.dhl.login')) || blank(config('services.dhl.password'))) {
+            return [];
+        }
+
+        try {
+            $response = (array) (new SoapClient($endpoint, ['trace' => false, 'exceptions' => true]))
+                ->__soapCall('getInternationalParams2', [[
+                    'authData' => ['username' => config('services.dhl.login'), 'password' => config('services.dhl.password')],
+                ]]);
+        } catch (SoapFault) {
+            return [];
+        }
+
+        $items = data_get($response, 'params.item', data_get($response, 'item', []));
+        if (is_object($items)) {
+            $items = [$items];
+        }
+
+        $countries = ['PL' => 'Polska'];
+        foreach ((array) $items as $item) {
+            $country = (array) $item;
+            $code = strtoupper((string) ($country['countryCode'] ?? ''));
+            $name = trim((string) ($country['countryName'] ?? ''));
+            if (strlen($code) === 2 && $name !== '') {
+                $countries[$code] = $name;
+            }
+        }
+
+        asort($countries, SORT_LOCALE_STRING);
+        return $countries;
+    }
+
+    protected function fallbackCountryOptions(): array
+    {
+        return [
+            'PL' => 'Polska',
+            'AT' => 'Austria',
+            'BE' => 'Belgia',
+            'CZ' => 'Czechy',
+            'DE' => 'Niemcy',
+            'DK' => 'Dania',
+            'EE' => 'Estonia',
+            'ES' => 'Hiszpania',
+            'FI' => 'Finlandia',
+            'FR' => 'Francja',
+            'HU' => 'Węgry',
+            'IT' => 'Włochy',
+            'LT' => 'Litwa',
+            'LV' => 'Łotwa',
+            'NL' => 'Holandia',
+            'NO' => 'Norwegia',
+            'PT' => 'Portugalia',
+            'SE' => 'Szwecja',
+            'SK' => 'Słowacja',
+        ];
+    }
+
     protected function callCreateShipment(array $payload): array
     {
         $endpoint = (string) config('services.dhl.endpoint');
@@ -223,7 +301,7 @@ class DhlShipmentService
             'apartmentNumber' => $data['apartment_number'] ?? null,
         ];
         if ($receiver) {
-            $address = array_merge(['addressType' => filled($data['company'] ?? null) ? 'B' : 'C', 'country' => $data['country'] ?? 'PL'], $address);
+            $address = array_merge(['addressType' => ($data['receiver_type'] ?? null) === 'company' ? 'B' : 'C', 'country' => $data['country'] ?? 'PL'], $address);
         }
 
         return ['preaviso' => $this->contact($data), 'contact' => $this->contact($data), 'address' => $address];
@@ -252,7 +330,7 @@ class DhlShipmentService
             }
         }
         foreach (['pdi' => 'PDI', 'pod' => 'POD', 'rod' => 'ROD', 'sas' => 'SAS', 'odb' => 'ODB'] as $flag => $type) {
-            if (data_get($form, 'special_services.'.$flag)) {
+            if (data_get($form, 'special_services.'.$flag) || ($flag === 'sas' && data_get($form, 'receiver.neighbour_delivery'))) {
                 $services[] = ['serviceType' => $type];
             }
         }
