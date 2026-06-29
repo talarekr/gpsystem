@@ -40,6 +40,7 @@ return [
     ],
 
     'ebay' => [
+        'template_asset_base_url' => env('GPS_EBAY_TEMPLATE_ASSET_BASE_URL', 'https://gpswiss.pl/ebay-template/assets'),
         'default_location' => [
             'merchant_location_key' => 'gpswiss-pl',
             'inventory_location_key' => 'gpswiss-pl',

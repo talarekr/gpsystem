@@ -75,14 +75,15 @@ class EbayPublishAdapter extends BaseMarketplacePublishAdapter
         foreach (['merchant_location_key' => 'eBay: brakuje merchantLocationKey', 'selected_fulfillment_policy_id' => 'eBay: brakuje fulfillmentPolicyId', 'selected_payment_policy_id' => 'eBay: brakuje paymentPolicyId', 'selected_return_policy_id' => 'eBay: brakuje returnPolicyId'] as $key => $message) if (blank($policies[$key] ?? $this->settingForPolicy($settings, $key))) $missing[] = $message;
         if ($missing !== []) return ['ok' => false, 'status' => 'payload_invalid', 'action' => 'publishOffer', 'error' => implode('; ', $missing), 'request_summary' => $this->requestSummary($payload), 'response_summary' => ['missing' => $missing]];
         $aspectNormalization = $this->normalizeAspects($payload['item_specifics'] ?? []);
-        $inventoryDescription = $this->inventoryDescription($payload, $part, $sku, (string) ($settings['marketplace_id'] ?? 'EBAY_DE'));
+        $marketplaceId = (string) ($settings['marketplace_id'] ?? ($this->accountCode() === 'ebay_fr' ? 'EBAY_FR' : 'EBAY_DE'));
+        $inventoryDescription = $this->inventoryDescription($payload, $part, $sku, $marketplaceId);
         $listingDescription = (string) ($payload['description_rendered_html'] ?? '');
         $inventory = [
             'product' => ['title' => (string) ($payload['title'] ?? $part->name), 'description' => $inventoryDescription, 'imageUrls' => $payload['image_urls'] ?? [], 'aspects' => $aspectNormalization['aspects']],
             'condition' => $this->conditionFromPart($part, $payload, $settings), 'availability' => ['shipToLocationAvailability' => ['quantity' => (int) ($payload['quantity'] ?? $part->quantity ?? 1)]],
         ];
         $merchantLocationKey = (string) ($policies['merchant_location_key'] ?? $this->settingForPolicy($settings, 'merchant_location_key') ?? '');
-        $offer = ['sku' => $sku, 'marketplaceId' => (string) ($settings['marketplace_id'] ?? 'EBAY_DE'), 'format' => (string) ($settings['format'] ?? 'FIXED_PRICE'), 'listingDuration' => (string) ($settings['listing_duration'] ?? 'GTC'), 'availableQuantity' => (int) ($payload['quantity'] ?? $part->quantity ?? 1), 'categoryId' => (string) ($payload['category_id'] ?? ''), 'merchantLocationKey' => $merchantLocationKey, 'pricingSummary' => ['price' => ['value' => (string) ($payload['price_eur'] ?? $readiness['marketplace_price']), 'currency' => 'EUR']], 'listingPolicies' => ['fulfillmentPolicyId' => (string) ($policies['selected_fulfillment_policy_id'] ?? $this->settingForPolicy($settings, 'selected_fulfillment_policy_id') ?? ''), 'paymentPolicyId' => (string) ($policies['selected_payment_policy_id'] ?? $this->settingForPolicy($settings, 'selected_payment_policy_id') ?? ''), 'returnPolicyId' => (string) ($policies['selected_return_policy_id'] ?? $this->settingForPolicy($settings, 'selected_return_policy_id') ?? '')]];
+        $offer = ['sku' => $sku, 'marketplaceId' => $marketplaceId, 'format' => (string) ($settings['format'] ?? 'FIXED_PRICE'), 'listingDuration' => (string) ($settings['listing_duration'] ?? 'GTC'), 'availableQuantity' => (int) ($payload['quantity'] ?? $part->quantity ?? 1), 'categoryId' => (string) ($payload['category_id'] ?? ''), 'merchantLocationKey' => $merchantLocationKey, 'pricingSummary' => ['price' => ['value' => (string) ($payload['price_eur'] ?? $readiness['marketplace_price']), 'currency' => 'EUR']], 'listingPolicies' => ['fulfillmentPolicyId' => (string) ($policies['selected_fulfillment_policy_id'] ?? $this->settingForPolicy($settings, 'selected_fulfillment_policy_id') ?? ''), 'paymentPolicyId' => (string) ($policies['selected_payment_policy_id'] ?? $this->settingForPolicy($settings, 'selected_payment_policy_id') ?? ''), 'returnPolicyId' => (string) ($policies['selected_return_policy_id'] ?? $this->settingForPolicy($settings, 'selected_return_policy_id') ?? '')]];
         if ($listingDescription !== '') $offer['listingDescription'] = $listingDescription;
         $contentLanguage = $this->contentLanguage((string) $offer['marketplaceId']);
         $result = (new EbayApiClient($this->accountCode(), $account))->publishInventoryOffer($sku, $inventory, $offer, $contentLanguage);
@@ -184,9 +185,12 @@ class EbayPublishAdapter extends BaseMarketplacePublishAdapter
 
     private function inventoryDescription(array $payload, Part $part, string $sku, string $marketplaceId): string
     {
-        $description = $this->plainText((string) ($payload['title'] ?? $part->name ?? ''));
+        $description = $this->plainText((string) (($payload['description'] ?? null) ?: ($payload['title'] ?? null) ?: ($part->name ?? '')));
         if ($description === '') {
-            $description = $marketplaceId === 'EBAY_DE' ? 'Autoteil '.$sku : 'Część samochodowa '.$sku;
+            $description = match ($marketplaceId) {
+                'EBAY_FR' => 'Pièce automobile '.$sku,
+                default => 'Autoteil '.$sku,
+            };
         }
 
         return mb_substr($description, 0, 3900);
