@@ -4,11 +4,21 @@ namespace App\Services\Marketplace\Publishing;
 
 use App\Models\MarketplaceAccount;
 use App\Models\Part;
+use App\Models\MarketplaceListing;
 use App\Services\Marketplace\Api\EbayApiClient;
+use App\Services\Marketplace\EbaySkuResolver;
+use Illuminate\Support\Facades\Schema;
 
 class EbayPublishAdapter extends BaseMarketplacePublishAdapter
 {
     private string $activeChannel = 'ebay_de';
+
+    public function __construct(
+        \App\Services\Marketplace\MarketplaceListingReadinessService $readinessService,
+        \App\Services\Marketplace\MarketplacePublishGate $gate,
+        \App\Services\Marketplace\ApiIntegrationLogger $logger,
+        private readonly EbaySkuResolver $skuResolver,
+    ) { parent::__construct($readinessService, $gate, $logger); }
 
     protected function channel(): string { return $this->activeChannel; }
     protected function marketplace(): string { return $this->activeChannel; }
@@ -76,7 +86,7 @@ class EbayPublishAdapter extends BaseMarketplacePublishAdapter
         if ($listingDescription !== '') $offer['listingDescription'] = $listingDescription;
         $contentLanguage = $this->contentLanguage((string) $offer['marketplaceId']);
         $result = (new EbayApiClient($this->accountCode(), $account))->publishInventoryOffer($sku, $inventory, $offer, $contentLanguage);
-        return ['ok' => $result['ok'] ?? false, 'action' => 'publishOffer', 'http_status' => $result['http_status'] ?? null, 'offer_id' => $result['offer_id'] ?? null, 'listing_id' => $result['listing_id'] ?? null, 'external_inventory_id' => $sku, 'url' => isset($result['listing_id']) ? $this->listingUrl((string) $offer['marketplaceId'], (string) $result['listing_id']) : null, 'request_id' => $result['request_id'] ?? null, 'request_summary' => $this->requestSummary($payload) + ['resolved_merchant_location_key' => $merchantLocationKey, 'merchantLocationKey' => $offer['merchantLocationKey'], 'aspects_diagnostics' => $aspectNormalization['diagnostics'], 'content_language' => $contentLanguage, 'marketplace_id' => $offer['marketplaceId'], 'inventory_description_source' => 'title', 'inventory_description_length' => mb_strlen($inventoryDescription), 'listing_description_length' => $listingDescription !== '' ? mb_strlen($listingDescription) : null], 'response_summary' => $this->responseSummary($result), 'json' => $result['json'] ?? [], 'error' => $this->ebayError($result), 'ui_error' => 'marketplace_api_error'];
+        return ['ok' => $result['ok'] ?? false, 'action' => 'publishOffer', 'http_status' => $result['http_status'] ?? null, 'offer_id' => $result['offer_id'] ?? null, 'listing_id' => $result['listing_id'] ?? null, 'external_inventory_id' => $sku, 'resolved_sku' => $sku, 'url' => isset($result['listing_id']) ? $this->listingUrl((string) $offer['marketplaceId'], (string) $result['listing_id']) : null, 'request_id' => $result['request_id'] ?? null, 'request_summary' => $this->requestSummary($payload) + ['resolved_ebay_sku' => $sku, 'resolved_merchant_location_key' => $merchantLocationKey, 'merchantLocationKey' => $offer['merchantLocationKey'], 'aspects_diagnostics' => $aspectNormalization['diagnostics'], 'content_language' => $contentLanguage, 'marketplace_id' => $offer['marketplaceId'], 'inventory_description_source' => 'title', 'inventory_description_length' => mb_strlen($inventoryDescription), 'listing_description_length' => $listingDescription !== '' ? mb_strlen($listingDescription) : null], 'response_summary' => $this->responseSummary($result), 'json' => $result['json'] ?? [], 'error' => $this->ebayError($result), 'ui_error' => 'marketplace_api_error'];
     }
 
     /**
@@ -202,10 +212,30 @@ class EbayPublishAdapter extends BaseMarketplacePublishAdapter
 
     private function skuFor(Part $part, array $payload): string
     {
-        foreach ([$payload['sku'] ?? null, $part->sku, $part->visible_code ?? null, $part->internal_code ?? null, $part->part_number, $part->manufacturer_code] as $value) {
-            if (filled($value)) return (string) $value;
-        }
-        return 'part-'.$part->id;
+        return $this->skuResolver->resolve($part);
+    }
+
+    protected function activeListing(Part $part): ?MarketplaceListing
+    {
+        $listing = parent::activeListing($part);
+        if ($listing || ! Schema::hasTable('marketplace_listings')) return $listing;
+
+        $sku = $this->skuResolver->resolve($part);
+
+        return MarketplaceListing::query()
+            ->where('marketplace', $this->marketplace())
+            ->where('sku', $sku)
+            ->where(function ($query) use ($part): void {
+                $query->where('part_id', $part->id)
+                    ->orWhereNull('part_id');
+            })
+            ->where(function ($query): void {
+                $query->whereNotNull('external_listing_id')
+                    ->orWhereNotNull('external_offer_id')
+                    ->orWhereNotNull('external_inventory_id');
+            })
+            ->whereIn('status', ['published', 'active', 'ACTIVE'])
+            ->first();
     }
 
     private function settingForPolicy(array $settings, string $key): mixed

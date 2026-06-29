@@ -302,7 +302,7 @@ class EbayApiClient extends AbstractMarketplaceApiClient
 
         $offerResponse = Http::withToken($token)->withHeaders($headers)->acceptJson()->asJson()->timeout(30)
             ->post($base.'/sell/inventory/v1/offer', $offerPayload);
-        if (! $offerResponse->successful()) return $this->writeResult('createOffer', $offerResponse, $headers) + ['inventory_http_status' => $inventoryResponse->status()];
+        if (! $offerResponse->successful()) return $this->writeResult('createOffer', $offerResponse, $headers) + ['inventory_http_status' => $inventoryResponse->status(), 'offer_id' => $this->offerIdFromErrorResponse($offerResponse->json())];
 
         $offerJson = $offerResponse->json();
         $offerId = is_array($offerJson) ? (string) ($offerJson['offerId'] ?? '') : '';
@@ -325,6 +325,27 @@ class EbayApiClient extends AbstractMarketplaceApiClient
             'content_language' => $headers['Content-Language'] ?? null,
             'marketplace_id' => $headers['X-EBAY-C-MARKETPLACE-ID'],
         ];
+    }
+
+    private function offerIdFromErrorResponse(mixed $json): ?string
+    {
+        $messages = [];
+        foreach ((array) data_get($json, 'errors', []) as $error) {
+            if (! is_array($error)) continue;
+            foreach (['message', 'longMessage'] as $key) {
+                if (filled($error[$key] ?? null)) $messages[] = (string) $error[$key];
+            }
+            foreach ((array) ($error['parameters'] ?? []) as $parameter) {
+                $value = is_array($parameter) ? ($parameter['value'] ?? null) : null;
+                if (filled($value) && preg_match('/^\d{6,}$/', (string) $value)) return (string) $value;
+            }
+        }
+
+        $text = implode(' ', $messages);
+        if (preg_match('/offerId\s*[=:]\s*(\d{6,})/i', $text, $matches)) return $matches[1];
+        if (preg_match('/Preisangebot-Entit(?:ä|ae)t existiert bereits.*?(\d{6,})/iu', $text, $matches)) return $matches[1];
+
+        return null;
     }
 
     private function writeResult(string $step, $response, array $headers = []): array
