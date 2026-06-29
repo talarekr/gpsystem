@@ -32,7 +32,7 @@
             display: flex;
             align-items: center;
             justify-content: flex-start;
-            gap: 4px;
+            gap: 8px;
             width: 100%;
             max-width: 100%;
             white-space: nowrap;
