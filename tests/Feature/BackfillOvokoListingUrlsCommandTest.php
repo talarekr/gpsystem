@@ -32,6 +32,32 @@ class BackfillOvokoListingUrlsCommandTest extends TestCase
         $this->assertDatabaseHas('marketplace_listings', ['id' => 501, 'url' => null]);
     }
 
+    public function test_dry_run_rejects_local_gpswiss_photo_url_and_does_not_write_it(): void
+    {
+        DB::table('parts')->insert(['id' => 7892, 'name' => 'PDC module', 'price' => 1, 'quantity' => 1, 'status' => 'ready', 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('marketplace_listings')->insert([
+            'id' => 501,
+            'marketplace' => 'ovoko',
+            'part_id' => 7892,
+            'external_offer_id' => '11700',
+            'raw_payload' => json_encode(['shop_url' => 'https://gpswiss.pl/storage/parts/photos/imported/7892/example.jpg']),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        Http::fake();
+
+        $this->artisan('marketplace:backfill-ovoko-listing-urls', ['--dry-run' => true, '--part-id' => 7892])
+            ->expectsOutputToContain('missing_shop_url')
+            ->expectsOutputToContain('skipped/local_invalid')
+            ->expectsOutputToContain('image_url_not_listing_url')
+            ->assertExitCode(0);
+
+        $this->assertDatabaseHas('marketplace_listings', ['id' => 501, 'url' => null]);
+        $this->assertDatabaseMissing('marketplace_listings', ['id' => 501, 'url' => 'https://gpswiss.pl/storage/parts/photos/imported/7892/example.jpg']);
+        Http::assertNothingSent();
+    }
+
     public function test_apply_updates_from_csv_and_does_not_call_api(): void
     {
         DB::table('parts')->insert(['id' => 7892, 'external_id' => 'gps-part-7892', 'name' => 'PDC module', 'price' => 1, 'quantity' => 1, 'status' => 'ready', 'created_at' => now(), 'updated_at' => now()]);

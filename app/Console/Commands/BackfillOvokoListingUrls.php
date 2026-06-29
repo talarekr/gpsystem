@@ -37,7 +37,7 @@ class BackfillOvokoListingUrls extends Command
         }
 
         $this->table(
-            ['local_part_id', 'marketplace_listing_id', 'existing_ovoko_id', 'existing_url', 'resolved_shop_url', 'source', 'action'],
+            ['local_part_id', 'marketplace_listing_id', 'existing_ovoko_id', 'existing_url', 'resolved_shop_url', 'source', 'action', 'rejected_local_url', 'rejected_local_url_reason', 'accepted_shop_url_host'],
             $result['results'],
         );
         $this->line(json_encode(['mode' => $result['mode'], 'summary' => $result['summary']], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
