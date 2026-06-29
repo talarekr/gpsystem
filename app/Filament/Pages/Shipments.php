@@ -64,6 +64,11 @@ class Shipments extends Page
 
     public function createDhlShipment(DhlShipmentService $dhl): void
     {
+        if ((bool) data_get($this->dhlForm, 'parcel.euro_return') && data_get($this->dhlForm, 'parcel.type') !== 'PALLET') {
+            $this->addError('dhlForm.parcel.euro_return', 'Zwrot palety jest dostępny tylko dla typu paleta.');
+            return;
+        }
+
         $this->dhlForm = $dhl->normalizeForm($this->dhlForm ?? []);
 
         $this->validate($dhl->rules());
