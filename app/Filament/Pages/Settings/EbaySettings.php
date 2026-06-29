@@ -23,9 +23,17 @@ class EbaySettings extends MarketplaceApiSettingsPage
     {
         $credentials = ['client_id' => 'Client ID', 'client_secret' => 'Client secret', 'dev_id' => 'Dev ID', 'ru_name' => 'RuName / redirect URI', 'expires_at' => 'Expires at'];
         return [
-            'ebay_de' => ['label' => 'eBay DE', 'marketplace' => 'ebay_de', 'name' => 'eBay DE', 'api_base_url' => 'https://api.ebay.com', 'marketplace_id' => 'EBAY_DE', 'site_id' => '77', 'credential_fields' => $credentials, 'required_credentials' => ['client_id', 'client_secret', 'refresh_token'], 'payment_policy_id' => '259264220013', 'return_policy_id' => '259264151013'],
-            'ebay_fr' => ['label' => 'eBay FR', 'marketplace' => 'ebay_fr', 'name' => 'eBay FR', 'api_base_url' => 'https://api.ebay.com', 'marketplace_id' => 'EBAY_FR', 'site_id' => '71', 'credential_fields' => $credentials, 'required_credentials' => ['client_id', 'client_secret', 'refresh_token'], 'payment_policy_id' => '260547435013', 'return_policy_id' => '260547447013'],
+            'ebay_de' => ['label' => 'eBay DE', 'marketplace' => 'ebay_de', 'name' => 'eBay DE', 'api_base_url' => 'https://api.ebay.com', 'marketplace_id' => 'EBAY_DE', 'site_id' => '77', 'credential_fields' => $credentials, 'required_credentials' => ['client_id', 'client_secret', 'refresh_token'], 'payment_policy_id' => '259264220013', 'return_policy_id' => '259264151013', 'api_settings_defaults' => $this->locationDefaults('ebay_de')],
+            'ebay_fr' => ['label' => 'eBay FR', 'marketplace' => 'ebay_fr', 'name' => 'eBay FR', 'api_base_url' => 'https://api.ebay.com', 'marketplace_id' => 'EBAY_FR', 'site_id' => '71', 'credential_fields' => $credentials, 'required_credentials' => ['client_id', 'client_secret', 'refresh_token'], 'payment_policy_id' => '260547435013', 'return_policy_id' => '260547447013', 'api_settings_defaults' => $this->locationDefaults('ebay_fr')],
         ];
+    }
+
+    private function locationDefaults(string $code): array
+    {
+        return array_merge(
+            (array) config('product-hub.ebay.default_location', []),
+            (array) config("product-hub.ebay.accounts.{$code}", [])
+        );
     }
 
     protected function policyInputs(string $code): array

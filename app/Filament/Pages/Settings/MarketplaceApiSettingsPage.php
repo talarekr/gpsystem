@@ -36,6 +36,7 @@ abstract class MarketplaceApiSettingsPage extends Page implements HasForms
             $account = $this->getAccount($code, $definition);
             $credentials = is_array($account->api_credentials) ? $account->api_credentials : [];
             $settings = is_array($account->api_settings) ? $account->api_settings : [];
+            $settings = $this->applyDefinitionApiSettingsDefaults($settings, $definition);
             $state[$code] = [
                 'api_enabled' => (bool) $account->api_enabled,
                 'api_mode' => $account->api_mode ?: 'dry_run',
@@ -102,7 +103,7 @@ abstract class MarketplaceApiSettingsPage extends Page implements HasForms
                 'api_base_url' => rtrim((string) ($state[$code]['api_base_url'] ?: ($definition['api_base_url'] ?? '')), '/'),
                 'api_mode' => (string) ($state[$code]['api_mode'] ?: 'dry_run'),
                 'api_credentials' => $credentials,
-                'api_settings' => array_filter(array_merge($settings, [
+                'api_settings' => array_filter(array_merge($this->applyDefinitionApiSettingsDefaults($settings, $definition), [
                     'seller_account_id' => trim((string) ($state[$code]['seller_account_id'] ?? '')),
                     'marketplace_id' => trim((string) ($state[$code]['marketplace_id'] ?? '')),
                     'site_id' => trim((string) ($state[$code]['site_id'] ?? '')),
@@ -129,7 +130,25 @@ abstract class MarketplaceApiSettingsPage extends Page implements HasForms
 
     protected function getAccount(string $code, array $definition): MarketplaceAccount
     {
-        return MarketplaceAccount::query()->firstOrCreate(['code' => $code], ['marketplace' => $definition['marketplace'], 'name' => $definition['name'], 'status' => 'active', 'api_base_url' => $definition['api_base_url'] ?? null, 'api_mode' => 'dry_run']);
+        return MarketplaceAccount::query()->firstOrCreate(['code' => $code], ['marketplace' => $definition['marketplace'], 'name' => $definition['name'], 'status' => 'active', 'api_base_url' => $definition['api_base_url'] ?? null, 'api_mode' => 'dry_run', 'api_settings' => $this->definitionApiSettingsDefaults($definition)]);
+    }
+
+    protected function applyDefinitionApiSettingsDefaults(array $settings, array $definition): array
+    {
+        $defaults = $this->definitionApiSettingsDefaults($definition);
+
+        foreach ($settings as $key => $value) {
+            if (! blank($value)) {
+                $defaults[$key] = $value;
+            }
+        }
+
+        return $defaults;
+    }
+
+    protected function definitionApiSettingsDefaults(array $definition): array
+    {
+        return is_array($definition['api_settings_defaults'] ?? null) ? $definition['api_settings_defaults'] : [];
     }
 
     protected function credentialsConfigured(string $code, array $definition): bool

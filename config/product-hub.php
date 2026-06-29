@@ -39,6 +39,26 @@ return [
         'pallet' => 'Pallet',
     ],
 
+    'ebay' => [
+        'default_location' => [
+            'merchant_location_key' => 'gpswiss-pl',
+            'inventory_location_key' => 'gpswiss-pl',
+            'inventory_location_name' => 'gpswiss-pl',
+        ],
+        'accounts' => [
+            'ebay_de' => [
+                'merchant_location_key' => 'gpswiss-pl',
+                'inventory_location_key' => 'gpswiss-pl',
+                'inventory_location_name' => 'gpswiss-pl',
+            ],
+            'ebay_fr' => [
+                'merchant_location_key' => 'gpswiss-pl',
+                'inventory_location_key' => 'gpswiss-pl',
+                'inventory_location_name' => 'gpswiss-pl',
+            ],
+        ],
+    ],
+
     'channel_shipping_groups' => [
         'ebay' => [
             'shipping_30',

@@ -44,12 +44,30 @@ class EbayPublishAdapter extends BaseMarketplacePublishAdapter
     private function settingForPolicy(array $settings, string $key): mixed
     {
         return match ($key) {
-            'merchant_location_key' => $settings['merchant_location_key'] ?? $settings['merchantLocationKey'] ?? null,
+            'merchant_location_key' => $this->merchantLocationKey($settings),
             'selected_fulfillment_policy_id' => $settings['fulfillment_policy_id'] ?? null,
             'selected_payment_policy_id' => $settings['payment_policy_id'] ?? null,
             'selected_return_policy_id' => $settings['return_policy_id'] ?? null,
             default => null,
         };
+    }
+
+    private function merchantLocationKey(array $settings): ?string
+    {
+        foreach (['merchant_location_key', 'merchantLocationKey', 'location_key', 'inventory_location_key'] as $key) {
+            if (filled($settings[$key] ?? null)) return (string) $settings[$key];
+        }
+
+        $defaults = array_merge(
+            (array) config('product-hub.ebay.default_location', []),
+            (array) config('product-hub.ebay.accounts.'.$this->accountCode(), [])
+        );
+
+        foreach (['merchant_location_key', 'merchantLocationKey', 'location_key', 'inventory_location_key'] as $key) {
+            if (filled($defaults[$key] ?? null)) return (string) $defaults[$key];
+        }
+
+        return null;
     }
 
     private function conditionFromPart(Part $part, array $payload, array $settings): string
