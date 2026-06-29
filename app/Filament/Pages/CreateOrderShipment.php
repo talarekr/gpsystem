@@ -16,9 +16,16 @@ class CreateOrderShipment extends CreateShipment
 
     public Order $order;
 
-    public function mount(DhlShipmentService $dhl, Order $order): void
+    public function mount(DhlShipmentService $dhl): void
     {
+        $order = request()->route('order');
+
+        if (! $order instanceof Order) {
+            $order = Order::query()->findOrFail($order);
+        }
+
         abort_unless(str_starts_with(strtolower((string) $order->marketplace), 'ebay'), 404);
+
         $this->order = $order;
         $this->dhlForm = $dhl->defaults($order);
         $this->showDhlForm = true;
