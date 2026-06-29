@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\MarketplaceCategoryMapping;
 use App\Models\Part;
 use App\Models\PartCategory;
+use App\Services\Marketplace\GoogleTranslateService;
 use App\Services\Marketplace\PartMarketplaceReadinessService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
@@ -14,6 +15,41 @@ use Tests\TestCase;
 class PartMarketplaceReadinessServiceTest extends TestCase
 {
     use RefreshDatabase;
+
+
+    public function test_prepare_ebay_card_persists_de_and_fr_prepared_translations(): void
+    {
+        $this->app->instance(GoogleTranslateService::class, new class extends GoogleTranslateService {
+            public function translate(string $text, string $target, ?string $source = null): array
+            {
+                return ['ok' => true, 'translated_text' => '['.$target.'] '.$text, 'blockers' => []];
+            }
+        });
+
+        $category = PartCategory::query()->create(['name' => 'Alternatory']);
+        $part = Part::query()->create([
+            'name' => 'Alternator BMW',
+            'description' => 'Opis alternatora.',
+            'condition_notes' => 'Używany',
+            'category_id' => $category->id,
+            'price' => 100,
+            'ebay_price' => 125,
+            'quantity' => 1,
+            'vehicle_snapshot' => ['make' => 'BMW', 'model' => '3'],
+        ]);
+
+        $this->getJson('/tools/prepare-part-marketplace-card?token=gps_images_import_2026&part_id='.$part->id.'&channel=ebay')
+            ->assertOk()
+            ->assertJsonPath('ebay_channels.ebay_de.translation_status', 'prepared')
+            ->assertJsonPath('ebay_channels.ebay_fr.translation_status', 'prepared');
+
+        $prepared = $part->refresh()->review_metadata['marketplace_prepared_translations'] ?? [];
+
+        $this->assertSame('prepared', $prepared['ebay_de']['status'] ?? null);
+        $this->assertSame('prepared', $prepared['ebay_fr']['status'] ?? null);
+        $this->assertSame('de', $prepared['ebay_de']['language'] ?? null);
+        $this->assertSame('fr', $prepared['ebay_fr']['language'] ?? null);
+    }
 
 
     public function test_part_resource_marketplace_section_has_sales_channels_title_and_is_expanded_by_default(): void
