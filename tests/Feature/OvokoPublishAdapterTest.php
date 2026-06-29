@@ -13,6 +13,9 @@ use App\Services\Marketplace\PublishPartToMarketplacesService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
+use App\Http\Controllers\OvokoPublicPhotoController;
+use App\Models\PartImage;
 use Tests\TestCase;
 
 class OvokoPublishAdapterTest extends TestCase
@@ -36,17 +39,21 @@ class OvokoPublishAdapterTest extends TestCase
         $this->assertTrue($result['channels']['ovoko']['success']);
         $this->assertDatabaseHas('marketplace_listings', ['part_id' => $part->id, 'marketplace' => 'ovoko', 'external_offer_id' => '288651', 'external_listing_id' => '288651', 'sync_status' => 'published']);
         Http::assertSent(function ($request) {
-            $data = $request->data();
+            $body = $request->body();
+
             return $request->url() === 'https://ovoko.example.test/crm/importPart'
-                && $data['username'] === 'ovoko-user'
-                && $data['password'] === 'ovoko-pass'
-                && $data['user_token'] === 'ovoko-token'
-                && $data['category_id'] === '252'
-                && $data['car_id'] === 777
-                && $data['quality'] === 1
-                && $data['status'] === 1
-                && $data['price'] == 120
-                && $data['photos[]'] === ['https://gps.test/storage/parts/photos/complete.jpg'];
+                && str_contains($request->header('Content-Type')[0] ?? '', 'application/x-www-form-urlencoded')
+                && str_contains($body, 'username=ovoko-user')
+                && str_contains($body, 'password=ovoko-pass')
+                && str_contains($body, 'user_token=ovoko-token')
+                && str_contains($body, 'category_id=252')
+                && str_contains($body, 'car_id=777')
+                && str_contains($body, 'quality=1')
+                && str_contains($body, 'status=1')
+                && str_contains($body, 'price=120')
+                && substr_count($body, 'photos%5B%5D=') === 1
+                && ! str_contains($body, 'photos%5B%5D%5B0%5D=')
+                && preg_match('/(?:^|&)photo=([^&]+)&photos%5B%5D=\1(?:&|$)/', $body) === 1;
         });
         $encodedLogs = json_encode(MarketplaceSyncLog::query()->pluck('payload')->all());
         $this->assertStringNotContainsString('ovoko-user', $encodedLogs);
@@ -103,6 +110,20 @@ class OvokoPublishAdapterTest extends TestCase
         $this->assertDatabaseHas('marketplace_listings', ['part_id' => $part->id, 'marketplace' => 'ovoko']);
         $this->assertDatabaseMissing('marketplace_listings', ['part_id' => $part->id, 'marketplace' => 'allegro']);
         $this->assertDatabaseMissing('marketplace_listings', ['part_id' => $part->id, 'marketplace' => 'ebay_de']);
+    }
+
+
+    public function test_ovoko_public_photo_route_serves_selected_image_without_auth_or_redirect(): void
+    {
+        Storage::fake('public');
+        Storage::disk('public')->put('parts/photos/imported/7892/example.jpg', 'fake-jpeg');
+        $partImage = PartImage::query()->create(['path' => 'parts/photos/imported/7892/example.jpg', 'sort_order' => 1, 'is_primary' => true]);
+        $signature = OvokoPublicPhotoController::signatureFor($partImage, 'parts/photos/imported/7892/example.jpg');
+
+        $this->get(route('marketplace.ovoko.photos.show', ['partImage' => $partImage->id, 'signature' => $signature, 'filename' => 'example.jpg']))
+            ->assertOk()
+            ->assertHeader('Content-Length', '9')
+            ->assertHeader('Cache-Control', 'public, max-age=86400');
     }
 
     public function test_no_order_stock_or_scheduler_code_was_added_for_ovoko_publish_scope(): void

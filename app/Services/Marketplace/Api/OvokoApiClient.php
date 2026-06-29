@@ -53,11 +53,12 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
     {
         $endpoint = rtrim((string) $this->account?->api_base_url, '/').'/crm/importPart';
         $form = $this->authFields() + $fields;
+        $encodedForm = $this->encodeFormRepeatedKeys($form);
 
-        $response = Http::asForm()
+        $response = Http::withBody($encodedForm, 'application/x-www-form-urlencoded')
             ->acceptJson()
             ->timeout(max(1, $timeoutSeconds))
-            ->post($endpoint, $form);
+            ->post($endpoint);
 
         $json = $response->json();
         $payload = is_array($json) ? $json : [];
@@ -74,6 +75,36 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
             'response_top_level_keys' => array_values(array_slice(array_keys($payload), 0, 30)),
             'payload' => $payload,
         ];
+    }
+
+    public function importPartFormDiagnostics(array $fields): array
+    {
+        $form = $this->authFields() + $fields;
+        $encoded = $this->encodeFormRepeatedKeys($form, true);
+
+        return [
+            'ovoko_form_encoding' => 'application/x-www-form-urlencoded',
+            'ovoko_photo_field_type' => get_debug_type($fields['photo'] ?? null),
+            'ovoko_photos_field_encoding_shape' => is_array($fields['photos[]'] ?? null) ? 'repeated_photos_brackets' : get_debug_type($fields['photos[]'] ?? null),
+            'ovoko_photos_repeated_keys_preview' => array_values(array_filter(explode('&', $encoded), fn (string $pair): bool => str_starts_with($pair, 'photos%5B%5D='))),
+        ];
+    }
+
+    private function encodeFormRepeatedKeys(array $form, bool $maskSecrets = false): string
+    {
+        $pairs = [];
+        foreach ($form as $key => $value) {
+            $values = is_array($value) ? array_values($value) : [$value];
+            foreach ($values as $item) {
+                if ($item === null || $item === '') {
+                    continue;
+                }
+                $safeValue = $maskSecrets && in_array($key, ['username', 'password', 'user_token'], true) ? '***' : (string) $item;
+                $pairs[] = rawurlencode((string) $key).'='.rawurlencode($safeValue);
+            }
+        }
+
+        return implode('&', $pairs);
     }
 
     public function fetchPartsPage(int $page, int $limit, int $timeoutSeconds = 30): array

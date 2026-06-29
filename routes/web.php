@@ -10,6 +10,7 @@ use App\Http\Controllers\Admin\PartSearchController;
 use App\Http\Controllers\Admin\ImportMigration\WooCategoryTreeController;
 use App\Http\Controllers\Admin\ImportMigration\WooProductImportRunController;
 use App\Http\Controllers\Admin\ImportMigration\WooStoragePublicController;
+use App\Http\Controllers\OvokoPublicPhotoController;
 use App\Http\Controllers\Storefront\CartController;
 use App\Http\Controllers\Storefront\CheckoutController;
 use App\Http\Controllers\Storefront\CatalogController;
@@ -142,6 +143,10 @@ Route::get('/admin/brand/logo.png', function () {
 
     abort(404);
 })->name('admin.brand.logo');
+
+Route::get('/marketplace/ovoko/photos/{partImage}/{signature}/{filename}', OvokoPublicPhotoController::class)
+    ->where(['signature' => '[A-Fa-f0-9]{24}', 'filename' => '[A-Za-z0-9._-]+'])
+    ->name('marketplace.ovoko.photos.show');
 
 Route::get('/ebay-template/assets/{filename}', function (string $filename) {
     $allowed = ['icon-shipping.png', 'icon-returns.png', 'icon-packaging.png', 'icon-original.png', 'europe-map.png', 'dhl-logo.png', 'dpd-logo.png'];
