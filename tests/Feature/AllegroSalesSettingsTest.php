@@ -106,6 +106,7 @@ class AllegroSalesSettingsTest extends TestCase
         $this->assertSame('ret-1', data_get($payload, 'afterSalesServices.returnPolicy.id'));
         $this->assertSame('imp-1', data_get($payload, 'afterSalesServices.impliedWarranty.id'));
         $this->assertSame('war-1', data_get($payload, 'afterSalesServices.warranty.id'));
+        $this->assertSame('Błotnik Audi', data_get($payload, 'productSet.0.product.name'));
     }
 
 
@@ -156,7 +157,8 @@ class AllegroSalesSettingsTest extends TestCase
                 && data_get($data, 'afterSalesServices.returnPolicy.id') === 'ret-1'
                 && data_get($data, 'afterSalesServices.impliedWarranty.id') === 'imp-1'
                 && data_get($data, 'afterSalesServices.warranty.id') === 'war-1'
-                && data_get($data, 'description.sections') === $description['sections'];
+                && data_get($data, 'description.sections') === $description['sections']
+                && data_get($data, 'productSet.0.product.name') === 'Błotnik Audi';
         });
     }
 

@@ -268,10 +268,10 @@ class MarketplaceListingReadinessService
         return $blockers;
     }
 
-    private function allegroProductSetPreview(array $allegroParameters, ?MarketplaceAccount $account): array
+    private function allegroProductSetPreview(array $allegroParameters, ?MarketplaceAccount $account, string $productName): array
     {
         $settings = is_array($account?->api_settings) ? $account->api_settings : [];
-        $productSet = ['product' => ['parameters' => $allegroParameters['product_parameters'] ?? []]];
+        $productSet = ['product' => ['name' => trim($productName), 'parameters' => $allegroParameters['product_parameters'] ?? []]];
         $responsibleProducer = $this->allegroResponsibleProducer($settings);
         $safetyInformation = $this->allegroSafetyInformation($settings);
         if ($responsibleProducer !== null) $productSet['responsibleProducer'] = $responsibleProducer;
@@ -489,7 +489,7 @@ class MarketplaceListingReadinessService
             $preview['will_make_marketplace_request'] = false;
             $preview['allegro_sales_settings'] = $allegroSalesSettings;
             $preview['delivery'] = ['shippingRates' => ['id' => $allegroSalesSettings['shippingRates']['id'] ?? null]];
-            $preview['productSet'] = [$this->allegroProductSetPreview($allegroParameters, $this->accountFor($channel))];
+            $preview['productSet'] = [$this->allegroProductSetPreview($allegroParameters, $this->accountFor($channel), $preview['title'])];
             $preview['gpsr_diagnostics'] = $this->allegroGpsrDiagnostics($this->accountFor($channel));
             $preview['afterSalesServices'] = array_filter([
                 'returnPolicy' => ['id' => $allegroSalesSettings['returnPolicy']['id'] ?? null],
