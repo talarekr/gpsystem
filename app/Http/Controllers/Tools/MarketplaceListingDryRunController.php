@@ -97,6 +97,98 @@ class MarketplaceListingDryRunController extends Controller
     }
 
 
+
+    public function allegroDescriptionUpdate(string $offerId, Request $request): JsonResponse
+    {
+        $part = $this->part((int) $request->query('part_id'));
+        if (! $part) return response()->json(['ok' => false, 'offer_id' => $offerId, 'blockers' => ['part_not_found'], 'part_id' => (int) $request->query('part_id')], 404);
+
+        $images = $this->imageUrls($part);
+        $built = app(AllegroDescriptionBuilder::class)->build($part, $images['public_urls_sample']);
+        $description = $built['description'];
+        $diagnostics = $this->allegroDescriptionUpdateDiagnostics($description);
+        $blockers = array_values(array_unique(array_merge($built['blockers'] ?? [], $this->allegroDescriptionUpdateBlockers($description, $diagnostics))));
+        $applyRequested = $request->boolean('apply', false);
+        $confirmed = hash_equals('update-allegro-description', (string) $request->query('confirm', ''));
+
+        $response = [
+            'ok' => $blockers === [] && (! $applyRequested || $confirmed),
+            'dry_run' => ! $applyRequested,
+            'would_send' => false,
+            'applied' => false,
+            'operation' => 'allegro_description_only_update',
+            'endpoint' => 'PATCH /sale/product-offers/{offerId}',
+            'offer_id' => $offerId,
+            'part_id' => $part->id,
+            'description' => $description,
+            'diagnostics' => $diagnostics + [
+                'builder' => $built['diagnostics'] ?? [],
+                'additional_marketplaces_observed_not_modified' => ['allegro-business-pl', 'allegro-sk', 'allegro-cz', 'allegro-hu', 'allegro-business-cz'],
+            ],
+            'blockers' => $blockers,
+            'safety_guards' => [
+                'createProductOffer' => false,
+                'relist_end_relist' => false,
+                'updates_only' => ['description'],
+                'unchanged' => ['price', 'stock', 'parameters', 'images', 'delivery', 'afterSalesServices', 'GPSR', 'payments', 'publication'],
+            ],
+        ];
+
+        if (! $applyRequested) return response()->json($response);
+        if (! $confirmed) return response()->json(array_merge($response, ['ok' => false, 'error' => 'Missing confirm=update-allegro-description for apply.']), 422);
+        if ($blockers !== []) return response()->json(array_merge($response, ['ok' => false, 'error' => 'Description update blocked.']), 422);
+
+        $account = $this->account('allegro_main');
+        if (! $account) return response()->json(array_merge($response, ['ok' => false, 'error' => 'Marketplace account allegro_main is missing.']), 422);
+
+        $result = (new AllegroApiClient('allegro_main', $account))->updateProductOfferDescription($offerId, $description);
+
+        return response()->json(array_merge($response, [
+            'ok' => (bool) ($result['ok'] ?? false),
+            'dry_run' => false,
+            'would_send' => true,
+            'applied' => (bool) ($result['ok'] ?? false),
+            'http_status' => $result['http_status'] ?? null,
+            'request_id' => $result['request_id'] ?? null,
+            'api_response' => $result['json'] ?? [],
+            'error' => ($result['ok'] ?? false) ? null : 'Allegro description-only update failed.',
+        ]), ($result['ok'] ?? false) ? 200 : 422);
+    }
+
+    private function allegroDescriptionUpdateDiagnostics(?array $description): array
+    {
+        $sections = is_array($description['sections'] ?? null) ? $description['sections'] : [];
+        $text = '';
+        $hasImage = false;
+        foreach ($sections as $section) {
+            foreach (($section['items'] ?? []) as $item) {
+                if (($item['type'] ?? null) === 'TEXT') $text .= ' '.trim(strip_tags((string) ($item['content'] ?? '')));
+                if (($item['type'] ?? null) === 'IMAGE' && filled($item['url'] ?? null)) $hasImage = true;
+            }
+        }
+        $text = trim(preg_replace('/\s+/u', ' ', $text) ?: '');
+
+        return [
+            'description_sections_count' => count($sections),
+            'description_text_length' => mb_strlen($text),
+            'description_has_image' => $hasImage,
+            'description_first_text_preview' => mb_substr($text, 0, 240),
+        ];
+    }
+
+    private function allegroDescriptionUpdateBlockers(?array $description, array $diagnostics): array
+    {
+        $blockers = [];
+        if (! is_array($description) || ! is_array($description['sections'] ?? null) || count($description['sections']) < 1) $blockers[] = 'description_sections_empty';
+        if (($diagnostics['description_text_length'] ?? 0) < 1) $blockers[] = 'description_text_empty';
+        foreach (($description['sections'] ?? []) as $section) {
+            foreach (($section['items'] ?? []) as $item) {
+                if (($item['type'] ?? null) === 'TEXT' && trim((string) ($item['content'] ?? '')) === '<p></p>') $blockers[] = 'description_text_is_blank_paragraph';
+            }
+        }
+        return $blockers;
+    }
+
     public function allegroPreview(Request $request)
     {
         if (! $this->validToken($request)) return $this->invalidTokenResponse();
