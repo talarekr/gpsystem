@@ -331,7 +331,7 @@ class AllegroCategoryParametersTest extends TestCase
         $this->assertDatabaseCount('marketplace_listings', 0);
     }
 
-    public function test_rodzaj_skrzyni_stays_only_in_product_parameters_not_payload_parameters(): void
+    public function test_product_only_parameters_stay_only_in_product_parameters_not_payload_parameters(): void
     {
         $part = Part::query()->create(['name' => 'Skrzynia Audi', 'part_number' => '06H903017J', 'category_id' => 77, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'vehicle_snapshot' => ['make' => 'Audi', 'gearbox_type' => 'Automatyczna'], 'is_visible_storefront' => true]);
 
@@ -343,10 +343,12 @@ class AllegroCategoryParametersTest extends TestCase
         ]]);
 
         $this->assertSame([], $result['missing_required_parameters']);
-        $this->assertSame(['11323', '127415', '215858'], array_column($result['payload_parameters'], 'id'));
+        $this->assertSame(['11323', '215858'], array_column($result['payload_parameters'], 'id'));
         $this->assertSame(['11323', '129917', '127415', '215858'], array_column($result['product_parameters'], 'id'));
         $this->assertContains('129917', array_column($result['product_parameters'], 'id'));
         $this->assertNotContains('129917', array_column($result['payload_parameters'], 'id'));
+        $this->assertContains('127415', array_column($result['product_parameters'], 'id'));
+        $this->assertNotContains('127415', array_column($result['payload_parameters'], 'id'));
     }
 
 
