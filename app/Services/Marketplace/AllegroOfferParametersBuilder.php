@@ -48,7 +48,7 @@ class AllegroOfferParametersBuilder
         if ($vehicleField = $this->vehicleFieldForParameter($name)) return $this->resolveVehicleParameter($part, $def, $vehicleField);
         if ($this->isPartManufacturerParameter($def, $name)) {
             $manufacturer = $this->partManufacturer($part);
-            return $this->resolveValue($manufacturer['value'], $manufacturer['source'], $def);
+            return $this->resolvePartManufacturer($manufacturer['value'], $manufacturer['source'], $def);
         }
         if ($this->isCatalogPartNumberParameter($def, $name) || (string) ($def['id'] ?? '') === '227345') {
             return $this->resolveValue($this->catalogPartNumber($part), 'part.part_number', $def);
@@ -262,6 +262,22 @@ class AllegroOfferParametersBuilder
         return ['value' => null, 'source' => $source, 'source_value' => $sourceValue, 'reason' => 'no_allowed_value_match', 'allowed_values_sample' => array_slice(array_map(fn ($allowed): array => ['id' => (string) ($allowed['id'] ?? ''), 'value' => (string) ($allowed['value'] ?? '')], $def['dictionary'] ?? []), 0, 10)];
     }
 
+
+    private function resolvePartManufacturer(mixed $value, string $source, array $def): array
+    {
+        $sourceValue = $value;
+        if (blank($value)) return ['value' => null, 'source' => $source, 'source_value' => $sourceValue, 'reason' => 'missing_source_value'];
+        if (($def['type'] ?? '') !== 'dictionary') return ['value' => (string) $value, 'source' => $source, 'source_value' => $sourceValue];
+
+        foreach (($def['dictionary'] ?? []) as $allowed) {
+            if ((string) ($allowed['id'] ?? '') === (string) $value || $this->matchesExactDictionaryLabel($allowed['value'] ?? '', $value) || $this->partManufacturerAliasMatches($allowed['value'] ?? '', $value)) {
+                return ['type' => 'dictionary', 'value' => [(string) $allowed['id']], 'label' => $allowed['value'] ?? null, 'source' => $source, 'source_value' => $sourceValue, 'normalized_value' => $this->norm($value), 'mapped_value_id' => (string) $allowed['id'], 'mapped_label' => $allowed['value'] ?? null];
+            }
+        }
+
+        return ['value' => null, 'source' => $source, 'source_value' => $sourceValue, 'normalized_value' => $this->norm($value), 'reason' => 'no_allowed_value_match', 'allowed_values_sample' => array_slice(array_map(fn ($allowed): array => ['id' => (string) ($allowed['id'] ?? ''), 'value' => (string) ($allowed['value'] ?? '')], $def['dictionary'] ?? []), 0, 20), 'allowed_values' => $this->allowedValuesDiagnostics($def)];
+    }
+
     private function diagnosticRow(array $def, array $resolved): array
     {
         $row = [
@@ -280,7 +296,7 @@ class AllegroOfferParametersBuilder
             'required' => (bool) ($def['required'] ?? false),
             'describesProduct' => (bool) ($def['options']['describesProduct'] ?? false),
             'status' => isset($resolved['reason']) ? (((bool) ($def['required'] ?? false)) ? (blank($resolved['source_value'] ?? null) ? 'missing' : 'invalid') : 'not_required') : (($resolved['value'] ?? null) === null ? 'not_required' : 'mapped'),
-            'allowed_values' => ($this->norm($def['name'] ?? '') === 'typsamochodu') ? array_column(array_map(fn ($allowed): array => ['id' => (string) ($allowed['id'] ?? ''), 'value' => (string) ($allowed['value'] ?? '')], $def['dictionary'] ?? []), 'value', 'id') : null,
+            'allowed_values' => $resolved['allowed_values'] ?? (($this->norm($def['name'] ?? '') === 'typsamochodu') ? $this->allowedValuesDiagnostics($def) : null),
         ];
 
         if ($row['reason'] === null) unset($row['reason']);
@@ -330,6 +346,38 @@ class AllegroOfferParametersBuilder
     {
         $a = $this->norm($allowed); $v = $this->norm($value);
         return $a === $v || ($v !== '' && str_contains($a, $v)) || ($a !== '' && str_contains($v, $a));
+    }
+
+
+    private function matchesExactDictionaryLabel(mixed $allowed, mixed $value): bool
+    {
+        return $this->norm($allowed) === $this->norm($value);
+    }
+
+    private function partManufacturerAliasMatches(mixed $allowed, mixed $value): bool
+    {
+        $allowedNorm = $this->norm($allowed);
+        $valueNorm = $this->norm($value);
+        foreach ($this->partManufacturerAliasGroups() as $group) {
+            $norms = array_map(fn ($alias) => $this->norm($alias), $group);
+            if (in_array($allowedNorm, $norms, true) && in_array($valueNorm, $norms, true)) return true;
+        }
+
+        return false;
+    }
+
+    private function partManufacturerAliasGroups(): array
+    {
+        return [
+            ['OE', 'OEM', 'O.E.', 'O.E.M.', 'oryginał', 'oryginal', 'oryginalny', 'oryginał z logo producenta pojazdu'],
+            ['Volkswagen', 'VW'],
+            ['Mercedes-Benz', 'Mercedes Benz', 'Mercedes'],
+        ];
+    }
+
+    private function allowedValuesDiagnostics(array $def): array
+    {
+        return array_column(array_map(fn ($allowed): array => ['id' => (string) ($allowed['id'] ?? ''), 'value' => (string) ($allowed['value'] ?? '')], $def['dictionary'] ?? []), 'value', 'id');
     }
 
     private function norm(mixed $v): string { return Str::of((string) $v)->lower()->ascii()->replaceMatches('/[^a-z0-9]+/', '')->toString(); }

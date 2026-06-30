@@ -182,6 +182,26 @@ class AllegroCategoryParametersTest extends TestCase
         $this->assertSame([], $result['missing_required_parameters']);
     }
 
+    public function test_part_manufacturer_dictionary_does_not_fuzzy_match_audi_to_audio_alubutyl(): void
+    {
+        $part = Part::query()->create(['name' => 'Część Audi', 'category_id' => 77, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'vehicle_snapshot' => ['make' => 'Audi'], 'is_visible_storefront' => true]);
+
+        $result = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, null, ['ok' => true, 'source' => 'cache', 'parameters' => [
+            ['id' => '127415', 'name' => 'Producent części', 'type' => 'dictionary', 'required' => true, 'dictionary' => [
+                ['id' => 'audio-alubutyl-id', 'value' => 'Audio Alubutyl'],
+                ['id' => 'oem-id', 'value' => 'OEM'],
+            ], 'options' => ['describesProduct' => false]],
+        ]]);
+
+        $this->assertSame([], $result['offer_parameters']);
+        $this->assertSame('Producent części', $result['missing_required_parameters'][0]['name']);
+        $this->assertSame('Audi', $result['missing_required_parameters'][0]['raw_local_value']);
+        $this->assertSame('no_allowed_value_match', $result['missing_required_parameters'][0]['reason']);
+        $this->assertSame('invalid', $result['missing_required_parameters'][0]['status']);
+        $this->assertSame(['audio-alubutyl-id' => 'Audio Alubutyl', 'oem-id' => 'OEM'], $result['missing_required_parameters'][0]['allowed_values']);
+        $this->assertArrayNotHasKey('mapped_value_id', $result['missing_required_parameters'][0]);
+    }
+
     public function test_part_catalog_number_uses_real_part_number_and_describes_product_section(): void
     {
         $part = Part::query()->create(['name' => 'Część Maserati', 'part_number' => '06H903017J', 'category_id' => 77, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'vehicle_snapshot' => ['make' => 'Maserati'], 'is_visible_storefront' => true]);
