@@ -9,6 +9,6 @@ Artisan::command('inspire', function (): void {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('marketplace:auto-sync-orders')
-    ->everyTenMinutes()
+    ->everyFiveMinutes()
     ->withoutOverlapping()
     ->when(fn (): bool => (bool) config('marketplace_order_sync.enabled', false));
