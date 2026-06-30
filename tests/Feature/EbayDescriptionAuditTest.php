@@ -298,6 +298,44 @@ class EbayDescriptionAuditTest extends TestCase
         });
     }
 
+    public function test_inventory_based_asset_patch_uses_inventory_offer_diagnostics_and_blocks_description_only_write(): void
+    {
+        $this->actingAsAdminUser();
+        config(['marketplace.external_api_writes_enabled' => true, 'marketplace.ebay_description_revise_enabled' => true]);
+        Http::fake([
+            'api.ebay.com/ws/api.dll' => Http::response('<?xml version="1.0" encoding="utf-8"?><GetItemResponse xmlns="urn:ebay:apis:eBLBaseComponents"><Ack>Success</Ack><Item><ItemID>800113252568</ItemID><Description><![CDATA[<section><img src="https://gpsystem.thecamels.pl/storage/icon-shipping-old.png"></section>]]></Description></Item></GetItemResponse>', 200, ['Content-Type' => 'text/xml']),
+            'api.ebay.com/buy/browse/v1/item/*' => Http::response(['itemId' => 'v1|800113252568|0', 'estimatedAvailabilities' => [['estimatedAvailabilityStatus' => 'IN_STOCK']]], 200),
+            'api.ebay.com/sell/inventory/v1/offer/OFFER-1486' => Http::response(['offerId' => 'OFFER-1486', 'sku' => 'SKU-1486', 'listingId' => '800113252568', 'listingDescription' => '<section>old</section>', 'pricingSummary' => ['price' => ['value' => '10.00', 'currency' => 'EUR']]], 200),
+        ]);
+        $account = MarketplaceAccount::query()->create([
+            'marketplace' => 'ebay_de', 'name' => 'eBay DE', 'code' => 'ebay_de', 'api_enabled' => true,
+            'api_base_url' => 'https://api.ebay.com', 'api_mode' => 'write', 'api_credentials' => ['access_token' => 'token'],
+            'api_settings' => ['marketplace_id' => 'EBAY_DE', 'site_id' => '77'],
+        ]);
+        $part = Part::query()->create(['name' => 'Część eBay', 'description' => 'Opis', 'price' => 100, 'quantity' => 1]);
+        MarketplaceListing::query()->create([
+            'marketplace' => 'ebay_de', 'marketplace_account_id' => $account->id, 'part_id' => $part->id, 'status' => 'active',
+            'external_listing_id' => '800113252568', 'external_offer_id' => 'OFFER-1486', 'sku' => 'SKU-1486',
+            'raw_payload' => ['offerId' => 'OFFER-1486', 'sku' => 'SKU-1486', 'item_id' => '800113252568'],
+        ]);
+
+        $this->getJson('/admin/tools/marketplace/ebay-description-audit?channel=ebay_de&part_id='.$part->id.'&patch_assets_only=1&fetch_live_description=1&apply=1&confirm=revise-ebay-description')
+            ->assertOk()
+            ->assertJsonPath('apply_executed', false)
+            ->assertJsonPath('applied', 0)
+            ->assertJsonPath('results.0.revise_api_family', 'inventory_offer')
+            ->assertJsonPath('results.0.inventory_sku', 'SKU-1486')
+            ->assertJsonPath('results.0.offer_id', 'OFFER-1486')
+            ->assertJsonPath('results.0.listing_id', '800113252568')
+            ->assertJsonPath('results.0.can_revise_description_via_inventory_offer', false)
+            ->assertJsonPath('results.0.error_code', 'cannot_revise_description_only_for_inventory_offer')
+            ->assertJsonPath('results.0.inventory_offer_read_only_api.offer_payload_keys.0', 'offerId');
+
+        Http::assertNotSent(fn ($request): bool => $request->hasHeader('X-EBAY-API-CALL-NAME', 'ReviseItem'));
+        Http::assertNotSent(fn ($request): bool => $request->method() !== 'GET' && str_contains($request->url(), '/sell/inventory/v1/offer/'));
+    }
+
+
     private function actingAsAdminUser(): User
     {
         $this->seed(RoleSeeder::class);
