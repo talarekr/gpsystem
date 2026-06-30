@@ -11,6 +11,7 @@ class OvokoListingUrlBackfillService
     public function __construct(
         private readonly MarketplaceApiManager $apiManager,
         private readonly OvokoPartIdExtractor $extractor,
+        private readonly ApiIntegrationLogger $logger,
     ) {}
 
     /** @return array{mode:string,summary:array<string,int>,results:array<int,array<string,mixed>>,warnings:array<int,string>} */
@@ -75,6 +76,9 @@ class OvokoListingUrlBackfillService
                             $listing->external_offer_id = $ovokoId;
                         }
                         $listing->save();
+                        if ($source === 'generated_from_ovoko_part_id') {
+                            $this->logGeneratedUrl($listing, $ovokoId, $resolved);
+                        }
                         $action = 'updated';
                         $summary['updated']++;
                     } else {
@@ -122,6 +126,7 @@ class OvokoListingUrlBackfillService
                 'returned_pagination_count' => $diagnostics['returned_pagination_count'],
                 'ovoko_read_api_attempts' => $diagnostics['ovoko_read_api_attempts'],
                 'resolution_attempts' => $diagnostics['resolution_attempts'],
+                'generated_rule' => $diagnostics['generated_rule'],
             ];
         }
 
@@ -211,6 +216,14 @@ class OvokoListingUrlBackfillService
             }
         }
 
+        $generatedUrl = $this->generatedShopUrlFromOvokoPartId($ovokoId);
+        if ($generatedUrl !== null) {
+            $diagnostics['resolution_attempts'][] = 'generated_from_ovoko_part_id';
+            $diagnostics['generated_rule'] = 'https://ovoko.pl/czesci-samochodowe/hgf{ovoko_part_id}';
+            $diagnostics['accepted_shop_url_host'] = 'ovoko.pl';
+            return [$generatedUrl, 'generated_from_ovoko_part_id', 'would_update', $diagnostics];
+        }
+
         return [null, $diagnostics['rejected_local_url'] !== null ? 'skipped/local_invalid' : ($diagnostics['ovoko_read_api_attempted'] ? 'ovoko_read_api' : ($csvRows !== [] ? 'csv' : 'skipped')), 'missing_shop_url', $diagnostics];
     }
 
@@ -240,6 +253,7 @@ class OvokoListingUrlBackfillService
             'mismatch_sample_ids' => [],
             'returned_pagination' => null,
             'returned_pagination_count' => null,
+            'generated_rule' => null,
         ];
     }
 
@@ -274,6 +288,39 @@ class OvokoListingUrlBackfillService
             if (count($matches) === 1) return ['shop_url' => $this->blankNull($matches[0]['shop_url'] ?? null)];
         }
         return [];
+    }
+
+    private function logGeneratedUrl(MarketplaceListing $listing, string $ovokoId, ?string $generatedUrl): void
+    {
+        if ($generatedUrl === null) {
+            return;
+        }
+
+        $this->logger->success('ovoko', 'ovoko_listing_url_generated', 'Ovoko listing URL generated from ovoko_part_id fallback rule.', [
+            'marketplace_listing_id' => $listing->id,
+            'part_id' => $listing->part_id,
+            'external_id' => $ovokoId,
+            'request' => [
+                'marketplace_listing_id' => $listing->id,
+                'local_part_id' => $listing->part_id,
+                'ovoko_part_id' => $ovokoId,
+            ],
+            'response' => [
+                'generated_url' => $generatedUrl,
+                'source' => 'generated_from_ovoko_part_id',
+                'generated_rule' => 'https://ovoko.pl/czesci-samochodowe/hgf{ovoko_part_id}',
+            ],
+        ]);
+    }
+
+    private function generatedShopUrlFromOvokoPartId(?string $ovokoId): ?string
+    {
+        $ovokoId = $this->blankNull($ovokoId);
+        if ($ovokoId === null || preg_match('/^\d+$/', $ovokoId) !== 1) {
+            return null;
+        }
+
+        return 'https://ovoko.pl/czesci-samochodowe/hgf'.$ovokoId;
     }
 
     private function validateShopUrl(string $url): array

@@ -49,8 +49,8 @@ class BackfillOvokoListingUrlsCommandTest extends TestCase
         Http::fake(['https://ovoko.example.test/*' => Http::response(['status_code' => 'R404', 'msg' => 'Not found'], 200)]);
 
         $this->artisan('marketplace:backfill-ovoko-listing-urls', ['--dry-run' => true, '--part-id' => 7892])
-            ->expectsOutputToContain('missing_shop_url')
-            ->expectsOutputToContain('skipped/local_invalid')
+            ->expectsOutputToContain('would_update')
+            ->expectsOutputToContain('generated_from_ovoko_part_id')
             ->expectsOutputToContain('image_url_not_listing_url')
             ->expectsOutputToContain('ovoko_read_api')
             ->assertExitCode(0);
@@ -87,6 +87,67 @@ class BackfillOvokoListingUrlsCommandTest extends TestCase
             ->assertExitCode(0);
 
         $this->assertDatabaseHas('marketplace_listings', ['id' => 501, 'url' => null]);
+    }
+
+
+    public function test_dry_run_generates_url_from_numeric_ovoko_part_id_without_writing(): void
+    {
+        MarketplaceAccount::query()->create(['marketplace' => 'ovoko', 'name' => 'Ovoko main', 'code' => 'ovoko_main', 'status' => 'active', 'api_base_url' => 'https://ovoko.example.test', 'api_credentials' => ['username' => 'u', 'password' => 'p', 'user_token' => 't']]);
+        DB::table('parts')->insert(['id' => 7892, 'name' => 'PDC module', 'price' => 1, 'quantity' => 1, 'status' => 'ready', 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('marketplace_listings')->insert(['id' => 501, 'marketplace' => 'ovoko', 'part_id' => 7892, 'external_offer_id' => '11701', 'created_at' => now(), 'updated_at' => now()]);
+
+        Http::fake(['https://ovoko.example.test/*' => Http::response(['status_code' => 'R404', 'msg' => 'Not found'], 200)]);
+
+        $this->artisan('marketplace:backfill-ovoko-listing-urls', ['--dry-run' => true, '--part-id' => 7892])
+            ->expectsOutputToContain('https://ovoko.pl/czesci-samochodowe/hgf11701')
+            ->expectsOutputToContain('generated_from_ovoko_part_id')
+            ->expectsOutputToContain('would_update')
+            ->assertExitCode(0);
+
+        $this->assertDatabaseHas('marketplace_listings', ['id' => 501, 'url' => null]);
+        $this->assertDatabaseMissing('marketplace_sync_logs', ['marketplace' => 'ovoko', 'action' => 'ovoko_listing_url_generated', 'marketplace_listing_id' => 501]);
+    }
+
+    public function test_does_not_generate_url_when_ovoko_part_id_is_missing_or_not_numeric_and_does_not_use_local_part_id(): void
+    {
+        MarketplaceAccount::query()->create(['marketplace' => 'ovoko', 'name' => 'Ovoko main', 'code' => 'ovoko_main', 'status' => 'active', 'api_base_url' => 'https://ovoko.example.test', 'api_credentials' => ['username' => 'u', 'password' => 'p', 'user_token' => 't']]);
+        DB::table('parts')->insert([
+            ['id' => 11701, 'name' => 'Part without Ovoko ID', 'price' => 1, 'quantity' => 1, 'status' => 'ready', 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 7893, 'name' => 'Part with bad Ovoko ID', 'price' => 1, 'quantity' => 1, 'status' => 'ready', 'created_at' => now(), 'updated_at' => now()],
+        ]);
+        DB::table('marketplace_listings')->insert([
+            ['id' => 501, 'marketplace' => 'ovoko', 'part_id' => 11701, 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 502, 'marketplace' => 'ovoko', 'part_id' => 7893, 'external_offer_id' => 'abc-11701', 'created_at' => now(), 'updated_at' => now()],
+        ]);
+
+        Http::fake(['https://ovoko.example.test/*' => Http::response(['status_code' => 'R404', 'msg' => 'Not found'], 200)]);
+
+        $this->artisan('marketplace:backfill-ovoko-listing-urls', ['--dry-run' => true, '--limit' => 2])
+            ->expectsOutputToContain('missing_ovoko_id')
+            ->expectsOutputToContain('missing_shop_url')
+            ->doesntExpectOutputToContain('https://ovoko.pl/czesci-samochodowe/hgf11701')
+            ->doesntExpectOutputToContain('https://ovoko.pl/czesci-samochodowe/hgfabc-11701')
+            ->assertExitCode(0);
+
+        $this->assertDatabaseHas('marketplace_listings', ['id' => 501, 'url' => null]);
+        $this->assertDatabaseHas('marketplace_listings', ['id' => 502, 'url' => null]);
+    }
+
+    public function test_apply_logs_generated_ovoko_listing_url(): void
+    {
+        MarketplaceAccount::query()->create(['marketplace' => 'ovoko', 'name' => 'Ovoko main', 'code' => 'ovoko_main', 'status' => 'active', 'api_base_url' => 'https://ovoko.example.test', 'api_credentials' => ['username' => 'u', 'password' => 'p', 'user_token' => 't']]);
+        DB::table('parts')->insert(['id' => 7892, 'name' => 'PDC module', 'price' => 1, 'quantity' => 1, 'status' => 'ready', 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('marketplace_listings')->insert(['id' => 501, 'marketplace' => 'ovoko', 'part_id' => 7892, 'external_offer_id' => '11701', 'created_at' => now(), 'updated_at' => now()]);
+
+        Http::fake(['https://ovoko.example.test/*' => Http::response(['status_code' => 'R404', 'msg' => 'Not found'], 200)]);
+
+        $this->artisan('marketplace:backfill-ovoko-listing-urls', ['--apply' => true, '--part-id' => 7892])
+            ->expectsOutputToContain('updated')
+            ->expectsOutputToContain('generated_from_ovoko_part_id')
+            ->assertExitCode(0);
+
+        $this->assertDatabaseHas('marketplace_listings', ['id' => 501, 'url' => 'https://ovoko.pl/czesci-samochodowe/hgf11701']);
+        $this->assertDatabaseHas('marketplace_sync_logs', ['marketplace' => 'ovoko', 'action' => 'ovoko_listing_url_generated', 'marketplace_listing_id' => 501, 'part_id' => 7892, 'external_id' => '11701']);
     }
 
     public function test_apply_updates_from_csv_and_does_not_call_api(): void
