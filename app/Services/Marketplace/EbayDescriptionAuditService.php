@@ -15,7 +15,7 @@ class EbayDescriptionAuditService
     public function __construct(private readonly EbayDescriptionTemplateRenderer $renderer) {}
 
     /** @return array<string,mixed> */
-    public function run(string $channel = 'ebay_de', int $limit = 20, int $offset = 0, ?int $partId = null, bool $apply = false, bool $confirmed = false, bool $checkApi = false): array
+    public function run(string $channel = 'ebay_de', int $limit = 20, int $offset = 0, ?int $partId = null, bool $apply = false, bool $confirmed = false, bool $checkApi = false, bool $patchAssetsOnly = false): array
     {
         abort_unless(in_array($channel, ['ebay_de', 'ebay_fr', 'ebay'], true), 422, 'Supported eBay channel values: ebay_de, ebay_fr, ebay.');
         $channel = $channel === 'ebay' ? 'ebay_de' : $channel;
@@ -24,7 +24,7 @@ class EbayDescriptionAuditService
 
         $all = (clone $query)->get();
         $rows = (clone $query)->orderBy('id')->offset(max(0, $offset))->limit(max(1, min(100, $limit)))->get();
-        $results = $rows->map(fn (MarketplaceListing $listing): array => $this->auditListing($listing, $channel, $apply, $confirmed, $checkApi))->values()->all();
+        $results = $rows->map(fn (MarketplaceListing $listing): array => $this->auditListing($listing, $channel, $apply, $confirmed, $checkApi, $patchAssetsOnly))->values()->all();
 
         return [
             'mode' => $apply && $confirmed ? 'apply' : 'dry_run',
@@ -41,15 +41,17 @@ class EbayDescriptionAuditService
                 'active_needs_description_revise' => collect($results)->where('needs_description_revise', true)->where('skip_ended_listing', false)->count(),
                 'ended_skipped' => collect($results)->where('skip_ended_listing', true)->count(),
                 'would_revise_description' => collect($results)->where('action', 'would_revise_description')->count(),
+                'would_patch_asset_src_only' => collect($results)->where('action', 'would_patch_asset_src_only')->count(),
+                'blocked' => collect($results)->where('action', 'blocked')->count(),
                 'applied' => 0,
             ],
             'results' => $results,
-            'warnings' => ['Read-only/dry-run audit. No eBay write, publish, revise, relist, end, stock, price or order sync is performed. apply=1 requires confirm=revise-ebay-description and is intentionally not executed by this diagnostic response.'],
+            'warnings' => ['Read-only/dry-run audit. No eBay write, publish, revise, relist, end, stock, price or order sync is performed. apply=1 requires confirm=revise-ebay-description and is intentionally not executed by this diagnostic response. patch_assets_only=1 never falls back to a generated full description.'],
         ];
     }
 
     /** @return array<string,mixed> */
-    public function auditListing(MarketplaceListing $listing, string $channel = 'ebay_de', bool $apply = false, bool $confirmed = false, bool $checkApi = false): array
+    public function auditListing(MarketplaceListing $listing, string $channel = 'ebay_de', bool $apply = false, bool $confirmed = false, bool $checkApi = false, bool $patchAssetsOnly = false): array
     {
         $raw = $listing->raw_payload ?: [];
         $localHtml = $this->localDescriptionHtml($raw);
@@ -58,6 +60,10 @@ class EbayDescriptionAuditService
         $liveHtml = (string) ($live['description_html'] ?: $localHtml);
         $status = $this->finalStatus($listing, $raw, $live);
         $skipEnded = $status !== 'active';
+
+        if ($patchAssetsOnly) {
+            return $this->auditListingAssetSrcOnly($listing, $channel, $localHtml, $liveHtml, $live, $raw, $status, $skipEnded, $apply, $confirmed);
+        }
 
         $current = $this->htmlDiagnostics($currentHtml, true);
         $liveDiag = $this->htmlDiagnostics($liveHtml, true);
@@ -106,6 +112,120 @@ class EbayDescriptionAuditService
             'revise_payload_safe' => $needs || $apply ? $payload : null,
             'revise_payload_forbidden_keys_present' => array_values(array_intersect(array_keys($payload), ['price','pricingSummary','availableQuantity','quantity','stock','availability','listingPolicies','fulfillmentPolicyId','paymentPolicyId','returnPolicyId','merchantLocationKey','images','product'])),
         ];
+    }
+
+
+    /** @return array<string,mixed> */
+    private function auditListingAssetSrcOnly(MarketplaceListing $listing, string $channel, string $localHtml, string $liveHtml, array $live, array $raw, string $status, bool $skipEnded, bool $apply, bool $confirmed): array
+    {
+        $sourceHtml = trim($liveHtml) !== '' ? $liveHtml : $localHtml;
+        $base = [
+            'local_part_id' => $listing->part_id,
+            'marketplace_listing_id' => $listing->id,
+            'marketplace' => $listing->marketplace,
+            'channel' => $channel,
+            'patch_assets_only' => true,
+            'marketplace_write' => false,
+            'publish' => false,
+            'revise' => false,
+            'relist' => false,
+            'end' => false,
+            'stock_order_price_sync' => false,
+            'local_status' => $listing->status,
+            'api_listing_status' => $live['api_listing_status'] ?? null,
+            'final_listing_status' => $status,
+            'skip_ended_listing' => $skipEnded,
+            'marketplace_listing_id_external' => $listing->external_listing_id,
+            'external_offer_id' => $listing->external_offer_id,
+            'item_id' => $this->itemId($listing, $raw),
+            'original_description_length' => mb_strlen($sourceHtml),
+            'local_description_length' => mb_strlen($localHtml),
+            'live_description_length' => mb_strlen($liveHtml),
+            'live_read_only_api' => Arr::except($live, ['description_html']),
+            'apply_requested' => $apply,
+            'apply_confirmed' => $confirmed,
+            'apply_executed' => false,
+        ];
+
+        if ($sourceHtml === '') {
+            return $base + [
+                'action' => 'blocked',
+                'blocker' => 'cannot_patch_assets_only_without_existing_description',
+                'needs_description_revise' => false,
+                'replacements_count' => 0,
+                'asset_src_replacements' => [],
+                'old_src' => [],
+                'new_src' => [],
+                'patched_description_length' => 0,
+                'changed_only_img_src' => false,
+                'forbidden_changes_detected' => false,
+                'revise_payload_safe' => null,
+                'revise_payload_forbidden_keys_present' => [],
+            ];
+        }
+
+        $patch = $this->patchTemplateAssetSrcs($sourceHtml);
+        $payload = ['listingDescription' => $patch['html']];
+
+        return $base + [
+            'action' => $skipEnded ? 'skip_ended_listing' : ($patch['replacements_count'] > 0 ? 'would_patch_asset_src_only' : 'ok'),
+            'needs_description_revise' => ! $skipEnded && $patch['replacements_count'] > 0,
+            'confidence' => $patch['replacements_count'] > 0 ? 'high' : null,
+            'replacements_count' => $patch['replacements_count'],
+            'asset_src_replacements' => $patch['replacements'],
+            'old_src' => array_values(array_unique(array_column($patch['replacements'], 'old_src'))),
+            'new_src' => array_values(array_unique(array_column($patch['replacements'], 'new_src'))),
+            'patched_description_length' => mb_strlen($patch['html']),
+            'changed_only_img_src' => $patch['changed_only_img_src'],
+            'forbidden_changes_detected' => ! $patch['changed_only_img_src'],
+            'description_changed' => $sourceHtml !== $patch['html'],
+            'revise_payload_safe' => ($patch['replacements_count'] > 0 || $apply) && ! $skipEnded ? $payload : null,
+            'revise_payload_forbidden_keys_present' => array_values(array_intersect(array_keys($payload), ['price','pricingSummary','availableQuantity','quantity','stock','availability','listingPolicies','fulfillmentPolicyId','paymentPolicyId','returnPolicyId','merchantLocationKey','images','product'])),
+        ];
+    }
+
+    /** @return array{html:string,replacements_count:int,replacements:array<int,array{old_src:string,new_src:string}>,changed_only_img_src:bool} */
+    private function patchTemplateAssetSrcs(string $html): array
+    {
+        $replacements = [];
+        $patched = preg_replace_callback('/(<img\b[^>]*?\bsrc\s*=\s*)(["\']?)([^"\'\s>]*)(\2)([^>]*>)/i', function (array $m) use (&$replacements): string {
+            $newSrc = $this->mappedTemplateAssetUrl($m[3]);
+            if ($newSrc === null || $newSrc === $m[3]) return $m[0];
+            $replacements[] = ['old_src' => $m[3], 'new_src' => $newSrc];
+            return $m[1].$m[2].$newSrc.$m[4].$m[5];
+        }, $html) ?? $html;
+
+        return [
+            'html' => $patched,
+            'replacements_count' => count($replacements),
+            'replacements' => $replacements,
+            'changed_only_img_src' => $this->maskImgSrcValues($patched) === $this->maskImgSrcValues($html),
+        ];
+    }
+
+    private function maskImgSrcValues(string $html): string
+    {
+        return preg_replace('/(<img\b[^>]*?\bsrc\s*=\s*)(["\']?)([^"\'\s>]*)(\2)([^>]*>)/i', '$1$2__IMG_SRC__$4$5', $html) ?? $html;
+    }
+
+    private function mappedTemplateAssetUrl(string $src): ?string
+    {
+        $s = strtolower($src);
+        $map = [
+            'icon-shipping.png' => ['icon-shipping', 'shipping'],
+            'icon-returns.png' => ['returns', 'return'],
+            'icon-packaging.png' => ['packaging', 'package'],
+            'icon-original.png' => ['original', 'oe'],
+            'europe-map.png' => ['europe-map', 'map'],
+            'dhl-logo.png' => ['dhl'],
+            'dpd-logo.png' => ['dpd'],
+        ];
+        foreach ($map as $file => $needles) {
+            foreach ($needles as $needle) {
+                if (str_contains($s, $needle)) return 'https://gpswiss.pl/ebay-template/assets/'.$file;
+            }
+        }
+        return null;
     }
 
     /** @return array<string,mixed> */
