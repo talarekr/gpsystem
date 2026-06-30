@@ -81,6 +81,7 @@ class MarketplaceListingReadinessService
             if (! $descriptionReady) { $missing[] = 'description'; $warnings[] = 'Allegro description should be prepared before publishing later.'; }
             $allegroSalesSettings = $this->allegroSalesSettingsResolver->resolve($account, $part->allegro_shipping_rate_name ?? null);
             foreach (($allegroSalesSettings['blockers'] ?? []) as $salesSettingsBlocker) { $blockers[] = $salesSettingsBlocker; }
+            foreach ($this->allegroGpsrBlockers($account) as $gpsrBlocker) { $missing[] = $gpsrBlocker['missing']; $blockers[] = $gpsrBlocker['blocker']; }
             if (blank($part->allegro_shipping_rate_name ?? null)) { $missing[] = 'allegro_shipping_rate_name'; }
             if ($categoryMapping && filled($categoryMapping->external_category_id)) {
                 $definitions = $this->allegroCategoryParametersService->definitions((string) $categoryMapping->external_category_id);
@@ -247,6 +248,41 @@ class MarketplaceListingReadinessService
     private function loadSafeRelations(Part $part): void { $relations = array_filter([method_exists($part, 'images') ? 'images' : null, method_exists($part, 'partImages') ? 'partImages' : null, method_exists($part, 'category') ? 'category' : null, method_exists($part, 'car') ? 'car' : null, method_exists($part, 'marketplaceListings') ? (Schema::hasTable('marketplace_accounts') ? 'marketplaceListings.account' : 'marketplaceListings') : null]); try { $part->loadMissing($relations); } catch (\Throwable) { foreach ($relations as $relation) { try { $part->loadMissing([$relation]); } catch (\Throwable) {} } } }
     private function imagesFor(Part $part): \Illuminate\Support\Collection { foreach (['images', 'partImages'] as $relation) { if (! method_exists($part, $relation)) continue; try { return $part->relationLoaded($relation) ? $part->{$relation}->filter() : $part->{$relation}()->get(); } catch (\Throwable) {} } return collect(); }
     private function accountFor(string $channel): ?MarketplaceAccount { if (! Schema::hasTable('marketplace_accounts')) return null; $code = $channel === 'ovoko' ? 'ovoko_main' : $channel; return MarketplaceAccount::query()->where('code', $code)->first(); }
+
+    private function allegroGpsrDiagnostics(?MarketplaceAccount $account): array
+    {
+        $settings = is_array($account?->api_settings) ? $account->api_settings : [];
+        return [
+            'responsibleProducer' => filled($this->allegroGpsrSetting($settings, 'responsibleProducer')) ? 'configured' : 'missing: configure marketplace_accounts.api_settings.responsibleProducer',
+            'safetyInformation' => filled($this->allegroGpsrSetting($settings, 'safetyInformation')) ? 'configured' : 'missing: configure marketplace_accounts.api_settings.safetyInformation',
+        ];
+    }
+
+    private function allegroGpsrBlockers(?MarketplaceAccount $account): array
+    {
+        $settings = is_array($account?->api_settings) ? $account->api_settings : [];
+        $blockers = [];
+        if (blank($this->allegroGpsrSetting($settings, 'responsibleProducer'))) $blockers[] = ['missing' => 'allegro_gpsr_responsibleProducer', 'blocker' => 'Allegro GPSR responsibleProducer is not configured.'];
+        if (blank($this->allegroGpsrSetting($settings, 'safetyInformation'))) $blockers[] = ['missing' => 'allegro_gpsr_safetyInformation', 'blocker' => 'Allegro GPSR safetyInformation is not configured.'];
+        return $blockers;
+    }
+
+    private function allegroProductSetPreview(array $allegroParameters, ?MarketplaceAccount $account): array
+    {
+        $settings = is_array($account?->api_settings) ? $account->api_settings : [];
+        $productSet = ['product' => ['parameters' => $allegroParameters['product_parameters'] ?? []]];
+        foreach (['responsibleProducer', 'safetyInformation'] as $key) {
+            $value = $this->allegroGpsrSetting($settings, $key);
+            if (filled($value)) $productSet[$key] = $value;
+        }
+        return $productSet;
+    }
+
+    private function allegroGpsrSetting(array $settings, string $key): mixed
+    {
+        return $settings[$key] ?? data_get($settings, 'gpsr.'.$key) ?? data_get($settings, 'productSet.0.'.$key);
+    }
+
     private function marketplaceCode(string $channel): ?string { return match (true) { $channel === 'storefront' => null, $channel === 'allegro_main' => 'allegro', str_starts_with($channel, 'ebay_') => $channel, default => $channel }; }
     private function priceFor(Part $part, string $channel): ?float { $base = is_numeric($part->price ?? null) ? (float) $part->price : null; $value = match ($channel) { 'ovoko' => $part->ovoko_price ?? null, 'ebay_de', 'ebay_fr' => $part->ebay_price ?? ($base !== null ? round($base * 1.25, 2) : null), 'allegro_main' => $part->allegro_price ?? $base, default => $base }; return is_numeric($value) ? (float) $value : null; }
     private function priceSource(string $channel): string { return match ($channel) { 'ovoko' => 'parts.ovoko_price_pln', 'ebay_de', 'ebay_fr' => 'parts.ebay_price_pln_or_storefront_price_x_1_25_pln', 'allegro_main' => 'parts.allegro_price_pln_or_storefront_price_pln', default => 'parts.price_pln' }; }
@@ -423,6 +459,8 @@ class MarketplaceListingReadinessService
             $preview['allegro_parameters'] = $allegroParameters;
             $preview['allegro_product_parameters'] = $allegroParameters['product_parameters'] ?? [];
             $preview['allegro_offer_parameters'] = $allegroParameters['offer_parameters'] ?? [];
+            $preview['allegro_payload_parameters'] = $allegroParameters['payload_parameters'] ?? $allegroParameters['offer_parameters'] ?? [];
+            $preview['parameters'] = $preview['allegro_payload_parameters'];
             $preview['payments'] = $allegroParameters['payments'] ?? [];
             $preview['allegro_payment_diagnostics'] = $allegroParameters['payment_diagnostics'] ?? [];
             $preview['allegro_parameter_diagnostics'] = [
@@ -437,6 +475,8 @@ class MarketplaceListingReadinessService
             $preview['will_make_marketplace_request'] = false;
             $preview['allegro_sales_settings'] = $allegroSalesSettings;
             $preview['delivery'] = ['shippingRates' => ['id' => $allegroSalesSettings['shippingRates']['id'] ?? null]];
+            $preview['productSet'] = [$this->allegroProductSetPreview($allegroParameters, $this->accountFor($channel))];
+            $preview['gpsr_diagnostics'] = $this->allegroGpsrDiagnostics($this->accountFor($channel));
             $preview['afterSalesServices'] = array_filter([
                 'returnPolicy' => ['id' => $allegroSalesSettings['returnPolicy']['id'] ?? null],
                 'impliedWarranty' => ['id' => $allegroSalesSettings['impliedWarranty']['id'] ?? null],

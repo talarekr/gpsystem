@@ -452,5 +452,27 @@ class AllegroOfferParametersBuilder
     }
 
     private function norm(mixed $v): string { return Str::of((string) $v)->lower()->ascii()->replaceMatches('/[^a-z0-9]+/', '')->toString(); }
-    private function result(array $offer, array $product, array $missing, array $optional, array $unmapped, array $diag, array $defs, array $payments = [], array $paymentDiagnostics = []): array { return ['allegro_parameters'=>array_merge($product, $offer),'offer_parameters'=>$offer,'product_parameters'=>$product,'payments'=>$payments,'missing_required_parameters'=>$missing,'optional_parameters_present'=>$optional,'unmapped_parameters'=>$unmapped,'parameter_source_diagnostics'=>array_merge($diag, $paymentDiagnostics),'product_parameter_diagnostics'=>array_values(array_filter($diag, fn ($row) => ($row['parameter_location'] ?? null) === 'productSet[0].product.parameters')),'offer_parameter_diagnostics'=>array_values(array_filter($diag, fn ($row) => ($row['parameter_location'] ?? null) === 'parameters')),'payment_diagnostics'=>$paymentDiagnostics,'parameter_definitions_source'=>$defs['source'] ?? 'none','will_make_marketplace_request'=>false]; }
+    private function result(array $offer, array $product, array $missing, array $optional, array $unmapped, array $diag, array $defs, array $payments = [], array $paymentDiagnostics = []): array
+    {
+        $requiredProductParameterIds = collect($diag)
+            ->filter(fn ($row) => ($row['parameter_location'] ?? null) === 'productSet[0].product.parameters' && (bool) ($row['required'] ?? false) && ($row['status'] ?? null) === 'resolved')
+            ->pluck('id')
+            ->map(fn ($id) => (string) $id)
+            ->all();
+        $payloadParameters = $this->mergeParameters($offer, array_values(array_filter($product, fn ($row) => in_array((string) ($row['id'] ?? ''), $requiredProductParameterIds, true))));
+
+        return ['allegro_parameters'=>array_merge($product, $offer),'offer_parameters'=>$offer,'payload_parameters'=>$payloadParameters,'product_parameters'=>$product,'payments'=>$payments,'missing_required_parameters'=>$missing,'optional_parameters_present'=>$optional,'unmapped_parameters'=>$unmapped,'parameter_source_diagnostics'=>array_merge($diag, $paymentDiagnostics),'product_parameter_diagnostics'=>array_values(array_filter($diag, fn ($row) => ($row['parameter_location'] ?? null) === 'productSet[0].product.parameters')),'offer_parameter_diagnostics'=>array_values(array_filter($diag, fn ($row) => ($row['parameter_location'] ?? null) === 'parameters')),'payment_diagnostics'=>$paymentDiagnostics,'parameter_definitions_source'=>$defs['source'] ?? 'none','will_make_marketplace_request'=>false];
+    }
+
+    private function mergeParameters(array ...$groups): array
+    {
+        $merged = [];
+        foreach ($groups as $group) {
+            foreach ($group as $parameter) {
+                if (! is_array($parameter) || blank($parameter['id'] ?? null)) continue;
+                $merged[(string) $parameter['id']] = $parameter;
+            }
+        }
+        return array_values($merged);
+    }
 }
