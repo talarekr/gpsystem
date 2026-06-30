@@ -31,25 +31,25 @@ class AllegroDescriptionBuilder
             $blockers[] = 'missing_part_description';
         }
 
-        if (! $part->car) {
+        $vehicle = $part->car;
+        $vehicleSnapshot = is_array($part->vehicle_snapshot ?? null) ? $part->vehicle_snapshot : [];
+        if (! $vehicle && $vehicleSnapshot === []) {
             $blockers[] = 'missing_donor_vehicle';
         }
-
-        $vehicle = $part->car;
         $values = [];
         $diagnostics = [];
         foreach (self::REQUIRED_VEHICLE_FIELDS as $field => $label) {
-            $value = $vehicle ? $this->cleanText((string) ($vehicle->{$field} ?? '')) : '';
+            $value = $vehicle ? $this->cleanText((string) ($vehicle->{$field} ?? '')) : $this->cleanText((string) ($vehicleSnapshot[$field] ?? ''));
             $values[$field] = $value;
-            if ($vehicle && $value === '') {
+            if (($vehicle || $vehicleSnapshot !== []) && $value === '') {
                 $blockers[] = 'missing_donor_vehicle_field:'.$label;
             }
         }
 
         foreach (self::OPTIONAL_VEHICLE_FIELDS as $field => $label) {
-            $value = $vehicle ? $this->cleanText((string) ($vehicle->{$field} ?? '')) : '';
+            $value = $vehicle ? $this->cleanText((string) ($vehicle->{$field} ?? '')) : $this->cleanText((string) ($vehicleSnapshot[$field] ?? ''));
             $values[$field] = $value;
-            if ($vehicle && $value === '') {
+            if (($vehicle || $vehicleSnapshot !== []) && $value === '') {
                 $diagnostics['optional_donor_vehicle_fields_missing'][] = $label;
             }
         }

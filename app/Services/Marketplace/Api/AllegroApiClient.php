@@ -186,8 +186,23 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
 
     public function productOfferOperationStatus(string $location): array
     {
-        $response = Http::withToken((string) $this->credentials()['access_token'])->accept('application/vnd.allegro.public.v1+json')->timeout(20)->get($location);
+        $response = Http::withToken((string) $this->credentials()['access_token'])->accept('application/vnd.allegro.public.v1+json')->timeout(20)->get($this->absoluteUrl($location));
         return ['ok' => $response->successful(), 'http_status' => $response->status(), 'json' => is_array($response->json()) ? $response->json() : [], 'request_id' => $response->header('trace-id') ?: $response->header('x-request-id')];
+    }
+
+    public function productOffer(string $offerId): array
+    {
+        $response = Http::withToken((string) $this->credentials()['access_token'])
+            ->accept('application/vnd.allegro.public.v1+json')
+            ->timeout(20)
+            ->get($this->absoluteUrl('/sale/product-offers/'.rawurlencode($offerId)));
+        return ['ok' => $response->successful(), 'http_status' => $response->status(), 'json' => is_array($response->json()) ? $response->json() : [], 'request_id' => $response->header('trace-id') ?: $response->header('x-request-id')];
+    }
+
+    private function absoluteUrl(string $location): string
+    {
+        if (str_starts_with($location, 'http://') || str_starts_with($location, 'https://')) return $location;
+        return rtrim((string) $this->account?->api_base_url, '/').'/'.ltrim($location, '/');
     }
 
     protected function requestSample(int $limit): array

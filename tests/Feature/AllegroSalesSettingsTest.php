@@ -158,6 +158,8 @@ class AllegroSalesSettingsTest extends TestCase
         $this->assertSame(['129917'], $result['request_summary']['productSet_0_product_parameters_ids']);
         $this->assertSame(1, $result['request_summary']['productSet_0_product_images_count']);
         $this->assertTrue($result['request_summary']['productSet_0_product_main_image_present']);
+        $this->assertSame(1, $result['request_summary']['description_sections_count']);
+        $this->assertTrue($result['request_summary']['description_has_non_empty_content']);
         Http::assertSent(function ($request) use ($description) {
             if ($request->url() !== 'https://api.allegro.pl/sale/product-offers') {
                 return false;
@@ -176,6 +178,62 @@ class AllegroSalesSettingsTest extends TestCase
                 && array_column($data['parameters'], 'id') === ['11323']
                 && array_column(data_get($data, 'productSet.0.product.parameters'), 'id') === ['129917'];
         });
+    }
+
+
+    public function test_allegro_readiness_payload_includes_builder_description_for_live_publish(): void
+    {
+        Http::fake($this->fakeAllegro());
+        $part = $this->part('KURIER DPD');
+        $part->forceFill(['vehicle_snapshot' => [
+            'make' => 'Audi',
+            'model' => 'A4',
+            'production_year' => '2018',
+            'engine_code' => 'CAGA',
+        ]])->save();
+
+        $result = app(MarketplaceListingReadinessService::class)->checkPartReadiness($part, 'allegro_main');
+
+        $this->assertSame([], $result['prepared_payload_preview_safe']['allegro_description_blockers']);
+        $this->assertSame('TEXT', data_get($result, 'prepared_payload_preview_safe.description.sections.0.items.0.type'));
+        $this->assertStringContainsString('Opis', data_get($result, 'prepared_payload_preview_safe.description.sections.0.items.0.content'));
+        $this->assertSame('IMAGE', data_get($result, 'prepared_payload_preview_safe.description.sections.0.items.1.type'));
+    }
+
+    public function test_allegro_live_payload_rebuilds_description_when_payload_contains_empty_placeholder(): void
+    {
+        Http::fake(array_merge($this->fakeAllegro(), [
+            'https://api.allegro.pl/sale/product-offers' => Http::response(['id' => 'offer-123'], 201),
+        ]));
+        $part = $this->part('KURIER DPD');
+        $part->forceFill(['vehicle_snapshot' => [
+            'make' => 'Audi',
+            'model' => 'A4',
+            'production_year' => '2018',
+            'engine_code' => 'CAGA',
+        ]])->save();
+        $payload = [
+            'sku' => 'GPS-7890',
+            'title' => 'Błotnik Audi',
+            'category_id' => '123',
+            'price_pln' => 100,
+            'quantity' => 1,
+            'image_urls' => ['https://gpswiss.pl/storage/parts/photos/imported/7890/kuyJdjAM4xzYvW7Hoy0YQ7WlCKE8nRfkSUskHyT0.jpg'],
+            'description' => ['sections' => [['items' => [['type' => 'TEXT', 'content' => '<p></p>']]]]],
+            'allegro_parameters' => ['payload_parameters' => [], 'product_parameters' => []],
+        ];
+
+        $adapter = new class(app(MarketplaceListingReadinessService::class), app(MarketplacePublishGate::class), app(ApiIntegrationLogger::class), app(AllegroSalesSettingsResolver::class)) extends AllegroPublishAdapter {
+            public function callPerformLivePublish(Part $part, array $readiness, array $payload, MarketplaceAccount $account): array { return $this->performLivePublish($part, $readiness, $payload, $account); }
+        };
+
+        $result = $adapter->callPerformLivePublish($part, ['marketplace_price' => 100], $payload, MarketplaceAccount::query()->where('code', 'allegro_main')->firstOrFail());
+
+        $this->assertTrue($result['ok']);
+        $this->assertTrue($result['request_summary']['description_has_non_empty_content']);
+        Http::assertSent(fn ($request) => $request->url() === 'https://api.allegro.pl/sale/product-offers'
+            && str_contains((string) data_get($request->data(), 'description.sections.0.items.0.content'), 'Opis')
+            && data_get($request->data(), 'description.sections.0.items.1.type') === 'IMAGE');
     }
 
     private function part(?string $shippingRateName): Part

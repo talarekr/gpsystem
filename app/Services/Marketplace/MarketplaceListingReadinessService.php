@@ -15,7 +15,7 @@ class MarketplaceListingReadinessService
     private const DEFAULT_ALLEGRO_SAFETY_INFORMATION = 'Część używana pochodząca z demontażu pojazdu. Montaż powinien zostać wykonany przez wykwalifikowany warsztat lub osobę posiadającą odpowiednią wiedzę techniczną. Przed montażem należy porównać numer części i zgodność z pojazdem. Produkt nie jest zabawką.';
     public const CHANNELS = ['storefront', 'allegro_main', 'ovoko', 'ebay_de', 'ebay_fr'];
 
-    public function __construct(private readonly TranslationService $translationService, private readonly EbayDescriptionTemplateRenderer $ebayDescriptionTemplateRenderer, private readonly NbpExchangeRateService $exchangeRateService, private readonly EbayItemSpecificsService $ebayItemSpecificsService, private readonly AllegroCategoryParametersService $allegroCategoryParametersService, private readonly AllegroOfferParametersBuilder $allegroOfferParametersBuilder, private readonly MarketplaceImageSelectionService $marketplaceImageSelectionService, private readonly AllegroSalesSettingsResolver $allegroSalesSettingsResolver) {}
+    public function __construct(private readonly TranslationService $translationService, private readonly EbayDescriptionTemplateRenderer $ebayDescriptionTemplateRenderer, private readonly NbpExchangeRateService $exchangeRateService, private readonly EbayItemSpecificsService $ebayItemSpecificsService, private readonly AllegroCategoryParametersService $allegroCategoryParametersService, private readonly AllegroOfferParametersBuilder $allegroOfferParametersBuilder, private readonly MarketplaceImageSelectionService $marketplaceImageSelectionService, private readonly AllegroSalesSettingsResolver $allegroSalesSettingsResolver, private readonly AllegroDescriptionBuilder $allegroDescriptionBuilder) {}
 
     /** @return array<string, mixed> */
     public function checkPartReadiness(Part $part, string $channel): array
@@ -489,6 +489,10 @@ class MarketplaceListingReadinessService
             $preview['unmapped_parameters'] = $allegroParameters['unmapped_parameters'] ?? [];
             $preview['parameter_definitions_source'] = $allegroParameters['parameter_definitions_source'] ?? 'none';
             $preview['will_make_marketplace_request'] = false;
+            $allegroDescription = $this->allegroDescriptionBuilder->build($part, $preview['image_urls']);
+            $preview['description'] = $allegroDescription['description'];
+            $preview['allegro_description_diagnostics'] = $allegroDescription['diagnostics'];
+            $preview['allegro_description_blockers'] = $allegroDescription['blockers'];
             $preview['allegro_sales_settings'] = $allegroSalesSettings;
             $preview['delivery'] = ['shippingRates' => ['id' => $allegroSalesSettings['shippingRates']['id'] ?? null]];
             $preview['productSet'] = [$this->allegroProductSetPreview($allegroParameters, $this->accountFor($channel), $preview['title'], $preview['image_urls'][0] ?? null)];
