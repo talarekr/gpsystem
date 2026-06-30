@@ -136,7 +136,15 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
             'images_count' => is_array($images) ? count($images) : 0,
             'images_shape' => $this->imagesShape($images),
             'first_image_type' => $first === null ? null : get_debug_type($first),
+            'payload_parameters_ids' => $this->parameterIds(is_array($body) ? ($body['parameters'] ?? []) : ($payload['parameters'] ?? $payload['allegro_parameters']['payload_parameters'] ?? $payload['allegro_offer_parameters'] ?? $payload['allegro_parameters']['offer_parameters'] ?? [])),
+            'productSet_0_product_parameters_ids' => $this->parameterIds(is_array($body) ? data_get($body, 'productSet.0.product.parameters', []) : data_get($payload, 'productSet.0.product.parameters', $payload['allegro_product_parameters'] ?? $payload['allegro_parameters']['product_parameters'] ?? [])),
         ];
+    }
+
+    /** @return array<int, string> */
+    private function parameterIds(mixed $parameters): array
+    {
+        return array_values(array_filter(array_map(fn (mixed $parameter): ?string => is_array($parameter) && filled($parameter['id'] ?? null) ? (string) $parameter['id'] : null, (array) $parameters)));
     }
 
     private function imagesShape(mixed $images): string

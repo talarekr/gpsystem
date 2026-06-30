@@ -10,6 +10,9 @@ use Illuminate\Support\Str;
 
 class AllegroOfferParametersBuilder
 {
+    /** @var array<int, string> */
+    private const PRODUCT_ONLY_PARAMETER_IDS = ['129917'];
+
     private array $loggedCarTypeMappings = [];
 
     public function build(Part $part, ?MarketplaceCategoryMapping $mapping, array $definitionsResult): array
@@ -460,6 +463,7 @@ class AllegroOfferParametersBuilder
             ->map(fn ($id) => (string) $id)
             ->all();
         $payloadParameters = $this->mergeParameters($offer, array_values(array_filter($product, fn ($row) => in_array((string) ($row['id'] ?? ''), $requiredProductParameterIds, true))));
+        $payloadParameters = array_values(array_filter($payloadParameters, fn ($row) => ! in_array((string) ($row['id'] ?? ''), self::PRODUCT_ONLY_PARAMETER_IDS, true)));
 
         return ['allegro_parameters'=>array_merge($product, $offer),'offer_parameters'=>$offer,'payload_parameters'=>$payloadParameters,'product_parameters'=>$product,'payments'=>$payments,'missing_required_parameters'=>$missing,'optional_parameters_present'=>$optional,'unmapped_parameters'=>$unmapped,'parameter_source_diagnostics'=>array_merge($diag, $paymentDiagnostics),'product_parameter_diagnostics'=>array_values(array_filter($diag, fn ($row) => ($row['parameter_location'] ?? null) === 'productSet[0].product.parameters')),'offer_parameter_diagnostics'=>array_values(array_filter($diag, fn ($row) => ($row['parameter_location'] ?? null) === 'parameters')),'payment_diagnostics'=>$paymentDiagnostics,'parameter_definitions_source'=>$defs['source'] ?? 'none','will_make_marketplace_request'=>false];
     }
