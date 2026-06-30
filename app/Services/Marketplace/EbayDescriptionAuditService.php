@@ -59,7 +59,8 @@ class EbayDescriptionAuditService
         $live = ($checkApi || $fetchLiveDescription) ? $this->readOnlyLiveDescription($listing, $channel, $fetchLiveDescription) : ['checked' => false, 'description_html' => null, 'live_description_source' => 'not_available'];
         $liveHtml = (string) ($live['description_html'] ?? '');
         $status = $this->finalStatus($listing, $raw, $live);
-        $skipEnded = $status !== 'active';
+        $skipEnded = $this->shouldSkipEndedListing($status, $live);
+        $statusDiagnostics = $this->statusDiagnostics($listing, $raw, $live, $status, $skipEnded);
 
         if ($patchAssetsOnly) {
             return $this->auditListingAssetSrcOnly($listing, $channel, $localHtml, $liveHtml, $live, $raw, $status, $skipEnded, $apply, $confirmed, $fetchLiveDescription);
@@ -88,6 +89,9 @@ class EbayDescriptionAuditService
             'api_listing_status' => $live['api_listing_status'] ?? null,
             'final_listing_status' => $status,
             'skip_ended_listing' => $skipEnded,
+            'status_blocking_reason' => $statusDiagnostics['status_blocking_reason'],
+            'status_source' => $statusDiagnostics['status_source'],
+            'trading_get_item_confirms_item_exists' => $statusDiagnostics['trading_get_item_confirms_item_exists'],
             'marketplace_listing_id_external' => $listing->external_listing_id,
             'external_offer_id' => $listing->external_offer_id,
             'item_id' => $this->itemId($listing, $raw),
@@ -138,6 +142,9 @@ class EbayDescriptionAuditService
             'api_listing_status' => $live['api_listing_status'] ?? null,
             'final_listing_status' => $status,
             'skip_ended_listing' => $skipEnded,
+            'status_blocking_reason' => $this->statusDiagnostics($listing, $raw, $live, $status, $skipEnded)['status_blocking_reason'],
+            'status_source' => $this->statusDiagnostics($listing, $raw, $live, $status, $skipEnded)['status_source'],
+            'trading_get_item_confirms_item_exists' => $this->statusDiagnostics($listing, $raw, $live, $status, $skipEnded)['trading_get_item_confirms_item_exists'],
             'marketplace_listing_id_external' => $listing->external_listing_id,
             'external_offer_id' => $listing->external_offer_id,
             'item_id' => $this->itemId($listing, $raw),
@@ -267,7 +274,50 @@ class EbayDescriptionAuditService
 
     private function isCurrentAssetUrl(string $src): bool { return Str::startsWith($src, 'https://gpswiss.pl/ebay-template/assets/'); }
     private function localDescriptionHtml(array $raw): string { foreach (['description_rendered_html','listingDescription','description.html','request_summary.description_rendered_html','request.listingDescription','offer.listingDescription','meta.description_rendered_html'] as $key) { $v = Arr::get($raw, $key); if (is_string($v) && trim($v) !== '') return $v; } return ''; }
-    private function finalStatus(MarketplaceListing $l, array $raw, array $live): string { $api = (string) ($live['api_listing_status'] ?? ''); if ($api === 'active') return 'active'; if (in_array($api, ['ended','inactive','not_found','unavailable'], true)) return 'ended'; $s = strtolower((string) ($l->last_api_status ?: $l->status ?: Arr::get($raw, 'status'))); return in_array($s, ['active','published','live'], true) ? 'active' : 'ended'; }
+    private function finalStatus(MarketplaceListing $l, array $raw, array $live): string
+    {
+        $api = (string) ($live['api_listing_status'] ?? '');
+        if ($api === 'active') return 'active';
+        if ($this->tradingGetItemConfirmsItemExists($live) && in_array($api, ['', 'unknown', 'unavailable', 'not_checked'], true)) return 'active';
+        if (in_array($api, ['ended', 'inactive', 'not_found'], true)) return $api === 'not_found' ? 'not_found' : 'ended';
+        $s = strtolower((string) ($l->last_api_status ?: $l->status ?: Arr::get($raw, 'status')));
+        if (in_array($s, ['active', 'published', 'live'], true)) return 'active';
+        if (in_array($s, ['ended', 'inactive', 'not_found'], true)) return 'ended';
+        return 'unknown';
+    }
+
+    private function shouldSkipEndedListing(string $status, array $live): bool
+    {
+        if ($this->tradingGetItemConfirmsItemExists($live) && in_array((string) ($live['api_listing_status'] ?? ''), ['', 'unknown', 'unavailable', 'not_checked'], true)) return false;
+        return in_array($status, ['ended', 'inactive', 'not_found'], true);
+    }
+
+    /** @return array{status_blocking_reason:?string,status_source:string,trading_get_item_confirms_item_exists:bool} */
+    private function statusDiagnostics(MarketplaceListing $l, array $raw, array $live, string $status, bool $skipEnded): array
+    {
+        $api = (string) ($live['api_listing_status'] ?? '');
+        $tradingConfirms = $this->tradingGetItemConfirmsItemExists($live);
+        $source = match (true) {
+            $tradingConfirms && in_array($api, ['', 'unknown', 'unavailable', 'not_checked'], true) => 'browse_status_unresolved_trading_get_item_confirmed_description',
+            $api === 'active' => 'browse_api_active',
+            in_array($api, ['ended', 'inactive', 'not_found'], true) => 'browse_api_'.$api,
+            $api === 'unavailable' => 'browse_api_unavailable_unresolved',
+            default => 'local_status_fallback',
+        };
+
+        return [
+            'status_blocking_reason' => $skipEnded ? 'clear_'.$status.'_status' : null,
+            'status_source' => $source,
+            'trading_get_item_confirms_item_exists' => $tradingConfirms,
+        ];
+    }
+
+    private function tradingGetItemConfirmsItemExists(array $live): bool
+    {
+        return ($live['trading_ack'] ?? null) === 'Success'
+            && (int) ($live['description_length'] ?? mb_strlen((string) ($live['description_html'] ?? ''))) > 0
+            && filled($live['item_id'] ?? null);
+    }
     private function itemId(MarketplaceListing $l, array $raw): ?string { foreach ([$l->external_listing_id, $l->external_offer_id, Schema::hasColumn('marketplace_listings','external_id') ? $l->external_id : null, preg_match('#/itm/(\d+)#', (string) $l->url, $m) ? $m[1] : null, Arr::get($raw,'item_id'), Arr::get($raw,'ebay.item_id')] as $v) if (filled($v) && ctype_digit((string) $v)) return (string) $v; return null; }
     private function readOnlyLiveDescription(MarketplaceListing $listing, string $channel, bool $fetchDescription = false): array
     {

@@ -153,6 +153,43 @@ class EbayDescriptionAuditTest extends TestCase
         $this->assertContains('https://gpsystem.thecamels.pl/storage/icon-shipping-old.png', $row['stale_asset_urls']);
     }
 
+    public function test_patch_assets_only_does_not_treat_unavailable_browse_status_as_ended_when_trading_confirms_description(): void
+    {
+        Http::fake([
+            'api.ebay.com/ws/api.dll' => Http::response('<?xml version="1.0" encoding="utf-8"?><GetItemResponse xmlns="urn:ebay:apis:eBLBaseComponents"><Ack>Success</Ack><Item><ItemID>800113252568</ItemID><Description><![CDATA[<section><img src="https://gpswiss.pl/wp-content/uploads/ebay-template/icon-shipping.png"><p>Keep live copy</p></section>]]></Description></Item></GetItemResponse>', 200, ['Content-Type' => 'text/xml']),
+            'api.ebay.com/buy/browse/v1/item/*' => Http::response(['errors' => [['message' => 'rate limited']]], 429),
+        ]);
+
+        $account = MarketplaceAccount::query()->create([
+            'marketplace' => 'ebay_de',
+            'name' => 'eBay DE',
+            'code' => 'ebay_de',
+            'api_enabled' => true,
+            'api_base_url' => 'https://api.ebay.com',
+            'api_mode' => 'read_only',
+            'api_credentials' => ['access_token' => 'token'],
+            'api_settings' => ['marketplace_id' => 'EBAY_DE', 'site_id' => '77'],
+        ]);
+        $part = Part::query()->create(['name' => 'Część eBay', 'description' => 'Opis', 'price' => 100, 'quantity' => 1]);
+        $listing = MarketplaceListing::query()->create(['marketplace' => 'ebay_de', 'marketplace_account_id' => $account->id, 'part_id' => $part->id, 'status' => 'ended', 'external_listing_id' => '800113252568', 'raw_payload' => []]);
+
+        $row = app(EbayDescriptionAuditService::class)->auditListing($listing->fresh(['part', 'account']), 'ebay_de', false, false, false, true, true);
+
+        $this->assertSame('unavailable', $row['api_listing_status']);
+        $this->assertSame('active', $row['final_listing_status']);
+        $this->assertFalse($row['skip_ended_listing']);
+        $this->assertNull($row['status_blocking_reason']);
+        $this->assertSame('browse_status_unresolved_trading_get_item_confirmed_description', $row['status_source']);
+        $this->assertTrue($row['trading_get_item_confirms_item_exists']);
+        $this->assertSame('would_patch_asset_src_only', $row['action']);
+        $this->assertTrue($row['needs_description_revise']);
+        $this->assertSame(1, $row['replacements_count']);
+        $this->assertTrue($row['changed_only_img_src']);
+        $this->assertFalse($row['forbidden_changes_detected']);
+        $this->assertSame(['listingDescription'], array_keys($row['revise_payload_safe']));
+        $this->assertSame([], $row['revise_payload_forbidden_keys_present']);
+    }
+
     public function test_patch_assets_only_blocks_when_live_description_fetch_is_unavailable(): void
     {
         Http::fake([
