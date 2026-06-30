@@ -246,6 +246,63 @@ class EbayApiClient extends AbstractMarketplaceApiClient
         return $base;
     }
 
+    public function getListingStatusByItemId(string $itemId, ?string $marketplaceId = null): array
+    {
+        $readiness = $this->getAccountReadiness();
+        $marketplaceId = $marketplaceId ?: $this->marketplaceId();
+        $base = [
+            'ok' => false,
+            'read_only' => true,
+            'channel' => $this->channel,
+            'item_id' => $itemId,
+            'marketplace_id' => $marketplaceId,
+            'api_listing_status' => 'unknown',
+            'http_status' => null,
+            'raw_api_status' => null,
+            'listing_marketplace_id' => null,
+            'item_web_url' => null,
+            'end_date' => null,
+            'blockers' => $readiness['blockers'] ?? [],
+            'warnings' => ['Read-only eBay Browse API item lookup only; no write, publish, revise, relist, end, stock, price, or local mutation is performed.'],
+        ];
+        if ($base['blockers'] !== []) return $base;
+
+        $response = Http::withToken($this->accessToken())
+            ->withHeaders(['X-EBAY-C-MARKETPLACE-ID' => $marketplaceId])
+            ->acceptJson()
+            ->timeout(15)
+            ->get(rtrim((string) $this->account?->api_base_url, '/').'/buy/browse/v1/item/v1|'.$itemId.'|0');
+        $json = $response->json();
+        $payload = is_array($json) ? $json : [];
+
+        $rawStatus = $payload['itemEndDate'] ?? $payload['estimatedAvailabilities'][0]['estimatedAvailabilityStatus'] ?? $payload['itemCreationDate'] ?? null;
+        $status = $this->normalizeBrowseItemStatus($response->status(), $payload);
+
+        return array_merge($base, [
+            'ok' => $response->successful(),
+            'http_status' => $response->status(),
+            'api_listing_status' => $status,
+            'raw_api_status' => $rawStatus,
+            'listing_marketplace_id' => $payload['itemLocation']['country'] ?? null,
+            'item_web_url' => $payload['itemWebUrl'] ?? null,
+            'end_date' => $payload['itemEndDate'] ?? null,
+            'title_present' => filled($payload['title'] ?? null),
+            'safe_top_level_keys' => array_slice(array_keys($payload), 0, 20),
+        ]);
+    }
+
+    private function normalizeBrowseItemStatus(int $httpStatus, array $payload): string
+    {
+        if ($httpStatus === 404) return 'not_found';
+        if ($httpStatus === 410) return 'ended';
+        if ($httpStatus < 200 || $httpStatus >= 300) return 'unavailable';
+        $availability = strtoupper((string) data_get($payload, 'estimatedAvailabilities.0.estimatedAvailabilityStatus', ''));
+        if (in_array($availability, ['IN_STOCK', 'LIMITED_STOCK'], true)) return 'active';
+        if (in_array($availability, ['OUT_OF_STOCK', 'UNAVAILABLE'], true)) return 'inactive';
+        if (filled($payload['itemEndDate'] ?? null) && strtotime((string) $payload['itemEndDate']) < now()->timestamp) return 'ended';
+        return filled($payload['itemId'] ?? null) ? 'active' : 'unknown';
+    }
+
     private function formatBusinessPolicy(array $policy): array
     {
         return array_filter([

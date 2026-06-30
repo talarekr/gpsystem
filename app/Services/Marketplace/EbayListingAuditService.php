@@ -2,8 +2,10 @@
 
 namespace App\Services\Marketplace;
 
+use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceListing;
 use App\Models\MarketplaceSyncLog;
+use App\Services\Marketplace\Api\EbayApiClient;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Schema;
 
@@ -12,17 +14,20 @@ class EbayListingAuditService
     private const CUTOFF = '2026-06-01 00:00:00';
 
     /** @return array<string,mixed> */
-    public function run(string $channel = 'ebay_de', int $limit = 100, int $offset = 0, ?int $partId = null, bool $apply = false): array
+    public function run(string $channel = 'ebay_de', int $limit = 100, int $offset = 0, ?int $partId = null, bool $apply = false, bool $checkApi = false): array
     {
         abort_unless(in_array($channel, ['ebay_de', 'ebay_fr', 'ebay'], true), 422, 'Supported eBay channel values: ebay_de, ebay_fr, ebay.');
-        $query = MarketplaceListing::query()->with('account:id,code,marketplace')->where('marketplace', $channel);
+        $query = MarketplaceListing::query()->with('account:id,code,marketplace,api_enabled,api_base_url,api_mode,api_credentials,api_settings')->where('marketplace', $channel);
         if ($partId !== null) $query->where('part_id', $partId);
 
         $all = (clone $query)->get();
         $rows = (clone $query)->orderBy('id')->offset(max(0, $offset))->limit(max(1, min(500, $limit)))->get();
         $applied = 0;
-        $results = $rows->map(function (MarketplaceListing $listing) use ($apply, &$applied): array {
-            $row = $this->auditListing($listing);
+        $apiChecks = [];
+        $results = $rows->map(function (MarketplaceListing $listing) use ($apply, $checkApi, &$applied, &$apiChecks): array {
+            $apiCheck = $checkApi ? $this->apiCheckListing($listing) : null;
+            $row = $this->auditListing($listing, $apiCheck);
+            if ($apiCheck !== null) $apiChecks[] = $apiCheck;
             if ($apply && $row['action'] === 'would_update_url' && $row['confidence'] === 'high' && filled($row['new_item_id']) && filled($row['new_url'])) {
                 $listing->forceFill(['url' => $row['new_url'], 'external_listing_id' => $row['new_item_id'], 'external_offer_id' => $row['new_item_id'], 'status' => 'active']);
                 $listing->save();
@@ -39,20 +44,21 @@ class EbayListingAuditService
             'marketplace_write' => false,
             'summary' => array_merge($this->summary($all, $results), ['locally_updated' => $applied]),
             'results' => $results,
-            'part_probe' => $partId ? $this->partProbe($channel, $partId) : null,
+            'part_probe' => $partId ? $this->partProbe($channel, $partId, $checkApi, $apiChecks) : null,
             'warnings' => ['Read-only local audit. No eBay write, publish, revise, relist, end, stock, price or order sync is performed. If eBay API status is not present in local raw_payload/meta/last_api_status, status falls back to needs_manual_review.'],
         ];
     }
 
     /** @return array<string,mixed> */
-    public function auditListing(MarketplaceListing $listing): array
+    public function auditListing(MarketplaceListing $listing, ?array $apiCheck = null): array
     {
         $raw = $listing->raw_payload ?: [];
         $ids = $this->rawIds($raw);
         $urlItemId = $this->itemIdFromUrl($listing->url);
         $resolved = $this->firstFilled([$listing->external_listing_id, $listing->external_offer_id, $this->columnValue($listing, 'external_id'), $urlItemId, ...array_values($ids)]);
-        $status = $this->normalizedStatus($listing, $raw);
-        $candidate = $status !== 'active' ? $this->newerCandidate($listing) : null;
+        $localStatus = $this->normalizedStatus($listing, $raw);
+        $status = $this->finalPanelStatus($localStatus, $apiCheck);
+        $candidate = $status !== 'active' && $apiCheck === null ? $this->newerCandidate($listing) : null;
         $action = $this->action($listing, $resolved, $status, $candidate);
 
         return [
@@ -63,6 +69,9 @@ class EbayListingAuditService
             'account_code' => $listing->account?->code,
             'marketplace_id' => strtoupper($this->channel($listing)),
             'local_status' => $listing->status,
+            'local_panel_status' => $localStatus,
+            'api_listing_status' => $apiCheck['api_listing_status'] ?? null,
+            'final_panel_status' => $status,
             'panel_listing_status' => $status,
             'external_offer_id' => $listing->external_offer_id,
             'external_listing_id' => $listing->external_listing_id,
@@ -87,6 +96,9 @@ class EbayListingAuditService
             'new_published_at' => $candidate['published_at'] ?? null,
             'match_source' => $candidate['match_source'] ?? null,
             'confidence' => $candidate['confidence'] ?? ($action === 'needs_manual_review' ? 'low' : null),
+            'api_check' => $apiCheck,
+            'should_panel_show_active' => $status === 'active',
+            'final_decision' => $apiCheck['final_decision'] ?? ($status === 'active' ? 'local_active_without_api_check' : 'local_not_active_without_api_check'),
             'action' => $action,
         ];
     }
@@ -107,6 +119,7 @@ class EbayListingAuditService
 
     private function action(MarketplaceListing $l, ?string $id, string $status, ?array $candidate): string
     {
+        if ($status === 'api_not_active') return 'api_needs_verification';
         if ($this->isGpsw($l->external_offer_id) || $this->isGpsw($l->external_listing_id) || ($id !== null && ! ctype_digit($id))) return 'invalid_external_id';
         if ($candidate && ($candidate['confidence'] ?? null) === 'high') return 'would_update_url';
         if ($status === 'ended' || $status === 'not_found') return 'stale_ended_listing';
@@ -135,8 +148,44 @@ class EbayListingAuditService
         return 'unknown';
     }
 
-    private function partProbe(string $channel, int $partId): array
-    { $listings = MarketplaceListing::query()->where('marketplace', $channel)->where('part_id', $partId)->get(); return ['part_id'=>$partId, 'attached_listing_ids'=>$listings->pluck('id')->all(), 'url_389994514100_in_url'=>$listings->contains(fn($l)=>str_contains((string)$l->url,'389994514100')), 'item_389994514100_in_ids_or_raw'=>$listings->contains(fn($l)=>str_contains(json_encode([$l->external_listing_id,$l->external_offer_id,$this->columnValue($l,'external_id'),$l->raw_payload]),'389994514100')), 'other_ebay_listings_count'=>max(0,$listings->count()-1), 'recent_publish_logs_count'=>Schema::hasTable('marketplace_sync_logs') ? MarketplaceSyncLog::query()->where('marketplace',$channel)->where('part_id',$partId)->where('created_at','>=',self::CUTOFF)->where('action','like','%publish%')->count() : 0]; }
+    private function partProbe(string $channel, int $partId, bool $checkApi = false, array $apiChecks = []): array
+    { $listings = MarketplaceListing::query()->where('marketplace', $channel)->where('part_id', $partId)->get(); return ['part_id'=>$partId, 'attached_listing_ids'=>$listings->pluck('id')->all(), 'url_389994514100_in_url'=>$listings->contains(fn($l)=>str_contains((string)$l->url,'389994514100')), 'item_389994514100_in_ids_or_raw'=>$listings->contains(fn($l)=>str_contains(json_encode([$l->external_listing_id,$l->external_offer_id,$this->columnValue($l,'external_id'),$l->raw_payload]),'389994514100')), 'other_ebay_listings_count'=>max(0,$listings->count()-1), 'recent_publish_logs_count'=>Schema::hasTable('marketplace_sync_logs') ? MarketplaceSyncLog::query()->where('marketplace',$channel)->where('part_id',$partId)->where('created_at','>=',self::CUTOFF)->where('action','like','%publish%')->count() : 0, 'api_checked'=>$checkApi, 'api_checks'=>$apiChecks]; }
+
+    private function apiCheckListing(MarketplaceListing $listing): array
+    {
+        $itemId = $this->firstFilled([$listing->external_listing_id, $listing->external_offer_id, $this->columnValue($listing, 'external_id'), $this->itemIdFromUrl($listing->url), ...array_values($this->rawIds($listing->raw_payload ?: []))]);
+        $marketplaceId = strtoupper($this->channel($listing));
+        if ($marketplaceId === 'EBAY_DE' || $listing->marketplace === 'ebay_de') $marketplaceId = 'EBAY_DE';
+        if ($marketplaceId === 'EBAY_FR' || $listing->marketplace === 'ebay_fr') $marketplaceId = 'EBAY_FR';
+        if (! $itemId || ! ctype_digit($itemId)) return ['checked' => false, 'item_id' => $itemId, 'marketplace_id' => $marketplaceId, 'api_listing_status' => 'not_checked', 'final_decision' => 'requires_manual_review', 'error_message_safe' => 'No numeric eBay itemId/listingId available for read-only API check.'];
+
+        $account = $listing->account ?: MarketplaceAccount::query()->where('code', $listing->marketplace)->orWhere('marketplace', $listing->marketplace)->first();
+        if (! $account) return ['checked' => false, 'item_id' => $itemId, 'marketplace_id' => $marketplaceId, 'api_listing_status' => 'not_checked', 'final_decision' => 'requires_manual_review', 'error_message_safe' => 'Marketplace account not found.'];
+
+        $result = (new EbayApiClient($listing->marketplace, $account))->getListingStatusByItemId($itemId, $marketplaceId);
+        $apiStatus = (string) ($result['api_listing_status'] ?? 'unknown');
+        return $result + [
+            'checked' => true,
+            'item_id' => $itemId,
+            'marketplace_id' => $marketplaceId,
+            'api_listing_status' => $apiStatus,
+            'exists' => ! in_array($apiStatus, ['not_found', 'unavailable'], true),
+            'is_active' => $apiStatus === 'active',
+            'is_ended_or_inactive' => in_array($apiStatus, ['ended', 'inactive'], true),
+            'final_decision' => $apiStatus === 'active' ? 'api_confirms_active' : 'api_does_not_confirm_active',
+        ];
+    }
+
+    private function finalPanelStatus(string $localStatus, ?array $apiCheck): string
+    {
+        if ($apiCheck === null) return $localStatus;
+        return match ((string) ($apiCheck['api_listing_status'] ?? 'unknown')) {
+            'active' => 'active',
+            'ended', 'inactive', 'not_found', 'unavailable' => 'ended',
+            default => 'api_not_active',
+        };
+    }
+
     private function rawIds(array $raw): array { return array_filter(['item_id'=>Arr::get($raw,'ebay.item_id') ?? Arr::get($raw,'item_id'), 'listing_id'=>Arr::get($raw,'ebay.listing_id') ?? Arr::get($raw,'listing_id'), 'offer_id'=>Arr::get($raw,'offerId') ?? Arr::get($raw,'offer_id'), 'inventory_id'=>Arr::get($raw,'inventoryItemGroupKey') ?? Arr::get($raw,'inventory_id')], fn($v)=>filled($v)); }
     private function itemIdFromUrl(?string $url): ?string { return preg_match('#/itm/(\d+)#', (string)$url, $m) ? $m[1] : null; }
     private function isGpsw(mixed $v): bool { return preg_match('/^GPSW-\d+$/i', trim((string)$v)) === 1; }
