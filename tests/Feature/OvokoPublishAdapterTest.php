@@ -10,6 +10,7 @@ use App\Models\MarketplaceSyncLog;
 use App\Models\Part;
 use App\Models\PartCategory;
 use App\Services\Marketplace\Api\OvokoApiClient;
+use App\Services\Marketplace\OvokoListingUrlBackfillService;
 use App\Services\Marketplace\PublishPartToMarketplacesService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -212,6 +213,46 @@ class OvokoPublishAdapterTest extends TestCase
         $this->assertFalse($result['api_ok']);
         $this->assertSame('detail_id_mismatch', $result['error']);
         $this->assertNull($result['matched_candidate_id']);
+    }
+
+
+    public function test_ovoko_read_lookup_uses_bracket_array_query_params_for_ids(): void
+    {
+        $account = MarketplaceAccount::query()->create(['marketplace' => 'ovoko', 'code' => 'ovoko_main', 'name' => 'Ovoko main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'read_only', 'api_credentials' => ['username' => 'u', 'password' => 'p', 'user_token' => 't']]);
+        Http::fake(['https://ovoko.example.test/*' => Http::response(['status_code' => 'R200', 'data' => []], 200)]);
+
+        (new OvokoApiClient('ovoko', $account))->fetchPartRawByLookup('11701', 'gps-part-7890');
+
+        Http::assertSent(fn ($request) => str_contains($request->url(), 'ids%5B%5D=11701'));
+        Http::assertSent(fn ($request) => str_contains($request->url(), 'part_ids%5B%5D=11701'));
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), 'ids=11701') || str_contains($request->url(), 'part_ids=11701'));
+    }
+
+    public function test_ovoko_read_lookup_accepts_requested_id_with_url_field(): void
+    {
+        $account = MarketplaceAccount::query()->create(['marketplace' => 'ovoko', 'code' => 'ovoko_main', 'name' => 'Ovoko main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'read_only', 'api_credentials' => ['username' => 'u', 'password' => 'p', 'user_token' => 't']]);
+        Http::fake(['https://ovoko.example.test/*' => Http::response(['status_code' => 'R200', 'data' => [
+            ['id' => 11701, 'external_id' => 'gps-part-7890', 'url' => 'https://ovoko.pl/czesci/right'],
+        ]], 200)]);
+
+        $result = (new OvokoApiClient('ovoko', $account))->fetchPartRawByLookup('11701', 'gps-part-7890');
+
+        $this->assertTrue($result['api_ok']);
+        $this->assertSame('11701', (string) $result['matched_candidate_id']);
+        $this->assertSame('https://ovoko.pl/czesci/right', $result['matched_candidate_shop_url']);
+    }
+
+
+    public function test_ovoko_url_backfill_rejects_gpswiss_storage_photo_url(): void
+    {
+        $service = (new \ReflectionClass(OvokoListingUrlBackfillService::class))->newInstanceWithoutConstructor();
+        $method = new \ReflectionMethod(OvokoListingUrlBackfillService::class, 'validateShopUrl');
+        $method->setAccessible(true);
+
+        $result = $method->invoke($service, 'https://gpswiss.pl/storage/parts/photos/imported/7890/photo.jpg');
+
+        $this->assertFalse($result['valid']);
+        $this->assertSame('image_url_not_listing_url', $result['reason']);
     }
 
     private function enableFlags(): void

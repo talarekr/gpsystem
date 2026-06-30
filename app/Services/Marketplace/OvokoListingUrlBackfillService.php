@@ -14,7 +14,7 @@ class OvokoListingUrlBackfillService
     ) {}
 
     /** @return array{mode:string,summary:array<string,int>,results:array<int,array<string,mixed>>,warnings:array<int,string>} */
-    public function run(bool $apply = false, bool $force = false, ?int $partId = null, int $limit = 100, ?string $csvPath = null, ?int $listingId = null): array
+    public function run(bool $apply = false, bool $force = false, ?int $partId = null, int $limit = 100, ?string $csvPath = null, ?int $listingId = null, int $maxPages = 3): array
     {
         if (! Schema::hasTable('marketplace_listings')) {
             throw new \RuntimeException('Required table marketplace_listings does not exist.');
@@ -66,7 +66,7 @@ class OvokoListingUrlBackfillService
                 $action = 'missing_ovoko_id';
                 $summary['skipped']++;
             } else {
-                [$resolved, $source, $action, $diagnostics] = $this->resolveShopUrl($listing, $ovokoId, $csvRows, $client);
+                [$resolved, $source, $action, $diagnostics] = $this->resolveShopUrl($listing, $ovokoId, $csvRows, $client, $maxPages);
 
                 if ($action === 'would_update') {
                     if ($apply) {
@@ -140,7 +140,7 @@ class OvokoListingUrlBackfillService
         return $this->extractor->extract($listing->part?->legacy_payload ?? null);
     }
 
-    private function resolveShopUrl(MarketplaceListing $listing, string $ovokoId, array $csvRows, mixed $client): array
+    private function resolveShopUrl(MarketplaceListing $listing, string $ovokoId, array $csvRows, mixed $client, int $maxPages): array
     {
         $diagnostics = $this->emptyDiagnostics();
         $externalId = $this->blankNull($listing->part?->external_id ?? null) ?? 'gps-part-'.(string) $listing->part_id;
@@ -167,8 +167,8 @@ class OvokoListingUrlBackfillService
 
             try {
                 $result = method_exists($client, 'fetchPartRawByLookup')
-                    ? $client->fetchPartRawByLookup($ovokoId, $externalId)
-                    : $client->fetchPartRawById($ovokoId);
+                    ? $client->fetchPartRawByLookup($ovokoId, $externalId, $maxPages)
+                    : $client->fetchPartRawById($ovokoId, $maxPages);
                 $diagnostics['ovoko_read_api_endpoint'] = $result['endpoint_used'] ?? data_get($result, 'attempts.0.endpoint');
                 $diagnostics['ovoko_read_api_status'] = $result['api_status_code'] ?? $result['http_status'] ?? data_get($result, 'attempts.0.api_status_code') ?? data_get($result, 'attempts.0.http_status');
                 $diagnostics['ovoko_read_api_response_keys'] = $result['response_top_level_keys'] ?? data_get($result, 'attempts.0.top_level_keys') ?? [];

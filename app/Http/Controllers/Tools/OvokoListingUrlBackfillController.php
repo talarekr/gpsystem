@@ -25,13 +25,14 @@ class OvokoListingUrlBackfillController extends Controller
             partId: $request->filled('part_id') ? (int) $request->query('part_id') : null,
             limit: max(1, min(1000, (int) $request->query('limit', 100))),
             listingId: $request->filled('listing_id') ? (int) $request->query('listing_id') : null,
+            maxPages: max(1, min(50, (int) $request->query('max_pages', 3))),
         );
 
         if (! $apply && ($request->filled('listing_id') || $request->filled('part_id'))) {
             $logger->success('ovoko', 'ovoko_listing_url_diagnostic', 'Ovoko listing URL diagnostic dry-run completed.', [
                 'marketplace_listing_id' => $request->filled('listing_id') ? (int) $request->query('listing_id') : null,
                 'part_id' => $request->filled('part_id') ? (int) $request->query('part_id') : null,
-                'request' => $request->only(['listing_id', 'part_id', 'limit', 'force']),
+                'request' => $request->only(['listing_id', 'part_id', 'limit', 'force', 'max_pages']),
                 'response' => ['summary' => $result['summary'], 'results' => $result['results']],
             ]);
         }
