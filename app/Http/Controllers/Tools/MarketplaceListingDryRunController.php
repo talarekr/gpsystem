@@ -8,6 +8,8 @@ use App\Models\MarketplaceCategoryMapping;
 use App\Models\MarketplaceListing;
 use App\Models\Part;
 use App\Services\Marketplace\AllegroCategoryParametersService;
+use App\Services\Marketplace\AllegroDescriptionBuilder;
+use App\Services\Marketplace\MarketplaceImageSelectionService;
 use App\Services\Marketplace\AllegroOfferParametersBuilder;
 use App\Services\Marketplace\AllegroSalesSettingsResolver;
 use Illuminate\Database\Eloquent\Builder;
@@ -181,6 +183,7 @@ class MarketplaceListingDryRunController extends Controller
         if ($channel === 'allegro_main') {
             $allegroSalesSettings = app(AllegroSalesSettingsResolver::class)->resolve($this->account($channel), $part->allegro_shipping_rate_name ?? null);
             foreach (($allegroSalesSettings['blockers'] ?? []) as $salesSettingsBlocker) $blockers[] = $salesSettingsBlocker;
+            foreach (app(AllegroDescriptionBuilder::class)->build($part, $images['public_urls_sample'])['blockers'] as $descriptionBlocker) $blockers[] = $descriptionBlocker;
         }
         if ($channel === 'allegro_main' && ! $mapping) $blockers[] = 'allegro_category_mapping_required_no_guessing';
         if ($channel === 'allegro_main' && $mapping && filled($mapping->external_category_id)) {
@@ -239,7 +242,9 @@ class MarketplaceListingDryRunController extends Controller
         }
 
         $allegro = $readiness['allegro_parameters'] ?? [];
-        return $common + ['name' => $part->name, 'stock' => ['available' => (int) $part->quantity, 'quantity' => (int) $part->quantity], 'parameters' => $allegro['offer_parameters'] ?? [], 'productSet' => [['product' => ['parameters' => $allegro['product_parameters'] ?? []]]], 'allegro_parameters' => $allegro, 'allegro_product_parameters' => $allegro['product_parameters'] ?? [], 'allegro_offer_parameters' => $allegro['offer_parameters'] ?? [], 'missing_required_parameters' => $allegro['missing_required_parameters'] ?? [], 'unmapped_parameters' => $allegro['unmapped_parameters'] ?? [], 'parameter_definitions_source' => $allegro['parameter_definitions_source'] ?? 'none', 'will_make_marketplace_request' => false, 'shipping' => $this->accountSetting($channel, 'shipping'), 'payment' => $this->accountSetting($channel, 'payment'), 'return' => $this->accountSetting($channel, 'return'), 'delivery' => ['shippingRates' => ['id' => data_get($readiness, 'allegro_sales_settings.shippingRates.id')]], 'afterSalesServices' => array_filter(['returnPolicy' => ['id' => data_get($readiness, 'allegro_sales_settings.returnPolicy.id')], 'impliedWarranty' => ['id' => data_get($readiness, 'allegro_sales_settings.impliedWarranty.id')], 'warranty' => ['id' => data_get($readiness, 'allegro_sales_settings.warranty.id')]], fn ($row) => filled($row['id'] ?? null)), 'allegro_sales_settings' => $readiness['allegro_sales_settings'] ?? null];
+        $allegroDescription = app(AllegroDescriptionBuilder::class)->build($part, $common['images']);
+
+        return array_merge($common, ['name' => $part->name, 'stock' => ['available' => (int) $part->quantity, 'quantity' => (int) $part->quantity], 'description' => $allegroDescription['description'], 'allegro_description_diagnostics' => $allegroDescription['diagnostics'], 'parameters' => $allegro['offer_parameters'] ?? [], 'productSet' => [['product' => ['parameters' => $allegro['product_parameters'] ?? []]]], 'allegro_parameters' => $allegro, 'allegro_product_parameters' => $allegro['product_parameters'] ?? [], 'allegro_offer_parameters' => $allegro['offer_parameters'] ?? [], 'missing_required_parameters' => $allegro['missing_required_parameters'] ?? [], 'unmapped_parameters' => $allegro['unmapped_parameters'] ?? [], 'parameter_definitions_source' => $allegro['parameter_definitions_source'] ?? 'none', 'will_make_marketplace_request' => false, 'shipping' => $this->accountSetting($channel, 'shipping'), 'payment' => $this->accountSetting($channel, 'payment'), 'return' => $this->accountSetting($channel, 'return'), 'delivery' => ['shippingRates' => ['id' => data_get($readiness, 'allegro_sales_settings.shippingRates.id')]], 'afterSalesServices' => array_filter(['returnPolicy' => ['id' => data_get($readiness, 'allegro_sales_settings.returnPolicy.id')], 'impliedWarranty' => ['id' => data_get($readiness, 'allegro_sales_settings.impliedWarranty.id')], 'warranty' => ['id' => data_get($readiness, 'allegro_sales_settings.warranty.id')]], fn ($row) => filled($row['id'] ?? null)), 'allegro_sales_settings' => $readiness['allegro_sales_settings'] ?? null]);
     }
 
     private function coverageFor(Request $request, string $channel): array
@@ -302,7 +307,7 @@ class MarketplaceListingDryRunController extends Controller
     private function price(Part $part, string $channel): ?float { $value = $channel === 'ovoko' ? $part->ovoko_price : ($part->allegro_price ?? $part->price); return is_numeric($value) ? (float) $value : null; }
     private function marketplace(string $channel): string { return $channel === 'allegro_main' ? 'allegro' : $channel; }
     private function categoryMapping(Part $part, string $channel): ?MarketplaceCategoryMapping { if (! Schema::hasTable('marketplace_category_mappings') || ! $part->category_id) return null; $channels = $channel === 'allegro_main' ? ['allegro_main','allegro'] : ['ovoko']; return MarketplaceCategoryMapping::query()->where('local_category_id', $part->category_id)->whereIn('channel', $channels)->orderByRaw('case when channel = ? then 0 else 1 end', [$channel])->first(); }
-    private function imageUrls(Part $part): array { $urls = $part->images->map(fn ($image) => method_exists($image, 'listingUrl') ? $image->listingUrl() : null); $public = $urls->filter()->values(); return ['count' => $part->images->count(), 'public_urls_sample' => $public->take(10)->all(), 'missing_public_images_count' => $urls->filter(fn ($url) => blank($url))->count()]; }
+    private function imageUrls(Part $part): array { $selection = app(MarketplaceImageSelectionService::class)->selectForPart($part, 10); return ['count' => $part->images->count(), 'public_urls_sample' => $selection['urls'], 'missing_public_images_count' => max(0, $part->images->count() - count($selection['urls'])), 'diagnostics' => $selection['diagnostics']]; }
     private function existingListing(Part $part, string $channel): array { $marketplaces = $channel === 'allegro_main' ? ['allegro_main', 'allegro'] : [$this->marketplace($channel)]; $listing = $part->marketplaceListings->first(fn ($item) => in_array($item->marketplace, $marketplaces, true)); return ['exists' => (bool) $listing, 'external_id' => $listing?->external_offer_id ?? $listing?->external_listing_id, 'status' => $listing?->status, 'marketplace_listing_id' => $listing?->id]; }
     private function account(string $channel): ?MarketplaceAccount { $code = $channel === 'ovoko' ? 'ovoko_main' : $channel; return Schema::hasTable('marketplace_accounts') ? MarketplaceAccount::query()->where('code', $code)->first() : null; }
     private function accountSetting(string $channel, string $key): mixed { $code = $channel === 'ovoko' ? 'ovoko_main' : $channel; $account = Schema::hasTable('marketplace_accounts') ? MarketplaceAccount::query()->where('code', $code)->first() : null; return data_get($account?->api_settings ?? [], $key); }
