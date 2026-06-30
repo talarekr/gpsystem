@@ -215,11 +215,10 @@ class PartResource extends Resource
                     ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--allegro-courier'])
                     ->schema([
                         Forms\Components\Select::make('allegro_shipping_rate_name')
-                            ->label('Kurier Allegro')
+                            ->hiddenLabel()
                             ->placeholder('Wybierz cennik dostawy Allegro')
                             ->options(AllegroSalesSettingsResolver::SHIPPING_RATE_OPTIONS)
-                            ->native(false)
-                            ->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])
+                            ->native(true)
                             ->columnSpanFull(),
                     ]),
 

@@ -46,7 +46,10 @@ class AllegroSalesSettingsTest extends TestCase
         $this->assertArrayNotHasKey('GABARYTY CZ SK HU', AllegroSalesSettingsResolver::SHIPPING_RATE_OPTIONS);
         $resource = file_get_contents(app_path('Filament/Resources/PartResource.php'));
         $this->assertStringContainsString("Section::make('Kurier Allegro')", $resource);
+        $this->assertStringContainsString("->hiddenLabel()", $resource);
         $this->assertStringContainsString("->options(AllegroSalesSettingsResolver::SHIPPING_RATE_OPTIONS)", $resource);
+        $this->assertStringContainsString("->native(true)", $resource);
+        $this->assertStringNotContainsString("->label('Kurier Allegro')", $resource);
     }
 
     public function test_missing_return_policy_zwrotgold_blocks_publish_readiness(): void
