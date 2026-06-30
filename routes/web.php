@@ -117,6 +117,7 @@ use App\Http\Controllers\Tools\RunEbayMappingLiveController;
 use App\Http\Controllers\Tools\RefreshAllegroActiveOfferLinksController;
 use App\Http\Controllers\Tools\RefreshAllegroActiveOfferLinksDryRunController;
 use App\Http\Controllers\Tools\CheckAdminMarketplaceStatusUiController;
+use App\Http\Controllers\Tools\AllegroListingReadOnlyStatusController;
 use App\Http\Controllers\Tools\SetFrontendMaintenanceController;
 use App\Http\Controllers\Tools\DeleteTestMarketplaceOrdersController;
 use App\Http\Controllers\Tools\ImportMarketplaceOrdersController;
@@ -415,6 +416,7 @@ Route::get('/tools/dry-run-marketplace-listing-coverage', [MarketplaceListingDry
 Route::get('/tools/dry-run-marketplace-listing-coverage-all', [MarketplaceListingDryRunController::class, 'coverageAll'])->name('tools.dry-run-marketplace-listing-coverage-all');
 Route::get('/tools/export-marketplace-listing-coverage', [MarketplaceListingDryRunController::class, 'export'])->name('tools.export-marketplace-listing-coverage');
 Route::get('/tools/check-part-marketplace-preparation-payload', [PartMarketplaceReadinessController::class, 'payload'])->name('tools.check-part-marketplace-preparation-payload');
+Route::get('/tools/check-allegro-listing-status-read-only', AllegroListingReadOnlyStatusController::class)->name('tools.check-allegro-listing-status-read-only');
 Route::get('/tools/allegro-listing-preview', [MarketplaceListingDryRunController::class, 'allegroPreview'])->name('tools.allegro-listing-preview');
 Route::get('/tools/ebay-listing-preview', [PartMarketplaceReadinessController::class, 'ebayPreview'])->name('tools.ebay-listing-preview');
 Route::get('/tools/ebay-listing-preview-html', [PartMarketplaceReadinessController::class, 'ebayPreviewHtml'])->name('tools.ebay-listing-preview-html');
