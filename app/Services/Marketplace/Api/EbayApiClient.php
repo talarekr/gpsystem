@@ -369,6 +369,92 @@ class EbayApiClient extends AbstractMarketplaceApiClient
     }
 
 
+
+    /**
+     * Read-only Inventory/Offer lookup used to diagnose inventory-based listings.
+     * No publish, relist, end, stock, price, title, photos, policies, category, or item specifics write is performed.
+     *
+     * @return array<string,mixed>
+     */
+    public function readOnlyInventoryOfferForDescriptionRevise(?string $offerId, ?string $sku, ?string $listingId = null): array
+    {
+        $readiness = $this->getAccountReadiness();
+        $baseUrl = rtrim((string) $this->account?->api_base_url, '/');
+        $marketplaceId = $this->marketplaceId();
+        $headers = ['X-EBAY-C-MARKETPLACE-ID' => $marketplaceId];
+        $base = [
+            'ok' => false,
+            'read_only' => true,
+            'api_endpoint_family' => 'inventory_offer.read_only',
+            'revise_api_family' => 'inventory_offer',
+            'inventory_sku' => $sku,
+            'offer_id' => $offerId,
+            'listing_id' => $listingId,
+            'marketplace_id' => $marketplaceId,
+            'can_revise_description_via_inventory_offer' => false,
+            'blocker' => null,
+            'inventory_offer_payload_fields_required' => ['full offer payload required by PUT /sell/inventory/v1/offer/{offerId}; listingDescription is only one field inside the offer payload'],
+            'would_send_payload_keys' => [],
+            'warnings' => ['Read-only Inventory/Offer API diagnostics only; no write, publish, revise, relist, end, stock, price, title, photos, policies, category, item specifics, or local mutation is performed.'],
+            'blockers' => $readiness['blockers'] ?? [],
+        ];
+        if ($base['blockers'] !== []) return array_merge($base, ['blocker' => 'inventory_offer_api_not_ready']);
+        if (blank($offerId) && blank($sku)) return array_merge($base, ['blocker' => 'missing_offer_id_or_inventory_sku']);
+
+        $token = $this->accessToken();
+        if (blank($token)) return array_merge($base, ['blocker' => 'missing_access_token', 'blockers' => ['Credential access_token is missing.']]);
+
+        $offerPayload = null;
+        $offerHttpStatus = null;
+        if (filled($offerId)) {
+            $response = Http::withToken($token)->withHeaders($headers)->acceptJson()->timeout(20)->get($baseUrl.'/sell/inventory/v1/offer/'.rawurlencode((string) $offerId));
+            $offerHttpStatus = $response->status();
+            $json = $response->json();
+            $offerPayload = is_array($json) ? $json : null;
+        } elseif (filled($sku)) {
+            $response = Http::withToken($token)->withHeaders($headers)->acceptJson()->timeout(20)->get($baseUrl.'/sell/inventory/v1/offer', ['sku' => (string) $sku, 'marketplace_id' => $marketplaceId]);
+            $offerHttpStatus = $response->status();
+            $json = $response->json();
+            $offers = is_array($json) ? array_values(array_filter($json['offers'] ?? [], 'is_array')) : [];
+            $offerPayload = $offers[0] ?? null;
+            $offerId = isset($offerPayload['offerId']) ? (string) $offerPayload['offerId'] : $offerId;
+        }
+
+        $offerKeys = is_array($offerPayload) ? array_keys($offerPayload) : [];
+        $listingDescriptionPresent = is_array($offerPayload) && array_key_exists('listingDescription', $offerPayload);
+
+        return array_merge($base, [
+            'ok' => $offerPayload !== null,
+            'offer_http_status' => $offerHttpStatus,
+            'offer_id' => $offerId,
+            'inventory_sku' => $sku ?: (is_array($offerPayload) ? ($offerPayload['sku'] ?? null) : null),
+            'listing_id' => $listingId ?: (is_array($offerPayload) ? ($offerPayload['listingId'] ?? null) : null),
+            'offer_payload_keys' => $offerKeys,
+            'offer_payload_listingDescription_present' => $listingDescriptionPresent,
+            'offer_payload_listingDescription_length' => $listingDescriptionPresent ? mb_strlen((string) $offerPayload['listingDescription']) : 0,
+            'would_send_payload_keys' => $offerKeys,
+            'can_revise_description_via_inventory_offer' => false,
+            'blocker' => $offerPayload === null ? 'cannot_read_inventory_offer' : 'cannot_revise_description_only_for_inventory_offer',
+        ]);
+    }
+
+    /** @param array{listingDescription:string} $payload */
+    public function reviseInventoryOfferDescriptionOnly(?string $offerId, ?string $sku, array $payload, ?array $offerPayload = null): array
+    {
+        return [
+            'ok' => false,
+            'step' => 'reviseInventoryOfferDescriptionOnly',
+            'api_endpoint_family' => 'inventory_offer.update_offer.description_only',
+            'revise_api_family' => 'inventory_offer',
+            'offer_id' => $offerId,
+            'inventory_sku' => $sku,
+            'error_code' => 'cannot_revise_description_only_for_inventory_offer',
+            'error_message_safe' => 'eBay Inventory API updates offers with PUT /sell/inventory/v1/offer/{offerId}, which requires a full offer payload; refusing to write a payload that might change fields other than listingDescription.',
+            'can_revise_description_via_inventory_offer' => false,
+            'would_send_payload_keys' => is_array($offerPayload) ? array_keys($offerPayload) : array_keys($payload),
+        ];
+    }
+
     /**
      * Revise only the Trading API item description. The request intentionally contains
      * no price, stock, title, photos, policies, category, or item specifics fields.

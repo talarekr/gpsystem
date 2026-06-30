@@ -125,6 +125,7 @@ class EbayDescriptionAuditService
             'marketplace_listing_id_external' => $listing->external_listing_id,
             'external_offer_id' => $listing->external_offer_id,
             'item_id' => $this->itemId($listing, $raw),
+            ...$this->inventoryOfferLocalDiagnostics($listing, $raw),
             'local_description_length' => mb_strlen($localHtml),
             'live_description_length' => mb_strlen($liveHtml),
             'live_description_source' => $live['live_description_source'] ?? 'not_available',
@@ -145,7 +146,7 @@ class EbayDescriptionAuditService
             'confidence' => $needs ? 'high' : null,
             'apply_requested' => $apply,
             'apply_confirmed' => $confirmed,
-            ...$this->applyResult($listing, $channel, $payload, $apply, $confirmed, $writeEnabled, $needs, $skipEnded, 0, false),
+            ...$this->applyResult($listing, $channel, $payload, $apply, $confirmed, $writeEnabled, $needs, $skipEnded, 0, false, $this->inventoryOfferLocalDiagnostics($listing, $raw)),
             'revise_payload_safe' => $needs || $apply ? $payload : null,
             'revise_payload_forbidden_keys_present' => array_values(array_intersect(array_keys($payload), ['price','pricingSummary','availableQuantity','quantity','stock','availability','listingPolicies','fulfillmentPolicyId','paymentPolicyId','returnPolicyId','merchantLocationKey','images','product'])),
         ];
@@ -182,6 +183,7 @@ class EbayDescriptionAuditService
             'marketplace_listing_id_external' => $listing->external_listing_id,
             'external_offer_id' => $listing->external_offer_id,
             'item_id' => $this->itemId($listing, $raw),
+            ...$this->inventoryOfferLocalDiagnostics($listing, $raw),
             'original_description_length' => mb_strlen($sourceHtml),
             'local_description_length' => mb_strlen($localHtml),
             'live_description_length' => mb_strlen($liveHtml),
@@ -190,13 +192,14 @@ class EbayDescriptionAuditService
             'live_listing_asset_urls' => $this->imgSrcs($liveHtml),
             'stale_asset_urls' => array_values(array_filter($this->imgSrcs($liveHtml), fn (string $url): bool => ! $this->isCurrentAssetUrl($url))),
             'live_read_only_api' => Arr::except($live, ['description_html']),
+            'inventory_offer_read_only_api' => $fetchLiveDescription ? $this->readOnlyInventoryOfferDiagnostics($listing, $channel, $raw) : null,
             'apply_requested' => $apply,
             'apply_confirmed' => $confirmed,
             'apply_executed' => false,
         ];
 
         if ($sourceHtml === '') {
-            return $base + [
+            return array_merge($base, [
                 'action' => 'blocked',
                 'blocker' => $fetchLiveDescription ? 'cannot_fetch_live_description' : 'cannot_patch_assets_only_without_existing_description',
                 'needs_description_revise' => false,
@@ -209,13 +212,13 @@ class EbayDescriptionAuditService
                 'forbidden_changes_detected' => false,
                 'revise_payload_safe' => null,
                 'revise_payload_forbidden_keys_present' => [],
-            ];
+            ]);
         }
 
         $patch = $this->patchTemplateAssetSrcs($sourceHtml);
         $payload = ['listingDescription' => $patch['html']];
 
-        return $base + [
+        return array_merge($base, [
             'action' => $skipEnded ? 'skip_ended_listing' : ($patch['replacements_count'] > 0 ? 'would_patch_asset_src_only' : 'ok'),
             'needs_description_revise' => ! $skipEnded && $patch['replacements_count'] > 0,
             'confidence' => $patch['replacements_count'] > 0 ? 'high' : null,
@@ -227,10 +230,10 @@ class EbayDescriptionAuditService
             'changed_only_img_src' => $patch['changed_only_img_src'],
             'forbidden_changes_detected' => ! $patch['changed_only_img_src'],
             'description_changed' => $sourceHtml !== $patch['html'],
-            ...$this->applyResult($listing, $channel, $payload, $apply, $confirmed, $writeEnabled, $patch['replacements_count'] > 0, $skipEnded, $patch['replacements_count'], $patch['changed_only_img_src']),
+            ...$this->applyResult($listing, $channel, $payload, $apply, $confirmed, $writeEnabled, $patch['replacements_count'] > 0, $skipEnded, $patch['replacements_count'], $patch['changed_only_img_src'], $this->inventoryOfferLocalDiagnostics($listing, $raw)),
             'revise_payload_safe' => ($patch['replacements_count'] > 0 || $apply) && ! $skipEnded ? $payload : null,
             'revise_payload_forbidden_keys_present' => array_values(array_intersect(array_keys($payload), ['price','pricingSummary','availableQuantity','quantity','stock','availability','listingPolicies','fulfillmentPolicyId','paymentPolicyId','returnPolicyId','merchantLocationKey','images','product'])),
-        ];
+        ]);
     }
 
 
@@ -246,17 +249,22 @@ class EbayDescriptionAuditService
     }
 
     /** @param array{listingDescription:string} $payload */
-    private function applyResult(MarketplaceListing $listing, string $channel, array $payload, bool $apply, bool $confirmed, bool $writeEnabled, bool $needsRevise, bool $skipEnded, int $replacementsCount, bool $changedOnlyImgSrc): array
+    private function applyResult(MarketplaceListing $listing, string $channel, array $payload, bool $apply, bool $confirmed, bool $writeEnabled, bool $needsRevise, bool $skipEnded, int $replacementsCount, bool $changedOnlyImgSrc, ?array $reviseDiagnostics = null): array
     {
         if (! $this->shouldExecuteApply($apply, $confirmed, $writeEnabled, $needsRevise, $skipEnded)) return ['apply_executed' => false];
 
-        $result = $this->executeDescriptionRevise($listing, $channel, $payload, $replacementsCount, $changedOnlyImgSrc);
+        $result = $this->executeDescriptionRevise($listing, $channel, $payload, $replacementsCount, $changedOnlyImgSrc, $reviseDiagnostics);
         if ((bool) ($result['ok'] ?? false)) {
             return [
                 'action' => 'applied',
                 'apply_executed' => true,
                 'ebay_ack' => $result['ebay_ack'] ?? $result['trading_ack'] ?? null,
                 'trading_http_status' => $result['trading_http_status'] ?? $result['http_status'] ?? null,
+                'revise_api_family' => $result['revise_api_family'] ?? $reviseDiagnostics['revise_api_family'] ?? null,
+                'inventory_sku' => $result['inventory_sku'] ?? $reviseDiagnostics['inventory_sku'] ?? null,
+                'offer_id' => $result['offer_id'] ?? $reviseDiagnostics['offer_id'] ?? null,
+                'listing_id' => $result['listing_id'] ?? $reviseDiagnostics['listing_id'] ?? null,
+                'can_revise_description_via_inventory_offer' => $result['can_revise_description_via_inventory_offer'] ?? $reviseDiagnostics['can_revise_description_via_inventory_offer'] ?? null,
             ];
         }
 
@@ -268,11 +276,16 @@ class EbayDescriptionAuditService
             'ebay_ack' => $result['ebay_ack'] ?? $result['trading_ack'] ?? null,
             'ebay_errors' => $result['ebay_errors'] ?? null,
             'trading_http_status' => $result['trading_http_status'] ?? $result['http_status'] ?? null,
+            'revise_api_family' => $result['revise_api_family'] ?? $reviseDiagnostics['revise_api_family'] ?? null,
+            'inventory_sku' => $result['inventory_sku'] ?? $reviseDiagnostics['inventory_sku'] ?? null,
+            'offer_id' => $result['offer_id'] ?? $reviseDiagnostics['offer_id'] ?? null,
+            'listing_id' => $result['listing_id'] ?? $reviseDiagnostics['listing_id'] ?? null,
+            'can_revise_description_via_inventory_offer' => $result['can_revise_description_via_inventory_offer'] ?? $reviseDiagnostics['can_revise_description_via_inventory_offer'] ?? null,
         ];
     }
 
     /** @param array{listingDescription:string} $payload */
-    private function executeDescriptionRevise(MarketplaceListing $listing, string $channel, array $payload, int $replacementsCount = 0, bool $changedOnlyImgSrc = false): array
+    private function executeDescriptionRevise(MarketplaceListing $listing, string $channel, array $payload, int $replacementsCount = 0, bool $changedOnlyImgSrc = false, ?array $reviseDiagnostics = null): array
     {
         $itemId = $this->itemId($listing, $listing->raw_payload ?: []);
         $result = ['ok' => false, 'error' => null];
@@ -282,7 +295,12 @@ class EbayDescriptionAuditService
             elseif ($itemId === null) $result = ['ok' => false, 'error' => 'missing_item_id'];
             else {
                 $account = $listing->account ?: MarketplaceAccount::query()->where('code', $channel)->orWhere('marketplace', $channel)->first();
-                $result = $account ? (new EbayApiClient($channel, $account))->reviseItemDescriptionOnly($itemId, $payload) : ['ok' => false, 'error' => 'marketplace_account_not_found'];
+                if (! $account) $result = ['ok' => false, 'error' => 'marketplace_account_not_found'];
+                elseif (($reviseDiagnostics['revise_api_family'] ?? 'trading') === 'inventory_offer') {
+                    $client = new EbayApiClient($channel, $account);
+                    $dryRun = $client->readOnlyInventoryOfferForDescriptionRevise($reviseDiagnostics['offer_id'] ?? null, $reviseDiagnostics['inventory_sku'] ?? null, $reviseDiagnostics['listing_id'] ?? $itemId);
+                    $result = $client->reviseInventoryOfferDescriptionOnly($dryRun['offer_id'] ?? ($reviseDiagnostics['offer_id'] ?? null), $dryRun['inventory_sku'] ?? ($reviseDiagnostics['inventory_sku'] ?? null), $payload) + $dryRun;
+                } else $result = (new EbayApiClient($channel, $account))->reviseItemDescriptionOnly($itemId, $payload);
             }
         } catch (Throwable $e) {
             $result = ['ok' => false, 'error' => class_basename($e), 'error_message_safe' => 'Technical error during eBay ReviseItem. Details logged.', 'exception_message' => $e->getMessage()];
@@ -435,6 +453,47 @@ class EbayDescriptionAuditService
         return ($live['trading_ack'] ?? null) === 'Success'
             && (int) ($live['description_length'] ?? mb_strlen((string) ($live['description_html'] ?? ''))) > 0
             && filled($live['item_id'] ?? null);
+    }
+
+
+    /** @return array<string,mixed>|null */
+    private function readOnlyInventoryOfferDiagnostics(MarketplaceListing $listing, string $channel, array $raw): ?array
+    {
+        $local = $this->inventoryOfferLocalDiagnostics($listing, $raw);
+        if (($local['revise_api_family'] ?? 'trading') !== 'inventory_offer') return null;
+        $account = $listing->account ?: MarketplaceAccount::query()->where('code', $channel)->orWhere('marketplace', $channel)->first();
+        if (! $account) return ['ok' => false, 'read_only' => true, 'revise_api_family' => 'inventory_offer', 'blocker' => 'marketplace_account_not_found'];
+        return (new EbayApiClient($channel, $account))->readOnlyInventoryOfferForDescriptionRevise($local['offer_id'] ?? null, $local['inventory_sku'] ?? null, $local['listing_id'] ?? null);
+    }
+
+    /** @return array<string,mixed> */
+    private function inventoryOfferLocalDiagnostics(MarketplaceListing $l, array $raw): array
+    {
+        $sku = $this->firstFilled([$l->sku, $l->external_inventory_id, Arr::get($raw, 'sku'), Arr::get($raw, 'inventoryItemSku'), Arr::get($raw, 'inventory_item_sku'), Arr::get($raw, 'offer.sku'), Arr::get($raw, 'inventory.sku')]);
+        $rawOfferId = $this->firstFilled([Arr::get($raw, 'offer_id'), Arr::get($raw, 'offerId'), Arr::get($raw, 'offer.offerId'), Arr::get($raw, 'offer.offer_id')]);
+        $offerId = $this->firstFilled([$rawOfferId, $l->external_offer_id]);
+        $listingId = $this->itemId($l, $raw);
+        $family = (filled($sku) || filled($rawOfferId) || filled($l->external_inventory_id) || (filled($offerId) && ! ctype_digit((string) $offerId))) ? 'inventory_offer' : 'trading';
+        $blocker = $family === 'inventory_offer' && (blank($sku) || blank($offerId)) ? 'missing_offer_id_or_inventory_sku' : null;
+
+        return [
+            'revise_api_family' => $family,
+            'inventory_sku' => $sku,
+            'offer_id' => $offerId,
+            'listing_id' => $listingId,
+            'raw_payload_offer_id' => Arr::get($raw, 'offer_id') ?? Arr::get($raw, 'offerId') ?? Arr::get($raw, 'offer.offerId'),
+            'raw_payload_listing_id' => Arr::get($raw, 'listing_id') ?? Arr::get($raw, 'listingId') ?? Arr::get($raw, 'listing.listingId'),
+            'raw_payload_item_id' => Arr::get($raw, 'item_id') ?? Arr::get($raw, 'itemId') ?? Arr::get($raw, 'ebay.item_id'),
+            'raw_payload_sku' => Arr::get($raw, 'sku') ?? Arr::get($raw, 'inventoryItemSku') ?? Arr::get($raw, 'offer.sku'),
+            'can_revise_description_via_inventory_offer' => $family === 'inventory_offer' ? false : null,
+            'inventory_offer_blocker' => $blocker ?: ($family === 'inventory_offer' ? 'cannot_revise_description_only_for_inventory_offer' : null),
+        ];
+    }
+
+    private function firstFilled(array $values): ?string
+    {
+        foreach ($values as $value) if (filled($value)) return (string) $value;
+        return null;
     }
     private function itemId(MarketplaceListing $l, array $raw): ?string { foreach ([$l->external_listing_id, $l->external_offer_id, Schema::hasColumn('marketplace_listings','external_id') ? $l->external_id : null, preg_match('#/itm/(\d+)#', (string) $l->url, $m) ? $m[1] : null, Arr::get($raw,'item_id'), Arr::get($raw,'ebay.item_id')] as $v) if (filled($v) && ctype_digit((string) $v)) return (string) $v; return null; }
     private function readOnlyLiveDescription(MarketplaceListing $listing, string $channel, bool $fetchDescription = false): array
