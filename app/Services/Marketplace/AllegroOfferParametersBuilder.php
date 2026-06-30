@@ -455,7 +455,7 @@ class AllegroOfferParametersBuilder
     private function result(array $offer, array $product, array $missing, array $optional, array $unmapped, array $diag, array $defs, array $payments = [], array $paymentDiagnostics = []): array
     {
         $requiredProductParameterIds = collect($diag)
-            ->filter(fn ($row) => ($row['parameter_location'] ?? null) === 'productSet[0].product.parameters' && (bool) ($row['required'] ?? false) && ($row['status'] ?? null) === 'resolved')
+            ->filter(fn ($row) => ($row['parameter_location'] ?? null) === 'productSet[0].product.parameters' && (bool) ($row['required'] ?? false) && in_array(($row['status'] ?? null), ['fixed', 'mapped'], true))
             ->pluck('id')
             ->map(fn ($id) => (string) $id)
             ->all();
