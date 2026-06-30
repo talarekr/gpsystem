@@ -142,7 +142,7 @@ class AllegroCategoryParametersTest extends TestCase
     }
 
 
-    public function test_part_manufacturer_prefers_part_brand_over_vehicle_make(): void
+    public function test_part_manufacturer_prefers_vehicle_make_over_part_brand_for_oe_business_rule(): void
     {
         $part = Part::query()->create(['name' => 'Część', 'category_id' => 77, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'vehicle_snapshot' => ['make' => 'Maserati'], 'is_visible_storefront' => true]);
         $part->setAttribute('brand', 'Bosch');
@@ -151,9 +151,10 @@ class AllegroCategoryParametersTest extends TestCase
             ['id' => '127415', 'name' => 'Producent części', 'type' => 'string', 'required' => true, 'options' => ['describesProduct' => true]],
         ]]);
 
-        $this->assertSame([['id' => '127415', 'values' => ['Bosch']]], $result['product_parameters']);
+        $this->assertSame([['id' => '127415', 'values' => ['Maserati OE']]], $result['product_parameters']);
         $this->assertSame([], $result['missing_required_parameters']);
-        $this->assertSame('part.brand', $result['parameter_source_diagnostics'][0]['source']);
+        $this->assertSame('vehicle_snapshot.make', $result['parameter_source_diagnostics'][0]['source']);
+        $this->assertSame('vehicle_snapshot.make', $result['parameter_source_diagnostics'][0]['source_field']);
     }
 
     public function test_part_manufacturer_falls_back_to_vehicle_snapshot_make_and_text_values(): void
@@ -164,7 +165,7 @@ class AllegroCategoryParametersTest extends TestCase
             ['id' => '127415', 'name' => 'Producent części', 'type' => 'string', 'required' => true, 'options' => ['describesProduct' => true]],
         ]]);
 
-        $this->assertSame([['id' => '127415', 'values' => ['Maserati']]], $result['product_parameters']);
+        $this->assertSame([['id' => '127415', 'values' => ['Maserati OE']]], $result['product_parameters']);
         $this->assertSame('vehicle_snapshot.make', $result['parameter_source_diagnostics'][0]['source']);
         $this->assertSame('Maserati', $result['parameter_source_diagnostics'][0]['source_value']);
         $this->assertFalse($result['will_make_marketplace_request']);
@@ -175,7 +176,7 @@ class AllegroCategoryParametersTest extends TestCase
         $part = Part::query()->create(['name' => 'Część Maserati', 'category_id' => 77, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'vehicle_snapshot' => ['make' => 'Maserati'], 'is_visible_storefront' => true]);
 
         $result = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, null, ['ok' => true, 'source' => 'cache', 'parameters' => [
-            ['id' => '127415', 'name' => 'Producent części', 'type' => 'dictionary', 'required' => true, 'dictionary' => [['id' => 'maserati-id', 'value' => 'Maserati']], 'options' => ['describesProduct' => false]],
+            ['id' => '127415', 'name' => 'Producent części', 'type' => 'dictionary', 'required' => true, 'dictionary' => [['id' => 'maserati-id', 'value' => 'Maserati OE']], 'options' => ['describesProduct' => false]],
         ]]);
 
         $this->assertSame([['id' => '127415', 'valuesIds' => ['maserati-id']]], $result['offer_parameters']);
@@ -196,10 +197,44 @@ class AllegroCategoryParametersTest extends TestCase
         $this->assertSame([], $result['offer_parameters']);
         $this->assertSame('Producent części', $result['missing_required_parameters'][0]['name']);
         $this->assertSame('Audi', $result['missing_required_parameters'][0]['raw_local_value']);
+        $this->assertSame('Audi OE', $result['missing_required_parameters'][0]['normalized_value']);
         $this->assertSame('no_allowed_value_match', $result['missing_required_parameters'][0]['reason']);
         $this->assertSame('invalid', $result['missing_required_parameters'][0]['status']);
         $this->assertSame(['audio-alubutyl-id' => 'Audio Alubutyl', 'oem-id' => 'OEM'], $result['missing_required_parameters'][0]['allowed_values']);
         $this->assertArrayNotHasKey('mapped_value_id', $result['missing_required_parameters'][0]);
+    }
+
+
+    public function test_all_parts_get_gvo_quality_oe_business_rule(): void
+    {
+        $part = Part::query()->create(['name' => 'Część Audi', 'category_id' => 77, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'vehicle_snapshot' => ['make' => 'Audi'], 'is_visible_storefront' => true]);
+
+        $result = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, null, ['ok' => true, 'source' => 'cache', 'parameters' => [
+            ['id' => 'quality', 'name' => 'Jakość części (zgodnie z GVO)', 'type' => 'dictionary', 'required' => true, 'dictionary' => [['id' => 'oe', 'value' => 'O - oryginał z logo producenta pojazdu (OE)']], 'options' => ['describesProduct' => false]],
+        ]]);
+
+        $this->assertSame([['id' => 'quality', 'valuesIds' => ['oe']]], $result['offer_parameters']);
+        $this->assertSame('O - oryginał z logo producenta pojazdu (OE)', $result['parameter_source_diagnostics'][0]['resolved_value']);
+    }
+
+    public function test_part_manufacturer_maps_audi_bmw_and_mercedes_oe_exact_or_alias_labels(): void
+    {
+        foreach ([['Audi', 'Audi OE', 'audi-id'], ['BMW', 'BMW OE', 'bmw-id'], ['VW', 'Volkswagen OE', 'vw-id'], ['Mercedes', 'Mercedes-Benz OE', 'mercedes-id']] as [$make, $label, $id]) {
+            $part = Part::query()->create(['name' => 'Część '.$make, 'category_id' => 77, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'vehicle_snapshot' => ['make' => $make], 'is_visible_storefront' => true]);
+
+            $result = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, null, ['ok' => true, 'source' => 'cache', 'parameters' => [
+                ['id' => '127415', 'name' => 'Producent części', 'type' => 'dictionary', 'required' => true, 'dictionary' => [
+                    ['id' => 'audio-alubutyl-id', 'value' => 'Audio Alubutyl'],
+                    ['id' => $id, 'value' => $label],
+                ], 'options' => ['describesProduct' => false]],
+            ]]);
+
+            $this->assertSame([['id' => '127415', 'valuesIds' => [$id]]], $result['offer_parameters']);
+            $this->assertSame($make, $result['parameter_source_diagnostics'][0]['raw_local_value']);
+            $this->assertSame($label, $result['parameter_source_diagnostics'][0]['mapped_label']);
+            $this->assertSame($id, $result['parameter_source_diagnostics'][0]['mapped_value_id']);
+            $this->assertSame('mapped', $result['parameter_source_diagnostics'][0]['status']);
+        }
     }
 
     public function test_part_catalog_number_uses_real_part_number_and_describes_product_section(): void
