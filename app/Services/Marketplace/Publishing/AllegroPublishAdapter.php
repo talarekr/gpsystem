@@ -95,7 +95,8 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
             ->map(fn (array $row) => [
                 'searched_name' => $row['searched_name'] ?? 'GPSWISS',
                 'id' => $row['id'] ?? null,
-                'found' => (bool) ($row['found'] ?? false),
+                'found' => (bool) ($row['found'] ?? filled($row['id'] ?? null)),
+                'status' => $row['status'] ?? (filled($row['id'] ?? null) ? 'mapped' : null),
                 'reason' => $row['reason'] ?? null,
             ])->all();
     }

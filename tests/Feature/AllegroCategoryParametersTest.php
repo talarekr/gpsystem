@@ -343,12 +343,14 @@ class AllegroCategoryParametersTest extends TestCase
         ]]);
 
         $this->assertSame([], $result['missing_required_parameters']);
-        $this->assertSame(['11323', '215858'], array_column($result['payload_parameters'], 'id'));
+        $this->assertSame(['11323'], array_column($result['payload_parameters'], 'id'));
         $this->assertSame(['11323', '129917', '127415', '215858'], array_column($result['product_parameters'], 'id'));
         $this->assertContains('129917', array_column($result['product_parameters'], 'id'));
         $this->assertNotContains('129917', array_column($result['payload_parameters'], 'id'));
         $this->assertContains('127415', array_column($result['product_parameters'], 'id'));
         $this->assertNotContains('127415', array_column($result['payload_parameters'], 'id'));
+        $this->assertContains('215858', array_column($result['product_parameters'], 'id'));
+        $this->assertNotContains('215858', array_column($result['payload_parameters'], 'id'));
     }
 
 
