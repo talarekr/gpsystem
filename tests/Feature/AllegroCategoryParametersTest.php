@@ -331,6 +331,22 @@ class AllegroCategoryParametersTest extends TestCase
         $this->assertDatabaseCount('marketplace_listings', 0);
     }
 
+    public function test_required_product_parameters_are_also_merged_into_final_payload_parameters(): void
+    {
+        $part = Part::query()->create(['name' => 'Skrzynia Audi', 'part_number' => '06H903017J', 'category_id' => 77, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'vehicle_snapshot' => ['make' => 'Audi', 'gearbox_type' => 'Automatyczna'], 'is_visible_storefront' => true]);
+
+        $result = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, null, ['ok' => true, 'source' => 'cache', 'parameters' => [
+            ['id' => '11323', 'name' => 'Stan', 'type' => 'dictionary', 'required' => true, 'dictionary' => [['id' => 'used', 'value' => 'Używany']], 'options' => ['describesProduct' => true]],
+            ['id' => '129917', 'name' => 'Rodzaj skrzyni', 'type' => 'dictionary', 'required' => true, 'dictionary' => [['id' => '129917_2', 'value' => 'Automatyczna']], 'options' => ['describesProduct' => true]],
+            ['id' => '127415', 'name' => 'Producent części', 'type' => 'string', 'required' => true, 'options' => ['describesProduct' => true]],
+            ['id' => '215858', 'name' => 'Numer katalogowy części', 'type' => 'string', 'required' => true, 'options' => ['describesProduct' => true]],
+        ]]);
+
+        $this->assertSame([], $result['missing_required_parameters']);
+        $this->assertSame(['11323', '129917', '127415', '215858'], array_column($result['payload_parameters'], 'id'));
+        $this->assertSame($result['product_parameters'], $result['payload_parameters']);
+    }
+
 
     public function test_allegro_car_type_maps_body_type_to_vehicle_type_values_id(): void
     {
