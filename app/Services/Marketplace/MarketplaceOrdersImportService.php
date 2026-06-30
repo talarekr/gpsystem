@@ -4,6 +4,8 @@ namespace App\Services\Marketplace;
 
 use App\Models\MarketplaceAccount;
 use App\Models\Order;
+use App\Services\Marketplace\Api\AllegroApiClient;
+use App\Support\Marketplace\EbayOAuthConfig;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
@@ -104,28 +106,69 @@ class MarketplaceOrdersImportService
         $limit = max(1, min((int) ($options['limit'] ?? 50), 100));
         $query = $this->orderQuery($marketplace, $options, $limit);
         $base = rtrim((string) $account->api_base_url, '/');
+        $endpointPath = $marketplace === 'allegro' ? '/order/checkout-forms' : '/sell/fulfillment/v1/order';
+        $diagnostics = $this->orderAuthDiagnostics($marketplace, $account, $endpointPath);
 
         if ($marketplace === 'allegro') {
-            $response = Http::withToken((string) ($credentials['access_token'] ?? ''))->accept('application/vnd.allegro.public.v1+json')->timeout(25)->get($base.'/order/checkout-forms', $query);
+            $response = $this->sendAllegroOrdersRequest($base, (string) ($credentials['access_token'] ?? ''), $query);
+            if ($response->status() === 401) {
+                $diagnostics['refresh_attempted'] = filled($credentials['refresh_token'] ?? null);
+                $refresh = $diagnostics['refresh_attempted'] ? (new AllegroApiClient((string) $account->code, $account))->refreshAccessToken() : ['ok' => false];
+                $diagnostics['refreshed'] = ($refresh['ok'] ?? false) === true;
+                if ($diagnostics['refreshed']) {
+                    $account->refresh();
+                    $credentials = is_array($account->api_credentials) ? $account->api_credentials : [];
+                    $diagnostics['token_expires_at'] = $this->tokenExpiresAt($marketplace, $credentials);
+                    $response = $this->sendAllegroOrdersRequest($base, (string) ($credentials['access_token'] ?? ''), $query);
+                }
+            }
         } elseif (in_array($marketplace, ['ebay', 'ebay_de', 'ebay_fr'], true)) {
-            $response = Http::withToken((string) ($credentials['access_token'] ?? ''))->withHeaders(['X-EBAY-C-MARKETPLACE-ID' => (string) (($account->api_settings ?? [])['marketplace_id'] ?? ($marketplace === 'ebay_fr' ? 'EBAY_FR' : 'EBAY_DE'))])->acceptJson()->timeout(25)->get($base.'/sell/fulfillment/v1/order', $query);
+            $marketplaceId = (string) (($account->api_settings ?? [])['marketplace_id'] ?? ($marketplace === 'ebay_fr' ? 'EBAY_FR' : 'EBAY_DE'));
+            $response = $this->sendEbayOrdersRequest($base, (string) ($credentials['access_token'] ?? ''), $marketplaceId, $query);
+            if ($response->status() === 401) {
+                $diagnostics['refresh_attempted'] = $this->canRefreshEbayToken($credentials);
+                $newToken = $diagnostics['refresh_attempted'] ? $this->refreshEbayAccessToken($account, $credentials) : null;
+                $diagnostics['refreshed'] = filled($newToken);
+                if ($diagnostics['refreshed']) {
+                    $account->refresh();
+                    $credentials = is_array($account->api_credentials) ? $account->api_credentials : [];
+                    $diagnostics['token_expires_at'] = $this->tokenExpiresAt($marketplace, $credentials);
+                    $diagnostics['scopes'] = $this->safeScopes($credentials);
+                    $response = $this->sendEbayOrdersRequest($base, (string) $newToken, $marketplaceId, $query);
+                }
+            }
         } else {
             return $this->fetchOvokoOrders($base, $credentials, $options, $result);
         }
 
         $payload = is_array($response->json()) ? $response->json() : [];
         $result['api_http_status'] = $response->status();
+        $diagnostics['http_status'] = $response->status();
         app(ApiIntegrationLogger::class)->record([
             'integration' => $marketplace, 'action' => 'GET orders', 'status' => $response->successful() ? 'success' : 'error',
             'http_status' => $response->status(), 'message' => 'Read-only marketplace order fetch.',
-            'request' => ['endpoint' => $marketplace === 'allegro' ? '/order/checkout-forms' : '/sell/fulfillment/v1/order', 'query' => $query],
+            'request' => ['endpoint' => $endpointPath, 'query' => $query, 'auth_diagnostics' => $diagnostics],
             'response' => ['keys' => is_array($payload) ? array_keys($payload) : []],
         ]);
         if (! $response->successful()) {
-            $result['errors'][] = ['marketplace' => $marketplace, 'http_status' => $response->status(), 'message' => 'Read-only order endpoint returned non-success status.'];
+            $result['errors'][] = [
+                'marketplace' => $marketplace,
+                'http_status' => $response->status(),
+                'message' => $this->ordersAuthErrorMessage($marketplace, $response->status(), $credentials),
+            ];
             return [];
         }
         return array_values(array_filter($payload['checkoutForms'] ?? $payload['orders'] ?? $payload['data'] ?? $payload['list'] ?? [], 'is_array'));
+    }
+
+    private function sendAllegroOrdersRequest(string $base, string $token, array $query): \Illuminate\Http\Client\Response
+    {
+        return Http::withToken($token)->accept('application/vnd.allegro.public.v1+json')->timeout(25)->get($base.'/order/checkout-forms', $query);
+    }
+
+    private function sendEbayOrdersRequest(string $base, string $token, string $marketplaceId, array $query): \Illuminate\Http\Client\Response
+    {
+        return Http::withToken($token)->withHeaders(['X-EBAY-C-MARKETPLACE-ID' => $marketplaceId])->acceptJson()->timeout(25)->get($base.'/sell/fulfillment/v1/order', $query);
     }
 
     private function fetchOvokoOrders(string $base, array $credentials, array $options, array &$result): array
@@ -464,4 +507,90 @@ class MarketplaceOrdersImportService
     private function emptySummary(array $o, bool $dry): array { return ['ok'=>true,'marketplace'=>$o['marketplace'] ?? 'all','dry_run'=>$dry,'date_from'=>$o['since'] ?? ($o['date_from'] ?? null),'date_to'=>$o['date_to'] ?? null,'orders_fetched'=>0,'orders_created'=>0,'orders_updated'=>0,'orders_skipped'=>0,'items_created'=>0,'items_updated'=>0,'errors'=>[],'warnings'=>[],'marketplaces'=>[],'safety_flags'=>$this->flags($dry)]; }
     private function emptyMarketplaceSummary(string $m, array $o, bool $dry): array { return ['marketplace'=>$m,'dry_run'=>$dry,'date_from'=>$o['since'] ?? ($o['date_from'] ?? null),'date_to'=>$o['date_to'] ?? null,'orders_fetched'=>0,'orders_created'=>0,'orders_updated'=>0,'orders_skipped'=>0,'items_created'=>0,'items_updated'=>0,'errors'=>[],'warnings'=>[],'would_import'=>[],'safety_flags'=>$this->flags($dry)]; }
     private function flags(bool $dry): array { return ['read_only'=>$dry,'orders_changed'=>! $dry,'products_changed'=>false,'parts_changed'=>false,'offers_changed'=>false,'listings_changed'=>false,'stock_changed'=>false,'prices_changed'=>false,'mappings_changed'=>false,'allegro_write'=>false,'ovoko_write'=>false,'ebay_write'=>false]; }
+
+    private function orderAuthDiagnostics(string $marketplace, MarketplaceAccount $account, string $endpointPath): array
+    {
+        $credentials = is_array($account->api_credentials) ? $account->api_credentials : [];
+        $settings = is_array($account->api_settings) ? $account->api_settings : [];
+
+        return array_filter([
+            'channel' => $marketplace,
+            'account_code' => $account->code,
+            'marketplace_id' => in_array($marketplace, ['ebay', 'ebay_de', 'ebay_fr'], true)
+                ? (string) ($settings['marketplace_id'] ?? ($marketplace === 'ebay_fr' ? 'EBAY_FR' : 'EBAY_DE'))
+                : null,
+            'token_present' => filled($credentials['access_token'] ?? null),
+            'token_expires_at' => $this->tokenExpiresAt($marketplace, $credentials),
+            'refresh_attempted' => false,
+            'refreshed' => false,
+            'scopes' => in_array($marketplace, ['ebay', 'ebay_de', 'ebay_fr'], true) ? $this->safeScopes($credentials) : null,
+            'endpoint' => $endpointPath,
+        ], fn ($value) => $value !== null);
+    }
+
+    private function tokenExpiresAt(string $marketplace, array $credentials): ?string
+    {
+        if ($marketplace === 'allegro') {
+            return $credentials['access_token_expires_at'] ?? $credentials['expires_at'] ?? null;
+        }
+
+        return $credentials['expires_at'] ?? $credentials['access_token_expires_at'] ?? null;
+    }
+
+    private function canRefreshEbayToken(array $credentials): bool
+    {
+        return filled($credentials['client_id'] ?? null) && filled($credentials['client_secret'] ?? null) && filled($credentials['refresh_token'] ?? null);
+    }
+
+    private function refreshEbayAccessToken(MarketplaceAccount $account, array $credentials): ?string
+    {
+        if (! $this->canRefreshEbayToken($credentials)) return null;
+
+        $response = Http::asForm()->withBasicAuth((string) $credentials['client_id'], (string) $credentials['client_secret'])->acceptJson()->timeout(20)->post(EbayOAuthConfig::tokenUrl((string) $account->api_base_url), [
+            'grant_type' => 'refresh_token',
+            'refresh_token' => (string) $credentials['refresh_token'],
+            'scope' => (string) ($credentials['scopes'] ?? EbayOAuthConfig::scopeString()),
+        ]);
+        $payload = $response->json();
+        if (! $response->successful() || ! is_array($payload) || blank($payload['access_token'] ?? null)) return null;
+
+        $updated = array_merge($credentials, [
+            'access_token' => (string) $payload['access_token'],
+            'expires_at' => EbayOAuthConfig::tokenExpiresAt($payload['expires_in'] ?? null),
+            'token_type' => (string) ($payload['token_type'] ?? ($credentials['token_type'] ?? '')),
+            'scopes' => $payload['scope'] ?? ($credentials['scopes'] ?? EbayOAuthConfig::scopeString()),
+            'refreshed_at' => now()->toISOString(),
+        ]);
+        if (filled($payload['refresh_token'] ?? null)) $updated['refresh_token'] = (string) $payload['refresh_token'];
+        $account->forceFill(['api_credentials' => $updated, 'last_connection_check_at' => now(), 'last_connection_status' => 'ok', 'last_connection_message' => 'eBay access token refreshed securely for read-only order sync.'])->save();
+
+        return (string) $updated['access_token'];
+    }
+
+    private function safeScopes(array $credentials): array
+    {
+        $scopes = $credentials['scopes'] ?? $credentials['scope'] ?? [];
+        if (is_string($scopes)) $scopes = preg_split('/\s+/', trim($scopes)) ?: [];
+        return array_values(array_filter(array_map('strval', is_array($scopes) ? $scopes : [])));
+    }
+
+    private function ordersAuthErrorMessage(string $marketplace, int $status, array $credentials): string
+    {
+        if ($status !== 401 && $status !== 403) return 'Read-only order endpoint returned non-success status.';
+
+        if ($marketplace === 'allegro') {
+            return 'Read-only Allegro orders authorization failed. Reconnect the Allegro account with order read permission if token refresh did not resolve it.';
+        }
+
+        if (in_array($marketplace, ['ebay', 'ebay_de', 'ebay_fr'], true)) {
+            $scopeText = implode(' ', $this->safeScopes($credentials));
+            $hasFulfillmentScope = str_contains($scopeText, 'sell.fulfillment');
+
+            return $hasFulfillmentScope
+                ? 'Read-only eBay orders authorization failed after token refresh attempt.'
+                : 'Read-only eBay orders authorization failed. Reconnect the eBay account with order read / sell.fulfillment.readonly scope.';
+        }
+
+        return 'Read-only order endpoint returned non-success status.';
+    }
 }
