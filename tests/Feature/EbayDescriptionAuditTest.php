@@ -87,6 +87,38 @@ class EbayDescriptionAuditTest extends TestCase
         $this->assertSame([], $row['revise_payload_forbidden_keys_present']);
     }
 
+
+    public function test_patch_assets_only_replaces_only_template_img_srcs(): void
+    {
+        $part = Part::query()->create(['name' => 'Część eBay', 'description' => 'Opis', 'price' => 100, 'quantity' => 1]);
+        $html = '<section><h1>Keep title</h1><img class="x" style="width:1px" src="https://gpsystem.thecamels.pl/storage/icon-shipping-old.png"><p>Keep text</p><img src="/storage/dhl.png"></section>';
+        $listing = MarketplaceListing::query()->create(['marketplace' => 'ebay_de', 'part_id' => $part->id, 'status' => 'active', 'external_listing_id' => '123456789012', 'raw_payload' => ['description_rendered_html' => $html]]);
+
+        $row = app(EbayDescriptionAuditService::class)->auditListing($listing->fresh(['part']), 'ebay_de', false, false, false, true);
+
+        $this->assertSame('would_patch_asset_src_only', $row['action']);
+        $this->assertSame(2, $row['replacements_count']);
+        $this->assertTrue($row['changed_only_img_src']);
+        $this->assertFalse($row['forbidden_changes_detected']);
+        $this->assertSame([], $row['revise_payload_forbidden_keys_present']);
+        $this->assertStringContainsString('<h1>Keep title</h1>', $row['revise_payload_safe']['listingDescription']);
+        $this->assertStringContainsString('src="https://gpswiss.pl/ebay-template/assets/icon-shipping.png"', $row['revise_payload_safe']['listingDescription']);
+        $this->assertStringContainsString('src="https://gpswiss.pl/ebay-template/assets/dhl-logo.png"', $row['revise_payload_safe']['listingDescription']);
+    }
+
+    public function test_patch_assets_only_blocks_without_existing_description(): void
+    {
+        $part = Part::query()->create(['name' => 'Część eBay', 'description' => 'Opis', 'price' => 100, 'quantity' => 1]);
+        $listing = MarketplaceListing::query()->create(['marketplace' => 'ebay_de', 'part_id' => $part->id, 'status' => 'active', 'external_listing_id' => '123456789012', 'raw_payload' => []]);
+
+        $row = app(EbayDescriptionAuditService::class)->auditListing($listing->fresh(['part']), 'ebay_de', false, false, false, true);
+
+        $this->assertSame('blocked', $row['action']);
+        $this->assertSame('cannot_patch_assets_only_without_existing_description', $row['blocker']);
+        $this->assertNull($row['revise_payload_safe']);
+        $this->assertSame(0, $row['replacements_count']);
+    }
+
     private function actingAsAdminUser(): User
     {
         $this->seed(RoleSeeder::class);
