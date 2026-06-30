@@ -14,7 +14,7 @@ class MarketplaceListingReadinessService
 {
     public const CHANNELS = ['storefront', 'allegro_main', 'ovoko', 'ebay_de', 'ebay_fr'];
 
-    public function __construct(private readonly TranslationService $translationService, private readonly EbayDescriptionTemplateRenderer $ebayDescriptionTemplateRenderer, private readonly NbpExchangeRateService $exchangeRateService, private readonly EbayItemSpecificsService $ebayItemSpecificsService, private readonly AllegroCategoryParametersService $allegroCategoryParametersService, private readonly AllegroOfferParametersBuilder $allegroOfferParametersBuilder, private readonly MarketplaceImageSelectionService $marketplaceImageSelectionService) {}
+    public function __construct(private readonly TranslationService $translationService, private readonly EbayDescriptionTemplateRenderer $ebayDescriptionTemplateRenderer, private readonly NbpExchangeRateService $exchangeRateService, private readonly EbayItemSpecificsService $ebayItemSpecificsService, private readonly AllegroCategoryParametersService $allegroCategoryParametersService, private readonly AllegroOfferParametersBuilder $allegroOfferParametersBuilder, private readonly MarketplaceImageSelectionService $marketplaceImageSelectionService, private readonly AllegroSalesSettingsResolver $allegroSalesSettingsResolver) {}
 
     /** @return array<string, mixed> */
     public function checkPartReadiness(Part $part, string $channel): array
@@ -46,6 +46,7 @@ class MarketplaceListingReadinessService
             default => null,
         };
         $allegroParameters = null;
+        $allegroSalesSettings = null;
 
         $this->requireFilled($part->name ?? null, 'title', $missing, $blockers);
         $this->requirePositive($price, str_starts_with($channel, 'ebay_') ? 'ebay_price_pln' : 'price', $missing, $blockers);
@@ -78,6 +79,9 @@ class MarketplaceListingReadinessService
             $this->checkAccount($account, $blockers, $warnings, 'Allegro OAuth/account is not configured or not enabled.');
             if (! $categoryMapping || blank($categoryMapping->external_category_id)) { $missing[] = 'allegro_category_mapping'; $blockers[] = 'Brakuje Allegro category id.'; }
             if (! $descriptionReady) { $missing[] = 'description'; $warnings[] = 'Allegro description should be prepared before publishing later.'; }
+            $allegroSalesSettings = $this->allegroSalesSettingsResolver->resolve($account, $part->allegro_shipping_rate_name ?? null);
+            foreach (($allegroSalesSettings['blockers'] ?? []) as $salesSettingsBlocker) { $blockers[] = $salesSettingsBlocker; }
+            if (blank($part->allegro_shipping_rate_name ?? null)) { $missing[] = 'allegro_shipping_rate_name'; }
             if ($categoryMapping && filled($categoryMapping->external_category_id)) {
                 $definitions = $this->allegroCategoryParametersService->definitions((string) $categoryMapping->external_category_id);
                 $allegroParameters = $this->allegroOfferParametersBuilder->build($part, $categoryMapping, $definitions);
@@ -127,7 +131,7 @@ class MarketplaceListingReadinessService
             'missing_fields' => $missing,
             'warnings' => $warnings,
             'blockers' => $blockers,
-            'prepared_payload_preview_safe' => $this->safePayloadPreview($part, $channel, $price, $categoryMapping, $ebayPrice, $allegroParameters),
+            'prepared_payload_preview_safe' => $this->safePayloadPreview($part, $channel, $price, $categoryMapping, $ebayPrice, $allegroParameters, $allegroSalesSettings),
             'price_source' => $this->priceSource($channel),
             'local_price' => is_numeric($part->price ?? null) ? (float) $part->price : null,
             'marketplace_price' => $ebayPrice['price_eur'] ?? $price,
@@ -385,7 +389,7 @@ class MarketplaceListingReadinessService
     }
     private function hasActiveListing(Part $part, ?string $marketplace, string $channel): bool { if (! $marketplace || ! Schema::hasTable('marketplace_listings')) return false; return MarketplaceListing::query()->where('part_id', $part->id)->where('marketplace', $marketplace)->whereNotNull('external_offer_id')->whereNotIn('status', ['ended', 'deleted', 'archived', 'inactive'])->exists(); }
     /** @return array<string, mixed> */
-    private function safePayloadPreview(Part $part, string $channel, ?float $price, ?MarketplaceCategoryMapping $categoryMapping = null, ?array $ebayPrice = null, ?array $allegroParameters = null): array
+    private function safePayloadPreview(Part $part, string $channel, ?float $price, ?MarketplaceCategoryMapping $categoryMapping = null, ?array $ebayPrice = null, ?array $allegroParameters = null, ?array $allegroSalesSettings = null): array
     {
         $translation = $this->preparedTranslation($part, $channel);
         $itemSpecifics = str_starts_with($channel, 'ebay_') ? $this->ebayItemSpecificsService->build($part, $channel, $categoryMapping, $translation) : null;
@@ -423,6 +427,13 @@ class MarketplaceListingReadinessService
             $preview['unmapped_parameters'] = $allegroParameters['unmapped_parameters'] ?? [];
             $preview['parameter_definitions_source'] = $allegroParameters['parameter_definitions_source'] ?? 'none';
             $preview['will_make_marketplace_request'] = false;
+            $preview['allegro_sales_settings'] = $allegroSalesSettings;
+            $preview['delivery'] = ['shippingRates' => ['id' => $allegroSalesSettings['shippingRates']['id'] ?? null]];
+            $preview['afterSalesServices'] = array_filter([
+                'returnPolicy' => ['id' => $allegroSalesSettings['returnPolicy']['id'] ?? null],
+                'impliedWarranty' => ['id' => $allegroSalesSettings['impliedWarranty']['id'] ?? null],
+                'warranty' => ['id' => $allegroSalesSettings['warranty']['id'] ?? null],
+            ], fn ($row) => filled($row['id'] ?? null));
         }
 
         return $preview;

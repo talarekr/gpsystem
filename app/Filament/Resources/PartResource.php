@@ -8,6 +8,7 @@ use App\Models\Car;
 use App\Models\Part;
 use App\Models\PartCategory;
 use App\Models\PartImage;
+use App\Services\Marketplace\AllegroSalesSettingsResolver;
 use App\Services\Marketplace\PreparePartMarketplaceListingService;
 use App\Services\Parts\PartImageUploadService;
 use App\Models\StorageLocation;
@@ -205,6 +206,20 @@ class PartResource extends Resource
                         Forms\Components\Placeholder::make('marketplace_price_links')
                             ->hiddenLabel()
                             ->content(fn (Forms\Get $get): HtmlString => new HtmlString(self::marketplacePriceLinksHtml($get)))
+                            ->columnSpanFull(),
+                    ]),
+
+                Section::make('Kurier Allegro')
+                    ->collapsible()
+                    ->columns(1)
+                    ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--allegro-courier'])
+                    ->schema([
+                        Forms\Components\Select::make('allegro_shipping_rate_name')
+                            ->label('Kurier Allegro')
+                            ->placeholder('Wybierz cennik dostawy Allegro')
+                            ->options(AllegroSalesSettingsResolver::SHIPPING_RATE_OPTIONS)
+                            ->native(false)
+                            ->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])
                             ->columnSpanFull(),
                     ]),
 
