@@ -183,7 +183,9 @@ class MarketplaceListingDryRunController extends Controller
         if ($channel === 'allegro_main') {
             $allegroSalesSettings = app(AllegroSalesSettingsResolver::class)->resolve($this->account($channel), $part->allegro_shipping_rate_name ?? null);
             foreach (($allegroSalesSettings['blockers'] ?? []) as $salesSettingsBlocker) $blockers[] = $salesSettingsBlocker;
-            foreach (app(AllegroDescriptionBuilder::class)->build($part, $images['public_urls_sample'])['blockers'] as $descriptionBlocker) $blockers[] = $descriptionBlocker;
+            $allegroDescription = app(AllegroDescriptionBuilder::class)->build($part, $images['public_urls_sample']);
+            foreach ($allegroDescription['blockers'] as $descriptionBlocker) $blockers[] = $descriptionBlocker;
+            foreach (($allegroDescription['diagnostics']['optional_donor_vehicle_fields_missing'] ?? []) as $missingOptionalField) $warnings[] = 'optional_donor_vehicle_field_missing:'.$missingOptionalField;
         }
         if ($channel === 'allegro_main' && ! $mapping) $blockers[] = 'allegro_category_mapping_required_no_guessing';
         if ($channel === 'allegro_main' && $mapping && filled($mapping->external_category_id)) {

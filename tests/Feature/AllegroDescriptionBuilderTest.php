@@ -42,6 +42,25 @@ class AllegroDescriptionBuilderTest extends TestCase
         $this->assertStringContainsString('<p><b>CZĘŚĆ SPRAWNA. STAN WIDOCZNY NA ZDJĘCIACH</b></p>', $content);
     }
 
+
+    public function test_missing_engine_power_is_warning_and_omitted_from_description(): void
+    {
+        Http::fake($this->fakeAllegro());
+        $part = $this->readyPart();
+        $part->car->forceFill(['engine_power_kw' => null])->save();
+
+        $response = $this->getJson('/tools/dry-run-marketplace-listing-payload?token=gps_images_import_2026&channel=allegro_main&part_id='.$part->id);
+
+        $response->assertOk();
+        $this->assertNotContains('missing_donor_vehicle_field:Moc silnika', $response->json('blockers'));
+        $this->assertContains('optional_donor_vehicle_field_missing:Moc silnika', $response->json('warnings'));
+        $this->assertIsArray($response->json('payload.description.sections'));
+        $content = $response->json('payload.description.sections.0.items.0.content');
+        $this->assertStringContainsString('<li>Oznaczenie silnika: <b>CJSA</b></li></ul>', $content);
+        $this->assertStringNotContainsString('Moc silnika:', $content);
+        $this->assertSame(['Moc silnika'], $response->json('payload.allegro_description_diagnostics.optional_donor_vehicle_fields_missing'));
+    }
+
     /** @dataProvider blockerCases */
     public function test_allegro_description_readiness_blockers(string $mutation, string $expectedBlocker): void
     {
