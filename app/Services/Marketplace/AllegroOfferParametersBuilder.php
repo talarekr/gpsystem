@@ -11,7 +11,7 @@ use Illuminate\Support\Str;
 class AllegroOfferParametersBuilder
 {
     /** @var array<int, string> */
-    private const PRODUCT_ONLY_PARAMETER_IDS = ['129917'];
+    private const PRODUCT_ONLY_PARAMETER_IDS = ['129917', '127415'];
 
     private array $loggedCarTypeMappings = [];
 
