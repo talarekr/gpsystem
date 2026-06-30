@@ -52,15 +52,42 @@ class AllegroSalesSettingsTest extends TestCase
         $this->assertStringNotContainsString("->label('Kurier Allegro')", $resource);
     }
 
-    public function test_missing_return_policy_zwrotgold_blocks_publish_readiness(): void
+    public function test_manual_return_policy_mapping_keeps_readiness_unblocked_when_api_does_not_return_it(): void
     {
         Http::fake($this->fakeAllegro(returnPolicies: []));
         $part = $this->part('KURIER DPD');
 
         $result = app(MarketplaceListingReadinessService::class)->checkPartReadiness($part, 'allegro_main');
 
-        $this->assertContains('allegro_returnPolicy_missing:ZWROTGOLD', $result['blockers']);
-        $this->assertSame('missing', $result['prepared_payload_preview_safe']['allegro_sales_settings']['returnPolicy']['status']);
+        $this->assertNotContains('allegro_returnPolicy_missing:ZWROTGOLD', $result['blockers']);
+        $this->assertSame('manual_id', $result['prepared_payload_preview_safe']['allegro_sales_settings']['returnPolicy']['status']);
+        $this->assertSame('91968c35-8bc3-4d74-baba-3609e4013f63', $result['prepared_payload_preview_safe']['allegro_sales_settings']['returnPolicy']['id']);
+    }
+
+    public function test_manual_sales_settings_mapping_is_used_when_allegro_read_returns_forbidden(): void
+    {
+        Http::fake([
+            'https://api.allegro.pl/sale/categories/123/parameters' => Http::response(['parameters' => []], 200),
+            'https://api.allegro.pl/sale/shipping-rates' => Http::response(['errors' => []], 403),
+            'https://api.allegro.pl/after-sales-service-conditions/return-policies' => Http::response(['errors' => []], 403),
+            'https://api.allegro.pl/after-sales-service-conditions/implied-warranties' => Http::response(['errors' => []], 403),
+            'https://api.allegro.pl/after-sales-service-conditions/warranties' => Http::response(['errors' => []], 403),
+        ]);
+        $part = $this->part('KURIER DPD NIESTANDARDOWY');
+
+        $result = app(MarketplaceListingReadinessService::class)->checkPartReadiness($part, 'allegro_main');
+        $settings = $result['prepared_payload_preview_safe']['allegro_sales_settings'];
+
+        $this->assertNotContains('allegro_shipping_rate_missing_or_inactive', $result['blockers']);
+        $this->assertSame('KURIER DPD NIESTANDARDOWY', $settings['selected_allegro_shipping_rate_name']);
+        $this->assertSame('KURIER DPD NIESTANDARDOWY', $settings['shippingRates']['searched_name']);
+        $this->assertSame('82c9b952-37e0-4378-8911-cd8a5e7d7816', $settings['shippingRates']['resolved_id']);
+        $this->assertSame('manual_id', $settings['shippingRates']['status']);
+        $this->assertSame('read_failed', $settings['shippingRates']['read_status']);
+        $this->assertSame(403, $settings['shippingRates']['http_status']);
+        $this->assertSame('91968c35-8bc3-4d74-baba-3609e4013f63', $settings['returnPolicy']['id']);
+        $this->assertSame('1d19a257-7203-4227-88a8-f79f28531eea', $settings['impliedWarranty']['id']);
+        $this->assertSame('6174a76b-b25c-4994-909c-fb7a161deea8', $settings['warranty']['id']);
     }
 
     public function test_resolved_after_sales_ids_are_in_dry_run_payload(): void
