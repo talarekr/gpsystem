@@ -199,7 +199,8 @@ class AllegroCategoryParametersTest extends TestCase
         $this->assertSame('Audi', $result['missing_required_parameters'][0]['raw_local_value']);
         $this->assertSame('Audi OE', $result['missing_required_parameters'][0]['normalized_value']);
         $this->assertSame('no_allowed_value_match', $result['missing_required_parameters'][0]['reason']);
-        $this->assertSame('invalid', $result['missing_required_parameters'][0]['status']);
+        $this->assertSame('missing', $result['missing_required_parameters'][0]['status']);
+        $this->assertSame('required_parameter_not_mapped', $result['missing_required_parameters'][0]['blocker']);
         $this->assertSame(['audio-alubutyl-id' => 'Audio Alubutyl', 'oem-id' => 'OEM'], $result['missing_required_parameters'][0]['allowed_values']);
         $this->assertArrayNotHasKey('mapped_value_id', $result['missing_required_parameters'][0]);
     }
@@ -356,7 +357,8 @@ class AllegroCategoryParametersTest extends TestCase
         $this->assertSame([], $result['offer_parameters']);
         $this->assertSame('Kosmiczna', $result['missing_required_parameters'][0]['raw_local_value']);
         $this->assertSame('no_allowed_value_match', $result['missing_required_parameters'][0]['reason']);
-        $this->assertSame('invalid', $result['missing_required_parameters'][0]['status']);
+        $this->assertSame('missing', $result['missing_required_parameters'][0]['status']);
+        $this->assertSame('required_parameter_not_mapped', $result['missing_required_parameters'][0]['blocker']);
     }
 
     public function test_allegro_vehicle_fuel_body_and_drivetrain_map_from_car_snapshot(): void

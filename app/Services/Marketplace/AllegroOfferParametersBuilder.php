@@ -233,9 +233,9 @@ class AllegroOfferParametersBuilder
         if (Schema::hasColumn('allegro_parameter_mappings', 'enabled')) $query->where('enabled', true);
         $row = $query->first();
         if (! $row) return null;
-        if ($row->fixed_value_id || $row->fixed_value_label) return ['value' => $row->fixed_value_id ?: $row->fixed_value_label, 'source' => 'allegro_parameter_mappings'];
+        if ($row->fixed_value_id || $row->fixed_value_label) return ['value' => $row->fixed_value_id ?: $row->fixed_value_label, 'source' => 'category_mapping', 'source_field' => 'allegro_parameter_mappings.fixed_value'];
         $field = (string) $row->source_field;
-        return ['value' => $this->fieldValue($part, $field), 'source' => 'allegro_parameter_mappings'];
+        return ['value' => $this->fieldValue($part, $field), 'source' => 'category_mapping', 'source_field' => $field];
     }
 
     private function fieldValue(Part $part, string $field): mixed
@@ -284,33 +284,58 @@ class AllegroOfferParametersBuilder
 
     private function diagnosticRow(array $def, array $resolved): array
     {
+        $required = (bool) ($def['required'] ?? false);
+        $value = $resolved['value'] ?? null;
+        $valuesIds = (($resolved['type'] ?? '') === 'dictionary' && $value !== null) ? array_values((array) $value) : [];
+        $values = (($resolved['type'] ?? '') !== 'dictionary' && $value !== null) ? array_values((array) $value) : [];
+        $source = $resolved['source'] ?? 'not_resolved';
+        $reason = $resolved['reason'] ?? null;
+        $status = $this->diagnosticStatus($required, $source, $value, $reason);
+        $blocker = ($required && $value === null) ? 'required_parameter_not_mapped' : null;
+
         $row = [
             'id' => (string) ($def['id'] ?? ''),
             'name' => (string) ($def['name'] ?? ''),
-            'source' => $resolved['source'] ?? 'not_resolved',
-            'source_field' => $resolved['source_field'] ?? ($resolved['source'] ?? 'not_resolved'),
+            'source' => $source,
+            'source_field' => $resolved['source_field'] ?? $source,
+            'raw_value' => $resolved['source_value'] ?? null,
             'raw_local_value' => $resolved['source_value'] ?? null,
             'source_value' => $resolved['source_value'] ?? null,
-            'reason' => $resolved['reason'] ?? null,
-            'normalized_value' => $resolved['normalized_value'] ?? null,
-            'mapped_value_id' => $resolved['mapped_value_id'] ?? null,
-            'mapped_label' => $resolved['mapped_label'] ?? null,
+            'normalized_value' => $resolved['normalized_value'] ?? ($value !== null ? ($resolved['label'] ?? $value) : null),
+            'resolved_value' => $resolved['label'] ?? $value,
+            'values' => $values,
+            'valuesIds' => $valuesIds,
+            'required' => $required,
+            'status' => $status,
+            'blocker' => $blocker,
+            'reason' => $reason,
+            'mapped_value_id' => $resolved['mapped_value_id'] ?? ($valuesIds[0] ?? null),
+            'mapped_label' => $resolved['mapped_label'] ?? ($resolved['label'] ?? null),
             'allowed_values_sample' => $resolved['allowed_values_sample'] ?? null,
             'type' => (string) ($def['type'] ?? ''),
-            'required' => (bool) ($def['required'] ?? false),
             'describesProduct' => (bool) ($def['options']['describesProduct'] ?? false),
-            'status' => isset($resolved['reason']) ? (((bool) ($def['required'] ?? false)) ? (blank($resolved['source_value'] ?? null) ? 'missing' : 'invalid') : 'not_required') : (($resolved['value'] ?? null) === null ? 'not_required' : 'mapped'),
+            'parameter_location' => ((bool) ($def['options']['describesProduct'] ?? false)) ? 'productSet[0].product.parameters' : 'parameters',
             'allowed_values' => $resolved['allowed_values'] ?? (($this->norm($def['name'] ?? '') === 'typsamochodu') ? $this->allowedValuesDiagnostics($def) : null),
         ];
 
+        if ($row['blocker'] === null) unset($row['blocker']);
         if ($row['reason'] === null) unset($row['reason']);
         if ($row['normalized_value'] === null) unset($row['normalized_value']);
+        if ($row['resolved_value'] === null) unset($row['resolved_value']);
         if ($row['mapped_value_id'] === null) unset($row['mapped_value_id']);
         if ($row['mapped_label'] === null) unset($row['mapped_label']);
         if ($row['allowed_values_sample'] === null) unset($row['allowed_values_sample']);
         if ($row['allowed_values'] === null) unset($row['allowed_values']);
 
         return $row;
+    }
+
+    private function diagnosticStatus(bool $required, string $source, mixed $value, ?string $reason): string
+    {
+        if ($value !== null && $source === 'fixed_business_rule') return 'fixed';
+        if ($value !== null) return 'mapped';
+        if ($required) return 'missing';
+        return $reason === null || $reason === 'no_source' ? 'skipped' : 'missing';
     }
 
     private function isPartManufacturerParameter(array $def, string $normalizedName): bool
@@ -403,5 +428,5 @@ class AllegroOfferParametersBuilder
     }
 
     private function norm(mixed $v): string { return Str::of((string) $v)->lower()->ascii()->replaceMatches('/[^a-z0-9]+/', '')->toString(); }
-    private function result(array $offer, array $product, array $missing, array $optional, array $unmapped, array $diag, array $defs): array { return ['allegro_parameters'=>array_merge($product, $offer),'offer_parameters'=>$offer,'product_parameters'=>$product,'missing_required_parameters'=>$missing,'optional_parameters_present'=>$optional,'unmapped_parameters'=>$unmapped,'parameter_source_diagnostics'=>$diag,'parameter_definitions_source'=>$defs['source'] ?? 'none','will_make_marketplace_request'=>false]; }
+    private function result(array $offer, array $product, array $missing, array $optional, array $unmapped, array $diag, array $defs): array { return ['allegro_parameters'=>array_merge($product, $offer),'offer_parameters'=>$offer,'product_parameters'=>$product,'missing_required_parameters'=>$missing,'optional_parameters_present'=>$optional,'unmapped_parameters'=>$unmapped,'parameter_source_diagnostics'=>$diag,'product_parameter_diagnostics'=>array_values(array_filter($diag, fn ($row) => ($row['parameter_location'] ?? null) === 'productSet[0].product.parameters')),'offer_parameter_diagnostics'=>array_values(array_filter($diag, fn ($row) => ($row['parameter_location'] ?? null) === 'parameters')),'parameter_definitions_source'=>$defs['source'] ?? 'none','will_make_marketplace_request'=>false]; }
 }
