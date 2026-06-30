@@ -12,6 +12,9 @@ use Illuminate\Http\Request;
 class OvokoListingUrlBackfillController extends Controller
 {
     private const CONFIRMATION = 'ovoko-url-backfill';
+    private const DEFAULT_BULK_LIMIT = 100;
+    private const MAX_BULK_LIMIT = 6500;
+    private const MAX_DIAGNOSTIC_LIMIT = 1000;
 
     public function __invoke(Request $request, OvokoListingUrlBackfillService $backfill, ApiIntegrationLogger $logger): JsonResponse
     {
@@ -19,9 +22,8 @@ class OvokoListingUrlBackfillController extends Controller
         abort_unless($user && $user->canAccessPanel(Filament::getPanel('admin')), 403);
 
         $apply = $request->boolean('apply') && $request->query('confirm') === self::CONFIRMATION;
-        $limit = max(1, min(1000, (int) $request->query('limit', 100)));
-
         if (! $request->filled('listing_id') && ! $request->filled('part_id')) {
+            $limit = max(1, min(self::MAX_BULK_LIMIT, (int) $request->query('limit', self::DEFAULT_BULK_LIMIT)));
             $result = $backfill->runLocalGeneratedBulk(
                 apply: $apply,
                 limit: $limit,
@@ -29,6 +31,8 @@ class OvokoListingUrlBackfillController extends Controller
                 includeExistingInvalid: $request->boolean('include_existing_invalid'),
             );
         } else {
+            $limit = max(1, min(self::MAX_DIAGNOSTIC_LIMIT, (int) $request->query('limit', self::DEFAULT_BULK_LIMIT)));
+
             $result = $backfill->run(
                 apply: $apply,
                 force: $request->boolean('force'),
