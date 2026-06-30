@@ -14,6 +14,105 @@ class OvokoListingUrlBackfillService
         private readonly ApiIntegrationLogger $logger,
     ) {}
 
+
+    /** @return array{mode:string,summary:array<string,int>,results:array<int,array<string,mixed>>,warnings:array<int,string>} */
+    public function runLocalGeneratedBulk(bool $apply = false, int $limit = 100, bool $onlyMissing = false, bool $includeExistingInvalid = false): array
+    {
+        if (! Schema::hasTable('marketplace_listings')) {
+            throw new \RuntimeException('Required table marketplace_listings does not exist.');
+        }
+
+        $summary = [
+            'inspected' => 0,
+            'already_has_url' => 0,
+            'missing_url_with_valid_ovoko_id' => 0,
+            'would_generate' => 0,
+            'would_update' => 0,
+            'updated' => 0,
+            'invalid_ovoko_id' => 0,
+            'missing_ovoko_id' => 0,
+            'suspicious_existing_url' => 0,
+            'image_url_rejected' => 0,
+            'skipped' => 0,
+        ];
+        $results = [];
+
+        $query = MarketplaceListing::query()
+            ->with('part:id,legacy_payload')
+            ->where('marketplace', 'ovoko')
+            ->orderBy('id')
+            ->limit(max(1, $limit));
+
+        foreach ($query->get() as $listing) {
+            $summary['inspected']++;
+            $existingUrl = $this->blankNull($listing->url);
+            $existingValidation = $existingUrl !== null ? $this->validateShopUrl($existingUrl) : null;
+            $ovokoId = $this->existingOvokoId($listing);
+            $generatedUrl = $this->generatedShopUrlFromOvokoPartId($ovokoId);
+            $action = 'skipped_has_url';
+            $reason = 'Listing already has a valid Ovoko/RRR marketplace URL.';
+
+            if ($existingUrl !== null && ($existingValidation['valid'] ?? false) === true) {
+                $summary['already_has_url']++;
+                $summary['skipped']++;
+                if ($onlyMissing) {
+                    continue;
+                }
+            } else {
+                if ($existingUrl !== null) {
+                    $summary['suspicious_existing_url']++;
+                    if (($existingValidation['reason'] ?? null) === 'image_url_not_listing_url') {
+                        $summary['image_url_rejected']++;
+                    }
+                }
+
+                if ($ovokoId === null) {
+                    $summary['missing_ovoko_id']++;
+                    $summary['skipped']++;
+                    $action = 'missing_ovoko_id';
+                    $reason = 'No local Ovoko part ID found in listing identifiers or payload.';
+                } elseif ($generatedUrl === null) {
+                    $summary['invalid_ovoko_id']++;
+                    $summary['skipped']++;
+                    $action = 'invalid_ovoko_id';
+                    $reason = 'Ovoko part ID is not numeric; local parts.id is never used as a fallback.';
+                } elseif ($existingUrl !== null && ! $includeExistingInvalid) {
+                    $summary['skipped']++;
+                    $action = 'rejected_existing_url';
+                    $reason = 'Existing URL is suspicious; pass include_existing_invalid=1 to include it in local apply candidates.';
+                } else {
+                    $summary['missing_url_with_valid_ovoko_id']++;
+                    $summary['would_generate']++;
+                    $summary['would_update']++;
+                    $action = $apply ? 'updated' : 'would_update';
+                    $reason = $existingUrl === null ? 'Missing URL and numeric ovoko_part_id is available.' : 'Suspicious existing URL can be replaced from numeric ovoko_part_id.';
+
+                    if ($apply) {
+                        $validation = $this->validateShopUrl($generatedUrl);
+                        if ($validation['valid'] && preg_match('/^\d+$/', (string) $ovokoId) === 1) {
+                            $listing->url = $generatedUrl;
+                            $listing->save();
+                            $summary['updated']++;
+                            $this->logGeneratedUrl($listing, (string) $ovokoId, $generatedUrl);
+                        }
+                    }
+                }
+            }
+
+            $results[] = [
+                'marketplace_listing_id' => $listing->id,
+                'local_part_id' => $listing->part_id,
+                'ovoko_part_id' => $ovokoId,
+                'existing_url' => $existingUrl,
+                'generated_url' => $generatedUrl,
+                'action' => $action,
+                'reason' => $reason,
+            ];
+        }
+
+        return ['mode' => $apply ? 'apply' : 'dry_run', 'summary' => $summary, 'results' => array_slice($results, 0, 20), 'warnings' => []];
+    }
+
     /** @return array{mode:string,summary:array<string,int>,results:array<int,array<string,mixed>>,warnings:array<int,string>} */
     public function run(bool $apply = false, bool $force = false, ?int $partId = null, int $limit = 100, ?string $csvPath = null, ?int $listingId = null, int $maxPages = 3): array
     {
@@ -141,6 +240,9 @@ class OvokoListingUrlBackfillService
                 if ($value !== null) return $value;
             }
         }
+
+        $fromRawPayload = $this->extractor->extract($listing->raw_payload ?? null);
+        if ($fromRawPayload !== null) return $fromRawPayload;
 
         return $this->extractor->extract($listing->part?->legacy_payload ?? null);
     }
