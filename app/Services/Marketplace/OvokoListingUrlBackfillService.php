@@ -14,7 +14,7 @@ class OvokoListingUrlBackfillService
     ) {}
 
     /** @return array{mode:string,summary:array<string,int>,results:array<int,array<string,mixed>>,warnings:array<int,string>} */
-    public function run(bool $apply = false, bool $force = false, ?int $partId = null, int $limit = 100, ?string $csvPath = null): array
+    public function run(bool $apply = false, bool $force = false, ?int $partId = null, int $limit = 100, ?string $csvPath = null, ?int $listingId = null): array
     {
         if (! Schema::hasTable('marketplace_listings')) {
             throw new \RuntimeException('Required table marketplace_listings does not exist.');
@@ -42,6 +42,9 @@ class OvokoListingUrlBackfillService
 
         if ($partId !== null) {
             $query->where('part_id', $partId);
+        }
+        if ($listingId !== null) {
+            $query->whereKey($listingId);
         }
 
         $results = [];

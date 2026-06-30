@@ -9,6 +9,7 @@ use App\Models\MarketplaceListing;
 use App\Models\MarketplaceSyncLog;
 use App\Models\Part;
 use App\Models\PartCategory;
+use App\Services\Marketplace\Api\OvokoApiClient;
 use App\Services\Marketplace\PublishPartToMarketplacesService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -71,6 +72,39 @@ class OvokoPublishAdapterTest extends TestCase
         $this->assertStringNotContainsString('ovoko-user', $encodedLogs);
         $this->assertStringNotContainsString('ovoko-pass', $encodedLogs);
         $this->assertStringNotContainsString('ovoko-token', $encodedLogs);
+    }
+
+
+    public function test_ovoko_publish_maps_response_part_id_to_listing_external_ids_and_logs_missing_shop_url(): void
+    {
+        $part = $this->readyPart();
+        $this->enableFlags();
+        Http::fake(['https://ovoko.example.test/crm/importPart' => Http::response(['part_id' => 11701, 'shop_url' => null, 'msg' => 'OK', 'status_code' => 'R200'], 200)]);
+
+        $result = app(PublishPartToMarketplacesService::class)->confirm($part, ['ovoko'], dryRun: false, confirm: true);
+
+        $this->assertTrue($result['channels']['ovoko']['success']);
+        $listing = MarketplaceListing::query()->where('part_id', $part->id)->where('marketplace', 'ovoko')->firstOrFail();
+        $this->assertSame('11701', $listing->external_offer_id);
+        $this->assertSame('11701', $listing->external_listing_id);
+        $this->assertSame('published', $listing->status);
+        $this->assertNull($listing->url);
+        $this->assertSame('11701', data_get($listing->raw_payload, 'response_summary.ovoko_part_id'));
+        $this->assertDatabaseHas('marketplace_sync_logs', ['marketplace' => 'ovoko', 'action' => 'crm/importPart', 'marketplace_listing_id' => $listing->id, 'part_id' => $part->id, 'external_id' => '11701']);
+        $this->assertDatabaseHas('marketplace_sync_logs', ['marketplace' => 'ovoko', 'action' => 'missing_shop_url', 'marketplace_listing_id' => $listing->id, 'part_id' => $part->id, 'external_id' => '11701']);
+    }
+
+    public function test_ovoko_publish_stores_shop_url_when_import_part_returns_it(): void
+    {
+        $part = $this->readyPart();
+        $this->enableFlags();
+        Http::fake(['https://ovoko.example.test/crm/importPart' => Http::response(['part_id' => 11701, 'shop_url' => 'https://ovoko.pl/czesci/11701', 'msg' => 'OK', 'status_code' => 'R200'], 200)]);
+
+        app(PublishPartToMarketplacesService::class)->confirm($part, ['ovoko'], dryRun: false, confirm: true);
+
+        $listing = MarketplaceListing::query()->where('part_id', $part->id)->where('marketplace', 'ovoko')->firstOrFail();
+        $this->assertSame('https://ovoko.pl/czesci/11701', $listing->url);
+        $this->assertDatabaseHas('marketplace_sync_logs', ['marketplace' => 'ovoko', 'action' => 'ovoko_listing_url_resolved', 'marketplace_listing_id' => $listing->id, 'part_id' => $part->id, 'external_id' => '11701']);
     }
 
     public function test_ovoko_api_error_logs_error_and_does_not_crash(): void
@@ -147,6 +181,37 @@ class OvokoPublishAdapterTest extends TestCase
         $this->assertStringNotContainsString('importPostData', $publishAdapter);
         $this->assertStringNotContainsString('changePartStatus', $publishAdapter);
         $this->assertStringNotContainsString('schedule', strtolower($publishAdapter));
+    }
+
+
+    public function test_ovoko_read_lookup_does_not_accept_first_candidate_when_ovoko_id_differs(): void
+    {
+        $account = MarketplaceAccount::query()->create(['marketplace' => 'ovoko', 'code' => 'ovoko_main', 'name' => 'Ovoko main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'read_only', 'api_credentials' => ['username' => 'u', 'password' => 'p', 'user_token' => 't']]);
+        Http::fake(['https://ovoko.example.test/*' => Http::response(['status_code' => 'R200', 'data' => [
+            ['id' => 99999, 'external_id' => 'gps-part-7890', 'shop_url' => 'https://ovoko.pl/czesci/wrong'],
+            ['id' => 11701, 'external_id' => 'gps-part-7890', 'shop_url' => 'https://ovoko.pl/czesci/right'],
+        ]], 200)]);
+
+        $result = (new OvokoApiClient('ovoko', $account))->fetchPartRawByLookup('11701', 'gps-part-7890');
+
+        $this->assertTrue($result['api_ok']);
+        $this->assertSame('11701', (string) $result['matched_candidate_id']);
+        $this->assertSame(1, $result['matched_candidate_index']);
+        $this->assertSame('https://ovoko.pl/czesci/right', $result['matched_candidate_shop_url']);
+    }
+
+    public function test_ovoko_read_lookup_rejects_external_id_match_with_different_ovoko_id(): void
+    {
+        $account = MarketplaceAccount::query()->create(['marketplace' => 'ovoko', 'code' => 'ovoko_main', 'name' => 'Ovoko main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'read_only', 'api_credentials' => ['username' => 'u', 'password' => 'p', 'user_token' => 't']]);
+        Http::fake(['https://ovoko.example.test/*' => Http::response(['status_code' => 'R200', 'data' => [
+            ['id' => 99999, 'external_id' => 'gps-part-7890', 'shop_url' => 'https://ovoko.pl/czesci/wrong'],
+        ]], 200)]);
+
+        $result = (new OvokoApiClient('ovoko', $account))->fetchPartRawByLookup('11701', 'gps-part-7890');
+
+        $this->assertFalse($result['api_ok']);
+        $this->assertSame('detail_id_mismatch', $result['error']);
+        $this->assertNull($result['matched_candidate_id']);
     }
 
     private function enableFlags(): void
