@@ -12,12 +12,13 @@ use Throwable;
 
 class MarketplaceOrdersImportService
 {
+    public const LIVE_BATCH = 'manual_marketplace_orders_live';
     public const TEST_BATCH = 'marketplace_orders_ui_test';
 
     public function run(array $options): array
     {
         $dryRun = (bool) ($options['dry_run'] ?? true);
-        $marketplaces = $this->marketplaces((string) ($options['marketplace'] ?? 'all'));
+        $marketplaces = $this->marketplaces((string) ($options['marketplace'] ?? ($options['channels'] ?? 'all')));
         $summary = $this->emptySummary($options, $dryRun);
 
         foreach ($marketplaces as $marketplace) {
@@ -77,7 +78,7 @@ class MarketplaceOrdersImportService
                     $result['warnings'][] = ['marketplace' => $marketplace, 'code' => 'missing_ordered_at', 'marketplace_order_id' => $normalized['marketplace_order_id']];
                 }
                 if ($dryRun) { $result['would_import'][] = Arr::only($normalized, ['marketplace','marketplace_order_id','marketplace_status','ordered_at','buyer_name','total_amount','delivery_amount','currency','amount_source','total_amount_source','delivery_amount_source']); continue; }
-                $this->upsertOrder($normalized, $raw, $result);
+                $this->upsertOrder($normalized, $raw, $result, (bool) ($options['live_import'] ?? false));
             }
         } catch (Throwable $e) {
             $result['errors'][] = ['marketplace' => $marketplace, 'message' => 'Marketplace orders read failed without exposing secrets.', 'exception' => $e::class];
@@ -87,26 +88,32 @@ class MarketplaceOrdersImportService
 
     private function fetchOrders(string $marketplace, array $options, array &$result): array
     {
-        $account = MarketplaceAccount::query()->whereIn('code', $this->accountCodes($marketplace))->first();
+        $account = MarketplaceAccount::query()->whereIn('code', $this->accountCodes($marketplace))->where('api_enabled', true)->first();
         if (! $account || ! $account->api_enabled || blank($account->api_base_url)) {
             $result['warnings'][] = 'Marketplace account API is not configured/enabled.';
             return [];
         }
         $credentials = is_array($account->api_credentials) ? $account->api_credentials : [];
         $limit = max(1, min((int) ($options['limit'] ?? 50), 100));
-        $query = array_filter(['limit' => $limit, 'offset' => $options['offset'] ?? null, 'date_from' => $options['date_from'] ?? null, 'date_to' => $options['date_to'] ?? null, 'status' => $options['status'] ?? null]);
+        $query = $this->orderQuery($marketplace, $options, $limit);
         $base = rtrim((string) $account->api_base_url, '/');
 
         if ($marketplace === 'allegro') {
             $response = Http::withToken((string) ($credentials['access_token'] ?? ''))->accept('application/vnd.allegro.public.v1+json')->timeout(25)->get($base.'/order/checkout-forms', $query);
-        } elseif ($marketplace === 'ebay') {
-            $response = Http::withToken((string) ($credentials['access_token'] ?? ''))->withHeaders(['X-EBAY-C-MARKETPLACE-ID' => (string) (($account->api_settings ?? [])['marketplace_id'] ?? 'EBAY_DE')])->acceptJson()->timeout(25)->get($base.'/sell/fulfillment/v1/order', $query);
+        } elseif (in_array($marketplace, ['ebay', 'ebay_de', 'ebay_fr'], true)) {
+            $response = Http::withToken((string) ($credentials['access_token'] ?? ''))->withHeaders(['X-EBAY-C-MARKETPLACE-ID' => (string) (($account->api_settings ?? [])['marketplace_id'] ?? ($marketplace === 'ebay_fr' ? 'EBAY_FR' : 'EBAY_DE'))])->acceptJson()->timeout(25)->get($base.'/sell/fulfillment/v1/order', $query);
         } else {
             return $this->fetchOvokoOrders($base, $credentials, $options, $result);
         }
 
         $payload = is_array($response->json()) ? $response->json() : [];
         $result['api_http_status'] = $response->status();
+        app(ApiIntegrationLogger::class)->record([
+            'integration' => $marketplace, 'action' => 'GET orders', 'status' => $response->successful() ? 'success' : 'error',
+            'http_status' => $response->status(), 'message' => 'Read-only marketplace order fetch.',
+            'request' => ['endpoint' => $marketplace === 'allegro' ? '/order/checkout-forms' : '/sell/fulfillment/v1/order', 'query' => $query],
+            'response' => ['keys' => is_array($payload) ? array_keys($payload) : []],
+        ]);
         if (! $response->successful()) {
             $result['errors'][] = ['marketplace' => $marketplace, 'http_status' => $response->status(), 'message' => 'Read-only order endpoint returned non-success status.'];
             return [];
@@ -412,9 +419,9 @@ class MarketplaceOrdersImportService
         return is_numeric($value) ? (float) $value : 0.0;
     }
 
-    private function upsertOrder(array $n, array $raw, array &$result): void
+    private function upsertOrder(array $n, array $raw, array &$result, bool $liveImport): void
     {
-        DB::transaction(function () use ($n, $raw, &$result): void {
+        DB::transaction(function () use ($n, $raw, &$result, $liveImport): void {
             $order = Order::query()->firstOrNew(['marketplace' => $n['marketplace'], 'marketplace_order_id' => $n['marketplace_order_id']]);
             $created = ! $order->exists;
             $order->fill([
@@ -423,8 +430,8 @@ class MarketplaceOrdersImportService
                 'currency' => substr($n['currency'], 0, 3), 'subtotal' => max(0, $n['total_amount'] - $n['delivery_amount']), 'shipping_total' => $n['delivery_amount'], 'total' => $n['total_amount'],
                 'payment_status' => $n['payment_status'], 'delivery_method' => $n['delivery_method'], 'customer_name' => $n['buyer_name'], 'email' => $n['buyer_email'] ?: 'marketplace-'.$n['marketplace_order_id'].'@example.invalid',
                 'phone' => $n['buyer_phone'] ?: '-', 'address_line1' => $n['delivery_address'] ?: '-', 'postal_code' => $n['delivery_postcode'] ?: '-', 'city' => $n['delivery_city'] ?: '-', 'country' => substr($n['delivery_country'] ?: 'PL', 0, 2),
-                'invoice_data' => $n['invoice_data'], 'raw_payload' => $raw, 'imported_at' => $order->imported_at ?: now(), 'test_import' => true, 'source_batch' => self::TEST_BATCH,
-                'notes' => trim('TEST IMPORT marketplace order. '.(string) ($order->notes ?? '')),
+                'invoice_data' => $n['invoice_data'], 'raw_payload' => $raw, 'imported_at' => $order->imported_at ?: now(), 'test_import' => ! $liveImport, 'source_batch' => $liveImport ? self::LIVE_BATCH : self::TEST_BATCH,
+                'notes' => trim(($liveImport ? '' : 'TEST IMPORT marketplace order. ').(string) ($order->notes ?? '')),
             ])->save();
             $created ? $result['orders_created']++ : $result['orders_updated']++;
             foreach ($n['items'] as $idx => $item) $this->upsertItem($order, $item, $idx, $result);
@@ -443,10 +450,11 @@ class MarketplaceOrdersImportService
         $created ? $result['items_created']++ : $result['items_updated']++;
     }
 
-    private function marketplaces(string $marketplace): array { return $marketplace === 'all' ? ['allegro', 'ebay', 'ovoko'] : array_values(array_intersect([$marketplace], ['allegro', 'ebay', 'ovoko'])); }
-    private function accountCodes(string $marketplace): array { return $marketplace === 'allegro' ? ['allegro_main'] : ($marketplace === 'ebay' ? ['ebay_de', 'ebay_fr'] : ['ovoko_main', 'ovoko']); }
+    private function marketplaces(string $marketplace): array { $requested = array_map('trim', explode(',', $marketplace)); return $marketplace === 'all' ? ['allegro', 'ebay_de', 'ebay_fr', 'ovoko'] : array_values(array_intersect($requested, ['allegro', 'ebay', 'ebay_de', 'ebay_fr', 'ovoko'])); }
+    private function accountCodes(string $marketplace): array { return $marketplace === 'allegro' ? ['allegro_main', 'allegro'] : ($marketplace === 'ebay' ? ['ebay_de', 'ebay_fr'] : ($marketplace === 'ovoko' ? ['ovoko_main', 'ovoko'] : [$marketplace])); }
+    private function orderQuery(string $marketplace, array $options, int $limit): array { $since = $options['since'] ?? ($options['date_from'] ?? null); $query = ['limit' => $limit]; if (filled($options['offset'] ?? null)) $query['offset'] = $options['offset']; if (filled($options['status'] ?? null)) $query['status'] = $options['status']; if ($marketplace === 'allegro' && filled($since)) $query['lineItems.boughtAt.gte'] = Carbon::parse($since, 'Europe/Warsaw')->utc()->toIso8601String(); if (in_array($marketplace, ['ebay', 'ebay_de', 'ebay_fr'], true) && filled($since)) $query['filter'] = 'creationdate:['.Carbon::parse($since, 'Europe/Warsaw')->utc()->format('Y-m-d\TH:i:s.000\Z').'..]'; return $query; }
     private function localStatus(string $status): string { return str_contains(strtolower($status), 'cancel') ? 'cancelled' : (str_contains(strtolower($status), 'complete') ? 'completed' : 'new'); }
-    private function emptySummary(array $o, bool $dry): array { return ['ok'=>true,'marketplace'=>$o['marketplace'] ?? 'all','dry_run'=>$dry,'date_from'=>$o['date_from'] ?? null,'date_to'=>$o['date_to'] ?? null,'orders_fetched'=>0,'orders_created'=>0,'orders_updated'=>0,'orders_skipped'=>0,'items_created'=>0,'items_updated'=>0,'errors'=>[],'warnings'=>[],'marketplaces'=>[],'safety_flags'=>$this->flags($dry)]; }
-    private function emptyMarketplaceSummary(string $m, array $o, bool $dry): array { return ['marketplace'=>$m,'dry_run'=>$dry,'date_from'=>$o['date_from'] ?? null,'date_to'=>$o['date_to'] ?? null,'orders_fetched'=>0,'orders_created'=>0,'orders_updated'=>0,'orders_skipped'=>0,'items_created'=>0,'items_updated'=>0,'errors'=>[],'warnings'=>[],'would_import'=>[],'safety_flags'=>$this->flags($dry)]; }
+    private function emptySummary(array $o, bool $dry): array { return ['ok'=>true,'marketplace'=>$o['marketplace'] ?? 'all','dry_run'=>$dry,'date_from'=>$o['since'] ?? ($o['date_from'] ?? null),'date_to'=>$o['date_to'] ?? null,'orders_fetched'=>0,'orders_created'=>0,'orders_updated'=>0,'orders_skipped'=>0,'items_created'=>0,'items_updated'=>0,'errors'=>[],'warnings'=>[],'marketplaces'=>[],'safety_flags'=>$this->flags($dry)]; }
+    private function emptyMarketplaceSummary(string $m, array $o, bool $dry): array { return ['marketplace'=>$m,'dry_run'=>$dry,'date_from'=>$o['since'] ?? ($o['date_from'] ?? null),'date_to'=>$o['date_to'] ?? null,'orders_fetched'=>0,'orders_created'=>0,'orders_updated'=>0,'orders_skipped'=>0,'items_created'=>0,'items_updated'=>0,'errors'=>[],'warnings'=>[],'would_import'=>[],'safety_flags'=>$this->flags($dry)]; }
     private function flags(bool $dry): array { return ['read_only'=>$dry,'orders_changed'=>! $dry,'products_changed'=>false,'parts_changed'=>false,'offers_changed'=>false,'listings_changed'=>false,'stock_changed'=>false,'prices_changed'=>false,'mappings_changed'=>false,'allegro_write'=>false,'ovoko_write'=>false,'ebay_write'=>false]; }
 }
