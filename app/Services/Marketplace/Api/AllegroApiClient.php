@@ -131,6 +131,40 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
         return [];
     }
 
+    /**
+     * Read-only GPSR responsible producers lookup for diagnostics.
+     */
+    public function responsibleProducers(): array
+    {
+        $base = rtrim((string) $this->account?->api_base_url, '/');
+        $response = Http::withToken((string) $this->credentials()['access_token'])
+            ->accept('application/vnd.allegro.public.v1+json')
+            ->timeout(20)
+            ->get($base.'/sale/responsible-producers');
+        $json = $response->json();
+
+        return [
+            'ok' => $response->successful(),
+            'http_status' => $response->status(),
+            'items' => $this->extractResponsibleProducerRows(is_array($json) ? $json : []),
+            'error' => in_array($response->status(), [401, 403], true)
+                ? 'Unauthorized or forbidden. Check Allegro token validity and scopes; no secrets are exposed here.'
+                : ($response->successful() ? null : 'Responsible producers lookup failed.'),
+            'request_id' => $response->header('trace-id') ?: $response->header('x-request-id'),
+        ];
+    }
+
+    private function extractResponsibleProducerRows(array $payload): array
+    {
+        $rows = $payload['responsibleProducers'] ?? $payload['producers'] ?? $payload['items'] ?? $payload['data'] ?? (array_is_list($payload) ? $payload : []);
+        return array_values(array_map(fn (array $row): array => array_filter([
+            'id' => $row['id'] ?? null,
+            'name' => $row['name'] ?? $row['customName'] ?? null,
+            'producerData' => $row['producerData'] ?? null,
+            'contact' => $row['contact'] ?? null,
+        ], fn ($value) => $value !== null && $value !== ''), array_filter($rows, 'is_array')));
+    }
+
     public function createProductOffer(array $payload): array
     {
         $base = rtrim((string) $this->account?->api_base_url, '/');

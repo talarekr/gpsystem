@@ -12,6 +12,7 @@ use App\Services\Marketplace\MarketplacePublishGate;
 
 class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
 {
+    private const DEFAULT_SAFETY_INFORMATION = 'Część używana pochodząca z demontażu pojazdu. Montaż powinien zostać wykonany przez wykwalifikowany warsztat lub osobę posiadającą odpowiednią wiedzę techniczną. Przed montażem należy porównać numer części i zgodność z pojazdem. Produkt nie jest zabawką.';
     public function __construct(MarketplaceListingReadinessService $readinessService, MarketplacePublishGate $gate, ApiIntegrationLogger $logger, private readonly AllegroSalesSettingsResolver $allegroSalesSettingsResolver)
     {
         parent::__construct($readinessService, $gate, $logger);
@@ -41,13 +42,30 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
     {
         $productSet = is_array($payload['productSet'] ?? null) ? $payload['productSet'] : (is_array($settings['productSet'] ?? null) ? $settings['productSet'] : []);
         if ($productSet === []) $productSet = [['product' => ['parameters' => $payload['allegro_product_parameters'] ?? $payload['allegro_parameters']['product_parameters'] ?? []]]];
-        foreach (['responsibleProducer', 'safetyInformation'] as $key) {
-            $value = $settings[$key] ?? data_get($settings, 'gpsr.'.$key) ?? data_get($settings, 'productSet.0.'.$key) ?? data_get($payload, 'productSet.0.'.$key);
-            if (filled($value)) $productSet[0][$key] = $value;
-        }
+        $responsibleProducer = $this->responsibleProducer($settings, $payload);
+        $safetyInformation = $this->safetyInformation($settings, $payload);
+        if ($responsibleProducer !== null) $productSet[0]['responsibleProducer'] = $responsibleProducer;
+        if ($safetyInformation !== null) $productSet[0]['safetyInformation'] = $safetyInformation;
         return $productSet === [] ? null : $productSet;
     }
 
+    private function responsibleProducer(array $settings, array $payload): ?array
+    {
+        $value = $settings['responsibleProducer'] ?? data_get($settings, 'gpsr.responsibleProducer') ?? data_get($settings, 'productSet.0.responsibleProducer') ?? data_get($payload, 'productSet.0.responsibleProducer');
+        if (! is_array($value)) return null;
+        $type = strtoupper((string) ($value['type'] ?? ''));
+        if ($type === 'ID' && filled($value['id'] ?? null)) return ['type' => 'ID', 'id' => (string) $value['id']];
+        if ($type === 'NAME' && filled($value['name'] ?? null)) return ['type' => 'NAME', 'name' => trim((string) $value['name'])];
+        return null;
+    }
+
+    private function safetyInformation(array $settings, array $payload): ?array
+    {
+        $value = $settings['safetyInformation'] ?? data_get($settings, 'gpsr.safetyInformation') ?? data_get($settings, 'productSet.0.safetyInformation') ?? data_get($payload, 'productSet.0.safetyInformation');
+        if (is_array($value) && strtoupper((string) ($value['type'] ?? '')) === 'TEXT' && filled($value['description'] ?? null)) return ['type' => 'TEXT', 'description' => trim(strip_tags((string) $value['description']))];
+        if (is_string($value) && trim(strip_tags($value)) !== '') return ['type' => 'TEXT', 'description' => trim(strip_tags($value))];
+        return ['type' => 'TEXT', 'description' => self::DEFAULT_SAFETY_INFORMATION];
+    }
 
     private function deliverySettings(array $settings, array $salesSettings): ?array
     {

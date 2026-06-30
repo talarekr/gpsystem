@@ -12,6 +12,7 @@ use Illuminate\Support\Str;
 
 class MarketplaceListingReadinessService
 {
+    private const DEFAULT_ALLEGRO_SAFETY_INFORMATION = 'Część używana pochodząca z demontażu pojazdu. Montaż powinien zostać wykonany przez wykwalifikowany warsztat lub osobę posiadającą odpowiednią wiedzę techniczną. Przed montażem należy porównać numer części i zgodność z pojazdem. Produkt nie jest zabawką.';
     public const CHANNELS = ['storefront', 'allegro_main', 'ovoko', 'ebay_de', 'ebay_fr'];
 
     public function __construct(private readonly TranslationService $translationService, private readonly EbayDescriptionTemplateRenderer $ebayDescriptionTemplateRenderer, private readonly NbpExchangeRateService $exchangeRateService, private readonly EbayItemSpecificsService $ebayItemSpecificsService, private readonly AllegroCategoryParametersService $allegroCategoryParametersService, private readonly AllegroOfferParametersBuilder $allegroOfferParametersBuilder, private readonly MarketplaceImageSelectionService $marketplaceImageSelectionService, private readonly AllegroSalesSettingsResolver $allegroSalesSettingsResolver) {}
@@ -253,8 +254,8 @@ class MarketplaceListingReadinessService
     {
         $settings = is_array($account?->api_settings) ? $account->api_settings : [];
         return [
-            'responsibleProducer' => filled($this->allegroGpsrSetting($settings, 'responsibleProducer')) ? 'configured' : 'missing: configure marketplace_accounts.api_settings.responsibleProducer',
-            'safetyInformation' => filled($this->allegroGpsrSetting($settings, 'safetyInformation')) ? 'configured' : 'missing: configure marketplace_accounts.api_settings.safetyInformation',
+            'responsibleProducer' => $this->allegroResponsibleProducer($settings) !== null ? 'configured' : 'missing: configure marketplace_accounts.api_settings.gpsr.responsibleProducer',
+            'safetyInformation' => $this->allegroSafetyInformation($settings) !== null ? 'configured_or_defaulted' : 'missing: configure marketplace_accounts.api_settings.gpsr.safetyInformation',
         ];
     }
 
@@ -262,8 +263,8 @@ class MarketplaceListingReadinessService
     {
         $settings = is_array($account?->api_settings) ? $account->api_settings : [];
         $blockers = [];
-        if (blank($this->allegroGpsrSetting($settings, 'responsibleProducer'))) $blockers[] = ['missing' => 'allegro_gpsr_responsibleProducer', 'blocker' => 'Allegro GPSR responsibleProducer is not configured.'];
-        if (blank($this->allegroGpsrSetting($settings, 'safetyInformation'))) $blockers[] = ['missing' => 'allegro_gpsr_safetyInformation', 'blocker' => 'Allegro GPSR safetyInformation is not configured.'];
+        if ($this->allegroResponsibleProducer($settings) === null) $blockers[] = ['missing' => 'allegro_gpsr_responsibleProducer', 'blocker' => 'Allegro GPSR responsibleProducer is not configured.'];
+        if ($this->allegroSafetyInformation($settings) === null) $blockers[] = ['missing' => 'allegro_gpsr_safetyInformation', 'blocker' => 'Allegro GPSR safetyInformation is not configured.'];
         return $blockers;
     }
 
@@ -271,16 +272,29 @@ class MarketplaceListingReadinessService
     {
         $settings = is_array($account?->api_settings) ? $account->api_settings : [];
         $productSet = ['product' => ['parameters' => $allegroParameters['product_parameters'] ?? []]];
-        foreach (['responsibleProducer', 'safetyInformation'] as $key) {
-            $value = $this->allegroGpsrSetting($settings, $key);
-            if (filled($value)) $productSet[$key] = $value;
-        }
+        $responsibleProducer = $this->allegroResponsibleProducer($settings);
+        $safetyInformation = $this->allegroSafetyInformation($settings);
+        if ($responsibleProducer !== null) $productSet['responsibleProducer'] = $responsibleProducer;
+        if ($safetyInformation !== null) $productSet['safetyInformation'] = $safetyInformation;
         return $productSet;
     }
 
-    private function allegroGpsrSetting(array $settings, string $key): mixed
+    private function allegroResponsibleProducer(array $settings): ?array
     {
-        return $settings[$key] ?? data_get($settings, 'gpsr.'.$key) ?? data_get($settings, 'productSet.0.'.$key);
+        $value = $settings['responsibleProducer'] ?? data_get($settings, 'gpsr.responsibleProducer') ?? data_get($settings, 'productSet.0.responsibleProducer');
+        if (! is_array($value)) return null;
+        $type = strtoupper((string) ($value['type'] ?? ''));
+        if ($type === 'ID' && filled($value['id'] ?? null)) return ['type' => 'ID', 'id' => (string) $value['id']];
+        if ($type === 'NAME' && filled($value['name'] ?? null)) return ['type' => 'NAME', 'name' => trim((string) $value['name'])];
+        return null;
+    }
+
+    private function allegroSafetyInformation(array $settings): ?array
+    {
+        $value = $settings['safetyInformation'] ?? data_get($settings, 'gpsr.safetyInformation') ?? data_get($settings, 'productSet.0.safetyInformation');
+        if (is_array($value) && strtoupper((string) ($value['type'] ?? '')) === 'TEXT' && filled($value['description'] ?? null)) return ['type' => 'TEXT', 'description' => trim(strip_tags((string) $value['description']))];
+        if (is_string($value) && trim(strip_tags($value)) !== '') return ['type' => 'TEXT', 'description' => trim(strip_tags($value))];
+        return ['type' => 'TEXT', 'description' => self::DEFAULT_ALLEGRO_SAFETY_INFORMATION];
     }
 
     private function marketplaceCode(string $channel): ?string { return match (true) { $channel === 'storefront' => null, $channel === 'allegro_main' => 'allegro', str_starts_with($channel, 'ebay_') => $channel, default => $channel }; }
