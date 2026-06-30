@@ -68,6 +68,12 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
      */
     public function resolveSalesSettingsByName(string $name): array
     {
+        return $this->resolveSalesSettingsByNames(['shippingRates' => $name, 'returnPolicy' => $name, 'impliedWarranty' => $name, 'warranty' => $name]);
+    }
+
+    /** @param array<string, string> $names */
+    public function resolveSalesSettingsByNames(array $names): array
+    {
         $base = rtrim((string) $this->account?->api_base_url, '/');
         $token = (string) $this->credentials()['access_token'];
         $endpoints = [
@@ -85,18 +91,33 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
                 ->get($base.$path);
             $json = $response->json();
             $rows = $this->extractSalesSettingsRows(is_array($json) ? $json : [], $listKeys);
-            $match = collect($rows)->first(fn (array $row) => strcasecmp(trim((string) ($row['name'] ?? '')), trim($name)) === 0);
+            $searchedName = (string) ($names[$key] ?? '');
+            $match = collect($rows)->first(fn (array $row) => strcasecmp(trim((string) ($row['name'] ?? '')), trim($searchedName)) === 0 && $this->isActiveSalesSettingsRow($row));
             $resolved[$key] = [
                 'http_status' => $response->status(),
                 'ok' => $response->successful(),
-                'searched_name' => $name,
+                'searched_name' => $searchedName,
                 'id' => is_array($match) ? ($match['id'] ?? null) : null,
                 'found' => is_array($match) && filled($match['id'] ?? null),
-                'reason' => $response->successful() ? (is_array($match) ? null : 'not_found') : 'read_failed',
+                'reason' => $response->successful() ? (is_array($match) ? null : 'not_found_or_inactive') : 'read_failed',
+                'active' => is_array($match) ? $this->isActiveSalesSettingsRow($match) : null,
             ];
         }
 
         return $resolved;
+    }
+
+    private function isActiveSalesSettingsRow(array $row): bool
+    {
+        foreach (['status', 'state'] as $key) {
+            if (! array_key_exists($key, $row) || blank($row[$key])) continue;
+            return in_array(strtolower((string) $row[$key]), ['active', 'enabled'], true);
+        }
+
+        if (array_key_exists('enabled', $row)) return (bool) $row['enabled'];
+        if (array_key_exists('active', $row)) return (bool) $row['active'];
+
+        return true;
     }
 
     private function extractSalesSettingsRows(array $payload, array $listKeys): array

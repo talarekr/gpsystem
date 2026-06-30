@@ -5,9 +5,17 @@ namespace App\Services\Marketplace\Publishing;
 use App\Models\MarketplaceAccount;
 use App\Models\Part;
 use App\Services\Marketplace\Api\AllegroApiClient;
+use App\Services\Marketplace\AllegroSalesSettingsResolver;
+use App\Services\Marketplace\ApiIntegrationLogger;
+use App\Services\Marketplace\MarketplaceListingReadinessService;
+use App\Services\Marketplace\MarketplacePublishGate;
 
 class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
 {
+    public function __construct(MarketplaceListingReadinessService $readinessService, MarketplacePublishGate $gate, ApiIntegrationLogger $logger, private readonly AllegroSalesSettingsResolver $allegroSalesSettingsResolver)
+    {
+        parent::__construct($readinessService, $gate, $logger);
+    }
     protected function channel(): string { return 'allegro_main'; }
     protected function marketplace(): string { return 'allegro'; }
     protected function accountCode(): string { return 'allegro_main'; }
@@ -18,10 +26,11 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
         $settings = is_array($account->api_settings) ? $account->api_settings : [];
         $sku = $this->skuFor($part, $payload);
         $payload['sku'] = $sku;
-        $client = new AllegroApiClient('allegro_main', $account);
-        $salesSettings = $client->resolveSalesSettingsByName((string) ($settings['sales_settings_name'] ?? 'GPSWISS'));
+        $salesSettings = $this->allegroSalesSettingsResolver->resolve($account, $part->allegro_shipping_rate_name ?? null);
+        if (($salesSettings['blockers'] ?? []) !== []) return ['ok' => false, 'status' => 'blocked_sales_settings', 'errors' => $salesSettings['blockers'], 'request_summary' => ['allegro_sales_settings' => $salesSettings], 'write' => false];
         $delivery = $this->deliverySettings($settings, $salesSettings);
         $afterSales = $this->afterSalesSettings($settings, $salesSettings);
+        $client = new AllegroApiClient('allegro_main', $account);
         $body = array_filter(['name' => (string) ($payload['title'] ?? $part->name), 'category' => ['id' => (string) ($payload['category_id'] ?? '')], 'productSet' => $settings['productSet'] ?? null, 'parameters' => $payload['allegro_offer_parameters'] ?? $payload['allegro_parameters']['offer_parameters'] ?? [], 'images' => $this->normalizeImageUrls($payload['image_urls'] ?? []), 'sellingMode' => $settings['sellingMode'] ?? ['format' => 'BUY_NOW', 'price' => ['amount' => (string) ($payload['price_pln'] ?? $readiness['marketplace_price']), 'currency' => 'PLN']], 'stock' => ['available' => (int) ($payload['quantity'] ?? $part->quantity ?? 1), 'unit' => 'UNIT'], 'publication' => ['status' => 'ACTIVE'], 'delivery' => $delivery, 'payments' => $settings['payments'] ?? null, 'afterSalesServices' => $afterSales, 'location' => $settings['location'] ?? null, 'external' => ['id' => $sku]], fn ($v) => $v !== null && $v !== []);
         $result = $client->createProductOffer($body);
         return ['ok' => $result['ok'] ?? false, 'action' => 'createProductOffer', 'http_status' => $result['http_status'] ?? null, 'offer_id' => $result['offer_id'] ?? null, 'external_listing_id' => $result['offer_id'] ?? null, 'listing_status' => ($result['http_status'] ?? null) === 202 ? 'publication_pending' : 'published', 'request_id' => $result['request_id'] ?? null, 'request_summary' => $this->requestSummary($payload, $body) + ['allegro_sales_settings' => $this->salesSettingsSummary($salesSettings)], 'response_summary' => $this->responseSummary($result), 'json' => $result['json'] ?? [], 'error' => 'Allegro product-offers publish failed.', 'ui_error' => 'Uzupełnij ustawienia sprzedaży Allegro GPSWISS. Szczegóły są w Logach.'];
@@ -31,7 +40,7 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
     private function deliverySettings(array $settings, array $salesSettings): ?array
     {
         $delivery = is_array($settings['delivery'] ?? null) ? $settings['delivery'] : [];
-        $id = $salesSettings['shippingRates']['id'] ?? data_get($delivery, 'shippingRates.id');
+        $id = $salesSettings['shippingRates']['id'] ?? null;
         if (blank($id)) return $delivery ?: null;
         $delivery['shippingRates'] = ['id' => (string) $id];
         return $delivery;
@@ -41,7 +50,7 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
     {
         $afterSales = is_array($settings['afterSalesServices'] ?? null) ? $settings['afterSalesServices'] : [];
         foreach (['returnPolicy', 'impliedWarranty', 'warranty'] as $key) {
-            $id = $salesSettings[$key]['id'] ?? data_get($afterSales, $key.'.id');
+            $id = $salesSettings[$key]['id'] ?? null;
             if (filled($id)) $afterSales[$key] = ['id' => (string) $id];
         }
         return $afterSales ?: null;
