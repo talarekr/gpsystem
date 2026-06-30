@@ -20,8 +20,15 @@ class MarketplaceOrdersImportService
     public function run(array $options): array
     {
         $dryRun = (bool) ($options['dry_run'] ?? true);
-        $marketplaces = $this->marketplaces((string) ($options['marketplace'] ?? ($options['channels'] ?? 'all')));
+        $requestedChannels = $this->requestedChannels((string) ($options['marketplace'] ?? ($options['channels'] ?? 'all')));
+        $marketplaces = $this->normalizeOrderImportChannels($requestedChannels);
         $summary = $this->emptySummary($options, $dryRun);
+        $summary['requested_channels'] = $requestedChannels;
+        $summary['normalized_channels'] = $marketplaces;
+        if ($this->requestedEbayMarketChannels($requestedChannels) !== [] && in_array('ebay', $marketplaces, true)) {
+            $summary['warnings'][] = ['marketplace' => 'ebay', 'code' => 'ebay_shared_order_feed', 'message' => 'eBay DE/FR share the same order feed; orders were imported once as ebay.'];
+            $options['ebay_shared_order_feed_warning'] = true;
+        }
 
         foreach ($marketplaces as $marketplace) {
             $summary['marketplaces'][$marketplace] = $this->runMarketplace($marketplace, $options, $dryRun);
@@ -70,8 +77,11 @@ class MarketplaceOrdersImportService
     private function runMarketplace(string $marketplace, array $options, bool $dryRun): array
     {
         $result = $this->emptyMarketplaceSummary($marketplace, $options, $dryRun);
+        if ($marketplace === 'ebay' && ($options['ebay_shared_order_feed_warning'] ?? false)) {
+            $result['warnings'][] = ['marketplace' => 'ebay', 'code' => 'ebay_shared_order_feed', 'message' => 'eBay DE/FR share the same order feed; orders were imported once as ebay.'];
+        }
         try {
-            $orders = $this->fetchOrders($marketplace, $options, $result);
+            $orders = $this->dedupeFetchedOrders($marketplace, $this->fetchOrders($marketplace, $options, $result), $result);
             $result['orders_fetched'] = count($orders);
             foreach ($orders as $raw) {
                 $normalized = $this->normalizeOrder($marketplace, $raw, $result);
@@ -79,7 +89,7 @@ class MarketplaceOrdersImportService
                 if (($normalized['ordered_at'] ?? null) === null) {
                     $result['warnings'][] = ['marketplace' => $marketplace, 'code' => 'missing_ordered_at', 'marketplace_order_id' => $normalized['marketplace_order_id']];
                 }
-                if ($dryRun) { $result['would_import'][] = Arr::only($normalized, ['marketplace','marketplace_order_id','marketplace_status','ordered_at','buyer_name','total_amount','delivery_amount','currency','amount_source','total_amount_source','delivery_amount_source']); continue; }
+                if ($dryRun) { $result['would_import'][] = Arr::only($normalized, ['marketplace','provider','marketplace_order_id','dedupe_key','source_marketplace_id','marketplace_status','ordered_at','buyer_name','total_amount','delivery_amount','currency','amount_source','total_amount_source','delivery_amount_source']); continue; }
                 $this->upsertOrder($normalized, $raw, $result, (bool) ($options['live_import'] ?? false));
             }
         } catch (Throwable $e) {
@@ -97,7 +107,7 @@ class MarketplaceOrdersImportService
 
     private function fetchOrders(string $marketplace, array $options, array &$result): array
     {
-        $account = MarketplaceAccount::query()->whereIn('code', $this->accountCodes($marketplace))->where('api_enabled', true)->first();
+        $account = $this->accountForOrders($marketplace);
         if (! $account || ! $account->api_enabled || blank($account->api_base_url)) {
             $result['warnings'][] = 'Marketplace account API is not configured/enabled.';
             return [];
@@ -123,7 +133,9 @@ class MarketplaceOrdersImportService
                 }
             }
         } elseif (in_array($marketplace, ['ebay', 'ebay_de', 'ebay_fr'], true)) {
-            $marketplaceId = (string) (($account->api_settings ?? [])['marketplace_id'] ?? ($marketplace === 'ebay_fr' ? 'EBAY_FR' : 'EBAY_DE'));
+            $marketplaceId = (string) (($account->api_settings ?? [])['marketplace_id'] ?? ($account->code === 'ebay_fr' ? 'EBAY_FR' : 'EBAY_DE'));
+            $result['source_account_code'] = (string) $account->code;
+            $result['requested_marketplace_id'] = $marketplaceId;
             $response = $this->sendEbayOrdersRequest($base, (string) ($credentials['access_token'] ?? ''), $marketplaceId, $query);
             if ($response->status() === 401) {
                 $diagnostics['refresh_attempted'] = $this->canRefreshEbayToken($credentials);
@@ -147,7 +159,7 @@ class MarketplaceOrdersImportService
         app(ApiIntegrationLogger::class)->record([
             'integration' => $marketplace, 'action' => 'GET orders', 'status' => $response->successful() ? 'success' : 'error',
             'http_status' => $response->status(), 'message' => 'Read-only marketplace order fetch.',
-            'request' => ['endpoint' => $endpointPath, 'query' => $query, 'auth_diagnostics' => $diagnostics],
+            'request' => ['endpoint' => $endpointPath, 'query' => $query, 'requested_channels' => $result['requested_channels'] ?? null, 'normalized_channels' => $result['normalized_channels'] ?? null, 'source_account_code' => $result['source_account_code'] ?? null, 'requested_marketplace_id' => $result['requested_marketplace_id'] ?? null, 'auth_diagnostics' => $diagnostics],
             'response' => ['keys' => is_array($payload) ? array_keys($payload) : []],
         ]);
         if (! $response->successful()) {
@@ -245,8 +257,10 @@ class MarketplaceOrdersImportService
         $total = $raw['summary']['totalToPay'] ?? $raw['pricingSummary']['total'] ?? $raw['total'] ?? [];
         $shipping = $raw['summary']['delivery'] ?? $raw['pricingSummary']['deliveryCost'] ?? $raw['deliveryCost'] ?? [];
         return [
-            'marketplace' => $marketplace,
+            'marketplace' => $this->orderProvider($marketplace),
+            'provider' => $this->orderProvider($marketplace),
             'marketplace_order_id' => (string) ($raw['id'] ?? $raw['orderId'] ?? $raw['order_id'] ?? ''),
+            'source_marketplace_id' => $this->responseMarketplaceId($raw),
             'marketplace_status' => (string) ($raw['status'] ?? $raw['orderFulfillmentStatus'] ?? ''),
             'ordered_at' => $this->orderedAt($marketplace, $raw, array_values(array_filter($items, 'is_array'))),
             'buyer_name' => trim((string) ($buyer['login'] ?? $buyer['username'] ?? $buyer['fullName'] ?? $buyer['name'] ?? $raw['buyer_name'] ?? 'Marketplace buyer')),
@@ -265,6 +279,7 @@ class MarketplaceOrdersImportService
             'delivery_method' => (string) ($delivery['method']['name'] ?? $delivery['shippingCarrierCode'] ?? $raw['delivery_method'] ?? ''),
             'items' => array_values(array_filter($items, 'is_array')),
             'raw_payload' => $raw,
+            'dedupe_key' => $this->orderProvider($marketplace).'|'.(string) ($raw['id'] ?? $raw['orderId'] ?? $raw['order_id'] ?? ''),
         ];
     }
 
@@ -500,12 +515,18 @@ class MarketplaceOrdersImportService
         $created ? $result['items_created']++ : $result['items_updated']++;
     }
 
-    private function marketplaces(string $marketplace): array { $requested = array_map('trim', explode(',', $marketplace)); return $marketplace === 'all' ? ['allegro', 'ebay_de', 'ebay_fr', 'ovoko'] : array_values(array_intersect($requested, ['allegro', 'ebay', 'ebay_de', 'ebay_fr', 'ovoko'])); }
-    private function accountCodes(string $marketplace): array { return $marketplace === 'allegro' ? ['allegro_main', 'allegro'] : ($marketplace === 'ebay' ? ['ebay_de', 'ebay_fr'] : ($marketplace === 'ovoko' ? ['ovoko_main', 'ovoko'] : [$marketplace])); }
+    private function requestedChannels(string $marketplace): array { $requested = $marketplace === 'all' ? ['allegro', 'ebay_de', 'ebay_fr', 'ovoko'] : array_map('trim', explode(',', $marketplace)); return array_values(array_intersect($requested, ['allegro', 'ebay', 'ebay_de', 'ebay_fr', 'ovoko'])); }
+    private function normalizeOrderImportChannels(array $requested): array { $normalized = []; foreach ($requested as $channel) { $normalized[] = in_array($channel, ['ebay_de', 'ebay_fr'], true) ? 'ebay' : $channel; } return array_values(array_unique($normalized)); }
+    private function requestedEbayMarketChannels(array $requested): array { return array_values(array_intersect($requested, ['ebay_de', 'ebay_fr'])); }
+    private function orderProvider(string $marketplace): string { return in_array($marketplace, ['ebay', 'ebay_de', 'ebay_fr'], true) ? 'ebay' : $marketplace; }
+    private function accountCodes(string $marketplace): array { return $marketplace === 'allegro' ? ['allegro_main', 'allegro'] : ($marketplace === 'ebay' ? ['ebay_de', 'ebay_fr', 'ebay'] : ($marketplace === 'ovoko' ? ['ovoko_main', 'ovoko'] : [$marketplace])); }
+    private function accountForOrders(string $marketplace): ?MarketplaceAccount { $query = MarketplaceAccount::query()->whereIn('code', $this->accountCodes($marketplace))->where('api_enabled', true); if ($marketplace === 'ebay') { $accounts = $query->get()->sortBy(fn (MarketplaceAccount $account): int => array_search((string) $account->code, $this->accountCodes('ebay'), true) === false ? 999 : (int) array_search((string) $account->code, $this->accountCodes('ebay'), true))->values(); return $accounts->first(fn (MarketplaceAccount $account): bool => str_contains(implode(' ', $this->safeScopes(is_array($account->api_credentials) ? $account->api_credentials : [])), 'sell.fulfillment')) ?: $accounts->first(); } return $query->first(); }
+    private function responseMarketplaceId(array $raw): ?string { return $raw['marketplaceId'] ?? $raw['marketplace_id'] ?? $raw['orderMarketplaceId'] ?? null; }
+    private function dedupeFetchedOrders(string $marketplace, array $orders, array &$result): array { if ($marketplace !== 'ebay') return $orders; $seen = []; $deduped = []; foreach ($orders as $order) { $id = (string) ($order['id'] ?? $order['orderId'] ?? $order['order_id'] ?? ''); $key = 'ebay|'.$id; if ($id !== '' && isset($seen[$key])) { $result['warnings'][] = ['marketplace' => 'ebay', 'code' => 'duplicate_across_channels', 'duplicate_across_channels' => true, 'dedupe_key' => $key, 'marketplace_order_id' => $id]; continue; } if ($id !== '') $seen[$key] = true; $deduped[] = $order; } return $deduped; }
     private function orderQuery(string $marketplace, array $options, int $limit): array { $since = $options['since'] ?? ($options['date_from'] ?? null); $query = ['limit' => $limit]; if (filled($options['offset'] ?? null)) $query['offset'] = $options['offset']; if (filled($options['status'] ?? null)) $query['status'] = $options['status']; if ($marketplace === 'allegro' && filled($since)) $query['lineItems.boughtAt.gte'] = Carbon::parse($since, 'Europe/Warsaw')->utc()->toIso8601String(); if (in_array($marketplace, ['ebay', 'ebay_de', 'ebay_fr'], true) && filled($since)) $query['filter'] = 'creationdate:['.Carbon::parse($since, 'Europe/Warsaw')->utc()->format('Y-m-d\TH:i:s.000\Z').'..]'; return $query; }
     private function localStatus(string $status): string { return str_contains(strtolower($status), 'cancel') ? 'cancelled' : (str_contains(strtolower($status), 'complete') ? 'completed' : 'new'); }
     private function emptySummary(array $o, bool $dry): array { return ['ok'=>true,'marketplace'=>$o['marketplace'] ?? 'all','dry_run'=>$dry,'date_from'=>$o['since'] ?? ($o['date_from'] ?? null),'date_to'=>$o['date_to'] ?? null,'orders_fetched'=>0,'orders_created'=>0,'orders_updated'=>0,'orders_skipped'=>0,'items_created'=>0,'items_updated'=>0,'errors'=>[],'warnings'=>[],'marketplaces'=>[],'safety_flags'=>$this->flags($dry)]; }
-    private function emptyMarketplaceSummary(string $m, array $o, bool $dry): array { return ['marketplace'=>$m,'dry_run'=>$dry,'date_from'=>$o['since'] ?? ($o['date_from'] ?? null),'date_to'=>$o['date_to'] ?? null,'orders_fetched'=>0,'orders_created'=>0,'orders_updated'=>0,'orders_skipped'=>0,'items_created'=>0,'items_updated'=>0,'errors'=>[],'warnings'=>[],'would_import'=>[],'safety_flags'=>$this->flags($dry)]; }
+    private function emptyMarketplaceSummary(string $m, array $o, bool $dry): array { $requested = $this->requestedChannels((string) ($o['marketplace'] ?? ($o['channels'] ?? 'all'))); return ['marketplace'=>$m,'dry_run'=>$dry,'date_from'=>$o['since'] ?? ($o['date_from'] ?? null),'date_to'=>$o['date_to'] ?? null,'requested_channels'=>$requested,'normalized_channels'=>$this->normalizeOrderImportChannels($requested),'orders_fetched'=>0,'orders_created'=>0,'orders_updated'=>0,'orders_skipped'=>0,'items_created'=>0,'items_updated'=>0,'errors'=>[],'warnings'=>[],'would_import'=>[],'safety_flags'=>$this->flags($dry)]; }
     private function flags(bool $dry): array { return ['read_only'=>$dry,'orders_changed'=>! $dry,'products_changed'=>false,'parts_changed'=>false,'offers_changed'=>false,'listings_changed'=>false,'stock_changed'=>false,'prices_changed'=>false,'mappings_changed'=>false,'allegro_write'=>false,'ovoko_write'=>false,'ebay_write'=>false]; }
 
     private function orderAuthDiagnostics(string $marketplace, MarketplaceAccount $account, string $endpointPath): array
@@ -517,7 +538,7 @@ class MarketplaceOrdersImportService
             'channel' => $marketplace,
             'account_code' => $account->code,
             'marketplace_id' => in_array($marketplace, ['ebay', 'ebay_de', 'ebay_fr'], true)
-                ? (string) ($settings['marketplace_id'] ?? ($marketplace === 'ebay_fr' ? 'EBAY_FR' : 'EBAY_DE'))
+                ? (string) ($settings['marketplace_id'] ?? ($account->code === 'ebay_fr' ? 'EBAY_FR' : 'EBAY_DE'))
                 : null,
             'token_present' => filled($credentials['access_token'] ?? null),
             'token_expires_at' => $this->tokenExpiresAt($marketplace, $credentials),

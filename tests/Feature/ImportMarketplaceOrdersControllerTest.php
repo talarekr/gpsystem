@@ -144,6 +144,42 @@ class ImportMarketplaceOrdersControllerTest extends TestCase
         $this->assertDatabaseCount('orders', 0);
     }
 
+    public function test_ebay_de_and_fr_order_import_is_normalized_to_single_ebay_feed(): void
+    {
+        Http::fake([
+            'allegro.example.test/order/checkout-forms*' => Http::response(['checkoutForms' => []], 200),
+            'ebay.example.test/sell/fulfillment/v1/order*' => Http::response([
+                'orders' => [
+                    ['orderId' => '01-14850-71691', 'orderFulfillmentStatus' => 'FULFILLED', 'creationDate' => '2026-06-29T08:00:00.000Z', 'marketplaceId' => 'EBAY_DE', 'pricingSummary' => ['total' => ['value' => '10.00', 'currency' => 'EUR']]],
+                    ['orderId' => '16-14822-57334', 'orderFulfillmentStatus' => 'NOT_STARTED', 'creationDate' => '2026-06-29T09:00:00.000Z', 'marketplaceId' => 'EBAY_FR', 'pricingSummary' => ['total' => ['value' => '20.00', 'currency' => 'EUR']]],
+                    ['orderId' => '12-14828-09830', 'orderFulfillmentStatus' => 'NOT_STARTED', 'creationDate' => '2026-06-29T10:00:00.000Z', 'pricingSummary' => ['total' => ['value' => '30.00', 'currency' => 'EUR']]],
+                ],
+            ], 200),
+        ]);
+
+        $this->createAllegroAccount();
+        $this->createEbayAccount('ebay_de', 'EBAY_DE');
+        $this->createEbayAccount('ebay_fr', 'EBAY_FR');
+
+        $response = $this->getJson('/tools/import-marketplace-orders?token=gps_images_import_2026&marketplace=allegro,ebay_de,ebay_fr&dry_run=1&date_from=2026-06-29&limit=20&include_debug=1');
+
+        $response->assertOk()
+            ->assertJsonPath('requested_channels', ['allegro', 'ebay_de', 'ebay_fr'])
+            ->assertJsonPath('normalized_channels', ['allegro', 'ebay'])
+            ->assertJsonMissingPath('marketplaces.ebay_de')
+            ->assertJsonMissingPath('marketplaces.ebay_fr')
+            ->assertJsonPath('marketplaces.ebay.source_account_code', 'ebay_de')
+            ->assertJsonPath('marketplaces.ebay.requested_marketplace_id', 'EBAY_DE')
+            ->assertJsonPath('marketplaces.ebay.orders_fetched', 3)
+            ->assertJsonPath('marketplaces.ebay.warnings.0.code', 'ebay_shared_order_feed')
+            ->assertJsonPath('marketplaces.ebay.would_import.0.marketplace', 'ebay')
+            ->assertJsonPath('marketplaces.ebay.would_import.0.dedupe_key', 'ebay|01-14850-71691')
+            ->assertJsonPath('orders_fetched', 3);
+
+        Http::assertSentCount(2);
+        $this->assertDatabaseCount('orders', 0);
+    }
+
     private function createOvokoAccount(): void
     {
         MarketplaceAccount::query()->create([
@@ -155,6 +191,21 @@ class ImportMarketplaceOrdersControllerTest extends TestCase
             'api_base_url' => 'https://ovoko.example.test',
             'api_mode' => 'dry_run',
             'api_credentials' => ['username' => 'user', 'password' => 'pass', 'user_token' => 'token'],
+        ]);
+    }
+
+    private function createEbayAccount(string $code, string $marketplaceId): void
+    {
+        MarketplaceAccount::query()->create([
+            'marketplace' => $code,
+            'code' => $code,
+            'name' => $code,
+            'status' => 'active',
+            'api_enabled' => true,
+            'api_base_url' => 'https://ebay.example.test',
+            'api_mode' => 'dry_run',
+            'api_credentials' => ['access_token' => 'secret-token', 'scopes' => 'https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly'],
+            'api_settings' => ['marketplace_id' => $marketplaceId],
         ]);
     }
 
