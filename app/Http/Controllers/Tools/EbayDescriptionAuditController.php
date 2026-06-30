@@ -23,6 +23,7 @@ class EbayDescriptionAuditController extends Controller
             confirmed: $request->query('confirm') === 'revise-ebay-description',
             checkApi: $request->boolean('check_api'),
             patchAssetsOnly: $request->boolean('patch_assets_only'),
+            fetchLiveDescription: $request->boolean('fetch_live_description'),
         );
         return response()->json(['ok' => true] + $result);
     }

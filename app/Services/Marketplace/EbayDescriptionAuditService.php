@@ -15,7 +15,7 @@ class EbayDescriptionAuditService
     public function __construct(private readonly EbayDescriptionTemplateRenderer $renderer) {}
 
     /** @return array<string,mixed> */
-    public function run(string $channel = 'ebay_de', int $limit = 20, int $offset = 0, ?int $partId = null, bool $apply = false, bool $confirmed = false, bool $checkApi = false, bool $patchAssetsOnly = false): array
+    public function run(string $channel = 'ebay_de', int $limit = 20, int $offset = 0, ?int $partId = null, bool $apply = false, bool $confirmed = false, bool $checkApi = false, bool $patchAssetsOnly = false, bool $fetchLiveDescription = false): array
     {
         abort_unless(in_array($channel, ['ebay_de', 'ebay_fr', 'ebay'], true), 422, 'Supported eBay channel values: ebay_de, ebay_fr, ebay.');
         $channel = $channel === 'ebay' ? 'ebay_de' : $channel;
@@ -24,7 +24,7 @@ class EbayDescriptionAuditService
 
         $all = (clone $query)->get();
         $rows = (clone $query)->orderBy('id')->offset(max(0, $offset))->limit(max(1, min(100, $limit)))->get();
-        $results = $rows->map(fn (MarketplaceListing $listing): array => $this->auditListing($listing, $channel, $apply, $confirmed, $checkApi, $patchAssetsOnly))->values()->all();
+        $results = $rows->map(fn (MarketplaceListing $listing): array => $this->auditListing($listing, $channel, $apply, $confirmed, $checkApi, $patchAssetsOnly, $fetchLiveDescription))->values()->all();
 
         return [
             'mode' => $apply && $confirmed ? 'apply' : 'dry_run',
@@ -51,22 +51,23 @@ class EbayDescriptionAuditService
     }
 
     /** @return array<string,mixed> */
-    public function auditListing(MarketplaceListing $listing, string $channel = 'ebay_de', bool $apply = false, bool $confirmed = false, bool $checkApi = false, bool $patchAssetsOnly = false): array
+    public function auditListing(MarketplaceListing $listing, string $channel = 'ebay_de', bool $apply = false, bool $confirmed = false, bool $checkApi = false, bool $patchAssetsOnly = false, bool $fetchLiveDescription = false): array
     {
         $raw = $listing->raw_payload ?: [];
         $localHtml = $this->localDescriptionHtml($raw);
         $currentHtml = $listing->part ? $this->renderer->render($channel, $listing->part, []) : '';
-        $live = $checkApi ? $this->readOnlyLiveDescription($listing, $channel) : ['checked' => false, 'description_html' => null];
-        $liveHtml = (string) ($live['description_html'] ?: $localHtml);
+        $live = ($checkApi || $fetchLiveDescription) ? $this->readOnlyLiveDescription($listing, $channel, $fetchLiveDescription) : ['checked' => false, 'description_html' => null, 'live_description_source' => 'not_available'];
+        $liveHtml = (string) ($live['description_html'] ?? '');
         $status = $this->finalStatus($listing, $raw, $live);
         $skipEnded = $status !== 'active';
 
         if ($patchAssetsOnly) {
-            return $this->auditListingAssetSrcOnly($listing, $channel, $localHtml, $liveHtml, $live, $raw, $status, $skipEnded, $apply, $confirmed);
+            return $this->auditListingAssetSrcOnly($listing, $channel, $localHtml, $liveHtml, $live, $raw, $status, $skipEnded, $apply, $confirmed, $fetchLiveDescription);
         }
 
         $current = $this->htmlDiagnostics($currentHtml, true);
-        $liveDiag = $this->htmlDiagnostics($liveHtml, true);
+        $comparisonHtml = trim($liveHtml) !== '' ? $liveHtml : $localHtml;
+        $liveDiag = $this->htmlDiagnostics($comparisonHtml, true);
         $missingCurrent = array_values(array_diff($current['asset_urls_found'], $liveDiag['asset_urls_found']));
         $stale = array_values(array_filter($liveDiag['asset_urls_found'], fn (string $url): bool => ! $this->isCurrentAssetUrl($url)));
         $needs = ! $skipEnded && ($stale !== [] || $missingCurrent !== [] || $liveDiag['has_bad_asset_src']);
@@ -92,8 +93,10 @@ class EbayDescriptionAuditService
             'item_id' => $this->itemId($listing, $raw),
             'local_description_length' => mb_strlen($localHtml),
             'live_description_length' => mb_strlen($liveHtml),
+            'live_description_source' => $live['live_description_source'] ?? 'not_available',
+            'live_description_can_confirm_assets' => trim($liveHtml) !== '',
             'current_generated_description_length' => mb_strlen($currentHtml),
-            'description_changed' => trim($liveHtml) !== trim($currentHtml),
+            'description_changed' => trim($comparisonHtml) !== trim($currentHtml),
             'local_description_diagnostics' => $this->htmlDiagnostics($localHtml, false),
             'current_template_asset_urls' => $current['asset_urls_found'],
             'live_listing_asset_urls' => $liveDiag['asset_urls_found'],
@@ -116,7 +119,7 @@ class EbayDescriptionAuditService
 
 
     /** @return array<string,mixed> */
-    private function auditListingAssetSrcOnly(MarketplaceListing $listing, string $channel, string $localHtml, string $liveHtml, array $live, array $raw, string $status, bool $skipEnded, bool $apply, bool $confirmed): array
+    private function auditListingAssetSrcOnly(MarketplaceListing $listing, string $channel, string $localHtml, string $liveHtml, array $live, array $raw, string $status, bool $skipEnded, bool $apply, bool $confirmed, bool $fetchLiveDescription = false): array
     {
         $sourceHtml = trim($liveHtml) !== '' ? $liveHtml : $localHtml;
         $base = [
@@ -141,6 +144,10 @@ class EbayDescriptionAuditService
             'original_description_length' => mb_strlen($sourceHtml),
             'local_description_length' => mb_strlen($localHtml),
             'live_description_length' => mb_strlen($liveHtml),
+            'live_description_source' => $live['live_description_source'] ?? 'not_available',
+            'live_description_can_confirm_assets' => trim($liveHtml) !== '',
+            'live_listing_asset_urls' => $this->imgSrcs($liveHtml),
+            'stale_asset_urls' => array_values(array_filter($this->imgSrcs($liveHtml), fn (string $url): bool => ! $this->isCurrentAssetUrl($url))),
             'live_read_only_api' => Arr::except($live, ['description_html']),
             'apply_requested' => $apply,
             'apply_confirmed' => $confirmed,
@@ -150,7 +157,7 @@ class EbayDescriptionAuditService
         if ($sourceHtml === '') {
             return $base + [
                 'action' => 'blocked',
-                'blocker' => 'cannot_patch_assets_only_without_existing_description',
+                'blocker' => $fetchLiveDescription ? 'cannot_fetch_live_description' : 'cannot_patch_assets_only_without_existing_description',
                 'needs_description_revise' => false,
                 'replacements_count' => 0,
                 'asset_src_replacements' => [],
@@ -262,11 +269,17 @@ class EbayDescriptionAuditService
     private function localDescriptionHtml(array $raw): string { foreach (['description_rendered_html','listingDescription','description.html','request_summary.description_rendered_html','request.listingDescription','offer.listingDescription','meta.description_rendered_html'] as $key) { $v = Arr::get($raw, $key); if (is_string($v) && trim($v) !== '') return $v; } return ''; }
     private function finalStatus(MarketplaceListing $l, array $raw, array $live): string { $api = (string) ($live['api_listing_status'] ?? ''); if ($api === 'active') return 'active'; if (in_array($api, ['ended','inactive','not_found','unavailable'], true)) return 'ended'; $s = strtolower((string) ($l->last_api_status ?: $l->status ?: Arr::get($raw, 'status'))); return in_array($s, ['active','published','live'], true) ? 'active' : 'ended'; }
     private function itemId(MarketplaceListing $l, array $raw): ?string { foreach ([$l->external_listing_id, $l->external_offer_id, Schema::hasColumn('marketplace_listings','external_id') ? $l->external_id : null, preg_match('#/itm/(\d+)#', (string) $l->url, $m) ? $m[1] : null, Arr::get($raw,'item_id'), Arr::get($raw,'ebay.item_id')] as $v) if (filled($v) && ctype_digit((string) $v)) return (string) $v; return null; }
-    private function readOnlyLiveDescription(MarketplaceListing $listing, string $channel): array
+    private function readOnlyLiveDescription(MarketplaceListing $listing, string $channel, bool $fetchDescription = false): array
     {
         $itemId = $this->itemId($listing, $listing->raw_payload ?: []); if (! $itemId) return ['checked' => false, 'api_listing_status' => 'not_checked', 'error_message_safe' => 'No numeric item id.'];
         $account = $listing->account ?: MarketplaceAccount::query()->where('code', $channel)->orWhere('marketplace', $channel)->first(); if (! $account) return ['checked' => false, 'api_listing_status' => 'not_checked', 'error_message_safe' => 'Marketplace account not found.'];
-        $status = (new EbayApiClient($channel, $account))->getListingStatusByItemId($itemId, strtoupper($channel));
-        return $status + ['checked' => true, 'description_html' => $status['description'] ?? $status['shortDescription'] ?? null];
+        $client = new EbayApiClient($channel, $account);
+        if ($fetchDescription) {
+            $description = $client->getItemDescriptionByItemId($itemId);
+            $status = $client->getListingStatusByItemId($itemId, strtoupper($channel));
+            return array_merge($status, $description, ['checked' => true, 'description_html' => $description['description_html'] ?? null]);
+        }
+        $status = $client->getListingStatusByItemId($itemId, strtoupper($channel));
+        return $status + ['checked' => true, 'description_html' => null, 'live_description_source' => 'not_available'];
     }
 }
