@@ -24,9 +24,11 @@ class OvokoListingUrlBackfillController extends Controller
         $apply = $request->boolean('apply') && $request->query('confirm') === self::CONFIRMATION;
         if (! $request->filled('listing_id') && ! $request->filled('part_id')) {
             $limit = max(1, min(self::MAX_BULK_LIMIT, (int) $request->query('limit', self::DEFAULT_BULK_LIMIT)));
+            $offset = max(0, (int) $request->query('offset', 0));
             $result = $backfill->runLocalGeneratedBulk(
                 apply: $apply,
                 limit: $limit,
+                offset: $offset,
                 onlyMissing: $request->boolean('only_missing'),
                 includeExistingInvalid: $request->boolean('include_existing_invalid'),
             );
@@ -60,6 +62,16 @@ class OvokoListingUrlBackfillController extends Controller
             'apply_confirmed' => $apply,
             'force' => $request->boolean('force'),
             'only_missing' => $request->boolean('only_missing'),
+            'only_missing_semantics' => $result['only_missing_semantics'] ?? null,
+            'limit_requested' => $result['limit_requested'] ?? $limit,
+            'limit_applied' => $result['limit_applied'] ?? $limit,
+            'offset_requested' => $result['offset_requested'] ?? 0,
+            'offset_applied' => $result['offset_applied'] ?? 0,
+            'first_inspected_listing_id' => $result['first_inspected_listing_id'] ?? null,
+            'last_inspected_listing_id' => $result['last_inspected_listing_id'] ?? null,
+            'inspected_listing_ids_sample' => $result['inspected_listing_ids_sample'] ?? [],
+            'total_ovoko_listings_count' => $result['total_ovoko_listings_count'] ?? null,
+            'total_ovoko_missing_url_count' => $result['total_ovoko_missing_url_count'] ?? null,
             'include_existing_invalid' => $request->boolean('include_existing_invalid'),
             'local_update_only' => $apply,
             'ovoko_write' => false,
