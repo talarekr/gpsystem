@@ -423,6 +423,14 @@ class MarketplaceListingReadinessService
             $preview['allegro_parameters'] = $allegroParameters;
             $preview['allegro_product_parameters'] = $allegroParameters['product_parameters'] ?? [];
             $preview['allegro_offer_parameters'] = $allegroParameters['offer_parameters'] ?? [];
+            $preview['payments'] = $allegroParameters['payments'] ?? [];
+            $preview['allegro_payment_diagnostics'] = $allegroParameters['payment_diagnostics'] ?? [];
+            $preview['allegro_parameter_diagnostics'] = [
+                'productSet[0].product.parameters' => $allegroParameters['product_parameter_diagnostics'] ?? [],
+                'parameters' => $allegroParameters['offer_parameter_diagnostics'] ?? [],
+                'payments' => $allegroParameters['payment_diagnostics'] ?? [],
+                'all' => $allegroParameters['parameter_source_diagnostics'] ?? [],
+            ];
             $preview['missing_required_parameters'] = $allegroParameters['missing_required_parameters'] ?? [];
             $preview['unmapped_parameters'] = $allegroParameters['unmapped_parameters'] ?? [];
             $preview['parameter_definitions_source'] = $allegroParameters['parameter_definitions_source'] ?? 'none';

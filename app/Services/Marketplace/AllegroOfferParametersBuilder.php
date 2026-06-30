@@ -15,10 +15,11 @@ class AllegroOfferParametersBuilder
     public function build(Part $part, ?MarketplaceCategoryMapping $mapping, array $definitionsResult): array
     {
         $this->loggedCarTypeMappings = [];
-        $offer = []; $product = []; $missing = []; $optional = []; $unmapped = []; $diag = [];
+        $offer = []; $product = []; $missing = []; $optional = []; $unmapped = []; $diag = []; $hasInvoiceParameter = false;
         $definitions = $definitionsResult['parameters'] ?? [];
         if (! ($definitionsResult['ok'] ?? false)) return $this->result([], [], [], [], [], [['source' => 'not_resolved', 'blocker' => $definitionsResult['blocker'] ?? 'allegro_category_parameters_unavailable']], $definitionsResult);
         foreach ($definitions as $def) {
+            $hasInvoiceParameter = $hasInvoiceParameter || $this->norm($def['name'] ?? '') === 'faktura';
             $required = (bool) ($def['required'] ?? false);
             $resolved = $this->resolve($part, $mapping, $def);
             if ($resolved['value'] === null) {
@@ -33,7 +34,9 @@ class AllegroOfferParametersBuilder
             if (! $required) $optional[] = ['id' => (string) $def['id'], 'name' => (string) ($def['name'] ?? '')];
             $diag[] = $this->diagnosticRow($def, $resolved) + ['resolved_value' => $resolved['label'] ?? $resolved['value']];
         }
-        return $this->result($offer, $product, $missing, $optional, $unmapped, $diag, $definitionsResult);
+        $paymentDiagnostics = $hasInvoiceParameter ? [] : [$this->invoicePaymentDiagnosticRow()];
+        $payments = $hasInvoiceParameter ? [] : ['invoice' => 'VAT'];
+        return $this->result($offer, $product, $missing, $optional, $unmapped, $diag, $definitionsResult, $payments, $paymentDiagnostics);
     }
 
     private function resolve(Part $part, ?MarketplaceCategoryMapping $mapping, array $def): array
@@ -424,11 +427,30 @@ class AllegroOfferParametersBuilder
         ];
     }
 
+    private function invoicePaymentDiagnosticRow(): array
+    {
+        return [
+            'name' => 'Faktura',
+            'source' => 'fixed_business_rule',
+            'source_field' => 'payments.invoice',
+            'raw_value' => 'Wystawiam fakturę VAT',
+            'raw_local_value' => 'Wystawiam fakturę VAT',
+            'source_value' => 'Wystawiam fakturę VAT',
+            'normalized_value' => 'Wystawiam fakturę VAT',
+            'resolved_value' => 'Wystawiam fakturę VAT',
+            'payments' => ['invoice' => 'VAT'],
+            'required' => false,
+            'status' => 'fixed',
+            'type' => 'payment_setting',
+            'parameter_location' => 'payments.invoice',
+        ];
+    }
+
     private function allowedValuesDiagnostics(array $def): array
     {
         return array_column(array_map(fn ($allowed): array => ['id' => (string) ($allowed['id'] ?? ''), 'value' => (string) ($allowed['value'] ?? '')], $def['dictionary'] ?? []), 'value', 'id');
     }
 
     private function norm(mixed $v): string { return Str::of((string) $v)->lower()->ascii()->replaceMatches('/[^a-z0-9]+/', '')->toString(); }
-    private function result(array $offer, array $product, array $missing, array $optional, array $unmapped, array $diag, array $defs): array { return ['allegro_parameters'=>array_merge($product, $offer),'offer_parameters'=>$offer,'product_parameters'=>$product,'missing_required_parameters'=>$missing,'optional_parameters_present'=>$optional,'unmapped_parameters'=>$unmapped,'parameter_source_diagnostics'=>$diag,'product_parameter_diagnostics'=>array_values(array_filter($diag, fn ($row) => ($row['parameter_location'] ?? null) === 'productSet[0].product.parameters')),'offer_parameter_diagnostics'=>array_values(array_filter($diag, fn ($row) => ($row['parameter_location'] ?? null) === 'parameters')),'parameter_definitions_source'=>$defs['source'] ?? 'none','will_make_marketplace_request'=>false]; }
+    private function result(array $offer, array $product, array $missing, array $optional, array $unmapped, array $diag, array $defs, array $payments = [], array $paymentDiagnostics = []): array { return ['allegro_parameters'=>array_merge($product, $offer),'offer_parameters'=>$offer,'product_parameters'=>$product,'payments'=>$payments,'missing_required_parameters'=>$missing,'optional_parameters_present'=>$optional,'unmapped_parameters'=>$unmapped,'parameter_source_diagnostics'=>array_merge($diag, $paymentDiagnostics),'product_parameter_diagnostics'=>array_values(array_filter($diag, fn ($row) => ($row['parameter_location'] ?? null) === 'productSet[0].product.parameters')),'offer_parameter_diagnostics'=>array_values(array_filter($diag, fn ($row) => ($row['parameter_location'] ?? null) === 'parameters')),'payment_diagnostics'=>$paymentDiagnostics,'parameter_definitions_source'=>$defs['source'] ?? 'none','will_make_marketplace_request'=>false]; }
 }

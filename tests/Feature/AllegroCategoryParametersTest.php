@@ -260,6 +260,27 @@ class AllegroCategoryParametersTest extends TestCase
         $this->assertSame('productSet[0].product.parameters', $diagnostics['Wersja']['parameter_location']);
     }
 
+
+    public function test_allegro_invoice_uses_payments_invoice_when_category_has_no_invoice_parameter(): void
+    {
+        $part = Part::query()->create(['name' => 'Część Audi', 'category_id' => 77, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'vehicle_snapshot' => ['make' => 'Audi'], 'is_visible_storefront' => true]);
+
+        $result = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, null, ['ok' => true, 'source' => 'cache', 'parameters' => [
+            ['id' => '11323', 'name' => 'Stan', 'type' => 'dictionary', 'required' => true, 'dictionary' => [['id' => '11323_2', 'value' => 'Używany']], 'options' => ['describesProduct' => false]],
+            ['id' => '130533', 'name' => 'Wersja', 'type' => 'dictionary', 'required' => false, 'dictionary' => [['id' => '130533_1', 'value' => 'Europejska']], 'options' => ['describesProduct' => true]],
+        ]]);
+
+        $this->assertSame(['invoice' => 'VAT'], $result['payments']);
+        $this->assertSame([['id' => '11323', 'valuesIds' => ['11323_2']]], $result['offer_parameters']);
+        $this->assertSame([['id' => '130533', 'valuesIds' => ['130533_1']]], $result['product_parameters']);
+
+        $diagnostics = collect($result['parameter_source_diagnostics'])->keyBy('name');
+        $this->assertSame('payments.invoice', $diagnostics['Faktura']['parameter_location']);
+        $this->assertSame(['invoice' => 'VAT'], $diagnostics['Faktura']['payments']);
+        $this->assertSame('Wystawiam fakturę VAT', $diagnostics['Faktura']['resolved_value']);
+        $this->assertSame('fixed', $diagnostics['Faktura']['status']);
+    }
+
     public function test_part_manufacturer_maps_audi_bmw_and_mercedes_oe_exact_or_alias_labels(): void
     {
         foreach ([['Audi', 'Audi OE', 'audi-id'], ['BMW', 'BMW OE', 'bmw-id'], ['VW', 'Volkswagen OE', 'vw-id'], ['Mercedes', 'Mercedes-Benz OE', 'mercedes-id']] as [$make, $label, $id]) {
