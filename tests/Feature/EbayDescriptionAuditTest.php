@@ -219,6 +219,85 @@ class EbayDescriptionAuditTest extends TestCase
         $this->assertNull($row['revise_payload_safe']);
     }
 
+
+    public function test_confirmed_apply_reports_marketplace_write_disabled_blocker(): void
+    {
+        $this->actingAsAdminUser();
+        config(['marketplace.external_api_writes_enabled' => false, 'marketplace.ebay_description_revise_enabled' => false]);
+        Http::fake(['gpswiss.pl/ebay-template/assets/*' => Http::response('png', 200, ['Content-Type' => 'image/png'])]);
+        $part = Part::query()->create(['name' => 'Część eBay', 'description' => 'Opis', 'price' => 100, 'quantity' => 1]);
+        MarketplaceListing::query()->create(['marketplace' => 'ebay_de', 'part_id' => $part->id, 'status' => 'active', 'external_listing_id' => '123456789012', 'raw_payload' => ['description_rendered_html' => '<img src="/storage/old.png">']]);
+
+        $this->getJson('/admin/tools/marketplace/ebay-description-audit?channel=ebay_de&apply=1&confirm=revise-ebay-description')
+            ->assertOk()
+            ->assertJsonPath('mode', 'apply')
+            ->assertJsonPath('dry_run', false)
+            ->assertJsonPath('write_enabled', false)
+            ->assertJsonPath('revise_enabled', false)
+            ->assertJsonPath('apply_executed', false)
+            ->assertJsonPath('applied', 0)
+            ->assertJsonPath('apply_blocked_reason', 'marketplace_write_disabled')
+            ->assertJsonPath('summary.write_enabled', false)
+            ->assertJsonPath('summary.revise_enabled', false)
+            ->assertJsonPath('summary.apply_blocked_reason', 'marketplace_write_disabled')
+            ->assertJsonPath('summary.applied', 0)
+            ->assertJsonPath('results.0.blocker', 'marketplace_write_disabled')
+            ->assertJsonPath('results.0.apply_blocked_reason', 'marketplace_write_disabled')
+            ->assertJsonPath('results.0.apply_executed', false);
+    }
+
+    public function test_enabled_apply_revises_description_only_payload(): void
+    {
+        $this->actingAsAdminUser();
+        config(['marketplace.external_api_writes_enabled' => true, 'marketplace.ebay_description_revise_enabled' => true]);
+        Http::fake([
+            'gpswiss.pl/ebay-template/assets/*' => Http::response('png', 200, ['Content-Type' => 'image/png']),
+            'api.ebay.com/ws/api.dll' => Http::response('<?xml version="1.0" encoding="utf-8"?><ReviseItemResponse xmlns="urn:ebay:apis:eBLBaseComponents"><Ack>Success</Ack></ReviseItemResponse>', 200, ['Content-Type' => 'text/xml']),
+        ]);
+        $account = MarketplaceAccount::query()->create([
+            'marketplace' => 'ebay_de',
+            'name' => 'eBay DE',
+            'code' => 'ebay_de',
+            'api_enabled' => true,
+            'api_base_url' => 'https://api.ebay.com',
+            'api_mode' => 'write',
+            'api_credentials' => ['access_token' => 'token'],
+            'api_settings' => ['marketplace_id' => 'EBAY_DE', 'site_id' => '77'],
+        ]);
+        $part = Part::query()->create(['name' => 'Część eBay', 'description' => 'Opis', 'price' => 100, 'quantity' => 1]);
+        MarketplaceListing::query()->create(['marketplace' => 'ebay_de', 'marketplace_account_id' => $account->id, 'part_id' => $part->id, 'status' => 'active', 'external_listing_id' => '123456789012', 'raw_payload' => ['description_rendered_html' => '<img src="https://gpsystem.thecamels.pl/storage/icon-shipping-old.png">']]);
+
+        $this->getJson('/admin/tools/marketplace/ebay-description-audit?channel=ebay_de&apply=1&confirm=revise-ebay-description')
+            ->assertOk()
+            ->assertJsonPath('write_enabled', true)
+            ->assertJsonPath('revise_enabled', true)
+            ->assertJsonPath('marketplace_write', true)
+            ->assertJsonPath('publish', false)
+            ->assertJsonPath('relist', false)
+            ->assertJsonPath('end', false)
+            ->assertJsonPath('stock_order_price_sync', false)
+            ->assertJsonPath('apply_executed', true)
+            ->assertJsonPath('applied', 1)
+            ->assertJsonPath('summary.applied', 1)
+            ->assertJsonPath('results.0.apply_executed', true)
+            ->assertJsonPath('results.0.revise_payload_forbidden_keys_present', []);
+
+        Http::assertSent(function ($request): bool {
+            $body = $request->body();
+            return $request->url() === 'https://api.ebay.com/ws/api.dll'
+                && $request->hasHeader('X-EBAY-API-CALL-NAME', 'ReviseItem')
+                && str_contains($body, '<ReviseItemRequest')
+                && str_contains($body, '<ItemID>123456789012</ItemID>')
+                && str_contains($body, '<Description><![CDATA[')
+                && ! str_contains($body, '<StartPrice>')
+                && ! str_contains($body, '<Quantity>')
+                && ! str_contains($body, '<Title>')
+                && ! str_contains($body, '<PictureDetails>')
+                && ! str_contains($body, '<PrimaryCategory>')
+                && ! str_contains($body, '<ItemSpecifics>');
+        });
+    }
+
     private function actingAsAdminUser(): User
     {
         $this->seed(RoleSeeder::class);

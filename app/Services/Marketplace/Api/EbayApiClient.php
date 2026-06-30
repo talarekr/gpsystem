@@ -368,6 +368,76 @@ class EbayApiClient extends AbstractMarketplaceApiClient
         ]);
     }
 
+
+    /**
+     * Revise only the Trading API item description. The request intentionally contains
+     * no price, stock, title, photos, policies, category, or item specifics fields.
+     *
+     * @param array{listingDescription:string} $payload
+     * @return array<string,mixed>
+     */
+    public function reviseItemDescriptionOnly(string $itemId, array $payload): array
+    {
+        $description = (string) ($payload['listingDescription'] ?? '');
+        $forbidden = array_values(array_intersect(array_keys($payload), ['price','pricingSummary','availableQuantity','quantity','stock','availability','listingPolicies','fulfillmentPolicyId','paymentPolicyId','returnPolicyId','merchantLocationKey','images','product','title','category','itemSpecifics']));
+        if ($forbidden !== []) return ['ok' => false, 'step' => 'reviseItemDescriptionOnly', 'error' => 'forbidden_payload_keys_present', 'forbidden_keys' => $forbidden];
+        if (blank($itemId) || blank($description)) return ['ok' => false, 'step' => 'reviseItemDescriptionOnly', 'error' => 'missing_item_id_or_listingDescription'];
+
+        $credentials = $this->credentials();
+        $token = $this->accessToken();
+        if (blank($token)) return ['ok' => false, 'step' => 'reviseItemDescriptionOnly', 'error' => 'Credential access_token is missing.'];
+
+        $siteId = (string) (($this->account?->api_settings ?? [])['site_id'] ?? ($this->marketplaceId() === 'EBAY_FR' ? '71' : '77'));
+        $xml = '<?xml version="1.0" encoding="utf-8"?>'
+            .'<ReviseItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+            .'<RequesterCredentials><eBayAuthToken>'.htmlspecialchars($token, ENT_XML1).'</eBayAuthToken></RequesterCredentials>'
+            .'<Item><ItemID>'.htmlspecialchars($itemId, ENT_XML1).'</ItemID><Description><![CDATA['.$this->safeCdata($description).']]></Description></Item>'
+            .'</ReviseItemRequest>';
+
+        $response = Http::withHeaders(array_filter([
+                'X-EBAY-API-CALL-NAME' => 'ReviseItem',
+                'X-EBAY-API-SITEID' => $siteId,
+                'X-EBAY-API-COMPATIBILITY-LEVEL' => (string) (($this->account?->api_settings ?? [])['trading_compatibility_level'] ?? '967'),
+                'X-EBAY-API-IAF-TOKEN' => $token,
+                'X-EBAY-API-APP-NAME' => $credentials['client_id'] ?? null,
+                'Content-Type' => 'text/xml',
+            ]))
+            ->timeout(20)
+            ->withBody($xml, 'text/xml')
+            ->post($this->tradingApiUrl());
+
+        $ack = null;
+        $errorMessage = null;
+        if (trim($response->body()) !== '') {
+            libxml_use_internal_errors(true);
+            $parsed = simplexml_load_string($response->body());
+            if ($parsed instanceof \SimpleXMLElement) {
+                $parsed->registerXPathNamespace('e', 'urn:ebay:apis:eBLBaseComponents');
+                $ack = (string) ($parsed->Ack ?? '');
+                $errors = $parsed->xpath('//e:Errors/e:LongMessage') ?: $parsed->xpath('//Errors/LongMessage') ?: [];
+                $errorMessage = isset($errors[0]) ? (string) $errors[0] : null;
+            }
+            libxml_clear_errors();
+        }
+
+        return [
+            'ok' => $response->successful() && in_array($ack, ['Success', 'Warning'], true),
+            'step' => 'reviseItemDescriptionOnly',
+            'api_endpoint_family' => 'trading.revise_item.description_only',
+            'http_status' => $response->status(),
+            'trading_ack' => $ack,
+            'error_message_safe' => $errorMessage,
+            'request_id' => $response->header('x-ebay-c-request-id') ?: $response->header('rlogid'),
+            'marketplace_id' => $this->marketplaceId(),
+            'trading_site_id' => $siteId,
+        ];
+    }
+
+    private function safeCdata(string $value): string
+    {
+        return str_replace(']]>', ']]]]><![CDATA[>', $value);
+    }
+
     private function tradingApiUrl(): string
     {
         $settings = is_array($this->account?->api_settings) ? $this->account->api_settings : [];

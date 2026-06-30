@@ -24,14 +24,27 @@ class EbayDescriptionAuditService
 
         $all = (clone $query)->get();
         $rows = (clone $query)->orderBy('id')->offset(max(0, $offset))->limit(max(1, min(100, $limit)))->get();
-        $results = $rows->map(fn (MarketplaceListing $listing): array => $this->auditListing($listing, $channel, $apply, $confirmed, $checkApi, $patchAssetsOnly, $fetchLiveDescription))->values()->all();
+        $writeEnabled = $this->descriptionReviseWriteEnabled();
+        $reviseEnabled = $writeEnabled;
+        $applyBlockedReason = $apply && $confirmed && ! $writeEnabled ? 'marketplace_write_disabled' : null;
+        $applied = 0;
+        $results = $rows->map(fn (MarketplaceListing $listing): array => $this->auditListing($listing, $channel, $apply, $confirmed, $checkApi, $patchAssetsOnly, $fetchLiveDescription, $writeEnabled))->values()->all();
+
+        $applied = collect($results)->where('apply_executed', true)->count();
 
         return [
             'mode' => $apply && $confirmed ? 'apply' : 'dry_run',
             'dry_run' => ! ($apply && $confirmed),
-            'marketplace_write' => false,
+            'marketplace_write' => $writeEnabled && $applied > 0,
+            'write_enabled' => $writeEnabled,
             'publish' => false,
-            'revise' => false,
+            'revise' => $writeEnabled && $applied > 0,
+            'revise_enabled' => $reviseEnabled,
+            'apply_requested' => $apply,
+            'apply_confirmed' => $confirmed,
+            'apply_executed' => $applied > 0,
+            'applied' => $applied,
+            'apply_blocked_reason' => $applyBlockedReason,
             'relist' => false,
             'end' => false,
             'stock_order_price_sync' => false,
@@ -43,15 +56,18 @@ class EbayDescriptionAuditService
                 'would_revise_description' => collect($results)->where('action', 'would_revise_description')->count(),
                 'would_patch_asset_src_only' => collect($results)->where('action', 'would_patch_asset_src_only')->count(),
                 'blocked' => collect($results)->where('action', 'blocked')->count(),
-                'applied' => 0,
+                'applied' => $applied,
+                'write_enabled' => $writeEnabled,
+                'revise_enabled' => $reviseEnabled,
+                'apply_blocked_reason' => $applyBlockedReason,
             ],
             'results' => $results,
-            'warnings' => ['Read-only/dry-run audit. No eBay write, publish, revise, relist, end, stock, price or order sync is performed. apply=1 requires confirm=revise-ebay-description and is intentionally not executed by this diagnostic response. patch_assets_only=1 never falls back to a generated full description.'],
+            'warnings' => [$writeEnabled ? 'Description-only eBay revise is enabled for confirmed apply requests. No publish, relist, end, stock, price, title, photos, policies, category, item specifics or order sync is performed.' : 'Read-only/dry-run audit. No eBay write, publish, revise, relist, end, stock, price or order sync is performed while marketplace write is disabled. apply=1 requires confirm=revise-ebay-description and GPS_EXTERNAL_API_WRITES_ENABLED=true plus GPS_EBAY_DESCRIPTION_REVISE_ENABLED=true. patch_assets_only=1 never falls back to a generated full description.'],
         ];
     }
 
     /** @return array<string,mixed> */
-    public function auditListing(MarketplaceListing $listing, string $channel = 'ebay_de', bool $apply = false, bool $confirmed = false, bool $checkApi = false, bool $patchAssetsOnly = false, bool $fetchLiveDescription = false): array
+    public function auditListing(MarketplaceListing $listing, string $channel = 'ebay_de', bool $apply = false, bool $confirmed = false, bool $checkApi = false, bool $patchAssetsOnly = false, bool $fetchLiveDescription = false, bool $writeEnabled = false): array
     {
         $raw = $listing->raw_payload ?: [];
         $localHtml = $this->localDescriptionHtml($raw);
@@ -63,7 +79,7 @@ class EbayDescriptionAuditService
         $statusDiagnostics = $this->statusDiagnostics($listing, $raw, $live, $status, $skipEnded);
 
         if ($patchAssetsOnly) {
-            return $this->auditListingAssetSrcOnly($listing, $channel, $localHtml, $liveHtml, $live, $raw, $status, $skipEnded, $apply, $confirmed, $fetchLiveDescription);
+            return $this->auditListingAssetSrcOnly($listing, $channel, $localHtml, $liveHtml, $live, $raw, $status, $skipEnded, $apply, $confirmed, $fetchLiveDescription, $writeEnabled);
         }
 
         $current = $this->htmlDiagnostics($currentHtml, true);
@@ -85,6 +101,10 @@ class EbayDescriptionAuditService
             'relist' => false,
             'end' => false,
             'stock_order_price_sync' => false,
+            'write_enabled' => $writeEnabled,
+            'revise_enabled' => $writeEnabled,
+            'apply_blocked_reason' => $apply && $confirmed && ! $writeEnabled ? 'marketplace_write_disabled' : null,
+            'blocker' => $apply && $confirmed && ! $writeEnabled ? 'marketplace_write_disabled' : null,
             'local_status' => $listing->status,
             'api_listing_status' => $live['api_listing_status'] ?? null,
             'final_listing_status' => $status,
@@ -115,7 +135,7 @@ class EbayDescriptionAuditService
             'confidence' => $needs ? 'high' : null,
             'apply_requested' => $apply,
             'apply_confirmed' => $confirmed,
-            'apply_executed' => false,
+            'apply_executed' => $this->shouldExecuteApply($apply, $confirmed, $writeEnabled, $needs, $skipEnded) ? (bool) (($this->executeDescriptionRevise($listing, $channel, $payload)['ok'] ?? false)) : false,
             'revise_payload_safe' => $needs || $apply ? $payload : null,
             'revise_payload_forbidden_keys_present' => array_values(array_intersect(array_keys($payload), ['price','pricingSummary','availableQuantity','quantity','stock','availability','listingPolicies','fulfillmentPolicyId','paymentPolicyId','returnPolicyId','merchantLocationKey','images','product'])),
         ];
@@ -123,7 +143,7 @@ class EbayDescriptionAuditService
 
 
     /** @return array<string,mixed> */
-    private function auditListingAssetSrcOnly(MarketplaceListing $listing, string $channel, string $localHtml, string $liveHtml, array $live, array $raw, string $status, bool $skipEnded, bool $apply, bool $confirmed, bool $fetchLiveDescription = false): array
+    private function auditListingAssetSrcOnly(MarketplaceListing $listing, string $channel, string $localHtml, string $liveHtml, array $live, array $raw, string $status, bool $skipEnded, bool $apply, bool $confirmed, bool $fetchLiveDescription = false, bool $writeEnabled = false): array
     {
         $sourceHtml = trim($liveHtml) !== '' ? $liveHtml : $localHtml;
         $base = [
@@ -138,6 +158,10 @@ class EbayDescriptionAuditService
             'relist' => false,
             'end' => false,
             'stock_order_price_sync' => false,
+            'write_enabled' => $writeEnabled,
+            'revise_enabled' => $writeEnabled,
+            'apply_blocked_reason' => $apply && $confirmed && ! $writeEnabled ? 'marketplace_write_disabled' : null,
+            'blocker' => $apply && $confirmed && ! $writeEnabled ? 'marketplace_write_disabled' : null,
             'local_status' => $listing->status,
             'api_listing_status' => $live['api_listing_status'] ?? null,
             'final_listing_status' => $status,
@@ -193,9 +217,33 @@ class EbayDescriptionAuditService
             'changed_only_img_src' => $patch['changed_only_img_src'],
             'forbidden_changes_detected' => ! $patch['changed_only_img_src'],
             'description_changed' => $sourceHtml !== $patch['html'],
+            'apply_executed' => $this->shouldExecuteApply($apply, $confirmed, $writeEnabled, $patch['replacements_count'] > 0, $skipEnded) ? (bool) (($this->executeDescriptionRevise($listing, $channel, $payload)['ok'] ?? false)) : false,
             'revise_payload_safe' => ($patch['replacements_count'] > 0 || $apply) && ! $skipEnded ? $payload : null,
             'revise_payload_forbidden_keys_present' => array_values(array_intersect(array_keys($payload), ['price','pricingSummary','availableQuantity','quantity','stock','availability','listingPolicies','fulfillmentPolicyId','paymentPolicyId','returnPolicyId','merchantLocationKey','images','product'])),
         ];
+    }
+
+
+    private function descriptionReviseWriteEnabled(): bool
+    {
+        return (bool) config('marketplace.external_api_writes_enabled', false)
+            && (bool) config('marketplace.ebay_description_revise_enabled', false);
+    }
+
+    private function shouldExecuteApply(bool $apply, bool $confirmed, bool $writeEnabled, bool $needsRevise, bool $skipEnded): bool
+    {
+        return $apply && $confirmed && $writeEnabled && $needsRevise && ! $skipEnded;
+    }
+
+    /** @param array{listingDescription:string} $payload */
+    private function executeDescriptionRevise(MarketplaceListing $listing, string $channel, array $payload): array
+    {
+        if (array_keys($payload) !== ['listingDescription']) return ['ok' => false, 'error' => 'unsafe_payload_shape'];
+        $itemId = $this->itemId($listing, $listing->raw_payload ?: []);
+        if ($itemId === null) return ['ok' => false, 'error' => 'missing_item_id'];
+        $account = $listing->account ?: MarketplaceAccount::query()->where('code', $channel)->orWhere('marketplace', $channel)->first();
+        if (! $account) return ['ok' => false, 'error' => 'marketplace_account_not_found'];
+        return (new EbayApiClient($account, $channel))->reviseItemDescriptionOnly($itemId, $payload);
     }
 
     /** @return array{html:string,replacements_count:int,replacements:array<int,array{old_src:string,new_src:string}>,changed_only_img_src:bool} */
