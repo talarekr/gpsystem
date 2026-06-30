@@ -439,7 +439,7 @@ class MarketplaceListingReadinessService
         ]);
         return $mapping;
     }
-    private function hasActiveListing(Part $part, ?string $marketplace, string $channel): bool { if (! $marketplace || ! Schema::hasTable('marketplace_listings')) return false; return MarketplaceListing::query()->where('part_id', $part->id)->where('marketplace', $marketplace)->whereNotNull('external_offer_id')->whereNotIn('status', ['ended', 'deleted', 'archived', 'inactive'])->exists(); }
+    private function hasActiveListing(Part $part, ?string $marketplace, string $channel): bool { if (! $marketplace || ! Schema::hasTable('marketplace_listings')) return false; return MarketplaceListing::query()->where('part_id', $part->id)->where('marketplace', $marketplace)->where(function ($q) { $q->whereNotNull('external_listing_id')->orWhereNotNull('external_offer_id'); })->where(function ($q) { $q->whereNull('external_listing_id')->orWhere('external_listing_id', 'not like', 'GPSW-%'); })->where(function ($q) { $q->whereNull('external_offer_id')->orWhere('external_offer_id', 'not like', 'GPSW-%'); })->whereIn('status', ['published','active','ACTIVE','live'])->whereNotIn('last_api_status', ['ended','inactive','deleted','archived','not_found'])->whereNull('not_seen_in_active_api_at')->exists(); }
     /** @return array<string, mixed> */
     private function safePayloadPreview(Part $part, string $channel, ?float $price, ?MarketplaceCategoryMapping $categoryMapping = null, ?array $ebayPrice = null, ?array $allegroParameters = null, ?array $allegroSalesSettings = null): array
     {
