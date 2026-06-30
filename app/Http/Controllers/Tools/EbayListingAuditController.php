@@ -21,6 +21,7 @@ class EbayListingAuditController extends Controller
             offset: (int) $request->query('offset', 0),
             partId: $request->filled('part_id') ? (int) $request->query('part_id') : null,
             apply: $request->boolean('apply') && $request->query('confirm') === 'ebay-listing-audit-fix',
+            checkApi: $request->boolean('check_api'),
         );
 
         return response()->json(['ok' => true] + $result);
