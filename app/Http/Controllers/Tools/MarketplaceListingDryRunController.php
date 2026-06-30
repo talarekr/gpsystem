@@ -12,6 +12,7 @@ use App\Services\Marketplace\AllegroDescriptionBuilder;
 use App\Services\Marketplace\MarketplaceImageSelectionService;
 use App\Services\Marketplace\AllegroOfferParametersBuilder;
 use App\Services\Marketplace\AllegroSalesSettingsResolver;
+use App\Services\Marketplace\Api\AllegroApiClient;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -22,6 +23,7 @@ class MarketplaceListingDryRunController extends Controller
 {
     private const TOKEN = 'gps_images_import_2026';
     private const CHANNELS = ['ovoko', 'allegro_main'];
+    private const DEFAULT_SAFETY_INFORMATION = 'Część używana pochodząca z demontażu pojazdu. Montaż powinien zostać wykonany przez wykwalifikowany warsztat lub osobę posiadającą odpowiednią wiedzę techniczną. Przed montażem należy porównać numer części i zgodność z pojazdem. Produkt nie jest zabawką.';
 
     public function readiness(Request $request): JsonResponse
     {
@@ -71,6 +73,25 @@ class MarketplaceListingDryRunController extends Controller
             'blockers' => $readiness['blockers'],
             'warnings' => $readiness['warnings'],
         ]);
+    }
+
+
+    public function allegroResponsibleProducers(Request $request): JsonResponse
+    {
+        $account = $this->account('allegro_main');
+        if (! $account) return response()->json(['ok' => false, 'http_status' => null, 'error' => 'Marketplace account allegro_main is missing.'], 422);
+
+        $result = (new AllegroApiClient('allegro_main', $account))->responsibleProducers();
+
+        return response()->json([
+            'ok' => (bool) ($result['ok'] ?? false),
+            'read_only' => true,
+            'endpoint' => 'GET /sale/responsible-producers',
+            'http_status' => $result['http_status'] ?? null,
+            'responsible_producers' => $result['items'] ?? [],
+            'error' => $result['error'] ?? null,
+            'request_id' => $result['request_id'] ?? null,
+        ], ($result['ok'] ?? false) ? 200 : 422);
     }
 
 
@@ -186,6 +207,7 @@ class MarketplaceListingDryRunController extends Controller
             $allegroDescription = app(AllegroDescriptionBuilder::class)->build($part, $images['public_urls_sample']);
             foreach ($allegroDescription['blockers'] as $descriptionBlocker) $blockers[] = $descriptionBlocker;
             foreach (($allegroDescription['diagnostics']['optional_donor_vehicle_fields_missing'] ?? []) as $missingOptionalField) $warnings[] = 'optional_donor_vehicle_field_missing:'.$missingOptionalField;
+            foreach ($this->allegroGpsrBlockers($this->account($channel)) as $gpsrBlocker) $blockers[] = $gpsrBlocker;
         }
         if ($channel === 'allegro_main' && ! $mapping) $blockers[] = 'allegro_category_mapping_required_no_guessing';
         if ($channel === 'allegro_main' && $mapping && filled($mapping->external_category_id)) {
@@ -218,6 +240,7 @@ class MarketplaceListingDryRunController extends Controller
             'warnings' => array_values(array_unique($warnings)),
             'allegro_parameters' => $allegroParameters,
             'allegro_sales_settings' => $allegroSalesSettings,
+            'gpsr_diagnostics' => $channel === 'allegro_main' ? $this->allegroGpsrDiagnostics($this->account($channel)) : null,
             'will_make_marketplace_request' => false,
         ];
     }
@@ -246,7 +269,7 @@ class MarketplaceListingDryRunController extends Controller
         $allegro = $readiness['allegro_parameters'] ?? [];
         $allegroDescription = app(AllegroDescriptionBuilder::class)->build($part, $common['images']);
 
-        return array_merge($common, ['name' => $part->name, 'stock' => ['available' => (int) $part->quantity, 'quantity' => (int) $part->quantity], 'description' => $allegroDescription['description'], 'allegro_description_diagnostics' => $allegroDescription['diagnostics'], 'parameters' => $allegro['payload_parameters'] ?? $allegro['offer_parameters'] ?? [], 'productSet' => [$this->allegroProductSetPreview($allegro, $channel)], 'payments' => $allegro['payments'] ?? [], 'allegro_parameter_diagnostics' => ['productSet[0].product.parameters' => $allegro['product_parameter_diagnostics'] ?? [], 'parameters' => $allegro['offer_parameter_diagnostics'] ?? [], 'payments' => $allegro['payment_diagnostics'] ?? [], 'all' => $allegro['parameter_source_diagnostics'] ?? []], 'allegro_payment_diagnostics' => $allegro['payment_diagnostics'] ?? [], 'allegro_parameters' => $allegro, 'allegro_product_parameters' => $allegro['product_parameters'] ?? [], 'allegro_offer_parameters' => $allegro['offer_parameters'] ?? [], 'missing_required_parameters' => $allegro['missing_required_parameters'] ?? [], 'unmapped_parameters' => $allegro['unmapped_parameters'] ?? [], 'parameter_definitions_source' => $allegro['parameter_definitions_source'] ?? 'none', 'will_make_marketplace_request' => false, 'shipping' => $this->accountSetting($channel, 'shipping'), 'payment' => $this->accountSetting($channel, 'payment'), 'return' => $this->accountSetting($channel, 'return'), 'delivery' => ['shippingRates' => ['id' => data_get($readiness, 'allegro_sales_settings.shippingRates.id')]], 'afterSalesServices' => array_filter(['returnPolicy' => ['id' => data_get($readiness, 'allegro_sales_settings.returnPolicy.id')], 'impliedWarranty' => ['id' => data_get($readiness, 'allegro_sales_settings.impliedWarranty.id')], 'warranty' => ['id' => data_get($readiness, 'allegro_sales_settings.warranty.id')]], fn ($row) => filled($row['id'] ?? null)), 'allegro_sales_settings' => $readiness['allegro_sales_settings'] ?? null]);
+        return array_merge($common, ['name' => $part->name, 'stock' => ['available' => (int) $part->quantity, 'quantity' => (int) $part->quantity], 'description' => $allegroDescription['description'], 'allegro_description_diagnostics' => $allegroDescription['diagnostics'], 'parameters' => $allegro['payload_parameters'] ?? $allegro['offer_parameters'] ?? [], 'productSet' => [$this->allegroProductSetPreview($allegro, $channel)], 'payments' => $allegro['payments'] ?? [], 'allegro_parameter_diagnostics' => ['productSet[0].product.parameters' => $allegro['product_parameter_diagnostics'] ?? [], 'parameters' => $allegro['offer_parameter_diagnostics'] ?? [], 'payments' => $allegro['payment_diagnostics'] ?? [], 'all' => $allegro['parameter_source_diagnostics'] ?? []], 'allegro_payment_diagnostics' => $allegro['payment_diagnostics'] ?? [], 'allegro_parameters' => $allegro, 'allegro_product_parameters' => $allegro['product_parameters'] ?? [], 'allegro_offer_parameters' => $allegro['offer_parameters'] ?? [], 'missing_required_parameters' => $allegro['missing_required_parameters'] ?? [], 'unmapped_parameters' => $allegro['unmapped_parameters'] ?? [], 'parameter_definitions_source' => $allegro['parameter_definitions_source'] ?? 'none', 'will_make_marketplace_request' => false, 'shipping' => $this->accountSetting($channel, 'shipping'), 'payment' => $this->accountSetting($channel, 'payment'), 'return' => $this->accountSetting($channel, 'return'), 'delivery' => ['shippingRates' => ['id' => data_get($readiness, 'allegro_sales_settings.shippingRates.id')]], 'afterSalesServices' => array_filter(['returnPolicy' => ['id' => data_get($readiness, 'allegro_sales_settings.returnPolicy.id')], 'impliedWarranty' => ['id' => data_get($readiness, 'allegro_sales_settings.impliedWarranty.id')], 'warranty' => ['id' => data_get($readiness, 'allegro_sales_settings.warranty.id')]], fn ($row) => filled($row['id'] ?? null)), 'allegro_sales_settings' => $readiness['allegro_sales_settings'] ?? null, 'gpsr_diagnostics' => $readiness['gpsr_diagnostics'] ?? $this->allegroGpsrDiagnostics($this->account($channel))]);
     }
 
     private function coverageFor(Request $request, string $channel): array
@@ -318,12 +341,50 @@ class MarketplaceListingDryRunController extends Controller
         $productSet = ['product' => ['parameters' => $allegro['product_parameters'] ?? []]];
         $account = Schema::hasTable('marketplace_accounts') ? MarketplaceAccount::query()->where('code', $channel)->first() : null;
         $settings = is_array($account?->api_settings) ? $account->api_settings : [];
-        foreach (['responsibleProducer', 'safetyInformation'] as $key) {
-            $value = $settings[$key] ?? data_get($settings, 'gpsr.'.$key) ?? data_get($settings, 'productSet.0.'.$key);
-            if (filled($value)) $productSet[$key] = $value;
-            else $productSet[$key.'_blocker'] = 'Missing Allegro GPSR '.$key.' configuration.';
-        }
+        $responsibleProducer = $this->allegroResponsibleProducer($settings);
+        $safetyInformation = $this->allegroSafetyInformation($settings);
+        if ($responsibleProducer !== null) $productSet['responsibleProducer'] = $responsibleProducer;
+        if ($safetyInformation !== null) $productSet['safetyInformation'] = $safetyInformation;
         return $productSet;
+    }
+
+    private function allegroGpsrDiagnostics(?MarketplaceAccount $account): array
+    {
+        $settings = is_array($account?->api_settings) ? $account->api_settings : [];
+        return [
+            'responsibleProducer' => $this->allegroResponsibleProducer($settings) !== null ? 'configured' : 'missing: configure marketplace_accounts.api_settings.gpsr.responsibleProducer',
+            'safetyInformation' => $this->allegroSafetyInformation($settings) !== null ? 'configured_or_defaulted' : 'missing: configure marketplace_accounts.api_settings.gpsr.safetyInformation',
+            'safetyInformation_source' => filled(data_get($settings, 'gpsr.safetyInformation') ?? ($settings['safetyInformation'] ?? null) ?? data_get($settings, 'productSet.0.safetyInformation')) ? 'api_settings' : 'default_used_parts_text',
+        ];
+    }
+
+    private function allegroGpsrBlockers(?MarketplaceAccount $account): array
+    {
+        $settings = is_array($account?->api_settings) ? $account->api_settings : [];
+        return array_values(array_filter([
+            $this->allegroResponsibleProducer($settings) === null ? 'allegro_gpsr_responsibleProducer' : null,
+            $this->allegroSafetyInformation($settings) === null ? 'allegro_gpsr_safetyInformation' : null,
+        ]));
+    }
+
+    private function allegroResponsibleProducer(array $settings): ?array
+    {
+        $value = $settings['responsibleProducer'] ?? data_get($settings, 'gpsr.responsibleProducer') ?? data_get($settings, 'productSet.0.responsibleProducer');
+        if (! is_array($value)) return null;
+        $type = strtoupper((string) ($value['type'] ?? ''));
+        if ($type === 'ID' && filled($value['id'] ?? null)) return ['type' => 'ID', 'id' => (string) $value['id']];
+        if ($type === 'NAME' && filled($value['name'] ?? null)) return ['type' => 'NAME', 'name' => trim((string) $value['name'])];
+        return null;
+    }
+
+    private function allegroSafetyInformation(array $settings): ?array
+    {
+        $value = $settings['safetyInformation'] ?? data_get($settings, 'gpsr.safetyInformation') ?? data_get($settings, 'productSet.0.safetyInformation');
+        if (is_array($value) && strtoupper((string) ($value['type'] ?? '')) === 'TEXT' && filled($value['description'] ?? null)) {
+            return ['type' => 'TEXT', 'description' => trim(strip_tags((string) $value['description']))];
+        }
+        if (is_string($value) && trim(strip_tags($value)) !== '') return ['type' => 'TEXT', 'description' => trim(strip_tags($value))];
+        return ['type' => 'TEXT', 'description' => self::DEFAULT_SAFETY_INFORMATION];
     }
 
     private function accountSetting(string $channel, string $key): mixed { $code = $channel === 'ovoko' ? 'ovoko_main' : $channel; $account = Schema::hasTable('marketplace_accounts') ? MarketplaceAccount::query()->where('code', $code)->first() : null; return data_get($account?->api_settings ?? [], $key); }
