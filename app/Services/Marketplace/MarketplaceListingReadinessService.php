@@ -15,7 +15,7 @@ class MarketplaceListingReadinessService
     private const DEFAULT_ALLEGRO_SAFETY_INFORMATION = 'Część używana pochodząca z demontażu pojazdu. Montaż powinien zostać wykonany przez wykwalifikowany warsztat lub osobę posiadającą odpowiednią wiedzę techniczną. Przed montażem należy porównać numer części i zgodność z pojazdem. Produkt nie jest zabawką.';
     public const CHANNELS = ['storefront', 'allegro_main', 'ovoko', 'ebay_de', 'ebay_fr'];
 
-    public function __construct(private readonly TranslationService $translationService, private readonly EbayDescriptionTemplateRenderer $ebayDescriptionTemplateRenderer, private readonly NbpExchangeRateService $exchangeRateService, private readonly EbayItemSpecificsService $ebayItemSpecificsService, private readonly AllegroCategoryParametersService $allegroCategoryParametersService, private readonly AllegroOfferParametersBuilder $allegroOfferParametersBuilder, private readonly MarketplaceImageSelectionService $marketplaceImageSelectionService, private readonly AllegroSalesSettingsResolver $allegroSalesSettingsResolver, private readonly AllegroDescriptionBuilder $allegroDescriptionBuilder) {}
+    public function __construct(private readonly TranslationService $translationService, private readonly EbayDescriptionTemplateRenderer $ebayDescriptionTemplateRenderer, private readonly NbpExchangeRateService $exchangeRateService, private readonly EbayItemSpecificsService $ebayItemSpecificsService, private readonly AllegroCategoryParametersService $allegroCategoryParametersService, private readonly AllegroOfferParametersBuilder $allegroOfferParametersBuilder, private readonly MarketplaceImageSelectionService $marketplaceImageSelectionService, private readonly AllegroSalesSettingsResolver $allegroSalesSettingsResolver, private readonly AllegroDescriptionBuilder $allegroDescriptionBuilder, private readonly EbayTitleSanitizer $ebayTitleSanitizer) {}
 
     /** @return array<string, mixed> */
     public function checkPartReadiness(Part $part, string $channel): array
@@ -112,6 +112,9 @@ class MarketplaceListingReadinessService
             if (! $this->isGoogleTranslateConfigured()) { $missing[] = 'translation_credentials'; $warnings[] = 'Google Translate credentials are not configured for later title/description/condition translation dry-runs.'; }
             $preparedTranslation = $this->preparedTranslation($part, $channel);
             if (($preparedTranslation['status'] ?? 'not_prepared') !== 'prepared') { $missing[] = 'prepared_translations'; $warnings[] = 'Tłumaczenia nieprzygotowane — użyj przycisku Przygotuj.'; }
+            $titleSanitization = $this->ebayTitleSanitization($part, $channel, $preparedTranslation);
+            if (($titleSanitization['blocker'] ?? null) === 'ebay_title_too_long_after_cleanup') { $missing[] = 'ebay_title'; $blockers[] = 'ebay_title_too_long_after_cleanup'; }
+            $notes['ebay_title'] = $titleSanitization['diagnostics'] ?? null;
             if (! $this->ebayTemplateExists($channel)) { $missing[] = 'description_template'; $blockers[] = 'eBay description template for '.$channel.' is missing.'; }
             $businessPolicies = $this->resolveEbayBusinessPolicies($account, $categoryMapping, $part, $channel);
             foreach ($businessPolicies['missing'] as $policyMissing) { $missing[] = $policyMissing; }
@@ -178,6 +181,11 @@ class MarketplaceListingReadinessService
             if (($result['ok'] ?? false) && filled($result['translated_text'] ?? null)) { $translated[$key] = (string) $result['translated_text']; $translatedFields[] = $key; }
             else { $translated[$key] = (string) $value; $untranslatedFields[] = $key; $blockers = array_merge($blockers, (array) ($result['blockers'] ?? ['translation_failed'])); }
         }
+        if ($channel === 'ebay_de') {
+            $titleSanitization = $this->ebayTitleSanitizer->sanitizeForEbayDe($part, $translated['title'] ?? $fields['title'], $fields['title']);
+            $translated['title'] = $titleSanitization['final_title'];
+            if (($titleSanitization['blocker'] ?? null) !== null) $blockers[] = $titleSanitization['blocker'];
+        }
         $itemSpecifics = $this->ebayItemSpecificsService->fallbackSpecifics($part, $channel, $this->ebayCategoryMapping($part, $channel));
         $part->refresh();
         $metadata = is_array($part->review_metadata) ? $part->review_metadata : [];
@@ -190,6 +198,7 @@ class MarketplaceListingReadinessService
             'prepared_at' => now()->toIso8601String(),
             'vehicle_source' => $vehicle['source'],
             'item_specifics' => $itemSpecifics,
+            'title_sanitization' => $channel === 'ebay_de' ? ($titleSanitization['diagnostics'] ?? null) : null,
         ]);
         $part->forceFill(['review_metadata' => $metadata])->save();
         return ['ok' => $blockers === [], 'channel' => $channel, 'translation_status' => $blockers === [] ? 'prepared' : 'failed', 'translation_language' => $language, 'translated_fields' => $translatedFields, 'untranslated_fields' => $untranslatedFields, 'item_specifics_translated_fields' => array_keys($itemSpecifics), 'blockers' => array_values(array_unique($blockers)), 'will_make_marketplace_request' => false];
@@ -445,7 +454,9 @@ class MarketplaceListingReadinessService
     {
         $translation = $this->preparedTranslation($part, $channel);
         $itemSpecifics = str_starts_with($channel, 'ebay_') ? $this->ebayItemSpecificsService->build($part, $channel, $categoryMapping, $translation) : null;
-        $preview = ['dry_run' => true, 'channel' => $channel, 'sku' => $part->sku ?? null, 'title' => $this->previewTitle($translation, $part), 'description_present' => filled(strip_tags((string) (($part->description ?? null) ?: ($part->short_description ?? null)))), 'condition_notes_present' => filled($part->condition_notes ?? null), 'price_pln' => $price, 'quantity' => $part->quantity ?? null, 'currency' => 'PLN', 'dimensions' => $this->dimensionsPayload($part), 'image_urls' => ($marketplaceImageSelection = $this->marketplaceImageSelectionService->selectForPart($part, 5))['urls'], 'category_id' => $categoryMapping?->external_category_id ?? ($part->category_id ?? null), 'category_mapping_source' => $categoryMapping ? 'marketplace_category_mappings' : null, 'category_mapping_channel' => $categoryMapping?->channel, 'category_mapping_name' => $categoryMapping?->external_category_name, 'category_mapping_path' => $categoryMapping?->external_category_path, 'local_category_id' => $part->category_id ?? null, 'vehicle' => $this->vehiclePayload($part, $channel), 'diagnostics' => array_merge($this->diagnosticsPayload($part, $channel, $translation), ['marketplace_images' => $marketplaceImageSelection['diagnostics']]), 'translation_status' => $translation['status'], 'translation_language' => $translation['language'], 'translated_fields' => $translation['translated_fields'], 'untranslated_fields' => $translation['untranslated_fields'], 'will_make_marketplace_request' => false];
+        $titleSanitization = str_starts_with($channel, 'ebay_') ? $this->ebayTitleSanitization($part, $channel, $translation) : null;
+        $previewTitle = $titleSanitization['final_title'] ?? $this->previewTitle($translation, $part);
+        $preview = ['dry_run' => true, 'channel' => $channel, 'sku' => $part->sku ?? null, 'title' => $previewTitle, 'description_present' => filled(strip_tags((string) (($part->description ?? null) ?: ($part->short_description ?? null)))), 'condition_notes_present' => filled($part->condition_notes ?? null), 'price_pln' => $price, 'quantity' => $part->quantity ?? null, 'currency' => 'PLN', 'dimensions' => $this->dimensionsPayload($part), 'image_urls' => ($marketplaceImageSelection = $this->marketplaceImageSelectionService->selectForPart($part, 5))['urls'], 'category_id' => $categoryMapping?->external_category_id ?? ($part->category_id ?? null), 'category_mapping_source' => $categoryMapping ? 'marketplace_category_mappings' : null, 'category_mapping_channel' => $categoryMapping?->channel, 'category_mapping_name' => $categoryMapping?->external_category_name, 'category_mapping_path' => $categoryMapping?->external_category_path, 'local_category_id' => $part->category_id ?? null, 'vehicle' => $this->vehiclePayload($part, $channel), 'diagnostics' => array_merge($this->diagnosticsPayload($part, $channel, $translation), ['marketplace_images' => $marketplaceImageSelection['diagnostics']], $titleSanitization ? ['ebay_title' => $titleSanitization['diagnostics']] : []), 'translation_status' => $translation['status'], 'translation_language' => $translation['language'], 'translated_fields' => $translation['translated_fields'], 'untranslated_fields' => $translation['untranslated_fields'], 'will_make_marketplace_request' => false];
 
         if ($itemSpecifics) {
             $preview = array_merge($preview, $itemSpecifics);
@@ -468,6 +479,8 @@ class MarketplaceListingReadinessService
             $preview['shipping_policy_resolution'] = $businessPolicies['shipping_policy_resolution'];
             $preview['business_policies'] = $businessPolicies['business_policies'];
             $preview['description_rendered_html'] = $rendered;
+            $preview['title_sanitization'] = $titleSanitization['diagnostics'] ?? null;
+            $preview['title_blocker'] = $titleSanitization['blocker'] ?? null;
             $preview['diagnostics']['specification_rows_count'] = substr_count($rendered, '<tr><td');
         }
 
@@ -509,9 +522,10 @@ class MarketplaceListingReadinessService
     private function preparedTranslation(Part $part, string $channel): array
     {
         $data = data_get(is_array($part->review_metadata) ? $part->review_metadata : [], 'marketplace_prepared_translations.'.$channel, []);
-        return is_array($data) ? ['status' => $data['status'] ?? 'not_prepared', 'language' => $data['language'] ?? strtolower((string) $this->targetLanguageForChannel($channel)), 'fields' => is_array($data['fields'] ?? null) ? $data['fields'] : [], 'item_specifics' => is_array($data['item_specifics'] ?? null) ? $data['item_specifics'] : [], 'translated_fields' => $data['translated_fields'] ?? [], 'untranslated_fields' => $data['untranslated_fields'] ?? []] : ['status' => 'not_prepared', 'language' => strtolower((string) $this->targetLanguageForChannel($channel)), 'fields' => [], 'item_specifics' => [], 'translated_fields' => [], 'untranslated_fields' => []];
+        return is_array($data) ? ['status' => $data['status'] ?? 'not_prepared', 'language' => $data['language'] ?? strtolower((string) $this->targetLanguageForChannel($channel)), 'fields' => is_array($data['fields'] ?? null) ? $data['fields'] : [], 'item_specifics' => is_array($data['item_specifics'] ?? null) ? $data['item_specifics'] : [], 'translated_fields' => $data['translated_fields'] ?? [], 'untranslated_fields' => $data['untranslated_fields'] ?? [], 'title_sanitization' => is_array($data['title_sanitization'] ?? null) ? $data['title_sanitization'] : null] : ['status' => 'not_prepared', 'language' => strtolower((string) $this->targetLanguageForChannel($channel)), 'fields' => [], 'item_specifics' => [], 'translated_fields' => [], 'untranslated_fields' => []];
     }
     private function renderDataFromTranslation(array $translation, ?Part $part = null, ?string $channel = null): array { $fields = $translation['fields'] ?? []; if (! is_array($fields)) return []; $data = []; foreach ($fields as $key => $value) { $data[str_replace('vehicle.', '', $key)] = $value; } if ($part && blank($data['title'] ?? null)) $data['title'] = $part->name ?? ''; if ($part && $channel) foreach (($this->vehiclePayload($part, $channel)['attributes'] ?? []) as $key => $value) { $data[$key] ??= $value; } if (($translation['status'] ?? null) !== 'prepared') $data['translation_fallback_notice'] = 'Tłumaczenia nieprzygotowane — użyj przycisku Przygotuj.'; return $data; }
+    private function ebayTitleSanitization(Part $part, string $channel, array $translation): ?array { if ($channel !== 'ebay_de') return null; $title = $this->previewTitle($translation, $part); return $this->ebayTitleSanitizer->sanitizeForEbayDe($part, $title, (string) ($part->name ?? '')); }
     private function previewTitle(array $translation, Part $part): ?string { $fields = is_array($translation['fields'] ?? null) ? $translation['fields'] : []; if (($translation['status'] ?? null) === 'prepared' && filled($fields['title'] ?? null)) return (string) $fields['title']; return $part->name ?? null; }
     private function diagnosticsPayload(Part $part, string $channel, array $translation): array { $vehicle = $this->vehiclePayload($part, $channel, false); return ['vehicle_source' => $vehicle['source'], 'vehicle_present' => $vehicle['present'], 'vehicle_fields_present' => $vehicle['fields_present'], 'vehicle_fields_missing' => $vehicle['fields_missing'], 'translation_status' => $translation['status'], 'translation_language' => $translation['language'], 'translated_fields' => $translation['translated_fields'], 'untranslated_fields' => $translation['untranslated_fields']]; }
     private function vehiclePayload(Part $part, string $channel, bool $translated = true): array

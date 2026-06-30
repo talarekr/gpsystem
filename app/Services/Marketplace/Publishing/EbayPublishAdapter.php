@@ -7,6 +7,7 @@ use App\Models\Part;
 use App\Models\MarketplaceListing;
 use App\Services\Marketplace\Api\EbayApiClient;
 use App\Services\Marketplace\EbaySkuResolver;
+use App\Services\Marketplace\EbayTitleSanitizer;
 use Illuminate\Support\Facades\Schema;
 
 class EbayPublishAdapter extends BaseMarketplacePublishAdapter
@@ -18,6 +19,7 @@ class EbayPublishAdapter extends BaseMarketplacePublishAdapter
         \App\Services\Marketplace\MarketplacePublishGate $gate,
         \App\Services\Marketplace\ApiIntegrationLogger $logger,
         private readonly EbaySkuResolver $skuResolver,
+        private readonly EbayTitleSanitizer $ebayTitleSanitizer,
     ) { parent::__construct($readinessService, $gate, $logger); }
 
     protected function channel(): string { return $this->activeChannel; }
@@ -72,6 +74,12 @@ class EbayPublishAdapter extends BaseMarketplacePublishAdapter
         $payload['sku'] = $sku;
         $missing = [];
         foreach (['category_id' => 'eBay: brakuje categoryId dla wybranej kategorii', 'title' => 'eBay: brakuje title'] as $key => $message) if (blank($payload[$key] ?? null) && ($key !== 'title' || blank($part->name ?? null))) $missing[] = $message;
+        if ($this->accountCode() === 'ebay_de') {
+            $titleSanitization = $this->ebayTitleSanitizer->sanitizeForEbayDe($part, (string) ($payload['title'] ?? $part->name ?? ''), (string) ($part->name ?? ''));
+            $payload['title'] = $titleSanitization['final_title'];
+            if (($titleSanitization['blocker'] ?? null) !== null) $missing[] = 'ebay_title_too_long_after_cleanup';
+            $payload['title_sanitization'] = $titleSanitization['diagnostics'];
+        }
         foreach (['merchant_location_key' => 'eBay: brakuje merchantLocationKey', 'selected_fulfillment_policy_id' => 'eBay: brakuje fulfillmentPolicyId', 'selected_payment_policy_id' => 'eBay: brakuje paymentPolicyId', 'selected_return_policy_id' => 'eBay: brakuje returnPolicyId'] as $key => $message) if (blank($policies[$key] ?? $this->settingForPolicy($settings, $key))) $missing[] = $message;
         if ($missing !== []) return ['ok' => false, 'status' => 'payload_invalid', 'action' => 'publishOffer', 'error' => implode('; ', $missing), 'request_summary' => $this->requestSummary($payload), 'response_summary' => ['missing' => $missing]];
         $aspectNormalization = $this->normalizeAspects($payload['item_specifics'] ?? []);
