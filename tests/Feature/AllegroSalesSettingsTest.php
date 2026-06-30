@@ -63,7 +63,8 @@ class AllegroSalesSettingsTest extends TestCase
         $result = app(MarketplaceListingReadinessService::class)->checkPartReadiness($part, 'allegro_main');
 
         $this->assertNotContains('allegro_returnPolicy_missing:ZWROTGOLD', $result['blockers']);
-        $this->assertSame('manual_id', $result['prepared_payload_preview_safe']['allegro_sales_settings']['returnPolicy']['status']);
+        $this->assertSame('mapped', $result['prepared_payload_preview_safe']['allegro_sales_settings']['returnPolicy']['status']);
+        $this->assertTrue($result['prepared_payload_preview_safe']['allegro_sales_settings']['returnPolicy']['found']);
         $this->assertSame('91968c35-8bc3-4d74-baba-3609e4013f63', $result['prepared_payload_preview_safe']['allegro_sales_settings']['returnPolicy']['id']);
     }
 
@@ -85,7 +86,8 @@ class AllegroSalesSettingsTest extends TestCase
         $this->assertSame('KURIER DPD NIESTANDARDOWY', $settings['selected_allegro_shipping_rate_name']);
         $this->assertSame('KURIER DPD NIESTANDARDOWY', $settings['shippingRates']['searched_name']);
         $this->assertSame('82c9b952-37e0-4378-8911-cd8a5e7d7816', $settings['shippingRates']['resolved_id']);
-        $this->assertSame('manual_id', $settings['shippingRates']['status']);
+        $this->assertSame('mapped', $settings['shippingRates']['status']);
+        $this->assertTrue($settings['shippingRates']['found']);
         $this->assertSame('read_failed', $settings['shippingRates']['read_status']);
         $this->assertSame(403, $settings['shippingRates']['http_status']);
         $this->assertSame('91968c35-8bc3-4d74-baba-3609e4013f63', $settings['returnPolicy']['id']);

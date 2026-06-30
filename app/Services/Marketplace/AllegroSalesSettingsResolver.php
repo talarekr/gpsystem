@@ -78,12 +78,14 @@ class AllegroSalesSettingsResolver
             $readStatus = ($row['reason'] ?? null) === 'read_failed' ? 'read_failed' : (($row['found'] ?? false) ? 'read_ok' : 'read_ok');
             $id = $row['id'] ?? null;
             $status = ($row['found'] ?? false) ? 'mapped' : (($row['reason'] ?? null) === 'read_failed' ? 'read_failed' : 'missing');
+            $found = (bool) ($row['found'] ?? false);
 
             if (blank($id)) {
                 $manualId = $this->manualId($key, $row['searched_name'] ?? $result[$key]['searched_name'] ?? null);
                 if (filled($manualId)) {
                     $id = $manualId;
-                    $status = 'manual_id';
+                    $status = 'mapped';
+                    $found = true;
                 }
             }
 
@@ -92,6 +94,7 @@ class AllegroSalesSettingsResolver
                 'resolved_id' => $id,
                 'id' => $id,
                 'status' => $status,
+                'found' => $found || filled($id),
                 'read_status' => $readStatus,
                 'http_status' => $row['http_status'] ?? null,
                 'active' => $row['active'] ?? null,
@@ -108,7 +111,7 @@ class AllegroSalesSettingsResolver
 
     private function emptyRow(?string $name, string $status): array
     {
-        return ['searched_name' => $name ?: null, 'resolved_id' => null, 'id' => null, 'status' => $status, 'read_status' => null];
+        return ['searched_name' => $name ?: null, 'resolved_id' => null, 'id' => null, 'status' => $status, 'found' => false, 'read_status' => null];
     }
 
     private function manualId(string $key, ?string $searchedName): ?string
