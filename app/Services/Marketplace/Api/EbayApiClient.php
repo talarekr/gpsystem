@@ -275,7 +275,10 @@ class EbayApiClient extends AbstractMarketplaceApiClient
         $json = $response->json();
         $payload = is_array($json) ? $json : [];
 
-        $rawStatus = $payload['itemEndDate'] ?? $payload['estimatedAvailabilities'][0]['estimatedAvailabilityStatus'] ?? $payload['itemCreationDate'] ?? null;
+        $availability = strtoupper((string) data_get($payload, 'estimatedAvailabilities.0.estimatedAvailabilityStatus', ''));
+        $endDate = $payload['itemEndDate'] ?? null;
+        $endDateIsPast = filled($endDate) && strtotime((string) $endDate) !== false && strtotime((string) $endDate) < now()->timestamp;
+        $rawStatus = $availability ?: ($endDate ?? $payload['itemCreationDate'] ?? null);
         $status = $this->normalizeBrowseItemStatus($response->status(), $payload);
 
         return array_merge($base, [
@@ -285,7 +288,9 @@ class EbayApiClient extends AbstractMarketplaceApiClient
             'raw_api_status' => $rawStatus,
             'listing_marketplace_id' => $payload['itemLocation']['country'] ?? null,
             'item_web_url' => $payload['itemWebUrl'] ?? null,
-            'end_date' => $payload['itemEndDate'] ?? null,
+            'end_date' => $endDate,
+            'end_date_is_past' => $endDateIsPast,
+            'availability_status' => $availability ?: null,
             'title_present' => filled($payload['title'] ?? null),
             'safe_top_level_keys' => array_slice(array_keys($payload), 0, 20),
         ]);
@@ -297,9 +302,11 @@ class EbayApiClient extends AbstractMarketplaceApiClient
         if ($httpStatus === 410) return 'ended';
         if ($httpStatus < 200 || $httpStatus >= 300) return 'unavailable';
         $availability = strtoupper((string) data_get($payload, 'estimatedAvailabilities.0.estimatedAvailabilityStatus', ''));
+        $endDate = $payload['itemEndDate'] ?? null;
+        $endDateIsPast = filled($endDate) && strtotime((string) $endDate) !== false && strtotime((string) $endDate) < now()->timestamp;
+        if ($endDateIsPast && ! in_array($availability, ['IN_STOCK', 'LIMITED_STOCK'], true)) return 'ended';
         if (in_array($availability, ['IN_STOCK', 'LIMITED_STOCK'], true)) return 'active';
         if (in_array($availability, ['OUT_OF_STOCK', 'UNAVAILABLE'], true)) return 'inactive';
-        if (filled($payload['itemEndDate'] ?? null) && strtotime((string) $payload['itemEndDate']) < now()->timestamp) return 'ended';
         return filled($payload['itemId'] ?? null) ? 'active' : 'unknown';
     }
 
