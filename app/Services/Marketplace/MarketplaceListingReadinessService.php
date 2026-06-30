@@ -268,10 +268,12 @@ class MarketplaceListingReadinessService
         return $blockers;
     }
 
-    private function allegroProductSetPreview(array $allegroParameters, ?MarketplaceAccount $account, string $productName): array
+    private function allegroProductSetPreview(array $allegroParameters, ?MarketplaceAccount $account, string $productName, ?string $mainImageUrl = null): array
     {
         $settings = is_array($account?->api_settings) ? $account->api_settings : [];
-        $productSet = ['product' => ['name' => trim($productName), 'parameters' => $allegroParameters['product_parameters'] ?? []]];
+        $product = ['name' => trim($productName), 'parameters' => $allegroParameters['product_parameters'] ?? []];
+        if (filled($mainImageUrl)) $product['images'] = [trim($mainImageUrl)];
+        $productSet = ['product' => $product];
         $responsibleProducer = $this->allegroResponsibleProducer($settings);
         $safetyInformation = $this->allegroSafetyInformation($settings);
         if ($responsibleProducer !== null) $productSet['responsibleProducer'] = $responsibleProducer;
@@ -443,7 +445,7 @@ class MarketplaceListingReadinessService
     {
         $translation = $this->preparedTranslation($part, $channel);
         $itemSpecifics = str_starts_with($channel, 'ebay_') ? $this->ebayItemSpecificsService->build($part, $channel, $categoryMapping, $translation) : null;
-        $preview = ['dry_run' => true, 'channel' => $channel, 'sku' => $part->sku ?? null, 'title' => $this->previewTitle($translation, $part), 'description_present' => filled(strip_tags((string) (($part->description ?? null) ?: ($part->short_description ?? null)))), 'condition_notes_present' => filled($part->condition_notes ?? null), 'price_pln' => $price, 'quantity' => $part->quantity ?? null, 'currency' => 'PLN', 'dimensions' => $this->dimensionsPayload($part), 'image_urls' => $this->marketplaceImageSelectionService->selectForPart($part, 5)['urls'], 'category_id' => $categoryMapping?->external_category_id ?? ($part->category_id ?? null), 'category_mapping_source' => $categoryMapping ? 'marketplace_category_mappings' : null, 'category_mapping_channel' => $categoryMapping?->channel, 'category_mapping_name' => $categoryMapping?->external_category_name, 'category_mapping_path' => $categoryMapping?->external_category_path, 'local_category_id' => $part->category_id ?? null, 'vehicle' => $this->vehiclePayload($part, $channel), 'diagnostics' => array_merge($this->diagnosticsPayload($part, $channel, $translation), ['marketplace_images' => $this->marketplaceImageSelectionService->selectForPart($part, 5)['diagnostics']]), 'translation_status' => $translation['status'], 'translation_language' => $translation['language'], 'translated_fields' => $translation['translated_fields'], 'untranslated_fields' => $translation['untranslated_fields'], 'will_make_marketplace_request' => false];
+        $preview = ['dry_run' => true, 'channel' => $channel, 'sku' => $part->sku ?? null, 'title' => $this->previewTitle($translation, $part), 'description_present' => filled(strip_tags((string) (($part->description ?? null) ?: ($part->short_description ?? null)))), 'condition_notes_present' => filled($part->condition_notes ?? null), 'price_pln' => $price, 'quantity' => $part->quantity ?? null, 'currency' => 'PLN', 'dimensions' => $this->dimensionsPayload($part), 'image_urls' => ($marketplaceImageSelection = $this->marketplaceImageSelectionService->selectForPart($part, 5))['urls'], 'category_id' => $categoryMapping?->external_category_id ?? ($part->category_id ?? null), 'category_mapping_source' => $categoryMapping ? 'marketplace_category_mappings' : null, 'category_mapping_channel' => $categoryMapping?->channel, 'category_mapping_name' => $categoryMapping?->external_category_name, 'category_mapping_path' => $categoryMapping?->external_category_path, 'local_category_id' => $part->category_id ?? null, 'vehicle' => $this->vehiclePayload($part, $channel), 'diagnostics' => array_merge($this->diagnosticsPayload($part, $channel, $translation), ['marketplace_images' => $marketplaceImageSelection['diagnostics']]), 'translation_status' => $translation['status'], 'translation_language' => $translation['language'], 'translated_fields' => $translation['translated_fields'], 'untranslated_fields' => $translation['untranslated_fields'], 'will_make_marketplace_request' => false];
 
         if ($itemSpecifics) {
             $preview = array_merge($preview, $itemSpecifics);
@@ -489,7 +491,7 @@ class MarketplaceListingReadinessService
             $preview['will_make_marketplace_request'] = false;
             $preview['allegro_sales_settings'] = $allegroSalesSettings;
             $preview['delivery'] = ['shippingRates' => ['id' => $allegroSalesSettings['shippingRates']['id'] ?? null]];
-            $preview['productSet'] = [$this->allegroProductSetPreview($allegroParameters, $this->accountFor($channel), $preview['title'])];
+            $preview['productSet'] = [$this->allegroProductSetPreview($allegroParameters, $this->accountFor($channel), $preview['title'], $preview['image_urls'][0] ?? null)];
             $preview['gpsr_diagnostics'] = $this->allegroGpsrDiagnostics($this->accountFor($channel));
             $preview['afterSalesServices'] = array_filter([
                 'returnPolicy' => ['id' => $allegroSalesSettings['returnPolicy']['id'] ?? null],
