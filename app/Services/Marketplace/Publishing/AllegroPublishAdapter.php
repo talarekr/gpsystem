@@ -31,7 +31,7 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
         $delivery = $this->deliverySettings($settings, $salesSettings);
         $afterSales = $this->afterSalesSettings($settings, $salesSettings);
         $client = new AllegroApiClient('allegro_main', $account);
-        $body = array_filter(['name' => (string) ($payload['title'] ?? $part->name), 'category' => ['id' => (string) ($payload['category_id'] ?? '')], 'productSet' => $settings['productSet'] ?? null, 'parameters' => $payload['allegro_offer_parameters'] ?? $payload['allegro_parameters']['offer_parameters'] ?? [], 'images' => $this->normalizeImageUrls($payload['image_urls'] ?? []), 'sellingMode' => $settings['sellingMode'] ?? ['format' => 'BUY_NOW', 'price' => ['amount' => (string) ($payload['price_pln'] ?? $readiness['marketplace_price']), 'currency' => 'PLN']], 'stock' => ['available' => (int) ($payload['quantity'] ?? $part->quantity ?? 1), 'unit' => 'UNIT'], 'publication' => ['status' => 'ACTIVE'], 'delivery' => $delivery, 'payments' => $settings['payments'] ?? null, 'afterSalesServices' => $afterSales, 'location' => $settings['location'] ?? null, 'external' => ['id' => $sku]], fn ($v) => $v !== null && $v !== []);
+        $body = array_filter(['name' => (string) ($payload['title'] ?? $part->name), 'category' => ['id' => (string) ($payload['category_id'] ?? '')], 'productSet' => $settings['productSet'] ?? null, 'parameters' => $payload['allegro_offer_parameters'] ?? $payload['allegro_parameters']['offer_parameters'] ?? [], 'images' => $this->normalizeImageUrls($payload['image_urls'] ?? $payload['images'] ?? []), 'description' => is_array($payload['description'] ?? null) ? $payload['description'] : null, 'sellingMode' => $settings['sellingMode'] ?? ['format' => 'BUY_NOW', 'price' => ['amount' => (string) ($payload['price_pln'] ?? $readiness['marketplace_price']), 'currency' => 'PLN']], 'stock' => ['available' => (int) ($payload['quantity'] ?? $part->quantity ?? 1), 'unit' => 'UNIT'], 'publication' => ['status' => 'ACTIVE'], 'delivery' => $delivery, 'payments' => $settings['payments'] ?? null, 'afterSalesServices' => $afterSales, 'location' => $settings['location'] ?? null, 'external' => ['id' => $sku]], fn ($v) => $v !== null && $v !== []);
         $result = $client->createProductOffer($body);
         return ['ok' => $result['ok'] ?? false, 'action' => 'createProductOffer', 'http_status' => $result['http_status'] ?? null, 'offer_id' => $result['offer_id'] ?? null, 'external_listing_id' => $result['offer_id'] ?? null, 'listing_status' => ($result['http_status'] ?? null) === 202 ? 'publication_pending' : 'published', 'request_id' => $result['request_id'] ?? null, 'request_summary' => $this->requestSummary($payload, $body) + ['allegro_sales_settings' => $this->salesSettingsSummary($salesSettings)], 'response_summary' => $this->responseSummary($result), 'json' => $result['json'] ?? [], 'error' => 'Allegro product-offers publish failed.', 'ui_error' => 'Uzupełnij ustawienia sprzedaży Allegro GPSWISS. Szczegóły są w Logach.'];
     }
@@ -58,12 +58,14 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
 
     private function salesSettingsSummary(array $salesSettings): array
     {
-        return collect($salesSettings)->map(fn (array $row) => [
-            'searched_name' => $row['searched_name'] ?? 'GPSWISS',
-            'id' => $row['id'] ?? null,
-            'found' => (bool) ($row['found'] ?? false),
-            'reason' => $row['reason'] ?? null,
-        ])->all();
+        return collect($salesSettings)
+            ->filter(fn (mixed $row): bool => is_array($row))
+            ->map(fn (array $row) => [
+                'searched_name' => $row['searched_name'] ?? 'GPSWISS',
+                'id' => $row['id'] ?? null,
+                'found' => (bool) ($row['found'] ?? false),
+                'reason' => $row['reason'] ?? null,
+            ])->all();
     }
 
     /** @return array<int, string> */
@@ -72,7 +74,10 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
         return array_values(array_filter(array_map(function (mixed $image): ?string {
             $url = null;
             if (is_string($image)) $url = $image;
-            if (is_array($image) && is_string($image['url'] ?? null)) $url = $image['url'];
+            if (is_array($image)) {
+                if (is_string($image['url'] ?? null)) $url = $image['url'];
+                elseif (is_string($image['selected_image_url'] ?? null)) $url = $image['selected_image_url'];
+            }
             if (is_object($image) && is_string($image->url ?? null)) $url = $image->url;
             $url = trim((string) $url);
             return strtolower((string) parse_url($url, PHP_URL_SCHEME)) === 'https' && (string) parse_url($url, PHP_URL_HOST) !== '' ? $url : null;

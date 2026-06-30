@@ -7,6 +7,9 @@ use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceCategoryMapping;
 use App\Models\Part;
 use App\Services\Marketplace\AllegroSalesSettingsResolver;
+use App\Services\Marketplace\ApiIntegrationLogger;
+use App\Services\Marketplace\MarketplacePublishGate;
+use App\Services\Marketplace\Publishing\AllegroPublishAdapter;
 use App\Services\Marketplace\MarketplaceListingReadinessService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -103,6 +106,58 @@ class AllegroSalesSettingsTest extends TestCase
         $this->assertSame('ret-1', data_get($payload, 'afterSalesServices.returnPolicy.id'));
         $this->assertSame('imp-1', data_get($payload, 'afterSalesServices.impliedWarranty.id'));
         $this->assertSame('war-1', data_get($payload, 'afterSalesServices.warranty.id'));
+    }
+
+
+    public function test_allegro_live_payload_accepts_string_image_urls_and_preserves_sales_settings_and_description(): void
+    {
+        Http::fake(array_merge($this->fakeAllegro(), [
+            'https://api.allegro.pl/sale/product-offers' => Http::response(['id' => 'offer-123'], 201),
+        ]));
+        $part = $this->part('KURIER DPD');
+        $description = ['sections' => [['items' => [['type' => 'TEXT', 'content' => '<p>Opis</p>']]]]];
+        $payload = [
+            'sku' => 'GPS-7890',
+            'title' => 'Błotnik Audi',
+            'category_id' => '123',
+            'price_pln' => 100,
+            'quantity' => 1,
+            'image_urls' => ['https://gpswiss.example.test/parts/7890/one.jpg', 'https://gpswiss.example.test/parts/7890/two.jpg'],
+            'description' => $description,
+            'allegro_offer_parameters' => [],
+        ];
+
+        $adapter = new class(
+            app(MarketplaceListingReadinessService::class),
+            app(MarketplacePublishGate::class),
+            app(ApiIntegrationLogger::class),
+            app(AllegroSalesSettingsResolver::class),
+        ) extends AllegroPublishAdapter {
+            public function callPerformLivePublish(Part $part, array $readiness, array $payload, MarketplaceAccount $account): array
+            {
+                return $this->performLivePublish($part, $readiness, $payload, $account);
+            }
+        };
+
+        $result = $adapter->callPerformLivePublish($part, ['marketplace_price' => 100], $payload, MarketplaceAccount::query()->where('code', 'allegro_main')->firstOrFail());
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame('strings', $result['request_summary']['images_shape']);
+        $this->assertSame('string', $result['request_summary']['first_image_type']);
+        Http::assertSent(function ($request) use ($description) {
+            if ($request->url() !== 'https://api.allegro.pl/sale/product-offers') {
+                return false;
+            }
+
+            $data = $request->data();
+
+            return $data['images'] === ['https://gpswiss.example.test/parts/7890/one.jpg', 'https://gpswiss.example.test/parts/7890/two.jpg']
+                && data_get($data, 'delivery.shippingRates.id') === 'ship-dpd'
+                && data_get($data, 'afterSalesServices.returnPolicy.id') === 'ret-1'
+                && data_get($data, 'afterSalesServices.impliedWarranty.id') === 'imp-1'
+                && data_get($data, 'afterSalesServices.warranty.id') === 'war-1'
+                && data_get($data, 'description.sections') === $description['sections'];
+        });
     }
 
     private function part(?string $shippingRateName): Part
