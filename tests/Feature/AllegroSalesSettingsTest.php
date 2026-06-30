@@ -125,7 +125,10 @@ class AllegroSalesSettingsTest extends TestCase
             'quantity' => 1,
             'image_urls' => ['https://gpswiss.example.test/parts/7890/one.jpg', 'https://gpswiss.example.test/parts/7890/two.jpg'],
             'description' => $description,
-            'allegro_offer_parameters' => [],
+            'allegro_parameters' => [
+                'payload_parameters' => [['id' => '11323', 'valuesIds' => ['used']]],
+                'product_parameters' => [['id' => '129917', 'valuesIds' => ['129917_2']]],
+            ],
         ];
 
         $adapter = new class(
@@ -145,6 +148,8 @@ class AllegroSalesSettingsTest extends TestCase
         $this->assertTrue($result['ok']);
         $this->assertSame('strings', $result['request_summary']['images_shape']);
         $this->assertSame('string', $result['request_summary']['first_image_type']);
+        $this->assertSame(['11323'], $result['request_summary']['payload_parameters_ids']);
+        $this->assertSame(['129917'], $result['request_summary']['productSet_0_product_parameters_ids']);
         Http::assertSent(function ($request) use ($description) {
             if ($request->url() !== 'https://api.allegro.pl/sale/product-offers') {
                 return false;
@@ -158,7 +163,9 @@ class AllegroSalesSettingsTest extends TestCase
                 && data_get($data, 'afterSalesServices.impliedWarranty.id') === 'imp-1'
                 && data_get($data, 'afterSalesServices.warranty.id') === 'war-1'
                 && data_get($data, 'description.sections') === $description['sections']
-                && data_get($data, 'productSet.0.product.name') === 'Błotnik Audi';
+                && data_get($data, 'productSet.0.product.name') === 'Błotnik Audi'
+                && array_column($data['parameters'], 'id') === ['11323']
+                && array_column(data_get($data, 'productSet.0.product.parameters'), 'id') === ['129917'];
         });
     }
 
