@@ -16,7 +16,7 @@ class OvokoListingUrlBackfillService
 
 
     /** @return array{mode:string,summary:array<string,int>,results:array<int,array<string,mixed>>,warnings:array<int,string>} */
-    public function runLocalGeneratedBulk(bool $apply = false, int $limit = 100, bool $onlyMissing = false, bool $includeExistingInvalid = false): array
+    public function runLocalGeneratedBulk(bool $apply = false, int $limit = 100, int $offset = 0, bool $onlyMissing = false, bool $includeExistingInvalid = false): array
     {
         if (! Schema::hasTable('marketplace_listings')) {
             throw new \RuntimeException('Required table marketplace_listings does not exist.');
@@ -41,6 +41,7 @@ class OvokoListingUrlBackfillService
             ->with('part:id,legacy_payload')
             ->where('marketplace', 'ovoko')
             ->orderBy('id')
+            ->offset(max(0, $offset))
             ->limit(max(1, $limit));
 
         foreach ($query->get() as $listing) {
