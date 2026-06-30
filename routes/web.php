@@ -57,6 +57,8 @@ use App\Http\Controllers\Tools\OvokoPriceImportController;
 use App\Http\Controllers\Tools\OvokoProductSyncController;
 use App\Http\Controllers\Tools\OvokoStockReconciliationController;
 use App\Http\Controllers\Tools\OvokoListingUrlBackfillController;
+use App\Http\Controllers\Tools\MarketplaceOrdersResetController;
+use App\Http\Controllers\Tools\MarketplaceOrdersSyncController;
 use App\Http\Controllers\Tools\PartMarketplaceReadinessController;
 use App\Http\Controllers\Tools\MarketplacePublishPartController;
 use App\Http\Controllers\Tools\ImportOvokoOrdersDryRunController;
@@ -219,6 +221,8 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/ebay/oauth/redirect', [EbayOAuthController::class, 'redirect'])->name('admin.ebay.oauth.redirect');
     Route::get('/admin/ebay/oauth/callback', [EbayOAuthController::class, 'callback'])->name('admin.ebay.oauth.callback');
     Route::get('/admin/tools/marketplace/ovoko-url-backfill', OvokoListingUrlBackfillController::class)->name('admin.tools.marketplace.ovoko-url-backfill');
+    Route::match(['get', 'post'], '/admin/tools/marketplace/orders-reset', MarketplaceOrdersResetController::class)->name('admin.tools.marketplace.orders-reset');
+    Route::match(['get', 'post'], '/admin/tools/marketplace/orders-sync', MarketplaceOrdersSyncController::class)->name('admin.tools.marketplace.orders-sync');
 });
 
 Route::get('/product-images-dry-run', ProductImagesDryRunController::class)->name('tools.product-images-dry-run');
