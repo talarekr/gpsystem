@@ -218,6 +218,48 @@ class AllegroCategoryParametersTest extends TestCase
         $this->assertSame('O - oryginał z logo producenta pojazdu (OE)', $result['parameter_source_diagnostics'][0]['resolved_value']);
     }
 
+    public function test_allegro_fixed_business_rules_send_condition_invoice_and_version_to_defined_locations(): void
+    {
+        $part = Part::query()->create(['name' => 'Część Audi', 'category_id' => 77, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'vehicle_snapshot' => ['make' => 'Audi'], 'is_visible_storefront' => true]);
+
+        $result = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, null, ['ok' => true, 'source' => 'cache', 'parameters' => [
+            ['id' => '11323', 'name' => 'Stan', 'type' => 'dictionary', 'required' => true, 'dictionary' => [['id' => '11323_2', 'value' => 'Używany']], 'options' => ['describesProduct' => false]],
+            ['id' => 'invoice_param_from_definition', 'name' => 'Faktura', 'type' => 'dictionary', 'required' => false, 'dictionary' => [['id' => 'invoice_vat_from_definition', 'value' => 'Wystawiam fakturę VAT']], 'options' => ['describesProduct' => false]],
+            ['id' => '130533', 'name' => 'Wersja', 'type' => 'dictionary', 'required' => false, 'dictionary' => [['id' => '130533_1', 'value' => 'Europejska']], 'options' => ['describesProduct' => true]],
+        ]]);
+
+        $this->assertSame([
+            ['id' => '11323', 'valuesIds' => ['11323_2']],
+            ['id' => 'invoice_param_from_definition', 'valuesIds' => ['invoice_vat_from_definition']],
+        ], $result['offer_parameters']);
+        $this->assertSame([['id' => '130533', 'valuesIds' => ['130533_1']]], $result['product_parameters']);
+
+        $diagnostics = collect($result['parameter_source_diagnostics'])->keyBy('name');
+        $this->assertSame('fixed_business_rule', $diagnostics['Stan']['source']);
+        $this->assertSame('Używany', $diagnostics['Stan']['raw_value']);
+        $this->assertSame('Używany', $diagnostics['Stan']['normalized_value']);
+        $this->assertSame('Używany', $diagnostics['Stan']['resolved_value']);
+        $this->assertSame(['11323_2'], $diagnostics['Stan']['valuesIds']);
+        $this->assertSame('fixed', $diagnostics['Stan']['status']);
+        $this->assertSame('parameters', $diagnostics['Stan']['parameter_location']);
+
+        $this->assertSame('fixed_business_rule', $diagnostics['Faktura']['source']);
+        $this->assertSame('Wystawiam fakturę VAT', $diagnostics['Faktura']['raw_value']);
+        $this->assertSame('Wystawiam fakturę VAT', $diagnostics['Faktura']['normalized_value']);
+        $this->assertSame('Wystawiam fakturę VAT', $diagnostics['Faktura']['resolved_value']);
+        $this->assertSame(['invoice_vat_from_definition'], $diagnostics['Faktura']['valuesIds']);
+        $this->assertSame('fixed', $diagnostics['Faktura']['status']);
+        $this->assertSame('parameters', $diagnostics['Faktura']['parameter_location']);
+
+        $this->assertSame('fixed_business_rule', $diagnostics['Wersja']['source']);
+        $this->assertSame('Europejska', $diagnostics['Wersja']['raw_value']);
+        $this->assertSame('Europejska', $diagnostics['Wersja']['normalized_value']);
+        $this->assertSame('Europejska', $diagnostics['Wersja']['resolved_value']);
+        $this->assertSame(['130533_1'], $diagnostics['Wersja']['valuesIds']);
+        $this->assertSame('fixed', $diagnostics['Wersja']['status']);
+        $this->assertSame('productSet[0].product.parameters', $diagnostics['Wersja']['parameter_location']);
+    }
+
     public function test_part_manufacturer_maps_audi_bmw_and_mercedes_oe_exact_or_alias_labels(): void
     {
         foreach ([['Audi', 'Audi OE', 'audi-id'], ['BMW', 'BMW OE', 'bmw-id'], ['VW', 'Volkswagen OE', 'vw-id'], ['Mercedes', 'Mercedes-Benz OE', 'mercedes-id']] as [$make, $label, $id]) {

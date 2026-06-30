@@ -40,13 +40,15 @@ class AllegroOfferParametersBuilder
     {
         $name = $this->norm($def['name'] ?? '');
         if ($name === 'jakoscczescizgodniezgvo') return $this->resolveValue('O - oryginał z logo producenta pojazdu (OE)', 'fixed_business_rule', $def);
+        if ($name === 'stan') return $this->resolveValue('Używany', 'fixed_business_rule', $def);
+        if ($name === 'faktura') return $this->resolveValue('Wystawiam fakturę VAT', 'fixed_business_rule', $def);
+        if ($name === 'wersja') return $this->resolveValue('Europejska', 'fixed_business_rule', $def);
         if ($this->isPartManufacturerParameter($def, $name)) {
             $manufacturer = $this->partManufacturer($part);
             return $this->resolvePartManufacturer($manufacturer['value'], $manufacturer['source'], $def, $manufacturer['source_field'] ?? $manufacturer['source']);
         }
         $m = $this->configuredMapping($part, $mapping, $def);
         if ($m) return $this->resolveValue($m['value'], $m['source'], $def);
-        if ($name === 'stan') return $this->resolveValue('Używany', 'fixed_business_rule', $def);
         if ($name === 'stronazabudowy') return $this->resolveValue($this->partPosition($part), 'part', $def);
         if ($name === 'typsamochodu') return $this->resolveCarType($part, $def);
         if ($vehicleField = $this->vehicleFieldForParameter($name)) return $this->resolveVehicleParameter($part, $def, $vehicleField);
