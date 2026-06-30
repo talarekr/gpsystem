@@ -12,6 +12,9 @@ class AllegroDescriptionBuilder
         'model' => 'Model',
         'production_year' => 'Rok',
         'engine_code' => 'Oznaczenie silnika',
+    ];
+
+    public const OPTIONAL_VEHICLE_FIELDS = [
         'engine_power_kw' => 'Moc silnika',
     ];
 
@@ -34,11 +37,20 @@ class AllegroDescriptionBuilder
 
         $vehicle = $part->car;
         $values = [];
+        $diagnostics = [];
         foreach (self::REQUIRED_VEHICLE_FIELDS as $field => $label) {
             $value = $vehicle ? $this->cleanText((string) ($vehicle->{$field} ?? '')) : '';
             $values[$field] = $value;
             if ($vehicle && $value === '') {
                 $blockers[] = 'missing_donor_vehicle_field:'.$label;
+            }
+        }
+
+        foreach (self::OPTIONAL_VEHICLE_FIELDS as $field => $label) {
+            $value = $vehicle ? $this->cleanText((string) ($vehicle->{$field} ?? '')) : '';
+            $values[$field] = $value;
+            if ($vehicle && $value === '') {
+                $diagnostics['optional_donor_vehicle_fields_missing'][] = $label;
             }
         }
 
@@ -50,7 +62,7 @@ class AllegroDescriptionBuilder
         }
 
         if ($blockers !== []) {
-            return ['description' => null, 'blockers' => array_values(array_unique($blockers)), 'diagnostics' => ['main_image_url' => $mainImageUrl, 'offer_images_contains_main' => $mainImageUrl !== null && in_array($mainImageUrl, $offerImageUrls, true)]];
+            return ['description' => null, 'blockers' => array_values(array_unique($blockers)), 'diagnostics' => $diagnostics + ['main_image_url' => $mainImageUrl, 'offer_images_contains_main' => $mainImageUrl !== null && in_array($mainImageUrl, $offerImageUrls, true)]];
         }
 
         $content = '<p>Witam oferta dotyczy:</p>'
@@ -60,14 +72,14 @@ class AllegroDescriptionBuilder
             .'<li>Model: <b>'.$this->e($values['model']).'</b></li>'
             .'<li>Rok: <b>'.$this->e($values['production_year']).'</b></li>'
             .'<li>Oznaczenie silnika: <b>'.$this->e($values['engine_code']).'</b></li>'
-            .'<li>Moc silnika: <b>'.$this->e($values['engine_power_kw']).'</b></li>'
+            .($values['engine_power_kw'] !== '' ? '<li>Moc silnika: <b>'.$this->e($values['engine_power_kw']).'</b></li>' : '')
             .'</ul>'
             .'<p><b>CZĘŚĆ SPRAWNA. STAN WIDOCZNY NA ZDJĘCIACH</b></p>';
 
         return [
             'description' => ['sections' => [['items' => [['type' => 'TEXT', 'content' => $content], ['type' => 'IMAGE', 'url' => $mainImageUrl]]]]],
             'blockers' => [],
-            'diagnostics' => ['main_image_url' => $mainImageUrl, 'offer_images_contains_main' => true],
+            'diagnostics' => $diagnostics + ['main_image_url' => $mainImageUrl, 'offer_images_contains_main' => true],
         ];
     }
 
