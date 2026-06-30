@@ -16,11 +16,14 @@ class OvokoListingUrlBackfillService
 
 
     /** @return array{mode:string,summary:array<string,int>,results:array<int,array<string,mixed>>,warnings:array<int,string>} */
-    public function runLocalGeneratedBulk(bool $apply = false, int $limit = 100, bool $onlyMissing = false, bool $includeExistingInvalid = false): array
+    public function runLocalGeneratedBulk(bool $apply = false, int $limit = 100, int $offset = 0, bool $onlyMissing = false, bool $includeExistingInvalid = false): array
     {
         if (! Schema::hasTable('marketplace_listings')) {
             throw new \RuntimeException('Required table marketplace_listings does not exist.');
         }
+
+        $limit = max(1, $limit);
+        $offset = max(0, $offset);
 
         $summary = [
             'inspected' => 0,
@@ -37,13 +40,23 @@ class OvokoListingUrlBackfillService
         ];
         $results = [];
 
-        $query = MarketplaceListing::query()
+        $baseQuery = MarketplaceListing::query()
+            ->where('marketplace', 'ovoko');
+        $totalOvokoListingsCount = (clone $baseQuery)->count();
+        $totalOvokoMissingUrlCount = (clone $baseQuery)
+            ->where(fn ($query) => $query->whereNull('url')->orWhere('url', ''))
+            ->count();
+
+        $query = (clone $baseQuery)
             ->with('part:id,legacy_payload')
-            ->where('marketplace', 'ovoko')
-            ->orderBy('id')
-            ->limit(max(1, $limit));
+            ->orderBy('marketplace_listings.id', 'asc')
+            ->offset($offset)
+            ->limit($limit);
+
+        $inspectedListingIds = [];
 
         foreach ($query->get() as $listing) {
+            $inspectedListingIds[] = (int) $listing->id;
             $summary['inspected']++;
             $existingUrl = $this->blankNull($listing->url);
             $existingValidation = $existingUrl !== null ? $this->validateShopUrl($existingUrl) : null;
@@ -110,7 +123,22 @@ class OvokoListingUrlBackfillService
             ];
         }
 
-        return ['mode' => $apply ? 'apply' : 'dry_run', 'summary' => $summary, 'results' => array_slice($results, 0, 20), 'warnings' => []];
+        return [
+            'mode' => $apply ? 'apply' : 'dry_run',
+            'summary' => $summary,
+            'results' => array_slice($results, 0, 20),
+            'warnings' => [],
+            'limit_requested' => $limit,
+            'limit_applied' => $limit,
+            'offset_requested' => $offset,
+            'offset_applied' => $offset,
+            'first_inspected_listing_id' => $inspectedListingIds[0] ?? null,
+            'last_inspected_listing_id' => $inspectedListingIds === [] ? null : $inspectedListingIds[array_key_last($inspectedListingIds)],
+            'inspected_listing_ids_sample' => array_slice($inspectedListingIds, 0, 10),
+            'total_ovoko_listings_count' => $totalOvokoListingsCount,
+            'total_ovoko_missing_url_count' => $totalOvokoMissingUrlCount,
+            'only_missing_semantics' => 'only_missing=1 does not filter the bulk query; it inspects the requested deterministic id range and only suppresses update candidates/results for listings that already have a valid Ovoko/RRR URL.',
+        ];
     }
 
     /** @return array{mode:string,summary:array<string,int>,results:array<int,array<string,mixed>>,warnings:array<int,string>} */
