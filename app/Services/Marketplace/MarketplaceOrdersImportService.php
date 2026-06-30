@@ -81,6 +81,13 @@ class MarketplaceOrdersImportService
                 $this->upsertOrder($normalized, $raw, $result, (bool) ($options['live_import'] ?? false));
             }
         } catch (Throwable $e) {
+            app(ApiIntegrationLogger::class)->error($marketplace, 'marketplace_orders_import', $e, [
+                'request' => [
+                    'dry_run' => $dryRun,
+                    'limit' => $options['limit'] ?? null,
+                    'since' => $options['since'] ?? null,
+                ],
+            ]);
             $result['errors'][] = ['marketplace' => $marketplace, 'message' => 'Marketplace orders read failed without exposing secrets.', 'exception' => $e::class];
         }
         return $result;
