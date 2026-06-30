@@ -38,18 +38,18 @@ class AllegroOfferParametersBuilder
 
     private function resolve(Part $part, ?MarketplaceCategoryMapping $mapping, array $def): array
     {
+        $name = $this->norm($def['name'] ?? '');
+        if ($name === 'jakoscczescizgodniezgvo') return $this->resolveValue('O - oryginał z logo producenta pojazdu (OE)', 'fixed_business_rule', $def);
+        if ($this->isPartManufacturerParameter($def, $name)) {
+            $manufacturer = $this->partManufacturer($part);
+            return $this->resolvePartManufacturer($manufacturer['value'], $manufacturer['source'], $def, $manufacturer['source_field'] ?? $manufacturer['source']);
+        }
         $m = $this->configuredMapping($part, $mapping, $def);
         if ($m) return $this->resolveValue($m['value'], $m['source'], $def);
-        $name = $this->norm($def['name'] ?? '');
         if ($name === 'stan') return $this->resolveValue('Używany', 'fixed_business_rule', $def);
-        if ($name === 'jakoscczescizgodniezgvo') return $this->resolveValue('O - oryginał z logo producenta pojazdu (OE)', 'fixed_business_rule', $def);
         if ($name === 'stronazabudowy') return $this->resolveValue($this->partPosition($part), 'part', $def);
         if ($name === 'typsamochodu') return $this->resolveCarType($part, $def);
         if ($vehicleField = $this->vehicleFieldForParameter($name)) return $this->resolveVehicleParameter($part, $def, $vehicleField);
-        if ($this->isPartManufacturerParameter($def, $name)) {
-            $manufacturer = $this->partManufacturer($part);
-            return $this->resolvePartManufacturer($manufacturer['value'], $manufacturer['source'], $def);
-        }
         if ($this->isCatalogPartNumberParameter($def, $name) || (string) ($def['id'] ?? '') === '227345') {
             return $this->resolveValue($this->catalogPartNumber($part), 'part.part_number', $def);
         }
@@ -263,19 +263,23 @@ class AllegroOfferParametersBuilder
     }
 
 
-    private function resolvePartManufacturer(mixed $value, string $source, array $def): array
+    private function resolvePartManufacturer(mixed $value, string $source, array $def, ?string $sourceField = null): array
     {
         $sourceValue = $value;
-        if (blank($value)) return ['value' => null, 'source' => $source, 'source_value' => $sourceValue, 'reason' => 'missing_source_value'];
-        if (($def['type'] ?? '') !== 'dictionary') return ['value' => (string) $value, 'source' => $source, 'source_value' => $sourceValue];
+        if (blank($value)) return ['value' => null, 'source' => $source, 'source_field' => $sourceField ?? $source, 'source_value' => $sourceValue, 'reason' => 'missing_source_value'];
 
-        foreach (($def['dictionary'] ?? []) as $allowed) {
-            if ((string) ($allowed['id'] ?? '') === (string) $value || $this->matchesExactDictionaryLabel($allowed['value'] ?? '', $value) || $this->partManufacturerAliasMatches($allowed['value'] ?? '', $value)) {
-                return ['type' => 'dictionary', 'value' => [(string) $allowed['id']], 'label' => $allowed['value'] ?? null, 'source' => $source, 'source_value' => $sourceValue, 'normalized_value' => $this->norm($value), 'mapped_value_id' => (string) $allowed['id'], 'mapped_label' => $allowed['value'] ?? null];
+        $candidate = trim((string) $value).' OE';
+        if (($def['type'] ?? '') !== 'dictionary') return ['value' => $candidate, 'source' => $source, 'source_field' => $sourceField ?? $source, 'source_value' => $sourceValue, 'normalized_value' => $candidate];
+
+        foreach ($this->partManufacturerCandidates((string) $value) as $candidate) {
+            foreach (($def['dictionary'] ?? []) as $allowed) {
+                if ($this->matchesExactDictionaryLabel($allowed['value'] ?? '', $candidate)) {
+                    return ['type' => 'dictionary', 'value' => [(string) $allowed['id']], 'label' => $allowed['value'] ?? null, 'source' => $source, 'source_field' => $sourceField ?? $source, 'source_value' => $sourceValue, 'normalized_value' => $candidate, 'mapped_value_id' => (string) $allowed['id'], 'mapped_label' => $allowed['value'] ?? null];
+                }
             }
         }
 
-        return ['value' => null, 'source' => $source, 'source_value' => $sourceValue, 'normalized_value' => $this->norm($value), 'reason' => 'no_allowed_value_match', 'allowed_values_sample' => array_slice(array_map(fn ($allowed): array => ['id' => (string) ($allowed['id'] ?? ''), 'value' => (string) ($allowed['value'] ?? '')], $def['dictionary'] ?? []), 0, 20), 'allowed_values' => $this->allowedValuesDiagnostics($def)];
+        return ['value' => null, 'source' => $source, 'source_field' => $sourceField ?? $source, 'source_value' => $sourceValue, 'normalized_value' => trim((string) $value).' OE', 'reason' => 'no_allowed_value_match', 'allowed_values_sample' => array_slice(array_map(fn ($allowed): array => ['id' => (string) ($allowed['id'] ?? ''), 'value' => (string) ($allowed['value'] ?? '')], $def['dictionary'] ?? []), 0, 20), 'allowed_values' => $this->allowedValuesDiagnostics($def)];
     }
 
     private function diagnosticRow(array $def, array $resolved): array
@@ -321,15 +325,17 @@ class AllegroOfferParametersBuilder
 
     private function partManufacturer(Part $part): array
     {
-        foreach (['manufacturer', 'brand', 'manufacturer_name', 'part_manufacturer', 'legacy_payload.manufacturer', 'legacy_payload.brand', 'legacy_payload.manufacturer_name', 'review_metadata.manufacturer', 'review_metadata.brand'] as $field) {
+        $part->loadMissing('car');
+        foreach (['car.make', 'vehicle_snapshot.make', 'legacy_payload.make', 'legacy_payload.vehicle_make', 'review_metadata.make', 'review_metadata.vehicle_make', 'manufacturer', 'brand', 'manufacturer_name', 'part_manufacturer', 'legacy_payload.manufacturer', 'legacy_payload.brand', 'legacy_payload.manufacturer_name', 'review_metadata.manufacturer', 'review_metadata.brand'] as $field) {
             $value = data_get($part, $field);
-            if (filled($value)) return ['value' => $value, 'source' => 'part.'.$field];
+            if (filled($value)) {
+                $source = str_starts_with($field, 'car.') ? 'part.'.$field : (str_starts_with($field, 'vehicle_snapshot.') ? $field : 'part.'.$field);
+                $sourceField = str_starts_with($field, 'car.') ? $field : $field;
+                return ['value' => $value, 'source' => $source, 'source_field' => $sourceField];
+            }
         }
 
-        $vehicleMake = data_get($part->vehicle_snapshot, 'make');
-        if (filled($vehicleMake)) return ['value' => $vehicleMake, 'source' => 'vehicle_snapshot.make'];
-
-        return ['value' => null, 'source' => 'not_resolved'];
+        return ['value' => null, 'source' => 'not_resolved', 'source_field' => 'not_resolved'];
     }
 
     private function catalogPartNumber(Part $part): mixed
@@ -352,6 +358,22 @@ class AllegroOfferParametersBuilder
     private function matchesExactDictionaryLabel(mixed $allowed, mixed $value): bool
     {
         return $this->norm($allowed) === $this->norm($value);
+    }
+
+    private function partManufacturerCandidates(string $make): array
+    {
+        $base = trim($make).' OE';
+        $aliases = [
+            'mercedes' => 'Mercedes-Benz OE',
+            'mercedesbenz' => 'Mercedes-Benz OE',
+            'vw' => 'Volkswagen OE',
+            'volkswagen' => 'Volkswagen OE',
+            'bmw' => 'BMW OE',
+            'audi' => 'Audi OE',
+        ];
+        $alias = $aliases[$this->norm($make)] ?? null;
+
+        return array_values(array_unique(array_filter([$base, $alias])));
     }
 
     private function partManufacturerAliasMatches(mixed $allowed, mixed $value): bool
