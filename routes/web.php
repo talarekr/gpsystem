@@ -229,6 +229,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::match(['get', 'post'], '/admin/tools/marketplace/orders/{order}/fulfillment-sync', MarketplaceOrderFulfillmentSyncController::class)->name('admin.tools.marketplace.orders.fulfillment-sync');
     Route::get('/admin/tools/marketplace/orders-timezone-fix', MarketplaceOrdersTimezoneFixController::class)->name('admin.tools.marketplace.orders-timezone-fix');
     Route::get('/admin/tools/marketplace/allegro/responsible-producers', [MarketplaceListingDryRunController::class, 'allegroResponsibleProducers'])->name('admin.tools.marketplace.allegro.responsible-producers');
+    Route::get('/admin/tools/marketplace/allegro/offers/{offerId}/description-update', [MarketplaceListingDryRunController::class, 'allegroDescriptionUpdate'])->name('admin.tools.marketplace.allegro.offers.description-update');
 });
 
 Route::get('/product-images-dry-run', ProductImagesDryRunController::class)->name('tools.product-images-dry-run');

@@ -184,6 +184,26 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
         ];
     }
 
+
+    public function updateProductOfferDescription(string $offerId, array $description): array
+    {
+        $response = Http::withToken((string) $this->credentials()['access_token'])
+            ->accept('application/vnd.allegro.public.v1+json')
+            ->contentType('application/vnd.allegro.public.v1+json')
+            ->timeout(30)
+            ->patch($this->absoluteUrl('/sale/product-offers/'.rawurlencode($offerId)), [
+                'description' => $description,
+            ]);
+        $json = $response->json();
+
+        return [
+            'ok' => $response->successful(),
+            'http_status' => $response->status(),
+            'json' => is_array($json) ? $json : [],
+            'request_id' => $response->header('trace-id') ?: $response->header('x-request-id'),
+        ];
+    }
+
     public function productOfferOperationStatus(string $location): array
     {
         $response = Http::withToken((string) $this->credentials()['access_token'])->accept('application/vnd.allegro.public.v1+json')->timeout(20)->get($this->absoluteUrl($location));
