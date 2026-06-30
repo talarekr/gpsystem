@@ -394,39 +394,52 @@ class EbayApiClient extends AbstractMarketplaceApiClient
             .'<Item><ItemID>'.htmlspecialchars($itemId, ENT_XML1).'</ItemID><Description><![CDATA['.$this->safeCdata($description).']]></Description></Item>'
             .'</ReviseItemRequest>';
 
-        $response = Http::withHeaders(array_filter([
-                'X-EBAY-API-CALL-NAME' => 'ReviseItem',
-                'X-EBAY-API-SITEID' => $siteId,
-                'X-EBAY-API-COMPATIBILITY-LEVEL' => (string) (($this->account?->api_settings ?? [])['trading_compatibility_level'] ?? '967'),
-                'X-EBAY-API-IAF-TOKEN' => $token,
-                'X-EBAY-API-APP-NAME' => $credentials['client_id'] ?? null,
-                'Content-Type' => 'text/xml',
-            ]))
-            ->timeout(20)
-            ->withBody($xml, 'text/xml')
-            ->post($this->tradingApiUrl());
+        try {
+            $response = Http::withHeaders(array_filter([
+                    'X-EBAY-API-CALL-NAME' => 'ReviseItem',
+                    'X-EBAY-API-SITEID' => $siteId,
+                    'X-EBAY-API-COMPATIBILITY-LEVEL' => (string) (($this->account?->api_settings ?? [])['trading_compatibility_level'] ?? '967'),
+                    'X-EBAY-API-IAF-TOKEN' => $token,
+                    'X-EBAY-API-APP-NAME' => $credentials['client_id'] ?? null,
+                    'Content-Type' => 'text/xml',
+                ]))
+                ->timeout(20)
+                ->withBody($xml, 'text/xml')
+                ->post($this->tradingApiUrl());
+        } catch (\Throwable $e) {
+            return ['ok' => false, 'step' => 'reviseItemDescriptionOnly', 'api_endpoint_family' => 'trading.revise_item.description_only', 'error_code' => class_basename($e), 'error_message_safe' => 'Technical error during eBay Trading API ReviseItem.', 'trading_http_status' => null, 'marketplace_id' => $this->marketplaceId(), 'trading_site_id' => $siteId];
+        }
 
         $ack = null;
         $errorMessage = null;
+        $ebayErrors = [];
         if (trim($response->body()) !== '') {
             libxml_use_internal_errors(true);
             $parsed = simplexml_load_string($response->body());
             if ($parsed instanceof \SimpleXMLElement) {
                 $parsed->registerXPathNamespace('e', 'urn:ebay:apis:eBLBaseComponents');
                 $ack = (string) ($parsed->Ack ?? '');
-                $errors = $parsed->xpath('//e:Errors/e:LongMessage') ?: $parsed->xpath('//Errors/LongMessage') ?: [];
-                $errorMessage = isset($errors[0]) ? (string) $errors[0] : null;
+                $errorNodes = $parsed->xpath('//e:Errors') ?: $parsed->xpath('//Errors') ?: [];
+                foreach ($errorNodes as $node) {
+                    $ebayErrors[] = array_filter(['short_message' => (string) ($node->ShortMessage ?? ''), 'long_message' => (string) ($node->LongMessage ?? ''), 'error_code' => (string) ($node->ErrorCode ?? ''), 'severity' => (string) ($node->SeverityCode ?? '')]);
+                }
+                $errorMessage = $ebayErrors[0]['long_message'] ?? $ebayErrors[0]['short_message'] ?? null;
             }
             libxml_clear_errors();
         }
 
+        $ok = $response->successful() && in_array($ack, ['Success', 'Warning'], true);
         return [
-            'ok' => $response->successful() && in_array($ack, ['Success', 'Warning'], true),
+            'ok' => $ok,
             'step' => 'reviseItemDescriptionOnly',
             'api_endpoint_family' => 'trading.revise_item.description_only',
             'http_status' => $response->status(),
+            'trading_http_status' => $response->status(),
             'trading_ack' => $ack,
-            'error_message_safe' => $errorMessage,
+            'ebay_ack' => $ack,
+            'ebay_errors' => $ebayErrors,
+            'error_code' => $ok ? null : ($ebayErrors[0]['error_code'] ?? 'ebay_revise_item_failed'),
+            'error_message_safe' => $ok ? null : ($errorMessage ?: 'eBay Trading API ReviseItem returned a non-success response.'),
             'request_id' => $response->header('x-ebay-c-request-id') ?: $response->header('rlogid'),
             'marketplace_id' => $this->marketplaceId(),
             'trading_site_id' => $siteId,

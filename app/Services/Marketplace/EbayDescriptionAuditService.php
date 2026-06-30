@@ -4,11 +4,13 @@ namespace App\Services\Marketplace;
 
 use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceListing;
+use App\Models\MarketplaceSyncLog;
 use App\Services\Marketplace\Api\EbayApiClient;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Throwable;
 
 class EbayDescriptionAuditService
 {
@@ -31,8 +33,10 @@ class EbayDescriptionAuditService
         $results = $rows->map(fn (MarketplaceListing $listing): array => $this->auditListing($listing, $channel, $apply, $confirmed, $checkApi, $patchAssetsOnly, $fetchLiveDescription, $writeEnabled))->values()->all();
 
         $applied = collect($results)->where('apply_executed', true)->count();
+        $failed = collect($results)->first(fn (array $row): bool => ($row['action'] ?? null) === 'revise_failed');
 
         return [
+            'ok' => $failed === null,
             'mode' => $apply && $confirmed ? 'apply' : 'dry_run',
             'dry_run' => ! ($apply && $confirmed),
             'marketplace_write' => $writeEnabled && $applied > 0,
@@ -44,6 +48,12 @@ class EbayDescriptionAuditService
             'apply_confirmed' => $confirmed,
             'apply_executed' => $applied > 0,
             'applied' => $applied,
+            'action' => $failed['action'] ?? null,
+            'error_code' => $failed['error_code'] ?? null,
+            'error_message_safe' => $failed['error_message_safe'] ?? null,
+            'ebay_ack' => $failed['ebay_ack'] ?? null,
+            'ebay_errors' => $failed['ebay_errors'] ?? null,
+            'trading_http_status' => $failed['trading_http_status'] ?? null,
             'apply_blocked_reason' => $applyBlockedReason,
             'relist' => false,
             'end' => false,
@@ -135,7 +145,7 @@ class EbayDescriptionAuditService
             'confidence' => $needs ? 'high' : null,
             'apply_requested' => $apply,
             'apply_confirmed' => $confirmed,
-            'apply_executed' => $this->shouldExecuteApply($apply, $confirmed, $writeEnabled, $needs, $skipEnded) ? (bool) (($this->executeDescriptionRevise($listing, $channel, $payload)['ok'] ?? false)) : false,
+            ...$this->applyResult($listing, $channel, $payload, $apply, $confirmed, $writeEnabled, $needs, $skipEnded, 0, false),
             'revise_payload_safe' => $needs || $apply ? $payload : null,
             'revise_payload_forbidden_keys_present' => array_values(array_intersect(array_keys($payload), ['price','pricingSummary','availableQuantity','quantity','stock','availability','listingPolicies','fulfillmentPolicyId','paymentPolicyId','returnPolicyId','merchantLocationKey','images','product'])),
         ];
@@ -217,7 +227,7 @@ class EbayDescriptionAuditService
             'changed_only_img_src' => $patch['changed_only_img_src'],
             'forbidden_changes_detected' => ! $patch['changed_only_img_src'],
             'description_changed' => $sourceHtml !== $patch['html'],
-            'apply_executed' => $this->shouldExecuteApply($apply, $confirmed, $writeEnabled, $patch['replacements_count'] > 0, $skipEnded) ? (bool) (($this->executeDescriptionRevise($listing, $channel, $payload)['ok'] ?? false)) : false,
+            ...$this->applyResult($listing, $channel, $payload, $apply, $confirmed, $writeEnabled, $patch['replacements_count'] > 0, $skipEnded, $patch['replacements_count'], $patch['changed_only_img_src']),
             'revise_payload_safe' => ($patch['replacements_count'] > 0 || $apply) && ! $skipEnded ? $payload : null,
             'revise_payload_forbidden_keys_present' => array_values(array_intersect(array_keys($payload), ['price','pricingSummary','availableQuantity','quantity','stock','availability','listingPolicies','fulfillmentPolicyId','paymentPolicyId','returnPolicyId','merchantLocationKey','images','product'])),
         ];
@@ -236,14 +246,74 @@ class EbayDescriptionAuditService
     }
 
     /** @param array{listingDescription:string} $payload */
-    private function executeDescriptionRevise(MarketplaceListing $listing, string $channel, array $payload): array
+    private function applyResult(MarketplaceListing $listing, string $channel, array $payload, bool $apply, bool $confirmed, bool $writeEnabled, bool $needsRevise, bool $skipEnded, int $replacementsCount, bool $changedOnlyImgSrc): array
     {
-        if (array_keys($payload) !== ['listingDescription']) return ['ok' => false, 'error' => 'unsafe_payload_shape'];
+        if (! $this->shouldExecuteApply($apply, $confirmed, $writeEnabled, $needsRevise, $skipEnded)) return ['apply_executed' => false];
+
+        $result = $this->executeDescriptionRevise($listing, $channel, $payload, $replacementsCount, $changedOnlyImgSrc);
+        if ((bool) ($result['ok'] ?? false)) {
+            return [
+                'action' => 'applied',
+                'apply_executed' => true,
+                'ebay_ack' => $result['ebay_ack'] ?? $result['trading_ack'] ?? null,
+                'trading_http_status' => $result['trading_http_status'] ?? $result['http_status'] ?? null,
+            ];
+        }
+
+        return [
+            'action' => 'revise_failed',
+            'apply_executed' => false,
+            'error_code' => $result['error_code'] ?? $result['error'] ?? 'revise_failed',
+            'error_message_safe' => $result['error_message_safe'] ?? 'eBay ReviseItem failed.',
+            'ebay_ack' => $result['ebay_ack'] ?? $result['trading_ack'] ?? null,
+            'ebay_errors' => $result['ebay_errors'] ?? null,
+            'trading_http_status' => $result['trading_http_status'] ?? $result['http_status'] ?? null,
+        ];
+    }
+
+    /** @param array{listingDescription:string} $payload */
+    private function executeDescriptionRevise(MarketplaceListing $listing, string $channel, array $payload, int $replacementsCount = 0, bool $changedOnlyImgSrc = false): array
+    {
         $itemId = $this->itemId($listing, $listing->raw_payload ?: []);
-        if ($itemId === null) return ['ok' => false, 'error' => 'missing_item_id'];
-        $account = $listing->account ?: MarketplaceAccount::query()->where('code', $channel)->orWhere('marketplace', $channel)->first();
-        if (! $account) return ['ok' => false, 'error' => 'marketplace_account_not_found'];
-        return (new EbayApiClient($account, $channel))->reviseItemDescriptionOnly($itemId, $payload);
+        $result = ['ok' => false, 'error' => null];
+
+        try {
+            if (array_keys($payload) !== ['listingDescription']) $result = ['ok' => false, 'error' => 'unsafe_payload_shape'];
+            elseif ($itemId === null) $result = ['ok' => false, 'error' => 'missing_item_id'];
+            else {
+                $account = $listing->account ?: MarketplaceAccount::query()->where('code', $channel)->orWhere('marketplace', $channel)->first();
+                $result = $account ? (new EbayApiClient($channel, $account))->reviseItemDescriptionOnly($itemId, $payload) : ['ok' => false, 'error' => 'marketplace_account_not_found'];
+            }
+        } catch (Throwable $e) {
+            $result = ['ok' => false, 'error' => class_basename($e), 'error_message_safe' => 'Technical error during eBay ReviseItem. Details logged.', 'exception_message' => $e->getMessage()];
+        }
+
+        if (! ($result['ok'] ?? false)) $this->logDescriptionReviseFailure($listing, $channel, $itemId, $payload, $result, $replacementsCount, $changedOnlyImgSrc);
+        return $result;
+    }
+
+    private function logDescriptionReviseFailure(MarketplaceListing $listing, string $channel, ?string $itemId, array $payload, array $result, int $replacementsCount, bool $changedOnlyImgSrc): void
+    {
+        try {
+            MarketplaceSyncLog::query()->create([
+                'marketplace' => 'ebay',
+                'marketplace_listing_id' => $listing->id,
+                'part_id' => $listing->part_id,
+                'action' => 'description_revise_asset_patch',
+                'status' => 'error',
+                'http_status' => $result['trading_http_status'] ?? $result['http_status'] ?? null,
+                'message' => (string) ($result['error_message_safe'] ?? $result['error'] ?? 'eBay ReviseItem failed.'),
+                'external_id' => $itemId,
+                'request_id' => $result['request_id'] ?? null,
+                'payload' => [
+                    'request_summary' => ['channel' => $channel, 'item_id' => $itemId, 'part_id' => $listing->part_id, 'payload_keys' => array_keys($payload), 'listingDescription_length' => mb_strlen((string) ($payload['listingDescription'] ?? '')), 'replacements_count' => $replacementsCount, 'changed_only_img_src' => $changedOnlyImgSrc, 'forbidden_changes_detected' => ! $changedOnlyImgSrc],
+                    'response_summary' => ['ebay_ack' => $result['ebay_ack'] ?? $result['trading_ack'] ?? null, 'ebay_errors' => $result['ebay_errors'] ?? null, 'trading_http_status' => $result['trading_http_status'] ?? $result['http_status'] ?? null, 'error_code' => $result['error_code'] ?? $result['error'] ?? null, 'error_message_safe' => $result['error_message_safe'] ?? null],
+                ],
+                'created_at' => now(),
+            ]);
+        } catch (Throwable) {
+            // Do not fail the audit response if technical logging is unavailable.
+        }
     }
 
     /** @return array{html:string,replacements_count:int,replacements:array<int,array{old_src:string,new_src:string}>,changed_only_img_src:bool} */
