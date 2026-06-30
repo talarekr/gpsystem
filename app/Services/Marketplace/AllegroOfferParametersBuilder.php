@@ -45,6 +45,7 @@ class AllegroOfferParametersBuilder
         if ($name === 'jakoscczescizgodniezgvo') return $this->resolveValue('O - oryginał z logo producenta pojazdu (OE)', 'fixed_business_rule', $def);
         if ($name === 'stronazabudowy') return $this->resolveValue($this->partPosition($part), 'part', $def);
         if ($name === 'typsamochodu') return $this->resolveCarType($part, $def);
+        if ($vehicleField = $this->vehicleFieldForParameter($name)) return $this->resolveVehicleParameter($part, $def, $vehicleField);
         if ($this->isPartManufacturerParameter($def, $name)) {
             $manufacturer = $this->partManufacturer($part);
             return $this->resolveValue($manufacturer['value'], $manufacturer['source'], $def);
@@ -142,6 +143,89 @@ class AllegroOfferParametersBuilder
         return ['value' => null, 'source' => 'not_resolved'];
     }
 
+
+    private function vehicleFieldForParameter(string $normalizedName): ?string
+    {
+        $map = [
+            'rodzajskrzyni' => 'gearbox_type', 'typskrzynibiegow' => 'gearbox_type', 'skrzyniabiegow' => 'gearbox_type',
+            'rodzajpaliwa' => 'fuel_type', 'typpaliwa' => 'fuel_type', 'paliwo' => 'fuel_type',
+            'typnadwozia' => 'body_type', 'nadwozie' => 'body_type',
+            'naped' => 'drivetrain', 'rodzajnapedu' => 'drivetrain',
+            'stronakierownicy' => 'steering_side', 'kierownica' => 'steering_side',
+            'pojemnoscsilnika' => 'engine_capacity_cm3', 'pojemnoscsilnikacm3' => 'engine_capacity_cm3',
+            'kodsilnika' => 'engine_code',
+            'kodskrzynibiegow' => 'gearbox_code', 'kodskrzyni' => 'gearbox_code',
+            'model' => 'model', 'modelsamochodu' => 'model',
+            'marka' => 'make', 'markasamochodu' => 'make',
+            'rokprodukcji' => 'production_year', 'roksamochodu' => 'production_year',
+        ];
+
+        return $map[$normalizedName] ?? null;
+    }
+
+    private function resolveVehicleParameter(Part $part, array $def, string $field): array
+    {
+        $vehicle = $this->vehicleValue($part, $field);
+        $raw = $vehicle['value'] ?? null;
+        $source = $vehicle['source'] ?? 'not_resolved';
+        if (blank($raw)) return ['value' => null, 'source' => $source, 'source_field' => 'car.'.$field, 'source_value' => $raw, 'normalized_value' => null, 'reason' => 'missing_source_value'];
+        if (($def['type'] ?? '') !== 'dictionary') {
+            return ['value' => (string) $raw, 'source' => $source, 'source_field' => 'car.'.$field, 'source_value' => $raw, 'normalized_value' => $this->norm($raw)];
+        }
+
+        $normalized = $this->norm($raw);
+        foreach (($def['dictionary'] ?? []) as $allowed) {
+            if ($this->vehicleDictionaryMatches($field, $raw, $allowed['value'] ?? '') || (string) ($allowed['id'] ?? '') === (string) $raw) {
+                return ['type' => 'dictionary', 'value' => [(string) $allowed['id']], 'label' => $allowed['value'] ?? null, 'source' => $source, 'source_field' => 'car.'.$field, 'source_value' => $raw, 'normalized_value' => $normalized, 'mapped_value_id' => (string) $allowed['id'], 'mapped_label' => $allowed['value'] ?? null];
+            }
+        }
+
+        return ['value' => null, 'source' => $source, 'source_field' => 'car.'.$field, 'source_value' => $raw, 'normalized_value' => $normalized, 'reason' => 'no_allowed_value_match', 'allowed_values_sample' => array_slice(array_map(fn ($allowed): array => ['id' => (string) ($allowed['id'] ?? ''), 'value' => (string) ($allowed['value'] ?? '')], $def['dictionary'] ?? []), 0, 20)];
+    }
+
+    private function vehicleValue(Part $part, string $field): array
+    {
+        $part->loadMissing('car');
+        foreach (["car.$field", "vehicle_snapshot.$field", "legacy_payload.$field", "review_metadata.$field"] as $path) {
+            $value = data_get($part, $path);
+            if (filled($value)) return ['value' => $value, 'source' => 'part.'.$path];
+        }
+        return ['value' => null, 'source' => 'not_resolved'];
+    }
+
+    private function vehicleDictionaryMatches(string $field, mixed $local, mixed $allowed): bool
+    {
+        if ($this->matchesDictionaryLabel($allowed, $local)) return true;
+        $localNorm = $this->norm($local); $allowedNorm = $this->norm($allowed);
+        foreach ($this->vehicleAliasGroups($field) as $group) {
+            $norms = array_map(fn ($v) => $this->norm($v), $group);
+            if (in_array($localNorm, $norms, true) && in_array($allowedNorm, $norms, true)) return true;
+        }
+        return false;
+    }
+
+    private function vehicleAliasGroups(string $field): array
+    {
+        return match ($field) {
+            'gearbox_type' => [
+                ['Automatyczny','Automatyczna','Automatik','automatic','automat','automatyczna skrzynia biegów','automatyczna'],
+                ['Manualny','Manualna','manual','ręczna','reczna','manualna skrzynia biegów'],
+                ['CVT','Multitronic','bezstopniowa'],
+                ['DSG','S tronic','stronic','dwusprzęgłowa','dwusprzeglowa'],
+            ],
+            'fuel_type' => [
+                ['Benzyna','petrol','gasoline'], ['Diesel','olej napędowy','olej napedowy'], ['Hybryda','hybrid'], ['Elektryczny','electric'], ['LPG','gaz'],
+            ],
+            'drivetrain' => [
+                ['Przód','przedni','FWD','front wheel drive'], ['Tył','tylny','RWD','rear wheel drive'], ['AWD','4x4','quattro','napęd na cztery koła','naped na cztery kola'],
+            ],
+            'steering_side' => [
+                ['Lewa strona','lewa','LHD','po lewej'], ['Prawa strona','prawa','RHD','po prawej'],
+            ],
+            default => [],
+        };
+    }
+
     private function configuredMapping(Part $part, ?MarketplaceCategoryMapping $mapping, array $def): ?array
     {
         if (! Schema::hasTable('allegro_parameter_mappings') || ! $mapping) return null;
@@ -184,6 +268,8 @@ class AllegroOfferParametersBuilder
             'id' => (string) ($def['id'] ?? ''),
             'name' => (string) ($def['name'] ?? ''),
             'source' => $resolved['source'] ?? 'not_resolved',
+            'source_field' => $resolved['source_field'] ?? ($resolved['source'] ?? 'not_resolved'),
+            'raw_local_value' => $resolved['source_value'] ?? null,
             'source_value' => $resolved['source_value'] ?? null,
             'reason' => $resolved['reason'] ?? null,
             'normalized_value' => $resolved['normalized_value'] ?? null,
@@ -193,6 +279,7 @@ class AllegroOfferParametersBuilder
             'type' => (string) ($def['type'] ?? ''),
             'required' => (bool) ($def['required'] ?? false),
             'describesProduct' => (bool) ($def['options']['describesProduct'] ?? false),
+            'status' => isset($resolved['reason']) ? (((bool) ($def['required'] ?? false)) ? (blank($resolved['source_value'] ?? null) ? 'missing' : 'invalid') : 'not_required') : (($resolved['value'] ?? null) === null ? 'not_required' : 'mapped'),
             'allowed_values' => ($this->norm($def['name'] ?? '') === 'typsamochodu') ? array_column(array_map(fn ($allowed): array => ['id' => (string) ($allowed['id'] ?? ''), 'value' => (string) ($allowed['value'] ?? '')], $def['dictionary'] ?? []), 'value', 'id') : null,
         ];
 

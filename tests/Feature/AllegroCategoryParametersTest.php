@@ -256,6 +256,72 @@ class AllegroCategoryParametersTest extends TestCase
         $this->assertSame(1, DB::table('marketplace_sync_logs')->where('marketplace', 'allegro')->where('action', 'map_parameter:Typ samochodu')->count());
     }
 
+
+    public function test_allegro_gearbox_type_maps_automatic_to_dictionary_value_id(): void
+    {
+        $part = Part::query()->create(['name' => 'Skrzynia Audi', 'category_id' => 77, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'vehicle_snapshot' => ['gearbox_type' => 'Automatyczny'], 'is_visible_storefront' => true]);
+
+        $result = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, null, ['ok' => true, 'source' => 'cache', 'parameters' => [
+            ['id' => '225693', 'name' => 'Rodzaj skrzyni', 'type' => 'dictionary', 'required' => true, 'dictionary' => $this->gearboxDictionary(), 'options' => ['describesProduct' => false]],
+        ]]);
+
+        $this->assertSame([['id' => '225693', 'valuesIds' => ['225693_2']]], $result['offer_parameters']);
+        $this->assertSame([], $result['missing_required_parameters']);
+        $this->assertSame('part.vehicle_snapshot.gearbox_type', $result['parameter_source_diagnostics'][0]['source']);
+        $this->assertSame('car.gearbox_type', $result['parameter_source_diagnostics'][0]['source_field']);
+        $this->assertSame('Automatyczny', $result['parameter_source_diagnostics'][0]['raw_local_value']);
+        $this->assertSame('automatyczny', $result['parameter_source_diagnostics'][0]['normalized_value']);
+        $this->assertSame('225693_2', $result['parameter_source_diagnostics'][0]['mapped_value_id']);
+        $this->assertSame('mapped', $result['parameter_source_diagnostics'][0]['status']);
+    }
+
+    public function test_allegro_gearbox_type_missing_blocks_required_parameter(): void
+    {
+        $part = Part::query()->create(['name' => 'Skrzynia Audi', 'category_id' => 77, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'vehicle_snapshot' => [], 'is_visible_storefront' => true]);
+
+        $result = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, null, ['ok' => true, 'source' => 'cache', 'parameters' => [
+            ['id' => '225693', 'name' => 'Rodzaj skrzyni', 'type' => 'dictionary', 'required' => true, 'dictionary' => $this->gearboxDictionary(), 'options' => ['describesProduct' => false]],
+        ]]);
+
+        $this->assertSame([], $result['offer_parameters']);
+        $this->assertSame('Rodzaj skrzyni', $result['missing_required_parameters'][0]['name']);
+        $this->assertSame('car.gearbox_type', $result['missing_required_parameters'][0]['source_field']);
+        $this->assertSame('missing_source_value', $result['missing_required_parameters'][0]['reason']);
+        $this->assertSame('missing', $result['missing_required_parameters'][0]['status']);
+    }
+
+    public function test_allegro_gearbox_type_invalid_dictionary_value_is_not_sent(): void
+    {
+        $part = Part::query()->create(['name' => 'Skrzynia Audi', 'category_id' => 77, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'vehicle_snapshot' => ['gearbox_type' => 'Kosmiczna'], 'is_visible_storefront' => true]);
+
+        $result = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, null, ['ok' => true, 'source' => 'cache', 'parameters' => [
+            ['id' => '225693', 'name' => 'Rodzaj skrzyni', 'type' => 'dictionary', 'required' => true, 'dictionary' => $this->gearboxDictionary(), 'options' => ['describesProduct' => false]],
+        ]]);
+
+        $this->assertSame([], $result['offer_parameters']);
+        $this->assertSame('Kosmiczna', $result['missing_required_parameters'][0]['raw_local_value']);
+        $this->assertSame('no_allowed_value_match', $result['missing_required_parameters'][0]['reason']);
+        $this->assertSame('invalid', $result['missing_required_parameters'][0]['status']);
+    }
+
+    public function test_allegro_vehicle_fuel_body_and_drivetrain_map_from_car_snapshot(): void
+    {
+        $part = Part::query()->create(['name' => 'Część Audi', 'category_id' => 77, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'vehicle_snapshot' => ['fuel_type' => 'Benzyna', 'body_type' => 'Hatchback', 'drivetrain' => 'AWD'], 'is_visible_storefront' => true]);
+
+        $result = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, null, ['ok' => true, 'source' => 'cache', 'parameters' => [
+            ['id' => 'fuel', 'name' => 'Rodzaj paliwa', 'type' => 'dictionary', 'required' => true, 'dictionary' => [['id' => 'petrol', 'value' => 'Benzyna']], 'options' => ['describesProduct' => false]],
+            ['id' => 'body', 'name' => 'Typ nadwozia', 'type' => 'dictionary', 'required' => true, 'dictionary' => [['id' => 'hatchback', 'value' => 'Hatchback']], 'options' => ['describesProduct' => false]],
+            ['id' => 'drive', 'name' => 'Napęd', 'type' => 'dictionary', 'required' => true, 'dictionary' => [['id' => '4x4', 'value' => '4x4']], 'options' => ['describesProduct' => false]],
+        ]]);
+
+        $this->assertSame([
+            ['id' => 'fuel', 'valuesIds' => ['petrol']],
+            ['id' => 'body', 'valuesIds' => ['hatchback']],
+            ['id' => 'drive', 'valuesIds' => ['4x4']],
+        ], $result['offer_parameters']);
+        $this->assertSame([], $result['missing_required_parameters']);
+    }
+
     private function carTypeDictionary(): array
     {
         return [
@@ -266,6 +332,16 @@ class AllegroCategoryParametersTest extends TestCase
             ['id' => '129591_2', 'value' => 'Samochody dostawcze'],
             ['id' => '129591_32', 'value' => 'Samochody kempingowe'],
             ['id' => '129591_1', 'value' => 'Samochody osobowe'],
+        ];
+    }
+
+    private function gearboxDictionary(): array
+    {
+        return [
+            ['id' => '225693_1', 'value' => 'Manualna'],
+            ['id' => '225693_2', 'value' => 'Automatyczna'],
+            ['id' => '225693_3', 'value' => 'CVT'],
+            ['id' => '225693_4', 'value' => 'DSG'],
         ];
     }
 
