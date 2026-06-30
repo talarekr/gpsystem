@@ -29,6 +29,7 @@ class FrontendMaintenanceMode
         'assets/build',
         'assets/build/*',
         'ebay-template/assets/*',
+        'wp-content/uploads/ebay-template/*',
         'favicon.ico',
         'robots.txt',
         'livewire/*',

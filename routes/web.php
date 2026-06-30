@@ -158,7 +158,7 @@ Route::get('/marketplace/ovoko/photos/{partImage}/{signature}/{filename}', Ovoko
     ->where(['signature' => '[A-Fa-f0-9]{24}', 'filename' => '[A-Za-z0-9._-]+'])
     ->name('marketplace.ovoko.photos.show');
 
-Route::get('/ebay-template/assets/{filename}', function (string $filename) {
+$serveEbayTemplateAsset = function (string $filename) {
     $allowed = ['icon-shipping.png', 'icon-returns.png', 'icon-packaging.png', 'icon-original.png', 'europe-map.png', 'dhl-logo.png', 'dpd-logo.png'];
 
     if (! in_array($filename, $allowed, true)) {
@@ -180,7 +180,15 @@ Route::get('/ebay-template/assets/{filename}', function (string $filename) {
         'Cache-Control' => 'public, max-age=86400',
         'Content-Type' => 'image/png',
     ]);
-})->where('filename', '[A-Za-z0-9._-]+\.png')->name('ebay-template.asset');
+};
+
+Route::get('/ebay-template/assets/{filename}', $serveEbayTemplateAsset)
+    ->where('filename', '[A-Za-z0-9._-]+\.png')
+    ->name('ebay-template.asset');
+
+Route::get('/wp-content/uploads/ebay-template/{filename}', $serveEbayTemplateAsset)
+    ->where('filename', '[A-Za-z0-9._-]+\.png')
+    ->name('ebay-template.asset.legacy');
 Route::get('/sklep', fn (Request $request) => redirect()->route('storefront.catalog', $request->query(), 301))->name('storefront.shop.legacy');
 Route::get('/czesci', [CatalogController::class, 'index'])->name('storefront.catalog');
 Route::get('/szukaj', [SearchController::class, 'index'])->name('storefront.search');

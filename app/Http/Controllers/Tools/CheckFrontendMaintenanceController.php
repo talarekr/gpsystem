@@ -20,7 +20,7 @@ class CheckFrontendMaintenanceController extends Controller
 
         $allowed = FrontendMaintenanceMode::allowedPatterns();
         $blockedSample = ['/', '/czesci', '/czesci/silniki', '/produkt/testowy-produkt', '/sklep', '/koszyk', '/zamowienie', '/kontakt'];
-        $allowedSample = ['/admin', '/admin/login', '/tools/check-frontend-maintenance', '/deploy.php', '/storage/example.jpg', '/css/app.css', '/js/app.js', '/images/logo.png', '/build/assets/app.css', '/assets/build/app.css', '/ebay-template/assets/icon-packaging.png'];
+        $allowedSample = ['/admin', '/admin/login', '/tools/check-frontend-maintenance', '/deploy.php', '/storage/example.jpg', '/css/app.css', '/js/app.js', '/images/logo.png', '/build/assets/app.css', '/assets/build/app.css', '/ebay-template/assets/icon-packaging.png', '/wp-content/uploads/ebay-template/icon-packaging.png'];
         $warnings = [];
         $blockers = [];
 
@@ -44,6 +44,7 @@ class CheckFrontendMaintenanceController extends Controller
             'tools_routes_allowed' => in_array('tools/*', $allowed, true),
             'assets_allowed' => count(array_intersect(['storage/*', 'css/*', 'js/*', 'images/*', 'build/*', 'assets/build/*'], $allowed)) === 6,
             'ebay_template_assets_allowed' => in_array('ebay-template/assets/*', $allowed, true),
+            'legacy_ebay_template_assets_allowed' => in_array('wp-content/uploads/ebay-template/*', $allowed, true),
             'storefront_blocked_for_guests' => (bool) config('frontend-maintenance.enabled'),
             'storefront_allowed_for_admin' => true,
             'blocked_routes_sample' => $blockedSample,
