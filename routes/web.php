@@ -36,6 +36,7 @@ use App\Http\Controllers\Tools\MarketplaceApiSettingsDiagnosticsController;
 use App\Http\Controllers\Tools\MarketplaceApiFoundationController;
 use App\Http\Controllers\Tools\MarketplaceListingDryRunController;
 use App\Http\Controllers\Tools\MarketplaceListingUrlBackfillController;
+use App\Http\Controllers\Tools\EbayListingAuditController;
 use App\Http\Controllers\Tools\MarketplaceCategoryTreeImportController;
 use App\Http\Controllers\Tools\EbayListingDryRunController;
 use App\Http\Controllers\Tools\CheckOvokoMappingController;
@@ -226,6 +227,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/ebay/oauth/callback', [EbayOAuthController::class, 'callback'])->name('admin.ebay.oauth.callback');
     Route::get('/admin/tools/marketplace/ovoko-url-backfill', OvokoListingUrlBackfillController::class)->name('admin.tools.marketplace.ovoko-url-backfill');
     Route::get('/admin/tools/marketplace/listing-url-backfill', MarketplaceListingUrlBackfillController::class)->name('admin.tools.marketplace.listing-url-backfill');
+    Route::get('/admin/tools/marketplace/ebay-listing-audit', EbayListingAuditController::class)->name('admin.tools.marketplace.ebay-listing-audit');
     Route::match(['get', 'post'], '/admin/tools/marketplace/orders-reset', MarketplaceOrdersResetController::class)->name('admin.tools.marketplace.orders-reset');
     Route::match(['get', 'post'], '/admin/tools/marketplace/orders-sync', MarketplaceOrdersSyncController::class)->name('admin.tools.marketplace.orders-sync');
     Route::match(['get', 'post'], '/admin/tools/marketplace/orders/{order}/fulfillment-sync', MarketplaceOrderFulfillmentSyncController::class)->name('admin.tools.marketplace.orders.fulfillment-sync');

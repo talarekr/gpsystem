@@ -81,6 +81,15 @@ class MarketplaceListingUrlBackfillServiceTest extends TestCase
         $this->assertSame([2], $result['summary']['inspected_listing_ids_sample']);
     }
 
+    public function test_ebay_gpsw_external_id_is_blocked_from_url_generation(): void
+    {
+        MarketplaceListing::query()->create(['marketplace' => 'ebay_de', 'part_id' => 56, 'external_offer_id' => 'GPSW-2135']);
+        $result = app(MarketplaceListingUrlBackfillService::class)->run('ebay', 'ebay_de');
+        $this->assertSame('invalid_external_id', $result['results'][0]['action']);
+        $this->assertTrue($result['results'][0]['gpsw_external_id']);
+        $this->assertNull($result['results'][0]['generated_url']);
+    }
+
     private function actingAsAdminUser(): User
     {
         $this->seed(RoleSeeder::class);
