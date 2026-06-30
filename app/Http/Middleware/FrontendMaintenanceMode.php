@@ -28,6 +28,7 @@ class FrontendMaintenanceMode
         'build/*',
         'assets/build',
         'assets/build/*',
+        'ebay-template/assets/*',
         'favicon.ico',
         'robots.txt',
         'livewire/*',
