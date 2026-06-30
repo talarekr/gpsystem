@@ -414,13 +414,47 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
     private function findMatchingOfferRow(array $rows, string $requestedId, ?string $requestedExternalId): array
     {
         foreach ($rows as $index => $row) {
-            $normalized = $this->normalizeOffer($row);
-            if ($this->matchesRequestedId($requestedId, $requestedExternalId, $row, $normalized)) {
+            if ($this->rowHasOvokoId($row, $requestedId)) {
                 return [$row, $index];
             }
         }
 
+        if ($requestedExternalId !== null && $requestedExternalId !== '') {
+            foreach ($rows as $index => $row) {
+                $normalized = $this->normalizeOffer($row);
+                if ($this->rowHasExternalId($row, $normalized, $requestedExternalId) && ! $this->rowHasDifferentOvokoId($row, $requestedId)) {
+                    return [$row, $index];
+                }
+            }
+        }
+
         return [null, null];
+    }
+
+    private function rowHasOvokoId(array $row, string $requestedId): bool
+    {
+        foreach (['id', 'part_id', 'ovoko_part_id', 'rrr_id'] as $key) {
+            if ($this->stringOrNull($row[$key] ?? null) === $requestedId) return true;
+        }
+        return false;
+    }
+
+    private function rowHasDifferentOvokoId(array $row, string $requestedId): bool
+    {
+        foreach (['id', 'part_id', 'ovoko_part_id', 'rrr_id'] as $key) {
+            $value = $this->stringOrNull($row[$key] ?? null);
+            if ($value !== null && $value !== $requestedId) return true;
+        }
+        return false;
+    }
+
+    private function rowHasExternalId(array $row, array $normalized, string $requestedExternalId): bool
+    {
+        foreach (['external_id', 'external_offer_id', 'visible_code', 'sku', 'code'] as $key) {
+            if ($this->stringOrNull($row[$key] ?? null) === $requestedExternalId) return true;
+        }
+
+        return $this->stringOrNull($normalized['sku'] ?? null) === $requestedExternalId;
     }
 
     private function rawCategoryFields(array $row): array
