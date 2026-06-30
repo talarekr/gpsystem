@@ -264,6 +264,9 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
             'method' => $attempt['method'] ?? 'GET',
             'endpoint' => $attempt['endpoint'] ?? null,
             'query_params' => $attempt['query_params'] ?? [],
+            'form_params' => $attempt['form_params'] ?? [],
+            'content_type' => $attempt['content_type'] ?? null,
+            'filter_ignored' => $attempt['filter_ignored'] ?? false,
             'pagination_scan' => $attempt['pagination_scan'] ?? false,
             'request_fields' => $attempt['request_fields'] ?? [],
             'http_status' => $attempt['http_status'] ?? null,
@@ -295,7 +298,6 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
             ['endpoint' => $base.'/v2/get/parts', 'fields' => ['ids[]' => [$id]]],
             ['endpoint' => $base.'/v2/get/parts', 'fields' => ['part_ids[]' => [$id]]],
             ['endpoint' => $base.'/v2/get/part', 'fields' => ['id' => $id]],
-            ['endpoint' => $base.'/v2/part/'.$encodedId, 'fields' => []],
             ['endpoint' => $base.'/v2/get/part/'.$encodedId, 'fields' => []],
             ['endpoint' => $base.'/get/part/'.$encodedId, 'fields' => []],
         ];
@@ -320,10 +322,9 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
     private function probePartDetailEndpoint(string $endpoint, array $fields, string $requestedId, ?string $requestedExternalId): array
     {
         try {
-            $queryFields = $this->authFields() + $fields;
-            $queryString = $this->encodeFormRepeatedKeys($queryFields);
-            $url = $endpoint.(str_contains($endpoint, '?') ? '&' : '?').$queryString;
-            $response = Http::acceptJson()->timeout(30)->get($url);
+            $formFields = $this->authFields() + $fields;
+            $encodedForm = $this->encodeFormRepeatedKeys($formFields);
+            $response = Http::withBody($encodedForm, 'application/x-www-form-urlencoded')->acceptJson()->timeout(30)->post($endpoint);
             $json = $response->json();
             $payload = is_array($json) ? $json : [];
             $rows = $this->extractOfferRows($payload);
@@ -335,9 +336,11 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
             $pagination = is_array($payload['pagination'] ?? null) ? $payload['pagination'] : null;
 
             return [
-                'method' => 'GET',
+                'method' => 'POST',
                 'endpoint' => $endpoint,
-                'query_params' => $this->sanitizeQueryFields($fields),
+                'query_params' => [],
+                'form_params' => $this->sanitizeQueryFields($fields),
+                'content_type' => 'application/x-www-form-urlencoded',
                 'request_fields' => array_keys($fields),
                 'http_status' => $response->status(),
                 'api_status_code' => $payload['status_code'] ?? null,
@@ -351,6 +354,7 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
                 'returned_url_fields' => is_array($diagnosticRow) ? $this->extractUrlFields($diagnosticRow) : [],
                 'returned_candidates_count' => count($rows),
                 'matched_candidate_index' => $matchedIndex,
+                'filter_ignored' => $this->filterIgnored($fields, $rows, is_array($row), $pagination),
                 'mismatch_sample_ids' => array_values(array_slice(array_map(fn (array $candidate): ?string => $this->firstString($candidate, ['id', 'external_id', 'part_id', 'ovoko_part_id', 'rrr_id']), $rows), 0, 5)),
                 'returned_pagination' => $pagination,
                 'returned_pagination_count' => is_numeric($pagination['total_count'] ?? null) ? (int) $pagination['total_count'] : (is_numeric($pagination['total'] ?? null) ? (int) $pagination['total'] : null),
@@ -359,8 +363,25 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
                 'raw' => is_array($row) ? $row : null,
             ];
         } catch (\Throwable $e) {
-            return ['method' => 'GET', 'endpoint' => $endpoint, 'query_params' => $this->sanitizeQueryFields($fields), 'request_fields' => array_keys($fields), 'http_status' => null, 'api_status_code' => null, 'api_ok' => false, 'matched_requested_id' => false, 'returned_raw_id' => null, 'returned_external_id' => null, 'returned_name' => null, 'returned_category_id' => null, 'returned_shop_url' => null, 'returned_candidates_count' => 0, 'matched_candidate_index' => null, 'mismatch_sample_ids' => [], 'returned_pagination' => null, 'returned_pagination_count' => null, 'top_level_keys' => [], 'error' => $e->getMessage(), 'raw' => null];
+            return ['method' => 'POST', 'endpoint' => $endpoint, 'query_params' => [], 'form_params' => $this->sanitizeQueryFields($fields), 'content_type' => 'application/x-www-form-urlencoded', 'request_fields' => array_keys($fields), 'http_status' => null, 'api_status_code' => null, 'api_ok' => false, 'matched_requested_id' => false, 'returned_raw_id' => null, 'returned_external_id' => null, 'returned_name' => null, 'returned_category_id' => null, 'returned_shop_url' => null, 'returned_candidates_count' => 0, 'matched_candidate_index' => null, 'filter_ignored' => false, 'mismatch_sample_ids' => [], 'returned_pagination' => null, 'returned_pagination_count' => null, 'top_level_keys' => [], 'error' => $e->getMessage(), 'raw' => null];
         }
+    }
+
+
+    private function filterIgnored(array $fields, array $rows, bool $matchedRequestedId, ?array $pagination): bool
+    {
+        if ($fields === [] || array_key_exists('page', $fields) || array_key_exists('limit', $fields)) {
+            return false;
+        }
+
+        if ($matchedRequestedId) {
+            return false;
+        }
+
+        $paginationPage = is_numeric($pagination['page'] ?? null) ? (int) $pagination['page'] : null;
+        $paginationLimit = is_numeric($pagination['limit'] ?? null) ? (int) $pagination['limit'] : null;
+
+        return count($rows) > 1 && ($pagination === null || $paginationPage === 1 || $paginationLimit === count($rows));
     }
 
     private function sanitizeQueryFields(array $fields): array
@@ -455,15 +476,6 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
         foreach ($rows as $index => $row) {
             if ($this->rowHasOvokoId($row, $requestedId)) {
                 return [$row, $index];
-            }
-        }
-
-        if ($requestedExternalId !== null && $requestedExternalId !== '') {
-            foreach ($rows as $index => $row) {
-                $normalized = $this->normalizeOffer($row);
-                if ($this->rowHasExternalId($row, $normalized, $requestedExternalId) && ! $this->rowHasDifferentOvokoId($row, $requestedId)) {
-                    return [$row, $index];
-                }
             }
         }
 
