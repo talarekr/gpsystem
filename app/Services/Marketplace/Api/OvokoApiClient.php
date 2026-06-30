@@ -194,15 +194,15 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
         return $this->extractOffers(['data' => [$row]])[0] ?? [];
     }
 
-    public function fetchPartRawById(string $id): array
+    public function fetchPartRawById(string $id, int $maxPages = 3): array
     {
-        return $this->fetchPartRawByLookup($id, null);
+        return $this->fetchPartRawByLookup($id, null, $maxPages);
     }
 
-    public function fetchPartRawByLookup(string $id, ?string $externalId = null): array
+    public function fetchPartRawByLookup(string $id, ?string $externalId = null, int $maxPages = 3): array
     {
         $mismatches = [];
-        $attempts = $this->comparePartDetailEndpoints($id, $externalId);
+        $attempts = $this->comparePartDetailEndpoints($id, $externalId, $maxPages);
         foreach ($attempts as $candidate) {
             if (($candidate['api_ok'] ?? false) && ($candidate['matched_requested_id'] ?? false) && is_array($candidate['raw'] ?? null)) {
                 return [
@@ -261,7 +261,10 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
     private function summarizePartDetailAttempts(array $attempts): array
     {
         return array_map(fn (array $attempt): array => [
+            'method' => $attempt['method'] ?? 'GET',
             'endpoint' => $attempt['endpoint'] ?? null,
+            'query_params' => $attempt['query_params'] ?? [],
+            'pagination_scan' => $attempt['pagination_scan'] ?? false,
             'request_fields' => $attempt['request_fields'] ?? [],
             'http_status' => $attempt['http_status'] ?? null,
             'api_status_code' => $attempt['api_status_code'] ?? null,
@@ -275,35 +278,52 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
             'returned_pagination' => $attempt['returned_pagination'] ?? null,
             'returned_pagination_count' => $attempt['returned_pagination_count'] ?? null,
             'returned_shop_url_present' => $this->stringOrNull($attempt['returned_shop_url'] ?? null) !== null,
+            'returned_url_fields' => $attempt['returned_url_fields'] ?? [],
             'top_level_keys' => $attempt['top_level_keys'] ?? [],
             'error' => $attempt['error'] ?? null,
         ], $attempts);
     }
 
-    public function comparePartDetailEndpoints(string $id, ?string $externalId = null): array
+    public function comparePartDetailEndpoints(string $id, ?string $externalId = null, int $maxPages = 3): array
     {
         $base = rtrim((string) $this->account?->api_base_url, '/');
         $encodedId = rawurlencode($id);
         $variants = [
+            ['endpoint' => $base.'/v2/get/parts', 'fields' => ['user_code' => $externalId], 'skip' => $externalId === null || $externalId === ''],
+            ['endpoint' => $base.'/v2/get/parts', 'fields' => ['external_id' => $externalId], 'skip' => $externalId === null || $externalId === ''],
+            ['endpoint' => $base.'/v2/get/parts', 'fields' => ['id' => $id]],
+            ['endpoint' => $base.'/v2/get/parts', 'fields' => ['ids[]' => [$id]]],
+            ['endpoint' => $base.'/v2/get/parts', 'fields' => ['part_ids[]' => [$id]]],
+            ['endpoint' => $base.'/v2/get/part', 'fields' => ['id' => $id]],
+            ['endpoint' => $base.'/v2/part/'.$encodedId, 'fields' => []],
             ['endpoint' => $base.'/v2/get/part/'.$encodedId, 'fields' => []],
             ['endpoint' => $base.'/get/part/'.$encodedId, 'fields' => []],
-            ['endpoint' => $base.'/v2/get/parts', 'fields' => ['id' => $id]],
-            ['endpoint' => $base.'/v2/get/parts', 'fields' => ['part_id' => $id]],
-            ['endpoint' => $base.'/v2/get/parts', 'fields' => ['part_ids' => [$id]]],
-            ['endpoint' => $base.'/v2/get/parts', 'fields' => ['ids' => [$id]]],
         ];
-        if ($externalId !== null && $externalId !== '') {
-            $variants[] = ['endpoint' => $base.'/v2/get/parts', 'fields' => ['external_id' => $externalId]];
-            $variants[] = ['endpoint' => $base.'/v2/get/parts', 'fields' => ['visible_code' => $externalId]];
+
+        $attempts = [];
+        foreach ($variants as $variant) {
+            if (($variant['skip'] ?? false) === true) continue;
+            $attempts[] = $this->probePartDetailEndpoint($variant['endpoint'], $variant['fields'], $id, $externalId);
         }
 
-        return array_map(fn (array $variant): array => $this->probePartDetailEndpoint($variant['endpoint'], $variant['fields'], $id, $externalId), $variants);
+        $maxPages = max(1, min(50, $maxPages));
+        for ($page = 1; $page <= $maxPages; $page++) {
+            $attempt = $this->probePartDetailEndpoint($base.'/v2/get/parts', ['limit' => self::MAX_PARTS_PAGE_LIMIT, 'page' => $page], $id, $externalId);
+            $attempt['pagination_scan'] = true;
+            $attempts[] = $attempt;
+            if (($attempt['matched_requested_id'] ?? false) === true) break;
+        }
+
+        return $attempts;
     }
 
     private function probePartDetailEndpoint(string $endpoint, array $fields, string $requestedId, ?string $requestedExternalId): array
     {
         try {
-            $response = Http::asForm()->acceptJson()->timeout(30)->post($endpoint, $this->authFields() + $fields);
+            $queryFields = $this->authFields() + $fields;
+            $queryString = $this->encodeFormRepeatedKeys($queryFields);
+            $url = $endpoint.(str_contains($endpoint, '?') ? '&' : '?').$queryString;
+            $response = Http::acceptJson()->timeout(30)->get($url);
             $json = $response->json();
             $payload = is_array($json) ? $json : [];
             $rows = $this->extractOfferRows($payload);
@@ -315,7 +335,9 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
             $pagination = is_array($payload['pagination'] ?? null) ? $payload['pagination'] : null;
 
             return [
+                'method' => 'GET',
                 'endpoint' => $endpoint,
+                'query_params' => $this->sanitizeQueryFields($fields),
                 'request_fields' => array_keys($fields),
                 'http_status' => $response->status(),
                 'api_status_code' => $payload['status_code'] ?? null,
@@ -325,7 +347,8 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
                 'returned_external_id' => $externalId,
                 'returned_name' => is_array($diagnosticRow) ? ($diagnosticRow['name'] ?? $diagnosticRow['title'] ?? null) : null,
                 'returned_category_id' => is_array($diagnosticRow) ? ($diagnosticRow['category_id'] ?? $diagnosticRow['categoryId'] ?? $diagnosticRow['part_category_id'] ?? data_get($diagnosticRow, 'category.id') ?? null) : null,
-                'returned_shop_url' => is_array($diagnosticRow) ? ($diagnosticRow['shop_url'] ?? $diagnosticRow['url'] ?? $diagnosticRow['link'] ?? null) : null,
+                'returned_shop_url' => is_array($diagnosticRow) ? ($diagnosticRow['shop_url'] ?? $diagnosticRow['url'] ?? $diagnosticRow['link'] ?? $diagnosticRow['public_url'] ?? $diagnosticRow['marketplace_url'] ?? null) : null,
+                'returned_url_fields' => is_array($diagnosticRow) ? $this->extractUrlFields($diagnosticRow) : [],
                 'returned_candidates_count' => count($rows),
                 'matched_candidate_index' => $matchedIndex,
                 'mismatch_sample_ids' => array_values(array_slice(array_map(fn (array $candidate): ?string => $this->firstString($candidate, ['id', 'external_id', 'part_id', 'ovoko_part_id', 'rrr_id']), $rows), 0, 5)),
@@ -336,8 +359,24 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
                 'raw' => is_array($row) ? $row : null,
             ];
         } catch (\Throwable $e) {
-            return ['endpoint' => $endpoint, 'request_fields' => array_keys($fields), 'http_status' => null, 'api_status_code' => null, 'api_ok' => false, 'matched_requested_id' => false, 'returned_raw_id' => null, 'returned_external_id' => null, 'returned_name' => null, 'returned_category_id' => null, 'returned_shop_url' => null, 'returned_candidates_count' => 0, 'matched_candidate_index' => null, 'mismatch_sample_ids' => [], 'returned_pagination' => null, 'returned_pagination_count' => null, 'top_level_keys' => [], 'error' => $e->getMessage(), 'raw' => null];
+            return ['method' => 'GET', 'endpoint' => $endpoint, 'query_params' => $this->sanitizeQueryFields($fields), 'request_fields' => array_keys($fields), 'http_status' => null, 'api_status_code' => null, 'api_ok' => false, 'matched_requested_id' => false, 'returned_raw_id' => null, 'returned_external_id' => null, 'returned_name' => null, 'returned_category_id' => null, 'returned_shop_url' => null, 'returned_candidates_count' => 0, 'matched_candidate_index' => null, 'mismatch_sample_ids' => [], 'returned_pagination' => null, 'returned_pagination_count' => null, 'top_level_keys' => [], 'error' => $e->getMessage(), 'raw' => null];
         }
+    }
+
+    private function sanitizeQueryFields(array $fields): array
+    {
+        return $fields;
+    }
+
+    private function extractUrlFields(array $row): array
+    {
+        return array_filter([
+            'url' => $this->stringOrNull($row['url'] ?? null),
+            'shop_url' => $this->stringOrNull($row['shop_url'] ?? null),
+            'link' => $this->stringOrNull($row['link'] ?? null),
+            'public_url' => $this->stringOrNull($row['public_url'] ?? null),
+            'marketplace_url' => $this->stringOrNull($row['marketplace_url'] ?? null),
+        ], fn ($value) => $value !== null);
     }
 
     private function matchesRequestedId(string $requestedId, ?string $requestedExternalId, ?array $row, array $normalized): bool
@@ -388,7 +427,7 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
             'original_currency' => $row['original_currency'] ?? null,
             'quantity' => $row['quantity'] ?? $row['stock'] ?? $row['qty'] ?? null,
             'status' => $row['status'] ?? null,
-            'url' => $row['shop_url'] ?? $row['url'] ?? $row['link'] ?? null,
+            'url' => $row['shop_url'] ?? $row['url'] ?? $row['link'] ?? $row['public_url'] ?? $row['marketplace_url'] ?? null,
             'ovoko_category_id' => $row['category_id'] ?? $row['categoryId'] ?? $row['part_category_id'] ?? $category['id'] ?? $category['category_id'] ?? $category['categoryId'] ?? null,
             'ovoko_category_name' => $row['category_name'] ?? $row['categoryName'] ?? $category['name'] ?? $category['category_name'] ?? $category['pl'] ?? $category['en'] ?? null,
             'ovoko_category_path' => $row['category_title_path'] ?? $row['category_path'] ?? $row['categoryPath'] ?? $category['path'] ?? $category['category_path'] ?? $category['category_title_path'] ?? null,
