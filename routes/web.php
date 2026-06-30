@@ -59,6 +59,7 @@ use App\Http\Controllers\Tools\OvokoStockReconciliationController;
 use App\Http\Controllers\Tools\OvokoListingUrlBackfillController;
 use App\Http\Controllers\Tools\MarketplaceOrdersResetController;
 use App\Http\Controllers\Tools\MarketplaceOrdersSyncController;
+use App\Http\Controllers\Tools\MarketplaceOrderFulfillmentSyncController;
 use App\Http\Controllers\Tools\MarketplaceOrdersTimezoneFixController;
 use App\Http\Controllers\Tools\PartMarketplaceReadinessController;
 use App\Http\Controllers\Tools\MarketplacePublishPartController;
@@ -224,6 +225,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/marketplace/ovoko-url-backfill', OvokoListingUrlBackfillController::class)->name('admin.tools.marketplace.ovoko-url-backfill');
     Route::match(['get', 'post'], '/admin/tools/marketplace/orders-reset', MarketplaceOrdersResetController::class)->name('admin.tools.marketplace.orders-reset');
     Route::match(['get', 'post'], '/admin/tools/marketplace/orders-sync', MarketplaceOrdersSyncController::class)->name('admin.tools.marketplace.orders-sync');
+    Route::match(['get', 'post'], '/admin/tools/marketplace/orders/{order}/fulfillment-sync', MarketplaceOrderFulfillmentSyncController::class)->name('admin.tools.marketplace.orders.fulfillment-sync');
     Route::get('/admin/tools/marketplace/orders-timezone-fix', MarketplaceOrdersTimezoneFixController::class)->name('admin.tools.marketplace.orders-timezone-fix');
 });
 
