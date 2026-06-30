@@ -28,7 +28,9 @@
     $deliveryLabel = $shippingPaymentLines['delivery'] ?? $order->delivery_method;
     $shipment = $order->shipments->sortByDesc('id')->first();
     $isEbayOrder = Str::startsWith($marketplaceKey, 'ebay');
-    $ebayFulfillment = (array) data_get($shipment?->response_payload, 'ebay_fulfillment', []);
+    $isFulfillmentMarketplaceOrder = in_array($marketplaceKey, ['allegro', 'ebay', 'ebay_de', 'ebay_fr'], true);
+    $fulfillmentMeta = is_array($order->meta) ? $order->meta : [];
+    $marketplaceFulfillmentStatus = $fulfillmentMeta['marketplace_fulfillment_status'] ?? null;
     $carrier = $shipment ? (Shipment::CARRIERS[$shipment->carrier] ?? $shipment->carrier) : null;
     $deliveryMethod = trim((string) ($deliveryLabel ?: $carrier ?: $order->delivery_method));
     $deliveryType = trim((string) data_get($order->raw_payload, 'delivery.type', data_get($order->raw_payload, 'delivery_type', data_get($order->raw_payload, 'shipping_type'))));
@@ -388,7 +390,7 @@
         <section class="gps-order-detail-card">
             <div class="gps-order-detail-fact">
                 <div class="gps-order-detail-label">Przesyłka</div>
-                @if ($isEbayOrder)
+                @if ($isFulfillmentMarketplaceOrder)
                     @if (! $shipment)
                         <div class="gps-order-detail-value">Brak przesyłki dla tego zamówienia.</div>
                         <div class="gps-order-shipment-actions">
@@ -403,7 +405,8 @@
                                     <div>Tracking: {{ $shipment->tracking_number ?: $shipment->carrier_shipment_id ?: '—' }}</div>
                                     <div>Status lokalny: {{ $shipment->shipment_status ?: '—' }}</div>
                                     <div>Utworzono: {{ $shipment->created_at?->format('Y-m-d H:i') ?: '—' }}</div>
-                                    <div>eBay tracking: {{ ($ebayFulfillment['ok'] ?? false) ? 'wysłany' : (($ebayFulfillment['error'] ?? null) ? 'błąd: '.$ebayFulfillment['error'] : 'brak potwierdzenia') }}</div>
+                                    <div>DHL: numer {{ $shipment->tracking_number ?: $shipment->carrier_shipment_id ?: '—' }}</div>
+                                    <div>Marketplace: {{ $marketplaceFulfillmentStatus === 'synced' ? 'tracking wysłany' : ($marketplaceFulfillmentStatus === 'error' ? 'błąd' : 'tracking nie wysłany') }}</div>
                                 </div>
                                 <div class="gps-order-shipment-actions">
                                     @if ($shipment->label_path)<a class="fi-btn fi-color-primary fi-btn-color-primary fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-primary-500 focus-visible:ring-2 focus-visible:ring-primary-600 dark:bg-primary-500 dark:hover:bg-primary-400 dark:focus-visible:ring-primary-500" href="{{ route('tools.download-shipment-label', $shipment) }}">Pobierz etykietę PDF</a>@endif

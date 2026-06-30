@@ -4,7 +4,6 @@ namespace App\Filament\Pages;
 
 use App\Models\Order;
 use App\Models\Shipment;
-use App\Services\Marketplace\Api\EbayFulfillmentService;
 use App\Services\Shipments\DhlShipmentService;
 use Filament\Notifications\Notification;
 
@@ -24,7 +23,7 @@ class CreateOrderShipment extends CreateShipment
             $order = Order::query()->findOrFail($order);
         }
 
-        abort_unless(str_starts_with(strtolower((string) $order->marketplace), 'ebay'), 404);
+        abort_unless(in_array(strtolower((string) $order->marketplace), ['allegro', 'ebay', 'ebay_de', 'ebay_fr'], true), 404);
 
         $this->order = $order;
         $this->dhlForm = $dhl->defaults($order);
@@ -33,17 +32,21 @@ class CreateOrderShipment extends CreateShipment
 
     protected function afterDhlShipmentCreated(Shipment $shipment): void
     {
-        $result = ['status' => 'skipped'];
+        $shipment->forceFill([
+            'response_payload' => array_merge((array) $shipment->response_payload, [
+                'marketplace_fulfillment' => [
+                    'status' => 'not_sent',
+                    'reason' => 'Fulfillment write is manual-only via the hidden admin fulfillment-sync endpoint.',
+                ],
+            ]),
+        ])->save();
 
-        try {
-            $result = app(EbayFulfillmentService::class)->sendTracking($this->order, $shipment);
-            Notification::make()->title('Tracking wysłany do eBay')->body('Numer: '.$shipment->tracking_number)->success()->send();
-        } catch (\Throwable $exception) {
-            $result = ['ok' => false, 'error' => $exception->getMessage(), 'failed_at' => now()->toISOString()];
-            Notification::make()->title('DHL utworzony, ale eBay odrzucił tracking')->body($exception->getMessage())->danger()->persistent()->send();
-        }
+        Notification::make()
+            ->title('Utworzono przesyłkę DHL')
+            ->body('Tracking nie został automatycznie wysłany do marketplace. Użyj endpointu fulfillment dry-run/apply.')
+            ->success()
+            ->send();
 
-        $shipment->forceFill(['response_payload' => array_merge((array) $shipment->response_payload, ['ebay_fulfillment' => $result])])->save();
         $this->redirect(\App\Filament\Resources\OrderResource::getUrl('view', ['record' => $this->order]));
     }
 }
