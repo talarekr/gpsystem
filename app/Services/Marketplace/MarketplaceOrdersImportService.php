@@ -5,6 +5,7 @@ namespace App\Services\Marketplace;
 use App\Models\MarketplaceAccount;
 use App\Models\Order;
 use App\Services\Marketplace\Api\AllegroApiClient;
+use App\Services\Marketplace\MarketplaceOrderTimeService;
 use App\Support\Marketplace\EbayOAuthConfig;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Arr;
@@ -14,6 +15,7 @@ use Throwable;
 
 class MarketplaceOrdersImportService
 {
+    public function __construct(private readonly MarketplaceOrderTimeService $timeService) {}
     public const LIVE_BATCH = 'manual_marketplace_orders_live';
     public const TEST_BATCH = 'marketplace_orders_ui_test';
 
@@ -89,7 +91,14 @@ class MarketplaceOrdersImportService
                 if (($normalized['ordered_at'] ?? null) === null) {
                     $result['warnings'][] = ['marketplace' => $marketplace, 'code' => 'missing_ordered_at', 'marketplace_order_id' => $normalized['marketplace_order_id']];
                 }
-                if ($dryRun) { $result['would_import'][] = Arr::only($normalized, ['marketplace','provider','marketplace_order_id','dedupe_key','source_marketplace_id','marketplace_status','ordered_at','buyer_name','total_amount','delivery_amount','currency','amount_source','total_amount_source','delivery_amount_source']); continue; }
+                if ($dryRun) {
+                    $preview = Arr::only($normalized, ['marketplace','provider','marketplace_order_id','dedupe_key','source_marketplace_id','marketplace_status','ordered_at','buyer_name','total_amount','delivery_amount','currency','amount_source','total_amount_source','delivery_amount_source']);
+                    $preview['ordered_at_utc'] = $normalized['ordered_at_utc'] ?? null;
+                    $preview['ordered_at_local'] = $normalized['ordered_at_local'] ?? null;
+                    $preview['timezone'] = MarketplaceOrderTimeService::LOCAL_TIMEZONE;
+                    $result['would_import'][] = $preview;
+                    continue;
+                }
                 $this->upsertOrder($normalized, $raw, $result, (bool) ($options['live_import'] ?? false));
             }
         } catch (Throwable $e) {
@@ -256,13 +265,18 @@ class MarketplaceOrdersImportService
         $items = $raw['lineItems'] ?? $raw['line_items'] ?? $raw['items'] ?? [];
         $total = $raw['summary']['totalToPay'] ?? $raw['pricingSummary']['total'] ?? $raw['total'] ?? [];
         $shipping = $raw['summary']['delivery'] ?? $raw['pricingSummary']['deliveryCost'] ?? $raw['deliveryCost'] ?? [];
+        $orderedAtUtc = $this->orderedAtUtc($marketplace, $raw, array_values(array_filter($items, 'is_array')));
+        $orderedAtLocal = $this->timeService->marketplaceUtcToLocalStorage($orderedAtUtc);
+
         return [
             'marketplace' => $this->orderProvider($marketplace),
             'provider' => $this->orderProvider($marketplace),
             'marketplace_order_id' => (string) ($raw['id'] ?? $raw['orderId'] ?? $raw['order_id'] ?? ''),
             'source_marketplace_id' => $this->responseMarketplaceId($raw),
             'marketplace_status' => (string) ($raw['status'] ?? $raw['orderFulfillmentStatus'] ?? ''),
-            'ordered_at' => $this->orderedAt($marketplace, $raw, array_values(array_filter($items, 'is_array'))),
+            'ordered_at_utc' => $this->timeService->marketplaceUtcIso($orderedAtUtc),
+            'ordered_at_local' => $orderedAtLocal,
+            'ordered_at' => $orderedAtLocal,
             'buyer_name' => trim((string) ($buyer['login'] ?? $buyer['username'] ?? $buyer['fullName'] ?? $buyer['name'] ?? $raw['buyer_name'] ?? 'Marketplace buyer')),
             'buyer_email' => (string) ($buyer['email'] ?? $raw['buyer_email'] ?? ''),
             'buyer_phone' => (string) ($buyer['phoneNumber'] ?? $buyer['phone'] ?? $address['phoneNumber'] ?? ''),
@@ -364,7 +378,7 @@ class MarketplaceOrdersImportService
     }
 
 
-    private function orderedAt(string $marketplace, array $raw, array $items): ?string
+    private function orderedAtUtc(string $marketplace, array $raw, array $items): ?string
     {
         $orderLevelKeys = $marketplace === 'allegro'
             ? ['boughtAt', 'orderedAt', 'purchasedAt', 'createdAt', 'creationDate', 'created_at', 'checkoutCompletedAt']

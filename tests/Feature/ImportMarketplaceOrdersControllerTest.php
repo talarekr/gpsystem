@@ -36,7 +36,10 @@ class ImportMarketplaceOrdersControllerTest extends TestCase
         $response->assertOk()
             ->assertJsonPath('marketplaces.allegro.api_http_status', 200)
             ->assertJsonPath('marketplaces.allegro.orders_fetched', 1)
-            ->assertJsonPath('marketplaces.allegro.would_import.0.ordered_at', '2026-06-10T12:00:00.000Z')
+            ->assertJsonPath('marketplaces.allegro.would_import.0.ordered_at', '2026-06-10 14:00:00')
+            ->assertJsonPath('marketplaces.allegro.would_import.0.ordered_at_utc', '2026-06-10T12:00:00.000Z')
+            ->assertJsonPath('marketplaces.allegro.would_import.0.ordered_at_local', '2026-06-10 14:00:00')
+            ->assertJsonPath('marketplaces.allegro.would_import.0.timezone', 'Europe/Warsaw')
             ->assertJsonPath('marketplaces.allegro.safety_flags.read_only', true)
             ->assertJsonPath('marketplaces.allegro.safety_flags.orders_changed', false)
             ->assertJsonPath('marketplaces.allegro.safety_flags.allegro_write', false);
