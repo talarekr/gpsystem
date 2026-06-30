@@ -296,6 +296,87 @@ class EbayApiClient extends AbstractMarketplaceApiClient
         ]);
     }
 
+    public function getItemDescriptionByItemId(string $itemId): array
+    {
+        $readiness = $this->getAccountReadiness();
+        $siteId = (string) (($this->account?->api_settings ?? [])['site_id'] ?? ($this->marketplaceId() === 'EBAY_FR' ? '71' : '77'));
+        $base = [
+            'ok' => false,
+            'read_only' => true,
+            'api_endpoint_family' => 'trading.get_item',
+            'live_description_source' => 'not_available',
+            'item_id' => $itemId,
+            'trading_site_id' => $siteId,
+            'trading_http_status' => null,
+            'description_html' => null,
+            'description_length' => 0,
+            'blockers' => $readiness['blockers'] ?? [],
+            'warnings' => ['Read-only eBay Trading API GetItem lookup only; no write, publish, revise, relist, end, stock, price, or local mutation is performed.'],
+        ];
+        if ($base['blockers'] !== []) return $base;
+
+        $credentials = $this->credentials();
+        $token = $this->accessToken();
+        if (blank($token)) return array_merge($base, ['blockers' => ['Credential access_token is missing.']]);
+
+        $xml = '<?xml version="1.0" encoding="utf-8"?>'
+            .'<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+            .'<RequesterCredentials><eBayAuthToken>'.htmlspecialchars($token, ENT_XML1).'</eBayAuthToken></RequesterCredentials>'
+            .'<ItemID>'.htmlspecialchars($itemId, ENT_XML1).'</ItemID>'
+            .'<DetailLevel>ReturnAll</DetailLevel>'
+            .'</GetItemRequest>';
+
+        $response = Http::withHeaders(array_filter([
+                'X-EBAY-API-CALL-NAME' => 'GetItem',
+                'X-EBAY-API-SITEID' => $siteId,
+                'X-EBAY-API-COMPATIBILITY-LEVEL' => (string) (($this->account?->api_settings ?? [])['trading_compatibility_level'] ?? '967'),
+                'X-EBAY-API-IAF-TOKEN' => $token,
+                'X-EBAY-API-APP-NAME' => $credentials['client_id'] ?? null,
+                'Content-Type' => 'text/xml',
+            ]))
+            ->timeout(20)
+            ->withBody($xml, 'text/xml')
+            ->post($this->tradingApiUrl());
+
+        $description = null;
+        $ack = null;
+        $errorMessage = null;
+        if ($response->successful() && trim($response->body()) !== '') {
+            libxml_use_internal_errors(true);
+            $parsed = simplexml_load_string($response->body());
+            if ($parsed instanceof \SimpleXMLElement) {
+                $parsed->registerXPathNamespace('e', 'urn:ebay:apis:eBLBaseComponents');
+                $ack = (string) ($parsed->Ack ?? '');
+                $nodes = $parsed->xpath('//e:Item/e:Description') ?: $parsed->xpath('//Item/Description') ?: [];
+                $description = isset($nodes[0]) ? (string) $nodes[0] : null;
+                $errors = $parsed->xpath('//e:Errors/e:LongMessage') ?: $parsed->xpath('//Errors/LongMessage') ?: [];
+                $errorMessage = isset($errors[0]) ? (string) $errors[0] : null;
+            }
+            libxml_clear_errors();
+        }
+
+        $hasDescription = is_string($description) && trim($description) !== '';
+
+        return array_merge($base, [
+            'ok' => $response->successful() && $hasDescription,
+            'live_description_source' => $hasDescription ? 'ebay_trading_get_item' : 'not_available',
+            'trading_http_status' => $response->status(),
+            'trading_ack' => $ack,
+            'description_html' => $description,
+            'description_length' => is_string($description) ? mb_strlen($description) : 0,
+            'blockers' => $hasDescription ? [] : array_values(array_filter(['cannot_fetch_live_description', $errorMessage])),
+        ]);
+    }
+
+    private function tradingApiUrl(): string
+    {
+        $settings = is_array($this->account?->api_settings) ? $this->account->api_settings : [];
+        if (filled($settings['trading_api_url'] ?? null)) return (string) $settings['trading_api_url'];
+        $baseUrl = (string) $this->account?->api_base_url;
+        if (str_contains($baseUrl, 'sandbox')) return 'https://api.sandbox.ebay.com/ws/api.dll';
+        return 'https://api.ebay.com/ws/api.dll';
+    }
+
     private function normalizeBrowseItemStatus(int $httpStatus, array $payload): string
     {
         if ($httpStatus === 404) return 'not_found';
