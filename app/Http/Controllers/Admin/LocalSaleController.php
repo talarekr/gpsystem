@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\LocalSale;
 use App\Models\Part;
 use App\Models\ShopEvent;
+use App\Services\Marketplace\LocalSaleEndMarketplacesService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -13,7 +14,7 @@ use Illuminate\Validation\ValidationException;
 
 class LocalSaleController extends Controller
 {
-    public function store(Request $request): JsonResponse
+    public function store(Request $request, LocalSaleEndMarketplacesService $marketplaceService): JsonResponse
     {
         $data = $request->validate([
             'part_id' => ['required', 'integer', 'exists:parts,id'],
@@ -120,9 +121,12 @@ class LocalSaleController extends Controller
             return response()->json(['message' => 'Nie udało się zapisać sprzedaży lokalnej.'], 500);
         }
 
+        $marketplaceSummary = $marketplaceService->apply($localSale->part()->firstOrFail());
+
         return response()->json([
             'message' => 'Sprzedaż lokalna została zapisana, a część zdjęta ze stanu.',
             'local_sale_id' => $localSale->id,
+            'marketplace_summary' => $marketplaceSummary,
         ]);
     }
 }
