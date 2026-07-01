@@ -183,7 +183,7 @@ class OvokoPublishAdapterTest extends TestCase
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://ovoko.example.test/crm/importCar');
     }
 
-    public function test_ovoko_publish_blocks_local_car_without_ovoko_car_id_with_clear_diagnostics(): void
+    public function test_ovoko_publish_uses_local_car_id_fallback_when_car_has_no_stored_ovoko_id(): void
     {
         $category = PartCategory::query()->create(['name' => 'Alternatory']);
         MarketplaceCategoryMapping::query()->create(['local_category_id' => $category->id, 'channel' => 'ovoko', 'external_category_id' => '252']);
@@ -192,17 +192,19 @@ class OvokoPublishAdapterTest extends TestCase
         $part = Part::query()->create(['sku' => 'GPS-OVOKO-NOCAR', 'name' => 'Part no car id', 'part_number' => 'LRE', 'price' => 100, 'ovoko_price' => 120, 'quantity' => 1, 'category_id' => $category->id, 'car_id' => $car->id]);
         DB::table('part_images')->insert(['part_id' => $part->id, 'path' => 'parts/photos/complete.jpg', 'sort_order' => 1, 'is_primary' => true, 'created_at' => now(), 'updated_at' => now()]);
         $this->enableFlags();
-        Http::fake();
+        Http::fake(['https://ovoko.example.test/crm/importPart' => Http::response(['part_id' => 288656, 'msg' => 'OK', 'status_code' => 'R200'], 200)]);
 
         $result = app(PublishPartToMarketplacesService::class)->confirm($part, ['ovoko'], dryRun: false, confirm: true);
 
-        $this->assertFalse($result['channels']['ovoko']['success']);
-        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://ovoko.example.test/crm/importPart');
+        $this->assertTrue($result['channels']['ovoko']['success']);
+        Http::assertSent(fn ($request): bool => $request->url() === 'https://ovoko.example.test/crm/importPart' && str_contains($request->body(), 'car_id='.$car->id));
         $payload = MarketplaceSyncLog::query()->where('marketplace', 'ovoko')->where('action', 'crm/importPart')->latest('id')->firstOrFail()->payload;
         $this->assertSame($car->id, data_get($payload, 'request.local_car_id'));
         $this->assertSame('Audi', data_get($payload, 'request.local_car_make'));
-        $this->assertFalse(data_get($payload, 'request.ovoko_car_id_present'));
-        $this->assertSame('missing_ovoko_car_id', data_get($payload, 'request.blocked_reason'));
+        $this->assertSame($car->id, data_get($payload, 'request.ovoko_car_id'));
+        $this->assertTrue(data_get($payload, 'request.ovoko_car_id_present'));
+        $this->assertSame('local_car_id_fallback', data_get($payload, 'request.ovoko_car_id_source'));
+        $this->assertNull(data_get($payload, 'request.blocked_reason'));
     }
 
     public function test_ovoko_publish_sends_car_id_when_local_car_has_ovoko_id(): void

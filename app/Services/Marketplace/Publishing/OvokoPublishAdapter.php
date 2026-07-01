@@ -271,12 +271,16 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
 
     private function ovokoCarDiagnostics(Part $part, array $vehicle, array $settings): array
     {
+        $storedOvokoCarId = $part->car?->getAttribute('ovoko_car_id')
+            ?? $part->car?->external_id
+            ?? data_get($part->car?->legacy_payload, 'ovoko_car_id')
+            ?? data_get($part->car?->legacy_payload, 'rrr_car_id')
+            ?? ($vehicle['ovoko_car_id'] ?? null)
+            ?? ($vehicle['rrr_car_id'] ?? null);
+
         $candidates = [
-            'car.external_id' => $part->car?->external_id ?? null,
-            'car.legacy_payload.ovoko_car_id' => data_get($part->car?->legacy_payload, 'ovoko_car_id'),
-            'car.legacy_payload.rrr_car_id' => data_get($part->car?->legacy_payload, 'rrr_car_id'),
-            'payload.vehicle.rrr_car_id' => $vehicle['rrr_car_id'] ?? null,
-            'payload.vehicle.ovoko_car_id' => $vehicle['ovoko_car_id'] ?? null,
+            'stored_ovoko_car_id' => $storedOvokoCarId,
+            'local_car_id_fallback' => $part->car?->id,
             'account.settings.default_car_id' => $settings['default_car_id'] ?? null,
         ];
         $id = null; $source = null;
