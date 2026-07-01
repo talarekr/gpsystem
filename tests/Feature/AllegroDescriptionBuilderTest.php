@@ -61,6 +61,45 @@ class AllegroDescriptionBuilderTest extends TestCase
         $this->assertSame(['Moc silnika'], $response->json('payload.allegro_description_diagnostics.optional_donor_vehicle_fields_missing'));
     }
 
+
+    public function test_allegro_uses_same_local_description_source_as_ebay_and_ovoko_when_main_description_exists(): void
+    {
+        Http::fake($this->fakeAllegro());
+        $part = $this->readyPart();
+        $part->forceFill(['description' => '<p>Informacje o części: lokalny opis HTML</p>', 'short_description' => 'Krótki opis'])->save();
+
+        $response = $this->getJson('/tools/dry-run-marketplace-listing-payload?token=gps_images_import_2026&channel=allegro_main&part_id='.$part->id);
+
+        $response->assertOk();
+        $content = $response->json('payload.description.sections.0.items.0.content');
+        $this->assertStringContainsString('Informacje o części: lokalny opis HTML', $content);
+        $this->assertSame('TEXT', $response->json('payload.description.sections.0.items.0.type'));
+        $this->assertNotContains('missing_part_description', $response->json('blockers') ?? []);
+        $this->assertTrue($response->json('payload.allegro_description_diagnostics.local_description_present'));
+        $this->assertSame('part.description', $response->json('payload.allegro_description_diagnostics.local_description_source'));
+        $this->assertSame('part.description', $response->json('payload.allegro_description_diagnostics.ebay_description_source'));
+        $this->assertSame('part.description', $response->json('payload.allegro_description_diagnostics.ovoko_description_source'));
+        $this->assertSame('part.description', $response->json('payload.allegro_description_diagnostics.allegro_description_source'));
+        $this->assertGreaterThan(0, $response->json('payload.allegro_description_diagnostics.allegro_description_raw_length'));
+        $this->assertGreaterThan(0, $response->json('payload.allegro_description_diagnostics.allegro_description_sanitized_length'));
+        $this->assertSame(1, $response->json('payload.allegro_description_diagnostics.allegro_description_sections_count'));
+        $this->assertTrue($response->json('payload.allegro_description_diagnostics.allegro_description_has_non_empty_content'));
+        $this->assertFalse($response->json('payload.allegro_description_diagnostics.description_source_mismatch'));
+    }
+
+    public function test_allegro_preserves_text_when_description_contains_html(): void
+    {
+        Http::fake($this->fakeAllegro());
+        $part = $this->readyPart();
+        $part->forceFill(['description' => '<div><strong>Opis z HTML</strong><script>bad()</script></div>'])->save();
+
+        $response = $this->getJson('/tools/dry-run-marketplace-listing-payload?token=gps_images_import_2026&channel=allegro_main&part_id='.$part->id);
+
+        $response->assertOk();
+        $this->assertStringContainsString('Opis z HTML', $response->json('payload.description.sections.0.items.0.content'));
+        $this->assertGreaterThan(0, $response->json('payload.allegro_description_diagnostics.allegro_description_sanitized_length'));
+    }
+
     /** @dataProvider blockerCases */
     public function test_allegro_description_readiness_blockers(string $mutation, string $expectedBlocker): void
     {
