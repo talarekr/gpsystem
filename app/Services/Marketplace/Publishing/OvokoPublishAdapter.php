@@ -80,7 +80,7 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
             'category_id' => $payload['category_id'] ?? null,
             'car_id' => $car['ovoko_car_id'] ?? null,
             'quality' => $condition['ovoko_quality'],
-            'status' => $condition['ovoko_status'] ?? $payload['status'] ?? $settings['default_part_status'] ?? $settings['ovoko_default_part_status'] ?? null,
+            'status' => $payload['status'] ?? $settings['default_part_status'] ?? $settings['ovoko_default_part_status'] ?? null,
             'price' => $readiness['marketplace_price'] ?? $payload['price_pln'] ?? null,
             'original_currency' => $readiness['currency'] ?? $payload['currency'] ?? 'PLN',
             'external_id' => $payload['sku'] ?? $part->sku ?? ('gps-part-'.$part->id),
@@ -91,13 +91,13 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
             'notes' => trim(strip_tags((string) (($part->description ?? null) ?: ($part->short_description ?? null) ?: ($part->condition_notes ?? null)))) ?: null,
             'photo' => $ovokoPhotoUrls[0] ?? null,
             'photos[]' => $ovokoPhotoUrls,
-        ], fn ($value) => is_int($value) || is_float($value) || $value === '0' || ! blank($value));
+        ], fn ($value) => ! blank($value));
 
         $missing = [];
         if (blank($fields['category_id'] ?? null)) $missing[] = 'Ovoko: brakuje category_id dla wybranej kategorii '.($payload['category_mapping_name'] ?? $payload['category_mapping_path'] ?? $payload['local_category_id'] ?? 'części');
         if (blank($fields['car_id'] ?? null)) $missing[] = 'Ovoko: wybrane auto nie ma RRR/Ovoko car_id. Najpierw utwórz/mapuj auto w Ovoko i zapisz jego car_id przy lokalnym aucie.';
         if (blank($fields['quality'] ?? null)) $missing[] = 'Ovoko: nie udało się zmapować quality z wartości '.($part->condition_notes ?? '');
-        if (! array_key_exists('status', $fields) || blank($fields['status']) && $fields['status'] !== 0 && $fields['status'] !== '0') $missing[] = 'Uzupełnij domyślny status części Ovoko w ustawieniach konta.';
+        if (blank($fields['status'] ?? null)) $missing[] = 'Uzupełnij domyślny status części Ovoko w ustawieniach konta.';
         if (blank($fields['photo'] ?? null)) $missing[] = 'Ovoko: zdjęcie części musi być publicznym URL-em HTTP/HTTPS. Szczegóły są w Logach.';
         $diagnostics = array_merge($condition, ['ovoko_status' => $fields['status'] ?? null], $car, $partCodeDiagnostics);
         if (blank($fields['car_id'] ?? null)) $diagnostics['blocked_reason'] = 'missing_ovoko_car_id';
@@ -296,17 +296,7 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
 
     private function ovokoConditionDiagnostics(Part $part): array
     {
-        return [
-            'local_condition' => $part->condition_notes,
-            'ovoko_quality' => 1,
-            'ovoko_status' => 0,
-            'ovoko_condition_field_name' => 'status',
-            'ovoko_condition_value' => 0,
-            'ovoko_condition_meaning' => 'used',
-            'condition_source' => 'business_rule_all_gp_swiss_parts_are_used',
-            'condition_mapped_as_used' => true,
-            'condition_mapping_verified' => true,
-        ];
+        return ['local_condition' => $part->condition_notes, 'ovoko_quality' => 1, 'ovoko_status' => null, 'condition_source' => 'business_rule_all_gp_swiss_parts_are_used', 'condition_mapped_as_used' => true];
     }
 
     private function looksLikeTitleCode(string $value, string $title = ''): bool
