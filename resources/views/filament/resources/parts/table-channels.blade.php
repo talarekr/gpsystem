@@ -30,13 +30,12 @@
 
         .gps-admin-channels .part-channel-row {
             display: grid;
-            grid-template-columns: 58px 76px 14px 18px 18px;
+            grid-template-columns: minmax(58px, max-content) minmax(76px, max-content) 14px 14px 16px;
             align-items: center;
             justify-content: flex-start;
             column-gap: 5px;
             width: 100%;
             max-width: 100%;
-            position: relative;
             white-space: nowrap;
             overflow: hidden;
             font-size: 12px;
@@ -55,7 +54,6 @@
         }
 
         .gps-admin-channels .part-channel-price {
-            width: 76px;
             min-width: 0;
             color: #1e293b;
             white-space: nowrap;
@@ -89,8 +87,8 @@
 
         .gps-admin-channels .part-channel-link-slot {
             display: inline-flex;
-            width: 18px;
-            min-width: 18px;
+            width: 14px;
+            min-width: 14px;
             height: 14px;
             align-items: center;
             justify-content: center;
@@ -121,38 +119,28 @@
             stroke-width: 2;
         }
 
-        .gps-admin-channels .part-channel-map-slot {
+        .gps-admin-channels .part-channel-map {
             position: relative;
-            display: inline-flex;
-            width: 18px;
-            min-width: 18px;
-            height: 16px;
-            align-items: center;
-            justify-content: center;
+            width: 16px;
+            min-width: 16px;
         }
 
-        .gps-admin-channels .part-channel-map__trigger {
+        .gps-admin-channels .part-channel-map summary {
             display: inline-flex;
-            width: 15px;
-            height: 15px;
+            width: 14px;
+            height: 14px;
             align-items: center;
             justify-content: center;
             cursor: pointer;
             color: #64748b;
             border: 1px solid #cbd5e1;
             border-radius: 999px;
-            background: #fff;
             font-size: 11px;
             line-height: 1;
-            padding: 0;
+            list-style: none;
         }
 
-        .gps-admin-channels .part-channel-map__trigger:hover,
-        .gps-admin-channels .part-channel-map__trigger:focus-visible {
-            color: #2563eb;
-            border-color: #93c5fd;
-            outline: none;
-        }
+        .gps-admin-channels .part-channel-map summary::-webkit-details-marker { display: none; }
 
         .gps-admin-channels .part-channel-map__popover {
             position: absolute;
@@ -178,14 +166,6 @@
             font-size: 12px;
         }
 
-        .gps-admin-channels [x-cloak] { display: none !important; }
-
-        .gps-admin-channels .part-channel-map__error {
-            color: #dc2626;
-            font-size: 11px;
-            line-height: 1.2;
-        }
-
         .gps-admin-channels .part-channel-map__popover button {
             align-self: flex-end;
             border: 1px solid #cbd5e1;
@@ -206,7 +186,6 @@
             <span class="part-channel-price">—</span>
             <span class="part-channel-status is-not-listed" title="Brak rekordu">✕</span>
             <span class="part-channel-link-slot" aria-hidden="true"></span>
-            <span class="part-channel-map-slot" aria-hidden="true"></span>
         </div>
     @else
         @foreach ($rows as $row)
@@ -235,42 +214,15 @@
                         </a>
                     @endif
                 </span>
-                <span
-                    class="part-channel-map-slot"
+                <span class="part-channel-map-slot">
                     @if (in_array($row['key'] ?? '', ['allegro', 'ovoko'], true))
-                        x-data="{ open: false, error: '' }"
-                        @keydown.escape.window="open = false"
-                    @endif
-                >
-                    @if (in_array($row['key'] ?? '', ['allegro', 'ovoko'], true))
-                        <button
-                            id="manual-link-trigger-{{ $part->id }}-{{ $row['key'] }}"
-                            type="button"
-                            class="part-channel-map__trigger"
-                            title="Dodaj ręczne mapowanie {{ $row['label'] }}"
-                            aria-label="Dodaj ręczne mapowanie {{ $row['label'] }}"
-                            :aria-expanded="open.toString()"
-                            @click.prevent.stop="open = ! open; error = ''; $nextTick(() => open && $refs.url?.focus())"
-                        >+</button>
-                        <form
-                            id="manual-link-popover-{{ $part->id }}-{{ $row['key'] }}"
-                            class="part-channel-map__popover"
-                            x-cloak
-                            x-show="open"
-                            @click.stop
-                            wire:submit.prevent="saveMarketplaceLinkMapping({{ $part->id }}, '{{ $row['key'] }}', $event.target.marketplace_url.value)"
-                        >
-                            <input
-                                id="manual-link-url-{{ $part->id }}-{{ $row['key'] }}"
-                                x-ref="url"
-                                name="marketplace_url"
-                                type="url"
-                                placeholder="Wklej link aukcji {{ $row['label'] }}"
-                                required
-                            >
-                            <div class="part-channel-map__error" x-text="error" x-show="error"></div>
-                            <button type="submit">Zapisz</button>
-                        </form>
+                        <details class="part-channel-map">
+                            <summary title="Dodaj ręczne mapowanie {{ $row['label'] }}" aria-label="Dodaj ręczne mapowanie {{ $row['label'] }}">+</summary>
+                            <form class="part-channel-map__popover" wire:submit.prevent="saveMarketplaceLinkMapping({{ $part->id }}, '{{ $row['key'] }}', $event.target.marketplace_url.value)">
+                                <input name="marketplace_url" type="url" placeholder="Wklej link aukcji {{ $row['label'] }}" required>
+                                <button type="submit">Zapisz</button>
+                            </form>
+                        </details>
                     @endif
                 </span>
             </div>
