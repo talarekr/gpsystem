@@ -12,6 +12,7 @@ use App\Services\Marketplace\AllegroDescriptionBuilder;
 use App\Services\Marketplace\MarketplaceImageSelectionService;
 use App\Services\Marketplace\AllegroOfferParametersBuilder;
 use App\Services\Marketplace\AllegroSalesSettingsResolver;
+use App\Services\Marketplace\AllegroCompatibilityMappingService;
 use App\Services\Marketplace\Api\AllegroApiClient;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
@@ -50,6 +51,12 @@ class MarketplaceListingDryRunController extends Controller
 
         $readiness = $this->readinessFor($part, $channel);
         $payload = $this->payloadFor($part, $channel, $readiness);
+        if ($channel === 'allegro_main') {
+            $compatibilityDryRun = app(AllegroCompatibilityMappingService::class)->dryRun($part, $payload);
+            $payload = $compatibilityDryRun['publish_payload_preview'] ?? $payload;
+        } else {
+            $compatibilityDryRun = null;
+        }
         $plannedAction = $this->plannedAction($readiness);
 
         return response()->json([
@@ -71,7 +78,11 @@ class MarketplaceListingDryRunController extends Controller
                 'existing_listing' => (bool) ($readiness['existing_listing']['exists'] ?? false),
                 'productSet_0_product_images_count' => count(data_get($payload, 'productSet.0.product.images', [])),
                 'productSet_0_product_main_image_present' => filled(data_get($payload, 'productSet.0.product.images.0')),
+                'productSet_0_product_id' => data_get($payload, 'productSet.0.product.id'),
+                'compatibilityList_type' => data_get($payload, 'compatibilityList.type'),
+                'tecdocSpecification_present' => array_key_exists('tecdocSpecification', $payload),
             ],
+            'allegro_compatibility_dry_run' => $compatibilityDryRun,
             'blockers' => $readiness['blockers'],
             'warnings' => $readiness['warnings'],
         ]);
