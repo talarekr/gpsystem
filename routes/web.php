@@ -37,6 +37,7 @@ use App\Http\Controllers\Tools\MarketplaceApiSettingsDiagnosticsController;
 use App\Http\Controllers\Tools\MarketplaceApiFoundationController;
 use App\Http\Controllers\Tools\MarketplaceListingDryRunController;
 use App\Http\Controllers\Tools\AllegroCompatibilityDryRunController;
+use App\Http\Controllers\Tools\OvokoCarMappingController;
 use App\Http\Controllers\Tools\MarketplaceListingUrlBackfillController;
 use App\Http\Controllers\Tools\EbayListingAuditController;
 use App\Http\Controllers\Tools\EbayDescriptionAuditController;
@@ -251,6 +252,8 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/marketplace/allegro/responsible-producers', [MarketplaceListingDryRunController::class, 'allegroResponsibleProducers'])->name('admin.tools.marketplace.allegro.responsible-producers');
     Route::get('/admin/tools/marketplace/allegro/compatible-products', [MarketplaceListingDryRunController::class, 'allegroCompatibleProducts'])->name('admin.tools.marketplace.allegro.compatible-products');
     Route::get('/admin/tools/allegro/parts/{part}/compatibility-dry-run', AllegroCompatibilityDryRunController::class)->name('admin.tools.allegro.parts.compatibility-dry-run');
+    Route::get('/admin/tools/ovoko/cars/{car}/mapping-dry-run', [OvokoCarMappingController::class, 'dryRun'])->name('admin.tools.ovoko.cars.mapping-dry-run');
+    Route::match(['get', 'post'], '/admin/tools/ovoko/cars/{car}/mapping-apply', [OvokoCarMappingController::class, 'apply'])->name('admin.tools.ovoko.cars.mapping-apply');
     Route::get('/admin/tools/marketplace/allegro/offers/{offerId}/description-update', [MarketplaceListingDryRunController::class, 'allegroDescriptionUpdate'])->name('admin.tools.marketplace.allegro.offers.description-update');
 });
 
