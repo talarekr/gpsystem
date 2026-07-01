@@ -144,6 +144,36 @@ class PartModuleFoundationTest extends TestCase
         $this->assertSame('https://ovoko.pl/czesci-samochodowe/hgf11703', $ovoko['url']);
     }
 
+    public function test_ovoko_channel_diagnostics_explain_missing_url_for_listing_id_only_records(): void
+    {
+        $part = Part::query()->create([
+            'name' => 'Część #7897',
+            'price' => 1250,
+            'ovoko_price' => 1250,
+            'quantity' => 1,
+            'status' => 'ready',
+        ]);
+
+        MarketplaceListing::query()->create([
+            'part_id' => $part->id,
+            'marketplace' => 'ovoko',
+            'external_offer_id' => null,
+            'external_listing_id' => '11703',
+            'price' => 1250,
+            'currency' => 'PLN',
+            'status' => 'published',
+            'url' => null,
+        ]);
+
+        $diagnostics = app(\App\Services\Admin\PartMarketplaceStatusResolver::class)
+            ->diagnosticsForPartChannel($part->fresh('marketplaceListings'), 'ovoko');
+
+        $this->assertTrue($diagnostics['resolved_is_listed']);
+        $this->assertNull($diagnostics['resolved_url']);
+        $this->assertFalse($diagnostics['link_visible']);
+        $this->assertSame('missing_marketplace_listings_url', $diagnostics['link_hidden_reason']);
+    }
+
     public function test_part_can_be_created_with_required_fields_and_safe_defaults(): void
     {
         $part = Part::query()->create(['name' => 'Reflektor lewy']);

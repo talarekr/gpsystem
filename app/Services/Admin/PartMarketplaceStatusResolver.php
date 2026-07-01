@@ -46,6 +46,24 @@ class PartMarketplaceStatusResolver
         ];
     }
 
+    /**
+     * @return array{resolved_is_listed: bool, resolved_url: ?string, link_visible: bool, link_hidden_reason: ?string}
+     */
+    public function diagnosticsForPartChannel(Part $part, string $channel): array
+    {
+        $row = collect($this->rowsForPart($part))->firstWhere('key', $channel);
+        $listed = (bool) ($row['listed'] ?? false);
+        $url = $row['url'] ?? null;
+        $linkVisible = $listed && filled($url);
+
+        return [
+            'resolved_is_listed' => $listed,
+            'resolved_url' => $url,
+            'link_visible' => $linkVisible,
+            'link_hidden_reason' => $linkVisible ? null : $this->linkHiddenReason($listed, $url),
+        ];
+    }
+
 
     /**
      * @param Collection<int, MarketplaceListing> $listings
@@ -145,6 +163,19 @@ class PartMarketplaceStatusResolver
         $url = trim((string) ($listing?->url ?? ''));
 
         return $url === '' ? null : $url;
+    }
+
+    private function linkHiddenReason(bool $listed, mixed $url): ?string
+    {
+        if (! $listed) {
+            return 'not_listed';
+        }
+
+        if (! filled($url)) {
+            return 'missing_marketplace_listings_url';
+        }
+
+        return null;
     }
 
     private function allegroUrl(?MarketplaceListing $listing): ?string

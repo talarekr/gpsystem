@@ -79,6 +79,39 @@ class OvokoListingUrlBackfillControllerTest extends TestCase
             ->assertJsonPath('summary.inspected', 1000);
     }
 
+    public function test_part_specific_admin_alias_repairs_when_confirmed_without_external_writes(): void
+    {
+        $this->actingAsAdminUser();
+
+        $this->mock(OvokoListingUrlBackfillService::class, function ($mock): void {
+            $mock->shouldReceive('run')
+                ->once()
+                ->withArgs(fn (
+                    bool $apply,
+                    bool $force,
+                    ?int $partId,
+                    int $limit,
+                    ?string $csvPath,
+                    ?int $listingId,
+                    int $maxPages
+                ): bool => $apply === true && $force === false && $partId === 7897 && $limit === 100 && $csvPath === null && $listingId === null && $maxPages === 3)
+                ->andReturn([
+                    'mode' => 'apply',
+                    'summary' => ['inspected' => 1, 'updated' => 1],
+                    'results' => [['local_part_id' => 7897, 'action' => 'updated']],
+                    'warnings' => [],
+                ]);
+        });
+
+        $this->getJson('/admin/tools/ovoko/listing-url-backfill?part_id=7897&confirm=ovoko-url-backfill')
+            ->assertOk()
+            ->assertJsonPath('dry_run', false)
+            ->assertJsonPath('apply_confirmed', true)
+            ->assertJsonPath('ovoko_write', false)
+            ->assertJsonPath('publish', false)
+            ->assertJsonPath('summary.updated', 1);
+    }
+
 
     public function test_bulk_offset_returns_distinct_non_overlapping_diagnostic_ranges(): void
     {
