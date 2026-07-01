@@ -111,7 +111,7 @@ class MarketplaceListingReadinessService
             else { $notes['ebay_category_mapping'] = ['source' => 'marketplace_category_mappings', 'channel' => $categoryMapping->channel, 'external_category_id' => $categoryMapping->external_category_id]; }
             if (! $this->isGoogleTranslateConfigured()) { $missing[] = 'translation_credentials'; $warnings[] = 'Google Translate credentials are not configured for later title/description/condition translation dry-runs.'; }
             $preparedTranslation = $this->preparedTranslation($part, $channel);
-            if (($preparedTranslation['status'] ?? 'not_prepared') !== 'prepared') { $missing[] = 'prepared_translations'; $warnings[] = 'Tłumaczenia nieprzygotowane — użyj przycisku Przygotuj.'; }
+            if (($preparedTranslation['status'] ?? 'not_prepared') !== 'prepared') { $missing[] = 'prepared_translations'; $warnings[] = 'Tłumaczenia nieprzygotowane — użyj przycisku Przygotuj.'; $blockers[] = 'Brak przygotowanego tłumaczenia '.($channel === 'ebay_de' ? 'eBay DE' : 'eBay FR'); }
             $titleSanitization = $this->ebayTitleSanitization($part, $channel, $preparedTranslation);
             if (($titleSanitization['blocker'] ?? null) === 'ebay_title_too_long_after_cleanup') { $missing[] = 'ebay_title'; $blockers[] = 'ebay_title_too_long_after_cleanup'; }
             $notes['ebay_title'] = $titleSanitization['diagnostics'] ?? null;
@@ -169,6 +169,7 @@ class MarketplaceListingReadinessService
         foreach (($vehicle['attributes_source'] ?? []) as $key => $value) {
             if (is_string($value) && trim($value) !== '') $fields['vehicle.'.$key] = $value;
         }
+        $originalPlTitle = $fields['title'];
         $translated = [];
         $translatedFields = [];
         $untranslatedFields = [];
@@ -179,7 +180,7 @@ class MarketplaceListingReadinessService
             if ($local !== null) { $translated[$key] = $local; $translatedFields[] = $key; continue; }
             $result = app(GoogleTranslateService::class)->translate((string) $value, $language, 'pl');
             if (($result['ok'] ?? false) && filled($result['translated_text'] ?? null)) { $translated[$key] = (string) $result['translated_text']; $translatedFields[] = $key; }
-            else { $translated[$key] = (string) $value; $untranslatedFields[] = $key; $blockers = array_merge($blockers, (array) ($result['blockers'] ?? ['translation_failed'])); }
+            else { $translated[$key] = (string) $value; $untranslatedFields[] = $key; $blockers = array_merge($blockers, $this->normalizeGoogleTranslateBlockers((array) ($result['blockers'] ?? ['translation_failed']))); }
         }
         if ($channel === 'ebay_de') {
             $titleSanitization = $this->ebayTitleSanitizer->sanitizeForEbayDe($part, $translated['title'] ?? $fields['title'], $fields['title']);
@@ -201,7 +202,8 @@ class MarketplaceListingReadinessService
             'title_sanitization' => $channel === 'ebay_de' ? ($titleSanitization['diagnostics'] ?? null) : null,
         ]);
         $part->forceFill(['review_metadata' => $metadata])->save();
-        return ['ok' => $blockers === [], 'channel' => $channel, 'translation_status' => $blockers === [] ? 'prepared' : 'failed', 'translation_language' => $language, 'translated_fields' => $translatedFields, 'untranslated_fields' => $untranslatedFields, 'item_specifics_translated_fields' => array_keys($itemSpecifics), 'blockers' => array_values(array_unique($blockers)), 'will_make_marketplace_request' => false];
+        $diagnostics = $channel === 'ebay_de' ? ($titleSanitization['diagnostics'] ?? []) : [];
+        return ['ok' => $blockers === [], 'channel' => $channel, 'translation_status' => $blockers === [] ? 'prepared' : 'failed', 'translation_language' => $language, 'prepared_translation_created' => $blockers === [], 'original_pl_title' => $originalPlTitle, 'translated_title_before_cleanup' => $diagnostics['translated_title_before_cleanup'] ?? ($translated['title'] ?? $originalPlTitle), 'final_title' => $diagnostics['final_title'] ?? ($translated['title'] ?? $originalPlTitle), 'final_length' => $diagnostics['final_length'] ?? mb_strlen((string) ($translated['title'] ?? $originalPlTitle)), 'title_limit' => $diagnostics['title_limit'] ?? EbayTitleSanitizer::LIMIT, 'removed_tokens' => $diagnostics['removed_tokens'] ?? [], 'protected_tokens' => $diagnostics['protected_tokens'] ?? [], 'protected_tokens_preserved' => $diagnostics['protected_tokens_preserved'] ?? true, 'cleanup_applied' => $diagnostics['cleanup_applied'] ?? false, 'blocker' => array_values(array_unique($blockers))[0] ?? null, 'translated_fields' => $translatedFields, 'untranslated_fields' => $untranslatedFields, 'item_specifics_translated_fields' => array_keys($itemSpecifics), 'blockers' => array_values(array_unique($blockers)), 'will_make_marketplace_request' => false];
     }
 
     public function checkAll(Part $part): array
@@ -518,6 +520,15 @@ class MarketplaceListingReadinessService
         }
 
         return $preview;
+    }
+    private function normalizeGoogleTranslateBlockers(array $blockers): array
+    {
+        return array_values(array_unique(array_map(function ($blocker): string {
+            $message = strtolower((string) $blocker);
+            if (str_contains($message, 'disabled') || str_contains($message, 'enabled=false')) return 'google_translate_disabled';
+            if (str_contains($message, 'api key') || str_contains($message, 'api_key') || str_contains($message, 'google_translate_api_key')) return 'google_translate_api_key_missing';
+            return (string) $blocker;
+        }, $blockers)));
     }
     private function preparedTranslation(Part $part, string $channel): array
     {

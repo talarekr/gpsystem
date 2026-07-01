@@ -184,9 +184,28 @@ class PartMarketplaceReadinessController extends Controller
             $ebayResults = [
                 'ebay_de' => $this->readinessService->prepareEbayTranslations($part, 'ebay_de'),
             ];
+
+            if (! (bool) ($ebayResults['ebay_de']['ok'] ?? false)) {
+                $blockers = (array) ($ebayResults['ebay_de']['blockers'] ?? []);
+
+                return response()->json([
+                    'ok' => false,
+                    'ready' => false,
+                    'status' => 'blocked',
+                    'message' => (string) (($ebayResults['ebay_de']['blocker'] ?? null) ?: ($blockers[0] ?? 'translation_failed')),
+                    'part_id' => $part->id,
+                    'channel' => $key,
+                    'will_make_marketplace_request' => false,
+                    'publish' => false,
+                    'marketplace_listings' => false,
+                    'blocker' => $ebayResults['ebay_de']['blocker'] ?? ($blockers[0] ?? null),
+                    'blockers' => $blockers,
+                    'ebay_channels' => $ebayResults,
+                ]);
+            }
         }
 
-        $card = $this->cardReadinessService->check($part)[$key] ?? [];
+        $card = $this->cardReadinessService->check($part->fresh())[$key] ?? [];
         $presentation = (array) ($card['presentation'] ?? []);
         $ready = (bool) ($presentation['ready'] ?? $card['ready'] ?? false);
         $message = $ready ? 'Gotowe' : $this->humanReadablePrepareMessage((array) ($presentation['missing'] ?? $card['missing'] ?? []));
