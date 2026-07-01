@@ -102,7 +102,7 @@ class WorkshopPartCreatedMail extends Mailable
 
     private function description(): string
     {
-        return (string) ($this->part->description ?? '');
+        return (string) ($this->part->internal_note ?? '');
     }
 
     private function attachmentName(PartImage $image): string
