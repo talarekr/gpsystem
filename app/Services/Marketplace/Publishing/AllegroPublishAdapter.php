@@ -45,7 +45,7 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
         $offerUrl = $offerId ? 'https://allegro.pl/oferta/'.$offerId : null;
         $async = (int) ($result['http_status'] ?? 0) === 202;
 
-        return ['ok' => $result['ok'] ?? false, 'action' => 'createProductOffer', 'http_status' => $result['http_status'] ?? null, 'offer_id' => $offerId, 'external_offer_id' => $offerId, 'external_listing_id' => $offerId, 'url' => $offerUrl, 'listing_status' => $async ? 'publication_pending' : 'published', 'request_id' => $result['request_id'] ?? null, 'operation_location' => $result['operation_location'] ?? null, 'async' => $async, 'log_context' => ['channel' => $this->channel(), 'allegro_offer_id' => $offerId, 'saved_url' => $offerUrl, 'operation_location' => $result['operation_location'] ?? null, 'async' => $async], 'request_summary' => $this->requestSummary($payload, $body) + $productNameDiagnostics + $signature + ['allegro_sales_settings' => $this->salesSettingsSummary($salesSettings)], 'response_summary' => $this->responseSummary($result), 'json' => $result['json'] ?? [], 'error' => 'Allegro product-offers publish failed.', 'ui_error' => 'Uzupełnij ustawienia sprzedaży Allegro GPSWISS. Szczegóły są w Logach.'];
+        return ['ok' => $result['ok'] ?? false, 'action' => 'createProductOffer', 'http_status' => $result['http_status'] ?? null, 'offer_id' => $offerId, 'external_offer_id' => $offerId, 'external_listing_id' => $offerId, 'url' => $offerUrl, 'listing_status' => $async ? 'publication_pending' : 'published', 'request_id' => $result['request_id'] ?? null, 'operation_location' => $result['operation_location'] ?? null, 'async' => $async, 'log_context' => ['channel' => $this->channel(), 'allegro_offer_id' => $offerId, 'saved_url' => $offerUrl, 'operation_location' => $result['operation_location'] ?? null, 'async' => $async], 'request_summary' => $this->requestSummary($payload, $body, $part) + $productNameDiagnostics + $signature + ['allegro_sales_settings' => $this->salesSettingsSummary($salesSettings)], 'response_summary' => $this->responseSummary($result), 'json' => $result['json'] ?? [], 'error' => 'Allegro product-offers publish failed.', 'ui_error' => 'Uzupełnij ustawienia sprzedaży Allegro GPSWISS. Szczegóły są w Logach.'];
     }
 
     /** @return array<string, mixed> */
@@ -98,6 +98,14 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
 
     private function descriptionPayload(Part $part, array $payload, array $offerImages): ?array
     {
+        $localDescription = $this->sanitizedPartDescription($part);
+        if ($localDescription !== '') {
+            return ['sections' => [['items' => array_values(array_filter([
+                ['type' => 'TEXT', 'content' => '<p>'.e($localDescription).'</p>'],
+                filled($offerImages[0] ?? null) ? ['type' => 'IMAGE', 'url' => $offerImages[0]] : null,
+            ]))]]];
+        }
+
         $description = $payload['description'] ?? null;
         if (is_array($description) && $this->hasNonEmptyDescriptionSection($description)) return $description;
 
@@ -105,6 +113,22 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
         $builtDescription = $built['description'] ?? null;
 
         return is_array($builtDescription) && $this->hasNonEmptyDescriptionSection($builtDescription) ? $builtDescription : null;
+    }
+
+    private function sanitizedPartDescription(Part $part): string
+    {
+        return trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags((string) ($part->description ?? '')), ENT_QUOTES | ENT_HTML5, 'UTF-8')) ?: '');
+    }
+
+    private function descriptionDiagnostics(Part $part, ?array $body = null): array
+    {
+        $sanitized = $this->sanitizedPartDescription($part);
+
+        return [
+            'description_present' => $sanitized !== '',
+            'description_source' => $sanitized !== '' ? 'part.description' : ($this->hasNonEmptyDescriptionSection((array) data_get($body, 'description', [])) ? 'payload_or_fallback' : 'none'),
+            'description_sanitized_length' => mb_strlen($sanitized),
+        ];
     }
 
     private function hasNonEmptyDescriptionSection(array $description): bool
@@ -221,7 +245,7 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
         }, (array) $images)));
     }
 
-    protected function requestSummary(array $payload, ?array $body = null): array
+    protected function requestSummary(array $payload, ?array $body = null, ?Part $part = null): array
     {
         $summary = parent::requestSummary($payload);
         $images = is_array($body) ? ($body['images'] ?? []) : $this->normalizeImageUrls($payload['image_urls'] ?? []);
@@ -241,7 +265,7 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
             'productSet_0_product_main_image_present' => filled(data_get($body ?? $payload, 'productSet.0.product.images.0')),
             'description_sections_count' => count((array) data_get($body ?? $payload, 'description.sections', [])),
             'description_has_non_empty_content' => $this->hasNonEmptyDescriptionSection((array) data_get($body ?? $payload, 'description', [])),
-        ];
+        ] + ($part ? $this->descriptionDiagnostics($part, $body) : []);
     }
 
     /** @return array<int, string> */

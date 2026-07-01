@@ -43,13 +43,14 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
 
         $result = (new OvokoApiClient('ovoko', $account))->importPart($form['fields']);
         $externalId = filled($result['part_id'] ?? null) ? (string) $result['part_id'] : null;
-        $shopUrl = filled($result['shop_url'] ?? null) ? trim((string) $result['shop_url']) : null;
+        $shopUrl = $this->ovokoListingUrl($externalId);
         $summary = [
             'endpoint' => $result['endpoint_used'] ?? null,
             'ovoko_status_code' => $result['api_status_code'] ?? null,
             'message' => $result['message'] ?? null,
             'ovoko_part_id' => $externalId,
             'ovoko_shop_url_present' => filled($shopUrl),
+            'ovoko_shop_url_source' => filled($externalId) ? 'generated_from_ovoko_part_id' : null,
             'ovoko_shop_url' => $shopUrl,
             'part_id_present' => filled($externalId),
             'response_top_level_keys' => $result['response_top_level_keys'] ?? [],
@@ -64,7 +65,19 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
             return ['ok' => false, 'status' => 'api_error', 'action' => 'crm/importPart', 'http_status' => $result['http_status'] ?? null, 'error' => (string) ($result['message'] ?? 'Ovoko/RRR importPart failed.'), 'request_summary' => $this->requestSummary($payload) + ['ovoko_form_keys' => array_keys($form['fields']), 'ovoko_photo' => $photoDiagnostics] + $formDiagnostics, 'response_summary' => $summary];
         }
 
-        return ['ok' => true, 'status' => 'published', 'listing_status' => 'published', 'action' => 'crm/importPart', 'http_status' => $result['http_status'] ?? null, 'external_offer_id' => $externalId, 'external_listing_id' => $externalId, 'url' => $shopUrl, 'request_summary' => $this->requestSummary($payload) + ['ovoko_form_keys' => array_keys($form['fields']), 'ovoko_photo' => $photoDiagnostics] + $formDiagnostics, 'response_summary' => $summary, 'log_context' => ['ovoko_part_id' => $externalId, 'ovoko_shop_url_present' => filled($shopUrl), 'ovoko_shop_url' => $shopUrl]];
+        return ['ok' => true, 'status' => 'published', 'listing_status' => 'published', 'action' => 'crm/importPart', 'http_status' => $result['http_status'] ?? null, 'external_offer_id' => $externalId, 'external_listing_id' => $externalId, 'url' => $shopUrl, 'request_summary' => $this->requestSummary($payload) + ['ovoko_form_keys' => array_keys($form['fields']), 'ovoko_photo' => $photoDiagnostics] + $formDiagnostics, 'response_summary' => $summary, 'log_context' => ['ovoko_part_id' => $externalId, 'ovoko_shop_url_present' => filled($shopUrl),
+            'ovoko_shop_url_source' => filled($externalId) ? 'generated_from_ovoko_part_id' : null, 'ovoko_shop_url' => $shopUrl]];
+    }
+
+
+    private function ovokoListingUrl(?string $ovokoPartId): ?string
+    {
+        $ovokoPartId = trim((string) $ovokoPartId);
+        if ($ovokoPartId === '' || preg_match('/^\d+$/', $ovokoPartId) !== 1) {
+            return null;
+        }
+
+        return 'https://ovoko.pl/czesci-samochodowe/hgf'.$ovokoPartId;
     }
 
     private function importPartPayload(Part $part, array $readiness, array $payload, MarketplaceAccount $account): array

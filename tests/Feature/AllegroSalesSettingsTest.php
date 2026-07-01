@@ -315,6 +315,41 @@ class AllegroSalesSettingsTest extends TestCase
             && data_get($request->data(), 'description.sections.0.items.1.type') === 'IMAGE');
     }
 
+
+    public function test_allegro_live_payload_uses_part_description_before_payload_description(): void
+    {
+        Http::fake(array_merge($this->fakeAllegro(), [
+            'https://api.allegro.pl/sale/product-offers' => Http::response(['id' => 'offer-123'], 201),
+        ]));
+        $part = $this->part('KURIER DPD');
+        $part->forceFill(['description' => '<p>Lokalny opis części 7897<br>Numer: ABC</p>'])->save();
+        $payload = [
+            'sku' => 'GPS-7897',
+            'title' => 'Mechanizm wycieraczek Audi',
+            'category_id' => '123',
+            'price_pln' => 100,
+            'quantity' => 1,
+            'image_urls' => ['https://gpswiss.example.test/parts/7897/one.jpg'],
+            'description' => ['sections' => [['items' => [['type' => 'TEXT', 'content' => '<h2>Cechy produktu</h2><p>O produkcie marketingowy opis</p>']]]]],
+            'allegro_parameters' => ['payload_parameters' => [], 'product_parameters' => []],
+        ];
+
+        $adapter = new class(app(MarketplaceListingReadinessService::class), app(MarketplacePublishGate::class), app(ApiIntegrationLogger::class), app(AllegroSalesSettingsResolver::class)) extends AllegroPublishAdapter {
+            public function callPerformLivePublish(Part $part, array $readiness, array $payload, MarketplaceAccount $account): array { return $this->performLivePublish($part, $readiness, $payload, $account); }
+        };
+
+        $result = $adapter->callPerformLivePublish($part, ['marketplace_price' => 100], $payload, MarketplaceAccount::query()->where('code', 'allegro_main')->firstOrFail());
+
+        $this->assertTrue($result['ok']);
+        $this->assertTrue($result['request_summary']['description_present']);
+        $this->assertSame('part.description', $result['request_summary']['description_source']);
+        $this->assertGreaterThan(0, $result['request_summary']['description_sanitized_length']);
+        Http::assertSent(fn ($request) => $request->url() === 'https://api.allegro.pl/sale/product-offers'
+            && str_contains((string) data_get($request->data(), 'description.sections.0.items.0.content'), 'Lokalny opis części 7897 Numer: ABC')
+            && ! str_contains((string) data_get($request->data(), 'description.sections.0.items.0.content'), 'Cechy produktu')
+            && ! str_contains((string) data_get($request->data(), 'description.sections.0.items.0.content'), 'marketingowy opis'));
+    }
+
     private function part(?string $shippingRateName): Part
     {
         config(['app.url' => 'https://gpswiss.pl']);
