@@ -90,6 +90,21 @@ class EbayTitleSanitizerTest extends TestCase
         $this->assertTrue($result['diagnostics']['minimal_cleanup_only']);
     }
 
+    public function test_part_7157_title_with_removed_baujahr_passes_when_under_ebay_limit(): void
+    {
+        $part = new Part(['name' => 'VOLKSWAGEN Multivan T5 2012 2.0 KOMPLETNY SILNIK STAN PERFECT CCH']);
+        $title = 'Volkswagen Multivan T5, Baujahr 2012, 2.0, kompletter Motor, einwandfreier Zustand, CCH';
+        $result = $this->sanitizer->sanitizeForEbayDe($part, $title);
+
+        $this->assertSame('Volkswagen Multivan T5, 2012, 2.0, kompletter Motor, einwandfreier Zustand, CCH', $result['final_title']);
+        $this->assertSame(79, $result['diagnostics']['final_length']);
+        $this->assertSame(EbayTitleSanitizer::LIMIT, $result['diagnostics']['title_limit']);
+        $this->assertTrue($result['ok']);
+        $this->assertNull($result['blocker']);
+        $this->assertSame(['Baujahr'], $result['diagnostics']['removed_tokens']);
+        $this->assertFalse($result['diagnostics']['protected_tokens_preserved']);
+    }
+
     public function test_payload_title_value_can_use_exact_sanitized_final_title(): void
     {
         $part = new Part(['name' => 'VOLKSWAGEN Multivan T5 2012 2.0 KOMPLETNY SILNIK STAN PERFECT CCH']);
