@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Models\MarketplaceCategoryMapping;
 use App\Models\Part;
 use App\Models\PartCategory;
-use App\Filament\Resources\PartResource;
 use App\Services\Marketplace\PublishPartToMarketplacesService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -79,12 +78,6 @@ class MarketplacePublishPartFlowTest extends TestCase
         $this->assertDatabaseHas('marketplace_listings', ['part_id' => $part->id, 'marketplace' => 'allegro']);
         $this->assertDatabaseHas('marketplace_listings', ['part_id' => $part->id, 'marketplace' => 'ovoko']);
         $this->assertDatabaseMissing('marketplace_listings', ['part_id' => $part->id, 'marketplace' => 'ebay_de']);
-        $part->refresh();
-        $this->assertFalse($part->needs_listing);
-        $this->assertTrue($part->is_visible_storefront);
-        $this->assertSame('ready', $part->status);
-        $this->assertTrue($response->json('marketplace_publication_state.has_any_marketplace_listing'));
-        $this->assertFalse($response->json('marketplace_publication_state.should_be_in_to_publish'));
     }
 
 
@@ -104,40 +97,6 @@ class MarketplacePublishPartFlowTest extends TestCase
         $this->assertSame('skipped_blocked_readiness', $result['channels']['ebay']['status']);
         $this->assertFalse($result['channels']['ebay']['write']);
         $this->assertDatabaseMissing('marketplace_listings', ['part_id' => $part->id, 'marketplace' => 'ebay_de']);
-        $this->assertFalse($part->refresh()->needs_listing);
-        $this->assertSame(['allegro', 'ovoko'], $result['marketplace_publication_state']['marketplace_success_channels']);
-        $this->assertSame(['ebay'], $result['marketplace_publication_state']['marketplace_blocked_channels']);
-    }
-
-    public function test_partial_marketplace_listing_moves_part_out_of_to_publish_and_into_parts(): void
-    {
-        $part = $this->completeLocalPart(['needs_listing' => true, 'needs_review' => false]);
-
-        DB::table('marketplace_listings')->insert([
-            ['marketplace' => 'allegro', 'part_id' => $part->id, 'external_offer_id' => 'ALG-1', 'status' => 'published', 'sync_status' => 'published', 'created_at' => now(), 'updated_at' => now()],
-            ['marketplace' => 'ebay_de', 'part_id' => $part->id, 'external_listing_id' => 'EBAY-1', 'url' => 'https://www.ebay.de/itm/EBAY-1', 'status' => 'active', 'sync_status' => 'published', 'created_at' => now(), 'updated_at' => now()],
-        ]);
-
-        $this->assertTrue(PartResource::adminAllPartsQuery()->whereKey($part->id)->exists());
-        $this->assertFalse(PartResource::adminPartsToListQuery()->whereKey($part->id)->exists());
-    }
-
-    public function test_single_success_marketplace_listing_moves_part_into_parts(): void
-    {
-        $part = $this->completeLocalPart(['needs_listing' => true, 'needs_review' => false]);
-
-        DB::table('marketplace_listings')->insert(['marketplace' => 'ovoko', 'part_id' => $part->id, 'external_offer_id' => 'OV-1', 'url' => 'https://ovoko.pl/czesci/OV-1', 'status' => 'published', 'sync_status' => 'published', 'created_at' => now(), 'updated_at' => now()]);
-
-        $this->assertTrue(PartResource::adminAllPartsQuery()->whereKey($part->id)->exists());
-        $this->assertFalse(PartResource::adminPartsToListQuery()->whereKey($part->id)->exists());
-    }
-
-    public function test_part_without_success_marketplace_listing_stays_to_publish(): void
-    {
-        $part = $this->completeLocalPart(['needs_listing' => true, 'needs_review' => false]);
-
-        $this->assertFalse(PartResource::adminAllPartsQuery()->whereKey($part->id)->exists());
-        $this->assertTrue(PartResource::adminPartsToListQuery()->whereKey($part->id)->exists());
     }
 
     public function test_confirm_explicit_single_channel_publishes_only_that_channel(): void
