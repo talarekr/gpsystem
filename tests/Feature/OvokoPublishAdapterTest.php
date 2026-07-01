@@ -116,6 +116,32 @@ class OvokoPublishAdapterTest extends TestCase
         Http::assertSent(fn ($request): bool => $request->url() === 'https://ovoko.example.test/v2/get/cars' && $request->method() === 'POST');
     }
 
+
+    public function test_ovoko_car_mapping_marks_unusable_unfiltered_first_page_as_search_unavailable(): void
+    {
+        MarketplaceAccount::query()->create(['marketplace' => 'ovoko', 'code' => 'ovoko_main', 'name' => 'Ovoko main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'read_only', 'api_credentials' => ['username' => 'ovoko-user', 'password' => 'ovoko-pass', 'user_token' => 'ovoko-token']]);
+        $car = Car::query()->create(['make' => 'VOLKSWAGEN', 'model' => 'PASSAT B6', 'production_year' => 2009, 'fuel_type' => 'benzyna']);
+        Http::fake(['https://ovoko.example.test/v2/get/cars' => Http::response(['status_code' => 'R200', 'data' => array_map(fn (int $id): array => ['id' => $id], range(1, 100))], 200)]);
+
+        $response = $this->getJson('/admin/tools/ovoko/cars/'.$car->id.'/mapping-dry-run');
+
+        $response->assertOk()
+            ->assertJsonPath('can_search_ovoko_car', false)
+            ->assertJsonPath('search_supported', false)
+            ->assertJsonPath('search_candidates', [])
+            ->assertJsonPath('search_warning', 'ovoko_car_search_filter_ignored_or_unusable')
+            ->assertJsonPath('existing_car_search_unavailable', true)
+            ->assertJsonPath('apply_will_create_new_car', true)
+            ->assertJsonPath('returned_candidates_count', 100)
+            ->assertJsonPath('parsed_candidates_count', 100)
+            ->assertJsonPath('usable_candidates_count', 0)
+            ->assertJsonPath('parsed_search_candidates.0.usable', false)
+            ->assertJsonPath('parsed_search_candidates.0.unusable_reason', 'missing_make_model_year_vin_external_id')
+            ->assertJsonPath('search_request_payload.username', '***')
+            ->assertJsonPath('search_request_payload.make', 'VOLKSWAGEN')
+            ->assertJsonPath('search_response_sample_raw.0.id', 1);
+    }
+
     public function test_ovoko_publish_blocks_local_car_without_ovoko_car_id_with_clear_diagnostics(): void
     {
         $category = PartCategory::query()->create(['name' => 'Alternatory']);

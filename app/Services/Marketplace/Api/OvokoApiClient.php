@@ -106,10 +106,16 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
     /** @return array<int, array<string, mixed>> */
     public function searchCars(?string $vin, ?string $externalId, array $vehicle, int $timeoutSeconds = 30): array
     {
+        return $this->searchCarsDiagnostics($vin, $externalId, $vehicle, $timeoutSeconds)['usable_candidates'];
+    }
+
+    public function searchCarsDiagnostics(?string $vin, ?string $externalId, array $vehicle, int $timeoutSeconds = 30): array
+    {
         $endpoint = rtrim((string) $this->account?->api_base_url, '/').'/v2/get/cars';
         $fields = array_filter($this->authFields() + [
             'vin' => $vin,
             'external_id' => $externalId,
+            'user_code' => $externalId,
             'make' => $vehicle['make'] ?? null,
             'model' => $vehicle['model'] ?? null,
             'year' => $vehicle['year'] ?? null,
@@ -120,28 +126,63 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
         $payload = is_array($json) ? $json : [];
         $statusCode = $payload['status_code'] ?? null;
         $apiOk = $response->successful() && ($statusCode === 'R200' || $statusCode === 200 || $statusCode === null);
+        $rows = $this->extractCarRows($payload);
+        $parsedCandidates = array_values(array_map(fn (array $row): array => $this->normalizeCarCandidate($row), $rows));
+        $usableCandidates = array_values(array_filter($parsedCandidates, fn (array $candidate): bool => (bool) ($candidate['usable'] ?? false)));
+        $filterApplied = $this->carSearchFilterApplied($usableCandidates, $vin, $externalId, $vehicle);
+        $filterIgnored = ! $filterApplied && count($rows) > 1;
 
-        if (! $apiOk) {
-            return [[
-                'error' => 'ovoko_car_search_not_supported_or_failed',
-                'http_status' => $response->status(),
-                'api_status_code' => $statusCode,
-                'error_message' => $payload['msg'] ?? $payload['message'] ?? 'Ovoko/RRR car search endpoint did not return a success status.',
-                'endpoint_used' => $endpoint,
-                'read_only' => true,
-            ]];
-        }
+        return [
+            'search_endpoint' => $endpoint,
+            'search_request_fields' => array_values(array_diff(array_keys($fields), ['username', 'password', 'user_token'])),
+            'search_request_payload' => $this->sanitizeQueryFields($fields),
+            'search_response_top_level_keys' => array_values(array_slice(array_keys($payload), 0, 30)),
+            'search_response_sample_raw' => array_values(array_map(fn (array $row): array => $this->sanitizeQueryFields($row), array_slice($rows, 0, 3))),
+            'search_filter_applied' => $filterApplied,
+            'search_filter_ignored' => $filterIgnored,
+            'returned_candidates_count' => count($rows),
+            'parsed_candidates_count' => count($parsedCandidates),
+            'usable_candidates_count' => count($usableCandidates),
+            'all_candidates' => $parsedCandidates,
+            'usable_candidates' => $usableCandidates,
+            'api_ok' => $apiOk,
+            'http_status' => $response->status(),
+            'api_status_code' => $statusCode,
+            'error_message' => $apiOk ? null : ($payload['msg'] ?? $payload['message'] ?? 'Ovoko/RRR car search endpoint did not return a success status.'),
+        ];
+    }
 
+    private function extractCarRows(array $payload): array
+    {
         $rows = $payload['data'] ?? $payload['list'] ?? $payload['cars'] ?? [];
+        return array_values(array_filter(is_array($rows) ? $rows : [], 'is_array'));
+    }
 
-        return array_values(array_map(fn (array $row): array => [
+    private function normalizeCarCandidate(array $row): array
+    {
+        $candidate = [
             'ovoko_car_id' => $row['car_id'] ?? $row['id'] ?? null,
-            'make' => $row['make'] ?? $row['manufacturer'] ?? null,
-            'model' => $row['model'] ?? null,
+            'make' => $row['make'] ?? $row['manufacturer'] ?? data_get($row, 'make.name'),
+            'model' => $row['model'] ?? data_get($row, 'model.name'),
             'year' => $row['year'] ?? $row['production_year'] ?? null,
             'vin' => $row['vin'] ?? null,
-            'external_id' => $row['external_id'] ?? null,
-        ], array_filter(is_array($rows) ? $rows : [], 'is_array')));
+            'external_id' => $row['external_id'] ?? $row['user_code'] ?? null,
+        ];
+        $candidate['usable'] = filled($candidate['make']) || filled($candidate['model']) || filled($candidate['year']) || filled($candidate['vin']) || filled($candidate['external_id']);
+        if (! $candidate['usable']) {
+            $candidate['unusable_reason'] = 'missing_make_model_year_vin_external_id';
+        }
+        return $candidate;
+    }
+
+    private function carSearchFilterApplied(array $usableCandidates, ?string $vin, ?string $externalId, array $vehicle): bool
+    {
+        foreach ($usableCandidates as $candidate) {
+            if (filled($vin) && strcasecmp((string) ($candidate['vin'] ?? ''), (string) $vin) === 0) return true;
+            if (filled($externalId) && strcasecmp((string) ($candidate['external_id'] ?? ''), (string) $externalId) === 0) return true;
+            if (filled($vehicle['make'] ?? null) && filled($vehicle['model'] ?? null) && strcasecmp((string) ($candidate['make'] ?? ''), (string) $vehicle['make']) === 0 && strcasecmp((string) ($candidate['model'] ?? ''), (string) $vehicle['model']) === 0) return true;
+        }
+        return false;
     }
 
     public function importPartFormDiagnostics(array $fields): array
@@ -452,7 +493,17 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
 
     private function sanitizeQueryFields(array $fields): array
     {
-        return $fields;
+        $sanitized = [];
+        foreach ($fields as $key => $value) {
+            if (in_array((string) $key, ['username', 'password', 'user_token', 'token', 'authorization'], true)) {
+                $sanitized[$key] = '***';
+            } elseif (is_array($value)) {
+                $sanitized[$key] = $this->sanitizeQueryFields($value);
+            } else {
+                $sanitized[$key] = $value;
+            }
+        }
+        return $sanitized;
     }
 
     private function extractUrlFields(array $row): array
