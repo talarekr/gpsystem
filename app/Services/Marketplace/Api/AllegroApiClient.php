@@ -186,6 +186,30 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
         return ['ok' => $response->successful(), 'http_status' => $response->status(), 'json' => is_array($json) ? $json : [], 'products' => is_array($json) ? array_values(array_filter($json['products'] ?? $json['items'] ?? [], 'is_array')) : [], 'request_id' => $response->header('trace-id') ?: $response->header('x-request-id'), 'error' => $response->successful() ? null : 'Allegro product catalog search failed.'];
     }
 
+    public function compatibleProducts(string $phrase, string $type = 'CAR'): array
+    {
+        $response = Http::withToken((string) $this->credentials()['access_token'])
+            ->accept('application/vnd.allegro.public.v1+json')
+            ->timeout(20)
+            ->get($this->absoluteUrl('/sale/compatible-products'), array_filter(['type' => $type, 'phrase' => $phrase], fn ($value) => filled($value)));
+        $json = $response->json();
+        $items = is_array($json) ? array_values(array_filter($json['compatibleProducts'] ?? $json['products'] ?? $json['items'] ?? [], 'is_array')) : [];
+
+        return [
+            'ok' => $response->successful(),
+            'http_status' => $response->status(),
+            'json' => is_array($json) ? $json : [],
+            'items' => array_map(fn (array $item): array => array_filter([
+                'id' => $item['id'] ?? null,
+                'text' => $item['text'] ?? $item['name'] ?? null,
+                'type' => $item['type'] ?? null,
+                'details' => $item['details'] ?? null,
+            ], fn ($value) => $value !== null && $value !== ''), $items),
+            'request_id' => $response->header('trace-id') ?: $response->header('x-request-id'),
+            'error' => $response->successful() ? null : 'Compatible products lookup failed.',
+        ];
+    }
+
     public function product(string $productId): array
     {
         $response = Http::withToken((string) $this->credentials()['access_token'])
