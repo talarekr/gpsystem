@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Auth;
@@ -68,6 +69,54 @@ class Car extends Model
             'dismantled_at' => 'date',
             'legacy_payload' => 'array',
         ];
+    }
+
+
+    /**
+     * Search cars by a multi-word phrase across visible vehicle identity fields.
+     *
+     * Every word must match at least one field, but different words may match
+     * different fields (for example make + model).
+     */
+    public function scopeSearchPhrase(Builder $query, ?string $phrase): Builder
+    {
+        $tokens = collect(preg_split('/\s+/', mb_strtolower(trim((string) $phrase))) ?: [])
+            ->filter()
+            ->values();
+
+        if ($tokens->isEmpty()) {
+            return $query;
+        }
+
+        $fields = [
+            'make',
+            'model',
+            'model_variant',
+            'engine_code',
+            'vin',
+            'registration_number',
+            'production_year',
+            'first_registration_year',
+            'fuel_type',
+            'body_type',
+            'color',
+            'drivetrain',
+            'steering_side',
+            'gearbox_type',
+            'gearbox_code',
+        ];
+
+        return $query->where(function (Builder $query) use ($tokens, $fields): void {
+            foreach ($tokens as $token) {
+                $like = '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $token).'%';
+
+                $query->where(function (Builder $query) use ($fields, $like): void {
+                    foreach ($fields as $field) {
+                        $query->orWhereRaw("LOWER(COALESCE({$field}, '')) LIKE ? ESCAPE '\\\\'", [$like]);
+                    }
+                });
+            }
+        });
     }
 
     protected static function booted(): void

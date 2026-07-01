@@ -192,15 +192,7 @@ class CarResource extends Resource
                         $record->model,
                         $record->model_variant,
                     ]))) ?: '—')
-                    ->searchable(query: function (Builder $query, string $search): Builder {
-                        return $query->where('make', 'like', "%{$search}%")
-                            ->orWhere('model', 'like', "%{$search}%")
-                            ->orWhere('model_variant', 'like', "%{$search}%")
-                            ->orWhere('registration_number', 'like', "%{$search}%")
-                            ->orWhere('engine_code', 'like', "%{$search}%")
-                            ->orWhere('gearbox_code', 'like', "%{$search}%")
-                            ->orWhere('color', 'like', "%{$search}%");
-                    }),
+                    ->searchable(query: fn (Builder $query, string $search): Builder => $query->searchPhrase($search)),
                 Tables\Columns\TextColumn::make('parts_placeholder')
                     ->label('Części')
                     ->state(static fn (): HtmlString => new HtmlString('<div class="gps-car-parts-stack"><span>Pozostały: 0</span><span>Sprzedany: 0</span></div>'))
