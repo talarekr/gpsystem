@@ -31,7 +31,8 @@ class EbayTitleSanitizer
             return [
                 'final_title' => $cleaned,
                 'cleaned_title' => $cleaned,
-                'blocker' => ! $preserved ? 'ebay_title_too_long_after_cleanup' : null,
+                'ok' => true,
+                'blocker' => null,
                 'diagnostics' => [
                     'original_pl_title' => $original,
                     'translated_title_before_cleanup' => $before,
@@ -74,6 +75,7 @@ class EbayTitleSanitizer
         return [
             'final_title' => $final,
             'cleaned_title' => $cleaned,
+            'ok' => mb_strlen($final) <= self::LIMIT && $preserved,
             'blocker' => mb_strlen($final) > self::LIMIT || ! $preserved ? 'ebay_title_too_long_after_cleanup' : null,
             'diagnostics' => [
                 'original_pl_title' => $original,
