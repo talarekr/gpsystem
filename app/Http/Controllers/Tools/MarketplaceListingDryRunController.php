@@ -107,6 +107,29 @@ class MarketplaceListingDryRunController extends Controller
         ], ($result['ok'] ?? false) ? 200 : 422);
     }
 
+    public function allegroCompatibleProducts(Request $request): JsonResponse
+    {
+        $account = $this->account('allegro_main');
+        if (! $account) return response()->json(['ok' => false, 'http_status' => null, 'error' => 'Marketplace account allegro_main is missing.'], 422);
+
+        $phrase = trim((string) $request->query('phrase', ''));
+        if ($phrase === '') return response()->json(['ok' => false, 'read_only' => true, 'endpoint' => 'GET /sale/compatible-products?type=CAR&phrase={phrase}', 'error' => 'Missing required query parameter: phrase.'], 422);
+
+        $result = (new AllegroApiClient('allegro_main', $account))->compatibleProducts($phrase, 'CAR');
+
+        return response()->json([
+            'ok' => (bool) ($result['ok'] ?? false),
+            'read_only' => true,
+            'endpoint' => 'GET /sale/compatible-products?type=CAR&phrase={phrase}',
+            'phrase' => $phrase,
+            'type' => 'CAR',
+            'http_status' => $result['http_status'] ?? null,
+            'compatible_products' => $result['items'] ?? [],
+            'error' => $result['error'] ?? null,
+            'request_id' => $result['request_id'] ?? null,
+        ], ($result['ok'] ?? false) ? 200 : 422);
+    }
+
 
 
     public function allegroDescriptionUpdate(string $offerId, Request $request): JsonResponse
