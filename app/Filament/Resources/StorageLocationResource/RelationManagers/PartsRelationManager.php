@@ -75,6 +75,7 @@ class PartsRelationManager extends RelationManager
                     ->label('Status')
                     ->formatStateUsing(fn (?string $state) => Part::statusOptions()[$state] ?? $state)
                     ->badge()
+                    ->color(fn (?string $state): string => Part::statusColor($state))
                     ->size('xs')
                     ->sortable()
                     ->extraHeaderAttributes(['class' => 'gps-col-status'])
