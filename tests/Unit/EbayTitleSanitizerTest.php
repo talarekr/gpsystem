@@ -74,6 +74,22 @@ class EbayTitleSanitizerTest extends TestCase
         $this->assertTrue($result['diagnostics']['minimal_cleanup_only']);
     }
 
+    public function test_short_translated_title_passes_even_when_protected_token_diagnostics_are_not_perfect(): void
+    {
+        $part = new Part(['name' => 'VOLKSWAGEN Tiguan licznik CUAA', 'part_number' => 'CUAA']);
+        $title = 'Volkswagen Tiguan Kombiinstrument funktionsfähig';
+        $result = $this->sanitizer->sanitizeForEbayDe($part, $title);
+
+        $this->assertLessThanOrEqual(80, mb_strlen($result['final_title']));
+        $this->assertSame($title, $result['final_title']);
+        $this->assertTrue($result['ok']);
+        $this->assertNull($result['blocker']);
+        $this->assertFalse($result['diagnostics']['protected_tokens_preserved']);
+        $this->assertContains('CUAA', $result['diagnostics']['protected_tokens']);
+        $this->assertFalse($result['diagnostics']['cleanup_applied']);
+        $this->assertTrue($result['diagnostics']['minimal_cleanup_only']);
+    }
+
     public function test_payload_title_value_can_use_exact_sanitized_final_title(): void
     {
         $part = new Part(['name' => 'VOLKSWAGEN Multivan T5 2012 2.0 KOMPLETNY SILNIK STAN PERFECT CCH']);
