@@ -19,6 +19,7 @@ class OvokoStockSyncController extends Controller
 {
     private const CONFIRM = 'ovoko-stock-sync';
     private const ENDPOINT_PATH = '/v2/get/parts';
+    private const SHAPE_KEYS = ['data', 'item', 'part', 'parts', 'items', 'result', 'list'];
     private const ACTION = 'ovoko_stock_pull';
 
     public function dryRun(Request $request): JsonResponse
@@ -145,7 +146,16 @@ class OvokoStockSyncController extends Controller
             'ovoko_id' => $ovokoId,
             'ovoko_mapping_source' => $mapping['source'],
             'local' => $local,
-            'ovoko' => ['quantity' => $quantity, 'status' => data_get($ovoko, 'part.status'), 'http_status' => $ovoko['http_status'] ?? null],
+            'ovoko' => [
+                'quantity' => $quantity,
+                'status' => data_get($ovoko, 'part.status'),
+                'http_status' => $ovoko['http_status'] ?? null,
+                'matched_in_attempt' => $ovoko['matched_in_attempt'] ?? null,
+                'matched_count' => $ovoko['matched_count'] ?? null,
+                'ovoko_lookup_attempts' => $ovoko['ovoko_lookup_attempts'] ?? [],
+                'ovoko_response_shape' => $ovoko['ovoko_response_shape'] ?? null,
+                'candidate_ids' => $ovoko['candidate_ids'] ?? [],
+            ],
             'planned_local_state' => $planned,
             'action' => $this->sameState($local, $planned) ? 'no_change' : 'update_local_stock',
             'blockers' => [],
@@ -229,26 +239,156 @@ class OvokoStockSyncController extends Controller
         $credentials = is_array($account->api_credentials) ? $account->api_credentials : [];
         foreach (['username', 'password', 'user_token'] as $key) if (blank($credentials[$key] ?? null)) return ['ok' => false, 'blocker' => 'ovoko_api_credentials_missing'];
 
+        $endpoint = rtrim((string) $account->api_base_url, '/').self::ENDPOINT_PATH.'?limit=100&page=1';
+        $attempts = [
+            ['name' => 'detail_by_part_id_and_id', 'method' => 'POST', 'endpoint' => $endpoint, 'params' => ['part_id' => $id, 'id' => $id]],
+            ['name' => 'list_search_by_part_id', 'method' => 'POST', 'endpoint' => $endpoint, 'params' => ['part_id' => $id]],
+            ['name' => 'list_search_by_id', 'method' => 'POST', 'endpoint' => $endpoint, 'params' => ['id' => $id]],
+        ];
+
+        $lastShape = null;
+        $candidateIds = [];
+        $safeAttempts = [];
+
         try {
-            $endpoint = rtrim((string) $account->api_base_url, '/').self::ENDPOINT_PATH.'?limit=100&page=1';
-            $response = Http::asForm()->acceptJson()->timeout(30)->post($endpoint, Arr::only($credentials, ['username', 'password', 'user_token']) + ['part_id' => $id, 'id' => $id]);
-            $payload = $response->json();
-            $payload = is_array($payload) ? $payload : [];
-            if (! $response->successful()) return ['ok' => false, 'http_status' => $response->status(), 'blocker' => in_array($response->status(), [401, 403], true) ? 'ovoko_api_auth_failed' : ($response->status() === 429 ? 'ovoko_api_rate_limited' : 'ovoko_api_failed')];
-            $rows = $this->extractRows($payload);
-            $matches = array_values(array_filter($rows, fn (array $row): bool => (string) $this->extractOvokoId($row) === (string) $id));
-            if ($matches === []) return ['ok' => false, 'http_status' => $response->status(), 'blocker' => 'missing_ovoko_product'];
-            return ['ok' => true, 'http_status' => $response->status(), 'part' => $matches[0], 'matched_count' => count($matches)];
+            foreach ($attempts as $attempt) {
+                $response = Http::asForm()->acceptJson()->timeout(30)->post($attempt['endpoint'], Arr::only($credentials, ['username', 'password', 'user_token']) + $attempt['params']);
+                $payload = $response->json();
+                $payload = is_array($payload) ? $payload : [];
+                $shape = $this->responseShape($payload, $response->status());
+                $rows = $this->extractRows($payload);
+                $attemptCandidateIds = $this->candidateIds($rows);
+                $candidateIds = array_values(array_unique(array_merge($candidateIds, $attemptCandidateIds)));
+                $safeAttempts[] = [
+                    'name' => $attempt['name'],
+                    'method' => $attempt['method'],
+                    'endpoint' => $attempt['endpoint'],
+                    'http_status' => $response->status(),
+                    'lookup_fields' => array_keys($attempt['params']),
+                    'response_shape' => $shape,
+                    'candidate_ids' => $attemptCandidateIds,
+                ];
+                $lastShape = $shape;
+
+                if (! $response->successful()) {
+                    $blocker = in_array($response->status(), [401, 403], true) ? 'ovoko_api_auth_failed' : ($response->status() === 429 ? 'ovoko_api_rate_limited' : 'ovoko_api_failed');
+                    return ['ok' => false, 'http_status' => $response->status(), 'blocker' => $blocker, 'ovoko_lookup_attempts' => $safeAttempts, 'ovoko_response_shape' => $lastShape, 'candidate_ids' => $candidateIds];
+                }
+
+                $matches = array_values(array_filter($rows, fn (array $row): bool => (string) $this->extractOvokoId($row) === (string) $id));
+                if ($matches !== []) {
+                    return [
+                        'ok' => true,
+                        'http_status' => $response->status(),
+                        'part' => $matches[0],
+                        'matched_count' => count($matches),
+                        'matched_in_attempt' => $attempt['name'],
+                        'ovoko_lookup_attempts' => $safeAttempts,
+                        'ovoko_response_shape' => $lastShape,
+                        'candidate_ids' => $candidateIds,
+                    ];
+                }
+            }
+
+            return ['ok' => false, 'http_status' => $safeAttempts[array_key_last($safeAttempts)]['http_status'] ?? null, 'blocker' => 'missing_ovoko_product', 'ovoko_lookup_attempts' => $safeAttempts, 'ovoko_response_shape' => $lastShape, 'candidate_ids' => $candidateIds];
         } catch (Throwable) {
-            return ['ok' => false, 'blocker' => 'ovoko_api_exception'];
+            return ['ok' => false, 'blocker' => 'ovoko_api_exception', 'ovoko_lookup_attempts' => $safeAttempts, 'ovoko_response_shape' => $lastShape, 'candidate_ids' => $candidateIds];
         }
+    }
+
+    private function responseShape(array $payload, int $httpStatus): array
+    {
+        $rows = $this->extractRows($payload);
+
+        return [
+            'http_status' => $httpStatus,
+            'top_level_keys' => array_slice(array_keys($payload), 0, 50),
+            'has_wrappers' => array_reduce(self::SHAPE_KEYS, function (array $carry, string $key) use ($payload): array {
+                $carry[$key] = array_key_exists($key, $payload);
+                return $carry;
+            }, []),
+            'count' => count($rows),
+            'candidate_ids' => $this->candidateIds($rows),
+            'raw_sample' => $this->sanitizeSample($payload),
+        ];
     }
 
     private function extractRows(array $payload): array
     {
-        $rows = $payload['list'] ?? $payload['data'] ?? $payload['parts'] ?? [];
-        if (isset($payload['id']) || isset($payload['part_id'])) $rows = [$payload];
-        return array_values(array_filter(is_array($rows) ? $rows : [], 'is_array'));
+        $rows = [];
+        if (isset($payload['id']) || isset($payload['part_id']) || isset($payload['ovoko_id']) || isset($payload['rrr_id'])) {
+            $rows[] = $payload;
+        }
+
+        foreach (self::SHAPE_KEYS as $key) {
+            if (! array_key_exists($key, $payload)) continue;
+            $value = $payload[$key];
+            if (! is_array($value)) continue;
+            if ($this->isAssoc($value)) {
+                if (isset($value['id']) || isset($value['part_id']) || isset($value['ovoko_id']) || isset($value['rrr_id'])) {
+                    $rows[] = $value;
+                    continue;
+                }
+                foreach (self::SHAPE_KEYS as $nestedKey) {
+                    if (isset($value[$nestedKey]) && is_array($value[$nestedKey])) {
+                        foreach ($this->normalizeRows($value[$nestedKey]) as $row) $rows[] = $row;
+                    }
+                }
+                continue;
+            }
+            foreach ($this->normalizeRows($value) as $row) $rows[] = $row;
+        }
+
+        return array_values(array_filter($rows, 'is_array'));
+    }
+
+    private function normalizeRows(array $value): array
+    {
+        if ($this->isAssoc($value)) return [$value];
+        return array_values(array_filter($value, 'is_array'));
+    }
+
+    private function isAssoc(array $value): bool
+    {
+        return array_keys($value) !== range(0, count($value) - 1);
+    }
+
+    private function candidateIds(array $rows): array
+    {
+        $ids = [];
+        foreach ($rows as $row) {
+            if (! is_array($row)) continue;
+            $id = $this->extractOvokoId($row);
+            if ($id !== null && $id !== '') $ids[] = (string) $id;
+            if (count($ids) >= 20) break;
+        }
+
+        return array_values(array_unique($ids));
+    }
+
+    private function sanitizeSample(mixed $value, int $depth = 0): mixed
+    {
+        if ($depth > 4) return '[truncated_depth]';
+        if (is_array($value)) {
+            $sample = [];
+            $count = 0;
+            foreach ($value as $key => $item) {
+                if ($count >= 12) {
+                    $sample['__truncated__'] = true;
+                    break;
+                }
+                $lowerKey = strtolower((string) $key);
+                if (str_contains($lowerKey, 'token') || str_contains($lowerKey, 'password') || str_contains($lowerKey, 'secret') || str_contains($lowerKey, 'authorization')) {
+                    $sample[$key] = '[redacted]';
+                } else {
+                    $sample[$key] = $this->sanitizeSample($item, $depth + 1);
+                }
+                $count++;
+            }
+            return $sample;
+        }
+        if (is_string($value)) return strlen($value) > 200 ? substr($value, 0, 200).'…[truncated]' : $value;
+        return $value;
     }
 
     private function extractOvokoId(array $row): mixed { return $row['id'] ?? $row['part_id'] ?? $row['ovoko_id'] ?? $row['rrr_id'] ?? null; }
