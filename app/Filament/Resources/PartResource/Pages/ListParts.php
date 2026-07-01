@@ -123,6 +123,25 @@ class ListParts extends Page
         $this->resetPage();
     }
 
+
+    public function saveInternalNote(int $partId, ?string $note = null): void
+    {
+        $part = $this->getPartsBaseQuery()->whereKey($partId)->first();
+
+        if (! $part) {
+            return;
+        }
+
+        $part->forceFill([
+            'internal_note' => filled($note) ? trim((string) $note) : null,
+        ])->save();
+
+        Notification::make()
+            ->title('Notatka wewnętrzna zapisana lokalnie.')
+            ->success()
+            ->send();
+    }
+
     public function markListingReady(int $partId): void
     {
         $part = Part::query()->whereKey($partId)->where('needs_listing', true)->first();

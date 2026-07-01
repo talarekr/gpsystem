@@ -94,13 +94,18 @@ class Part extends Model
         };
     }
 
-    public static function statusBadgeClass(?string $status): string
+    public static function statusTextClass(?string $status): string
     {
         return match ($status) {
-            'ready' => 'gps-part-status-badge--ready',
-            'sold' => 'gps-part-status-badge--sold',
-            default => 'gps-part-status-badge--default',
+            'ready' => 'gps-part-status-text--ready',
+            'sold' => 'gps-part-status-text--sold',
+            default => 'gps-part-status-text--default',
         };
+    }
+
+    public static function statusBadgeClass(?string $status): string
+    {
+        return static::statusTextClass($status);
     }
 
     public function fillVehicleSnapshot(): void

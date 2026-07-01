@@ -5,6 +5,8 @@ namespace Tests\Feature;
 use App\Enums\UserRole;
 use App\Filament\Resources\PartResource;
 use App\Filament\Resources\PartResource\Pages\EditPart;
+use App\Filament\Resources\PartResource\Pages\ListParts;
+use App\Filament\Resources\PartResource\Pages\PartsToList;
 use App\Filament\Resources\PartResource\Pages\ViewPart;
 use App\Models\Car;
 use App\Models\MarketplaceListing;
@@ -47,13 +49,15 @@ class PartModuleFoundationTest extends TestCase
         $this->assertSame('https://www.ebay.com/sch/i.html?_nkw=HED%20123', $links['ebay']);
     }
 
-    public function test_part_status_ready_renders_as_for_sale_with_green_badge_and_sold_as_red_badge(): void
+    public function test_part_status_ready_and_sold_render_as_plain_colored_text_classes(): void
     {
         $this->assertSame('W sprzedaży', Part::statusOptions()['ready']);
         $this->assertSame('success', Part::statusColor('ready'));
         $this->assertSame('danger', Part::statusColor('sold'));
-        $this->assertSame('gps-part-status-badge--ready', Part::statusBadgeClass('ready'));
-        $this->assertSame('gps-part-status-badge--sold', Part::statusBadgeClass('sold'));
+        $this->assertSame('gps-part-status-text--ready', Part::statusTextClass('ready'));
+        $this->assertSame('gps-part-status-text--sold', Part::statusTextClass('sold'));
+        $this->assertSame('gps-part-status-text--ready', Part::statusBadgeClass('ready'));
+        $this->assertSame('gps-part-status-text--sold', Part::statusBadgeClass('sold'));
     }
 
     public function test_sold_part_marketplace_end_plan_is_dry_run_and_lists_external_ids_without_writes(): void
@@ -509,6 +513,44 @@ class PartModuleFoundationTest extends TestCase
             ->assertJsonPath('samples_needs_listing_in_admin_all', []);
     }
 
+
+
+    public function test_parts_lists_show_plain_status_text_and_inline_internal_note_editor(): void
+    {
+        $this->actingAsWarehouseUser();
+
+        $ready = Part::query()->create([
+            'name' => 'Część w sprzedaży',
+            'status' => 'ready',
+            'internal_note' => null,
+            'needs_listing' => false,
+        ]);
+
+        $sold = Part::query()->create([
+            'name' => 'Część sprzedana',
+            'status' => 'sold',
+            'internal_note' => 'Oddzwonić do klienta',
+            'needs_listing' => true,
+        ]);
+
+        Livewire::test(ListParts::class)
+            ->assertSee('W sprzedaży')
+            ->assertSee('gps-part-status-text--ready', false)
+            ->assertSee('gps-part-note__plus', false)
+            ->call('saveInternalNote', $ready->id, 'Nowa notatka lokalna')
+            ->assertHasNoErrors();
+
+        $this->assertSame('Nowa notatka lokalna', $ready->fresh()->internal_note);
+
+        Livewire::test(PartsToList::class)
+            ->assertSee('Sprzedana')
+            ->assertSee('gps-part-status-text--sold', false)
+            ->assertSee('Oddzwonić do klienta')
+            ->call('saveInternalNote', $sold->id, '')
+            ->assertHasNoErrors();
+
+        $this->assertNull($sold->fresh()->internal_note);
+    }
 
     public function test_part_admin_view_and_edit_share_existing_images_and_safe_preview_actions(): void
     {
