@@ -175,7 +175,7 @@ class ListParts extends Page
 
         Notification::make()
             ->title('Lokalne mapowanie '.ucfirst($result['marketplace']).' zapisane.')
-            ->body('ID: '.$result['external_id'])
+            ->body('marketplace='.$result['marketplace'].' | extracted_external_id='.$result['external_id'].' | saved_listing_id='.$result['listing']->id.' | mapping_ready='.(($result['mapping_ready'] ?? false) ? 'true' : 'false').' | marketplace_write=false | sync_triggered=false')
             ->success()
             ->send();
     }

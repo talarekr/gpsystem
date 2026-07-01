@@ -69,6 +69,7 @@ use App\Http\Controllers\Tools\MarketplaceOrdersResetController;
 use App\Http\Controllers\Tools\MarketplaceOrdersSyncController;
 use App\Http\Controllers\Tools\MarketplaceOrderFulfillmentSyncController;
 use App\Http\Controllers\Tools\MarketplaceOrdersTimezoneFixController;
+use App\Http\Controllers\Tools\ManualLinkMappingDiagnosticsController;
 use App\Http\Controllers\Tools\PartMarketplaceReadinessController;
 use App\Http\Controllers\Tools\MarketplacePublishPartController;
 use App\Http\Controllers\Tools\ImportOvokoOrdersDryRunController;
@@ -244,6 +245,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/ovoko/listing-url-backfill', OvokoListingUrlBackfillController::class)->name('admin.tools.ovoko.listing-url-backfill');
     Route::get('/admin/tools/ovoko/listing-url-diagnostics', OvokoListingUrlDiagnosticsController::class)->name('admin.tools.ovoko.listing-url-diagnostics');
     Route::get('/admin/tools/marketplace/listing-url-backfill', MarketplaceListingUrlBackfillController::class)->name('admin.tools.marketplace.listing-url-backfill');
+    Route::get('/admin/tools/marketplace/manual-link-mapping/diagnostics', ManualLinkMappingDiagnosticsController::class)->name('admin.tools.marketplace.manual-link-mapping.diagnostics');
     Route::get('/admin/tools/marketplace/ebay-listing-audit', EbayListingAuditController::class)->name('admin.tools.marketplace.ebay-listing-audit');
     Route::get('/admin/tools/marketplace/ebay-description-audit', EbayDescriptionAuditController::class)->name('admin.tools.marketplace.ebay-description-audit');
     Route::get('/admin/tools/marketplace/ebay-listing-audit-runner', EbayListingAuditRunnerController::class)->name('admin.tools.marketplace.ebay-listing-audit-runner');

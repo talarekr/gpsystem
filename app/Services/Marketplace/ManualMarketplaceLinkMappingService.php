@@ -10,7 +10,7 @@ use InvalidArgumentException;
 class ManualMarketplaceLinkMappingService
 {
     /**
-     * @return array{listing: MarketplaceListing, marketplace: string, external_id: string, url: string, action: string}
+     * @return array{listing: MarketplaceListing, marketplace: string, external_id: string, url: string, action: string, mapping_ready: bool, marketplace_write: bool, sync_triggered: bool}
      */
     public function save(Part $part, string $marketplace, string $url): array
     {
@@ -48,7 +48,7 @@ class ManualMarketplaceLinkMappingService
 
             $listing->forceFill($this->attributes($part, $marketplace, $externalId, $url, $listing->raw_payload ?? []))->save();
 
-            return ['listing' => $listing, 'marketplace' => $marketplace, 'external_id' => $externalId, 'url' => $url, 'action' => 'updated'];
+            return $this->result($listing, $marketplace, $externalId, $url, 'updated');
         }
 
         $account = MarketplaceAccount::query()->firstOrCreate(
@@ -62,7 +62,24 @@ class ManualMarketplaceLinkMappingService
             'marketplace' => $marketplace,
         ]);
 
-        return ['listing' => $listing, 'marketplace' => $marketplace, 'external_id' => $externalId, 'url' => $url, 'action' => 'created'];
+        return $this->result($listing, $marketplace, $externalId, $url, 'created');
+    }
+
+    /**
+     * @return array{listing: MarketplaceListing, marketplace: string, external_id: string, url: string, action: string, mapping_ready: bool, marketplace_write: bool, sync_triggered: bool}
+     */
+    private function result(MarketplaceListing $listing, string $marketplace, string $externalId, string $url, string $action): array
+    {
+        return [
+            'listing' => $listing,
+            'marketplace' => $marketplace,
+            'external_id' => $externalId,
+            'url' => $url,
+            'action' => $action,
+            'mapping_ready' => true,
+            'marketplace_write' => false,
+            'sync_triggered' => false,
+        ];
     }
 
     public function parseAllegroOfferId(string $url): ?string
