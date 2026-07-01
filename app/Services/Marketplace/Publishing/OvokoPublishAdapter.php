@@ -10,6 +10,9 @@ use Throwable;
 
 class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
 {
+    private const OVOKO_USED_QUALITY = 0;
+    private const OVOKO_NEW_QUALITY = 1;
+
     protected function channel(): string { return 'ovoko'; }
     protected function marketplace(): string { return 'ovoko'; }
     protected function accountCode(): string { return 'ovoko_main'; }
@@ -99,7 +102,7 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
         if (blank($fields['quality'] ?? null)) $missing[] = 'Ovoko: nie udało się zmapować quality z wartości '.($part->condition_notes ?? '');
         if (blank($fields['status'] ?? null)) $missing[] = 'Uzupełnij domyślny status części Ovoko w ustawieniach konta.';
         if (blank($fields['photo'] ?? null)) $missing[] = 'Ovoko: zdjęcie części musi być publicznym URL-em HTTP/HTTPS. Szczegóły są w Logach.';
-        $diagnostics = array_merge($condition, ['ovoko_status' => $fields['status'] ?? null], $car, $partCodeDiagnostics);
+        $diagnostics = array_merge($condition, ['ovoko_status' => $fields['status'] ?? null, 'raw_condition_payload_fields' => ['quality' => $fields['quality'] ?? null, 'status' => $fields['status'] ?? null]], $car, $partCodeDiagnostics);
         if (blank($fields['car_id'] ?? null)) $diagnostics['blocked_reason'] = 'missing_ovoko_car_id';
         if (($partCodeDiagnostics['ovoko_codes_look_like_title'] ?? false) === true) $diagnostics['warning'] = 'ovoko_code_looks_like_full_title';
         if ($missing !== []) return ['ok' => false, 'fields' => $fields, 'missing' => $missing, 'error' => implode('; ', $missing), 'diagnostics' => $diagnostics];
@@ -296,7 +299,19 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
 
     private function ovokoConditionDiagnostics(Part $part): array
     {
-        return ['local_condition' => $part->condition_notes, 'ovoko_quality' => 1, 'ovoko_status' => null, 'condition_source' => 'business_rule_all_gp_swiss_parts_are_used', 'condition_mapped_as_used' => true];
+        return [
+            'local_condition' => $part->condition_notes,
+            'ovoko_condition_field_name' => 'quality',
+            'ovoko_condition_value' => self::OVOKO_USED_QUALITY,
+            'ovoko_condition_meaning' => 'used',
+            'ovoko_quality' => self::OVOKO_USED_QUALITY,
+            'ovoko_status' => null,
+            'condition_source' => 'business_rule_all_gp_swiss_parts_are_used; Ovoko/RRR importPart condition is quality, where 0=used and 1=new; status is availability/publication status, not item condition',
+            'condition_mapping_verified' => true,
+            'condition_mapped_as_used' => self::OVOKO_USED_QUALITY !== self::OVOKO_NEW_QUALITY,
+            'ovoko_new_quality_value' => self::OVOKO_NEW_QUALITY,
+            'raw_condition_payload_fields' => ['quality' => self::OVOKO_USED_QUALITY],
+        ];
     }
 
     private function looksLikeTitleCode(string $value, string $title = ''): bool

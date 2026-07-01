@@ -6,7 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Car;
 use App\Models\MarketplaceSyncLog;
 use App\Services\Marketplace\Api\OvokoApiClient;
-use App\Services\Marketplace\MarketplaceApiManager;
+use App\Services\Marketplace\Api\MarketplaceApiManager;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 
@@ -69,7 +69,12 @@ class OvokoCarMappingController extends Controller
             $candidates = $client->searchCars($car->vin, $car->external_id, $payload);
         } catch (\Throwable $e) {
             $canSearch = false;
-            $candidates = [['error' => 'ovoko_car_search_unavailable', 'exception' => $e::class]];
+            $candidates = [[
+                'error' => 'ovoko_car_search_unavailable',
+                'error_class' => $e::class,
+                'error_message' => $this->safeErrorMessage($e),
+                'read_only' => true,
+            ]];
         }
 
         return [
@@ -95,6 +100,11 @@ class OvokoCarMappingController extends Controller
                 'note' => 'Public web search did not reveal official Ovoko/RRR car import documentation; endpoints are isolated behind dry-run/apply safeguards and must be validated with seller API credentials.',
             ],
         ];
+    }
+
+    private function safeErrorMessage(\Throwable $e): string
+    {
+        return str($e->getMessage())->replaceMatches('/(password|user_token|token|secret|authorization|username)=([^&\s]+)/i', '$1=***')->limit(500)->toString();
     }
 
     private function createPayload(Car $car): array

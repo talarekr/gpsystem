@@ -50,7 +50,8 @@ class OvokoPublishAdapterTest extends TestCase
                 && str_contains($body, 'user_token=ovoko-token')
                 && str_contains($body, 'category_id=252')
                 && str_contains($body, 'car_id=777')
-                && str_contains($body, 'quality=1')
+                && str_contains($body, 'quality=0')
+                && ! str_contains($body, 'quality=1')
                 && str_contains($body, 'status=1')
                 && str_contains($body, 'price=120')
                 && str_contains($body, 'manufacturer_code=3Q0919294F')
@@ -85,12 +86,34 @@ class OvokoPublishAdapterTest extends TestCase
 
         $this->assertTrue($result['channels']['ovoko']['success']);
         Http::assertSent(fn ($request): bool => $request->url() === 'https://ovoko.example.test/crm/importPart'
-            && str_contains($request->body(), 'quality=1')
-            && ! str_contains($request->body(), 'quality=2'));
+            && str_contains($request->body(), 'quality=0')
+            && ! str_contains($request->body(), 'quality=1'));
         $payload = MarketplaceSyncLog::query()->where('marketplace', 'ovoko')->where('action', 'crm/importPart')->latest('id')->firstOrFail()->payload;
         $this->assertSame('nowy', data_get($payload, 'request.local_condition'));
-        $this->assertSame(1, data_get($payload, 'request.ovoko_quality'));
+        $this->assertSame(0, data_get($payload, 'request.ovoko_quality'));
+        $this->assertSame('quality', data_get($payload, 'request.ovoko_condition_field_name'));
+        $this->assertSame(0, data_get($payload, 'request.ovoko_condition_value'));
+        $this->assertSame('used', data_get($payload, 'request.ovoko_condition_meaning'));
+        $this->assertSame(1, data_get($payload, 'request.ovoko_new_quality_value'));
+        $this->assertTrue(data_get($payload, 'request.condition_mapping_verified'));
         $this->assertTrue(data_get($payload, 'request.condition_mapped_as_used'));
+        $this->assertSame(['quality' => 0, 'status' => 1], data_get($payload, 'request.raw_condition_payload_fields'));
+    }
+
+
+    public function test_ovoko_car_mapping_dry_run_searches_read_only_without_container_binding_error(): void
+    {
+        MarketplaceAccount::query()->create(['marketplace' => 'ovoko', 'code' => 'ovoko_main', 'name' => 'Ovoko main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'read_only', 'api_credentials' => ['username' => 'ovoko-user', 'password' => 'ovoko-pass', 'user_token' => 'ovoko-token']]);
+        $car = Car::query()->create(['make' => 'VOLKSWAGEN', 'model' => 'PASSAT B6', 'production_year' => 2009, 'fuel_type' => 'benzyna', 'vin' => 'WVWZZZ3CZ9E000001']);
+        Http::fake(['https://ovoko.example.test/v2/get/cars' => Http::response(['status_code' => 'R200', 'data' => [['id' => 4960, 'make' => 'VOLKSWAGEN', 'model' => 'PASSAT B6', 'year' => 2009, 'vin' => 'WVWZZZ3CZ9E000001']]], 200)]);
+
+        $response = $this->getJson('/admin/tools/ovoko/cars/'.$car->id.'/mapping-dry-run');
+
+        $response->assertOk()
+            ->assertJsonPath('can_search_ovoko_car', true)
+            ->assertJsonPath('search_candidates.0.ovoko_car_id', 4960)
+            ->assertJsonMissing(['exception' => 'Illuminate\Contracts\Container\BindingResolutionException']);
+        Http::assertSent(fn ($request): bool => $request->url() === 'https://ovoko.example.test/v2/get/cars' && $request->method() === 'POST');
     }
 
     public function test_ovoko_publish_blocks_local_car_without_ovoko_car_id_with_clear_diagnostics(): void

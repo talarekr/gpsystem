@@ -118,6 +118,20 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
         $response = Http::asForm()->acceptJson()->timeout(max(1, $timeoutSeconds))->post($endpoint, $fields);
         $json = $response->json();
         $payload = is_array($json) ? $json : [];
+        $statusCode = $payload['status_code'] ?? null;
+        $apiOk = $response->successful() && ($statusCode === 'R200' || $statusCode === 200 || $statusCode === null);
+
+        if (! $apiOk) {
+            return [[
+                'error' => 'ovoko_car_search_not_supported_or_failed',
+                'http_status' => $response->status(),
+                'api_status_code' => $statusCode,
+                'error_message' => $payload['msg'] ?? $payload['message'] ?? 'Ovoko/RRR car search endpoint did not return a success status.',
+                'endpoint_used' => $endpoint,
+                'read_only' => true,
+            ]];
+        }
+
         $rows = $payload['data'] ?? $payload['list'] ?? $payload['cars'] ?? [];
 
         return array_values(array_map(fn (array $row): array => [
