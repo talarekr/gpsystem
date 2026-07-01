@@ -514,6 +514,9 @@ class MarketplaceOrdersImportService
             ])->save();
             $created ? $result['orders_created']++ : $result['orders_updated']++;
             foreach ($n['items'] as $idx => $item) $this->upsertItem($order, $item, $idx, $result);
+            if ($liveImport) {
+                app(SaleFinalizationService::class)->applyForOrder($order->load('items'));
+            }
         });
     }
 

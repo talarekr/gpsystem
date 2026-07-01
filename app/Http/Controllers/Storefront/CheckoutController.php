@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Storefront;
 use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Services\Storefront\CartService;
+use App\Services\Marketplace\SaleFinalizationService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -26,7 +27,7 @@ class CheckoutController extends Controller
         return view('storefront.checkout.show', $this->viewData());
     }
 
-    public function store(Request $request): RedirectResponse
+    public function store(Request $request, SaleFinalizationService $saleFinalization): RedirectResponse
     {
         $items = $this->cart->items();
 
@@ -83,6 +84,8 @@ class CheckoutController extends Controller
 
             return $order;
         });
+
+        $saleFinalization->applyForOrder($order->load('items'));
 
         $this->cart->clear();
 
