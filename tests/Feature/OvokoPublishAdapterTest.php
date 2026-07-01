@@ -131,7 +131,14 @@ class OvokoPublishAdapterTest extends TestCase
             ->assertJsonPath('search_candidates', [])
             ->assertJsonPath('search_warning', 'ovoko_car_search_filter_ignored_or_unusable')
             ->assertJsonPath('existing_car_search_unavailable', true)
-            ->assertJsonPath('apply_will_create_new_car', true)
+            ->assertJsonPath('apply_will_create_new_car', false)
+            ->assertJsonPath('can_create_ovoko_car', false)
+            ->assertJsonPath('blocked_reason', 'missing_ovoko_car_model_id')
+            ->assertJsonPath('manual_input_required', true)
+            ->assertJsonPath('required_fields_missing', ['car_model'])
+            ->assertJsonPath('ovoko_required_car_model_id_present', false)
+            ->assertJsonPath('would_create_payload.external_id', 'gps-car-'.$car->id)
+            ->assertJsonMissingPath('would_create_payload.model')
             ->assertJsonPath('returned_candidates_count', 100)
             ->assertJsonPath('parsed_candidates_count', 100)
             ->assertJsonPath('usable_candidates_count', 0)
@@ -140,6 +147,40 @@ class OvokoPublishAdapterTest extends TestCase
             ->assertJsonPath('search_request_payload.username', '***')
             ->assertJsonPath('search_request_payload.make', 'VOLKSWAGEN')
             ->assertJsonPath('search_response_sample_raw.0.id', 1);
+    }
+
+    public function test_ovoko_car_mapping_apply_does_not_import_car_without_required_car_model_id(): void
+    {
+        MarketplaceAccount::query()->create(['marketplace' => 'ovoko', 'code' => 'ovoko_main', 'name' => 'Ovoko main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'read_only', 'api_credentials' => ['username' => 'ovoko-user', 'password' => 'ovoko-pass', 'user_token' => 'ovoko-token']]);
+        $car = Car::query()->create(['make' => 'VOLKSWAGEN', 'model' => 'PASSAT B6', 'production_year' => 2009, 'fuel_type' => 'benzyna']);
+        Http::fake(['https://ovoko.example.test/v2/get/cars' => Http::response(['status_code' => 'R200', 'data' => array_map(fn (int $id): array => ['id' => $id], range(1, 100))], 200)]);
+
+        $response = $this->postJson('/admin/tools/ovoko/cars/'.$car->id.'/mapping-apply?confirm=ovoko-car-map');
+
+        $response->assertStatus(422)
+            ->assertJsonPath('blocked', true)
+            ->assertJsonPath('reason', 'ovoko_car_id_required_manual_input')
+            ->assertJsonPath('can_create_ovoko_car', false)
+            ->assertJsonPath('blocked_reason', 'missing_ovoko_car_model_id')
+            ->assertJsonPath('manual_input_required', true)
+            ->assertJsonPath('required_fields_missing', ['car_model']);
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://ovoko.example.test/crm/importCar');
+    }
+
+    public function test_ovoko_car_mapping_apply_can_save_manual_car_model_id_without_creating_car(): void
+    {
+        MarketplaceAccount::query()->create(['marketplace' => 'ovoko', 'code' => 'ovoko_main', 'name' => 'Ovoko main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'read_only', 'api_credentials' => ['username' => 'ovoko-user', 'password' => 'ovoko-pass', 'user_token' => 'ovoko-token']]);
+        $car = Car::query()->create(['make' => 'VOLKSWAGEN', 'model' => 'PASSAT B6', 'production_year' => 2009, 'fuel_type' => 'benzyna']);
+        Http::fake(['https://ovoko.example.test/v2/get/cars' => Http::response(['status_code' => 'R200', 'data' => []], 200)]);
+
+        $response = $this->postJson('/admin/tools/ovoko/cars/'.$car->id.'/mapping-apply?confirm=ovoko-car-map', ['ovoko_car_model_id' => 'RRR-MODEL-123']);
+
+        $response->assertOk()
+            ->assertJsonPath('ovoko_car_model_id', 'RRR-MODEL-123')
+            ->assertJsonPath('no_car_create', true)
+            ->assertJsonPath('no_part_publish', true);
+        $this->assertSame('RRR-MODEL-123', $car->refresh()->legacy_payload['ovoko_car_model_id']);
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://ovoko.example.test/crm/importCar');
     }
 
     public function test_ovoko_publish_blocks_local_car_without_ovoko_car_id_with_clear_diagnostics(): void
