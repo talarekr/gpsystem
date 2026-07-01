@@ -165,6 +165,45 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
         ], fn ($value) => $value !== null && $value !== ''), array_filter($rows, 'is_array')));
     }
 
+
+    public function compatibilitySupportedCategories(): array
+    {
+        $response = Http::withToken((string) $this->credentials()['access_token'])
+            ->accept('application/vnd.allegro.public.v1+json')
+            ->timeout(20)
+            ->get($this->absoluteUrl('/sale/compatibility-list/supported-categories'));
+        $json = $response->json();
+        return ['ok' => $response->successful(), 'http_status' => $response->status(), 'json' => is_array($json) ? $json : [], 'request_id' => $response->header('trace-id') ?: $response->header('x-request-id'), 'error' => $response->successful() ? null : 'Compatibility supported categories lookup failed.'];
+    }
+
+    public function searchProducts(string $categoryId, string $phrase): array
+    {
+        $response = Http::withToken((string) $this->credentials()['access_token'])
+            ->accept('application/vnd.allegro.public.v1+json')
+            ->timeout(20)
+            ->get($this->absoluteUrl('/sale/products'), array_filter(['category.id' => $categoryId, 'phrase' => $phrase, 'limit' => 20], fn ($value) => filled($value)));
+        $json = $response->json();
+        return ['ok' => $response->successful(), 'http_status' => $response->status(), 'json' => is_array($json) ? $json : [], 'products' => is_array($json) ? array_values(array_filter($json['products'] ?? $json['items'] ?? [], 'is_array')) : [], 'request_id' => $response->header('trace-id') ?: $response->header('x-request-id'), 'error' => $response->successful() ? null : 'Allegro product catalog search failed.'];
+    }
+
+    public function product(string $productId): array
+    {
+        $response = Http::withToken((string) $this->credentials()['access_token'])
+            ->accept('application/vnd.allegro.public.v1+json')
+            ->timeout(20)
+            ->get($this->absoluteUrl('/sale/products/'.rawurlencode($productId)));
+        $json = $response->json();
+        return ['ok' => $response->successful(), 'http_status' => $response->status(), 'json' => is_array($json) ? $json : [], 'request_id' => $response->header('trace-id') ?: $response->header('x-request-id'), 'error' => $response->successful() ? null : 'Allegro product details lookup failed.'];
+    }
+
+    public function compatibilityListSuggestions(?string $productId = null, ?string $offerId = null, ?string $language = null): array
+    {
+        $query = array_filter(['product.id' => $productId, 'offer.id' => $offerId, 'language' => $language], fn ($value) => filled($value));
+        $response = Http::withToken((string) $this->credentials()['access_token'])->accept('application/vnd.allegro.public.v1+json')->timeout(20)->get($this->absoluteUrl('/sale/compatibility-list-suggestions'), $query);
+        $json = $response->json();
+        return ['ok' => $response->successful(), 'http_status' => $response->status(), 'json' => is_array($json) ? $json : [], 'request_id' => $response->header('trace-id') ?: $response->header('x-request-id')];
+    }
+
     public function createProductOffer(array $payload): array
     {
         $base = rtrim((string) $this->account?->api_base_url, '/');

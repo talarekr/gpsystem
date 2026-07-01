@@ -35,6 +35,7 @@ use App\Http\Controllers\Tools\CheckOvokoApiSettingsController;
 use App\Http\Controllers\Tools\MarketplaceApiSettingsDiagnosticsController;
 use App\Http\Controllers\Tools\MarketplaceApiFoundationController;
 use App\Http\Controllers\Tools\MarketplaceListingDryRunController;
+use App\Http\Controllers\Tools\AllegroCompatibilityDryRunController;
 use App\Http\Controllers\Tools\MarketplaceListingUrlBackfillController;
 use App\Http\Controllers\Tools\EbayListingAuditController;
 use App\Http\Controllers\Tools\EbayDescriptionAuditController;
@@ -246,6 +247,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::match(['get', 'post'], '/admin/tools/marketplace/orders/{order}/fulfillment-sync', MarketplaceOrderFulfillmentSyncController::class)->name('admin.tools.marketplace.orders.fulfillment-sync');
     Route::get('/admin/tools/marketplace/orders-timezone-fix', MarketplaceOrdersTimezoneFixController::class)->name('admin.tools.marketplace.orders-timezone-fix');
     Route::get('/admin/tools/marketplace/allegro/responsible-producers', [MarketplaceListingDryRunController::class, 'allegroResponsibleProducers'])->name('admin.tools.marketplace.allegro.responsible-producers');
+    Route::get('/admin/tools/allegro/parts/{part}/compatibility-dry-run', AllegroCompatibilityDryRunController::class)->name('admin.tools.allegro.parts.compatibility-dry-run');
     Route::get('/admin/tools/marketplace/allegro/offers/{offerId}/description-update', [MarketplaceListingDryRunController::class, 'allegroDescriptionUpdate'])->name('admin.tools.marketplace.allegro.offers.description-update');
 });
 
