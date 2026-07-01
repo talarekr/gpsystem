@@ -18,7 +18,7 @@ use Throwable;
 class OvokoStockSyncController extends Controller
 {
     private const CONFIRM = 'ovoko-stock-sync';
-    private const ENDPOINT_PATH = '/v2/get/parts';
+    private const ENDPOINT_PATH = '/get/part';
     private const SHAPE_KEYS = ['data', 'item', 'part', 'parts', 'items', 'result', 'list'];
     private const ACTION = 'ovoko_stock_pull';
 
@@ -155,6 +155,7 @@ class OvokoStockSyncController extends Controller
                 'ovoko_lookup_attempts' => $ovoko['ovoko_lookup_attempts'] ?? [],
                 'ovoko_response_shape' => $ovoko['ovoko_response_shape'] ?? null,
                 'candidate_ids' => $ovoko['candidate_ids'] ?? [],
+                'filter_applied' => $ovoko['filter_applied'] ?? false,
             ],
             'planned_local_state' => $planned,
             'action' => $this->sameState($local, $planned) ? 'no_change' : 'update_local_stock',
@@ -239,12 +240,15 @@ class OvokoStockSyncController extends Controller
         $credentials = is_array($account->api_credentials) ? $account->api_credentials : [];
         foreach (['username', 'password', 'user_token'] as $key) if (blank($credentials[$key] ?? null)) return ['ok' => false, 'blocker' => 'ovoko_api_credentials_missing'];
 
-        $endpoint = rtrim((string) $account->api_base_url, '/').self::ENDPOINT_PATH.'?limit=100&page=1';
-        $attempts = [
-            ['name' => 'detail_by_part_id_and_id', 'method' => 'POST', 'endpoint' => $endpoint, 'params' => ['part_id' => $id, 'id' => $id]],
-            ['name' => 'list_search_by_part_id', 'method' => 'POST', 'endpoint' => $endpoint, 'params' => ['part_id' => $id]],
-            ['name' => 'list_search_by_id', 'method' => 'POST', 'endpoint' => $endpoint, 'params' => ['id' => $id]],
-        ];
+        $endpoint = rtrim((string) $account->api_base_url, '/').self::ENDPOINT_PATH.'/'.rawurlencode($id);
+        $attempts = [[
+            'name' => 'official_get_part_by_path_id',
+            'method' => 'POST',
+            'endpoint' => $endpoint,
+            'query_params' => [],
+            'body' => Arr::only($credentials, ['username', 'password', 'user_token']),
+            'official_source' => 'RRR API docs: POST /get/part/{id}; id is a required URI value; request body contains only authentication form data.',
+        ]];
 
         $lastShape = null;
         $candidateIds = [];
@@ -252,19 +256,25 @@ class OvokoStockSyncController extends Controller
 
         try {
             foreach ($attempts as $attempt) {
-                $response = Http::asForm()->acceptJson()->timeout(30)->post($attempt['endpoint'], Arr::only($credentials, ['username', 'password', 'user_token']) + $attempt['params']);
+                $response = Http::asForm()->acceptJson()->timeout(30)->post($attempt['endpoint'], $attempt['body']);
                 $payload = $response->json();
                 $payload = is_array($payload) ? $payload : [];
                 $shape = $this->responseShape($payload, $response->status());
                 $rows = $this->extractRows($payload);
                 $attemptCandidateIds = $this->candidateIds($rows);
                 $candidateIds = array_values(array_unique(array_merge($candidateIds, $attemptCandidateIds)));
+                $filterApplied = in_array((string) $id, $attemptCandidateIds, true) && count(array_diff($attemptCandidateIds, [(string) $id])) === 0;
                 $safeAttempts[] = [
                     'name' => $attempt['name'],
                     'method' => $attempt['method'],
                     'endpoint' => $attempt['endpoint'],
+                    'query_params' => $attempt['query_params'],
+                    'request_body_keys' => array_keys($attempt['body']),
+                    'request_body_sample' => $this->sanitizeSample($attempt['body']),
+                    'official_source' => $attempt['official_source'],
                     'http_status' => $response->status(),
-                    'lookup_fields' => array_keys($attempt['params']),
+                    'lookup_fields' => ['path.id'],
+                    'filter_applied' => $filterApplied,
                     'response_shape' => $shape,
                     'candidate_ids' => $attemptCandidateIds,
                 ];
@@ -272,11 +282,11 @@ class OvokoStockSyncController extends Controller
 
                 if (! $response->successful()) {
                     $blocker = in_array($response->status(), [401, 403], true) ? 'ovoko_api_auth_failed' : ($response->status() === 429 ? 'ovoko_api_rate_limited' : 'ovoko_api_failed');
-                    return ['ok' => false, 'http_status' => $response->status(), 'blocker' => $blocker, 'ovoko_lookup_attempts' => $safeAttempts, 'ovoko_response_shape' => $lastShape, 'candidate_ids' => $candidateIds];
+                    return ['ok' => false, 'http_status' => $response->status(), 'blocker' => $blocker, 'ovoko_lookup_attempts' => $safeAttempts, 'ovoko_response_shape' => $lastShape, 'candidate_ids' => $candidateIds, 'filter_applied' => false];
                 }
 
                 $matches = array_values(array_filter($rows, fn (array $row): bool => (string) $this->extractOvokoId($row) === (string) $id));
-                if ($matches !== []) {
+                if ($matches !== [] && $filterApplied) {
                     return [
                         'ok' => true,
                         'http_status' => $response->status(),
@@ -286,13 +296,18 @@ class OvokoStockSyncController extends Controller
                         'ovoko_lookup_attempts' => $safeAttempts,
                         'ovoko_response_shape' => $lastShape,
                         'candidate_ids' => $candidateIds,
+                        'filter_applied' => true,
                     ];
+                }
+
+                if ($attemptCandidateIds !== [] && ! $filterApplied) {
+                    return ['ok' => false, 'http_status' => $response->status(), 'blocker' => 'ovoko_lookup_filter_not_applied', 'ovoko_lookup_attempts' => $safeAttempts, 'ovoko_response_shape' => $lastShape, 'candidate_ids' => $candidateIds, 'filter_applied' => false];
                 }
             }
 
-            return ['ok' => false, 'http_status' => $safeAttempts[array_key_last($safeAttempts)]['http_status'] ?? null, 'blocker' => 'missing_ovoko_product', 'ovoko_lookup_attempts' => $safeAttempts, 'ovoko_response_shape' => $lastShape, 'candidate_ids' => $candidateIds];
+            return ['ok' => false, 'http_status' => $safeAttempts[array_key_last($safeAttempts)]['http_status'] ?? null, 'blocker' => 'missing_ovoko_product', 'ovoko_lookup_attempts' => $safeAttempts, 'ovoko_response_shape' => $lastShape, 'candidate_ids' => $candidateIds, 'filter_applied' => false];
         } catch (Throwable) {
-            return ['ok' => false, 'blocker' => 'ovoko_api_exception', 'ovoko_lookup_attempts' => $safeAttempts, 'ovoko_response_shape' => $lastShape, 'candidate_ids' => $candidateIds];
+            return ['ok' => false, 'blocker' => 'ovoko_api_exception', 'ovoko_lookup_attempts' => $safeAttempts, 'ovoko_response_shape' => $lastShape, 'candidate_ids' => $candidateIds, 'filter_applied' => false];
         }
     }
 

@@ -26,7 +26,7 @@ class OvokoStockSyncControllerTest extends TestCase
         MarketplaceListing::query()->create(['marketplace' => 'ovoko', 'part_id' => $part->id, 'external_offer_id' => '11711', 'status' => 'active']);
 
         Http::fake([
-            'ovoko.test/v2/get/parts?limit=100&page=1' => Http::response(['parts' => [
+            'ovoko.test/get/part/*' => Http::response(['parts' => [
                 ['id' => '11711', 'quantity' => 0, 'status' => 'sold'],
             ]], 200),
         ]);
@@ -46,7 +46,7 @@ class OvokoStockSyncControllerTest extends TestCase
             ->assertJsonPath('items.0.planned_local_state.quantity', 0)
             ->assertJsonPath('items.0.action', 'update_local_stock');
 
-        Http::assertSent(fn ($request): bool => $request['part_id'] === '11711' && $request['id'] === '11711');
+        Http::assertSent(fn ($request): bool => (string) $request->url() === 'https://ovoko.test/get/part/11711' && array_keys($request->data()) === ['username', 'password', 'user_token']);
     }
 
     public function test_dry_run_resolves_second_sample_ovoko_id_from_listing(): void
@@ -57,7 +57,7 @@ class OvokoStockSyncControllerTest extends TestCase
         MarketplaceListing::query()->create(['marketplace' => 'ovoko', 'part_id' => $part->id, 'external_offer_id' => '11694', 'status' => 'imported']);
 
         Http::fake([
-            'ovoko.test/v2/get/parts?limit=100&page=1' => Http::response(['parts' => [
+            'ovoko.test/get/part/*' => Http::response(['parts' => [
                 ['id' => '11694', 'quantity' => 2, 'status' => 'active'],
             ]], 200),
         ]);
@@ -78,14 +78,14 @@ class OvokoStockSyncControllerTest extends TestCase
         MarketplaceListing::query()->create(['marketplace' => 'ovoko', 'part_id' => $part->id, 'external_offer_id' => '11711', 'status' => 'active']);
 
         Http::fake([
-            'ovoko.test/v2/get/parts?limit=100&page=1' => Http::response(['status_code' => 'R200', 'item' => ['id' => '11711', 'quantity' => 3, 'status' => 'active']], 200),
+            'ovoko.test/get/part/*' => Http::response(['status_code' => 'R200', 'item' => ['id' => '11711', 'quantity' => 3, 'status' => 'active']], 200),
         ]);
 
         $this->getJson('/admin/tools/ovoko-stock-sync-dry-run?part_id=7910')
             ->assertOk()
             ->assertJsonPath('marketplace_write', false)
             ->assertJsonPath('items.0.ovoko.quantity', 3)
-            ->assertJsonPath('items.0.ovoko.matched_in_attempt', 'detail_by_part_id_and_id')
+            ->assertJsonPath('items.0.ovoko.matched_in_attempt', 'official_get_part_by_path_id')
             ->assertJsonPath('items.0.ovoko.ovoko_response_shape.has_wrappers.item', true)
             ->assertJsonPath('items.0.ovoko.candidate_ids.0', '11711')
             ->assertJsonPath('items.0.blockers', []);
@@ -99,7 +99,7 @@ class OvokoStockSyncControllerTest extends TestCase
         MarketplaceListing::query()->create(['marketplace' => 'ovoko', 'part_id' => $part->id, 'external_offer_id' => '11711', 'status' => 'active']);
 
         Http::fake([
-            'ovoko.test/v2/get/parts?limit=100&page=1' => Http::response(['parts' => [
+            'ovoko.test/get/part/*' => Http::response(['parts' => [
                 ['id' => '99999', 'quantity' => 0, 'status' => 'sold'],
             ], 'user_token' => 'secret-token'], 200),
         ]);
@@ -108,7 +108,7 @@ class OvokoStockSyncControllerTest extends TestCase
             ->assertOk()
             ->assertJsonPath('ok', false)
             ->assertJsonPath('items.0.action', 'blocked')
-            ->assertJsonPath('items.0.ovoko.blocker', 'missing_ovoko_product')
+            ->assertJsonPath('items.0.ovoko.blocker', 'ovoko_lookup_filter_not_applied')
             ->assertJsonPath('items.0.ovoko.candidate_ids.0', '99999')
             ->assertJsonPath('items.0.ovoko.ovoko_response_shape.raw_sample.user_token', '[redacted]');
     }
