@@ -6,7 +6,6 @@ use App\Filament\Resources\PartResource;
 use App\Models\Car;
 use App\Models\Part;
 use App\Models\StorageLocation;
-use App\Services\Marketplace\ManualMarketplaceListingMapper;
 use App\Services\Marketplace\PreparePartMarketplaceListingService;
 use Filament\Notifications\Notification;
 use Filament\Actions;
@@ -124,44 +123,6 @@ class ListParts extends Page
         $this->resetPage();
     }
 
-
-
-    public function saveMarketplaceLinkMapping(int $partId, string $marketplace, ?string $url = null): void
-    {
-        $part = $this->getPartsBaseQuery()->whereKey($partId)->first();
-
-        if (! $part) {
-            return;
-        }
-
-        try {
-            $result = app(ManualMarketplaceListingMapper::class)->map($part, $marketplace, (string) $url);
-        } catch (\InvalidArgumentException $exception) {
-            Notification::make()
-                ->title('Nie można zapisać mapowania aukcji.')
-                ->body($exception->getMessage())
-                ->danger()
-                ->send();
-
-            return;
-        }
-
-        if (($result['action'] ?? null) === 'conflict') {
-            Notification::make()
-                ->title('existing_mapping_conflict')
-                ->body('Obecne ID: '.($result['existing_external_id'] ?? '—').' | Nowe ID: '.($result['new_external_id'] ?? '—'))
-                ->danger()
-                ->send();
-
-            return;
-        }
-
-        Notification::make()
-            ->title('Mapowanie aukcji zapisane lokalnie.')
-            ->body('part_id='.$result['part_id'].' marketplace='.$result['marketplace'].' extracted_external_id='.$result['extracted_external_id'].' action='.$result['action'].' marketplace_write=false sync_triggered=false')
-            ->success()
-            ->send();
-    }
 
     public function saveInternalNote(int $partId, ?string $note = null): void
     {
