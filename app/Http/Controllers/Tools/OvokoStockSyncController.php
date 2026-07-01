@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Tools;
 
 use App\Http\Controllers\Controller;
 use App\Models\MarketplaceAccount;
+use App\Models\MarketplaceListing;
 use App\Models\MarketplaceSyncLog;
 use App\Models\Part;
 use Illuminate\Http\JsonResponse;
@@ -11,6 +12,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Schema;
 use Throwable;
 
 class OvokoStockSyncController extends Controller
@@ -105,25 +107,31 @@ class OvokoStockSyncController extends Controller
     {
         $part = Part::query()->find($partId);
         if (! $part) {
-            return ['part_id' => $partId, 'ovoko_id' => $partId, 'blockers' => ['missing_local_part'], 'action' => 'blocked'];
+            return ['part_id' => $partId, 'ovoko_id' => null, 'ovoko_mapping_source' => null, 'blockers' => ['missing_local_part'], 'action' => 'blocked'];
         }
 
         $local = $this->localState($part);
         if ((bool) $part->needs_listing) {
-            return ['part_id' => $partId, 'ovoko_id' => $partId, 'local' => $local, 'blockers' => ['skipped_do_wystawienia'], 'action' => 'blocked'];
+            return ['part_id' => $partId, 'ovoko_id' => null, 'ovoko_mapping_source' => null, 'local' => $local, 'blockers' => ['skipped_do_wystawienia'], 'action' => 'blocked'];
         }
         if ($part->status === 'sold') {
-            return ['part_id' => $partId, 'ovoko_id' => $partId, 'local' => $local, 'blockers' => ['sold_part_blocked'], 'action' => 'blocked'];
+            return ['part_id' => $partId, 'ovoko_id' => null, 'ovoko_mapping_source' => null, 'local' => $local, 'blockers' => ['sold_part_blocked'], 'action' => 'blocked'];
         }
 
-        $ovoko = $this->fetchOvokoPart($partId);
+        $mapping = $this->resolveOvokoMapping($part);
+        if (! ($mapping['ok'] ?? false)) {
+            return ['part_id' => $partId, 'ovoko_id' => null, 'ovoko_mapping_source' => null, 'local' => $local, 'blockers' => [$mapping['blocker'] ?? 'missing_ovoko_mapping'], 'action' => 'blocked'];
+        }
+
+        $ovokoId = (string) $mapping['ovoko_id'];
+        $ovoko = $this->fetchOvokoPart($ovokoId);
         if (! ($ovoko['ok'] ?? false)) {
-            return ['part_id' => $partId, 'ovoko_id' => $partId, 'local' => $local, 'ovoko' => $ovoko, 'blockers' => [$ovoko['blocker'] ?? 'ovoko_api_failed'], 'action' => 'blocked'];
+            return ['part_id' => $partId, 'ovoko_id' => $ovokoId, 'ovoko_mapping_source' => $mapping['source'], 'local' => $local, 'ovoko' => $ovoko, 'blockers' => [$ovoko['blocker'] ?? 'ovoko_api_failed'], 'action' => 'blocked'];
         }
 
         $quantity = $this->extractQuantity($ovoko['part'] ?? []);
         if ($quantity === null) {
-            return ['part_id' => $partId, 'ovoko_id' => $partId, 'local' => $local, 'ovoko' => $ovoko, 'blockers' => ['ovoko_stock_not_unambiguous'], 'action' => 'blocked'];
+            return ['part_id' => $partId, 'ovoko_id' => $ovokoId, 'ovoko_mapping_source' => $mapping['source'], 'local' => $local, 'ovoko' => $ovoko, 'blockers' => ['ovoko_stock_not_unambiguous'], 'action' => 'blocked'];
         }
 
         $planned = [
@@ -134,7 +142,8 @@ class OvokoStockSyncController extends Controller
 
         return [
             'part_id' => $partId,
-            'ovoko_id' => $partId,
+            'ovoko_id' => $ovokoId,
+            'ovoko_mapping_source' => $mapping['source'],
             'local' => $local,
             'ovoko' => ['quantity' => $quantity, 'status' => data_get($ovoko, 'part.status'), 'http_status' => $ovoko['http_status'] ?? null],
             'planned_local_state' => $planned,
@@ -143,7 +152,77 @@ class OvokoStockSyncController extends Controller
         ];
     }
 
-    private function fetchOvokoPart(int $id): array
+    /** @return array{ok: bool, ovoko_id?: string, source?: string, blocker?: string} */
+    private function resolveOvokoMapping(Part $part): array
+    {
+        $listingMapping = $this->resolveFromMarketplaceListings($part);
+        if (($listingMapping['ovoko_id'] ?? null) !== null) {
+            return ['ok' => true, 'ovoko_id' => (string) $listingMapping['ovoko_id'], 'source' => (string) $listingMapping['source']];
+        }
+
+        $legacyMapping = app(\App\Services\Marketplace\OvokoPartIdExtractor::class)->extractWithPath($part->legacy_payload);
+        if (($legacyMapping['id'] ?? null) !== null) {
+            return ['ok' => true, 'ovoko_id' => (string) $legacyMapping['id'], 'source' => 'parts.legacy_payload.'.($legacyMapping['path'] ?? 'ovoko_part_id')];
+        }
+
+        return ['ok' => false, 'blocker' => 'missing_ovoko_mapping'];
+    }
+
+    /** @return array{ovoko_id: ?string, source: ?string} */
+    private function resolveFromMarketplaceListings(Part $part): array
+    {
+        if (! Schema::hasTable('marketplace_listings')) {
+            return ['ovoko_id' => null, 'source' => null];
+        }
+
+        $columns = ['id', 'external_offer_id', 'external_listing_id', 'external_inventory_id', 'status', 'last_api_status', 'not_seen_in_active_api_at', 'raw_payload'];
+        if (Schema::hasColumn('marketplace_listings', 'external_id')) {
+            $columns[] = 'external_id';
+        }
+
+        $listings = MarketplaceListing::query()
+            ->where('marketplace', 'ovoko')
+            ->where('part_id', $part->id)
+            ->orderByRaw("CASE WHEN status IN ('published','active','ACTIVE','live') AND (last_api_status IS NULL OR last_api_status NOT IN ('ended','inactive','deleted','archived','not_found')) AND not_seen_in_active_api_at IS NULL THEN 0 ELSE 1 END")
+            ->latest('id')
+            ->get($columns);
+
+        foreach ($listings as $listing) {
+            foreach ($this->listingIdCandidates($listing) as $candidate) {
+                if ($candidate['ovoko_id'] !== null) {
+                    return $candidate;
+                }
+            }
+        }
+
+        return ['ovoko_id' => null, 'source' => null];
+    }
+
+    /** @return array<int, array{ovoko_id: ?string, source: ?string}> */
+    private function listingIdCandidates(MarketplaceListing $listing): array
+    {
+        $raw = is_array($listing->raw_payload) ? $listing->raw_payload : [];
+
+        return [
+            ['ovoko_id' => $this->blankId($listing->external_offer_id), 'source' => 'marketplace_listing.external_offer_id'],
+            ['ovoko_id' => $this->blankId($listing->external_listing_id), 'source' => 'marketplace_listing.external_listing_id'],
+            ['ovoko_id' => Schema::hasColumn('marketplace_listings', 'external_id') ? $this->blankId($listing->getAttribute('external_id')) : null, 'source' => 'marketplace_listing.external_id'],
+            ['ovoko_id' => $this->blankId($raw['external_id'] ?? null), 'source' => 'marketplace_listing.raw_payload.external_id'],
+            ['ovoko_id' => $this->blankId($raw['ovoko_part_id'] ?? null), 'source' => 'marketplace_listing.raw_payload.ovoko_part_id'],
+            ['ovoko_id' => $this->blankId($raw['marketplace_external_id'] ?? null), 'source' => 'marketplace_listing.raw_payload.marketplace_external_id'],
+            ['ovoko_id' => $this->blankId($raw['listing_id'] ?? null), 'source' => 'marketplace_listing.raw_payload.listing_id'],
+            ['ovoko_id' => $this->blankId(data_get($raw, 'metadata.ovoko_part_id')), 'source' => 'marketplace_listing.raw_payload.metadata.ovoko_part_id'],
+        ];
+    }
+
+    private function blankId(mixed $value): ?string
+    {
+        $value = trim((string) $value);
+
+        return $value === '' || str_starts_with($value, 'GPSW-') ? null : $value;
+    }
+
+    private function fetchOvokoPart(string $id): array
     {
         $account = MarketplaceAccount::query()->where('code', 'ovoko_main')->first();
         if (! $account || ! $account->api_enabled || blank($account->api_base_url)) return ['ok' => false, 'blocker' => 'ovoko_api_not_configured'];
