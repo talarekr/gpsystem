@@ -32,7 +32,9 @@ class AllegroDescriptionBuilderTest extends TestCase
         $this->assertSame('text_image_50_50', $response->json('payload.allegro_description_diagnostics.description_template'));
         $this->assertSame(1, $response->json('payload.allegro_description_diagnostics.description_sections_count'));
         $this->assertTrue($response->json('payload.allegro_description_diagnostics.description_part_description_present'));
-        $this->assertSame(['make', 'model', 'production_year', 'engine_code'], $response->json('payload.allegro_description_diagnostics.description_vehicle_fields_present'));
+        $this->assertSame(['make', 'model', 'production_year', 'engine_code', 'engine_power_kw'], $response->json('payload.allegro_description_diagnostics.description_vehicle_fields_present'));
+        $this->assertSame([], $response->json('payload.allegro_description_diagnostics.required_donor_vehicle_fields_missing'));
+        $this->assertSame([], $response->json('payload.allegro_description_diagnostics.optional_donor_vehicle_fields_missing'));
         $this->assertTrue($response->json('payload.allegro_description_diagnostics.description_engine_power_present'));
     }
 
@@ -53,6 +55,36 @@ class AllegroDescriptionBuilderTest extends TestCase
         $this->assertStringNotContainsString('wysokiej jakości część zamienna', $content);
     }
 
+
+    /** @dataProvider optionalVehicleFieldCases */
+    public function test_missing_optional_vehicle_fields_are_warnings_and_omitted_from_description(string $field, string $label): void
+    {
+        Http::fake($this->fakeAllegro());
+        $part = $this->readyPart();
+        $part->car->forceFill([$field => null])->save();
+
+        $response = $this->getJson('/tools/dry-run-marketplace-listing-payload?token=gps_images_import_2026&channel=allegro_main&part_id='.$part->id);
+
+        $response->assertOk();
+        $this->assertNotContains('missing_donor_vehicle_field:'.$label, $response->json('blockers'));
+        $this->assertContains('optional_donor_vehicle_field_missing:'.$label, $response->json('warnings'));
+        $this->assertSame(1, $response->json('payload.allegro_description_diagnostics.description_sections_count'));
+        $this->assertIsArray($response->json('payload.description.sections'));
+        $content = $response->json('payload.description.sections.0.items.0.content');
+        $this->assertStringNotContainsString($label.':', $content);
+        $this->assertStringNotContainsString('<li>'.$label.': <b></b></li>', $content);
+        $this->assertSame([$label], $response->json('payload.allegro_description_diagnostics.optional_donor_vehicle_fields_missing'));
+        $this->assertSame([], $response->json('payload.allegro_description_diagnostics.required_donor_vehicle_fields_missing'));
+    }
+
+    public static function optionalVehicleFieldCases(): array
+    {
+        return [
+            ['engine_code', 'Oznaczenie silnika'],
+            ['engine_power_kw', 'Moc silnika'],
+            ['production_year', 'Rok'],
+        ];
+    }
 
     public function test_missing_engine_power_is_warning_and_omitted_from_description(): void
     {
@@ -82,7 +114,8 @@ class AllegroDescriptionBuilderTest extends TestCase
         match ($mutation) {
             'description' => $part->forceFill(['description' => null])->save(),
             'car' => $part->forceFill(['car_id' => null])->save(),
-            'engine_code' => $part->car->forceFill(['engine_code' => null])->save(),
+            'make' => $part->car->forceFill(['make' => null])->save(),
+            'model' => $part->car->forceFill(['model' => null])->save(),
             'image' => $part->images()->delete(),
         };
         $part->refresh();
@@ -98,7 +131,8 @@ class AllegroDescriptionBuilderTest extends TestCase
         return [
             ['description', 'missing_part_description'],
             ['car', 'missing_donor_vehicle'],
-            ['engine_code', 'missing_donor_vehicle_field:Oznaczenie silnika'],
+            ['make', 'missing_donor_vehicle_field:Marka'],
+            ['model', 'missing_donor_vehicle_field:Model'],
             ['image', 'missing_main_image'],
         ];
     }
