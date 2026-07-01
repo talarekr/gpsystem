@@ -7,7 +7,9 @@ use App\Services\Marketplace\Publishing\AllegroPublishAdapter;
 use App\Services\Marketplace\Publishing\EbayPublishAdapter;
 use App\Services\Marketplace\Publishing\MarketplacePublishCommand;
 use App\Services\Marketplace\Publishing\OvokoPublishAdapter;
+use App\Models\MarketplaceListing;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class PublishPartToMarketplacesService
 {
@@ -46,15 +48,20 @@ class PublishPartToMarketplacesService
 
         $command = new MarketplacePublishCommand($dryRun, $confirm, $ready, $enabled);
         $results = [];
+        $partStatusBefore = $this->partStatusSnapshot($part);
         DB::transaction(function () use ($part, $ready, $command, &$results, $skipped): void {
             foreach ($ready as $channel) $results[$channel] = $this->adapter($channel)->publish($part, $command)->data;
             foreach ($skipped as $channel => $data) $results[$channel] = $this->skippedResult($channel, $data);
-            if ($this->allSelectedSuccessful($results, $ready) && $skipped === []) $this->prepareService->markLocallyListed($part);
+            if ($this->hasAnySuccessfulMarketplaceListing($part, $results)) $this->prepareService->markLocallyListed($part);
         });
 
         $published = array_values(array_filter($ready, fn (string $channel): bool => (bool) ($results[$channel]['success'] ?? false)));
         $success = $published !== [];
-        return array_merge($base, ['part_id' => $part->id, 'blocked' => ! $success, 'channels' => $results, 'ready_channels' => $ready, 'published_channels' => $published, 'skipped_channels' => $this->skippedChannels($skipped), 'readiness_ok' => $skipped === [], 'needs_listing_changed' => $success && $skipped === [], 'products_changed' => $success && $skipped === [], 'offers_changed' => collect($results)->contains(fn ($r) => (bool) ($r['write'] ?? false)), 'marketplace_write' => collect($results)->contains(fn ($r) => (bool) ($r['write'] ?? false)), 'allegro_write' => (bool) ($results['allegro']['write'] ?? false), 'ovoko_write' => (bool) ($results['ovoko']['write'] ?? false), 'ebay_write' => (bool) ($results['ebay']['write'] ?? false)]);
+        $part->refresh();
+        $publicationState = $this->publicationStateDiagnostics($part, $results, $partStatusBefore ?? null);
+        Log::info('marketplace_publish.local_publication_state', $publicationState);
+
+        return array_merge($base, ['part_id' => $part->id, 'blocked' => ! $success, 'channels' => $results, 'ready_channels' => $ready, 'published_channels' => $published, 'skipped_channels' => $this->skippedChannels($skipped), 'readiness_ok' => $skipped === [], 'needs_listing_changed' => (bool) ($publicationState['status_before']['needs_listing'] ?? false) !== (bool) ($publicationState['status_after']['needs_listing'] ?? false), 'products_changed' => $success, 'offers_changed' => collect($results)->contains(fn ($r) => (bool) ($r['write'] ?? false)), 'marketplace_write' => collect($results)->contains(fn ($r) => (bool) ($r['write'] ?? false)), 'marketplace_publication_state' => $publicationState, 'allegro_write' => (bool) ($results['allegro']['write'] ?? false), 'ovoko_write' => (bool) ($results['ovoko']['write'] ?? false), 'ebay_write' => (bool) ($results['ebay']['write'] ?? false)]);
     }
 
     public function normalizeChannels(array|string $channels): array
@@ -62,6 +69,79 @@ class PublishPartToMarketplacesService
         $value = is_array($channels) ? implode(',', $channels) : $channels;
         if ($value === 'all' || blank($value)) return self::CHANNELS;
         return array_values(array_intersect(self::CHANNELS, array_map('trim', explode(',', $value))));
+    }
+
+
+    private function hasAnySuccessfulMarketplaceListing(Part $part, array $results): bool
+    {
+        if (collect($results)->contains(fn (array $result): bool => (bool) ($result['success'] ?? false) && ((bool) ($result['write'] ?? false) || filled($result['external_offer_id'] ?? null) || filled($result['external_listing_id'] ?? null)))) {
+            return true;
+        }
+
+        return $this->activeMarketplaceListings($part)->isNotEmpty();
+    }
+
+    private function publicationStateDiagnostics(Part $part, array $results, ?array $statusBefore): array
+    {
+        $activeListings = $this->activeMarketplaceListings($part);
+        $successChannels = collect($results)
+            ->filter(fn (array $result): bool => (bool) ($result['success'] ?? false))
+            ->keys()
+            ->merge($activeListings->map(fn (MarketplaceListing $listing): string => $this->channelForMarketplace((string) $listing->marketplace)))
+            ->unique()
+            ->values()
+            ->all();
+        $blockedChannels = collect($results)
+            ->filter(fn (array $result): bool => ! (bool) ($result['success'] ?? false))
+            ->keys()
+            ->values()
+            ->all();
+        $hasAnyMarketplaceListing = $successChannels !== [];
+
+        return [
+            'part_id' => $part->id,
+            'marketplace_success_channels' => $successChannels,
+            'marketplace_blocked_channels' => $blockedChannels,
+            'has_any_marketplace_listing' => $hasAnyMarketplaceListing,
+            'should_be_in_parts' => $hasAnyMarketplaceListing || ! (bool) $part->needs_listing,
+            'should_be_in_to_publish' => ! $hasAnyMarketplaceListing && (bool) $part->needs_listing,
+            'status_before' => $statusBefore,
+            'status_after' => $this->partStatusSnapshot($part),
+        ];
+    }
+
+    private function activeMarketplaceListings(Part $part): \Illuminate\Support\Collection
+    {
+        return $part->marketplaceListings()
+            ->where(function ($query): void {
+                $query->whereNotNull('external_offer_id')->orWhereNotNull('external_listing_id')->orWhereNotNull('url');
+            })
+            ->where(function ($query): void {
+                $query->whereNull('status')->orWhereNotIn('status', ['ended', 'inactive', 'deleted', 'archived', 'not_found', 'NOT_FOUND_IN_ACTIVE_API']);
+            })
+            ->where(function ($query): void {
+                $query->whereNull('last_api_status')->orWhereNotIn('last_api_status', ['ended', 'inactive', 'deleted', 'archived', 'not_found', 'NOT_FOUND_IN_ACTIVE_API']);
+            })
+            ->get();
+    }
+
+    private function partStatusSnapshot(Part $part): array
+    {
+        return [
+            'status' => $part->status,
+            'needs_listing' => (bool) $part->needs_listing,
+            'needs_review' => (bool) $part->needs_review,
+            'is_visible_storefront' => (bool) $part->is_visible_storefront,
+        ];
+    }
+
+    private function channelForMarketplace(string $marketplace): string
+    {
+        return str_starts_with($marketplace, 'ebay') ? 'ebay' : match ($marketplace) {
+            'allegro_main' => 'allegro',
+            'ovoko_main' => 'ovoko',
+            default => $marketplace,
+        };
     }
 
     private function adapter(string $channel): object { return match ($channel) { 'allegro' => $this->allegro, 'ovoko' => $this->ovoko, 'ebay' => $this->ebay }; }
