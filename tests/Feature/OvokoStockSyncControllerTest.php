@@ -70,6 +70,49 @@ class OvokoStockSyncControllerTest extends TestCase
             ->assertJsonPath('items.0.ovoko.quantity', 2);
     }
 
+    public function test_dry_run_finds_exact_ovoko_id_inside_wrapped_item_response(): void
+    {
+        $this->actingAsAdminUser();
+        $this->account();
+        $part = Part::query()->forceCreate(['id' => 7910, 'name' => 'Lamp', 'quantity' => 1, 'status' => 'ready', 'is_visible_storefront' => true, 'needs_listing' => false]);
+        MarketplaceListing::query()->create(['marketplace' => 'ovoko', 'part_id' => $part->id, 'external_offer_id' => '11711', 'status' => 'active']);
+
+        Http::fake([
+            'ovoko.test/v2/get/parts?limit=100&page=1' => Http::response(['status_code' => 'R200', 'item' => ['id' => '11711', 'quantity' => 3, 'status' => 'active']], 200),
+        ]);
+
+        $this->getJson('/admin/tools/ovoko-stock-sync-dry-run?part_id=7910')
+            ->assertOk()
+            ->assertJsonPath('marketplace_write', false)
+            ->assertJsonPath('items.0.ovoko.quantity', 3)
+            ->assertJsonPath('items.0.ovoko.matched_in_attempt', 'detail_by_part_id_and_id')
+            ->assertJsonPath('items.0.ovoko.ovoko_response_shape.has_wrappers.item', true)
+            ->assertJsonPath('items.0.ovoko.candidate_ids.0', '11711')
+            ->assertJsonPath('items.0.blockers', []);
+    }
+
+    public function test_dry_run_does_not_accept_first_ovoko_row_when_id_does_not_match(): void
+    {
+        $this->actingAsAdminUser();
+        $this->account();
+        $part = Part::query()->forceCreate(['id' => 7910, 'name' => 'Lamp', 'quantity' => 1, 'status' => 'ready', 'is_visible_storefront' => true, 'needs_listing' => false]);
+        MarketplaceListing::query()->create(['marketplace' => 'ovoko', 'part_id' => $part->id, 'external_offer_id' => '11711', 'status' => 'active']);
+
+        Http::fake([
+            'ovoko.test/v2/get/parts?limit=100&page=1' => Http::response(['parts' => [
+                ['id' => '99999', 'quantity' => 0, 'status' => 'sold'],
+            ], 'user_token' => 'secret-token'], 200),
+        ]);
+
+        $this->getJson('/admin/tools/ovoko-stock-sync-dry-run?part_id=7910')
+            ->assertOk()
+            ->assertJsonPath('ok', false)
+            ->assertJsonPath('items.0.action', 'blocked')
+            ->assertJsonPath('items.0.ovoko.blocker', 'missing_ovoko_product')
+            ->assertJsonPath('items.0.ovoko.candidate_ids.0', '99999')
+            ->assertJsonPath('items.0.ovoko.ovoko_response_shape.raw_sample.user_token', '[redacted]');
+    }
+
     public function test_missing_mapping_blocks_without_ovoko_api_request(): void
     {
         $this->actingAsAdminUser();
