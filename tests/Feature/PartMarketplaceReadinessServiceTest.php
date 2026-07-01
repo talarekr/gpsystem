@@ -51,6 +51,59 @@ class PartMarketplaceReadinessServiceTest extends TestCase
     }
 
 
+    public function test_prepare_ebay_card_creates_missing_de_translation_without_missing_translation_blocker(): void
+    {
+        $this->app->instance(GoogleTranslateService::class, new class extends GoogleTranslateService {
+            public function translate(string $text, string $target, ?string $source = null): array
+            {
+                return ['ok' => true, 'translated_text' => 'DE '.str_replace('Baujahr 2010 ', '', $text), 'blockers' => []];
+            }
+        });
+
+        $category = PartCategory::query()->create(['name' => 'Alternatory']);
+        $part = Part::query()->create([
+            'name' => 'Alternator BMW E90 Baujahr 2010 komplet',
+            'description' => 'Opis alternatora.',
+            'condition_notes' => 'Używany',
+            'category_id' => $category->id,
+            'price' => 100,
+            'ebay_price' => 125,
+            'quantity' => 1,
+            'vehicle_snapshot' => ['make' => 'BMW', 'model' => '3'],
+        ]);
+
+        $this->assertNull(data_get($part->review_metadata, 'marketplace_prepared_translations.ebay_de'));
+
+        $response = $this->getJson('/tools/prepare-part-marketplace-card?token=gps_images_import_2026&part_id='.$part->id.'&channel=ebay')
+            ->assertOk()
+            ->assertJsonPath('ebay_channels.ebay_de.prepared_translation_created', true)
+            ->assertJsonPath('ebay_channels.ebay_de.title_limit', 80);
+
+        $response->assertJsonMissing(['blocker' => 'Brak przygotowanego tłumaczenia eBay DE']);
+        $this->assertSame('prepared', data_get($part->refresh()->review_metadata, 'marketplace_prepared_translations.ebay_de.status'));
+        $this->assertSame(
+            data_get($part->review_metadata, 'marketplace_prepared_translations.ebay_de.fields.title'),
+            $response->json('ebay_channels.ebay_de.final_title')
+        );
+    }
+
+    public function test_missing_ebay_de_prepared_translation_blocks_readiness_before_prepare(): void
+    {
+        config(['services.google_translate.enabled' => true, 'services.google_translate.key' => 'test-key', 'services.google_translate.mode' => 'dry_run']);
+
+        $part = $this->ebayReadinessPart([
+            'review_metadata' => [],
+            'vehicle_snapshot' => ['make' => 'BMW', 'model' => '3'],
+        ]);
+
+        $readiness = app(\App\Services\Marketplace\MarketplaceListingReadinessService::class)->checkPartReadiness($part->fresh(), 'ebay_de');
+
+        $this->assertContains('prepared_translations', $readiness['missing_fields']);
+        $this->assertContains('Brak przygotowanego tłumaczenia eBay DE', $readiness['blockers']);
+        $this->assertFalse($readiness['can_publish_later']);
+    }
+
+
     public function test_part_resource_marketplace_section_has_sales_channels_title_and_is_expanded_by_default(): void
     {
         $resource = file_get_contents(app_path('Filament/Resources/PartResource.php'));
