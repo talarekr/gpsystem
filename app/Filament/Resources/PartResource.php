@@ -724,7 +724,7 @@ class PartResource extends Resource
 
     public static function carLabel(Car $car): string
     {
-        $name = trim(implode(' ', array_filter([$car->make, $car->model, $car->model_variant])));
+        $name = trim(implode(' ', array_filter([$car->make, $car->model])));
         $year = $car->production_year ?: $car->first_registration_year;
 
         return trim($name.($year ? ' ('.$year.')' : '')) ?: '#'.$car->id;
@@ -757,7 +757,7 @@ class PartResource extends Resource
 
         if ($record?->vehicle_snapshot) {
             $snapshot = $record->vehicle_snapshot;
-            $name = trim(implode(' ', array_filter([$snapshot['make'] ?? null, $snapshot['model'] ?? null, $snapshot['model_variant'] ?? null])));
+            $name = trim(implode(' ', array_filter([$snapshot['make'] ?? null, $snapshot['model'] ?? null])));
 
             return '<div class="gps-selected-vehicle"><span>Wybrano: '.e($name ?: 'samochód z zapisanej migawki').'</span></div>';
         }

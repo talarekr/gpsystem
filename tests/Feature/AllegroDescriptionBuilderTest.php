@@ -55,6 +55,38 @@ class AllegroDescriptionBuilderTest extends TestCase
         $this->assertStringNotContainsString('wysokiej jakości część zamienna', $content);
     }
 
+    public function test_gp_swiss_template_hides_duplicate_variant_from_model_line(): void
+    {
+        Http::fake($this->fakeAllegro());
+        $part = $this->readyPart();
+        $part->car->forceFill(['model' => 'A4 S4 B6 8E 8H', 'model_variant' => 'A4 S4 B6 8E 8H'])->save();
+
+        $response = $this->getJson('/tools/dry-run-marketplace-listing-payload?token=gps_images_import_2026&channel=allegro_main&part_id='.$part->id);
+
+        $response->assertOk();
+        $content = $response->json('payload.description.sections.0.items.0.content');
+        $this->assertStringContainsString('Model: <b>A4 S4 B6 8E 8H</b>', $content);
+        $this->assertStringNotContainsString('A4 S4 B6 8E 8H A4 S4 B6 8E 8H', $content);
+        $this->assertSame('model', $response->json('payload.allegro_description_diagnostics.description_vehicle_model_source'));
+        $this->assertTrue($response->json('payload.allegro_description_diagnostics.description_vehicle_variant_hidden'));
+    }
+
+    public function test_gp_swiss_template_uses_variant_as_model_fallback(): void
+    {
+        Http::fake($this->fakeAllegro());
+        $part = $this->readyPart();
+        $part->car->forceFill(['model' => null, 'model_variant' => 'RSQ3'])->save();
+
+        $response = $this->getJson('/tools/dry-run-marketplace-listing-payload?token=gps_images_import_2026&channel=allegro_main&part_id='.$part->id);
+
+        $response->assertOk();
+        $this->assertNotContains('missing_donor_vehicle_field:Model', $response->json('blockers'));
+        $content = $response->json('payload.description.sections.0.items.0.content');
+        $this->assertStringContainsString('Model: <b>RSQ3</b>', $content);
+        $this->assertSame('variant_fallback', $response->json('payload.allegro_description_diagnostics.description_vehicle_model_source'));
+        $this->assertTrue($response->json('payload.allegro_description_diagnostics.description_vehicle_variant_hidden'));
+    }
+
 
     /** @dataProvider optionalVehicleFieldCases */
     public function test_missing_optional_vehicle_fields_are_warnings_and_omitted_from_description(string $field, string $label): void

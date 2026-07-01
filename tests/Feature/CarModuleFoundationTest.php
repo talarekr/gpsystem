@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\UserRole;
 use App\Filament\Resources\CarResource;
+use App\Filament\Resources\PartResource;
 use App\Models\Car;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -71,6 +72,39 @@ class CarModuleFoundationTest extends TestCase
         $this->assertSame([$target->id], Car::query()->searchPhrase('bmw x4')->pluck('id')->all());
         $this->assertSame([$target->id], Car::query()->searchPhrase('x4 f26')->pluck('id')->all());
         $this->assertSame([$target->id], Car::query()->searchPhrase('B47 wx4')->pluck('id')->all());
+    }
+
+
+    public function test_visible_car_labels_hide_duplicate_variant(): void
+    {
+        $a4 = Car::query()->create([
+            'make' => 'Audi',
+            'model' => 'A4 S4 B6 8E 8H',
+            'model_variant' => 'A4 S4 B6 8E 8H',
+        ]);
+        $rsq3 = Car::query()->create([
+            'make' => 'Audi',
+            'model' => 'RSQ3',
+            'model_variant' => 'RSQ3',
+        ]);
+
+        $this->assertSame('Audi A4 S4 B6 8E 8H', PartResource::carLabel($a4));
+        $this->assertSame('Audi RSQ3', PartResource::carLabel($rsq3));
+    }
+
+    public function test_car_picker_searches_variant_but_hides_it_from_label(): void
+    {
+        $car = Car::query()->create([
+            'make' => 'Audi',
+            'model' => 'A4',
+            'model_variant' => 'rare variant token',
+        ]);
+
+        $options = PartResource::carPickerOptions('rare variant token');
+
+        $this->assertArrayHasKey($car->id, $options);
+        $this->assertStringContainsString('Audi A4', $options[$car->id]);
+        $this->assertStringNotContainsString('rare variant token', $options[$car->id]);
     }
 
     public function test_car_images_keep_first_ordered_image_as_primary_thumbnail(): void

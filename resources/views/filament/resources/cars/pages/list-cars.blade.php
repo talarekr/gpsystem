@@ -21,7 +21,7 @@
         <div class="gps-grid gps-header"><div>Samochód</div><div>Status</div><div>Paliwo</div><div>Skrzynia</div><div>Silnik</div><div>Zakup</div><div>Autor</div><div>Akcje</div></div>
         @forelse ($cars as $car)
             <div class="gps-card gps-grid" wire:key="car-{{ $car->id }}">
-                <div><div class="gps-title">#{{ $car->id }} {{ trim(implode(' ', array_filter([$car->make, $car->model, $car->model_variant]))) ?: '—' }}</div><div class="gps-muted">VIN: {{ $car->vin ?: '—' }} · Rej.: {{ $car->registration_number ?: '—' }}</div></div>
+                <div><div class="gps-title">#{{ $car->id }} {{ trim(implode(' ', array_filter([$car->make, $car->model]))) ?: '—' }}</div><div class="gps-muted">VIN: {{ $car->vin ?: '—' }} · Rej.: {{ $car->registration_number ?: '—' }}</div></div>
                 <div><span class="gps-badge">{{ $car->status ?: '—' }}</span></div><div>{{ $car->fuel_type ?: '—' }}</div><div>{{ $car->gearbox_type ?: '—' }}</div><div>{{ $car->engine_code ?: '—' }}@if($car->engine_capacity_cm3) <span class="gps-muted">{{ $car->engine_capacity_cm3 }} cm3</span>@endif</div><div>{{ $car->purchase_date?->format('Y-m-d') ?? '—' }}</div><div>{{ $car->createdBy?->name ?? '—' }}</div>
                 <div class="gps-actions"><a class="gps-action" href="{{ CarResource::getUrl('edit', ['record' => $car]) }}">Edytuj</a></div>
             </div>
