@@ -75,15 +75,28 @@ class AllegroDescriptionUpdateToolTest extends TestCase
         $this->assertSame('text_image_50_50', $log->payload['description_template']);
     }
 
-    public function test_missing_engine_power_does_not_block_update(): void
+    /** @dataProvider optionalVehicleFieldCases */
+    public function test_missing_optional_vehicle_field_does_not_block_update(string $field, string $label): void
     {
-        $part = $this->readyPart(enginePower: null);
+        $part = $this->readyPart();
+        $part->car->forceFill([$field => null])->save();
         $this->actingAsAdminUser();
 
         $this->getJson('/admin/tools/allegro/offers/description-update-dry-run?part_id='.$part->id)
             ->assertOk()
-            ->assertJsonMissing(['missing_donor_vehicle_field:Moc silnika'])
+            ->assertJsonMissing(['missing_donor_vehicle_field:'.$label])
+            ->assertJsonPath('vehicle_diagnostics.description_sections_count', 1)
+            ->assertJsonPath('vehicle_diagnostics.optional_donor_vehicle_fields_missing', [$label])
             ->assertJsonPath('blockers', []);
+    }
+
+    public static function optionalVehicleFieldCases(): array
+    {
+        return [
+            ['engine_code', 'Oznaczenie silnika'],
+            ['engine_power_kw', 'Moc silnika'],
+            ['production_year', 'Rok'],
+        ];
     }
 
     private function readyPart(?int $enginePower = 110): Part

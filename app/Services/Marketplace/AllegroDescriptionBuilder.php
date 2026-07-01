@@ -9,11 +9,11 @@ class AllegroDescriptionBuilder
     public const REQUIRED_VEHICLE_FIELDS = [
         'make' => 'Marka',
         'model' => 'Model',
-        'production_year' => 'Rok',
-        'engine_code' => 'Oznaczenie silnika',
     ];
 
     public const OPTIONAL_VEHICLE_FIELDS = [
+        'production_year' => 'Rok',
+        'engine_code' => 'Oznaczenie silnika',
         'engine_power_kw' => 'Moc silnika',
     ];
 
@@ -46,6 +46,7 @@ class AllegroDescriptionBuilder
             $values[$field] = $value;
             if (($vehicle || $vehicleSnapshot !== []) && $value === '') {
                 $blockers[] = 'missing_donor_vehicle_field:'.$label;
+                $diagnostics['required_donor_vehicle_fields_missing'][] = $label;
             }
         }
 
@@ -94,7 +95,9 @@ class AllegroDescriptionBuilder
     private function diagnostics(array $diagnostics, array $values, ?array $descriptionPayload, ?string $mainImageUrl, bool $offerImagesContainsMain): array
     {
         return $diagnostics + [
-            'description_vehicle_fields_present' => collect(self::REQUIRED_VEHICLE_FIELDS)->keys()->filter(fn (string $field): bool => ($values[$field] ?? '') !== '')->values()->all(),
+            'description_vehicle_fields_present' => collect(array_merge(self::REQUIRED_VEHICLE_FIELDS, self::OPTIONAL_VEHICLE_FIELDS))->keys()->filter(fn (string $field): bool => ($values[$field] ?? '') !== '')->values()->all(),
+            'required_donor_vehicle_fields_missing' => $diagnostics['required_donor_vehicle_fields_missing'] ?? [],
+            'optional_donor_vehicle_fields_missing' => $diagnostics['optional_donor_vehicle_fields_missing'] ?? [],
             'description_engine_power_present' => ($values['engine_power_kw'] ?? '') !== '',
             'description_sections_count' => is_array($descriptionPayload) ? count($descriptionPayload['sections'] ?? []) : 0,
             'main_image_url' => $mainImageUrl,
