@@ -30,7 +30,7 @@
 
         .gps-admin-channels .part-channel-row {
             display: grid;
-            grid-template-columns: minmax(58px, max-content) minmax(76px, max-content) 14px 14px;
+            grid-template-columns: minmax(58px, max-content) minmax(76px, max-content) 14px 14px 16px;
             align-items: center;
             justify-content: flex-start;
             column-gap: 5px;
@@ -119,6 +119,63 @@
             stroke-width: 2;
         }
 
+        .gps-admin-channels .part-channel-map {
+            position: relative;
+            width: 16px;
+            min-width: 16px;
+        }
+
+        .gps-admin-channels .part-channel-map summary {
+            display: inline-flex;
+            width: 14px;
+            height: 14px;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            color: #64748b;
+            border: 1px solid #cbd5e1;
+            border-radius: 999px;
+            font-size: 11px;
+            line-height: 1;
+            list-style: none;
+        }
+
+        .gps-admin-channels .part-channel-map summary::-webkit-details-marker { display: none; }
+
+        .gps-admin-channels .part-channel-map__popover {
+            position: absolute;
+            z-index: 20;
+            top: 18px;
+            right: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            width: 260px;
+            padding: 8px;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            background: #fff;
+            box-shadow: 0 10px 25px rgba(15, 23, 42, .16);
+        }
+
+        .gps-admin-channels .part-channel-map__popover input {
+            width: 100%;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            padding: 5px 7px;
+            font-size: 12px;
+        }
+
+        .gps-admin-channels .part-channel-map__popover button {
+            align-self: flex-end;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            padding: 4px 8px;
+            background: #f8fafc;
+            color: #334155;
+            font-size: 12px;
+        }
+
     </style>
 @endonce
 
@@ -155,6 +212,17 @@
                                 <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
                             </svg>
                         </a>
+                    @endif
+                </span>
+                <span class="part-channel-map-slot">
+                    @if (in_array($row['key'] ?? '', ['allegro', 'ovoko'], true))
+                        <details class="part-channel-map">
+                            <summary title="Dodaj ręczne mapowanie {{ $row['label'] }}" aria-label="Dodaj ręczne mapowanie {{ $row['label'] }}">+</summary>
+                            <form class="part-channel-map__popover" wire:submit.prevent="saveMarketplaceLinkMapping({{ $part->id }}, '{{ $row['key'] }}', $event.target.marketplace_url.value)">
+                                <input name="marketplace_url" type="url" placeholder="Wklej link aukcji {{ $row['label'] }}" required>
+                                <button type="submit">Zapisz</button>
+                            </form>
+                        </details>
                     @endif
                 </span>
             </div>
