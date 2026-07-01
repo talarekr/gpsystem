@@ -21,7 +21,8 @@ class OvokoListingUrlBackfillController extends Controller
         $user = $request->user();
         abort_unless($user && $user->canAccessPanel(Filament::getPanel('admin')), 403);
 
-        $apply = $request->boolean('apply') && $request->query('confirm') === self::CONFIRMATION;
+        $apply = ($request->boolean('apply') || $request->is('admin/tools/ovoko/listing-url-backfill'))
+            && $request->query('confirm') === self::CONFIRMATION;
         if (! $request->filled('listing_id') && ! $request->filled('part_id')) {
             $limit = max(1, min(self::MAX_BULK_LIMIT, (int) $request->query('limit', self::DEFAULT_BULK_LIMIT)));
             $offset = max(0, (int) $request->query('offset', 0));

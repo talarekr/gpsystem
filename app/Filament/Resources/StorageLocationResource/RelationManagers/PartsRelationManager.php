@@ -24,7 +24,7 @@ class PartsRelationManager extends RelationManager
         return $table
             ->modifyQueryUsing(fn (Builder $query): Builder => $query->with([
                 'images:id,part_id,path,sort_order,is_primary',
-                'marketplaceListings:id,part_id,marketplace,external_offer_id,price,currency,status,sync_status,match_status,last_error,url,last_api_status,last_seen_at,not_seen_in_active_api_at',
+                'marketplaceListings:id,part_id,marketplace,external_offer_id,external_listing_id,price,currency,status,sync_status,match_status,last_error,url,last_api_status,last_seen_at,not_seen_in_active_api_at',
             ]))
             ->emptyStateHeading('Brak części w tym miejscu')
             ->emptyStateDescription(null)

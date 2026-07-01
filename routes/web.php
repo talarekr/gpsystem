@@ -64,6 +64,7 @@ use App\Http\Controllers\Tools\OvokoPriceImportController;
 use App\Http\Controllers\Tools\OvokoProductSyncController;
 use App\Http\Controllers\Tools\OvokoStockReconciliationController;
 use App\Http\Controllers\Tools\OvokoListingUrlBackfillController;
+use App\Http\Controllers\Tools\OvokoListingUrlDiagnosticsController;
 use App\Http\Controllers\Tools\MarketplaceOrdersResetController;
 use App\Http\Controllers\Tools\MarketplaceOrdersSyncController;
 use App\Http\Controllers\Tools\MarketplaceOrderFulfillmentSyncController;
@@ -240,6 +241,8 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/ebay/oauth/callback', [EbayOAuthController::class, 'callback'])->name('admin.ebay.oauth.callback');
     Route::get('/admin/tools/marketplace/oauth-token-health', MarketplaceOAuthTokenHealthController::class)->name('admin.tools.marketplace.oauth-token-health');
     Route::get('/admin/tools/marketplace/ovoko-url-backfill', OvokoListingUrlBackfillController::class)->name('admin.tools.marketplace.ovoko-url-backfill');
+    Route::get('/admin/tools/ovoko/listing-url-backfill', OvokoListingUrlBackfillController::class)->name('admin.tools.ovoko.listing-url-backfill');
+    Route::get('/admin/tools/ovoko/listing-url-diagnostics', OvokoListingUrlDiagnosticsController::class)->name('admin.tools.ovoko.listing-url-diagnostics');
     Route::get('/admin/tools/marketplace/listing-url-backfill', MarketplaceListingUrlBackfillController::class)->name('admin.tools.marketplace.listing-url-backfill');
     Route::get('/admin/tools/marketplace/ebay-listing-audit', EbayListingAuditController::class)->name('admin.tools.marketplace.ebay-listing-audit');
     Route::get('/admin/tools/marketplace/ebay-description-audit', EbayDescriptionAuditController::class)->name('admin.tools.marketplace.ebay-description-audit');
