@@ -453,7 +453,8 @@ class PartResource extends Resource
                     ->options(fn (): array => self::carPickerOptions())
                     ->getSearchResultsUsing(fn (string $search): array => self::carPickerOptions($search))
                     ->getOptionLabelUsing(fn ($value): ?string => self::carPickerOptionLabel($value))
-                    ->helperText('Wyniki są ograniczone do 30 samochodów.')
+                    ->extraAttributes(['class' => 'gps-vehicle-picker-select'])
+                    ->helperText('Wpisz kilka słów, np. „bmw x4” albo „x4 f26”. Wyniki są ograniczone do 30 samochodów.')
                     ->columnSpanFull(),
             ])
             ->action(function (array $data, Forms\Set $set): void {
@@ -511,13 +512,7 @@ class PartResource extends Resource
         $search = trim((string) $search);
 
         return Car::query()
-            ->when($search !== '', function (Builder $query) use ($search): Builder {
-                return $query->where(function (Builder $query) use ($search): void {
-                    foreach (['make', 'model', 'model_variant', 'production_year', 'first_registration_year', 'fuel_type', 'body_type', 'color', 'drivetrain', 'steering_side', 'gearbox_type', 'engine_code', 'vin', 'registration_number'] as $field) {
-                        $query->orWhere($field, 'like', '%'.$search.'%');
-                    }
-                });
-            })
+            ->searchPhrase($search)
             ->orderByDesc('id')
             ->limit(30)
             ->get()

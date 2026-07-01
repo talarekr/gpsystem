@@ -50,6 +50,29 @@ class CarModuleFoundationTest extends TestCase
         ], Car::statusOptions());
     }
 
+
+    public function test_car_search_phrase_matches_multiple_words_across_vehicle_fields(): void
+    {
+        $target = Car::query()->create([
+            'make' => 'BMW',
+            'model' => 'X4 F26',
+            'model_variant' => 'X4 F26',
+            'engine_code' => 'B47D20',
+            'vin' => 'WBAX4F26000000001',
+            'registration_number' => 'WX4F26',
+        ]);
+
+        Car::query()->create([
+            'make' => 'Audi',
+            'model' => 'A4',
+            'model_variant' => 'B8',
+        ]);
+
+        $this->assertSame([$target->id], Car::query()->searchPhrase('bmw x4')->pluck('id')->all());
+        $this->assertSame([$target->id], Car::query()->searchPhrase('x4 f26')->pluck('id')->all());
+        $this->assertSame([$target->id], Car::query()->searchPhrase('B47 wx4')->pluck('id')->all());
+    }
+
     public function test_car_images_keep_first_ordered_image_as_primary_thumbnail(): void
     {
         $car = Car::query()->create([
