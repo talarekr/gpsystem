@@ -27,6 +27,7 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
         $settings = is_array($account->api_settings) ? $account->api_settings : [];
         $sku = $this->skuFor($part, $payload);
         $payload['sku'] = $sku;
+        $signature = $this->allegroSignature($part);
         $salesSettings = $this->allegroSalesSettingsResolver->resolve($account, $part->allegro_shipping_rate_name ?? null);
         if (($salesSettings['blockers'] ?? []) !== []) return ['ok' => false, 'status' => 'blocked_sales_settings', 'errors' => $salesSettings['blockers'], 'request_summary' => ['allegro_sales_settings' => $salesSettings], 'write' => false];
         $delivery = $this->deliverySettings($settings, $salesSettings);
@@ -38,13 +39,37 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
         if (($productNameDiagnostics['product_name_length'] ?? 0) < 12) return ['ok' => false, 'status' => 'blocked_product_name_too_short', 'errors' => ['allegro_product_name_too_short'], 'request_summary' => $productNameDiagnostics, 'write' => false];
         $productSet = $this->productSetPayload($settings, $payload, $productNameDiagnostics['product_name'], $offerImages[0] ?? null);
         $offerParameters = $this->offerParametersPayload($payload, $productSet);
-        $body = array_filter(['name' => (string) ($payload['title'] ?? $part->name), 'category' => ['id' => (string) ($payload['category_id'] ?? '')], 'productSet' => $productSet, 'parameters' => $offerParameters, 'images' => $offerImages, 'description' => $description, 'sellingMode' => $settings['sellingMode'] ?? ['format' => 'BUY_NOW', 'price' => ['amount' => (string) ($payload['price_pln'] ?? $readiness['marketplace_price']), 'currency' => 'PLN']], 'stock' => ['available' => (int) ($payload['quantity'] ?? $part->quantity ?? 1), 'unit' => 'UNIT'], 'publication' => ['status' => 'ACTIVE'], 'delivery' => $delivery, 'payments' => $this->paymentsPayload($settings['payments'] ?? null, $payload['payments'] ?? null), 'afterSalesServices' => $afterSales, 'location' => $settings['location'] ?? null, 'external' => ['id' => $sku]], fn ($v) => $v !== null && $v !== []);
+        $body = array_filter(['name' => (string) ($payload['title'] ?? $part->name), 'category' => ['id' => (string) ($payload['category_id'] ?? '')], 'productSet' => $productSet, 'parameters' => $offerParameters, 'images' => $offerImages, 'description' => $description, 'sellingMode' => $settings['sellingMode'] ?? ['format' => 'BUY_NOW', 'price' => ['amount' => (string) ($payload['price_pln'] ?? $readiness['marketplace_price']), 'currency' => 'PLN']], 'stock' => ['available' => (int) ($payload['quantity'] ?? $part->quantity ?? 1), 'unit' => 'UNIT'], 'publication' => ['status' => 'ACTIVE'], 'delivery' => $delivery, 'payments' => $this->paymentsPayload($settings['payments'] ?? null, $payload['payments'] ?? null), 'afterSalesServices' => $afterSales, 'location' => $settings['location'] ?? null, 'external' => filled($signature['allegro_signature_value']) ? ['id' => $signature['allegro_signature_value']] : null], fn ($v) => $v !== null && $v !== []);
         $result = $client->createProductOffer($body);
         $offerId = filled($result['offer_id'] ?? null) ? (string) $result['offer_id'] : null;
         $offerUrl = $offerId ? 'https://allegro.pl/oferta/'.$offerId : null;
         $async = (int) ($result['http_status'] ?? 0) === 202;
 
-        return ['ok' => $result['ok'] ?? false, 'action' => 'createProductOffer', 'http_status' => $result['http_status'] ?? null, 'offer_id' => $offerId, 'external_offer_id' => $offerId, 'external_listing_id' => $offerId, 'url' => $offerUrl, 'listing_status' => $async ? 'publication_pending' : 'published', 'request_id' => $result['request_id'] ?? null, 'operation_location' => $result['operation_location'] ?? null, 'async' => $async, 'log_context' => ['channel' => $this->channel(), 'allegro_offer_id' => $offerId, 'saved_url' => $offerUrl, 'operation_location' => $result['operation_location'] ?? null, 'async' => $async], 'request_summary' => $this->requestSummary($payload, $body) + $productNameDiagnostics + ['allegro_sales_settings' => $this->salesSettingsSummary($salesSettings)], 'response_summary' => $this->responseSummary($result), 'json' => $result['json'] ?? [], 'error' => 'Allegro product-offers publish failed.', 'ui_error' => 'Uzupełnij ustawienia sprzedaży Allegro GPSWISS. Szczegóły są w Logach.'];
+        return ['ok' => $result['ok'] ?? false, 'action' => 'createProductOffer', 'http_status' => $result['http_status'] ?? null, 'offer_id' => $offerId, 'external_offer_id' => $offerId, 'external_listing_id' => $offerId, 'url' => $offerUrl, 'listing_status' => $async ? 'publication_pending' : 'published', 'request_id' => $result['request_id'] ?? null, 'operation_location' => $result['operation_location'] ?? null, 'async' => $async, 'log_context' => ['channel' => $this->channel(), 'allegro_offer_id' => $offerId, 'saved_url' => $offerUrl, 'operation_location' => $result['operation_location'] ?? null, 'async' => $async], 'request_summary' => $this->requestSummary($payload, $body) + $productNameDiagnostics + $signature + ['allegro_sales_settings' => $this->salesSettingsSummary($salesSettings)], 'response_summary' => $this->responseSummary($result), 'json' => $result['json'] ?? [], 'error' => 'Allegro product-offers publish failed.', 'ui_error' => 'Uzupełnij ustawienia sprzedaży Allegro GPSWISS. Szczegóły są w Logach.'];
+    }
+
+    /** @return array<string, mixed> */
+    private function allegroSignature(Part $part): array
+    {
+        $part->loadMissing('storageLocation');
+
+        $storageLocation = trim((string) ($part->storageLocation?->name ?? ''));
+        $partCodes = array_values(array_filter([
+            trim((string) ($part->part_number ?? '')),
+            trim((string) ($part->oem_number ?? '')),
+            trim((string) ($part->manufacturer_code ?? '')),
+        ], fn (string $value): bool => $value !== ''));
+
+        return [
+            'allegro_signature_field' => 'external.id',
+            'allegro_signature_value' => $storageLocation !== '' ? $storageLocation : null,
+            'allegro_signature_source' => $storageLocation !== '' ? 'part.storageLocation.name' : 'none_missing_storage_location',
+            'storage_location' => $storageLocation !== '' ? $storageLocation : null,
+            'part_number' => $part->part_number,
+            'oe_number' => $part->oem_number,
+            'manufacturer_code' => $part->manufacturer_code,
+            'signature_uses_part_code' => $storageLocation !== '' && in_array($storageLocation, $partCodes, true),
+        ];
     }
 
     /** @return array<string, mixed> */

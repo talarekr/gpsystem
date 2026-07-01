@@ -86,6 +86,8 @@ class MarketplaceListingReadinessService
             foreach (($allegroSalesSettings['blockers'] ?? []) as $salesSettingsBlocker) { $blockers[] = $salesSettingsBlocker; }
             foreach ($this->allegroGpsrBlockers($account) as $gpsrBlocker) { $missing[] = $gpsrBlocker['missing']; $blockers[] = $gpsrBlocker['blocker']; }
             if (blank($part->allegro_shipping_rate_name ?? null)) { $missing[] = 'allegro_shipping_rate_name'; }
+            $allegroSignature = $this->allegroSignatureDiagnostics($part);
+            if (blank($allegroSignature['allegro_signature_value'] ?? null)) { $missing[] = 'storage_location'; $warnings[] = 'Allegro external.id / sygnatura is empty because storage location is missing; part codes are not used as signature.'; }
             if (($productNameDiagnostics['product_name_length'] ?? 0) < 12) { $missing[] = 'allegro_product_name'; $blockers[] = 'allegro_product_name_too_short'; }
             if ($categoryMapping && filled($categoryMapping->external_category_id)) {
                 $definitions = $this->allegroCategoryParametersService->definitions((string) $categoryMapping->external_category_id);
@@ -552,6 +554,10 @@ class MarketplaceListingReadinessService
             $productNameDiagnostics = $this->allegroProductNameDiagnostics($part);
             $preview = array_merge($preview, $productNameDiagnostics);
             $preview['diagnostics']['allegro_product_name'] = $productNameDiagnostics;
+            $signatureDiagnostics = $this->allegroSignatureDiagnostics($part);
+            $preview = array_merge($preview, $signatureDiagnostics);
+            $preview['external'] = filled($signatureDiagnostics['allegro_signature_value']) ? ['id' => $signatureDiagnostics['allegro_signature_value']] : null;
+            $preview['diagnostics']['allegro_signature'] = $signatureDiagnostics;
             $preview['productSet'] = [$this->allegroProductSetPreview($allegroParameters, $this->accountFor($channel), $productNameDiagnostics['product_name'], $preview['image_urls'][0] ?? null)];
             $preview['gpsr_diagnostics'] = $this->allegroGpsrDiagnostics($this->accountFor($channel));
             $preview['afterSalesServices'] = array_filter([
@@ -563,6 +569,24 @@ class MarketplaceListingReadinessService
 
         return $preview;
     }
+    private function allegroSignatureDiagnostics(Part $part): array
+    {
+        $part->loadMissing('storageLocation');
+        $storageLocation = trim((string) ($part->storageLocation?->name ?? ''));
+        $partCodes = array_values(array_filter([trim((string) $part->part_number), trim((string) $part->oem_number), trim((string) $part->manufacturer_code)], fn (string $value): bool => $value !== ''));
+
+        return [
+            'allegro_signature_field' => 'external.id',
+            'allegro_signature_value' => $storageLocation !== '' ? $storageLocation : null,
+            'allegro_signature_source' => $storageLocation !== '' ? 'part.storageLocation.name' : 'none_missing_storage_location',
+            'storage_location' => $storageLocation !== '' ? $storageLocation : null,
+            'part_number' => $part->part_number,
+            'oe_number' => $part->oem_number,
+            'manufacturer_code' => $part->manufacturer_code,
+            'signature_uses_part_code' => $storageLocation !== '' && in_array($storageLocation, $partCodes, true),
+        ];
+    }
+
     private function normalizeGoogleTranslateBlockers(array $blockers): array
     {
         return array_values(array_unique(array_map(function ($blocker): string {

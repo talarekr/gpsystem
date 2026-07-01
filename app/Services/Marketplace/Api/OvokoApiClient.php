@@ -78,6 +78,58 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
         ];
     }
 
+    /**
+     * Candidate donor-car import endpoint. This is intentionally used only by the guarded
+     * admin per-car mapping tool and never by part publish/stock/price/order flows.
+     */
+    public function importCar(array $fields, int $timeoutSeconds = 30): array
+    {
+        $endpoint = rtrim((string) $this->account?->api_base_url, '/').'/crm/importCar';
+        $response = Http::asForm()->acceptJson()->timeout(max(1, $timeoutSeconds))->post($endpoint, $this->authFields() + $fields);
+        $json = $response->json();
+        $payload = is_array($json) ? $json : [];
+        $statusCode = $payload['status_code'] ?? null;
+        $apiOk = $response->successful() && ($statusCode === 'R200' || $statusCode === 200);
+
+        return [
+            'http_status' => $response->status(),
+            'api_status_code' => $statusCode,
+            'api_ok' => $apiOk,
+            'endpoint_used' => $endpoint,
+            'car_id' => $payload['car_id'] ?? $payload['id'] ?? null,
+            'message' => $payload['msg'] ?? $payload['message'] ?? null,
+            'response_top_level_keys' => array_values(array_slice(array_keys($payload), 0, 30)),
+            'payload' => $payload,
+        ];
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    public function searchCars(?string $vin, ?string $externalId, array $vehicle, int $timeoutSeconds = 30): array
+    {
+        $endpoint = rtrim((string) $this->account?->api_base_url, '/').'/v2/get/cars';
+        $fields = array_filter($this->authFields() + [
+            'vin' => $vin,
+            'external_id' => $externalId,
+            'make' => $vehicle['make'] ?? null,
+            'model' => $vehicle['model'] ?? null,
+            'year' => $vehicle['year'] ?? null,
+        ], fn ($value): bool => filled($value));
+
+        $response = Http::asForm()->acceptJson()->timeout(max(1, $timeoutSeconds))->post($endpoint, $fields);
+        $json = $response->json();
+        $payload = is_array($json) ? $json : [];
+        $rows = $payload['data'] ?? $payload['list'] ?? $payload['cars'] ?? [];
+
+        return array_values(array_map(fn (array $row): array => [
+            'ovoko_car_id' => $row['car_id'] ?? $row['id'] ?? null,
+            'make' => $row['make'] ?? $row['manufacturer'] ?? null,
+            'model' => $row['model'] ?? null,
+            'year' => $row['year'] ?? $row['production_year'] ?? null,
+            'vin' => $row['vin'] ?? null,
+            'external_id' => $row['external_id'] ?? null,
+        ], array_filter(is_array($rows) ? $rows : [], 'is_array')));
+    }
+
     public function importPartFormDiagnostics(array $fields): array
     {
         $form = $this->authFields() + $fields;
