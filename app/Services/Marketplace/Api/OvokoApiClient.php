@@ -68,10 +68,10 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
         return [
             'http_status' => $response->status(),
             'api_status_code' => $statusCode,
-            'api_ok' => $apiOk,
+            'api_ok' => $apiOk || (is_string($payload['msg'] ?? null) && stripos((string) $payload['msg'], 'PART exist') !== false && filled($payload['part_id'] ?? $payload['ovoko_part_id'] ?? data_get($payload, 'data.part_id') ?? data_get($payload, 'data.ovoko_part_id'))),
             'endpoint_used' => $endpoint,
-            'part_id' => $payload['part_id'] ?? null,
-            'shop_url' => $payload['shop_url'] ?? null,
+            'part_id' => $payload['part_id'] ?? $payload['ovoko_part_id'] ?? data_get($payload, 'data.part_id') ?? data_get($payload, 'data.ovoko_part_id') ?? null,
+            'shop_url' => $payload['shop_url'] ?? data_get($payload, 'data.shop_url') ?? null,
             'message' => $payload['msg'] ?? $payload['message'] ?? null,
             'response_top_level_keys' => array_values(array_slice(array_keys($payload), 0, 30)),
             'payload' => $payload,

@@ -260,10 +260,10 @@ class OvokoPublishAdapterTest extends TestCase
         $this->assertSame('11701', $listing->external_offer_id);
         $this->assertSame('11701', $listing->external_listing_id);
         $this->assertSame('published', $listing->status);
-        $this->assertNull($listing->url);
+        $this->assertSame('https://ovoko.pl/czesci-samochodowe/hgf11701', $listing->url);
         $this->assertSame('11701', data_get($listing->raw_payload, 'response_summary.ovoko_part_id'));
         $this->assertDatabaseHas('marketplace_sync_logs', ['marketplace' => 'ovoko', 'action' => 'crm/importPart', 'marketplace_listing_id' => $listing->id, 'part_id' => $part->id, 'external_id' => '11701']);
-        $this->assertDatabaseHas('marketplace_sync_logs', ['marketplace' => 'ovoko', 'action' => 'missing_shop_url', 'marketplace_listing_id' => $listing->id, 'part_id' => $part->id, 'external_id' => '11701']);
+        $this->assertDatabaseHas('marketplace_sync_logs', ['marketplace' => 'ovoko', 'action' => 'ovoko_listing_url_resolved', 'marketplace_listing_id' => $listing->id, 'part_id' => $part->id, 'external_id' => '11701']);
     }
 
     public function test_ovoko_publish_stores_shop_url_when_import_part_returns_it(): void
@@ -275,8 +275,24 @@ class OvokoPublishAdapterTest extends TestCase
         app(PublishPartToMarketplacesService::class)->confirm($part, ['ovoko'], dryRun: false, confirm: true);
 
         $listing = MarketplaceListing::query()->where('part_id', $part->id)->where('marketplace', 'ovoko')->firstOrFail();
-        $this->assertSame('https://ovoko.pl/czesci/11701', $listing->url);
+        $this->assertSame('https://ovoko.pl/czesci-samochodowe/hgf11701', $listing->url);
         $this->assertDatabaseHas('marketplace_sync_logs', ['marketplace' => 'ovoko', 'action' => 'ovoko_listing_url_resolved', 'marketplace_listing_id' => $listing->id, 'part_id' => $part->id, 'external_id' => '11701']);
+    }
+
+
+    public function test_ovoko_part_exist_response_with_part_id_stores_generated_listing_url(): void
+    {
+        $part = $this->readyPart();
+        $this->enableFlags();
+        Http::fake(['https://ovoko.example.test/crm/importPart' => Http::response(['part_id' => 11703, 'msg' => 'PART exist', 'status_code' => 'R400'], 200)]);
+
+        $result = app(PublishPartToMarketplacesService::class)->confirm($part, ['ovoko'], dryRun: false, confirm: true);
+
+        $this->assertTrue($result['channels']['ovoko']['success']);
+        $listing = MarketplaceListing::query()->where('part_id', $part->id)->where('marketplace', 'ovoko')->firstOrFail();
+        $this->assertSame('11703', $listing->external_offer_id);
+        $this->assertSame('11703', $listing->external_listing_id);
+        $this->assertSame('https://ovoko.pl/czesci-samochodowe/hgf11703', $listing->url);
     }
 
     public function test_ovoko_api_error_logs_error_and_does_not_crash(): void
