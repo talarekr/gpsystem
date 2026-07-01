@@ -100,6 +100,61 @@ class OvokoPublishAdapterTest extends TestCase
         $this->assertSame(['quality' => 0, 'status' => 1], data_get($payload, 'request.raw_condition_payload_fields'));
     }
 
+    public function test_ovoko_payload_builder_keeps_zero_quality_for_all_gp_swiss_parts(): void
+    {
+        $parts = [
+            $this->readyPart(['condition_notes' => 'nowy']),
+            $this->readyPart(['condition_notes' => 'New / OE']),
+            $this->readyPart(['condition_notes' => 'używany']),
+        ];
+
+        $adapter = app(\App\Services\Marketplace\Publishing\OvokoPublishAdapter::class);
+        $method = new \ReflectionMethod($adapter, 'importPartPayload');
+        $method->setAccessible(true);
+
+        foreach ($parts as $part) {
+            $result = $method->invoke($adapter, $part, ['marketplace_price' => 120, 'currency' => 'PLN'], [
+                'category_id' => '252',
+                'sku' => $part->sku,
+                'image_urls' => ['https://gpswiss.pl/storage/parts/photos/complete.jpg'],
+                'status' => 1,
+            ], MarketplaceAccount::query()->where('code', 'ovoko_main')->firstOrFail());
+
+            $this->assertTrue($result['ok']);
+            $this->assertSame(0, data_get($result, 'fields.quality'));
+            $this->assertSame(1, data_get($result, 'fields.status'));
+            $this->assertSame('quality', data_get($result, 'diagnostics.ovoko_condition_field_name'));
+            $this->assertSame(0, data_get($result, 'diagnostics.ovoko_condition_value'));
+            $this->assertSame(0, data_get($result, 'diagnostics.ovoko_quality'));
+            $this->assertTrue(data_get($result, 'diagnostics.condition_mapped_as_used'));
+            $this->assertSame(['quality' => 0, 'status' => 1], data_get($result, 'diagnostics.raw_condition_payload_fields'));
+        }
+    }
+
+    public function test_ovoko_payload_builder_allows_zero_publication_status_without_confusing_it_with_condition(): void
+    {
+        $part = $this->readyPart(['condition_notes' => 'nowy']);
+        $adapter = app(\App\Services\Marketplace\Publishing\OvokoPublishAdapter::class);
+        $method = new \ReflectionMethod($adapter, 'importPartPayload');
+        $method->setAccessible(true);
+
+        $result = $method->invoke($adapter, $part, ['marketplace_price' => 120, 'currency' => 'PLN'], [
+            'category_id' => '252',
+            'sku' => $part->sku,
+            'image_urls' => ['https://gpswiss.pl/storage/parts/photos/complete.jpg'],
+            'status' => 0,
+        ], MarketplaceAccount::query()->where('code', 'ovoko_main')->firstOrFail());
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame(0, data_get($result, 'fields.quality'));
+        $this->assertSame(0, data_get($result, 'fields.status'));
+        $this->assertSame('quality', data_get($result, 'diagnostics.ovoko_condition_field_name'));
+        $this->assertSame(0, data_get($result, 'diagnostics.ovoko_condition_value'));
+        $this->assertSame(0, data_get($result, 'diagnostics.ovoko_quality'));
+        $this->assertTrue(data_get($result, 'diagnostics.condition_mapped_as_used'));
+        $this->assertSame(['quality' => 0, 'status' => 0], data_get($result, 'diagnostics.raw_condition_payload_fields'));
+    }
+
 
     public function test_ovoko_car_mapping_dry_run_searches_read_only_without_container_binding_error(): void
     {
@@ -187,7 +242,7 @@ class OvokoPublishAdapterTest extends TestCase
     {
         $category = PartCategory::query()->create(['name' => 'Alternatory']);
         MarketplaceCategoryMapping::query()->create(['local_category_id' => $category->id, 'channel' => 'ovoko', 'external_category_id' => '252']);
-        MarketplaceAccount::query()->create(['marketplace' => 'ovoko', 'code' => 'ovoko_main', 'name' => 'Ovoko main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'live', 'api_credentials' => ['username' => 'ovoko-user', 'password' => 'ovoko-pass', 'user_token' => 'ovoko-token'], 'api_settings' => ['default_part_status' => 1]]);
+        MarketplaceAccount::query()->firstOrCreate(['code' => 'ovoko_main'], ['marketplace' => 'ovoko', 'name' => 'Ovoko main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'live', 'api_credentials' => ['username' => 'ovoko-user', 'password' => 'ovoko-pass', 'user_token' => 'ovoko-token'], 'api_settings' => ['default_part_status' => 1]]);
         $car = Car::query()->create(['make' => 'Audi', 'model' => 'RSQ3', 'production_year' => 2015, 'vin' => 'WAUZZZ8U0FA000001', 'engine_code' => 'CZGB']);
         $part = Part::query()->create(['sku' => 'GPS-OVOKO-NOCAR', 'name' => 'Part no car id', 'part_number' => 'LRE', 'price' => 100, 'ovoko_price' => 120, 'quantity' => 1, 'category_id' => $category->id, 'car_id' => $car->id]);
         DB::table('part_images')->insert(['part_id' => $part->id, 'path' => 'parts/photos/complete.jpg', 'sort_order' => 1, 'is_primary' => true, 'created_at' => now(), 'updated_at' => now()]);

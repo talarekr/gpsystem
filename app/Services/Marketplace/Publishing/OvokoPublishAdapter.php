@@ -94,20 +94,29 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
             'notes' => trim(strip_tags((string) (($part->description ?? null) ?: ($part->short_description ?? null) ?: ($part->condition_notes ?? null)))) ?: null,
             'photo' => $ovokoPhotoUrls[0] ?? null,
             'photos[]' => $ovokoPhotoUrls,
-        ], fn ($value) => ! blank($value));
+        ], fn ($value): bool => $this->ovokoFieldFilled($value));
 
         $missing = [];
-        if (blank($fields['category_id'] ?? null)) $missing[] = 'Ovoko: brakuje category_id dla wybranej kategorii '.($payload['category_mapping_name'] ?? $payload['category_mapping_path'] ?? $payload['local_category_id'] ?? 'części');
-        if (blank($fields['car_id'] ?? null)) $missing[] = 'Ovoko: wybrane auto nie ma RRR/Ovoko car_id. Najpierw utwórz/mapuj auto w Ovoko i zapisz jego car_id przy lokalnym aucie.';
-        if (blank($fields['quality'] ?? null)) $missing[] = 'Ovoko: nie udało się zmapować quality z wartości '.($part->condition_notes ?? '');
-        if (blank($fields['status'] ?? null)) $missing[] = 'Uzupełnij domyślny status części Ovoko w ustawieniach konta.';
-        if (blank($fields['photo'] ?? null)) $missing[] = 'Ovoko: zdjęcie części musi być publicznym URL-em HTTP/HTTPS. Szczegóły są w Logach.';
+        if (! $this->ovokoFieldFilled($fields['category_id'] ?? null)) $missing[] = 'Ovoko: brakuje category_id dla wybranej kategorii '.($payload['category_mapping_name'] ?? $payload['category_mapping_path'] ?? $payload['local_category_id'] ?? 'części');
+        if (! $this->ovokoFieldFilled($fields['car_id'] ?? null)) $missing[] = 'Ovoko: wybrane auto nie ma RRR/Ovoko car_id. Najpierw utwórz/mapuj auto w Ovoko i zapisz jego car_id przy lokalnym aucie.';
+        if (! $this->ovokoFieldFilled($fields['quality'] ?? null)) $missing[] = 'Ovoko: nie udało się zmapować quality z wartości '.($part->condition_notes ?? '');
+        if (! $this->ovokoFieldFilled($fields['status'] ?? null)) $missing[] = 'Uzupełnij domyślny status części Ovoko w ustawieniach konta.';
+        if (! $this->ovokoFieldFilled($fields['photo'] ?? null)) $missing[] = 'Ovoko: zdjęcie części musi być publicznym URL-em HTTP/HTTPS. Szczegóły są w Logach.';
         $diagnostics = array_merge($condition, ['ovoko_status' => $fields['status'] ?? null, 'raw_condition_payload_fields' => ['quality' => $fields['quality'] ?? null, 'status' => $fields['status'] ?? null]], $car, $partCodeDiagnostics);
         if (blank($fields['car_id'] ?? null)) $diagnostics['blocked_reason'] = 'missing_ovoko_car_id';
         if (($partCodeDiagnostics['ovoko_codes_look_like_title'] ?? false) === true) $diagnostics['warning'] = 'ovoko_code_looks_like_full_title';
         if ($missing !== []) return ['ok' => false, 'fields' => $fields, 'missing' => $missing, 'error' => implode('; ', $missing), 'diagnostics' => $diagnostics];
 
         return ['ok' => true, 'fields' => $fields, 'diagnostics' => $diagnostics];
+    }
+
+    private function ovokoFieldFilled(mixed $value): bool
+    {
+        if ($value === null) return false;
+        if (is_string($value)) return trim($value) !== '';
+        if (is_array($value)) return $value !== [];
+
+        return true;
     }
 
     /** @return array<int, string> */
