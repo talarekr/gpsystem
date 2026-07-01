@@ -6,6 +6,8 @@ use App\Filament\Resources\PartResource;
 use App\Models\Car;
 use App\Models\Part;
 use App\Models\StorageLocation;
+use App\Services\Marketplace\ManualMarketplaceLinkMappingService;
+use App\Services\Marketplace\ManualMarketplaceMappingConflictException;
 use App\Services\Marketplace\PreparePartMarketplaceListingService;
 use Filament\Notifications\Notification;
 use Filament\Actions;
@@ -138,6 +140,42 @@ class ListParts extends Page
 
         Notification::make()
             ->title('Notatka wewnętrzna zapisana lokalnie.')
+            ->success()
+            ->send();
+    }
+
+
+    public function saveManualMarketplaceLink(int $partId, string $marketplace, ?string $url = null): void
+    {
+        $part = $this->getPartsBaseQuery()->whereKey($partId)->first();
+
+        if (! $part) {
+            return;
+        }
+
+        try {
+            $result = app(ManualMarketplaceLinkMappingService::class)->save($part, $marketplace, (string) $url);
+        } catch (ManualMarketplaceMappingConflictException $exception) {
+            Notification::make()
+                ->title('existing_mapping_conflict')
+                ->body('Obecne ID: '.$exception->existingId.' | Nowe ID: '.$exception->newId)
+                ->danger()
+                ->send();
+
+            return;
+        } catch (\InvalidArgumentException $exception) {
+            Notification::make()
+                ->title('Nieprawidłowy link '.ucfirst($marketplace).'.')
+                ->body($exception->getMessage())
+                ->danger()
+                ->send();
+
+            return;
+        }
+
+        Notification::make()
+            ->title('Lokalne mapowanie '.ucfirst($result['marketplace']).' zapisane.')
+            ->body('ID: '.$result['external_id'])
             ->success()
             ->send();
     }
