@@ -26,7 +26,7 @@ class OvokoCarMappingController extends Controller
         $dryRun = $this->buildDryRun($car);
         $requested = trim((string) $request->input('ovoko_car_id', $request->query('ovoko_car_id', '')));
 
-        if ($requested === '' && count($dryRun['search_candidates']) === 1) {
+        if ($requested === '' && empty($dryRun['existing_car_search_unavailable']) && count($dryRun['search_candidates']) === 1) {
             $requested = (string) $dryRun['search_candidates'][0]['ovoko_car_id'];
         }
 
@@ -62,19 +62,44 @@ class OvokoCarMappingController extends Controller
         $missing = array_values(array_filter(['make', 'model', 'year'], fn (string $field): bool => blank($payload[$field] ?? null)));
         $candidates = [];
         $canSearch = true;
+        $searchSupported = true;
+        $searchWarning = null;
+        $searchDiagnostics = [
+            'search_endpoint' => null,
+            'search_request_fields' => [],
+            'search_request_payload' => [],
+            'search_response_top_level_keys' => [],
+            'search_response_sample_raw' => [],
+            'search_filter_applied' => false,
+            'search_filter_ignored' => false,
+            'returned_candidates_count' => 0,
+            'parsed_candidates_count' => 0,
+            'usable_candidates_count' => 0,
+        ];
 
         try {
             /** @var OvokoApiClient $client */
             $client = app(MarketplaceApiManager::class)->client('ovoko');
-            $candidates = $client->searchCars($car->vin, $car->external_id, $payload);
+            $searchDiagnostics = $client->searchCarsDiagnostics($car->vin, $car->external_id, $payload);
+            $candidates = $searchDiagnostics['usable_candidates'];
+            $searchSupported = (bool) ($searchDiagnostics['api_ok'] ?? false);
+            $canSearch = $searchSupported;
+
+            if (($searchDiagnostics['search_filter_ignored'] ?? false) || ($searchDiagnostics['returned_candidates_count'] ?? 0) > 0 && ($searchDiagnostics['usable_candidates_count'] ?? 0) === 0) {
+                $searchSupported = false;
+                $canSearch = false;
+                $candidates = [];
+                $searchWarning = 'ovoko_car_search_filter_ignored_or_unusable';
+            }
         } catch (\Throwable $e) {
             $canSearch = false;
-            $candidates = [[
-                'error' => 'ovoko_car_search_unavailable',
+            $searchSupported = false;
+            $searchWarning = 'ovoko_car_search_unavailable';
+            $searchDiagnostics['error'] = [
                 'error_class' => $e::class,
                 'error_message' => $this->safeErrorMessage($e),
                 'read_only' => true,
-            ]];
+            ];
         }
 
         return [
@@ -88,7 +113,22 @@ class OvokoCarMappingController extends Controller
             'mileage' => $car->mileage_km,
             'existing_ovoko_car_id' => $car->external_id,
             'can_search_ovoko_car' => $canSearch,
+            'search_supported' => $searchSupported,
             'search_candidates' => $candidates,
+            'search_warning' => $searchWarning,
+            'existing_car_search_unavailable' => ! $searchSupported,
+            'apply_will_create_new_car' => ! $searchSupported && $missing === [],
+            'search_endpoint' => $searchDiagnostics['search_endpoint'] ?? null,
+            'search_request_fields' => $searchDiagnostics['search_request_fields'] ?? [],
+            'search_request_payload' => $searchDiagnostics['search_request_payload'] ?? [],
+            'search_response_top_level_keys' => $searchDiagnostics['search_response_top_level_keys'] ?? [],
+            'search_response_sample_raw' => $searchDiagnostics['search_response_sample_raw'] ?? [],
+            'search_filter_applied' => $searchDiagnostics['search_filter_applied'] ?? false,
+            'search_filter_ignored' => $searchDiagnostics['search_filter_ignored'] ?? false,
+            'returned_candidates_count' => $searchDiagnostics['returned_candidates_count'] ?? 0,
+            'parsed_candidates_count' => $searchDiagnostics['parsed_candidates_count'] ?? 0,
+            'usable_candidates_count' => $searchDiagnostics['usable_candidates_count'] ?? 0,
+            'parsed_search_candidates' => $searchDiagnostics['all_candidates'] ?? [],
             'can_create_ovoko_car' => $missing === [],
             'required_fields_missing' => $missing,
             'would_create_payload' => $payload,
@@ -97,6 +137,8 @@ class OvokoCarMappingController extends Controller
                 'public_docs_found' => false,
                 'implemented_candidate_create_endpoint' => '/crm/importCar',
                 'implemented_candidate_search_endpoint' => '/v2/get/cars',
+                'checked_alternative_lookup_fields' => ['external_id', 'user_code', 'vin', 'id'],
+                'reliable_alternative_search_endpoint_found' => false,
                 'note' => 'Public web search did not reveal official Ovoko/RRR car import documentation; endpoints are isolated behind dry-run/apply safeguards and must be validated with seller API credentials.',
             ],
         ];
