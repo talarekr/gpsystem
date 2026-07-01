@@ -52,6 +52,8 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
             'ovoko_shop_url_present' => filled($shopUrl),
             'ovoko_shop_url_source' => filled($externalId) ? 'generated_from_ovoko_part_id' : null,
             'ovoko_shop_url' => $shopUrl,
+            'ovoko_listing_url' => $shopUrl,
+            'ovoko_listing_url_source' => filled($externalId) ? 'generated_from_ovoko_part_id' : null,
             'part_id_present' => filled($externalId),
             'response_top_level_keys' => $result['response_top_level_keys'] ?? [],
             'ovoko_photo' => $photoDiagnostics,
@@ -66,7 +68,7 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
         }
 
         return ['ok' => true, 'status' => 'published', 'listing_status' => 'published', 'action' => 'crm/importPart', 'http_status' => $result['http_status'] ?? null, 'external_offer_id' => $externalId, 'external_listing_id' => $externalId, 'url' => $shopUrl, 'request_summary' => $this->requestSummary($payload) + ['ovoko_form_keys' => array_keys($form['fields']), 'ovoko_photo' => $photoDiagnostics] + $formDiagnostics, 'response_summary' => $summary, 'log_context' => ['ovoko_part_id' => $externalId, 'ovoko_shop_url_present' => filled($shopUrl),
-            'ovoko_shop_url_source' => filled($externalId) ? 'generated_from_ovoko_part_id' : null, 'ovoko_shop_url' => $shopUrl]];
+            'ovoko_shop_url_source' => filled($externalId) ? 'generated_from_ovoko_part_id' : null, 'ovoko_shop_url' => $shopUrl, 'ovoko_listing_url' => $shopUrl, 'ovoko_listing_url_source' => filled($externalId) ? 'generated_from_ovoko_part_id' : null]];
     }
 
 
