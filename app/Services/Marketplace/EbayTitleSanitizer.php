@@ -18,7 +18,33 @@ class EbayTitleSanitizer
         $before = trim((string) ($translatedTitle ?: $original));
         $protected = $this->protectedTokens($part, $original.' '.$before);
         $removed = [];
-        $cleaned = $before;
+        $cleaned = $this->normalize($before);
+
+        if (mb_strlen($cleaned) <= self::LIMIT) {
+            $preserved = $this->tokensPreserved($protected, $cleaned);
+
+            return [
+                'final_title' => $cleaned,
+                'cleaned_title' => $cleaned,
+                'blocker' => ! $preserved ? 'ebay_title_too_long_after_cleanup' : null,
+                'diagnostics' => [
+                    'original_pl_title' => $original,
+                    'translated_title_before_cleanup' => $before,
+                    'cleaned_title' => $cleaned,
+                    'final_title' => $cleaned,
+                    'original_length' => mb_strlen($original),
+                    'translated_length' => mb_strlen($before),
+                    'final_length' => mb_strlen($cleaned),
+                    'title_limit' => self::LIMIT,
+                    'removed_tokens' => [],
+                    'protected_tokens' => $protected,
+                    'protected_tokens_preserved' => $preserved,
+                    'cleanup_applied' => $cleaned !== $before,
+                    'minimal_cleanup_only' => true,
+                ],
+            ];
+        }
+
         $allowsYearLabel = (bool) preg_match('/\b(rok|rocznik|rok\s+produkcji|produkcji|prod\.)\b/iu', $original);
 
         if (! $allowsYearLabel) {
