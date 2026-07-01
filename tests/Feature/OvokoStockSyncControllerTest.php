@@ -91,6 +91,52 @@ class OvokoStockSyncControllerTest extends TestCase
             ->assertJsonPath('items.0.blockers', []);
     }
 
+    public function test_dry_run_finds_exact_ovoko_id_inside_nested_official_list_response(): void
+    {
+        $this->actingAsAdminUser();
+        $this->account();
+        $part = Part::query()->forceCreate(['id' => 7910, 'name' => 'Tylna klapa bagażnika', 'quantity' => 1, 'status' => 'ready', 'is_visible_storefront' => true, 'needs_listing' => false]);
+        MarketplaceListing::query()->create(['marketplace' => 'ovoko', 'part_id' => $part->id, 'external_offer_id' => '11711', 'status' => 'active']);
+
+        Http::fake([
+            'ovoko.test/get/part/*' => Http::response([
+                'list' => [[
+                    [
+                        'id' => '11711',
+                        'id_bridge' => 'gps-part-7910',
+                        'car_id' => '174',
+                        'category_id' => '556',
+                        'name' => 'Tylna klapa bagażnika',
+                        'price' => '352.94',
+                        'currency' => 'EUR',
+                        'quantity' => 0,
+                        'status' => 'sold',
+                    ],
+                ]],
+                'msg' => 'OK',
+                'status_code' => 'R200',
+            ], 200),
+        ]);
+
+        $this->getJson('/admin/tools/ovoko-stock-sync-dry-run?part_id=7910')
+            ->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('dry_run', true)
+            ->assertJsonPath('marketplace_write', false)
+            ->assertJsonPath('items.0.ovoko_id', '11711')
+            ->assertJsonPath('items.0.ovoko.quantity', 0)
+            ->assertJsonPath('items.0.ovoko.status', 'sold')
+            ->assertJsonPath('items.0.ovoko.candidate_ids.0', '11711')
+            ->assertJsonPath('items.0.ovoko.filter_applied', true)
+            ->assertJsonPath('items.0.ovoko.ovoko_response_shape.has_wrappers.list', true)
+            ->assertJsonPath('items.0.ovoko.ovoko_response_shape.top_level_keys.0', 'list')
+            ->assertJsonPath('items.0.blockers', [])
+            ->assertJsonPath('items.0.planned_local_state.quantity', 0)
+            ->assertJsonPath('items.0.planned_local_state.status', 'sold')
+            ->assertJsonPath('items.0.planned_local_state.is_visible_storefront', false)
+            ->assertJsonPath('items.0.action', 'update_local_stock');
+    }
+
     public function test_dry_run_does_not_accept_first_ovoko_row_when_id_does_not_match(): void
     {
         $this->actingAsAdminUser();

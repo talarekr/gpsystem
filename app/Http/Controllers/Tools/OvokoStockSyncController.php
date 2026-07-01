@@ -360,7 +360,20 @@ class OvokoStockSyncController extends Controller
     private function normalizeRows(array $value): array
     {
         if ($this->isAssoc($value)) return [$value];
-        return array_values(array_filter($value, 'is_array'));
+
+        $rows = [];
+        foreach ($value as $item) {
+            if (! is_array($item)) continue;
+            if ($this->isAssoc($item)) {
+                $rows[] = $item;
+                continue;
+            }
+            foreach ($this->normalizeRows($item) as $row) {
+                $rows[] = $row;
+            }
+        }
+
+        return $rows;
     }
 
     private function isAssoc(array $value): bool
