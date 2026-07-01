@@ -68,6 +68,7 @@ class EbayTitleSanitizerTest extends TestCase
         $this->assertSame(65, $result['diagnostics']['final_length']);
         $this->assertNull($result['blocker']);
         $this->assertTrue($result['diagnostics']['protected_tokens_preserved']);
+        $this->assertSame(['03N131656G', 'DPF'], $result['diagnostics']['protected_tokens']);
         $this->assertSame([], $result['diagnostics']['removed_tokens']);
         $this->assertFalse($result['diagnostics']['cleanup_applied']);
         $this->assertTrue($result['diagnostics']['minimal_cleanup_only']);

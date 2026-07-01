@@ -12,6 +12,11 @@ class EbayTitleSanitizer
         '/\bperfekt\b/iu', '/\bkompletter?\b/iu', '/\bkomplett\b/iu',
     ];
 
+    private const DESCRIPTIVE_POLISH_TOKENS = [
+        'KOMPLETNY', 'SPRAWNY', 'STAN', 'IDEALNY', 'UŻYWANY', 'UZYWANY',
+        'LEWY', 'PRAWY', 'PRZÓD', 'PRZOD', 'TYŁ', 'TYL',
+    ];
+
     public function sanitizeForEbayDe(Part $part, ?string $translatedTitle, ?string $originalPlTitle = null): array
     {
         $original = (string) ($originalPlTitle ?? $part->name ?? '');
@@ -115,8 +120,18 @@ class EbayTitleSanitizer
     {
         $tokens = array_filter([(string) ($part->part_number ?? ''), (string) data_get($part->vehicle_snapshot, 'engine_code', ''), (string) data_get($part->vehicle_snapshot, 'gearbox_code', '')]);
         preg_match_all('/\b[A-Z0-9]{3,20}\b/u', $text, $matches);
-        foreach ($matches[0] ?? [] as $token) if (preg_match('/^(?=.*[A-Z])(?=.*\d)|[A-Z]{3,5}$/u', $token)) $tokens[] = $token;
-        return array_values(array_unique(array_map('trim', array_filter($tokens))));
+        foreach ($matches[0] ?? [] as $token) {
+            $token = trim($token);
+            if ($this->isDescriptivePolishToken($token)) continue;
+            if (preg_match('/^(?=.*[A-Z])(?=.*\d)|[A-Z]{3,5}$/u', $token)) $tokens[] = $token;
+        }
+
+        return array_values(array_unique(array_map('trim', array_filter($tokens, fn (string $token): bool => ! $this->isDescriptivePolishToken($token)))));
+    }
+
+    private function isDescriptivePolishToken(string $token): bool
+    {
+        return in_array(mb_strtoupper(trim($token), 'UTF-8'), self::DESCRIPTIVE_POLISH_TOKENS, true);
     }
 
     private function tokensPreserved(array $tokens, string $title): bool
