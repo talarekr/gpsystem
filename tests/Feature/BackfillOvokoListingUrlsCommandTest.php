@@ -150,6 +150,30 @@ class BackfillOvokoListingUrlsCommandTest extends TestCase
         $this->assertDatabaseHas('marketplace_sync_logs', ['marketplace' => 'ovoko', 'action' => 'ovoko_listing_url_generated', 'marketplace_listing_id' => 501, 'part_id' => 7892, 'external_id' => '11701']);
     }
 
+    public function test_apply_generates_url_from_external_listing_id_when_offer_id_is_empty(): void
+    {
+        MarketplaceAccount::query()->create(['marketplace' => 'ovoko', 'name' => 'Ovoko main', 'code' => 'ovoko_main', 'status' => 'active', 'api_base_url' => 'https://ovoko.example.test', 'api_credentials' => ['username' => 'u', 'password' => 'p', 'user_token' => 't']]);
+        DB::table('parts')->insert(['id' => 7897, 'name' => 'PDC module', 'price' => 1, 'quantity' => 1, 'status' => 'ready', 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('marketplace_listings')->insert(['id' => 503, 'marketplace' => 'ovoko', 'part_id' => 7897, 'external_listing_id' => '11703', 'created_at' => now(), 'updated_at' => now()]);
+
+        Http::fake(['https://ovoko.example.test/*' => Http::response(['status_code' => 'R404', 'msg' => 'Not found'], 200)]);
+
+        $this->artisan('marketplace:backfill-ovoko-listing-urls', ['--apply' => true, '--part-id' => 7897])
+            ->expectsOutputToContain('updated')
+            ->expectsOutputToContain('generated_from_ovoko_part_id')
+            ->assertExitCode(0);
+
+        $this->assertDatabaseHas('marketplace_listings', ['id' => 503, 'url' => 'https://ovoko.pl/czesci-samochodowe/hgf11703']);
+        $this->assertDatabaseHas('marketplace_sync_logs', ['marketplace' => 'ovoko', 'action' => 'ovoko_listing_url_generated', 'marketplace_listing_id' => 503, 'part_id' => 7897, 'external_id' => '11703']);
+
+        $payload = DB::table('marketplace_sync_logs')->where('marketplace_listing_id', 503)->where('action', 'ovoko_listing_url_generated')->value('payload');
+        $decoded = json_decode((string) $payload, true);
+
+        $this->assertSame('11703', $decoded['response']['ovoko_part_id'] ?? null);
+        $this->assertSame('https://ovoko.pl/czesci-samochodowe/hgf11703', $decoded['response']['ovoko_listing_url'] ?? null);
+        $this->assertSame('generated_from_ovoko_part_id', $decoded['response']['ovoko_listing_url_source'] ?? null);
+    }
+
     public function test_apply_updates_from_csv_and_does_not_call_api(): void
     {
         DB::table('parts')->insert(['id' => 7892, 'external_id' => 'gps-part-7892', 'name' => 'PDC module', 'price' => 1, 'quantity' => 1, 'status' => 'ready', 'created_at' => now(), 'updated_at' => now()]);

@@ -438,6 +438,9 @@ class OvokoListingUrlBackfillService
             'response' => [
                 'generated_url' => $generatedUrl,
                 'source' => 'generated_from_ovoko_part_id',
+                'ovoko_part_id' => $ovokoId,
+                'ovoko_listing_url' => $generatedUrl,
+                'ovoko_listing_url_source' => 'generated_from_ovoko_part_id',
                 'generated_rule' => 'https://ovoko.pl/czesci-samochodowe/hgf{ovoko_part_id}',
             ],
         ]);

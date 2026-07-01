@@ -113,6 +113,37 @@ class PartModuleFoundationTest extends TestCase
         $this->assertSame('https://allegro.pl/oferta/18723793233', $allegro['url']);
     }
 
+    public function test_ovoko_channel_uses_listing_url_and_external_listing_id_when_offer_id_is_empty(): void
+    {
+        $part = Part::query()->create([
+            'name' => 'Część #7897',
+            'price' => 1250,
+            'ovoko_price' => 1250,
+            'quantity' => 1,
+            'status' => 'ready',
+        ]);
+
+        MarketplaceListing::query()->create([
+            'part_id' => $part->id,
+            'marketplace' => 'ovoko',
+            'external_offer_id' => null,
+            'external_listing_id' => '11703',
+            'price' => 1250,
+            'currency' => 'PLN',
+            'status' => 'published',
+            'url' => 'https://ovoko.pl/czesci-samochodowe/hgf11703',
+        ]);
+
+        $rows = app(\App\Services\Admin\PartMarketplaceStatusResolver::class)
+            ->rowsForPart($part->fresh('marketplaceListings'));
+
+        $ovoko = collect($rows)->firstWhere('key', 'ovoko');
+
+        $this->assertTrue($ovoko['listed']);
+        $this->assertSame('11703', $ovoko['external_offer_id']);
+        $this->assertSame('https://ovoko.pl/czesci-samochodowe/hgf11703', $ovoko['url']);
+    }
+
     public function test_part_can_be_created_with_required_fields_and_safe_defaults(): void
     {
         $part = Part::query()->create(['name' => 'Reflektor lewy']);

@@ -130,9 +130,14 @@ class PartMarketplaceStatusResolver
 
     private function externalOfferId(?MarketplaceListing $listing): ?string
     {
-        $id = trim((string) ($listing?->external_offer_id ?? ''));
+        foreach ([$listing?->external_offer_id, $listing?->external_listing_id] as $value) {
+            $id = trim((string) ($value ?? ''));
+            if ($id !== '') {
+                return $id;
+            }
+        }
 
-        return $id === '' ? null : $id;
+        return null;
     }
 
     private function listingUrl(?MarketplaceListing $listing): ?string
