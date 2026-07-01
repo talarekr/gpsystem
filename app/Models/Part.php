@@ -21,7 +21,7 @@ class Part extends Model
     protected $fillable = [
         'source_system','external_id','sku','name','slug','legacy_url','legacy_slug','part_number','oem_number','manufacturer_code','short_description','description','condition_notes','internal_note','code_photo_path',
         'category_id','suggested_category_id','category_confidence','category_suggestion_reason','category_needs_review',
-        'car_id','vehicle_snapshot','legacy_payload','storage_location_id','weight_kg','length_cm','width_cm','height_cm','price','currency','allegro_price','ovoko_price','ebay_price','allegro_shipping_rate_name','quantity','status',
+        'car_id','vehicle_snapshot','legacy_payload','storage_location_id','weight_kg','length_cm','width_cm','height_cm','price','currency','allegro_price','ovoko_price','ebay_price','allegro_shipping_rate_name','quantity','status','sale_source','sold_at',
         'is_visible_storefront','needs_listing','needs_review','review_reason','review_detected_at','review_source','review_metadata','created_by',
     ];
 
@@ -41,6 +41,7 @@ class Part extends Model
             'height_cm' => 'decimal:2',
             'ebay_price' => 'decimal:2',
             'quantity' => 'integer',
+            'sold_at' => 'datetime',
             'is_visible_storefront' => 'boolean',
             'needs_listing' => 'boolean',
             'needs_review' => 'boolean',
@@ -76,6 +77,47 @@ class Part extends Model
                 $part->ebay_price = round($storefrontPrice * 1.25, 2);
             }
         });
+    }
+
+
+    public static function saleSourceOptions(): array
+    {
+        return [
+            'local_sale' => 'Sprzedaż lokalna',
+            'allegro' => 'Allegro',
+            'ovoko' => 'Ovoko',
+            'ebay' => 'eBay',
+            'sklep' => 'Sklep',
+            'storefront' => 'Sklep',
+            'local' => 'Sklep',
+        ];
+    }
+
+    public static function saleSourceLabel(?string $source): string
+    {
+        $normalized = mb_strtolower(trim((string) $source));
+
+        return match ($normalized) {
+            'local_sale', 'local sale', 'sprzedaż lokalna', 'sprzedaz lokalna' => 'Sprzedaż lokalna',
+            'allegro' => 'Allegro',
+            'ovoko' => 'Ovoko',
+            'ebay', 'ebay_de', 'ebay_pl' => 'eBay',
+            'sklep', 'storefront', 'local' => 'Sklep',
+            '' => '—',
+            default => (string) $source,
+        };
+    }
+
+    public function markSoldViaLocalSale(?\DateTimeInterface $soldAt = null): void
+    {
+        $this->forceFill([
+            'status' => 'sold',
+            'quantity' => 0,
+            'is_visible_storefront' => false,
+            'needs_listing' => false,
+            'sale_source' => 'local_sale',
+            'sold_at' => $soldAt ?: now(),
+        ]);
     }
 
     public static function statusOptions(): array

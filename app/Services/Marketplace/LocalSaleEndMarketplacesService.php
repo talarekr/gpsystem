@@ -27,7 +27,8 @@ class LocalSaleEndMarketplacesService
         $summary = DB::transaction(function () use ($part): array {
             /** @var Part $locked */
             $locked = Part::query()->whereKey($part->id)->lockForUpdate()->firstOrFail();
-            $locked->forceFill(['status' => 'sold', 'quantity' => 0, 'is_visible_storefront' => false, 'needs_listing' => false])->save();
+            $locked->markSoldViaLocalSale();
+            $locked->save();
 
             return $this->buildSummary($locked->fresh(), true);
         });

@@ -69,6 +69,8 @@ class LocalSaleEndMarketplacesTest extends TestCase
 
         $part->refresh();
         $this->assertSame('sold', $part->status);
+        $this->assertSame('local_sale', $part->sale_source);
+        $this->assertNotNull($part->sold_at);
         $this->assertSame(0, $part->quantity);
         $this->assertFalse((bool) $part->is_visible_storefront);
         $this->assertFalse(Part::query()->whereKey($part->id)->storefrontVisible()->exists());
@@ -93,9 +95,27 @@ class LocalSaleEndMarketplacesTest extends TestCase
             ->assertJsonCount(1, 'failed_marketplaces')
             ->assertJsonPath('blockers.0.blocker', 'missing_external_id');
 
-        $this->assertSame('sold', $part->fresh()->status);
+        $part->refresh();
+        $this->assertSame('sold', $part->status);
+        $this->assertSame('local_sale', $part->sale_source);
+        $this->assertNotNull($part->sold_at);
         $this->assertSame(1, MarketplaceSyncLog::query()->where('status', 'error')->count());
         Http::assertSentCount(1);
+    }
+
+
+    public function test_local_sale_source_label_is_available_for_sold_parts(): void
+    {
+        $this->actingAs($this->user());
+        Http::fake();
+        $part = Part::query()->create(['name' => 'Label source part', 'status' => 'ready', 'quantity' => 1]);
+
+        $this->getJson("/admin/tools/parts/{$part->id}/local-sale-end-marketplaces-apply?confirm=local-sale-end-marketplaces")
+            ->assertOk();
+
+        $part->refresh();
+        $this->assertSame('local_sale', $part->sale_source);
+        $this->assertSame('Sprzedaż lokalna', Part::saleSourceLabel($part->sale_source));
     }
 
     private function user(): User

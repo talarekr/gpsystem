@@ -5,6 +5,7 @@ namespace App\Filament\Resources\PartResource\Pages;
 use App\Filament\Resources\PartResource;
 use App\Models\LocalSale;
 use App\Models\OrderItem;
+use App\Models\Part;
 use App\Support\OrderItemThumbnailDiagnostics;
 use Filament\Resources\Pages\Page;
 use Filament\Support\Enums\MaxWidth;
@@ -56,6 +57,7 @@ class SoldParts extends Page
     {
         $rows = $this->orderItemRows()
             ->merge($this->localSaleRows())
+            ->merge($this->partSaleRows())
             ->when(filled($this->search), fn (Collection $rows): Collection => $this->filterRows($rows, trim($this->search)))
             ->sortByDesc(fn (array $row): int => $row['sold_at_sort'])
             ->values();
@@ -132,7 +134,7 @@ class SoldParts extends Page
                     'type' => 'local_sale',
                     'part' => $sale->part,
                     'name' => $sale->part?->name ?: ($snapshot['name'] ?? '—'),
-                    'source' => 'sprzedaż lokalna',
+                    'source' => $sale->part?->sale_source ?: 'local_sale',
                     'reference' => 'Lokalna #'.$sale->id,
                     'sold_at' => $soldAt,
                     'sold_at_sort' => $soldAt?->getTimestamp() ?? 0,
@@ -152,9 +154,51 @@ class SoldParts extends Page
                         $snapshot['oem_number'] ?? null,
                         $snapshot['manufacturer_code'] ?? null,
                         'sprzedaż lokalna',
+                        'local_sale',
                         'local sale',
                         'lokalna',
                         'Lokalna #'.$sale->id,
+                    ]),
+                ];
+            });
+    }
+
+    private function partSaleRows(): Collection
+    {
+        $localSalePartIds = LocalSale::query()->whereNotNull('part_id')->pluck('part_id')->all();
+
+        return Part::query()
+            ->with(['images', 'storageLocation'])
+            ->where('status', 'sold')
+            ->when($localSalePartIds !== [], fn ($query) => $query->whereNotIn('id', $localSalePartIds))
+            ->latest('sold_at')
+            ->latest('id')
+            ->limit(500)
+            ->get()
+            ->map(function (Part $part): array {
+                $soldAt = $part->sold_at ?: $part->updated_at;
+                $source = $part->sale_source ?: 'sklep';
+
+                return [
+                    'type' => 'part_sale',
+                    'part' => $part,
+                    'name' => $part->name,
+                    'source' => $source,
+                    'reference' => 'Część #'.$part->id,
+                    'sold_at' => $soldAt,
+                    'sold_at_sort' => $soldAt?->getTimestamp() ?? 0,
+                    'price' => $part->price,
+                    'currency' => $part->currency ?: 'PLN',
+                    'part_id' => $part->id,
+                    'thumbnail_url' => $part->adminTableImageUrl(),
+                    'thumbnail_source' => $part->adminTableImageUrl() ? 'admin_parts_thumbnail' : 'placeholder',
+                    'storage_location' => $part->storageLocation?->name ?: 'Brak lokalizacji',
+                    'part_url' => PartResource::getUrl('view', ['record' => $part]),
+                    'order_url' => null,
+                    'search_values' => $this->partSearchValues($part, [
+                        Part::saleSourceLabel($source),
+                        $source,
+                        'Część #'.$part->id,
                     ]),
                 ];
             });

@@ -55,10 +55,10 @@ class LocalSaleController extends Controller
 
                 $part->quantity = $newQuantity;
 
+                $soldAt = now();
+
                 if ($newQuantity <= 0) {
-                    $part->quantity = 0;
-                    $part->status = 'sold';
-                    $part->is_visible_storefront = false;
+                    $part->markSoldViaLocalSale($soldAt);
                 }
 
                 $part->save();
@@ -71,7 +71,7 @@ class LocalSaleController extends Controller
                     'currency' => 'PLN',
                     'payment_method' => $data['payment_method'],
                     'quantity' => 1,
-                    'sold_at' => now(),
+                    'sold_at' => $soldAt,
                     'created_by' => $request->user()?->id,
                     'notes' => $data['notes'] ?? null,
                     'marketplace_sync_status' => 'pending',
