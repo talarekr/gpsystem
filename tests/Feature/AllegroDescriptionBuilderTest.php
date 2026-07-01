@@ -28,9 +28,15 @@ class AllegroDescriptionBuilderTest extends TestCase
         $this->assertCount(2, $description['sections'][0]['items']);
         $this->assertSame('TEXT', $description['sections'][0]['items'][0]['type']);
         $this->assertSame('IMAGE', $description['sections'][0]['items'][1]['type']);
+        $this->assertSame('allegro_gp_swiss_template', $response->json('payload.allegro_description_diagnostics.description_source'));
+        $this->assertSame('text_image_50_50', $response->json('payload.allegro_description_diagnostics.description_template'));
+        $this->assertSame(1, $response->json('payload.allegro_description_diagnostics.description_sections_count'));
+        $this->assertTrue($response->json('payload.allegro_description_diagnostics.description_part_description_present'));
+        $this->assertSame(['make', 'model', 'production_year', 'engine_code'], $response->json('payload.allegro_description_diagnostics.description_vehicle_fields_present'));
+        $this->assertTrue($response->json('payload.allegro_description_diagnostics.description_engine_power_present'));
     }
 
-    public function test_car_parameters_are_ul_li_and_values_are_bold(): void
+    public function test_gp_swiss_template_contains_required_copy_and_no_generic_marketing_copy(): void
     {
         Http::fake($this->fakeAllegro());
         $part = $this->readyPart();
@@ -38,8 +44,13 @@ class AllegroDescriptionBuilderTest extends TestCase
         $content = $this->getJson('/tools/dry-run-marketplace-listing-payload?token=gps_images_import_2026&channel=allegro_main&part_id='.$part->id)
             ->json('payload.description.sections.0.items.0.content');
 
+        $this->assertStringContainsString('Witam oferta dotyczy:', $content);
+        $this->assertStringContainsString('<p><b>Sterownik silnika 1.8 TFSI</b></p>', $content);
         $this->assertStringContainsString('<ul><li>Marka: <b>AUDI</b></li><li>Model: <b>A4</b></li><li>Rok: <b>2018</b></li><li>Oznaczenie silnika: <b>CJSA</b></li><li>Moc silnika: <b>110</b></li></ul>', $content);
         $this->assertStringContainsString('<p><b>CZĘŚĆ SPRAWNA. STAN WIDOCZNY NA ZDJĘCIACH</b></p>', $content);
+        $this->assertStringNotContainsString('Cechy produktu', $content);
+        $this->assertStringNotContainsString('O produkcie', $content);
+        $this->assertStringNotContainsString('wysokiej jakości część zamienna', $content);
     }
 
 
@@ -59,6 +70,7 @@ class AllegroDescriptionBuilderTest extends TestCase
         $this->assertStringContainsString('<li>Oznaczenie silnika: <b>CJSA</b></li></ul>', $content);
         $this->assertStringNotContainsString('Moc silnika:', $content);
         $this->assertSame(['Moc silnika'], $response->json('payload.allegro_description_diagnostics.optional_donor_vehicle_fields_missing'));
+        $this->assertFalse($response->json('payload.allegro_description_diagnostics.description_engine_power_present'));
     }
 
     /** @dataProvider blockerCases */

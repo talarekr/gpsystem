@@ -3,7 +3,6 @@
 namespace App\Services\Marketplace;
 
 use App\Models\Part;
-use Illuminate\Support\Str;
 
 class AllegroDescriptionBuilder
 {
@@ -18,7 +17,7 @@ class AllegroDescriptionBuilder
         'engine_power_kw' => 'Moc silnika',
     ];
 
-    public function __construct(private readonly MarketplaceImageSelectionService $imageSelectionService) {}
+    public function __construct(private readonly MarketplaceImageSelectionService $imageSelectionService, private readonly AllegroGpSwissDescriptionTemplate $template) {}
 
     /** @return array{description: ?array<string, mixed>, blockers: array<int, string>, diagnostics: array<string, mixed>} */
     public function build(Part $part, array $offerImageUrls): array
@@ -37,7 +36,11 @@ class AllegroDescriptionBuilder
             $blockers[] = 'missing_donor_vehicle';
         }
         $values = [];
-        $diagnostics = [];
+        $diagnostics = [
+            'description_source' => AllegroGpSwissDescriptionTemplate::SOURCE,
+            'description_part_description_present' => $description !== '',
+            'description_template' => AllegroGpSwissDescriptionTemplate::TEMPLATE,
+        ];
         foreach (self::REQUIRED_VEHICLE_FIELDS as $field => $label) {
             $value = $vehicle ? $this->cleanText((string) ($vehicle->{$field} ?? '')) : $this->cleanText((string) ($vehicleSnapshot[$field] ?? ''));
             $values[$field] = $value;
@@ -45,6 +48,8 @@ class AllegroDescriptionBuilder
                 $blockers[] = 'missing_donor_vehicle_field:'.$label;
             }
         }
+
+        $values['model_variant'] = $vehicle ? $this->cleanText((string) ($vehicle->model_variant ?? '')) : $this->cleanText((string) ($vehicleSnapshot['model_variant'] ?? ''));
 
         foreach (self::OPTIONAL_VEHICLE_FIELDS as $field => $label) {
             $value = $vehicle ? $this->cleanText((string) ($vehicle->{$field} ?? '')) : $this->cleanText((string) ($vehicleSnapshot[$field] ?? ''));
@@ -62,24 +67,15 @@ class AllegroDescriptionBuilder
         }
 
         if ($blockers !== []) {
-            return ['description' => null, 'blockers' => array_values(array_unique($blockers)), 'diagnostics' => $diagnostics + ['main_image_url' => $mainImageUrl, 'offer_images_contains_main' => $mainImageUrl !== null && in_array($mainImageUrl, $offerImageUrls, true)]];
+            return ['description' => null, 'blockers' => array_values(array_unique($blockers)), 'diagnostics' => $this->diagnostics($diagnostics, $values, null, $mainImageUrl, $mainImageUrl !== null && in_array($mainImageUrl, $offerImageUrls, true))];
         }
 
-        $content = '<p>Witam oferta dotyczy:</p>'
-            .'<p><b>'.$this->e($description).'</b></p>'
-            .'<ul>'
-            .'<li>Marka: <b>'.$this->e($values['make']).'</b></li>'
-            .'<li>Model: <b>'.$this->e($values['model']).'</b></li>'
-            .'<li>Rok: <b>'.$this->e($values['production_year']).'</b></li>'
-            .'<li>Oznaczenie silnika: <b>'.$this->e($values['engine_code']).'</b></li>'
-            .($values['engine_power_kw'] !== '' ? '<li>Moc silnika: <b>'.$this->e($values['engine_power_kw']).'</b></li>' : '')
-            .'</ul>'
-            .'<p><b>CZĘŚĆ SPRAWNA. STAN WIDOCZNY NA ZDJĘCIACH</b></p>';
+        $descriptionPayload = $this->template->render($description, $values, $mainImageUrl);
 
         return [
-            'description' => ['sections' => [['items' => [['type' => 'TEXT', 'content' => $content], ['type' => 'IMAGE', 'url' => $mainImageUrl]]]]],
+            'description' => $descriptionPayload,
             'blockers' => [],
-            'diagnostics' => $diagnostics + ['main_image_url' => $mainImageUrl, 'offer_images_contains_main' => true],
+            'diagnostics' => $this->diagnostics($diagnostics, $values, $descriptionPayload, $mainImageUrl, true),
         ];
     }
 
@@ -94,8 +90,15 @@ class AllegroDescriptionBuilder
         return trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags($value), ENT_QUOTES | ENT_HTML5, 'UTF-8')) ?: '');
     }
 
-    private function e(string $value): string
+    /** @param array<string, mixed> $diagnostics @param array<string, string> $values */
+    private function diagnostics(array $diagnostics, array $values, ?array $descriptionPayload, ?string $mainImageUrl, bool $offerImagesContainsMain): array
     {
-        return e(Str::limit($value, 4000, ''));
+        return $diagnostics + [
+            'description_vehicle_fields_present' => collect(self::REQUIRED_VEHICLE_FIELDS)->keys()->filter(fn (string $field): bool => ($values[$field] ?? '') !== '')->values()->all(),
+            'description_engine_power_present' => ($values['engine_power_kw'] ?? '') !== '',
+            'description_sections_count' => is_array($descriptionPayload) ? count($descriptionPayload['sections'] ?? []) : 0,
+            'main_image_url' => $mainImageUrl,
+            'offer_images_contains_main' => $offerImagesContainsMain,
+        ];
     }
 }
