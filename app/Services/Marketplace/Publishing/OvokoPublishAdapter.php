@@ -28,14 +28,14 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
         }
 
         $form = $this->importPartPayload($part, $readiness, $payload, $account);
-        $formDiagnostics = $this->formDiagnostics($form['fields'] ?? []);
+        $formDiagnostics = $this->formDiagnostics($form['fields'] ?? [], $form['diagnostics'] ?? []);
         $photoDiagnostics = $this->photoDiagnostics($form['fields'] ?? []) + $formDiagnostics;
         if (($form['ok'] ?? false) === true && ! ($photoDiagnostics['any_photo_accessible_publicly'] ?? false)) {
             return ['ok' => false, 'status' => 'payload_invalid', 'action' => 'crm/importPart', 'error' => 'Ovoko photo is not publicly accessible.', 'ui_error' => 'Ovoko nie może pobrać zdjęcia części. Szczegóły są w Logach.', 'request_summary' => $this->requestSummary($payload) + ['ovoko_form_keys' => array_keys($form['fields'] ?? []), 'ovoko_photo' => $photoDiagnostics], 'response_summary' => ['ovoko_photo' => $photoDiagnostics]];
         }
 
         if (($form['ok'] ?? false) !== true) {
-            return ['ok' => false, 'status' => 'payload_invalid', 'action' => 'crm/importPart', 'error' => (string) ($form['error'] ?? 'Ovoko publish payload is incomplete.'), 'request_summary' => $this->requestSummary($payload) + ['ovoko_form_keys' => array_keys($form['fields'] ?? []), 'ovoko_photo' => $photoDiagnostics], 'response_summary' => ['missing' => $form['missing'] ?? []]];
+            return ['ok' => false, 'status' => 'payload_invalid', 'action' => 'crm/importPart', 'error' => (string) ($form['error'] ?? 'Ovoko publish payload is incomplete.'), 'request_summary' => $this->requestSummary($payload) + ['ovoko_form_keys' => array_keys($form['fields'] ?? []), 'ovoko_photo' => $photoDiagnostics] + $formDiagnostics, 'response_summary' => ['missing' => $form['missing'] ?? [], 'diagnostics' => $formDiagnostics]];
         }
 
         $result = (new OvokoApiClient('ovoko', $account))->importPart($form['fields']);
@@ -70,18 +70,22 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
         $vehicle = is_array($payload['vehicle'] ?? null) ? $payload['vehicle'] : [];
         $ovokoPhotoUrls = $this->publicImageUrls($payload['image_urls'] ?? []);
 
-        $partCodes = $this->ovokoPartCodes($part);
+        $part->loadMissing('car');
+        $partCodeDiagnostics = $this->ovokoPartCodeDiagnostics($part);
+        $partCodes = $partCodeDiagnostics['ovoko_optional_codes'];
+        $car = $this->ovokoCarDiagnostics($part, $vehicle, $settings);
+        $condition = $this->ovokoConditionDiagnostics($part);
 
         $fields = array_filter([
             'category_id' => $payload['category_id'] ?? null,
-            'car_id' => $this->ovokoCarId($part, $vehicle, $settings),
-            'quality' => $payload['quality'] ?? $this->qualityFromPart($part) ?? $settings['default_quality'] ?? $settings['ovoko_default_quality'] ?? null,
+            'car_id' => $car['ovoko_car_id'] ?? null,
+            'quality' => $condition['ovoko_quality'],
             'status' => $payload['status'] ?? $settings['default_part_status'] ?? $settings['ovoko_default_part_status'] ?? null,
             'price' => $readiness['marketplace_price'] ?? $payload['price_pln'] ?? null,
             'original_currency' => $readiness['currency'] ?? $payload['currency'] ?? 'PLN',
             'external_id' => $payload['sku'] ?? $part->sku ?? ('gps-part-'.$part->id),
             'visible_code' => $payload['sku'] ?? $part->sku ?? null,
-            'manufacturer_code' => $partCodes[0] ?? $part->manufacturer_code ?? null,
+            'manufacturer_code' => $partCodeDiagnostics['ovoko_manufacturer_code'] ?? null,
             'other_code' => $part->oem_number ?? $part->manufacturer_code ?? null,
             'optional_codes' => $partCodes,
             'notes' => trim(strip_tags((string) (($part->description ?? null) ?: ($part->short_description ?? null) ?: ($part->condition_notes ?? null)))) ?: null,
@@ -91,13 +95,16 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
 
         $missing = [];
         if (blank($fields['category_id'] ?? null)) $missing[] = 'Ovoko: brakuje category_id dla wybranej kategorii '.($payload['category_mapping_name'] ?? $payload['category_mapping_path'] ?? $payload['local_category_id'] ?? 'części');
-        if (blank($fields['car_id'] ?? null)) $missing[] = 'Ovoko: wybrane auto nie ma RRR car_id';
+        if (blank($fields['car_id'] ?? null)) $missing[] = 'Ovoko: wybrane auto nie ma RRR/Ovoko car_id. Najpierw utwórz/mapuj auto w Ovoko i zapisz jego car_id przy lokalnym aucie.';
         if (blank($fields['quality'] ?? null)) $missing[] = 'Ovoko: nie udało się zmapować quality z wartości '.($part->condition_notes ?? '');
         if (blank($fields['status'] ?? null)) $missing[] = 'Uzupełnij domyślny status części Ovoko w ustawieniach konta.';
         if (blank($fields['photo'] ?? null)) $missing[] = 'Ovoko: zdjęcie części musi być publicznym URL-em HTTP/HTTPS. Szczegóły są w Logach.';
-        if ($missing !== []) return ['ok' => false, 'fields' => $fields, 'missing' => $missing, 'error' => implode('; ', $missing)];
+        $diagnostics = array_merge($condition, ['ovoko_status' => $fields['status'] ?? null], $car, $partCodeDiagnostics);
+        if (blank($fields['car_id'] ?? null)) $diagnostics['blocked_reason'] = 'missing_ovoko_car_id';
+        if (($partCodeDiagnostics['ovoko_codes_look_like_title'] ?? false) === true) $diagnostics['warning'] = 'ovoko_code_looks_like_full_title';
+        if ($missing !== []) return ['ok' => false, 'fields' => $fields, 'missing' => $missing, 'error' => implode('; ', $missing), 'diagnostics' => $diagnostics];
 
-        return ['ok' => true, 'fields' => $fields];
+        return ['ok' => true, 'fields' => $fields, 'diagnostics' => $diagnostics];
     }
 
     /** @return array<int, string> */
@@ -117,18 +124,18 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
     }
 
 
-    private function formDiagnostics(array $fields): array
+    private function formDiagnostics(array $fields, array $payloadDiagnostics = []): array
     {
         $photos = is_array($fields['photos[]'] ?? null) ? array_values($fields['photos[]']) : [];
         $partCodes = is_array($fields['optional_codes'] ?? null) ? array_values($fields['optional_codes']) : [];
 
-        return [
+        return $payloadDiagnostics + [
             'ovoko_form_encoding' => 'application/x-www-form-urlencoded',
             'ovoko_part_codes' => $partCodes,
             'ovoko_primary_part_code' => $partCodes[0] ?? null,
             'ovoko_part_codes_field_name' => 'optional_codes',
             'ovoko_part_codes_encoding_shape' => is_array($fields['optional_codes'] ?? null) ? 'repeated_optional_codes' : get_debug_type($fields['optional_codes'] ?? null),
-            'ovoko_part_codes_source' => 'part.part_number first, then part.oem_number and part.manufacturer_code',
+            'ovoko_part_codes_source' => $payloadDiagnostics['ovoko_codes_source'] ?? 'part.part_number first, then part.oem_number and part.manufacturer_code',
             'ovoko_photo_field_type' => get_debug_type($fields['photo'] ?? null),
             'ovoko_photos_field_encoding_shape' => is_array($fields['photos[]'] ?? null) ? 'repeated_photos_brackets' : get_debug_type($fields['photos[]'] ?? null),
             'ovoko_photos_are_repeated_keys' => is_array($fields['photos[]'] ?? null),
@@ -137,21 +144,37 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
     }
 
     /** @return array<int, string> */
-    private function ovokoPartCodes(Part $part): array
+    private function ovokoPartCodeDiagnostics(Part $part): array
     {
         $codes = [];
+        $source = [];
+        $sourceLookedLikeTitle = false;
         foreach ([
             'part_number' => $part->part_number ?? null,
             'oem_number' => $part->oem_number ?? null,
             'manufacturer_code' => $part->manufacturer_code ?? null,
-        ] as $value) {
+        ] as $field => $value) {
             $code = trim((string) $value);
+            if ($this->looksLikeTitleCode($code, (string) ($part->name ?? ''))) {
+                $sourceLookedLikeTitle = true;
+                $code = $this->extractCodeFromTitleLikeValue($code) ?? '';
+            }
             if ($code !== '' && ! in_array($code, $codes, true)) {
                 $codes[] = $code;
+                $source[] = $field;
             }
         }
 
-        return $codes;
+        return [
+            'part_title' => $part->name,
+            'part_part_number' => $part->part_number,
+            'part_oem_number' => $part->oem_number,
+            'part_manufacturer_code' => $part->manufacturer_code,
+            'ovoko_manufacturer_code' => $codes[0] ?? null,
+            'ovoko_optional_codes' => $codes,
+            'ovoko_codes_source' => implode(',', array_unique($source)) ?: 'none',
+            'ovoko_codes_look_like_title' => $sourceLookedLikeTitle || collect($codes)->contains(fn (string $code): bool => $this->looksLikeTitleCode($code, (string) ($part->name ?? ''))),
+        ];
     }
 
     private function photoDiagnostics(array $fields): array
@@ -243,19 +266,51 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
         return (string) parse_url($url, PHP_URL_PATH);
     }
 
-    private function ovokoCarId(Part $part, array $vehicle, array $settings): mixed
+    private function ovokoCarDiagnostics(Part $part, array $vehicle, array $settings): array
     {
-        $part->loadMissing('car');
-        foreach ([$part->car?->external_id ?? null, data_get($part->car?->legacy_payload, 'ovoko_car_id'), data_get($part->car?->legacy_payload, 'rrr_car_id'), $vehicle['rrr_car_id'] ?? null, $vehicle['ovoko_car_id'] ?? null, $settings['default_car_id'] ?? null] as $value) {
-            if (! blank($value)) return $value;
+        $candidates = [
+            'car.external_id' => $part->car?->external_id ?? null,
+            'car.legacy_payload.ovoko_car_id' => data_get($part->car?->legacy_payload, 'ovoko_car_id'),
+            'car.legacy_payload.rrr_car_id' => data_get($part->car?->legacy_payload, 'rrr_car_id'),
+            'payload.vehicle.rrr_car_id' => $vehicle['rrr_car_id'] ?? null,
+            'payload.vehicle.ovoko_car_id' => $vehicle['ovoko_car_id'] ?? null,
+            'account.settings.default_car_id' => $settings['default_car_id'] ?? null,
+        ];
+        $id = null; $source = null;
+        foreach ($candidates as $candidateSource => $value) {
+            if (! blank($value)) { $id = $value; $source = $candidateSource; break; }
         }
-        return null;
+        return [
+            'local_car_id' => $part->car_id,
+            'local_car_make' => $part->car?->make,
+            'local_car_model' => $part->car?->model,
+            'local_car_year' => $part->car?->production_year ?? $part->car?->first_registration_year,
+            'local_car_vin' => $part->car?->vin,
+            'local_car_engine_code' => $part->car?->engine_code,
+            'ovoko_car_id' => $id,
+            'ovoko_car_id_present' => filled($id),
+            'ovoko_car_id_source' => $source,
+            'can_create_or_map_ovoko_car' => false,
+        ];
     }
 
-    private function qualityFromPart(Part $part): mixed
+    private function ovokoConditionDiagnostics(Part $part): array
     {
-        $value = mb_strtolower(trim((string) ($part->condition_notes ?? '')));
-        $map = ['używany' => 1, 'uzywany' => 1, 'używana' => 1, 'uzywana' => 1, 'used' => 1, 'nowy' => 2, 'nowa' => 2, 'new' => 2];
-        return $map[$value] ?? null;
+        return ['local_condition' => $part->condition_notes, 'ovoko_quality' => 1, 'ovoko_status' => null, 'condition_source' => 'business_rule_all_gp_swiss_parts_are_used', 'condition_mapped_as_used' => true];
+    }
+
+    private function looksLikeTitleCode(string $value, string $title = ''): bool
+    {
+        $value = trim($value);
+        if ($value === '') return false;
+        return str_contains($value, ' ') && (mb_strlen($value) > 30 || ($title !== '' && mb_strtolower($value) === mb_strtolower(trim($title))));
+    }
+
+    private function extractCodeFromTitleLikeValue(string $value): ?string
+    {
+        if (preg_match('/\b[A-Z0-9]{2,}[A-Z][A-Z0-9]*\d[A-Z0-9]*\b$/u', trim($value), $matches)) {
+            return $matches[0];
+        }
+        return null;
     }
 }
