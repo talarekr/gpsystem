@@ -2,6 +2,7 @@
 
 namespace App\Services\Marketplace\Api;
 
+use App\Services\Marketplace\OAuthTokenManager;
 use App\Support\Marketplace\AllegroOAuthConfig;
 use Illuminate\Support\Facades\Http;
 
@@ -13,6 +14,11 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
 
 
     public function refreshAccessToken(): array
+    {
+        return app(OAuthTokenManager::class)->refresh($this->account);
+    }
+
+    public function legacyRefreshAccessToken(): array
     {
         $credentials = $this->credentials();
         $clientId = (string) ($credentials['client_id'] ?? '');
@@ -168,30 +174,21 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
 
     public function compatibilitySupportedCategories(): array
     {
-        $response = Http::withToken((string) $this->credentials()['access_token'])
-            ->accept('application/vnd.allegro.public.v1+json')
-            ->timeout(20)
-            ->get($this->absoluteUrl('/sale/compatibility-list/supported-categories'));
+        $response = $this->getWithAuthRetry($this->absoluteUrl('/sale/compatibility-list/supported-categories'));
         $json = $response->json();
         return ['ok' => $response->successful(), 'http_status' => $response->status(), 'json' => is_array($json) ? $json : [], 'request_id' => $response->header('trace-id') ?: $response->header('x-request-id'), 'error' => $response->successful() ? null : 'Compatibility supported categories lookup failed.'];
     }
 
     public function searchProducts(string $categoryId, string $phrase): array
     {
-        $response = Http::withToken((string) $this->credentials()['access_token'])
-            ->accept('application/vnd.allegro.public.v1+json')
-            ->timeout(20)
-            ->get($this->absoluteUrl('/sale/products'), array_filter(['category.id' => $categoryId, 'phrase' => $phrase, 'limit' => 20], fn ($value) => filled($value)));
+        $response = $this->getWithAuthRetry($this->absoluteUrl('/sale/products'), array_filter(['category.id' => $categoryId, 'phrase' => $phrase, 'limit' => 20], fn ($value) => filled($value)));
         $json = $response->json();
         return ['ok' => $response->successful(), 'http_status' => $response->status(), 'json' => is_array($json) ? $json : [], 'products' => is_array($json) ? array_values(array_filter($json['products'] ?? $json['items'] ?? [], 'is_array')) : [], 'request_id' => $response->header('trace-id') ?: $response->header('x-request-id'), 'error' => $response->successful() ? null : 'Allegro product catalog search failed.'];
     }
 
     public function compatibleProducts(string $phrase, string $type = 'CAR'): array
     {
-        $response = Http::withToken((string) $this->credentials()['access_token'])
-            ->accept('application/vnd.allegro.public.v1+json')
-            ->timeout(20)
-            ->get($this->absoluteUrl('/sale/compatible-products'), array_filter(['type' => $type, 'phrase' => $phrase], fn ($value) => filled($value)));
+        $response = $this->getWithAuthRetry($this->absoluteUrl('/sale/compatible-products'), array_filter(['type' => $type, 'phrase' => $phrase], fn ($value) => filled($value)));
         $json = $response->json();
         $items = is_array($json) ? array_values(array_filter($json['compatibleProducts'] ?? $json['products'] ?? $json['items'] ?? [], 'is_array')) : [];
 
@@ -212,10 +209,7 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
 
     public function product(string $productId): array
     {
-        $response = Http::withToken((string) $this->credentials()['access_token'])
-            ->accept('application/vnd.allegro.public.v1+json')
-            ->timeout(20)
-            ->get($this->absoluteUrl('/sale/products/'.rawurlencode($productId)));
+        $response = $this->getWithAuthRetry($this->absoluteUrl('/sale/products/'.rawurlencode($productId)));
         $json = $response->json();
         return ['ok' => $response->successful(), 'http_status' => $response->status(), 'json' => is_array($json) ? $json : [], 'request_id' => $response->header('trace-id') ?: $response->header('x-request-id'), 'error' => $response->successful() ? null : 'Allegro product details lookup failed.'];
     }
@@ -223,7 +217,7 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
     public function compatibilityListSuggestions(?string $productId = null, ?string $offerId = null, ?string $language = null): array
     {
         $query = array_filter(['product.id' => $productId, 'offer.id' => $offerId, 'language' => $language], fn ($value) => filled($value));
-        $response = Http::withToken((string) $this->credentials()['access_token'])->accept('application/vnd.allegro.public.v1+json')->timeout(20)->get($this->absoluteUrl('/sale/compatibility-list-suggestions'), $query);
+        $response = $this->getWithAuthRetry($this->absoluteUrl('/sale/compatibility-list-suggestions'), $query);
         $json = $response->json();
         return ['ok' => $response->successful(), 'http_status' => $response->status(), 'json' => is_array($json) ? $json : [], 'request_id' => $response->header('trace-id') ?: $response->header('x-request-id')];
     }
@@ -282,6 +276,25 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
         return ['ok' => $response->successful(), 'http_status' => $response->status(), 'json' => is_array($response->json()) ? $response->json() : [], 'request_id' => $response->header('trace-id') ?: $response->header('x-request-id')];
     }
 
+    private function accessToken(): string
+    {
+        if (! $this->account) return (string) ($this->credentials()['access_token'] ?? '');
+        $result = app(OAuthTokenManager::class)->ensureValidToken($this->account);
+        return (string) ($result['access_token'] ?? ($this->credentials()['access_token'] ?? ''));
+    }
+
+    private function getWithAuthRetry(string $url, array $query = [], int $timeout = 20)
+    {
+        $response = Http::withToken($this->accessToken())->accept('application/vnd.allegro.public.v1+json')->timeout($timeout)->get($url, $query);
+        if ($response->status() === 401 && $this->account) {
+            $refresh = app(OAuthTokenManager::class)->refresh($this->account);
+            if (($refresh['ok'] ?? false) === true) {
+                $response = Http::withToken((string) $refresh['access_token'])->accept('application/vnd.allegro.public.v1+json')->timeout($timeout)->get($url, $query);
+            }
+        }
+        return $response;
+    }
+
     private function absoluteUrl(string $location): string
     {
         if (str_starts_with($location, 'http://') || str_starts_with($location, 'https://')) return $location;
@@ -290,7 +303,7 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
 
     protected function requestSample(int $limit): array
     {
-        $response = Http::withToken((string) $this->credentials()['access_token'])->accept('application/vnd.allegro.public.v1+json')->timeout(15)->get($this->endpointUsed($limit));
+        $response = $this->getWithAuthRetry($this->endpointUsed($limit), [], 15);
         $json = $response->json();
         $error = in_array($response->status(), [401, 403], true) ? 'Access token expired, unauthorized, forbidden, or missing required scopes.' : null;
         return ['http_status' => $response->status(), 'json' => is_array($json) ? $json : [], 'api_ok' => $response->successful(), 'error' => $error];

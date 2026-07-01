@@ -2,6 +2,7 @@
 
 namespace App\Services\Marketplace\Api;
 
+use App\Services\Marketplace\OAuthTokenManager;
 use App\Support\Marketplace\EbayOAuthConfig;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -14,7 +15,7 @@ class EbayApiClient extends AbstractMarketplaceApiClient
 
     protected function requestSample(int $limit): array
     {
-        $response = Http::withToken($this->accessToken())->acceptJson()->timeout(15)->get($this->endpointUsed($limit));
+        $response = $this->getWithAuthRetry($this->endpointUsed($limit), [], [], 15);
         $json = $response->json();
         $error = in_array($response->status(), [401, 403], true) ? 'OAuth token expired, unauthorized, forbidden, or missing Inventory API scope.' : null;
         return ['http_status' => $response->status(), 'json' => is_array($json) ? $json : [], 'api_ok' => $response->successful(), 'error' => $error];
@@ -572,35 +573,28 @@ class EbayApiClient extends AbstractMarketplaceApiClient
 
     private function accessToken(): string
     {
-        $credentials = $this->credentials();
-        $expiresAt = isset($credentials['expires_at']) ? strtotime((string) $credentials['expires_at']) : null;
-        if (! blank($credentials['access_token'] ?? null) && (! $expiresAt || $expiresAt > now()->addMinute()->timestamp)) return (string) $credentials['access_token'];
-        return $this->refreshAccessToken();
+        if (! $this->account) return (string) ($this->credentials()['access_token'] ?? '');
+        $result = app(OAuthTokenManager::class)->ensureValidToken($this->account);
+        return (string) ($result['access_token'] ?? ($this->credentials()['access_token'] ?? ''));
+    }
+
+    private function getWithAuthRetry(string $url, array $query = [], array $headers = [], int $timeout = 20)
+    {
+        $response = Http::withToken($this->accessToken())->withHeaders($headers)->acceptJson()->timeout($timeout)->get($url, $query);
+        if ($response->status() === 401 && $this->account) {
+            $refresh = app(OAuthTokenManager::class)->refresh($this->account);
+            if (($refresh['ok'] ?? false) === true) {
+                $response = Http::withToken((string) $refresh['access_token'])->withHeaders($headers)->acceptJson()->timeout($timeout)->get($url, $query);
+            }
+        }
+        return $response;
     }
 
     private function refreshAccessToken(): string
     {
-        $credentials = $this->credentials();
-        if (blank($credentials['client_id'] ?? null) || blank($credentials['client_secret'] ?? null) || blank($credentials['refresh_token'] ?? null)) return (string) ($credentials['access_token'] ?? '');
-
-        $response = Http::asForm()->withBasicAuth((string) $credentials['client_id'], (string) $credentials['client_secret'])->acceptJson()->timeout(20)->post(EbayOAuthConfig::tokenUrl((string) $this->account?->api_base_url), [
-            'grant_type' => 'refresh_token',
-            'refresh_token' => (string) $credentials['refresh_token'],
-            'scope' => (string) ($credentials['scopes'] ?? EbayOAuthConfig::scopeString()),
-        ]);
-        $payload = $response->json();
-        if (! $response->successful() || ! is_array($payload) || blank($payload['access_token'] ?? null)) return (string) ($credentials['access_token'] ?? '');
-
-        $updated = array_merge($credentials, [
-            'access_token' => (string) $payload['access_token'],
-            'expires_at' => EbayOAuthConfig::tokenExpiresAt($payload['expires_in'] ?? null),
-            'token_type' => (string) ($payload['token_type'] ?? ($credentials['token_type'] ?? '')),
-            'scopes' => $payload['scope'] ?? ($credentials['scopes'] ?? EbayOAuthConfig::scopeString()),
-        ]);
-        if (filled($payload['refresh_token'] ?? null)) $updated['refresh_token'] = (string) $payload['refresh_token'];
-        $this->account?->forceFill(['api_credentials' => $updated])->save();
-
-        return (string) $updated['access_token'];
+        if (! $this->account) return (string) ($this->credentials()['access_token'] ?? '');
+        $result = app(OAuthTokenManager::class)->refresh($this->account);
+        return (string) ($result['access_token'] ?? ($this->credentials()['access_token'] ?? ''));
     }
 
 
