@@ -44,6 +44,26 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
     }
 
 
+
+    public function deactivatePart(string $partId): array
+    {
+        $endpoint = rtrim((string) $this->account?->api_base_url, '/').'/crm/updatePart';
+        $fields = $this->authFields() + ['part_id' => $partId, 'status' => 0, 'quantity' => 0];
+        $response = Http::asForm()->acceptJson()->timeout(20)->post($endpoint, $fields);
+        $json = $response->json();
+        $body = is_array($json) ? $json : [];
+        $apiCode = $body['status_code'] ?? null;
+        $ok = $response->successful() && ($apiCode === 'R200' || $apiCode === 200 || $apiCode === null);
+
+        return [
+            'ok' => $ok,
+            'http_status' => $response->status(),
+            'message' => $ok ? 'Ovoko part deactivated.' : (string) ($body['msg'] ?? $body['message'] ?? 'Ovoko deactivate part failed.'),
+            'request_summary' => ['endpoint' => 'POST /crm/updatePart', 'part_id' => $partId, 'status' => 0, 'quantity' => 0],
+            'response_summary' => ['api_status_code' => $apiCode, 'message' => $body['msg'] ?? $body['message'] ?? null, 'top_level_keys' => array_slice(array_keys($body), 0, 20)],
+        ];
+    }
+
     /**
      * Create a CRM part in Ovoko/RRR using the documented /crm/importPart form endpoint.
      * This method performs only stage-1 publish/import of a part; it does not import orders,

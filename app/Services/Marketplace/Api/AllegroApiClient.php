@@ -67,6 +67,28 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
     }
 
 
+
+    public function endOffer(string $offerId): array
+    {
+        $endpoint = rtrim((string) $this->account?->api_base_url, '/').'/sale/product-offers/'.rawurlencode($offerId);
+        $payload = ['publication' => ['status' => 'ENDED']];
+        $response = Http::withToken((string) $this->credentials()['access_token'])
+            ->accept('application/vnd.allegro.public.v1+json')
+            ->asJson()
+            ->timeout(20)
+            ->patch($endpoint, $payload);
+        $json = $response->json();
+        $body = is_array($json) ? $json : [];
+
+        return [
+            'ok' => $response->successful(),
+            'http_status' => $response->status(),
+            'message' => $response->successful() ? 'Allegro offer ended.' : 'Allegro end offer failed.',
+            'request_summary' => ['endpoint' => 'PATCH /sale/product-offers/{offerId}', 'offer_id' => $offerId, 'publication.status' => 'ENDED'],
+            'response_summary' => ['top_level_keys' => array_slice(array_keys($body), 0, 20), 'status' => $body['publication']['status'] ?? $body['status'] ?? null],
+        ];
+    }
+
     /**
      * Read-only lookup of seller sales settings required by /sale/product-offers.
      * Allegro product-offers expects resource identifiers, not display names, for

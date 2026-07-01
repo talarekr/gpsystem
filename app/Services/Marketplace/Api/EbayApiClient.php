@@ -21,6 +21,26 @@ class EbayApiClient extends AbstractMarketplaceApiClient
         return ['http_status' => $response->status(), 'json' => is_array($json) ? $json : [], 'api_ok' => $response->successful(), 'error' => $error];
     }
 
+
+    public function endOffer(string $offerIdOrSku, ?string $sku = null): array
+    {
+        $base = rtrim((string) $this->account?->api_base_url, '/');
+        $marketplaceId = $this->marketplaceId();
+        $headers = ['X-EBAY-C-MARKETPLACE-ID' => $marketplaceId];
+        $endpoint = $base.'/sell/inventory/v1/offer/'.rawurlencode($offerIdOrSku).'/withdraw';
+        $response = $this->postWithAuthRetry($endpoint, [], $headers, 20);
+        $json = $response->json();
+        $body = is_array($json) ? $json : [];
+
+        return [
+            'ok' => $response->successful(),
+            'http_status' => $response->status(),
+            'message' => $response->successful() ? 'eBay offer withdrawn.' : 'eBay withdraw offer failed.',
+            'request_summary' => ['endpoint' => 'POST /sell/inventory/v1/offer/{offerId}/withdraw', 'offer_id_or_sku' => $offerIdOrSku, 'sku' => $sku, 'marketplace_id' => $marketplaceId],
+            'response_summary' => ['top_level_keys' => array_slice(array_keys($body), 0, 20), 'warnings_count' => is_countable($body['warnings'] ?? null) ? count($body['warnings']) : 0],
+        ];
+    }
+
     public function readOnlyDiagnostics(): array
     {
         $token = $this->accessToken();
@@ -585,6 +605,19 @@ class EbayApiClient extends AbstractMarketplaceApiClient
             $refresh = app(OAuthTokenManager::class)->refresh($this->account);
             if (($refresh['ok'] ?? false) === true) {
                 $response = Http::withToken((string) $refresh['access_token'])->withHeaders($headers)->acceptJson()->timeout($timeout)->get($url, $query);
+            }
+        }
+        return $response;
+    }
+
+
+    private function postWithAuthRetry(string $url, array $payload = [], array $headers = [], int $timeout = 20)
+    {
+        $response = Http::withToken($this->accessToken())->withHeaders($headers)->acceptJson()->asJson()->timeout($timeout)->post($url, $payload);
+        if ($response->status() === 401 && $this->account) {
+            $refresh = app(OAuthTokenManager::class)->refresh($this->account);
+            if (($refresh['ok'] ?? false) === true) {
+                $response = Http::withToken((string) $refresh['access_token'])->withHeaders($headers)->acceptJson()->asJson()->timeout($timeout)->post($url, $payload);
             }
         }
         return $response;
