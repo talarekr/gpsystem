@@ -257,6 +257,8 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/allegro/parts/{part}/compatibility-dry-run', AllegroCompatibilityDryRunController::class)->name('admin.tools.allegro.parts.compatibility-dry-run');
     Route::get('/admin/tools/ovoko/cars/{car}/mapping-dry-run', [OvokoCarMappingController::class, 'dryRun'])->name('admin.tools.ovoko.cars.mapping-dry-run');
     Route::match(['get', 'post'], '/admin/tools/ovoko/cars/{car}/mapping-apply', [OvokoCarMappingController::class, 'apply'])->name('admin.tools.ovoko.cars.mapping-apply');
+    Route::get('/admin/tools/allegro/offers/description-update-dry-run', [MarketplaceListingDryRunController::class, 'allegroDescriptionUpdateDryRun'])->name('admin.tools.allegro.offers.description-update-dry-run');
+    Route::get('/admin/tools/allegro/offers/description-update-apply', [MarketplaceListingDryRunController::class, 'allegroDescriptionUpdateApply'])->name('admin.tools.allegro.offers.description-update-apply');
     Route::get('/admin/tools/marketplace/allegro/offers/{offerId}/description-update', [MarketplaceListingDryRunController::class, 'allegroDescriptionUpdate'])->name('admin.tools.marketplace.allegro.offers.description-update');
 });
 
