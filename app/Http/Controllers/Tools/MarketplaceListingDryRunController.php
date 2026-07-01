@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceCategoryMapping;
 use App\Models\MarketplaceListing;
+use App\Models\MarketplaceSyncLog;
 use App\Models\Part;
 use App\Services\Marketplace\AllegroCategoryParametersService;
 use App\Services\Marketplace\AllegroDescriptionBuilder;
@@ -131,6 +132,114 @@ class MarketplaceListingDryRunController extends Controller
     }
 
 
+
+
+    public function allegroDescriptionUpdateDryRun(Request $request): JsonResponse
+    {
+        return $this->allegroDescriptionUpdateForPart($request, false);
+    }
+
+    public function allegroDescriptionUpdateApply(Request $request): JsonResponse
+    {
+        return $this->allegroDescriptionUpdateForPart($request, true);
+    }
+
+    private function allegroDescriptionUpdateForPart(Request $request, bool $apply): JsonResponse
+    {
+        $partId = (int) $request->query('part_id');
+        $part = $this->part($partId);
+        if (! $part) return response()->json(['ok' => false, 'part_id' => $partId, 'blockers' => ['part_not_found']], 404);
+
+        $listing = MarketplaceListing::query()
+            ->where('part_id', $part->id)
+            ->whereIn('marketplace', ['allegro', 'allegro_main'])
+            ->where(fn (Builder $query): Builder => $query->whereNotNull('external_offer_id')->orWhereNotNull('external_listing_id'))
+            ->latest('id')
+            ->first();
+        $offerId = (string) ($listing?->external_offer_id ?: $listing?->external_listing_id ?: '');
+
+        $images = $this->imageUrls($part);
+        $built = app(AllegroDescriptionBuilder::class)->build($part, $images['public_urls_sample']);
+        $description = $built['description'];
+        $diagnostics = $this->allegroDescriptionUpdateDiagnostics($description);
+        $blockers = array_values(array_unique(array_merge(
+            $listing ? [] : ['missing_existing_allegro_offer'],
+            $offerId !== '' ? [] : ['missing_allegro_offer_id'],
+            $built['blockers'] ?? [],
+            $this->allegroDescriptionUpdateBlockers($description, $diagnostics)
+        )));
+        $confirmed = hash_equals('allegro-description-update', (string) $request->query('confirm', ''));
+
+        $raw = is_array($listing?->raw_payload) ? $listing->raw_payload : [];
+        $currentDescription = $raw['description'] ?? data_get($raw, 'offer.description');
+        $response = [
+            'ok' => $blockers === [] && (! $apply || $confirmed),
+            'dry_run' => ! $apply,
+            'would_send' => $apply && $confirmed && $blockers === [],
+            'applied' => false,
+            'operation' => 'allegro_existing_offer_description_only_update',
+            'endpoint' => 'PATCH /sale/product-offers/{offerId}',
+            'part_id' => $part->id,
+            'offer_id' => $offerId !== '' ? $offerId : null,
+            'allegro_offer_id' => $offerId !== '' ? $offerId : null,
+            'current_description_summary' => $this->allegroCurrentDescriptionSummary($currentDescription),
+            'new_description_payload' => $description,
+            'description_source' => \App\Services\Marketplace\AllegroGpSwissDescriptionTemplate::SOURCE,
+            'description_template' => \App\Services\Marketplace\AllegroGpSwissDescriptionTemplate::TEMPLATE,
+            'main_image_url' => data_get($built, 'diagnostics.main_image_url'),
+            'vehicle_fields' => data_get($built, 'diagnostics.description_vehicle_fields_present', []),
+            'vehicle_diagnostics' => $built['diagnostics'] ?? [],
+            'blockers' => $blockers,
+            'safety_guards' => [
+                'existing_offer_only' => true,
+                'single_part_id_only' => true,
+                'bulk_update' => false,
+                'createProductOffer' => false,
+                'publish_relist_end' => false,
+                'updates_only' => ['description'],
+                'unchanged' => ['price', 'stock', 'title', 'parameters', 'images', 'delivery', 'afterSalesServices', 'GPSR', 'payments', 'publication'],
+            ],
+        ];
+
+        if (! $apply) return response()->json($response);
+        if (! $confirmed) return response()->json(array_merge($response, ['ok' => false, 'error' => 'Missing confirm=allegro-description-update for apply.']), 422);
+        if ($blockers !== []) return response()->json(array_merge($response, ['ok' => false, 'error' => 'Description update blocked.']), 422);
+
+        $account = $listing?->account ?: $this->account('allegro_main');
+        if (! $account) return response()->json(array_merge($response, ['ok' => false, 'error' => 'Marketplace account allegro_main is missing.']), 422);
+
+        $started = microtime(true);
+        $result = (new AllegroApiClient('allegro_main', $account))->updateProductOfferDescription($offerId, $description);
+        MarketplaceSyncLog::query()->create([
+            'marketplace' => 'allegro',
+            'marketplace_listing_id' => $listing?->id,
+            'part_id' => $part->id,
+            'action' => 'allegro_description_update',
+            'status' => ($result['ok'] ?? false) ? 'success' : 'failed',
+            'http_status' => $result['http_status'] ?? null,
+            'message' => 'Description-only update for existing Allegro offer.',
+            'duration_ms' => (int) round((microtime(true) - $started) * 1000),
+            'request_id' => $result['request_id'] ?? null,
+            'external_id' => $offerId,
+            'payload' => ['offer_id' => $offerId, 'part_id' => $part->id, 'description_source' => $response['description_source'], 'description_template' => $response['description_template'], 'request_payload_keys' => ['description']],
+            'created_at' => now(),
+        ]);
+
+        return response()->json(array_merge($response, ['ok' => (bool) ($result['ok'] ?? false), 'dry_run' => false, 'would_send' => true, 'applied' => (bool) ($result['ok'] ?? false), 'http_status' => $result['http_status'] ?? null, 'request_id' => $result['request_id'] ?? null, 'api_response' => $result['json'] ?? [], 'error' => ($result['ok'] ?? false) ? null : 'Allegro description-only update failed.']), ($result['ok'] ?? false) ? 200 : 422);
+    }
+
+    private function allegroCurrentDescriptionSummary(mixed $description): array
+    {
+        $sections = is_array($description) ? ($description['sections'] ?? []) : [];
+        $text = is_string($description) ? $description : '';
+        foreach (is_array($sections) ? $sections : [] as $section) {
+            foreach (($section['items'] ?? []) as $item) {
+                if (($item['type'] ?? null) === 'TEXT') $text .= ' '.strip_tags((string) ($item['content'] ?? ''));
+            }
+        }
+        $text = trim(preg_replace('/\s+/u', ' ', $text) ?: '');
+        return ['sections_count' => is_array($sections) ? count($sections) : 0, 'text_length' => mb_strlen($text), 'preview' => mb_substr($text, 0, 240)];
+    }
 
     public function allegroDescriptionUpdate(string $offerId, Request $request): JsonResponse
     {
