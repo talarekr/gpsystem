@@ -500,6 +500,37 @@ class PartModuleFoundationTest extends TestCase
         $this->assertStringContainsString('/storage/'.$importedPath, $renderedGallery);
     }
 
+
+    public function test_admin_part_position_saves_to_review_metadata_and_hydrates_on_edit(): void
+    {
+        $this->actingAsWarehouseUser();
+
+        $part = Part::query()->create([
+            'name' => 'Błotnik do testu pozycji',
+            'quantity' => 1,
+            'status' => 'draft',
+        ]);
+
+        Livewire::test(EditPart::class, ['record' => $part->getRouteKey()])
+            ->assertFormSet(['part_position' => null])
+            ->fillForm(['part_position' => 'Lewa strona'])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $this->assertSame('Lewa strona', $part->fresh()->review_metadata['part_position'] ?? null);
+
+        Livewire::test(EditPart::class, ['record' => $part->getRouteKey()])
+            ->assertFormSet(['part_position' => 'Lewa strona'])
+            ->fillForm(['part_position' => 'Przód strona prawa'])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $this->assertSame('Przód strona prawa', $part->fresh()->review_metadata['part_position'] ?? null);
+
+        Livewire::test(EditPart::class, ['record' => $part->getRouteKey()])
+            ->assertFormSet(['part_position' => 'Przód strona prawa']);
+    }
+
     public function test_part_resource_navigation_and_labels_are_polish_and_iconless_children(): void
     {
         $this->assertSame('Części', PartResource::getNavigationGroup());

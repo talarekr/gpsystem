@@ -28,6 +28,8 @@ class EditPart extends EditRecord
             $data['condition_notes'] = PartResource::DEFAULT_CONDITION_VALUE;
         }
 
+        $data['part_position'] = PartResource::partPositionFormValue($this->record);
+
         $currentSteering = $this->record->vehicle_snapshot['steering_side'] ?? null;
         $data[PartResource::ADMIN_STEERING_FORM_STATE] = PartResource::isMissingAdminDefaultValue($currentSteering)
             ? PartResource::EXPECTED_LEFT_STEERING_VALUE
@@ -47,6 +49,7 @@ class EditPart extends EditRecord
         unset($data['part_photo_paths'], $data['marketplace_category_selections']);
 
         $data['condition_notes'] = PartResource::defaultConditionValue($data['condition_notes'] ?? null);
+        $data = PartResource::applyPartPositionFormStateToData($data, $this->record);
         $data = PartResource::applyAdminSteeringFormStateToData($data, $this->record);
 
         return $data;
