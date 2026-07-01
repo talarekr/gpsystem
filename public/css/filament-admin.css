@@ -2435,13 +2435,7 @@ body:has(.gps-admin-topbar) .fi-no {
 }
 
 .fi-modal-window.gps-vehicle-picker-modal .gps-vehicle-picker-select,
-.gps-vehicle-picker-modal.fi-modal-window .gps-vehicle-picker-select {
-    display: flex !important;
-    flex: 1 1 auto !important;
-    flex-direction: column !important;
-    min-height: 0 !important;
-}
-
+.gps-vehicle-picker-modal.fi-modal-window .gps-vehicle-picker-select,
 .fi-modal-window.gps-vehicle-picker-modal .choices,
 .gps-vehicle-picker-modal.fi-modal-window .choices {
     display: flex !important;
@@ -2450,11 +2444,25 @@ body:has(.gps-admin-topbar) .fi-no {
     min-height: 0 !important;
 }
 
+.fi-modal-window.gps-vehicle-picker-modal .choices__inner,
+.gps-vehicle-picker-modal.fi-modal-window .choices__inner {
+    flex: 0 0 auto !important;
+}
+
 .fi-modal-window.gps-vehicle-picker-modal .choices__list--dropdown,
 .fi-modal-window.gps-vehicle-picker-modal .choices__list[aria-expanded],
 .gps-vehicle-picker-modal.fi-modal-window .choices__list--dropdown,
 .gps-vehicle-picker-modal.fi-modal-window .choices__list[aria-expanded] {
-    max-height: calc(100vh - 13rem) !important;
+    height: auto !important;
+    max-height: min(42rem, calc(100vh - 12rem)) !important;
+    overflow: hidden !important;
+}
+
+.fi-modal-window.gps-vehicle-picker-modal .choices__list--dropdown .choices__list,
+.fi-modal-window.gps-vehicle-picker-modal .choices__list[aria-expanded] .choices__list,
+.gps-vehicle-picker-modal.fi-modal-window .choices__list--dropdown .choices__list,
+.gps-vehicle-picker-modal.fi-modal-window .choices__list[aria-expanded] .choices__list {
+    max-height: min(42rem, calc(100vh - 12rem)) !important;
     overflow-y: auto !important;
 }
 
@@ -2462,7 +2470,11 @@ body:has(.gps-admin-topbar) .fi-no {
     .fi-modal-window.gps-vehicle-picker-modal .choices__list--dropdown,
     .fi-modal-window.gps-vehicle-picker-modal .choices__list[aria-expanded],
     .gps-vehicle-picker-modal.fi-modal-window .choices__list--dropdown,
-    .gps-vehicle-picker-modal.fi-modal-window .choices__list[aria-expanded] {
-        max-height: calc(100dvh - 13rem) !important;
+    .gps-vehicle-picker-modal.fi-modal-window .choices__list[aria-expanded],
+    .fi-modal-window.gps-vehicle-picker-modal .choices__list--dropdown .choices__list,
+    .fi-modal-window.gps-vehicle-picker-modal .choices__list[aria-expanded] .choices__list,
+    .gps-vehicle-picker-modal.fi-modal-window .choices__list--dropdown .choices__list,
+    .gps-vehicle-picker-modal.fi-modal-window .choices__list[aria-expanded] .choices__list {
+        max-height: min(42rem, calc(100dvh - 12rem)) !important;
     }
 }
