@@ -65,7 +65,13 @@ class PartMarketplaceStatusResolver
             return false;
         }
 
-        return $listing->last_api_status === 'ACTIVE' || $listing->status === 'ACTIVE';
+        if (in_array($listing->last_api_status, ['ended', 'inactive', 'deleted', 'archived', 'not_found', 'NOT_FOUND_IN_ACTIVE_API'], true)
+            || in_array($listing->status, ['ended', 'inactive', 'deleted', 'archived', 'not_found', 'NOT_FOUND_IN_ACTIVE_API'], true)) {
+            return false;
+        }
+
+        return in_array($listing->last_api_status, ['ACTIVE'], true)
+            || in_array($listing->status, ['ACTIVE', 'published', 'publication_pending'], true);
     }
 
     private function allegroTitle(?MarketplaceListing $listing, bool $listed): string
@@ -74,8 +80,12 @@ class PartMarketplaceStatusResolver
             return 'Brak lokalnej oferty Allegro';
         }
 
+        if ($listed && $listing->status === 'publication_pending') {
+            return 'Oferta Allegro została utworzona lokalnie; publikacja czeka na asynchroniczne potwierdzenie Allegro';
+        }
+
         return $listed
-            ? 'Oferta Allegro aktywna według ostatniego odświeżenia API'
+            ? 'Oferta Allegro aktywna lub wystawiona lokalnie'
             : 'Oferta Allegro nie została znaleziona w ACTIVE API podczas ostatniego odświeżenia';
     }
 
@@ -136,6 +146,6 @@ class PartMarketplaceStatusResolver
     {
         $offerId = $this->externalOfferId($listing);
 
-        return $offerId ? 'https://allegro.pl/oferta/'.$offerId : null;
+        return $this->listingUrl($listing) ?: ($offerId ? 'https://allegro.pl/oferta/'.$offerId : null);
     }
 }

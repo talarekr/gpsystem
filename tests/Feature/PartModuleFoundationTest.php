@@ -82,6 +82,37 @@ class PartModuleFoundationTest extends TestCase
         $this->assertSame('1 562,50 zł', $pricesByKey['ebay']);
     }
 
+    public function test_allegro_channel_shows_offer_link_while_publication_is_pending(): void
+    {
+        $part = Part::query()->create([
+            'name' => 'Część #7866',
+            'price' => 1250,
+            'allegro_price' => 1250,
+            'quantity' => 1,
+            'status' => 'ready',
+        ]);
+
+        MarketplaceListing::query()->create([
+            'part_id' => $part->id,
+            'marketplace' => 'allegro',
+            'external_offer_id' => '18723793233',
+            'external_listing_id' => '18723793233',
+            'price' => 1250,
+            'currency' => 'PLN',
+            'status' => 'publication_pending',
+            'url' => 'https://allegro.pl/oferta/18723793233',
+        ]);
+
+        $rows = app(\App\Services\Admin\PartMarketplaceStatusResolver::class)
+            ->rowsForPart($part->fresh('marketplaceListings'));
+
+        $allegro = collect($rows)->firstWhere('key', 'allegro');
+
+        $this->assertTrue($allegro['listed']);
+        $this->assertSame('18723793233', $allegro['external_offer_id']);
+        $this->assertSame('https://allegro.pl/oferta/18723793233', $allegro['url']);
+    }
+
     public function test_part_can_be_created_with_required_fields_and_safe_defaults(): void
     {
         $part = Part::query()->create(['name' => 'Reflektor lewy']);

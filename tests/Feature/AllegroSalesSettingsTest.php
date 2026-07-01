@@ -152,6 +152,9 @@ class AllegroSalesSettingsTest extends TestCase
         $result = $adapter->callPerformLivePublish($part, ['marketplace_price' => 100], $payload, MarketplaceAccount::query()->where('code', 'allegro_main')->firstOrFail());
 
         $this->assertTrue($result['ok']);
+        $this->assertSame('offer-123', $result['offer_id']);
+        $this->assertSame('offer-123', $result['external_offer_id']);
+        $this->assertSame('https://allegro.pl/oferta/offer-123', $result['url']);
         $this->assertSame('strings', $result['request_summary']['images_shape']);
         $this->assertSame('string', $result['request_summary']['first_image_type']);
         $this->assertSame(['11323'], $result['request_summary']['payload_parameters_ids']);
