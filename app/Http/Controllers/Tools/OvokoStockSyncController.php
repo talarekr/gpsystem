@@ -130,11 +130,20 @@ class OvokoStockSyncController extends Controller
             return ['part_id' => $partId, 'ovoko_id' => $ovokoId, 'ovoko_mapping_source' => $mapping['source'], 'local' => $local, 'ovoko' => $ovoko, 'blockers' => [$ovoko['blocker'] ?? 'ovoko_api_failed'], 'action' => 'blocked'];
         }
 
-        $quantity = $this->extractQuantity($ovoko['part'] ?? []);
-        if ($quantity === null) {
-            return ['part_id' => $partId, 'ovoko_id' => $ovokoId, 'ovoko_mapping_source' => $mapping['source'], 'local' => $local, 'ovoko' => $ovoko, 'blockers' => ['ovoko_stock_not_unambiguous'], 'action' => 'blocked'];
+        $stock = $this->mapOvokoStock($ovoko['part'] ?? []);
+        if (! ($stock['ok'] ?? false)) {
+            return [
+                'part_id' => $partId,
+                'ovoko_id' => $ovokoId,
+                'ovoko_mapping_source' => $mapping['source'],
+                'local' => $local,
+                'ovoko' => $this->ovokoStockSummary($ovoko, $stock),
+                'blockers' => [$stock['blocker'] ?? 'ovoko_stock_not_unambiguous'],
+                'action' => 'blocked',
+            ];
         }
 
+        $quantity = (int) $stock['quantity'];
         $planned = [
             'quantity' => $quantity,
             'status' => $quantity > 0 ? (in_array($part->status, ['draft', 'archived'], true) ? $part->status : 'ready') : 'draft',
@@ -146,17 +155,7 @@ class OvokoStockSyncController extends Controller
             'ovoko_id' => $ovokoId,
             'ovoko_mapping_source' => $mapping['source'],
             'local' => $local,
-            'ovoko' => [
-                'quantity' => $quantity,
-                'status' => data_get($ovoko, 'part.status'),
-                'http_status' => $ovoko['http_status'] ?? null,
-                'matched_in_attempt' => $ovoko['matched_in_attempt'] ?? null,
-                'matched_count' => $ovoko['matched_count'] ?? null,
-                'ovoko_lookup_attempts' => $ovoko['ovoko_lookup_attempts'] ?? [],
-                'ovoko_response_shape' => $ovoko['ovoko_response_shape'] ?? null,
-                'candidate_ids' => $ovoko['candidate_ids'] ?? [],
-                'filter_applied' => $ovoko['filter_applied'] ?? false,
-            ],
+            'ovoko' => $this->ovokoStockSummary($ovoko, $stock),
             'planned_local_state' => $planned,
             'action' => $this->sameState($local, $planned) ? 'no_change' : 'update_local_stock',
             'blockers' => [],
@@ -426,6 +425,95 @@ class OvokoStockSyncController extends Controller
         foreach (['quantity', 'stock', 'qty', 'amount', 'available_quantity'] as $field) {
             if (array_key_exists($field, $row) && is_numeric($row[$field])) return max(0, (int) $row[$field]);
         }
+        return null;
+    }
+
+
+    private function ovokoStockSummary(array $ovoko, array $stock): array
+    {
+        return [
+            'quantity' => $stock['quantity'] ?? null,
+            'status' => data_get($ovoko, 'part.status'),
+            'ovoko_stock_source' => $stock['ovoko_stock_source'] ?? null,
+            'ovoko_status_raw' => $stock['ovoko_status_raw'] ?? data_get($ovoko, 'part.status'),
+            'ovoko_status_meaning' => $stock['ovoko_status_meaning'] ?? null,
+            'quantity_inferred' => (bool) ($stock['quantity_inferred'] ?? false),
+            'availability_inferred' => (bool) ($stock['availability_inferred'] ?? false),
+            'reserved_user' => data_get($ovoko, 'part.reserved_user'),
+            'reserved_date' => data_get($ovoko, 'part.reserved_date'),
+            'http_status' => $ovoko['http_status'] ?? null,
+            'matched_in_attempt' => $ovoko['matched_in_attempt'] ?? null,
+            'matched_count' => $ovoko['matched_count'] ?? null,
+            'ovoko_lookup_attempts' => $ovoko['ovoko_lookup_attempts'] ?? [],
+            'ovoko_response_shape' => $ovoko['ovoko_response_shape'] ?? null,
+            'candidate_ids' => $ovoko['candidate_ids'] ?? [],
+            'filter_applied' => $ovoko['filter_applied'] ?? false,
+        ];
+    }
+
+    private function mapOvokoStock(array $row): array
+    {
+        $quantity = $this->extractQuantity($row);
+        if ($quantity !== null) {
+            return [
+                'ok' => true,
+                'quantity' => $quantity,
+                'ovoko_stock_source' => 'quantity',
+                'ovoko_status_raw' => array_key_exists('status', $row) ? (string) $row['status'] : null,
+                'ovoko_status_meaning' => null,
+                'quantity_inferred' => false,
+                'availability_inferred' => false,
+            ];
+        }
+
+        $reserved = $this->isOvokoReserved($row);
+        if ($reserved === true) {
+            return [
+                'ok' => false,
+                'blocker' => 'ovoko_stock_not_unambiguous',
+                'ovoko_stock_source' => 'reserved_fields',
+                'ovoko_status_raw' => array_key_exists('status', $row) ? (string) $row['status'] : null,
+                'ovoko_status_meaning' => 'reserved_unmapped',
+                'quantity_inferred' => false,
+                'availability_inferred' => false,
+            ];
+        }
+
+        if (array_key_exists('status', $row)) {
+            $status = trim((string) $row['status']);
+            if ($status === '0') {
+                return [
+                    'ok' => true,
+                    'quantity' => 1,
+                    'ovoko_stock_source' => 'status',
+                    'ovoko_status_raw' => $status,
+                    'ovoko_status_meaning' => 'active_available',
+                    'quantity_inferred' => true,
+                    'availability_inferred' => true,
+                ];
+            }
+
+            return [
+                'ok' => false,
+                'blocker' => 'ovoko_stock_not_unambiguous',
+                'ovoko_stock_source' => 'status',
+                'ovoko_status_raw' => $status,
+                'ovoko_status_meaning' => 'unknown_unmapped',
+                'quantity_inferred' => false,
+                'availability_inferred' => false,
+            ];
+        }
+
+        return ['ok' => false, 'blocker' => 'ovoko_stock_not_unambiguous', 'quantity_inferred' => false, 'availability_inferred' => false];
+    }
+
+    private function isOvokoReserved(array $row): ?bool
+    {
+        $reservedUser = trim((string) ($row['reserved_user'] ?? ''));
+        $reservedDate = trim((string) ($row['reserved_date'] ?? ''));
+        if ($reservedUser !== '' && $reservedUser !== '0') return true;
+        if ($reservedDate !== '' && ! in_array($reservedDate, ['0', '0000-00-00 00:00:00', 'null'], true)) return true;
+        if (array_key_exists('reserved_user', $row) || array_key_exists('reserved_date', $row)) return false;
         return null;
     }
 
