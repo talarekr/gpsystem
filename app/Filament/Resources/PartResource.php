@@ -794,11 +794,7 @@ class PartResource extends Resource
 
     public static function adminAllPartsQuery(): Builder
     {
-        return Part::query()
-            ->where(fn (Builder $query) => $query
-                ->where('needs_listing', false)
-                ->orWhere(fn (Builder $query) => static::whereHasAnyMarketplaceListing($query)))
-            ->where(fn (Builder $query) => $query->where('needs_review', false)->orWhereNull('needs_review'));
+        return Part::query()->where('needs_listing', false)->where(fn (Builder $query) => $query->where('needs_review', false)->orWhereNull('needs_review'));
     }
 
     public static function getAllPartsNavigationCount(): int
@@ -821,27 +817,7 @@ class PartResource extends Resource
 
     public static function adminPartsToListQuery(): Builder
     {
-        return Part::query()
-            ->where('needs_listing', true)
-            ->where(fn (Builder $query) => static::whereDoesntHaveAnyMarketplaceListing($query));
-    }
-
-    private static function whereHasAnyMarketplaceListing(Builder $query): Builder
-    {
-        return $query->whereHas('marketplaceListings', fn (Builder $query) => static::marketplaceListingPublishedQuery($query));
-    }
-
-    private static function whereDoesntHaveAnyMarketplaceListing(Builder $query): Builder
-    {
-        return $query->whereDoesntHave('marketplaceListings', fn (Builder $query) => static::marketplaceListingPublishedQuery($query));
-    }
-
-    private static function marketplaceListingPublishedQuery(Builder $query): Builder
-    {
-        return $query
-            ->where(fn (Builder $query) => $query->whereNotNull('external_offer_id')->orWhereNotNull('external_listing_id')->orWhereNotNull('url'))
-            ->where(fn (Builder $query) => $query->whereNull('status')->orWhereNotIn('status', ['ended', 'inactive', 'deleted', 'archived', 'not_found', 'NOT_FOUND_IN_ACTIVE_API']))
-            ->where(fn (Builder $query) => $query->whereNull('last_api_status')->orWhereNotIn('last_api_status', ['ended', 'inactive', 'deleted', 'archived', 'not_found', 'NOT_FOUND_IN_ACTIVE_API']));
+        return Part::query()->where('needs_listing', true);
     }
 
     public static function getPartsToListNavigationCount(): int
