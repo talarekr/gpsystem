@@ -41,8 +41,16 @@ class AllegroDescriptionBuilder
             'description_part_description_present' => $description !== '',
             'description_template' => AllegroGpSwissDescriptionTemplate::TEMPLATE,
         ];
+        $values['model_variant'] = $vehicle ? $this->cleanText((string) ($vehicle->model_variant ?? '')) : $this->cleanText((string) ($vehicleSnapshot['model_variant'] ?? ''));
+
         foreach (self::REQUIRED_VEHICLE_FIELDS as $field => $label) {
             $value = $vehicle ? $this->cleanText((string) ($vehicle->{$field} ?? '')) : $this->cleanText((string) ($vehicleSnapshot[$field] ?? ''));
+
+            if ($field === 'model' && $value === '' && $values['model_variant'] !== '') {
+                $value = $values['model_variant'];
+                $diagnostics['description_vehicle_model_source'] = 'variant_fallback';
+            }
+
             $values[$field] = $value;
             if (($vehicle || $vehicleSnapshot !== []) && $value === '') {
                 $blockers[] = 'missing_donor_vehicle_field:'.$label;
@@ -50,7 +58,8 @@ class AllegroDescriptionBuilder
             }
         }
 
-        $values['model_variant'] = $vehicle ? $this->cleanText((string) ($vehicle->model_variant ?? '')) : $this->cleanText((string) ($vehicleSnapshot['model_variant'] ?? ''));
+        $diagnostics['description_vehicle_model_source'] ??= 'model';
+        $diagnostics['description_vehicle_variant_hidden'] = true;
 
         foreach (self::OPTIONAL_VEHICLE_FIELDS as $field => $label) {
             $value = $vehicle ? $this->cleanText((string) ($vehicle->{$field} ?? '')) : $this->cleanText((string) ($vehicleSnapshot[$field] ?? ''));

@@ -36,7 +36,7 @@ class AllegroGpSwissDescriptionTemplate
     /** @param array<string, string> $vehicleValues */
     private function vehicleModel(array $vehicleValues): string
     {
-        return trim(collect([$vehicleValues['model'] ?? null, $vehicleValues['model_variant'] ?? null])->filter()->implode(' '));
+        return trim((string) (($vehicleValues['model'] ?? '') ?: ($vehicleValues['model_variant'] ?? '')));
     }
 
     private function line(string $label, string $value): string

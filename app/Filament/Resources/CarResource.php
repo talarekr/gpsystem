@@ -190,7 +190,6 @@ class CarResource extends Resource
                     ->state(static fn (Car $record): string => trim(implode(' ', array_filter([
                         $record->make,
                         $record->model,
-                        $record->model_variant,
                     ]))) ?: '—')
                     ->searchable(query: fn (Builder $query, string $search): Builder => $query->searchPhrase($search)),
                 Tables\Columns\TextColumn::make('parts_placeholder')
