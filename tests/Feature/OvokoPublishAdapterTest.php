@@ -75,6 +75,85 @@ class OvokoPublishAdapterTest extends TestCase
         $this->assertStringNotContainsString('ovoko-token', $encodedLogs);
     }
 
+    public function test_ovoko_condition_is_always_published_as_used_even_when_local_note_says_new(): void
+    {
+        $part = $this->readyPart(['condition_notes' => 'nowy']);
+        $this->enableFlags();
+        Http::fake(['https://ovoko.example.test/crm/importPart' => Http::response(['part_id' => 288652, 'msg' => 'OK', 'status_code' => 'R200'], 200)]);
+
+        $result = app(PublishPartToMarketplacesService::class)->confirm($part, ['ovoko'], dryRun: false, confirm: true);
+
+        $this->assertTrue($result['channels']['ovoko']['success']);
+        Http::assertSent(fn ($request): bool => $request->url() === 'https://ovoko.example.test/crm/importPart'
+            && str_contains($request->body(), 'quality=1')
+            && ! str_contains($request->body(), 'quality=2'));
+        $payload = MarketplaceSyncLog::query()->where('marketplace', 'ovoko')->where('action', 'crm/importPart')->latest('id')->firstOrFail()->payload;
+        $this->assertSame('nowy', data_get($payload, 'request.local_condition'));
+        $this->assertSame(1, data_get($payload, 'request.ovoko_quality'));
+        $this->assertTrue(data_get($payload, 'request.condition_mapped_as_used'));
+    }
+
+    public function test_ovoko_publish_blocks_local_car_without_ovoko_car_id_with_clear_diagnostics(): void
+    {
+        $category = PartCategory::query()->create(['name' => 'Alternatory']);
+        MarketplaceCategoryMapping::query()->create(['local_category_id' => $category->id, 'channel' => 'ovoko', 'external_category_id' => '252']);
+        MarketplaceAccount::query()->create(['marketplace' => 'ovoko', 'code' => 'ovoko_main', 'name' => 'Ovoko main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'live', 'api_credentials' => ['username' => 'ovoko-user', 'password' => 'ovoko-pass', 'user_token' => 'ovoko-token'], 'api_settings' => ['default_part_status' => 1]]);
+        $car = Car::query()->create(['make' => 'Audi', 'model' => 'RSQ3', 'production_year' => 2015, 'vin' => 'WAUZZZ8U0FA000001', 'engine_code' => 'CZGB']);
+        $part = Part::query()->create(['sku' => 'GPS-OVOKO-NOCAR', 'name' => 'Part no car id', 'part_number' => 'LRE', 'price' => 100, 'ovoko_price' => 120, 'quantity' => 1, 'category_id' => $category->id, 'car_id' => $car->id]);
+        DB::table('part_images')->insert(['part_id' => $part->id, 'path' => 'parts/photos/complete.jpg', 'sort_order' => 1, 'is_primary' => true, 'created_at' => now(), 'updated_at' => now()]);
+        $this->enableFlags();
+        Http::fake();
+
+        $result = app(PublishPartToMarketplacesService::class)->confirm($part, ['ovoko'], dryRun: false, confirm: true);
+
+        $this->assertFalse($result['channels']['ovoko']['success']);
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://ovoko.example.test/crm/importPart');
+        $payload = MarketplaceSyncLog::query()->where('marketplace', 'ovoko')->where('action', 'crm/importPart')->latest('id')->firstOrFail()->payload;
+        $this->assertSame($car->id, data_get($payload, 'request.local_car_id'));
+        $this->assertSame('Audi', data_get($payload, 'request.local_car_make'));
+        $this->assertFalse(data_get($payload, 'request.ovoko_car_id_present'));
+        $this->assertSame('missing_ovoko_car_id', data_get($payload, 'request.blocked_reason'));
+    }
+
+    public function test_ovoko_publish_sends_car_id_when_local_car_has_ovoko_id(): void
+    {
+        $part = $this->readyPart();
+        $this->enableFlags();
+        Http::fake(['https://ovoko.example.test/crm/importPart' => Http::response(['part_id' => 288653, 'msg' => 'OK', 'status_code' => 'R200'], 200)]);
+
+        app(PublishPartToMarketplacesService::class)->confirm($part, ['ovoko'], dryRun: false, confirm: true);
+
+        Http::assertSent(fn ($request): bool => $request->url() === 'https://ovoko.example.test/crm/importPart' && str_contains($request->body(), 'car_id=777'));
+    }
+
+    public function test_ovoko_code_mapping_uses_lre_as_manufacturer_and_optional_code(): void
+    {
+        $part = $this->readyPart(['part_number' => 'LRE', 'oem_number' => null, 'manufacturer_code' => null]);
+        $this->enableFlags();
+        Http::fake(['https://ovoko.example.test/crm/importPart' => Http::response(['part_id' => 288654, 'msg' => 'OK', 'status_code' => 'R200'], 200)]);
+
+        app(PublishPartToMarketplacesService::class)->confirm($part, ['ovoko'], dryRun: false, confirm: true);
+
+        Http::assertSent(fn ($request): bool => $request->url() === 'https://ovoko.example.test/crm/importPart'
+            && str_contains($request->body(), 'manufacturer_code=LRE')
+            && preg_match('/(?:^|&)optional_codes=LRE(?:&|$)/', $request->body()) === 1);
+    }
+
+    public function test_ovoko_code_mapping_extracts_final_code_instead_of_sending_full_title(): void
+    {
+        $title = 'AUDI RSQ3 8U BOCZEK TAPICERKA DRZWI PRAWY TYLNY 8U0867306';
+        $part = $this->readyPart(['name' => $title, 'part_number' => $title, 'oem_number' => null, 'manufacturer_code' => null]);
+        $this->enableFlags();
+        Http::fake(['https://ovoko.example.test/crm/importPart' => Http::response(['part_id' => 288655, 'msg' => 'OK', 'status_code' => 'R200'], 200)]);
+
+        app(PublishPartToMarketplacesService::class)->confirm($part, ['ovoko'], dryRun: false, confirm: true);
+
+        Http::assertSent(fn ($request): bool => $request->url() === 'https://ovoko.example.test/crm/importPart'
+            && str_contains($request->body(), 'manufacturer_code=8U0867306')
+            && preg_match('/(?:^|&)optional_codes=8U0867306(?:&|$)/', $request->body()) === 1
+            && ! str_contains(urldecode($request->body()), 'optional_codes='.$title));
+    }
+
 
     public function test_ovoko_publish_maps_response_part_id_to_listing_external_ids_and_logs_missing_shop_url(): void
     {
@@ -260,13 +339,13 @@ class OvokoPublishAdapterTest extends TestCase
         foreach (['GPS_EXTERNAL_API_WRITES_ENABLED', 'GPS_MARKETPLACE_PUBLISHING_ENABLED', 'GPS_OVOKO_PUBLISHING_ENABLED'] as $flag) putenv($flag.'=true');
     }
 
-    private function readyPart(): Part
+    private function readyPart(array $overrides = []): Part
     {
         $category = PartCategory::query()->create(['name' => 'Alternatory']);
         MarketplaceCategoryMapping::query()->create(['local_category_id' => $category->id, 'channel' => 'ovoko', 'external_category_id' => '252']);
         MarketplaceAccount::query()->create(['marketplace' => 'ovoko', 'code' => 'ovoko_main', 'name' => 'Ovoko main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'live', 'api_credentials' => ['username' => 'ovoko-user', 'password' => 'ovoko-pass', 'user_token' => 'ovoko-token'], 'api_settings' => ['default_part_status' => 1]]);
         $car = Car::query()->create(['source_system' => 'ovoko', 'external_id' => 777, 'make' => 'BMW', 'model' => '3']);
-        $part = Part::query()->create(['sku' => 'GPS-OVOKO-1', 'name' => 'Kompletna część Ovoko', 'part_number' => '3Q0919294F', 'oem_number' => 'OEM-OVOKO-1', 'manufacturer_code' => 'MFR-OVOKO-1', 'description' => 'Pełny opis części.', 'condition_notes' => 'używany', 'price' => 100, 'ovoko_price' => 120, 'quantity' => 1, 'category_id' => $category->id, 'car_id' => $car->id]);
+        $part = Part::query()->create(array_merge(['sku' => 'GPS-OVOKO-1', 'name' => 'Kompletna część Ovoko', 'part_number' => '3Q0919294F', 'oem_number' => 'OEM-OVOKO-1', 'manufacturer_code' => 'MFR-OVOKO-1', 'description' => 'Pełny opis części.', 'condition_notes' => 'używany', 'price' => 100, 'ovoko_price' => 120, 'quantity' => 1, 'category_id' => $category->id, 'car_id' => $car->id], $overrides));
         DB::table('part_images')->insert(['part_id' => $part->id, 'path' => 'parts/photos/complete.jpg', 'sort_order' => 1, 'is_primary' => true, 'created_at' => now(), 'updated_at' => now()]);
         return $part;
     }
