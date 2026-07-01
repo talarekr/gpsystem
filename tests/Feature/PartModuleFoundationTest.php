@@ -13,6 +13,7 @@ use App\Models\PartCategory;
 use App\Models\PartImage;
 use App\Models\StorageLocation;
 use App\Models\User;
+use App\Services\Marketplace\SoldPartMarketplaceEndPlanService;
 use Database\Seeders\RoleSeeder;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -44,6 +45,54 @@ class PartModuleFoundationTest extends TestCase
         $this->assertSame('https://allegro.pl/listing?string=HED%20123', $links['allegro']);
         $this->assertSame('https://www.ovoko.pl/pl/search?q=HED%20123', $links['ovoko']);
         $this->assertSame('https://www.ebay.com/sch/i.html?_nkw=HED%20123', $links['ebay']);
+    }
+
+    public function test_part_status_ready_renders_as_for_sale_with_green_badge_and_sold_as_red_badge(): void
+    {
+        $this->assertSame('W sprzedaży', Part::statusOptions()['ready']);
+        $this->assertSame('success', Part::statusColor('ready'));
+        $this->assertSame('danger', Part::statusColor('sold'));
+        $this->assertSame('gps-part-status-badge--ready', Part::statusBadgeClass('ready'));
+        $this->assertSame('gps-part-status-badge--sold', Part::statusBadgeClass('sold'));
+    }
+
+    public function test_sold_part_marketplace_end_plan_is_dry_run_and_lists_external_ids_without_writes(): void
+    {
+        $part = Part::query()->create([
+            'name' => 'Sprzedana lampa',
+            'quantity' => 0,
+            'status' => 'sold',
+        ]);
+
+        MarketplaceListing::query()->create([
+            'part_id' => $part->id,
+            'marketplace' => 'allegro',
+            'external_offer_id' => 'ALG-123',
+            'status' => 'ACTIVE',
+            'sync_status' => 'mapped',
+        ]);
+
+        MarketplaceListing::query()->create([
+            'part_id' => $part->id,
+            'marketplace' => 'ebay_de',
+            'external_listing_id' => 'EB-456',
+            'status' => 'ended',
+            'sync_status' => 'mapped',
+        ]);
+
+        $plan = app(SoldPartMarketplaceEndPlanService::class)->planForPart($part->fresh('marketplaceListings'));
+
+        $this->assertTrue($plan['dry_run']);
+        $this->assertSame(1, $plan['listings_count']);
+        $this->assertSame('allegro', $plan['listings'][0]['marketplace']);
+        $this->assertSame('ALG-123', $plan['listings'][0]['external_offer_id']);
+        $this->assertSame('would_end_listing_no_api_write', $plan['listings'][0]['action']);
+
+        $this->assertDatabaseHas('marketplace_listings', [
+            'part_id' => $part->id,
+            'marketplace' => 'allegro',
+            'status' => 'ACTIVE',
+        ]);
     }
 
     public function test_part_marketplace_price_search_links_are_disabled_without_query(): void

@@ -80,7 +80,27 @@ class Part extends Model
 
     public static function statusOptions(): array
     {
-        return ['draft'=>'Szkic','needs_review'=>'Do sprawdzenia','ready'=>'Gotowa','published'=>'Opublikowana','sold'=>'Sprzedana','archived'=>'Archiwalna'];
+        return ['draft'=>'Szkic','needs_review'=>'Do sprawdzenia','ready'=>'W sprzedaży','published'=>'Opublikowana','sold'=>'Sprzedana','archived'=>'Archiwalna'];
+    }
+
+    public static function statusColor(?string $status): string
+    {
+        return match ($status) {
+            'ready' => 'success',
+            'sold' => 'danger',
+            'needs_review' => 'warning',
+            'published' => 'info',
+            default => 'gray',
+        };
+    }
+
+    public static function statusBadgeClass(?string $status): string
+    {
+        return match ($status) {
+            'ready' => 'gps-part-status-badge--ready',
+            'sold' => 'gps-part-status-badge--sold',
+            default => 'gps-part-status-badge--default',
+        };
     }
 
     public function fillVehicleSnapshot(): void
