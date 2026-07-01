@@ -40,6 +40,12 @@ class AllegroCompatibilityMappingServiceTest extends TestCase
         $this->assertSame('Części samochodowe', $result['matched_supported_category_name']);
         $this->assertSame('ID', $result['matched_supported_category_input_type']);
         $this->assertSame('CAR', $result['matched_supported_category_items_type']);
+        $this->assertSame(1, $result['supported_categories_count']);
+        $this->assertTrue($result['supported_categories_contains_category_id_620']);
+        $this->assertSame('620', $result['supported_categories_category_id_620']['id']);
+        $this->assertSame('categories', $result['supported_categories_response_key']);
+        $this->assertSame('620', $result['supported_categories_sample'][0]['id']);
+        $this->assertSame('620', $result['supported_categories_car_matches'][0]['id']);
         $this->assertSame('Części samochodowe > Silniki kompletne', $result['current_category_path']);
         $this->assertSame([['id' => '620', 'name' => 'Części samochodowe']], $result['current_category_ancestors']);
         $this->assertSame('Volkswagen Tiguan 2018 2.0 TDI CUAA', $result['compatible_products_phrase']);
@@ -48,4 +54,33 @@ class AllegroCompatibilityMappingServiceTest extends TestCase
         $this->assertSame('no_allegro_catalog_product_candidate_found', $result['product_catalog_blocked_reason']);
         Http::assertSent(fn ($request) => $request->method() === 'GET' && str_starts_with($request->url(), 'https://api.allegro.pl/sale/compatible-products') && $request['type'] === 'CAR');
     }
+
+    public function test_supported_categories_diagnostics_accept_snake_case_category_id_and_integer_ids(): void
+    {
+        MarketplaceAccount::query()->create(['code' => 'allegro_main', 'marketplace' => 'allegro', 'name' => 'Allegro', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://api.allegro.pl', 'api_credentials' => ['access_token' => 'token']]);
+        $local = PartCategory::query()->create(['name' => 'Silniki kompletne']);
+        MarketplaceCategoryMapping::query()->create(['local_category_id' => $local->id, 'channel' => 'allegro_main', 'external_category_id' => '312565']);
+        MarketplaceCategory::query()->create(['channel' => 'allegro_main', 'external_category_id' => '620', 'name' => 'Części samochodowe', 'full_path' => 'Części samochodowe']);
+        MarketplaceCategory::query()->create(['channel' => 'allegro_main', 'external_category_id' => '312565', 'parent_external_category_id' => '620', 'name' => 'Silniki kompletne', 'full_path' => 'Części samochodowe > Silniki kompletne']);
+        $part = Part::query()->create(['name' => 'Silnik Tiguan', 'category_id' => $local->id, 'part_number' => 'GPS-7157']);
+
+        Http::fake([
+            'https://api.allegro.pl/sale/compatibility-list/supported-categories' => Http::response(['supported_categories' => [['categoryId' => 620, 'name' => 'Części samochodowe', 'inputType' => 'ID', 'itemsType' => 'CAR']]], 200),
+            'https://api.allegro.pl/sale/products*' => Http::response(['products' => []], 200),
+        ]);
+
+        $result = app(AllegroCompatibilityMappingService::class)->dryRun($part, ['name' => 'preview']);
+
+        $this->assertTrue($result['category_supports_compatibility']);
+        $this->assertTrue($result['supported_category_parent_match']);
+        $this->assertSame('620', $result['matched_supported_category_id']);
+        $this->assertSame('supported_categories', $result['supported_categories_response_key']);
+        $this->assertSame(1, $result['supported_categories_count']);
+        $this->assertTrue($result['supported_categories_contains_category_id_620']);
+        $this->assertSame(620, $result['supported_categories_category_id_620']['raw_id']);
+        $this->assertSame('integer', $result['supported_categories_category_id_620']['raw_id_type']);
+        $this->assertSame('620', $result['supported_categories_sample'][0]['id']);
+        $this->assertSame('620', $result['supported_categories_car_matches'][0]['id']);
+    }
+
 }
