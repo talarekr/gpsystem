@@ -34,11 +34,37 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
         $client = new AllegroApiClient('allegro_main', $account);
         $offerImages = $this->normalizeImageUrls($payload['image_urls'] ?? $payload['images'] ?? []);
         $description = $this->descriptionPayload($part, $payload, $offerImages);
-        $productSet = $this->productSetPayload($settings, $payload, (string) ($payload['title'] ?? $part->name), $offerImages[0] ?? null);
+        $productNameDiagnostics = $this->productNameDiagnostics($part, $payload);
+        if (($productNameDiagnostics['product_name_length'] ?? 0) < 12) return ['ok' => false, 'status' => 'blocked_product_name_too_short', 'errors' => ['allegro_product_name_too_short'], 'request_summary' => $productNameDiagnostics, 'write' => false];
+        $productSet = $this->productSetPayload($settings, $payload, $productNameDiagnostics['product_name'], $offerImages[0] ?? null);
         $offerParameters = $this->offerParametersPayload($payload, $productSet);
         $body = array_filter(['name' => (string) ($payload['title'] ?? $part->name), 'category' => ['id' => (string) ($payload['category_id'] ?? '')], 'productSet' => $productSet, 'parameters' => $offerParameters, 'images' => $offerImages, 'description' => $description, 'sellingMode' => $settings['sellingMode'] ?? ['format' => 'BUY_NOW', 'price' => ['amount' => (string) ($payload['price_pln'] ?? $readiness['marketplace_price']), 'currency' => 'PLN']], 'stock' => ['available' => (int) ($payload['quantity'] ?? $part->quantity ?? 1), 'unit' => 'UNIT'], 'publication' => ['status' => 'ACTIVE'], 'delivery' => $delivery, 'payments' => $this->paymentsPayload($settings['payments'] ?? null, $payload['payments'] ?? null), 'afterSalesServices' => $afterSales, 'location' => $settings['location'] ?? null, 'external' => ['id' => $sku]], fn ($v) => $v !== null && $v !== []);
         $result = $client->createProductOffer($body);
-        return ['ok' => $result['ok'] ?? false, 'action' => 'createProductOffer', 'http_status' => $result['http_status'] ?? null, 'offer_id' => $result['offer_id'] ?? null, 'external_listing_id' => $result['offer_id'] ?? null, 'listing_status' => ($result['http_status'] ?? null) === 202 ? 'publication_pending' : 'published', 'request_id' => $result['request_id'] ?? null, 'request_summary' => $this->requestSummary($payload, $body) + ['allegro_sales_settings' => $this->salesSettingsSummary($salesSettings)], 'response_summary' => $this->responseSummary($result), 'json' => $result['json'] ?? [], 'error' => 'Allegro product-offers publish failed.', 'ui_error' => 'Uzupełnij ustawienia sprzedaży Allegro GPSWISS. Szczegóły są w Logach.'];
+        return ['ok' => $result['ok'] ?? false, 'action' => 'createProductOffer', 'http_status' => $result['http_status'] ?? null, 'offer_id' => $result['offer_id'] ?? null, 'external_listing_id' => $result['offer_id'] ?? null, 'listing_status' => ($result['http_status'] ?? null) === 202 ? 'publication_pending' : 'published', 'request_id' => $result['request_id'] ?? null, 'request_summary' => $this->requestSummary($payload, $body) + $productNameDiagnostics + ['allegro_sales_settings' => $this->salesSettingsSummary($salesSettings)], 'response_summary' => $this->responseSummary($result), 'json' => $result['json'] ?? [], 'error' => 'Allegro product-offers publish failed.', 'ui_error' => 'Uzupełnij ustawienia sprzedaży Allegro GPSWISS. Szczegóły są w Logach.'];
+    }
+
+    /** @return array<string, mixed> */
+    private function productNameDiagnostics(Part $part, array $payload): array
+    {
+        $partTitle = trim((string) (($payload['title'] ?? null) ?: ($part->name ?? '')));
+        $mainPartCode = trim((string) (($payload['part_number'] ?? null) ?: ($part->part_number ?? null) ?: ($part->oem_number ?? null) ?: ($part->manufacturer_code ?? null) ?: ($payload['sku'] ?? null) ?: ($part->sku ?? '')));
+        $productName = $partTitle;
+        $source = 'part_title';
+        $fallbackUsed = false;
+
+        if ($productName === '') {
+            $fallbackUsed = true;
+            $pieces = array_filter([data_get($part->vehicle_snapshot, 'make'), data_get($part->vehicle_snapshot, 'model'), $part->category?->name, $mainPartCode], fn ($value) => filled($value));
+            $productName = trim(implode(' ', array_map(fn ($value) => trim((string) $value), $pieces)));
+            $source = $productName !== '' && $productName !== $mainPartCode ? 'vehicle_category_code_fallback' : 'main_part_code_final_fallback';
+        }
+
+        if ($productName === '') {
+            $productName = $mainPartCode;
+            $source = 'main_part_code_final_fallback';
+        }
+
+        return ['product_name' => $productName, 'product_name_source' => $source, 'product_name_length' => mb_strlen($productName), 'part_title' => $partTitle, 'main_part_code' => $mainPartCode, 'product_name_fallback_used' => $fallbackUsed];
     }
 
     private function descriptionPayload(Part $part, array $payload, array $offerImages): ?array
@@ -81,7 +107,7 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
         $productSet = is_array($payload['productSet'] ?? null) ? $payload['productSet'] : (is_array($settings['productSet'] ?? null) ? $settings['productSet'] : []);
         if ($productSet === []) $productSet = [['product' => ['parameters' => $payload['allegro_product_parameters'] ?? $payload['allegro_parameters']['product_parameters'] ?? []]]];
         if (! is_array($productSet[0]['product'] ?? null)) $productSet[0]['product'] = [];
-        if (blank($productSet[0]['product']['name'] ?? null) && filled($offerName)) $productSet[0]['product']['name'] = trim($offerName);
+        if (filled($offerName)) $productSet[0]['product']['name'] = trim($offerName);
         if (filled($mainImageUrl)) $productSet[0]['product']['images'] = [trim($mainImageUrl)];
         $responsibleProducer = $this->responsibleProducer($settings, $payload);
         $safetyInformation = $this->safetyInformation($settings, $payload);

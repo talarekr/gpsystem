@@ -240,6 +240,42 @@ class AllegroSalesSettingsTest extends TestCase
         $this->assertSame('IMAGE', data_get($result, 'prepared_payload_preview_safe.description.sections.0.items.1.type'));
     }
 
+    public function test_allegro_product_name_uses_part_title_not_main_part_code(): void
+    {
+        Http::fake($this->fakeAllegro());
+        $title = 'AUDI RSQ3 8U BOCZEK TAPICERKA DRZWI PRAWY TYLNY 8U0867306';
+        $mainPartCode = '8U0867306';
+        $part = $this->part('KURIER DPD');
+        $part->forceFill(['name' => $title, 'part_number' => $mainPartCode])->save();
+
+        $response = $this->getJson('/tools/dry-run-marketplace-listing-payload?token=gps_images_import_2026&channel=allegro_main&part_id='.$part->id);
+
+        $response->assertOk();
+        $payload = $response->json('payload') ?: [];
+        $this->assertSame($title, data_get($payload, 'productSet.0.product.name'));
+        $this->assertNotSame($mainPartCode, data_get($payload, 'productSet.0.product.name'));
+        $this->assertGreaterThanOrEqual(12, mb_strlen((string) data_get($payload, 'productSet.0.product.name')));
+        $this->assertSame($title, data_get($payload, 'product_name'));
+        $this->assertSame('part_title', data_get($payload, 'product_name_source'));
+        $this->assertSame(mb_strlen($title), data_get($payload, 'product_name_length'));
+        $this->assertSame($title, data_get($payload, 'part_title'));
+        $this->assertSame($mainPartCode, data_get($payload, 'main_part_code'));
+        $this->assertFalse(data_get($payload, 'product_name_fallback_used'));
+    }
+
+    public function test_allegro_readiness_blocks_short_final_product_name_fallback(): void
+    {
+        Http::fake($this->fakeAllegro());
+        $part = $this->part('KURIER DPD');
+        $part->forceFill(['name' => '', 'part_number' => '8U0867306', 'vehicle_snapshot' => null])->save();
+
+        $result = app(MarketplaceListingReadinessService::class)->checkPartReadiness($part, 'allegro_main');
+
+        $this->assertContains('allegro_product_name_too_short', $result['blockers']);
+        $this->assertSame('8U0867306', data_get($result, 'prepared_payload_preview_safe.product_name'));
+        $this->assertSame(9, data_get($result, 'prepared_payload_preview_safe.product_name_length'));
+    }
+
     public function test_allegro_live_payload_rebuilds_description_when_payload_contains_empty_placeholder(): void
     {
         Http::fake(array_merge($this->fakeAllegro(), [

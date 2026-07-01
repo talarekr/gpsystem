@@ -49,6 +49,8 @@ class MarketplaceListingReadinessService
         $allegroParameters = null;
         $allegroSalesSettings = null;
 
+        $productNameDiagnostics = $this->allegroProductNameDiagnostics($part);
+
         $this->requireFilled($part->name ?? null, 'title', $missing, $blockers);
         $this->requirePositive($price, str_starts_with($channel, 'ebay_') ? 'ebay_price_pln' : 'price', $missing, $blockers);
         $this->requirePositive($part->quantity ?? null, 'quantity', $missing, $blockers);
@@ -84,6 +86,7 @@ class MarketplaceListingReadinessService
             foreach (($allegroSalesSettings['blockers'] ?? []) as $salesSettingsBlocker) { $blockers[] = $salesSettingsBlocker; }
             foreach ($this->allegroGpsrBlockers($account) as $gpsrBlocker) { $missing[] = $gpsrBlocker['missing']; $blockers[] = $gpsrBlocker['blocker']; }
             if (blank($part->allegro_shipping_rate_name ?? null)) { $missing[] = 'allegro_shipping_rate_name'; }
+            if (($productNameDiagnostics['product_name_length'] ?? 0) < 12) { $missing[] = 'allegro_product_name'; $blockers[] = 'allegro_product_name_too_short'; }
             if ($categoryMapping && filled($categoryMapping->external_category_id)) {
                 $definitions = $this->allegroCategoryParametersService->definitions((string) $categoryMapping->external_category_id);
                 $allegroParameters = $this->allegroOfferParametersBuilder->build($part, $categoryMapping, $definitions);
@@ -277,6 +280,42 @@ class MarketplaceListingReadinessService
         if ($this->allegroResponsibleProducer($settings) === null) $blockers[] = ['missing' => 'allegro_gpsr_responsibleProducer', 'blocker' => 'Allegro GPSR responsibleProducer is not configured.'];
         if ($this->allegroSafetyInformation($settings) === null) $blockers[] = ['missing' => 'allegro_gpsr_safetyInformation', 'blocker' => 'Allegro GPSR safetyInformation is not configured.'];
         return $blockers;
+    }
+
+    /** @return array<string, mixed> */
+    private function allegroProductNameDiagnostics(Part $part): array
+    {
+        $partTitle = trim((string) ($part->name ?? ''));
+        $mainPartCode = trim((string) (($part->part_number ?? null) ?: ($part->oem_number ?? null) ?: ($part->manufacturer_code ?? null) ?: ($part->sku ?? '')));
+        $productName = $partTitle;
+        $source = 'part_title';
+        $fallbackUsed = false;
+
+        if ($productName === '') {
+            $fallbackUsed = true;
+            $pieces = array_filter([
+                data_get($part->vehicle_snapshot, 'make'),
+                data_get($part->vehicle_snapshot, 'model'),
+                $part->category?->name,
+                $mainPartCode,
+            ], fn ($value) => filled($value));
+            $productName = trim(implode(' ', array_map(fn ($value) => trim((string) $value), $pieces)));
+            $source = $productName !== '' && $productName !== $mainPartCode ? 'vehicle_category_code_fallback' : 'main_part_code_final_fallback';
+        }
+
+        if ($productName === '') {
+            $productName = $mainPartCode;
+            $source = 'main_part_code_final_fallback';
+        }
+
+        return [
+            'product_name' => $productName,
+            'product_name_source' => $source,
+            'product_name_length' => mb_strlen($productName),
+            'part_title' => $partTitle,
+            'main_part_code' => $mainPartCode,
+            'product_name_fallback_used' => $fallbackUsed,
+        ];
     }
 
     private function allegroProductSetPreview(array $allegroParameters, ?MarketplaceAccount $account, string $productName, ?string $mainImageUrl = null): array
@@ -510,7 +549,10 @@ class MarketplaceListingReadinessService
             $preview['allegro_description_blockers'] = $allegroDescription['blockers'];
             $preview['allegro_sales_settings'] = $allegroSalesSettings;
             $preview['delivery'] = ['shippingRates' => ['id' => $allegroSalesSettings['shippingRates']['id'] ?? null]];
-            $preview['productSet'] = [$this->allegroProductSetPreview($allegroParameters, $this->accountFor($channel), $preview['title'], $preview['image_urls'][0] ?? null)];
+            $productNameDiagnostics = $this->allegroProductNameDiagnostics($part);
+            $preview = array_merge($preview, $productNameDiagnostics);
+            $preview['diagnostics']['allegro_product_name'] = $productNameDiagnostics;
+            $preview['productSet'] = [$this->allegroProductSetPreview($allegroParameters, $this->accountFor($channel), $productNameDiagnostics['product_name'], $preview['image_urls'][0] ?? null)];
             $preview['gpsr_diagnostics'] = $this->allegroGpsrDiagnostics($this->accountFor($channel));
             $preview['afterSalesServices'] = array_filter([
                 'returnPolicy' => ['id' => $allegroSalesSettings['returnPolicy']['id'] ?? null],
