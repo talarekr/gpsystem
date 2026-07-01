@@ -34,7 +34,9 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
         $client = new AllegroApiClient('allegro_main', $account);
         $offerImages = $this->normalizeImageUrls($payload['image_urls'] ?? $payload['images'] ?? []);
         $description = $this->descriptionPayload($part, $payload, $offerImages);
-        $body = array_filter(['name' => (string) ($payload['title'] ?? $part->name), 'category' => ['id' => (string) ($payload['category_id'] ?? '')], 'productSet' => $this->productSetPayload($settings, $payload, (string) ($payload['title'] ?? $part->name), $offerImages[0] ?? null), 'parameters' => $payload['parameters'] ?? $payload['allegro_parameters']['payload_parameters'] ?? $payload['allegro_offer_parameters'] ?? $payload['allegro_parameters']['offer_parameters'] ?? [], 'images' => $offerImages, 'description' => $description, 'sellingMode' => $settings['sellingMode'] ?? ['format' => 'BUY_NOW', 'price' => ['amount' => (string) ($payload['price_pln'] ?? $readiness['marketplace_price']), 'currency' => 'PLN']], 'stock' => ['available' => (int) ($payload['quantity'] ?? $part->quantity ?? 1), 'unit' => 'UNIT'], 'publication' => ['status' => 'ACTIVE'], 'delivery' => $delivery, 'payments' => $this->paymentsPayload($settings['payments'] ?? null, $payload['payments'] ?? null), 'afterSalesServices' => $afterSales, 'location' => $settings['location'] ?? null, 'external' => ['id' => $sku]], fn ($v) => $v !== null && $v !== []);
+        $productSet = $this->productSetPayload($settings, $payload, (string) ($payload['title'] ?? $part->name), $offerImages[0] ?? null);
+        $offerParameters = $this->offerParametersPayload($payload, $productSet);
+        $body = array_filter(['name' => (string) ($payload['title'] ?? $part->name), 'category' => ['id' => (string) ($payload['category_id'] ?? '')], 'productSet' => $productSet, 'parameters' => $offerParameters, 'images' => $offerImages, 'description' => $description, 'sellingMode' => $settings['sellingMode'] ?? ['format' => 'BUY_NOW', 'price' => ['amount' => (string) ($payload['price_pln'] ?? $readiness['marketplace_price']), 'currency' => 'PLN']], 'stock' => ['available' => (int) ($payload['quantity'] ?? $part->quantity ?? 1), 'unit' => 'UNIT'], 'publication' => ['status' => 'ACTIVE'], 'delivery' => $delivery, 'payments' => $this->paymentsPayload($settings['payments'] ?? null, $payload['payments'] ?? null), 'afterSalesServices' => $afterSales, 'location' => $settings['location'] ?? null, 'external' => ['id' => $sku]], fn ($v) => $v !== null && $v !== []);
         $result = $client->createProductOffer($body);
         return ['ok' => $result['ok'] ?? false, 'action' => 'createProductOffer', 'http_status' => $result['http_status'] ?? null, 'offer_id' => $result['offer_id'] ?? null, 'external_listing_id' => $result['offer_id'] ?? null, 'listing_status' => ($result['http_status'] ?? null) === 202 ? 'publication_pending' : 'published', 'request_id' => $result['request_id'] ?? null, 'request_summary' => $this->requestSummary($payload, $body) + ['allegro_sales_settings' => $this->salesSettingsSummary($salesSettings)], 'response_summary' => $this->responseSummary($result), 'json' => $result['json'] ?? [], 'error' => 'Allegro product-offers publish failed.', 'ui_error' => 'Uzupełnij ustawienia sprzedaży Allegro GPSWISS. Szczegóły są w Logach.'];
     }
@@ -62,6 +64,16 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
         }
 
         return false;
+    }
+
+
+    /** @return array<int, array<string, mixed>> */
+    private function offerParametersPayload(array $payload, ?array $productSet): array
+    {
+        $offerParameters = $payload['parameters'] ?? $payload['allegro_parameters']['payload_parameters'] ?? $payload['allegro_offer_parameters'] ?? $payload['allegro_parameters']['offer_parameters'] ?? [];
+        $productParameterIds = array_flip($this->parameterIds(data_get($productSet, '0.product.parameters', [])));
+
+        return array_values(array_filter((array) $offerParameters, fn (mixed $parameter): bool => is_array($parameter) && filled($parameter['id'] ?? null) && ! isset($productParameterIds[(string) $parameter['id']])));
     }
 
     private function productSetPayload(array $settings, array $payload, string $offerName, ?string $mainImageUrl = null): ?array
@@ -166,6 +178,10 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
             'first_image_type' => $first === null ? null : get_debug_type($first),
             'payload_parameters_ids' => $this->parameterIds(is_array($body) ? ($body['parameters'] ?? []) : ($payload['parameters'] ?? $payload['allegro_parameters']['payload_parameters'] ?? $payload['allegro_offer_parameters'] ?? $payload['allegro_parameters']['offer_parameters'] ?? [])),
             'productSet_0_product_parameters_ids' => $this->parameterIds(is_array($body) ? data_get($body, 'productSet.0.product.parameters', []) : data_get($payload, 'productSet.0.product.parameters', $payload['allegro_product_parameters'] ?? $payload['allegro_parameters']['product_parameters'] ?? [])),
+            'offer_parameter_ids' => $this->parameterIds(is_array($body) ? ($body['parameters'] ?? []) : ($payload['parameters'] ?? $payload['allegro_parameters']['payload_parameters'] ?? $payload['allegro_offer_parameters'] ?? $payload['allegro_parameters']['offer_parameters'] ?? [])),
+            'product_parameter_ids' => $this->parameterIds(is_array($body) ? data_get($body, 'productSet.0.product.parameters', []) : data_get($payload, 'productSet.0.product.parameters', $payload['allegro_product_parameters'] ?? $payload['allegro_parameters']['product_parameters'] ?? [])),
+            'duplicated_parameter_ids' => $this->duplicatedParameterIds($payload, $body),
+            'removed_from_offer_parameters_due_to_product_scope' => $this->removedFromOfferParametersDueToProductScope($payload, $body),
             'productSet_0_product_images_count' => count(data_get($body ?? $payload, 'productSet.0.product.images', [])),
             'productSet_0_product_main_image_present' => filled(data_get($body ?? $payload, 'productSet.0.product.images.0')),
             'description_sections_count' => count((array) data_get($body ?? $payload, 'description.sections', [])),
@@ -177,6 +193,27 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
     private function parameterIds(mixed $parameters): array
     {
         return array_values(array_filter(array_map(fn (mixed $parameter): ?string => is_array($parameter) && filled($parameter['id'] ?? null) ? (string) $parameter['id'] : null, (array) $parameters)));
+    }
+
+
+    /** @return array<int, string> */
+    private function duplicatedParameterIds(array $payload, ?array $body): array
+    {
+        $offerIds = $this->parameterIds(is_array($body) ? ($body['parameters'] ?? []) : []);
+        $productIds = $this->parameterIds(is_array($body) ? data_get($body, 'productSet.0.product.parameters', []) : []);
+
+        return array_values(array_intersect($offerIds, $productIds));
+    }
+
+    /** @return array<int, string> */
+    private function removedFromOfferParametersDueToProductScope(array $payload, ?array $body): array
+    {
+        if (! is_array($body)) return [];
+        $rawOfferIds = $this->parameterIds($payload['parameters'] ?? $payload['allegro_parameters']['payload_parameters'] ?? $payload['allegro_offer_parameters'] ?? $payload['allegro_parameters']['offer_parameters'] ?? []);
+        $bodyOfferIds = $this->parameterIds($body['parameters'] ?? []);
+        $productIds = $this->parameterIds(data_get($body, 'productSet.0.product.parameters', []));
+
+        return array_values(array_intersect(array_diff($rawOfferIds, $bodyOfferIds), $productIds));
     }
 
     private function imagesShape(mixed $images): string

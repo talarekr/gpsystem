@@ -336,7 +336,7 @@ class AllegroCategoryParametersTest extends TestCase
         $part = Part::query()->create(['name' => 'Skrzynia Audi', 'part_number' => '06H903017J', 'category_id' => 77, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'vehicle_snapshot' => ['make' => 'Audi', 'gearbox_type' => 'Automatyczna'], 'is_visible_storefront' => true]);
 
         $result = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, null, ['ok' => true, 'source' => 'cache', 'parameters' => [
-            ['id' => '11323', 'name' => 'Stan', 'type' => 'dictionary', 'required' => true, 'dictionary' => [['id' => 'used', 'value' => 'Używany']], 'options' => ['describesProduct' => true]],
+            ['id' => '11323', 'name' => 'Stan', 'type' => 'dictionary', 'required' => true, 'dictionary' => [['id' => 'used', 'value' => 'Używany']], 'options' => ['describesProduct' => false]],
             ['id' => '129917', 'name' => 'Rodzaj skrzyni', 'type' => 'dictionary', 'required' => true, 'dictionary' => [['id' => '129917_2', 'value' => 'Automatyczna']], 'options' => ['describesProduct' => true]],
             ['id' => '127415', 'name' => 'Producent części', 'type' => 'string', 'required' => true, 'options' => ['describesProduct' => true]],
             ['id' => '215858', 'name' => 'Numer katalogowy części', 'type' => 'string', 'required' => true, 'options' => ['describesProduct' => true]],
@@ -353,6 +353,21 @@ class AllegroCategoryParametersTest extends TestCase
         $this->assertNotContains('215858', array_column($result['payload_parameters'], 'id'));
     }
 
+
+    public function test_category_256035_part_7866_keeps_car_type_product_scoped_and_condition_offer_scoped(): void
+    {
+        $part = Part::query()->create(['name' => 'Część SUV', 'category_id' => 256035, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'vehicle_snapshot' => ['body_type' => 'SUV'], 'is_visible_storefront' => true]);
+
+        $result = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, null, ['ok' => true, 'source' => 'cache', 'parameters' => [
+            ['id' => '11323', 'name' => 'Stan', 'type' => 'dictionary', 'required' => true, 'dictionary' => [['id' => '11323_2', 'value' => 'Używany']], 'options' => ['describesProduct' => false]],
+            ['id' => '129591', 'name' => 'Typ samochodu', 'type' => 'dictionary', 'required' => true, 'dictionary' => $this->carTypeDictionary(), 'options' => ['describesProduct' => true]],
+        ]]);
+
+        $this->assertSame(['11323'], array_column($result['payload_parameters'], 'id'));
+        $this->assertNotContains('129591', array_column($result['payload_parameters'], 'id'));
+        $this->assertContains('129591', array_column($result['product_parameters'], 'id'));
+        $this->assertSame([['id' => '11323', 'valuesIds' => ['11323_2']]], $result['offer_parameters']);
+    }
 
     public function test_allegro_car_type_maps_body_type_to_vehicle_type_values_id(): void
     {

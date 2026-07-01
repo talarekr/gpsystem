@@ -181,6 +181,46 @@ class AllegroSalesSettingsTest extends TestCase
     }
 
 
+    public function test_live_publish_payload_removes_product_scoped_duplicates_from_offer_parameters(): void
+    {
+        Http::fake($this->fakeAllegro());
+        $part = $this->part('KURIER DPD');
+        $payload = [
+            'title' => 'Część SUV',
+            'category_id' => '256035',
+            'price_pln' => 100,
+            'quantity' => 1,
+            'image_urls' => ['https://gpswiss.example.test/parts/7866/one.jpg'],
+            'allegro_parameters' => [
+                'payload_parameters' => [
+                    ['id' => '11323', 'valuesIds' => ['11323_2']],
+                    ['id' => '129591', 'valuesIds' => ['129591_64']],
+                ],
+                'product_parameters' => [
+                    ['id' => '129591', 'valuesIds' => ['129591_64']],
+                ],
+            ],
+        ];
+
+        $adapter = new class(app(MarketplaceListingReadinessService::class), app(MarketplacePublishGate::class), app(ApiIntegrationLogger::class), app(AllegroSalesSettingsResolver::class)) extends AllegroPublishAdapter {
+            public function callPerformLivePublish(Part $part, array $readiness, array $payload, MarketplaceAccount $account): array
+            {
+                return $this->performLivePublish($part, $readiness, $payload, $account);
+            }
+        };
+
+        $result = $adapter->callPerformLivePublish($part, ['marketplace_price' => 100], $payload, MarketplaceAccount::query()->where('code', 'allegro_main')->firstOrFail());
+
+        $this->assertSame(['11323'], $result['request_summary']['offer_parameter_ids']);
+        $this->assertSame(['129591'], $result['request_summary']['product_parameter_ids']);
+        $this->assertSame([], $result['request_summary']['duplicated_parameter_ids']);
+        $this->assertSame(['129591'], $result['request_summary']['removed_from_offer_parameters_due_to_product_scope']);
+
+        Http::assertSent(fn ($request) => $request->url() === 'https://api.allegro.pl/sale/product-offers'
+            && array_column($request->data()['parameters'], 'id') === ['11323']
+            && array_column(data_get($request->data(), 'productSet.0.product.parameters'), 'id') === ['129591']);
+    }
+
     public function test_allegro_readiness_payload_includes_builder_description_for_live_publish(): void
     {
         Http::fake($this->fakeAllegro());
