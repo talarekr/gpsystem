@@ -25,7 +25,9 @@ class AllegroDescriptionBuilder
     {
         $part->loadMissing(['car', 'images']);
         $blockers = [];
-        $description = $this->cleanText((string) ($part->description ?? ''));
+        $source = $this->resolveLocalDescription($part);
+        $description = $source['sanitized'];
+        $diagnostics = $this->descriptionSourceDiagnostics($part, $source);
 
         if ($description === '') {
             $blockers[] = 'missing_part_description';
@@ -37,7 +39,6 @@ class AllegroDescriptionBuilder
             $blockers[] = 'missing_donor_vehicle';
         }
         $values = [];
-        $diagnostics = [];
         foreach (self::REQUIRED_VEHICLE_FIELDS as $field => $label) {
             $value = $vehicle ? $this->cleanText((string) ($vehicle->{$field} ?? '')) : $this->cleanText((string) ($vehicleSnapshot[$field] ?? ''));
             $values[$field] = $value;
@@ -62,7 +63,7 @@ class AllegroDescriptionBuilder
         }
 
         if ($blockers !== []) {
-            return ['description' => null, 'blockers' => array_values(array_unique($blockers)), 'diagnostics' => $diagnostics + ['main_image_url' => $mainImageUrl, 'offer_images_contains_main' => $mainImageUrl !== null && in_array($mainImageUrl, $offerImageUrls, true)]];
+            return ['description' => null, 'blockers' => array_values(array_unique($blockers)), 'diagnostics' => $diagnostics + $this->allegroSectionDiagnostics($source, []) + ['main_image_url' => $mainImageUrl, 'offer_images_contains_main' => $mainImageUrl !== null && in_array($mainImageUrl, $offerImageUrls, true)]];
         }
 
         $content = '<p>Witam oferta dotyczy:</p>'
@@ -76,10 +77,12 @@ class AllegroDescriptionBuilder
             .'</ul>'
             .'<p><b>CZĘŚĆ SPRAWNA. STAN WIDOCZNY NA ZDJĘCIACH</b></p>';
 
+        $sections = [['items' => [['type' => 'TEXT', 'content' => $content], ['type' => 'IMAGE', 'url' => $mainImageUrl]]]];
+
         return [
-            'description' => ['sections' => [['items' => [['type' => 'TEXT', 'content' => $content], ['type' => 'IMAGE', 'url' => $mainImageUrl]]]]],
+            'description' => ['sections' => $sections],
             'blockers' => [],
-            'diagnostics' => $diagnostics + ['main_image_url' => $mainImageUrl, 'offer_images_contains_main' => true],
+            'diagnostics' => $diagnostics + $this->allegroSectionDiagnostics($source, $sections) + ['main_image_url' => $mainImageUrl, 'offer_images_contains_main' => true],
         ];
     }
 
@@ -92,6 +95,64 @@ class AllegroDescriptionBuilder
     private function cleanText(string $value): string
     {
         return trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags($value), ENT_QUOTES | ENT_HTML5, 'UTF-8')) ?: '');
+    }
+
+    /** @return array{source: ?string, raw: string, sanitized: string} */
+    private function resolveLocalDescription(Part $part): array
+    {
+        foreach ([
+            'part.description' => $part->description ?? null,
+            'part.short_description' => $part->short_description ?? null,
+            'part.legacy_payload.woo_product.description' => data_get($part->legacy_payload, 'woo_product.description'),
+            'part.legacy_payload.description' => data_get($part->legacy_payload, 'description'),
+            'part.legacy_payload.meta.description' => data_get($part->legacy_payload, 'meta.description'),
+        ] as $candidateSource => $value) {
+            $raw = is_string($value) ? $value : '';
+            $sanitized = $this->cleanText($raw);
+            if ($sanitized !== '') {
+                return ['source' => $candidateSource, 'raw' => $raw, 'sanitized' => $sanitized];
+            }
+        }
+
+        return ['source' => null, 'raw' => '', 'sanitized' => ''];
+    }
+
+    private function descriptionSourceDiagnostics(Part $part, array $source): array
+    {
+        $ebaySource = $this->resolveLocalDescription($part);
+        $ovokoSource = $this->resolveLocalDescription($part);
+
+        return [
+            'local_description_present' => $source['sanitized'] !== '',
+            'local_description_source' => $source['source'],
+            'ebay_description_present' => $ebaySource['sanitized'] !== '',
+            'ebay_description_source' => $ebaySource['source'],
+            'ovoko_description_present' => $ovokoSource['sanitized'] !== '',
+            'ovoko_description_source' => $ovokoSource['source'],
+            'allegro_description_source' => $source['source'],
+            'allegro_description_raw_length' => mb_strlen($source['raw']),
+            'allegro_description_sanitized_length' => mb_strlen($source['sanitized']),
+            'description_source_mismatch' => count(array_unique(array_filter([$source['source'], $ebaySource['source'], $ovokoSource['source']]))) > 1,
+        ];
+    }
+
+    private function allegroSectionDiagnostics(array $source, array $sections): array
+    {
+        $hasText = false;
+        foreach ($sections as $section) {
+            foreach ((array) ($section['items'] ?? []) as $item) {
+                if (($item['type'] ?? null) === 'TEXT' && $this->cleanText((string) ($item['content'] ?? '')) !== '') {
+                    $hasText = true;
+                }
+            }
+        }
+
+        return [
+            'allegro_description_raw_length' => mb_strlen($source['raw']),
+            'allegro_description_sanitized_length' => mb_strlen($source['sanitized']),
+            'allegro_description_sections_count' => count($sections),
+            'allegro_description_has_non_empty_content' => $hasText,
+        ];
     }
 
     private function e(string $value): string

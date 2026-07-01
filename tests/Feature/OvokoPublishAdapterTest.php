@@ -51,7 +51,7 @@ class OvokoPublishAdapterTest extends TestCase
                 && str_contains($body, 'category_id=252')
                 && str_contains($body, 'car_id=777')
                 && str_contains($body, 'quality=1')
-                && str_contains($body, 'status=1')
+                && str_contains($body, 'status=0')
                 && str_contains($body, 'price=120')
                 && str_contains($body, 'manufacturer_code=3Q0919294F')
                 && preg_match('/(?:^|&)optional_codes=3Q0919294F(?:&|$)/', $body) === 1
@@ -86,11 +86,18 @@ class OvokoPublishAdapterTest extends TestCase
         $this->assertTrue($result['channels']['ovoko']['success']);
         Http::assertSent(fn ($request): bool => $request->url() === 'https://ovoko.example.test/crm/importPart'
             && str_contains($request->body(), 'quality=1')
+            && str_contains($request->body(), 'status=0')
+            && ! str_contains($request->body(), 'status=1')
             && ! str_contains($request->body(), 'quality=2'));
         $payload = MarketplaceSyncLog::query()->where('marketplace', 'ovoko')->where('action', 'crm/importPart')->latest('id')->firstOrFail()->payload;
         $this->assertSame('nowy', data_get($payload, 'request.local_condition'));
         $this->assertSame(1, data_get($payload, 'request.ovoko_quality'));
+        $this->assertSame(0, data_get($payload, 'request.ovoko_status'));
+        $this->assertSame('status', data_get($payload, 'request.ovoko_condition_field_name'));
+        $this->assertSame(0, data_get($payload, 'request.ovoko_condition_value'));
+        $this->assertSame('used', data_get($payload, 'request.ovoko_condition_meaning'));
         $this->assertTrue(data_get($payload, 'request.condition_mapped_as_used'));
+        $this->assertTrue(data_get($payload, 'request.condition_mapping_verified'));
     }
 
     public function test_ovoko_publish_blocks_local_car_without_ovoko_car_id_with_clear_diagnostics(): void
