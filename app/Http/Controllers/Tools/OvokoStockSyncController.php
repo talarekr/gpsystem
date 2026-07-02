@@ -577,12 +577,23 @@ class OvokoStockSyncController extends Controller
 
     private function localState(Part $part): array
     {
-        return ['quantity' => (int) $part->quantity, 'status' => $part->status, 'is_visible_storefront' => (bool) $part->is_visible_storefront, 'needs_listing' => (bool) $part->needs_listing, 'availability' => $this->localAvailability($part)];
+        return [
+            'quantity' => (int) $part->quantity,
+            'status' => $part->status,
+            'status_raw' => $part->status,
+            'ui_label' => $part->uiStatusLabel(),
+            'is_visible_storefront' => (bool) $part->is_visible_storefront,
+            'needs_listing' => (bool) $part->needs_listing,
+            'sold_at' => $part->sold_at?->toISOString(),
+            'sale_source' => $part->sale_source,
+            'availability' => $this->localAvailability($part),
+            'availability_source' => $part->localAvailabilitySourceForMarketplaceSync(),
+        ];
     }
 
     private function localAvailability(Part $part): string
     {
-        return ((int) $part->quantity > 0 && (bool) $part->is_visible_storefront && in_array((string) $part->status, ['ready', 'published'], true)) ? 'for_sale' : 'sold';
+        return $part->localAvailabilityForMarketplaceSync();
     }
 
     public function writeLog(?array $item, bool $applied, string $status, array $blockers, ?int $runId = null): void

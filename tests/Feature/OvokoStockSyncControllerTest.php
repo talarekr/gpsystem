@@ -44,7 +44,7 @@ class OvokoStockSyncControllerTest extends TestCase
             ->assertJsonPath('items.0.ovoko.quantity', 0)
             ->assertJsonPath('items.0.ovoko.status', 'sold')
             ->assertJsonPath('items.0.planned_local_state.quantity', 0)
-            ->assertJsonPath('items.0.action', 'update_local_stock');
+            ->assertJsonPath('items.0.action', 'should_mark_sold');
 
         Http::assertSent(fn ($request): bool => (string) $request->url() === 'https://ovoko.test/get/part/11711' && array_keys($request->data()) === ['username', 'password', 'user_token']);
     }
@@ -134,7 +134,7 @@ class OvokoStockSyncControllerTest extends TestCase
             ->assertJsonPath('items.0.planned_local_state.quantity', 0)
             ->assertJsonPath('items.0.planned_local_state.status', 'sold')
             ->assertJsonPath('items.0.planned_local_state.is_visible_storefront', false)
-            ->assertJsonPath('items.0.action', 'update_local_stock');
+            ->assertJsonPath('items.0.action', 'should_mark_sold');
     }
 
     public function test_dry_run_does_not_accept_first_ovoko_row_when_id_does_not_match(): void
@@ -175,6 +175,50 @@ class OvokoStockSyncControllerTest extends TestCase
             ->assertJsonFragment(['missing_ovoko_mapping']);
 
         Http::assertNothingSent();
+    }
+
+
+    public function test_dry_run_uses_parts_ui_status_label_for_local_availability_when_ovoko_is_available(): void
+    {
+        $this->actingAsAdminUser();
+        $this->account();
+        $part = Part::query()->forceCreate([
+            'id' => 39,
+            'name' => 'UI visible for sale part',
+            'quantity' => 0,
+            'status' => 'ready',
+            'is_visible_storefront' => false,
+            'needs_listing' => false,
+            'sold_at' => null,
+            'sale_source' => null,
+        ]);
+        MarketplaceListing::query()->create(['marketplace' => 'ovoko', 'part_id' => $part->id, 'external_offer_id' => '10743', 'status' => 'active']);
+
+        Http::fake([
+            'ovoko.test/get/part/*' => Http::response(['item' => [
+                'id' => '10743',
+                'status' => '0',
+                'reserved_user' => '',
+                'reserved_date' => '0000-00-00 00:00:00',
+            ]], 200),
+        ]);
+
+        $this->getJson('/admin/tools/ovoko-stock-sync-dry-run?part_id=39')
+            ->assertOk()
+            ->assertJsonPath('items.0.part_id', 39)
+            ->assertJsonPath('items.0.ovoko_id', '10743')
+            ->assertJsonPath('items.0.available_on_ovoko', true)
+            ->assertJsonPath('items.0.local.status_raw', 'ready')
+            ->assertJsonPath('items.0.local.quantity', 0)
+            ->assertJsonPath('items.0.local.is_visible_storefront', false)
+            ->assertJsonPath('items.0.local.needs_listing', false)
+            ->assertJsonPath('items.0.local.sold_at', null)
+            ->assertJsonPath('items.0.local.sale_source', null)
+            ->assertJsonPath('items.0.local.ui_label', 'W sprzedaży')
+            ->assertJsonPath('items.0.local.availability_source', 'parts.status via Part::statusOptions UI label')
+            ->assertJsonPath('items.0.local_availability', 'for_sale')
+            ->assertJsonPath('items.0.recommended_local_availability', 'for_sale')
+            ->assertJsonPath('items.0.action', 'already_correct');
     }
 
     private function account(): void

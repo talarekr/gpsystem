@@ -125,6 +125,33 @@ class Part extends Model
         return ['draft'=>'Szkic','needs_review'=>'Do sprawdzenia','ready'=>'W sprzedaży','published'=>'Opublikowana','sold'=>'Sprzedana','archived'=>'Archiwalna'];
     }
 
+    public function uiStatusLabel(): string
+    {
+        return self::statusOptions()[(string) $this->status] ?? (string) $this->status;
+    }
+
+    public function localAvailabilityForMarketplaceSync(): string
+    {
+        if ($this->sold_at !== null || in_array((string) $this->status, ['sold', 'archived'], true)) {
+            return 'sold';
+        }
+
+        if (in_array((string) $this->status, ['ready', 'published'], true)) {
+            return 'for_sale';
+        }
+
+        return 'sold';
+    }
+
+    public function localAvailabilitySourceForMarketplaceSync(): string
+    {
+        if ($this->sold_at !== null) {
+            return 'parts.sold_at';
+        }
+
+        return 'parts.status via Part::statusOptions UI label';
+    }
+
     public static function statusColor(?string $status): string
     {
         return match ($status) {
