@@ -804,4 +804,18 @@ class PartModuleFoundationTest extends TestCase
         $this->assertLessThan(strpos($source, "RichEditor::make('description')"), strpos($source, "Section::make('Wymiary')"));
     }
 
+    public function test_part_title_field_has_allegro_length_counter_and_limit(): void
+    {
+        $source = file_get_contents(app_path('Filament/Resources/PartResource.php'));
+
+        $this->assertSame(75, PartResource::PART_TITLE_MAX_LENGTH);
+        $this->assertStringContainsString("->label('Tytuł produktu')", $source);
+        $this->assertStringContainsString('->maxLength(self::PART_TITLE_MAX_LENGTH)', $source);
+        $this->assertStringContainsString('->live(debounce: 150)', $source);
+        $this->assertStringContainsString('->suffix(fn (Forms\\Get $get): HtmlString => self::partTitleCharacterCounter($get(\'name\')))', $source);
+        $this->assertStringContainsString('38/75', (string) PartResource::partTitleCharacterCounter(str_repeat('a', 38)));
+        $this->assertStringContainsString('82/75', (string) PartResource::partTitleCharacterCounter(str_repeat('a', 82)));
+        $this->assertStringContainsString('text-amber-600', (string) PartResource::partTitleCharacterCounter(str_repeat('a', 82)));
+    }
+
 }
