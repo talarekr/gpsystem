@@ -126,10 +126,10 @@ class PartResource extends Resource
                             ->label('Tytuł produktu')
                             ->required()
                             ->maxLength(self::PART_TITLE_MAX_LENGTH)
-                            ->live(debounce: 150)
-                            ->suffix(fn (Forms\Get $get): HtmlString => self::partTitleCharacterCounter($get('name')))
+                            ->suffix(self::partTitleCharacterCounter())
                             ->extraInputAttributes([
                                 'class' => 'font-normal',
+                                'maxlength' => (string) self::PART_TITLE_MAX_LENGTH,
                             ])
                             ->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))
                             ->columnSpanFull(),
@@ -549,17 +549,33 @@ class PartResource extends Resource
         return '<div class="gps-vehicle-option"><span class="gps-vehicle-option__icon">🚗</span><span><strong>'.e(self::carLabel($car)).'</strong>'.($details ? '<small>'.e(implode(' · ', $details)).'</small>' : '').'</span></div>';
     }
 
-    public static function partTitleCharacterCounter(?string $title): HtmlString
+    public static function partTitleCharacterCounter(): HtmlString
     {
-        $length = mb_strlen((string) $title);
-        $toneClass = $length > self::PART_TITLE_MAX_LENGTH ? 'text-amber-600 dark:text-amber-400' : 'text-gray-400 dark:text-gray-500';
+        $limit = self::PART_TITLE_MAX_LENGTH;
 
-        return new HtmlString(sprintf(
-            '<span class="text-xs font-normal tabular-nums whitespace-nowrap %s">%d/%d</span>',
-            $toneClass,
-            $length,
-            self::PART_TITLE_MAX_LENGTH,
-        ));
+        return new HtmlString(<<<HTML
+            <span
+                class="text-xs font-normal tabular-nums whitespace-nowrap text-gray-400 dark:text-gray-500"
+                x-data="{
+                    limit: {$limit},
+                    update() {
+                        const input = this.\$el.closest('.fi-input-wrp')?.querySelector('input');
+                        const length = input?.value?.length ?? 0;
+
+                        this.\$el.textContent = `${length}/${this.limit}`;
+                        this.\$el.classList.toggle('text-amber-600', length > this.limit);
+                        this.\$el.classList.toggle('dark:text-amber-400', length > this.limit);
+                        this.\$el.classList.toggle('text-gray-400', length <= this.limit);
+                        this.\$el.classList.toggle('dark:text-gray-500', length <= this.limit);
+                    },
+                }"
+                x-init="
+                    update();
+                    const input = \$el.closest('.fi-input-wrp')?.querySelector('input');
+                    input?.addEventListener('input', () => update());
+                "
+            >0/{$limit}</span>
+        HTML);
     }
 
     public static function categoryTreeAction(): Action
