@@ -4,6 +4,7 @@ namespace App\Services\Marketplace;
 
 use App\Http\Controllers\Tools\OvokoStockSyncController;
 use App\Models\OvokoStockSyncRun;
+use App\Models\OvokoStockSyncRunItem;
 use App\Models\Part;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -85,7 +86,9 @@ class OvokoStockSyncRunProcessor
                     $blockers[$blocker] = ($blockers[$blocker] ?? 0) + 1;
                 }
 
-                $recent[] = $this->compactItem($item, $action);
+                $compactItem = $this->compactItem($item, $action);
+                $this->storeRunItem($run, $compactItem);
+                $recent[] = $compactItem;
                 $recent = array_slice($recent, -20);
 
                 $run->forceFill($this->counterUpdates($run, $action) + [
@@ -120,6 +123,21 @@ class OvokoStockSyncRunProcessor
         });
     }
 
+    private function storeRunItem(OvokoStockSyncRun $run, array $item): void
+    {
+        OvokoStockSyncRunItem::query()->updateOrCreate(
+            [
+                'ovoko_stock_sync_run_id' => (int) $run->id,
+                'part_id' => $item['part_id'] ?? null,
+            ],
+            [
+                'ovoko_id' => $item['ovoko_id'] ?? null,
+                'action' => (string) ($item['action'] ?? 'failed'),
+                'payload' => $item,
+            ]
+        );
+    }
+
     private function counterUpdates(OvokoStockSyncRun $run, string $action): array
     {
         return match ($action) {
@@ -134,7 +152,26 @@ class OvokoStockSyncRunProcessor
 
     private function compactItem(array $item, string $action): array
     {
-        return ['part_id' => $item['part_id'] ?? null, 'ovoko_id' => $item['ovoko_id'] ?? null, 'mapping_source' => $item['ovoko_mapping_source'] ?? null, 'local_availability' => data_get($item, 'local.local_availability'), 'local_before' => $item['local'] ?? null, 'ovoko_available' => ((int) data_get($item, 'ovoko.quantity', 0)) > 0, 'ovoko_stock_status' => $item['ovoko'] ?? null, 'recommended_availability' => data_get($item, 'planned_local_state.local_availability'), 'planned_or_applied_local_state' => $item['planned_local_state'] ?? null, 'action' => $action, 'blockers' => $item['blockers'] ?? [], 'error' => $item['error'] ?? null];
+        return ['part_id' => $item['part_id'] ?? null, 'ovoko_id' => $item['ovoko_id'] ?? null, 'mapping_source' => $item['ovoko_mapping_source'] ?? null, 'local_availability' => data_get($item, 'local.local_availability'), 'local_status_label' => data_get($item, 'local.ui_status_label'), 'local_quantity' => data_get($item, 'local.quantity'), 'local_is_visible_storefront' => data_get($item, 'local.is_visible_storefront'), 'local_before' => $item['local'] ?? null, 'available_on_ovoko' => ((int) data_get($item, 'ovoko.quantity', 0)) > 0, 'ovoko_available' => ((int) data_get($item, 'ovoko.quantity', 0)) > 0, 'ovoko_status_raw' => data_get($item, 'ovoko.ovoko_status_raw'), 'ovoko_status_meaning' => data_get($item, 'ovoko.ovoko_status_meaning'), 'reserved_user' => data_get($item, 'ovoko.reserved_user'), 'reserved_date' => data_get($item, 'ovoko.reserved_date'), 'ovoko_stock_status' => $item['ovoko'] ?? null, 'recommended_local_availability' => data_get($item, 'planned_local_state.local_availability'), 'recommended_availability' => data_get($item, 'planned_local_state.local_availability'), 'planned_local_state' => $item['planned_local_state'] ?? null, 'planned_or_applied_local_state' => $item['planned_local_state'] ?? null, 'reason' => $this->reason($item, $action), 'diff' => $this->diff($item), 'action' => $action, 'blockers' => $item['blockers'] ?? [], 'error' => $item['error'] ?? null, 'api_status' => data_get($item, 'ovoko.http_status')];
+    }
+
+    private function reason(array $item, string $action): ?string
+    {
+        if (($item['blockers'] ?? []) !== []) return implode(', ', $item['blockers']);
+        if ($action === 'already_correct') return 'local availability already matches Ovoko';
+        if (isset($item['planned_local_state'])) return 'local availability differs from Ovoko';
+        return $item['error'] ?? null;
+    }
+
+    private function diff(array $item): array
+    {
+        $diff = [];
+        foreach (['local_availability', 'quantity', 'status', 'is_visible_storefront'] as $field) {
+            $local = data_get($item, 'local.'.($field === 'local_availability' ? 'local_availability' : $field));
+            $planned = data_get($item, 'planned_local_state.'.($field === 'local_availability' ? 'local_availability' : $field));
+            if ($planned !== null && $local !== $planned) $diff[$field] = ['local' => $local, 'planned' => $planned];
+        }
+        return $diff;
     }
 
     private function topBlockers(array $blockers): array

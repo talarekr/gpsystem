@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class OvokoStockSyncRun extends Model
 {
@@ -13,6 +14,11 @@ class OvokoStockSyncRun extends Model
     protected function casts(): array
     {
         return ['top_blockers' => 'array', 'recent_results' => 'array', 'started_at' => 'datetime', 'finished_at' => 'datetime', 'cancel_requested_at' => 'datetime'];
+    }
+
+    public function items(): HasMany
+    {
+        return $this->hasMany(OvokoStockSyncRunItem::class);
     }
 
     public function remainingCount(): int

@@ -49,6 +49,7 @@
         <div class="grid" id="metrics"></div>
     </div>
 
+    <div class="card"><h2>Full results</h2><div id="resultLinks" class="row"><p class="muted">Linki pojawią się po załadowaniu runa.</p></div></div>
     <div class="card"><h2>Top blockers</h2><pre id="blockers">{}</pre></div>
     <div class="card"><h2>Recent results (ostatnie 20)</h2><div id="recent"></div></div>
     <div class="card"><h2>Log</h2><pre id="log"></pre></div>
@@ -65,6 +66,7 @@ const urls = {
     tick: id => `/admin/tools/ovoko-stock-sync-runner/tick/${id}?confirm=ovoko-stock-sync-runner-tick`,
     cancel: id => `/admin/tools/ovoko-stock-sync-runner/cancel/${id}?confirm=cancel-ovoko-stock-sync-runner`,
     diagnostics: '/admin/tools/ovoko-stock-sync-runner/diagnostics',
+    results: (id, filter) => `/admin/tools/ovoko-stock-sync-runner/results/${id}?filter=${filter}&page=1&per_page=100`,
 };
 function log(msg){document.getElementById('log').textContent = `[${new Date().toLocaleTimeString()}] ${msg}\n` + document.getElementById('log').textContent;}
 async function getJson(url){const res=await fetch(url,{headers:{Accept:'application/json'}}); const data=await res.json(); if(!res.ok){throw data;} return data;}
@@ -77,6 +79,8 @@ function render(data){
     const keys=['no_change_count','would_update_count','applied_count','blocked_count','skipped_count','failed_count','remaining_count'];
     document.getElementById('metrics').innerHTML=keys.map(k=>`<div class="metric"><span class="muted">${k}</span><b>${data[k] ?? 0}</b></div>`).join('');
     document.getElementById('blockers').textContent=JSON.stringify(data.top_blockers || {}, null, 2);
+    const wouldCount=Number(data.would_update_count || 0); const blockedCount=Number(data.blocked_count || 0);
+    document.getElementById('resultLinks').innerHTML=currentRunId ? `<a class="btn secondary" href="${urls.results(currentRunId, 'would_update')}" target="_blank" rel="noopener">Pokaż produkty do zmiany (${wouldCount})</a><a class="btn secondary" href="${urls.results(currentRunId, 'blocked')}" target="_blank" rel="noopener">Pokaż blockery (${blockedCount})</a><a class="btn secondary" href="${urls.results(currentRunId, 'all')}" target="_blank" rel="noopener">Pokaż wszystkie wyniki</a>` : '<p class="muted">Linki pojawią się po załadowaniu runa.</p>';
     const rows=(data.recent_results || []).slice().reverse();
     document.getElementById('recent').innerHTML=rows.length ? `<table><thead><tr><th>part_id</th><th>ovoko_id</th><th>action</th><th>blockers</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${r.part_id ?? ''}</td><td>${r.ovoko_id ?? ''}</td><td>${r.action ?? ''}</td><td class="mono">${(r.blockers || []).join(', ')}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">Brak wyników.</p>';
     document.getElementById('applyStart').disabled=['queued','running'].includes(status);
