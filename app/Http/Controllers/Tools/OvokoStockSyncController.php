@@ -56,8 +56,8 @@ class OvokoStockSyncController extends Controller
             return response()->json($plan, 422);
         }
 
-        if (($item['action'] ?? null) === 'no_change') {
-            $this->writeLog($item, false, 'no_change', []);
+        if (($item['action'] ?? null) === 'already_correct') {
+            $this->writeLog($item, false, 'already_correct', []);
             return response()->json($plan + ['applied_count' => 0]);
         }
 
@@ -68,7 +68,7 @@ class OvokoStockSyncController extends Controller
                 return;
             }
 
-            $part->forceFill($item['planned_local_state'])->save();
+            $part->forceFill(array_intersect_key($item['planned_local_state'] ?? [], array_flip(['quantity', 'status', 'is_visible_storefront'])))->save();
             $applied = true;
         });
 
@@ -144,11 +144,14 @@ class OvokoStockSyncController extends Controller
         }
 
         $quantity = (int) $stock['quantity'];
+        $ovokoAvailability = $quantity > 0 ? 'for_sale' : 'sold';
         $planned = [
             'quantity' => $quantity,
             'status' => $quantity > 0 ? (in_array($part->status, ['draft', 'archived'], true) ? $part->status : 'ready') : 'draft',
             'is_visible_storefront' => $quantity > 0,
+            'local_availability' => $ovokoAvailability,
         ];
+        $action = $this->sameAvailability($local, $planned) ? 'already_correct' : ($ovokoAvailability === 'for_sale' ? 'should_mark_for_sale' : 'should_mark_sold');
 
         return [
             'part_id' => $partId,
@@ -157,7 +160,7 @@ class OvokoStockSyncController extends Controller
             'local' => $local,
             'ovoko' => $this->ovokoStockSummary($ovoko, $stock),
             'planned_local_state' => $planned,
-            'action' => $this->sameState($local, $planned) ? 'no_change' : 'update_local_stock',
+            'action' => $action,
             'blockers' => [],
         ];
     }
@@ -519,12 +522,23 @@ class OvokoStockSyncController extends Controller
 
     private function localState(Part $part): array
     {
-        return ['quantity' => (int) $part->quantity, 'status' => $part->status, 'is_visible_storefront' => (bool) $part->is_visible_storefront, 'needs_listing' => (bool) $part->needs_listing];
+        return [
+            'quantity' => (int) $part->quantity,
+            'status' => $part->status,
+            'raw_local_status' => $part->status,
+            'ui_status_label' => $part->adminStatusLabel(),
+            'is_visible_storefront' => (bool) $part->is_visible_storefront,
+            'needs_listing' => (bool) $part->needs_listing,
+            'sold_at' => $part->sold_at?->toISOString(),
+            'sale_source' => $part->sale_source,
+            'local_availability' => $part->adminLocalAvailability(),
+            'local_availability_source' => 'Part::adminLocalAvailability/from_admin_status_label',
+        ];
     }
 
-    private function sameState(array $local, array $planned): bool
+    private function sameAvailability(array $local, array $planned): bool
     {
-        return (int) $local['quantity'] === (int) $planned['quantity'] && (string) $local['status'] === (string) $planned['status'] && (bool) $local['is_visible_storefront'] === (bool) $planned['is_visible_storefront'];
+        return (string) ($local['local_availability'] ?? '') === (string) ($planned['local_availability'] ?? '');
     }
 
     public function writeLog(?array $item, bool $applied, string $status, array $blockers, ?int $runId = null): void
