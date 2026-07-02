@@ -248,8 +248,10 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/ebay/oauth/redirect', [EbayOAuthController::class, 'redirect'])->name('admin.ebay.oauth.redirect');
     Route::get('/admin/ebay/oauth/callback', [EbayOAuthController::class, 'callback'])->name('admin.ebay.oauth.callback');
     Route::get('/admin/tools/jarek-gearboxes/ping', [JarekGearboxToolController::class, 'ping'])->name('admin.tools.jarek-gearboxes.ping');
+    Route::get('/admin/tools/jarek-gearboxes/allegro-import-runner', [JarekGearboxToolController::class, 'runner'])->name('admin.tools.jarek-gearboxes.allegro-import-runner');
     Route::get('/admin/tools/jarek-gearboxes/allegro-import-dry-run', [JarekGearboxToolController::class, 'dryRun'])->name('admin.tools.jarek-gearboxes.allegro-import-dry-run');
     Route::get('/admin/tools/jarek-gearboxes/allegro-import-apply', [JarekGearboxToolController::class, 'apply'])->name('admin.tools.jarek-gearboxes.allegro-import-apply');
+    Route::get('/admin/tools/jarek-gearboxes/import-status', [JarekGearboxToolController::class, 'status'])->name('admin.tools.jarek-gearboxes.import-status');
     Route::get('/admin/tools/jarek-gearboxes/allegro-oauth/start', [JarekAllegroOAuthController::class, 'start'])->name('admin.tools.jarek-gearboxes.allegro-oauth.start');
     Route::get('/admin/tools/jarek-gearboxes/allegro-oauth/callback', [JarekAllegroOAuthController::class, 'callback'])->name('admin.tools.jarek-gearboxes.allegro-oauth.callback');
     Route::get('/admin/tools/jarek-gearboxes/{jarekGearbox}/ebay-preview', [JarekGearboxToolController::class, 'ebayPreview'])->name('admin.tools.jarek-gearboxes.ebay-preview');
