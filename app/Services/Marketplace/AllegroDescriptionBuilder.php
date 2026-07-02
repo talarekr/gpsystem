@@ -40,6 +40,8 @@ class AllegroDescriptionBuilder
             'description_source' => AllegroGpSwissDescriptionTemplate::SOURCE,
             'description_part_description_present' => $description !== '',
             'description_template' => AllegroGpSwissDescriptionTemplate::TEMPLATE,
+            'description_builder_class' => self::class,
+            'description_publish_blocked_if_template_missing' => true,
         ];
         $values['model_variant'] = $vehicle ? $this->cleanText((string) ($vehicle->model_variant ?? '')) : $this->cleanText((string) ($vehicleSnapshot['model_variant'] ?? ''));
 
@@ -95,6 +97,20 @@ class AllegroDescriptionBuilder
         return is_string($selected) && $selected !== '' ? $selected : null;
     }
 
+    private function descriptionTextContains(?array $descriptionPayload, string $needle): bool
+    {
+        $text = '';
+        foreach ((array) ($descriptionPayload['sections'] ?? []) as $section) {
+            foreach ((array) ($section['items'] ?? []) as $item) {
+                if (is_array($item) && strtoupper((string) ($item['type'] ?? '')) === 'TEXT') {
+                    $text .= ' '.strip_tags((string) ($item['content'] ?? ''));
+                }
+            }
+        }
+
+        return str_contains($text, $needle);
+    }
+
     private function cleanText(string $value): string
     {
         return trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags($value), ENT_QUOTES | ENT_HTML5, 'UTF-8')) ?: '');
@@ -109,6 +125,9 @@ class AllegroDescriptionBuilder
             'optional_donor_vehicle_fields_missing' => $diagnostics['optional_donor_vehicle_fields_missing'] ?? [],
             'description_engine_power_present' => ($values['engine_power_kw'] ?? '') !== '',
             'description_sections_count' => is_array($descriptionPayload) ? count($descriptionPayload['sections'] ?? []) : 0,
+            'description_contains_gp_swiss_intro' => $this->descriptionTextContains($descriptionPayload, 'Witam oferta dotyczy'),
+            'description_contains_gp_swiss_footer' => $this->descriptionTextContains($descriptionPayload, 'CZĘŚĆ SPRAWNA. STAN WIDOCZNY NA ZDJĘCIACH'),
+            'description_contains_vehicle_fields' => $this->descriptionTextContains($descriptionPayload, 'Marka:') && $this->descriptionTextContains($descriptionPayload, 'Model:'),
             'main_image_url' => $mainImageUrl,
             'offer_images_contains_main' => $offerImagesContainsMain,
         ];

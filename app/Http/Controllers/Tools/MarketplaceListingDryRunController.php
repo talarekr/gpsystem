@@ -186,6 +186,11 @@ class MarketplaceListingDryRunController extends Controller
             'new_description_payload' => $description,
             'description_source' => \App\Services\Marketplace\AllegroGpSwissDescriptionTemplate::SOURCE,
             'description_template' => \App\Services\Marketplace\AllegroGpSwissDescriptionTemplate::TEMPLATE,
+            'description_builder_class' => AllegroDescriptionBuilder::class,
+            'description_contains_gp_swiss_intro' => data_get($built, 'diagnostics.description_contains_gp_swiss_intro', false),
+            'description_contains_gp_swiss_footer' => data_get($built, 'diagnostics.description_contains_gp_swiss_footer', false),
+            'description_contains_vehicle_fields' => data_get($built, 'diagnostics.description_contains_vehicle_fields', false),
+            'description_publish_blocked_if_template_missing' => true,
             'main_image_url' => data_get($built, 'diagnostics.main_image_url'),
             'vehicle_fields' => data_get($built, 'diagnostics.description_vehicle_fields_present', []),
             'vehicle_diagnostics' => $built['diagnostics'] ?? [],
@@ -221,7 +226,7 @@ class MarketplaceListingDryRunController extends Controller
             'duration_ms' => (int) round((microtime(true) - $started) * 1000),
             'request_id' => $result['request_id'] ?? null,
             'external_id' => $offerId,
-            'payload' => ['offer_id' => $offerId, 'part_id' => $part->id, 'description_source' => $response['description_source'], 'description_template' => $response['description_template'], 'request_payload_keys' => ['description']],
+            'payload' => ['offer_id' => $offerId, 'part_id' => $part->id, 'description_source' => $response['description_source'], 'description_template' => $response['description_template'], 'description_builder_class' => $response['description_builder_class'], 'description_contains_gp_swiss_intro' => $response['description_contains_gp_swiss_intro'], 'description_contains_gp_swiss_footer' => $response['description_contains_gp_swiss_footer'], 'description_contains_vehicle_fields' => $response['description_contains_vehicle_fields'], 'description_publish_blocked_if_template_missing' => true, 'request_payload_keys' => ['description']],
             'created_at' => now(),
         ]);
 

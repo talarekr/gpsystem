@@ -7,6 +7,8 @@ use App\Models\Part;
 use App\Services\Marketplace\Api\AllegroApiClient;
 use App\Services\Marketplace\AllegroSalesSettingsResolver;
 use App\Services\Marketplace\ApiIntegrationLogger;
+use App\Services\Marketplace\AllegroDescriptionBuilder;
+use App\Services\Marketplace\AllegroGpSwissDescriptionTemplate;
 use App\Services\Marketplace\MarketplaceListingReadinessService;
 use App\Services\Marketplace\MarketplacePublishGate;
 
@@ -34,12 +36,15 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
         $afterSales = $this->afterSalesSettings($settings, $salesSettings);
         $client = new AllegroApiClient('allegro_main', $account);
         $offerImages = $this->normalizeImageUrls($payload['image_urls'] ?? $payload['images'] ?? []);
-        $description = $this->descriptionPayload($part, $payload, $offerImages);
+        $builtDescription = $this->descriptionPayload($part, $offerImages);
+        $description = $builtDescription['description'];
         $productNameDiagnostics = $this->productNameDiagnostics($part, $payload);
         if (($productNameDiagnostics['product_name_length'] ?? 0) < 12) return ['ok' => false, 'status' => 'blocked_product_name_too_short', 'errors' => ['allegro_product_name_too_short'], 'request_summary' => $productNameDiagnostics, 'write' => false];
         $productSet = $this->productSetPayload($settings, $payload, $productNameDiagnostics['product_name'], $offerImages[0] ?? null);
         $offerParameters = $this->offerParametersPayload($payload, $productSet);
         $body = array_filter(['name' => (string) ($payload['title'] ?? $part->name), 'category' => ['id' => (string) ($payload['category_id'] ?? '')], 'productSet' => $productSet, 'parameters' => $offerParameters, 'images' => $offerImages, 'description' => $description, 'sellingMode' => $settings['sellingMode'] ?? ['format' => 'BUY_NOW', 'price' => ['amount' => (string) ($payload['price_pln'] ?? $readiness['marketplace_price']), 'currency' => 'PLN']], 'stock' => ['available' => (int) ($payload['quantity'] ?? $part->quantity ?? 1), 'unit' => 'UNIT'], 'publication' => ['status' => 'ACTIVE'], 'delivery' => $delivery, 'payments' => $this->paymentsPayload($settings['payments'] ?? null, $payload['payments'] ?? null), 'afterSalesServices' => $afterSales, 'location' => $settings['location'] ?? null, 'external' => filled($signature['allegro_signature_value']) ? ['id' => $signature['allegro_signature_value']] : null], fn ($v) => $v !== null && $v !== []);
+        $descriptionGuard = $this->assertGpSwissDescriptionTemplate($body, $builtDescription['diagnostics']);
+        if (! $descriptionGuard['ok']) return ['ok' => false, 'status' => 'blocked', 'action' => 'createProductOffer', 'error' => 'allegro_description_template_not_applied', 'ui_error' => 'allegro_description_template_not_applied', 'request_summary' => $this->requestSummary($payload, $body, $part) + $productNameDiagnostics + $signature + ['allegro_sales_settings' => $this->salesSettingsSummary($salesSettings), 'description_guard' => $descriptionGuard], 'write' => false];
         $result = $client->createProductOffer($body);
         $offerId = filled($result['offer_id'] ?? null) ? (string) $result['offer_id'] : null;
         $offerUrl = $offerId ? 'https://allegro.pl/oferta/'.$offerId : null;
@@ -96,23 +101,50 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
         return ['product_name' => $productName, 'product_name_source' => $source, 'product_name_length' => mb_strlen($productName), 'part_title' => $partTitle, 'main_part_code' => $mainPartCode, 'product_name_fallback_used' => $fallbackUsed];
     }
 
-    private function descriptionPayload(Part $part, array $payload, array $offerImages): ?array
+    /** @return array{description: ?array<string, mixed>, diagnostics: array<string, mixed>, blockers: array<int, string>} */
+    private function descriptionPayload(Part $part, array $offerImages): array
     {
-        $localDescription = $this->sanitizedPartDescription($part);
-        if ($localDescription !== '') {
-            return ['sections' => [['items' => array_values(array_filter([
-                ['type' => 'TEXT', 'content' => '<p>'.e($localDescription).'</p>'],
-                filled($offerImages[0] ?? null) ? ['type' => 'IMAGE', 'url' => $offerImages[0]] : null,
-            ]))]]];
-        }
-
-        $description = $payload['description'] ?? null;
-        if (is_array($description) && $this->hasNonEmptyDescriptionSection($description)) return $description;
-
-        $built = app(\App\Services\Marketplace\AllegroDescriptionBuilder::class)->build($part, $offerImages);
+        $built = app(AllegroDescriptionBuilder::class)->build($part, $offerImages);
         $builtDescription = $built['description'] ?? null;
 
-        return is_array($builtDescription) && $this->hasNonEmptyDescriptionSection($builtDescription) ? $builtDescription : null;
+        return [
+            'description' => is_array($builtDescription) && $this->hasNonEmptyDescriptionSection($builtDescription) ? $builtDescription : null,
+            'diagnostics' => (array) ($built['diagnostics'] ?? []),
+            'blockers' => (array) ($built['blockers'] ?? []),
+        ];
+    }
+
+    /** @param array<string, mixed> $body @param array<string, mixed> $builderDiagnostics */
+    private function assertGpSwissDescriptionTemplate(array $body, array $builderDiagnostics = []): array
+    {
+        $description = (array) data_get($body, 'description', []);
+        $text = '';
+        $hasTextImage5050 = false;
+        foreach ((array) ($description['sections'] ?? []) as $section) {
+            $items = array_values((array) ($section['items'] ?? []));
+            if (count($items) >= 2 && strtoupper((string) ($items[0]['type'] ?? '')) === 'TEXT' && strtoupper((string) ($items[1]['type'] ?? '')) === 'IMAGE') {
+                $hasTextImage5050 = true;
+            }
+            foreach ($items as $item) {
+                if (is_array($item) && strtoupper((string) ($item['type'] ?? '')) === 'TEXT') $text .= ' '.strip_tags((string) ($item['content'] ?? ''));
+            }
+        }
+
+        $intro = str_contains($text, 'Witam oferta dotyczy');
+        $footer = str_contains($text, 'CZĘŚĆ SPRAWNA. STAN WIDOCZNY NA ZDJĘCIACH');
+        $template = $hasTextImage5050 ? AllegroGpSwissDescriptionTemplate::TEMPLATE : null;
+
+        return array_merge($builderDiagnostics, [
+            'ok' => $intro && $footer && $template === AllegroGpSwissDescriptionTemplate::TEMPLATE,
+            'blocker' => $intro && $footer && $template === AllegroGpSwissDescriptionTemplate::TEMPLATE ? null : 'allegro_description_template_not_applied',
+            'description_source' => AllegroGpSwissDescriptionTemplate::SOURCE,
+            'description_template' => $template,
+            'description_builder_class' => AllegroDescriptionBuilder::class,
+            'description_contains_gp_swiss_intro' => $intro,
+            'description_contains_gp_swiss_footer' => $footer,
+            'description_contains_vehicle_fields' => str_contains($text, 'Marka:') && str_contains($text, 'Model:'),
+            'description_publish_blocked_if_template_missing' => true,
+        ]);
     }
 
     private function sanitizedPartDescription(Part $part): string
@@ -123,12 +155,15 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
     private function descriptionDiagnostics(Part $part, ?array $body = null): array
     {
         $sanitized = $this->sanitizedPartDescription($part);
+        $guard = is_array($body) ? $this->assertGpSwissDescriptionTemplate($body) : [];
 
-        return [
-            'description_present' => $sanitized !== '',
-            'description_source' => $sanitized !== '' ? 'part.description' : ($this->hasNonEmptyDescriptionSection((array) data_get($body, 'description', [])) ? 'payload_or_fallback' : 'none'),
+        return array_merge([
+            'description_present' => $this->hasNonEmptyDescriptionSection((array) data_get($body, 'description', [])),
+            'description_source' => AllegroGpSwissDescriptionTemplate::SOURCE,
+            'description_template' => AllegroGpSwissDescriptionTemplate::TEMPLATE,
+            'description_builder_class' => AllegroDescriptionBuilder::class,
             'description_sanitized_length' => mb_strlen($sanitized),
-        ];
+        ], $guard);
     }
 
     private function hasNonEmptyDescriptionSection(array $description): bool
