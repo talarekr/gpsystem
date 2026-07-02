@@ -34,6 +34,7 @@ class PartResource extends Resource
     public const DEFAULT_CONDITION_VALUE = 'Używany';
     public const EXPECTED_LEFT_STEERING_VALUE = 'po lewej';
     public const EXPECTED_RIGHT_STEERING_VALUE = 'po prawej';
+    public const PART_TITLE_MAX_LENGTH = 75;
     public const ADMIN_STEERING_OPTIONS = [
         self::EXPECTED_LEFT_STEERING_VALUE => self::EXPECTED_LEFT_STEERING_VALUE,
         self::EXPECTED_RIGHT_STEERING_VALUE => self::EXPECTED_RIGHT_STEERING_VALUE,
@@ -121,7 +122,17 @@ class PartResource extends Resource
                     ->columns(12)
                     ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--part-info'])
                     ->schema([
-                        Forms\Components\TextInput::make('name')->label('Tytuł produktu')->required()->maxLength(255)->live(onBlur: true)->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))->columnSpanFull(),
+                        Forms\Components\TextInput::make('name')
+                            ->label('Tytuł produktu')
+                            ->required()
+                            ->maxLength(self::PART_TITLE_MAX_LENGTH)
+                            ->live(debounce: 150)
+                            ->suffix(fn (Forms\Get $get): HtmlString => self::partTitleCharacterCounter($get('name')))
+                            ->extraInputAttributes([
+                                'class' => 'font-normal',
+                            ])
+                            ->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))
+                            ->columnSpanFull(),
                         Forms\Components\TextInput::make('part_number')->label('Główny kod części')->maxLength(255)->live(debounce: 500)->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))->columnSpanFull(),
                         Forms\Components\Hidden::make('sku'),
                         Forms\Components\Select::make('category_id')->label('Kategoria')->placeholder('Kategoria')->relationship('category', 'name')->required()->validationMessages(['required' => 'Kategoria jest wymagana.'])->searchable()->preload()->native(false)->live()->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set): null => self::refreshMarketplaceMappings($get, $set))->suffixAction(self::categoryTreeAction())->columnSpanFull(),
@@ -536,6 +547,19 @@ class PartResource extends Resource
         $details = self::carDetails($car);
 
         return '<div class="gps-vehicle-option"><span class="gps-vehicle-option__icon">🚗</span><span><strong>'.e(self::carLabel($car)).'</strong>'.($details ? '<small>'.e(implode(' · ', $details)).'</small>' : '').'</span></div>';
+    }
+
+    public static function partTitleCharacterCounter(?string $title): HtmlString
+    {
+        $length = mb_strlen((string) $title);
+        $toneClass = $length > self::PART_TITLE_MAX_LENGTH ? 'text-amber-600 dark:text-amber-400' : 'text-gray-400 dark:text-gray-500';
+
+        return new HtmlString(sprintf(
+            '<span class="text-xs font-normal tabular-nums whitespace-nowrap %s">%d/%d</span>',
+            $toneClass,
+            $length,
+            self::PART_TITLE_MAX_LENGTH,
+        ));
     }
 
     public static function categoryTreeAction(): Action
