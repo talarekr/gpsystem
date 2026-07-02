@@ -15,16 +15,20 @@ class OvokoStockSyncRunProcessor
 
     public function tick(OvokoStockSyncRun $run): array
     {
-        $lock = Cache::lock('ovoko-stock-sync-run:'.$run->id, 120);
-
-        if (! $lock->get()) {
-            return ['ok' => false, 'locked' => true, 'message' => 'Run is already being processed by another tick.'] + $run->fresh()->summary();
-        }
-
         try {
-            return ['ok' => true, 'locked' => false] + $this->processUnlocked($run->fresh());
-        } finally {
-            optional($lock)->release();
+            $lock = Cache::lock('ovoko-stock-sync-run:'.$run->id, 120);
+
+            if (! $lock->get()) {
+                return ['ok' => false, 'locked' => true, 'cache_lock_available' => true, 'message' => 'Run is already being processed by another tick.'] + $run->fresh()->summary();
+            }
+
+            try {
+                return ['ok' => true, 'locked' => false, 'cache_lock_available' => true] + $this->processUnlocked($run->fresh());
+            } finally {
+                optional($lock)->release();
+            }
+        } catch (Throwable $e) {
+            return ['ok' => true, 'locked' => false, 'cache_lock_available' => false, 'lock_warning' => $e->getMessage()] + $this->processUnlocked($run->fresh());
         }
     }
 
