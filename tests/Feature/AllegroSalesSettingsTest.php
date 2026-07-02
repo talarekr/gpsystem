@@ -122,15 +122,14 @@ class AllegroSalesSettingsTest extends TestCase
             'https://api.allegro.pl/sale/product-offers' => Http::response(['id' => 'offer-123'], 201),
         ]));
         $part = $this->part('KURIER DPD');
-        $description = ['sections' => [['items' => [['type' => 'TEXT', 'content' => '<p>Opis</p>']]]]];
         $payload = [
             'sku' => 'GPS-7890',
             'title' => 'Błotnik Audi',
             'category_id' => '123',
             'price_pln' => 100,
             'quantity' => 1,
-            'image_urls' => ['https://gpswiss.example.test/parts/7890/one.jpg', 'https://gpswiss.example.test/parts/7890/two.jpg'],
-            'description' => $description,
+            'image_urls' => ['https://gpswiss.pl/storage/parts/photos/imported/7890/kuyJdjAM4xzYvW7Hoy0YQ7WlCKE8nRfkSUskHyT0.jpg', 'https://gpswiss.example.test/parts/7890/two.jpg'],
+            'description' => ['sections' => [['items' => [['type' => 'TEXT', 'content' => '<p>Opis ręczny nie powinien wejść</p>']]]]],
             'allegro_parameters' => [
                 'payload_parameters' => [['id' => '11323', 'valuesIds' => ['used']]],
                 'product_parameters' => [['id' => '129917', 'valuesIds' => ['129917_2']]],
@@ -163,21 +162,24 @@ class AllegroSalesSettingsTest extends TestCase
         $this->assertTrue($result['request_summary']['productSet_0_product_main_image_present']);
         $this->assertSame(1, $result['request_summary']['description_sections_count']);
         $this->assertTrue($result['request_summary']['description_has_non_empty_content']);
-        Http::assertSent(function ($request) use ($description) {
+        Http::assertSent(function ($request) {
             if ($request->url() !== 'https://api.allegro.pl/sale/product-offers') {
                 return false;
             }
 
             $data = $request->data();
 
-            return $data['images'] === ['https://gpswiss.example.test/parts/7890/one.jpg', 'https://gpswiss.example.test/parts/7890/two.jpg']
+            return $data['images'] === ['https://gpswiss.pl/storage/parts/photos/imported/7890/kuyJdjAM4xzYvW7Hoy0YQ7WlCKE8nRfkSUskHyT0.jpg', 'https://gpswiss.example.test/parts/7890/two.jpg']
                 && data_get($data, 'delivery.shippingRates.id') === 'ship-dpd'
                 && data_get($data, 'afterSalesServices.returnPolicy.id') === 'ret-1'
                 && data_get($data, 'afterSalesServices.impliedWarranty.id') === 'imp-1'
                 && data_get($data, 'afterSalesServices.warranty.id') === 'war-1'
-                && data_get($data, 'description.sections') === $description['sections']
+                && str_contains((string) data_get($data, 'description.sections.0.items.0.content'), 'Witam oferta dotyczy')
+                && str_contains((string) data_get($data, 'description.sections.0.items.0.content'), 'CZĘŚĆ SPRAWNA. STAN WIDOCZNY NA ZDJĘCIACH')
+                && str_contains((string) data_get($data, 'description.sections.0.items.0.content'), 'Marka:')
+                && str_contains((string) data_get($data, 'description.sections.0.items.0.content'), 'Model:')
                 && data_get($data, 'productSet.0.product.name') === 'Błotnik Audi'
-                && data_get($data, 'productSet.0.product.images') === ['https://gpswiss.example.test/parts/7890/one.jpg']
+                && data_get($data, 'productSet.0.product.images') === ['https://gpswiss.pl/storage/parts/photos/imported/7890/kuyJdjAM4xzYvW7Hoy0YQ7WlCKE8nRfkSUskHyT0.jpg']
                 && array_column($data['parameters'], 'id') === ['11323']
                 && array_column(data_get($data, 'productSet.0.product.parameters'), 'id') === ['129917'];
         });
@@ -193,7 +195,7 @@ class AllegroSalesSettingsTest extends TestCase
             'category_id' => '256035',
             'price_pln' => 100,
             'quantity' => 1,
-            'image_urls' => ['https://gpswiss.example.test/parts/7866/one.jpg'],
+            'image_urls' => ['https://gpswiss.pl/storage/parts/photos/imported/7890/kuyJdjAM4xzYvW7Hoy0YQ7WlCKE8nRfkSUskHyT0.jpg'],
             'allegro_parameters' => [
                 'payload_parameters' => [
                     ['id' => '11323', 'valuesIds' => ['11323_2']],
@@ -329,7 +331,7 @@ class AllegroSalesSettingsTest extends TestCase
             'category_id' => '123',
             'price_pln' => 100,
             'quantity' => 1,
-            'image_urls' => ['https://gpswiss.example.test/parts/7897/one.jpg'],
+            'image_urls' => ['https://gpswiss.pl/storage/parts/photos/imported/7890/kuyJdjAM4xzYvW7Hoy0YQ7WlCKE8nRfkSUskHyT0.jpg'],
             'description' => ['sections' => [['items' => [['type' => 'TEXT', 'content' => '<h2>Cechy produktu</h2><p>O produkcie marketingowy opis</p>']]]]],
             'allegro_parameters' => ['payload_parameters' => [], 'product_parameters' => []],
         ];
@@ -342,7 +344,8 @@ class AllegroSalesSettingsTest extends TestCase
 
         $this->assertTrue($result['ok']);
         $this->assertTrue($result['request_summary']['description_present']);
-        $this->assertSame('part.description', $result['request_summary']['description_source']);
+        $this->assertSame('allegro_gp_swiss_template', $result['request_summary']['description_source']);
+        $this->assertSame('text_image_50_50', $result['request_summary']['description_template']);
         $this->assertGreaterThan(0, $result['request_summary']['description_sanitized_length']);
         Http::assertSent(fn ($request) => $request->url() === 'https://api.allegro.pl/sale/product-offers'
             && str_contains((string) data_get($request->data(), 'description.sections.0.items.0.content'), 'Lokalny opis części 7897 Numer: ABC')
@@ -350,11 +353,71 @@ class AllegroSalesSettingsTest extends TestCase
             && ! str_contains((string) data_get($request->data(), 'description.sections.0.items.0.content'), 'marketingowy opis'));
     }
 
+    public function test_allegro_live_publish_blocks_before_api_when_template_markers_are_missing(): void
+    {
+        Http::fake(array_merge($this->fakeAllegro(), [
+            'https://api.allegro.pl/sale/product-offers' => Http::response(['id' => 'offer-should-not-be-created'], 201),
+        ]));
+        $part = $this->part('KURIER DPD');
+        $part->images()->delete();
+        $payload = [
+            'sku' => 'GPS-BLOCK',
+            'title' => 'Mechanizm wycieraczek Audi',
+            'category_id' => '123',
+            'price_pln' => 100,
+            'quantity' => 1,
+            'image_urls' => ['https://gpswiss.example.test/not-builder.jpg'],
+            'description' => ['sections' => [['items' => [['type' => 'TEXT', 'content' => '<p>Stary opis</p>']]]]],
+            'allegro_parameters' => ['payload_parameters' => [], 'product_parameters' => []],
+        ];
+
+        $adapter = new class(app(MarketplaceListingReadinessService::class), app(MarketplacePublishGate::class), app(ApiIntegrationLogger::class), app(AllegroSalesSettingsResolver::class)) extends AllegroPublishAdapter {
+            public function callPerformLivePublish(Part $part, array $readiness, array $payload, MarketplaceAccount $account): array { return $this->performLivePublish($part, $readiness, $payload, $account); }
+        };
+
+        $result = $adapter->callPerformLivePublish($part, ['marketplace_price' => 100], $payload, MarketplaceAccount::query()->where('code', 'allegro_main')->firstOrFail());
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('allegro_description_template_not_applied', $result['ui_error']);
+        $this->assertFalse($result['write']);
+        Http::assertNotSent(fn ($request) => $request->url() === 'https://api.allegro.pl/sale/product-offers');
+    }
+
+    public function test_short_part_description_still_uses_gp_swiss_template(): void
+    {
+        Http::fake(array_merge($this->fakeAllegro(), [
+            'https://api.allegro.pl/sale/product-offers' => Http::response(['id' => 'offer-123'], 201),
+        ]));
+        $part = $this->part('KURIER DPD');
+        $part->forceFill(['description' => 'KLAPA W KOLOR'])->save();
+        $payload = [
+            'sku' => 'GPS-SHORT',
+            'title' => 'Klapa tylna Audi',
+            'category_id' => '123',
+            'price_pln' => 100,
+            'quantity' => 1,
+            'image_urls' => ['https://gpswiss.pl/storage/parts/photos/imported/7890/kuyJdjAM4xzYvW7Hoy0YQ7WlCKE8nRfkSUskHyT0.jpg'],
+            'allegro_parameters' => ['payload_parameters' => [], 'product_parameters' => []],
+        ];
+
+        $adapter = new class(app(MarketplaceListingReadinessService::class), app(MarketplacePublishGate::class), app(ApiIntegrationLogger::class), app(AllegroSalesSettingsResolver::class)) extends AllegroPublishAdapter {
+            public function callPerformLivePublish(Part $part, array $readiness, array $payload, MarketplaceAccount $account): array { return $this->performLivePublish($part, $readiness, $payload, $account); }
+        };
+
+        $result = $adapter->callPerformLivePublish($part, ['marketplace_price' => 100], $payload, MarketplaceAccount::query()->where('code', 'allegro_main')->firstOrFail());
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame('allegro_gp_swiss_template', $result['request_summary']['description_source']);
+        Http::assertSent(fn ($request) => $request->url() === 'https://api.allegro.pl/sale/product-offers'
+            && str_contains((string) data_get($request->data(), 'description.sections.0.items.0.content'), '<p><b>KLAPA W KOLOR</b></p>')
+            && str_contains((string) data_get($request->data(), 'description.sections.0.items.0.content'), 'Witam oferta dotyczy'));
+    }
+
     private function part(?string $shippingRateName): Part
     {
         config(['app.url' => 'https://gpswiss.pl']);
         MarketplaceAccount::query()->create(['code' => 'allegro_main', 'marketplace' => 'allegro', 'name' => 'Allegro', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://api.allegro.pl', 'api_credentials' => ['access_token' => 'token']]);
-        $part = Part::query()->create(['name' => 'Błotnik Audi', 'category_id' => 77, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'vehicle_snapshot' => ['make' => 'Audi'], 'is_visible_storefront' => true, 'allegro_shipping_rate_name' => $shippingRateName]);
+        $part = Part::query()->create(['name' => 'Błotnik Audi', 'category_id' => 77, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'vehicle_snapshot' => ['make' => 'Audi', 'model' => 'A4'], 'is_visible_storefront' => true, 'allegro_shipping_rate_name' => $shippingRateName]);
         MarketplaceCategoryMapping::query()->create(['local_category_id' => 77, 'channel' => 'allegro_main', 'external_category_id' => '123']);
         PartImage::query()->create(['part_id' => $part->id, 'path' => 'parts/photos/imported/7890/kuyJdjAM4xzYvW7Hoy0YQ7WlCKE8nRfkSUskHyT0.jpg', 'is_primary' => true, 'sort_order' => 1]);
         return $part;
