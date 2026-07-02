@@ -8,6 +8,7 @@ use App\Models\Part;
 use App\Services\Marketplace\ApiIntegrationLogger;
 use App\Services\Marketplace\MarketplaceListingReadinessService;
 use App\Services\Marketplace\MarketplacePublishGate;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Schema;
 
 abstract class BaseMarketplacePublishAdapter implements MarketplacePublishAdapterInterface
@@ -34,9 +35,25 @@ abstract class BaseMarketplacePublishAdapter implements MarketplacePublishAdapte
 
     public function publish(Part $part, MarketplacePublishCommand $command): MarketplacePublishResult
     {
+        if ($this->marketplace() === 'allegro') {
+            $lock = Cache::lock($this->publishLockKey($part), 180);
+            if (! $lock->get()) return $this->blocked('allegro_publish_already_in_progress', ['status' => 'allegro_publish_already_in_progress']);
+
+            try {
+                return $this->publishWithoutLock($part, $command);
+            } finally {
+                optional($lock)->release();
+            }
+        }
+
+        return $this->publishWithoutLock($part, $command);
+    }
+
+    private function publishWithoutLock(Part $part, MarketplacePublishCommand $command): MarketplacePublishResult
+    {
         $gate = $this->gate->decision($this->channel());
         if ($command->dryRun || ! $command->confirm || ! $gate['allowed']) return $this->blocked('publish_blocked_by_flags', ['publish_gate' => $gate]);
-        if ($existing = $this->activeListing($part)) return $this->blocked('duplicate_guard_existing_listing', ['status' => 'skipped_existing_listing', 'external_listing_id' => $existing->external_listing_id ?: $existing->external_offer_id, 'warnings' => ['Istnieje aktywny lokalny listing; nie wykonano duplikującego publish.']]);
+        if ($existing = $this->activeListing($part)) return $this->blocked('duplicate_guard_existing_listing', ['status' => 'skipped_existing_listing', 'external_listing_id' => $existing->external_listing_id ?: $existing->external_offer_id, 'warnings' => ['Istnieje lokalny Allegro listing niebędący ended/failed; nie wykonano duplikującego publish.']]);
 
         $readiness = $this->readinessService->checkPartReadiness($part, $this->channel());
         if (! (bool) ($readiness['can_publish_later'] ?? false)) return new MarketplacePublishResult($this->channel(), ['channel' => $this->channel(), 'marketplace' => $this->marketplace(), 'success' => false, 'status' => 'blocked_readiness', 'errors' => $readiness['blockers'] ?? [], 'warnings' => $readiness['warnings'] ?? [], 'write' => false]);
@@ -68,6 +85,7 @@ abstract class BaseMarketplacePublishAdapter implements MarketplacePublishAdapte
     }
 
     protected function blocked(string $reason, array $extra = []): MarketplacePublishResult { return new MarketplacePublishResult($this->channel(), array_merge(['channel' => $this->channel(), 'marketplace' => $this->marketplace(), 'success' => false, 'status' => 'blocked', 'blocked' => true, 'errors' => [$reason], 'warnings' => [], 'write' => false], $extra)); }
-    protected function activeListing(Part $part): ?MarketplaceListing { return Schema::hasTable('marketplace_listings') ? MarketplaceListing::query()->where('part_id', $part->id)->where('marketplace', $this->marketplace())->where(function ($q) { $q->whereNotNull('external_listing_id')->orWhereNotNull('external_offer_id'); })->where(function ($q) { $q->whereNull('external_listing_id')->orWhere('external_listing_id', 'not like', 'GPSW-%'); })->where(function ($q) { $q->whereNull('external_offer_id')->orWhere('external_offer_id', 'not like', 'GPSW-%'); })->whereIn('status', ['published','active','ACTIVE','live'])->whereNotIn('last_api_status', ['ended','inactive','deleted','archived','not_found'])->first() : null; }
+    protected function activeListing(Part $part): ?MarketplaceListing { return Schema::hasTable('marketplace_listings') ? MarketplaceListing::query()->where('part_id', $part->id)->where('marketplace', $this->marketplace())->where(function ($q) { $q->whereNotNull('external_listing_id')->orWhereNotNull('external_offer_id'); })->where(function ($q) { $q->whereNull('external_listing_id')->orWhere('external_listing_id', 'not like', 'GPSW-%'); })->where(function ($q) { $q->whereNull('external_offer_id')->orWhere('external_offer_id', 'not like', 'GPSW-%'); })->whereNotIn('status', ['ended','failed','deleted','archived','cancelled','ENDED','FAILED','DELETED','ARCHIVED','CANCELLED'])->whereNotIn('last_api_status', ['ended','failed','deleted','archived','not_found','ENDED','FAILED','DELETED','ARCHIVED','NOT_FOUND'])->first() : null; }
+    protected function publishLockKey(Part $part): string { return 'marketplace_publish:'.$this->marketplace().':'.$part->id; }
     protected function requestSummary(array $payload): array { return ['keys' => array_keys($payload), 'sku' => $payload['sku'] ?? null, 'title_present' => filled($payload['title'] ?? null), 'category_id' => $payload['category_id'] ?? null, 'images_count' => count((array) ($payload['image_urls'] ?? [])), 'price' => $payload['price_eur'] ?? $payload['price_pln'] ?? null, 'quantity' => $payload['quantity'] ?? null, 'marketplace_images' => $payload['marketplace_image_diagnostics'] ?? null]; }
 }
