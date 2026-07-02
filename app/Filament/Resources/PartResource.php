@@ -553,29 +553,31 @@ class PartResource extends Resource
     {
         $limit = self::PART_TITLE_MAX_LENGTH;
 
-        return new HtmlString(<<<HTML
+        $html = <<<'HTML'
             <span
                 class="text-xs font-normal tabular-nums whitespace-nowrap text-gray-400 dark:text-gray-500"
                 x-data="{
-                    limit: {$limit},
+                    limit: __LIMIT__,
                     update() {
-                        const input = this.\$el.closest('.fi-input-wrp')?.querySelector('input');
-                        const length = input?.value?.length ?? 0;
+                        const input = this.$el.closest('.fi-input-wrp')?.querySelector('input');
+                        const currentLength = input?.value?.length ?? 0;
 
-                        this.\$el.textContent = `${length}/${this.limit}`;
-                        this.\$el.classList.toggle('text-amber-600', length > this.limit);
-                        this.\$el.classList.toggle('dark:text-amber-400', length > this.limit);
-                        this.\$el.classList.toggle('text-gray-400', length <= this.limit);
-                        this.\$el.classList.toggle('dark:text-gray-500', length <= this.limit);
+                        this.$el.textContent = `${currentLength}/${this.limit}`;
+                        this.$el.classList.toggle('text-amber-600', currentLength > this.limit);
+                        this.$el.classList.toggle('dark:text-amber-400', currentLength > this.limit);
+                        this.$el.classList.toggle('text-gray-400', currentLength <= this.limit);
+                        this.$el.classList.toggle('dark:text-gray-500', currentLength <= this.limit);
                     },
                 }"
                 x-init="
                     update();
-                    const input = \$el.closest('.fi-input-wrp')?.querySelector('input');
+                    const input = $el.closest('.fi-input-wrp')?.querySelector('input');
                     input?.addEventListener('input', () => update());
                 "
-            >0/{$limit}</span>
-        HTML);
+            >0/__LIMIT__</span>
+        HTML;
+
+        return new HtmlString(str_replace('__LIMIT__', (string) $limit, $html));
     }
 
     public static function categoryTreeAction(): Action
