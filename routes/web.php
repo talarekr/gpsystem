@@ -134,7 +134,6 @@ use App\Http\Controllers\Tools\SetFrontendMaintenanceController;
 use App\Http\Controllers\Tools\DeleteTestMarketplaceOrdersController;
 use App\Http\Controllers\Tools\ImportMarketplaceOrdersController;
 use App\Http\Controllers\Tools\ShipmentToolsController;
-use App\Http\Controllers\Tools\JarekGearboxToolsController;
 use App\Services\ImportMigration\WooProductImport;
 use App\Support\ImportMigration\ManualImportFileResolver;
 use App\Support\ImportMigration\WooProductImportRunRepository;
@@ -276,9 +275,6 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::match(['get', 'post'], '/admin/tools/ovoko/cars/{car}/mapping-apply', [OvokoCarMappingController::class, 'apply'])->name('admin.tools.ovoko.cars.mapping-apply');
     Route::get('/admin/tools/allegro/offers/description-update-dry-run', [MarketplaceListingDryRunController::class, 'allegroDescriptionUpdateDryRun'])->name('admin.tools.allegro.offers.description-update-dry-run');
     Route::get('/admin/tools/allegro/offers/description-update-apply', [MarketplaceListingDryRunController::class, 'allegroDescriptionUpdateApply'])->name('admin.tools.allegro.offers.description-update-apply');
-    Route::get('/admin/tools/jarek-gearboxes/allegro-import-dry-run', [JarekGearboxToolsController::class, 'dryRunImport'])->name('admin.tools.jarek-gearboxes.allegro-import-dry-run');
-    Route::get('/admin/tools/jarek-gearboxes/allegro-import-apply', [JarekGearboxToolsController::class, 'applyImport'])->name('admin.tools.jarek-gearboxes.allegro-import-apply');
-    Route::get('/admin/tools/jarek-gearboxes/{gearbox}/ebay-preview', [JarekGearboxToolsController::class, 'ebayPreview'])->name('admin.tools.jarek-gearboxes.ebay-preview');
     Route::get('/admin/tools/marketplace/allegro/offers/{offerId}/description-update', [MarketplaceListingDryRunController::class, 'allegroDescriptionUpdate'])->name('admin.tools.marketplace.allegro.offers.description-update');
 });
 
