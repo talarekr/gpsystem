@@ -125,6 +125,20 @@ class Part extends Model
         return ['draft'=>'Szkic','needs_review'=>'Do sprawdzenia','ready'=>'W sprzedaży','published'=>'Opublikowana','sold'=>'Sprzedana','archived'=>'Archiwalna'];
     }
 
+    public function adminStatusLabel(): string
+    {
+        return self::statusOptions()[$this->status] ?? ($this->status ?: '—');
+    }
+
+    public function adminLocalAvailability(): string
+    {
+        return match ($this->adminStatusLabel()) {
+            'W sprzedaży', 'Opublikowana' => 'for_sale',
+            'Sprzedana' => 'sold',
+            default => 'not_for_sale',
+        };
+    }
+
     public static function statusColor(?string $status): string
     {
         return match ($status) {

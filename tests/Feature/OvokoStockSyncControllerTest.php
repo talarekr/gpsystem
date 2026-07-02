@@ -44,7 +44,7 @@ class OvokoStockSyncControllerTest extends TestCase
             ->assertJsonPath('items.0.ovoko.quantity', 0)
             ->assertJsonPath('items.0.ovoko.status', 'sold')
             ->assertJsonPath('items.0.planned_local_state.quantity', 0)
-            ->assertJsonPath('items.0.action', 'update_local_stock');
+            ->assertJsonPath('items.0.action', 'should_mark_sold');
 
         Http::assertSent(fn ($request): bool => (string) $request->url() === 'https://ovoko.test/get/part/11711' && array_keys($request->data()) === ['username', 'password', 'user_token']);
     }
@@ -134,7 +134,7 @@ class OvokoStockSyncControllerTest extends TestCase
             ->assertJsonPath('items.0.planned_local_state.quantity', 0)
             ->assertJsonPath('items.0.planned_local_state.status', 'sold')
             ->assertJsonPath('items.0.planned_local_state.is_visible_storefront', false)
-            ->assertJsonPath('items.0.action', 'update_local_stock');
+            ->assertJsonPath('items.0.action', 'should_mark_sold');
     }
 
     public function test_dry_run_does_not_accept_first_ovoko_row_when_id_does_not_match(): void
@@ -157,6 +157,39 @@ class OvokoStockSyncControllerTest extends TestCase
             ->assertJsonPath('items.0.ovoko.blocker', 'ovoko_lookup_filter_not_applied')
             ->assertJsonPath('items.0.ovoko.candidate_ids.0', '99999')
             ->assertJsonPath('items.0.ovoko.ovoko_response_shape.raw_sample.user_token', '[redacted]');
+    }
+
+
+    public function test_ready_local_part_available_on_ovoko_is_already_correct(): void
+    {
+        $this->actingAsAdminUser();
+        $this->account();
+        $part = Part::query()->forceCreate([
+            'id' => 39,
+            'name' => 'Door',
+            'quantity' => 1,
+            'status' => 'ready',
+            'is_visible_storefront' => true,
+            'needs_listing' => false,
+        ]);
+        MarketplaceListing::query()->create(['marketplace' => 'ovoko', 'part_id' => $part->id, 'external_offer_id' => '10743', 'status' => 'active']);
+
+        Http::fake([
+            'ovoko.test/get/part/*' => Http::response(['parts' => [
+                ['id' => '10743', 'quantity' => 1, 'status' => 'active'],
+            ]], 200),
+        ]);
+
+        $this->getJson('/admin/tools/ovoko-stock-sync-dry-run?part_id=39')
+            ->assertOk()
+            ->assertJsonPath('items.0.part_id', 39)
+            ->assertJsonPath('items.0.ovoko_id', '10743')
+            ->assertJsonPath('items.0.local.raw_local_status', 'ready')
+            ->assertJsonPath('items.0.local.ui_status_label', 'W sprzedaży')
+            ->assertJsonPath('items.0.local.local_availability', 'for_sale')
+            ->assertJsonPath('items.0.local.local_availability_source', 'Part::adminLocalAvailability/from_admin_status_label')
+            ->assertJsonPath('items.0.planned_local_state.local_availability', 'for_sale')
+            ->assertJsonPath('items.0.action', 'already_correct');
     }
 
     public function test_missing_mapping_blocks_without_ovoko_api_request(): void
