@@ -56,15 +56,15 @@ class OvokoStockSyncController extends Controller
             return response()->json($plan, 422);
         }
 
-        if (($item['action'] ?? null) === 'already_correct') {
-            $this->writeLog($item, false, 'already_correct', []);
+        if (($item['action'] ?? null) === 'no_change') {
+            $this->writeLog($item, false, 'no_change', []);
             return response()->json($plan + ['applied_count' => 0]);
         }
 
         $applied = false;
         DB::transaction(function () use ($item, &$applied): void {
             $part = Part::query()->lockForUpdate()->find($item['part_id']);
-            if (! $part || (bool) $part->needs_listing) {
+            if (! $part || (bool) $part->needs_listing || $part->status === 'sold') {
                 return;
             }
 
@@ -99,7 +99,6 @@ class OvokoStockSyncController extends Controller
             'apply_requires_part_id' => true,
             'updated_fields' => ['quantity', 'status', 'is_visible_storefront'],
             'items' => $items,
-            'counters' => $this->availabilityCounters($items),
             'blockers' => $blockers,
             'warnings' => ['local_stock_only_no_price_no_publish_no_relist_no_end_no_marketplace_writes'],
         ];
@@ -109,25 +108,29 @@ class OvokoStockSyncController extends Controller
     {
         $part = Part::query()->find($partId);
         if (! $part) {
-            return $this->blockedItem($partId, null, null, null, ['missing_local_part']);
+            return ['part_id' => $partId, 'ovoko_id' => null, 'ovoko_mapping_source' => null, 'blockers' => ['missing_local_part'], 'action' => 'blocked'];
         }
 
         $local = $this->localState($part);
         if ((bool) $part->needs_listing) {
-            return $this->blockedItem($partId, null, null, $local, ['skipped_do_wystawienia']);
+            return ['part_id' => $partId, 'ovoko_id' => null, 'ovoko_mapping_source' => null, 'local' => $local, 'blockers' => ['skipped_do_wystawienia'], 'action' => 'blocked'];
         }
+        if ($part->status === 'sold') {
+            return ['part_id' => $partId, 'ovoko_id' => null, 'ovoko_mapping_source' => null, 'local' => $local, 'blockers' => ['sold_part_blocked'], 'action' => 'blocked'];
+        }
+
         $mapping = $this->resolveOvokoMapping($part);
         if (! ($mapping['ok'] ?? false)) {
-            return $this->blockedItem($partId, null, null, $local, [$mapping['blocker'] ?? 'missing_ovoko_mapping']);
+            return ['part_id' => $partId, 'ovoko_id' => null, 'ovoko_mapping_source' => null, 'local' => $local, 'blockers' => [$mapping['blocker'] ?? 'missing_ovoko_mapping'], 'action' => 'blocked'];
         }
 
         $ovokoId = (string) $mapping['ovoko_id'];
         $ovoko = $this->fetchOvokoPart($ovokoId);
         if (! ($ovoko['ok'] ?? false)) {
-            return $this->blockedItem($partId, $ovokoId, $mapping['source'], $local, [$ovoko['blocker'] ?? 'ovoko_api_failed'], $ovoko);
+            return ['part_id' => $partId, 'ovoko_id' => $ovokoId, 'ovoko_mapping_source' => $mapping['source'], 'local' => $local, 'ovoko' => $ovoko, 'blockers' => [$ovoko['blocker'] ?? 'ovoko_api_failed'], 'action' => 'blocked'];
         }
 
-        $stock = $this->mapOvokoAvailability($ovoko['part'] ?? []);
+        $stock = $this->mapOvokoStock($ovoko['part'] ?? []);
         if (! ($stock['ok'] ?? false)) {
             return [
                 'part_id' => $partId,
@@ -136,24 +139,16 @@ class OvokoStockSyncController extends Controller
                 'local' => $local,
                 'ovoko' => $this->ovokoStockSummary($ovoko, $stock),
                 'blockers' => [$stock['blocker'] ?? 'ovoko_stock_not_unambiguous'],
-                'available_on_ovoko' => $stock['available_on_ovoko'] ?? null,
-                'ovoko_availability_source' => $stock['ovoko_availability_source'] ?? null,
-                'ovoko_status_raw' => $stock['ovoko_status_raw'] ?? null,
-                'ovoko_status_meaning' => $stock['ovoko_status_meaning'] ?? 'availability_unknown',
-                'reserved_user' => data_get($ovoko, 'part.reserved_user'),
-                'reserved_date' => data_get($ovoko, 'part.reserved_date'),
-                'local_availability' => $local['availability'] ?? null,
-                'recommended_local_availability' => null,
                 'action' => 'blocked',
             ];
         }
 
-        $recommended = ($stock['available_on_ovoko'] ?? null) === true ? 'for_sale' : 'sold';
-        $planned = $recommended === 'for_sale'
-            ? ['quantity' => 1, 'status' => 'ready', 'is_visible_storefront' => true, 'sold_at' => null]
-            : ['quantity' => 0, 'status' => 'sold', 'is_visible_storefront' => false];
-        $localAvailability = $this->localAvailability($part);
-        $action = $localAvailability === $recommended ? 'already_correct' : ($recommended === 'for_sale' ? 'should_mark_for_sale' : 'should_mark_sold');
+        $quantity = (int) $stock['quantity'];
+        $planned = [
+            'quantity' => $quantity,
+            'status' => $quantity > 0 ? (in_array($part->status, ['draft', 'archived'], true) ? $part->status : 'ready') : 'draft',
+            'is_visible_storefront' => $quantity > 0,
+        ];
 
         return [
             'part_id' => $partId,
@@ -161,54 +156,10 @@ class OvokoStockSyncController extends Controller
             'ovoko_mapping_source' => $mapping['source'],
             'local' => $local,
             'ovoko' => $this->ovokoStockSummary($ovoko, $stock),
-            'available_on_ovoko' => $stock['available_on_ovoko'] ?? null,
-            'ovoko_availability_source' => $stock['ovoko_availability_source'] ?? null,
-            'ovoko_status_raw' => $stock['ovoko_status_raw'] ?? null,
-            'ovoko_status_meaning' => $stock['ovoko_status_meaning'] ?? null,
-            'reserved_user' => data_get($ovoko, 'part.reserved_user'),
-            'reserved_date' => data_get($ovoko, 'part.reserved_date'),
-            'local_availability' => $localAvailability,
-            'recommended_local_availability' => $recommended,
             'planned_local_state' => $planned,
-            'action' => $action,
+            'action' => $this->sameState($local, $planned) ? 'no_change' : 'update_local_stock',
             'blockers' => [],
         ];
-    }
-
-    private function blockedItem(int $partId, ?string $ovokoId, ?string $mappingSource, ?array $local, array $blockers, ?array $ovoko = null): array
-    {
-        return [
-            'part_id' => $partId,
-            'ovoko_id' => $ovokoId,
-            'ovoko_mapping_source' => $mappingSource,
-            'local' => $local,
-            'ovoko' => $ovoko,
-            'available_on_ovoko' => null,
-            'ovoko_availability_source' => null,
-            'ovoko_status_raw' => null,
-            'ovoko_status_meaning' => 'availability_unknown',
-            'reserved_user' => null,
-            'reserved_date' => null,
-            'local_availability' => $local['availability'] ?? null,
-            'recommended_local_availability' => null,
-            'blockers' => $blockers,
-            'action' => 'blocked',
-        ];
-    }
-
-    private function availabilityCounters(array $items): array
-    {
-        $counters = array_fill_keys(['available_on_ovoko_count','not_available_on_ovoko_count','availability_unknown_count','local_for_sale_count','local_sold_count','already_correct_count','should_mark_for_sale_count','should_mark_sold_count','blocked_count'], 0);
-        foreach ($items as $item) {
-            $available = $item['available_on_ovoko'] ?? null;
-            if ($available === true) $counters['available_on_ovoko_count']++;
-            elseif ($available === false) $counters['not_available_on_ovoko_count']++;
-            else $counters['availability_unknown_count']++;
-            if (($item['local_availability'] ?? null) === 'for_sale') $counters['local_for_sale_count']++;
-            elseif (($item['local_availability'] ?? null) === 'sold') $counters['local_sold_count']++;
-            if (isset($counters[($item['action'] ?? '').'_count'])) $counters[($item['action'] ?? '').'_count']++;
-        }
-        return $counters;
     }
 
     /** @return array{ok: bool, ovoko_id?: string, source?: string, blocker?: string} */
@@ -500,34 +451,42 @@ class OvokoStockSyncController extends Controller
         ];
     }
 
-    private function mapOvokoAvailability(array $row): array
+    private function mapOvokoStock(array $row): array
     {
-        $reserved = $this->isOvokoReserved($row);
-        $statusRaw = array_key_exists('status', $row) ? trim((string) $row['status']) : null;
-
-        if ($reserved === true) {
+        $quantity = $this->extractQuantity($row);
+        if ($quantity !== null) {
             return [
                 'ok' => true,
-                'available_on_ovoko' => false,
-                'quantity' => 0,
-                'ovoko_availability_source' => 'reserved_fields',
-                'ovoko_stock_source' => 'reserved_fields',
-                'ovoko_status_raw' => $statusRaw,
-                'ovoko_status_meaning' => 'reserved_not_available',
-                'quantity_inferred' => true,
-                'availability_inferred' => true,
+                'quantity' => $quantity,
+                'ovoko_stock_source' => 'quantity',
+                'ovoko_status_raw' => array_key_exists('status', $row) ? (string) $row['status'] : null,
+                'ovoko_status_meaning' => null,
+                'quantity_inferred' => false,
+                'availability_inferred' => false,
             ];
         }
 
-        if ($statusRaw !== null && $statusRaw !== '') {
-            if ($statusRaw === '0') {
+        $reserved = $this->isOvokoReserved($row);
+        if ($reserved === true) {
+            return [
+                'ok' => false,
+                'blocker' => 'ovoko_stock_not_unambiguous',
+                'ovoko_stock_source' => 'reserved_fields',
+                'ovoko_status_raw' => array_key_exists('status', $row) ? (string) $row['status'] : null,
+                'ovoko_status_meaning' => 'reserved_unmapped',
+                'quantity_inferred' => false,
+                'availability_inferred' => false,
+            ];
+        }
+
+        if (array_key_exists('status', $row)) {
+            $status = trim((string) $row['status']);
+            if ($status === '0') {
                 return [
                     'ok' => true,
-                    'available_on_ovoko' => true,
                     'quantity' => 1,
-                    'ovoko_availability_source' => 'status_0_without_reservation',
-                    'ovoko_stock_source' => 'status_0_without_reservation',
-                    'ovoko_status_raw' => $statusRaw,
+                    'ovoko_stock_source' => 'status',
+                    'ovoko_status_raw' => $status,
                     'ovoko_status_meaning' => 'active_available',
                     'quantity_inferred' => true,
                     'availability_inferred' => true,
@@ -536,33 +495,16 @@ class OvokoStockSyncController extends Controller
 
             return [
                 'ok' => false,
-                'blocker' => 'availability_unknown_status_unmapped',
-                'available_on_ovoko' => null,
-                'ovoko_availability_source' => 'status',
+                'blocker' => 'ovoko_stock_not_unambiguous',
                 'ovoko_stock_source' => 'status',
-                'ovoko_status_raw' => $statusRaw,
-                'ovoko_status_meaning' => 'availability_unknown',
+                'ovoko_status_raw' => $status,
+                'ovoko_status_meaning' => 'unknown_unmapped',
                 'quantity_inferred' => false,
                 'availability_inferred' => false,
             ];
         }
 
-        $quantity = $this->extractQuantity($row);
-        if ($quantity !== null) {
-            return [
-                'ok' => true,
-                'available_on_ovoko' => $quantity > 0,
-                'quantity' => $quantity > 0 ? 1 : 0,
-                'ovoko_availability_source' => 'quantity_without_status',
-                'ovoko_stock_source' => 'quantity_without_status',
-                'ovoko_status_raw' => null,
-                'ovoko_status_meaning' => $quantity > 0 ? 'quantity_positive_available' : 'quantity_zero_not_available',
-                'quantity_inferred' => false,
-                'availability_inferred' => false,
-            ];
-        }
-
-        return ['ok' => false, 'blocker' => 'availability_unknown_missing_status', 'available_on_ovoko' => null, 'ovoko_status_meaning' => 'availability_unknown', 'quantity_inferred' => false, 'availability_inferred' => false];
+        return ['ok' => false, 'blocker' => 'ovoko_stock_not_unambiguous', 'quantity_inferred' => false, 'availability_inferred' => false];
     }
 
     private function isOvokoReserved(array $row): ?bool
@@ -577,12 +519,12 @@ class OvokoStockSyncController extends Controller
 
     private function localState(Part $part): array
     {
-        return ['quantity' => (int) $part->quantity, 'status' => $part->status, 'is_visible_storefront' => (bool) $part->is_visible_storefront, 'needs_listing' => (bool) $part->needs_listing, 'availability' => $this->localAvailability($part)];
+        return ['quantity' => (int) $part->quantity, 'status' => $part->status, 'is_visible_storefront' => (bool) $part->is_visible_storefront, 'needs_listing' => (bool) $part->needs_listing];
     }
 
-    private function localAvailability(Part $part): string
+    private function sameState(array $local, array $planned): bool
     {
-        return ((int) $part->quantity > 0 && (bool) $part->is_visible_storefront && in_array((string) $part->status, ['ready', 'published'], true)) ? 'for_sale' : 'sold';
+        return (int) $local['quantity'] === (int) $planned['quantity'] && (string) $local['status'] === (string) $planned['status'] && (bool) $local['is_visible_storefront'] === (bool) $planned['is_visible_storefront'];
     }
 
     public function writeLog(?array $item, bool $applied, string $status, array $blockers, ?int $runId = null): void
