@@ -104,7 +104,7 @@ class OvokoStockSyncController extends Controller
         ];
     }
 
-    private function planPart(int $partId): array
+    public function planPart(int $partId): array
     {
         $part = Part::query()->find($partId);
         if (! $part) {
@@ -527,7 +527,7 @@ class OvokoStockSyncController extends Controller
         return (int) $local['quantity'] === (int) $planned['quantity'] && (string) $local['status'] === (string) $planned['status'] && (bool) $local['is_visible_storefront'] === (bool) $planned['is_visible_storefront'];
     }
 
-    private function writeLog(?array $item, bool $applied, string $status, array $blockers): void
+    public function writeLog(?array $item, bool $applied, string $status, array $blockers, ?int $runId = null): void
     {
         MarketplaceSyncLog::query()->create([
             'marketplace' => 'ovoko',
@@ -547,6 +547,7 @@ class OvokoStockSyncController extends Controller
                 'planned_local_state' => $item['planned_local_state'] ?? null,
                 'applied_changes' => $applied ? $item['planned_local_state'] ?? [] : [],
                 'blockers' => $blockers,
+                'run_id' => $runId,
             ],
             'created_at' => now(),
         ]);
