@@ -65,6 +65,7 @@ use App\Http\Controllers\Tools\OvokoPriceImportController;
 use App\Http\Controllers\Tools\OvokoProductSyncController;
 use App\Http\Controllers\Tools\OvokoStockReconciliationController;
 use App\Http\Controllers\Tools\OvokoStockSyncController;
+use App\Http\Controllers\Tools\OvokoStockSyncRunnerController;
 use App\Http\Controllers\Tools\OvokoListingUrlBackfillController;
 use App\Http\Controllers\Tools\OvokoListingUrlDiagnosticsController;
 use App\Http\Controllers\Tools\MarketplaceOrdersResetController;
@@ -248,6 +249,9 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/ovoko/listing-url-diagnostics', OvokoListingUrlDiagnosticsController::class)->name('admin.tools.ovoko.listing-url-diagnostics');
     Route::get('/admin/tools/ovoko-stock-sync-dry-run', [OvokoStockSyncController::class, 'dryRun'])->name('admin.tools.ovoko-stock-sync-dry-run');
     Route::match(['get', 'post'], '/admin/tools/ovoko-stock-sync-apply', [OvokoStockSyncController::class, 'apply'])->name('admin.tools.ovoko-stock-sync-apply');
+    Route::match(['get', 'post'], '/admin/tools/ovoko-stock-sync-runner/start', [OvokoStockSyncRunnerController::class, 'start'])->name('admin.tools.ovoko-stock-sync-runner.start');
+    Route::get('/admin/tools/ovoko-stock-sync-runner/status/{run}', [OvokoStockSyncRunnerController::class, 'status'])->name('admin.tools.ovoko-stock-sync-runner.status');
+    Route::match(['get', 'post'], '/admin/tools/ovoko-stock-sync-runner/cancel/{run}', [OvokoStockSyncRunnerController::class, 'cancel'])->name('admin.tools.ovoko-stock-sync-runner.cancel');
     Route::get('/admin/tools/marketplace/listing-url-backfill', MarketplaceListingUrlBackfillController::class)->name('admin.tools.marketplace.listing-url-backfill');
     Route::get('/admin/tools/marketplace/manual-link-mapping/diagnostics', ManualLinkMappingDiagnosticsController::class)->name('admin.tools.marketplace.manual-link-mapping.diagnostics');
     Route::get('/admin/tools/marketplace/ebay-listing-audit', EbayListingAuditController::class)->name('admin.tools.marketplace.ebay-listing-audit');
