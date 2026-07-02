@@ -24,6 +24,14 @@ return new class extends Migration
             $table->unsignedInteger('blocked_count')->default(0);
             $table->unsignedInteger('skipped_count')->default(0);
             $table->unsignedInteger('failed_count')->default(0);
+            $table->unsignedInteger('available_on_ovoko_count')->default(0);
+            $table->unsignedInteger('not_available_on_ovoko_count')->default(0);
+            $table->unsignedInteger('availability_unknown_count')->default(0);
+            $table->unsignedInteger('local_for_sale_count')->default(0);
+            $table->unsignedInteger('local_sold_count')->default(0);
+            $table->unsignedInteger('already_correct_count')->default(0);
+            $table->unsignedInteger('should_mark_for_sale_count')->default(0);
+            $table->unsignedInteger('should_mark_sold_count')->default(0);
             $table->json('top_blockers')->nullable();
             $table->json('recent_results')->nullable();
             $table->timestamp('started_at')->nullable();

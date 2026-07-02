@@ -75,7 +75,7 @@ class OvokoStockSyncRunProcessor
                 $item = $this->planner->planPart((int) $partRow->id);
                 $action = $item['action'] ?? 'failed';
 
-                if ($action === 'update_local_stock' && $run->mode === 'apply' && ($item['blockers'] ?? []) === []) {
+                if (in_array($action, ['should_mark_for_sale', 'should_mark_sold'], true) && $run->mode === 'apply' && ($item['blockers'] ?? []) === []) {
                     $applied = $this->applyItem($item);
                     $action = $applied ? 'applied' : 'blocked';
                     $this->planner->writeLog($item, $applied, $applied ? 'success' : 'blocked', $applied ? [] : ['part_unavailable_or_guard_failed_during_apply'], (int) $run->id);
@@ -88,7 +88,7 @@ class OvokoStockSyncRunProcessor
                 $recent[] = $this->compactItem($item, $action);
                 $recent = array_slice($recent, -20);
 
-                $run->forceFill($this->counterUpdates($run, $action) + [
+                $run->forceFill($this->availabilityCounterUpdates($run, $item) + $this->counterUpdates($run, $action) + [
                     'processed_count' => (int) $run->processed_count + 1,
                     'last_processed_part_id' => (int) $partRow->id,
                     'top_blockers' => $this->topBlockers($blockers),
@@ -113,18 +113,34 @@ class OvokoStockSyncRunProcessor
     {
         return (bool) DB::transaction(function () use ($item): bool {
             $part = Part::query()->lockForUpdate()->find($item['part_id']);
-            if (! $part || (bool) $part->needs_listing || $part->status === 'sold') return false;
+            if (! $part || (bool) $part->needs_listing) return false;
             $part->forceFill(array_intersect_key($item['planned_local_state'] ?? [], array_flip(['quantity', 'status', 'is_visible_storefront'])))->save();
 
             return true;
         });
     }
 
+    private function availabilityCounterUpdates(OvokoStockSyncRun $run, array $item): array
+    {
+        $updates = [];
+        $available = $item['available_on_ovoko'] ?? null;
+        if ($available === true) $updates['available_on_ovoko_count'] = (int) $run->available_on_ovoko_count + 1;
+        elseif ($available === false) $updates['not_available_on_ovoko_count'] = (int) $run->not_available_on_ovoko_count + 1;
+        else $updates['availability_unknown_count'] = (int) $run->availability_unknown_count + 1;
+
+        $local = $item['local_availability'] ?? data_get($item, 'local.availability');
+        if ($local === 'for_sale') $updates['local_for_sale_count'] = (int) $run->local_for_sale_count + 1;
+        elseif ($local === 'sold') $updates['local_sold_count'] = (int) $run->local_sold_count + 1;
+
+        return $updates;
+    }
+
     private function counterUpdates(OvokoStockSyncRun $run, string $action): array
     {
         return match ($action) {
-            'no_change' => ['no_change_count' => (int) $run->no_change_count + 1],
-            'update_local_stock' => ['would_update_count' => (int) $run->would_update_count + 1],
+            'already_correct' => ['no_change_count' => (int) $run->no_change_count + 1, 'already_correct_count' => (int) $run->already_correct_count + 1],
+            'should_mark_for_sale' => ['would_update_count' => (int) $run->would_update_count + 1, 'should_mark_for_sale_count' => (int) $run->should_mark_for_sale_count + 1],
+            'should_mark_sold' => ['would_update_count' => (int) $run->would_update_count + 1, 'should_mark_sold_count' => (int) $run->should_mark_sold_count + 1],
             'applied' => ['applied_count' => (int) $run->applied_count + 1],
             'skipped' => ['skipped_count' => (int) $run->skipped_count + 1],
             'blocked' => ['blocked_count' => (int) $run->blocked_count + 1],
@@ -134,7 +150,7 @@ class OvokoStockSyncRunProcessor
 
     private function compactItem(array $item, string $action): array
     {
-        return ['part_id' => $item['part_id'] ?? null, 'ovoko_id' => $item['ovoko_id'] ?? null, 'mapping_source' => $item['ovoko_mapping_source'] ?? null, 'local_before' => $item['local'] ?? null, 'ovoko_stock_status' => $item['ovoko'] ?? null, 'planned_or_applied_local_state' => $item['planned_local_state'] ?? null, 'action' => $action, 'blockers' => $item['blockers'] ?? [], 'error' => $item['error'] ?? null];
+        return ['part_id' => $item['part_id'] ?? null, 'ovoko_id' => $item['ovoko_id'] ?? null, 'mapping_source' => $item['ovoko_mapping_source'] ?? null, 'available_on_ovoko' => $item['available_on_ovoko'] ?? null, 'ovoko_availability_source' => $item['ovoko_availability_source'] ?? null, 'ovoko_status_raw' => $item['ovoko_status_raw'] ?? null, 'ovoko_status_meaning' => $item['ovoko_status_meaning'] ?? null, 'reserved_user' => $item['reserved_user'] ?? null, 'reserved_date' => $item['reserved_date'] ?? null, 'local_availability' => $item['local_availability'] ?? data_get($item, 'local.availability'), 'recommended_local_availability' => $item['recommended_local_availability'] ?? null, 'local_before' => $item['local'] ?? null, 'ovoko_stock_status' => $item['ovoko'] ?? null, 'planned_or_applied_local_state' => $item['planned_local_state'] ?? null, 'action' => $action, 'blockers' => $item['blockers'] ?? [], 'error' => $item['error'] ?? null];
     }
 
     private function topBlockers(array $blockers): array
