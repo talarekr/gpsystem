@@ -28,6 +28,8 @@ return new class extends Migration
             'images' => fn (Blueprint $table): mixed => $table->json('images')->nullable(),
             'category_id' => fn (Blueprint $table): mixed => $table->string('category_id')->nullable()->index(),
             'category_name' => fn (Blueprint $table): mixed => $table->string('category_name')->nullable(),
+            'category_path' => fn (Blueprint $table): mixed => $table->json('category_path')->nullable(),
+            'category_payload' => fn (Blueprint $table): mixed => $table->json('category_payload')->nullable(),
             'parameters' => fn (Blueprint $table): mixed => $table->json('parameters')->nullable(),
             'raw_payload' => fn (Blueprint $table): mixed => $table->json('raw_payload')->nullable(),
             'import_status' => fn (Blueprint $table): mixed => $table->string('import_status')->default('imported')->index(),
