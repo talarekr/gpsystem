@@ -35,7 +35,7 @@ class JarekGearboxToolController extends Controller
 
     public function dryRun(Request $request, AllegroJarekImportService $service): JsonResponse
     {
-        return response()->json($service->dryRun($this->limit($request), (int) $request->query('offset', 0)));
+        return response()->json($service->dryRun($this->limit($request), $this->offset($request)));
     }
 
     public function apply(Request $request, AllegroJarekImportService $service): JsonResponse
@@ -44,7 +44,20 @@ class JarekGearboxToolController extends Controller
             return response()->json(['ok' => false, 'error' => 'Missing confirm=jarek-gearboxes-import', 'marketplace_write' => false], 422);
         }
 
-        return response()->json(['ok' => true] + $service->apply($this->limit($request), (int) $request->query('offset', 0)));
+        return response()->json(['ok' => true] + $service->apply($this->limit($request), $this->offset($request)));
+    }
+
+    public function status(AllegroJarekImportService $service): JsonResponse
+    {
+        return response()->json($service->status());
+    }
+
+    public function runner(): \Illuminate\View\View
+    {
+        return view('admin.jarek-gearboxes.import-runner', [
+            'defaultBatchSize' => 100,
+            'maxApplyBatchSize' => 200,
+        ]);
     }
 
     public function ebayPreview(JarekGearbox $jarekGearbox, JarekGearboxEbayPreviewService $service): JsonResponse
@@ -123,5 +136,10 @@ class JarekGearboxToolController extends Controller
     private function limit(Request $request): int
     {
         return max(1, (int) $request->query('limit', 20));
+    }
+
+    private function offset(Request $request): int
+    {
+        return max(0, (int) $request->query('offset', 0));
     }
 }

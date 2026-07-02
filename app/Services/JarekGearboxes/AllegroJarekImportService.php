@@ -5,6 +5,7 @@ namespace App\Services\JarekGearboxes;
 use App\Models\JarekGearbox;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 
@@ -41,6 +42,7 @@ class AllegroJarekImportService
             'marketplace_write' => false,
             'database_write' => false,
             'requested_limit' => $result['pagination']['requested_limit'],
+            'offset' => $result['pagination']['offset'],
             'effective_limit' => $result['pagination']['effective_limit'],
             'page_size' => $result['pagination']['page_size'],
             'pages_fetched' => $result['pagination']['pages_fetched'],
@@ -49,6 +51,8 @@ class AllegroJarekImportService
             'has_more_after_limit' => $result['pagination']['has_more_after_limit'],
             'would_create' => $mapped->where(fn ($row) => ! JarekGearbox::where('allegro_offer_id', $row['allegro_offer_id'])->exists())->count(),
             'would_update' => $mapped->where(fn ($row) => JarekGearbox::where('allegro_offer_id', $row['allegro_offer_id'])->exists())->count(),
+            'created' => 0,
+            'updated' => 0,
             'categories_count' => $categoryRows->count(),
             'categories_sample' => $categoryRows->take(10)->map(fn ($category) => $this->categorySummary((array) $category))->all(),
             'missing_category_name_count' => $mapped->where(fn ($row) => blank($row['category_name']))->count(),
@@ -66,7 +70,7 @@ class AllegroJarekImportService
         $created = 0;
         $updated = 0;
 
-        $result = $this->fetchDetailedOffers($limit, $offset);
+        $result = $this->fetchDetailedOffers($limit, $offset, 200);
 
         foreach ($result['offers'] as $offer) {
             $data = $this->mapOffer($offer);
@@ -75,12 +79,55 @@ class AllegroJarekImportService
             $existing ? $updated++ : $created++;
         }
 
-        return compact('created', 'updated') + $result['pagination'] + ['marketplace_write' => false, 'database_write' => true, 'deleted' => 0];
+        return compact('created', 'updated') + $result['pagination'] + [
+            'found' => count($result['offers']),
+            'would_create' => 0,
+            'would_update' => 0,
+            'marketplace_write' => false,
+            'database_write' => true,
+            'deleted' => 0,
+        ];
     }
 
-    private function fetchDetailedOffers(int $limit, int $offset): array
+    public function status(): array
     {
-        $result = $this->fetchOffers($limit, $offset);
+        return [
+            'marketplace_write' => false,
+            'total_rows' => JarekGearbox::query()->count(),
+            'distinct_allegro_offer_id_count' => JarekGearbox::query()->distinct('allegro_offer_id')->count('allegro_offer_id'),
+            'latest_imported_at' => JarekGearbox::query()->max('imported_at'),
+            'latest_updated_from_allegro_at' => JarekGearbox::query()->max('updated_from_allegro_at'),
+            'counts_by_allegro_status' => $this->countsBy('allegro_status'),
+            'counts_by_category' => JarekGearbox::query()
+                ->select('category_id', 'category_name', DB::raw('count(*) as total'))
+                ->groupBy('category_id', 'category_name')
+                ->orderByDesc('total')
+                ->limit(100)
+                ->get()
+                ->map(fn (JarekGearbox $row): array => [
+                    'category_id' => $row->category_id,
+                    'category_name' => $row->category_name,
+                    'total' => (int) $row->total,
+                ])
+                ->values()
+                ->all(),
+        ];
+    }
+
+    private function countsBy(string $column): array
+    {
+        return JarekGearbox::query()
+            ->select($column, DB::raw('count(*) as total'))
+            ->groupBy($column)
+            ->orderByDesc('total')
+            ->pluck('total', $column)
+            ->map(fn ($total): int => (int) $total)
+            ->all();
+    }
+
+    private function fetchDetailedOffers(int $limit, int $offset, ?int $maxLimit = null): array
+    {
+        $result = $this->fetchOffers($limit, $offset, $maxLimit);
         $result['offers'] = collect($result['offers'])
             ->map(fn (array $offer): array => array_replace_recursive($offer, $this->fetchOfferDetails((string) Arr::get($offer, 'id'))))
             ->all();
@@ -91,17 +138,18 @@ class AllegroJarekImportService
     /**
      * @return array{offers: array<int, array<string, mixed>>, pagination: array<string, int|bool>}
      */
-    private function fetchOffers(int $limit, int $offset): array
+    private function fetchOffers(int $limit, int $offset, ?int $maxLimit = null): array
     {
         $requestedLimit = max(1, $limit);
+        $effectiveRequestedLimit = $maxLimit === null ? $requestedLimit : min($requestedLimit, max(1, $maxLimit));
         $pageSize = 100;
         $currentOffset = max(0, $offset);
         $offers = [];
         $pagesFetched = 0;
         $lastPageCount = 0;
 
-        while (count($offers) < $requestedLimit) {
-            $remaining = $requestedLimit - count($offers);
+        while (count($offers) < $effectiveRequestedLimit) {
+            $remaining = $effectiveRequestedLimit - count($offers);
             $currentPageSize = min($pageSize, $remaining);
             $response = $this->allegro()->get($this->baseUrl().'/sale/offers', [
                 'limit' => $currentPageSize,
@@ -132,16 +180,18 @@ class AllegroJarekImportService
 
         $found = count($offers);
         $reachedRequestedLimit = $found >= $requestedLimit;
+        $reachedEffectiveLimit = $found >= $effectiveRequestedLimit;
 
         return [
-            'offers' => array_slice($offers, 0, $requestedLimit),
+            'offers' => array_slice($offers, 0, $effectiveRequestedLimit),
             'pagination' => [
                 'requested_limit' => $requestedLimit,
-                'effective_limit' => min($requestedLimit, $found),
+                'offset' => max(0, $offset),
+                'effective_limit' => min($effectiveRequestedLimit, $found),
                 'page_size' => $pageSize,
                 'pages_fetched' => $pagesFetched,
                 'reached_requested_limit' => $reachedRequestedLimit,
-                'has_more_after_limit' => $reachedRequestedLimit && $lastPageCount === min($pageSize, $requestedLimit - (($pagesFetched - 1) * $pageSize)),
+                'has_more_after_limit' => $reachedEffectiveLimit && $lastPageCount === min($pageSize, $effectiveRequestedLimit - (($pagesFetched - 1) * $pageSize)),
             ],
         ];
     }
