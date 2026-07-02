@@ -72,6 +72,25 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
     }
 
 
+    private function normalizeOvokoText(mixed $value, bool $collapseWhitespace = true): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $text = html_entity_decode((string) $value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $text = str_replace("\u{00A0}", ' ', $text);
+        $text = strip_tags($text);
+        $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $text = str_replace("\u{00A0}", ' ', $text);
+        if ($collapseWhitespace) {
+            $text = preg_replace('/\s+/u', ' ', $text) ?? $text;
+        }
+        $text = trim($text);
+
+        return $text === '' ? null : $text;
+    }
+
     private function ovokoListingUrl(?string $ovokoPartId): ?string
     {
         $ovokoPartId = trim((string) $ovokoPartId);
@@ -101,12 +120,12 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
             'status' => $payload['status'] ?? $settings['default_part_status'] ?? $settings['ovoko_default_part_status'] ?? null,
             'price' => $readiness['marketplace_price'] ?? $payload['price_pln'] ?? null,
             'original_currency' => $readiness['currency'] ?? $payload['currency'] ?? 'PLN',
-            'external_id' => $payload['sku'] ?? $part->sku ?? ('gps-part-'.$part->id),
-            'visible_code' => $payload['sku'] ?? $part->sku ?? null,
-            'manufacturer_code' => $partCodeDiagnostics['ovoko_manufacturer_code'] ?? null,
-            'other_code' => $part->oem_number ?? $part->manufacturer_code ?? null,
-            'optional_codes' => $partCodes,
-            'notes' => trim(strip_tags((string) (($part->description ?? null) ?: ($part->short_description ?? null) ?: ($part->condition_notes ?? null)))) ?: null,
+            'external_id' => $this->normalizeOvokoText($payload['sku'] ?? $part->sku ?? ('gps-part-'.$part->id), collapseWhitespace: false),
+            'visible_code' => $this->normalizeOvokoText($payload['sku'] ?? $part->sku ?? null, collapseWhitespace: false),
+            'manufacturer_code' => $this->normalizeOvokoText($partCodeDiagnostics['ovoko_manufacturer_code'] ?? null, collapseWhitespace: false),
+            'other_code' => $this->normalizeOvokoText($part->oem_number ?? $part->manufacturer_code ?? null, collapseWhitespace: false),
+            'optional_codes' => array_values(array_filter(array_map(fn (string $code): ?string => $this->normalizeOvokoText($code, collapseWhitespace: false), $partCodes), fn (?string $code): bool => ! blank($code))),
+            'notes' => $this->normalizeOvokoText(($part->description ?? null) ?: ($part->short_description ?? null) ?: ($part->condition_notes ?? null)),
             'photo' => $ovokoPhotoUrls[0] ?? null,
             'photos[]' => $ovokoPhotoUrls,
         ], fn ($value) => ! blank($value));

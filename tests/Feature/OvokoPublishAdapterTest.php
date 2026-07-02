@@ -76,6 +76,36 @@ class OvokoPublishAdapterTest extends TestCase
         $this->assertStringNotContainsString('ovoko-token', $encodedLogs);
     }
 
+
+    public function test_ovoko_publish_normalizes_html_entities_and_nbsp_in_text_payload(): void
+    {
+        $part = $this->readyPart([
+            'description' => '<p>OBUDOWA OSŁONA KOMPUTERA EUROPA&nbsp;</p>',
+            'sku' => "GPS&nbsp;SKU&#160;1\u{00A0}",
+            'part_number' => "PN&nbsp;123\u{00A0}",
+            'oem_number' => 'OEM&#160;456&nbsp;',
+            'manufacturer_code' => null,
+        ]);
+        $this->enableFlags();
+        Http::fake(['https://ovoko.example.test/crm/importPart' => Http::response(['part_id' => 288657, 'msg' => 'OK', 'status_code' => 'R200'], 200)]);
+
+        app(PublishPartToMarketplacesService::class)->confirm($part, ['ovoko'], dryRun: false, confirm: true);
+
+        Http::assertSent(function ($request): bool {
+            $body = urldecode($request->body());
+
+            return $request->url() === 'https://ovoko.example.test/crm/importPart'
+                && str_contains($body, 'notes=OBUDOWA OSŁONA KOMPUTERA EUROPA')
+                && str_contains($body, 'visible_code=GPS SKU 1')
+                && str_contains($body, 'manufacturer_code=PN 123')
+                && str_contains($body, 'optional_codes=OEM 456')
+                && ! str_contains($body, '&nbsp;')
+                && ! str_contains($body, '&#160;')
+                && ! str_contains($body, "\u{00A0}")
+                && ! str_contains($body, '<p>');
+        });
+    }
+
     public function test_ovoko_condition_is_always_published_as_used_even_when_local_note_says_new(): void
     {
         $part = $this->readyPart(['condition_notes' => 'nowy']);

@@ -14,6 +14,18 @@
     <h1>Ovoko stock sync runner</h1>
     <div class="card warning"><b>Warning:</b> Lokalny stock only: brak marketplace write, brak price sync, brak publish/relist/end. Tryb apply zapisuje wyłącznie lokalne pola: quantity, status, is_visible_storefront.</div>
 
+    <div class="card {{ ($diagnostics['blockers'] ?? []) ? 'danger' : '' }}">
+        <h2>Diagnostics</h2>
+        <div class="grid">
+            <div class="metric"><span class="muted">db table exists</span><b>{{ ($diagnostics['db_table_exists'] ?? false) ? 'true' : 'false' }}</b></div>
+            <div class="metric"><span class="muted">active run exists</span><b>{{ ($diagnostics['active_run_exists'] ?? false) ? 'true' : 'false' }}</b></div>
+            <div class="metric"><span class="muted">queue required</span><b>{{ ($diagnostics['queue_required'] ?? false) ? 'true' : 'false' }}</b></div>
+            <div class="metric"><span class="muted">cache lock available</span><b>{{ ($diagnostics['cache_lock_available'] ?? false) ? 'true' : 'false' }}</b></div>
+        </div>
+        @if($diagnostics['blockers'] ?? [])<p><b>Blockers:</b> <span class="mono">{{ implode(', ', $diagnostics['blockers']) }}</span></p>@endif
+        @if($diagnostics['last_error'] ?? null)<p><b>Last error:</b> <span class="mono">{{ $diagnostics['last_error'] }}</span></p>@endif
+    </div>
+
     <div class="card">
         <p>Browser runner działa bez queue workera: kliknięcie Start/Resume uruchamia HTTP tick co 900 ms. Każdy tick przetwarza maksymalnie <b>{{ $batchSize }}</b> produktów synchronicznie.</p>
         <div class="row">
@@ -49,6 +61,7 @@ const urls = {
     status: id => `/admin/tools/ovoko-stock-sync-runner/status/${id}`,
     tick: id => `/admin/tools/ovoko-stock-sync-runner/tick/${id}?confirm=ovoko-stock-sync-runner-tick`,
     cancel: id => `/admin/tools/ovoko-stock-sync-runner/cancel/${id}?confirm=cancel-ovoko-stock-sync-runner`,
+    diagnostics: @json(route('admin.tools.ovoko-stock-sync-runner.diagnostics', [], false)),
 };
 function log(msg){document.getElementById('log').textContent = `[${new Date().toLocaleTimeString()}] ${msg}\n` + document.getElementById('log').textContent;}
 async function getJson(url){const res=await fetch(url,{headers:{Accept:'application/json'}}); const data=await res.json(); if(!res.ok){throw data;} return data;}
