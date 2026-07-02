@@ -33,13 +33,20 @@ class AllegroJarekImportService
 
     public function dryRun(int $limit = 20, int $offset = 0): array
     {
-        $mapped = collect($this->fetchDetailedOffers($limit, $offset))->map(fn (array $offer): array => $this->mapOffer($offer))->values();
+        $result = $this->fetchDetailedOffers($limit, $offset);
+        $mapped = collect($result['offers'])->map(fn (array $offer): array => $this->mapOffer($offer))->values();
         $categoryRows = $mapped->pluck('category_payload')->filter()->unique('id')->values();
 
         return [
             'marketplace_write' => false,
             'database_write' => false,
+            'requested_limit' => $result['pagination']['requested_limit'],
+            'effective_limit' => $result['pagination']['effective_limit'],
+            'page_size' => $result['pagination']['page_size'],
+            'pages_fetched' => $result['pagination']['pages_fetched'],
             'found' => $mapped->count(),
+            'reached_requested_limit' => $result['pagination']['reached_requested_limit'],
+            'has_more_after_limit' => $result['pagination']['has_more_after_limit'],
             'would_create' => $mapped->where(fn ($row) => ! JarekGearbox::where('allegro_offer_id', $row['allegro_offer_id'])->exists())->count(),
             'would_update' => $mapped->where(fn ($row) => JarekGearbox::where('allegro_offer_id', $row['allegro_offer_id'])->exists())->count(),
             'categories_count' => $categoryRows->count(),
@@ -59,32 +66,84 @@ class AllegroJarekImportService
         $created = 0;
         $updated = 0;
 
-        foreach ($this->fetchDetailedOffers($limit, $offset) as $offer) {
+        $result = $this->fetchDetailedOffers($limit, $offset);
+
+        foreach ($result['offers'] as $offer) {
             $data = $this->mapOffer($offer);
             $existing = JarekGearbox::where('allegro_offer_id', $data['allegro_offer_id'])->first();
             $existing ? $existing->fill($data)->save() : JarekGearbox::create($data);
             $existing ? $updated++ : $created++;
         }
 
-        return compact('created', 'updated') + ['marketplace_write' => false, 'deleted' => 0];
+        return compact('created', 'updated') + $result['pagination'] + ['marketplace_write' => false, 'database_write' => true, 'deleted' => 0];
     }
 
     private function fetchDetailedOffers(int $limit, int $offset): array
     {
-        return collect($this->fetchOffers($limit, $offset))
+        $result = $this->fetchOffers($limit, $offset);
+        $result['offers'] = collect($result['offers'])
             ->map(fn (array $offer): array => array_replace_recursive($offer, $this->fetchOfferDetails((string) Arr::get($offer, 'id'))))
             ->all();
+
+        return $result;
     }
 
+    /**
+     * @return array{offers: array<int, array<string, mixed>>, pagination: array<string, int|bool>}
+     */
     private function fetchOffers(int $limit, int $offset): array
     {
-        $response = $this->allegro()->get($this->baseUrl().'/sale/offers', ['limit' => max(1, min($limit, 100)), 'offset' => max(0, $offset)]);
+        $requestedLimit = max(1, $limit);
+        $pageSize = 100;
+        $currentOffset = max(0, $offset);
+        $offers = [];
+        $pagesFetched = 0;
+        $lastPageCount = 0;
 
-        if (! $response->successful()) {
-            throw new RuntimeException('Allegro Jarek read-only import failed: HTTP '.$response->status());
+        while (count($offers) < $requestedLimit) {
+            $remaining = $requestedLimit - count($offers);
+            $currentPageSize = min($pageSize, $remaining);
+            $response = $this->allegro()->get($this->baseUrl().'/sale/offers', [
+                'limit' => $currentPageSize,
+                'offset' => $currentOffset,
+            ]);
+
+            if (! $response->successful()) {
+                throw new RuntimeException('Allegro Jarek read-only import failed: HTTP '.$response->status());
+            }
+
+            $pageOffers = $response->json('offers', []);
+            $pageOffers = is_array($pageOffers) ? array_values($pageOffers) : [];
+            $lastPageCount = count($pageOffers);
+            $pagesFetched++;
+
+            foreach ($pageOffers as $offer) {
+                if (is_array($offer)) {
+                    $offers[] = $offer;
+                }
+            }
+
+            if ($lastPageCount < $currentPageSize) {
+                break;
+            }
+
+            $currentOffset += $currentPageSize;
         }
 
-        return $response->json('offers', []);
+        $found = count($offers);
+        $reachedRequestedLimit = $found >= $requestedLimit;
+
+        return [
+            'offers' => array_slice($offers, 0, $requestedLimit),
+            'pagination' => [
+                'requested_limit' => $requestedLimit,
+                'effective_limit' => min($requestedLimit, $found),
+                'page_size' => $pageSize,
+                'pages_fetched' => $pagesFetched,
+                'reached_requested_limit' => $reachedRequestedLimit,
+                'has_more_after_limit' => $reachedRequestedLimit && $lastPageCount === min($pageSize, $requestedLimit - (($pagesFetched - 1) * $pageSize)),
+            ],
+        ];
     }
 
     private function fetchOfferDetails(string $offerId): array
