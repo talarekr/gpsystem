@@ -249,7 +249,10 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/ovoko/listing-url-diagnostics', OvokoListingUrlDiagnosticsController::class)->name('admin.tools.ovoko.listing-url-diagnostics');
     Route::get('/admin/tools/ovoko-stock-sync-dry-run', [OvokoStockSyncController::class, 'dryRun'])->name('admin.tools.ovoko-stock-sync-dry-run');
     Route::match(['get', 'post'], '/admin/tools/ovoko-stock-sync-apply', [OvokoStockSyncController::class, 'apply'])->name('admin.tools.ovoko-stock-sync-apply');
+    Route::get('/admin/tools/ovoko-stock-sync-runner', [OvokoStockSyncRunnerController::class, 'index'])->name('admin.tools.ovoko-stock-sync-runner.index');
     Route::match(['get', 'post'], '/admin/tools/ovoko-stock-sync-runner/start', [OvokoStockSyncRunnerController::class, 'start'])->name('admin.tools.ovoko-stock-sync-runner.start');
+    Route::match(['get', 'post'], '/admin/tools/ovoko-stock-sync-runner/start-browser', [OvokoStockSyncRunnerController::class, 'startBrowser'])->name('admin.tools.ovoko-stock-sync-runner.start-browser');
+    Route::get('/admin/tools/ovoko-stock-sync-runner/tick/{run}', [OvokoStockSyncRunnerController::class, 'tick'])->name('admin.tools.ovoko-stock-sync-runner.tick');
     Route::get('/admin/tools/ovoko-stock-sync-runner/status/{run}', [OvokoStockSyncRunnerController::class, 'status'])->name('admin.tools.ovoko-stock-sync-runner.status');
     Route::match(['get', 'post'], '/admin/tools/ovoko-stock-sync-runner/cancel/{run}', [OvokoStockSyncRunnerController::class, 'cancel'])->name('admin.tools.ovoko-stock-sync-runner.cancel');
     Route::get('/admin/tools/marketplace/listing-url-backfill', MarketplaceListingUrlBackfillController::class)->name('admin.tools.marketplace.listing-url-backfill');
