@@ -147,6 +147,69 @@ class ManualMarketplaceLinkMappingTest extends TestCase
         app(ManualMarketplaceLinkMappingService::class)->save($part, 'allegro', 'https://allegro.pl/oferta/name-222');
     }
 
+    public function test_replace_dry_run_reports_allegro_mapping_repair_without_writes(): void
+    {
+        $this->actingAsAdminUser();
+        $part = Part::query()->create(['id' => 7865, 'name' => 'Passat DSG', 'quantity' => 1, 'status' => 'ready']);
+        MarketplaceListing::query()->create(['part_id' => $part->id, 'marketplace' => 'allegro', 'external_offer_id' => '18723823450', 'external_listing_id' => '18723823450', 'url' => 'https://allegro.pl/oferta/old-18723823450', 'status' => 'ACTIVE', 'sync_status' => 'mapped', 'match_status' => 'confirmed', 'last_api_status' => 'ACTIVE']);
+
+        $this->getJson('/admin/tools/marketplace/manual-link-mapping/replace-dry-run?part_id=7865&marketplace=allegro&url='.urlencode('https://allegro.pl/oferta/vw-passat-b6-3-2-fsi-vr6-automatyczna-skrzynia-biegow-dsg-lre-18723770245'))
+            ->assertOk()
+            ->assertJsonPath('action', 'replace_mapping')
+            ->assertJsonPath('previous_external_id', '18723823450')
+            ->assertJsonPath('new_external_id', '18723770245')
+            ->assertJsonPath('marketplace_write', false)
+            ->assertJsonPath('sync_triggered', false)
+            ->assertJsonPath('publish', false)
+            ->assertJsonPath('relist', false)
+            ->assertJsonPath('end', false)
+            ->assertJsonPath('current_active_local_mapped_listings.0.external_offer_id', '18723823450');
+
+        $this->assertDatabaseHas('marketplace_listings', ['part_id' => 7865, 'external_offer_id' => '18723823450', 'status' => 'ACTIVE']);
+    }
+
+    public function test_replace_apply_requires_confirm(): void
+    {
+        $this->actingAsAdminUser();
+        Part::query()->create(['id' => 7865, 'name' => 'Passat DSG', 'quantity' => 1, 'status' => 'ready']);
+
+        $this->getJson('/admin/tools/marketplace/manual-link-mapping/replace-apply?part_id=7865&marketplace=allegro&url='.urlencode('https://allegro.pl/oferta/vw-passat-b6-18723770245'))
+            ->assertStatus(422)
+            ->assertJsonPath('applied', false)
+            ->assertJsonPath('marketplace_write', false)
+            ->assertJsonPath('sync_triggered', false);
+    }
+
+    public function test_replace_apply_updates_local_active_mapping_and_description_dry_run_uses_new_offer(): void
+    {
+        $this->actingAsAdminUser();
+        $part = Part::query()->create(['id' => 7865, 'name' => 'Passat DSG', 'quantity' => 1, 'status' => 'ready', 'description' => 'DSG gearbox']);
+        MarketplaceListing::query()->create(['part_id' => $part->id, 'marketplace' => 'allegro', 'external_offer_id' => '18723823450', 'external_listing_id' => '18723823450', 'url' => 'https://allegro.pl/oferta/old-18723823450', 'status' => 'ACTIVE', 'sync_status' => 'mapped', 'match_status' => 'confirmed', 'last_api_status' => 'ACTIVE']);
+        $url = 'https://allegro.pl/oferta/vw-passat-b6-3-2-fsi-vr6-automatyczna-skrzynia-biegow-dsg-lre-18723770245';
+
+        $this->getJson('/admin/tools/marketplace/manual-link-mapping/replace-apply?part_id=7865&marketplace=allegro&url='.urlencode($url).'&confirm=replace-marketplace-link-mapping')
+            ->assertOk()
+            ->assertJsonPath('applied', true)
+            ->assertJsonPath('previous_external_id', '18723823450')
+            ->assertJsonPath('new_external_id', '18723770245')
+            ->assertJsonPath('marketplace_write', false)
+            ->assertJsonPath('sync_triggered', false);
+
+        $this->assertSame(1, MarketplaceListing::query()->where('part_id', 7865)->whereIn('marketplace', ['allegro', 'allegro_main'])->where('sync_status', 'mapped')->count());
+        $this->assertDatabaseHas('marketplace_listings', ['part_id' => 7865, 'marketplace' => 'allegro', 'external_offer_id' => '18723770245', 'external_listing_id' => '18723770245', 'url' => $url, 'status' => 'ACTIVE', 'sync_status' => 'mapped']);
+        $this->assertDatabaseHas('marketplace_listings', ['part_id' => 7865, 'marketplace' => 'allegro', 'external_offer_id' => '18723823450', 'status' => 'replaced', 'sync_status' => 'archived']);
+
+        $part->load('marketplaceListings');
+        $row = collect(app(PartMarketplaceStatusResolver::class)->rowsForPart($part))->firstWhere('key', 'allegro');
+        $this->assertSame('18723770245', $row['external_offer_id']);
+
+        $this->getJson('/admin/tools/allegro/offers/description-update-dry-run?part_id=7865')
+            ->assertOk()
+            ->assertJsonPath('offer_id', '18723770245');
+
+        $this->assertDatabaseCount('marketplace_sync_logs', 0);
+    }
+
     private function actingAsAdminUser(): User
     {
         $this->seed(RoleSeeder::class);

@@ -74,6 +74,7 @@ use App\Http\Controllers\Tools\MarketplaceOrdersSyncController;
 use App\Http\Controllers\Tools\MarketplaceOrderFulfillmentSyncController;
 use App\Http\Controllers\Tools\MarketplaceOrdersTimezoneFixController;
 use App\Http\Controllers\Tools\ManualLinkMappingDiagnosticsController;
+use App\Http\Controllers\Tools\ManualLinkMappingReplaceController;
 use App\Http\Controllers\Tools\PartMarketplaceReadinessController;
 use App\Http\Controllers\Tools\MarketplacePublishPartController;
 use App\Http\Controllers\Tools\ImportOvokoOrdersDryRunController;
@@ -262,6 +263,8 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::match(['get', 'post'], '/admin/tools/ovoko-stock-sync-runner/cancel/{run}', [OvokoStockSyncRunnerController::class, 'cancel'])->name('admin.tools.ovoko-stock-sync-runner.cancel');
     Route::get('/admin/tools/marketplace/listing-url-backfill', MarketplaceListingUrlBackfillController::class)->name('admin.tools.marketplace.listing-url-backfill');
     Route::get('/admin/tools/marketplace/manual-link-mapping/diagnostics', ManualLinkMappingDiagnosticsController::class)->name('admin.tools.marketplace.manual-link-mapping.diagnostics');
+    Route::get('/admin/tools/marketplace/manual-link-mapping/replace-dry-run', [ManualLinkMappingReplaceController::class, 'dryRun'])->name('admin.tools.marketplace.manual-link-mapping.replace-dry-run');
+    Route::get('/admin/tools/marketplace/manual-link-mapping/replace-apply', [ManualLinkMappingReplaceController::class, 'apply'])->name('admin.tools.marketplace.manual-link-mapping.replace-apply');
     Route::get('/admin/tools/marketplace/ebay-listing-audit', EbayListingAuditController::class)->name('admin.tools.marketplace.ebay-listing-audit');
     Route::get('/admin/tools/marketplace/ebay-description-audit', EbayDescriptionAuditController::class)->name('admin.tools.marketplace.ebay-description-audit');
     Route::get('/admin/tools/marketplace/ebay-listing-audit-runner', EbayListingAuditRunnerController::class)->name('admin.tools.marketplace.ebay-listing-audit-runner');

@@ -154,6 +154,8 @@ class MarketplaceListingDryRunController extends Controller
             ->where('part_id', $part->id)
             ->whereIn('marketplace', ['allegro', 'allegro_main'])
             ->where(fn (Builder $query): Builder => $query->whereNotNull('external_offer_id')->orWhereNotNull('external_listing_id'))
+            ->orderByRaw("case when status in ('ACTIVE', 'published', 'publication_pending') or last_api_status = 'ACTIVE' then 1 else 0 end desc")
+            ->orderByRaw("case when status in ('ended', 'inactive', 'deleted', 'archived', 'replaced', 'not_found') or last_api_status in ('ended', 'inactive', 'deleted', 'archived', 'replaced', 'not_found', 'NOT_FOUND_IN_ACTIVE_API') then 1 else 0 end asc")
             ->latest('id')
             ->first();
         $offerId = (string) ($listing?->external_offer_id ?: $listing?->external_listing_id ?: '');
