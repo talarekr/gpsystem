@@ -8,7 +8,7 @@ class OvokoStockSyncRun extends Model
 {
     public const BATCH_SIZE = 20;
 
-    protected $fillable = ['mode','status','batch_size','total_candidates','processed_count','last_processed_part_id','no_change_count','would_update_count','applied_count','blocked_count','skipped_count','failed_count','top_blockers','recent_results','started_at','finished_at','last_error','cancel_requested_at'];
+    protected $fillable = ['mode','status','batch_size','total_candidates','processed_count','last_processed_part_id','no_change_count','would_update_count','applied_count','blocked_count','skipped_count','failed_count','available_on_ovoko_count','not_available_on_ovoko_count','availability_unknown_count','local_for_sale_count','local_sold_count','already_correct_count','should_mark_for_sale_count','should_mark_sold_count','top_blockers','recent_results','started_at','finished_at','last_error','cancel_requested_at'];
 
     protected function casts(): array
     {
@@ -44,6 +44,14 @@ class OvokoStockSyncRun extends Model
             'blocked_count' => (int) $this->blocked_count,
             'skipped_count' => (int) $this->skipped_count,
             'failed_count' => (int) $this->failed_count,
+            'available_on_ovoko_count' => (int) $this->available_on_ovoko_count,
+            'not_available_on_ovoko_count' => (int) $this->not_available_on_ovoko_count,
+            'availability_unknown_count' => (int) $this->availability_unknown_count,
+            'local_for_sale_count' => (int) $this->local_for_sale_count,
+            'local_sold_count' => (int) $this->local_sold_count,
+            'already_correct_count' => (int) $this->already_correct_count,
+            'should_mark_for_sale_count' => (int) $this->should_mark_for_sale_count,
+            'should_mark_sold_count' => (int) $this->should_mark_sold_count,
             'top_blockers' => $this->top_blockers ?? [],
             'started_at' => $this->started_at?->toISOString(),
             'finished_at' => $this->finished_at?->toISOString(),
