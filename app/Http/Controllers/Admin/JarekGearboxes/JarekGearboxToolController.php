@@ -122,6 +122,6 @@ class JarekGearboxToolController extends Controller
 
     private function limit(Request $request): int
     {
-        return max(1, min((int) $request->query('limit', 20), 100));
+        return max(1, (int) $request->query('limit', 20));
     }
 }
