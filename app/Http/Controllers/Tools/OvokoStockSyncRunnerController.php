@@ -11,6 +11,7 @@ use Illuminate\View\View;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Throwable;
 
@@ -120,6 +121,91 @@ class OvokoStockSyncRunnerController extends Controller
     public function diagnosticsEndpoint(): JsonResponse
     {
         return response()->json(['ok' => true, 'diagnostics' => $this->diagnostics()]);
+    }
+
+    public function ping(): JsonResponse
+    {
+        return response()->json([
+            'ok' => true,
+            'controller_loaded' => true,
+            'php_version' => PHP_VERSION,
+            'app_env' => app()->environment(),
+            'route_loaded' => true,
+        ]);
+    }
+
+    public function debugMinimal(): JsonResponse
+    {
+        $checks = [];
+        $errors = [];
+        $tableExists = false;
+
+        $this->debugCheck($checks, $errors, 'controller_class_exists', function (): bool {
+            return class_exists(self::class);
+        });
+
+        $this->debugCheck($checks, $errors, 'view_exists', function (): bool {
+            return view()->exists('admin.tools.ovoko-stock-sync-runner');
+        });
+
+        $this->debugCheck($checks, $errors, 'ovoko_stock_sync_runs_table_exists', function () use (&$tableExists): bool {
+            $tableExists = Schema::hasTable('ovoko_stock_sync_runs');
+
+            return $tableExists;
+        });
+
+        $this->debugCheck($checks, $errors, 'ovoko_stock_sync_runs_count_select', function () use (&$tableExists): array {
+            if (! $tableExists) {
+                return ['skipped' => true, 'reason' => 'missing_ovoko_stock_sync_runs_table'];
+            }
+
+            return ['count' => DB::table('ovoko_stock_sync_runs')->count()];
+        });
+
+        $this->debugCheck($checks, $errors, 'cache_lock_available', function (): bool {
+            $lock = Cache::lock('ovoko-stock-sync-runner-debug-minimal', 5);
+            $acquired = (bool) $lock->get();
+            if ($acquired) {
+                $lock->release();
+            }
+
+            return $acquired;
+        });
+
+        $this->debugCheck($checks, $errors, 'active_run', function () use (&$tableExists): array {
+            if (! $tableExists) {
+                return ['skipped' => true, 'reason' => 'missing_ovoko_stock_sync_runs_table'];
+            }
+
+            $run = OvokoStockSyncRun::query()->whereIn('status', ['queued', 'running'])->latest('id')->first();
+
+            return ['exists' => (bool) $run, 'run' => $run?->summary()];
+        });
+
+        return response()->json([
+            'ok' => true,
+            'checks' => $checks,
+            'errors' => $errors,
+            'marketplace_write' => false,
+        ]);
+    }
+
+    private function debugCheck(array &$checks, array &$errors, string $name, callable $callback): void
+    {
+        try {
+            $checks[$name] = [
+                'ok' => true,
+                'result' => $callback(),
+            ];
+        } catch (Throwable $e) {
+            $checks[$name] = ['ok' => false];
+            $errors[$name] = [
+                'message' => $e->getMessage(),
+                'class' => get_class($e),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ];
+        }
     }
 
     private function findRunOrBlocker(int|string $runId): array

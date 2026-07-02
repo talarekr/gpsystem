@@ -250,6 +250,8 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/ovoko-stock-sync-dry-run', [OvokoStockSyncController::class, 'dryRun'])->name('admin.tools.ovoko-stock-sync-dry-run');
     Route::match(['get', 'post'], '/admin/tools/ovoko-stock-sync-apply', [OvokoStockSyncController::class, 'apply'])->name('admin.tools.ovoko-stock-sync-apply');
     Route::get('/admin/tools/ovoko-stock-sync-runner', [OvokoStockSyncRunnerController::class, 'index'])->name('admin.tools.ovoko-stock-sync-runner.index');
+    Route::get('/admin/tools/ovoko-stock-sync-runner/ping', [OvokoStockSyncRunnerController::class, 'ping'])->name('admin.tools.ovoko-stock-sync-runner.ping');
+    Route::get('/admin/tools/ovoko-stock-sync-runner/debug-minimal', [OvokoStockSyncRunnerController::class, 'debugMinimal'])->name('admin.tools.ovoko-stock-sync-runner.debug-minimal');
     Route::match(['get', 'post'], '/admin/tools/ovoko-stock-sync-runner/start', [OvokoStockSyncRunnerController::class, 'start'])->name('admin.tools.ovoko-stock-sync-runner.start');
     Route::match(['get', 'post'], '/admin/tools/ovoko-stock-sync-runner/start-browser', [OvokoStockSyncRunnerController::class, 'startBrowser'])->name('admin.tools.ovoko-stock-sync-runner.start-browser');
     Route::get('/admin/tools/ovoko-stock-sync-runner/diagnostics', [OvokoStockSyncRunnerController::class, 'diagnosticsEndpoint'])->name('admin.tools.ovoko-stock-sync-runner.diagnostics');

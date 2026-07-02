@@ -23,6 +23,9 @@
             <div class="metric"><span class="muted">cache lock available</span><b>{{ ($diagnostics['cache_lock_available'] ?? false) ? 'true' : 'false' }}</b></div>
         </div>
         @if($diagnostics['blockers'] ?? [])<p><b>Blockers:</b> <span class="mono">{{ implode(', ', $diagnostics['blockers']) }}</span></p>@endif
+        @if(! ($diagnostics['db_table_exists'] ?? false))
+            <p><b>Migration required:</b> tabela <span class="mono">ovoko_stock_sync_runs</span> nie istnieje. Uruchom na produkcji <span class="mono">php artisan migrate --force</span>, a potem wyczyść cache: <span class="mono">php artisan optimize:clear</span>.</p>
+        @endif
         @if($diagnostics['last_error'] ?? null)<p><b>Last error:</b> <span class="mono">{{ $diagnostics['last_error'] }}</span></p>@endif
     </div>
 
@@ -31,8 +34,8 @@
         <div class="row">
             <button id="dryStart" class="btn primary">Start dry-run</button>
             <button id="applyStart" class="btn applyBtn">Start apply — zapisuje lokalny stock</button>
-            <button id="resume" class="btn secondary" @disabled(! $activeRun)>Resume aktywny run{{ $activeRun ? ' #'.$activeRun->id : '' }}</button>
-            <button id="cancel" class="btn dangerBtn" @disabled(! $activeRun)>Cancel</button>
+            <button id="resume" class="btn secondary" {{ ! $activeRun ? 'disabled' : '' }}>Resume aktywny run{{ $activeRun ? ' #'.$activeRun->id : '' }}</button>
+            <button id="cancel" class="btn dangerBtn" {{ ! $activeRun ? 'disabled' : '' }}>Cancel</button>
         </div>
         @if($activeRun)
             <p class="muted">Wykryto aktywny run <b>#{{ $activeRun->id }}</b> ze statusem <b>{{ $activeRun->status }}</b>. Możesz go wznowić przez browser tick.</p>
@@ -56,12 +59,12 @@ let currentRunId = activeRun ? activeRun.run_id : null;
 let running = false;
 let timer = null;
 const urls = {
-    startDry: @json(route('admin.tools.ovoko-stock-sync-runner.start-browser', ['mode' => 'dry-run', 'confirm' => 'ovoko-stock-sync-runner'], false)),
-    startApply: @json(route('admin.tools.ovoko-stock-sync-runner.start-browser', ['mode' => 'apply', 'confirm' => 'ovoko-stock-sync-runner-apply'], false)),
+    startDry: '/admin/tools/ovoko-stock-sync-runner/start-browser?mode=dry-run&confirm=ovoko-stock-sync-runner',
+    startApply: '/admin/tools/ovoko-stock-sync-runner/start-browser?mode=apply&confirm=ovoko-stock-sync-runner-apply',
     status: id => `/admin/tools/ovoko-stock-sync-runner/status/${id}`,
     tick: id => `/admin/tools/ovoko-stock-sync-runner/tick/${id}?confirm=ovoko-stock-sync-runner-tick`,
     cancel: id => `/admin/tools/ovoko-stock-sync-runner/cancel/${id}?confirm=cancel-ovoko-stock-sync-runner`,
-    diagnostics: @json(route('admin.tools.ovoko-stock-sync-runner.diagnostics', [], false)),
+    diagnostics: '/admin/tools/ovoko-stock-sync-runner/diagnostics',
 };
 function log(msg){document.getElementById('log').textContent = `[${new Date().toLocaleTimeString()}] ${msg}\n` + document.getElementById('log').textContent;}
 async function getJson(url){const res=await fetch(url,{headers:{Accept:'application/json'}}); const data=await res.json(); if(!res.ok){throw data;} return data;}
