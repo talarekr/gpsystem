@@ -257,6 +257,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/ovoko-stock-sync-runner/diagnostics', [OvokoStockSyncRunnerController::class, 'diagnosticsEndpoint'])->name('admin.tools.ovoko-stock-sync-runner.diagnostics');
     Route::get('/admin/tools/ovoko-stock-sync-runner/tick/{run}', [OvokoStockSyncRunnerController::class, 'tick'])->name('admin.tools.ovoko-stock-sync-runner.tick');
     Route::get('/admin/tools/ovoko-stock-sync-runner/status/{run}', [OvokoStockSyncRunnerController::class, 'status'])->name('admin.tools.ovoko-stock-sync-runner.status');
+    Route::get('/admin/tools/ovoko-stock-sync-runner/results/{run}', [OvokoStockSyncRunnerController::class, 'results'])->name('admin.tools.ovoko-stock-sync-runner.results');
     Route::match(['get', 'post'], '/admin/tools/ovoko-stock-sync-runner/cancel/{run}', [OvokoStockSyncRunnerController::class, 'cancel'])->name('admin.tools.ovoko-stock-sync-runner.cancel');
     Route::get('/admin/tools/marketplace/listing-url-backfill', MarketplaceListingUrlBackfillController::class)->name('admin.tools.marketplace.listing-url-backfill');
     Route::get('/admin/tools/marketplace/manual-link-mapping/diagnostics', ManualLinkMappingDiagnosticsController::class)->name('admin.tools.marketplace.manual-link-mapping.diagnostics');
