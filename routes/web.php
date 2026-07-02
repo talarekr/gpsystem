@@ -3,6 +3,7 @@
 use App\Http\Controllers\Admin\ImportMigration\PartImagePresentationController;
 use App\Http\Controllers\Admin\LocalSaleController;
 use App\Http\Controllers\Admin\LocalSaleEndMarketplacesController;
+use App\Http\Controllers\Admin\AllegroDuplicateCheckController;
 use App\Http\Controllers\Admin\EbayDePreviewController;
 use App\Http\Controllers\Admin\MarketplaceCategoryMapperController;
 use App\Http\Controllers\Admin\Allegro\AllegroOAuthController;
@@ -2256,6 +2257,7 @@ Route::get('/tools/post-domain-switch-check', PostDomainSwitchCheckController::c
 Route::middleware(Authenticate::class)->prefix('admin')->name('admin.')->group(function (): void {
     Route::get('/search/parts', PartSearchController::class)->name('search.parts');
     Route::get('/tools/marketplace/ebay-de-preview/{part}', EbayDePreviewController::class)->name('tools.marketplace.ebay-de-preview');
+    Route::get('/tools/marketplace/allegro-duplicate-check', AllegroDuplicateCheckController::class)->name('tools.marketplace.allegro-duplicate-check');
     Route::post('/local-sales', [LocalSaleController::class, 'store'])->name('local-sales.store');
     Route::get('/tools/parts/{part}/local-sale-end-marketplaces-dry-run', [LocalSaleEndMarketplacesController::class, 'dryRun'])->name('tools.parts.local-sale-end-marketplaces-dry-run');
     Route::get('/tools/parts/{part}/local-sale-end-marketplaces-apply', [LocalSaleEndMarketplacesController::class, 'apply'])->name('tools.parts.local-sale-end-marketplaces-apply');

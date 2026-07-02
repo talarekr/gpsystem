@@ -22,6 +22,8 @@ class EditPart extends EditRecord
 
     protected array $marketplaceCategorySelections = [];
 
+    public bool $marketplacePublishInProgress = false;
+
     protected function mutateFormDataBeforeFill(array $data): array
     {
         if (PartResource::isMissingAdminDefaultValue($data['condition_notes'] ?? null)) {
@@ -392,6 +394,14 @@ class EditPart extends EditRecord
 
     private function publishMarketplaceChannels(PublishPartToMarketplacesService $publishService, array|string $channels, ?string $singleChannel = null): void
     {
+        if ($this->marketplacePublishInProgress) {
+            Notification::make()->title('Wystawianie marketplace już trwa.')->body('Poczekaj na zakończenie aktualnej operacji; drugi request nie został wysłany.')->warning()->send();
+            return;
+        }
+
+        $this->marketplacePublishInProgress = true;
+
+        try {
         $this->save(false, false);
         $this->record->refresh();
 
@@ -443,6 +453,9 @@ class EditPart extends EditRecord
             ->send();
 
         return;
+        } finally {
+            $this->marketplacePublishInProgress = false;
+        }
     }
 
     private function getSaveAndPublishAction(string $name): Actions\Action
@@ -455,7 +468,10 @@ class EditPart extends EditRecord
             ->visible(fn (): bool => (bool) $this->record->needs_listing)
             ->extraAttributes([
                 'class' => 'gps-part-edit-layout-action gps-part-edit-layout-action--publish' . (str_ends_with($name, 'Footer') ? ' gps-part-edit-footer-action' : ''),
+                'wire:loading.attr' => 'disabled',
+                'wire:target' => $name,
             ])
+            ->disabled(fn (): bool => $this->marketplacePublishInProgress)
             ->action(function (PublishPartToMarketplacesService $publishService): void {
                 $this->publishMarketplaceChannels($publishService, 'all');
             });
