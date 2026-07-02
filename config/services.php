@@ -54,13 +54,4 @@ return [
         'test_mode' => env('DPD_TEST_MODE', true),
     ],
 
-
-    'allegro_jarek' => [
-        'client_id' => env('ALLEGRO_JAREK_CLIENT_ID'),
-        'client_secret' => env('ALLEGRO_JAREK_CLIENT_SECRET'),
-        'access_token' => env('ALLEGRO_JAREK_ACCESS_TOKEN'),
-        'refresh_token' => env('ALLEGRO_JAREK_REFRESH_TOKEN'),
-        'base_url' => env('ALLEGRO_JAREK_BASE_URL', 'https://api.allegro.pl'),
-    ],
-
 ];
