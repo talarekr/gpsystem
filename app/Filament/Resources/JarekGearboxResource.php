@@ -14,6 +14,7 @@ use Filament\Tables;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\HtmlString;
 
 class JarekGearboxResource extends Resource
@@ -176,12 +177,31 @@ class JarekGearboxResource extends Resource
     public static function getNavigationItems(): array
     {
         return [
-            NavigationItem::make(static::getNavigationLabel())
+            NavigationItem::make(static::navigationLabelWithCount(static::getNavigationLabel(), static::getJarekGearboxesNavigationCount()))
                 ->group(static::getNavigationGroup())
                 ->sort(static::getNavigationSort())
                 ->url(static::getUrl('index'))
                 ->isActiveWhen(fn (): bool => request()->routeIs('filament.admin.resources.jarek-gearboxes.*')),
         ];
+    }
+
+    public static function getNavigationBadge(): ?string
+    {
+        return (string) static::getJarekGearboxesNavigationCount();
+    }
+
+    public static function getJarekGearboxesNavigationCount(): int
+    {
+        if (! Schema::hasTable('jarek_gearboxes')) {
+            return 0;
+        }
+
+        return JarekGearbox::count();
+    }
+
+    private static function navigationLabelWithCount(string $label, int $count): string
+    {
+        return sprintf('%s (%d)', $label, $count);
     }
 
     public static function canCreate(): bool { return false; }
