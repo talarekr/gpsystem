@@ -79,7 +79,7 @@ class AllegroJarekImportService
 
     private function mapOffer(array $offer): array
     {
-        $images = collect(Arr::get($offer, 'images', []))->map(fn ($image) => is_array($image) ? ($image['url'] ?? null) : $image)->filter()->values()->all();
+        $images = $this->mapImages($offer);
         $price = Arr::get($offer, 'sellingMode.price.amount') ?? Arr::get($offer, 'sellingMode.minimalPrice.amount');
         $category = Arr::get($offer, 'category', []);
 
@@ -105,5 +105,53 @@ class AllegroJarekImportService
             'imported_at' => now(),
             'updated_from_allegro_at' => now(),
         ];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function mapImages(array $offer): array
+    {
+        $urls = [];
+
+        foreach ([
+            Arr::get($offer, 'primaryImage.url'),
+            Arr::get($offer, 'images', []),
+            Arr::get($offer, 'gallery', []),
+        ] as $source) {
+            $urls = array_merge($urls, $this->extractImageUrls($source));
+        }
+
+        return collect($urls)
+            ->filter(fn ($url): bool => is_string($url) && filled($url))
+            ->map(fn (string $url): string => trim($url))
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function extractImageUrls(mixed $source): array
+    {
+        if (is_string($source)) {
+            return [$source];
+        }
+
+        if (! is_array($source)) {
+            return [];
+        }
+
+        if (isset($source['url']) && is_string($source['url'])) {
+            return [$source['url']];
+        }
+
+        $urls = [];
+        foreach ($source as $item) {
+            $urls = array_merge($urls, $this->extractImageUrls($item));
+        }
+
+        return $urls;
     }
 }
