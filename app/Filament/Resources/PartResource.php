@@ -121,26 +121,7 @@ class PartResource extends Resource
                     ->columns(12)
                     ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--part-info'])
                     ->schema([
-                        Forms\Components\TextInput::make('name')
-                            ->label('Tytuł produktu')
-                            ->required()
-                            ->maxLength(75)
-                            ->live(onBlur: true)
-                            ->suffix(new HtmlString(<<<'HTML'
-<span
-    class="gps-part-title-counter text-xs font-normal text-slate-400"
-    x-text="`${count}/75`"
-    x-bind:class="count > limit ? 'text-amber-600' : 'text-slate-400'"
-    aria-live="polite"
->0/75</span>
-HTML))
-                            ->extraFieldWrapperAttributes([
-                                'class' => 'gps-part-title-field',
-                                'x-data' => "{ count: 0, limit: 75, refresh() { const input = this.$el.querySelector('input'); this.count = input ? Array.from(input.value).length : 0 }, init() { this.$nextTick(() => { this.refresh(); const input = this.$el.querySelector('input'); input?.addEventListener('input', () => this.refresh()); input?.addEventListener('change', () => this.refresh()) }) } }",
-                            ])
-                            ->extraInputAttributes(['maxlength' => 75])
-                            ->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))
-                            ->columnSpanFull(),
+                        Forms\Components\TextInput::make('name')->label('Tytuł produktu')->required()->maxLength(255)->live(onBlur: true)->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))->columnSpanFull(),
                         Forms\Components\TextInput::make('part_number')->label('Główny kod części')->maxLength(255)->live(debounce: 500)->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))->columnSpanFull(),
                         Forms\Components\Hidden::make('sku'),
                         Forms\Components\Select::make('category_id')->label('Kategoria')->placeholder('Kategoria')->relationship('category', 'name')->required()->validationMessages(['required' => 'Kategoria jest wymagana.'])->searchable()->preload()->native(false)->live()->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set): null => self::refreshMarketplaceMappings($get, $set))->suffixAction(self::categoryTreeAction())->columnSpanFull(),
