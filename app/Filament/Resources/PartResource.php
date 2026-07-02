@@ -126,13 +126,12 @@ class PartResource extends Resource
                             ->label('Tytuł produktu')
                             ->required()
                             ->maxLength(self::PART_TITLE_MAX_LENGTH)
-                            ->suffix(self::partTitleCharacterCounter())
-                            ->extraFieldWrapperAttributes([
-                                'x-data' => self::partTitleCharacterCounterAlpineData(),
-                            ])
+                            ->live(debounce: 150)
+                            ->suffix(fn (Forms\Get $get): HtmlString => self::partTitleCharacterCounter($get('name')))
                             ->extraInputAttributes([
                                 'class' => 'font-normal',
                             ])
+                            ->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))
                             ->columnSpanFull(),
                         Forms\Components\TextInput::make('part_number')->label('Główny kod części')->maxLength(255)->live(debounce: 500)->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))->columnSpanFull(),
                         Forms\Components\Hidden::make('sku'),
@@ -550,35 +549,17 @@ class PartResource extends Resource
         return '<div class="gps-vehicle-option"><span class="gps-vehicle-option__icon">🚗</span><span><strong>'.e(self::carLabel($car)).'</strong>'.($details ? '<small>'.e(implode(' · ', $details)).'</small>' : '').'</span></div>';
     }
 
-    public static function partTitleCharacterCounter(): HtmlString
+    public static function partTitleCharacterCounter(?string $title): HtmlString
     {
+        $length = mb_strlen((string) $title);
+        $toneClass = $length > self::PART_TITLE_MAX_LENGTH ? 'text-amber-600 dark:text-amber-400' : 'text-gray-400 dark:text-gray-500';
+
         return new HtmlString(sprintf(
-            "<span class=\"text-xs font-normal tabular-nums whitespace-nowrap\" x-text=\"`${count}/%1$d`\" :class=\"count > %1$d ? 'text-amber-600 dark:text-amber-400' : 'text-gray-400 dark:text-gray-500'\">0/%1$d</span>",
+            '<span class="text-xs font-normal tabular-nums whitespace-nowrap %s">%d/%d</span>',
+            $toneClass,
+            $length,
             self::PART_TITLE_MAX_LENGTH,
         ));
-    }
-
-    public static function partTitleCharacterCounterAlpineData(): string
-    {
-        return sprintf(<<<'JS'
-{
-    count: 0,
-    init() {
-        const input = this.$el.querySelector('input');
-
-        if (! input) {
-            return;
-        }
-
-        const updateCount = () => {
-            this.count = input.value.length;
-        };
-
-        updateCount();
-        input.addEventListener('input', updateCount);
-    },
-}
-JS, self::PART_TITLE_MAX_LENGTH);
     }
 
     public static function categoryTreeAction(): Action
