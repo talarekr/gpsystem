@@ -91,6 +91,8 @@ class JarekGearboxToolController extends Controller
             'images',
             'category_id',
             'category_name',
+            'category_path',
+            'category_payload',
             'parameters',
             'raw_payload',
             'import_status',

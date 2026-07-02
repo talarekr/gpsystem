@@ -3,6 +3,7 @@
 namespace App\Services\JarekGearboxes;
 
 use App\Models\JarekGearbox;
+use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
@@ -14,6 +15,9 @@ class AllegroJarekImportService
         'client_secret' => 'ALLEGRO_JAREK_CLIENT_SECRET',
         'access_token' => 'ALLEGRO_JAREK_ACCESS_TOKEN',
     ];
+
+    /** @var array<string, array<string, mixed>> */
+    private array $categoryCache = [];
 
     public function configStatus(): array
     {
@@ -29,16 +33,24 @@ class AllegroJarekImportService
 
     public function dryRun(int $limit = 20, int $offset = 0): array
     {
-        $offers = $this->fetchOffers($limit, $offset);
-        $mapped = collect($offers)->map(fn (array $offer): array => $this->mapOffer($offer))->values();
+        $mapped = collect($this->fetchDetailedOffers($limit, $offset))->map(fn (array $offer): array => $this->mapOffer($offer))->values();
+        $categoryRows = $mapped->pluck('category_payload')->filter()->unique('id')->values();
 
         return [
             'marketplace_write' => false,
             'database_write' => false,
-            'found' => count($offers),
+            'found' => $mapped->count(),
             'would_create' => $mapped->where(fn ($row) => ! JarekGearbox::where('allegro_offer_id', $row['allegro_offer_id'])->exists())->count(),
             'would_update' => $mapped->where(fn ($row) => JarekGearbox::where('allegro_offer_id', $row['allegro_offer_id'])->exists())->count(),
-            'sample' => $mapped->take(5)->all(),
+            'categories_count' => $categoryRows->count(),
+            'categories_sample' => $categoryRows->take(10)->map(fn ($category) => $this->categorySummary((array) $category))->all(),
+            'missing_category_name_count' => $mapped->where(fn ($row) => blank($row['category_name']))->count(),
+            'missing_category_id_count' => $mapped->where(fn ($row) => blank($row['category_id']))->count(),
+            'missing_description_count' => $mapped->where(fn ($row) => blank($row['description']) && blank($row['plain_description']))->count(),
+            'missing_parameters_count' => $mapped->where(fn ($row) => count($row['parameters'] ?? []) === 0)->count(),
+            'missing_images_count' => $mapped->where(fn ($row) => count($row['images'] ?? []) === 0)->count(),
+            'single_image_only_count' => $mapped->where(fn ($row) => count($row['images'] ?? []) === 1)->count(),
+            'sample' => $mapped->take(5)->map(fn (array $row): array => $this->sampleRow($row))->all(),
         ];
     }
 
@@ -47,7 +59,7 @@ class AllegroJarekImportService
         $created = 0;
         $updated = 0;
 
-        foreach ($this->fetchOffers($limit, $offset) as $offer) {
+        foreach ($this->fetchDetailedOffers($limit, $offset) as $offer) {
             $data = $this->mapOffer($offer);
             $existing = JarekGearbox::where('allegro_offer_id', $data['allegro_offer_id'])->first();
             $existing ? $existing->fill($data)->save() : JarekGearbox::create($data);
@@ -57,18 +69,16 @@ class AllegroJarekImportService
         return compact('created', 'updated') + ['marketplace_write' => false, 'deleted' => 0];
     }
 
+    private function fetchDetailedOffers(int $limit, int $offset): array
+    {
+        return collect($this->fetchOffers($limit, $offset))
+            ->map(fn (array $offer): array => array_replace_recursive($offer, $this->fetchOfferDetails((string) Arr::get($offer, 'id'))))
+            ->all();
+    }
+
     private function fetchOffers(int $limit, int $offset): array
     {
-        $status = $this->configStatus();
-        if (! $status['present']) {
-            throw new RuntimeException('Missing .env/config key for Allegro Jarek: '.$status['missing'][0]);
-        }
-
-        $baseUrl = rtrim((string) config('services.allegro_jarek.base_url', 'https://api.allegro.pl'), '/');
-        $response = Http::withToken((string) config('services.allegro_jarek.access_token'))
-            ->accept('application/vnd.allegro.public.v1+json')
-            ->timeout(20)
-            ->get($baseUrl.'/sale/offers', ['limit' => max(1, min($limit, 100)), 'offset' => max(0, $offset)]);
+        $response = $this->allegro()->get($this->baseUrl().'/sale/offers', ['limit' => max(1, min($limit, 100)), 'offset' => max(0, $offset)]);
 
         if (! $response->successful()) {
             throw new RuntimeException('Allegro Jarek read-only import failed: HTTP '.$response->status());
@@ -77,11 +87,28 @@ class AllegroJarekImportService
         return $response->json('offers', []);
     }
 
+    private function fetchOfferDetails(string $offerId): array
+    {
+        if (blank($offerId)) {
+            return [];
+        }
+
+        foreach (['/sale/product-offers/'.$offerId, '/sale/offers/'.$offerId] as $path) {
+            $response = $this->allegro()->get($this->baseUrl().$path);
+            if ($response->successful()) {
+                return $response->json() ?? [];
+            }
+        }
+
+        return [];
+    }
+
     private function mapOffer(array $offer): array
     {
         $images = $this->mapImages($offer);
         $price = Arr::get($offer, 'sellingMode.price.amount') ?? Arr::get($offer, 'sellingMode.minimalPrice.amount');
-        $category = Arr::get($offer, 'category', []);
+        $description = $this->mapDescription($offer);
+        $category = $this->mapCategory(Arr::get($offer, 'category', []));
 
         return [
             'source_account' => 'jarek',
@@ -89,17 +116,19 @@ class AllegroJarekImportService
             'allegro_offer_id' => (string) Arr::get($offer, 'id'),
             'allegro_offer_url' => filled(Arr::get($offer, 'id')) ? 'https://allegro.pl/oferta/'.Arr::get($offer, 'id') : null,
             'title' => (string) Arr::get($offer, 'name', 'Oferta Allegro Jarka'),
-            'description' => is_array(Arr::get($offer, 'description')) ? json_encode(Arr::get($offer, 'description'), JSON_UNESCAPED_UNICODE) : Arr::get($offer, 'description'),
-            'plain_description' => strip_tags((string) (Arr::get($offer, 'description.sections.0.items.0.content') ?? '')),
+            'description' => $description['structured'],
+            'plain_description' => $description['plain'],
             'price' => $price !== null ? (float) $price : null,
             'currency' => (string) (Arr::get($offer, 'sellingMode.price.currency') ?? 'PLN'),
             'quantity' => (int) (Arr::get($offer, 'stock.available') ?? 0),
             'allegro_status' => Arr::get($offer, 'publication.status'),
             'main_image_url' => $images[0] ?? null,
             'images' => $images,
-            'category_id' => Arr::get($category, 'id'),
-            'category_name' => Arr::get($category, 'name'),
-            'parameters' => Arr::get($offer, 'parameters', []),
+            'category_id' => $category['id'],
+            'category_name' => $category['name'],
+            'category_path' => $category['path'],
+            'category_payload' => $category['payload'],
+            'parameters' => $this->mapParameters(Arr::get($offer, 'parameters', [])),
             'raw_payload' => $offer,
             'import_status' => 'imported',
             'imported_at' => now(),
@@ -107,42 +136,94 @@ class AllegroJarekImportService
         ];
     }
 
-    /**
-     * @return array<int, string>
-     */
+    private function mapDescription(array $offer): array
+    {
+        $raw = Arr::get($offer, 'description');
+        $structured = is_array($raw) ? json_encode($raw, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : (is_string($raw) ? $raw : null);
+        $plainParts = [];
+        foreach (Arr::get($offer, 'description.sections', []) as $section) {
+            foreach (Arr::get($section, 'items', []) as $item) {
+                $plainParts[] = strip_tags((string) Arr::get($item, 'content', ''));
+            }
+        }
+        $plain = trim(preg_replace('/\s+/', ' ', implode(' ', array_filter($plainParts))) ?? '');
+
+        return ['structured' => $structured, 'plain' => $plain !== '' ? $plain : strip_tags((string) $structured)];
+    }
+
+    private function mapParameters(mixed $parameters): array
+    {
+        return collect(is_array($parameters) ? $parameters : [])->map(fn ($parameter): array => Arr::only((array) $parameter, ['id', 'name', 'values', 'valuesIds', 'unit', 'rangeValue', 'valuesLabels']))->values()->all();
+    }
+
+    private function mapCategory(mixed $category): array
+    {
+        $categoryId = (string) Arr::get((array) $category, 'id', '');
+        $payload = $categoryId !== '' ? $this->fetchCategory($categoryId) : [];
+        $name = Arr::get($category, 'name') ?: Arr::get($payload, 'name');
+        $path = Arr::get($payload, 'path', []);
+
+        return ['id' => $categoryId ?: null, 'name' => $name, 'path' => $path, 'payload' => $payload ?: (array) $category];
+    }
+
+    private function fetchCategory(string $categoryId): array
+    {
+        if (isset($this->categoryCache[$categoryId])) {
+            return $this->categoryCache[$categoryId];
+        }
+
+        $response = $this->allegro()->get($this->baseUrl().'/sale/categories/'.$categoryId);
+        if (! $response->successful()) {
+            return $this->categoryCache[$categoryId] = ['id' => $categoryId];
+        }
+
+        $category = $response->json() ?? ['id' => $categoryId];
+        $parentId = Arr::get($category, 'parent.id');
+        $parentPath = filled($parentId) ? Arr::get($this->fetchCategory((string) $parentId), 'path', []) : [];
+        $category['path'] = array_values(array_merge($parentPath, [[
+            'id' => (string) Arr::get($category, 'id', $categoryId),
+            'name' => Arr::get($category, 'name'),
+        ]]));
+
+        return $this->categoryCache[$categoryId] = $category;
+    }
+
+    private function categorySummary(array $category): array
+    {
+        return ['id' => Arr::get($category, 'id'), 'name' => Arr::get($category, 'name'), 'path' => Arr::get($category, 'path', [])];
+    }
+
+    private function sampleRow(array $row): array
+    {
+        return Arr::only($row, ['allegro_offer_id', 'title', 'price', 'currency', 'quantity', 'allegro_status', 'category_id', 'category_name', 'category_path', 'main_image_url', 'images']) + [
+            'has_description' => filled($row['description']) || filled($row['plain_description']),
+            'description_length' => mb_strlen((string) ($row['description'] ?? '')),
+            'plain_description_length' => mb_strlen((string) ($row['plain_description'] ?? '')),
+            'parameters_count' => count($row['parameters'] ?? []),
+            'parameters_sample' => array_slice($row['parameters'] ?? [], 0, 5),
+            'images_count' => count($row['images'] ?? []),
+            'category_payload_summary' => $this->categorySummary((array) ($row['category_payload'] ?? [])),
+        ];
+    }
+
     private function mapImages(array $offer): array
     {
         $urls = [];
-
-        foreach ([
-            Arr::get($offer, 'primaryImage.url'),
-            Arr::get($offer, 'images', []),
-            Arr::get($offer, 'gallery', []),
-        ] as $source) {
+        foreach ([Arr::get($offer, 'primaryImage.url'), Arr::get($offer, 'images', []), Arr::get($offer, 'gallery', [])] as $source) {
             $urls = array_merge($urls, $this->extractImageUrls($source));
         }
 
-        return collect($urls)
-            ->filter(fn ($url): bool => is_string($url) && filled($url))
-            ->map(fn (string $url): string => trim($url))
-            ->unique()
-            ->values()
-            ->all();
+        return collect($urls)->filter(fn ($url): bool => is_string($url) && filled($url))->map(fn (string $url): string => trim($url))->unique()->values()->all();
     }
 
-    /**
-     * @return array<int, string>
-     */
     private function extractImageUrls(mixed $source): array
     {
         if (is_string($source)) {
             return [$source];
         }
-
         if (! is_array($source)) {
             return [];
         }
-
         if (isset($source['url']) && is_string($source['url'])) {
             return [$source['url']];
         }
@@ -153,5 +234,22 @@ class AllegroJarekImportService
         }
 
         return $urls;
+    }
+
+    private function allegro(): PendingRequest
+    {
+        $status = $this->configStatus();
+        if (! $status['present']) {
+            throw new RuntimeException('Missing .env/config key for Allegro Jarek: '.$status['missing'][0]);
+        }
+
+        return Http::withToken((string) config('services.allegro_jarek.access_token'))
+            ->accept('application/vnd.allegro.public.v1+json')
+            ->timeout(20);
+    }
+
+    private function baseUrl(): string
+    {
+        return rtrim((string) config('services.allegro_jarek.base_url', 'https://api.allegro.pl'), '/');
     }
 }
