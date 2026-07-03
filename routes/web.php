@@ -78,6 +78,7 @@ use App\Http\Controllers\Tools\MarketplaceOrdersTimezoneFixController;
 use App\Http\Controllers\Tools\ManualLinkMappingDiagnosticsController;
 use App\Http\Controllers\Tools\ManualLinkMappingReplaceController;
 use App\Http\Controllers\Tools\PartMarketplaceReadinessController;
+use App\Http\Controllers\Tools\PartsToListStorageLocationBackfillController;
 use App\Http\Controllers\Tools\MarketplacePublishPartController;
 use App\Http\Controllers\Tools\ImportOvokoOrdersDryRunController;
 use App\Http\Controllers\Tools\CheckPartNumberPerformanceController;
@@ -247,6 +248,9 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/allegro/oauth/callback', [AllegroOAuthController::class, 'callback'])->name('admin.allegro.oauth.callback');
     Route::get('/admin/ebay/oauth/redirect', [EbayOAuthController::class, 'redirect'])->name('admin.ebay.oauth.redirect');
     Route::get('/admin/ebay/oauth/callback', [EbayOAuthController::class, 'callback'])->name('admin.ebay.oauth.callback');
+    Route::get('/admin/tools/parts-to-list/storage-location-backfill-dry-run', [PartsToListStorageLocationBackfillController::class, 'dryRun'])->name('admin.tools.parts-to-list.storage-location-backfill-dry-run');
+    Route::match(['get', 'post'], '/admin/tools/parts-to-list/storage-location-backfill-apply', [PartsToListStorageLocationBackfillController::class, 'apply'])->name('admin.tools.parts-to-list.storage-location-backfill-apply');
+    Route::get('/admin/tools/parts-to-list/storage-location-backfill-results', [PartsToListStorageLocationBackfillController::class, 'results'])->name('admin.tools.parts-to-list.storage-location-backfill-results');
     Route::get('/admin/tools/jarek-gearboxes/ping', [JarekGearboxToolController::class, 'ping'])->name('admin.tools.jarek-gearboxes.ping');
     Route::get('/admin/tools/jarek-gearboxes/allegro-import-runner', [JarekGearboxToolController::class, 'runner'])->name('admin.tools.jarek-gearboxes.allegro-import-runner');
     Route::get('/admin/tools/jarek-gearboxes/allegro-import-dry-run', [JarekGearboxToolController::class, 'dryRun'])->name('admin.tools.jarek-gearboxes.allegro-import-dry-run');
