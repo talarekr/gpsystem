@@ -45,11 +45,20 @@ class OvokoImportProductDataControllerTest extends TestCase
             ->assertJsonPath('mapped_count', 1)
             ->assertJsonPath('fetched_count', 1)
             ->assertJsonPath('failed_count', 0)
+            ->assertJsonPath('would_update_count', 1)
+            ->assertJsonPath('products_with_price_count', 0)
+            ->assertJsonPath('products_missing_price_count', 1)
             ->assertJsonPath('items.0.status', 'would_update')
-            ->assertJsonPath('items.0.old_values.needs_listing', true)
-            ->assertJsonPath('items.0.new_values.needs_listing', false)
-            ->assertJsonPath('items.0.old_values.status', 'draft')
-            ->assertJsonPath('items.0.new_values.status', 'ready');
+            ->assertJsonPath('items.0.changes.0.field', 'main_part_code')
+            ->assertJsonPath('items.0.changes.0.label', 'Główny kod części')
+            ->assertJsonPath('items.0.changes.0.old_value', '')
+            ->assertJsonPath('items.0.changes.0.new_value', 'MC-1')
+            ->assertJsonPath('items.0.changes.2.field', 'needs_listing')
+            ->assertJsonPath('items.0.changes.2.old_value', true)
+            ->assertJsonPath('items.0.changes.2.new_value', false)
+            ->assertJsonPath('items.0.changes.3.field', 'status')
+            ->assertJsonPath('items.0.changes.3.old_value', 'draft')
+            ->assertJsonPath('items.0.changes.3.new_value', 'ready');
 
         $this->assertTrue($part->fresh()->needs_listing);
         $this->assertSame('draft', $part->fresh()->status);
