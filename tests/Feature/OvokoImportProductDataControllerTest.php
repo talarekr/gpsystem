@@ -286,6 +286,10 @@ class OvokoImportProductDataControllerTest extends TestCase
             ->assertJsonPath('items.0.changes.1.new_value', 'Układ chłodzenia > Chłodnice dodatkowe')
             ->assertJsonPath('items.0.changes.1.will_update', false)
             ->assertJsonPath('items.0.changes.1.reason', 'local_category_not_found')
+            ->assertJsonPath('items.0.changes.1.category_action', 'create')
+            ->assertJsonPath('local_category_not_found_count', 1)
+            ->assertJsonPath('summary.missing_local_categories.0.external_id', '241')
+            ->assertJsonPath('summary.missing_local_categories.0.path', 'Układ chłodzenia > Chłodnice dodatkowe')
             ->assertJsonPath('items.0.changes.4.new_value', '250.00')
             ->assertJsonPath('items.0.changes.4.will_update', true)
             ->assertJsonPath('items.0.changes.5.new_value', '250.00')
@@ -319,10 +323,41 @@ class OvokoImportProductDataControllerTest extends TestCase
             ->assertOk()
             ->assertJsonPath('items.0.changes.1.field', 'category')
             ->assertJsonPath('items.0.changes.1.new_value', 'Układ chłodzenia > Chłodnice dodatkowe')
-            ->assertJsonPath('items.0.changes.1.will_update', true);
+            ->assertJsonPath('items.0.changes.1.will_update', true)
+            ->assertJsonPath('items.0.changes.1.category_action', 'map_existing')
+            ->assertJsonPath('local_category_not_found_count', 0)
+            ->assertJsonPath('summary.missing_local_categories', []);
 
         $this->assertNull($part->fresh()->category_id);
         $this->assertSame($category->id, PartCategory::query()->where('external_id', '241')->value('id'));
+    }
+
+
+    public function test_dry_run_maps_existing_ovoko_category_by_path_without_external_id_match(): void
+    {
+        $this->actingAsAdminUser();
+        $this->account();
+
+        $category = PartCategory::query()->create(['source_system' => 'woo', 'external_id' => 'woo-9', 'name' => 'Boczki bagażnika i inne elementy', 'category_path' => 'Boczek / Tapicerka / bagażnika / Poszycia / Boczki bagażnika i inne elementy']);
+        $part = Part::query()->forceCreate(['id' => 510, 'name' => 'Old', 'status' => 'ready', 'needs_listing' => false]);
+        MarketplaceListing::query()->create(['marketplace' => 'ovoko', 'part_id' => $part->id, 'external_offer_id' => '11690', 'status' => 'active']);
+
+        Http::fake([
+            'ovoko.test/get/part/11690' => Http::response([
+                'status_code' => 'R200',
+                'list' => [[['id' => '11690', 'category_id' => '999', 'category_title_path' => 'Boczek / Tapicerka / bagażnika / Poszycia / Boczki bagażnika i inne elementy']]],
+            ], 200),
+        ]);
+
+        $this->getJson('/admin/tools/ovoko/import-product-data?ids=11690&dry_run=1')
+            ->assertOk()
+            ->assertJsonPath('items.0.changes.1.will_update', true)
+            ->assertJsonPath('items.0.changes.1.category_action', 'map_existing')
+            ->assertJsonPath('local_category_not_found_count', 0)
+            ->assertJsonPath('summary.missing_local_categories', []);
+
+        $this->assertNull($part->fresh()->category_id);
+        $this->assertSame($category->id, PartCategory::query()->whereKey($category->id)->value('id'));
     }
 
     public function test_dry_run_reports_no_changes_when_all_import_values_match_or_are_missing(): void
@@ -356,6 +391,7 @@ class OvokoImportProductDataControllerTest extends TestCase
             ->assertJsonPath('items.0.changes.1.new_value', null)
             ->assertJsonPath('items.0.changes.1.reason', 'missing_from_ovoko')
             ->assertJsonPath('items.0.changes.13.field', 'status')
+            ->assertJsonPath('items.0.changes.13.new_value', 'ready')
             ->assertJsonPath('items.0.changes.13.will_update', false);
     }
 

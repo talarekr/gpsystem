@@ -31,6 +31,7 @@ class OvokoImportProductDataController extends Controller
         $items = [];
         $fetched = $updated = $skipped = $failed = $wouldUpdate = 0;
         $productsWithPrice = $productsWithCategory = $productsWithCar = $productsWithDimensions = 0;
+        $missingLocalCategories = [];
 
         foreach ($ids as $id) {
             $listing = $listings[$id] ?? null;
@@ -61,6 +62,9 @@ class OvokoImportProductDataController extends Controller
             if ($this->hasReadableValue($part, $changes, ['category_id'])) $productsWithCategory++;
             if ($this->hasReadableValue($part, $changes, ['car_id'])) $productsWithCar++;
             if ($this->hasReadableValue($part, $changes, ['length_cm', 'width_cm', 'height_cm'])) $productsWithDimensions++;
+            if (($changes['category_resolution']['action'] ?? null) === 'create') {
+                $missingLocalCategories[$changes['category_resolution']['signature']] = $changes['category_resolution'];
+            }
 
             if ($changes['new'] === []) {
                 $item['status'] = 'no_changes';
@@ -88,7 +92,8 @@ class OvokoImportProductDataController extends Controller
             $items[] = $item;
         }
 
-        $payload = ['requested_count' => count($ids), 'mapped_count' => count($listings), 'fetched_count' => $fetched, 'would_update_count' => $wouldUpdate, 'updated_count' => $updated, 'skipped_count' => $skipped, 'failed_count' => $failed, 'products_with_price_count' => $productsWithPrice, 'products_missing_price_count' => max(0, $fetched - $productsWithPrice), 'products_with_category_count' => $productsWithCategory, 'products_with_car_count' => $productsWithCar, 'products_with_dimensions_count' => $productsWithDimensions, 'dry_run' => $dryRun, 'local_update' => ! $dryRun, 'marketplace_write' => false, 'items' => $items];
+        $missingLocalCategories = array_values($missingLocalCategories);
+        $payload = ['requested_count' => count($ids), 'mapped_count' => count($listings), 'fetched_count' => $fetched, 'would_update_count' => $wouldUpdate, 'updated_count' => $updated, 'skipped_count' => $skipped, 'failed_count' => $failed, 'products_with_price_count' => $productsWithPrice, 'products_missing_price_count' => max(0, $fetched - $productsWithPrice), 'products_with_category_count' => $productsWithCategory, 'products_with_car_count' => $productsWithCar, 'products_with_dimensions_count' => $productsWithDimensions, 'local_category_not_found_count' => count($missingLocalCategories), 'summary' => ['missing_local_categories' => $missingLocalCategories], 'dry_run' => $dryRun, 'local_update' => ! $dryRun, 'marketplace_write' => false, 'items' => $items];
         $this->writeLog($payload, $failed > 0 ? 'warning' : 'success');
 
         return response()->json($payload);
@@ -277,10 +282,11 @@ class OvokoImportProductDataController extends Controller
         $shopPrice = $this->priceFromNotes($ovoko, ['shop_price','shopPrice','store_price','storePrice'], ['shop', 'sklep']);
         $allegroPrice = $this->priceFromNotes($ovoko, ['allegro_price','allegroPrice'], ['allegro']);
         $title = $this->text($this->first($ovoko, ['notes','description','desc','content','body','text','title','part_name','partName','name']));
+        $categoryResolution = $this->resolveOvokoCategory($ovoko, $allowCreateCategory);
         $newLegacy = array_replace_recursive($legacy, ['ovoko_import_product_data' => ['part_position' => $partPosition, 'raw_selected_fields' => $this->selectedFields($ovoko)]]);
         $candidate = [
             'part_number' => $mainCode,
-            'category_id' => $this->categoryId($ovoko, $allowCreateCategory),
+            'category_id' => $categoryResolution['id'],
             'car_id' => $this->int($this->first($ovoko, ['car_id','carId','vehicle_id','vehicleId','car.id','vehicle.id'])),
             'name' => $title,
             'weight_kg' => $this->decimal($this->first($ovoko, ['weight_kg','weightKg','weight','package.weight'])),
@@ -290,6 +296,7 @@ class OvokoImportProductDataController extends Controller
             'legacy_payload' => $newLegacy,
         ];
         $candidateAll = $candidate;
+        $candidateAll['category_action'] = $categoryResolution['action'];
         $candidateAll['ovoko_price'] = $part->ovoko_price;
         $candidateAll['price'] = $shopPrice;
         $candidateAll['allegro_price'] = $allegroPrice;
@@ -307,7 +314,7 @@ class OvokoImportProductDataController extends Controller
             $diff = ['old' => [], 'new' => []];
         }
 
-        return $diff + ['candidate' => $candidate, 'candidate_all' => $candidateAll, 'ovoko_readable' => $this->ovokoReadableValues($ovoko, $candidateAll), 'field_reasons' => $this->fieldReasons($ovoko, $candidateAll)];
+        return $diff + ['candidate' => $candidate, 'candidate_all' => $candidateAll, 'ovoko_readable' => $this->ovokoReadableValues($ovoko, $candidateAll), 'field_reasons' => $this->fieldReasons($ovoko, $candidateAll), 'category_resolution' => $categoryResolution];
     }
 
     private function readableChanges(Part $part, array $changes): array
@@ -340,6 +347,9 @@ class OvokoImportProductDataController extends Controller
             $hasPlannedValue = array_key_exists($modelField, $newValues);
             $newValue = $hasPlannedValue ? $newValues[$modelField] : ($candidateAll[$modelField] ?? null);
             $displayValue = array_key_exists($modelField, $ovokoReadable) ? $ovokoReadable[$modelField] : $this->readableValue($part, $modelField, $newValue);
+            if ($modelField === 'status' && ! $hasPlannedValue) {
+                $displayValue = $this->readableValue($part, $modelField, $part->getAttribute($modelField));
+            }
             $row = [
                 'field' => $meta['field'],
                 'label' => $meta['label'],
@@ -350,6 +360,9 @@ class OvokoImportProductDataController extends Controller
             if (array_key_exists($modelField, $fieldReasons) && ! $hasPlannedValue) {
                 $row['will_update'] = false;
                 $row['reason'] = $fieldReasons[$modelField];
+            }
+            if ($modelField === 'category_id' && ($candidateAll['category_action'] ?? null) !== null) {
+                $row['category_action'] = $candidateAll['category_action'];
             }
             if (! $hasOvokoValue && ! in_array($modelField, ['ovoko_price', 'needs_listing', 'status'], true)) {
                 $row['new_value'] = null;
@@ -414,17 +427,92 @@ class OvokoImportProductDataController extends Controller
         return false;
     }
 
-    private function categoryId(array $ovoko, bool $allowCreate): ?int
+    private function resolveOvokoCategory(array $ovoko, bool $allowCreate): array
     {
-        $external = $this->text($this->first($ovoko, ['category_id','categoryId','part_category_id','partCategoryId','category.id','category.category_id','category.categoryId']));
-        $name = $this->text($this->first($ovoko, ['category_name','categoryName','category_title','categoryTitle','category.name','category.category_name','category.pl','category.en','category']));
-        if ($external) {
-            $cat = PartCategory::query()->where('external_id', $external)->whereIn('source_system', ['ovoko','rrr','ovoko_old'])->first();
-            if (! $cat && is_numeric($external)) $cat = PartCategory::query()->whereKey((int) $external)->first();
+        $external = $this->text($this->first($ovoko, ['category_id','categoryId','part_category_id','partCategoryId','category.id','category.category_id','category.categoryId','ovoko_category_id','ovokoCategoryId']));
+        $path = $this->text($this->first($ovoko, ['category_title_path','categoryTitlePath','category_path','categoryPath','category.path','category.title_path','category.titlePath']));
+        $name = $this->text($this->first($ovoko, ['category_name','categoryName','category_title','categoryTitle','category.name','category.category_name','category.pl','category.en','category'])) ?? $this->leafCategoryName($path);
+        $signature = $external ?: ($path ?: ($name ?: md5(json_encode($ovoko))));
+
+        $cat = $this->findLocalCategory($external, $name, $path);
+        if ($cat) return ['id' => $cat->id, 'action' => 'map_existing', 'external_id' => $external, 'name' => $name, 'path' => $path, 'signature' => $signature, 'local_category_id' => $cat->id];
+
+        if (! $name && ! $path && ! $external) return ['id' => null, 'action' => null, 'external_id' => null, 'name' => null, 'path' => null, 'signature' => $signature];
+
+        $nameForCreate = $name ?: $path ?: 'Ovoko '.$external;
+        if ($allowCreate) {
+            $cat = PartCategory::query()->create([
+                'source_system' => 'ovoko',
+                'external_id' => $external ?: 'ovoko-path-'.md5($path ?: $nameForCreate),
+                'name' => $nameForCreate,
+                'slug' => $this->uniqueCategorySlug($nameForCreate),
+                'category_path' => $path ?: $nameForCreate,
+                'legacy_payload' => ['ovoko_import' => ['category_id' => $external, 'category_path' => $path, 'category_name' => $name]],
+            ]);
+
+            return ['id' => $cat->id, 'action' => 'create', 'external_id' => $external, 'name' => $name, 'path' => $path, 'signature' => $signature, 'local_category_id' => $cat->id];
         }
-        if (isset($cat) && $cat) return $cat->id;
-        if ($name && $allowCreate) return PartCategory::query()->firstOrCreate(['source_system' => 'ovoko', 'external_id' => $external ?: 'ovoko-name-'.md5($name)], ['name' => $name, 'slug' => Str::slug($name), 'category_path' => $name])->id;
+
+        return ['id' => null, 'action' => 'create', 'external_id' => $external, 'name' => $name, 'path' => $path, 'signature' => $signature];
+    }
+
+    private function findLocalCategory(?string $external, ?string $name, ?string $path): ?PartCategory
+    {
+        if ($external) {
+            $cat = PartCategory::query()->where('external_id', $external)->whereIn('source_system', ['ovoko','rrr','ovoko_old'])->first()
+                ?? PartCategory::query()->where('external_id', $external)->first();
+            if ($cat) return $cat;
+
+            if (Schema::hasTable('marketplace_category_mappings')) {
+                $mappedLocalId = DB::table('marketplace_category_mappings')
+                    ->where('channel', 'ovoko')
+                    ->where('external_category_id', $external)
+                    ->value('local_category_id');
+                if ($mappedLocalId && ($cat = PartCategory::query()->whereKey((int) $mappedLocalId)->first())) return $cat;
+            }
+
+            if (is_numeric($external) && ($cat = PartCategory::query()->whereKey((int) $external)->first())) return $cat;
+        }
+
+        foreach (array_filter([$path, $name, $this->leafCategoryName($path)]) as $value) {
+            $normalized = $this->normalizeCategoryLookup($value);
+            $cat = PartCategory::query()->get()->first(function (PartCategory $category) use ($normalized): bool {
+                return in_array($normalized, [
+                    $this->normalizeCategoryLookup((string) $category->name),
+                    $this->normalizeCategoryLookup((string) $category->category_path),
+                    $this->normalizeCategoryLookup($category->publicDisplayName()),
+                ], true);
+            });
+            if ($cat) return $cat;
+        }
+
         return null;
+    }
+
+    private function leafCategoryName(?string $path): ?string
+    {
+        if (! $path) return null;
+        $parts = preg_split('#\s*(?:>|/)\s*#u', $path, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+        return $parts === [] ? $path : trim((string) end($parts));
+    }
+
+    private function normalizeCategoryLookup(string $value): string
+    {
+        $value = Str::lower(trim($value));
+        $value = preg_replace('/\s+/', ' ', $value) ?? $value;
+
+        return str_replace([' / ', '/', ' > ', '>'], '>', $value);
+    }
+
+    private function uniqueCategorySlug(string $name): string
+    {
+        $base = Str::slug($name) ?: 'ovoko-category';
+        $slug = $base;
+        $i = 2;
+        while (PartCategory::query()->where('slug', $slug)->exists()) $slug = $base.'-'.$i++;
+
+        return $slug;
     }
 
     private function ovokoReadableValues(array $ovoko, array $candidateAll): array
@@ -453,7 +541,7 @@ class OvokoImportProductDataController extends Controller
     {
         $reasons = [];
         $external = $this->text($this->first($ovoko, ['category_id','categoryId','part_category_id','partCategoryId','category.id','category.category_id','category.categoryId']));
-        if ($external !== null && ($candidateAll['category_id'] ?? null) === null) {
+        if (($candidateAll['category_action'] ?? null) === 'create' && ($candidateAll['category_id'] ?? null) === null) {
             $reasons['category_id'] = 'local_category_not_found';
         }
         $reasons['ovoko_price'] = 'excluded_from_import';
