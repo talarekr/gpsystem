@@ -115,7 +115,7 @@ class WorkshopQuickPartController extends Controller
                 'name' => 'Część do wystawienia '.$validated['part_number'],
                 'part_number' => trim($validated['part_number']),
                 'storage_location_id' => $location->id,
-                'internal_note' => filled($validated['internal_note'] ?? null) ? trim($validated['internal_note']) : null,
+                'description' => filled($validated['internal_note'] ?? null) ? trim($validated['internal_note']) : null,
                 'condition_notes' => filled($conditionNotes) ? trim($conditionNotes) : null,
                 'quantity' => 1,
                 'status' => 'draft',

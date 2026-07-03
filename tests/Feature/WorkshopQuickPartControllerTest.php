@@ -79,8 +79,8 @@ class WorkshopQuickPartControllerTest extends TestCase
         $this->assertSame('draft', $part->status);
         $this->assertFalse($part->is_visible_storefront);
         $this->assertFalse($part->needs_review);
-        $this->assertNull($part->description);
-        $this->assertSame('rysa, cena 300 zł', $part->internal_note);
+        $this->assertSame('rysa, cena 300 zł', $part->description);
+        $this->assertNull($part->internal_note);
         $this->assertSame('Hala B / Kosz 12', $part->storageLocation->name);
         $this->assertCount(2, $part->images);
         $this->assertNotContains($part->id, Part::query()->storefrontVisible()->pluck('id')->all());

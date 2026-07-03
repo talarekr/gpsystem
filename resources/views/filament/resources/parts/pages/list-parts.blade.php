@@ -34,7 +34,7 @@
         </div>
     </div>
 
-    @include('filament.resources.parts.partials.parts-card-list', ['parts' => $parts, 'showListingReadyAction' => $this->showListingReadyAction])
+    @include('filament.resources.parts.partials.parts-card-list', ['parts' => $parts, 'showListingReadyAction' => $this->showListingReadyAction, 'showAddedAtInPartTitle' => $this->showAddedAtInPartTitle])
 
     <div class="gps-parts-pagination">
         <div class="gps-parts-pagination-bar">

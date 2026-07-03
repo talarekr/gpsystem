@@ -4,6 +4,7 @@
     use Illuminate\Support\Str;
 
     $showListingReadyAction = $showListingReadyAction ?? false;
+    $showAddedAtInPartTitle = $showAddedAtInPartTitle ?? false;
 @endphp
 
 <div class="gps-parts-list">
@@ -16,7 +17,7 @@
                 $number = trim((string) $part->part_number);
             @endphp
             <div class="gps-part-card"><div class="gps-admin-parts-grid">
-                <div class="gps-part-col"><div class="gps-part-main"><div class="gps-part-thumb">@if ($imageUrl)<img src="{{ $imageUrl }}" alt="Zdjęcie części #{{ $part->id }}" loading="lazy">@if ($images->count() > 1)<span class="gps-part-thumb__badge">{{ $images->count() }}</span>@endif @else <span class="gps-part-thumb__placeholder">Brak<br>zdjęcia</span>@endif</div><div class="gps-part-info"><a class="gps-part-title" href="{{ PartResource::getUrl('edit', ['record' => $part]) }}">{{ $part->name ?: 'Bez nazwy' }}</a><div class="gps-part-muted">Magazyn: {{ $part->storageLocation?->name ?: 'Brak lokalizacji' }}</div></div></div></div>
+                <div class="gps-part-col"><div class="gps-part-main"><div class="gps-part-thumb">@if ($imageUrl)<img src="{{ $imageUrl }}" alt="Zdjęcie części #{{ $part->id }}" loading="lazy">@if ($images->count() > 1)<span class="gps-part-thumb__badge">{{ $images->count() }}</span>@endif @else <span class="gps-part-thumb__placeholder">Brak<br>zdjęcia</span>@endif</div><div class="gps-part-info"><a class="gps-part-title" href="{{ PartResource::getUrl('edit', ['record' => $part]) }}">{{ $part->name ?: 'Bez nazwy' }}</a><div class="gps-part-muted">Magazyn: {{ $part->storageLocation?->name ?: 'Brak lokalizacji' }}</div>@if ($showAddedAtInPartTitle)<div class="gps-part-muted">Dodano: {{ $part->created_at?->format('Y-m-d H:i') ?: '—' }}</div>@endif</div></div></div>
                 <div class="gps-part-col"><div class="gps-part-number-row"><span class="gps-part-number">{{ filled($number) ? $number : '—' }}</span>@if (filled($number))<button type="button" class="gps-part-copy" title="Kopiuj numer części" onclick="event.preventDefault(); navigator.clipboard?.writeText(@js($number));"><svg viewBox="0 0 20 20" fill="currentColor"><path d="M7 3.5A2.5 2.5 0 0 1 9.5 1h6A2.5 2.5 0 0 1 18 3.5v6a2.5 2.5 0 0 1-2.5 2.5h-6A2.5 2.5 0 0 1 7 9.5v-6Z"/><path d="M4.5 6A2.5 2.5 0 0 0 2 8.5v8A2.5 2.5 0 0 0 4.5 19h8a2.5 2.5 0 0 0 2.5-2.5V14h-2v2.5a.5.5 0 0 1-.5.5h-8a.5.5 0 0 1-.5-.5v-8a.5.5 0 0 1 .5-.5H7V6H4.5Z"/></svg></button>@endif</div></div>
                 <div class="gps-part-col">@include('filament.resources.parts.table-channels', ['part' => $part])</div>
                 <div class="gps-part-col">@include('filament.resources.parts.table-manual-marketplace-links', ['part' => $part])</div>
