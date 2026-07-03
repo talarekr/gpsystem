@@ -160,14 +160,16 @@ class OvokoImportProductDataControllerTest extends TestCase
             ->assertJsonPath('items.0.changes.3.new_value', 321)
             ->assertJsonPath('items.0.changes.4.new_value', '250.00')
             ->assertJsonPath('items.0.changes.5.new_value', '270.00')
-            ->assertJsonPath('items.0.changes.6.new_value', '280.00')
+            ->assertJsonPath('items.0.changes.6.new_value', '')
+            ->assertJsonPath('items.0.changes.6.will_update', false)
+            ->assertJsonPath('items.0.changes.6.reason', 'excluded_from_import')
             ->assertJsonPath('items.0.changes.7.new_value', 'Audi A6 intercooler 4G0145804D')
             ->assertJsonPath('items.0.changes.8.new_value', '3.40')
             ->assertJsonPath('items.0.changes.9.new_value', '60.00')
             ->assertJsonPath('items.0.changes.10.new_value', '40.00')
             ->assertJsonPath('items.0.changes.11.new_value', '20.00')
             ->assertJsonPath('items.0.ovoko_debug.raw_excerpt_sanitized.user_token', '***')
-            ->assertJsonPath('items.0.ovoko_debug.field_sources_tried.ovoko_price.0', 'price');
+            ->assertJsonPath('items.0.ovoko_debug.field_sources_tried.ovoko_price.0', 'excluded_from_import');
     }
 
     public function test_get_part_list_response_uses_first_list_record_without_local_payload_merge(): void
@@ -204,7 +206,8 @@ class OvokoImportProductDataControllerTest extends TestCase
             ->assertJsonPath('failed_count', 0)
             ->assertJsonPath('items.0.changes.0.new_value', 'OVOKO-CODE')
             ->assertJsonPath('items.0.changes.1.new_value', 'Ovoko category')
-            ->assertJsonPath('items.0.changes.6.new_value', '123.45')
+            ->assertJsonPath('items.0.changes.6.new_value', '')
+            ->assertJsonPath('items.0.changes.6.reason', 'excluded_from_import')
             ->assertJsonPath('items.0.ovoko_debug.top_level_keys.0', 'id')
             ->assertJsonPath('items.0.ovoko_debug.selected_record_keys.0', 'id')
             ->assertJsonPath('items.0.ovoko_debug.selected_record_path', 'list.0')
@@ -241,7 +244,8 @@ class OvokoImportProductDataControllerTest extends TestCase
             ->assertJsonPath('failed_count', 0)
             ->assertJsonPath('items.0.changes.0.new_value', 'NESTED-CODE')
             ->assertJsonPath('items.0.changes.1.new_value', 'Nested category')
-            ->assertJsonPath('items.0.changes.6.new_value', '456.78')
+            ->assertJsonPath('items.0.changes.6.new_value', '')
+            ->assertJsonPath('items.0.changes.6.reason', 'excluded_from_import')
             ->assertJsonPath('items.0.ovoko_debug.selected_record_keys.0', 'id')
             ->assertJsonPath('items.0.ovoko_debug.selected_record_path', 'list.0.0')
             ->assertJsonPath('items.0.ovoko_debug.raw_excerpt_sanitized.id', '11691')
@@ -255,7 +259,7 @@ class OvokoImportProductDataControllerTest extends TestCase
         $this->actingAsAdminUser();
         $this->account();
 
-        $part = Part::query()->forceCreate(['id' => 508, 'name' => 'Chłodnica dodatkowa', 'status' => 'ready', 'needs_listing' => false]);
+        $part = Part::query()->forceCreate(['id' => 508, 'name' => 'Chłodnica dodatkowa', 'status' => 'ready', 'needs_listing' => false, 'ovoko_price' => 280.00]);
         MarketplaceListing::query()->create(['marketplace' => 'ovoko', 'part_id' => $part->id, 'external_offer_id' => '11691', 'status' => 'active']);
 
         Http::fake([
@@ -286,6 +290,10 @@ class OvokoImportProductDataControllerTest extends TestCase
             ->assertJsonPath('items.0.changes.4.will_update', true)
             ->assertJsonPath('items.0.changes.5.new_value', '250.00')
             ->assertJsonPath('items.0.changes.5.will_update', true)
+            ->assertJsonPath('items.0.changes.6.old_value', '280.00')
+            ->assertJsonPath('items.0.changes.6.new_value', '280.00')
+            ->assertJsonPath('items.0.changes.6.will_update', false)
+            ->assertJsonPath('items.0.changes.6.reason', 'excluded_from_import')
             ->assertJsonPath('items.0.changes.7.new_value', 'DODATKOWA CHŁODNICA WODY USZKODZENIE WIDOCZNE NA ZDJĘCIU MAG:17KNS')
             ->assertJsonPath('items.0.changes.7.will_update', true)
             ->assertJsonPath('items.0.ovoko_debug.raw_excerpt_sanitized.category_title_path', 'Układ chłodzenia > Chłodnice dodatkowe');

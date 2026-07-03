@@ -20,7 +20,7 @@ use Throwable;
 class OvokoImportProductDataController extends Controller
 {
     private const DEFAULT_IDS = [11691,11690,11689,11688,11687,11686,11685,11684,11683,11682,11681,11680,11679,11678,11677,11675,11674,11673,11672,11671,11670,11669,11668,11664,11656,11653,11649,11647,11645,11644,11640,11639,11638,11636,11635,11633,11631,11630,11629,11628,11627,11626,11625,11624,11623,11621,11619,11618,11617,11613,11612,11609,11572,11552,11543,11538,11502,11485,11196,11191,11068,11061,11060,11059,11058,11057];
-    private const SKIPPED_FIELDS = ['photos', 'quality', 'steering_side', 'storage_location'];
+    private const SKIPPED_FIELDS = ['photos', 'quality', 'steering_side', 'storage_location', 'ovoko_price'];
 
     public function __invoke(Request $request): JsonResponse
     {
@@ -57,7 +57,7 @@ class OvokoImportProductDataController extends Controller
             if ($this->debugRequested($request, $id)) {
                 $item['ovoko_debug'] = $this->debugPayload($remote, $changes);
             }
-            if ($this->hasReadableValue($part, $changes, ['ovoko_price'])) $productsWithPrice++;
+            if ($this->hasReadableValue($part, $changes, ['price', 'allegro_price'])) $productsWithPrice++;
             if ($this->hasReadableValue($part, $changes, ['category_id'])) $productsWithCategory++;
             if ($this->hasReadableValue($part, $changes, ['car_id'])) $productsWithCar++;
             if ($this->hasReadableValue($part, $changes, ['length_cm', 'width_cm', 'height_cm'])) $productsWithDimensions++;
@@ -276,7 +276,6 @@ class OvokoImportProductDataController extends Controller
         $partPosition = $this->text($this->first($ovoko, ['part_position','partPosition','position','side','place','location']));
         $shopPrice = $this->priceFromNotes($ovoko, ['shop_price','shopPrice','store_price','storePrice'], ['shop', 'sklep']);
         $allegroPrice = $this->priceFromNotes($ovoko, ['allegro_price','allegroPrice'], ['allegro']);
-        $ovokoPrice = $this->decimal($this->first($ovoko, ['price','price.amount','sell_price','sellPrice','sell_price.amount','sell_price.seller.amount','seller_price','sellerPrice','ovoko_price','ovokoPrice']));
         $title = $this->text($this->first($ovoko, ['notes','description','desc','content','body','text','title','part_name','partName','name']));
         $newLegacy = array_replace_recursive($legacy, ['ovoko_import_product_data' => ['part_position' => $partPosition, 'raw_selected_fields' => $this->selectedFields($ovoko)]]);
         $candidate = [
@@ -288,10 +287,10 @@ class OvokoImportProductDataController extends Controller
             'length_cm' => $this->decimal($this->first($ovoko, ['length_cm','lengthCm','length','package.length'])),
             'width_cm' => $this->decimal($this->first($ovoko, ['width_cm','widthCm','width','package.width'])),
             'height_cm' => $this->decimal($this->first($ovoko, ['height_cm','heightCm','height','package.height'])),
-            'ovoko_price' => $ovokoPrice,
             'legacy_payload' => $newLegacy,
         ];
         $candidateAll = $candidate;
+        $candidateAll['ovoko_price'] = $part->ovoko_price;
         $candidateAll['price'] = $shopPrice;
         $candidateAll['allegro_price'] = $allegroPrice;
         $candidateAll['review_metadata'] = $partPosition !== null
@@ -352,7 +351,7 @@ class OvokoImportProductDataController extends Controller
                 $row['will_update'] = false;
                 $row['reason'] = $fieldReasons[$modelField];
             }
-            if (! $hasOvokoValue && ! in_array($modelField, ['needs_listing', 'status'], true)) {
+            if (! $hasOvokoValue && ! in_array($modelField, ['ovoko_price', 'needs_listing', 'status'], true)) {
                 $row['new_value'] = null;
                 $row['will_update'] = false;
                 $row['reason'] = 'missing_from_ovoko';
@@ -386,7 +385,7 @@ class OvokoImportProductDataController extends Controller
     {
         $groups = [];
         if (array_intersect(array_keys($newValues), ['needs_listing', 'status'])) $groups[] = 'listing_state';
-        if (array_intersect(array_keys($newValues), ['price', 'allegro_price', 'ovoko_price'])) $groups[] = 'prices';
+        if (array_intersect(array_keys($newValues), ['price', 'allegro_price'])) $groups[] = 'prices';
         if (array_key_exists('category_id', $newValues)) $groups[] = 'category';
         if (array_key_exists('car_id', $newValues)) $groups[] = 'car';
         if (array_intersect(array_keys($newValues), ['weight_kg', 'length_cm', 'width_cm', 'height_cm'])) $groups[] = 'dimensions';
@@ -457,6 +456,7 @@ class OvokoImportProductDataController extends Controller
         if ($external !== null && ($candidateAll['category_id'] ?? null) === null) {
             $reasons['category_id'] = 'local_category_not_found';
         }
+        $reasons['ovoko_price'] = 'excluded_from_import';
 
         return $reasons;
     }
@@ -511,7 +511,7 @@ class OvokoImportProductDataController extends Controller
                 'car_id' => ['car_id','carId','vehicle_id','vehicleId','car.id','vehicle.id'],
                 'shop_price' => ['shop_price','shopPrice','store_price','notes/internal_notes label sklep/shop'],
                 'allegro_price' => ['allegro_price','allegroPrice','notes/internal_notes label allegro'],
-                'ovoko_price' => ['price','price.amount','sell_price','sell_price.seller.amount','ovoko_price'],
+                'ovoko_price' => ['excluded_from_import'],
                 'title' => ['notes','description','desc','content','body','title','part_name','name'],
                 'dimensions' => ['weight_kg/weightKg/weight','length_cm/lengthCm/length','width_cm/widthCm/width','height_cm/heightCm/height'],
             ],
