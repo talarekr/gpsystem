@@ -3,31 +3,60 @@
 namespace App\Http\Controllers\Tools;
 
 use App\Http\Controllers\Controller;
-use App\Models\MarketplaceListing;
-use App\Models\Part;
-use App\Services\Marketplace\OvokoPartIdExtractor;
-use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Schema;
-use Throwable;
 
 class OvokoSoldMappingCheckController extends Controller
 {
     private const DEFAULT_IDS = [8526,3203,8268,8857,8620,8183,7558,9857,2972,9775,9956,8980,6818,10550,10325,7451,10124,9706,10640,9587,10656,10061,10409,9586,8884,9761,9902,1074,6224,9240,10744,8508,8219,10696,6713,10029,9416,5074,8875,7944,291,10502,9427,7310,659,9216,9560,6762,8925,3001,10423,8809,4533,9818,10130,9396,10564,8355,7419,10857,4036,10819,7087,10221,10614,10897,10319,10714,9770,10102,10903,9886,9748,10547,9557,6141,7515,6778,10678,9034,9488,9865,8182,10648,10573,10422,6722,9067,6844,8807,8197,5962,10908,6777,4286,5614,10757,8171,10795,7320,10702,9481,9031,8472,10809,7019,10469,4513,7418,10936,10953,10212,8816,10559,6195,8095,9535,10060,9766,10037,9532,10930,9655,7900,10431,4341,9051,8680,9637,10220,10598,9266,9887,10588,10990,10742,7911,10599,7752,8054,8130,10546,10233,10351,10088,9704,10991,6977,5815,9921,9271,7893,10628,9020,5762,4303,8776,10284,8138,2059,7124,7725,10101,5636,5747,10027,9160,7887,7466,10941,10294,5067,11021,9480,9211,9280,10845,10609,6859,9422,10844,7546,5941,10571,10521,10643,8131,6067,7144,7619,9250,9196,10365,10622,6758,5413,10929,5484,6957,8437,6340,6276,6277,8137,1602,10874,10405,9623,10122,6585,10501,7267,4260,8463,8390,7890,9801,9128,10444,9291,4770,7601,7308,7577,10216,10735,8677,4097,10921,9006,9164,8038,11029,10519,8900,8373,1246,10688,9555,7007,6718,10611,7575,9387,9982,1777,5694,49,4960,4016,10660,10617,10386,10938,8243,7013,9959,10073,1250,10545,10375,10955,6383,6239,9270,1360,11025,9608,10411,7643,5783,6322,10268,8047,10947,3850,11024,10582,9714,8324,9717,9314,10788,10783,9272,10499,3629,1495,9405,5813,9784,7931,10734,7034,9646,8703,10463,5616,8125,1365,2776,941,9757,7773,8506,5645,7192,7314,9452,9501,8500,8904,9371,9262,10261,6298,6419,10613,9979,3632,1976,8092,8020,11644,10910,10877];
 
-    public function __invoke(Request $request): JsonResponse
+    public function __invoke(Request $request)
     {
+        $debugStep = (string) $request->query('debug_step', 'probe');
+        $allowedSteps = ['probe', 'parse_ids', 'schema', 'parts', 'marketplace', 'full'];
+        if (! in_array($debugStep, $allowedSteps, true)) {
+            $debugStep = 'probe';
+        }
+
+        if ($debugStep === 'probe') {
+            return response()->json($this->debugPayload($debugStep, 'probe'), 200);
+        }
+
         $ids = [];
         $warnings = [];
         $errors = [];
         $matchesById = [];
+        $reachedStep = 'probe';
 
         try {
             $ids = $this->requestedIds($request);
-            /** @var OvokoPartIdExtractor $extractor */
-            $extractor = app(OvokoPartIdExtractor::class);
-            $matchesById = $this->collectMarketplaceListingMatches($ids, $warnings, $errors);
-            $this->collectPartMatches($ids, $matchesById, $extractor, $warnings, $errors);
+            $reachedStep = 'parse_ids';
+            if ($debugStep === 'parse_ids') {
+                return response()->json($this->debugPayload($debugStep, $reachedStep, $errors, $warnings, ['ids' => $ids, 'requested_count' => count($ids)]), 200);
+            }
+
+            $schema = $this->collectSchemaDiagnostics($warnings, $errors);
+            $reachedStep = 'schema';
+            if ($debugStep === 'schema') {
+                return response()->json($this->debugPayload($debugStep, $reachedStep, $errors, $warnings, ['ids' => $ids, 'schema' => $schema]), 200);
+            }
+
+            $this->collectPartMatches($ids, $matchesById, null, $warnings, $errors);
+            $reachedStep = 'parts';
+            if ($debugStep === 'parts') {
+                return response()->json($this->debugPayload($debugStep, $reachedStep, $errors, $warnings, ['ids' => $ids, 'matches_by_id' => $this->debugMatches($matchesById)]), 200);
+            }
+
+            $marketplaceMatches = $this->collectMarketplaceListingMatches($ids, $warnings, $errors);
+            $matchesById = $this->mergeMatches($matchesById, $marketplaceMatches);
+            $reachedStep = 'marketplace';
+            if ($debugStep === 'marketplace') {
+                return response()->json($this->debugPayload($debugStep, $reachedStep, $errors, $warnings, ['ids' => $ids, 'matches_by_id' => $this->debugMatches($matchesById)]), 200);
+            }
+
+            $extractor = app(\App\Services\Marketplace\OvokoPartIdExtractor::class);
+            $extractorMatches = [];
+            $this->collectPartMatches($ids, $extractorMatches, $extractor, $warnings, $errors);
+            $matchesById = $this->mergeMatches($matchesById, $extractorMatches);
 
             $localPartUse = [];
             foreach ($matchesById as $matches) {
@@ -38,22 +67,15 @@ class OvokoSoldMappingCheckController extends Controller
 
             $items = collect($ids)->map(fn (string $id): array => $this->buildItem($id, $matchesById[$id] ?? [], $localPartUse, $warnings))->values();
             $summary = $this->buildSummary($items, $localPartUse);
+            $reachedStep = 'full';
 
-            return response()->json($this->payload($ids, $items->all(), $summary, $warnings, $errors));
-        } catch (Throwable $e) {
-            return response()->json([
-                'ok' => false,
-                'dry_run' => true,
-                'local_update' => false,
-                'marketplace_write' => false,
-                'errors' => [[
-                    'type' => get_class($e),
-                    'message' => $e->getMessage(),
-                ]],
-                'warnings' => [],
-                'requested_count' => 0,
-                'items' => [],
-            ], 200);
+            return response()->json(array_merge(
+                $this->debugPayload($debugStep, $reachedStep, $errors, $warnings),
+                $this->payload($ids, $items->all(), $summary, $warnings, $errors)
+            ), 200);
+        } catch (\Throwable $e) {
+            $errors[] = $this->formatThrowable($reachedStep.'_debug_error', $e);
+            return response()->json($this->debugPayload($debugStep, $reachedStep, $errors, $warnings, ['ids' => $ids]), 200);
         }
     }
 
@@ -76,11 +98,11 @@ class OvokoSoldMappingCheckController extends Controller
 
         try {
             $matches = [];
-            MarketplaceListing::query()
+            \App\Models\MarketplaceListing::query()
                 ->with('part')
                 ->where('marketplace', 'ovoko')
                 ->get($available)
-                ->each(function (MarketplaceListing $listing) use (&$matches, $ids, $available): void {
+                ->each(function ($listing) use (&$matches, $ids, $available): void {
                     foreach ($this->listingCandidates($listing, $available) as $candidate) {
                         if (in_array($candidate['value'], $ids, true)) {
                             $matches[$candidate['value']][] = ['part' => $listing->part, 'part_id' => $listing->part_id, 'source' => $candidate['source'], 'value' => $candidate['value'], 'listing_id' => $listing->id];
@@ -89,13 +111,13 @@ class OvokoSoldMappingCheckController extends Controller
                 });
 
             return $matches;
-        } catch (Throwable $e) {
+        } catch (\Throwable $e) {
             $errors[] = $this->formatThrowable('marketplace_listings_mapping_error', $e);
             return [];
         }
     }
 
-    private function collectPartMatches(array $ids, array &$matches, OvokoPartIdExtractor $extractor, array &$warnings, array &$errors): void
+    private function collectPartMatches(array $ids, array &$matches, $extractor, array &$warnings, array &$errors): void
     {
         if (! $this->hasTable('parts', $warnings, $errors)) {
             return;
@@ -108,10 +130,10 @@ class OvokoSoldMappingCheckController extends Controller
         }
 
         try {
-            $query = Part::query()->select($columns);
-            $query->where(function ($query) use ($ids, $columns): void {
+            $query = \App\Models\Part::query()->select($columns);
+            $query->where(function ($query) use ($ids, $columns, $extractor): void {
                 $hasExternal = in_array('source_system', $columns, true) && in_array('external_id', $columns, true);
-                $hasLegacy = in_array('legacy_payload', $columns, true);
+                $hasLegacy = $extractor !== null && in_array('legacy_payload', $columns, true);
 
                 if ($hasExternal) {
                     $query->where(function ($q) use ($ids): void {
@@ -123,23 +145,23 @@ class OvokoSoldMappingCheckController extends Controller
                 }
             });
 
-            if (! in_array('source_system', $columns, true) && ! in_array('external_id', $columns, true) && ! in_array('legacy_payload', $columns, true)) {
+            if (! in_array('source_system', $columns, true) && ! in_array('external_id', $columns, true) && ($extractor === null || ! in_array('legacy_payload', $columns, true))) {
                 $warnings[] = 'unavailable source: parts missing source_system/external_id and legacy_payload; skipped parts mapping';
                 return;
             }
 
-            $query->get()->each(function (Part $part) use (&$matches, $ids, $extractor, $columns): void {
+            $query->get()->each(function ($part) use (&$matches, $ids, $extractor, $columns): void {
                 if (in_array('source_system', $columns, true) && in_array('external_id', $columns, true) && in_array((string) $part->external_id, $ids, true) && in_array((string) $part->source_system, ['ovoko', 'rrr'], true)) {
                     $matches[(string) $part->external_id][] = ['part' => $part, 'part_id' => $part->id, 'source' => 'parts.source_system+parts.external_id', 'value' => (string) $part->external_id, 'listing_id' => null];
                 }
-                if (in_array('legacy_payload', $columns, true)) {
+                if ($extractor !== null && in_array('legacy_payload', $columns, true)) {
                     $legacy = $extractor->extractWithPath($part->legacy_payload);
                     if (($legacy['id'] ?? null) !== null && in_array((string) $legacy['id'], $ids, true)) {
                         $matches[(string) $legacy['id']][] = ['part' => $part, 'part_id' => $part->id, 'source' => 'parts.legacy_payload.'.($legacy['path'] ?? 'ovoko_part_id'), 'value' => (string) $legacy['id'], 'listing_id' => null];
                     }
                 }
             });
-        } catch (Throwable $e) {
+        } catch (\Throwable $e) {
             $errors[] = $this->formatThrowable('parts_mapping_error', $e);
         }
     }
@@ -171,7 +193,7 @@ class OvokoSoldMappingCheckController extends Controller
         ];
     }
 
-    private function listingCandidates(MarketplaceListing $listing, array $columns): array
+    private function listingCandidates($listing, array $columns): array
     {
         $raw = in_array('raw_payload', $columns, true) ? $listing->raw_payload : null;
         if (! is_array($raw)) {
@@ -235,12 +257,65 @@ class OvokoSoldMappingCheckController extends Controller
         ];
     }
 
+    private function debugPayload(string $debugStep, string $reachedStep, array $errors = [], array $warnings = [], array $extra = []): array
+    {
+        return array_merge([
+            'ok' => $errors === [],
+            'probe' => 'entered-controller',
+            'debug_step' => $debugStep,
+            'reached_step' => $reachedStep,
+            'dry_run' => true,
+            'local_update' => false,
+            'marketplace_write' => false,
+            'errors' => array_values(array_unique($errors)),
+            'warnings' => array_values(array_unique($warnings)),
+        ], $extra);
+    }
+
+    private function collectSchemaDiagnostics(array &$warnings, array &$errors): array
+    {
+        return [
+            'parts' => [
+                'exists' => $this->hasTable('parts', $warnings, $errors),
+                'columns' => $this->availableColumns('parts', ['id', 'source_system', 'external_id', 'legacy_payload', 'status', 'part_number', 'name', 'needs_listing', 'is_visible_storefront'], $warnings, $errors),
+            ],
+            'marketplace_listings' => [
+                'exists' => $this->hasTable('marketplace_listings', $warnings, $errors),
+                'columns' => $this->availableColumns('marketplace_listings', ['id', 'part_id', 'marketplace', 'external_offer_id', 'external_listing_id', 'external_inventory_id', 'external_id', 'raw_payload'], $warnings, $errors),
+            ],
+        ];
+    }
+
+    private function mergeMatches(array $left, array $right): array
+    {
+        foreach ($right as $id => $matches) {
+            $left[$id] = array_merge($left[$id] ?? [], $matches);
+        }
+
+        return $left;
+    }
+
+    private function debugMatches(array $matchesById): array
+    {
+        $debug = [];
+        foreach ($matchesById as $id => $matches) {
+            $debug[$id] = collect($matches)->map(fn (array $match): array => [
+                'part_id' => $match['part_id'] ?? null,
+                'source' => $match['source'] ?? null,
+                'value' => $match['value'] ?? null,
+                'marketplace_listing_id' => $match['listing_id'] ?? null,
+            ])->values()->all();
+        }
+
+        return $debug;
+    }
+
     private function hasTable(string $table, array &$warnings, array &$errors): bool
     {
         try {
-            if (Schema::hasTable($table)) return true;
+            if (\Illuminate\Support\Facades\Schema::hasTable($table)) return true;
             $warnings[] = "unavailable source: table {$table} does not exist";
-        } catch (Throwable $e) {
+        } catch (\Throwable $e) {
             $errors[] = $this->formatThrowable("schema_check_{$table}_error", $e);
         }
         return false;
@@ -251,41 +326,41 @@ class OvokoSoldMappingCheckController extends Controller
         $available = [];
         foreach ($columns as $column) {
             try {
-                if (Schema::hasColumn($table, $column)) {
+                if (\Illuminate\Support\Facades\Schema::hasColumn($table, $column)) {
                     $available[] = $column;
                 } else {
                     $warnings[] = "unavailable column: {$table}.{$column}";
                 }
-            } catch (Throwable $e) {
+            } catch (\Throwable $e) {
                 $errors[] = $this->formatThrowable("schema_check_{$table}_{$column}_error", $e);
             }
         }
         return $available;
     }
 
-    private function safeStatusLabel(?Part $part, array &$warnings): ?string
+    private function safeStatusLabel($part, array &$warnings): ?string
     {
         if (! $part) return null;
         try {
             return method_exists($part, 'adminStatusLabel') ? $part->adminStatusLabel() : ($part->status ?: '—');
-        } catch (Throwable $e) {
+        } catch (\Throwable $e) {
             $warnings[] = 'status label helper failed; returned raw status: '.$e->getMessage();
             return $part->status ?: '—';
         }
     }
 
-    private function safeAvailability(?Part $part, array &$warnings): ?string
+    private function safeAvailability($part, array &$warnings): ?string
     {
         if (! $part) return null;
         try {
             if (method_exists($part, 'adminLocalAvailability')) return $part->adminLocalAvailability();
-        } catch (Throwable $e) {
+        } catch (\Throwable $e) {
             $warnings[] = 'availability helper failed; returned raw status: '.$e->getMessage();
         }
         return $part->status;
     }
 
-    private function formatThrowable(string $context, Throwable $e): string
+    private function formatThrowable(string $context, \Throwable $e): string
     {
         return $context.': '.get_class($e).': '.$e->getMessage();
     }
