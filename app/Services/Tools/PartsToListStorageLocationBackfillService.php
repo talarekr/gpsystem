@@ -6,8 +6,7 @@ use App\Filament\Resources\PartResource;
 use App\Models\MarketplaceSyncLog;
 use App\Models\Part;
 use App\Models\StorageLocation;
-use Illuminate\Support\Facades\Storage;
-use RuntimeException;
+use Throwable;
 
 class PartsToListStorageLocationBackfillService
 {
@@ -16,11 +15,13 @@ class PartsToListStorageLocationBackfillService
 
     public function dryRun(int $limit = 100): array
     {
-        $csv = $this->readCsv();
+        $path = $this->resolveCsvPath();
+        $csv = $this->readCsv($path);
         $analysis = $this->analyse($csv, $limit);
+        $analysis['diagnostics']['csv'] = $path;
         $this->log('dry_run', 'success', $analysis['metrics'], $analysis);
 
-        return $analysis + ['csv_path' => 'storage/app/'.self::CSV_PATH, 'dry_run' => true, 'local_update' => false, 'marketplace_write' => false];
+        return $analysis + ['csv_path' => $path['relative_path'], 'dry_run' => true, 'local_update' => false, 'marketplace_write' => false];
     }
 
     public function apply(int $limit = 10, bool $confirmed = false): array
@@ -29,7 +30,9 @@ class PartsToListStorageLocationBackfillService
             return ['ok' => false, 'message' => 'Missing confirm='.self::CONFIRM, 'dry_run' => false, 'local_update' => false, 'marketplace_write' => false];
         }
 
-        $analysis = $this->analyse($this->readCsv(), $limit);
+        $path = $this->resolveCsvPath();
+        $analysis = $this->analyse($this->readCsv($path), $limit);
+        $analysis['diagnostics']['csv'] = $path;
         $updated = [];
         $failed = 0;
         $skippedAlready = 0;
@@ -69,6 +72,7 @@ class PartsToListStorageLocationBackfillService
             'failed_count' => $failed,
             'updated' => $updated,
             'metrics' => $analysis['metrics'],
+            'diagnostics' => $analysis['diagnostics'],
         ];
 
         $this->log('apply', $failed > 0 ? 'partial' : 'success', ['updated_count' => count($updated), 'failed_count' => $failed], $result);
@@ -95,7 +99,7 @@ class PartsToListStorageLocationBackfillService
 
     private function analyse(array $csvRows, int $limit): array
     {
-        $csvById = collect($csvRows)->groupBy('staging_item_id');
+        $csvById = $this->runStage('build_csv_index', fn (): \Illuminate\Support\Collection => collect($csvRows)->groupBy('staging_item_id'));
         $metrics = ['total_csv_rows' => count($csvRows), 'csv_rows_with_storage_raw' => 0, 'csv_rows_with_storage_normalized' => 0, 'target_parts_to_list_total' => PartResource::adminPartsToListQuery()->count(), 'target_parts_to_list_missing_storage' => 0, 'parts_to_list_with_gps_gmail_number' => 0, 'matched_by_gps_gmail_staging_id_count' => 0, 'would_update_count' => 0, 'already_has_storage_count' => 0, 'no_match_count' => 0, 'ambiguous_count' => 0, 'skipped_empty_storage_count' => 0, 'skipped_non_gps_gmail_number_count' => 0, 'failed_count' => 0];
         foreach ($csvRows as $row) {
             if (filled(trim((string) ($row['storage_location'] ?? '')))) $metrics['csv_rows_with_storage_raw']++;
@@ -103,6 +107,8 @@ class PartsToListStorageLocationBackfillService
         }
 
         $would = []; $blocked = [];
+        $this->runStage('query_parts_to_list', fn (): int => PartResource::adminPartsToListQuery()->count());
+        $this->runStage('classify_matches', function () use (&$metrics, &$would, &$blocked, $csvById, $limit): void {
         PartResource::adminPartsToListQuery()->with('storageLocation')->orderBy('id')->chunkById(500, function ($parts) use (&$metrics, &$would, &$blocked, $csvById, $limit): void {
             foreach ($parts as $part) {
                 $hasStorage = filled($part->storageLocation?->name);
@@ -121,6 +127,7 @@ class PartsToListStorageLocationBackfillService
                 if (count($would) < max(50, $limit)) $would[] = ['local_part_id' => $part->id, 'panel_number' => $part->part_number, 'normalized_panel_gps_gmail_id' => $normalized, 'csv_staging_item_id' => $csv['staging_item_id'], 'current_storage_location' => null, 'raw_csv_storage_location' => $csv['storage_location'] ?? null, 'new_storage_location' => $new, 'match_method' => 'gps_gmail_staging_id'];
             }
         });
+        });
 
         return ['ok' => true, 'metrics' => $metrics, 'would_update' => $would, 'blocked' => $blocked, 'diagnostics' => ['part_number_field' => 'parts.part_number', 'storage_location_field' => 'parts.storage_location_id -> storage_locations.name', 'target_filter' => 'PartResource::adminPartsToListQuery(): parts.needs_listing = true']];
     }
@@ -134,15 +141,48 @@ class PartsToListStorageLocationBackfillService
     private function blocked(Part $part, ?string $normalized, string $reason, int $count): array
     { return ['local_part_id' => $part->id, 'panel_number' => $part->part_number, 'normalized_panel_gps_gmail_id' => $normalized, 'reason' => $reason, 'candidate_count_csv' => $count, 'current_storage_location' => $part->storageLocation?->name]; }
 
-    private function readCsv(): array
+    public function resolveCsvPath(): array
     {
-        if (! Storage::disk('local')->exists(self::CSV_PATH)) throw new RuntimeException('CSV not found at storage/app/'.self::CSV_PATH);
-        $handle = fopen(Storage::disk('local')->path(self::CSV_PATH), 'r');
-        $header = fgetcsv($handle) ?: [];
-        $rows = [];
-        while (($data = fgetcsv($handle)) !== false) $rows[] = array_combine($header, array_pad($data, count($header), null));
-        fclose($handle);
-        return $rows;
+        return $this->runStage('resolve_csv_path', function (): array {
+            $absolute = storage_path('app/'.self::CSV_PATH);
+            $exists = is_file($absolute);
+            $readable = $exists && is_readable($absolute);
+
+            return [
+                'expected_absolute_path' => $absolute,
+                'relative_path' => 'storage/app/'.self::CSV_PATH,
+                'storage_path_base' => storage_path(),
+                'file_exists' => $exists,
+                'is_readable' => $readable,
+                'filesize' => $exists ? filesize($absolute) : null,
+            ];
+        });
+    }
+
+    private function readCsv(array $path): array
+    {
+        return $this->runStage('read_csv', function () use ($path): array {
+            if (! $path['file_exists'] || ! $path['is_readable']) {
+                throw CsvUnavailableException::fromDiagnostics($path);
+            }
+
+            $handle = fopen($path['expected_absolute_path'], 'r');
+            if ($handle === false) {
+                throw CsvUnavailableException::fromDiagnostics($path + ['is_readable' => false]);
+            }
+
+            try {
+                return $this->runStage('parse_csv', function () use ($handle): array {
+                    $header = fgetcsv($handle) ?: [];
+                    $rows = [];
+                    while (($data = fgetcsv($handle)) !== false) $rows[] = array_combine($header, array_pad($data, count($header), null));
+
+                    return $rows;
+                });
+            } finally {
+                fclose($handle);
+            }
+        });
     }
 
     private function findOrCreateLocation(string $name): StorageLocation
@@ -155,6 +195,23 @@ class PartsToListStorageLocationBackfillService
 
     private function log(string $mode, string $status, array $summary, array $payload): void
     {
-        MarketplaceSyncLog::query()->create(['marketplace' => 'local', 'action' => 'parts_to_list_storage_location_backfill', 'status' => $status, 'message' => 'Parts to list storage location backfill '.$mode.'; no marketplace write.', 'payload' => ['summary' => $summary, 'payload' => $payload], 'created_at' => now()]);
+        $this->runStage('write_log', function () use ($mode, $status, $summary, $payload): void {
+            try {
+                MarketplaceSyncLog::query()->create(['marketplace' => 'local', 'action' => 'parts_to_list_storage_location_backfill', 'status' => $status, 'message' => 'Parts to list storage location backfill '.$mode.'; no marketplace write.', 'payload' => ['summary' => $summary, 'payload' => $payload], 'created_at' => now()]);
+            } catch (Throwable $e) {
+                report($e);
+            }
+        });
+    }
+
+    private function runStage(string $stage, callable $callback): mixed
+    {
+        try {
+            return $callback();
+        } catch (CsvUnavailableException $e) {
+            throw $e->withStage($stage);
+        } catch (Throwable $e) {
+            throw $e;
+        }
     }
 }
