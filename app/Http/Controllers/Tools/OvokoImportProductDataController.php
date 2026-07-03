@@ -53,19 +53,20 @@ class OvokoImportProductDataController extends Controller
             $fetched++;
 
             $changes = $this->plannedChanges($part, $remote['part'], ! $dryRun);
-            $item['changes'] = $this->readableChanges($part, $changes['old'], $changes['new']);
+            $item['changes'] = $this->readableChanges($part, $changes);
             if ($this->hasReadableValue($part, $changes, ['ovoko_price'])) $productsWithPrice++;
             if ($this->hasReadableValue($part, $changes, ['category_id'])) $productsWithCategory++;
             if ($this->hasReadableValue($part, $changes, ['car_id'])) $productsWithCar++;
             if ($this->hasReadableValue($part, $changes, ['length_cm', 'width_cm', 'height_cm'])) $productsWithDimensions++;
 
             if ($changes['new'] === []) {
-                $item['status'] = 'no_change';
+                $item['status'] = 'no_changes';
                 $skipped++; $items[] = $item; continue;
             }
 
             if ($dryRun) {
-                $item['status'] = 'would_update';
+                $item['status'] = $this->dryRunItemStatus($changes['new']);
+                $item['change_groups'] = $this->changeGroups($changes['new']);
                 $wouldUpdate++;
                 $skipped++; $items[] = $item; continue;
             }
@@ -174,28 +175,36 @@ class OvokoImportProductDataController extends Controller
             'ovoko_price' => $this->decimal($this->first($ovoko, ['price','sell_price'])),
             'legacy_payload' => $newLegacy,
         ];
+        $candidateAll = $candidate;
+        $candidateAll['price'] = $candidateAll['allegro_price'] = $this->decimal($this->first($ovoko, ['notes','internal_notes','internal_note']));
+        $candidateAll['review_metadata'] = $this->text($this->first($ovoko, ['part_position','position','side','place'])) !== null
+            ? array_replace($review, ['part_position' => $this->text($this->first($ovoko, ['part_position','position','side','place']))])
+            : null;
         if ((bool) $part->needs_listing) $candidate['needs_listing'] = false;
         if ($part->status === 'draft') $candidate['status'] = 'ready';
-        $notePrice = $this->decimal($this->first($ovoko, ['notes','internal_notes','internal_note']));
+        $notePrice = $candidateAll['price'];
         if ($notePrice !== null) $candidate['price'] = $candidate['allegro_price'] = $notePrice;
-        if ($pos = $this->text($this->first($ovoko, ['part_position','position','side','place']))) $candidate['review_metadata'] = array_replace($review, ['part_position' => $pos]);
+        if (is_array($candidateAll['review_metadata'])) $candidate['review_metadata'] = $candidateAll['review_metadata'];
         $candidate = array_filter($candidate, fn ($v) => $v !== null);
         $diff = $this->diff($part, $candidate);
+        if (array_keys($diff['new']) === ['legacy_payload']) {
+            $diff = ['old' => [], 'new' => []];
+        }
 
-        return $diff + ['candidate' => $candidate];
+        return $diff + ['candidate' => $candidate, 'candidate_all' => $candidateAll];
     }
 
-    private function readableChanges(Part $part, array $oldValues, array $newValues): array
+    private function readableChanges(Part $part, array $changes): array
     {
         $fields = [
             'part_number' => ['field' => 'main_part_code', 'label' => 'Główny kod części'],
             'category_id' => ['field' => 'category', 'label' => 'Kategoria'],
             'review_metadata' => ['field' => 'part_position', 'label' => 'Pozycja części'],
-            'car_id' => ['field' => 'car_id', 'label' => 'Przypisany samochód / car_id'],
-            'price' => ['field' => 'shop_price_internal_notes', 'label' => 'Cena sklep z notatek wewnętrznych'],
-            'allegro_price' => ['field' => 'allegro_price_internal_notes', 'label' => 'Cena Allegro z notatek wewnętrznych'],
+            'car_id' => ['field' => 'car_id', 'label' => 'Przypisany samochód'],
+            'price' => ['field' => 'shop_price', 'label' => 'Cena sklep'],
+            'allegro_price' => ['field' => 'allegro_price', 'label' => 'Cena Allegro'],
             'ovoko_price' => ['field' => 'ovoko_price', 'label' => 'Cena Ovoko'],
-            'name' => ['field' => 'product_title', 'label' => 'Tytuł produktu z opisu / treści ogłoszenia'],
+            'name' => ['field' => 'title', 'label' => 'Tytuł produktu'],
             'weight_kg' => ['field' => 'weight_kg', 'label' => 'Waga kg'],
             'length_cm' => ['field' => 'length_cm', 'label' => 'Długość'],
             'width_cm' => ['field' => 'width_cm', 'label' => 'Szerokość'],
@@ -204,19 +213,29 @@ class OvokoImportProductDataController extends Controller
             'status' => ['field' => 'status', 'label' => 'Status'],
         ];
 
-        $changes = [];
+        $candidateAll = $changes['candidate_all'] ?? [];
+        $newValues = $changes['new'] ?? [];
+        $rows = [];
         foreach ($fields as $modelField => $meta) {
-            if (! array_key_exists($modelField, $newValues)) continue;
-
-            $changes[] = [
+            $hasOvokoValue = array_key_exists($modelField, $candidateAll) && $candidateAll[$modelField] !== null;
+            $hasPlannedValue = array_key_exists($modelField, $newValues);
+            $newValue = $hasPlannedValue ? $newValues[$modelField] : ($candidateAll[$modelField] ?? $part->getAttribute($modelField));
+            $row = [
                 'field' => $meta['field'],
                 'label' => $meta['label'],
-                'old_value' => $this->readableValue($part, $modelField, $oldValues[$modelField] ?? null),
-                'new_value' => $this->readableValue($part, $modelField, $newValues[$modelField]),
+                'old_value' => $this->readableValue($part, $modelField, $part->getAttribute($modelField)),
+                'new_value' => $this->readableValue($part, $modelField, $newValue),
+                'will_update' => $hasPlannedValue,
             ];
+            if (! $hasOvokoValue && ! in_array($modelField, ['needs_listing', 'status'], true)) {
+                $row['new_value'] = null;
+                $row['will_update'] = false;
+                $row['reason'] = 'missing_from_ovoko';
+            }
+            $rows[] = $row;
         }
 
-        return $changes;
+        return $rows;
     }
 
     private function readableValue(Part $part, string $field, mixed $value): mixed
@@ -227,6 +246,28 @@ class OvokoImportProductDataController extends Controller
         if ($field === 'needs_listing') return (bool) $value;
 
         return $value ?? '';
+    }
+
+
+    private function dryRunItemStatus(array $newValues): string
+    {
+        $fields = array_keys($newValues);
+        $listingOnly = $fields !== [] && collect($fields)->every(fn (string $field): bool => in_array($field, ['needs_listing', 'status'], true));
+
+        return $listingOnly ? 'would_update_listing_state_only' : 'would_update';
+    }
+
+    private function changeGroups(array $newValues): array
+    {
+        $groups = [];
+        if (array_intersect(array_keys($newValues), ['needs_listing', 'status'])) $groups[] = 'listing_state';
+        if (array_intersect(array_keys($newValues), ['price', 'allegro_price', 'ovoko_price'])) $groups[] = 'prices';
+        if (array_key_exists('category_id', $newValues)) $groups[] = 'category';
+        if (array_key_exists('car_id', $newValues)) $groups[] = 'car';
+        if (array_intersect(array_keys($newValues), ['weight_kg', 'length_cm', 'width_cm', 'height_cm'])) $groups[] = 'dimensions';
+        if (array_intersect(array_keys($newValues), ['part_number', 'name', 'review_metadata'])) $groups[] = 'descriptive_fields';
+
+        return $groups;
     }
 
     private function categoryName(mixed $id): string

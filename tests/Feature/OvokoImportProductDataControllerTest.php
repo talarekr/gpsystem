@@ -53,12 +53,21 @@ class OvokoImportProductDataControllerTest extends TestCase
             ->assertJsonPath('items.0.changes.0.label', 'Główny kod części')
             ->assertJsonPath('items.0.changes.0.old_value', '')
             ->assertJsonPath('items.0.changes.0.new_value', 'MC-1')
-            ->assertJsonPath('items.0.changes.2.field', 'needs_listing')
-            ->assertJsonPath('items.0.changes.2.old_value', true)
-            ->assertJsonPath('items.0.changes.2.new_value', false)
-            ->assertJsonPath('items.0.changes.3.field', 'status')
-            ->assertJsonPath('items.0.changes.3.old_value', 'draft')
-            ->assertJsonPath('items.0.changes.3.new_value', 'ready');
+            ->assertJsonPath('items.0.changes.0.will_update', true)
+            ->assertJsonPath('items.0.changes.1.field', 'category')
+            ->assertJsonPath('items.0.changes.1.new_value', null)
+            ->assertJsonPath('items.0.changes.1.will_update', false)
+            ->assertJsonPath('items.0.changes.1.reason', 'missing_from_ovoko')
+            ->assertJsonPath('items.0.changes.7.field', 'title')
+            ->assertJsonPath('items.0.changes.7.new_value', 'Imported name')
+            ->assertJsonPath('items.0.changes.12.field', 'needs_listing')
+            ->assertJsonPath('items.0.changes.12.old_value', true)
+            ->assertJsonPath('items.0.changes.12.new_value', false)
+            ->assertJsonPath('items.0.changes.12.will_update', true)
+            ->assertJsonPath('items.0.changes.13.field', 'status')
+            ->assertJsonPath('items.0.changes.13.old_value', 'draft')
+            ->assertJsonPath('items.0.changes.13.new_value', 'ready')
+            ->assertJsonPath('items.0.changes.13.will_update', true);
 
         $this->assertTrue($part->fresh()->needs_listing);
         $this->assertSame('draft', $part->fresh()->status);
@@ -104,6 +113,40 @@ class OvokoImportProductDataControllerTest extends TestCase
             ->assertJsonPath('items.0.ovoko_diagnostics.http_status', 200)
             ->assertJsonPath('items.0.ovoko_diagnostics.ovoko_status_code', 'R404')
             ->assertJsonPath('items.0.ovoko_diagnostics.ovoko_message', 'Part not found');
+    }
+
+    public function test_dry_run_reports_no_changes_when_all_import_values_match_or_are_missing(): void
+    {
+        $this->actingAsAdminUser();
+        $this->account();
+
+        $part = Part::query()->forceCreate([
+            'id' => 504,
+            'name' => 'Same title',
+            'part_number' => 'MC-SAME',
+            'status' => 'ready',
+            'needs_listing' => false,
+        ]);
+        MarketplaceListing::query()->create(['marketplace' => 'ovoko', 'part_id' => $part->id, 'external_offer_id' => '11694', 'status' => 'active']);
+
+        Http::fake([
+            'ovoko.test/get/part/11694' => Http::response([
+                'status_code' => 'R200',
+                'item' => ['id' => '11694', 'description' => 'Same title', 'manufacturer_code' => 'MC-SAME'],
+            ], 200),
+        ]);
+
+        $this->getJson('/admin/tools/ovoko/import-product-data?ids=11694&dry_run=1')
+            ->assertOk()
+            ->assertJsonPath('would_update_count', 0)
+            ->assertJsonPath('items.0.status', 'no_changes')
+            ->assertJsonPath('items.0.changes.0.field', 'main_part_code')
+            ->assertJsonPath('items.0.changes.0.will_update', false)
+            ->assertJsonPath('items.0.changes.1.field', 'category')
+            ->assertJsonPath('items.0.changes.1.new_value', null)
+            ->assertJsonPath('items.0.changes.1.reason', 'missing_from_ovoko')
+            ->assertJsonPath('items.0.changes.13.field', 'status')
+            ->assertJsonPath('items.0.changes.13.will_update', false);
     }
 
     private function account(): void
