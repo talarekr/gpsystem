@@ -144,9 +144,10 @@ class OvokoImportProductDataController extends Controller
                 $payload = $response->json();
                 $payload = is_array($payload) ? $payload : [];
                 $rows = $this->extractRows($payload);
+                $directListRecord = $this->directListRecord($payload, $variant['endpoint_path']);
                 $matches = array_values(array_filter($rows, fn (array $row): bool => $this->matchesOvokoId($row, $id, $externalId) && ! $this->looksLikeLocalPayload($row)));
                 $apiOk = $this->ovokoResponseOk($response->status(), $payload);
-                $selected = $matches[0] ?? ($apiOk && count($rows) === 1 && ! $this->looksLikeLocalPayload($rows[0]) && $this->looksLikeProduct($rows[0]) ? $rows[0] : null);
+                $selected = $directListRecord ?? ($matches[0] ?? ($apiOk && count($rows) === 1 && ! $this->looksLikeLocalPayload($rows[0]) && $this->looksLikeProduct($rows[0]) ? $rows[0] : null));
                 $diagnostics = [
                     'source' => 'ovoko_api',
                     'endpoint_path' => $variant['endpoint_path'],
@@ -155,10 +156,11 @@ class OvokoImportProductDataController extends Controller
                     'ovoko_status_code' => data_get($payload, 'status_code'),
                     'ovoko_message' => $this->text($this->first($payload, ['msg','message','error'])),
                     'top_level_keys' => array_values(array_slice(array_keys($payload), 0, 80)),
-                    'raw_excerpt_sanitized' => $this->sanitizeDebug($this->selectedFields($selected ?? ($rows[0] ?? $payload))),
+                    'raw_excerpt_sanitized' => $this->sanitizeDebug($this->debugExcerpt($selected ?? ($rows[0] ?? $payload))),
                     'response_shape' => $this->responseShape($payload),
+                    'selected_record_keys' => is_array($selected) ? array_values(array_slice(array_keys($selected), 0, 80)) : [],
                 ];
-                $attempts[] = $diagnostics + ['matched_requested_id' => $selected !== null, 'returned_rows_count' => count($rows), 'local_payload_rejected' => collect($rows)->contains(fn (array $row): bool => $this->looksLikeLocalPayload($row))];
+                $attempts[] = $diagnostics + ['matched_requested_id' => $selected !== null, 'returned_rows_count' => count($rows), 'direct_list_record_selected' => $directListRecord !== null, 'local_payload_rejected' => $directListRecord === null && collect($rows)->contains(fn (array $row): bool => $this->looksLikeLocalPayload($row))];
 
                 if ($apiOk && $selected !== null) {
                     return $diagnostics + ['ok' => true, 'part' => $selected, 'attempts' => $attempts];
@@ -170,6 +172,16 @@ class OvokoImportProductDataController extends Controller
 
         $last = $attempts[array_key_last($attempts)] ?? [];
         return $last + ['ok' => false, 'source' => 'ovoko_api', 'error' => 'missing_ovoko_product', 'attempts' => $attempts];
+    }
+
+    private function directListRecord(array $payload, string $endpointPath): ?array
+    {
+        if (! preg_match('#^/(?:v2/)?get/part/[^/]+$#', $endpointPath)) return null;
+
+        $list = $payload['list'] ?? null;
+        if (is_array($list) && isset($list[0]) && is_array($list[0])) return $list[0];
+
+        return null;
     }
 
     private function listingExternalId(?MarketplaceListing $listing): ?string
@@ -431,9 +443,10 @@ class OvokoImportProductDataController extends Controller
             'ovoko_status_code' => $remote['ovoko_status_code'] ?? null,
             'ovoko_message' => $remote['ovoko_message'] ?? null,
             'attempts' => $this->sanitizeDebug($remote['attempts'] ?? []),
-            'raw_excerpt_sanitized' => $this->sanitizeDebug($this->selectedFields($ovoko)),
+            'raw_excerpt_sanitized' => $this->sanitizeDebug($this->debugExcerpt($ovoko)),
             'top_level_keys' => array_values(array_slice(array_keys($ovoko), 0, 80)),
-            'parser_candidate_all' => $this->sanitizeDebug($changes['candidate_all'] ?? []),
+            'selected_record_keys' => array_values(array_slice(array_keys($ovoko), 0, 80)),
+            'parser_candidate_all' => $this->sanitizeDebug(Arr::except($changes['candidate_all'] ?? [], ['legacy_payload', 'review_metadata'])),
             'parser_readable_values' => $this->sanitizeDebug($changes['ovoko_readable'] ?? []),
             'field_sources_tried' => [
                 'main_part_code' => ['manufacturer_code','manufacturerCode','main_part_code','code','part_code','main_code','oem_code','visible_code','sku'],
@@ -447,6 +460,18 @@ class OvokoImportProductDataController extends Controller
                 'dimensions' => ['weight_kg/weightKg/weight','length_cm/lengthCm/length','width_cm/widthCm/width','height_cm/heightCm/height'],
             ],
         ];
+    }
+
+    private function debugExcerpt(array $ovoko): array
+    {
+        $selected = $this->selectedFields($ovoko);
+        if ($selected !== []) return $selected;
+
+        return collect($ovoko)
+            ->reject(fn ($value, $key): bool => in_array((string) $key, ['legacy_payload', 'legacy_payload_json', 'woo_product', 'meta', 'review_metadata'], true))
+            ->filter(fn ($value): bool => is_scalar($value) || $value === null || (is_array($value) && count($value) <= 5))
+            ->take(30)
+            ->all();
     }
 
     private function sanitizeDebug(mixed $value): mixed
