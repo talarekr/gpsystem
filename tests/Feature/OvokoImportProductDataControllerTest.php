@@ -115,6 +115,58 @@ class OvokoImportProductDataControllerTest extends TestCase
             ->assertJsonPath('items.0.ovoko_diagnostics.ovoko_message', 'Part not found');
     }
 
+    public function test_dry_run_maps_realistic_get_part_fields_and_debug_payload(): void
+    {
+        $this->actingAsAdminUser();
+        $this->account();
+
+        $part = Part::query()->forceCreate(['id' => 505, 'name' => 'Old', 'status' => 'draft', 'needs_listing' => true]);
+        MarketplaceListing::query()->create(['marketplace' => 'ovoko', 'part_id' => $part->id, 'external_offer_id' => '11691', 'status' => 'active']);
+
+        Http::fake([
+            'ovoko.test/get/part/11691' => Http::response([
+                'status_code' => 'R200',
+                'part' => [
+                    'rrr_id' => '11691',
+                    'manufacturerCode' => '4G0145804D',
+                    'categoryId' => 'CAT-9',
+                    'categoryName' => 'Intercooler',
+                    'partPosition' => 'Przód',
+                    'car' => ['id' => '321'],
+                    'internalNotes' => 'Cena sklep: 250.00; Cena Allegro: 270,00',
+                    'sell_price' => ['seller' => ['amount' => '280.00', 'currency' => 'PLN']],
+                    'content' => 'Audi A6 intercooler 4G0145804D',
+                    'weightKg' => '3.4',
+                    'lengthCm' => '60',
+                    'widthCm' => '40',
+                    'heightCm' => '20',
+                    'user_token' => 'must-not-leak',
+                ],
+            ], 200),
+        ]);
+
+        $this->getJson('/admin/tools/ovoko/import-product-data?ids=11691&dry_run=1&debug_id=11691')
+            ->assertOk()
+            ->assertJsonPath('products_with_price_count', 1)
+            ->assertJsonPath('products_with_category_count', 1)
+            ->assertJsonPath('products_with_car_count', 1)
+            ->assertJsonPath('products_with_dimensions_count', 1)
+            ->assertJsonPath('items.0.changes.0.new_value', '4G0145804D')
+            ->assertJsonPath('items.0.changes.1.new_value', 'Intercooler')
+            ->assertJsonPath('items.0.changes.2.new_value', 'Przód')
+            ->assertJsonPath('items.0.changes.3.new_value', 321)
+            ->assertJsonPath('items.0.changes.4.new_value', '250.00')
+            ->assertJsonPath('items.0.changes.5.new_value', '270.00')
+            ->assertJsonPath('items.0.changes.6.new_value', '280.00')
+            ->assertJsonPath('items.0.changes.7.new_value', 'Audi A6 intercooler 4G0145804D')
+            ->assertJsonPath('items.0.changes.8.new_value', '3.40')
+            ->assertJsonPath('items.0.changes.9.new_value', '60.00')
+            ->assertJsonPath('items.0.changes.10.new_value', '40.00')
+            ->assertJsonPath('items.0.changes.11.new_value', '20.00')
+            ->assertJsonPath('items.0.ovoko_debug.raw_excerpt_sanitized.user_token', '***')
+            ->assertJsonPath('items.0.ovoko_debug.field_sources_tried.ovoko_price.0', 'price');
+    }
+
     public function test_dry_run_reports_no_changes_when_all_import_values_match_or_are_missing(): void
     {
         $this->actingAsAdminUser();

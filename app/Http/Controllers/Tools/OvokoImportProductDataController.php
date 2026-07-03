@@ -54,6 +54,9 @@ class OvokoImportProductDataController extends Controller
 
             $changes = $this->plannedChanges($part, $remote['part'], ! $dryRun);
             $item['changes'] = $this->readableChanges($part, $changes);
+            if ($this->debugRequested($request, $id)) {
+                $item['ovoko_debug'] = $this->debugPayload($remote['part'], $changes);
+            }
             if ($this->hasReadableValue($part, $changes, ['ovoko_price'])) $productsWithPrice++;
             if ($this->hasReadableValue($part, $changes, ['category_id'])) $productsWithCategory++;
             if ($this->hasReadableValue($part, $changes, ['car_id'])) $productsWithCar++;
@@ -118,7 +121,7 @@ class OvokoImportProductDataController extends Controller
         $response = Http::asForm()->acceptJson()->timeout(30)->post(rtrim((string) $account->api_base_url, '/').'/get/part/'.rawurlencode($id), $credentials);
         $payload = $response->json();
         $rows = $this->extractRows(is_array($payload) ? $payload : []);
-        $matches = array_values(array_filter($rows, fn (array $row): bool => (string) $this->first($row, ['id','part_id','ovoko_id','rrr_id']) === $id));
+        $matches = array_values(array_filter($rows, fn (array $row): bool => (string) $this->first($row, ['id','part_id','ovoko_id','ovoko_part_id','rrr_id','external_id']) === $id));
         $apiOk = $this->ovokoResponseOk($response->status(), is_array($payload) ? $payload : null);
         $part = $matches[0] ?? ($apiOk && count($rows) === 1 && $this->looksLikeProduct($rows[0]) ? $rows[0] : null);
 
@@ -137,7 +140,7 @@ class OvokoImportProductDataController extends Controller
 
     private function extractRows(array $payload): array
     {
-        foreach (['data.item','data.part','data.parts','data.items','data.result','data.list','data','item','part','parts','items','result','list'] as $key) {
+        foreach (['data.item','data.part','data.parts','data.items','data.result','data.list','item','part','parts','items','result','list','data'] as $key) {
             $value = $payload[$key] ?? null;
             if (str_contains($key, '.')) $value = data_get($payload, $key);
             if (is_array($value) && Arr::isAssoc($value)) return [$value];
@@ -162,28 +165,35 @@ class OvokoImportProductDataController extends Controller
     {
         $review = is_array($part->review_metadata) ? $part->review_metadata : [];
         $legacy = is_array($part->legacy_payload) ? $part->legacy_payload : [];
-        $newLegacy = array_replace_recursive($legacy, ['ovoko_import_product_data' => ['part_position' => $this->text($this->first($ovoko, ['part_position','position','side','place'])), 'raw_selected_fields' => Arr::only($ovoko, ['id','part_id','manufacturer_code','optional_codes','category_id','category_name','category','position','car_id','notes','description','name','weight','length','width','height','price'])]]);
+        $mainCode = $this->text($this->first($ovoko, ['manufacturer_code','manufacturerCode','main_part_code','mainPartCode','code','part_code','partCode','main_code','mainCode','oem_code','oemCode','visible_code','sku']));
+        $partPosition = $this->text($this->first($ovoko, ['part_position','partPosition','position','side','place','location']));
+        $shopPrice = $this->priceFromNotes($ovoko, ['shop_price','shopPrice','store_price','storePrice'], ['shop', 'sklep']);
+        $allegroPrice = $this->priceFromNotes($ovoko, ['allegro_price','allegroPrice'], ['allegro']);
+        $ovokoPrice = $this->decimal($this->first($ovoko, ['price','price.amount','sell_price','sellPrice','sell_price.amount','sell_price.seller.amount','seller_price','sellerPrice','ovoko_price','ovokoPrice']));
+        $title = $this->text($this->first($ovoko, ['description','desc','content','body','text','name','title','part_name','partName']));
+        $newLegacy = array_replace_recursive($legacy, ['ovoko_import_product_data' => ['part_position' => $partPosition, 'raw_selected_fields' => $this->selectedFields($ovoko)]]);
         $candidate = [
-            'part_number' => $this->text($this->first($ovoko, ['manufacturer_code','code','part_code','main_code','oem_code'])),
+            'part_number' => $mainCode,
             'category_id' => $this->categoryId($ovoko, $allowCreateCategory),
-            'car_id' => $this->int($this->first($ovoko, ['car_id','vehicle_id'])),
-            'name' => $this->text($this->first($ovoko, ['description','desc','content','name','title'])),
-            'weight_kg' => $this->decimal($this->first($ovoko, ['weight_kg','weight'])),
-            'length_cm' => $this->decimal($this->first($ovoko, ['length_cm','length'])),
-            'width_cm' => $this->decimal($this->first($ovoko, ['width_cm','width'])),
-            'height_cm' => $this->decimal($this->first($ovoko, ['height_cm','height'])),
-            'ovoko_price' => $this->decimal($this->first($ovoko, ['price','sell_price'])),
+            'car_id' => $this->int($this->first($ovoko, ['car_id','carId','vehicle_id','vehicleId','car.id','vehicle.id'])),
+            'name' => $title,
+            'weight_kg' => $this->decimal($this->first($ovoko, ['weight_kg','weightKg','weight','package.weight'])),
+            'length_cm' => $this->decimal($this->first($ovoko, ['length_cm','lengthCm','length','package.length'])),
+            'width_cm' => $this->decimal($this->first($ovoko, ['width_cm','widthCm','width','package.width'])),
+            'height_cm' => $this->decimal($this->first($ovoko, ['height_cm','heightCm','height','package.height'])),
+            'ovoko_price' => $ovokoPrice,
             'legacy_payload' => $newLegacy,
         ];
         $candidateAll = $candidate;
-        $candidateAll['price'] = $candidateAll['allegro_price'] = $this->decimal($this->first($ovoko, ['notes','internal_notes','internal_note']));
-        $candidateAll['review_metadata'] = $this->text($this->first($ovoko, ['part_position','position','side','place'])) !== null
-            ? array_replace($review, ['part_position' => $this->text($this->first($ovoko, ['part_position','position','side','place']))])
+        $candidateAll['price'] = $shopPrice;
+        $candidateAll['allegro_price'] = $allegroPrice;
+        $candidateAll['review_metadata'] = $partPosition !== null
+            ? array_replace($review, ['part_position' => $partPosition])
             : null;
         if ((bool) $part->needs_listing) $candidate['needs_listing'] = false;
         if ($part->status === 'draft') $candidate['status'] = 'ready';
-        $notePrice = $candidateAll['price'];
-        if ($notePrice !== null) $candidate['price'] = $candidate['allegro_price'] = $notePrice;
+        if ($shopPrice !== null) $candidate['price'] = $shopPrice;
+        if ($allegroPrice !== null) $candidate['allegro_price'] = $allegroPrice;
         if (is_array($candidateAll['review_metadata'])) $candidate['review_metadata'] = $candidateAll['review_metadata'];
         $candidate = array_filter($candidate, fn ($v) => $v !== null);
         $diff = $this->diff($part, $candidate);
@@ -191,7 +201,7 @@ class OvokoImportProductDataController extends Controller
             $diff = ['old' => [], 'new' => []];
         }
 
-        return $diff + ['candidate' => $candidate, 'candidate_all' => $candidateAll];
+        return $diff + ['candidate' => $candidate, 'candidate_all' => $candidateAll, 'ovoko_readable' => $this->ovokoReadableValues($ovoko, $candidateAll)];
     }
 
     private function readableChanges(Part $part, array $changes): array
@@ -214,17 +224,20 @@ class OvokoImportProductDataController extends Controller
         ];
 
         $candidateAll = $changes['candidate_all'] ?? [];
+        $ovokoReadable = $changes['ovoko_readable'] ?? [];
         $newValues = $changes['new'] ?? [];
         $rows = [];
         foreach ($fields as $modelField => $meta) {
-            $hasOvokoValue = array_key_exists($modelField, $candidateAll) && $candidateAll[$modelField] !== null;
+            $hasOvokoValue = (array_key_exists($modelField, $candidateAll) && $candidateAll[$modelField] !== null)
+                || (array_key_exists($modelField, $ovokoReadable) && $ovokoReadable[$modelField] !== null && $ovokoReadable[$modelField] !== '');
             $hasPlannedValue = array_key_exists($modelField, $newValues);
-            $newValue = $hasPlannedValue ? $newValues[$modelField] : ($candidateAll[$modelField] ?? $part->getAttribute($modelField));
+            $newValue = $hasPlannedValue ? $newValues[$modelField] : ($candidateAll[$modelField] ?? null);
+            $displayValue = array_key_exists($modelField, $ovokoReadable) ? $ovokoReadable[$modelField] : $this->readableValue($part, $modelField, $newValue);
             $row = [
                 'field' => $meta['field'],
                 'label' => $meta['label'],
                 'old_value' => $this->readableValue($part, $modelField, $part->getAttribute($modelField)),
-                'new_value' => $this->readableValue($part, $modelField, $newValue),
+                'new_value' => $displayValue,
                 'will_update' => $hasPlannedValue,
             ];
             if (! $hasOvokoValue && ! in_array($modelField, ['needs_listing', 'status'], true)) {
@@ -280,8 +293,10 @@ class OvokoImportProductDataController extends Controller
     private function hasReadableValue(Part $part, array $changes, array $fields): bool
     {
         $candidate = $changes['candidate'] ?? [];
+        $candidateAll = $changes['candidate_all'] ?? [];
+        $readable = $changes['ovoko_readable'] ?? [];
         foreach ($fields as $field) {
-            $value = array_key_exists($field, $candidate) ? $candidate[$field] : $part->getAttribute($field);
+            $value = $candidate[$field] ?? $candidateAll[$field] ?? $readable[$field] ?? null;
             if ($value !== null && $value !== '') return true;
         }
 
@@ -290,12 +305,85 @@ class OvokoImportProductDataController extends Controller
 
     private function categoryId(array $ovoko, bool $allowCreate): ?int
     {
-        $external = $this->text($this->first($ovoko, ['category_id','category.id']));
-        $name = $this->text($this->first($ovoko, ['category_name','category.name','category']));
+        $external = $this->text($this->first($ovoko, ['category_id','categoryId','part_category_id','partCategoryId','category.id','category.category_id','category.categoryId']));
+        $name = $this->text($this->first($ovoko, ['category_name','categoryName','category_title','categoryTitle','category.name','category.category_name','category.pl','category.en','category']));
         if ($external) $cat = PartCategory::query()->where('external_id', $external)->whereIn('source_system', ['ovoko','rrr','ovoko_old'])->first();
         if (isset($cat)) return $cat->id;
         if ($name && $allowCreate) return PartCategory::query()->firstOrCreate(['source_system' => 'ovoko', 'external_id' => $external ?: 'ovoko-name-'.md5($name)], ['name' => $name, 'slug' => Str::slug($name), 'category_path' => $name])->id;
         return null;
+    }
+
+    private function ovokoReadableValues(array $ovoko, array $candidateAll): array
+    {
+        $category = $this->text($this->first($ovoko, ['category_name','categoryName','category_title','categoryTitle','category_path','categoryPath','category.name','category.category_name','category.pl','category.en','category']))
+            ?? $this->text($this->first($ovoko, ['category_id','categoryId','part_category_id','partCategoryId','category.id']));
+
+        return array_filter([
+            'part_number' => $candidateAll['part_number'] ?? null,
+            'category_id' => $category,
+            'review_metadata' => is_array($candidateAll['review_metadata'] ?? null) ? ($candidateAll['review_metadata']['part_position'] ?? null) : null,
+            'car_id' => $candidateAll['car_id'] ?? null,
+            'price' => $this->readableNumber($candidateAll['price'] ?? null),
+            'allegro_price' => $this->readableNumber($candidateAll['allegro_price'] ?? null),
+            'ovoko_price' => $this->readableNumber($candidateAll['ovoko_price'] ?? null),
+            'name' => $candidateAll['name'] ?? null,
+            'weight_kg' => $this->readableNumber($candidateAll['weight_kg'] ?? null),
+            'length_cm' => $this->readableNumber($candidateAll['length_cm'] ?? null),
+            'width_cm' => $this->readableNumber($candidateAll['width_cm'] ?? null),
+            'height_cm' => $this->readableNumber($candidateAll['height_cm'] ?? null),
+        ], fn ($value) => $value !== null && $value !== '');
+    }
+
+    private function priceFromNotes(array $ovoko, array $directKeys, array $labels): ?float
+    {
+        $direct = $this->decimal($this->first($ovoko, $directKeys));
+        if ($direct !== null) return $direct;
+        $notes = $this->text($this->first($ovoko, ['notes','internal_notes','internalNotes','internal_note','internalNote','comment','comments']));
+        if ($notes === null) return null;
+        foreach ($labels as $label) {
+            if (preg_match('/'.preg_quote($label, '/').'.{0,30}?(\d+(?:[,.]\d{1,2})?)/iu', $notes, $m) === 1) {
+                return $this->decimal($m[1]);
+            }
+        }
+        return null;
+    }
+
+    private function selectedFields(array $ovoko): array
+    {
+        return Arr::only($ovoko, ['id','part_id','ovoko_part_id','rrr_id','external_id','manufacturer_code','manufacturerCode','optional_codes','category_id','categoryId','category_name','categoryName','category','position','part_position','car_id','carId','vehicle_id','notes','internal_notes','description','name','title','weight','weight_kg','length','length_cm','width','width_cm','height','height_cm','price','sell_price','user_token']);
+    }
+
+    private function debugRequested(Request $request, string $id): bool
+    {
+        return $request->boolean('include_raw') || (string) $request->query('debug_id', '') === $id;
+    }
+
+    private function debugPayload(array $ovoko, array $changes): array
+    {
+        return [
+            'raw_excerpt_sanitized' => $this->sanitizeDebug($this->selectedFields($ovoko)),
+            'top_level_keys' => array_values(array_slice(array_keys($ovoko), 0, 80)),
+            'parser_candidate_all' => $this->sanitizeDebug($changes['candidate_all'] ?? []),
+            'parser_readable_values' => $this->sanitizeDebug($changes['ovoko_readable'] ?? []),
+            'field_sources_tried' => [
+                'main_part_code' => ['manufacturer_code','manufacturerCode','main_part_code','code','part_code','main_code','oem_code','visible_code','sku'],
+                'category' => ['category_id','categoryId','part_category_id','category_name','categoryName','category.name','category'],
+                'part_position' => ['part_position','partPosition','position','side','place','location'],
+                'car_id' => ['car_id','carId','vehicle_id','vehicleId','car.id','vehicle.id'],
+                'shop_price' => ['shop_price','shopPrice','store_price','notes/internal_notes label sklep/shop'],
+                'allegro_price' => ['allegro_price','allegroPrice','notes/internal_notes label allegro'],
+                'ovoko_price' => ['price','price.amount','sell_price','sell_price.seller.amount','ovoko_price'],
+                'title' => ['description','desc','content','body','name','title','part_name'],
+                'dimensions' => ['weight_kg/weightKg/weight','length_cm/lengthCm/length','width_cm/widthCm/width','height_cm/heightCm/height'],
+            ],
+        ];
+    }
+
+    private function sanitizeDebug(mixed $value): mixed
+    {
+        if (is_array($value)) return collect($value)->map(fn ($v, $k) => preg_match('/password|token|email|phone|address|name_surname/i', (string) $k) ? '***' : $this->sanitizeDebug($v))->all();
+        if (is_string($value)) return Str::limit($value, 300);
+        return $value;
     }
 
     private function diff(Part $part, array $candidate): array
@@ -309,6 +397,7 @@ class OvokoImportProductDataController extends Controller
     private function text(mixed $v): ?string { return filled($v) ? trim((string) $v) : null; }
     private function int(mixed $v): ?int { return is_numeric($v) ? (int) $v : null; }
     private function decimal(mixed $v): ?float { if (! filled($v)) return null; preg_match('/-?\d+(?:[,.]\d+)?/', (string) $v, $m); return isset($m[0]) ? round((float) str_replace(',', '.', $m[0]), 2) : null; }
+    private function readableNumber(mixed $v): ?string { return $v === null || $v === '' ? null : number_format((float) $v, 2, '.', ''); }
     private function responseShape(array $payload): array { return collect($payload)->map(fn ($v) => is_array($v) ? (Arr::isAssoc($v) ? 'object:'.implode(',', array_slice(array_keys($v), 0, 8)) : 'list:'.count($v)) : gettype($v))->all(); }
 
     private function writeLog(array $payload, string $status): void
