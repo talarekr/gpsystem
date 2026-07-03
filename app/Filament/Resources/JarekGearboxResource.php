@@ -33,17 +33,28 @@ class JarekGearboxResource extends Resource
             ->columns(1)
             ->extraAttributes(['class' => 'gps-part-form gps-jarek-gearbox-form'])
             ->schema([
-                Section::make('Zdjęcia skrzyni')
+                Section::make('Zdjęcie kodu części')
+                    ->hidden()
+                    ->collapsible()
+                    ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--code-photo'])
+                    ->schema([
+                        Forms\Components\Placeholder::make('code_photo_path')
+                            ->hiddenLabel()
+                            ->content('Skrzynie Jarka nie używają osobnego zdjęcia kodu części.')
+                            ->columnSpanFull(),
+                    ]),
+
+                Section::make('Zdjęcia części')
                     ->collapsible()
                     ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--photos'])
                     ->schema([
-                        Forms\Components\Placeholder::make('images_preview')
+                        Forms\Components\Placeholder::make('part_images_editor')
                             ->hiddenLabel()
                             ->content(fn (?JarekGearbox $record): HtmlString => new HtmlString(self::imagesPreviewHtml($record)))
                             ->columnSpanFull(),
                     ]),
 
-                Section::make('Informacje o skrzyni')
+                Section::make('Informacje o części')
                     ->collapsible()
                     ->columns(12)
                     ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--part-info'])
@@ -51,87 +62,90 @@ class JarekGearboxResource extends Resource
                         Forms\Components\TextInput::make('title')
                             ->label('Tytuł produktu')
                             ->required()
+                            ->maxLength(75)
+                            ->extraInputAttributes(['class' => 'font-normal', 'maxlength' => '75'])
+                            ->columnSpanFull(),
+                        Forms\Components\TextInput::make('allegro_offer_id')
+                            ->label('Główny kod części')
                             ->maxLength(255)
-                            ->columnSpanFull(),
-                        Forms\Components\Textarea::make('description')
-                            ->label('Opis')
-                            ->rows(8)
-                            ->columnSpanFull(),
-                        Forms\Components\Textarea::make('plain_description')
-                            ->label('Opis prosty')
-                            ->rows(5)
                             ->columnSpanFull(),
                         Forms\Components\TextInput::make('category_name')
-                            ->label('Kategoria Allegro')
+                            ->label('Kategoria')
+                            ->placeholder('Kategoria')
                             ->maxLength(255)
+                            ->columnSpanFull(),
+                        Forms\Components\Select::make('import_status')
+                            ->label('Jakość')
+                            ->options(fn (?JarekGearbox $record): array => self::statusOptions('import_status', $record?->import_status))
+                            ->native(false)
+                            ->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])
                             ->columnSpan(6),
                         Forms\Components\TextInput::make('category_id')
-                            ->label('ID kategorii Allegro')
+                            ->label('Pozycja części (strona zabudowy)')
+                            ->placeholder('Wybierz')
                             ->maxLength(255)
                             ->columnSpan(6),
+                        Forms\Components\Select::make('allegro_status')
+                            ->label('Kierownica po stronie')
+                            ->options(fn (?JarekGearbox $record): array => self::statusOptions('allegro_status', $record?->allegro_status))
+                            ->native(false)
+                            ->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])
+                            ->columnSpan(6),
+                        Forms\Components\TextInput::make('quantity')
+                            ->label('Magazyn')
+                            ->numeric()
+                            ->minValue(0)
+                            ->columnSpan(6),
+                        Forms\Components\TextInput::make('source_account')->label('Waga, kg')->disabled()->dehydrated(false)->columnSpan(3),
+                        Forms\Components\TextInput::make('allegro_account')->label('Długość, cm')->disabled()->dehydrated(false)->columnSpan(3),
+                        Forms\Components\TextInput::make('ebay_inventory_sku')->label('Szerokość, cm')->maxLength(255)->columnSpan(3),
+                        Forms\Components\TextInput::make('ebay_listing_id')->label('Wysokość, cm')->maxLength(255)->columnSpan(3),
+                        Forms\Components\RichEditor::make('description')->label('Opis')->placeholder('Opis')->columnSpanFull(),
                     ]),
 
-                Section::make('Ceny i ilość')
+                Section::make('Informacje o samochodzie')
+                    ->collapsible()
+                    ->columns(2)
+                    ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--vehicle'])
+                    ->schema([
+                        Forms\Components\Placeholder::make('vehicle_context')
+                            ->hiddenLabel()
+                            ->content('Skrzynie Jarka są osobnym zasobem jarek_gearboxes i nie są wiązane z rekordem samochodu z modułu części.')
+                            ->columnSpanFull(),
+                    ]),
+
+                Section::make('Ceny')
                     ->collapsible()
                     ->columns(4)
                     ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--prices'])
                     ->schema([
-                        Forms\Components\TextInput::make('price')
-                            ->label('Cena')
-                            ->numeric()
-                            ->prefix('PLN')
-                            ->minValue(0),
-                        Forms\Components\TextInput::make('currency')
-                            ->label('Waluta')
-                            ->maxLength(3)
-                            ->default('PLN'),
-                        Forms\Components\TextInput::make('quantity')
-                            ->label('Ilość')
-                            ->numeric()
-                            ->minValue(0),
+                        Forms\Components\TextInput::make('price')->label('Cena sklep')->numeric()->prefix('PLN')->minValue(0),
+                        Forms\Components\Placeholder::make('allegro_price')->label('Cena Allegro')->content(fn (?JarekGearbox $record): string => filled($record?->price) ? number_format((float) $record->price, 2, ',', ' ').' PLN' : '—'),
+                        Forms\Components\Placeholder::make('ovoko_price')->label('Cena Ovoko')->content('Nie dotyczy Skrzyń Jarka — brak Ovoko write.'),
+                        Forms\Components\Placeholder::make('ebay_price')->label('Cena eBay')->content(fn (?JarekGearbox $record): string => filled($record?->price) ? number_format((float) $record->price, 2, ',', ' ').' PLN (preview)' : '—'),
+                        Forms\Components\Hidden::make('currency')->default('PLN'),
+                        Forms\Components\Placeholder::make('marketplace_price_links')
+                            ->hiddenLabel()
+                            ->content(fn (?JarekGearbox $record): HtmlString => new HtmlString($record ? '<a class="text-primary-600 underline" href="'.e(route('admin.tools.jarek-gearboxes.ebay-preview', $record)).'" target="_blank" rel="noopener">eBay preview / dry-run</a>' : 'Zapisz rekord, aby zobaczyć podgląd eBay.'))
+                            ->columnSpanFull(),
+                    ]),
+
+                Section::make('Kurier Allegro')
+                    ->collapsible()
+                    ->columns(1)
+                    ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--allegro-courier'])
+                    ->schema([
+                        Forms\Components\TextInput::make('allegro_offer_url')->hiddenLabel()->placeholder('Wybierz cennik dostawy Allegro')->disabled()->dehydrated(false)->columnSpanFull(),
                     ]),
 
                 Section::make('Kanały sprzedaży')
                     ->collapsible()
-                    ->columns(2)
                     ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--marketplace-preparation'])
                     ->schema([
-                        Forms\Components\Select::make('allegro_status')
-                            ->label('Status Allegro')
-                            ->options(fn (?JarekGearbox $record): array => self::statusOptions('allegro_status', $record?->allegro_status))
-                            ->native(false),
-                        Forms\Components\Select::make('ebay_status')
-                            ->label('Status eBay')
-                            ->options(self::ebayStatusOptions())
-                            ->default('not_ready')
-                            ->native(false),
-                        Forms\Components\TextInput::make('ebay_listing_id')->label('eBay listing ID')->maxLength(255),
-                        Forms\Components\TextInput::make('ebay_offer_id')->label('eBay offer ID')->maxLength(255),
-                        Forms\Components\TextInput::make('ebay_inventory_sku')->label('eBay SKU')->maxLength(255),
-                        Forms\Components\Placeholder::make('ebay_preview')
-                            ->label('eBay preview/dry-run')
-                            ->content(fn (?JarekGearbox $record): HtmlString => new HtmlString($record ? '<a class="text-primary-600 underline" href="'.e(route('admin.tools.jarek-gearboxes.ebay-preview', $record)).'" target="_blank" rel="noopener">Otwórz podgląd eBay</a>' : 'Zapisz rekord, aby zobaczyć URL preview.')),
-                    ]),
-
-                Section::make('Źródło importu')
-                    ->collapsible()
-                    ->collapsed()
-                    ->columns(2)
-                    ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--source'])
-                    ->schema([
-                        Forms\Components\TextInput::make('source_account')->label('Konto źródłowe')->disabled()->dehydrated(false),
-                        Forms\Components\TextInput::make('allegro_account')->label('Konto Allegro')->disabled()->dehydrated(false),
-                        Forms\Components\TextInput::make('allegro_offer_id')->label('ID oferty Allegro')->disabled()->dehydrated(false),
-                        Forms\Components\TextInput::make('allegro_offer_url')->label('URL oferty Allegro')->disabled()->dehydrated(false)->columnSpanFull(),
-                        Forms\Components\Placeholder::make('import_dates')
-                            ->label('Daty')
-                            ->content(fn (?JarekGearbox $record): string => $record ? 'Import: '.($record->imported_at?->format('Y-m-d H:i') ?? '—').' · Aktualizacja Allegro: '.($record->updated_from_allegro_at?->format('Y-m-d H:i') ?? '—') : '—')
-                            ->columnSpanFull(),
-                        Forms\Components\Textarea::make('ebay_payload_snapshot')
-                            ->label('eBay payload snapshot')
-                            ->disabled()
-                            ->dehydrated(false)
-                            ->formatStateUsing(fn ($state) => json_encode($state, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE))
+                        Forms\Components\Placeholder::make('marketplace_readiness_cards')
+                            ->label('Status gotowości')
+                            ->hiddenLabel()
+                            ->content(fn (?JarekGearbox $record): HtmlString => new HtmlString(self::jarekMarketplacePreviewHtml($record)))
                             ->columnSpanFull(),
                     ]),
             ]);
@@ -229,6 +243,24 @@ class JarekGearboxResource extends Resource
         }
 
         return collect($values)->mapWithKeys(fn (string $value): array => [$value => $value])->all();
+    }
+
+
+    private static function jarekMarketplacePreviewHtml(?JarekGearbox $record): string
+    {
+        if (! $record || ! $record->exists) {
+            return '<div class="text-sm text-gray-500">Zapisz skrzynię, aby zobaczyć podgląd gotowości eBay. Ovoko i Allegro main są wyłączone.</div>';
+        }
+
+        $previewUrl = route('admin.tools.jarek-gearboxes.ebay-preview', $record);
+        $allegroStatus = e($record->allegro_status ?: '—');
+        $ebayStatus = e($record->ebay_status ?: 'not_ready');
+
+        return '<div class="space-y-2 text-sm text-gray-700">'
+            .'<div><strong>Allegro Jarka:</strong> '. $allegroStatus .' (źródło/import, bez Allegro main write)</div>'
+            .'<div><strong>Ovoko:</strong> wyłączone dla Skrzyń Jarka</div>'
+            .'<div><strong>eBay:</strong> '. $ebayStatus .' · <a class="text-primary-600 underline" href="'.e($previewUrl).'" target="_blank" rel="noopener">preview / dry-run</a></div>'
+            .'</div>';
     }
 
     private static function imagesPreviewHtml(?JarekGearbox $record): string
