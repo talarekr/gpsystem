@@ -9,6 +9,7 @@ use App\Services\Marketplace\OvokoPartIdExtractor;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
+use Throwable;
 
 class OvokoSoldMappingCheckController extends Controller
 {
@@ -17,79 +18,126 @@ class OvokoSoldMappingCheckController extends Controller
     public function __invoke(Request $request, OvokoPartIdExtractor $extractor): JsonResponse
     {
         $ids = $this->requestedIds($request);
-        $matchesById = $this->collectMarketplaceListingMatches($ids) + [];
-        $this->collectPartMatches($ids, $matchesById, $extractor);
+        $warnings = [];
+        $errors = [];
+        $matchesById = [];
 
-        $localPartUse = [];
-        foreach ($matchesById as $matches) {
-            foreach ($this->uniquePartIds($matches) as $partId) {
-                $localPartUse[(string) $partId] = ($localPartUse[(string) $partId] ?? 0) + 1;
+        try {
+            $matchesById = $this->collectMarketplaceListingMatches($ids, $warnings, $errors);
+            $this->collectPartMatches($ids, $matchesById, $extractor, $warnings, $errors);
+
+            $localPartUse = [];
+            foreach ($matchesById as $matches) {
+                foreach ($this->uniquePartIds($matches) as $partId) {
+                    $localPartUse[(string) $partId] = ($localPartUse[(string) $partId] ?? 0) + 1;
+                }
+            }
+
+            $items = collect($ids)->map(fn (string $id): array => $this->buildItem($id, $matchesById[$id] ?? [], $localPartUse, $warnings))->values();
+            $summary = $this->buildSummary($items, $localPartUse);
+
+            return response()->json($this->payload($ids, $items->all(), $summary, $warnings, $errors));
+        } catch (Throwable $e) {
+            $errors[] = $this->formatThrowable('unexpected_diagnostic_error', $e);
+            $items = collect($ids)->map(fn (string $id): array => $this->buildItem($id, $matchesById[$id] ?? [], [], $warnings))->values();
+            $summary = $this->buildSummary($items, []);
+
+            return response()->json($this->payload($ids, $items->all(), $summary, $warnings, $errors));
+        }
+    }
+
+    private function collectMarketplaceListingMatches(array $ids, array &$warnings, array &$errors): array
+    {
+        if (! $this->hasTable('marketplace_listings', $warnings, $errors)) {
+            return [];
+        }
+
+        $required = ['id', 'part_id', 'marketplace'];
+        $optional = ['external_offer_id', 'external_listing_id', 'external_inventory_id', 'external_id', 'raw_payload'];
+        $available = $this->availableColumns('marketplace_listings', array_merge($required, $optional), $warnings, $errors);
+
+        foreach ($required as $column) {
+            if (! in_array($column, $available, true)) {
+                $warnings[] = "unavailable source: marketplace_listings missing required column {$column}; skipped marketplace listing mapping";
+                return [];
             }
         }
 
-        $items = collect($ids)->map(fn (string $id): array => $this->buildItem($id, $matchesById[$id] ?? [], $localPartUse))->values();
+        try {
+            $matches = [];
+            MarketplaceListing::query()
+                ->with('part')
+                ->where('marketplace', 'ovoko')
+                ->get($available)
+                ->each(function (MarketplaceListing $listing) use (&$matches, $ids, $available): void {
+                    foreach ($this->listingCandidates($listing, $available) as $candidate) {
+                        if (in_array($candidate['value'], $ids, true)) {
+                            $matches[$candidate['value']][] = ['part' => $listing->part, 'part_id' => $listing->part_id, 'source' => $candidate['source'], 'value' => $candidate['value'], 'listing_id' => $listing->id];
+                        }
+                    }
+                });
 
-        $summary = [
-            'missing_ovoko_ids' => $items->where('match_status', 'missing')->pluck('ovoko_product_id')->values()->all(),
-            'ambiguous_ovoko_ids' => $items->where('match_status', 'ambiguous')->pluck('ovoko_product_id')->values()->all(),
-            'duplicate_local_parts' => collect($localPartUse)->filter(fn (int $count): bool => $count > 1)->map(fn (int $count, string $partId): array => ['local_part_id' => (int) $partId, 'requested_ovoko_id_count' => $count])->values()->all(),
-            'already_sold_ids' => $items->where('planned_action', 'no_change_already_sold')->pluck('ovoko_product_id')->values()->all(),
-            'would_mark_sold_ids' => $items->where('planned_action', 'would_mark_sold')->pluck('ovoko_product_id')->values()->all(),
-        ];
-
-        return response()->json([
-            'ok' => true,
-            'dry_run' => true,
-            'local_update' => false,
-            'marketplace_write' => false,
-            'requested_count' => count($ids),
-            'mapped_count' => $items->whereIn('match_status', ['found', 'duplicate_local_part'])->count(),
-            'missing_count' => count($summary['missing_ovoko_ids']),
-            'ambiguous_count' => count($summary['ambiguous_ovoko_ids']),
-            'duplicate_local_part_count' => count($summary['duplicate_local_parts']),
-            'already_sold_count' => count($summary['already_sold_ids']),
-            'not_sold_count' => count($summary['would_mark_sold_ids']),
-            'mapping_tables_fields' => ['marketplace_listings.marketplace=ovoko external_offer_id/external_listing_id/external_inventory_id/external_id/raw_payload ids', 'parts.source_system/external_id', 'parts.legacy_payload ovoko_part_id/_ovoko_part_id'],
-            'summary' => $summary,
-            'items' => $items->all(),
-        ]);
+            return $matches;
+        } catch (Throwable $e) {
+            $errors[] = $this->formatThrowable('marketplace_listings_mapping_error', $e);
+            return [];
+        }
     }
 
-    private function collectMarketplaceListingMatches(array $ids): array
+    private function collectPartMatches(array $ids, array &$matches, OvokoPartIdExtractor $extractor, array &$warnings, array &$errors): void
     {
-        if (! Schema::hasTable('marketplace_listings')) return [];
-        $matches = [];
-        $columns = ['id','part_id','external_offer_id','external_listing_id','external_inventory_id','raw_payload','marketplace'];
-        if (Schema::hasColumn('marketplace_listings', 'external_id')) $columns[] = 'external_id';
-        MarketplaceListing::query()->with('part')->where('marketplace', 'ovoko')->get($columns)->each(function (MarketplaceListing $listing) use (&$matches, $ids): void {
-            foreach ($this->listingCandidates($listing) as $candidate) {
-                if (in_array($candidate['value'], $ids, true)) $matches[$candidate['value']][] = ['part' => $listing->part, 'part_id' => $listing->part_id, 'source' => $candidate['source'], 'value' => $candidate['value'], 'listing_id' => $listing->id];
+        if (! $this->hasTable('parts', $warnings, $errors)) {
+            return;
+        }
+
+        $columns = $this->availableColumns('parts', ['id', 'source_system', 'external_id', 'legacy_payload', 'status', 'part_number', 'name', 'needs_listing', 'is_visible_storefront'], $warnings, $errors);
+        if (! in_array('id', $columns, true)) {
+            $warnings[] = 'unavailable source: parts missing required column id; skipped parts mapping';
+            return;
+        }
+
+        try {
+            $query = Part::query()->select($columns);
+            $query->where(function ($query) use ($ids, $columns): void {
+                $hasExternal = in_array('source_system', $columns, true) && in_array('external_id', $columns, true);
+                $hasLegacy = in_array('legacy_payload', $columns, true);
+
+                if ($hasExternal) {
+                    $query->where(function ($q) use ($ids): void {
+                        $q->whereIn('source_system', ['ovoko', 'rrr'])->whereIn('external_id', $ids);
+                    });
+                }
+                if ($hasLegacy) {
+                    $hasExternal ? $query->orWhereNotNull('legacy_payload') : $query->whereNotNull('legacy_payload');
+                }
+            });
+
+            if (! in_array('source_system', $columns, true) && ! in_array('external_id', $columns, true) && ! in_array('legacy_payload', $columns, true)) {
+                $warnings[] = 'unavailable source: parts missing source_system/external_id and legacy_payload; skipped parts mapping';
+                return;
             }
-        });
-        return $matches;
+
+            $query->get()->each(function (Part $part) use (&$matches, $ids, $extractor, $columns): void {
+                if (in_array('source_system', $columns, true) && in_array('external_id', $columns, true) && in_array((string) $part->external_id, $ids, true) && in_array((string) $part->source_system, ['ovoko', 'rrr'], true)) {
+                    $matches[(string) $part->external_id][] = ['part' => $part, 'part_id' => $part->id, 'source' => 'parts.source_system+parts.external_id', 'value' => (string) $part->external_id, 'listing_id' => null];
+                }
+                if (in_array('legacy_payload', $columns, true)) {
+                    $legacy = $extractor->extractWithPath($part->legacy_payload);
+                    if (($legacy['id'] ?? null) !== null && in_array((string) $legacy['id'], $ids, true)) {
+                        $matches[(string) $legacy['id']][] = ['part' => $part, 'part_id' => $part->id, 'source' => 'parts.legacy_payload.'.($legacy['path'] ?? 'ovoko_part_id'), 'value' => (string) $legacy['id'], 'listing_id' => null];
+                    }
+                }
+            });
+        } catch (Throwable $e) {
+            $errors[] = $this->formatThrowable('parts_mapping_error', $e);
+        }
     }
 
-    private function collectPartMatches(array $ids, array &$matches, OvokoPartIdExtractor $extractor): void
-    {
-        Part::query()->where(function ($query) use ($ids): void {
-            $query->where(function ($q): void { $q->where('source_system', 'ovoko')->orWhere('source_system', 'rrr'); })->whereIn('external_id', $ids)->orWhereNotNull('legacy_payload');
-        })->get()->each(function (Part $part) use (&$matches, $ids, $extractor): void {
-            if (in_array((string) $part->external_id, $ids, true) && in_array((string) $part->source_system, ['ovoko', 'rrr'], true)) {
-                $matches[(string) $part->external_id][] = ['part' => $part, 'part_id' => $part->id, 'source' => 'parts.source_system+parts.external_id', 'value' => (string) $part->external_id, 'listing_id' => null];
-            }
-            $legacy = $extractor->extractWithPath($part->legacy_payload);
-            if (($legacy['id'] ?? null) !== null && in_array((string) $legacy['id'], $ids, true)) {
-                $matches[(string) $legacy['id']][] = ['part' => $part, 'part_id' => $part->id, 'source' => 'parts.legacy_payload.'.($legacy['path'] ?? 'ovoko_part_id'), 'value' => (string) $legacy['id'], 'listing_id' => null];
-            }
-        });
-    }
-
-    private function buildItem(string $id, array $matches, array $localPartUse): array
+    private function buildItem(string $id, array $matches, array $localPartUse, array &$warnings): array
     {
         $partIds = $this->uniquePartIds($matches);
         $part = collect($matches)->pluck('part')->filter()->first();
         $status = count($partIds) === 0 ? 'missing' : (count($partIds) > 1 ? 'ambiguous' : (($localPartUse[(string) $partIds[0]] ?? 0) > 1 ? 'duplicate_local_part' : 'found'));
-        $blockers = match ($status) { 'missing' => ['missing_mapping'], 'ambiguous' => ['ambiguous_mapping'], 'duplicate_local_part' => ['duplicate_local_part'], default => [] };
         $planned = $status === 'found' ? ($part?->status === 'sold' ? 'no_change_already_sold' : 'would_mark_sold') : ($status === 'missing' ? 'blocked_missing_mapping' : 'blocked_ambiguous');
 
         return [
@@ -100,32 +148,135 @@ class OvokoSoldMappingCheckController extends Controller
             'local_part_number' => $part?->part_number,
             'local_title' => $part?->name,
             'local_status' => $part?->status,
-            'local_status_label' => $part?->adminStatusLabel(),
-            'local_availability' => $part?->adminLocalAvailability(),
+            'local_status_label' => $this->safeStatusLabel($part, $warnings),
+            'local_availability' => $this->safeAvailability($part, $warnings),
             'local_needs_listing' => $part?->needs_listing,
             'local_is_visible_storefront' => $part?->is_visible_storefront,
             'mapping_source' => collect($matches)->pluck('source')->unique()->implode(', ') ?: null,
             'matched_values' => collect($matches)->map(fn (array $m): array => ['source' => $m['source'], 'value' => $m['value'], 'local_part_id' => $m['part_id'], 'marketplace_listing_id' => $m['listing_id']])->unique()->values()->all(),
             'planned_action' => $planned,
-            'blockers' => $blockers,
+            'blockers' => match ($status) { 'missing' => ['missing_mapping'], 'ambiguous' => ['ambiguous_mapping'], 'duplicate_local_part' => ['duplicate_local_part'], default => [] },
             'notes' => $this->notes($status, $partIds),
         ];
     }
 
-    private function listingCandidates(MarketplaceListing $listing): array
+    private function listingCandidates(MarketplaceListing $listing, array $columns): array
     {
-        $raw = is_array($listing->raw_payload) ? $listing->raw_payload : [];
-        return collect([
-            ['source' => 'marketplace_listings.external_offer_id', 'value' => $listing->external_offer_id],
-            ['source' => 'marketplace_listings.external_listing_id', 'value' => $listing->external_listing_id],
-            ['source' => 'marketplace_listings.external_inventory_id', 'value' => $listing->external_inventory_id],
-            ['source' => 'marketplace_listings.external_id', 'value' => Schema::hasColumn('marketplace_listings', 'external_id') ? $listing->getAttribute('external_id') : null],
+        $raw = in_array('raw_payload', $columns, true) ? $listing->raw_payload : null;
+        if (! is_array($raw)) {
+            $decoded = is_string($raw) ? json_decode($raw, true) : null;
+            $raw = is_array($decoded) ? $decoded : [];
+        }
+
+        $candidateDefinitions = [
+            'external_offer_id' => 'marketplace_listings.external_offer_id',
+            'external_listing_id' => 'marketplace_listings.external_listing_id',
+            'external_inventory_id' => 'marketplace_listings.external_inventory_id',
+            'external_id' => 'marketplace_listings.external_id',
+        ];
+
+        $candidates = [];
+        foreach ($candidateDefinitions as $column => $source) {
+            if (in_array($column, $columns, true)) {
+                $candidates[] = ['source' => $source, 'value' => $listing->getAttribute($column)];
+            }
+        }
+
+        return collect(array_merge($candidates, [
             ['source' => 'marketplace_listings.raw_payload.external_id', 'value' => $raw['external_id'] ?? null],
             ['source' => 'marketplace_listings.raw_payload.ovoko_part_id', 'value' => $raw['ovoko_part_id'] ?? null],
             ['source' => 'marketplace_listings.raw_payload.marketplace_external_id', 'value' => $raw['marketplace_external_id'] ?? null],
             ['source' => 'marketplace_listings.raw_payload.listing_id', 'value' => $raw['listing_id'] ?? null],
             ['source' => 'marketplace_listings.raw_payload.metadata.ovoko_part_id', 'value' => data_get($raw, 'metadata.ovoko_part_id')],
-        ])->map(fn (array $candidate): array => ['source' => $candidate['source'], 'value' => trim((string) $candidate['value'])])->filter(fn (array $candidate): bool => $candidate['value'] !== '' && ! str_starts_with($candidate['value'], 'GPSW-'))->values()->all();
+        ]))->map(fn (array $candidate): array => ['source' => $candidate['source'], 'value' => trim((string) $candidate['value'])])->filter(fn (array $candidate): bool => $candidate['value'] !== '' && ! str_starts_with($candidate['value'], 'GPSW-'))->values()->all();
+    }
+
+    private function buildSummary($items, array $localPartUse): array
+    {
+        return [
+            'missing_ovoko_ids' => collect($items)->where('match_status', 'missing')->pluck('ovoko_product_id')->values()->all(),
+            'ambiguous_ovoko_ids' => collect($items)->where('match_status', 'ambiguous')->pluck('ovoko_product_id')->values()->all(),
+            'duplicate_local_parts' => collect($localPartUse)->filter(fn (int $count): bool => $count > 1)->map(fn (int $count, string $partId): array => ['local_part_id' => (int) $partId, 'requested_ovoko_id_count' => $count])->values()->all(),
+            'already_sold_ids' => collect($items)->where('planned_action', 'no_change_already_sold')->pluck('ovoko_product_id')->values()->all(),
+            'would_mark_sold_ids' => collect($items)->where('planned_action', 'would_mark_sold')->pluck('ovoko_product_id')->values()->all(),
+        ];
+    }
+
+    private function payload(array $ids, array $items, array $summary, array $warnings, array $errors): array
+    {
+        return [
+            'ok' => $errors === [] && $warnings === [],
+            'dry_run' => true,
+            'local_update' => false,
+            'marketplace_write' => false,
+            'requested_count' => count($ids),
+            'errors' => array_values(array_unique($errors)),
+            'warnings' => array_values(array_unique($warnings)),
+            'mapped_count' => collect($items)->whereIn('match_status', ['found', 'duplicate_local_part'])->count(),
+            'missing_count' => count($summary['missing_ovoko_ids']),
+            'ambiguous_count' => count($summary['ambiguous_ovoko_ids']),
+            'duplicate_local_part_count' => count($summary['duplicate_local_parts']),
+            'already_sold_count' => count($summary['already_sold_ids']),
+            'not_sold_count' => count($summary['would_mark_sold_ids']),
+            'mapping_tables_fields' => ['marketplace_listings.marketplace=ovoko external_offer_id/external_listing_id/external_inventory_id/external_id/raw_payload ids', 'parts.source_system/external_id', 'parts.legacy_payload ovoko_part_id/_ovoko_part_id'],
+            'summary' => $summary,
+            'items' => $items,
+        ];
+    }
+
+    private function hasTable(string $table, array &$warnings, array &$errors): bool
+    {
+        try {
+            if (Schema::hasTable($table)) return true;
+            $warnings[] = "unavailable source: table {$table} does not exist";
+        } catch (Throwable $e) {
+            $errors[] = $this->formatThrowable("schema_check_{$table}_error", $e);
+        }
+        return false;
+    }
+
+    private function availableColumns(string $table, array $columns, array &$warnings, array &$errors): array
+    {
+        $available = [];
+        foreach ($columns as $column) {
+            try {
+                if (Schema::hasColumn($table, $column)) {
+                    $available[] = $column;
+                } else {
+                    $warnings[] = "unavailable column: {$table}.{$column}";
+                }
+            } catch (Throwable $e) {
+                $errors[] = $this->formatThrowable("schema_check_{$table}_{$column}_error", $e);
+            }
+        }
+        return $available;
+    }
+
+    private function safeStatusLabel(?Part $part, array &$warnings): ?string
+    {
+        if (! $part) return null;
+        try {
+            return method_exists($part, 'adminStatusLabel') ? $part->adminStatusLabel() : ($part->status ?: '—');
+        } catch (Throwable $e) {
+            $warnings[] = 'status label helper failed; returned raw status: '.$e->getMessage();
+            return $part->status ?: '—';
+        }
+    }
+
+    private function safeAvailability(?Part $part, array &$warnings): ?string
+    {
+        if (! $part) return null;
+        try {
+            if (method_exists($part, 'adminLocalAvailability')) return $part->adminLocalAvailability();
+        } catch (Throwable $e) {
+            $warnings[] = 'availability helper failed; returned raw status: '.$e->getMessage();
+        }
+        return $part->status;
+    }
+
+    private function formatThrowable(string $context, Throwable $e): string
+    {
+        return $context.': '.get_class($e).': '.$e->getMessage();
     }
 
     private function requestedIds(Request $request): array
