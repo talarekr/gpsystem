@@ -46,6 +46,7 @@ class OvokoImportProductDataController extends Controller
             if (! ($remote['ok'] ?? false)) {
                 $item['status'] = 'failed';
                 $item['errors'][] = $remote['error'] ?? $remote['blocker'] ?? 'ovoko_fetch_failed';
+                $item['ovoko_diagnostics'] = Arr::only($remote, ['http_status', 'ovoko_status_code', 'ovoko_message', 'response_excerpt', 'response_shape']);
                 $failed++; $items[] = $item; continue;
             }
             $fetched++;
@@ -113,18 +114,43 @@ class OvokoImportProductDataController extends Controller
         $payload = $response->json();
         $rows = $this->extractRows(is_array($payload) ? $payload : []);
         $matches = array_values(array_filter($rows, fn (array $row): bool => (string) $this->first($row, ['id','part_id','ovoko_id','rrr_id']) === $id));
+        $apiOk = $this->ovokoResponseOk($response->status(), is_array($payload) ? $payload : null);
+        $part = $matches[0] ?? ($apiOk && count($rows) === 1 && $this->looksLikeProduct($rows[0]) ? $rows[0] : null);
 
-        return $response->successful() && $matches !== [] ? ['ok' => true, 'part' => $matches[0]] : ['ok' => false, 'error' => $response->successful() ? 'missing_ovoko_product' : 'ovoko_api_failed', 'http_status' => $response->status()];
+        return $apiOk && $part !== null
+            ? ['ok' => true, 'part' => $part]
+            : [
+                'ok' => false,
+                'error' => $response->successful() ? 'missing_ovoko_product' : 'ovoko_api_failed',
+                'http_status' => $response->status(),
+                'ovoko_status_code' => is_array($payload) ? data_get($payload, 'status_code') : null,
+                'ovoko_message' => is_array($payload) ? $this->text($this->first($payload, ['msg','message','error'])) : null,
+                'response_excerpt' => Str::limit($response->body(), 500),
+                'response_shape' => is_array($payload) ? $this->responseShape($payload) : gettype($payload),
+            ];
     }
 
     private function extractRows(array $payload): array
     {
-        foreach (['data','item','part','parts','items','result','list'] as $key) {
+        foreach (['data.item','data.part','data.parts','data.items','data.result','data.list','data','item','part','parts','items','result','list'] as $key) {
             $value = $payload[$key] ?? null;
+            if (str_contains($key, '.')) $value = data_get($payload, $key);
             if (is_array($value) && Arr::isAssoc($value)) return [$value];
             if (is_array($value)) return array_values(array_filter($value, 'is_array'));
         }
         return Arr::isAssoc($payload) ? [$payload] : array_values(array_filter($payload, 'is_array'));
+    }
+
+    private function ovokoResponseOk(int $httpStatus, ?array $payload): bool
+    {
+        if ($httpStatus < 200 || $httpStatus >= 300) return false;
+        $statusCode = $payload ? (string) data_get($payload, 'status_code', '') : '';
+        return $statusCode === '' || in_array(strtoupper($statusCode), ['R200', '200', 'OK', 'SUCCESS'], true);
+    }
+
+    private function looksLikeProduct(array $row): bool
+    {
+        return Arr::except($row, ['status_code', 'msg', 'message', 'error', 'errors']) !== [];
     }
 
     private function plannedChanges(Part $part, array $ovoko, bool $allowCreateCategory): array
@@ -144,6 +170,8 @@ class OvokoImportProductDataController extends Controller
             'ovoko_price' => $this->decimal($this->first($ovoko, ['price','sell_price'])),
             'legacy_payload' => $newLegacy,
         ];
+        if ((bool) $part->needs_listing) $candidate['needs_listing'] = false;
+        if ($part->status === 'draft') $candidate['status'] = 'ready';
         $notePrice = $this->decimal($this->first($ovoko, ['notes','internal_notes','internal_note']));
         if ($notePrice !== null) $candidate['price'] = $candidate['allegro_price'] = $notePrice;
         if ($pos = $this->text($this->first($ovoko, ['part_position','position','side','place']))) $candidate['review_metadata'] = array_replace($review, ['part_position' => $pos]);
@@ -171,6 +199,7 @@ class OvokoImportProductDataController extends Controller
     private function text(mixed $v): ?string { return filled($v) ? trim((string) $v) : null; }
     private function int(mixed $v): ?int { return is_numeric($v) ? (int) $v : null; }
     private function decimal(mixed $v): ?float { if (! filled($v)) return null; preg_match('/-?\d+(?:[,.]\d+)?/', (string) $v, $m); return isset($m[0]) ? round((float) str_replace(',', '.', $m[0]), 2) : null; }
+    private function responseShape(array $payload): array { return collect($payload)->map(fn ($v) => is_array($v) ? (Arr::isAssoc($v) ? 'object:'.implode(',', array_slice(array_keys($v), 0, 8)) : 'list:'.count($v)) : gettype($v))->all(); }
 
     private function writeLog(array $payload, string $status): void
     {
