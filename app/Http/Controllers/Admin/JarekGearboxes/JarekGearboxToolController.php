@@ -44,7 +44,7 @@ class JarekGearboxToolController extends Controller
 
     public function partsImportDryRun(Request $request): JsonResponse
     {
-        $summary = $this->buildPartsImportDryRun($this->limit($request), $this->offset($request));
+        $summary = $this->buildPartsImportDryRun($this->limit($request), $this->offset($request), $request->integer('jarek_gearbox_id') ?: null);
 
         if (Schema::hasTable('marketplace_sync_logs')) {
             MarketplaceSyncLog::query()->create([
@@ -79,7 +79,17 @@ class JarekGearboxToolController extends Controller
         }
 
         $limit = max(1, min(5, (int) $request->query('limit', 1)));
-        $result = $this->applyPartsImport($limit, $this->offset($request));
+        $jarekGearboxId = $request->integer('jarek_gearbox_id') ?: null;
+        $updateExisting = $request->boolean('update_existing');
+
+        if ($updateExisting && ($jarekGearboxId === null || $limit !== 1)) {
+            $response = ['ok' => false, 'error' => 'update_existing requires jarek_gearbox_id and limit=1', 'marketplace_write' => false];
+            $this->logPartsImportApply('blocked', 'Odmowa update_existing: wymagane jarek_gearbox_id i limit=1.', $response);
+
+            return response()->json($response, 422);
+        }
+
+        $result = $this->applyPartsImport($limit, $this->offset($request), $jarekGearboxId, $updateExisting);
         $this->logPartsImportApply('success', 'Apply importu Skrzyń Jarka do parts; tylko lokalny draft, marketplace_write=false.', $result);
 
         return response()->json($result);
@@ -106,7 +116,7 @@ class JarekGearboxToolController extends Controller
     /**
      * @return array<string, mixed>
      */
-    private function buildPartsImportDryRun(int $limit, int $offset): array
+    private function buildPartsImportDryRun(int $limit, int $offset, ?int $jarekGearboxId = null): array
     {
         $requiredTables = ['jarek_gearboxes', 'parts'];
         $missingTables = array_values(array_filter($requiredTables, fn (string $table): bool => ! Schema::hasTable($table)));
@@ -146,8 +156,13 @@ class JarekGearboxToolController extends Controller
             return $base;
         }
 
-        $base['total'] = DB::table('jarek_gearboxes')->count();
-        $rows = DB::table('jarek_gearboxes')->orderBy('id')->get();
+        $query = DB::table('jarek_gearboxes')->orderBy('id');
+        if ($jarekGearboxId !== null) {
+            $query->where('id', $jarekGearboxId);
+        }
+
+        $base['total'] = (clone $query)->count();
+        $rows = $query->get();
         $allowedStatuses = ['ACTIVE', 'ENDED', 'INACTIVE', 'ACTIVATING'];
 
         foreach ($rows as $row) {
@@ -172,6 +187,7 @@ class JarekGearboxToolController extends Controller
                 'allegro_status' => $row->allegro_status,
                 'category_id' => $row->category_id,
                 'category_name' => $row->category_name,
+                'diagnostics' => $this->jarekPartsMappingDiagnostics($row, $sku),
             ];
 
             if ($reasons === []) {
@@ -192,14 +208,19 @@ class JarekGearboxToolController extends Controller
     /**
      * @return array<string, mixed>
      */
-    private function applyPartsImport(int $limit, int $offset): array
+    private function applyPartsImport(int $limit, int $offset, ?int $jarekGearboxId = null, bool $updateExisting = false): array
     {
         $created = [];
         $skipped = [];
         $duplicates = [];
         $seenEligible = 0;
 
-        $rows = DB::table('jarek_gearboxes')->orderBy('id')->get();
+        $query = DB::table('jarek_gearboxes')->orderBy('id');
+        if ($jarekGearboxId !== null) {
+            $query->where('id', $jarekGearboxId);
+        }
+
+        $rows = $query->get();
 
         foreach ($rows as $row) {
             $sku = filled($row->allegro_offer_id ?? null) ? 'JAREK-'.$row->allegro_offer_id : null;
@@ -210,8 +231,9 @@ class JarekGearboxToolController extends Controller
                 continue;
             }
 
-            if ($this->partDuplicateExists($sku, $offerId)) {
-                $duplicates[] = ['source_jarek_gearbox_id' => $row->id, 'sku' => $sku, 'external_id' => $offerId];
+            $existingPart = $this->findExistingJarekPart($sku, $offerId);
+            if ($existingPart && ! $updateExisting) {
+                $duplicates[] = ['source_jarek_gearbox_id' => $row->id, 'sku' => $sku, 'external_id' => $offerId, 'part_id' => $existingPart->id];
                 continue;
             }
 
@@ -225,13 +247,14 @@ class JarekGearboxToolController extends Controller
                 break;
             }
 
-            $created[] = DB::transaction(function () use ($row, $sku, $offerId): array {
+            $created[] = DB::transaction(function () use ($row, $sku, $offerId, $existingPart): array {
                 $category = $this->safeCategoryMatch($row);
-                $part = Part::query()->create(array_filter([
+                $partData = array_filter([
                     'source_system' => 'jarek',
                     'external_id' => $offerId,
                     'sku' => $sku,
                     'name' => (string) $row->title,
+                    'part_number' => $this->detectJarekPartNumber($row, $sku),
                     'description' => $row->description ?: $row->plain_description,
                     'short_description' => $row->plain_description,
                     'price' => $row->price,
@@ -243,18 +266,29 @@ class JarekGearboxToolController extends Controller
                     'category_id' => $category?->id,
                     'suggested_category_id' => $category?->id,
                     'category_confidence' => $category ? 0.80 : null,
-                    'category_suggestion_reason' => $category ? 'Bezpieczne dopasowanie lokalnej kategorii na podstawie kategorii Skrzyń Jarka.' : null,
-                    'category_needs_review' => $category !== null,
+                    'category_suggestion_reason' => $this->categorySuggestionReason($row, $category),
+                    'category_needs_review' => $category === null,
                     'internal_note' => 'Rekord pochodzi ze Skrzyń Jarka. Pierwotny status Allegro Jarka: '.($row->allegro_status ?: 'brak').'. Źródłowy jarek_gearboxes.id: '.$row->id.'.',
                     'legacy_url' => $row->allegro_offer_url,
                     'legacy_payload' => $this->jarekLegacyPayload($row),
-                ], fn ($value): bool => $value !== null));
+                ], fn ($value): bool => $value !== null);
+
+                if ($existingPart) {
+                    unset($partData['status'], $partData['is_visible_storefront']);
+                    $existingPart->fill($partData)->save();
+                    $part = $existingPart->refresh();
+                    $action = 'updated';
+                } else {
+                    $part = Part::query()->create($partData);
+                    $action = 'created';
+                }
 
                 foreach ($this->jarekImageUrls($row) as $index => $url) {
-                    PartImage::query()->create([
+                    PartImage::query()->updateOrCreate([
+                        'part_id' => $part->id,
                         'source_system' => 'jarek',
                         'external_id' => $offerId.':'.$index,
-                        'part_id' => $part->id,
+                    ], [
                         'path' => $url,
                         'alt_text' => (string) $row->title,
                         'sort_order' => $index,
@@ -263,16 +297,21 @@ class JarekGearboxToolController extends Controller
                     ]);
                 }
 
-                return ['created_part_id' => $part->id, 'created_sku' => $part->sku, 'source_jarek_gearbox_id' => $row->id];
+                PartImage::query()->where('part_id', $part->id)->where('source_system', 'jarek')->where('external_id', $offerId.':0')->update(['is_primary' => true, 'sort_order' => 0]);
+
+                return ['action' => $action, 'part_id' => $part->id, 'sku' => $part->sku, 'part_number' => $part->part_number, 'source_jarek_gearbox_id' => $row->id, 'images_count' => count($this->jarekImageUrls($row)), 'category_id' => $part->category_id, 'suggested_category_id' => $part->suggested_category_id, 'category_needs_review' => $part->category_needs_review];
             });
         }
 
         return [
             'ok' => true,
-            'created_count' => count($created),
+            'changed_count' => count($created),
+            'created_count' => count(array_filter($created, fn (array $row): bool => ($row['action'] ?? null) === 'created')),
+            'updated_count' => count(array_filter($created, fn (array $row): bool => ($row['action'] ?? null) === 'updated')),
             'skipped_count' => count($skipped),
             'duplicate_count' => count($duplicates),
-            'created' => $created,
+            'changed' => $created,
+            'created' => array_values(array_filter($created, fn (array $row): bool => ($row['action'] ?? null) === 'created')),
             'duplicates' => $duplicates,
             'skipped' => $skipped,
             'marketplace_write' => false,
@@ -319,6 +358,7 @@ class JarekGearboxToolController extends Controller
             'category_id' => $row->category_id,
             'category_name' => $row->category_name,
             'category_path' => $row->category_path,
+            'category_payload' => $this->decodedJsonValue($row->category_payload ?? null),
             'marketplace_write' => false,
         ];
     }
@@ -357,6 +397,119 @@ class JarekGearboxToolController extends Controller
                 fn ($query) => $query->orWhere(fn ($query) => $query->where('source_system', 'jarek')->where('external_id', $offerId)),
             )
             ->exists();
+    }
+
+    private function findExistingJarekPart(string $sku, string $offerId): ?Part
+    {
+        return Part::query()
+            ->where('sku', $sku)
+            ->when(
+                $offerId !== '' && Schema::hasColumn('parts', 'source_system') && Schema::hasColumn('parts', 'external_id'),
+                fn ($query) => $query->orWhere(fn ($query) => $query->where('source_system', 'jarek')->where('external_id', $offerId)),
+            )
+            ->first();
+    }
+
+    private function detectJarekPartNumber(object $row, string $sku): string
+    {
+        foreach ($this->decodedJsonArray($row->parameters ?? null) as $parameter) {
+            $name = mb_strtolower((string) data_get($parameter, 'name', data_get($parameter, 'id', '')));
+            if (! str_contains($name, 'numer') && ! str_contains($name, 'part') && ! str_contains($name, 'oe')) {
+                continue;
+            }
+
+            $values = data_get($parameter, 'values', data_get($parameter, 'valuesIds', []));
+            foreach ((array) $values as $value) {
+                $detected = $this->firstPartNumberCandidate((string) $value);
+                if ($detected) return $detected;
+            }
+        }
+
+        return $this->firstPartNumberCandidate((string) ($row->title ?? '')) ?: $sku;
+    }
+
+    private function firstPartNumberCandidate(string $text): ?string
+    {
+        preg_match_all('/\b(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{7,16}\b/u', mb_strtoupper($text), $matches);
+
+        foreach ($matches[0] ?? [] as $candidate) {
+            if (! str_starts_with($candidate, 'JAREK')) return $candidate;
+        }
+
+        return null;
+    }
+
+    private function categorySuggestionReason(object $row, ?PartCategory $category): string
+    {
+        $prefix = $category
+            ? 'Bezpieczne dopasowanie lokalnej kategorii na podstawie kategorii Allegro/Skrzyń Jarka.'
+            : 'Brak jednoznacznego lokalnego dopasowania; wymagana weryfikacja kategorii Allegro/Skrzyń Jarka.';
+
+        return $prefix.' Allegro category_id: '.($row->category_id ?: '—')
+            .'; category_name: '.($row->category_name ?: '—')
+            .'; category_path: '.$this->jsonishToText($row->category_path ?? null).'.';
+    }
+
+    /** @return array<string, mixed> */
+    private function jarekPartsMappingDiagnostics(object $row, ?string $sku): array
+    {
+        $category = $this->safeCategoryMatch($row);
+        $images = $this->jarekImageUrls($row);
+
+        return [
+            'main_image_url_available' => filled($row->main_image_url ?? null),
+            'detected_images_count' => count($images),
+            'part_images_to_write' => array_map(fn (string $url, int $index): array => [
+                'path' => $url,
+                'sort_order' => $index,
+                'is_primary' => $index === 0,
+                'source_system' => 'jarek',
+                'external_id' => ((string) ($row->allegro_offer_id ?? '')).':'.$index,
+            ], $images, array_keys($images)),
+            'part_number_to_set' => $sku ? $this->detectJarekPartNumber($row, $sku) : null,
+            'allegro_category' => [
+                'category_id' => $row->category_id ?? null,
+                'category_name' => $row->category_name ?? null,
+                'category_path' => $this->decodedJsonValue($row->category_path ?? null),
+                'category_payload' => $this->decodedJsonValue($row->category_payload ?? null),
+            ],
+            'local_category_match' => $category ? ['id' => $category->id, 'name' => $category->name] : null,
+            'parts_fields_to_set' => [
+                'sku' => $sku,
+                'source_system' => 'jarek',
+                'external_id' => $row->allegro_offer_id ?? null,
+                'part_number' => $sku ? $this->detectJarekPartNumber($row, $sku) : null,
+                'category_id' => $category?->id,
+                'suggested_category_id' => $category?->id,
+                'category_needs_review' => $category === null,
+                'category_suggestion_reason' => $this->categorySuggestionReason($row, $category),
+                'status' => 'draft',
+                'needs_listing' => true,
+                'is_visible_storefront' => false,
+                'legacy_payload.category_payload' => $this->decodedJsonValue($row->category_payload ?? null),
+            ],
+        ];
+    }
+
+    /** @return array<int, mixed> */
+    private function decodedJsonArray(mixed $value): array
+    {
+        $decoded = $this->decodedJsonValue($value);
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    private function decodedJsonValue(mixed $value): mixed
+    {
+        if (! is_string($value)) return $value;
+        $decoded = json_decode($value, true);
+        return json_last_error() === JSON_ERROR_NONE ? $decoded : $value;
+    }
+
+    private function jsonishToText(mixed $value): string
+    {
+        $decoded = $this->decodedJsonValue($value);
+        if (is_array($decoded)) return json_encode($decoded, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '—';
+        return filled($decoded) ? (string) $decoded : '—';
     }
 
     private function missingExpectedColumns(): array
