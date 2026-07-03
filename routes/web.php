@@ -72,6 +72,7 @@ use App\Http\Controllers\Tools\OvokoStockSyncRunnerController;
 use App\Http\Controllers\Tools\OvokoListingUrlBackfillController;
 use App\Http\Controllers\Tools\OvokoListingUrlDiagnosticsController;
 use App\Http\Controllers\Tools\OvokoLinkedProductsCheckController;
+use App\Http\Controllers\Tools\OvokoSoldMappingCheckController;
 use App\Http\Controllers\Tools\OvokoImportProductDataController;
 use App\Http\Controllers\Tools\MarketplaceOrdersResetController;
 use App\Http\Controllers\Tools\MarketplaceOrdersSyncController;
@@ -266,6 +267,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/ovoko/listing-url-backfill', OvokoListingUrlBackfillController::class)->name('admin.tools.ovoko.listing-url-backfill');
     Route::get('/admin/tools/ovoko/listing-url-diagnostics', OvokoListingUrlDiagnosticsController::class)->name('admin.tools.ovoko.listing-url-diagnostics');
     Route::get('/admin/tools/ovoko/linked-products-check', OvokoLinkedProductsCheckController::class)->name('admin.tools.ovoko.linked-products-check');
+    Route::get('/admin/tools/ovoko/sold-mapping-check', OvokoSoldMappingCheckController::class)->name('admin.tools.ovoko.sold-mapping-check');
     Route::get('/admin/tools/ovoko/import-product-data', OvokoImportProductDataController::class)->name('admin.tools.ovoko.import-product-data');
     Route::get('/admin/tools/ovoko-stock-sync-dry-run', [OvokoStockSyncController::class, 'dryRun'])->name('admin.tools.ovoko-stock-sync-dry-run');
     Route::match(['get', 'post'], '/admin/tools/ovoko-stock-sync-apply', [OvokoStockSyncController::class, 'apply'])->name('admin.tools.ovoko-stock-sync-apply');
