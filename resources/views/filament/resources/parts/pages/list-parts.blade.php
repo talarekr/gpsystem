@@ -3,8 +3,6 @@
     use App\Models\Part;
 
     $parts = $this->parts;
-    $resourceClass = static::getResource();
-    $statusOptionsClass = $resourceClass === App\Filament\Resources\JarekGearboxResource::class ? App\Models\JarekGearbox::class : App\Models\Part::class;
 @endphp
 
 <x-filament-panels::page>
@@ -36,7 +34,7 @@
         </div>
     </div>
 
-    @include('filament.resources.parts.partials.parts-card-list', ['parts' => $parts, 'showListingReadyAction' => $this->showListingReadyAction, 'showAddedAtInPartTitle' => $this->showAddedAtInPartTitle, 'resourceClass' => $resourceClass, 'statusOptionsClass' => $statusOptionsClass])
+    @include('filament.resources.parts.partials.parts-card-list', ['parts' => $parts, 'showListingReadyAction' => $this->showListingReadyAction, 'showAddedAtInPartTitle' => $this->showAddedAtInPartTitle])
 
     <div class="gps-parts-pagination">
         <div class="gps-parts-pagination-bar">

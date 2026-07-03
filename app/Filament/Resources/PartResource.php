@@ -86,7 +86,7 @@ class PartResource extends Resource
                             ->dehydrated(false)
                             ->visibleOn('view')
                             ->view('filament.resources.parts.part-images-gallery')
-                            ->viewData(fn (?Model $record): array => ['part' => $record, 'editable' => false])
+                            ->viewData(fn (?Part $record): array => ['part' => $record, 'editable' => false])
                             ->columnSpanFull(),
                         Forms\Components\ViewField::make('part_images_editor')
                             ->label('Zdjęcia części')
@@ -94,7 +94,7 @@ class PartResource extends Resource
                             ->dehydrated(false)
                             ->visibleOn('edit')
                             ->view('filament.resources.parts.part-images-gallery')
-                            ->viewData(fn (?Model $record): array => ['part' => $record, 'editable' => true])
+                            ->viewData(fn (?Part $record): array => ['part' => $record, 'editable' => true])
                             ->columnSpanFull(),
                         Forms\Components\FileUpload::make('part_photo_paths')
                             ->label('Zdjęcia części')
@@ -131,9 +131,9 @@ class PartResource extends Resource
                                 'class' => 'font-normal',
                                 'maxlength' => (string) self::PART_TITLE_MAX_LENGTH,
                             ])
-                            ->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Model $record): null => self::refreshCategorySuggestion($get, $set, $record))
+                            ->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))
                             ->columnSpanFull(),
-                        Forms\Components\TextInput::make('part_number')->label('Główny kod części')->maxLength(255)->live(debounce: 500)->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Model $record): null => self::refreshCategorySuggestion($get, $set, $record))->columnSpanFull(),
+                        Forms\Components\TextInput::make('part_number')->label('Główny kod części')->maxLength(255)->live(debounce: 500)->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))->columnSpanFull(),
                         Forms\Components\Hidden::make('sku'),
                         Forms\Components\Select::make('category_id')->label('Kategoria')->placeholder('Kategoria')->relationship('category', 'name')->required()->validationMessages(['required' => 'Kategoria jest wymagana.'])->searchable()->preload()->native(false)->live()->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set): null => self::refreshMarketplaceMappings($get, $set))->suffixAction(self::categoryTreeAction())->columnSpanFull(),
                         Forms\Components\Select::make('condition_notes')->label('Jakość')->placeholder('Jakość')->options(['Używany' => 'Używany', 'Nowy' => 'Nowy', 'Uszkodzony' => 'Uszkodzony', 'Regenerowany' => 'Regenerowany'])->default(self::DEFAULT_CONDITION_VALUE)->native(false)->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])->columnSpan(6),
@@ -168,7 +168,7 @@ class PartResource extends Resource
                             ->columnSpanFull(),
                         Forms\Components\Placeholder::make('vehicle_context')
                             ->hiddenLabel()
-                            ->content(fn (?Model $record, Forms\Get $get): HtmlString => new HtmlString(self::vehicleContextHtml($record, $get('car_id'))))
+                            ->content(fn (?Part $record, Forms\Get $get): HtmlString => new HtmlString(self::vehicleContextHtml($record, $get('car_id'))))
                             ->columnSpanFull(),
                     ]),
 
@@ -241,14 +241,14 @@ class PartResource extends Resource
                             ->label('Status gotowości')
                             ->hiddenLabel()
                             ->dehydrated(false)
-                            ->visible(fn (?Model $record): bool => $record instanceof Part && $record->exists)
+                            ->visible(fn (?Part $record): bool => $record !== null && $record->exists)
                             ->view('filament.resources.parts.marketplace-readiness-cards')
-                            ->viewData(fn (?Model $record, Forms\Get $get): array => ['part' => $record, 'categoryId' => $get('category_id'), 'marketplaceCategorySelections' => (array) ($get('marketplace_category_selections') ?: [])])
+                            ->viewData(fn (?Part $record, Forms\Get $get): array => ['part' => $record, 'categoryId' => $get('category_id'), 'marketplaceCategorySelections' => (array) ($get('marketplace_category_selections') ?: [])])
                             ->columnSpanFull(),
                         Forms\Components\Placeholder::make('marketplace_readiness_empty')
                             ->hiddenLabel()
                             ->content('Zapisz część, aby zobaczyć podgląd gotowości Allegro / Ovoko / eBay.')
-                            ->visible(fn (?Model $record): bool => $record === null || ! $record->exists)
+                            ->visible(fn (?Part $record): bool => $record === null || ! $record->exists)
                             ->columnSpanFull(),
                     ]),
 
@@ -269,7 +269,7 @@ class PartResource extends Resource
     }
 
 
-    public static function partPositionFormValue(?Model $record): ?string
+    public static function partPositionFormValue(?Part $record): ?string
     {
         foreach (['review_metadata.part_position', 'legacy_payload.part_position', 'legacy_payload.position'] as $field) {
             $value = data_get($record, $field);
@@ -282,7 +282,7 @@ class PartResource extends Resource
         return null;
     }
 
-    public static function applyPartPositionFormStateToData(array $data, ?Model $record = null): array
+    public static function applyPartPositionFormStateToData(array $data, ?Part $record = null): array
     {
         $selectedPartPosition = $data['part_position'] ?? null;
         unset($data['part_position']);
@@ -300,7 +300,7 @@ class PartResource extends Resource
         return $data;
     }
 
-    public static function applyAdminSteeringFormStateToData(array $data, ?Model $record = null): array
+    public static function applyAdminSteeringFormStateToData(array $data, ?Part $record = null): array
     {
         $selectedSteeringSide = $data[self::ADMIN_STEERING_FORM_STATE] ?? null;
         unset($data[self::ADMIN_STEERING_FORM_STATE]);
@@ -390,7 +390,7 @@ class PartResource extends Resource
     }
 
 
-    public static function refreshCategorySuggestion(Forms\Get $get, Forms\Set $set, ?Model $record = null): null
+    public static function refreshCategorySuggestion(Forms\Get $get, Forms\Set $set, ?Part $record = null): null
     {
         $result = app(PartCategorySuggestionService::class)->suggestCategoryFromTitle((string) $get('name'), $record?->id);
         $top = $result['suggestions'][0] ?? null;
@@ -788,7 +788,7 @@ class PartResource extends Resource
         ]));
     }
 
-    public static function vehicleContextHtml(?Model $record, mixed $carId): string
+    public static function vehicleContextHtml(?Part $record, mixed $carId): string
     {
         $car = $carId ? Car::query()->find($carId) : null;
 
