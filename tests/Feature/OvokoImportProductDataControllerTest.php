@@ -6,6 +6,7 @@ use App\Enums\UserRole;
 use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceListing;
 use App\Models\Part;
+use App\Models\PartCategory;
 use App\Models\User;
 use Database\Seeders\RoleSeeder;
 use Filament\Facades\Filament;
@@ -121,6 +122,7 @@ class OvokoImportProductDataControllerTest extends TestCase
         $this->account();
 
         $part = Part::query()->forceCreate(['id' => 505, 'name' => 'Old', 'status' => 'draft', 'needs_listing' => true]);
+        PartCategory::query()->create(['id' => 909, 'source_system' => 'ovoko', 'external_id' => 'CAT-9', 'name' => 'Local Intercooler']);
         MarketplaceListing::query()->create(['marketplace' => 'ovoko', 'part_id' => $part->id, 'external_offer_id' => '11691', 'status' => 'active']);
 
         Http::fake([
@@ -153,6 +155,7 @@ class OvokoImportProductDataControllerTest extends TestCase
             ->assertJsonPath('products_with_dimensions_count', 1)
             ->assertJsonPath('items.0.changes.0.new_value', '4G0145804D')
             ->assertJsonPath('items.0.changes.1.new_value', 'Intercooler')
+            ->assertJsonPath('items.0.changes.1.will_update', true)
             ->assertJsonPath('items.0.changes.2.new_value', 'Przód')
             ->assertJsonPath('items.0.changes.3.new_value', 321)
             ->assertJsonPath('items.0.changes.4.new_value', '250.00')
@@ -245,6 +248,73 @@ class OvokoImportProductDataControllerTest extends TestCase
             ->assertJsonPath('items.0.ovoko_debug.parser_candidate_all.part_number', 'NESTED-CODE')
             ->assertJsonPath('items.0.ovoko_debug.attempts.0.selected_record_path', 'list.0.0')
             ->assertJsonPath('items.0.ovoko_debug.attempts.0.direct_list_record_selected', true);
+    }
+
+    public function test_real_ovoko_fields_use_internal_notes_for_prices_notes_for_title_and_report_missing_category_mapping(): void
+    {
+        $this->actingAsAdminUser();
+        $this->account();
+
+        $part = Part::query()->forceCreate(['id' => 508, 'name' => 'Chłodnica dodatkowa', 'status' => 'ready', 'needs_listing' => false]);
+        MarketplaceListing::query()->create(['marketplace' => 'ovoko', 'part_id' => $part->id, 'external_offer_id' => '11691', 'status' => 'active']);
+
+        Http::fake([
+            'ovoko.test/get/part/11691' => Http::response([
+                'status_code' => 'R200',
+                'list' => [[[
+                    'id' => '11691',
+                    'manufacturer_code' => '4G0145804D',
+                    'category_id' => '241',
+                    'category_title_path' => 'Układ chłodzenia > Chłodnice dodatkowe',
+                    'car_id' => '131',
+                    'price' => '65.88',
+                    'position' => '100',
+                    'internal_notes' => '250',
+                    'notes' => 'DODATKOWA CHŁODNICA WODY USZKODZENIE WIDOCZNE NA ZDJĘCIU MAG:17KNS',
+                    'name' => 'Chłodnica dodatkowa',
+                ]]],
+            ], 200),
+        ]);
+
+        $this->getJson('/admin/tools/ovoko/import-product-data?ids=11691&dry_run=1&debug_id=11691&include_raw=1')
+            ->assertOk()
+            ->assertJsonPath('items.0.changes.1.field', 'category')
+            ->assertJsonPath('items.0.changes.1.new_value', 'Układ chłodzenia > Chłodnice dodatkowe')
+            ->assertJsonPath('items.0.changes.1.will_update', false)
+            ->assertJsonPath('items.0.changes.1.reason', 'local_category_not_found')
+            ->assertJsonPath('items.0.changes.4.new_value', '250.00')
+            ->assertJsonPath('items.0.changes.4.will_update', true)
+            ->assertJsonPath('items.0.changes.5.new_value', '250.00')
+            ->assertJsonPath('items.0.changes.5.will_update', true)
+            ->assertJsonPath('items.0.changes.7.new_value', 'DODATKOWA CHŁODNICA WODY USZKODZENIE WIDOCZNE NA ZDJĘCIU MAG:17KNS')
+            ->assertJsonPath('items.0.changes.7.will_update', true)
+            ->assertJsonPath('items.0.ovoko_debug.raw_excerpt_sanitized.category_title_path', 'Układ chłodzenia > Chłodnice dodatkowe');
+    }
+
+    public function test_real_ovoko_category_id_updates_when_local_category_mapping_exists(): void
+    {
+        $this->actingAsAdminUser();
+        $this->account();
+
+        $category = PartCategory::query()->create(['source_system' => 'ovoko', 'external_id' => '241', 'name' => 'Chłodnice dodatkowe']);
+        $part = Part::query()->forceCreate(['id' => 509, 'name' => 'Old', 'status' => 'ready', 'needs_listing' => false]);
+        MarketplaceListing::query()->create(['marketplace' => 'ovoko', 'part_id' => $part->id, 'external_offer_id' => '11691', 'status' => 'active']);
+
+        Http::fake([
+            'ovoko.test/get/part/11691' => Http::response([
+                'status_code' => 'R200',
+                'list' => [[['id' => '11691', 'category_id' => '241', 'category_title_path' => 'Układ chłodzenia > Chłodnice dodatkowe']]],
+            ], 200),
+        ]);
+
+        $this->getJson('/admin/tools/ovoko/import-product-data?ids=11691&dry_run=1')
+            ->assertOk()
+            ->assertJsonPath('items.0.changes.1.field', 'category')
+            ->assertJsonPath('items.0.changes.1.new_value', 'Układ chłodzenia > Chłodnice dodatkowe')
+            ->assertJsonPath('items.0.changes.1.will_update', true);
+
+        $this->assertNull($part->fresh()->category_id);
+        $this->assertSame($category->id, PartCategory::query()->where('external_id', '241')->value('id'));
     }
 
     public function test_dry_run_reports_no_changes_when_all_import_values_match_or_are_missing(): void
