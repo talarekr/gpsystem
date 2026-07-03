@@ -215,6 +215,11 @@ class ListParts extends Page
         return false;
     }
 
+    public function getShowAddedAtInPartTitleProperty(): bool
+    {
+        return false;
+    }
+
     public function getActiveFiltersCountProperty(): int
     {
         return collect([$this->status,$this->categoryId,$this->categoryNeedsReview,$this->isVisibleStorefront,$this->needsListing,$this->needsReview,$this->missingImages,$this->missingPrice,$this->missingSku,$this->missingPartNumber,$this->createdFrom,$this->createdUntil,$this->carId,$this->storageLocationId,$this->conditionNotes,$this->priceFrom,$this->priceUntil,$this->allegroPriceFrom,$this->allegroPriceUntil,$this->ebayPriceFrom,$this->ebayPriceUntil,$this->createdBy])->filter(fn ($value): bool => filled($value))->count();

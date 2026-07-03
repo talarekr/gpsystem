@@ -16,4 +16,9 @@ class PartsToList extends ListParts
         return PartResource::adminPartsToListQuery();
     }
 
+    public function getShowAddedAtInPartTitleProperty(): bool
+    {
+        return true;
+    }
+
 }

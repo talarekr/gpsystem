@@ -543,6 +543,7 @@ class PartModuleFoundationTest extends TestCase
         $this->assertSame('Nowa notatka lokalna', $ready->fresh()->internal_note);
 
         Livewire::test(PartsToList::class)
+            ->assertSee('Dodano: '.$sold->created_at->format('Y-m-d H:i'))
             ->assertSee('Sprzedana')
             ->assertSee('gps-part-status-text--sold', false)
             ->assertSee('Oddzwonić do klienta')
