@@ -19,6 +19,7 @@ use App\Services\Marketplace\SoldPartMarketplaceEndPlanService;
 use Database\Seeders\RoleSeeder;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
@@ -526,12 +527,18 @@ class PartModuleFoundationTest extends TestCase
             'needs_listing' => false,
         ]);
 
+        $soldCreatedAtUtc = Carbon::parse('2026-07-03 08:25:00', 'UTC');
+
         $sold = Part::query()->create([
             'name' => 'Część sprzedana',
             'status' => 'sold',
             'internal_note' => 'Oddzwonić do klienta',
             'needs_listing' => true,
+            'created_at' => $soldCreatedAtUtc,
+            'updated_at' => $soldCreatedAtUtc,
         ]);
+
+        config(['app.timezone' => 'Europe/Warsaw']);
 
         Livewire::test(ListParts::class)
             ->assertSee('W sprzedaży')
@@ -542,8 +549,12 @@ class PartModuleFoundationTest extends TestCase
 
         $this->assertSame('Nowa notatka lokalna', $ready->fresh()->internal_note);
 
+        $expectedAddedAt = $soldCreatedAtUtc->copy()->timezone(config('app.timezone'))->format('Y-m-d H:i');
+        $rawUtcAddedAt = $soldCreatedAtUtc->format('Y-m-d H:i');
+
         Livewire::test(PartsToList::class)
-            ->assertSee('Dodano: '.$sold->created_at->format('Y-m-d H:i'))
+            ->assertSee('Dodano: '.$expectedAddedAt)
+            ->assertDontSee('Dodano: '.$rawUtcAddedAt)
             ->assertSee('Sprzedana')
             ->assertSee('gps-part-status-text--sold', false)
             ->assertSee('Oddzwonić do klienta')
