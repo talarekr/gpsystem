@@ -287,6 +287,9 @@ class OvokoImportProductDataControllerTest extends TestCase
             ->assertJsonPath('items.0.changes.1.will_update', false)
             ->assertJsonPath('items.0.changes.1.reason', 'local_category_not_found')
             ->assertJsonPath('items.0.changes.1.category_action', 'create')
+            ->assertJsonPath('items.0.changes.2.ovoko_value', '100')
+            ->assertJsonPath('items.0.changes.2.new_value', 'Przód')
+            ->assertJsonPath('items.0.changes.2.display_value', 'Przód')
             ->assertJsonPath('local_category_not_found_count', 1)
             ->assertJsonPath('summary.missing_local_categories.0.external_id', '241')
             ->assertJsonPath('summary.missing_local_categories.0.path', 'Układ chłodzenia > Chłodnice dodatkowe')
@@ -300,6 +303,9 @@ class OvokoImportProductDataControllerTest extends TestCase
             ->assertJsonPath('items.0.changes.6.reason', 'excluded_from_import')
             ->assertJsonPath('items.0.changes.7.new_value', 'DODATKOWA CHŁODNICA WODY USZKODZENIE WIDOCZNE NA ZDJĘCIU MAG:17KNS')
             ->assertJsonPath('items.0.changes.7.will_update', true)
+            ->assertJsonPath('items.0.changes.13.field', 'description')
+            ->assertJsonPath('items.0.changes.13.new_value', 'DODATKOWA CHŁODNICA WODY USZKODZENIE WIDOCZNE NA ZDJĘCIU MAG:17KNS')
+            ->assertJsonPath('items.0.changes.13.will_update', true)
             ->assertJsonPath('items.0.ovoko_debug.raw_excerpt_sanitized.category_title_path', 'Układ chłodzenia > Chłodnice dodatkowe');
     }
 
