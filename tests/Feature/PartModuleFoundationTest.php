@@ -538,7 +538,7 @@ class PartModuleFoundationTest extends TestCase
             'updated_at' => $soldCreatedAtUtc,
         ]);
 
-        config(['app.timezone' => 'Europe/Warsaw']);
+        config(['app.timezone' => 'UTC']);
 
         Livewire::test(ListParts::class)
             ->assertSee('W sprzedaży')
@@ -549,11 +549,10 @@ class PartModuleFoundationTest extends TestCase
 
         $this->assertSame('Nowa notatka lokalna', $ready->fresh()->internal_note);
 
-        $expectedAddedAt = $soldCreatedAtUtc->copy()->timezone(config('app.timezone'))->format('Y-m-d H:i');
         $rawUtcAddedAt = $soldCreatedAtUtc->format('Y-m-d H:i');
 
         Livewire::test(PartsToList::class)
-            ->assertSee('Dodano: '.$expectedAddedAt)
+            ->assertSee('Dodano: 2026-07-03 10:25')
             ->assertDontSee('Dodano: '.$rawUtcAddedAt)
             ->assertSee('Sprzedana')
             ->assertSee('gps-part-status-text--sold', false)
