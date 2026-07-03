@@ -19,6 +19,20 @@ use Throwable;
 
 class OvokoImportProductDataController extends Controller
 {
+    private const OVOKO_POSITION_TO_LOCAL = [
+        '10' => 'Wszystkie',
+        '20' => 'Lewa strona',
+        '30' => 'Środek',
+        '40' => 'Prawa strona',
+        '50' => 'Komplet',
+        '60' => 'Tył strona lewa',
+        '70' => 'Tył strona prawa',
+        '80' => 'Przód strona lewa',
+        '90' => 'Przód strona prawa',
+        '100' => 'Przód',
+        '110' => 'Tył',
+    ];
+
     private const DEFAULT_IDS = [11691,11690,11689,11688,11687,11686,11685,11684,11683,11682,11681,11680,11679,11678,11677,11675,11674,11673,11672,11671,11670,11669,11668,11664,11656,11653,11649,11647,11645,11644,11640,11639,11638,11636,11635,11633,11631,11630,11629,11628,11627,11626,11625,11624,11623,11621,11619,11618,11617,11613,11612,11609,11572,11552,11543,11538,11502,11485,11196,11191,11068,11061,11060,11059,11058,11057];
     private const SKIPPED_FIELDS = ['photos', 'quality', 'steering_side', 'storage_location', 'ovoko_price'];
 
@@ -278,7 +292,8 @@ class OvokoImportProductDataController extends Controller
         $review = is_array($part->review_metadata) ? $part->review_metadata : [];
         $legacy = is_array($part->legacy_payload) ? $part->legacy_payload : [];
         $mainCode = $this->text($this->first($ovoko, ['manufacturer_code','manufacturerCode','main_part_code','mainPartCode','code','part_code','partCode','main_code','mainCode','oem_code','oemCode','visible_code','sku']));
-        $partPosition = $this->text($this->first($ovoko, ['part_position','partPosition','position','side','place','location']));
+        $ovokoPartPosition = $this->text($this->first($ovoko, ['part_position','partPosition','position','side','place','location']));
+        $partPosition = $this->localPartPosition($ovokoPartPosition);
         $shopPrice = $this->priceFromNotes($ovoko, ['shop_price','shopPrice','store_price','storePrice'], ['shop', 'sklep']);
         $allegroPrice = $this->priceFromNotes($ovoko, ['allegro_price','allegroPrice'], ['allegro']);
         $title = $this->text($this->first($ovoko, ['notes','description','desc','content','body','text','title','part_name','partName','name']));
@@ -289,6 +304,7 @@ class OvokoImportProductDataController extends Controller
             'category_id' => $categoryResolution['id'],
             'car_id' => $this->int($this->first($ovoko, ['car_id','carId','vehicle_id','vehicleId','car.id','vehicle.id'])),
             'name' => $title,
+            'description' => $title,
             'weight_kg' => $this->decimal($this->first($ovoko, ['weight_kg','weightKg','weight','package.weight'])),
             'length_cm' => $this->decimal($this->first($ovoko, ['length_cm','lengthCm','length','package.length'])),
             'width_cm' => $this->decimal($this->first($ovoko, ['width_cm','widthCm','width','package.width'])),
@@ -300,6 +316,7 @@ class OvokoImportProductDataController extends Controller
         $candidateAll['ovoko_price'] = $part->ovoko_price;
         $candidateAll['price'] = $shopPrice;
         $candidateAll['allegro_price'] = $allegroPrice;
+        $candidateAll['ovoko_part_position'] = $ovokoPartPosition;
         $candidateAll['review_metadata'] = $partPosition !== null
             ? array_replace($review, ['part_position' => $partPosition])
             : null;
@@ -334,6 +351,7 @@ class OvokoImportProductDataController extends Controller
             'height_cm' => ['field' => 'height_cm', 'label' => 'Wysokość'],
             'needs_listing' => ['field' => 'needs_listing', 'label' => 'Do wystawienia'],
             'status' => ['field' => 'status', 'label' => 'Status'],
+            'description' => ['field' => 'description', 'label' => 'Opis'],
         ];
 
         $candidateAll = $changes['candidate_all'] ?? [];
@@ -360,6 +378,10 @@ class OvokoImportProductDataController extends Controller
             if (array_key_exists($modelField, $fieldReasons) && ! $hasPlannedValue) {
                 $row['will_update'] = false;
                 $row['reason'] = $fieldReasons[$modelField];
+            }
+            if ($modelField === 'review_metadata') {
+                $row['ovoko_value'] = $candidateAll['ovoko_part_position'] ?? null;
+                $row['display_value'] = $displayValue;
             }
             if ($modelField === 'category_id' && ($candidateAll['category_action'] ?? null) !== null) {
                 $row['category_action'] = $candidateAll['category_action'];
@@ -529,6 +551,7 @@ class OvokoImportProductDataController extends Controller
             'allegro_price' => $this->readableNumber($candidateAll['allegro_price'] ?? null),
             'ovoko_price' => $this->readableNumber($candidateAll['ovoko_price'] ?? null),
             'name' => $candidateAll['name'] ?? null,
+            'description' => $candidateAll['description'] ?? null,
             'weight_kg' => $this->readableNumber($candidateAll['weight_kg'] ?? null),
             'length_cm' => $this->readableNumber($candidateAll['length_cm'] ?? null),
             'width_cm' => $this->readableNumber($candidateAll['width_cm'] ?? null),
@@ -547,6 +570,13 @@ class OvokoImportProductDataController extends Controller
         $reasons['ovoko_price'] = 'excluded_from_import';
 
         return $reasons;
+    }
+
+    private function localPartPosition(?string $ovokoCode): ?string
+    {
+        if ($ovokoCode === null) return null;
+
+        return self::OVOKO_POSITION_TO_LOCAL[$ovokoCode] ?? $ovokoCode;
     }
 
     private function priceFromNotes(array $ovoko, array $directKeys, array $labels): ?float
@@ -601,6 +631,7 @@ class OvokoImportProductDataController extends Controller
                 'allegro_price' => ['allegro_price','allegroPrice','notes/internal_notes label allegro'],
                 'ovoko_price' => ['excluded_from_import'],
                 'title' => ['notes','description','desc','content','body','title','part_name','name'],
+                'description' => ['same_as_title'],
                 'dimensions' => ['weight_kg/weightKg/weight','length_cm/lengthCm/length','width_cm/widthCm/width','height_cm/heightCm/height'],
             ],
         ];
