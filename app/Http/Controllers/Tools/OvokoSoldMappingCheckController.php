@@ -15,14 +15,17 @@ class OvokoSoldMappingCheckController extends Controller
 {
     private const DEFAULT_IDS = [8526,3203,8268,8857,8620,8183,7558,9857,2972,9775,9956,8980,6818,10550,10325,7451,10124,9706,10640,9587,10656,10061,10409,9586,8884,9761,9902,1074,6224,9240,10744,8508,8219,10696,6713,10029,9416,5074,8875,7944,291,10502,9427,7310,659,9216,9560,6762,8925,3001,10423,8809,4533,9818,10130,9396,10564,8355,7419,10857,4036,10819,7087,10221,10614,10897,10319,10714,9770,10102,10903,9886,9748,10547,9557,6141,7515,6778,10678,9034,9488,9865,8182,10648,10573,10422,6722,9067,6844,8807,8197,5962,10908,6777,4286,5614,10757,8171,10795,7320,10702,9481,9031,8472,10809,7019,10469,4513,7418,10936,10953,10212,8816,10559,6195,8095,9535,10060,9766,10037,9532,10930,9655,7900,10431,4341,9051,8680,9637,10220,10598,9266,9887,10588,10990,10742,7911,10599,7752,8054,8130,10546,10233,10351,10088,9704,10991,6977,5815,9921,9271,7893,10628,9020,5762,4303,8776,10284,8138,2059,7124,7725,10101,5636,5747,10027,9160,7887,7466,10941,10294,5067,11021,9480,9211,9280,10845,10609,6859,9422,10844,7546,5941,10571,10521,10643,8131,6067,7144,7619,9250,9196,10365,10622,6758,5413,10929,5484,6957,8437,6340,6276,6277,8137,1602,10874,10405,9623,10122,6585,10501,7267,4260,8463,8390,7890,9801,9128,10444,9291,4770,7601,7308,7577,10216,10735,8677,4097,10921,9006,9164,8038,11029,10519,8900,8373,1246,10688,9555,7007,6718,10611,7575,9387,9982,1777,5694,49,4960,4016,10660,10617,10386,10938,8243,7013,9959,10073,1250,10545,10375,10955,6383,6239,9270,1360,11025,9608,10411,7643,5783,6322,10268,8047,10947,3850,11024,10582,9714,8324,9717,9314,10788,10783,9272,10499,3629,1495,9405,5813,9784,7931,10734,7034,9646,8703,10463,5616,8125,1365,2776,941,9757,7773,8506,5645,7192,7314,9452,9501,8500,8904,9371,9262,10261,6298,6419,10613,9979,3632,1976,8092,8020,11644,10910,10877];
 
-    public function __invoke(Request $request, OvokoPartIdExtractor $extractor): JsonResponse
+    public function __invoke(Request $request): JsonResponse
     {
-        $ids = $this->requestedIds($request);
+        $ids = [];
         $warnings = [];
         $errors = [];
         $matchesById = [];
 
         try {
+            $ids = $this->requestedIds($request);
+            /** @var OvokoPartIdExtractor $extractor */
+            $extractor = app(OvokoPartIdExtractor::class);
             $matchesById = $this->collectMarketplaceListingMatches($ids, $warnings, $errors);
             $this->collectPartMatches($ids, $matchesById, $extractor, $warnings, $errors);
 
@@ -38,11 +41,19 @@ class OvokoSoldMappingCheckController extends Controller
 
             return response()->json($this->payload($ids, $items->all(), $summary, $warnings, $errors));
         } catch (Throwable $e) {
-            $errors[] = $this->formatThrowable('unexpected_diagnostic_error', $e);
-            $items = collect($ids)->map(fn (string $id): array => $this->buildItem($id, $matchesById[$id] ?? [], [], $warnings))->values();
-            $summary = $this->buildSummary($items, []);
-
-            return response()->json($this->payload($ids, $items->all(), $summary, $warnings, $errors));
+            return response()->json([
+                'ok' => false,
+                'dry_run' => true,
+                'local_update' => false,
+                'marketplace_write' => false,
+                'errors' => [[
+                    'type' => get_class($e),
+                    'message' => $e->getMessage(),
+                ]],
+                'warnings' => [],
+                'requested_count' => 0,
+                'items' => [],
+            ], 200);
         }
     }
 
@@ -138,24 +149,24 @@ class OvokoSoldMappingCheckController extends Controller
         $partIds = $this->uniquePartIds($matches);
         $part = collect($matches)->pluck('part')->filter()->first();
         $status = count($partIds) === 0 ? 'missing' : (count($partIds) > 1 ? 'ambiguous' : (($localPartUse[(string) $partIds[0]] ?? 0) > 1 ? 'duplicate_local_part' : 'found'));
-        $planned = $status === 'found' ? ($part?->status === 'sold' ? 'no_change_already_sold' : 'would_mark_sold') : ($status === 'missing' ? 'blocked_missing_mapping' : 'blocked_ambiguous');
+        $planned = $status === 'found' ? ($part && $part->status === 'sold' ? 'no_change_already_sold' : 'would_mark_sold') : ($status === 'missing' ? 'blocked_missing_mapping' : 'blocked_ambiguous');
 
         return [
             'ovoko_product_id' => (int) $id,
             'match_status' => $status,
-            'local_part_id' => $part?->id,
+            'local_part_id' => $part ? $part->id : null,
             'local_part_admin_url' => $part ? url('/admin/parts/'.$part->id.'/edit') : null,
-            'local_part_number' => $part?->part_number,
-            'local_title' => $part?->name,
-            'local_status' => $part?->status,
+            'local_part_number' => $part ? $part->part_number : null,
+            'local_title' => $part ? $part->name : null,
+            'local_status' => $part ? $part->status : null,
             'local_status_label' => $this->safeStatusLabel($part, $warnings),
             'local_availability' => $this->safeAvailability($part, $warnings),
-            'local_needs_listing' => $part?->needs_listing,
-            'local_is_visible_storefront' => $part?->is_visible_storefront,
+            'local_needs_listing' => $part ? $part->needs_listing : null,
+            'local_is_visible_storefront' => $part ? $part->is_visible_storefront : null,
             'mapping_source' => collect($matches)->pluck('source')->unique()->implode(', ') ?: null,
             'matched_values' => collect($matches)->map(fn (array $m): array => ['source' => $m['source'], 'value' => $m['value'], 'local_part_id' => $m['part_id'], 'marketplace_listing_id' => $m['listing_id']])->unique()->values()->all(),
             'planned_action' => $planned,
-            'blockers' => match ($status) { 'missing' => ['missing_mapping'], 'ambiguous' => ['ambiguous_mapping'], 'duplicate_local_part' => ['duplicate_local_part'], default => [] },
+            'blockers' => $this->blockers($status),
             'notes' => $this->notes($status, $partIds),
         ];
     }
@@ -188,7 +199,7 @@ class OvokoSoldMappingCheckController extends Controller
             ['source' => 'marketplace_listings.raw_payload.marketplace_external_id', 'value' => $raw['marketplace_external_id'] ?? null],
             ['source' => 'marketplace_listings.raw_payload.listing_id', 'value' => $raw['listing_id'] ?? null],
             ['source' => 'marketplace_listings.raw_payload.metadata.ovoko_part_id', 'value' => data_get($raw, 'metadata.ovoko_part_id')],
-        ]))->map(fn (array $candidate): array => ['source' => $candidate['source'], 'value' => trim((string) $candidate['value'])])->filter(fn (array $candidate): bool => $candidate['value'] !== '' && ! str_starts_with($candidate['value'], 'GPSW-'))->values()->all();
+        ]))->map(fn (array $candidate): array => ['source' => $candidate['source'], 'value' => trim((string) $candidate['value'])])->filter(fn (array $candidate): bool => $candidate['value'] !== '' && strpos($candidate['value'], 'GPSW-') !== 0)->values()->all();
     }
 
     private function buildSummary($items, array $localPartUse): array
@@ -291,13 +302,31 @@ class OvokoSoldMappingCheckController extends Controller
         return collect($matches)->pluck('part_id')->filter()->unique()->values()->all();
     }
 
+    private function blockers(string $status): array
+    {
+        if ($status === 'missing') {
+            return ['missing_mapping'];
+        }
+        if ($status === 'ambiguous') {
+            return ['ambiguous_mapping'];
+        }
+        if ($status === 'duplicate_local_part') {
+            return ['duplicate_local_part'];
+        }
+        return [];
+    }
+
     private function notes(string $status, array $partIds): string
     {
-        return match ($status) {
-            'missing' => 'No local mapping found for this Ovoko ID; no action would be possible in stage 2.',
-            'ambiguous' => 'More than one local part matched this Ovoko ID: '.implode(',', $partIds),
-            'duplicate_local_part' => 'This local part is referenced by more than one requested Ovoko ID; stage 2 must resolve before applying.',
-            default => 'Exactly one local part matched; stage 2 would only mark it sold if it is not already sold.',
-        };
+        if ($status === 'missing') {
+            return 'No local mapping found for this Ovoko ID; no action would be possible in stage 2.';
+        }
+        if ($status === 'ambiguous') {
+            return 'More than one local part matched this Ovoko ID: '.implode(',', $partIds);
+        }
+        if ($status === 'duplicate_local_part') {
+            return 'This local part is referenced by more than one requested Ovoko ID; stage 2 must resolve before applying.';
+        }
+        return 'Exactly one local part matched; stage 2 would only mark it sold if it is not already sold.';
     }
 }
