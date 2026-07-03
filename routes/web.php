@@ -258,6 +258,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/jarek-gearboxes/allegro-import-runner', [JarekGearboxToolController::class, 'runner'])->name('admin.tools.jarek-gearboxes.allegro-import-runner');
     Route::get('/admin/tools/jarek-gearboxes/allegro-import-dry-run', [JarekGearboxToolController::class, 'dryRun'])->name('admin.tools.jarek-gearboxes.allegro-import-dry-run');
     Route::get('/admin/tools/jarek-gearboxes/parts-import-dry-run', [JarekGearboxToolController::class, 'partsImportDryRun'])->name('admin.tools.jarek-gearboxes.parts-import-dry-run');
+    Route::get('/admin/tools/jarek-gearboxes/parts-import-apply', [JarekGearboxToolController::class, 'partsImportApply'])->name('admin.tools.jarek-gearboxes.parts-import-apply');
     Route::get('/admin/tools/jarek-gearboxes/allegro-import-apply', [JarekGearboxToolController::class, 'apply'])->name('admin.tools.jarek-gearboxes.allegro-import-apply');
     Route::get('/admin/tools/jarek-gearboxes/import-status', [JarekGearboxToolController::class, 'status'])->name('admin.tools.jarek-gearboxes.import-status');
     Route::get('/admin/tools/jarek-gearboxes/allegro-oauth/start', [JarekAllegroOAuthController::class, 'start'])->name('admin.tools.jarek-gearboxes.allegro-oauth.start');
