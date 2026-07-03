@@ -167,6 +167,49 @@ class OvokoImportProductDataControllerTest extends TestCase
             ->assertJsonPath('items.0.ovoko_debug.field_sources_tried.ovoko_price.0', 'price');
     }
 
+    public function test_get_part_list_response_uses_first_list_record_without_local_payload_merge(): void
+    {
+        $this->actingAsAdminUser();
+        $this->account();
+
+        $part = Part::query()->forceCreate([
+            'id' => 506,
+            'name' => 'Old list name',
+            'status' => 'draft',
+            'needs_listing' => true,
+            'legacy_payload' => ['legacy_payload_json' => ['local_only' => true]],
+        ]);
+        MarketplaceListing::query()->create(['marketplace' => 'ovoko', 'part_id' => $part->id, 'external_offer_id' => '11695', 'status' => 'active']);
+
+        Http::fake([
+            'ovoko.test/get/part/11695' => Http::response([
+                'status_code' => 'R200',
+                'msg' => 'OK',
+                'list' => [[
+                    'id' => '11695',
+                    'manufacturer_code' => 'OVOKO-CODE',
+                    'categoryName' => 'Ovoko category',
+                    'price' => '123.45',
+                    'legacy_payload' => ['present_in_api_record' => true],
+                ]],
+            ], 200),
+        ]);
+
+        $this->getJson('/admin/tools/ovoko/import-product-data?ids=11695&dry_run=1&debug_id=11695&include_raw=1')
+            ->assertOk()
+            ->assertJsonPath('fetched_count', 1)
+            ->assertJsonPath('failed_count', 0)
+            ->assertJsonPath('items.0.changes.0.new_value', 'OVOKO-CODE')
+            ->assertJsonPath('items.0.changes.1.new_value', 'Ovoko category')
+            ->assertJsonPath('items.0.changes.6.new_value', '123.45')
+            ->assertJsonPath('items.0.ovoko_debug.top_level_keys.0', 'id')
+            ->assertJsonPath('items.0.ovoko_debug.selected_record_keys.0', 'id')
+            ->assertJsonPath('items.0.ovoko_debug.raw_excerpt_sanitized.id', '11695')
+            ->assertJsonPath('items.0.ovoko_debug.parser_candidate_all.part_number', 'OVOKO-CODE')
+            ->assertJsonMissingPath('items.0.ovoko_debug.parser_candidate_all.legacy_payload')
+            ->assertJsonPath('items.0.ovoko_debug.attempts.0.direct_list_record_selected', true);
+    }
+
     public function test_dry_run_reports_no_changes_when_all_import_values_match_or_are_missing(): void
     {
         $this->actingAsAdminUser();
