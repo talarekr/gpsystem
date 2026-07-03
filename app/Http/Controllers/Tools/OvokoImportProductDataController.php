@@ -43,11 +43,11 @@ class OvokoImportProductDataController extends Controller
                 $failed++; $items[] = $item; continue;
             }
 
-            $remote = $this->fetchOvokoPart($id);
+            $remote = $this->fetchOvokoPart($id, $listing);
             if (! ($remote['ok'] ?? false)) {
                 $item['status'] = 'failed';
                 $item['errors'][] = $remote['error'] ?? $remote['blocker'] ?? 'ovoko_fetch_failed';
-                $item['ovoko_diagnostics'] = Arr::only($remote, ['http_status', 'ovoko_status_code', 'ovoko_message', 'response_excerpt', 'response_shape']);
+                $item['ovoko_diagnostics'] = Arr::only($remote, ['source', 'endpoint_path', 'request_url', 'http_status', 'ovoko_status_code', 'ovoko_message', 'raw_excerpt_sanitized', 'top_level_keys', 'response_shape', 'attempts']);
                 $failed++; $items[] = $item; continue;
             }
             $fetched++;
@@ -55,7 +55,7 @@ class OvokoImportProductDataController extends Controller
             $changes = $this->plannedChanges($part, $remote['part'], ! $dryRun);
             $item['changes'] = $this->readableChanges($part, $changes);
             if ($this->debugRequested($request, $id)) {
-                $item['ovoko_debug'] = $this->debugPayload($remote['part'], $changes);
+                $item['ovoko_debug'] = $this->debugPayload($remote, $changes);
             }
             if ($this->hasReadableValue($part, $changes, ['ovoko_price'])) $productsWithPrice++;
             if ($this->hasReadableValue($part, $changes, ['category_id'])) $productsWithCategory++;
@@ -111,31 +111,93 @@ class OvokoImportProductDataController extends Controller
         return $out;
     }
 
-    private function fetchOvokoPart(string $id): array
+    private function fetchOvokoPart(string $id, ?MarketplaceListing $listing = null): array
     {
         $account = MarketplaceAccount::query()->where('code', 'ovoko_main')->first();
-        if (! $account || ! $account->api_enabled || blank($account->api_base_url)) return ['ok' => false, 'blocker' => 'ovoko_api_not_configured'];
+        if (! $account || ! $account->api_enabled || blank($account->api_base_url)) return ['ok' => false, 'source' => 'none', 'blocker' => 'ovoko_api_not_configured'];
         $credentials = is_array($account->api_credentials) ? Arr::only($account->api_credentials, ['username', 'password', 'user_token']) : [];
-        if (count(array_filter($credentials, fn ($v) => filled($v))) < 3) return ['ok' => false, 'blocker' => 'ovoko_api_credentials_missing'];
+        if (count(array_filter($credentials, fn ($v) => filled($v))) < 3) return ['ok' => false, 'source' => 'none', 'blocker' => 'ovoko_api_credentials_missing'];
 
-        $response = Http::asForm()->acceptJson()->timeout(30)->post(rtrim((string) $account->api_base_url, '/').'/get/part/'.rawurlencode($id), $credentials);
-        $payload = $response->json();
-        $rows = $this->extractRows(is_array($payload) ? $payload : []);
-        $matches = array_values(array_filter($rows, fn (array $row): bool => (string) $this->first($row, ['id','part_id','ovoko_id','ovoko_part_id','rrr_id','external_id']) === $id));
-        $apiOk = $this->ovokoResponseOk($response->status(), is_array($payload) ? $payload : null);
-        $part = $matches[0] ?? ($apiOk && count($rows) === 1 && $this->looksLikeProduct($rows[0]) ? $rows[0] : null);
+        $base = rtrim((string) $account->api_base_url, '/');
+        $encodedId = rawurlencode($id);
+        $externalId = $this->listingExternalId($listing);
+        $variants = [
+            ['endpoint_path' => '/get/part/'.$encodedId, 'fields' => []],
+            ['endpoint_path' => '/v2/get/part/'.$encodedId, 'fields' => []],
+            ['endpoint_path' => '/v2/get/part', 'fields' => ['id' => $id]],
+            ['endpoint_path' => '/v2/get/parts', 'fields' => ['id' => $id]],
+            ['endpoint_path' => '/v2/get/parts', 'fields' => ['ids[]' => [$id]]],
+            ['endpoint_path' => '/v2/get/parts', 'fields' => ['part_ids[]' => [$id]]],
+        ];
+        if ($externalId !== null && $externalId !== $id) {
+            array_splice($variants, 3, 0, [
+                ['endpoint_path' => '/v2/get/parts', 'fields' => ['external_id' => $externalId]],
+                ['endpoint_path' => '/v2/get/parts', 'fields' => ['user_code' => $externalId]],
+            ]);
+        }
 
-        return $apiOk && $part !== null
-            ? ['ok' => true, 'part' => $part]
-            : [
-                'ok' => false,
-                'error' => $response->successful() ? 'missing_ovoko_product' : 'ovoko_api_failed',
-                'http_status' => $response->status(),
-                'ovoko_status_code' => is_array($payload) ? data_get($payload, 'status_code') : null,
-                'ovoko_message' => is_array($payload) ? $this->text($this->first($payload, ['msg','message','error'])) : null,
-                'response_excerpt' => Str::limit($response->body(), 500),
-                'response_shape' => is_array($payload) ? $this->responseShape($payload) : gettype($payload),
-            ];
+        $attempts = [];
+        foreach ($variants as $variant) {
+            $endpoint = $base.$variant['endpoint_path'];
+            try {
+                $response = Http::asForm()->acceptJson()->timeout(30)->post($endpoint, $credentials + $variant['fields']);
+                $payload = $response->json();
+                $payload = is_array($payload) ? $payload : [];
+                $rows = $this->extractRows($payload);
+                $matches = array_values(array_filter($rows, fn (array $row): bool => $this->matchesOvokoId($row, $id, $externalId) && ! $this->looksLikeLocalPayload($row)));
+                $apiOk = $this->ovokoResponseOk($response->status(), $payload);
+                $selected = $matches[0] ?? ($apiOk && count($rows) === 1 && ! $this->looksLikeLocalPayload($rows[0]) && $this->looksLikeProduct($rows[0]) ? $rows[0] : null);
+                $diagnostics = [
+                    'source' => 'ovoko_api',
+                    'endpoint_path' => $variant['endpoint_path'],
+                    'request_url' => $endpoint,
+                    'http_status' => $response->status(),
+                    'ovoko_status_code' => data_get($payload, 'status_code'),
+                    'ovoko_message' => $this->text($this->first($payload, ['msg','message','error'])),
+                    'top_level_keys' => array_values(array_slice(array_keys($payload), 0, 80)),
+                    'raw_excerpt_sanitized' => $this->sanitizeDebug($this->selectedFields($selected ?? ($rows[0] ?? $payload))),
+                    'response_shape' => $this->responseShape($payload),
+                ];
+                $attempts[] = $diagnostics + ['matched_requested_id' => $selected !== null, 'returned_rows_count' => count($rows), 'local_payload_rejected' => collect($rows)->contains(fn (array $row): bool => $this->looksLikeLocalPayload($row))];
+
+                if ($apiOk && $selected !== null) {
+                    return $diagnostics + ['ok' => true, 'part' => $selected, 'attempts' => $attempts];
+                }
+            } catch (Throwable $e) {
+                $attempts[] = ['source' => 'ovoko_api', 'endpoint_path' => $variant['endpoint_path'], 'request_url' => $endpoint, 'http_status' => null, 'error' => $e->getMessage()];
+            }
+        }
+
+        $last = $attempts[array_key_last($attempts)] ?? [];
+        return $last + ['ok' => false, 'source' => 'ovoko_api', 'error' => 'missing_ovoko_product', 'attempts' => $attempts];
+    }
+
+    private function listingExternalId(?MarketplaceListing $listing): ?string
+    {
+        foreach (['external_offer_id', 'external_listing_id'] as $field) {
+            $value = $this->text($listing?->{$field} ?? null);
+            if ($value !== null && ! str_starts_with($value, 'GPSW-')) return $value;
+        }
+        return null;
+    }
+
+    private function matchesOvokoId(array $row, string $id, ?string $externalId): bool
+    {
+        foreach (['id','part_id','ovoko_id','ovoko_part_id','rrr_id','external_id','external_offer_id'] as $key) {
+            $value = $this->text(data_get($row, $key));
+            if ($value === $id || ($externalId !== null && $value === $externalId)) return true;
+        }
+        return false;
+    }
+
+    private function looksLikeLocalPayload(array $row): bool
+    {
+        return array_key_exists('legacy_payload', $row)
+            || array_key_exists('legacy_payload_json', $row)
+            || array_key_exists('woo_product', $row)
+            || array_key_exists('meta', $row)
+            || array_key_exists('review_metadata', $row)
+            || (array_key_exists('source_system', $row) && in_array($row['source_system'], ['woo', 'laravel', 'local'], true));
     }
 
     private function extractRows(array $payload): array
@@ -358,9 +420,17 @@ class OvokoImportProductDataController extends Controller
         return $request->boolean('include_raw') || (string) $request->query('debug_id', '') === $id;
     }
 
-    private function debugPayload(array $ovoko, array $changes): array
+    private function debugPayload(array $remote, array $changes): array
     {
+        $ovoko = $remote['part'] ?? [];
         return [
+            'source' => $remote['source'] ?? 'unknown',
+            'endpoint_path' => $remote['endpoint_path'] ?? null,
+            'request_url' => $remote['request_url'] ?? null,
+            'http_status' => $remote['http_status'] ?? null,
+            'ovoko_status_code' => $remote['ovoko_status_code'] ?? null,
+            'ovoko_message' => $remote['ovoko_message'] ?? null,
+            'attempts' => $this->sanitizeDebug($remote['attempts'] ?? []),
             'raw_excerpt_sanitized' => $this->sanitizeDebug($this->selectedFields($ovoko)),
             'top_level_keys' => array_values(array_slice(array_keys($ovoko), 0, 80)),
             'parser_candidate_all' => $this->sanitizeDebug($changes['candidate_all'] ?? []),
