@@ -96,6 +96,28 @@ class PartsToListStorageLocationBackfillTest extends TestCase
             ->assertJsonPath('blocked.0.reason', 'empty_storage_after_normalization');
     }
 
+
+    public function test_missing_csv_returns_clear_404_with_path_diagnostics_for_dry_run_and_apply(): void
+    {
+        Storage::disk('local')->delete(self::CSV);
+
+        $user = User::factory()->create();
+
+        $this->actingAs($user)->getJson('/admin/tools/parts-to-list/storage-location-backfill-dry-run?limit=100')
+            ->assertNotFound()
+            ->assertJsonPath('ok', false)
+            ->assertJsonPath('stage', 'read_csv')
+            ->assertJsonStructure(['correlation_id'])
+            ->assertJsonPath('diagnostics.csv.relative_path', 'storage/app/'.self::CSV)
+            ->assertJsonPath('diagnostics.csv.file_exists', false);
+
+        $this->actingAs($user)->getJson('/admin/tools/parts-to-list/storage-location-backfill-apply?confirm=parts-to-list-storage-backfill&limit=10')
+            ->assertNotFound()
+            ->assertJsonPath('ok', false)
+            ->assertJsonPath('dry_run', false)
+            ->assertJsonPath('diagnostics.csv.file_exists', false);
+    }
+
     private function part(string $number, array $extra = []): Part
     {
         return Part::query()->create($extra + ['name' => 'Test', 'part_number' => $number, 'needs_listing' => true]);
