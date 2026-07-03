@@ -144,7 +144,8 @@ class OvokoImportProductDataController extends Controller
                 $payload = $response->json();
                 $payload = is_array($payload) ? $payload : [];
                 $rows = $this->extractRows($payload);
-                $directListRecord = $this->directListRecord($payload, $variant['endpoint_path']);
+                $directListSelection = $this->directListRecord($payload, $variant['endpoint_path']);
+                $directListRecord = $directListSelection['record'] ?? null;
                 $matches = array_values(array_filter($rows, fn (array $row): bool => $this->matchesOvokoId($row, $id, $externalId) && ! $this->looksLikeLocalPayload($row)));
                 $apiOk = $this->ovokoResponseOk($response->status(), $payload);
                 $selected = $directListRecord ?? ($matches[0] ?? ($apiOk && count($rows) === 1 && ! $this->looksLikeLocalPayload($rows[0]) && $this->looksLikeProduct($rows[0]) ? $rows[0] : null));
@@ -159,6 +160,7 @@ class OvokoImportProductDataController extends Controller
                     'raw_excerpt_sanitized' => $this->sanitizeDebug($this->debugExcerpt($selected ?? ($rows[0] ?? $payload))),
                     'response_shape' => $this->responseShape($payload),
                     'selected_record_keys' => is_array($selected) ? array_values(array_slice(array_keys($selected), 0, 80)) : [],
+                    'selected_record_path' => $directListRecord === $selected ? ($directListSelection['path'] ?? null) : null,
                 ];
                 $attempts[] = $diagnostics + ['matched_requested_id' => $selected !== null, 'returned_rows_count' => count($rows), 'direct_list_record_selected' => $directListRecord !== null, 'local_payload_rejected' => $directListRecord === null && collect($rows)->contains(fn (array $row): bool => $this->looksLikeLocalPayload($row))];
 
@@ -179,7 +181,23 @@ class OvokoImportProductDataController extends Controller
         if (! preg_match('#^/(?:v2/)?get/part/[^/]+$#', $endpointPath)) return null;
 
         $list = $payload['list'] ?? null;
-        if (is_array($list) && isset($list[0]) && is_array($list[0])) return $list[0];
+        if (! is_array($list) || ! array_key_exists(0, $list) || ! is_array($list[0])) return null;
+
+        return $this->firstAssociativeRecord($list[0], ['list', 0]);
+    }
+
+    private function firstAssociativeRecord(array $value, array $path): ?array
+    {
+        if (Arr::isAssoc($value)) {
+            return ['record' => $value, 'path' => implode('.', $path)];
+        }
+
+        foreach ($value as $index => $child) {
+            if (! is_array($child)) continue;
+
+            $record = $this->firstAssociativeRecord($child, array_merge($path, [$index]));
+            if ($record !== null) return $record;
+        }
 
         return null;
     }
@@ -218,9 +236,24 @@ class OvokoImportProductDataController extends Controller
             $value = $payload[$key] ?? null;
             if (str_contains($key, '.')) $value = data_get($payload, $key);
             if (is_array($value) && Arr::isAssoc($value)) return [$value];
-            if (is_array($value)) return array_values(array_filter($value, 'is_array'));
+            if (is_array($value)) return $this->extractAssociativeRows($value);
         }
-        return Arr::isAssoc($payload) ? [$payload] : array_values(array_filter($payload, 'is_array'));
+        return Arr::isAssoc($payload) ? [$payload] : $this->extractAssociativeRows($payload);
+    }
+
+    private function extractAssociativeRows(array $rows): array
+    {
+        $out = [];
+        foreach ($rows as $row) {
+            if (! is_array($row)) continue;
+            if (Arr::isAssoc($row)) {
+                $out[] = $row;
+                continue;
+            }
+            array_push($out, ...$this->extractAssociativeRows($row));
+        }
+
+        return $out;
     }
 
     private function ovokoResponseOk(int $httpStatus, ?array $payload): bool
@@ -446,6 +479,7 @@ class OvokoImportProductDataController extends Controller
             'raw_excerpt_sanitized' => $this->sanitizeDebug($this->debugExcerpt($ovoko)),
             'top_level_keys' => array_values(array_slice(array_keys($ovoko), 0, 80)),
             'selected_record_keys' => array_values(array_slice(array_keys($ovoko), 0, 80)),
+            'selected_record_path' => $remote['selected_record_path'] ?? null,
             'parser_candidate_all' => $this->sanitizeDebug(Arr::except($changes['candidate_all'] ?? [], ['legacy_payload', 'review_metadata'])),
             'parser_readable_values' => $this->sanitizeDebug($changes['ovoko_readable'] ?? []),
             'field_sources_tried' => [

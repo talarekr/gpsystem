@@ -204,9 +204,46 @@ class OvokoImportProductDataControllerTest extends TestCase
             ->assertJsonPath('items.0.changes.6.new_value', '123.45')
             ->assertJsonPath('items.0.ovoko_debug.top_level_keys.0', 'id')
             ->assertJsonPath('items.0.ovoko_debug.selected_record_keys.0', 'id')
+            ->assertJsonPath('items.0.ovoko_debug.selected_record_path', 'list.0')
             ->assertJsonPath('items.0.ovoko_debug.raw_excerpt_sanitized.id', '11695')
             ->assertJsonPath('items.0.ovoko_debug.parser_candidate_all.part_number', 'OVOKO-CODE')
             ->assertJsonMissingPath('items.0.ovoko_debug.parser_candidate_all.legacy_payload')
+            ->assertJsonPath('items.0.ovoko_debug.attempts.0.direct_list_record_selected', true);
+    }
+
+    public function test_get_part_nested_list_response_unwraps_to_first_product_record(): void
+    {
+        $this->actingAsAdminUser();
+        $this->account();
+
+        $part = Part::query()->forceCreate(['id' => 507, 'name' => 'Old nested name', 'status' => 'draft', 'needs_listing' => true]);
+        MarketplaceListing::query()->create(['marketplace' => 'ovoko', 'part_id' => $part->id, 'external_offer_id' => '11691', 'status' => 'active']);
+
+        Http::fake([
+            'ovoko.test/get/part/11691' => Http::response([
+                'status_code' => 'R200',
+                'msg' => 'OK',
+                'list' => [[[
+                    'id' => '11691',
+                    'manufacturer_code' => 'NESTED-CODE',
+                    'categoryName' => 'Nested category',
+                    'price' => '456.78',
+                ]]],
+            ], 200),
+        ]);
+
+        $this->getJson('/admin/tools/ovoko/import-product-data?ids=11691&dry_run=1&debug_id=11691&include_raw=1')
+            ->assertOk()
+            ->assertJsonPath('fetched_count', 1)
+            ->assertJsonPath('failed_count', 0)
+            ->assertJsonPath('items.0.changes.0.new_value', 'NESTED-CODE')
+            ->assertJsonPath('items.0.changes.1.new_value', 'Nested category')
+            ->assertJsonPath('items.0.changes.6.new_value', '456.78')
+            ->assertJsonPath('items.0.ovoko_debug.selected_record_keys.0', 'id')
+            ->assertJsonPath('items.0.ovoko_debug.selected_record_path', 'list.0.0')
+            ->assertJsonPath('items.0.ovoko_debug.raw_excerpt_sanitized.id', '11691')
+            ->assertJsonPath('items.0.ovoko_debug.parser_candidate_all.part_number', 'NESTED-CODE')
+            ->assertJsonPath('items.0.ovoko_debug.attempts.0.selected_record_path', 'list.0.0')
             ->assertJsonPath('items.0.ovoko_debug.attempts.0.direct_list_record_selected', true);
     }
 
