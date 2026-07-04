@@ -28,7 +28,7 @@ class JarekGearbox extends Model
         $urls = [];
         foreach (range(1, self::LOCALIZED_IMAGE_MAX_INDEX) as $index) {
             $relative = self::LOCALIZED_IMAGES_DIRECTORY.'/'.$offerId.'/'.str_pad((string) $index, 2, '0', STR_PAD_LEFT).'.jpg';
-            if (Storage::disk('public')->exists($relative)) {
+            if (Storage::disk('public')->exists($relative) || is_file(dirname(base_path()).'/public_html/storage/'.$relative)) {
                 $urls[] = $this->publicStorageUrl($relative);
             }
         }
@@ -70,7 +70,7 @@ class JarekGearbox extends Model
 
     private function publicStorageUrl(string $relativePath): string
     {
-        return rtrim((string) config('app.url', 'https://gpswiss.pl'), '/').'/storage/'.ltrim($relativePath, '/');
+        return 'https://gpswiss.pl/storage/'.ltrim($relativePath, '/');
     }
 
     /** @return array<int, string> */

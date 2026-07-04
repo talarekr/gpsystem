@@ -2054,6 +2054,28 @@ class JarekGearboxToolController extends Controller
         return response()->json($result);
     }
 
+    public function imageImportPreview(Request $request): JsonResponse
+    {
+        try {
+            return response()->json($this->buildJarekImageImport($request, false));
+        } catch (Throwable $e) {
+            return response()->json(['ok' => false, 'dry_run' => true, 'marketplace_write' => false, 'parts_changed' => false, 'error' => $e->getMessage()], 200);
+        }
+    }
+
+    public function imageImportApply(Request $request): JsonResponse
+    {
+        try {
+            if ($request->query('confirm') !== 'jarek-image-import-download') {
+                return response()->json(['ok' => false, 'dry_run' => false, 'applied' => false, 'error' => 'Missing confirm=jarek-image-import-download', 'marketplace_write' => false, 'parts_changed' => false], 422);
+            }
+
+            return response()->json($this->buildJarekImageImport($request, true));
+        } catch (Throwable $e) {
+            return response()->json(['ok' => false, 'dry_run' => false, 'applied' => false, 'marketplace_write' => false, 'parts_changed' => false, 'error' => $e->getMessage()], 200);
+        }
+    }
+
     public function ebayCsvExport(Request $request): JsonResponse|StreamedResponse
     {
         if ($request->query('confirm') !== 'jarek-ebay-csv') {
@@ -2420,6 +2442,162 @@ class JarekGearboxToolController extends Controller
         }
 
         return $base;
+    }
+
+    /** @return array<string, mixed> */
+    private function buildJarekImageImport(Request $request, bool $apply): array
+    {
+        $limit = max(1, min($apply ? 20 : 100, (int) $request->query('limit', 20)));
+        $offset = max(0, (int) $request->query('offset', 0));
+        $sku = trim((string) $request->query('sku', ''));
+        $onlyMissing = $request->boolean('only_missing');
+        $overwrite = $request->boolean('overwrite');
+        $base = [
+            'ok' => Schema::hasTable('jarek_gearboxes'),
+            'dry_run' => ! $apply,
+            'applied' => $apply,
+            'marketplace_write' => false,
+            'parts_changed' => false,
+            'ebay_write' => false,
+            'source_table' => 'jarek_gearboxes',
+            'destination_root' => $this->jarekPublicHtmlImageRoot(),
+            'limit' => $limit,
+            'offset' => $offset,
+            'sku' => $sku !== '' ? $sku : null,
+            'only_missing' => $onlyMissing,
+            'overwrite' => $overwrite,
+            'items' => [],
+            'summary' => [
+                'total' => 0,
+                'ready_to_download_count' => 0,
+                'blocked_count' => 0,
+                'missing_source_urls_count' => 0,
+                'destination_existing_count' => 0,
+                'planned_files_count' => 0,
+                'downloaded_count' => 0,
+                'skipped_existing_count' => 0,
+                'failed_download_count' => 0,
+            ],
+        ];
+
+        if (! Schema::hasTable('jarek_gearboxes')) return $base;
+
+        $query = JarekGearbox::query()->orderBy('id');
+        if ($sku !== '') {
+            $offerId = preg_replace('/^JAREK-/i', '', $sku);
+            $query->where(function ($query) use ($sku, $offerId): void {
+                $query->where('allegro_offer_id', $offerId)->orWhereRaw("concat('JAREK-', allegro_offer_id) = ?", [$sku]);
+            });
+        }
+
+        $base['summary']['total'] = (clone $query)->count();
+        $rows = $query->offset($offset)->limit($limit)->get();
+
+        foreach ($rows as $gearbox) {
+            $item = $this->jarekImageImportPlanItem($gearbox);
+            if ($onlyMissing && $item['destination_existing_count'] > 0) {
+                $item['warnings'][] = 'skipped_by_only_missing_destination_already_has_files';
+                $item['planned_downloads'] = [];
+                $item['planned_download_count'] = 0;
+            }
+
+            if ($item['source_count'] === 0) {
+                $item['blockers'][] = 'missing_source_urls';
+                $base['summary']['missing_source_urls_count']++;
+            }
+
+            if ($item['blockers'] === [] && $item['planned_download_count'] > 0) $base['summary']['ready_to_download_count']++;
+            if ($item['blockers'] !== []) $base['summary']['blocked_count']++;
+            $base['summary']['destination_existing_count'] += $item['destination_existing_count'];
+            $base['summary']['planned_files_count'] += $item['planned_download_count'];
+
+            if ($apply && $item['blockers'] === []) {
+                $this->applyJarekImageImportItem($item, $overwrite, $base['summary']);
+            }
+
+            $base['items'][] = $item;
+        }
+
+        return $base;
+    }
+
+    /** @return array<string, mixed> */
+    private function jarekImageImportPlanItem(JarekGearbox $gearbox): array
+    {
+        $offerId = preg_replace('/[^A-Za-z0-9_-]+/', '-', (string) ($gearbox->allegro_offer_id ?: $gearbox->id));
+        $dir = $this->jarekPublicHtmlImageRoot().'/'.$offerId;
+        $baseUrl = 'https://gpswiss.pl/storage/jarek-gearboxes/'.$offerId;
+        $sourceUrls = array_values(array_filter($this->rawJarekImageUrlCandidates($gearbox), fn (string $url): bool => $this->isAllowedJarekSourceImageUrl($url)));
+        $existing = is_dir($dir) ? count(glob($dir.'/*.{jpg,jpeg,png,webp}', GLOB_BRACE) ?: []) : 0;
+        $planned = [];
+        foreach ($sourceUrls as $index => $url) {
+            $filename = str_pad((string) ($index + 1), 2, '0', STR_PAD_LEFT).'.jpg';
+            $planned[] = [
+                'source_url' => $url,
+                'destination_path' => $dir.'/'.$filename,
+                'destination_filename' => $filename,
+                'public_url' => $baseUrl.'/'.$filename,
+            ];
+        }
+
+        return [
+            'sku' => 'JAREK-'.($gearbox->allegro_offer_id ?: $gearbox->id),
+            'offer_source_id' => $offerId,
+            'source_image_urls' => $sourceUrls,
+            'source_count' => count($sourceUrls),
+            'destination_directory' => $dir,
+            'destination_public_url_base' => $baseUrl,
+            'planned_downloads' => $planned,
+            'destination_existing_count' => $existing,
+            'planned_download_count' => count($planned),
+            'blockers' => [],
+            'warnings' => $existing > 0 ? ['destination_already_contains_files'] : [],
+        ];
+    }
+
+    /** @param array<string, mixed> $item @param array<string, int> $summary */
+    private function applyJarekImageImportItem(array &$item, bool $overwrite, array &$summary): void
+    {
+        foreach ($item['planned_downloads'] as &$download) {
+            $download['downloaded'] = false;
+            $download['skipped'] = false;
+            $download['error'] = null;
+            if (is_file($download['destination_path']) && ! $overwrite) {
+                $download['skipped'] = true;
+                $download['error'] = 'destination_exists';
+                $summary['skipped_existing_count']++;
+                continue;
+            }
+
+            try {
+                $response = Http::timeout(30)->retry(1, 500)->get($download['source_url']);
+                $contentType = mb_strtolower(trim(explode(';', (string) $response->header('Content-Type'))[0]));
+                if ($response->status() !== 200) {
+                    $download['error'] = 'http_status_'.$response->status();
+                    $summary['failed_download_count']++;
+                    continue;
+                }
+                if (! str_starts_with($contentType, 'image/')) {
+                    $download['error'] = 'invalid_content_type_'.$contentType;
+                    $summary['failed_download_count']++;
+                    continue;
+                }
+
+                if (! is_dir(dirname($download['destination_path']))) mkdir(dirname($download['destination_path']), 0775, true);
+                file_put_contents($download['destination_path'], $response->body());
+                $download['downloaded'] = true;
+                $download['content_type'] = $contentType;
+                $summary['downloaded_count']++;
+            } catch (Throwable $e) {
+                $download['error'] = $e->getMessage();
+                $summary['failed_download_count']++;
+            }
+        }
+    }
+
+    private function jarekPublicHtmlImageRoot(): string
+    {
+        return dirname(base_path()).'/public_html/storage/jarek-gearboxes';
     }
 
     /** @return array<string, string> */
