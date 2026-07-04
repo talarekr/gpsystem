@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\JarekGearbox;
+use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceCategoryMapping;
 use App\Models\PartCategory;
 use App\Services\Marketplace\GoogleTranslateService;
@@ -300,6 +301,72 @@ class JarekGearboxEbayDePreparePreviewTest extends TestCase
         $this->assertStringNotContainsString('Die alte Hinterachse muss zurückgegeben werden.', $response->json('rendered_description_de_template'));
     }
 
+
+    public function test_ebay_de_publish_preview_returns_full_dry_run_api_plan_from_existing_settings(): void
+    {
+        Storage::fake('public');
+        config(['app.url' => 'https://gpswiss.pl']);
+        Cache::put('nbp_table_a_eur_rate', ['rate' => 4.30, 'effective_date' => '2026-06-27', 'table_no' => '123/A/NBP/2026']);
+        $this->mockTranslations();
+        $this->createCategoryMappings('620', '100684');
+        Storage::disk('public')->put('jarek-gearboxes/18727785496/01.jpg', 'jpg');
+
+        MarketplaceAccount::query()->create([
+            'marketplace' => 'ebay_de',
+            'code' => 'ebay_de',
+            'name' => 'eBay DE',
+            'status' => 'active',
+            'api_enabled' => true,
+            'api_mode' => 'dry_run',
+            'api_settings' => [
+                'marketplace_id' => 'EBAY_DE',
+                'merchant_location_key' => 'gpswiss-de-location',
+                'payment_policy_id' => 'payment-de',
+                'return_policy_id' => 'return-de',
+                'format' => 'FIXED_PRICE',
+                'listing_duration' => 'GTC',
+            ],
+        ]);
+
+        JarekGearbox::query()->create([
+            'allegro_offer_id' => '18727785496',
+            'title' => 'Skrzynia DSG 0D9300041 Audi',
+            'description' => 'Opis skrzyni',
+            'price' => 2450,
+            'currency' => 'PLN',
+            'quantity' => 1,
+            'category_id' => '620',
+            'category_name' => 'Skrzynie biegów',
+            'parameters' => [['name' => 'Numer części', 'values' => ['0D9300041']]],
+        ]);
+
+        $response = $this->withoutMiddleware()->getJson('/admin/tools/jarek-gearboxes/ebay-de-publish-preview?sku=JAREK-18727785496');
+
+        $response->assertOk()
+            ->assertJsonPath('dry_run', true)
+            ->assertJsonPath('marketplace_write', false)
+            ->assertJsonPath('ready', true)
+            ->assertJsonPath('blockers', [])
+            ->assertJsonPath('apply_requires_confirm', 'jarek-ebay-de-publish-one')
+            ->assertJsonPath('idempotency.apply_requires_confirm', 'jarek-ebay-de-publish-one')
+            ->assertJsonPath('ebay_api_plan.merchant_location_key', 'gpswiss-de-location')
+            ->assertJsonPath('ebay_api_plan.marketplace_id', 'EBAY_DE')
+            ->assertJsonPath('ebay_api_plan.fulfillment_policy_id', 'fulfillment-de-50')
+            ->assertJsonPath('ebay_api_plan.payment_policy_id', 'payment-de')
+            ->assertJsonPath('ebay_api_plan.return_policy_id', 'return-de')
+            ->assertJsonPath('ebay_api_plan.format', 'FIXED_PRICE')
+            ->assertJsonPath('ebay_api_plan.listing_duration', 'GTC')
+            ->assertJsonPath('ebay_api_plan.category_id', '100684')
+            ->assertJsonPath('ebay_api_plan.sku', 'JAREK-18727785496')
+            ->assertJsonPath('ebay_api_plan.quantity', 1)
+            ->assertJsonPath('ebay_api_plan.price', 569.77)
+            ->assertJsonPath('ebay_api_plan.currency', 'EUR')
+            ->assertJsonPath('ebay_api_plan.inventory_item_request.availability.shipToLocationAvailability.quantity', 1)
+            ->assertJsonPath('ebay_api_plan.offer_request.marketplaceId', 'EBAY_DE')
+            ->assertJsonPath('ebay_api_plan.offer_request.listingPolicies.fulfillmentPolicyId', 'fulfillment-de-50')
+            ->assertJsonPath('ebay_api_plan.publish_offer_request.method', 'POST');
+    }
+
     private function mockTranslations(): void
     {
         $this->mock(GoogleTranslateService::class, function ($mock): void {
@@ -315,6 +382,6 @@ class JarekGearboxEbayDePreparePreviewTest extends TestCase
     {
         $category = PartCategory::query()->create(['name' => 'Skrzynie biegów', 'category_path' => 'Motoryzacja > Części > Skrzynie biegów']);
         MarketplaceCategoryMapping::query()->create(['local_category_id' => $category->id, 'channel' => 'allegro_main', 'external_category_id' => $allegroCategoryId, 'external_category_name' => 'Skrzynie biegów']);
-        MarketplaceCategoryMapping::query()->create(['local_category_id' => $category->id, 'channel' => 'ebay_de', 'external_category_id' => $ebayCategoryId, 'external_category_name' => 'Getriebe']);
+        MarketplaceCategoryMapping::query()->create(['local_category_id' => $category->id, 'channel' => 'ebay_de', 'external_category_id' => $ebayCategoryId, 'external_category_name' => 'Getriebe', 'shipping_group' => 'de_50_eur', 'fulfillment_policy_id' => 'fulfillment-de-50']);
     }
 }

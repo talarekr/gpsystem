@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin\JarekGearboxes;
 
 use App\Http\Controllers\Controller;
 use App\Models\JarekGearbox;
+use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceCategoryMapping;
 use App\Models\MarketplaceSyncLog;
 use App\Models\Part;
@@ -274,6 +275,8 @@ class JarekGearboxToolController extends Controller
             'selected_brand' => $selectedBrand,
             'brand_selection_reason' => $brandSelectionReason,
             'brand_source' => $brandSelection['brand_source'],
+            'fulfillment_policy_id' => $mapping['fulfillment_policy_id'] ?? null,
+            'shipping_group' => $mapping['shipping_group'] ?? null,
             'item_specifics' => array_filter([
                 'Brand' => $selectedBrand,
                 'Hersteller' => $selectedBrand,
@@ -346,14 +349,19 @@ class JarekGearboxToolController extends Controller
         $payload['marketplace_write'] = false;
         $payload['parts_changed'] = false;
         $payload['publish_preview'] = true;
+        $payload['apply_requires_confirm'] = 'jarek-ebay-de-publish-one';
         $payload['idempotency'] = [
             'sku' => $payload['sku'] ?? null,
             'existing_ebay_listing_id' => $payload['existing_ebay_listing_id'] ?? null,
             'existing_ebay_offer_id' => $payload['existing_ebay_offer_id'] ?? null,
             'existing_ebay_inventory_sku' => $payload['existing_ebay_inventory_sku'] ?? null,
             'safe_to_retry' => true,
-            'apply_requires_confirm' => 'jarek-ebay-de-publish',
+            'apply_requires_confirm' => 'jarek-ebay-de-publish-one',
         ];
+        $plan = $this->jarekEbayDeApiPlan($payload);
+        $payload['ebay_api_plan'] = $plan['plan'];
+        $payload['blockers'] = array_values(array_unique(array_merge($payload['blockers'] ?? [], $plan['blockers'])));
+        $payload['ready'] = ($payload['blockers'] ?? []) === [];
         $payload['safety'] = array_values(array_unique(array_merge($payload['safety'] ?? [], [
             'dry_run_only',
             'no_ebay_api_write',
@@ -386,13 +394,117 @@ class JarekGearboxToolController extends Controller
             'parts_changed' => false,
             'applied' => false,
             'error' => 'Publish apply is guarded and disabled in this deployment path. No eBay API write was attempted.',
-            'required_confirm' => 'jarek-ebay-de-publish',
+            'required_confirm' => 'jarek-ebay-de-publish-one',
             'provided_confirm' => $request->query('confirm'),
             'blockers' => ['publish_apply_disabled'],
             'warnings' => [],
         ];
 
         return response()->json($payload, 423);
+    }
+
+
+    /** @return array{plan: array<string, mixed>, blockers: array<int, string>} */
+    private function jarekEbayDeApiPlan(array $payload): array
+    {
+        $account = Schema::hasTable('marketplace_accounts') ? MarketplaceAccount::query()->where('code', 'ebay_de')->first() : null;
+        $settings = is_array($account?->api_settings) ? $account->api_settings : [];
+        $mapping = is_array($payload['payload_preview'] ?? null) ? ($payload['payload_preview'] ?? []) : [];
+        $categoryId = filled($payload['ebay_category_id'] ?? null) ? (string) $payload['ebay_category_id'] : null;
+        $sku = filled($payload['sku'] ?? null) ? (string) $payload['sku'] : null;
+        $quantity = is_numeric($payload['quantity'] ?? null) ? (int) $payload['quantity'] : null;
+        $price = is_numeric($payload['price'] ?? null) ? round((float) $payload['price'], 2) : null;
+        $currency = filled($payload['currency'] ?? null) ? (string) $payload['currency'] : 'EUR';
+        $imageUrls = array_values((array) ($payload['image_urls'] ?? []));
+        $itemSpecifics = (array) ($payload['item_specifics'] ?? []);
+        $listingDescription = (string) ($payload['rendered_description_de_template'] ?? $payload['translated_description_de'] ?? '');
+        $marketplaceId = filled($settings['marketplace_id'] ?? null) ? (string) $settings['marketplace_id'] : null;
+        $format = filled($settings['format'] ?? null) ? (string) $settings['format'] : 'FIXED_PRICE';
+        $listingDuration = filled($settings['listing_duration'] ?? null) ? (string) $settings['listing_duration'] : 'GTC';
+        $merchantLocationKey = $this->jarekEbayMerchantLocationKey($settings, is_array($account?->config) ? $account->config : []);
+        $fulfillmentPolicyId = filled($payload['payload_preview']['fulfillment_policy_id'] ?? null) ? (string) $payload['payload_preview']['fulfillment_policy_id'] : null;
+        $paymentPolicyId = $this->jarekEbayPolicyId($settings, 'payment');
+        $returnPolicyId = $this->jarekEbayPolicyId($settings, 'return');
+
+        $aspects = [];
+        foreach ($itemSpecifics as $name => $value) {
+            if (! filled($name) || ! filled($value)) continue;
+            $aspects[(string) $name] = [trim((string) $value)];
+        }
+
+        $inventoryItemRequest = [
+            'product' => ['title' => (string) ($payload['translated_title_de'] ?? ''), 'description' => $this->plainJarekText($listingDescription), 'imageUrls' => $imageUrls, 'aspects' => $aspects],
+            'condition' => 'USED',
+            'availability' => ['shipToLocationAvailability' => ['quantity' => $quantity]],
+        ];
+        $offerRequest = [
+            'sku' => $sku,
+            'marketplaceId' => $marketplaceId,
+            'format' => $format,
+            'listingDuration' => $listingDuration,
+            'availableQuantity' => $quantity,
+            'categoryId' => $categoryId,
+            'merchantLocationKey' => $merchantLocationKey,
+            'pricingSummary' => ['price' => ['value' => $price !== null ? (string) $price : null, 'currency' => $currency]],
+            'listingPolicies' => ['fulfillmentPolicyId' => $fulfillmentPolicyId, 'paymentPolicyId' => $paymentPolicyId, 'returnPolicyId' => $returnPolicyId],
+            'listingDescription' => $listingDescription,
+        ];
+        $publishOfferRequest = ['method' => 'POST', 'path' => '/sell/inventory/v1/offer/{offerId}/publish', 'body' => null];
+
+        $blockers = [];
+        if (blank($merchantLocationKey)) $blockers[] = 'missing_merchant_location_key';
+        if (blank($fulfillmentPolicyId)) $blockers[] = 'missing_fulfillment_policy_id';
+        if (blank($paymentPolicyId)) $blockers[] = 'missing_payment_policy_id';
+        if (blank($returnPolicyId)) $blockers[] = 'missing_return_policy_id';
+        if (blank($marketplaceId)) $blockers[] = 'missing_marketplace_id';
+        if (blank($sku) || blank($inventoryItemRequest['product']['title']) || $imageUrls === [] || ! is_int($quantity) || $quantity <= 0) $blockers[] = 'missing_inventory_item_request_fields';
+        if (blank($sku) || blank($categoryId) || blank($format) || blank($listingDuration) || blank($merchantLocationKey) || blank($fulfillmentPolicyId) || blank($paymentPolicyId) || blank($returnPolicyId) || $price === null || $price <= 0 || ! is_int($quantity) || $quantity <= 0) $blockers[] = 'missing_offer_request_fields';
+
+        return ['plan' => [
+            'inventory_item_request' => $inventoryItemRequest,
+            'offer_request' => $offerRequest,
+            'publish_offer_request' => $publishOfferRequest,
+            'merchant_location_key' => $merchantLocationKey,
+            'marketplace_id' => $marketplaceId,
+            'fulfillment_policy_id' => $fulfillmentPolicyId,
+            'payment_policy_id' => $paymentPolicyId,
+            'return_policy_id' => $returnPolicyId,
+            'format' => $format,
+            'listing_duration' => $listingDuration,
+            'category_id' => $categoryId,
+            'sku' => $sku,
+            'quantity' => $quantity,
+            'price' => $price,
+            'currency' => $currency,
+            'image_urls' => $imageUrls,
+            'item_specifics' => $itemSpecifics,
+            'listing_description' => $listingDescription,
+        ], 'blockers' => array_values(array_unique($blockers))];
+    }
+
+    private function jarekEbayPolicyId(array $settings, string $type): ?string
+    {
+        foreach (["{$type}_policy_id", "default_{$type}_policy_id", "ebay_{$type}_policy_id"] as $key) {
+            if (filled($settings[$key] ?? null)) return (string) $settings[$key];
+        }
+        $policies = is_array($settings['business_policies'] ?? null) ? $settings['business_policies'] : [];
+        return filled($policies[$type] ?? null) ? (string) $policies[$type] : null;
+    }
+
+    private function jarekEbayMerchantLocationKey(array $settings, array $config): ?string
+    {
+        foreach ([$settings, $config, array_merge((array) config('product-hub.ebay.default_location', []), (array) config('product-hub.ebay.accounts.ebay_de', []))] as $source) {
+            foreach (['merchant_location_key', 'merchantLocationKey', 'location_key', 'inventory_location_key'] as $key) {
+                if (filled($source[$key] ?? null)) return (string) $source[$key];
+            }
+        }
+
+        return null;
+    }
+
+    private function plainJarekText(string $value): string
+    {
+        return mb_substr(trim((string) preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags($value), ENT_QUOTES | ENT_HTML5, 'UTF-8'))), 0, 3900);
     }
 
 
@@ -832,6 +944,8 @@ class JarekGearboxToolController extends Controller
             'ebay_category_id' => (string) $ebay->external_category_id,
             'ebay_category_name' => $ebay->external_category_name,
             'ebay_category_path' => $ebay->external_category_path,
+            'shipping_group' => $ebay->shipping_group,
+            'fulfillment_policy_id' => $ebay->fulfillment_policy_id,
         ];
     }
 
