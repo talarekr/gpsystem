@@ -267,6 +267,8 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/jarek-gearboxes/ebay-de-prepare-preview', [JarekGearboxToolController::class, 'ebayDePreparePreview'])->name('admin.tools.jarek-gearboxes.ebay-de-prepare-preview');
     Route::get('/admin/tools/jarek-gearboxes/ebay-de-bulk-prepare-preview', [JarekGearboxToolController::class, 'ebayDeBulkPreparePreview'])->name('admin.tools.jarek-gearboxes.ebay-de-bulk-prepare-preview');
     Route::get('/admin/tools/jarek-gearboxes/ebay-de-bulk-prepare-publish-preview', [JarekGearboxToolController::class, 'ebayDeBulkPreparePublishPreview'])->name('admin.tools.jarek-gearboxes.ebay-de-bulk-prepare-publish-preview');
+    Route::get('/admin/tools/jarek-gearboxes/ebay-de-publish-runner-plan', [JarekGearboxToolController::class, 'ebayDePublishRunnerPlan'])->name('admin.tools.jarek-gearboxes.ebay-de-publish-runner-plan');
+    Route::match(['get', 'post'], '/admin/tools/jarek-gearboxes/ebay-de-publish-runner-pause', [JarekGearboxToolController::class, 'ebayDePublishRunnerPause'])->name('admin.tools.jarek-gearboxes.ebay-de-publish-runner-pause');
     Route::get('/admin/tools/jarek-gearboxes/ebay-de-publish-preview', [JarekGearboxToolController::class, 'ebayDePublishPreview'])->name('admin.tools.jarek-gearboxes.ebay-de-publish-preview');
     Route::match(['get', 'post'], '/admin/tools/jarek-gearboxes/ebay-de-publish-apply', [JarekGearboxToolController::class, 'ebayDePublishApply'])->name('admin.tools.jarek-gearboxes.ebay-de-publish-apply');
     Route::get('/admin/tools/jarek-gearboxes/ebay-de-listing-diagnostics', [JarekGearboxToolController::class, 'ebayDeListingDiagnostics'])->name('admin.tools.jarek-gearboxes.ebay-de-listing-diagnostics');
