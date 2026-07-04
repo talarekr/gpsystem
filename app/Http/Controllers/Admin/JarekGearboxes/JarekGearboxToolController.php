@@ -35,6 +35,7 @@ class JarekGearboxToolController extends Controller
 
     private int $jarekImageFileExistsChecks = 0;
     private bool $jarekImageFileExistsBudgetExceeded = false;
+    private bool $jarekPublishRunnerMarketplaceWriteStarted = false;
 
     public function ping(AllegroJarekImportService $service): JsonResponse
     {
@@ -252,14 +253,15 @@ class JarekGearboxToolController extends Controller
             'has_more' => false,
             'batch_summary' => ['processed_count' => 0, 'published_count' => 0, 'skipped_count' => 0, 'blocked_count' => 0, 'failed_count' => 0, 'duplicate_existing_count' => 0],
             'items' => [],
+            'admin_diagnostics' => [],
         ];
+        $this->jarekPublishRunnerMarketplaceWriteStarted = false;
 
         try {
             if ($confirm !== $requiredConfirm) {
                 return response()->json($base + ['ok' => false, 'blockers' => ['missing_or_invalid_confirm_token'], 'error' => 'Missing or invalid confirm token.'], 200);
             }
 
-            $base['marketplace_write'] = true;
             $previewRequest = Request::create($request->path(), 'GET', [
                 'offset' => $offset,
                 'limit' => $limit,
@@ -283,12 +285,26 @@ class JarekGearboxToolController extends Controller
                 if (($item['status'] ?? null) === 'skipped_existing' || in_array('existing_ebay_offer_or_listing_found', (array) ($item['blockers'] ?? []), true)) $base['batch_summary']['duplicate_existing_count']++;
             }
 
+            $base['marketplace_write'] = $this->jarekPublishRunnerMarketplaceWriteStarted;
             $base['applied'] = $base['batch_summary']['published_count'] > 0;
             return response()->json($base, 200);
         } catch (Throwable $e) {
+            $traceId = $request->headers->get('trace-id') ?: $request->headers->get('x-request-id') ?: $request->headers->get('x-correlation-id');
+            $diagnostics = [
+                'error_class' => $e::class,
+                'error_message' => $e->getMessage(),
+            ];
+            if (filled($traceId)) {
+                $diagnostics['trace_id'] = $traceId;
+            }
+
             $base['ok'] = false;
+            $base['marketplace_write'] = $this->jarekPublishRunnerMarketplaceWriteStarted;
+            $base['applied'] = false;
+            $base['error'] = $e->getMessage();
+            $base['admin_diagnostics'] = $diagnostics;
             $base['batch_summary']['failed_count']++;
-            $base['items'][] = ['sku' => null, 'status' => 'failed', 'offer_id' => null, 'listing_id' => null, 'ebay_item_url' => null, 'blockers' => ['publish_runner_batch_exception'], 'warnings' => [], 'errors' => [$e->getMessage()], 'request_id' => null, 'admin_diagnostics' => ['error_class' => $e::class, 'error_message' => $e->getMessage()]];
+            $base['items'][] = ['sku' => null, 'status' => 'failed', 'offer_id' => null, 'listing_id' => null, 'ebay_item_url' => null, 'blockers' => ['publish_runner_batch_exception'], 'warnings' => [], 'errors' => [$e->getMessage()], 'request_id' => null, 'admin_diagnostics' => $diagnostics];
             return response()->json($base, 200);
         }
     }
@@ -322,6 +338,7 @@ class JarekGearboxToolController extends Controller
                 return $item;
             }
 
+            $this->jarekPublishRunnerMarketplaceWriteStarted = true;
             $result = $client->publishInventoryOffer($sku, (array) ($offer['inventory_item_request'] ?? []), (array) ($offer['offer_request'] ?? []), 'de-DE');
             $item['offer_id'] = $result['offer_id'] ?? null;
             $item['listing_id'] = $result['listing_id'] ?? null;
