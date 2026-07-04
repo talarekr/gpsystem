@@ -373,6 +373,22 @@ class JarekGearboxEbayDePreparePreviewTest extends TestCase
         $this->assertStringNotContainsString('BeschreibungWir bieten', $response->json('ebay_api_plan.inventory_item_request.product.description'));
     }
 
+
+    public function test_ebay_de_publish_apply_is_locked_to_single_sku_and_exact_confirm(): void
+    {
+        $this->withoutMiddleware()
+            ->getJson('/admin/tools/jarek-gearboxes/ebay-de-publish-apply?confirm=jarek-ebay-de-publish-one&sku=JAREK-OTHER')
+            ->assertForbidden()
+            ->assertJsonPath('marketplace_write', false)
+            ->assertJsonPath('blockers.0', 'sku_not_allowed');
+
+        $this->withoutMiddleware()
+            ->getJson('/admin/tools/jarek-gearboxes/ebay-de-publish-apply?confirm=wrong&sku=JAREK-18727785496')
+            ->assertForbidden()
+            ->assertJsonPath('marketplace_write', false)
+            ->assertJsonPath('blockers.0', 'invalid_confirm');
+    }
+
     private function mockTranslations(): void
     {
         $this->mock(GoogleTranslateService::class, function ($mock): void {

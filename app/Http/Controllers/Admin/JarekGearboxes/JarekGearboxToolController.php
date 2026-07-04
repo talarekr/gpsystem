@@ -15,6 +15,7 @@ use App\Services\JarekGearboxes\JarekGearboxEbayPreviewService;
 use App\Services\Marketplace\EbayDescriptionTemplateRenderer;
 use App\Services\Marketplace\GoogleTranslateService;
 use App\Services\Marketplace\NbpExchangeRateService;
+use App\Services\Marketplace\Api\EbayApiClient;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -385,24 +386,110 @@ class JarekGearboxToolController extends Controller
         return response()->json($payload, $response->getStatusCode());
     }
 
-    public function ebayDePublishApply(Request $request): JsonResponse
+    public function ebayDePublishApply(Request $request, GoogleTranslateService $translateService, EbayDescriptionTemplateRenderer $renderer, NbpExchangeRateService $exchangeRateService): JsonResponse
     {
-        $payload = [
+        $started = microtime(true);
+        $requiredConfirm = 'jarek-ebay-de-publish-one';
+        $allowedSku = 'JAREK-18727785496';
+        $sku = (string) $request->query('sku', '');
+        $confirm = (string) $request->query('confirm', '');
+
+        $base = [
             'ok' => false,
             'dry_run' => false,
             'marketplace_write' => false,
             'parts_changed' => false,
             'applied' => false,
-            'error' => 'Publish apply is guarded and disabled in this deployment path. No eBay API write was attempted.',
-            'required_confirm' => 'jarek-ebay-de-publish-one',
+            'action' => 'jarek_gearboxes_ebay_de_publish_one',
+            'required_confirm' => $requiredConfirm,
             'provided_confirm' => $request->query('confirm'),
-            'blockers' => ['publish_apply_disabled'],
+            'allowed_sku' => $allowedSku,
+            'sku' => $sku,
+            'blockers' => [],
             'warnings' => [],
         ];
 
-        return response()->json($payload, 423);
+        if ($sku !== $allowedSku) {
+            return response()->json($base + ['error' => 'Publish apply is allowed only for the single guarded SKU.', 'blockers' => ['sku_not_allowed']], 403);
+        }
+        if ($confirm !== $requiredConfirm) {
+            return response()->json($base + ['error' => 'Missing or invalid guarded apply confirmation token.', 'blockers' => ['invalid_confirm']], 403);
+        }
+
+        $previewRequest = Request::create($request->path(), 'GET', ['sku' => $sku]);
+        $prepareResponse = $this->ebayDePublishPreview($previewRequest, $translateService, $renderer, $exchangeRateService);
+        $prepare = $prepareResponse->getData(true);
+        $plan = is_array($prepare['ebay_api_plan'] ?? null) ? $prepare['ebay_api_plan'] : [];
+        $blockers = array_values((array) ($prepare['blockers'] ?? []));
+
+        foreach (['existing_ebay_listing_id', 'existing_ebay_offer_id', 'existing_ebay_inventory_sku'] as $field) {
+            if (filled($prepare[$field] ?? null)) $blockers[] = $field.'_present';
+        }
+
+        $account = Schema::hasTable('marketplace_accounts') ? MarketplaceAccount::query()->where('code', 'ebay_de')->first() : null;
+        $client = new EbayApiClient('ebay_de', $account);
+        $idempotencyCheck = $client->readOnlyInventoryAndOfferExistence($sku);
+        if (! ($idempotencyCheck['ok'] ?? false)) $blockers[] = 'idempotency_check_failed';
+        if ($idempotencyCheck['inventory_item_exists'] ?? false) $blockers[] = 'inventory_item_exists';
+        if ($idempotencyCheck['offer_exists'] ?? false) $blockers[] = 'offer_exists';
+        if (filled($idempotencyCheck['listing_id'] ?? null)) $blockers[] = 'listing_exists';
+
+        $payload = $base + [
+            'prepare' => $prepare,
+            'idempotency' => $idempotencyCheck + ['safe_to_retry' => false],
+            'ebay_api_plan' => $plan,
+        ];
+        $payload['blockers'] = array_values(array_unique($blockers));
+
+        if ($payload['blockers'] !== []) {
+            $payload['error'] = 'Guarded publish apply blocked before any eBay write.';
+            $this->logJarekEbayDePublishOne('blocked', $payload['error'], $payload, $started);
+            return response()->json($payload, 409);
+        }
+
+        $result = $client->publishInventoryOffer($sku, (array) ($plan['inventory_item_request'] ?? []), (array) ($plan['offer_request'] ?? []), 'de-DE');
+        $payload['marketplace_write'] = true;
+        $payload['applied'] = (bool) ($result['ok'] ?? false);
+        $payload['result'] = $result;
+        $payload['offer_id'] = $result['offer_id'] ?? null;
+        $payload['listing_id'] = $result['listing_id'] ?? null;
+        $payload['published_offer_response'] = $result['json'] ?? null;
+        $payload['errors'] = ($result['ok'] ?? false) ? [] : [$result['error'] ?? ($result['json'] ?? 'eBay publish failed')];
+        $payload['ok'] = (bool) ($result['ok'] ?? false);
+
+        $this->logJarekEbayDePublishOne($payload['ok'] ? 'success' : 'error', $payload['ok'] ? 'Guarded single SKU eBay DE publish completed.' : 'Guarded single SKU eBay DE publish failed.', $payload, $started);
+
+        return response()->json($payload, $payload['ok'] ? 200 : 502);
     }
 
+
+
+    /** @param array<string, mixed> $payload */
+    private function logJarekEbayDePublishOne(string $status, string $message, array $payload, float $started): void
+    {
+        if (! Schema::hasTable('marketplace_sync_logs')) return;
+
+        MarketplaceSyncLog::query()->create([
+            'marketplace' => 'ebay_de',
+            'action' => 'jarek_gearboxes_ebay_de_publish_one',
+            'status' => $status,
+            'message' => $message,
+            'duration_ms' => (int) round((microtime(true) - $started) * 1000),
+            'external_id' => $payload['offer_id'] ?? $payload['sku'] ?? null,
+            'payload' => [
+                'sku' => $payload['sku'] ?? null,
+                'ebay_inventory_sku' => $payload['sku'] ?? null,
+                'offer_id' => $payload['offer_id'] ?? null,
+                'listing_id' => $payload['listing_id'] ?? null,
+                'published_offer_response' => $payload['published_offer_response'] ?? null,
+                'errors' => $payload['errors'] ?? [],
+                'result' => $payload['result'] ?? null,
+                'idempotency' => $payload['idempotency'] ?? null,
+                'blockers' => $payload['blockers'] ?? [],
+            ],
+            'created_at' => now(),
+        ]);
+    }
 
     /** @return array{plan: array<string, mixed>, blockers: array<int, string>} */
     private function jarekEbayDeApiPlan(array $payload): array
