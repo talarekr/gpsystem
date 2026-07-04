@@ -125,6 +125,32 @@ class JarekGearboxToolController extends Controller
         ]);
     }
 
+
+    public function storageLinkDiagnostics(): JsonResponse
+    {
+        $result = $this->buildJarekStorageLinkDiagnostics(false);
+        $this->logJarekStorageLink('dry_run', $result['can_safely_create_symlink'] ? 'Storage link diagnostics ready; apply is possible.' : 'Storage link diagnostics completed; apply is blocked.', $result);
+
+        return response()->json($result);
+    }
+
+    public function storageLinkApply(Request $request): JsonResponse
+    {
+        if ($request->query('confirm') !== 'jarek-storage-link') {
+            $result = $this->buildJarekStorageLinkDiagnostics(false);
+            $result['ok'] = false;
+            $result['error'] = 'Missing confirm=jarek-storage-link';
+            $this->logJarekStorageLink('blocked', 'Storage link apply blocked: missing required confirm.', $result);
+
+            return response()->json($result, 422);
+        }
+
+        $result = $this->buildJarekStorageLinkDiagnostics(true);
+        $this->logJarekStorageLink($result['ok'] ? 'success' : 'blocked', $result['message'], $result);
+
+        return response()->json($result, $result['ok'] ? 200 : 409);
+    }
+
     public function ebayPreview(JarekGearbox $jarekGearbox, JarekGearboxEbayPreviewService $service): JsonResponse
     {
         return response()->json($service->build($jarekGearbox));
@@ -673,29 +699,52 @@ class JarekGearboxToolController extends Controller
         $storagePath = storage_path('app/public/'.$relative);
         $publicPath = public_path('storage/'.$relative);
         $symlink = public_path('storage');
-        $response = Http::withHeaders(['User-Agent' => 'eBay image diagnostics (+https://gpswiss.pl)'])->withOptions(['allow_redirects' => true])->timeout(20)->get($url);
-        $effectiveUrl = method_exists($response, 'handlerStats') ? (string) (($response->handlerStats()['url'] ?? null) ?: $url) : $url;
-        $bodyStart = substr($response->body(), 0, 16);
-        $isImageBody = str_starts_with($bodyStart, "\xFF\xD8\xFF") || str_starts_with($bodyStart, "\x89PNG");
-        $contentType = (string) $response->header('content-type');
-        $isPublicImage = $response->successful() && (str_contains(strtolower($contentType), 'image/') || $isImageBody);
+        try {
+            $response = Http::withHeaders(['User-Agent' => 'eBay image diagnostics (+https://gpswiss.pl)'])->withOptions(['allow_redirects' => true])->timeout(20)->get($url);
+            $effectiveUrl = method_exists($response, 'handlerStats') ? (string) (($response->handlerStats()['url'] ?? null) ?: $url) : $url;
+            $body = $response->body();
+            $bodyStart = substr($body, 0, 16);
+            $isImageBody = str_starts_with($bodyStart, "\xFF\xD8\xFF") || str_starts_with($bodyStart, "\x89PNG");
+            $contentType = (string) ($response->header('content-type') ?: $response->header('Content-Type'));
+            $normalizedContentType = strtolower(trim(explode(';', $contentType)[0] ?? ''));
+            $hasSafeContentType = in_array($normalizedContentType, ['image/jpeg', 'image/png'], true);
+            $isPublicImage = $response->successful() && $hasSafeContentType && $isImageBody;
 
-        return [
-            'url' => $url,
-            'file_exists' => is_file($storagePath),
-            'storage_path' => $storagePath,
-            'public_path' => $publicPath,
-            'public_storage_symlink' => $symlink,
-            'public_storage_is_link' => is_link($symlink),
-            'public_storage_realpath' => realpath($symlink) ?: null,
-            'http_status' => $response->status(),
-            'final_url' => $effectiveUrl,
-            'content_type' => $contentType ?: null,
-            'content_length' => $response->header('content-length'),
-            'body_starts_as_jpeg_or_png' => $isImageBody,
-            'is_public_image' => $isPublicImage,
-            'is_ebay_safe_image_url' => $isPublicImage && str_starts_with($url, 'https://'),
-        ];
+            return [
+                'url' => $url,
+                'file_exists' => is_file($storagePath),
+                'storage_path' => $storagePath,
+                'public_path' => $publicPath,
+                'public_storage_symlink' => $symlink,
+                'public_storage_is_link' => is_link($symlink),
+                'public_storage_realpath' => realpath($symlink) ?: null,
+                'http_status' => $response->status(),
+                'final_url' => $effectiveUrl,
+                'content_type' => $contentType ?: null,
+                'content_length' => $response->header('content-length') !== null ? (int) $response->header('content-length') : strlen($body),
+                'body_starts_as_jpeg_or_png' => $isImageBody,
+                'is_public_image' => $isPublicImage,
+                'is_ebay_safe_image_url' => $isPublicImage && str_starts_with($url, 'https://'),
+            ];
+        } catch (Throwable $e) {
+            return [
+                'url' => $url,
+                'file_exists' => is_file($storagePath),
+                'storage_path' => $storagePath,
+                'public_path' => $publicPath,
+                'public_storage_symlink' => $symlink,
+                'public_storage_is_link' => is_link($symlink),
+                'public_storage_realpath' => realpath($symlink) ?: null,
+                'http_status' => null,
+                'final_url' => null,
+                'content_type' => null,
+                'content_length' => null,
+                'body_starts_as_jpeg_or_png' => false,
+                'is_public_image' => false,
+                'is_ebay_safe_image_url' => false,
+                'error' => $e->getMessage(),
+            ];
+        }
     }
 
     /** @return array{plan: array<string, mixed>, blockers: array<int, string>} */
@@ -2478,6 +2527,100 @@ class JarekGearboxToolController extends Controller
         $decoded = $this->decodedJsonValue($value);
         if (is_array($decoded)) return json_encode($decoded, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '—';
         return filled($decoded) ? (string) $decoded : '—';
+    }
+
+
+    private function buildJarekStorageLinkDiagnostics(bool $apply): array
+    {
+        $linkPath = public_path('storage');
+        $absoluteTarget = storage_path('app/public');
+        $relativeTarget = '../storage/app/public';
+        $testUrl = 'https://gpswiss.pl/storage/jarek-gearboxes/18727785496/01.jpg';
+
+        clearstatcache(true, $linkPath);
+        clearstatcache(true, $absoluteTarget);
+
+        $exists = file_exists($linkPath) || is_link($linkPath);
+        $isLink = is_link($linkPath);
+        $linkTarget = $isLink ? readlink($linkPath) : null;
+        $type = $isLink ? 'symlink' : (is_dir($linkPath) ? 'directory' : (is_file($linkPath) ? 'file' : ($exists ? 'other' : 'missing')));
+        $targetExists = is_dir($absoluteTarget);
+        $parentWritable = is_writable(dirname($linkPath));
+        $alreadyCorrect = $isLink && realpath($linkPath) !== false && realpath($linkPath) === realpath($absoluteTarget);
+        $canCreate = ! $exists && $targetExists && $parentWritable;
+        $blockedReason = null;
+
+        if (! $alreadyCorrect && ! $canCreate) {
+            $blockedReason = $exists
+                ? 'public/storage already exists and is not the expected storage symlink; it was not removed automatically'
+                : (! $targetExists ? 'storage/app/public target does not exist' : 'public directory is not writable');
+        }
+
+        $created = false;
+        $error = null;
+        if ($apply && $canCreate) {
+            try {
+                $created = symlink($relativeTarget, $linkPath);
+            } catch (Throwable $e) {
+                $error = $e->getMessage();
+            }
+            clearstatcache(true, $linkPath);
+            $isLink = is_link($linkPath);
+            $linkTarget = $isLink ? readlink($linkPath) : null;
+            $type = $isLink ? 'symlink' : (is_dir($linkPath) ? 'directory' : (is_file($linkPath) ? 'file' : ((file_exists($linkPath) || is_link($linkPath)) ? 'other' : 'missing')));
+            $alreadyCorrect = $isLink && realpath($linkPath) !== false && realpath($linkPath) === realpath($absoluteTarget);
+        }
+
+        $httpCheck = $this->checkJarekPublicImageUrl(null, $testUrl);
+        $ok = $alreadyCorrect && $httpCheck['is_ebay_safe_image_url'] === true;
+
+        return [
+            'ok' => $ok,
+            'mode' => $apply ? 'apply' : 'dry_run',
+            'marketplace_write' => false,
+            'parts_changed' => false,
+            'ebay_write' => false,
+            'message' => $ok ? 'Publiczny Laravel storage link działa i testowy URL zwraca publiczny obraz.' : ($blockedReason ?: 'Storage link nie został jeszcze potwierdzony jako publicznie dostępny obraz.'),
+            'public_storage' => [
+                'path' => $linkPath,
+                'exists' => file_exists($linkPath) || is_link($linkPath),
+                'type' => $type,
+                'is_link' => $isLink,
+                'link_target' => $linkTarget,
+                'realpath' => realpath($linkPath) ?: null,
+            ],
+            'planned_symlink' => [
+                'link' => $linkPath,
+                'target' => $relativeTarget,
+                'absolute_target' => $absoluteTarget,
+                'target_exists' => $targetExists,
+                'parent_writable' => $parentWritable,
+                'already_correct' => $alreadyCorrect,
+                'can_safely_create_symlink' => $canCreate,
+                'blocked_reason' => $blockedReason,
+                'created' => $created,
+                'error' => $error,
+            ],
+            'can_safely_create_symlink' => $canCreate,
+            'test_url' => $testUrl,
+            'test_url_check' => $httpCheck,
+        ];
+    }
+
+    private function logJarekStorageLink(string $status, string $message, array $payload): void
+    {
+        if (! Schema::hasTable('marketplace_sync_logs')) {
+            return;
+        }
+
+        MarketplaceSyncLog::query()->create([
+            'marketplace' => 'local',
+            'action' => 'jarek_gearboxes_storage_link',
+            'status' => $status,
+            'message' => $message,
+            'payload' => $payload,
+            'created_at' => now(),
+        ]);
     }
 
     private function missingExpectedColumns(): array
