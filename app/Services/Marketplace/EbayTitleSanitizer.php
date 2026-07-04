@@ -7,138 +7,70 @@ use App\Models\Part;
 class EbayTitleSanitizer
 {
     public const LIMIT = 80;
-    private const LOW_VALUE_PATTERNS = [
-        '/\bZustand\s+perfekt\b/iu', '/\bperfekter\s+Zustand\b/iu', '/\bsehr\s+guter\s+Zustand\b/iu',
-        '/\bperfekt\b/iu', '/\bkompletter?\b/iu', '/\bkomplett\b/iu',
-    ];
-
-    private const DESCRIPTIVE_POLISH_TOKENS = [
-        'KOMPLETNY', 'SPRAWNY', 'STAN', 'IDEALNY', 'UŻYWANY', 'UZYWANY',
-        'LEWY', 'PRAWY', 'PRZÓD', 'PRZOD', 'TYŁ', 'TYL',
-    ];
 
     public function sanitizeForEbayDe(Part $part, ?string $translatedTitle, ?string $originalPlTitle = null): array
     {
         $original = (string) ($originalPlTitle ?? $part->name ?? '');
-        $before = trim((string) ($translatedTitle ?: $original));
-        $protected = $this->protectedTokens($part, $original.' '.$before);
-        $removed = [];
-        $cleaned = $this->normalize($before);
+        $translated = trim((string) ($translatedTitle ?: $original));
+        $cleaned = $this->normalize($translated);
+        $translatedLength = mb_strlen($cleaned);
+        $suggested = $translatedLength > self::LIMIT ? $this->safeTrim($cleaned) : null;
+        $tokensLost = $suggested !== null ? $this->lostWords($cleaned, $suggested) : [];
 
-        if (mb_strlen($cleaned) <= self::LIMIT) {
-            $preserved = $this->tokensPreserved($protected, $cleaned);
-
-            return [
-                'final_title' => $cleaned,
-                'cleaned_title' => $cleaned,
-                'ok' => true,
-                'blocker' => null,
-                'diagnostics' => [
-                    'original_pl_title' => $original,
-                    'translated_title_before_cleanup' => $before,
-                    'cleaned_title' => $cleaned,
-                    'final_title' => $cleaned,
-                    'original_length' => mb_strlen($original),
-                    'translated_length' => mb_strlen($before),
-                    'final_length' => mb_strlen($cleaned),
-                    'title_limit' => self::LIMIT,
-                    'removed_tokens' => [],
-                    'protected_tokens' => $protected,
-                    'protected_tokens_preserved' => $preserved,
-                    'cleanup_applied' => $cleaned !== $before,
-                    'minimal_cleanup_only' => true,
-                ],
-            ];
-        }
-
-        $allowsYearLabel = (bool) preg_match('/\b(rok|rocznik|rok\s+produkcji|produkcji|prod\.)\b/iu', $original);
-
-        if (! $allowsYearLabel) {
-            $cleaned = preg_replace_callback('/\b(Baujahr|Bauj\.|Modelljahr|Erstzulassung)\s*:?\s*(?=(?:19|20)\d{2}\b)/iu', function (array $m) use (&$removed): string {
-                $removed[] = trim($m[0]);
-                return '';
-            }, $cleaned) ?? $cleaned;
-        }
-
-        $cleaned = $this->normalize($cleaned);
-        $final = $cleaned;
-        if (mb_strlen($final) > self::LIMIT) {
-            foreach (self::LOW_VALUE_PATTERNS as $pattern) {
-                $next = preg_replace_callback($pattern, function (array $m) use (&$removed): string { $removed[] = $m[0]; return ''; }, $final) ?? $final;
-                $final = $this->normalize($next);
-                if (mb_strlen($final) <= self::LIMIT) break;
-            }
-        }
-        if (mb_strlen($final) > self::LIMIT) $final = $this->safeTrim($final, $protected);
-
-        $preserved = $this->tokensPreserved($protected, $final);
         return [
-            'final_title' => $final,
+            'final_title' => $cleaned,
             'cleaned_title' => $cleaned,
-            'ok' => mb_strlen($final) <= self::LIMIT,
-            'blocker' => mb_strlen($final) > self::LIMIT ? 'ebay_title_too_long_after_cleanup' : null,
+            'translated_title' => $cleaned,
+            'suggested_short_title' => $suggested,
+            'ok' => $translatedLength <= self::LIMIT,
+            'blocker' => $translatedLength > self::LIMIT ? 'ebay_title_needs_review' : null,
             'diagnostics' => [
+                'original_source_title' => $original,
                 'original_pl_title' => $original,
-                'translated_title_before_cleanup' => $before,
+                'translated_title' => $cleaned,
+                'translated_title_before_cleanup' => $translated,
                 'cleaned_title' => $cleaned,
-                'final_title' => $final,
+                'final_title' => $cleaned,
+                'suggested_short_title' => $suggested,
                 'original_length' => mb_strlen($original),
-                'translated_length' => mb_strlen($before),
-                'final_length' => mb_strlen($final),
+                'translated_length' => $translatedLength,
+                'final_length' => $translatedLength,
+                'suggested_short_title_length' => $suggested !== null ? mb_strlen($suggested) : null,
                 'title_limit' => self::LIMIT,
-                'removed_tokens' => array_values(array_unique(array_filter($removed))),
-                'protected_tokens' => $protected,
-                'protected_tokens_preserved' => $preserved,
-                'cleanup_applied' => $final !== $before || $cleaned !== $before || $removed !== [],
+                'exceeds_limit' => $translatedLength > self::LIMIT,
+                'title_was_shortened' => $suggested !== null,
+                'requires_manual_review' => $translatedLength > self::LIMIT,
+                'removed_tokens' => [],
+                'tokens_lost' => $tokensLost,
+                'potentially_lost_words' => $tokensLost,
+                'protected_tokens' => [],
+                'protected_tokens_preserved' => true,
+                'cleanup_applied' => $cleaned !== $translated,
+                'minimal_cleanup_only' => true,
             ],
         ];
     }
 
     private function normalize(string $title): string
     {
-        $title = preg_replace('/\s+,/u', ',', $title) ?? $title;
-        $title = preg_replace('/,\s*,+/u', ',', $title) ?? $title;
-        $title = preg_replace('/\s*([-–—])\s*(?=,|$)/u', ' ', $title) ?? $title;
-        $title = preg_replace('/(?:^|\s)[,;:-]+(?:\s|$)/u', ' ', $title) ?? $title;
         $title = preg_replace('/\s+/u', ' ', $title) ?? $title;
-        $title = preg_replace('/\s*,\s*/u', ', ', $title) ?? $title;
-        return trim($title, " \t\n\r\0\x0B,;-–—");
+        return trim($title);
     }
 
-    private function safeTrim(string $title, array $protected): string
+    private function safeTrim(string $title): string
     {
         $cut = rtrim(mb_substr($title, 0, self::LIMIT));
-        $cut = preg_replace('/\s+\S*$/u', '', $cut) ?: $cut;
-        $cut = $this->normalize($cut);
-        foreach ($protected as $token) {
-            if (stripos($title, $token) !== false && stripos($cut, $token) === false && mb_strlen($cut.' '.$token) <= self::LIMIT) {
-                $cut = $this->normalize($cut.' '.$token);
-            }
-        }
-        return $cut;
+        $wordCut = preg_replace('/\s+\S*$/u', '', $cut);
+        return $this->normalize($wordCut ?: $cut);
     }
 
-    private function protectedTokens(Part $part, string $text): array
+    /** @return array<int, string> */
+    private function lostWords(string $original, string $suggested): array
     {
-        $tokens = array_filter([(string) ($part->part_number ?? ''), (string) data_get($part->vehicle_snapshot, 'engine_code', ''), (string) data_get($part->vehicle_snapshot, 'gearbox_code', '')]);
-        preg_match_all('/\b[A-Z0-9]{3,20}\b/u', $text, $matches);
-        foreach ($matches[0] ?? [] as $token) {
-            $token = trim($token);
-            if ($this->isDescriptivePolishToken($token)) continue;
-            if (preg_match('/^(?=.*[A-Z])(?=.*\d)|[A-Z]{3,5}$/u', $token)) $tokens[] = $token;
-        }
+        $originalWords = preg_split('/\s+/u', $original) ?: [];
+        $suggestedWords = preg_split('/\s+/u', $suggested) ?: [];
+        $lost = array_slice($originalWords, count($suggestedWords));
 
-        return array_values(array_unique(array_map('trim', array_filter($tokens, fn (string $token): bool => ! $this->isDescriptivePolishToken($token)))));
-    }
-
-    private function isDescriptivePolishToken(string $token): bool
-    {
-        return in_array(mb_strtoupper(trim($token), 'UTF-8'), self::DESCRIPTIVE_POLISH_TOKENS, true);
-    }
-
-    private function tokensPreserved(array $tokens, string $title): bool
-    {
-        foreach ($tokens as $token) if (stripos($title, $token) === false) return false;
-        return true;
+        return array_values(array_filter(array_map('trim', $lost), fn (string $word): bool => $word !== ''));
     }
 }

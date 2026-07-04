@@ -16,6 +16,7 @@
     $ready = (bool) ($readiness['can_prepare'] ?? false);
     $diagnostics = $preview['diagnostics'] ?? [];
     $translationStatus = $preview['translation_status'] ?? 'not_prepared';
+    $ebayTitle = $preview['title_sanitization'] ?? ($diagnostics['ebay_title'] ?? []);
 @endphp
 <div class="wrap">
     <div class="notice">To jest tylko podgląd. Nie wystawia oferty i nie wykonuje żadnego zapisu do marketplace.</div>
@@ -40,6 +41,11 @@
                 <div class="k">Marketplace request</div><div class="v"><span class="pill ok">will_make_marketplace_request=false</span></div>
                 <div class="k">Waluta</div><div class="v">{{ $preview['currency'] ?? $readiness['currency'] ?? 'EUR' }}</div>
                 <div class="k">Status tłumaczeń</div><div class="v">{{ $translationStatus }} / {{ $preview['translation_language'] ?? '—' }}</div>
+                <div class="k">Source title PL</div><div class="v">{{ $ebayTitle['original_source_title'] ?? $part->name ?? '—' }}</div>
+                <div class="k">Translated title DE 1:1</div><div class="v">{{ $ebayTitle['translated_title'] ?? $preview['title'] ?? '—' }}</div>
+                <div class="k">eBay title length</div><div class="v">{{ $ebayTitle['translated_length'] ?? mb_strlen((string) ($preview['title'] ?? '')) }} / {{ $ebayTitle['title_limit'] ?? 80 }} @if(($ebayTitle['exceeds_limit'] ?? false))<span class="pill bad">przekracza limit</span>@else<span class="pill ok">OK</span>@endif</div>
+                <div class="k">Suggested short title</div><div class="v">{{ $ebayTitle['suggested_short_title'] ?? '—' }}</div>
+                <div class="k">Manual review</div><div class="v"><span class="pill {{ ($ebayTitle['requires_manual_review'] ?? false) ? 'bad' : 'ok' }}">{{ ($ebayTitle['requires_manual_review'] ?? false) ? 'wymagana akceptacja' : 'niewymagana' }}</span></div>
                 <div class="k">Vehicle source</div><div class="v">{{ $diagnostics['vehicle_source'] ?? 'none' }} (present={{ ($diagnostics['vehicle_present'] ?? false) ? 'true' : 'false' }})</div>
                 <div class="k">Cena źródłowa PLN</div><div class="v">{{ $preview['price_source_pln'] ?? $preview['price_pln'] ?? '—' }}</div>
                 <div class="k">Cena EUR</div><div class="v">{{ $preview['price_eur'] ?? '—' }}</div>
