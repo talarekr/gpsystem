@@ -631,6 +631,64 @@ class EbayApiClient extends AbstractMarketplaceApiClient
     }
 
 
+    /**
+     * Read-only existence check for a guarded create-only Inventory API publish.
+     * No inventory item, offer, listing, stock, price, description, relist, revise, end, or batch write is performed.
+     *
+     * @return array<string,mixed>
+     */
+    public function readOnlyInventoryAndOfferExistence(string $sku): array
+    {
+        $readiness = $this->getAccountReadiness();
+        $baseUrl = rtrim((string) $this->account?->api_base_url, '/');
+        $marketplaceId = $this->marketplaceId();
+        $headers = ['X-EBAY-C-MARKETPLACE-ID' => $marketplaceId];
+        $base = [
+            'ok' => false,
+            'read_only' => true,
+            'sku' => $sku,
+            'marketplace_id' => $marketplaceId,
+            'inventory_item_exists' => false,
+            'offer_exists' => false,
+            'offer_id' => null,
+            'listing_id' => null,
+            'inventory_http_status' => null,
+            'offer_http_status' => null,
+            'blockers' => $readiness['blockers'] ?? [],
+        ];
+        if ($base['blockers'] !== []) return $base + ['blocker' => 'inventory_offer_api_not_ready'];
+        if (blank($sku)) return $base + ['blocker' => 'missing_sku', 'blockers' => ['missing_sku']];
+
+        $token = $this->accessToken();
+        if (blank($token)) return $base + ['blocker' => 'missing_access_token', 'blockers' => ['Credential access_token is missing.']];
+
+        $inventoryResponse = Http::withToken($token)->withHeaders($headers)->acceptJson()->timeout(20)
+            ->get($baseUrl.'/sell/inventory/v1/inventory_item/'.rawurlencode($sku));
+        $offerResponse = Http::withToken($token)->withHeaders($headers)->acceptJson()->timeout(20)
+            ->get($baseUrl.'/sell/inventory/v1/offer', ['sku' => $sku, 'marketplace_id' => $marketplaceId]);
+        $offerJson = $offerResponse->json();
+        $offers = is_array($offerJson) ? array_values(array_filter($offerJson['offers'] ?? [], 'is_array')) : [];
+        $offer = $offers[0] ?? null;
+
+        $inventoryOk = $inventoryResponse->successful() || $inventoryResponse->status() === 404;
+        $offerOk = $offerResponse->successful() || $offerResponse->status() === 404;
+
+        return array_merge($base, [
+            'ok' => $inventoryOk && $offerOk,
+            'inventory_http_status' => $inventoryResponse->status(),
+            'offer_http_status' => $offerResponse->status(),
+            'inventory_item_exists' => $inventoryResponse->successful(),
+            'offer_exists' => $offer !== null,
+            'offer_id' => is_array($offer) ? ($offer['offerId'] ?? null) : null,
+            'listing_id' => is_array($offer) ? ($offer['listingId'] ?? null) : null,
+            'offer_count' => count($offers),
+            'blockers' => array_values(array_filter([
+                $inventoryOk ? null : 'inventory_item_lookup_failed',
+                $offerOk ? null : 'offer_lookup_failed',
+            ])),
+        ]);
+    }
+
     public function publishInventoryOffer(string $sku, array $inventoryPayload, array $offerPayload, ?string $contentLanguage = null): array
     {
         $base = rtrim((string) $this->account?->api_base_url, '/');
