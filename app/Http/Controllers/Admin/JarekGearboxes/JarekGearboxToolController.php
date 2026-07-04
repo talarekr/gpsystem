@@ -609,6 +609,117 @@ class JarekGearboxToolController extends Controller
         }
     }
 
+    public function ebayDeReviseApply(Request $request, GoogleTranslateService $translateService, EbayDescriptionTemplateRenderer $renderer, NbpExchangeRateService $exchangeRateService): JsonResponse
+    {
+        $started = microtime(true);
+        $requiredConfirm = 'jarek-ebay-de-revise-one';
+        $allowedSku = 'JAREK-18727785496';
+        $sku = (string) $request->query('sku', '');
+        $confirm = (string) $request->query('confirm', '');
+
+        $base = [
+            'ok' => false,
+            'dry_run' => false,
+            'marketplace_write' => false,
+            'parts_changed' => false,
+            'applied' => false,
+            'action' => 'jarek_gearboxes_ebay_de_revise_apply',
+            'required_confirm' => $requiredConfirm,
+            'provided_confirm' => $request->query('confirm'),
+            'allowed_sku' => $allowedSku,
+            'sku' => $sku,
+            'blockers' => [],
+            'warnings' => [],
+        ];
+
+        if ($sku !== $allowedSku) {
+            return response()->json($base + ['error' => 'Revise apply is allowed only for the single guarded SKU.', 'blockers' => ['sku_not_allowed']], 403);
+        }
+        if ($confirm !== $requiredConfirm) {
+            return response()->json($base + ['error' => 'Missing or invalid guarded revise confirmation token.', 'blockers' => ['invalid_confirm']], 403);
+        }
+
+        $previewRequest = Request::create($request->path(), 'GET', ['sku' => $sku]);
+        $previewResponse = $this->ebayDeRevisePreview($previewRequest, $translateService, $renderer, $exchangeRateService);
+        $preview = $previewResponse->getData(true);
+        $blockers = array_values((array) ($preview['blockers'] ?? []));
+        $warnings = array_values((array) ($preview['warnings'] ?? []));
+        $offerId = (string) ($preview['offer_id'] ?? data_get($preview, 'revised_offer_request.offerId', ''));
+        $listingId = $preview['listing_id'] ?? null;
+        $inventoryPayload = (array) ($preview['revised_inventory_item_request'] ?? []);
+        $offerPayload = (array) ($preview['revised_offer_request'] ?? []);
+
+        foreach ([
+            'offer_id' => $offerId,
+            'inventory_payload' => $inventoryPayload,
+            'offer_payload' => $offerPayload,
+            'public_image_urls' => $preview['public_image_urls'] ?? [],
+            'listingDescription' => data_get($offerPayload, 'listingDescription'),
+            'price' => data_get($offerPayload, 'pricingSummary.price.value'),
+            'condition' => data_get($inventoryPayload, 'condition'),
+        ] as $field => $value) {
+            if (blank($value) || (is_array($value) && $value === [])) $blockers[] = 'missing_'.$field;
+        }
+
+        $payload = $base + [
+            'preview' => $preview,
+            'offer_id' => $offerId ?: null,
+            'listing_id' => $listingId,
+            'public_image_urls' => $preview['public_image_urls'] ?? [],
+            'revised_inventory_item_request' => $inventoryPayload,
+            'revised_offer_request' => $offerPayload,
+            'diagnostics' => [
+                'price_diagnostics' => $preview['price_diagnostics'] ?? null,
+                'image_diagnostics' => $preview['image_diagnostics'] ?? null,
+                'live_listing_diagnostics' => $preview['live_listing_diagnostics'] ?? null,
+                'public_url_diagnostics' => $preview['public_url_diagnostics'] ?? null,
+                'core_return_diagnostics' => $preview['core_return_diagnostics'] ?? null,
+                'condition_template_diagnostics' => $preview['condition_template_diagnostics'] ?? null,
+                'admin_diagnostics' => $preview['admin_diagnostics'] ?? null,
+            ],
+        ];
+        $payload['blockers'] = array_values(array_unique(array_filter($blockers)));
+        $payload['warnings'] = $warnings;
+
+        if ($payload['blockers'] !== []) {
+            $payload['error'] = 'Guarded revise apply blocked before any eBay write.';
+            $this->logJarekEbayDeReviseOne('blocked', $payload['error'], $payload, $started);
+            return response()->json($payload, 409);
+        }
+
+        $account = Schema::hasTable('marketplace_accounts') ? MarketplaceAccount::query()->where('code', 'ebay_de')->first() : null;
+        $client = new EbayApiClient('ebay_de', $account);
+        $result = $client->reviseInventoryOffer($sku, $offerId, $inventoryPayload, $offerPayload, 'de-DE');
+        $payload['marketplace_write'] = true;
+        $payload['applied'] = (bool) ($result['ok'] ?? false);
+        $payload['result'] = $result;
+        $payload['offer_id'] = $result['offer_id'] ?? $offerId;
+        $payload['listing_id'] = $result['listing_id'] ?? $listingId;
+        $payload['errors'] = ($result['ok'] ?? false) ? [] : [$result['error'] ?? ($result['json'] ?? 'eBay revise failed')];
+        $payload['ok'] = (bool) ($result['ok'] ?? false);
+
+        $this->logJarekEbayDeReviseOne($payload['ok'] ? 'success' : 'error', $payload['ok'] ? 'Guarded single SKU eBay DE revise completed.' : 'Guarded single SKU eBay DE revise failed.', $payload, $started);
+
+        return response()->json($payload, $payload['ok'] ? 200 : 502);
+    }
+
+    /** @param array<string, mixed> $payload */
+    private function logJarekEbayDeReviseOne(string $status, string $message, array $payload, float $started): void
+    {
+        if (! Schema::hasTable('marketplace_sync_logs')) return;
+
+        MarketplaceSyncLog::query()->create([
+            'marketplace' => 'ebay_de',
+            'action' => 'jarek_gearboxes_ebay_de_revise_one',
+            'status' => $status,
+            'message' => $message,
+            'duration_ms' => (int) round((microtime(true) - $started) * 1000),
+            'external_id' => $payload['offer_id'] ?? $payload['sku'] ?? null,
+            'payload' => $payload,
+            'created_at' => now(),
+        ]);
+    }
+
     /** @param array<string, mixed> $adminDiagnostics */
     private function normalizeJarekRevisePreviewAdminDiagnostics(array $adminDiagnostics): array
     {
