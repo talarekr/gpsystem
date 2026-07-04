@@ -11,6 +11,8 @@ use App\Models\PartCategory;
 use App\Models\PartImage;
 use App\Services\JarekGearboxes\AllegroJarekImportService;
 use App\Services\JarekGearboxes\JarekGearboxEbayPreviewService;
+use App\Services\Marketplace\EbayDescriptionTemplateRenderer;
+use App\Services\Marketplace\GoogleTranslateService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -122,6 +124,128 @@ class JarekGearboxToolController extends Controller
     public function ebayPreview(JarekGearbox $jarekGearbox, JarekGearboxEbayPreviewService $service): JsonResponse
     {
         return response()->json($service->build($jarekGearbox));
+    }
+
+
+    public function ebayDePreparePreview(Request $request, GoogleTranslateService $translateService, EbayDescriptionTemplateRenderer $renderer): JsonResponse
+    {
+        $started = microtime(true);
+        $sku = trim((string) $request->query('sku', ''));
+        $offerId = trim((string) $request->query('allegro_offer_id', ''));
+        if ($offerId === '' && preg_match('/^JAREK-(.+)$/', $sku, $matches)) {
+            $offerId = $matches[1];
+        }
+
+        $gearbox = Schema::hasTable('jarek_gearboxes')
+            ? JarekGearbox::query()
+                ->when($offerId !== '', fn ($query) => $query->where('allegro_offer_id', $offerId))
+                ->when($offerId === '' && $sku !== '', fn ($query) => $query->whereRaw("concat('JAREK-', allegro_offer_id) = ?", [$sku]))
+                ->first()
+            : null;
+
+        if (! $gearbox) {
+            $payload = [
+                'ok' => false,
+                'dry_run' => true,
+                'marketplace_write' => false,
+                'parts_changed' => false,
+                'source_table' => 'jarek_gearboxes',
+                'sku' => $sku ?: null,
+                'allegro_offer_id' => $offerId ?: null,
+                'market' => 'ebay_de',
+                'ready' => false,
+                'blockers' => ['jarek_gearbox_not_found'],
+                'warnings' => [],
+            ];
+            $this->logJarekEbayDePreparePreview('blocked', 'Preview eBay DE dla Skrzyń Jarka zablokowany: brak rekordu źródłowego.', $payload, $started);
+
+            return response()->json($payload, 404);
+        }
+
+        $warnings = [];
+        $blockers = [];
+        $sku = 'JAREK-'.($gearbox->allegro_offer_id ?: $gearbox->id);
+        $sourceTitle = trim((string) $gearbox->title);
+        $titleTranslation = $translateService->translate($sourceTitle, 'de', 'pl');
+        $warnings = array_merge($warnings, $titleTranslation['warnings'] ?? []);
+        $blockers = array_merge($blockers, $titleTranslation['blockers'] ?? []);
+        $translatedTitle = trim((string) ($titleTranslation['translated_text'] ?? ''));
+        $titleLength = mb_strlen($translatedTitle);
+        $titleRequiresReview = $titleLength > 80;
+        $suggestedShortTitle = $titleRequiresReview ? $this->suggestJarekEbayShortTitle($translatedTitle, 80) : null;
+        if ($titleRequiresReview) $blockers[] = 'ebay_title_needs_review';
+
+        $descriptionWarnings = [];
+        $sourceDescription = $this->normalizeJarekDescription($gearbox->description ?: $gearbox->plain_description, $descriptionWarnings);
+        $warnings = array_merge($warnings, $descriptionWarnings);
+        $descriptionTranslation = $translateService->translate($sourceDescription, 'de', 'pl');
+        $warnings = array_merge($warnings, $descriptionTranslation['warnings'] ?? []);
+        $blockers = array_merge($blockers, $descriptionTranslation['blockers'] ?? []);
+        $translatedDescription = trim((string) ($descriptionTranslation['translated_text'] ?? ''));
+
+        $templatePart = new Part();
+        $templatePart->name = $translatedTitle;
+        $templatePart->description = $translatedDescription;
+        $renderedDescription = $renderer->render('ebay_de', $templatePart, [
+            'title' => $translatedTitle,
+            'description' => $translatedDescription,
+            'part_number' => $this->detectJarekPartNumber((object) $gearbox->getAttributes(), $sku),
+            'condition' => 'Gebraucht',
+        ]);
+
+        $imageUrls = $gearbox->localizedImageUrls();
+        if ($imageUrls === []) $blockers[] = 'missing_local_images';
+        $mapping = $this->jarekEbayCategoryMapping($gearbox);
+        if (! $mapping) $blockers[] = 'missing_ebay_category';
+        $blockers = array_values(array_unique(array_filter($blockers)));
+        $warnings = array_values(array_unique(array_filter($warnings)));
+
+        $payloadPreview = [
+            'sku' => $sku,
+            'marketplace' => 'ebay_de',
+            'title' => $translatedTitle,
+            'description' => $renderedDescription,
+            'categoryId' => $mapping['ebay_category_id'] ?? null,
+            'imageUrls' => $imageUrls,
+            'price' => $gearbox->price,
+            'currency' => $gearbox->currency ?: 'PLN',
+            'quantity' => (int) $gearbox->quantity,
+            'condition' => 'USED',
+        ];
+
+        $payload = [
+            'ok' => true,
+            'dry_run' => true,
+            'marketplace_write' => false,
+            'parts_changed' => false,
+            'source_table' => 'jarek_gearboxes',
+            'sku' => $sku,
+            'allegro_offer_id' => (string) $gearbox->allegro_offer_id,
+            'market' => 'ebay_de',
+            'ready' => $blockers === [],
+            'blockers' => $blockers,
+            'warnings' => $warnings,
+            'source_title_pl' => $sourceTitle,
+            'translated_title_de' => $translatedTitle,
+            'title_length' => $titleLength,
+            'title_limit' => 80,
+            'suggested_short_title' => $suggestedShortTitle,
+            'title_requires_review' => $titleRequiresReview,
+            'source_description_pl_cleaned' => $sourceDescription,
+            'translated_description_de' => $translatedDescription,
+            'rendered_description_de_template' => $renderedDescription,
+            'ebay_category_id' => $mapping['ebay_category_id'] ?? null,
+            'image_urls' => $imageUrls,
+            'price' => $gearbox->price,
+            'currency' => $gearbox->currency ?: 'PLN',
+            'quantity' => (int) $gearbox->quantity,
+            'payload_preview' => $payloadPreview,
+            'contains_allegro_image_urls' => $this->arrayContainsStringFragment($payloadPreview, 'a.allegroimg.com'),
+        ];
+
+        $this->logJarekEbayDePreparePreview($payload['ready'] ? 'success' : 'blocked', 'Preview payloadu eBay DE dla Skrzyń Jarka; bez eBay API, bez parts, marketplace_write=false.', $payload, $started);
+
+        return response()->json($payload);
     }
 
     public function ebayCsvPreview(Request $request): JsonResponse
@@ -1318,6 +1442,47 @@ class JarekGearboxToolController extends Controller
             'category_payload' => $this->decodedJsonValue($row->category_payload ?? null),
             'marketplace_write' => false,
         ];
+    }
+
+
+    private function suggestJarekEbayShortTitle(string $title, int $limit): string
+    {
+        $short = mb_substr($title, 0, $limit);
+        $lastSpace = mb_strrpos($short, ' ');
+        if ($lastSpace !== false && $lastSpace >= 50) {
+            $short = mb_substr($short, 0, $lastSpace);
+        }
+
+        return rtrim($short, " \t\n\r\0\x0B,.;:-");
+    }
+
+    private function arrayContainsStringFragment(mixed $value, string $fragment): bool
+    {
+        if (is_string($value)) return str_contains($value, $fragment);
+        if (! is_array($value)) return false;
+
+        foreach ($value as $item) {
+            if ($this->arrayContainsStringFragment($item, $fragment)) return true;
+        }
+
+        return false;
+    }
+
+    /** @param array<string, mixed> $payload */
+    private function logJarekEbayDePreparePreview(string $status, string $message, array $payload, float $started): void
+    {
+        if (! Schema::hasTable('marketplace_sync_logs')) return;
+
+        MarketplaceSyncLog::query()->create([
+            'marketplace' => 'ebay_de',
+            'action' => 'jarek_gearboxes_ebay_de_prepare_preview',
+            'status' => $status,
+            'message' => $message,
+            'duration_ms' => (int) round((microtime(true) - $started) * 1000),
+            'external_id' => $payload['allegro_offer_id'] ?? $payload['sku'] ?? null,
+            'payload' => $payload,
+            'created_at' => now(),
+        ]);
     }
 
     private function logPartsImportApply(string $status, string $message, array $payload): void
