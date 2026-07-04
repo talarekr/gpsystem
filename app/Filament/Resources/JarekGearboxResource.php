@@ -265,7 +265,7 @@ class JarekGearboxResource extends Resource
 
     private static function imagesPreviewHtml(?JarekGearbox $record): string
     {
-        $images = collect([$record?->main_image_url])->merge((array) ($record?->images ?? []))->filter()->unique()->take(12);
+        $images = collect($record?->displayImageUrls() ?? [])->filter()->unique()->take(12);
 
         if ($images->isEmpty()) {
             return '<div class="text-sm text-gray-500">Brak zdjęć.</div>';
