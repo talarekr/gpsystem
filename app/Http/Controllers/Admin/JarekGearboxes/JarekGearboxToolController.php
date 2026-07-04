@@ -13,6 +13,7 @@ use App\Models\PartImage;
 use App\Services\JarekGearboxes\AllegroJarekImportService;
 use App\Services\JarekGearboxes\JarekGearboxEbayPreviewService;
 use App\Services\Marketplace\EbayDescriptionTemplateRenderer;
+use App\Services\Marketplace\Ebay\EbayConditionMapper;
 use App\Services\Marketplace\GoogleTranslateService;
 use App\Services\Marketplace\NbpExchangeRateService;
 use App\Services\Marketplace\Api\EbayApiClient;
@@ -264,7 +265,7 @@ class JarekGearboxToolController extends Controller
             'price' => $priceEur,
             'currency' => 'EUR',
             'quantity' => (int) $gearbox->quantity,
-            'condition' => 'USED',
+            'condition' => (new EbayConditionMapper())->usedPartCondition()['condition_mapped_value'],
             'core_return_required' => $coreReturnNotice['required'],
             'core_return_type' => $coreReturnNotice['type'],
             'core_return_notice_added' => $coreReturnNoticeAdded,
@@ -351,7 +352,7 @@ class JarekGearboxToolController extends Controller
         $payload['parts_changed'] = false;
         $payload['publish_preview'] = true;
         $payload['apply_requires_confirm'] = 'jarek-ebay-de-publish-one';
-        $payload['idempotency'] = [
+        $payload['idempotency'] = $this->jarekEbayDePreviewIdempotency((string) ($payload['sku'] ?? '')) + [
             'sku' => $payload['sku'] ?? null,
             'existing_ebay_listing_id' => $payload['existing_ebay_listing_id'] ?? null,
             'existing_ebay_offer_id' => $payload['existing_ebay_offer_id'] ?? null,
@@ -361,7 +362,14 @@ class JarekGearboxToolController extends Controller
         ];
         $plan = $this->jarekEbayDeApiPlan($payload);
         $payload['ebay_api_plan'] = $plan['plan'];
-        $payload['blockers'] = array_values(array_unique(array_merge($payload['blockers'] ?? [], $plan['blockers'])));
+        $idempotencyBlockers = [];
+        if (($payload['idempotency']['read_only_api_check'] ?? null) === 'performed') {
+            if ($payload['idempotency']['inventory_item_exists'] ?? false) $idempotencyBlockers[] = 'inventory_item_exists';
+            if ($payload['idempotency']['offer_exists'] ?? false) $idempotencyBlockers[] = 'offer_exists';
+            if (filled($payload['idempotency']['listing_id'] ?? null)) $idempotencyBlockers[] = 'listing_exists';
+            if (! ($payload['idempotency']['ok'] ?? false)) $idempotencyBlockers[] = 'idempotency_check_failed';
+        }
+        $payload['blockers'] = array_values(array_unique(array_merge($payload['blockers'] ?? [], $plan['blockers'], $idempotencyBlockers)));
         $payload['ready'] = ($payload['blockers'] ?? []) === [];
         $payload['safety'] = array_values(array_unique(array_merge($payload['safety'] ?? [], [
             'dry_run_only',
@@ -491,6 +499,34 @@ class JarekGearboxToolController extends Controller
         ]);
     }
 
+
+    /** @return array<string, mixed> */
+    private function jarekEbayDePreviewIdempotency(string $sku): array
+    {
+        $account = Schema::hasTable('marketplace_accounts') ? MarketplaceAccount::query()->where('code', 'ebay_de')->first() : null;
+        $credentials = is_array($account?->api_credentials) ? $account->api_credentials : [];
+        $canCheck = $account !== null && $account->api_enabled && filled($account->api_base_url) && filled($credentials['access_token'] ?? null) && filled($sku);
+
+        if (! $canCheck) {
+            return [
+                'read_only_api_check' => 'skipped',
+                'read_only_api_check_reason' => 'ebay_de_account_or_access_token_not_configured_for_preview',
+                'inventory_item_exists' => false,
+                'offer_exists' => false,
+                'offer_id' => null,
+                'listing_id' => null,
+                'offer_count' => 0,
+            ];
+        }
+
+        $check = (new EbayApiClient('ebay_de', $account))->readOnlyInventoryAndOfferExistence($sku);
+
+        return $check + [
+            'read_only_api_check' => 'performed',
+            'safe_to_retry' => ! ($check['inventory_item_exists'] ?? false) && ! ($check['offer_exists'] ?? false) && blank($check['listing_id'] ?? null),
+        ];
+    }
+
     /** @return array{plan: array<string, mixed>, blockers: array<int, string>} */
     private function jarekEbayDeApiPlan(array $payload): array
     {
@@ -513,6 +549,8 @@ class JarekGearboxToolController extends Controller
         $fulfillmentPolicyId = filled($payload['payload_preview']['fulfillment_policy_id'] ?? null) ? (string) $payload['payload_preview']['fulfillment_policy_id'] : null;
         $paymentPolicyId = $this->jarekEbayPolicyId($settings, 'payment');
         $returnPolicyId = $this->jarekEbayPolicyId($settings, 'return');
+        $conditionDiagnostics = (new EbayConditionMapper())->usedPartCondition($settings);
+        $condition = $conditionDiagnostics['condition'];
 
         $aspects = [];
         foreach ($itemSpecifics as $name => $value) {
@@ -522,7 +560,7 @@ class JarekGearboxToolController extends Controller
 
         $inventoryItemRequest = [
             'product' => ['title' => (string) ($payload['translated_title_de'] ?? ''), 'description' => $inventoryDescription, 'imageUrls' => $imageUrls, 'aspects' => $aspects],
-            'condition' => 'USED',
+            'condition' => $condition,
             'availability' => ['shipToLocationAvailability' => ['quantity' => $quantity]],
         ];
         $offerRequest = [
@@ -546,6 +584,7 @@ class JarekGearboxToolController extends Controller
         if (blank($returnPolicyId)) $blockers[] = 'missing_return_policy_id';
         if (blank($marketplaceId)) $blockers[] = 'missing_marketplace_id';
         if (blank($sku) || blank($inventoryItemRequest['product']['title']) || $imageUrls === [] || ! is_int($quantity) || $quantity <= 0) $blockers[] = 'missing_inventory_item_request_fields';
+        if (blank($condition) || ! ($conditionDiagnostics['condition_mapping_valid'] ?? false)) $blockers[] = 'missing_or_invalid_ebay_condition';
         if (blank($sku) || blank($categoryId) || blank($format) || blank($listingDuration) || blank($merchantLocationKey) || blank($fulfillmentPolicyId) || blank($paymentPolicyId) || blank($returnPolicyId) || $price === null || $price <= 0 || ! is_int($quantity) || $quantity <= 0) $blockers[] = 'missing_offer_request_fields';
 
         return ['plan' => [
@@ -568,6 +607,9 @@ class JarekGearboxToolController extends Controller
             'item_specifics' => $itemSpecifics,
             'listing_description' => $listingDescription,
             'inventory_description_source' => filled($payload['translated_description_de'] ?? null) ? 'translated_description_de' : 'translated_title_de',
+            'condition_source' => $conditionDiagnostics['condition_source'],
+            'condition_mapped_value' => $conditionDiagnostics['condition_mapped_value'],
+            'condition_diagnostics' => $conditionDiagnostics,
         ], 'blockers' => array_values(array_unique($blockers))];
     }
 
