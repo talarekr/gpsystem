@@ -689,6 +689,61 @@ class EbayApiClient extends AbstractMarketplaceApiClient
         ]);
     }
 
+    public function readOnlyInventoryOfferListingDiagnostics(string $sku, ?string $offerId = null, ?string $listingId = null): array
+    {
+        $existence = $this->readOnlyInventoryAndOfferExistence($sku);
+        $readiness = $this->getAccountReadiness();
+        $baseUrl = rtrim((string) $this->account?->api_base_url, '/');
+        $marketplaceId = $this->marketplaceId();
+        $headers = ['X-EBAY-C-MARKETPLACE-ID' => $marketplaceId];
+        $token = $this->accessToken();
+        $offerId = $offerId ?: ($existence['offer_id'] ?? null);
+        $listingId = $listingId ?: ($existence['listing_id'] ?? null);
+        $result = $existence + [
+            'read_only_api_check' => 'performed',
+            'offer_id' => $offerId,
+            'listing_id' => $listingId,
+            'inventory_item_status' => ($existence['inventory_item_exists'] ?? false) ? 'exists' : 'not_found',
+            'offer_status' => null,
+            'listing_status' => null,
+            'is_publicly_visible' => false,
+            'public_item_url' => null,
+            'public_item_url_source' => null,
+            'read_only_ebay_api_responses' => [],
+            'blockers' => $readiness['blockers'] ?? [],
+        ];
+        if (($result['blockers'] ?? []) !== [] || blank($token)) return $result;
+
+        if (filled($offerId)) {
+            $offerResponse = Http::withToken($token)->withHeaders($headers)->acceptJson()->timeout(20)->get($baseUrl.'/sell/inventory/v1/offer/'.rawurlencode((string) $offerId));
+            $offerJson = $offerResponse->json();
+            $offer = is_array($offerJson) ? $offerJson : [];
+            $listingId = $listingId ?: ($offer['listingId'] ?? null);
+            $result['offer_status'] = $offer['status'] ?? $offer['listingStatus'] ?? null;
+            $result['listing_id'] = $listingId;
+            $result['read_only_ebay_api_responses']['get_offer'] = ['http_status' => $offerResponse->status(), 'json' => $offer];
+        }
+
+        if (filled($listingId)) {
+            $legacyResponse = Http::withToken($token)->withHeaders($headers)->acceptJson()->timeout(20)
+                ->get($baseUrl.'/buy/browse/v1/item/get_item_by_legacy_id', ['legacy_item_id' => (string) $listingId]);
+            $legacyJson = $legacyResponse->json();
+            $item = is_array($legacyJson) ? $legacyJson : [];
+            $result['read_only_ebay_api_responses']['browse_get_item_by_legacy_id'] = ['http_status' => $legacyResponse->status(), 'json' => $item];
+            $result['listing_status'] = $item['itemEndDate'] ?? null ? 'ENDED_OR_HAS_END_DATE' : ($legacyResponse->successful() ? 'PUBLICLY_READABLE' : null);
+            $result['public_item_url'] = $item['itemWebUrl'] ?? $item['itemAffiliateWebUrl'] ?? null;
+            $result['public_item_url_source'] = filled($result['public_item_url']) ? 'buy_browse_get_item_by_legacy_id.itemWebUrl' : null;
+            $result['is_publicly_visible'] = $legacyResponse->successful() && filled($result['public_item_url']);
+        }
+
+        $result['warnings'] = array_values(array_filter([
+            ($result['is_publicly_visible'] ?? false) ? null : 'publishOffer_success_does_not_guarantee_public_url_is_immediately_visible_or_browse_readable',
+            blank($result['public_item_url']) ? 'public_item_url_not_returned_by_read_only_ebay_api' : null,
+        ]));
+
+        return $result;
+    }
+
     public function publishInventoryOffer(string $sku, array $inventoryPayload, array $offerPayload, ?string $contentLanguage = null): array
     {
         $base = rtrim((string) $this->account?->api_base_url, '/');

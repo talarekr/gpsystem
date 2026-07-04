@@ -181,7 +181,7 @@ class JarekGearboxToolController extends Controller
 
         $descriptionWarnings = [];
         $sourceDescription = $this->normalizeJarekDescription($gearbox->description ?: $gearbox->plain_description, $descriptionWarnings);
-        $coreReturnNotice = $this->jarekCoreReturnNotice($sourceTitle);
+        $coreReturnNotice = $this->jarekCoreReturnNotice($sourceTitle.' '.$sourceDescription);
         $sourceDescriptionForTranslation = $coreReturnNotice['required']
             ? $this->removeCoreReturnNotices($sourceDescription, $coreReturnNotice)
             : $sourceDescription;
@@ -196,6 +196,9 @@ class JarekGearboxToolController extends Controller
         $translatedDescription = $translatedDescriptionBase;
         $coreReturnNoticeAddedDe = false;
 
+        $conditionDiagnostics = $this->jarekEbayConditionDiagnostics($gearbox);
+        $templateConditionLabel = $this->jarekEbayTemplateConditionLabel($conditionDiagnostics['mapped_ebay_condition'] ?? null);
+
         $templatePart = new Part();
         $templatePart->name = $translatedTitle;
         $templatePart->description = $translatedDescriptionBase;
@@ -204,7 +207,7 @@ class JarekGearboxToolController extends Controller
             'title' => $translatedTitle,
             'description' => $translatedDescription,
             'part_number' => $partNumber,
-            'condition' => 'Gebraucht',
+            'condition' => $templateConditionLabel,
         ]);
         if ($coreReturnNotice['required']) {
             $renderedDescription = $this->removeCoreReturnNotices($renderedDescription, $coreReturnNotice);
@@ -245,8 +248,6 @@ class JarekGearboxToolController extends Controller
         $blockers = array_values(array_unique(array_filter($blockers)));
         $warnings = array_values(array_unique(array_filter($warnings)));
 
-        $conditionDiagnostics = $this->jarekEbayConditionDiagnostics($gearbox);
-
         $payloadPreview = [
             'sku' => $sku,
             'marketplace' => 'ebay_de',
@@ -268,6 +269,7 @@ class JarekGearboxToolController extends Controller
             'currency' => 'EUR',
             'quantity' => (int) $gearbox->quantity,
             'condition' => $conditionDiagnostics['mapped_ebay_condition'],
+            'template_condition_label_de' => $templateConditionLabel,
             'core_return_required' => $coreReturnNotice['required'],
             'core_return_type' => $coreReturnNotice['type'],
             'core_return_notice_added' => $coreReturnNoticeAdded,
@@ -287,6 +289,7 @@ class JarekGearboxToolController extends Controller
             'condition_source' => $conditionDiagnostics['condition_source'],
             'condition_mapping_reason' => $conditionDiagnostics['condition_mapping_reason'],
             'mapped_ebay_condition' => $conditionDiagnostics['mapped_ebay_condition'],
+            'template_condition_label_de' => $templateConditionLabel,
             'condition_diagnostics' => $conditionDiagnostics,
             'item_specifics' => array_filter([
                 'Brand' => $selectedBrand,
@@ -347,6 +350,7 @@ class JarekGearboxToolController extends Controller
             'condition_source' => $conditionDiagnostics['condition_source'],
             'condition_mapping_reason' => $conditionDiagnostics['condition_mapping_reason'],
             'mapped_ebay_condition' => $conditionDiagnostics['mapped_ebay_condition'],
+            'template_condition_label_de' => $templateConditionLabel,
             'condition_diagnostics' => $conditionDiagnostics,
             'payload_preview' => $payloadPreview,
             'contains_allegro_image_urls' => $this->arrayContainsStringFragment($payloadPreview, 'a.allegroimg.com'),
@@ -408,6 +412,62 @@ class JarekGearboxToolController extends Controller
         }
 
         return response()->json($payload, $response->getStatusCode());
+    }
+
+    public function ebayDeListingDiagnostics(Request $request): JsonResponse
+    {
+        $payload = $this->buildJarekEbayDeListingDiagnostics((string) $request->query('sku', ''));
+        $this->logJarekEbayDeDiagnostic(($payload['ok'] ?? false) ? 'success' : 'blocked', 'Read-only diagnostics for one Jarek eBay DE listing; no marketplace write.', $payload);
+
+        return response()->json($payload, ($payload['ok'] ?? false) ? 200 : 422);
+    }
+
+    public function ebayDeRevisePreview(Request $request, GoogleTranslateService $translateService, EbayDescriptionTemplateRenderer $renderer, NbpExchangeRateService $exchangeRateService): JsonResponse
+    {
+        $sku = (string) $request->query('sku', '');
+        $prepareResponse = $this->ebayDePreparePreview(Request::create($request->path(), 'GET', ['sku' => $sku]), $translateService, $renderer, $exchangeRateService);
+        $prepare = $prepareResponse->getData(true);
+        $diagnostics = $this->buildJarekEbayDeListingDiagnostics($sku);
+        $plan = $this->jarekEbayDeApiPlan($prepare);
+        $listingId = $diagnostics['listing_id'] ?? $prepare['existing_ebay_listing_id'] ?? null;
+        $offerId = $diagnostics['offer_id'] ?? $prepare['existing_ebay_offer_id'] ?? null;
+        $recommendedImages = $diagnostics['image_diagnostics']['recommended_image_urls'] ?? ($prepare['image_urls'] ?? []);
+        $currentImages = $prepare['image_urls'] ?? [];
+        $description = (string) ($prepare['rendered_description_de_template'] ?? '');
+        $payload = [
+            'ok' => (bool) ($prepare['ok'] ?? false),
+            'dry_run' => true,
+            'marketplace_write' => false,
+            'parts_changed' => false,
+            'action' => 'jarek_gearboxes_ebay_de_revise_preview',
+            'source_table' => 'jarek_gearboxes',
+            'inventory_sku' => $sku,
+            'listing_id' => $listingId,
+            'offer_id' => $offerId,
+            'revised_inventory_item_request' => $recommendedImages !== $currentImages ? data_set($plan['plan']['inventory_item_request'] ?? [], 'product.imageUrls', $recommendedImages) : null,
+            'revised_offer_request' => ['offerId' => $offerId, 'listingDescription' => $description],
+            'image_diagnostics' => $diagnostics['image_diagnostics'] ?? null,
+            'live_listing_diagnostics' => $diagnostics['live_listing_diagnostics'] ?? null,
+            'public_url_diagnostics' => $diagnostics['public_url_diagnostics'] ?? null,
+            'core_return_diagnostics' => [
+                'required' => $prepare['core_return_required'] ?? null,
+                'type' => $prepare['core_return_type'] ?? null,
+                'notice_de' => $prepare['core_return_notice_de'] ?? null,
+                'occurrences_in_listingDescription' => substr_count($description, (string) ($prepare['core_return_notice_de'] ?? "\0")),
+                'location' => $prepare['core_return_notice_location'] ?? null,
+            ],
+            'condition_template_diagnostics' => [
+                'source_condition_name' => $prepare['source_condition_name'] ?? null,
+                'source_condition_value' => $prepare['source_condition_value'] ?? null,
+                'mapped_ebay_condition' => $prepare['mapped_ebay_condition'] ?? null,
+                'template_condition_label_de' => $prepare['template_condition_label_de'] ?? null,
+            ],
+            'blockers' => array_values(array_unique(array_merge($prepare['blockers'] ?? [], $diagnostics['blockers'] ?? []))),
+            'warnings' => array_values(array_unique(array_merge($prepare['warnings'] ?? [], $diagnostics['warnings'] ?? []))),
+        ];
+        $this->logJarekEbayDeDiagnostic('success', 'Guarded revise preview for one Jarek eBay DE listing; no revise/write.', $payload);
+
+        return response()->json($payload);
     }
 
     public function ebayDePublishApply(Request $request, GoogleTranslateService $translateService, EbayDescriptionTemplateRenderer $renderer, NbpExchangeRateService $exchangeRateService): JsonResponse
@@ -543,6 +603,101 @@ class JarekGearboxToolController extends Controller
         ];
     }
 
+    private function buildJarekEbayDeListingDiagnostics(string $sku): array
+    {
+        $sku = trim($sku);
+        $offerIdPart = preg_match('/^JAREK-(.+)$/', $sku, $m) ? $m[1] : '';
+        $gearbox = Schema::hasTable('jarek_gearboxes') ? JarekGearbox::query()->where('allegro_offer_id', $offerIdPart)->first() : null;
+        $listingId = $gearbox?->ebay_listing_id ?: null;
+        $offerId = $gearbox?->ebay_offer_id ?: null;
+        $inventorySku = $gearbox?->ebay_inventory_sku ?: $sku;
+        $account = Schema::hasTable('marketplace_accounts') ? MarketplaceAccount::query()->where('code', 'ebay_de')->first() : null;
+        $live = ['ok' => false, 'read_only_api_check' => 'skipped', 'reason' => 'ebay_de_account_not_configured'];
+        if ($account && $account->api_enabled) {
+            $client = new EbayApiClient('ebay_de', $account);
+            $live = $client->readOnlyInventoryOfferListingDiagnostics($inventorySku, $offerId, $listingId);
+            $listingId = $listingId ?: ($live['listing_id'] ?? null);
+            $offerId = $offerId ?: ($live['offer_id'] ?? null);
+        }
+        $imageUrls = $gearbox ? $gearbox->localizedImageUrls() : [];
+        $imageDiagnostics = $this->jarekEbayImageDiagnostics($gearbox, $imageUrls);
+        $publicUrl = $live['public_item_url'] ?? null;
+
+        return [
+            'ok' => $gearbox !== null,
+            'dry_run' => true,
+            'read_only' => true,
+            'marketplace_write' => false,
+            'parts_changed' => false,
+            'source_table' => 'jarek_gearboxes',
+            'sku' => $sku,
+            'inventory_sku' => $inventorySku,
+            'offer_id' => $offerId,
+            'listing_id' => $listingId,
+            'inventory_item_status' => $live['inventory_item_status'] ?? null,
+            'offer_status' => $live['offer_status'] ?? null,
+            'listing_status' => $live['listing_status'] ?? null,
+            'public_item_url' => $publicUrl,
+            'is_publicly_visible' => (bool) ($live['is_publicly_visible'] ?? false),
+            'live_listing_diagnostics' => $live,
+            'public_url_diagnostics' => ['public_item_url' => $publicUrl, 'url_source' => $live['public_item_url_source'] ?? null, 'not_guessed' => true],
+            'image_diagnostics' => $imageDiagnostics,
+            'blockers' => array_values(array_filter([$gearbox ? null : 'jarek_gearbox_not_found'])),
+            'warnings' => array_values(array_filter($imageDiagnostics['warnings'] ?? [])),
+        ];
+    }
+
+    private function jarekEbayImageDiagnostics(?JarekGearbox $gearbox, array $imageUrls): array
+    {
+        $checks = [];
+        $recommended = [];
+        foreach ($imageUrls as $url) {
+            foreach (array_values(array_unique([$url, preg_replace('#^https://gpswiss\\.pl/#', 'https://www.gpswiss.pl/', $url) ?: $url])) as $candidate) {
+                $checks[] = $check = $this->checkJarekPublicImageUrl($gearbox, $candidate);
+                if (($check['is_ebay_safe_image_url'] ?? false) && ! in_array($candidate, $recommended, true)) $recommended[] = $candidate;
+            }
+        }
+
+        return [
+            'image_urls_sent_to_ebay' => $imageUrls,
+            'image_url_checks' => $checks,
+            'recommended_image_urls' => $recommended !== [] ? $recommended : $imageUrls,
+            'warnings' => $recommended === [] && $imageUrls !== [] ? ['no_public_ebay_safe_image_url_confirmed'] : [],
+        ];
+    }
+
+    private function checkJarekPublicImageUrl(?JarekGearbox $gearbox, string $url): array
+    {
+        $path = parse_url($url, PHP_URL_PATH) ?: '';
+        $relative = preg_replace('#^/storage/#', '', $path) ?: ltrim($path, '/');
+        $storagePath = storage_path('app/public/'.$relative);
+        $publicPath = public_path('storage/'.$relative);
+        $symlink = public_path('storage');
+        $response = Http::withHeaders(['User-Agent' => 'eBay image diagnostics (+https://gpswiss.pl)'])->withOptions(['allow_redirects' => true])->timeout(20)->get($url);
+        $effectiveUrl = method_exists($response, 'handlerStats') ? (string) (($response->handlerStats()['url'] ?? null) ?: $url) : $url;
+        $bodyStart = substr($response->body(), 0, 16);
+        $isImageBody = str_starts_with($bodyStart, "\xFF\xD8\xFF") || str_starts_with($bodyStart, "\x89PNG");
+        $contentType = (string) $response->header('content-type');
+        $isPublicImage = $response->successful() && (str_contains(strtolower($contentType), 'image/') || $isImageBody);
+
+        return [
+            'url' => $url,
+            'file_exists' => is_file($storagePath),
+            'storage_path' => $storagePath,
+            'public_path' => $publicPath,
+            'public_storage_symlink' => $symlink,
+            'public_storage_is_link' => is_link($symlink),
+            'public_storage_realpath' => realpath($symlink) ?: null,
+            'http_status' => $response->status(),
+            'final_url' => $effectiveUrl,
+            'content_type' => $contentType ?: null,
+            'content_length' => $response->header('content-length'),
+            'body_starts_as_jpeg_or_png' => $isImageBody,
+            'is_public_image' => $isPublicImage,
+            'is_ebay_safe_image_url' => $isPublicImage && str_starts_with($url, 'https://'),
+        ];
+    }
+
     /** @return array{plan: array<string, mixed>, blockers: array<int, string>} */
     private function jarekEbayDeApiPlan(array $payload): array
     {
@@ -656,6 +811,16 @@ class JarekGearboxToolController extends Controller
         ];
     }
 
+    private function jarekEbayTemplateConditionLabel(?string $condition): string
+    {
+        return match ($condition) {
+            'SELLER_REFURBISHED' => 'Generalüberholt',
+            'USED' => 'Gebraucht',
+            'NEW' => 'Neu',
+            default => 'Gebraucht',
+        };
+    }
+
     /** @return array<string, mixed> */
     private function findJarekConditionParameter(JarekGearbox $gearbox): array
     {
@@ -747,7 +912,7 @@ class JarekGearboxToolController extends Controller
     /** @return array{required: bool, type: ?string, notice_pl: ?string, notice_de: ?string, warning: ?string} */
     private function jarekCoreReturnNotice(string $title): array
     {
-        if (preg_match('/skrzynia\s+biegów/iu', $title)) {
+        if (preg_match('/(?:reduktor\s+skrzyni(?:\s+biegów)?|skrzyni(?:a|ę)?\s+biegów|skrzyn[iy])/iu', $title)) {
             return [
                 'required' => true,
                 'type' => 'gearbox',
@@ -2131,6 +2296,21 @@ class JarekGearboxToolController extends Controller
             'message' => $message,
             'duration_ms' => (int) round((microtime(true) - $started) * 1000),
             'external_id' => $payload['allegro_offer_id'] ?? $payload['sku'] ?? null,
+            'payload' => $payload,
+            'created_at' => now(),
+        ]);
+    }
+
+    private function logJarekEbayDeDiagnostic(string $status, string $message, array $payload): void
+    {
+        if (! Schema::hasTable('marketplace_sync_logs')) return;
+
+        MarketplaceSyncLog::query()->create([
+            'marketplace' => 'ebay_de',
+            'action' => $payload['action'] ?? 'jarek_gearboxes_ebay_de_listing_diagnostics',
+            'status' => $status,
+            'message' => $message,
+            'external_id' => $payload['offer_id'] ?? $payload['sku'] ?? null,
             'payload' => $payload,
             'created_at' => now(),
         ]);
