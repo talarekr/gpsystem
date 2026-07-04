@@ -230,6 +230,145 @@ class JarekGearboxToolController extends Controller
     }
 
 
+    public function publishRunner(): \Illuminate\Contracts\View\View
+    {
+        return view('admin.jarek-gearboxes.publish-runner');
+    }
+
+    public function publishRunnerBatch(Request $request, GoogleTranslateService $translateService, EbayDescriptionTemplateRenderer $renderer, NbpExchangeRateService $exchangeRateService): JsonResponse
+    {
+        $started = microtime(true);
+        $requiredConfirm = 'jarek-ebay-de-bulk-publish-ready';
+        $limit = max(1, min(5, (int) $request->input('limit', $request->query('limit', 1))));
+        $offset = max(0, (int) $request->input('offset', $request->query('offset', 0)));
+        $confirm = (string) $request->input('confirm', $request->query('confirm', ''));
+        $base = [
+            'ok' => true,
+            'marketplace_write' => false,
+            'applied' => false,
+            'offset' => $offset,
+            'limit' => $limit,
+            'next_offset' => $offset,
+            'has_more' => false,
+            'batch_summary' => ['processed_count' => 0, 'published_count' => 0, 'skipped_count' => 0, 'blocked_count' => 0, 'failed_count' => 0, 'duplicate_existing_count' => 0],
+            'items' => [],
+        ];
+
+        try {
+            if ($confirm !== $requiredConfirm) {
+                return response()->json($base + ['ok' => false, 'blockers' => ['missing_or_invalid_confirm_token'], 'error' => 'Missing or invalid confirm token.'], 200);
+            }
+
+            $base['marketplace_write'] = true;
+            $previewRequest = Request::create($request->path(), 'GET', [
+                'offset' => $offset,
+                'limit' => $limit,
+                'missing_offer_id_only' => '1',
+            ]);
+            $preview = $this->ebayDeBulkPreparePublishPreview($previewRequest, $translateService, $renderer, $exchangeRateService)->getData(true);
+            $offers = array_values((array) ($preview['offers'] ?? []));
+            $base['next_offset'] = (int) data_get($preview, 'summary.next_offset', $offset + count($offers));
+            $base['has_more'] = (bool) data_get($preview, 'summary.has_more', false);
+            $account = Schema::hasTable('marketplace_accounts') ? MarketplaceAccount::query()->where('code', 'ebay_de')->first() : null;
+            $client = new EbayApiClient('ebay_de', $account);
+
+            foreach ($offers as $offer) {
+                $item = $this->publishRunnerOne((array) $offer, $client, $started);
+                $base['items'][] = $item;
+                $base['batch_summary']['processed_count']++;
+                if (($item['status'] ?? null) === 'published') $base['batch_summary']['published_count']++;
+                elseif (($item['status'] ?? null) === 'blocked') $base['batch_summary']['blocked_count']++;
+                elseif (($item['status'] ?? null) === 'failed') $base['batch_summary']['failed_count']++;
+                else $base['batch_summary']['skipped_count']++;
+                if (($item['status'] ?? null) === 'skipped_existing' || in_array('existing_ebay_offer_or_listing_found', (array) ($item['blockers'] ?? []), true)) $base['batch_summary']['duplicate_existing_count']++;
+            }
+
+            $base['applied'] = $base['batch_summary']['published_count'] > 0;
+            return response()->json($base, 200);
+        } catch (Throwable $e) {
+            $base['ok'] = false;
+            $base['batch_summary']['failed_count']++;
+            $base['items'][] = ['sku' => null, 'status' => 'failed', 'offer_id' => null, 'listing_id' => null, 'ebay_item_url' => null, 'blockers' => ['publish_runner_batch_exception'], 'warnings' => [], 'errors' => [$e->getMessage()], 'request_id' => null, 'admin_diagnostics' => ['error_class' => $e::class, 'error_message' => $e->getMessage()]];
+            return response()->json($base, 200);
+        }
+    }
+
+    private function publishRunnerOne(array $offer, EbayApiClient $client, float $started): array
+    {
+        $sku = (string) ($offer['sku'] ?? '');
+        $item = ['sku' => $sku ?: null, 'status' => 'blocked', 'offer_id' => null, 'listing_id' => null, 'ebay_item_url' => null, 'blockers' => [], 'warnings' => array_values((array) ($offer['warnings'] ?? [])), 'errors' => [], 'request_id' => null, 'admin_diagnostics' => ['ready_preview' => (bool) ($offer['ready_to_publish'] ?? false)]];
+        try {
+            if (! ($offer['ready_to_publish'] ?? false)) {
+                $item['blockers'] = array_values((array) ($offer['blockers'] ?? ['not_ready_to_publish']));
+                $item['status'] = in_array('existing_ebay_offer_or_listing_found', $item['blockers'], true) ? 'skipped_existing' : 'blocked';
+                $this->logPublishRunnerItem($item['status'], 'Publish runner skipped non-ready SKU.', $item + ['offer' => $offer], $started);
+                return $item;
+            }
+
+            $guard = $this->jarekEbayDeBulkDuplicateGuard($sku);
+            $item['admin_diagnostics']['duplicate_guard_before_publish'] = $guard;
+            if (($guard['inventory_item_exists'] ?? false) || ($guard['offer_exists'] ?? false) || filled($guard['listing_id'] ?? null)) {
+                $item['status'] = 'skipped_existing';
+                $item['offer_id'] = $guard['offer_id'] ?? null;
+                $item['listing_id'] = $guard['listing_id'] ?? null;
+                $item['blockers'] = ['existing_ebay_offer_or_listing_found'];
+                $this->logPublishRunnerItem('skipped_existing', 'Duplicate eBay offer/listing found immediately before publish.', $item + ['offer' => $offer], $started);
+                return $item;
+            }
+            if (($guard['ok'] ?? true) === false && (($guard['read_only_api_check'] ?? null) === 'performed')) {
+                $item['status'] = 'blocked';
+                $item['blockers'] = ['ebay_duplicate_guard_lookup_failed'];
+                $this->logPublishRunnerItem('blocked', 'Duplicate guard failed before publish.', $item + ['offer' => $offer], $started);
+                return $item;
+            }
+
+            $result = $client->publishInventoryOffer($sku, (array) ($offer['inventory_item_request'] ?? []), (array) ($offer['offer_request'] ?? []), 'de-DE');
+            $item['offer_id'] = $result['offer_id'] ?? null;
+            $item['listing_id'] = $result['listing_id'] ?? null;
+            $item['request_id'] = $result['request_id'] ?? null;
+            $item['admin_diagnostics']['ebay_response'] = $result;
+            if ($item['listing_id']) $item['ebay_item_url'] = data_get($result, 'json.listingUrl');
+            if ($result['ok'] ?? false) {
+                $item['status'] = 'published';
+                $this->markJarekGearboxPublished($sku, $item['offer_id'], $item['listing_id'], $result);
+            } else {
+                $item['status'] = str_contains(strtolower((string) json_encode($result)), 'exist') ? 'skipped_existing' : 'failed';
+                $item['blockers'] = $item['status'] === 'skipped_existing' ? ['existing_ebay_offer_or_listing_found'] : [];
+                $item['errors'] = [$result['error'] ?? ($result['json'] ?? 'eBay publish failed')];
+            }
+            $this->logPublishRunnerItem($item['status'] === 'published' ? 'success' : $item['status'], 'Jarek eBay DE publish runner per-SKU result.', $item + ['offer' => $offer], $started);
+            return $item;
+        } catch (Throwable $e) {
+            $item['status'] = 'failed';
+            $item['errors'] = [$e->getMessage()];
+            $item['admin_diagnostics']['exception'] = ['error_class' => $e::class, 'error_message' => $e->getMessage()];
+            $this->logPublishRunnerItem('error', 'Jarek eBay DE publish runner SKU exception.', $item + ['offer' => $offer], $started);
+            return $item;
+        }
+    }
+
+
+    private function markJarekGearboxPublished(string $sku, mixed $offerId, mixed $listingId, array $result): void
+    {
+        if (! Schema::hasTable('jarek_gearboxes')) return;
+        $offerSourceId = preg_match('/^JAREK-(.+)$/', $sku, $matches) ? $matches[1] : $sku;
+        JarekGearbox::query()->where('allegro_offer_id', $offerSourceId)->update([
+            'ebay_inventory_sku' => $sku,
+            'ebay_offer_id' => filled($offerId) ? (string) $offerId : null,
+            'ebay_listing_id' => filled($listingId) ? (string) $listingId : null,
+            'ebay_status' => 'published',
+            'ebay_payload_snapshot' => $result,
+            'ebay_published_at' => now(),
+        ]);
+    }
+
+    private function logPublishRunnerItem(string $status, string $message, array $payload, float $started): void
+    {
+        if (! Schema::hasTable('marketplace_sync_logs')) return;
+        MarketplaceSyncLog::query()->create(['marketplace' => 'ebay_de', 'action' => 'jarek_gearboxes_ebay_de_publish_runner_batch_item', 'status' => $status, 'message' => $message, 'duration_ms' => (int) round((microtime(true) - $started) * 1000), 'external_id' => $payload['offer_id'] ?? $payload['sku'] ?? null, 'payload' => $payload, 'created_at' => now()]);
+    }
+
+
     public function storageLinkDiagnostics(): JsonResponse
     {
         $result = $this->buildJarekStorageLinkDiagnostics(false);
