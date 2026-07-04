@@ -96,6 +96,49 @@ class JarekGearboxEbayDePreparePreviewTest extends TestCase
             ->assertJsonFragment(['missing_nbp_exchange_rate']);
     }
 
+
+    public function test_ebay_de_prepare_preview_selects_audi_from_title_and_never_falls_back_to_gpswiss_brand(): void
+    {
+        Storage::fake('public');
+        config(['app.url' => 'https://gpswiss.pl']);
+        Cache::put('nbp_table_a_eur_rate', ['rate' => 4.30, 'effective_date' => '2026-06-27', 'table_no' => '123/A/NBP/2026']);
+        $this->mockTranslations();
+        $this->createCategoryMappings('620', '100684');
+        Storage::disk('public')->put('jarek-gearboxes/18727785496/01.jpg', 'jpg');
+
+        JarekGearbox::query()->create([
+            'allegro_offer_id' => '18727785496',
+            'title' => 'Reduktor skrzyni 0CN409053AF VW Skoda Audi 2.0TDI',
+            'description' => 'Opis skrzyni',
+            'price' => 2450,
+            'currency' => 'PLN',
+            'quantity' => 1,
+            'category_id' => '620',
+            'category_name' => 'Skrzynie biegów',
+            'parameters' => [['name' => 'Numer części', 'values' => ['0CN409053AF']]],
+        ]);
+
+        $response = $this->withoutMiddleware()->getJson('/admin/tools/jarek-gearboxes/ebay-de-prepare-preview?sku=JAREK-18727785496');
+
+        $response->assertOk()
+            ->assertJsonPath('ready', true)
+            ->assertJsonPath('marketplace_write', false)
+            ->assertJsonPath('parts_changed', false)
+            ->assertJsonPath('source_table', 'jarek_gearboxes')
+            ->assertJsonPath('source_brand_candidates', ['Volkswagen', 'Skoda', 'Audi'])
+            ->assertJsonPath('selected_brand', 'Audi')
+            ->assertJsonPath('brand_selection_reason', 'preferred_detected_brand')
+            ->assertJsonPath('brand_source', 'title')
+            ->assertJsonPath('item_specifics.Brand', 'Audi')
+            ->assertJsonPath('item_specifics.Hersteller', 'Audi')
+            ->assertJsonPath('payload_preview.source_brand_candidates', ['Volkswagen', 'Skoda', 'Audi'])
+            ->assertJsonPath('payload_preview.selected_brand', 'Audi')
+            ->assertJsonPath('payload_preview.item_specifics.Brand', 'Audi')
+            ->assertJsonMissing(['Brand' => 'GPSwiss'])
+            ->assertJsonMissing(['Manufacturer' => 'GPSwiss'])
+            ->assertJsonMissing(['Hersteller' => 'GPSwiss']);
+    }
+
     private function mockTranslations(): void
     {
         $this->mock(GoogleTranslateService::class, function ($mock): void {
