@@ -76,8 +76,7 @@ class EbayPublishAdapter extends BaseMarketplacePublishAdapter
         foreach (['category_id' => 'eBay: brakuje categoryId dla wybranej kategorii', 'title' => 'eBay: brakuje title'] as $key => $message) if (blank($payload[$key] ?? null) && ($key !== 'title' || blank($part->name ?? null))) $missing[] = $message;
         if ($this->accountCode() === 'ebay_de') {
             $titleSanitization = $this->ebayTitleSanitizer->sanitizeForEbayDe($part, (string) ($payload['title'] ?? $part->name ?? ''), (string) ($part->name ?? ''));
-            $payload['title'] = $titleSanitization['final_title'];
-            if (($titleSanitization['blocker'] ?? null) !== null) $missing[] = 'ebay_title_too_long_after_cleanup';
+            if (($titleSanitization['blocker'] ?? null) !== null) $missing[] = 'ebay_title_needs_review';
             $payload['title_sanitization'] = $titleSanitization['diagnostics'];
         }
         foreach (['merchant_location_key' => 'eBay: brakuje merchantLocationKey', 'selected_fulfillment_policy_id' => 'eBay: brakuje fulfillmentPolicyId', 'selected_payment_policy_id' => 'eBay: brakuje paymentPolicyId', 'selected_return_policy_id' => 'eBay: brakuje returnPolicyId'] as $key => $message) if (blank($policies[$key] ?? $this->settingForPolicy($settings, $key))) $missing[] = $message;

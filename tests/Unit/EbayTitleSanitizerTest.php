@@ -16,101 +16,49 @@ class EbayTitleSanitizerTest extends TestCase
         $this->sanitizer = new EbayTitleSanitizer();
     }
 
-    public function test_removes_unwanted_baujahr_and_preserves_year_and_engine_code(): void
+    public function test_short_translated_title_is_used_without_changes(): void
     {
-        $part = new Part(['name' => 'VOLKSWAGEN Multivan T5 2012 2.0 KOMPLETNY SILNIK STAN PERFECT CCH']);
-        $result = $this->sanitizer->sanitizeForEbayDe($part, 'Volkswagen Multivan T5 Baujahr 2012 2.0 kompletter Motor Zustand perfekt CCH mit sehr langem Zusatztext');
-
-        $this->assertLessThanOrEqual(80, mb_strlen($result['final_title']));
-        $this->assertStringNotContainsString('Baujahr', $result['final_title']);
-        $this->assertStringContainsString('2012', $result['final_title']);
-        $this->assertStringContainsString('CCH', $result['final_title']);
-        $this->assertTrue($result['diagnostics']['protected_tokens_preserved']);
-    }
-
-    public function test_keeps_year_label_when_polish_title_explicitly_mentions_production_year(): void
-    {
-        $part = new Part(['name' => 'VOLKSWAGEN Multivan T5 rok produkcji 2012 silnik CCH']);
-        $result = $this->sanitizer->sanitizeForEbayDe($part, 'Volkswagen Multivan T5 Baujahr 2012 Motor CCH');
-
-        $this->assertLessThanOrEqual(80, mb_strlen($result['final_title']));
-        $this->assertStringContainsString('Baujahr 2012', $result['final_title']);
-        $this->assertTrue($result['diagnostics']['protected_tokens_preserved']);
-    }
-
-    public function test_oem_code_is_not_cut_by_trimming(): void
-    {
-        $part = new Part(['name' => 'AUDI A4 licznik 5NA920791B bardzo długi opis elementu wyposażenia samochodu', 'part_number' => '5NA920791B']);
-        $result = $this->sanitizer->sanitizeForEbayDe($part, 'Audi A4 Kombiinstrument sehr guter Zustand perfekter Zustand langer Beschreibungstext 5NA920791B');
-
-        $this->assertLessThanOrEqual(80, mb_strlen($result['final_title']));
-        $this->assertStringContainsString('5NA920791B', $result['final_title']);
-        $this->assertTrue($result['diagnostics']['protected_tokens_preserved']);
-    }
-
-    public function test_short_clean_title_is_not_destroyed(): void
-    {
-        $part = new Part(['name' => 'Audi A4 8K Schaltknauf 8K1713041AN']);
+        $part = new Part(['name' => 'Audi A4 8K gałka zmiany biegów 8K1713041AN']);
         $title = 'Audi A4 8K Schaltknauf 8K1713041AN';
+
         $result = $this->sanitizer->sanitizeForEbayDe($part, $title);
 
         $this->assertSame($title, $result['final_title']);
-        $this->assertFalse($result['diagnostics']['cleanup_applied']);
+        $this->assertSame($title, $result['translated_title']);
+        $this->assertNull($result['suggested_short_title']);
+        $this->assertTrue($result['ok']);
+        $this->assertNull($result['blocker']);
+        $this->assertFalse($result['diagnostics']['requires_manual_review']);
+        $this->assertFalse($result['diagnostics']['title_was_shortened']);
     }
 
-    public function test_part_7843_short_translated_title_is_not_blocked_or_sanitized(): void
+    public function test_long_translated_title_is_not_silently_replaced_by_shortened_title(): void
     {
-        $part = new Part(['name' => 'VOLKSWAGEN Tiguan 2018 2.0 KOMPLETNY DPF SPRAWNY 03N131656G', 'part_number' => '03N131656G']);
-        $title = 'Volkswagen Tiguan 2018 2.0 Komplett DPF funktionsfähig 03N131656G';
+        $part = new Part(['name' => 'VOLKSWAGEN Multivan T5 2012 2.0 KOMPLETNY SILNIK STAN PERFECT CCH']);
+        $title = 'Volkswagen Multivan T5 Baujahr 2012 2.0 kompletter Motor Zustand perfekt CCH mit sehr langem Zusatztext';
+
         $result = $this->sanitizer->sanitizeForEbayDe($part, $title);
 
         $this->assertSame($title, $result['final_title']);
-        $this->assertSame(65, $result['diagnostics']['final_length']);
-        $this->assertNull($result['blocker']);
-        $this->assertTrue($result['diagnostics']['protected_tokens_preserved']);
-        $this->assertSame(['03N131656G', 'DPF'], $result['diagnostics']['protected_tokens']);
+        $this->assertSame($title, $result['translated_title']);
+        $this->assertGreaterThan(EbayTitleSanitizer::LIMIT, mb_strlen($result['final_title']));
+        $this->assertSame('ebay_title_needs_review', $result['blocker']);
+        $this->assertFalse($result['ok']);
+        $this->assertNotNull($result['suggested_short_title']);
+        $this->assertLessThanOrEqual(EbayTitleSanitizer::LIMIT, mb_strlen($result['suggested_short_title']));
+        $this->assertTrue($result['diagnostics']['requires_manual_review']);
+        $this->assertTrue($result['diagnostics']['title_was_shortened']);
+        $this->assertNotSame($result['suggested_short_title'], $result['final_title']);
+    }
+
+    public function test_only_whitespace_is_normalized_for_translated_title(): void
+    {
+        $part = new Part(['name' => 'Polski tytuł']);
+        $result = $this->sanitizer->sanitizeForEbayDe($part, "Deutscher   Titel\n1:1");
+
+        $this->assertSame('Deutscher Titel 1:1', $result['final_title']);
+        $this->assertTrue($result['diagnostics']['cleanup_applied']);
         $this->assertSame([], $result['diagnostics']['removed_tokens']);
-        $this->assertFalse($result['diagnostics']['cleanup_applied']);
         $this->assertTrue($result['diagnostics']['minimal_cleanup_only']);
-    }
-
-    public function test_short_translated_title_passes_even_when_protected_token_diagnostics_are_not_perfect(): void
-    {
-        $part = new Part(['name' => 'VOLKSWAGEN Tiguan licznik CUAA', 'part_number' => 'CUAA']);
-        $title = 'Volkswagen Tiguan Kombiinstrument funktionsfähig';
-        $result = $this->sanitizer->sanitizeForEbayDe($part, $title);
-
-        $this->assertLessThanOrEqual(80, mb_strlen($result['final_title']));
-        $this->assertSame($title, $result['final_title']);
-        $this->assertTrue($result['ok']);
-        $this->assertNull($result['blocker']);
-        $this->assertFalse($result['diagnostics']['protected_tokens_preserved']);
-        $this->assertContains('CUAA', $result['diagnostics']['protected_tokens']);
-        $this->assertFalse($result['diagnostics']['cleanup_applied']);
-        $this->assertTrue($result['diagnostics']['minimal_cleanup_only']);
-    }
-
-    public function test_part_7157_title_with_removed_baujahr_passes_when_under_ebay_limit(): void
-    {
-        $part = new Part(['name' => 'VOLKSWAGEN Multivan T5 2012 2.0 KOMPLETNY SILNIK STAN PERFECT CCH']);
-        $title = 'Volkswagen Multivan T5, Baujahr 2012, 2.0, kompletter Motor, einwandfreier Zustand, CCH';
-        $result = $this->sanitizer->sanitizeForEbayDe($part, $title);
-
-        $this->assertSame('Volkswagen Multivan T5, 2012, 2.0, kompletter Motor, einwandfreier Zustand, CCH', $result['final_title']);
-        $this->assertSame(79, $result['diagnostics']['final_length']);
-        $this->assertSame(EbayTitleSanitizer::LIMIT, $result['diagnostics']['title_limit']);
-        $this->assertTrue($result['ok']);
-        $this->assertNull($result['blocker']);
-        $this->assertSame(['Baujahr'], $result['diagnostics']['removed_tokens']);
-        $this->assertFalse($result['diagnostics']['protected_tokens_preserved']);
-    }
-
-    public function test_payload_title_value_can_use_exact_sanitized_final_title(): void
-    {
-        $part = new Part(['name' => 'VOLKSWAGEN Multivan T5 2012 2.0 KOMPLETNY SILNIK STAN PERFECT CCH']);
-        $result = $this->sanitizer->sanitizeForEbayDe($part, 'Volkswagen Multivan T5 Baujahr 2012 2.0 kompletter Motor Zustand perfekt CCH mit sehr langem Zusatztext');
-        $payload = ['product' => ['title' => $result['final_title']]];
-
-        $this->assertSame($result['final_title'], $payload['product']['title']);
     }
 }
