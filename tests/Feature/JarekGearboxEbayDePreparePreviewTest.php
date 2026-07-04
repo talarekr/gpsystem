@@ -330,7 +330,7 @@ class JarekGearboxEbayDePreparePreviewTest extends TestCase
 
         JarekGearbox::query()->create([
             'allegro_offer_id' => '18727785496',
-            'title' => 'Skrzynia DSG 0D9300041 Audi',
+            'title' => 'Skrzynia DSG 0D9300041 Audi Regnerowana',
             'description' => 'Opis skrzyni',
             'price' => 2450,
             'currency' => 'PLN',
@@ -362,14 +362,14 @@ class JarekGearboxEbayDePreparePreviewTest extends TestCase
             ->assertJsonPath('ebay_api_plan.price', 569.77)
             ->assertJsonPath('ebay_api_plan.currency', 'EUR')
             ->assertJsonPath('ebay_api_plan.inventory_item_request.availability.shipToLocationAvailability.quantity', 1)
-            ->assertJsonPath('ebay_api_plan.inventory_item_request.condition', 'USED_EXCELLENT')
+            ->assertJsonPath('ebay_api_plan.inventory_item_request.condition', 'SELLER_REFURBISHED')
             ->assertJsonPath('ebay_api_plan.source_condition_name', 'Stan')
             ->assertJsonPath('ebay_api_plan.source_condition_value', 'Używany')
             ->assertJsonPath('ebay_api_plan.source_condition_parameter_id', '11323')
             ->assertJsonPath('ebay_api_plan.condition_source', 'parameters')
             ->assertJsonPath('ebay_api_plan.condition_mapping_reason', 'localized_condition_map')
-            ->assertJsonPath('ebay_api_plan.mapped_ebay_condition', 'USED_EXCELLENT')
-            ->assertJsonPath('ebay_api_plan.condition_mapped_value', 'USED_EXCELLENT')
+            ->assertJsonPath('ebay_api_plan.mapped_ebay_condition', 'SELLER_REFURBISHED')
+            ->assertJsonPath('ebay_api_plan.condition_mapped_value', 'SELLER_REFURBISHED')
             ->assertJsonPath('ebay_api_plan.condition_diagnostics.condition_mapping_valid', true)
             ->assertJsonPath('ebay_api_plan.inventory_item_request.product.description', 'Opis skrzyni')
             ->assertJsonPath('ebay_api_plan.inventory_description_source', 'translated_description_de')
@@ -377,8 +377,12 @@ class JarekGearboxEbayDePreparePreviewTest extends TestCase
             ->assertJsonPath('ebay_api_plan.offer_request.listingPolicies.fulfillmentPolicyId', 'fulfillment-de-50')
             ->assertJsonPath('ebay_api_plan.publish_offer_request.method', 'POST');
 
-        $this->assertStringContainsString('Beschreibung', $response->json('ebay_api_plan.offer_request.listingDescription'));
-        $this->assertStringContainsString('Spezifikationen', $response->json('ebay_api_plan.offer_request.listingDescription'));
+        $listingDescription = $response->json('ebay_api_plan.offer_request.listingDescription');
+        $this->assertStringContainsString('Beschreibung', $listingDescription);
+        $this->assertStringNotContainsString('Spezifikationen', $listingDescription);
+        $this->assertStringNotContainsString('Teilenummer', $listingDescription);
+        $this->assertStringNotContainsString('Zustand / Qualität', $listingDescription);
+        $this->assertStringContainsString('Das Altgetriebe muss zurückgegeben werden.', $listingDescription);
         $this->assertStringNotContainsString('BeschreibungWir bieten', $response->json('ebay_api_plan.inventory_item_request.product.description'));
     }
 

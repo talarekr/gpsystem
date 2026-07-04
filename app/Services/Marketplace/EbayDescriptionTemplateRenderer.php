@@ -35,6 +35,7 @@ class EbayDescriptionTemplateRenderer
             'assets' => $this->assetUrls(),
             'title' => (string) ($data['title'] ?? $part->name ?? ''),
             'descriptionBlock' => new HtmlString($this->descriptionBlock($part, $data)),
+            'showSpecifications' => (bool) ($data['show_specifications'] ?? true),
             'specificationRows' => new HtmlString($this->specificationRows($channel, $part, $data)),
             'sameVehicleCta' => new HtmlString($this->sameVehicleCta($data)),
             'translationFallbackNotice' => (string) ($data['translation_fallback_notice'] ?? ''),

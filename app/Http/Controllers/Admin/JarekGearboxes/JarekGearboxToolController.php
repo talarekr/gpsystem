@@ -510,6 +510,7 @@ class JarekGearboxToolController extends Controller
             'description' => $translatedDescription,
             'part_number' => $partNumber,
             'condition' => $templateConditionLabel,
+            'show_specifications' => false,
         ]);
         if ($coreReturnNotice['required']) {
             $renderedDescription = $this->removeCoreReturnNotices($renderedDescription, $coreReturnNotice);
@@ -1961,6 +1962,10 @@ class JarekGearboxToolController extends Controller
         $value = is_string($candidate['value'] ?? null) ? (string) $candidate['value'] : '';
         $mapped = filled($value) ? (new EbayConditionMapper())->jarekCondition($value, (string) ($candidate['source'] ?? 'jarek_gearboxes.parameters')) : null;
         $valid = (bool) ($mapped['condition_mapping_valid'] ?? false);
+        $condition = $valid ? ($mapped['condition'] ?? null) : null;
+        if ($condition === 'USED_EXCELLENT') {
+            $condition = 'SELLER_REFURBISHED';
+        }
 
         return [
             'source_condition_name' => $candidate['name'] ?? null,
@@ -1968,7 +1973,7 @@ class JarekGearboxToolController extends Controller
             'source_condition_parameter_id' => $candidate['parameter_id'] ?? null,
             'condition_source' => $candidate['source'] ?? null,
             'condition_mapping_reason' => $valid ? (string) ($mapped['condition_mapping_used'] ?? 'localized_condition_map') : (filled($value) ? 'source_condition_value_not_mapped' : 'source_condition_parameter_not_found'),
-            'mapped_ebay_condition' => $valid ? ($mapped['condition'] ?? null) : null,
+            'mapped_ebay_condition' => $condition,
             'condition_mapping_valid' => $valid,
             'condition_inventory_api_format' => $mapped['condition_inventory_api_format'] ?? 'string_enum',
             'condition_allowed_values' => $mapped['condition_allowed_values'] ?? [],
