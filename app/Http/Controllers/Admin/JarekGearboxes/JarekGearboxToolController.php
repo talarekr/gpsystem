@@ -192,10 +192,6 @@ class JarekGearboxToolController extends Controller
             : $translatedDescriptionBase;
         $translatedDescription = $translatedDescriptionBase;
         $coreReturnNoticeAddedDe = false;
-        if ($coreReturnNotice['required'] && ! $this->containsNotice($translatedDescription, $coreReturnNotice['notice_de'])) {
-            $translatedDescription = $this->appendNotice($translatedDescription, $coreReturnNotice['notice_de']);
-            $coreReturnNoticeAddedDe = true;
-        }
 
         $templatePart = new Part();
         $templatePart->name = $translatedTitle;
@@ -273,6 +269,7 @@ class JarekGearboxToolController extends Controller
             'core_return_notice_pl' => $coreReturnNotice['notice_pl'],
             'core_return_notice_de' => $coreReturnNotice['notice_de'],
             'core_return_notice_added_after_translation' => $coreReturnNoticeAddedDe,
+            'core_return_notice_location' => $coreReturnNotice['required'] ? 'payload_template_footer' : null,
             'source_brand_candidates' => $sourceBrandCandidates,
             'selected_brand' => $selectedBrand,
             'brand_selection_reason' => $brandSelectionReason,
@@ -311,6 +308,7 @@ class JarekGearboxToolController extends Controller
             'core_return_notice_pl' => $coreReturnNotice['notice_pl'],
             'core_return_notice_de' => $coreReturnNotice['notice_de'],
             'core_return_notice_added_after_translation' => $coreReturnNoticeAddedDe,
+            'core_return_notice_location' => $coreReturnNotice['required'] ? 'payload_template_footer' : null,
             'ebay_category_id' => $mapping['ebay_category_id'] ?? null,
             'image_urls' => $imageUrls,
             'source_price_pln' => $sourcePricePln,
@@ -387,6 +385,10 @@ class JarekGearboxToolController extends Controller
         $notices = array_filter([
             $coreReturnNotice['notice_pl'],
             $coreReturnNotice['notice_de'],
+            'Stara skrzynia biegów podlega zwrotowi',
+            'Stary tylny most podlega zwrotowi',
+            'Das Altgetriebe muss zurückgegeben werden.',
+            'Die alte Hinterachse muss zurückgegeben werden.',
             'Das alte Getriebe kann zurückgegeben werden.',
         ], fn ($notice): bool => filled($notice));
 
