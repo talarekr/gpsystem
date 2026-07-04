@@ -319,6 +319,9 @@ class JarekGearboxToolController extends Controller
             'price' => $priceEur,
             'currency' => 'EUR',
             'quantity' => (int) $gearbox->quantity,
+            'existing_ebay_listing_id' => $gearbox->ebay_listing_id,
+            'existing_ebay_offer_id' => $gearbox->ebay_offer_id,
+            'existing_ebay_inventory_sku' => $gearbox->ebay_inventory_sku,
             'source_brand_candidates' => $sourceBrandCandidates,
             'selected_brand' => $selectedBrand,
             'brand_selection_reason' => $brandSelectionReason,
@@ -331,6 +334,65 @@ class JarekGearboxToolController extends Controller
         $this->logJarekEbayDePreparePreview($payload['ready'] ? 'success' : 'blocked', 'Preview payloadu eBay DE dla Skrzyń Jarka; bez eBay API, bez parts, marketplace_write=false.', $payload, $started);
 
         return response()->json($payload);
+    }
+
+
+    public function ebayDePublishPreview(Request $request, GoogleTranslateService $translateService, EbayDescriptionTemplateRenderer $renderer, NbpExchangeRateService $exchangeRateService): JsonResponse
+    {
+        $response = $this->ebayDePreparePreview($request, $translateService, $renderer, $exchangeRateService);
+        $payload = $response->getData(true);
+        $payload['action'] = 'jarek_gearboxes_ebay_de_publish_preview';
+        $payload['dry_run'] = true;
+        $payload['marketplace_write'] = false;
+        $payload['parts_changed'] = false;
+        $payload['publish_preview'] = true;
+        $payload['idempotency'] = [
+            'sku' => $payload['sku'] ?? null,
+            'existing_ebay_listing_id' => $payload['existing_ebay_listing_id'] ?? null,
+            'existing_ebay_offer_id' => $payload['existing_ebay_offer_id'] ?? null,
+            'existing_ebay_inventory_sku' => $payload['existing_ebay_inventory_sku'] ?? null,
+            'safe_to_retry' => true,
+            'apply_requires_confirm' => 'jarek-ebay-de-publish',
+        ];
+        $payload['safety'] = array_values(array_unique(array_merge($payload['safety'] ?? [], [
+            'dry_run_only',
+            'no_ebay_api_write',
+            'no_inventory_item_write',
+            'no_offer_publish',
+            'no_parts_write',
+        ])));
+
+        if (Schema::hasTable('marketplace_sync_logs')) {
+            MarketplaceSyncLog::query()->create([
+                'marketplace' => 'ebay_de',
+                'action' => 'jarek_gearboxes_ebay_de_publish_preview',
+                'status' => ($payload['ready'] ?? false) ? 'success' : 'blocked',
+                'message' => 'Dry-run publish preview eBay DE dla Skrzyń Jarka; bez eBay API write i bez apply.',
+                'external_id' => $payload['allegro_offer_id'] ?? $payload['sku'] ?? null,
+                'payload' => $payload,
+                'created_at' => now(),
+            ]);
+        }
+
+        return response()->json($payload, $response->getStatusCode());
+    }
+
+    public function ebayDePublishApply(Request $request): JsonResponse
+    {
+        $payload = [
+            'ok' => false,
+            'dry_run' => false,
+            'marketplace_write' => false,
+            'parts_changed' => false,
+            'applied' => false,
+            'error' => 'Publish apply is guarded and disabled in this deployment path. No eBay API write was attempted.',
+            'required_confirm' => 'jarek-ebay-de-publish',
+            'provided_confirm' => $request->query('confirm'),
+            'blockers' => ['publish_apply_disabled'],
+            'warnings' => [],
+        ];
+
+        return response()->json($payload, 423);
     }
 
 
