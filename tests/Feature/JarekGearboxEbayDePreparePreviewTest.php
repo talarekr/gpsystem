@@ -383,6 +383,64 @@ class JarekGearboxEbayDePreparePreviewTest extends TestCase
     }
 
 
+    public function test_ebay_de_revise_preview_builds_json_payload_without_response_exception_blocker(): void
+    {
+        Storage::fake('public');
+        config(['app.url' => 'https://gpswiss.pl']);
+        Cache::put('nbp_table_a_eur_rate', ['rate' => 4.30, 'effective_date' => '2026-06-27', 'table_no' => '123/A/NBP/2026']);
+        Http::fake([
+            'https://gpswiss.pl/storage/jarek-gearboxes/18727785496/01.jpg' => Http::response("\xFF\xD8\xFFjpg", 200, ['Content-Type' => 'image/jpeg']),
+            'https://www.gpswiss.pl/storage/jarek-gearboxes/18727785496/01.jpg' => Http::response("\xFF\xD8\xFFjpg", 200, ['Content-Type' => 'image/jpeg']),
+        ]);
+        $this->mockTranslations();
+        $this->createCategoryMappings('620', '100684');
+        Storage::disk('public')->put('jarek-gearboxes/18727785496/01.jpg', "\xFF\xD8\xFFjpg");
+
+        MarketplaceAccount::query()->create([
+            'marketplace' => 'ebay_de',
+            'code' => 'ebay_de',
+            'name' => 'eBay DE',
+            'status' => 'active',
+            'api_enabled' => false,
+            'api_mode' => 'dry_run',
+            'api_settings' => [
+                'marketplace_id' => 'EBAY_DE',
+                'merchant_location_key' => 'gpswiss-de-location',
+                'payment_policy_id' => 'payment-de',
+                'return_policy_id' => 'return-de',
+                'format' => 'FIXED_PRICE',
+                'listing_duration' => 'GTC',
+            ],
+        ]);
+
+        JarekGearbox::query()->create([
+            'allegro_offer_id' => '18727785496',
+            'title' => 'Skrzynia DSG 0D9300041 Audi',
+            'description' => 'Opis skrzyni',
+            'price' => 2450,
+            'currency' => 'PLN',
+            'quantity' => 1,
+            'category_id' => '620',
+            'category_name' => 'Skrzynie biegów',
+            'parameters' => [['id' => '11323', 'name' => 'Stan', 'valuesLabels' => ['Używany']], ['name' => 'Numer części', 'values' => ['0D9300041']]],
+            'ebay_listing_id' => '1234567890',
+            'ebay_offer_id' => '9876543210',
+            'ebay_inventory_sku' => 'JAREK-18727785496',
+        ]);
+
+        $response = $this->withoutMiddleware()->getJson('/admin/tools/jarek-gearboxes/ebay-de-revise-preview?sku=JAREK-18727785496');
+
+        $response->assertOk()
+            ->assertJsonPath('dry_run', true)
+            ->assertJsonPath('marketplace_write', false)
+            ->assertJsonMissing(['revise_preview_response_exception'])
+            ->assertJsonMissing(['error_message' => 'data_set(): Argument #1 ($target) could not be passed by reference'])
+            ->assertJsonPath('public_image_urls.0', 'https://gpswiss.pl/storage/jarek-gearboxes/18727785496/01.jpg')
+            ->assertJsonPath('revised_inventory_item_request.product.imageUrls.0', 'https://gpswiss.pl/storage/jarek-gearboxes/18727785496/01.jpg')
+            ->assertJsonPath('revised_offer_request.offerId', '9876543210');
+    }
+
+
     public function test_ebay_de_publish_apply_is_locked_to_single_sku_and_exact_confirm(): void
     {
         $this->withoutMiddleware()
