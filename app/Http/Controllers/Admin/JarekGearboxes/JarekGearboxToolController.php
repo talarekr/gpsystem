@@ -21,6 +21,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -547,6 +548,8 @@ class JarekGearboxToolController extends Controller
                 'missing_required_fields_count' => 0,
                 'translation_warning_count' => 0,
                 'estimated_publish_count' => 0,
+                'duplicate_existing_count' => 0,
+                'skipped_existing_count' => 0,
                 'offset' => $offset,
                 'limit' => $limit,
                 'next_offset' => null,
@@ -595,7 +598,8 @@ class JarekGearboxToolController extends Controller
                     $previewRequest = Request::create($request->path(), 'GET', ['sku' => $sku]);
                     $prepare = $this->ebayDePreparePreview($previewRequest, $translateService, $renderer, $exchangeRateService)->getData(true);
                     $plan = $this->jarekEbayDeApiPlan($prepare);
-                    $item = $this->jarekBulkPreparePublishPreviewItem($gearbox, $sku, $prepare, $plan);
+                    $duplicateGuard = $this->jarekEbayDeBulkDuplicateGuard($sku);
+                    $item = $this->jarekBulkPreparePublishPreviewItem($gearbox, $sku, $prepare, $plan, $duplicateGuard);
                 } catch (Throwable $e) {
                     $item = $this->jarekBulkPreparePublishPreviewExceptionItem($gearbox, $sku, $e);
                 }
@@ -611,6 +615,8 @@ class JarekGearboxToolController extends Controller
                 if (($item['public_image_urls'] ?? []) === []) $payload['summary']['missing_images_count']++;
                 if (in_array('missing_required_fields', (array) ($item['blockers'] ?? []), true)) $payload['summary']['missing_required_fields_count']++;
                 if (in_array('translation_warning', (array) ($item['warnings'] ?? []), true)) $payload['summary']['translation_warning_count']++;
+                if (in_array('existing_ebay_offer_or_listing_found', (array) ($item['blockers'] ?? []), true)) $payload['summary']['duplicate_existing_count']++;
+                if (filled($item['existing_offer_id'] ?? null) || filled($item['existing_listing_id'] ?? null)) $payload['summary']['skipped_existing_count']++;
                 if ($item['ready_to_publish'] ?? false) {
                     $payload['summary']['ready_to_publish_count']++;
                     $payload['summary']['estimated_publish_count']++;
@@ -625,8 +631,115 @@ class JarekGearboxToolController extends Controller
         return response()->json($payload, 200);
     }
 
+
+
+    public function ebayDePublishRunnerPlan(Request $request, GoogleTranslateService $translateService, EbayDescriptionTemplateRenderer $renderer, NbpExchangeRateService $exchangeRateService): JsonResponse
+    {
+        $runId = 'jarek-ebay-de-plan-'.now()->format('YmdHis').'-'.Str::lower(Str::random(8));
+        $batchSize = max(1, min(20, (int) $request->query('batch_size', 20)));
+        $limit = max(1, min(2000, (int) $request->query('limit', 2000)));
+        $offset = max(0, (int) $request->query('offset', 0));
+        $processed = 0;
+        $items = [];
+        $summary = $this->emptyJarekEbayDeRunnerSummary($runId, $batchSize, $offset);
+        $summary['state'] = 'running';
+        $summary['started_at'] = now()->toISOString();
+
+        while ($processed < $limit) {
+            $previewRequest = Request::create($request->path(), 'GET', [
+                'limit' => min($batchSize, $limit - $processed),
+                'offset' => $offset + $processed,
+                'missing_offer_id_only' => $request->boolean('missing_offer_id_only', true) ? '1' : '0',
+            ]);
+            $batch = $this->ebayDeBulkPreparePublishPreview($previewRequest, $translateService, $renderer, $exchangeRateService)->getData(true);
+            foreach ((array) ($batch['offers'] ?? []) as $offer) {
+                $items[] = $this->jarekEbayDeRunnerPlanItem((array) $offer);
+            }
+            $count = count((array) ($batch['offers'] ?? []));
+            $processed += $count;
+            $summary['current_offset'] = $offset + $processed;
+            if (! ($batch['summary']['has_more'] ?? false) || $count === 0) break;
+        }
+
+        $summary['state'] = 'completed';
+        $summary['finished_at'] = now()->toISOString();
+        $summary['total'] = count($items);
+        foreach ($items as $item) {
+            $summary['processed']++;
+            if ($item['ready'] ?? false) $summary['succeeded']++;
+            if (($item['status'] ?? null) === 'blocked') $summary['blocked']++;
+            if (($item['status'] ?? null) === 'failed') $summary['failed']++;
+            if (($item['status'] ?? null) === 'skipped') $summary['skipped']++;
+            if (in_array('missing_public_images', $item['blockers'] ?? [], true)) $summary['missing_images_count']++;
+            if (in_array('translation_failed', $item['blockers'] ?? [], true)) $summary['translation_failed_count']++;
+            if (in_array('existing_ebay_offer_or_listing_found', $item['blockers'] ?? [], true)) $summary['duplicate_existing_count']++;
+        }
+        $summary['published_count'] = 0;
+        $summary['blocked_count'] = $summary['blocked'];
+        $summary['failed_count'] = $summary['failed'];
+        $summary['skipped_existing_count'] = $summary['duplicate_existing_count'];
+
+        $payload = [
+            'ok' => true,
+            'dry_run' => true,
+            'read_only' => true,
+            'marketplace_write' => false,
+            'marketplace_write_enabled' => false,
+            'action' => 'jarek_gearboxes_ebay_de_publish_runner_plan',
+            'run_id' => $runId,
+            'state' => 'completed',
+            'batch_size' => $batchSize,
+            'max_publish_batch_size' => 20,
+            'confirm_required_for_real_publish' => 'future_guarded_confirm_token_not_implemented_in_plan_only',
+            'resume' => ['current_offset' => $summary['current_offset'], 'can_resume_from_offset' => true],
+            'controls' => ['pending', 'running', 'paused', 'completed', 'failed'],
+            'summary' => $summary,
+            'errors_or_blockers' => array_values(array_filter($items, fn ($item) => ($item['blockers'] ?? []) !== [] || filled($item['error'] ?? null))),
+            'published_skus' => [],
+            'items' => $items,
+            'safety' => ['plan_only', 'dry_run_true', 'read_only_true', 'marketplace_write_false', 'no_createInventoryItem', 'no_createOffer', 'no_publishOffer', 'duplicate_guard_by_sku_before_publish'],
+        ];
+        $this->logJarekEbayDeRunnerPlan($payload);
+
+        return response()->json($payload);
+    }
+
+    public function ebayDePublishRunnerPause(Request $request): JsonResponse
+    {
+        $payload = ['ok' => true, 'dry_run' => true, 'read_only' => true, 'marketplace_write' => false, 'run_id' => $request->query('run_id'), 'state' => 'paused', 'message' => 'Plan-only runner pause marker recorded; no marketplace write.'];
+        $this->logJarekEbayDeRunnerPlan($payload + ['action' => 'jarek_gearboxes_ebay_de_publish_runner_pause']);
+        return response()->json($payload);
+    }
+
+    private function jarekEbayDeBulkDuplicateGuard(string $sku): array
+    {
+        try {
+            return $this->jarekEbayDePreviewIdempotency($sku) + ['guard' => 'existing_ebay_offer_or_listing_by_sku'];
+        } catch (Throwable $e) {
+            return ['ok' => false, 'read_only' => true, 'read_only_api_check' => 'performed', 'sku' => $sku, 'inventory_item_exists' => false, 'offer_exists' => false, 'offer_id' => null, 'listing_id' => null, 'blockers' => ['ebay_duplicate_guard_lookup_failed'], 'guard' => 'existing_ebay_offer_or_listing_by_sku', 'error_class' => $e::class, 'error_message' => $e->getMessage()];
+        }
+    }
+
+    private function jarekEbayDeRunnerPlanItem(array $offer): array
+    {
+        $blockers = array_values((array) ($offer['blockers'] ?? []));
+        $status = ($offer['ready_to_publish'] ?? false) ? 'ready' : ($blockers === [] ? 'skipped' : 'blocked');
+        return ['sku' => $offer['sku'] ?? null, 'status' => $status, 'ready' => (bool) ($offer['ready_to_publish'] ?? false), 'published' => false, 'blocked' => $blockers !== [], 'error' => null, 'offer_id' => $offer['existing_offer_id'] ?? null, 'listing_id' => $offer['existing_listing_id'] ?? null, 'warnings' => array_values((array) ($offer['warnings'] ?? [])), 'blockers' => $blockers];
+    }
+
+    private function emptyJarekEbayDeRunnerSummary(string $runId, int $batchSize, int $offset): array
+    {
+        return ['run_id' => $runId, 'state' => 'pending', 'batch_size' => $batchSize, 'total' => 0, 'processed' => 0, 'succeeded' => 0, 'blocked' => 0, 'failed' => 0, 'skipped' => 0, 'current_offset' => $offset, 'started_at' => null, 'finished_at' => null, 'published_count' => 0, 'blocked_count' => 0, 'failed_count' => 0, 'skipped_existing_count' => 0, 'missing_images_count' => 0, 'translation_failed_count' => 0, 'duplicate_existing_count' => 0];
+    }
+
+    private function logJarekEbayDeRunnerPlan(array $payload): void
+    {
+        if (! Schema::hasTable('marketplace_sync_logs')) return;
+        MarketplaceSyncLog::query()->create(['marketplace' => 'ebay_de', 'action' => $payload['action'] ?? 'jarek_gearboxes_ebay_de_publish_runner_plan', 'status' => $payload['state'] ?? 'success', 'message' => 'Plan-only dry-run runner snapshot for Jarek eBay DE guarded bulk publish; no marketplace write.', 'external_id' => $payload['run_id'] ?? null, 'payload' => $payload, 'created_at' => now()]);
+    }
+
     /** @param array<string, mixed> $prepare @param array{plan: array<string, mixed>, blockers: array<int, string>} $plan */
-    private function jarekBulkPreparePublishPreviewItem(JarekGearbox $gearbox, string $sku, array $prepare, array $plan): array
+    private function jarekBulkPreparePublishPreviewItem(JarekGearbox $gearbox, string $sku, array $prepare, array $plan, ?array $duplicateGuard = null): array
     {
         $blockers = array_values(array_unique(array_filter(array_merge((array) ($prepare['blockers'] ?? []), (array) ($plan['blockers'] ?? [])))));
         $warnings = array_values(array_unique(array_filter((array) ($prepare['warnings'] ?? []))));
@@ -666,20 +779,30 @@ class JarekGearboxToolController extends Controller
         if (! is_numeric($prepare['price_eur'] ?? null)) $blockers[] = 'price_conversion_failed';
         if (array_filter($required, fn ($value): bool => blank($value)) !== []) $blockers[] = 'missing_required_fields';
 
+        $duplicateGuard ??= ['ok' => true, 'read_only_api_check' => 'skipped'];
+        $duplicateOfferId = $duplicateGuard['offer_id'] ?? null;
+        $duplicateListingId = $duplicateGuard['listing_id'] ?? null;
+        if (($duplicateGuard['inventory_item_exists'] ?? false) || ($duplicateGuard['offer_exists'] ?? false) || filled($duplicateListingId)) {
+            $blockers[] = 'existing_ebay_offer_or_listing_found';
+        }
+        if (($duplicateGuard['ok'] ?? true) === false && (($duplicateGuard['read_only_api_check'] ?? null) === 'performed')) {
+            $blockers[] = 'ebay_duplicate_guard_lookup_failed';
+        }
+
         $blockers = array_values(array_unique(array_filter($blockers)));
-        $ready = $blockers === [] && blank($gearbox->ebay_offer_id) && blank($gearbox->ebay_listing_id);
+        $ready = $blockers === [] && blank($gearbox->ebay_offer_id) && blank($gearbox->ebay_listing_id) && blank($duplicateOfferId) && blank($duplicateListingId);
 
         return [
             'sku' => $sku,
             'source_id' => $gearbox->id,
             'offer_source_id' => $gearbox->allegro_offer_id,
-            'existing_offer_id' => $gearbox->ebay_offer_id,
-            'existing_listing_id' => $gearbox->ebay_listing_id,
+            'existing_offer_id' => $gearbox->ebay_offer_id ?: $duplicateOfferId,
+            'existing_listing_id' => $gearbox->ebay_listing_id ?: $duplicateListingId,
             'ok' => $blockers === [],
             'ready_to_publish' => $ready,
             'blockers' => $blockers,
             'warnings' => $warnings,
-            'admin_diagnostics' => ['dry_run' => true, 'read_only' => true, 'marketplace_write' => false],
+            'admin_diagnostics' => ['dry_run' => true, 'read_only' => true, 'marketplace_write' => false, 'ebay_duplicate_guard' => $duplicateGuard],
             'public_image_urls' => $publicImageUrls,
             'image_diagnostics' => ['public_image_urls_count' => count($publicImageUrls), 'blockers' => array_values(array_intersect($blockers, ['missing_public_images', 'image_not_public_or_not_ebay_safe']))],
             'price_diagnostics' => ['source_price_pln' => $prepare['source_price_pln'] ?? null, 'nbp_exchange_rate' => $prepare['nbp_exchange_rate'] ?? null, 'price_eur' => $prepare['price_eur'] ?? null, 'currency' => 'EUR'],
@@ -689,7 +812,7 @@ class JarekGearboxToolController extends Controller
             'translated_description_de' => $prepare['rendered_description_de_template'] ?? $prepare['translated_description_de'] ?? null,
             'inventory_item_request' => $inventoryItemRequest,
             'offer_request' => $offerRequest,
-            'publish_plan' => ['steps' => ['PUT inventory_item/{sku}', 'POST offer', 'POST publish_offer/{offerId}'], 'execute' => false],
+            'publish_plan' => ['steps' => ['PUT inventory_item/{sku}', 'POST offer', 'POST publish_offer/{offerId}'], 'execute' => false, 'route' => in_array('existing_ebay_offer_or_listing_found', $blockers, true) ? 'revise' : 'publish'],
         ];
     }
 
@@ -715,7 +838,7 @@ class JarekGearboxToolController extends Controller
             'translated_description_de' => null,
             'inventory_item_request' => null,
             'offer_request' => null,
-            'publish_plan' => ['steps' => ['PUT inventory_item/{sku}', 'POST offer', 'POST publish_offer/{offerId}'], 'execute' => false],
+            'publish_plan' => ['steps' => ['PUT inventory_item/{sku}', 'POST offer', 'POST publish_offer/{offerId}'], 'execute' => false, 'route' => 'publish'],
         ];
     }
 
