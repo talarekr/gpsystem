@@ -14,6 +14,7 @@ use App\Services\JarekGearboxes\JarekGearboxEbayPreviewService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -159,6 +160,26 @@ class JarekGearboxToolController extends Controller
             'file_exists_checks_used' => $this->jarekImageFileExistsChecks,
             'file_exists_budget_exceeded' => $this->jarekImageFileExistsBudgetExceeded,
         ]);
+    }
+
+    public function localizeImagesDryRun(Request $request): JsonResponse
+    {
+        return response()->json($this->buildJarekImageLocalization($this->limit($request), false));
+    }
+
+    public function localizeImagesApply(Request $request): JsonResponse
+    {
+        if ($request->query('confirm') !== 'jarek-localize-images') {
+            $response = ['ok' => false, 'error' => 'Missing confirm=jarek-localize-images', 'marketplace_write' => false, 'parts_changed' => false];
+            $this->logJarekImageLocalization('blocked', 'Odmowa lokalizacji zdjęć Jarka: brak wymaganego confirm.', $response);
+
+            return response()->json($response, 422);
+        }
+
+        $result = $this->buildJarekImageLocalization(max(1, min(10, (int) $request->query('limit', 5))), true);
+        $this->logJarekImageLocalization('success', 'Lokalizacja zdjęć Skrzyń Jarka; bez parts i bez marketplace write.', $result);
+
+        return response()->json($result);
     }
 
     public function ebayCsvExport(Request $request): JsonResponse|StreamedResponse
@@ -435,7 +456,7 @@ class JarekGearboxToolController extends Controller
     /** @return array<int, string> */
     private function localJarekImageUrls(JarekGearbox $gearbox): array
     {
-        $stored = collect([])
+        $stored = collect(array_merge($this->jarekPartImageCandidates($gearbox), $this->jarekStoragePathCandidates($gearbox)))
             ->pluck('public_url')
             ->filter(fn ($url): bool => is_string($url) && $this->isLocalServerImageUrl($url))
             ->all();
@@ -443,6 +464,108 @@ class JarekGearboxToolController extends Controller
         $fromColumns = array_filter(array_map(fn (string $url): ?string => $this->normalizeOurServerImageUrl($url), $this->rawJarekImageUrlCandidates($gearbox)));
 
         return array_values(array_unique(array_merge($stored, $fromColumns)));
+    }
+
+    /** @return array<string, mixed> */
+    private function buildJarekImageLocalization(int $limit, bool $apply): array
+    {
+        $limit = max(1, min($apply ? 10 : 100, $limit));
+        $base = [
+            'ok' => Schema::hasTable('jarek_gearboxes'),
+            'dry_run' => ! $apply,
+            'applied' => $apply,
+            'marketplace_write' => false,
+            'parts_changed' => false,
+            'source_table' => 'jarek_gearboxes',
+            'target_storage_disk' => 'public',
+            'target_storage_directory' => 'jarek-gearboxes',
+            'limit' => $limit,
+            'records_scanned' => 0,
+            'records_with_only_allegro_image_urls' => 0,
+            'images_to_download_or_copy' => 0,
+            'images_downloaded' => 0,
+            'images_already_existing' => 0,
+            'records_with_local_images_before' => 0,
+            'records_with_local_images_after_expected' => 0,
+            'records_with_local_images_after_apply' => 0,
+            'samples' => [],
+            'safety' => ['no_parts_write' => true, 'no_marketplace_write' => true, 'no_ebay_api_write' => true, 'no_ovoko_write' => true, 'no_allegro_write' => true],
+        ];
+
+        if (! Schema::hasTable('jarek_gearboxes')) return $base;
+
+        foreach (JarekGearbox::query()->orderBy('id')->limit($limit)->get() as $gearbox) {
+            $base['records_scanned']++;
+            $localBefore = $this->localJarekImageUrls($gearbox);
+            if ($localBefore !== []) $base['records_with_local_images_before']++;
+            $sourceUrls = array_values(array_filter($this->rawJarekImageUrlCandidates($gearbox), fn (string $url): bool => $this->isAllowedJarekSourceImageUrl($url)));
+            if ($sourceUrls !== [] && $localBefore === []) $base['records_with_only_allegro_image_urls']++;
+
+            $images = [];
+            foreach ($sourceUrls as $index => $url) {
+                $target = $this->jarekLocalizedImageTarget($gearbox, $url, $index);
+                $exists = Storage::disk('public')->exists($target['relative_path']);
+                $base['images_to_download_or_copy']++;
+                if ($exists) $base['images_already_existing']++;
+
+                $downloaded = false;
+                $error = null;
+                if ($apply && ! $exists) {
+                    try {
+                        $response = Http::timeout(20)->retry(1, 500)->get($url);
+                        if ($response->successful() && str_starts_with((string) $response->header('Content-Type'), 'image/')) {
+                            Storage::disk('public')->put($target['relative_path'], $response->body());
+                            $downloaded = true;
+                            $base['images_downloaded']++;
+                            $exists = true;
+                        } else {
+                            $error = 'download_failed_or_not_image';
+                        }
+                    } catch (Throwable $e) {
+                        $error = $e->getMessage();
+                    }
+                }
+
+                $images[] = $target + ['source_url' => $url, 'file_exists' => $exists, 'downloaded' => $downloaded, 'error' => $error];
+            }
+
+            if ($sourceUrls !== [] || $localBefore !== []) $base['records_with_local_images_after_expected']++;
+            if ($apply && $this->localJarekImageUrls($gearbox) !== []) $base['records_with_local_images_after_apply']++;
+
+            $base['samples'][] = [
+                'source_jarek_gearbox_id' => $gearbox->id,
+                'allegro_offer_id' => $gearbox->allegro_offer_id,
+                'sku' => 'JAREK-'.($gearbox->allegro_offer_id ?: $gearbox->id),
+                'local_images_before_count' => count($localBefore),
+                'source_allegro_image_urls_count' => count($sourceUrls),
+                'target_images' => $images,
+            ];
+        }
+
+        return $base;
+    }
+
+    /** @return array<string, string> */
+    private function jarekLocalizedImageTarget(JarekGearbox $gearbox, string $sourceUrl, int $index): array
+    {
+        $offerId = preg_replace('/[^A-Za-z0-9_-]+/', '-', (string) ($gearbox->allegro_offer_id ?: $gearbox->id));
+        $path = parse_url($sourceUrl, PHP_URL_PATH);
+        $extension = is_string($path) ? strtolower(pathinfo($path, PATHINFO_EXTENSION)) : '';
+        if (! in_array($extension, ['jpg', 'jpeg', 'png', 'webp'], true)) $extension = 'jpg';
+        $relative = 'jarek-gearboxes/'.$offerId.'/'.str_pad((string) ($index + 1), 2, '0', STR_PAD_LEFT).'.'.$extension;
+
+        return [
+            'relative_path' => $relative,
+            'storage_path' => storage_path('app/public/'.$relative),
+            'public_url' => $this->publicStorageUrl($relative),
+            'www_public_url' => 'https://www.gpswiss.pl/storage/'.$relative,
+        ];
+    }
+
+    private function isAllowedJarekSourceImageUrl(string $url): bool
+    {
+        $host = parse_url($url, PHP_URL_HOST);
+        return is_string($host) && mb_strtolower($host) === 'a.allegroimg.com';
     }
 
 
@@ -555,9 +678,9 @@ class JarekGearboxToolController extends Controller
             (string) $gearbox->allegro_offer_id,
             'JAREK-'.($gearbox->allegro_offer_id ?: $gearbox->id),
         ])));
-        $directories = ['parts/photos/imported', 'parts/photos/jarek'];
+        $directories = ['jarek-gearboxes', 'parts/photos/imported', 'parts/photos/jarek'];
         $extensions = ['jpg', 'jpeg', 'png', 'webp'];
-        $suffixes = ['', '-1', '_1', '/1', '/main'];
+        $suffixes = array_merge(['', '-1', '_1', '/1', '/main'], array_map(fn (int $i): string => '/'.str_pad((string) $i, 2, '0', STR_PAD_LEFT), range(1, 20)));
         $paths = [];
 
         foreach ($directories as $directory) {
@@ -579,10 +702,13 @@ class JarekGearboxToolController extends Controller
         return array_values(array_unique([
             storage_path('app/public/parts/photos/imported'),
             storage_path('app/public/parts/photos/jarek'),
+            storage_path('app/public/jarek-gearboxes'),
             public_path('storage/parts/photos/imported'),
             public_path('storage/parts/photos/jarek'),
+            public_path('storage/jarek-gearboxes'),
             dirname(base_path()).'/public_html/storage/parts/photos/imported',
             dirname(base_path()).'/public_html/storage/parts/photos/jarek',
+            dirname(base_path()).'/public_html/storage/jarek-gearboxes',
         ]));
     }
 
@@ -658,7 +784,69 @@ class JarekGearboxToolController extends Controller
                 'category_name' => $rows->first()->category_name,
                 'category_path' => $this->categoryPathString($rows->first()->category_path),
                 'count' => $rows->count(),
+                'existing_allegro_mappings' => $this->existingJarekAllegroMappings($categoryId),
+                'candidate_local_ebay_mappings' => $this->candidateLocalEbayMappings((string) $rows->first()->category_name),
             ])
+            ->values()
+            ->all();
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    private function existingJarekAllegroMappings(string $categoryId): array
+    {
+        if ($categoryId === '' || ! Schema::hasTable('marketplace_category_mappings')) return [];
+
+        return MarketplaceCategoryMapping::query()
+            ->whereIn('channel', ['allegro_main', 'allegro'])
+            ->where('external_category_id', $categoryId)
+            ->limit(10)
+            ->get()
+            ->map(fn (MarketplaceCategoryMapping $mapping): array => [
+                'mapping_id' => $mapping->id,
+                'channel' => $mapping->channel,
+                'local_category_id' => $mapping->local_category_id,
+                'external_category_id' => $mapping->external_category_id,
+                'external_category_name' => $mapping->external_category_name,
+                'is_blocked' => (bool) $mapping->is_blocked,
+            ])
+            ->all();
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    private function candidateLocalEbayMappings(string $categoryName): array
+    {
+        if ($categoryName === '' || ! Schema::hasTable('part_categories') || ! Schema::hasTable('marketplace_category_mappings')) return [];
+
+        $query = PartCategory::query()->where('name', 'like', '%'.$categoryName.'%');
+        if (Schema::hasColumn('part_categories', 'category_path')) {
+            $query->orWhere('category_path', 'like', '%'.$categoryName.'%');
+        }
+
+        return $query
+            ->limit(10)
+            ->get()
+            ->map(function (PartCategory $category): array {
+                $ebay = MarketplaceCategoryMapping::query()
+                    ->where('local_category_id', $category->id)
+                    ->whereIn('channel', ['ebay_de', 'ebay_fr', 'ebay'])
+                    ->where('is_blocked', false)
+                    ->whereNotNull('external_category_id')
+                    ->get();
+
+                return [
+                    'local_category_id' => $category->id,
+                    'local_category_name' => $category->name,
+                    'local_category_path' => $category->category_path ?? null,
+                    'ebay_mappings' => $ebay->map(fn (MarketplaceCategoryMapping $mapping): array => [
+                        'mapping_id' => $mapping->id,
+                        'channel' => $mapping->channel,
+                        'external_category_id' => $mapping->external_category_id,
+                        'external_category_name' => $mapping->external_category_name,
+                        'external_category_path' => $mapping->external_category_path,
+                    ])->all(),
+                ];
+            })
+            ->filter(fn (array $candidate): bool => $candidate['ebay_mappings'] !== [])
             ->values()
             ->all();
     }
@@ -1107,6 +1295,20 @@ class JarekGearboxToolController extends Controller
         MarketplaceSyncLog::query()->create([
             'marketplace' => 'admin',
             'action' => 'jarek_gearboxes_parts_import_apply',
+            'status' => $status,
+            'message' => $message,
+            'payload' => $payload,
+            'created_at' => now(),
+        ]);
+    }
+
+    private function logJarekImageLocalization(string $status, string $message, array $payload): void
+    {
+        if (! Schema::hasTable('marketplace_sync_logs')) return;
+
+        MarketplaceSyncLog::query()->create([
+            'marketplace' => 'admin',
+            'action' => 'jarek_gearboxes_localize_images',
             'status' => $status,
             'message' => $message,
             'payload' => $payload,
