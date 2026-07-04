@@ -337,7 +337,7 @@ class JarekGearboxEbayDePreparePreviewTest extends TestCase
             'quantity' => 1,
             'category_id' => '620',
             'category_name' => 'Skrzynie biegów',
-            'parameters' => [['name' => 'Numer części', 'values' => ['0D9300041']]],
+            'parameters' => [['id' => '11323', 'name' => 'Stan', 'valuesLabels' => ['Używany']], ['name' => 'Numer części', 'values' => ['0D9300041']]],
         ]);
 
         $response = $this->withoutMiddleware()->getJson('/admin/tools/jarek-gearboxes/ebay-de-publish-preview?sku=JAREK-18727785496');
@@ -363,7 +363,12 @@ class JarekGearboxEbayDePreparePreviewTest extends TestCase
             ->assertJsonPath('ebay_api_plan.currency', 'EUR')
             ->assertJsonPath('ebay_api_plan.inventory_item_request.availability.shipToLocationAvailability.quantity', 1)
             ->assertJsonPath('ebay_api_plan.inventory_item_request.condition', 'USED_EXCELLENT')
-            ->assertJsonPath('ebay_api_plan.condition_source', 'jarek_gearboxes.default_used_part_condition')
+            ->assertJsonPath('ebay_api_plan.source_condition_name', 'Stan')
+            ->assertJsonPath('ebay_api_plan.source_condition_value', 'Używany')
+            ->assertJsonPath('ebay_api_plan.source_condition_parameter_id', '11323')
+            ->assertJsonPath('ebay_api_plan.condition_source', 'parameters')
+            ->assertJsonPath('ebay_api_plan.condition_mapping_reason', 'localized_condition_map')
+            ->assertJsonPath('ebay_api_plan.mapped_ebay_condition', 'USED_EXCELLENT')
             ->assertJsonPath('ebay_api_plan.condition_mapped_value', 'USED_EXCELLENT')
             ->assertJsonPath('ebay_api_plan.condition_diagnostics.condition_mapping_valid', true)
             ->assertJsonPath('ebay_api_plan.inventory_item_request.product.description', 'Opis skrzyni')
