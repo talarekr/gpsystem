@@ -6,7 +6,7 @@
     <div class="gps-parts-list-header gps-admin-parts-grid"><div>Część</div><div>Numer części</div><div>Kanały sprzedaży</div><div>Mapowanie</div><div>Status</div><div>Notatka</div><div>ID</div><div>Akcje</div></div>
     @forelse ($gearboxes as $gearbox)
         @php
-            $images = collect([$gearbox->main_image_url])->merge((array) ($gearbox->images ?? []))->filter()->unique()->values();
+            $images = collect($gearbox->displayImageUrls())->filter()->unique()->values();
             $imageUrl = $images->first();
             $identifier = $gearbox->allegro_offer_id ?: $gearbox->id;
             $currency = $gearbox->currency ?: 'PLN';

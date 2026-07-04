@@ -251,7 +251,8 @@ class JarekGearboxToolController extends Controller
             'warnings_by_reason' => array_fill_keys(['missing_title','title_too_long','missing_price','missing_quantity','missing_local_images','missing_part_number','missing_ebay_category','missing_ebay_category_mapping','duplicate_sku','invalid_currency','csv_field_normalized','csv_field_omitted'], 0),
             'sample_rows' => [],
             'blocked_samples' => [],
-            'local_image_url_source_fields' => ['main_image_url', 'images'],
+            'local_image_url_source_fields' => [JarekGearbox::LOCALIZED_IMAGES_SOURCE],
+            'localized_images_source' => JarekGearbox::LOCALIZED_IMAGES_SOURCE,
             'csv_uses_only_our_server_images' => true,
             'allowed_image_hosts' => $this->localImageHosts(),
             'category_mapping_diagnostics' => ['source' => 'marketplace_category_mappings: allegro/allegro_main external_category_id -> local_category_id -> ebay_de/ebay_fr/ebay mapping'],
@@ -306,7 +307,7 @@ class JarekGearboxToolController extends Controller
     /** @return array<string, string|null> */
     private function jarekEbayCsvRow(JarekGearbox $gearbox): array
     {
-        $images = $this->localJarekImageUrls($gearbox);
+        $images = $gearbox->csvImageUrls();
         $categoryMapping = $this->jarekEbayCategoryMapping($gearbox);
         $sku = 'JAREK-'.($gearbox->allegro_offer_id ?: $gearbox->id);
         $partNumber = $this->detectJarekPartNumber((object) $gearbox->getAttributes(), $sku);
@@ -348,7 +349,7 @@ class JarekGearboxToolController extends Controller
         if (mb_strlen($title) > 80) $warnings[] = 'title_too_long';
         if (! is_numeric($gearbox->price) || (float) $gearbox->price <= 0) $warnings[] = 'missing_price';
         if (! is_numeric($gearbox->quantity) || (int) $gearbox->quantity < 1) $warnings[] = 'missing_quantity';
-        if ($this->localJarekImageUrls($gearbox) === []) $warnings[] = 'missing_local_images';
+        if ($gearbox->csvImageUrls() === []) $warnings[] = 'missing_local_images';
         if (blank($this->detectJarekPartNumber((object) $gearbox->getAttributes(), $sku))) $warnings[] = 'missing_part_number';
         if (! $this->jarekEbayCategoryMapping($gearbox)) {
             $warnings[] = 'missing_ebay_category';
@@ -431,7 +432,11 @@ class JarekGearboxToolController extends Controller
             'source_fields' => $this->jarekPotentialImageColumns(),
             'local_storage_diagnostics' => $includeStorage ? $this->localJarekImageStorageDiagnostics($gearbox) : ['status' => 'local_image_storage_lookup_skipped_too_expensive', 'reason' => 'Preview storage diagnostics are limited to sample records only.', 'recursive_storage_scan' => false],
             'urls_before_filtering_count' => count($all),
-            'urls_after_our_host_filtering_count' => count($this->localJarekImageUrls($gearbox)),
+            'localized_images_count' => count($gearbox->localizedImageUrls()),
+            'localized_images_source' => JarekGearbox::LOCALIZED_IMAGES_SOURCE,
+            'display_images_source' => $gearbox->localizedImageUrls() !== [] ? 'localized' : 'allegro_fallback',
+            'csv_images_source' => $gearbox->csvImageUrls() !== [] ? 'localized' : 'missing_local_images',
+            'urls_after_our_host_filtering_count' => count($gearbox->csvImageUrls()),
             'allowed_hosts' => $this->localImageHosts(),
             'rejected_sample_hosts' => array_values(array_unique(array_filter($hosts, fn ($host): bool => ! is_string($host) || ! in_array(mb_strtolower($host), $this->localImageHosts(), true)))) ,
             'full_url_count' => collect($all)->filter(fn (string $url): bool => (bool) parse_url($url, PHP_URL_SCHEME))->count(),
@@ -456,14 +461,7 @@ class JarekGearboxToolController extends Controller
     /** @return array<int, string> */
     private function localJarekImageUrls(JarekGearbox $gearbox): array
     {
-        $stored = collect(array_merge($this->jarekPartImageCandidates($gearbox), $this->jarekStoragePathCandidates($gearbox)))
-            ->pluck('public_url')
-            ->filter(fn ($url): bool => is_string($url) && $this->isLocalServerImageUrl($url))
-            ->all();
-
-        $fromColumns = array_filter(array_map(fn (string $url): ?string => $this->normalizeOurServerImageUrl($url), $this->rawJarekImageUrlCandidates($gearbox)));
-
-        return array_values(array_unique(array_merge($stored, $fromColumns)));
+        return $gearbox->localizedImageUrls();
     }
 
     /** @return array<string, mixed> */
@@ -496,7 +494,7 @@ class JarekGearboxToolController extends Controller
 
         foreach (JarekGearbox::query()->orderBy('id')->limit($limit)->get() as $gearbox) {
             $base['records_scanned']++;
-            $localBefore = $this->localJarekImageUrls($gearbox);
+            $localBefore = $gearbox->localizedImageUrls();
             if ($localBefore !== []) $base['records_with_local_images_before']++;
             $sourceUrls = array_values(array_filter($this->rawJarekImageUrlCandidates($gearbox), fn (string $url): bool => $this->isAllowedJarekSourceImageUrl($url)));
             if ($sourceUrls !== [] && $localBefore === []) $base['records_with_only_allegro_image_urls']++;
@@ -530,13 +528,15 @@ class JarekGearboxToolController extends Controller
             }
 
             if ($sourceUrls !== [] || $localBefore !== []) $base['records_with_local_images_after_expected']++;
-            if ($apply && $this->localJarekImageUrls($gearbox) !== []) $base['records_with_local_images_after_apply']++;
+            if ($apply && $gearbox->fresh()->localizedImageUrls() !== []) $base['records_with_local_images_after_apply']++;
 
             $base['samples'][] = [
                 'source_jarek_gearbox_id' => $gearbox->id,
                 'allegro_offer_id' => $gearbox->allegro_offer_id,
                 'sku' => 'JAREK-'.($gearbox->allegro_offer_id ?: $gearbox->id),
                 'local_images_before_count' => count($localBefore),
+                'localized_images_count' => count($gearbox->localizedImageUrls()),
+                'localized_images_source' => JarekGearbox::LOCALIZED_IMAGES_SOURCE,
                 'source_allegro_image_urls_count' => count($sourceUrls),
                 'target_images' => $images,
             ];
@@ -588,7 +588,11 @@ class JarekGearboxToolController extends Controller
         $candidates = array_values(array_merge($partImages, $storageCandidates));
 
         return [
-            'status' => $candidates === [] ? 'local_images_not_found' : 'local_images_found',
+            'status' => $gearbox->localizedImageUrls() === [] ? 'local_images_not_found' : 'local_images_found',
+            'localized_images_count' => count($gearbox->localizedImageUrls()),
+            'localized_images_source' => JarekGearbox::LOCALIZED_IMAGES_SOURCE,
+            'csv_images_source' => $gearbox->csvImageUrls() !== [] ? 'localized' : 'missing_local_images',
+            'display_images_source' => $gearbox->localizedImageUrls() !== [] ? 'localized' : 'allegro_fallback',
             'checked_tables' => ['part_images'],
             'checked_storage_roots' => $this->jarekStorageRoots(),
             'recursive_storage_scan' => false,

@@ -16,9 +16,11 @@ class JarekGearboxEbayCsvExportTest extends TestCase
 
     public function test_preview_uses_only_local_images_and_blocks_allegro_images(): void
     {
+        Storage::fake('public');
         config(['app.url' => 'https://gpswiss.pl']);
 
         $this->createCategoryMappings('620', '100684');
+        Storage::disk('public')->put('jarek-gearboxes/123/01.jpg', 'jpg');
 
         JarekGearbox::query()->create([
             'allegro_offer_id' => '123',
@@ -28,8 +30,8 @@ class JarekGearboxEbayCsvExportTest extends TestCase
             'price' => 1000,
             'currency' => 'PLN',
             'quantity' => 1,
-            'main_image_url' => 'https://gpswiss.pl/storage/jarek/123/main.jpg',
-            'images' => ['https://gpswiss.pl/storage/jarek/123/main.jpg', 'https://gpswiss.pl/storage/jarek/123/2.jpg'],
+            'main_image_url' => 'https://a.allegroimg.com/original/photo-123.jpg',
+            'images' => ['https://a.allegroimg.com/original/photo-123.jpg'],
             'category_id' => '620',
             'category_name' => 'Skrzynie biegów',
             'category_path' => ['Motoryzacja', 'Części', 'Skrzynie biegów'],
@@ -55,17 +57,22 @@ class JarekGearboxEbayCsvExportTest extends TestCase
             ->assertJsonPath('exportable_count', 1)
             ->assertJsonPath('blocked_count', 1)
             ->assertJsonPath('warnings_by_reason.missing_local_images', 1)
-            ->assertJsonPath('local_image_url_source_fields', ['main_image_url', 'images'])
+            ->assertJsonPath('local_image_url_source_fields', ['storage/app/public/jarek-gearboxes'])
+            ->assertJsonPath('localized_images_source', 'storage/app/public/jarek-gearboxes')
             ->assertJsonPath('csv_uses_only_our_server_images', true)
-            ->assertJsonPath('sample_rows.0.Main image URL', 'https://gpswiss.pl/storage/jarek/123/main.jpg');
+            ->assertJsonPath('sample_rows.0.Main image URL', 'https://gpswiss.pl/storage/jarek-gearboxes/123/01.jpg')
+            ->assertJsonPath('sample_rows.0.diagnostics.images.localized_images_count', 1)
+            ->assertJsonPath('sample_rows.0.diagnostics.images.csv_images_source', 'localized');
     }
 
     public function test_export_requires_confirm_writes_small_csv_and_logs_without_marketplace_or_parts_write(): void
     {
         Storage::fake('local');
+        Storage::fake('public');
         config(['app.url' => 'https://gpswiss.pl']);
 
         $this->createCategoryMappings('620', '100684');
+        Storage::disk('public')->put('jarek-gearboxes/123/01.jpg', 'jpg');
 
         JarekGearbox::query()->create([
             'allegro_offer_id' => '123',
@@ -74,8 +81,8 @@ class JarekGearboxEbayCsvExportTest extends TestCase
             'price' => 1000,
             'currency' => 'PLN',
             'quantity' => 1,
-            'main_image_url' => 'https://gpswiss.pl/storage/jarek/123/main.jpg',
-            'images' => ['https://gpswiss.pl/storage/jarek/123/main.jpg'],
+            'main_image_url' => 'https://a.allegroimg.com/original/photo-123.jpg',
+            'images' => ['https://a.allegroimg.com/original/photo-123.jpg'],
             'category_id' => '620',
             'category_name' => 'Skrzynie biegów',
         ]);
@@ -98,9 +105,12 @@ class JarekGearboxEbayCsvExportTest extends TestCase
 
     public function test_preview_normalizes_nested_csv_fields_without_server_error(): void
     {
+        Storage::fake('public');
         config(['app.url' => 'https://gpswiss.pl']);
 
         $this->createCategoryMappings('620', '100684');
+        Storage::disk('public')->put('jarek-gearboxes/125/01.jpg', 'jpg');
+        Storage::disk('public')->put('jarek-gearboxes/125/02.jpg', 'jpg');
 
         JarekGearbox::query()->create([
             'allegro_offer_id' => '125',
@@ -135,8 +145,8 @@ class JarekGearboxEbayCsvExportTest extends TestCase
             ->assertJsonPath('marketplace_write', false)
             ->assertJsonPath('parts_changed', false)
             ->assertJsonPath('sample_rows.0.Allegro category path', 'Motoryzacja > Części samochodowe > Układ napędowy > Skrzynie biegów > Kompletne skrzynie')
-            ->assertJsonPath('sample_rows.0.Main image URL', 'https://gpswiss.pl/storage/jarek/125/main.jpg')
-            ->assertJsonPath('sample_rows.0.Additional image URLs', 'https://gpswiss.pl/storage/jarek/125/2.jpg')
+            ->assertJsonPath('sample_rows.0.Main image URL', 'https://gpswiss.pl/storage/jarek-gearboxes/125/01.jpg')
+            ->assertJsonPath('sample_rows.0.Additional image URLs', 'https://gpswiss.pl/storage/jarek-gearboxes/125/02.jpg')
             ->assertJsonPath('warnings_by_reason.csv_field_normalized', 1)
             ->assertJsonPath('blocked_count', 0)
             ->assertJsonPath('sample_rows.0.Suggested eBay category', '100684')
