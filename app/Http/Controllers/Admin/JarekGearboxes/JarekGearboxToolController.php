@@ -248,12 +248,13 @@ class JarekGearboxToolController extends Controller
             'total' => 0,
             'exportable_count' => 0,
             'blocked_count' => 0,
-            'warnings_by_reason' => array_fill_keys(['missing_title','title_too_long','missing_price','missing_quantity','missing_local_images','missing_part_number','missing_ebay_category','missing_ebay_category_mapping','duplicate_sku','invalid_currency','csv_field_normalized','csv_field_omitted'], 0),
+            'warnings_by_reason' => array_fill_keys(['missing_title','title_too_long','missing_price','missing_quantity','missing_local_images','missing_part_number','missing_ebay_category','missing_ebay_category_mapping','duplicate_sku','invalid_currency','csv_field_normalized','csv_field_omitted','description_image_blocks_removed'], 0),
             'sample_rows' => [],
             'blocked_samples' => [],
             'local_image_url_source_fields' => [JarekGearbox::LOCALIZED_IMAGES_SOURCE],
             'localized_images_source' => JarekGearbox::LOCALIZED_IMAGES_SOURCE,
             'csv_uses_only_our_server_images' => true,
+            'csv_contains_allegro_image_urls' => false,
             'allowed_image_hosts' => $this->localImageHosts(),
             'category_mapping_diagnostics' => ['source' => 'marketplace_category_mappings: allegro/allegro_main external_category_id -> local_category_id -> ebay_de/ebay_fr/ebay mapping'],
             'missing_ebay_category_mapping_summary' => [],
@@ -299,6 +300,7 @@ class JarekGearboxToolController extends Controller
         ];
 
         $base['csv_uses_only_our_server_images'] = collect($base['sample_rows'])->every(fn (array $row): bool => $this->csvRowImagesAreLocal($row));
+        $base['csv_contains_allegro_image_urls'] = collect($base['sample_rows'])->contains(fn (array $row): bool => $this->csvRowContainsAllegroImageUrl($row));
         $base['missing_ebay_category_mapping_summary'] = $this->missingJarekEbayCategoryMappingSummary();
 
         return $base;
@@ -316,7 +318,7 @@ class JarekGearboxToolController extends Controller
         return [
             'SKU' => $sku,
             'Title' => $this->normalizeString($gearbox->title, 'title', $normalizationWarnings),
-            'Description' => $this->normalizeString($gearbox->description ?: $gearbox->plain_description, 'description', $normalizationWarnings),
+            'Description' => $this->normalizeJarekDescription($gearbox->description ?: $gearbox->plain_description, $normalizationWarnings),
             'Price' => $this->normalizeString($gearbox->price, 'price', $normalizationWarnings),
             'Currency' => $this->normalizeString($gearbox->currency ?: 'PLN', 'currency', $normalizationWarnings),
             'Quantity' => $this->normalizeString($gearbox->quantity, 'quantity', $normalizationWarnings),
@@ -360,13 +362,14 @@ class JarekGearboxToolController extends Controller
         $csvWarnings = $this->jarekEbayCsvRow($gearbox)['normalization_warnings'] ?? [];
         if (collect($csvWarnings)->contains(fn (string $warning): bool => str_ends_with($warning, '_normalized'))) $warnings[] = 'csv_field_normalized';
         if (collect($csvWarnings)->contains(fn (string $warning): bool => str_ends_with($warning, '_omitted'))) $warnings[] = 'csv_field_omitted';
+        if (in_array('description_image_blocks_removed', $csvWarnings, true)) $warnings[] = 'description_image_blocks_removed';
         return array_values(array_unique($warnings));
     }
 
     /** @return array<int, string> */
     private function jarekEbayCsvBlockers(array $warnings): array
     {
-        $nonBlocking = ['missing_part_number', 'csv_field_normalized', 'csv_field_omitted'];
+        $nonBlocking = ['missing_part_number', 'csv_field_normalized', 'csv_field_omitted', 'description_image_blocks_removed'];
         return array_values(array_diff($warnings, $nonBlocking));
     }
 
@@ -881,6 +884,11 @@ class JarekGearboxToolController extends Controller
         return array_values(array_unique($hosts));
     }
 
+    private function csvRowContainsAllegroImageUrl(array $row): bool
+    {
+        return collect($row)->contains(fn (mixed $value): bool => is_string($value) && str_contains($value, 'a.allegroimg.com'));
+    }
+
     private function csvRowImagesAreLocal(array $row): bool
     {
         $urls = array_filter(array_merge([(string) ($row['Main image URL'] ?? '')], explode('|', (string) ($row['Additional image URLs'] ?? ''))));
@@ -1144,6 +1152,26 @@ class JarekGearboxToolController extends Controller
             if (filled($item) && is_scalar($item)) $urls[] = trim((string) $item);
         }
         return array_values(array_unique(array_filter($urls)));
+    }
+
+    /** @param array<int, string> $warnings */
+    private function normalizeJarekDescription(mixed $value, array &$warnings): string
+    {
+        $description = $this->normalizeString($value, 'description', $warnings);
+        if ($description === '') return '';
+
+        $cleaned = $description;
+        $cleaned = preg_replace('/(?:^|[\s|]+)IMAGE\s*\|\s*https?:\/\/[^\s|]+(?:\s*\|\s*)?/iu', ' ', $cleaned) ?? $cleaned;
+        $cleaned = preg_replace('/\bTEXT\s*\|\s*/iu', '', $cleaned) ?? $cleaned;
+        $cleaned = preg_replace('/https?:\/\/a\.allegroimg\.com\/[^\s<|"\']+/iu', '', $cleaned) ?? $cleaned;
+        $cleaned = preg_replace('/https?:\/\/[^\s<|"\']+\/(?:storage\/)?[^\s<|"\']+\.(?:jpe?g|png|webp|gif)(?:\?[^\s<|"\']*)?/iu', '', $cleaned) ?? $cleaned;
+        $cleaned = preg_replace('/\s*\|\s*(?=<)/u', ' ', $cleaned) ?? $cleaned;
+        $cleaned = preg_replace('/\s{2,}/u', ' ', $cleaned) ?? $cleaned;
+        $cleaned = trim($cleaned, " \t\n\r\0\x0B|");
+
+        if ($cleaned !== $description) $warnings[] = 'description_image_blocks_removed';
+
+        return $cleaned;
     }
 
     /** @param array<int, string> $warnings */

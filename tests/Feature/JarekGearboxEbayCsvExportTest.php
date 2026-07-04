@@ -153,6 +153,47 @@ class JarekGearboxEbayCsvExportTest extends TestCase
             ->assertJsonPath('sample_rows.0.diagnostics.category.mapping_source', 'marketplace_category_mappings');
     }
 
+
+    public function test_preview_strips_image_blocks_and_allegro_urls_from_description(): void
+    {
+        Storage::fake('public');
+        config(['app.url' => 'https://gpswiss.pl']);
+
+        $this->createCategoryMappings('620', '100684');
+        Storage::disk('public')->put('jarek-gearboxes/126/01.jpg', 'jpg');
+        Storage::disk('public')->put('jarek-gearboxes/126/02.jpg', 'jpg');
+
+        JarekGearbox::query()->create([
+            'allegro_offer_id' => '126',
+            'title' => 'Skrzynia DSG 0D9300043',
+            'description' => 'IMAGE | https://a.allegroimg.com/original/photo-126.jpg | TEXT | <p>Oferujemy skrzynię biegów.</p> IMAGE | https://a.allegroimg.com/original/photo-127.jpg | https://a.allegroimg.com/original/inline.jpg',
+            'price' => 1000,
+            'currency' => 'PLN',
+            'quantity' => 1,
+            'main_image_url' => 'https://a.allegroimg.com/original/photo-126.jpg',
+            'images' => ['https://a.allegroimg.com/original/photo-126.jpg'],
+            'category_id' => '620',
+            'category_name' => 'Skrzynie biegów',
+        ]);
+
+        $response = $this->withoutMiddleware()->getJson('/admin/tools/jarek-gearboxes/ebay-csv-preview?limit=10');
+
+        $response->assertOk()
+            ->assertJsonPath('marketplace_write', false)
+            ->assertJsonPath('parts_changed', false)
+            ->assertJsonPath('exportable_count', 1)
+            ->assertJsonPath('csv_contains_allegro_image_urls', false)
+            ->assertJsonPath('warnings_by_reason.description_image_blocks_removed', 1)
+            ->assertJsonPath('sample_rows.0.Description', '<p>Oferujemy skrzynię biegów.</p>')
+            ->assertJsonPath('sample_rows.0.Main image URL', 'https://gpswiss.pl/storage/jarek-gearboxes/126/01.jpg')
+            ->assertJsonPath('sample_rows.0.Additional image URLs', 'https://gpswiss.pl/storage/jarek-gearboxes/126/02.jpg');
+
+        $description = $response->json('sample_rows.0.Description');
+        $this->assertStringNotContainsString('IMAGE |', $description);
+        $this->assertStringNotContainsString('TEXT |', $description);
+        $this->assertStringNotContainsString('a.allegroimg.com', $description);
+    }
+
     private function createCategoryMappings(string $allegroCategoryId, string $ebayCategoryId): void
     {
         $category = PartCategory::query()->create(['name' => 'Skrzynie biegów', 'category_path' => 'Motoryzacja > Części > Skrzynie biegów']);
