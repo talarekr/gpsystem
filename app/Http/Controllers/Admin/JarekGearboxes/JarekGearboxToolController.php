@@ -194,6 +194,7 @@ class JarekGearboxToolController extends Controller
             'csv_uses_only_our_server_images' => true,
             'allowed_image_hosts' => $this->localImageHosts(),
             'category_mapping_diagnostics' => ['source' => 'marketplace_category_mappings: allegro/allegro_main external_category_id -> local_category_id -> ebay_de/ebay_fr/ebay mapping'],
+            'missing_ebay_category_mapping_summary' => [],
             'safety' => ['no_parts_write' => true, 'no_ovoko_write' => true, 'no_allegro_write' => true, 'no_ebay_api_write' => true, 'no_publish_relist_end_update' => true, 'no_api_sync' => true, 'no_image_download_or_copy' => true],
         ];
 
@@ -220,6 +221,7 @@ class JarekGearboxToolController extends Controller
         }
 
         $base['csv_uses_only_our_server_images'] = collect($base['sample_rows'])->every(fn (array $row): bool => $this->csvRowImagesAreLocal($row));
+        $base['missing_ebay_category_mapping_summary'] = $this->missingJarekEbayCategoryMappingSummary();
 
         return $base;
     }
@@ -349,7 +351,8 @@ class JarekGearboxToolController extends Controller
         $all = $this->rawJarekImageUrlCandidates($gearbox);
         $hosts = array_map(fn (string $url): ?string => parse_url($url, PHP_URL_HOST), $all);
         return [
-            'source_fields' => ['main_image_url', 'images'],
+            'source_fields' => $this->jarekPotentialImageColumns(),
+            'local_storage_diagnostics' => $this->localJarekImageStorageDiagnostics($gearbox),
             'urls_before_filtering_count' => count($all),
             'urls_after_our_host_filtering_count' => count($this->localJarekImageUrls($gearbox)),
             'allowed_hosts' => $this->localImageHosts(),
@@ -369,7 +372,174 @@ class JarekGearboxToolController extends Controller
     /** @return array<int, string> */
     private function localJarekImageUrls(JarekGearbox $gearbox): array
     {
-        return array_values(array_unique(array_filter(array_map(fn (string $url): ?string => $this->normalizeOurServerImageUrl($url), $this->rawJarekImageUrlCandidates($gearbox)))));
+        $stored = collect($this->localJarekImageStorageDiagnostics($gearbox)['candidate_images'] ?? [])
+            ->pluck('public_url')
+            ->filter(fn ($url): bool => is_string($url) && $this->isLocalServerImageUrl($url))
+            ->all();
+
+        $fromColumns = array_filter(array_map(fn (string $url): ?string => $this->normalizeOurServerImageUrl($url), $this->rawJarekImageUrlCandidates($gearbox)));
+
+        return array_values(array_unique(array_merge($stored, $fromColumns)));
+    }
+
+
+    /** @return array<int, string> */
+    private function jarekPotentialImageColumns(): array
+    {
+        if (! Schema::hasTable('jarek_gearboxes')) return ['main_image_url', 'images'];
+
+        return array_values(array_unique(array_filter(
+            Schema::getColumnListing('jarek_gearboxes'),
+            fn (string $column): bool => (bool) preg_match('/(image|images|photo|photos|media|path|url)/i', $column)
+        )));
+    }
+
+    /** @return array<string, mixed> */
+    private function localJarekImageStorageDiagnostics(JarekGearbox $gearbox): array
+    {
+        $partImages = $this->jarekPartImageCandidates($gearbox);
+        $storageCandidates = $this->jarekStoragePathCandidates($gearbox);
+        $candidates = array_values(array_merge($partImages, $storageCandidates));
+
+        return [
+            'status' => $candidates === [] ? 'local_images_not_found' : 'local_images_found',
+            'checked_tables' => ['part_images'],
+            'checked_storage_roots' => $this->jarekStorageRoots(),
+            'identifiers' => [
+                'jarek_gearbox_id' => $gearbox->id,
+                'allegro_offer_id' => $gearbox->allegro_offer_id,
+                'sku' => 'JAREK-'.($gearbox->allegro_offer_id ?: $gearbox->id),
+            ],
+            'candidate_images_count' => count($candidates),
+            'candidate_images' => array_slice($candidates, 0, 10),
+            'allegro_only_source_fields' => [
+                'main_image_url' => $gearbox->main_image_url,
+                'images' => $gearbox->images,
+            ],
+            'can_build_public_url_from_our_host' => collect($candidates)->contains(fn (array $candidate): bool => is_string($candidate['public_url'] ?? null) && $this->isLocalServerImageUrl($candidate['public_url'])),
+            'no_download_or_copy_performed' => true,
+        ];
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    private function jarekPartImageCandidates(JarekGearbox $gearbox): array
+    {
+        if (! Schema::hasTable('part_images')) return [];
+
+        $offerId = (string) $gearbox->allegro_offer_id;
+        $rows = PartImage::query()
+            ->where(function ($query) use ($gearbox, $offerId): void {
+                $query->where('source_system', 'jarek')
+                    ->where(function ($query) use ($gearbox, $offerId): void {
+                        if ($offerId !== '') $query->orWhere('external_id', 'like', $offerId.':%')->orWhere('external_id', $offerId);
+                        $query->orWhere('legacy_payload->jarek_gearbox_id', $gearbox->id)
+                            ->orWhere('legacy_payload->source_jarek_gearbox_id', $gearbox->id);
+                    });
+            })
+            ->orderBy('sort_order')
+            ->limit(25)
+            ->get();
+
+        return $rows->map(fn (PartImage $image): array => $this->partImageCandidatePayload($image))->all();
+    }
+
+    /** @return array<string, mixed> */
+    private function partImageCandidatePayload(PartImage $image): array
+    {
+        $url = $this->normalizeOurServerImageUrl((string) $image->listingUrl()) ?: $this->normalizeOurServerImageUrl((string) $image->publicUrl());
+        return [
+            'source' => 'part_images',
+            'part_image_id' => $image->id,
+            'part_id' => $image->part_id,
+            'path' => $image->path,
+            'source_system' => $image->source_system,
+            'external_id' => $image->external_id,
+            'public_url' => $url,
+            'file_exists' => $this->publicStorageRelativePathExists($image->path),
+        ];
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    private function jarekStoragePathCandidates(JarekGearbox $gearbox): array
+    {
+        $needles = array_values(array_filter([(string) $gearbox->id, (string) $gearbox->allegro_offer_id, 'JAREK-'.($gearbox->allegro_offer_id ?: $gearbox->id)]));
+        $matches = [];
+        foreach ($this->jarekStorageRoots() as $root) {
+            if (! is_dir($root)) continue;
+            foreach ($needles as $needle) {
+                foreach (glob($root.'/*'.$needle.'*') ?: [] as $path) {
+                    if (! is_file($path) || ! preg_match('/\.(jpe?g|png|webp)$/i', $path)) continue;
+                    $relative = $this->relativePublicStoragePath($path);
+                    $matches[] = ['source' => 'storage_scan', 'absolute_path' => $path, 'relative_path' => $relative, 'public_url' => $relative ? $this->publicStorageUrl($relative) : null, 'file_exists' => true];
+                    if (count($matches) >= 25) return $matches;
+                }
+            }
+        }
+        return $matches;
+    }
+
+    /** @return array<int, string> */
+    private function jarekStorageRoots(): array
+    {
+        return array_values(array_unique([
+            storage_path('app/public/parts/photos/imported'),
+            storage_path('app/public/parts/photos/jarek'),
+            public_path('storage/parts/photos/imported'),
+            public_path('storage/parts/photos/jarek'),
+            dirname(base_path()).'/public_html/storage/parts/photos/imported',
+            dirname(base_path()).'/public_html/storage/parts/photos/jarek',
+        ]));
+    }
+
+    private function publicStorageRelativePathExists(?string $path): bool
+    {
+        $relative = $this->publicDiskRelativePath($path);
+        if ($relative === null) return false;
+        return Storage::disk('public')->exists($relative) || is_file(public_path('storage/'.$relative)) || is_file(dirname(base_path()).'/public_html/storage/'.$relative);
+    }
+
+    private function publicDiskRelativePath(?string $path): ?string
+    {
+        if (! is_string($path) || trim($path) === '') return null;
+        $path = ltrim(trim($path), '/');
+        if (str_starts_with($path, 'storage/')) $path = substr($path, 8);
+        if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+            $urlPath = parse_url($path, PHP_URL_PATH);
+            if (! is_string($urlPath) || ! str_starts_with($urlPath, '/storage/')) return null;
+            $path = substr($urlPath, 9);
+        }
+        return $path !== '' ? $path : null;
+    }
+
+    private function relativePublicStoragePath(string $absolutePath): ?string
+    {
+        $absolutePath = str_replace('\\', '/', $absolutePath);
+        $marker = '/storage/';
+        $pos = strpos($absolutePath, $marker);
+        return $pos === false ? null : substr($absolutePath, $pos + strlen($marker));
+    }
+
+    private function publicStorageUrl(string $relativePath): string
+    {
+        return rtrim((string) config('app.url', 'https://gpswiss.pl'), '/').'/storage/'.ltrim($relativePath, '/');
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    private function missingJarekEbayCategoryMappingSummary(): array
+    {
+        if (! Schema::hasTable('jarek_gearboxes')) return [];
+
+        return JarekGearbox::query()->get()
+            ->filter(fn (JarekGearbox $gearbox): bool => $this->jarekEbayCategoryMapping($gearbox) === null)
+            ->groupBy(fn (JarekGearbox $gearbox): string => (string) ($gearbox->category_id ?: ''))
+            ->map(fn ($rows, string $categoryId): array => [
+                'source_allegro_category_id' => $categoryId ?: null,
+                'category_name' => $rows->first()->category_name,
+                'category_path' => $this->categoryPathString($rows->first()->category_path),
+                'count' => $rows->count(),
+            ])
+            ->values()
+            ->all();
     }
 
     private function normalizeOurServerImageUrl(string $url): ?string
