@@ -199,11 +199,16 @@ class JarekGearboxToolController extends Controller
         $templatePart->name = $translatedTitle;
         $templatePart->description = $translatedDescriptionBase;
         $partNumber = $this->detectJarekPartNumber((object) $gearbox->getAttributes(), $sku);
+        $conditionDiagnostics = $this->jarekEbayConditionDiagnostics($gearbox);
+        if (blank($conditionDiagnostics['mapped_ebay_condition'] ?? null)) {
+            $blockers[] = 'missing_or_invalid_ebay_condition';
+        }
+
         $renderedDescription = $renderer->render('ebay_de', $templatePart, [
             'title' => $translatedTitle,
             'description' => $translatedDescription,
             'part_number' => $partNumber,
-            'condition' => 'Gebraucht',
+            'condition' => $conditionDiagnostics['source_condition_value'] ?? null,
         ]);
         if ($coreReturnNotice['required']) {
             $renderedDescription = $this->removeCoreReturnNotices($renderedDescription, $coreReturnNotice);
@@ -264,7 +269,13 @@ class JarekGearboxToolController extends Controller
             'price' => $priceEur,
             'currency' => 'EUR',
             'quantity' => (int) $gearbox->quantity,
-            'condition' => 'USED',
+            'condition' => $conditionDiagnostics['mapped_ebay_condition'],
+            'source_condition_name' => $conditionDiagnostics['source_condition_name'],
+            'source_condition_value' => $conditionDiagnostics['source_condition_value'],
+            'source_condition_parameter_id' => $conditionDiagnostics['source_condition_parameter_id'],
+            'condition_source' => $conditionDiagnostics['condition_source'],
+            'condition_mapping_reason' => $conditionDiagnostics['condition_mapping_reason'],
+            'mapped_ebay_condition' => $conditionDiagnostics['mapped_ebay_condition'],
             'core_return_required' => $coreReturnNotice['required'],
             'core_return_type' => $coreReturnNotice['type'],
             'core_return_notice_added' => $coreReturnNoticeAdded,
@@ -331,6 +342,12 @@ class JarekGearboxToolController extends Controller
             'brand_selection_reason' => $brandSelectionReason,
             'brand_source' => $brandSelection['brand_source'],
             'item_specifics' => $payloadPreview['item_specifics'],
+            'source_condition_name' => $conditionDiagnostics['source_condition_name'],
+            'source_condition_value' => $conditionDiagnostics['source_condition_value'],
+            'source_condition_parameter_id' => $conditionDiagnostics['source_condition_parameter_id'],
+            'condition_source' => $conditionDiagnostics['condition_source'],
+            'condition_mapping_reason' => $conditionDiagnostics['condition_mapping_reason'],
+            'mapped_ebay_condition' => $conditionDiagnostics['mapped_ebay_condition'],
             'payload_preview' => $payloadPreview,
             'contains_allegro_image_urls' => $this->arrayContainsStringFragment($payloadPreview, 'a.allegroimg.com'),
         ];
@@ -520,9 +537,11 @@ class JarekGearboxToolController extends Controller
             $aspects[(string) $name] = [trim((string) $value)];
         }
 
+        $condition = filled($payload['mapped_ebay_condition'] ?? null) ? (string) $payload['mapped_ebay_condition'] : null;
+
         $inventoryItemRequest = [
             'product' => ['title' => (string) ($payload['translated_title_de'] ?? ''), 'description' => $inventoryDescription, 'imageUrls' => $imageUrls, 'aspects' => $aspects],
-            'condition' => 'USED',
+            'condition' => $condition,
             'availability' => ['shipToLocationAvailability' => ['quantity' => $quantity]],
         ];
         $offerRequest = [
@@ -545,6 +564,7 @@ class JarekGearboxToolController extends Controller
         if (blank($paymentPolicyId)) $blockers[] = 'missing_payment_policy_id';
         if (blank($returnPolicyId)) $blockers[] = 'missing_return_policy_id';
         if (blank($marketplaceId)) $blockers[] = 'missing_marketplace_id';
+        if (blank($condition)) $blockers[] = 'missing_or_invalid_ebay_condition';
         if (blank($sku) || blank($inventoryItemRequest['product']['title']) || $imageUrls === [] || ! is_int($quantity) || $quantity <= 0) $blockers[] = 'missing_inventory_item_request_fields';
         if (blank($sku) || blank($categoryId) || blank($format) || blank($listingDuration) || blank($merchantLocationKey) || blank($fulfillmentPolicyId) || blank($paymentPolicyId) || blank($returnPolicyId) || $price === null || $price <= 0 || ! is_int($quantity) || $quantity <= 0) $blockers[] = 'missing_offer_request_fields';
 
@@ -568,7 +588,76 @@ class JarekGearboxToolController extends Controller
             'item_specifics' => $itemSpecifics,
             'listing_description' => $listingDescription,
             'inventory_description_source' => filled($payload['translated_description_de'] ?? null) ? 'translated_description_de' : 'translated_title_de',
+            'condition_diagnostics' => [
+                'source_condition_name' => $payload['source_condition_name'] ?? null,
+                'source_condition_value' => $payload['source_condition_value'] ?? null,
+                'source_condition_parameter_id' => $payload['source_condition_parameter_id'] ?? null,
+                'condition_source' => $payload['condition_source'] ?? null,
+                'condition_mapping_reason' => $payload['condition_mapping_reason'] ?? null,
+                'mapped_ebay_condition' => $condition,
+            ],
         ], 'blockers' => array_values(array_unique($blockers))];
+    }
+
+    /** @return array<string, mixed> */
+    private function jarekEbayConditionDiagnostics(JarekGearbox $gearbox): array
+    {
+        $parameter = $this->jarekFindConditionParameter($gearbox);
+        $value = $parameter['value'] ?? null;
+        $normalized = $this->normalizeConditionValue($value);
+        $map = [
+            'nowy' => 'NEW',
+            'nowa' => 'NEW',
+            'new' => 'NEW',
+            'uzywany' => 'USED_EXCELLENT',
+            'używany' => 'USED_EXCELLENT',
+            'uzywana' => 'USED_EXCELLENT',
+            'używana' => 'USED_EXCELLENT',
+            'used' => 'USED_EXCELLENT',
+            'regenerowany' => 'SELLER_REFURBISHED',
+            'regenerowana' => 'SELLER_REFURBISHED',
+            'po regeneracji' => 'SELLER_REFURBISHED',
+            'refurbished' => 'SELLER_REFURBISHED',
+        ];
+        $mapped = $normalized !== null ? ($map[$normalized] ?? null) : null;
+
+        return [
+            'source_condition_name' => $parameter['name'] ?? null,
+            'source_condition_value' => $value,
+            'source_condition_parameter_id' => $parameter['id'] ?? null,
+            'condition_source' => $parameter['source'] ?? null,
+            'condition_mapping_reason' => $mapped
+                ? 'mapped_from_allegro_condition_parameter'
+                : ($parameter ? 'allegro_condition_value_not_mapped' : 'allegro_condition_parameter_not_found'),
+            'mapped_ebay_condition' => $mapped,
+        ];
+    }
+
+    /** @return array<string, mixed>|null */
+    private function jarekFindConditionParameter(JarekGearbox $gearbox): ?array
+    {
+        foreach ([
+            'parameters' => $gearbox->parameters,
+            'raw_payload.parameters' => data_get($gearbox->raw_payload, 'parameters'),
+            'category_payload.parameters' => data_get($gearbox->category_payload, 'parameters'),
+        ] as $source => $parameters) {
+            foreach (is_array($parameters) ? $parameters : [] as $parameter) {
+                $name = (string) data_get($parameter, 'name', '');
+                if (! in_array(mb_strtolower(trim($name)), ['stan', 'kondycja', 'condition'], true)) continue;
+
+                $values = data_get($parameter, 'valuesLabels') ?: data_get($parameter, 'values') ?: [];
+                $value = is_array($values) ? ($values[0] ?? null) : $values;
+                return ['source' => $source, 'id' => data_get($parameter, 'id'), 'name' => $name, 'value' => is_scalar($value) ? (string) $value : null];
+            }
+        }
+
+        return null;
+    }
+
+    private function normalizeConditionValue(mixed $value): ?string
+    {
+        if (! is_scalar($value) || trim((string) $value) === '') return null;
+        return mb_strtolower(trim(preg_replace('/\s+/', ' ', (string) $value) ?? (string) $value));
     }
 
     private function jarekEbayPolicyId(array $settings, string $type): ?string

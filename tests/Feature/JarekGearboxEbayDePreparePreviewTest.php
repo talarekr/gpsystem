@@ -36,6 +36,7 @@ class JarekGearboxEbayDePreparePreviewTest extends TestCase
             'images' => ['https://a.allegroimg.com/original/photo.jpg'],
             'category_id' => '620',
             'category_name' => 'Skrzynie biegów',
+            'parameters' => [['id' => '11323', 'name' => 'Stan', 'values' => ['Używany']]],
         ]);
 
         $response = $this->withoutMiddleware()->getJson('/admin/tools/jarek-gearboxes/ebay-de-prepare-preview?sku=JAREK-18727785496');
@@ -78,6 +79,7 @@ class JarekGearboxEbayDePreparePreviewTest extends TestCase
             'quantity' => 1,
             'category_id' => '620',
             'category_name' => 'Skrzynie biegów',
+            'parameters' => [['id' => '11323', 'name' => 'Stan', 'values' => ['Używany']]],
         ]);
 
         $response = $this->withoutMiddleware()->getJson('/admin/tools/jarek-gearboxes/ebay-de-prepare-preview?sku=JAREK-18727785496');
@@ -116,7 +118,10 @@ class JarekGearboxEbayDePreparePreviewTest extends TestCase
             'quantity' => 1,
             'category_id' => '620',
             'category_name' => 'Skrzynie biegów',
-            'parameters' => [['name' => 'Numer części', 'values' => ['0CN409053AF']]],
+            'parameters' => [
+                ['id' => '11323', 'name' => 'Stan', 'values' => ['Używany']],
+                ['name' => 'Numer części', 'values' => ['0CN409053AF']],
+            ],
         ]);
 
         $response = $this->withoutMiddleware()->getJson('/admin/tools/jarek-gearboxes/ebay-de-prepare-preview?sku=JAREK-18727785496');
@@ -159,6 +164,7 @@ class JarekGearboxEbayDePreparePreviewTest extends TestCase
             'quantity' => 1,
             'category_id' => '620',
             'category_name' => 'Skrzynie biegów',
+            'parameters' => [['id' => '11323', 'name' => 'Stan', 'values' => ['Używany']]],
         ]);
 
         $response = $this->withoutMiddleware()->getJson('/admin/tools/jarek-gearboxes/ebay-de-prepare-preview?sku=JAREK-18717293813');
@@ -211,6 +217,7 @@ class JarekGearboxEbayDePreparePreviewTest extends TestCase
             'quantity' => 1,
             'category_id' => '620',
             'category_name' => 'Skrzynie biegów',
+            'parameters' => [['id' => '11323', 'name' => 'Stan', 'values' => ['Używany']]],
         ]);
 
         $response = $this->withoutMiddleware()->getJson('/admin/tools/jarek-gearboxes/ebay-de-prepare-preview?sku=JAREK-18717293813');
@@ -249,6 +256,7 @@ class JarekGearboxEbayDePreparePreviewTest extends TestCase
             'quantity' => 1,
             'category_id' => '620',
             'category_name' => 'Skrzynie biegów',
+            'parameters' => [['id' => '11323', 'name' => 'Stan', 'values' => ['Używany']]],
         ]);
 
         $response = $this->withoutMiddleware()->getJson('/admin/tools/jarek-gearboxes/ebay-de-prepare-preview?sku=JAREK-18720000000');
@@ -284,6 +292,7 @@ class JarekGearboxEbayDePreparePreviewTest extends TestCase
             'quantity' => 1,
             'category_id' => '620',
             'category_name' => 'Skrzynie biegów',
+            'parameters' => [['id' => '11323', 'name' => 'Stan', 'values' => ['Używany']]],
         ]);
 
         $response = $this->withoutMiddleware()->getJson('/admin/tools/jarek-gearboxes/ebay-de-prepare-preview?sku=JAREK-18727785496');
@@ -337,7 +346,10 @@ class JarekGearboxEbayDePreparePreviewTest extends TestCase
             'quantity' => 1,
             'category_id' => '620',
             'category_name' => 'Skrzynie biegów',
-            'parameters' => [['name' => 'Numer części', 'values' => ['0D9300041']]],
+            'parameters' => [
+                ['id' => '11323', 'name' => 'Stan', 'values' => ['Używany']],
+                ['name' => 'Numer części', 'values' => ['0D9300041']],
+            ],
         ]);
 
         $response = $this->withoutMiddleware()->getJson('/admin/tools/jarek-gearboxes/ebay-de-publish-preview?sku=JAREK-18727785496');
@@ -361,6 +373,14 @@ class JarekGearboxEbayDePreparePreviewTest extends TestCase
             ->assertJsonPath('ebay_api_plan.quantity', 1)
             ->assertJsonPath('ebay_api_plan.price', 569.77)
             ->assertJsonPath('ebay_api_plan.currency', 'EUR')
+            ->assertJsonPath('source_condition_name', 'Stan')
+            ->assertJsonPath('source_condition_value', 'Używany')
+            ->assertJsonPath('source_condition_parameter_id', '11323')
+            ->assertJsonPath('condition_source', 'parameters')
+            ->assertJsonPath('condition_mapping_reason', 'mapped_from_allegro_condition_parameter')
+            ->assertJsonPath('mapped_ebay_condition', 'USED_EXCELLENT')
+            ->assertJsonPath('ebay_api_plan.inventory_item_request.condition', 'USED_EXCELLENT')
+            ->assertJsonPath('ebay_api_plan.condition_diagnostics.mapped_ebay_condition', 'USED_EXCELLENT')
             ->assertJsonPath('ebay_api_plan.inventory_item_request.availability.shipToLocationAvailability.quantity', 1)
             ->assertJsonPath('ebay_api_plan.inventory_item_request.product.description', 'Opis skrzyni')
             ->assertJsonPath('ebay_api_plan.inventory_description_source', 'translated_description_de')
