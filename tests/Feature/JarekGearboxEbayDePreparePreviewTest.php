@@ -453,7 +453,14 @@ class JarekGearboxEbayDePreparePreviewTest extends TestCase
             ->getJson('/admin/tools/jarek-gearboxes/ebay-de-revise-apply?confirm=wrong&sku=JAREK-18727785496')
             ->assertForbidden()
             ->assertJsonPath('marketplace_write', false)
-            ->assertJsonPath('blockers.0', 'invalid_confirm');
+            ->assertJsonPath('blockers.0', 'missing_or_invalid_confirm_token');
+
+        $this->withoutMiddleware()
+            ->getJson('/admin/tools/jarek-gearboxes/ebay-de-revise-apply?sku=JAREK-18727785496')
+            ->assertForbidden()
+            ->assertJsonPath('marketplace_write', false)
+            ->assertJsonPath('applied', false)
+            ->assertJsonPath('blockers.0', 'missing_or_invalid_confirm_token');
     }
 
 

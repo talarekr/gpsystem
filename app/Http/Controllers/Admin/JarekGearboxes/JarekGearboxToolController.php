@@ -633,10 +633,10 @@ class JarekGearboxToolController extends Controller
         ];
 
         if ($sku !== $allowedSku) {
-            return response()->json($base + ['error' => 'Revise apply is allowed only for the single guarded SKU.', 'blockers' => ['sku_not_allowed']], 403);
+            return response()->json(array_merge($base, ['error' => 'Revise apply is allowed only for the single guarded SKU.', 'blockers' => ['sku_not_allowed']]), 403);
         }
         if ($confirm !== $requiredConfirm) {
-            return response()->json($base + ['error' => 'Missing or invalid guarded revise confirmation token.', 'blockers' => ['invalid_confirm']], 403);
+            return response()->json(array_merge($base, ['error' => 'Missing or invalid guarded revise confirmation token.', 'blockers' => ['missing_or_invalid_confirm_token']]), 403);
         }
 
         $previewRequest = Request::create($request->path(), 'GET', ['sku' => $sku]);
