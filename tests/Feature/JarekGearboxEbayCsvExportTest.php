@@ -87,4 +87,46 @@ class JarekGearboxEbayCsvExportTest extends TestCase
         $this->assertStringContainsString('JAREK-123', Storage::disk('local')->get($response->json('csv_path')));
         $this->assertSame(1, MarketplaceSyncLog::query()->where('action', 'jarek_gearboxes_ebay_csv_export')->count());
     }
+
+    public function test_preview_normalizes_nested_csv_fields_without_server_error(): void
+    {
+        config(['app.url' => 'https://gpswiss.pl']);
+
+        JarekGearbox::query()->create([
+            'allegro_offer_id' => '125',
+            'title' => 'Skrzynia DSG 0D9300042',
+            'description' => 'Opis',
+            'price' => 1000,
+            'currency' => 'PLN',
+            'quantity' => 1,
+            'main_image_url' => null,
+            'images' => [
+                ['url' => 'https://gpswiss.pl/storage/jarek/125/main.jpg'],
+                ['image' => ['url' => 'https://gpswiss.pl/storage/jarek/125/2.jpg']],
+                ['unexpected' => ['nested' => 'not-url']],
+            ],
+            'category_id' => '620',
+            'category_name' => 'Skrzynie biegów',
+            'category_path' => [
+                ['id' => '3', 'name' => 'Motoryzacja'],
+                ['id' => '620', 'name' => 'Części samochodowe'],
+                ['id' => '621', 'name' => 'Układ napędowy'],
+                ['id' => '622', 'name' => 'Skrzynie biegów'],
+                ['id' => '623', 'name' => 'Kompletne skrzynie'],
+            ],
+            'parameters' => [['name' => 'Numer części', 'values' => ['0D9300042']]],
+            'category_payload' => ['id' => '620', 'name' => 'Skrzynie biegów'],
+            'raw_payload' => ['nested' => ['data' => true]],
+        ]);
+
+        $response = $this->withoutMiddleware()->getJson('/admin/tools/jarek-gearboxes/ebay-csv-preview?limit=10');
+
+        $response->assertOk()
+            ->assertJsonPath('marketplace_write', false)
+            ->assertJsonPath('parts_changed', false)
+            ->assertJsonPath('sample_rows.0.Allegro category path', 'Motoryzacja > Części samochodowe > Układ napędowy > Skrzynie biegów > Kompletne skrzynie')
+            ->assertJsonPath('sample_rows.0.Main image URL', 'https://gpswiss.pl/storage/jarek/125/main.jpg')
+            ->assertJsonPath('sample_rows.0.Additional image URLs', 'https://gpswiss.pl/storage/jarek/125/2.jpg')
+            ->assertJsonPath('warnings_by_reason.csv_field_normalized', 1);
+    }
 }
