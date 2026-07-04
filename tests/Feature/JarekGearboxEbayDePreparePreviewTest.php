@@ -168,10 +168,59 @@ class JarekGearboxEbayDePreparePreviewTest extends TestCase
             ->assertJsonPath('core_return_notice_added', true)
             ->assertJsonPath('core_return_notice_pl', 'Stara skrzynia biegów podlega zwrotowi')
             ->assertJsonPath('core_return_notice_de', 'Das Altgetriebe muss zurückgegeben werden.')
+            ->assertJsonPath('core_return_notice_added_after_translation', true)
+            ->assertJsonPath('source_description_pl_cleaned', 'Opis skrzyni')
             ->assertJsonPath('payload_preview.core_return_required', true)
             ->assertJsonPath('payload_preview.core_return_type', 'gearbox')
+            ->assertJsonPath('payload_preview.core_return_notice_added_after_translation', true)
             ->assertJsonFragment(['gearbox_core_return_notice_added']);
 
+        $this->assertSame(1, substr_count($response->json('translated_description_de'), 'Das Altgetriebe muss zurückgegeben werden.'));
+        $this->assertStringNotContainsString('Das alte Getriebe kann zurückgegeben werden.', $response->json('translated_description_de'));
+        $this->assertSame(1, substr_count($response->json('rendered_description_de_template'), 'Das Altgetriebe muss zurückgegeben werden.'));
+        $this->assertStringNotContainsString('Das alte Getriebe kann zurückgegeben werden.', $response->json('rendered_description_de_template'));
+        $this->assertStringEndsWith('Das Altgetriebe muss zurückgegeben werden.', $response->json('rendered_description_de_template'));
+    }
+
+    public function test_ebay_de_prepare_preview_removes_soft_google_core_return_text_before_appending_controlled_notice(): void
+    {
+        Storage::fake('public');
+        config(['app.url' => 'https://gpswiss.pl']);
+        Cache::put('nbp_table_a_eur_rate', ['rate' => 4.30, 'effective_date' => '2026-06-27', 'table_no' => '123/A/NBP/2026']);
+        $this->createCategoryMappings('620', '100684');
+        Storage::disk('public')->put('jarek-gearboxes/18717293813/01.jpg', 'jpg');
+
+        $this->mock(GoogleTranslateService::class, function ($mock): void {
+            $mock->shouldReceive('translate')->twice()->andReturnUsing(fn (string $text): array => [
+                'translated_text' => str_contains($text, 'Opis skrzyni') ? 'Getriebebeschreibung. Das alte Getriebe kann zurückgegeben werden.' : $text,
+                'warnings' => [],
+                'blockers' => [],
+            ]);
+        });
+
+        JarekGearbox::query()->create([
+            'allegro_offer_id' => '18717293813',
+            'title' => 'Skrzynia biegów RGA Regnerowana VW Caddy 1.2TSI',
+            'description' => 'Opis skrzyni. Stara skrzynia biegów podlega zwrotowi',
+            'price' => 2450,
+            'currency' => 'PLN',
+            'quantity' => 1,
+            'category_id' => '620',
+            'category_name' => 'Skrzynie biegów',
+        ]);
+
+        $response = $this->withoutMiddleware()->getJson('/admin/tools/jarek-gearboxes/ebay-de-prepare-preview?sku=JAREK-18717293813');
+
+        $response->assertOk()
+            ->assertJsonPath('ready', true)
+            ->assertJsonPath('source_description_pl_cleaned', 'Opis skrzyni.')
+            ->assertJsonPath('core_return_notice_added_after_translation', true);
+
+        $this->assertStringNotContainsString('Stara skrzynia biegów podlega zwrotowi', $response->json('source_description_pl_cleaned'));
+        $this->assertStringNotContainsString('Das alte Getriebe kann zurückgegeben werden.', $response->json('translated_description_de'));
+        $this->assertSame(1, substr_count($response->json('translated_description_de'), 'Das Altgetriebe muss zurückgegeben werden.'));
+        $this->assertStringNotContainsString('Das alte Getriebe kann zurückgegeben werden.', $response->json('rendered_description_de_template'));
+        $this->assertSame(1, substr_count($response->json('rendered_description_de_template'), 'Das Altgetriebe muss zurückgegeben werden.'));
         $this->assertStringEndsWith('Das Altgetriebe muss zurückgegeben werden.', $response->json('rendered_description_de_template'));
     }
 
