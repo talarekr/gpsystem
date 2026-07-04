@@ -13,6 +13,7 @@ use App\Services\JarekGearboxes\AllegroJarekImportService;
 use App\Services\JarekGearboxes\JarekGearboxEbayPreviewService;
 use App\Services\Marketplace\EbayDescriptionTemplateRenderer;
 use App\Services\Marketplace\GoogleTranslateService;
+use App\Services\Marketplace\NbpExchangeRateService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -127,7 +128,7 @@ class JarekGearboxToolController extends Controller
     }
 
 
-    public function ebayDePreparePreview(Request $request, GoogleTranslateService $translateService, EbayDescriptionTemplateRenderer $renderer): JsonResponse
+    public function ebayDePreparePreview(Request $request, GoogleTranslateService $translateService, EbayDescriptionTemplateRenderer $renderer, NbpExchangeRateService $exchangeRateService): JsonResponse
     {
         $started = microtime(true);
         $sku = trim((string) $request->query('sku', ''));
@@ -197,6 +198,18 @@ class JarekGearboxToolController extends Controller
         if ($imageUrls === []) $blockers[] = 'missing_local_images';
         $mapping = $this->jarekEbayCategoryMapping($gearbox);
         if (! $mapping) $blockers[] = 'missing_ebay_category';
+
+        $sourcePricePln = is_numeric($gearbox->price) ? (float) $gearbox->price : null;
+        $nbpRateData = $exchangeRateService->eurPln();
+        $nbpExchangeRate = is_numeric($nbpRateData['rate'] ?? null) && (float) $nbpRateData['rate'] > 0 ? (float) $nbpRateData['rate'] : null;
+        if ($nbpExchangeRate === null) {
+            $blockers[] = 'missing_nbp_exchange_rate';
+            if (filled($nbpRateData['warning'] ?? null)) {
+                $warnings[] = (string) $nbpRateData['warning'];
+            }
+        }
+        $priceEur = $sourcePricePln !== null && $sourcePricePln > 0 && $nbpExchangeRate !== null ? round($sourcePricePln / $nbpExchangeRate, 2) : null;
+
         $blockers = array_values(array_unique(array_filter($blockers)));
         $warnings = array_values(array_unique(array_filter($warnings)));
 
@@ -207,8 +220,18 @@ class JarekGearboxToolController extends Controller
             'description' => $renderedDescription,
             'categoryId' => $mapping['ebay_category_id'] ?? null,
             'imageUrls' => $imageUrls,
-            'price' => $gearbox->price,
-            'currency' => $gearbox->currency ?: 'PLN',
+            'source_price_pln' => $sourcePricePln,
+            'nbp_exchange_rate' => $nbpExchangeRate,
+            'nbp_exchange_rate_meta' => [
+                'source' => $nbpRateData['source'] ?? 'NBP_TABLE_A',
+                'effective_date' => $nbpRateData['effective_date'] ?? null,
+                'table_no' => $nbpRateData['table_no'] ?? null,
+                'cached' => $nbpRateData['cached'] ?? null,
+            ],
+            'target_currency' => 'EUR',
+            'price_eur' => $priceEur,
+            'price' => $priceEur,
+            'currency' => 'EUR',
             'quantity' => (int) $gearbox->quantity,
             'condition' => 'USED',
         ];
@@ -236,8 +259,13 @@ class JarekGearboxToolController extends Controller
             'rendered_description_de_template' => $renderedDescription,
             'ebay_category_id' => $mapping['ebay_category_id'] ?? null,
             'image_urls' => $imageUrls,
-            'price' => $gearbox->price,
-            'currency' => $gearbox->currency ?: 'PLN',
+            'source_price_pln' => $sourcePricePln,
+            'nbp_exchange_rate' => $nbpExchangeRate,
+            'nbp_exchange_rate_meta' => $payloadPreview['nbp_exchange_rate_meta'],
+            'target_currency' => 'EUR',
+            'price_eur' => $priceEur,
+            'price' => $priceEur,
+            'currency' => 'EUR',
             'quantity' => (int) $gearbox->quantity,
             'payload_preview' => $payloadPreview,
             'contains_allegro_image_urls' => $this->arrayContainsStringFragment($payloadPreview, 'a.allegroimg.com'),
