@@ -548,6 +548,12 @@ class JarekGearboxToolController extends Controller
             $blockers = array_values(array_unique(array_filter(array_merge($prepare['blockers'] ?? [], $diagnostics['blockers'] ?? [], $plan['blockers'] ?? []))));
             $warnings = array_values(array_unique(array_filter(array_merge($prepare['warnings'] ?? [], $diagnostics['warnings'] ?? []))));
             $adminDiagnostics = $this->normalizeJarekRevisePreviewAdminDiagnostics($adminDiagnostics);
+            $revisedInventoryItemRequest = $plan['plan']['inventory_item_request'] ?? [];
+            if (! is_array($revisedInventoryItemRequest)) {
+                $revisedInventoryItemRequest = [];
+            }
+            data_set($revisedInventoryItemRequest, 'product.imageUrls', $recommendedImages);
+
             $payload = [
                 'ok' => (bool) (($prepare['ok'] ?? false) && $blockers === [] && $adminDiagnostics === []),
                 'dry_run' => true,
@@ -560,7 +566,7 @@ class JarekGearboxToolController extends Controller
                 'listing_id' => $listingId,
                 'offer_id' => $offerId,
                 'public_image_urls' => $recommendedImages,
-                'revised_inventory_item_request' => data_set($plan['plan']['inventory_item_request'] ?? [], 'product.imageUrls', $recommendedImages),
+                'revised_inventory_item_request' => $revisedInventoryItemRequest,
                 'revised_offer_request' => [
                     'offerId' => $offerId,
                     'listingDescription' => $description,
