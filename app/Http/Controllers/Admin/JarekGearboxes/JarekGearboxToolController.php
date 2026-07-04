@@ -245,6 +245,8 @@ class JarekGearboxToolController extends Controller
         $blockers = array_values(array_unique(array_filter($blockers)));
         $warnings = array_values(array_unique(array_filter($warnings)));
 
+        $conditionDiagnostics = $this->jarekEbayConditionDiagnostics($gearbox);
+
         $payloadPreview = [
             'sku' => $sku,
             'marketplace' => 'ebay_de',
@@ -265,7 +267,7 @@ class JarekGearboxToolController extends Controller
             'price' => $priceEur,
             'currency' => 'EUR',
             'quantity' => (int) $gearbox->quantity,
-            'condition' => (new EbayConditionMapper())->usedPartCondition()['condition_mapped_value'],
+            'condition' => $conditionDiagnostics['mapped_ebay_condition'],
             'core_return_required' => $coreReturnNotice['required'],
             'core_return_type' => $coreReturnNotice['type'],
             'core_return_notice_added' => $coreReturnNoticeAdded,
@@ -279,6 +281,13 @@ class JarekGearboxToolController extends Controller
             'brand_source' => $brandSelection['brand_source'],
             'fulfillment_policy_id' => $mapping['fulfillment_policy_id'] ?? null,
             'shipping_group' => $mapping['shipping_group'] ?? null,
+            'source_condition_name' => $conditionDiagnostics['source_condition_name'],
+            'source_condition_value' => $conditionDiagnostics['source_condition_value'],
+            'source_condition_parameter_id' => $conditionDiagnostics['source_condition_parameter_id'],
+            'condition_source' => $conditionDiagnostics['condition_source'],
+            'condition_mapping_reason' => $conditionDiagnostics['condition_mapping_reason'],
+            'mapped_ebay_condition' => $conditionDiagnostics['mapped_ebay_condition'],
+            'condition_diagnostics' => $conditionDiagnostics,
             'item_specifics' => array_filter([
                 'Brand' => $selectedBrand,
                 'Hersteller' => $selectedBrand,
@@ -332,6 +341,13 @@ class JarekGearboxToolController extends Controller
             'brand_selection_reason' => $brandSelectionReason,
             'brand_source' => $brandSelection['brand_source'],
             'item_specifics' => $payloadPreview['item_specifics'],
+            'source_condition_name' => $conditionDiagnostics['source_condition_name'],
+            'source_condition_value' => $conditionDiagnostics['source_condition_value'],
+            'source_condition_parameter_id' => $conditionDiagnostics['source_condition_parameter_id'],
+            'condition_source' => $conditionDiagnostics['condition_source'],
+            'condition_mapping_reason' => $conditionDiagnostics['condition_mapping_reason'],
+            'mapped_ebay_condition' => $conditionDiagnostics['mapped_ebay_condition'],
+            'condition_diagnostics' => $conditionDiagnostics,
             'payload_preview' => $payloadPreview,
             'contains_allegro_image_urls' => $this->arrayContainsStringFragment($payloadPreview, 'a.allegroimg.com'),
         ];
@@ -549,8 +565,8 @@ class JarekGearboxToolController extends Controller
         $fulfillmentPolicyId = filled($payload['payload_preview']['fulfillment_policy_id'] ?? null) ? (string) $payload['payload_preview']['fulfillment_policy_id'] : null;
         $paymentPolicyId = $this->jarekEbayPolicyId($settings, 'payment');
         $returnPolicyId = $this->jarekEbayPolicyId($settings, 'return');
-        $conditionDiagnostics = (new EbayConditionMapper())->usedPartCondition($settings);
-        $condition = $conditionDiagnostics['condition'];
+        $conditionDiagnostics = is_array($payload['condition_diagnostics'] ?? null) ? $payload['condition_diagnostics'] : [];
+        $condition = $conditionDiagnostics['mapped_ebay_condition'] ?? null;
 
         $aspects = [];
         foreach ($itemSpecifics as $name => $value) {
@@ -607,10 +623,86 @@ class JarekGearboxToolController extends Controller
             'item_specifics' => $itemSpecifics,
             'listing_description' => $listingDescription,
             'inventory_description_source' => filled($payload['translated_description_de'] ?? null) ? 'translated_description_de' : 'translated_title_de',
-            'condition_source' => $conditionDiagnostics['condition_source'],
-            'condition_mapped_value' => $conditionDiagnostics['condition_mapped_value'],
+            'source_condition_name' => $conditionDiagnostics['source_condition_name'] ?? null,
+            'source_condition_value' => $conditionDiagnostics['source_condition_value'] ?? null,
+            'source_condition_parameter_id' => $conditionDiagnostics['source_condition_parameter_id'] ?? null,
+            'condition_source' => $conditionDiagnostics['condition_source'] ?? null,
+            'condition_mapping_reason' => $conditionDiagnostics['condition_mapping_reason'] ?? null,
+            'mapped_ebay_condition' => $conditionDiagnostics['mapped_ebay_condition'] ?? null,
+            'condition_mapped_value' => $conditionDiagnostics['mapped_ebay_condition'] ?? null,
             'condition_diagnostics' => $conditionDiagnostics,
         ], 'blockers' => array_values(array_unique($blockers))];
+    }
+
+
+    /** @return array<string, mixed> */
+    private function jarekEbayConditionDiagnostics(JarekGearbox $gearbox): array
+    {
+        $candidate = $this->findJarekConditionParameter($gearbox);
+        $value = is_string($candidate['value'] ?? null) ? (string) $candidate['value'] : '';
+        $mapped = filled($value) ? (new EbayConditionMapper())->jarekCondition($value, (string) ($candidate['source'] ?? 'jarek_gearboxes.parameters')) : null;
+        $valid = (bool) ($mapped['condition_mapping_valid'] ?? false);
+
+        return [
+            'source_condition_name' => $candidate['name'] ?? null,
+            'source_condition_value' => $candidate['value'] ?? null,
+            'source_condition_parameter_id' => $candidate['parameter_id'] ?? null,
+            'condition_source' => $candidate['source'] ?? null,
+            'condition_mapping_reason' => $valid ? (string) ($mapped['condition_mapping_used'] ?? 'localized_condition_map') : (filled($value) ? 'source_condition_value_not_mapped' : 'source_condition_parameter_not_found'),
+            'mapped_ebay_condition' => $valid ? ($mapped['condition'] ?? null) : null,
+            'condition_mapping_valid' => $valid,
+            'condition_inventory_api_format' => $mapped['condition_inventory_api_format'] ?? 'string_enum',
+            'condition_allowed_values' => $mapped['condition_allowed_values'] ?? [],
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function findJarekConditionParameter(JarekGearbox $gearbox): array
+    {
+        foreach ([
+            'parameters' => $gearbox->parameters,
+            'raw_payload.parameters' => data_get($gearbox->raw_payload, 'parameters'),
+            'raw_payload.publication.marketplaces' => data_get($gearbox->raw_payload, 'publication.marketplaces'),
+            'category_payload.parameters' => data_get($gearbox->category_payload, 'parameters'),
+            'category_payload' => $gearbox->category_payload,
+            'raw_payload' => $gearbox->raw_payload,
+        ] as $source => $data) {
+            $found = $this->findConditionInValue($data, $source);
+            if ($found !== null) return $found;
+        }
+
+        return ['name' => null, 'value' => null, 'parameter_id' => null, 'source' => null];
+    }
+
+    /** @return array<string, mixed>|null */
+    private function findConditionInValue(mixed $value, string $source): ?array
+    {
+        if (! is_array($value)) return null;
+
+        $name = $value['name'] ?? $value['label'] ?? null;
+        $id = $value['id'] ?? $value['parameterId'] ?? $value['parameter_id'] ?? null;
+        if (is_string($name) && preg_match('/^(stan|kondycja|condition)$/iu', trim($name))) {
+            $conditionValue = $this->extractJarekParameterValue($value);
+            if (filled($conditionValue)) return ['name' => $name, 'value' => $conditionValue, 'parameter_id' => $id, 'source' => $source];
+        }
+
+        foreach ($value as $child) {
+            $found = $this->findConditionInValue($child, $source);
+            if ($found !== null) return $found;
+        }
+
+        return null;
+    }
+
+    private function extractJarekParameterValue(array $parameter): ?string
+    {
+        foreach (['valuesLabels', 'values', 'valueLabels', 'value', 'valuesIds'] as $key) {
+            $value = $parameter[$key] ?? null;
+            if (is_array($value)) $value = reset($value);
+            if (is_scalar($value) && filled((string) $value)) return trim((string) $value);
+        }
+
+        return null;
     }
 
     private function jarekEbayPolicyId(array $settings, string $type): ?string
