@@ -126,6 +126,109 @@ class JarekGearboxToolController extends Controller
         ]);
     }
 
+    public function jarekRunner(): \Illuminate\View\View
+    {
+        return view('admin.jarek-gearboxes.runner');
+    }
+
+    public function imageImportRunnerBatch(Request $request): JsonResponse
+    {
+        if ($request->query('confirm') !== 'jarek-image-import-download') {
+            return response()->json(['ok' => false, 'applied' => false, 'error' => 'Missing confirm=jarek-image-import-download', 'marketplace_write' => false, 'ebay_write' => false], 422);
+        }
+
+        $result = $this->buildJarekImageImport($request->merge([
+            'limit' => max(1, min(20, (int) $request->query('limit', 20))),
+            'only_missing' => $request->query('only_missing', '1'),
+            'overwrite' => $request->query('overwrite', '0'),
+        ]), true);
+        $processed = count($result['items'] ?? []);
+        $nextOffset = (int) ($result['offset'] ?? 0) + $processed;
+        $total = (int) data_get($result, 'summary.total', 0);
+
+        return response()->json([
+            'ok' => (bool) ($result['ok'] ?? false),
+            'applied' => true,
+            'marketplace_write' => false,
+            'ebay_write' => false,
+            'offset' => (int) ($result['offset'] ?? 0),
+            'limit' => (int) ($result['limit'] ?? 20),
+            'next_offset' => $nextOffset,
+            'has_more' => $nextOffset < $total,
+            'batch_summary' => [
+                'total' => $total,
+                'processed_count' => $processed,
+                'ready_to_download_count' => (int) data_get($result, 'summary.ready_to_download_count', 0),
+                'downloaded_count' => (int) data_get($result, 'summary.downloaded_count', 0),
+                'skipped_existing_count' => (int) data_get($result, 'summary.skipped_existing_count', 0),
+                'failed_download_count' => (int) data_get($result, 'summary.failed_download_count', 0),
+                'blocked_count' => (int) data_get($result, 'summary.blocked_count', 0),
+            ],
+            'items' => collect($result['items'] ?? [])->map(fn (array $item): array => [
+                'sku' => $item['sku'] ?? null,
+                'offer_source_id' => $item['offer_source_id'] ?? null,
+                'source_count' => $item['source_count'] ?? 0,
+                'planned_download_count' => $item['planned_download_count'] ?? 0,
+                'downloaded_count' => collect($item['planned_downloads'] ?? [])->where('downloaded', true)->count(),
+                'failed_download_count' => collect($item['planned_downloads'] ?? [])->filter(fn ($download): bool => filled($download['error'] ?? null) && ($download['error'] ?? null) !== 'destination_exists')->count(),
+                'blockers' => $item['blockers'] ?? [],
+                'warnings' => $item['warnings'] ?? [],
+                'public_urls' => collect($item['planned_downloads'] ?? [])->pluck('public_url')->filter()->values()->all(),
+            ])->values()->all(),
+        ]);
+    }
+
+    public function ebayPrepareRunnerBatch(Request $request, GoogleTranslateService $translateService, EbayDescriptionTemplateRenderer $renderer, NbpExchangeRateService $exchangeRateService): JsonResponse
+    {
+        $batchRequest = Request::create($request->path(), 'GET', [
+            'offset' => max(0, (int) $request->query('offset', 0)),
+            'limit' => max(1, min(10, (int) $request->query('limit', 5))),
+            'missing_offer_id_only' => $request->boolean('missing_offer_id_only', true) ? '1' : '0',
+        ]);
+        $result = $this->ebayDeBulkPreparePublishPreview($batchRequest, $translateService, $renderer, $exchangeRateService)->getData(true);
+        $offers = collect($result['offers'] ?? []);
+        $total = Schema::hasTable('jarek_gearboxes')
+            ? JarekGearbox::query()
+                ->when($request->boolean('missing_offer_id_only', true), fn ($query) => $query->where(fn ($query) => $query->whereNull('ebay_offer_id')->orWhere('ebay_offer_id', '')))
+                ->count()
+            : 0;
+
+        return response()->json([
+            'ok' => (bool) ($result['ok'] ?? false),
+            'dry_run' => true,
+            'read_only' => true,
+            'marketplace_write' => false,
+            'offset' => (int) ($result['offset'] ?? data_get($result, 'summary.offset', 0)),
+            'limit' => (int) ($result['limit'] ?? data_get($result, 'summary.limit', 5)),
+            'next_offset' => (int) data_get($result, 'summary.next_offset', 0),
+            'has_more' => (bool) data_get($result, 'summary.has_more', false),
+            'batch_summary' => [
+                'total' => $total,
+                'processed_count' => $offers->count(),
+                'ready_to_publish_count' => (int) data_get($result, 'summary.ready_to_publish_count', 0),
+                'blocked_count' => (int) data_get($result, 'summary.blocked_count', 0),
+                'missing_images_count' => (int) data_get($result, 'summary.missing_images_count', 0),
+                'duplicate_existing_count' => (int) data_get($result, 'summary.duplicate_existing_count', 0),
+                'skipped_existing_count' => (int) data_get($result, 'summary.skipped_existing_count', 0),
+                'failed_count' => $offers->filter(fn ($item): bool => in_array('record_prepare_exception', (array) ($item['blockers'] ?? []), true))->count(),
+            ],
+            'items' => $offers->map(fn (array $item): array => [
+                'sku' => $item['sku'] ?? null,
+                'offer_source_id' => $item['offer_source_id'] ?? null,
+                'ready_to_publish' => (bool) ($item['ready_to_publish'] ?? false),
+                'status' => ($item['ready_to_publish'] ?? false) ? 'ready' : (filled($item['existing_offer_id'] ?? null) || filled($item['existing_listing_id'] ?? null) ? 'skipped_existing' : (in_array('record_prepare_exception', (array) ($item['blockers'] ?? []), true) ? 'failed' : 'blocked')),
+                'blockers' => $item['blockers'] ?? [],
+                'warnings' => $item['warnings'] ?? [],
+                'existing_offer_id' => $item['existing_offer_id'] ?? null,
+                'existing_listing_id' => $item['existing_listing_id'] ?? null,
+                'public_image_urls_count' => count((array) ($item['public_image_urls'] ?? [])),
+                'price_eur' => data_get($item, 'price_diagnostics.price_eur'),
+                'title_de' => $item['translated_title_de'] ?? null,
+                'admin_diagnostics' => $item['admin_diagnostics'] ?? [],
+            ])->values()->all(),
+        ]);
+    }
+
 
     public function storageLinkDiagnostics(): JsonResponse
     {
