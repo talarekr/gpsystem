@@ -186,7 +186,7 @@ class JarekGearboxToolController extends Controller
             'total' => 0,
             'exportable_count' => 0,
             'blocked_count' => 0,
-            'warnings_by_reason' => array_fill_keys(['missing_title','title_too_long','missing_price','missing_quantity','missing_local_images','missing_part_number','missing_ebay_category','duplicate_sku','invalid_currency'], 0),
+            'warnings_by_reason' => array_fill_keys(['missing_title','title_too_long','missing_price','missing_quantity','missing_local_images','missing_part_number','missing_ebay_category','duplicate_sku','invalid_currency','csv_field_normalized','csv_field_omitted'], 0),
             'sample_rows' => [],
             'blocked_samples' => [],
             'local_image_url_source_fields' => ['main_image_url', 'images'],
@@ -206,7 +206,7 @@ class JarekGearboxToolController extends Controller
             $reasons = $this->jarekEbayCsvWarnings($gearbox, (int) ($skuCounts[$gearbox->allegro_offer_id] ?? 0));
             foreach (array_unique($reasons) as $reason) $base['warnings_by_reason'][$reason]++;
 
-            if ($reasons === [] || array_diff($reasons, ['missing_part_number', 'missing_ebay_category']) === []) {
+            if ($reasons === [] || array_diff($reasons, ['missing_part_number', 'missing_ebay_category', 'csv_field_normalized', 'csv_field_omitted']) === []) {
                 $base['exportable_count']++;
                 if (count($base['sample_rows']) < $limit) $base['sample_rows'][] = $csvRow + ['warnings' => $reasons];
             } else {
@@ -226,26 +226,28 @@ class JarekGearboxToolController extends Controller
         $images = $this->localJarekImageUrls($gearbox);
         $sku = 'JAREK-'.($gearbox->allegro_offer_id ?: $gearbox->id);
         $partNumber = $this->detectJarekPartNumber((object) $gearbox->getAttributes(), $sku);
+        $normalizationWarnings = [];
 
         return [
             'SKU' => $sku,
-            'Title' => $gearbox->title,
-            'Description' => $gearbox->description ?: $gearbox->plain_description,
-            'Price' => filled($gearbox->price) ? (string) $gearbox->price : null,
-            'Currency' => $gearbox->currency ?: 'PLN',
-            'Quantity' => filled($gearbox->quantity) ? (string) $gearbox->quantity : null,
+            'Title' => $this->normalizeString($gearbox->title, 'title', $normalizationWarnings),
+            'Description' => $this->normalizeString($gearbox->description ?: $gearbox->plain_description, 'description', $normalizationWarnings),
+            'Price' => $this->normalizeString($gearbox->price, 'price', $normalizationWarnings),
+            'Currency' => $this->normalizeString($gearbox->currency ?: 'PLN', 'currency', $normalizationWarnings),
+            'Quantity' => $this->normalizeString($gearbox->quantity, 'quantity', $normalizationWarnings),
             'Condition' => 'Used',
             'Manufacturer Part Number' => $partNumber,
             'Brand' => 'GPSwiss',
-            'Allegro category ID' => $gearbox->category_id,
-            'Allegro category name' => $gearbox->category_name,
-            'Allegro category path' => is_array($gearbox->category_path) ? implode(' > ', array_filter($gearbox->category_path)) : (string) $gearbox->category_path,
+            'Allegro category ID' => $this->normalizeString($gearbox->category_id, 'category_id', $normalizationWarnings),
+            'Allegro category name' => $this->normalizeString($gearbox->category_name, 'category_name', $normalizationWarnings),
+            'Allegro category path' => $this->normalizeCategoryPath($gearbox->category_path, $normalizationWarnings),
             'Suggested eBay category' => null,
             'Main image URL' => $images[0] ?? null,
             'Additional image URLs' => implode('|', array_slice($images, 1)),
             'Source JarekGearbox ID' => (string) $gearbox->id,
-            'Allegro offer ID' => $gearbox->allegro_offer_id,
-            'Original Allegro URL' => $gearbox->allegro_offer_url,
+            'Allegro offer ID' => $this->normalizeString($gearbox->allegro_offer_id, 'allegro_offer_id', $normalizationWarnings),
+            'Original Allegro URL' => $this->normalizeString($gearbox->allegro_offer_url, 'allegro_offer_url', $normalizationWarnings),
+            'normalization_warnings' => array_values(array_unique($normalizationWarnings)),
         ];
     }
 
@@ -254,15 +256,22 @@ class JarekGearboxToolController extends Controller
     {
         $sku = 'JAREK-'.($gearbox->allegro_offer_id ?: $gearbox->id);
         $warnings = [];
-        if (blank($gearbox->title)) $warnings[] = 'missing_title';
-        if (mb_strlen((string) $gearbox->title) > 80) $warnings[] = 'title_too_long';
+        $normalizationWarnings = [];
+        $title = $this->normalizeString($gearbox->title, 'title', $normalizationWarnings);
+        $currency = $this->normalizeString($gearbox->currency ?: 'PLN', 'currency', $normalizationWarnings);
+
+        if (blank($title)) $warnings[] = 'missing_title';
+        if (mb_strlen($title) > 80) $warnings[] = 'title_too_long';
         if (! is_numeric($gearbox->price) || (float) $gearbox->price <= 0) $warnings[] = 'missing_price';
         if (! is_numeric($gearbox->quantity) || (int) $gearbox->quantity < 1) $warnings[] = 'missing_quantity';
         if ($this->localJarekImageUrls($gearbox) === []) $warnings[] = 'missing_local_images';
         if (blank($this->detectJarekPartNumber((object) $gearbox->getAttributes(), $sku))) $warnings[] = 'missing_part_number';
         $warnings[] = 'missing_ebay_category';
         if ($skuCount > 1) $warnings[] = 'duplicate_sku';
-        if (! in_array(strtoupper((string) ($gearbox->currency ?: 'PLN')), ['PLN','EUR','USD','GBP'], true)) $warnings[] = 'invalid_currency';
+        if (! in_array(strtoupper($currency), ['PLN','EUR','USD','GBP'], true)) $warnings[] = 'invalid_currency';
+        $csvWarnings = $this->jarekEbayCsvRow($gearbox)['normalization_warnings'] ?? [];
+        if (collect($csvWarnings)->contains(fn (string $warning): bool => str_ends_with($warning, '_normalized'))) $warnings[] = 'csv_field_normalized';
+        if (collect($csvWarnings)->contains(fn (string $warning): bool => str_ends_with($warning, '_omitted'))) $warnings[] = 'csv_field_omitted';
         return array_values(array_unique($warnings));
     }
 
@@ -298,7 +307,10 @@ class JarekGearboxToolController extends Controller
         $columns = ['SKU','Title','Description','Price','Currency','Quantity','Condition','Manufacturer Part Number','Brand','Allegro category ID','Allegro category name','Allegro category path','Suggested eBay category','Main image URL','Additional image URLs','Source JarekGearbox ID','Allegro offer ID','Original Allegro URL'];
         $handle = fopen('php://temp', 'r+');
         fputcsv($handle, $columns);
-        foreach ($rows as $row) fputcsv($handle, array_map(fn (string $column): mixed => $row[$column] ?? '', $columns));
+        foreach ($rows as $row) {
+            $warnings = [];
+            fputcsv($handle, array_map(fn (string $column): string => $this->normalizeString($row[$column] ?? '', $column, $warnings), $columns));
+        }
         rewind($handle);
         return stream_get_contents($handle) ?: '';
     }
@@ -527,17 +539,134 @@ class JarekGearboxToolController extends Controller
     /** @return array<int, string> */
     private function jarekImageUrls(object $row): array
     {
-        $images = [];
-        if (filled($row->main_image_url ?? null)) $images[] = trim((string) $row->main_image_url);
-        $decoded = json_decode((string) ($row->images ?? ''), true);
-        if (is_array($decoded)) {
-            foreach ($decoded as $image) {
-                $url = is_array($image) ? ($image['url'] ?? null) : $image;
-                if (filled($url)) $images[] = trim((string) $url);
+        $warnings = [];
+        return $this->normalizeUrlList([$row->main_image_url ?? null, ...$this->decodedJsonArray($row->images ?? null)], 'images', $warnings);
+    }
+
+    /** @param array<int, string> $warnings */
+    private function normalizeString(mixed $value, string $field, array &$warnings): string
+    {
+        $value = $this->decodedJsonValue($value);
+
+        if ($value === null || $value === '') {
+            return '';
+        }
+
+        if (is_scalar($value) || $value instanceof \Stringable) {
+            return trim((string) $value);
+        }
+
+        if (is_object($value)) {
+            $value = (array) $value;
+        }
+
+        if (is_array($value)) {
+            $flattened = $this->flattenTextValues($value);
+            if ($flattened !== []) {
+                $warnings[] = $field.'_normalized';
+                return implode(' | ', $flattened);
+            }
+
+            $warnings[] = $field.'_omitted';
+            return '';
+        }
+
+        $warnings[] = $field.'_omitted';
+        return '';
+    }
+
+    /** @param array<int, string> $warnings */
+    private function normalizeCategoryPath(mixed $value, array &$warnings): string
+    {
+        $decoded = $this->decodedJsonValue($value);
+        if (! is_array($decoded) && ! is_object($decoded)) {
+            return $this->normalizeString($decoded, 'category_path', $warnings);
+        }
+
+        $items = is_object($decoded) ? (array) $decoded : $decoded;
+        $names = [];
+        foreach ($items as $item) {
+            if (is_object($item)) {
+                $item = (array) $item;
+            }
+
+            if (is_array($item)) {
+                $name = $item['name'] ?? $item['label'] ?? $item['title'] ?? null;
+                if (filled($name)) {
+                    $names[] = trim((string) $name);
+                    continue;
+                }
+            } elseif (filled($item)) {
+                $names[] = trim((string) $item);
             }
         }
 
-        return array_values(array_unique(array_filter($images)));
+        $names = array_values(array_unique(array_filter($names)));
+        if ($names !== []) {
+            $warnings[] = 'category_path_normalized';
+            return implode(' > ', $names);
+        }
+
+        return $this->normalizeString($decoded, 'category_path', $warnings);
+    }
+
+    /**
+     * @param array<int, string> $warnings
+     * @return array<int, string>
+     */
+    private function normalizeUrlList(mixed $value, string $field, array &$warnings): array
+    {
+        $decoded = $this->decodedJsonValue($value);
+        $items = is_array($decoded) ? $decoded : [$decoded];
+        $urls = [];
+
+        foreach ($items as $item) {
+            $item = $this->decodedJsonValue($item);
+            if (is_object($item)) {
+                $item = (array) $item;
+            }
+
+            if (is_array($item)) {
+                $candidate = $item['url'] ?? $item['src'] ?? $item['href'] ?? data_get($item, 'image.url') ?? null;
+                if (filled($candidate) && is_scalar($candidate)) {
+                    $urls[] = trim((string) $candidate);
+                } else {
+                    $warnings[] = $field.'_item_omitted';
+                }
+                continue;
+            }
+
+            if (filled($item) && is_scalar($item)) {
+                $urls[] = trim((string) $item);
+            }
+        }
+
+        return array_values(array_unique(array_filter($urls, fn (string $url): bool => filter_var($url, FILTER_VALIDATE_URL) !== false)));
+    }
+
+    /** @return array<int, string> */
+    private function flattenTextValues(array $value): array
+    {
+        $texts = [];
+        foreach ($value as $item) {
+            $item = $this->decodedJsonValue($item);
+            if (is_object($item)) {
+                $item = (array) $item;
+            }
+
+            if (is_scalar($item) || $item instanceof \Stringable) {
+                if (filled($item)) $texts[] = trim((string) $item);
+                continue;
+            }
+
+            if (is_array($item)) {
+                foreach ($this->flattenTextValues($item) as $text) {
+                    $texts[] = $text;
+                }
+            }
+        }
+
+        return array_values(array_unique(array_filter($texts)));
     }
 
     /** @return array<string, mixed> */
