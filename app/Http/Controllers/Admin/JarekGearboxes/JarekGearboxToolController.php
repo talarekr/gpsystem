@@ -14,6 +14,8 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use Throwable;
 
 class JarekGearboxToolController extends Controller
@@ -111,6 +113,199 @@ class JarekGearboxToolController extends Controller
     public function ebayPreview(JarekGearbox $jarekGearbox, JarekGearboxEbayPreviewService $service): JsonResponse
     {
         return response()->json($service->build($jarekGearbox));
+    }
+
+    public function ebayCsvPreview(Request $request): JsonResponse
+    {
+        return response()->json($this->buildJarekEbayCsvPreview($this->smallCsvLimit($request)));
+    }
+
+    public function ebayCsvExport(Request $request): JsonResponse|StreamedResponse
+    {
+        if ($request->query('confirm') !== 'jarek-ebay-csv') {
+            return response()->json(['ok' => false, 'error' => 'Missing confirm=jarek-ebay-csv', 'marketplace_write' => false, 'parts_changed' => false], 422);
+        }
+
+        $preview = $this->buildJarekEbayCsvPreview($this->smallCsvLimit($request));
+        $rows = $preview['sample_rows'];
+        $filename = 'jarek-gearboxes-ebay-'.now()->format('Ymd-His').'-limit-'.$preview['limit'].'.csv';
+        $path = 'exports/jarek-gearboxes/'.$filename;
+
+        Storage::disk('local')->put($path, $this->csvString($rows));
+
+        $payload = $preview + [
+            'csv_path' => $path,
+            'download_url' => route('admin.tools.jarek-gearboxes.ebay-csv-download', ['filename' => $filename]),
+            'exported_count' => count($rows),
+        ];
+
+        if (Schema::hasTable('marketplace_sync_logs')) {
+            MarketplaceSyncLog::query()->create([
+                'marketplace' => 'ebay',
+                'action' => 'jarek_gearboxes_ebay_csv_export',
+                'status' => 'success',
+                'message' => 'CSV export Skrzyń Jarka dla eBay; bez eBay API, bez parts, marketplace_write=false.',
+                'payload' => $payload,
+                'created_at' => now(),
+            ]);
+        }
+
+        if ($request->boolean('download')) {
+            return Storage::disk('local')->download($path, $filename, ['Content-Type' => 'text/csv; charset=UTF-8']);
+        }
+
+        return response()->json($payload);
+    }
+
+    public function ebayCsvDownload(string $filename): StreamedResponse|JsonResponse
+    {
+        if (! preg_match('/^jarek-gearboxes-ebay-[0-9]{8}-[0-9]{6}-limit-[0-9]+\.csv$/', $filename)) {
+            return response()->json(['ok' => false, 'error' => 'Invalid filename', 'marketplace_write' => false], 404);
+        }
+
+        $path = 'exports/jarek-gearboxes/'.$filename;
+        if (! Storage::disk('local')->exists($path)) {
+            return response()->json(['ok' => false, 'error' => 'File not found', 'marketplace_write' => false], 404);
+        }
+
+        return Storage::disk('local')->download($path, $filename, ['Content-Type' => 'text/csv; charset=UTF-8']);
+    }
+
+
+    /** @return array<string, mixed> */
+    private function buildJarekEbayCsvPreview(int $limit): array
+    {
+        $base = [
+            'ok' => Schema::hasTable('jarek_gearboxes'),
+            'dry_run' => true,
+            'marketplace_write' => false,
+            'parts_changed' => false,
+            'source_table' => 'jarek_gearboxes',
+            'limit' => $limit,
+            'max_without_separate_confirmation' => 25,
+            'total' => 0,
+            'exportable_count' => 0,
+            'blocked_count' => 0,
+            'warnings_by_reason' => array_fill_keys(['missing_title','title_too_long','missing_price','missing_quantity','missing_local_images','missing_part_number','missing_ebay_category','duplicate_sku','invalid_currency'], 0),
+            'sample_rows' => [],
+            'blocked_samples' => [],
+            'local_image_url_source_fields' => ['main_image_url', 'images'],
+            'csv_uses_only_our_server_images' => true,
+            'allowed_image_hosts' => $this->localImageHosts(),
+            'safety' => ['no_parts_write' => true, 'no_ovoko_write' => true, 'no_allegro_write' => true, 'no_ebay_api_write' => true, 'no_publish_relist_end_update' => true, 'no_api_sync' => true, 'no_image_download_or_copy' => true],
+        ];
+
+        if (! Schema::hasTable('jarek_gearboxes')) return $base;
+
+        $query = JarekGearbox::query()->orderBy('id');
+        $base['total'] = (clone $query)->count();
+        $skuCounts = (clone $query)->select('allegro_offer_id', DB::raw('count(*) as c'))->groupBy('allegro_offer_id')->pluck('c', 'allegro_offer_id');
+
+        foreach ((clone $query)->get() as $gearbox) {
+            $csvRow = $this->jarekEbayCsvRow($gearbox);
+            $reasons = $this->jarekEbayCsvWarnings($gearbox, (int) ($skuCounts[$gearbox->allegro_offer_id] ?? 0));
+            foreach (array_unique($reasons) as $reason) $base['warnings_by_reason'][$reason]++;
+
+            if ($reasons === [] || array_diff($reasons, ['missing_part_number', 'missing_ebay_category']) === []) {
+                $base['exportable_count']++;
+                if (count($base['sample_rows']) < $limit) $base['sample_rows'][] = $csvRow + ['warnings' => $reasons];
+            } else {
+                $base['blocked_count']++;
+                if (count($base['blocked_samples']) < $limit) $base['blocked_samples'][] = ['source_jarek_gearbox_id' => $gearbox->id, 'sku' => $csvRow['SKU'], 'title' => $gearbox->title, 'blockers' => $reasons];
+            }
+        }
+
+        $base['csv_uses_only_our_server_images'] = collect($base['sample_rows'])->every(fn (array $row): bool => $this->csvRowImagesAreLocal($row));
+
+        return $base;
+    }
+
+    /** @return array<string, string|null> */
+    private function jarekEbayCsvRow(JarekGearbox $gearbox): array
+    {
+        $images = $this->localJarekImageUrls($gearbox);
+        $sku = 'JAREK-'.($gearbox->allegro_offer_id ?: $gearbox->id);
+        $partNumber = $this->detectJarekPartNumber((object) $gearbox->getAttributes(), $sku);
+
+        return [
+            'SKU' => $sku,
+            'Title' => $gearbox->title,
+            'Description' => $gearbox->description ?: $gearbox->plain_description,
+            'Price' => filled($gearbox->price) ? (string) $gearbox->price : null,
+            'Currency' => $gearbox->currency ?: 'PLN',
+            'Quantity' => filled($gearbox->quantity) ? (string) $gearbox->quantity : null,
+            'Condition' => 'Used',
+            'Manufacturer Part Number' => $partNumber,
+            'Brand' => 'GPSwiss',
+            'Allegro category ID' => $gearbox->category_id,
+            'Allegro category name' => $gearbox->category_name,
+            'Allegro category path' => is_array($gearbox->category_path) ? implode(' > ', array_filter($gearbox->category_path)) : (string) $gearbox->category_path,
+            'Suggested eBay category' => null,
+            'Main image URL' => $images[0] ?? null,
+            'Additional image URLs' => implode('|', array_slice($images, 1)),
+            'Source JarekGearbox ID' => (string) $gearbox->id,
+            'Allegro offer ID' => $gearbox->allegro_offer_id,
+            'Original Allegro URL' => $gearbox->allegro_offer_url,
+        ];
+    }
+
+    /** @return array<int, string> */
+    private function jarekEbayCsvWarnings(JarekGearbox $gearbox, int $skuCount): array
+    {
+        $sku = 'JAREK-'.($gearbox->allegro_offer_id ?: $gearbox->id);
+        $warnings = [];
+        if (blank($gearbox->title)) $warnings[] = 'missing_title';
+        if (mb_strlen((string) $gearbox->title) > 80) $warnings[] = 'title_too_long';
+        if (! is_numeric($gearbox->price) || (float) $gearbox->price <= 0) $warnings[] = 'missing_price';
+        if (! is_numeric($gearbox->quantity) || (int) $gearbox->quantity < 1) $warnings[] = 'missing_quantity';
+        if ($this->localJarekImageUrls($gearbox) === []) $warnings[] = 'missing_local_images';
+        if (blank($this->detectJarekPartNumber((object) $gearbox->getAttributes(), $sku))) $warnings[] = 'missing_part_number';
+        $warnings[] = 'missing_ebay_category';
+        if ($skuCount > 1) $warnings[] = 'duplicate_sku';
+        if (! in_array(strtoupper((string) ($gearbox->currency ?: 'PLN')), ['PLN','EUR','USD','GBP'], true)) $warnings[] = 'invalid_currency';
+        return array_values(array_unique($warnings));
+    }
+
+    /** @return array<int, string> */
+    private function localJarekImageUrls(JarekGearbox $gearbox): array
+    {
+        return array_values(array_filter($this->jarekImageUrls((object) $gearbox->getAttributes()), fn (string $url): bool => $this->isLocalServerImageUrl($url)));
+    }
+
+    private function isLocalServerImageUrl(string $url): bool
+    {
+        $host = parse_url($url, PHP_URL_HOST);
+        return is_string($host) && in_array(mb_strtolower($host), $this->localImageHosts(), true) && ! str_contains(mb_strtolower($host), 'allegro');
+    }
+
+    /** @return array<int, string> */
+    private function localImageHosts(): array
+    {
+        $hosts = ['gpswiss.pl'];
+        $appHost = parse_url((string) config('app.url'), PHP_URL_HOST);
+        if (is_string($appHost) && $appHost !== '') $hosts[] = mb_strtolower($appHost);
+        return array_values(array_unique($hosts));
+    }
+
+    private function csvRowImagesAreLocal(array $row): bool
+    {
+        $urls = array_filter(array_merge([(string) ($row['Main image URL'] ?? '')], explode('|', (string) ($row['Additional image URLs'] ?? ''))));
+        return $urls !== [] && collect($urls)->every(fn (string $url): bool => $this->isLocalServerImageUrl($url));
+    }
+
+    private function csvString(array $rows): string
+    {
+        $columns = ['SKU','Title','Description','Price','Currency','Quantity','Condition','Manufacturer Part Number','Brand','Allegro category ID','Allegro category name','Allegro category path','Suggested eBay category','Main image URL','Additional image URLs','Source JarekGearbox ID','Allegro offer ID','Original Allegro URL'];
+        $handle = fopen('php://temp', 'r+');
+        fputcsv($handle, $columns);
+        foreach ($rows as $row) fputcsv($handle, array_map(fn (string $column): mixed => $row[$column] ?? '', $columns));
+        rewind($handle);
+        return stream_get_contents($handle) ?: '';
+    }
+
+    private function smallCsvLimit(Request $request): int
+    {
+        return max(1, min(25, (int) $request->query('limit', 10)));
     }
 
     /**
