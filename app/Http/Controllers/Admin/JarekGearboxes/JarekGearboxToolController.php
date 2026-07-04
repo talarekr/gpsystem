@@ -424,6 +424,142 @@ class JarekGearboxToolController extends Controller
     }
 
 
+
+    public function ebayDeBulkPreparePreview(Request $request, GoogleTranslateService $translateService, EbayDescriptionTemplateRenderer $renderer, NbpExchangeRateService $exchangeRateService): JsonResponse
+    {
+        $limit = max(1, min(100, (int) $request->query('limit', 20)));
+        $offset = max(0, (int) $request->query('offset', 0));
+        $skuFilter = trim((string) $request->query('sku', ''));
+        $onlyReady = $request->boolean('only_ready');
+        $onlyBlocked = $request->boolean('only_blocked');
+
+        $payload = [
+            'ok' => true,
+            'dry_run' => true,
+            'read_only' => true,
+            'marketplace_write' => false,
+            'parts_changed' => false,
+            'action' => 'jarek_gearboxes_ebay_de_bulk_prepare_preview',
+            'source_table' => 'jarek_gearboxes',
+            'limit' => $limit,
+            'offset' => $offset,
+            'filters' => [
+                'sku' => $skuFilter ?: null,
+                'only_ready' => $onlyReady,
+                'only_blocked' => $onlyBlocked,
+            ],
+            'summary' => [
+                'total' => 0,
+                'ok_count' => 0,
+                'blocked_count' => 0,
+                'warning_count' => 0,
+                'missing_images_count' => 0,
+                'missing_offer_id_count' => 0,
+                'ready_to_apply_count' => 0,
+            ],
+            'offers' => [],
+            'safety' => [
+                'dry_run_only',
+                'no_ebay_api_write',
+                'no_publish',
+                'no_apply',
+                'no_revise',
+                'marketplace_write_false',
+            ],
+        ];
+
+        if (! Schema::hasTable('jarek_gearboxes')) {
+            $payload['ok'] = false;
+            $payload['blockers'] = ['jarek_gearboxes_table_missing'];
+            return response()->json($payload, 200);
+        }
+
+        $query = JarekGearbox::query()->orderBy('id');
+        if ($skuFilter !== '') {
+            $offerId = preg_match('/^JAREK-(.+)$/', $skuFilter, $m) ? $m[1] : $skuFilter;
+            $query->where(function ($query) use ($skuFilter, $offerId): void {
+                $query->where('allegro_offer_id', $offerId)
+                    ->orWhere('ebay_inventory_sku', $skuFilter);
+            });
+        }
+
+        $gearboxes = $query->offset($offset)->limit($limit)->get();
+
+        foreach ($gearboxes as $gearbox) {
+            $sku = 'JAREK-'.($gearbox->allegro_offer_id ?: $gearbox->id);
+            try {
+                $previewRequest = Request::create($request->path(), 'GET', ['sku' => $sku]);
+                $preview = $this->ebayDeRevisePreview($previewRequest, $translateService, $renderer, $exchangeRateService)->getData(true);
+                $item = $this->jarekBulkPreparePreviewItem($sku, $preview);
+            } catch (Throwable $e) {
+                $item = $this->jarekBulkPreparePreviewExceptionItem($sku, $gearbox, $e);
+            }
+
+            if ($onlyReady && ! ($item['ok'] ?? false)) continue;
+            if ($onlyBlocked && (($item['blockers'] ?? []) === [])) continue;
+
+            $payload['offers'][] = $item;
+            $payload['summary']['total']++;
+            if ($item['ok'] ?? false) $payload['summary']['ok_count']++;
+            if (($item['blockers'] ?? []) !== []) $payload['summary']['blocked_count']++;
+            if (($item['warnings'] ?? []) !== []) $payload['summary']['warning_count']++;
+            if (($item['public_image_urls'] ?? []) === []) $payload['summary']['missing_images_count']++;
+            if (blank($item['offer_id'] ?? null)) $payload['summary']['missing_offer_id_count']++;
+            if (($item['ok'] ?? false) && filled($item['offer_id'] ?? null)) $payload['summary']['ready_to_apply_count']++;
+        }
+
+        return response()->json($payload, 200);
+    }
+
+    /** @param array<string, mixed> $preview */
+    private function jarekBulkPreparePreviewItem(string $sku, array $preview): array
+    {
+        $imageDiagnostics = is_array($preview['image_diagnostics'] ?? null) ? $preview['image_diagnostics'] : [];
+
+        return [
+            'sku' => $sku,
+            'offer_id' => $preview['offer_id'] ?? null,
+            'listing_id' => $preview['listing_id'] ?? null,
+            'ok' => (bool) ($preview['ok'] ?? false),
+            'blockers' => array_values((array) ($preview['blockers'] ?? [])),
+            'warnings' => array_values((array) ($preview['warnings'] ?? [])),
+            'public_image_urls' => array_values((array) ($preview['public_image_urls'] ?? [])),
+            'price_diagnostics' => $preview['price_diagnostics'] ?? null,
+            'image_diagnostics' => [
+                'recommended_image_urls_count' => count((array) ($imageDiagnostics['recommended_image_urls'] ?? [])),
+                'public_image_urls_count' => count((array) ($preview['public_image_urls'] ?? [])),
+                'blockers' => array_values((array) ($imageDiagnostics['blockers'] ?? [])),
+                'warnings' => array_values((array) ($imageDiagnostics['warnings'] ?? [])),
+                'source' => $imageDiagnostics['source'] ?? null,
+            ],
+            'condition_template_diagnostics' => $preview['condition_template_diagnostics'] ?? null,
+            'core_return_diagnostics' => $preview['core_return_diagnostics'] ?? null,
+            'revised_inventory_item_request' => $preview['revised_inventory_item_request'] ?? null,
+            'revised_offer_request' => $preview['revised_offer_request'] ?? null,
+            'admin_diagnostics' => $preview['admin_diagnostics'] ?? [],
+        ];
+    }
+
+    private function jarekBulkPreparePreviewExceptionItem(string $sku, JarekGearbox $gearbox, Throwable $e): array
+    {
+        return [
+            'sku' => $sku,
+            'offer_id' => $gearbox->ebay_offer_id,
+            'listing_id' => $gearbox->ebay_listing_id,
+            'ok' => false,
+            'blockers' => ['bulk_prepare_preview_exception'],
+            'warnings' => [],
+            'public_image_urls' => [],
+            'price_diagnostics' => null,
+            'image_diagnostics' => ['recommended_image_urls_count' => 0, 'public_image_urls_count' => 0, 'blockers' => [], 'warnings' => [], 'source' => null],
+            'condition_template_diagnostics' => null,
+            'core_return_diagnostics' => null,
+            'revised_inventory_item_request' => null,
+            'revised_offer_request' => null,
+            'admin_diagnostics' => ['error_class' => $e::class, 'error_message' => $e->getMessage()],
+        ];
+    }
+
     public function ebayDePublishPreview(Request $request, GoogleTranslateService $translateService, EbayDescriptionTemplateRenderer $renderer, NbpExchangeRateService $exchangeRateService): JsonResponse
     {
         $response = $this->ebayDePreparePreview($request, $translateService, $renderer, $exchangeRateService);

@@ -195,7 +195,7 @@ class JarekGearboxEbayDePreparePreviewTest extends TestCase
         Storage::disk('public')->put('jarek-gearboxes/18717293813/01.jpg', 'jpg');
 
         $this->mock(GoogleTranslateService::class, function ($mock): void {
-            $mock->shouldReceive('translate')->twice()->andReturnUsing(fn (string $text): array => [
+            $mock->shouldReceive('translate')->zeroOrMoreTimes()->andReturnUsing(fn (string $text): array => [
                 'translated_text' => str_contains($text, 'Opis skrzyni') ? 'Getriebebeschreibung. Das alte Getriebe kann zurückgegeben werden.' : $text,
                 'warnings' => [],
                 'blockers' => [],
@@ -441,6 +441,74 @@ class JarekGearboxEbayDePreparePreviewTest extends TestCase
     }
 
 
+
+    public function test_ebay_de_bulk_prepare_preview_returns_dry_run_partial_results_with_summary(): void
+    {
+        Storage::fake('public');
+        config(['app.url' => 'https://gpswiss.pl']);
+        Cache::put('nbp_table_a_eur_rate', ['rate' => 4.30, 'effective_date' => '2026-06-27', 'table_no' => '123/A/NBP/2026']);
+        $this->mockTranslations();
+        $this->createCategoryMappings('620', '100684');
+        Storage::disk('public')->put('jarek-gearboxes/18727785496/01.jpg', 'jpg');
+
+        MarketplaceAccount::query()->create([
+            'code' => 'ebay_de',
+            'name' => 'eBay DE',
+            'marketplace' => 'ebay',
+            'api_enabled' => false,
+            'api_settings' => [
+                'marketplace_id' => 'EBAY_DE',
+                'merchant_location_key' => 'gpswiss-de',
+                'payment_policy_id' => 'payment-de',
+                'return_policy_id' => 'return-de',
+                'format' => 'FIXED_PRICE',
+                'listing_duration' => 'GTC',
+            ],
+        ]);
+
+        JarekGearbox::query()->create([
+            'allegro_offer_id' => '18727785496',
+            'title' => 'Skrzynia DSG 0D9300041 Audi',
+            'description' => 'Opis skrzyni',
+            'price' => 2450,
+            'currency' => 'PLN',
+            'quantity' => 1,
+            'category_id' => '620',
+            'category_name' => 'Skrzynie biegów',
+            'parameters' => [['id' => '11323', 'name' => 'Stan', 'valuesLabels' => ['Używany']], ['name' => 'Numer części', 'values' => ['0D9300041']]],
+            'ebay_listing_id' => '1234567890',
+            'ebay_offer_id' => '9876543210',
+            'ebay_inventory_sku' => 'JAREK-18727785496',
+        ]);
+        JarekGearbox::query()->create([
+            'allegro_offer_id' => '18720000000',
+            'title' => 'Skrzynia manualna VW',
+            'description' => 'Opis skrzyni',
+            'price' => 1000,
+            'currency' => 'PLN',
+            'quantity' => 1,
+            'category_id' => '620',
+            'category_name' => 'Skrzynie biegów',
+            'parameters' => [['id' => '11323', 'name' => 'Stan', 'valuesLabels' => ['Używany']]],
+        ]);
+
+        $response = $this->withoutMiddleware()->getJson('/admin/tools/jarek-gearboxes/ebay-de-bulk-prepare-preview?limit=20');
+
+        $response->assertOk()
+            ->assertJsonPath('dry_run', true)
+            ->assertJsonPath('marketplace_write', false)
+            ->assertJsonPath('summary.total', 2)
+            ->assertJsonPath('summary.missing_images_count', 1)
+            ->assertJsonPath('summary.missing_offer_id_count', 1)
+            ->assertJsonPath('offers.0.sku', 'JAREK-18727785496')
+            ->assertJsonPath('offers.0.offer_id', '9876543210')
+            ->assertJsonPath('offers.0.listing_id', '1234567890')
+            ->assertJsonPath('offers.0.public_image_urls.0', 'https://gpswiss.pl/storage/jarek-gearboxes/18727785496/01.jpg')
+            ->assertJsonPath('offers.0.revised_offer_request.offerId', '9876543210')
+            ->assertJsonPath('offers.1.sku', 'JAREK-18720000000')
+            ->assertJsonFragment(['no_ebay_api_write']);
+    }
+
     public function test_ebay_de_revise_apply_is_locked_to_single_sku_and_exact_confirm(): void
     {
         $this->withoutMiddleware()
@@ -482,7 +550,7 @@ class JarekGearboxEbayDePreparePreviewTest extends TestCase
     private function mockTranslations(): void
     {
         $this->mock(GoogleTranslateService::class, function ($mock): void {
-            $mock->shouldReceive('translate')->twice()->andReturnUsing(fn (string $text): array => [
+            $mock->shouldReceive('translate')->zeroOrMoreTimes()->andReturnUsing(fn (string $text): array => [
                 'translated_text' => $text,
                 'warnings' => [],
                 'blockers' => [],
