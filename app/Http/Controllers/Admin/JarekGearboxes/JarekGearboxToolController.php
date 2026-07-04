@@ -21,6 +21,13 @@ use Throwable;
 
 class JarekGearboxToolController extends Controller
 {
+    private const JAREK_PREVIEW_MAX_IMAGE_DIAGNOSTIC_RECORDS = 10;
+    private const JAREK_PREVIEW_MAX_STORAGE_CANDIDATE_PATHS_PER_RECORD = 20;
+    private const JAREK_PREVIEW_MAX_FILE_EXISTS_CHECKS = 100;
+
+    private int $jarekImageFileExistsChecks = 0;
+    private bool $jarekImageFileExistsBudgetExceeded = false;
+
     public function ping(AllegroJarekImportService $service): JsonResponse
     {
         try {
@@ -121,6 +128,39 @@ class JarekGearboxToolController extends Controller
         return response()->json($this->buildJarekEbayCsvPreview($this->smallCsvLimit($request)));
     }
 
+    public function imageSourceDiagnostics(Request $request): JsonResponse
+    {
+        if ($request->query('confirm') !== 'jarek-image-diagnostics') {
+            return response()->json(['ok' => false, 'error' => 'Missing confirm=jarek-image-diagnostics', 'marketplace_write' => false, 'parts_changed' => false], 422);
+        }
+
+        $limit = max(1, min(5, (int) $request->query('limit', 5)));
+        $deep = $request->boolean('deep');
+        $this->resetJarekImageDiagnosticsBudget();
+
+        $rows = Schema::hasTable('jarek_gearboxes')
+            ? JarekGearbox::query()->orderBy('id')->limit($limit)->get()
+            : collect();
+
+        return response()->json([
+            'ok' => Schema::hasTable('jarek_gearboxes'),
+            'dry_run' => true,
+            'marketplace_write' => false,
+            'parts_changed' => false,
+            'source_table' => 'jarek_gearboxes',
+            'limit' => $limit,
+            'deep' => $deep,
+            'safety' => ['no_parts_write' => true, 'no_ovoko_write' => true, 'no_allegro_write' => true, 'no_ebay_api_write' => true, 'no_image_download_or_copy' => true],
+            'diagnostics' => $rows->map(fn (JarekGearbox $gearbox): array => [
+                'source_jarek_gearbox_id' => $gearbox->id,
+                'sku' => 'JAREK-'.($gearbox->allegro_offer_id ?: $gearbox->id),
+                'images' => $this->jarekImageDiagnostics($gearbox, $deep),
+            ])->all(),
+            'file_exists_checks_used' => $this->jarekImageFileExistsChecks,
+            'file_exists_budget_exceeded' => $this->jarekImageFileExistsBudgetExceeded,
+        ]);
+    }
+
     public function ebayCsvExport(Request $request): JsonResponse|StreamedResponse
     {
         if ($request->query('confirm') !== 'jarek-ebay-csv') {
@@ -204,21 +244,37 @@ class JarekGearboxToolController extends Controller
         $base['total'] = (clone $query)->count();
         $skuCounts = (clone $query)->select('allegro_offer_id', DB::raw('count(*) as c'))->groupBy('allegro_offer_id')->pluck('c', 'allegro_offer_id');
 
+        $this->resetJarekImageDiagnosticsBudget();
+        $diagnosticLimit = min($limit, self::JAREK_PREVIEW_MAX_IMAGE_DIAGNOSTIC_RECORDS);
+
         foreach ((clone $query)->get() as $gearbox) {
             $csvRow = $this->jarekEbayCsvRow($gearbox);
             $reasons = $this->jarekEbayCsvWarnings($gearbox, (int) ($skuCounts[$gearbox->allegro_offer_id] ?? 0));
             foreach (array_unique($reasons) as $reason) $base['warnings_by_reason'][$reason]++;
             $blockers = $this->jarekEbayCsvBlockers($reasons);
-            $diagnostics = ['category' => $this->jarekCategoryDiagnostics($gearbox), 'images' => $this->jarekImageDiagnostics($gearbox)];
 
             if ($blockers === []) {
                 $base['exportable_count']++;
-                if (count($base['sample_rows']) < $limit) $base['sample_rows'][] = $csvRow + ['warnings' => $reasons, 'diagnostics' => $diagnostics];
+                if (count($base['sample_rows']) < $limit) {
+                    $base['sample_rows'][] = $csvRow + ['warnings' => $reasons, 'diagnostics' => $this->jarekPreviewDiagnostics($gearbox, count($base['sample_rows']) < $diagnosticLimit)];
+                }
             } else {
                 $base['blocked_count']++;
-                if (count($base['blocked_samples']) < $limit) $base['blocked_samples'][] = ['source_jarek_gearbox_id' => $gearbox->id, 'sku' => $csvRow['SKU'], 'title' => $gearbox->title, 'blockers' => $blockers, 'warnings' => $reasons, 'diagnostics' => $diagnostics];
+                if (count($base['blocked_samples']) < $limit) {
+                    $titleWarnings = [];
+                    $base['blocked_samples'][] = ['source_jarek_gearbox_id' => $gearbox->id, 'sku' => $csvRow['SKU'], 'title' => $this->normalizeString($gearbox->title, 'title', $titleWarnings), 'blockers' => $blockers, 'warnings' => $reasons, 'diagnostics' => $this->jarekPreviewDiagnostics($gearbox, count($base['blocked_samples']) < $diagnosticLimit)];
+                }
             }
         }
+
+        $base['image_diagnostics_limits'] = [
+            'max_records_with_storage_diagnostics' => $diagnosticLimit,
+            'max_candidate_paths_per_record' => self::JAREK_PREVIEW_MAX_STORAGE_CANDIDATE_PATHS_PER_RECORD,
+            'max_file_exists_checks_per_request' => self::JAREK_PREVIEW_MAX_FILE_EXISTS_CHECKS,
+            'file_exists_checks_used' => $this->jarekImageFileExistsChecks,
+            'file_exists_budget_exceeded' => $this->jarekImageFileExistsBudgetExceeded,
+            'recursive_storage_scan' => false,
+        ];
 
         $base['csv_uses_only_our_server_images'] = collect($base['sample_rows'])->every(fn (array $row): bool => $this->csvRowImagesAreLocal($row));
         $base['missing_ebay_category_mapping_summary'] = $this->missingJarekEbayCategoryMappingSummary();
@@ -243,14 +299,14 @@ class JarekGearboxToolController extends Controller
             'Currency' => $this->normalizeString($gearbox->currency ?: 'PLN', 'currency', $normalizationWarnings),
             'Quantity' => $this->normalizeString($gearbox->quantity, 'quantity', $normalizationWarnings),
             'Condition' => 'Used',
-            'Manufacturer Part Number' => $partNumber,
+            'Manufacturer Part Number' => $this->normalizeString($partNumber, 'part_number', $normalizationWarnings),
             'Brand' => 'GPSwiss',
             'Allegro category ID' => $this->normalizeString($gearbox->category_id, 'category_id', $normalizationWarnings),
             'Allegro category name' => $this->normalizeString($gearbox->category_name, 'category_name', $normalizationWarnings),
             'Allegro category path' => $this->normalizeCategoryPath($gearbox->category_path, $normalizationWarnings),
-            'Suggested eBay category' => $categoryMapping['ebay_category_id'] ?? null,
-            'Main image URL' => $images[0] ?? null,
-            'Additional image URLs' => implode('|', array_slice($images, 1)),
+            'Suggested eBay category' => $this->normalizeString($categoryMapping['ebay_category_id'] ?? null, 'ebay_category_id', $normalizationWarnings),
+            'Main image URL' => $this->normalizeString($images[0] ?? null, 'main_image_url', $normalizationWarnings),
+            'Additional image URLs' => implode('|', $this->normalizeUrlList(array_slice($images, 1), 'additional_image_urls', $normalizationWarnings)),
             'Source JarekGearbox ID' => (string) $gearbox->id,
             'Allegro offer ID' => $this->normalizeString($gearbox->allegro_offer_id, 'allegro_offer_id', $normalizationWarnings),
             'Original Allegro URL' => $this->normalizeString($gearbox->allegro_offer_url, 'allegro_offer_url', $normalizationWarnings),
@@ -346,13 +402,13 @@ class JarekGearboxToolController extends Controller
     }
 
     /** @return array<string, mixed> */
-    private function jarekImageDiagnostics(JarekGearbox $gearbox): array
+    private function jarekImageDiagnostics(JarekGearbox $gearbox, bool $includeStorage = true): array
     {
         $all = $this->rawJarekImageUrlCandidates($gearbox);
         $hosts = array_map(fn (string $url): ?string => parse_url($url, PHP_URL_HOST), $all);
         return [
             'source_fields' => $this->jarekPotentialImageColumns(),
-            'local_storage_diagnostics' => $this->localJarekImageStorageDiagnostics($gearbox),
+            'local_storage_diagnostics' => $includeStorage ? $this->localJarekImageStorageDiagnostics($gearbox) : ['status' => 'local_image_storage_lookup_skipped_too_expensive', 'reason' => 'Preview storage diagnostics are limited to sample records only.', 'recursive_storage_scan' => false],
             'urls_before_filtering_count' => count($all),
             'urls_after_our_host_filtering_count' => count($this->localJarekImageUrls($gearbox)),
             'allowed_hosts' => $this->localImageHosts(),
@@ -365,14 +421,21 @@ class JarekGearboxToolController extends Controller
 
     private function categoryPathString(mixed $path): ?string
     {
-        if (is_array($path)) return implode(' > ', array_filter(array_map(fn ($value): string => is_array($value) ? (string) ($value['name'] ?? $value['id'] ?? '') : (string) $value, $path)));
-        return filled($path) ? (string) $path : null;
+        $warnings = [];
+        $normalized = $this->normalizeCategoryPath($path, $warnings);
+        return $normalized !== '' ? $normalized : null;
+    }
+
+    /** @return array<string, mixed> */
+    private function jarekPreviewDiagnostics(JarekGearbox $gearbox, bool $includeStorage): array
+    {
+        return ['category' => $this->jarekCategoryDiagnostics($gearbox), 'images' => $this->jarekImageDiagnostics($gearbox, $includeStorage)];
     }
 
     /** @return array<int, string> */
     private function localJarekImageUrls(JarekGearbox $gearbox): array
     {
-        $stored = collect($this->localJarekImageStorageDiagnostics($gearbox)['candidate_images'] ?? [])
+        $stored = collect([])
             ->pluck('public_url')
             ->filter(fn ($url): bool => is_string($url) && $this->isLocalServerImageUrl($url))
             ->all();
@@ -405,6 +468,9 @@ class JarekGearboxToolController extends Controller
             'status' => $candidates === [] ? 'local_images_not_found' : 'local_images_found',
             'checked_tables' => ['part_images'],
             'checked_storage_roots' => $this->jarekStorageRoots(),
+            'recursive_storage_scan' => false,
+            'max_candidate_paths_per_record' => self::JAREK_PREVIEW_MAX_STORAGE_CANDIDATE_PATHS_PER_RECORD,
+            'max_file_exists_checks_per_request' => self::JAREK_PREVIEW_MAX_FILE_EXISTS_CHECKS,
             'identifiers' => [
                 'jarek_gearbox_id' => $gearbox->id,
                 'allegro_offer_id' => $gearbox->allegro_offer_id,
@@ -462,20 +528,49 @@ class JarekGearboxToolController extends Controller
     /** @return array<int, array<string, mixed>> */
     private function jarekStoragePathCandidates(JarekGearbox $gearbox): array
     {
-        $needles = array_values(array_filter([(string) $gearbox->id, (string) $gearbox->allegro_offer_id, 'JAREK-'.($gearbox->allegro_offer_id ?: $gearbox->id)]));
+        $relativePaths = $this->deterministicJarekImageRelativePathCandidates($gearbox);
         $matches = [];
-        foreach ($this->jarekStorageRoots() as $root) {
-            if (! is_dir($root)) continue;
-            foreach ($needles as $needle) {
-                foreach (glob($root.'/*'.$needle.'*') ?: [] as $path) {
-                    if (! is_file($path) || ! preg_match('/\.(jpe?g|png|webp)$/i', $path)) continue;
-                    $relative = $this->relativePublicStoragePath($path);
-                    $matches[] = ['source' => 'storage_scan', 'absolute_path' => $path, 'relative_path' => $relative, 'public_url' => $relative ? $this->publicStorageUrl($relative) : null, 'file_exists' => true];
-                    if (count($matches) >= 25) return $matches;
+
+        foreach (array_slice($relativePaths, 0, self::JAREK_PREVIEW_MAX_STORAGE_CANDIDATE_PATHS_PER_RECORD) as $relative) {
+            if (! $this->publicStorageRelativePathExists($relative)) {
+                continue;
+            }
+
+            $matches[] = [
+                'source' => 'deterministic_storage_lookup',
+                'relative_path' => $relative,
+                'public_url' => $this->publicStorageUrl($relative),
+                'file_exists' => true,
+            ];
+        }
+
+        return $matches;
+    }
+
+    /** @return array<int, string> */
+    private function deterministicJarekImageRelativePathCandidates(JarekGearbox $gearbox): array
+    {
+        $ids = array_values(array_unique(array_filter([
+            (string) $gearbox->id,
+            (string) $gearbox->allegro_offer_id,
+            'JAREK-'.($gearbox->allegro_offer_id ?: $gearbox->id),
+        ])));
+        $directories = ['parts/photos/imported', 'parts/photos/jarek'];
+        $extensions = ['jpg', 'jpeg', 'png', 'webp'];
+        $suffixes = ['', '-1', '_1', '/1', '/main'];
+        $paths = [];
+
+        foreach ($directories as $directory) {
+            foreach ($ids as $id) {
+                foreach ($suffixes as $suffix) {
+                    foreach ($extensions as $extension) {
+                        $paths[] = $directory.'/'.$id.$suffix.'.'.$extension;
+                    }
                 }
             }
         }
-        return $matches;
+
+        return array_values(array_unique($paths));
     }
 
     /** @return array<int, string> */
@@ -495,20 +590,46 @@ class JarekGearboxToolController extends Controller
     {
         $relative = $this->publicDiskRelativePath($path);
         if ($relative === null) return false;
-        return Storage::disk('public')->exists($relative) || is_file(public_path('storage/'.$relative)) || is_file(dirname(base_path()).'/public_html/storage/'.$relative);
+        if ($this->jarekImageFileExistsChecks >= self::JAREK_PREVIEW_MAX_FILE_EXISTS_CHECKS) {
+            $this->jarekImageFileExistsBudgetExceeded = true;
+            return false;
+        }
+
+        foreach ([
+            fn (): bool => Storage::disk('public')->exists($relative),
+            fn (): bool => is_file(public_path('storage/'.$relative)),
+            fn (): bool => is_file(dirname(base_path()).'/public_html/storage/'.$relative),
+        ] as $exists) {
+            if ($this->jarekImageFileExistsChecks >= self::JAREK_PREVIEW_MAX_FILE_EXISTS_CHECKS) {
+                $this->jarekImageFileExistsBudgetExceeded = true;
+                return false;
+            }
+            $this->jarekImageFileExistsChecks++;
+            if ($exists()) return true;
+        }
+
+        return false;
     }
 
     private function publicDiskRelativePath(?string $path): ?string
     {
         if (! is_string($path) || trim($path) === '') return null;
-        $path = ltrim(trim($path), '/');
-        if (str_starts_with($path, 'storage/')) $path = substr($path, 8);
+        $path = trim($path);
         if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
             $urlPath = parse_url($path, PHP_URL_PATH);
             if (! is_string($urlPath) || ! str_starts_with($urlPath, '/storage/')) return null;
             $path = substr($urlPath, 9);
         }
+
+        $path = ltrim($path, '/');
+        if (str_starts_with($path, 'storage/')) $path = substr($path, 8);
         return $path !== '' ? $path : null;
+    }
+
+    private function resetJarekImageDiagnosticsBudget(): void
+    {
+        $this->jarekImageFileExistsChecks = 0;
+        $this->jarekImageFileExistsBudgetExceeded = false;
     }
 
     private function relativePublicStoragePath(string $absolutePath): ?string
@@ -882,12 +1003,14 @@ class JarekGearboxToolController extends Controller
 
             if (is_array($item)) {
                 $name = $item['name'] ?? $item['label'] ?? $item['title'] ?? null;
-                if (filled($name)) {
-                    $names[] = trim((string) $name);
+                $normalizedName = $this->normalizeString($name, 'category_path_item', $warnings);
+                if ($normalizedName !== '') {
+                    $names[] = $normalizedName;
                     continue;
                 }
-            } elseif (filled($item)) {
-                $names[] = trim((string) $item);
+            } else {
+                $normalizedItem = $this->normalizeString($item, 'category_path_item', $warnings);
+                if ($normalizedItem !== '') $names[] = $normalizedItem;
             }
         }
 
@@ -1034,7 +1157,8 @@ class JarekGearboxToolController extends Controller
 
             $values = data_get($parameter, 'values', data_get($parameter, 'valuesIds', []));
             foreach ((array) $values as $value) {
-                $detected = $this->firstPartNumberCandidate((string) $value);
+                $valueWarnings = [];
+                $detected = $this->firstPartNumberCandidate($this->normalizeString($value, 'part_number_parameter', $valueWarnings));
                 if ($detected) return $detected;
             }
         }
