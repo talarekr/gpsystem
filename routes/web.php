@@ -264,6 +264,8 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/jarek-gearboxes/allegro-oauth/start', [JarekAllegroOAuthController::class, 'start'])->name('admin.tools.jarek-gearboxes.allegro-oauth.start');
     Route::get('/admin/tools/jarek-gearboxes/allegro-oauth/callback', [JarekAllegroOAuthController::class, 'callback'])->name('admin.tools.jarek-gearboxes.allegro-oauth.callback');
     Route::get('/admin/tools/jarek-gearboxes/ebay-csv-preview', [JarekGearboxToolController::class, 'ebayCsvPreview'])->name('admin.tools.jarek-gearboxes.ebay-csv-preview');
+    Route::get('/admin/tools/jarek-gearboxes/localize-images-dry-run', [JarekGearboxToolController::class, 'localizeImagesDryRun'])->name('admin.tools.jarek-gearboxes.localize-images-dry-run');
+    Route::get('/admin/tools/jarek-gearboxes/localize-images-apply', [JarekGearboxToolController::class, 'localizeImagesApply'])->name('admin.tools.jarek-gearboxes.localize-images-apply');
     Route::get('/admin/tools/jarek-gearboxes/ebay-csv-export', [JarekGearboxToolController::class, 'ebayCsvExport'])->name('admin.tools.jarek-gearboxes.ebay-csv-export');
     Route::get('/admin/tools/jarek-gearboxes/image-source-diagnostics', [JarekGearboxToolController::class, 'imageSourceDiagnostics'])->name('admin.tools.jarek-gearboxes.image-source-diagnostics');
     Route::get('/admin/tools/jarek-gearboxes/ebay-csv-download/{filename}', [JarekGearboxToolController::class, 'ebayCsvDownload'])->name('admin.tools.jarek-gearboxes.ebay-csv-download');
