@@ -1,0 +1,90 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\JarekGearbox;
+use App\Models\MarketplaceSyncLog;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Storage;
+use Tests\TestCase;
+
+class JarekGearboxEbayCsvExportTest extends TestCase
+{
+    use RefreshDatabase;
+
+    public function test_preview_uses_only_local_images_and_blocks_allegro_images(): void
+    {
+        config(['app.url' => 'https://gpswiss.pl']);
+
+        JarekGearbox::query()->create([
+            'allegro_offer_id' => '123',
+            'allegro_offer_url' => 'https://allegro.pl/oferta/123',
+            'title' => 'Skrzynia DSG 0D9300041',
+            'description' => 'Opis',
+            'price' => 1000,
+            'currency' => 'PLN',
+            'quantity' => 1,
+            'main_image_url' => 'https://gpswiss.pl/storage/jarek/123/main.jpg',
+            'images' => ['https://gpswiss.pl/storage/jarek/123/main.jpg', 'https://gpswiss.pl/storage/jarek/123/2.jpg'],
+            'category_id' => '620',
+            'category_name' => 'Skrzynie biegów',
+            'category_path' => ['Motoryzacja', 'Części', 'Skrzynie biegów'],
+        ]);
+        JarekGearbox::query()->create([
+            'allegro_offer_id' => '124',
+            'title' => 'Skrzynia z Allegro zdjęciem',
+            'price' => 1000,
+            'currency' => 'PLN',
+            'quantity' => 1,
+            'main_image_url' => 'https://a.allegroimg.com/original/photo.jpg',
+            'images' => ['https://a.allegroimg.com/original/photo.jpg'],
+        ]);
+
+        $response = $this->withoutMiddleware()->getJson('/admin/tools/jarek-gearboxes/ebay-csv-preview?limit=10');
+
+        $response->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('dry_run', true)
+            ->assertJsonPath('marketplace_write', false)
+            ->assertJsonPath('parts_changed', false)
+            ->assertJsonPath('total', 2)
+            ->assertJsonPath('exportable_count', 1)
+            ->assertJsonPath('blocked_count', 1)
+            ->assertJsonPath('warnings_by_reason.missing_local_images', 1)
+            ->assertJsonPath('local_image_url_source_fields', ['main_image_url', 'images'])
+            ->assertJsonPath('csv_uses_only_our_server_images', true)
+            ->assertJsonPath('sample_rows.0.Main image URL', 'https://gpswiss.pl/storage/jarek/123/main.jpg');
+    }
+
+    public function test_export_requires_confirm_writes_small_csv_and_logs_without_marketplace_or_parts_write(): void
+    {
+        Storage::fake('local');
+        config(['app.url' => 'https://gpswiss.pl']);
+
+        JarekGearbox::query()->create([
+            'allegro_offer_id' => '123',
+            'title' => 'Skrzynia DSG 0D9300041',
+            'description' => 'Opis',
+            'price' => 1000,
+            'currency' => 'PLN',
+            'quantity' => 1,
+            'main_image_url' => 'https://gpswiss.pl/storage/jarek/123/main.jpg',
+            'images' => ['https://gpswiss.pl/storage/jarek/123/main.jpg'],
+        ]);
+
+        $this->withoutMiddleware()->getJson('/admin/tools/jarek-gearboxes/ebay-csv-export?limit=10')
+            ->assertStatus(422)
+            ->assertJsonPath('marketplace_write', false);
+
+        $response = $this->withoutMiddleware()->getJson('/admin/tools/jarek-gearboxes/ebay-csv-export?confirm=jarek-ebay-csv&limit=10');
+
+        $response->assertOk()
+            ->assertJsonPath('marketplace_write', false)
+            ->assertJsonPath('parts_changed', false)
+            ->assertJsonPath('exported_count', 1);
+
+        Storage::disk('local')->assertExists($response->json('csv_path'));
+        $this->assertStringContainsString('JAREK-123', Storage::disk('local')->get($response->json('csv_path')));
+        $this->assertSame(1, MarketplaceSyncLog::query()->where('action', 'jarek_gearboxes_ebay_csv_export')->count());
+    }
+}
