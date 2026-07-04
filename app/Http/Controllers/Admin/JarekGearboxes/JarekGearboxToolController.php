@@ -187,12 +187,21 @@ class JarekGearboxToolController extends Controller
         $templatePart = new Part();
         $templatePart->name = $translatedTitle;
         $templatePart->description = $translatedDescription;
+        $partNumber = $this->detectJarekPartNumber((object) $gearbox->getAttributes(), $sku);
         $renderedDescription = $renderer->render('ebay_de', $templatePart, [
             'title' => $translatedTitle,
             'description' => $translatedDescription,
-            'part_number' => $this->detectJarekPartNumber((object) $gearbox->getAttributes(), $sku),
+            'part_number' => $partNumber,
             'condition' => 'Gebraucht',
         ]);
+
+        $brandSelection = $this->selectJarekGearboxBrand($gearbox);
+        $sourceBrandCandidates = $brandSelection['source_brand_candidates'];
+        $selectedBrand = $brandSelection['selected_brand'];
+        $brandSelectionReason = $brandSelection['brand_selection_reason'];
+        if ($selectedBrand === null) {
+            $warnings[] = 'missing_brand_manufacturer';
+        }
 
         $imageUrls = $gearbox->localizedImageUrls();
         if ($imageUrls === []) $blockers[] = 'missing_local_images';
@@ -234,6 +243,15 @@ class JarekGearboxToolController extends Controller
             'currency' => 'EUR',
             'quantity' => (int) $gearbox->quantity,
             'condition' => 'USED',
+            'source_brand_candidates' => $sourceBrandCandidates,
+            'selected_brand' => $selectedBrand,
+            'brand_selection_reason' => $brandSelectionReason,
+            'brand_source' => $brandSelection['brand_source'],
+            'item_specifics' => array_filter([
+                'Brand' => $selectedBrand,
+                'Hersteller' => $selectedBrand,
+                'Manufacturer Part Number' => $partNumber,
+            ], fn ($value): bool => filled($value)),
         ];
 
         $payload = [
@@ -267,6 +285,11 @@ class JarekGearboxToolController extends Controller
             'price' => $priceEur,
             'currency' => 'EUR',
             'quantity' => (int) $gearbox->quantity,
+            'source_brand_candidates' => $sourceBrandCandidates,
+            'selected_brand' => $selectedBrand,
+            'brand_selection_reason' => $brandSelectionReason,
+            'brand_source' => $brandSelection['brand_source'],
+            'item_specifics' => $payloadPreview['item_specifics'],
             'payload_preview' => $payloadPreview,
             'contains_allegro_image_urls' => $this->arrayContainsStringFragment($payloadPreview, 'a.allegroimg.com'),
         ];
@@ -274,6 +297,94 @@ class JarekGearboxToolController extends Controller
         $this->logJarekEbayDePreparePreview($payload['ready'] ? 'success' : 'blocked', 'Preview payloadu eBay DE dla Skrzyń Jarka; bez eBay API, bez parts, marketplace_write=false.', $payload, $started);
 
         return response()->json($payload);
+    }
+
+    /** @return array{source_brand_candidates: array<int, string>, selected_brand: ?string, brand_selection_reason: string, brand_source: string} */
+    private function selectJarekGearboxBrand(JarekGearbox $gearbox): array
+    {
+        $parameterBrand = $this->detectJarekGearboxParameterBrand($gearbox->parameters ?? []);
+        $titleCandidates = $this->detectJarekGearboxTitleBrands((string) $gearbox->title);
+
+        if ($parameterBrand !== null) {
+            return [
+                'source_brand_candidates' => array_values(array_unique(array_merge([$parameterBrand], $titleCandidates))),
+                'selected_brand' => $parameterBrand,
+                'brand_selection_reason' => 'parameter_brand',
+                'brand_source' => 'parameter',
+            ];
+        }
+
+        if (in_array('Audi', $titleCandidates, true)) {
+            return [
+                'source_brand_candidates' => $titleCandidates,
+                'selected_brand' => 'Audi',
+                'brand_selection_reason' => 'preferred_detected_brand',
+                'brand_source' => 'title',
+            ];
+        }
+
+        if ($titleCandidates !== []) {
+            return [
+                'source_brand_candidates' => $titleCandidates,
+                'selected_brand' => $titleCandidates[0],
+                'brand_selection_reason' => 'first_detected_brand',
+                'brand_source' => 'title',
+            ];
+        }
+
+        return [
+            'source_brand_candidates' => [],
+            'selected_brand' => null,
+            'brand_selection_reason' => 'missing_brand_manufacturer',
+            'brand_source' => 'none',
+        ];
+    }
+
+    private function detectJarekGearboxParameterBrand(array $parameters): ?string
+    {
+        foreach ($parameters as $parameter) {
+            if (! is_array($parameter)) continue;
+            $name = mb_strtolower(trim((string) ($parameter['name'] ?? $parameter['id'] ?? '')));
+            if (! preg_match('/(producent|manufacturer|brand|marka|oe)/u', $name)) continue;
+
+            $values = $parameter['values'] ?? $parameter['value'] ?? null;
+            $values = is_array($values) ? $values : [$values];
+            $normalized = array_values(array_unique(array_filter(array_map(fn ($value): ?string => $this->normalizeJarekGearboxBrand((string) $value), $values))));
+            if (count($normalized) === 1 && $normalized[0] !== 'GPSwiss') {
+                return $normalized[0];
+            }
+        }
+
+        return null;
+    }
+
+    /** @return array<int, string> */
+    private function detectJarekGearboxTitleBrands(string $title): array
+    {
+        $aliases = [
+            'Mercedes-Benz' => 'Mercedes-Benz', 'Mercedes' => 'Mercedes-Benz', 'Citroën' => 'Citroen', 'Citroen' => 'Citroen',
+            'Volkswagen' => 'Volkswagen', 'VW' => 'Volkswagen', 'VAG' => 'Volkswagen', 'Audi' => 'Audi', 'Skoda' => 'Skoda',
+            'Renault' => 'Renault', 'Kia' => 'Kia', 'Hyundai' => 'Hyundai', 'Ford' => 'Ford', 'Opel' => 'Opel', 'BMW' => 'BMW',
+            'Peugeot' => 'Peugeot', 'Toyota' => 'Toyota', 'Honda' => 'Honda', 'Nissan' => 'Nissan', 'Fiat' => 'Fiat', 'Volvo' => 'Volvo',
+        ];
+        $matches = [];
+        foreach ($aliases as $alias => $brand) {
+            if (preg_match('/(?<![\pL\pN])'.preg_quote($alias, '/').'(?![\pL\pN])/iu', $title, $match, PREG_OFFSET_CAPTURE)) {
+                $matches[] = ['brand' => $brand, 'pos' => $match[0][1]];
+            }
+        }
+        usort($matches, fn (array $a, array $b): int => $a['pos'] <=> $b['pos']);
+
+        return array_values(array_unique(array_column($matches, 'brand')));
+    }
+
+    private function normalizeJarekGearboxBrand(string $brand): ?string
+    {
+        $brand = trim(preg_replace('/\s+/u', ' ', strip_tags($brand)) ?: '');
+        if ($brand === '' || strcasecmp($brand, 'GPSwiss') === 0) return null;
+        $map = ['vw' => 'Volkswagen', 'vag' => 'Volkswagen', 'mercedes' => 'Mercedes-Benz', 'citroën' => 'Citroen', 'citroen' => 'Citroen'];
+        $key = mb_strtolower($brand);
+        return $map[$key] ?? $brand;
     }
 
     public function ebayCsvPreview(Request $request): JsonResponse
