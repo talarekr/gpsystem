@@ -8,6 +8,7 @@ use App\Models\MarketplaceListing;
 use App\Services\Marketplace\Api\EbayApiClient;
 use App\Services\Marketplace\EbaySkuResolver;
 use App\Services\Marketplace\EbayTitleSanitizer;
+use App\Services\Marketplace\Ebay\EbayConditionMapper;
 use Illuminate\Support\Facades\Schema;
 
 class EbayPublishAdapter extends BaseMarketplacePublishAdapter
@@ -87,7 +88,7 @@ class EbayPublishAdapter extends BaseMarketplacePublishAdapter
         $listingDescription = (string) ($payload['description_rendered_html'] ?? '');
         $inventory = [
             'product' => ['title' => (string) ($payload['title'] ?? $part->name), 'description' => $inventoryDescription, 'imageUrls' => $payload['image_urls'] ?? [], 'aspects' => $aspectNormalization['aspects']],
-            'condition' => $this->conditionFromPart($part, $payload, $settings), 'availability' => ['shipToLocationAvailability' => ['quantity' => (int) ($payload['quantity'] ?? $part->quantity ?? 1)]],
+            'condition' => (new EbayConditionMapper())->partCondition($part, $payload, $settings)['condition'], 'availability' => ['shipToLocationAvailability' => ['quantity' => (int) ($payload['quantity'] ?? $part->quantity ?? 1)]],
         ];
         $merchantLocationKey = (string) ($policies['merchant_location_key'] ?? $this->settingForPolicy($settings, 'merchant_location_key') ?? '');
         $offer = ['sku' => $sku, 'marketplaceId' => $marketplaceId, 'format' => (string) ($settings['format'] ?? 'FIXED_PRICE'), 'listingDuration' => (string) ($settings['listing_duration'] ?? 'GTC'), 'availableQuantity' => (int) ($payload['quantity'] ?? $part->quantity ?? 1), 'categoryId' => (string) ($payload['category_id'] ?? ''), 'merchantLocationKey' => $merchantLocationKey, 'pricingSummary' => ['price' => ['value' => (string) ($payload['price_eur'] ?? $readiness['marketplace_price']), 'currency' => 'EUR']], 'listingPolicies' => ['fulfillmentPolicyId' => (string) ($policies['selected_fulfillment_policy_id'] ?? $this->settingForPolicy($settings, 'selected_fulfillment_policy_id') ?? ''), 'paymentPolicyId' => (string) ($policies['selected_payment_policy_id'] ?? $this->settingForPolicy($settings, 'selected_payment_policy_id') ?? ''), 'returnPolicyId' => (string) ($policies['selected_return_policy_id'] ?? $this->settingForPolicy($settings, 'selected_return_policy_id') ?? '')]];
@@ -276,14 +277,6 @@ class EbayPublishAdapter extends BaseMarketplacePublishAdapter
         }
 
         return null;
-    }
-
-    private function conditionFromPart(Part $part, array $payload, array $settings): string
-    {
-        if (filled($payload['condition'] ?? null)) return strtoupper((string) $payload['condition']);
-        $value = mb_strtolower(trim((string) ($part->condition_notes ?? '')));
-        $map = ['używany' => 'USED_EXCELLENT', 'uzywany' => 'USED_EXCELLENT', 'używana' => 'USED_EXCELLENT', 'used' => 'USED_EXCELLENT', 'nowy' => 'NEW', 'nowa' => 'NEW', 'new' => 'NEW'];
-        return $map[$value] ?? strtoupper((string) ($settings['condition'] ?? 'USED_EXCELLENT'));
     }
 
     private function ebayError(array $result): string
