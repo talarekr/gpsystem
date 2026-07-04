@@ -271,6 +271,9 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/jarek-gearboxes/ebay-de-revise-preview', [JarekGearboxToolController::class, 'ebayDeRevisePreview'])->name('admin.tools.jarek-gearboxes.ebay-de-revise-preview');
     Route::get('/admin/tools/jarek-gearboxes/storage-link-diagnostics', [JarekGearboxToolController::class, 'storageLinkDiagnostics'])->name('admin.tools.jarek-gearboxes.storage-link-diagnostics');
     Route::match(['get', 'post'], '/admin/tools/jarek-gearboxes/storage-link-apply', [JarekGearboxToolController::class, 'storageLinkApply'])->name('admin.tools.jarek-gearboxes.storage-link-apply');
+    Route::get('/admin/tools/jarek-gearboxes/public-root-diagnostics', [JarekGearboxToolController::class, 'publicRootDiagnostics'])->name('admin.tools.jarek-gearboxes.public-root-diagnostics');
+    Route::get('/admin/tools/jarek-gearboxes/public-images-dry-run', [JarekGearboxToolController::class, 'publicImagesDryRun'])->name('admin.tools.jarek-gearboxes.public-images-dry-run');
+    Route::get('/admin/tools/jarek-gearboxes/public-images-apply', [JarekGearboxToolController::class, 'publicImagesApply'])->name('admin.tools.jarek-gearboxes.public-images-apply');
     Route::get('/admin/tools/jarek-gearboxes/localize-images-dry-run', [JarekGearboxToolController::class, 'localizeImagesDryRun'])->name('admin.tools.jarek-gearboxes.localize-images-dry-run');
     Route::get('/admin/tools/jarek-gearboxes/localize-images-apply', [JarekGearboxToolController::class, 'localizeImagesApply'])->name('admin.tools.jarek-gearboxes.localize-images-apply');
     Route::get('/admin/tools/jarek-gearboxes/ebay-csv-export', [JarekGearboxToolController::class, 'ebayCsvExport'])->name('admin.tools.jarek-gearboxes.ebay-csv-export');

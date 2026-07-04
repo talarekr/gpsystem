@@ -151,6 +151,39 @@ class JarekGearboxToolController extends Controller
         return response()->json($result, $result['ok'] ? 200 : 409);
     }
 
+
+    public function publicRootDiagnostics(Request $request): JsonResponse
+    {
+        $relative = ltrim((string) $request->query('path', 'jarek-gearboxes/18727785496/01.jpg'), '/');
+        $payload = $this->buildJarekPublicRootDiagnostics($relative);
+        $this->logJarekStorageLink('dry_run', 'Diagnostyka public root / host mapping dla zdjęć Jarka; bez zapisu.', $payload);
+
+        return response()->json($payload);
+    }
+
+    public function publicImagesDryRun(Request $request): JsonResponse
+    {
+        $payload = $this->buildJarekPublicImagesOne((string) $request->query('sku', 'JAREK-18727785496'), false);
+        $this->logJarekImageLocalization(($payload['ok'] ?? false) ? 'success' : 'blocked', 'Dry-run kopiowania lokalnych zdjęć Jarka do działającego public_html storage dla jednego SKU.', $payload);
+
+        return response()->json($payload, ($payload['ok'] ?? false) ? 200 : 422);
+    }
+
+    public function publicImagesApply(Request $request): JsonResponse
+    {
+        if ($request->query('confirm') !== 'jarek-public-images-one') {
+            $payload = ['ok' => false, 'error' => 'Missing confirm=jarek-public-images-one', 'marketplace_write' => false, 'parts_changed' => false];
+            $this->logJarekImageLocalization('blocked', 'Apply publicznych zdjęć Jarka zablokowany: brak confirm.', $payload);
+
+            return response()->json($payload, 422);
+        }
+
+        $payload = $this->buildJarekPublicImagesOne((string) $request->query('sku', 'JAREK-18727785496'), true);
+        $this->logJarekImageLocalization(($payload['ok'] ?? false) ? 'success' : 'blocked', 'Apply kopiowania lokalnych zdjęć Jarka do public_html storage dla jednego SKU; bez pobierania z Allegro.', $payload);
+
+        return response()->json($payload, ($payload['ok'] ?? false) ? 200 : 422);
+    }
+
     public function ebayPreview(JarekGearbox $jarekGearbox, JarekGearboxEbayPreviewService $service): JsonResponse
     {
         return response()->json($service->build($jarekGearbox));
@@ -269,7 +302,8 @@ class JarekGearboxToolController extends Controller
                 $warnings[] = (string) $nbpRateData['warning'];
             }
         }
-        $priceEur = $sourcePricePln !== null && $sourcePricePln > 0 && $nbpExchangeRate !== null ? round($sourcePricePln / $nbpExchangeRate, 2) : null;
+        $jarekEbayPrice = $this->jarekEbayDePriceDiagnostics($sourcePricePln, $nbpExchangeRate);
+        $priceEur = $jarekEbayPrice['price_eur'];
 
         $blockers = array_values(array_unique(array_filter($blockers)));
         $warnings = array_values(array_unique(array_filter($warnings)));
@@ -282,6 +316,8 @@ class JarekGearboxToolController extends Controller
             'categoryId' => $mapping['ebay_category_id'] ?? null,
             'imageUrls' => $imageUrls,
             'source_price_pln' => $sourcePricePln,
+            'ebay_markup_percent' => $jarekEbayPrice['ebay_markup_percent'],
+            'ebay_price_pln' => $jarekEbayPrice['ebay_price_pln'],
             'nbp_exchange_rate' => $nbpExchangeRate,
             'nbp_exchange_rate_meta' => [
                 'source' => $nbpRateData['source'] ?? 'NBP_TABLE_A',
@@ -355,6 +391,8 @@ class JarekGearboxToolController extends Controller
             'ebay_category_id' => $mapping['ebay_category_id'] ?? null,
             'image_urls' => $imageUrls,
             'source_price_pln' => $sourcePricePln,
+            'ebay_markup_percent' => $jarekEbayPrice['ebay_markup_percent'],
+            'ebay_price_pln' => $jarekEbayPrice['ebay_price_pln'],
             'nbp_exchange_rate' => $nbpExchangeRate,
             'nbp_exchange_rate_meta' => $payloadPreview['nbp_exchange_rate_meta'],
             'target_currency' => 'EUR',
@@ -471,7 +509,21 @@ class JarekGearboxToolController extends Controller
             'listing_id' => $listingId,
             'offer_id' => $offerId,
             'revised_inventory_item_request' => $recommendedImages !== $currentImages ? data_set($plan['plan']['inventory_item_request'] ?? [], 'product.imageUrls', $recommendedImages) : null,
-            'revised_offer_request' => ['offerId' => $offerId, 'listingDescription' => $description],
+            'revised_offer_request' => [
+                'offerId' => $offerId,
+                'listingDescription' => $description,
+                'pricingSummary' => data_get($plan['plan'] ?? [], 'offer_request.pricingSummary'),
+            ],
+            'price_diagnostics' => [
+                'source_price_pln' => $prepare['source_price_pln'] ?? null,
+                'ebay_markup_percent' => $prepare['ebay_markup_percent'] ?? null,
+                'ebay_price_pln' => $prepare['ebay_price_pln'] ?? null,
+                'nbp_exchange_rate' => $prepare['nbp_exchange_rate'] ?? null,
+                'target_currency' => $prepare['target_currency'] ?? null,
+                'price_eur' => $prepare['price_eur'] ?? null,
+                'final_price' => data_get($plan['plan'] ?? [], 'offer_request.pricingSummary.price.value'),
+                'final_currency' => data_get($plan['plan'] ?? [], 'offer_request.pricingSummary.price.currency'),
+            ],
             'image_diagnostics' => $diagnostics['image_diagnostics'] ?? null,
             'live_listing_diagnostics' => $diagnostics['live_listing_diagnostics'] ?? null,
             'public_url_diagnostics' => $diagnostics['public_url_diagnostics'] ?? null,
@@ -745,6 +797,117 @@ class JarekGearboxToolController extends Controller
                 'error' => $e->getMessage(),
             ];
         }
+    }
+
+
+    /** @return array{source_price_pln: ?float, ebay_markup_percent: int, ebay_price_pln: ?float, nbp_exchange_rate: ?float, target_currency: string, price_eur: ?float} */
+    private function jarekEbayDePriceDiagnostics(?float $sourcePricePln, ?float $nbpExchangeRate): array
+    {
+        $ebayPricePln = $sourcePricePln !== null && $sourcePricePln > 0 ? round($sourcePricePln * 1.25, 2) : null;
+
+        return [
+            'source_price_pln' => $sourcePricePln,
+            'ebay_markup_percent' => 25,
+            'ebay_price_pln' => $ebayPricePln,
+            'nbp_exchange_rate' => $nbpExchangeRate,
+            'target_currency' => 'EUR',
+            'price_eur' => $ebayPricePln !== null && $nbpExchangeRate !== null && $nbpExchangeRate > 0 ? round($ebayPricePln / $nbpExchangeRate, 2) : null,
+        ];
+    }
+
+    private function buildJarekPublicRootDiagnostics(string $relative): array
+    {
+        $relative = ltrim($relative, '/');
+        $urls = [
+            'https://gpswiss.pl/storage/'.$relative,
+            'https://www.gpswiss.pl/storage/'.$relative,
+            'https://gpsystem.thecamels.pl/storage/'.$relative,
+            'https://gpsystem.thecamels.pl/app/public/storage/'.$relative,
+        ];
+        $publicHtml = dirname(base_path()).'/public_html';
+        $partSamples = Schema::hasTable('part_images') ? PartImage::query()->where('path', 'like', 'parts/photos/imported/%')->limit(5)->pluck('path')->all() : [];
+
+        return [
+            'ok' => true,
+            'dry_run' => true,
+            'marketplace_write' => false,
+            'parts_changed' => false,
+            'laravel_paths' => [
+                'public_path' => public_path(),
+                'base_path' => base_path(),
+                'storage_path' => storage_path(),
+                'app_url_config' => config('app.url'),
+                'app_url_env' => env('APP_URL'),
+                'request_host' => request()->getHost(),
+                'tested_public_path' => public_path('storage/'.$relative),
+            ],
+            'candidate_document_roots' => [
+                'laravel_public' => public_path(),
+                'sibling_public_html' => $publicHtml,
+                'sibling_public_html_exists' => is_dir($publicHtml),
+                'sibling_public_html_storage_exists' => is_dir($publicHtml.'/storage'),
+                'sibling_public_html_storage_realpath' => realpath($publicHtml.'/storage') ?: null,
+            ],
+            'normal_parts_images' => [
+                'sample_paths' => $partSamples,
+                'sample_public_urls' => array_map(fn ($path) => $this->publicStorageUrl((string) $path), $partSamples),
+                'sample_public_html_paths' => array_map(fn ($path) => $publicHtml.'/storage/'.ltrim((string) $path, '/'), $partSamples),
+            ],
+            'url_checks' => array_map(fn ($url) => $this->checkJarekPublicImageUrl(null, $url), $urls),
+        ];
+    }
+
+    private function buildJarekPublicImagesOne(string $sku, bool $apply): array
+    {
+        $offerId = preg_match('/^JAREK-(.+)$/', trim($sku), $m) ? $m[1] : trim($sku);
+        $gearbox = Schema::hasTable('jarek_gearboxes') ? JarekGearbox::query()->where('allegro_offer_id', $offerId)->first() : null;
+        $sourceDir = storage_path('app/public/jarek-gearboxes/'.$offerId);
+        $targetDir = dirname(base_path()).'/public_html/storage/jarek-gearboxes/'.$offerId;
+        $files = is_dir($sourceDir) ? array_values(array_filter(scandir($sourceDir) ?: [], fn ($f) => is_file($sourceDir.'/'.$f) && preg_match('/\.(jpe?g|png)$/i', $f))) : [];
+        sort($files);
+        $items = [];
+        foreach ($files as $file) {
+            $source = $sourceDir.'/'.$file;
+            $target = $targetDir.'/'.$file;
+            $copied = false;
+            $error = null;
+            if ($apply && ! is_file($target)) {
+                if (! is_dir($targetDir)) @mkdir($targetDir, 0755, true);
+                $copied = @copy($source, $target);
+                if (! $copied) $error = 'copy_failed';
+            }
+            $url = 'https://gpswiss.pl/storage/jarek-gearboxes/'.$offerId.'/'.$file;
+            $items[] = [
+                'source_local_path' => $source,
+                'target_public_path' => $target,
+                'target_public_url' => $url,
+                'source_file_exists' => is_file($source),
+                'target_file_exists_before_or_after' => is_file($target),
+                'target_already_exists' => is_file($target) && ! $copied,
+                'copied' => $copied,
+                'idempotent' => true,
+                'http_check' => $this->checkJarekPublicImageUrl($gearbox, $url),
+                'error' => $error,
+            ];
+        }
+
+        return [
+            'ok' => $gearbox !== null && is_dir($sourceDir),
+            'dry_run' => ! $apply,
+            'applied' => $apply,
+            'marketplace_write' => false,
+            'parts_changed' => false,
+            'sku' => 'JAREK-'.$offerId,
+            'allegro_offer_id' => $offerId,
+            'source_local_path' => $sourceDir,
+            'target_public_path' => $targetDir,
+            'target_public_url_base' => 'https://gpswiss.pl/storage/jarek-gearboxes/'.$offerId,
+            'source_directory_exists' => is_dir($sourceDir),
+            'target_directory_exists' => is_dir($targetDir),
+            'files' => $items,
+            'safe_to_batch_later' => false,
+            'safety' => ['single_sku_only', 'no_delete', 'no_allegro_download', 'no_parts_write', 'no_ebay_api_write'],
+        ];
     }
 
     /** @return array{plan: array<string, mixed>, blockers: array<int, string>} */
