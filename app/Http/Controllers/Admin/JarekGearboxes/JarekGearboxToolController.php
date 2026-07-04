@@ -270,10 +270,8 @@ class JarekGearboxToolController extends Controller
         ]);
         if ($coreReturnNotice['required']) {
             $renderedDescription = $this->removeCoreReturnNotices($renderedDescription, $coreReturnNotice);
-            if (! $this->containsNotice($renderedDescription, $coreReturnNotice['notice_de'])) {
-                $renderedDescription = $this->appendNotice($renderedDescription, $coreReturnNotice['notice_de']);
-                $coreReturnNoticeAddedDe = true;
-            }
+            $renderedDescription = $this->insertCoreReturnNoticeInDescriptionSection($renderedDescription, $coreReturnNotice['notice_de']);
+            $coreReturnNoticeAddedDe = true;
         }
         $coreReturnNoticeAdded = $coreReturnNoticeAddedDe;
         if ($coreReturnNoticeAdded && $coreReturnNotice['warning'] !== null) {
@@ -338,7 +336,7 @@ class JarekGearboxToolController extends Controller
             'core_return_notice_pl' => $coreReturnNotice['notice_pl'],
             'core_return_notice_de' => $coreReturnNotice['notice_de'],
             'core_return_notice_added_after_translation' => $coreReturnNoticeAddedDe,
-            'core_return_notice_location' => $coreReturnNotice['required'] ? 'payload_template_footer' : null,
+            'core_return_notice_location' => $coreReturnNotice['required'] ? 'description_section_last_paragraph' : null,
             'source_brand_candidates' => $sourceBrandCandidates,
             'selected_brand' => $selectedBrand,
             'brand_selection_reason' => $brandSelectionReason,
@@ -387,7 +385,7 @@ class JarekGearboxToolController extends Controller
             'core_return_notice_pl' => $coreReturnNotice['notice_pl'],
             'core_return_notice_de' => $coreReturnNotice['notice_de'],
             'core_return_notice_added_after_translation' => $coreReturnNoticeAddedDe,
-            'core_return_notice_location' => $coreReturnNotice['required'] ? 'payload_template_footer' : null,
+            'core_return_notice_location' => $coreReturnNotice['required'] ? 'description_section_last_paragraph' : null,
             'ebay_category_id' => $mapping['ebay_category_id'] ?? null,
             'image_urls' => $imageUrls,
             'source_price_pln' => $sourcePricePln,
@@ -1409,6 +1407,18 @@ class JarekGearboxToolController extends Controller
 
         $text = trim($text);
         return $text === '' ? (string) $notice : $text."\n\n".$notice;
+    }
+
+    private function insertCoreReturnNoticeInDescriptionSection(string $html, ?string $notice): string
+    {
+        if (! filled($notice) || $this->containsNotice($html, $notice)) return $html;
+
+        $paragraph = '<p style="margin:14px 0 0;color:#111827;font-size:16px;line-height:1.7;text-align:center;font-weight:700;">'.e((string) $notice).'</p>';
+        $descriptionSectionPattern = '/(<div style="border:1px solid #dbe3ef;border-radius:8px;overflow:hidden;background:#ffffff;margin:0 0 22px;">\s*<div style="background:#06275d;color:#ffffff;padding:15px 17px;font-size:18px;font-weight:900;letter-spacing:\.2px;text-align:center;">Beschreibung<\/div>\s*<div style="padding:20px 22px;text-align:center;">.*?)(<\/div>\s*<\/div>)/su';
+
+        $updated = preg_replace($descriptionSectionPattern, '$1'.$paragraph.'$2', $html, 1, $count);
+
+        return $count === 1 && is_string($updated) ? $updated : $html;
     }
 
     /** @param array{required: bool, type: ?string, notice_pl: ?string, notice_de: ?string, warning: ?string} $coreReturnNotice */

@@ -49,6 +49,18 @@ class EbayDescriptionAuditTest extends TestCase
         $this->assertSame('ok', $row['action']);
     }
 
+    public function test_core_return_notice_can_be_rendered_inside_description_box(): void
+    {
+        $part = Part::query()->create(['name' => 'Skrzynia biegów', 'description' => 'Beschreibung Text', 'price' => 100, 'quantity' => 1]);
+        $html = app(\App\Services\Marketplace\EbayDescriptionTemplateRenderer::class)->render('ebay_de', $part, [
+            'core_return_notice' => 'Das Altgetriebe muss zurückgegeben werden.',
+        ]);
+
+        $this->assertSame(1, substr_count($html, 'Das Altgetriebe muss zurückgegeben werden.'));
+        $this->assertMatchesRegularExpression('/Beschreibung.*Beschreibung Text.*Das Altgetriebe muss zurückgegeben werden\\..*Spezifikationen/s', $html);
+        $this->assertDoesNotMatchRegularExpression('/<\/div>\\s*Das Altgetriebe muss zurückgegeben werden\\./s', $html);
+    }
+
     public function test_ended_listing_is_skipped(): void
     {
         Http::fake(['gpswiss.pl/ebay-template/assets/*' => Http::response('png', 200, ['Content-Type' => 'image/png'])]);
