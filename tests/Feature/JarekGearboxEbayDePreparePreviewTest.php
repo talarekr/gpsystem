@@ -139,6 +139,109 @@ class JarekGearboxEbayDePreparePreviewTest extends TestCase
             ->assertJsonMissing(['Hersteller' => 'GPSwiss']);
     }
 
+
+    public function test_ebay_de_prepare_preview_adds_gearbox_core_return_notice_from_title(): void
+    {
+        Storage::fake('public');
+        config(['app.url' => 'https://gpswiss.pl']);
+        Cache::put('nbp_table_a_eur_rate', ['rate' => 4.30, 'effective_date' => '2026-06-27', 'table_no' => '123/A/NBP/2026']);
+        $this->mockTranslations();
+        $this->createCategoryMappings('620', '100684');
+        Storage::disk('public')->put('jarek-gearboxes/18717293813/01.jpg', 'jpg');
+
+        JarekGearbox::query()->create([
+            'allegro_offer_id' => '18717293813',
+            'title' => 'Skrzynia biegów RGA Regnerowana VW Caddy 1.2TSI',
+            'description' => 'Opis skrzyni',
+            'price' => 2450,
+            'currency' => 'PLN',
+            'quantity' => 1,
+            'category_id' => '620',
+            'category_name' => 'Skrzynie biegów',
+        ]);
+
+        $response = $this->withoutMiddleware()->getJson('/admin/tools/jarek-gearboxes/ebay-de-prepare-preview?sku=JAREK-18717293813');
+
+        $response->assertOk()
+            ->assertJsonPath('core_return_required', true)
+            ->assertJsonPath('core_return_type', 'gearbox')
+            ->assertJsonPath('core_return_notice_added', true)
+            ->assertJsonPath('core_return_notice_pl', 'Stara skrzynia biegów podlega zwrotowi')
+            ->assertJsonPath('core_return_notice_de', 'Das Altgetriebe muss zurückgegeben werden.')
+            ->assertJsonPath('payload_preview.core_return_required', true)
+            ->assertJsonPath('payload_preview.core_return_type', 'gearbox')
+            ->assertJsonFragment(['gearbox_core_return_notice_added']);
+
+        $this->assertStringEndsWith('Das Altgetriebe muss zurückgegeben werden.', $response->json('rendered_description_de_template'));
+    }
+
+    public function test_ebay_de_prepare_preview_adds_rear_axle_core_return_notice_from_title(): void
+    {
+        Storage::fake('public');
+        config(['app.url' => 'https://gpswiss.pl']);
+        Cache::put('nbp_table_a_eur_rate', ['rate' => 4.30, 'effective_date' => '2026-06-27', 'table_no' => '123/A/NBP/2026']);
+        $this->mockTranslations();
+        $this->createCategoryMappings('620', '100684');
+        Storage::disk('public')->put('jarek-gearboxes/18720000000/01.jpg', 'jpg');
+
+        JarekGearbox::query()->create([
+            'allegro_offer_id' => '18720000000',
+            'title' => 'Tylny Most VW Crafter A9063502500 51/10 Bliźniak',
+            'description' => 'Opis mostu',
+            'price' => 2450,
+            'currency' => 'PLN',
+            'quantity' => 1,
+            'category_id' => '620',
+            'category_name' => 'Skrzynie biegów',
+        ]);
+
+        $response = $this->withoutMiddleware()->getJson('/admin/tools/jarek-gearboxes/ebay-de-prepare-preview?sku=JAREK-18720000000');
+
+        $response->assertOk()
+            ->assertJsonPath('core_return_required', true)
+            ->assertJsonPath('core_return_type', 'rear_axle')
+            ->assertJsonPath('core_return_notice_added', true)
+            ->assertJsonPath('core_return_notice_de', 'Die alte Hinterachse muss zurückgegeben werden.')
+            ->assertJsonFragment(['rear_axle_core_return_notice_added']);
+
+        $this->assertStringEndsWith('Die alte Hinterachse muss zurückgegeben werden.', $response->json('rendered_description_de_template'));
+    }
+
+    public function test_ebay_de_prepare_preview_does_not_add_core_return_notice_for_reductor_title(): void
+    {
+        Storage::fake('public');
+        config(['app.url' => 'https://gpswiss.pl']);
+        Cache::put('nbp_table_a_eur_rate', ['rate' => 4.30, 'effective_date' => '2026-06-27', 'table_no' => '123/A/NBP/2026']);
+        $this->mockTranslations();
+        $this->createCategoryMappings('620', '100684');
+        Storage::disk('public')->put('jarek-gearboxes/18727785496/01.jpg', 'jpg');
+
+        JarekGearbox::query()->create([
+            'allegro_offer_id' => '18727785496',
+            'title' => 'Reduktor skrzyni 0CN409053AF VW Skoda Audi 2.0TDI',
+            'description' => 'Opis reduktora',
+            'price' => 2450,
+            'currency' => 'PLN',
+            'quantity' => 1,
+            'category_id' => '620',
+            'category_name' => 'Skrzynie biegów',
+        ]);
+
+        $response = $this->withoutMiddleware()->getJson('/admin/tools/jarek-gearboxes/ebay-de-prepare-preview?sku=JAREK-18727785496');
+
+        $response->assertOk()
+            ->assertJsonPath('core_return_required', false)
+            ->assertJsonPath('core_return_type', null)
+            ->assertJsonPath('core_return_notice_added', false)
+            ->assertJsonPath('core_return_notice_pl', null)
+            ->assertJsonPath('core_return_notice_de', null)
+            ->assertJsonMissing(['gearbox_core_return_notice_added'])
+            ->assertJsonMissing(['rear_axle_core_return_notice_added']);
+
+        $this->assertStringNotContainsString('Das Altgetriebe muss zurückgegeben werden.', $response->json('rendered_description_de_template'));
+        $this->assertStringNotContainsString('Die alte Hinterachse muss zurückgegeben werden.', $response->json('rendered_description_de_template'));
+    }
+
     private function mockTranslations(): void
     {
         $this->mock(GoogleTranslateService::class, function ($mock): void {

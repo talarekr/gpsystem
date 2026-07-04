@@ -178,8 +178,15 @@ class JarekGearboxToolController extends Controller
 
         $descriptionWarnings = [];
         $sourceDescription = $this->normalizeJarekDescription($gearbox->description ?: $gearbox->plain_description, $descriptionWarnings);
+        $coreReturnNotice = $this->jarekCoreReturnNotice($sourceTitle);
+        $sourceDescriptionWithCoreReturnNotice = $sourceDescription;
+        $coreReturnNoticeAddedPl = false;
+        if ($coreReturnNotice['required'] && ! $this->containsNotice($sourceDescriptionWithCoreReturnNotice, $coreReturnNotice['notice_pl'])) {
+            $sourceDescriptionWithCoreReturnNotice = $this->appendNotice($sourceDescriptionWithCoreReturnNotice, $coreReturnNotice['notice_pl']);
+            $coreReturnNoticeAddedPl = true;
+        }
         $warnings = array_merge($warnings, $descriptionWarnings);
-        $descriptionTranslation = $translateService->translate($sourceDescription, 'de', 'pl');
+        $descriptionTranslation = $translateService->translate($sourceDescriptionWithCoreReturnNotice, 'de', 'pl');
         $warnings = array_merge($warnings, $descriptionTranslation['warnings'] ?? []);
         $blockers = array_merge($blockers, $descriptionTranslation['blockers'] ?? []);
         $translatedDescription = trim((string) ($descriptionTranslation['translated_text'] ?? ''));
@@ -194,6 +201,15 @@ class JarekGearboxToolController extends Controller
             'part_number' => $partNumber,
             'condition' => 'Gebraucht',
         ]);
+        $coreReturnNoticeAddedDe = false;
+        if ($coreReturnNotice['required'] && ! $this->containsNotice($renderedDescription, $coreReturnNotice['notice_de'])) {
+            $renderedDescription = $this->appendNotice($renderedDescription, $coreReturnNotice['notice_de']);
+            $coreReturnNoticeAddedDe = true;
+        }
+        $coreReturnNoticeAdded = $coreReturnNoticeAddedPl || $coreReturnNoticeAddedDe;
+        if ($coreReturnNoticeAdded && $coreReturnNotice['warning'] !== null) {
+            $warnings[] = $coreReturnNotice['warning'];
+        }
 
         $brandSelection = $this->selectJarekGearboxBrand($gearbox);
         $sourceBrandCandidates = $brandSelection['source_brand_candidates'];
@@ -243,6 +259,11 @@ class JarekGearboxToolController extends Controller
             'currency' => 'EUR',
             'quantity' => (int) $gearbox->quantity,
             'condition' => 'USED',
+            'core_return_required' => $coreReturnNotice['required'],
+            'core_return_type' => $coreReturnNotice['type'],
+            'core_return_notice_added' => $coreReturnNoticeAdded,
+            'core_return_notice_pl' => $coreReturnNotice['notice_pl'],
+            'core_return_notice_de' => $coreReturnNotice['notice_de'],
             'source_brand_candidates' => $sourceBrandCandidates,
             'selected_brand' => $selectedBrand,
             'brand_selection_reason' => $brandSelectionReason,
@@ -272,9 +293,14 @@ class JarekGearboxToolController extends Controller
             'title_limit' => 80,
             'suggested_short_title' => $suggestedShortTitle,
             'title_requires_review' => $titleRequiresReview,
-            'source_description_pl_cleaned' => $sourceDescription,
+            'source_description_pl_cleaned' => $sourceDescriptionWithCoreReturnNotice,
             'translated_description_de' => $translatedDescription,
             'rendered_description_de_template' => $renderedDescription,
+            'core_return_required' => $coreReturnNotice['required'],
+            'core_return_type' => $coreReturnNotice['type'],
+            'core_return_notice_added' => $coreReturnNoticeAdded,
+            'core_return_notice_pl' => $coreReturnNotice['notice_pl'],
+            'core_return_notice_de' => $coreReturnNotice['notice_de'],
             'ebay_category_id' => $mapping['ebay_category_id'] ?? null,
             'image_urls' => $imageUrls,
             'source_price_pln' => $sourcePricePln,
@@ -297,6 +323,52 @@ class JarekGearboxToolController extends Controller
         $this->logJarekEbayDePreparePreview($payload['ready'] ? 'success' : 'blocked', 'Preview payloadu eBay DE dla Skrzyń Jarka; bez eBay API, bez parts, marketplace_write=false.', $payload, $started);
 
         return response()->json($payload);
+    }
+
+
+    /** @return array{required: bool, type: ?string, notice_pl: ?string, notice_de: ?string, warning: ?string} */
+    private function jarekCoreReturnNotice(string $title): array
+    {
+        if (preg_match('/skrzynia\s+biegów/iu', $title)) {
+            return [
+                'required' => true,
+                'type' => 'gearbox',
+                'notice_pl' => 'Stara skrzynia biegów podlega zwrotowi',
+                'notice_de' => 'Das Altgetriebe muss zurückgegeben werden.',
+                'warning' => 'gearbox_core_return_notice_added',
+            ];
+        }
+
+        if (preg_match('/tylny\s+most/iu', $title)) {
+            return [
+                'required' => true,
+                'type' => 'rear_axle',
+                'notice_pl' => 'Stary tylny most podlega zwrotowi',
+                'notice_de' => 'Die alte Hinterachse muss zurückgegeben werden.',
+                'warning' => 'rear_axle_core_return_notice_added',
+            ];
+        }
+
+        return [
+            'required' => false,
+            'type' => null,
+            'notice_pl' => null,
+            'notice_de' => null,
+            'warning' => null,
+        ];
+    }
+
+    private function containsNotice(string $text, ?string $notice): bool
+    {
+        return filled($notice) && mb_stripos($text, (string) $notice) !== false;
+    }
+
+    private function appendNotice(string $text, ?string $notice): string
+    {
+        if (! filled($notice)) return $text;
+
+        $text = trim($text);
+        return $text === '' ? (string) $notice : $text."\n\n".$notice;
     }
 
     /** @return array{source_brand_candidates: array<int, string>, selected_brand: ?string, brand_selection_reason: string, brand_source: string} */
