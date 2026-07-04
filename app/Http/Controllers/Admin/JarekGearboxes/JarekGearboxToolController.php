@@ -419,6 +419,7 @@ class JarekGearboxToolController extends Controller
         $itemSpecifics = (array) ($payload['item_specifics'] ?? []);
         $listingDescription = (string) ($payload['rendered_description_de_template'] ?? $payload['translated_description_de'] ?? '');
         $marketplaceId = filled($settings['marketplace_id'] ?? null) ? (string) $settings['marketplace_id'] : null;
+        $inventoryDescription = $this->jarekInventoryDescription($payload, (string) ($sku ?? ''), (string) ($marketplaceId ?? 'EBAY_DE'));
         $format = filled($settings['format'] ?? null) ? (string) $settings['format'] : 'FIXED_PRICE';
         $listingDuration = filled($settings['listing_duration'] ?? null) ? (string) $settings['listing_duration'] : 'GTC';
         $merchantLocationKey = $this->jarekEbayMerchantLocationKey($settings, is_array($account?->config) ? $account->config : []);
@@ -433,7 +434,7 @@ class JarekGearboxToolController extends Controller
         }
 
         $inventoryItemRequest = [
-            'product' => ['title' => (string) ($payload['translated_title_de'] ?? ''), 'description' => $this->plainJarekText($listingDescription), 'imageUrls' => $imageUrls, 'aspects' => $aspects],
+            'product' => ['title' => (string) ($payload['translated_title_de'] ?? ''), 'description' => $inventoryDescription, 'imageUrls' => $imageUrls, 'aspects' => $aspects],
             'condition' => 'USED',
             'availability' => ['shipToLocationAvailability' => ['quantity' => $quantity]],
         ];
@@ -479,6 +480,7 @@ class JarekGearboxToolController extends Controller
             'image_urls' => $imageUrls,
             'item_specifics' => $itemSpecifics,
             'listing_description' => $listingDescription,
+            'inventory_description_source' => filled($payload['translated_description_de'] ?? null) ? 'translated_description_de' : 'translated_title_de',
         ], 'blockers' => array_values(array_unique($blockers))];
     }
 
@@ -505,6 +507,19 @@ class JarekGearboxToolController extends Controller
     private function plainJarekText(string $value): string
     {
         return mb_substr(trim((string) preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags($value), ENT_QUOTES | ENT_HTML5, 'UTF-8'))), 0, 3900);
+    }
+
+    private function jarekInventoryDescription(array $payload, string $sku, string $marketplaceId): string
+    {
+        $description = $this->plainJarekText((string) (($payload['translated_description_de'] ?? null) ?: ($payload['translated_title_de'] ?? null) ?: ''));
+        if ($description === '') {
+            $description = match ($marketplaceId) {
+                'EBAY_FR' => 'Pièce automobile '.$sku,
+                default => 'Autoteil '.$sku,
+            };
+        }
+
+        return mb_substr($description, 0, 3900);
     }
 
 

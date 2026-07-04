@@ -362,9 +362,15 @@ class JarekGearboxEbayDePreparePreviewTest extends TestCase
             ->assertJsonPath('ebay_api_plan.price', 569.77)
             ->assertJsonPath('ebay_api_plan.currency', 'EUR')
             ->assertJsonPath('ebay_api_plan.inventory_item_request.availability.shipToLocationAvailability.quantity', 1)
+            ->assertJsonPath('ebay_api_plan.inventory_item_request.product.description', 'Opis skrzyni')
+            ->assertJsonPath('ebay_api_plan.inventory_description_source', 'translated_description_de')
             ->assertJsonPath('ebay_api_plan.offer_request.marketplaceId', 'EBAY_DE')
             ->assertJsonPath('ebay_api_plan.offer_request.listingPolicies.fulfillmentPolicyId', 'fulfillment-de-50')
             ->assertJsonPath('ebay_api_plan.publish_offer_request.method', 'POST');
+
+        $this->assertStringContainsString('Beschreibung', $response->json('ebay_api_plan.offer_request.listingDescription'));
+        $this->assertStringContainsString('Spezifikationen', $response->json('ebay_api_plan.offer_request.listingDescription'));
+        $this->assertStringNotContainsString('BeschreibungWir bieten', $response->json('ebay_api_plan.inventory_item_request.product.description'));
     }
 
     private function mockTranslations(): void
