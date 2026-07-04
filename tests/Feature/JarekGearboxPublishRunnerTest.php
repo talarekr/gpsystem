@@ -17,6 +17,7 @@ class JarekGearboxPublishRunnerTest extends TestCase
             ->assertJsonPath('ok', false)
             ->assertJsonPath('marketplace_write', false)
             ->assertJsonPath('blockers.0', 'missing_or_invalid_confirm_token')
+            ->assertJsonPath('admin_diagnostics', [])
             ->assertJsonPath('batch_summary.processed_count', 0);
     }
 
@@ -27,6 +28,9 @@ class JarekGearboxPublishRunnerTest extends TestCase
         $response->assertOk()
             ->assertSee('Jarek Gearboxes eBay DE real publish runner')
             ->assertSee('value="1"', false)
-            ->assertSee('value="10"', false);
+            ->assertSee('value="10"', false)
+            ->assertSee('admin_diagnostics')
+            ->assertSee('error_message')
+            ->assertSee('offset ${state.offset}, limit ${limit}, error_message=', false);
     }
 }
