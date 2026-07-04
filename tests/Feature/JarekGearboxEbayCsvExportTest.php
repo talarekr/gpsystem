@@ -3,7 +3,9 @@
 namespace Tests\Feature;
 
 use App\Models\JarekGearbox;
+use App\Models\MarketplaceCategoryMapping;
 use App\Models\MarketplaceSyncLog;
+use App\Models\PartCategory;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
@@ -15,6 +17,8 @@ class JarekGearboxEbayCsvExportTest extends TestCase
     public function test_preview_uses_only_local_images_and_blocks_allegro_images(): void
     {
         config(['app.url' => 'https://gpswiss.pl']);
+
+        $this->createCategoryMappings('620', '100684');
 
         JarekGearbox::query()->create([
             'allegro_offer_id' => '123',
@@ -61,6 +65,8 @@ class JarekGearboxEbayCsvExportTest extends TestCase
         Storage::fake('local');
         config(['app.url' => 'https://gpswiss.pl']);
 
+        $this->createCategoryMappings('620', '100684');
+
         JarekGearbox::query()->create([
             'allegro_offer_id' => '123',
             'title' => 'Skrzynia DSG 0D9300041',
@@ -70,6 +76,8 @@ class JarekGearboxEbayCsvExportTest extends TestCase
             'quantity' => 1,
             'main_image_url' => 'https://gpswiss.pl/storage/jarek/123/main.jpg',
             'images' => ['https://gpswiss.pl/storage/jarek/123/main.jpg'],
+            'category_id' => '620',
+            'category_name' => 'Skrzynie biegów',
         ]);
 
         $this->withoutMiddleware()->getJson('/admin/tools/jarek-gearboxes/ebay-csv-export?limit=10')
@@ -91,6 +99,8 @@ class JarekGearboxEbayCsvExportTest extends TestCase
     public function test_preview_normalizes_nested_csv_fields_without_server_error(): void
     {
         config(['app.url' => 'https://gpswiss.pl']);
+
+        $this->createCategoryMappings('620', '100684');
 
         JarekGearbox::query()->create([
             'allegro_offer_id' => '125',
@@ -127,6 +137,16 @@ class JarekGearboxEbayCsvExportTest extends TestCase
             ->assertJsonPath('sample_rows.0.Allegro category path', 'Motoryzacja > Części samochodowe > Układ napędowy > Skrzynie biegów > Kompletne skrzynie')
             ->assertJsonPath('sample_rows.0.Main image URL', 'https://gpswiss.pl/storage/jarek/125/main.jpg')
             ->assertJsonPath('sample_rows.0.Additional image URLs', 'https://gpswiss.pl/storage/jarek/125/2.jpg')
-            ->assertJsonPath('warnings_by_reason.csv_field_normalized', 1);
+            ->assertJsonPath('warnings_by_reason.csv_field_normalized', 1)
+            ->assertJsonPath('blocked_count', 0)
+            ->assertJsonPath('sample_rows.0.Suggested eBay category', '100684')
+            ->assertJsonPath('sample_rows.0.diagnostics.category.mapping_source', 'marketplace_category_mappings');
+    }
+
+    private function createCategoryMappings(string $allegroCategoryId, string $ebayCategoryId): void
+    {
+        $category = PartCategory::query()->create(['name' => 'Skrzynie biegów', 'category_path' => 'Motoryzacja > Części > Skrzynie biegów']);
+        MarketplaceCategoryMapping::query()->create(['local_category_id' => $category->id, 'channel' => 'allegro_main', 'external_category_id' => $allegroCategoryId, 'external_category_name' => 'Skrzynie biegów']);
+        MarketplaceCategoryMapping::query()->create(['local_category_id' => $category->id, 'channel' => 'ebay_de', 'external_category_id' => $ebayCategoryId, 'external_category_name' => 'Getriebe']);
     }
 }

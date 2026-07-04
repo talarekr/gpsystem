@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin\JarekGearboxes;
 
 use App\Http\Controllers\Controller;
 use App\Models\JarekGearbox;
+use App\Models\MarketplaceCategoryMapping;
 use App\Models\MarketplaceSyncLog;
 use App\Models\Part;
 use App\Models\PartCategory;
@@ -186,12 +187,13 @@ class JarekGearboxToolController extends Controller
             'total' => 0,
             'exportable_count' => 0,
             'blocked_count' => 0,
-            'warnings_by_reason' => array_fill_keys(['missing_title','title_too_long','missing_price','missing_quantity','missing_local_images','missing_part_number','missing_ebay_category','duplicate_sku','invalid_currency','csv_field_normalized','csv_field_omitted'], 0),
+            'warnings_by_reason' => array_fill_keys(['missing_title','title_too_long','missing_price','missing_quantity','missing_local_images','missing_part_number','missing_ebay_category','missing_ebay_category_mapping','duplicate_sku','invalid_currency','csv_field_normalized','csv_field_omitted'], 0),
             'sample_rows' => [],
             'blocked_samples' => [],
             'local_image_url_source_fields' => ['main_image_url', 'images'],
             'csv_uses_only_our_server_images' => true,
             'allowed_image_hosts' => $this->localImageHosts(),
+            'category_mapping_diagnostics' => ['source' => 'marketplace_category_mappings: allegro/allegro_main external_category_id -> local_category_id -> ebay_de/ebay_fr/ebay mapping'],
             'safety' => ['no_parts_write' => true, 'no_ovoko_write' => true, 'no_allegro_write' => true, 'no_ebay_api_write' => true, 'no_publish_relist_end_update' => true, 'no_api_sync' => true, 'no_image_download_or_copy' => true],
         ];
 
@@ -205,13 +207,15 @@ class JarekGearboxToolController extends Controller
             $csvRow = $this->jarekEbayCsvRow($gearbox);
             $reasons = $this->jarekEbayCsvWarnings($gearbox, (int) ($skuCounts[$gearbox->allegro_offer_id] ?? 0));
             foreach (array_unique($reasons) as $reason) $base['warnings_by_reason'][$reason]++;
+            $blockers = $this->jarekEbayCsvBlockers($reasons);
+            $diagnostics = ['category' => $this->jarekCategoryDiagnostics($gearbox), 'images' => $this->jarekImageDiagnostics($gearbox)];
 
-            if ($reasons === [] || array_diff($reasons, ['missing_part_number', 'missing_ebay_category', 'csv_field_normalized', 'csv_field_omitted']) === []) {
+            if ($blockers === []) {
                 $base['exportable_count']++;
-                if (count($base['sample_rows']) < $limit) $base['sample_rows'][] = $csvRow + ['warnings' => $reasons];
+                if (count($base['sample_rows']) < $limit) $base['sample_rows'][] = $csvRow + ['warnings' => $reasons, 'diagnostics' => $diagnostics];
             } else {
                 $base['blocked_count']++;
-                if (count($base['blocked_samples']) < $limit) $base['blocked_samples'][] = ['source_jarek_gearbox_id' => $gearbox->id, 'sku' => $csvRow['SKU'], 'title' => $gearbox->title, 'blockers' => $reasons];
+                if (count($base['blocked_samples']) < $limit) $base['blocked_samples'][] = ['source_jarek_gearbox_id' => $gearbox->id, 'sku' => $csvRow['SKU'], 'title' => $gearbox->title, 'blockers' => $blockers, 'warnings' => $reasons, 'diagnostics' => $diagnostics];
             }
         }
 
@@ -224,6 +228,7 @@ class JarekGearboxToolController extends Controller
     private function jarekEbayCsvRow(JarekGearbox $gearbox): array
     {
         $images = $this->localJarekImageUrls($gearbox);
+        $categoryMapping = $this->jarekEbayCategoryMapping($gearbox);
         $sku = 'JAREK-'.($gearbox->allegro_offer_id ?: $gearbox->id);
         $partNumber = $this->detectJarekPartNumber((object) $gearbox->getAttributes(), $sku);
         $normalizationWarnings = [];
@@ -241,7 +246,7 @@ class JarekGearboxToolController extends Controller
             'Allegro category ID' => $this->normalizeString($gearbox->category_id, 'category_id', $normalizationWarnings),
             'Allegro category name' => $this->normalizeString($gearbox->category_name, 'category_name', $normalizationWarnings),
             'Allegro category path' => $this->normalizeCategoryPath($gearbox->category_path, $normalizationWarnings),
-            'Suggested eBay category' => null,
+            'Suggested eBay category' => $categoryMapping['ebay_category_id'] ?? null,
             'Main image URL' => $images[0] ?? null,
             'Additional image URLs' => implode('|', array_slice($images, 1)),
             'Source JarekGearbox ID' => (string) $gearbox->id,
@@ -266,7 +271,10 @@ class JarekGearboxToolController extends Controller
         if (! is_numeric($gearbox->quantity) || (int) $gearbox->quantity < 1) $warnings[] = 'missing_quantity';
         if ($this->localJarekImageUrls($gearbox) === []) $warnings[] = 'missing_local_images';
         if (blank($this->detectJarekPartNumber((object) $gearbox->getAttributes(), $sku))) $warnings[] = 'missing_part_number';
-        $warnings[] = 'missing_ebay_category';
+        if (! $this->jarekEbayCategoryMapping($gearbox)) {
+            $warnings[] = 'missing_ebay_category';
+            $warnings[] = 'missing_ebay_category_mapping';
+        }
         if ($skuCount > 1) $warnings[] = 'duplicate_sku';
         if (! in_array(strtoupper($currency), ['PLN','EUR','USD','GBP'], true)) $warnings[] = 'invalid_currency';
         $csvWarnings = $this->jarekEbayCsvRow($gearbox)['normalization_warnings'] ?? [];
@@ -276,9 +284,103 @@ class JarekGearboxToolController extends Controller
     }
 
     /** @return array<int, string> */
+    private function jarekEbayCsvBlockers(array $warnings): array
+    {
+        $nonBlocking = ['missing_part_number', 'csv_field_normalized', 'csv_field_omitted'];
+        return array_values(array_diff($warnings, $nonBlocking));
+    }
+
+    /** @return array<string, mixed>|null */
+    private function jarekEbayCategoryMapping(JarekGearbox $gearbox): ?array
+    {
+        if (! Schema::hasTable('marketplace_category_mappings') || blank($gearbox->category_id)) return null;
+
+        $allegro = MarketplaceCategoryMapping::query()
+            ->whereIn('channel', ['allegro_main', 'allegro'])
+            ->where('external_category_id', (string) $gearbox->category_id)
+            ->where('is_blocked', false)
+            ->orderByRaw("case when channel = 'allegro_main' then 0 else 1 end")
+            ->first();
+
+        if (! $allegro || blank($allegro->local_category_id)) return null;
+
+        $ebay = MarketplaceCategoryMapping::query()
+            ->where('local_category_id', $allegro->local_category_id)
+            ->whereIn('channel', ['ebay_de', 'ebay_fr', 'ebay'])
+            ->where('is_blocked', false)
+            ->whereNotNull('external_category_id')
+            ->orderByRaw("case when channel = 'ebay_de' then 0 when channel = 'ebay' then 1 else 2 end")
+            ->first();
+
+        if (! $ebay || blank($ebay->external_category_id)) return null;
+
+        return [
+            'source' => 'marketplace_category_mappings',
+            'source_allegro_mapping_id' => $allegro->id,
+            'source_allegro_channel' => $allegro->channel,
+            'local_category_id' => $allegro->local_category_id,
+            'ebay_mapping_id' => $ebay->id,
+            'ebay_channel' => $ebay->channel,
+            'ebay_category_id' => (string) $ebay->external_category_id,
+            'ebay_category_name' => $ebay->external_category_name,
+            'ebay_category_path' => $ebay->external_category_path,
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function jarekCategoryDiagnostics(JarekGearbox $gearbox): array
+    {
+        $mapping = $this->jarekEbayCategoryMapping($gearbox);
+        return [
+            'source_allegro_category_id' => $gearbox->category_id,
+            'source_allegro_category_name' => $gearbox->category_name,
+            'source_allegro_category_path' => $this->categoryPathString($gearbox->category_path),
+            'ebay_category_id' => $mapping['ebay_category_id'] ?? null,
+            'mapping_source' => $mapping['source'] ?? null,
+            'mapping' => $mapping,
+            'reason' => $mapping ? null : 'missing_ebay_category_mapping',
+            'message' => $mapping ? 'Mapped from Allegro category via marketplace_category_mappings.' : 'No Allegro -> local category -> eBay category mapping found in marketplace_category_mappings.',
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function jarekImageDiagnostics(JarekGearbox $gearbox): array
+    {
+        $all = $this->rawJarekImageUrlCandidates($gearbox);
+        $hosts = array_map(fn (string $url): ?string => parse_url($url, PHP_URL_HOST), $all);
+        return [
+            'source_fields' => ['main_image_url', 'images'],
+            'urls_before_filtering_count' => count($all),
+            'urls_after_our_host_filtering_count' => count($this->localJarekImageUrls($gearbox)),
+            'allowed_hosts' => $this->localImageHosts(),
+            'rejected_sample_hosts' => array_values(array_unique(array_filter($hosts, fn ($host): bool => ! is_string($host) || ! in_array(mb_strtolower($host), $this->localImageHosts(), true)))) ,
+            'full_url_count' => collect($all)->filter(fn (string $url): bool => (bool) parse_url($url, PHP_URL_SCHEME))->count(),
+            'relative_url_count' => collect($all)->filter(fn (string $url): bool => ! parse_url($url, PHP_URL_SCHEME))->count(),
+            'host_counts' => array_count_values(array_map(fn ($host): string => is_string($host) && $host !== '' ? mb_strtolower($host) : '(relative-or-invalid)', $hosts)),
+        ];
+    }
+
+    private function categoryPathString(mixed $path): ?string
+    {
+        if (is_array($path)) return implode(' > ', array_filter(array_map(fn ($value): string => is_array($value) ? (string) ($value['name'] ?? $value['id'] ?? '') : (string) $value, $path)));
+        return filled($path) ? (string) $path : null;
+    }
+
+    /** @return array<int, string> */
     private function localJarekImageUrls(JarekGearbox $gearbox): array
     {
-        return array_values(array_filter($this->jarekImageUrls((object) $gearbox->getAttributes()), fn (string $url): bool => $this->isLocalServerImageUrl($url)));
+        return array_values(array_unique(array_filter(array_map(fn (string $url): ?string => $this->normalizeOurServerImageUrl($url), $this->rawJarekImageUrlCandidates($gearbox)))));
+    }
+
+    private function normalizeOurServerImageUrl(string $url): ?string
+    {
+        if (str_starts_with($url, '//')) {
+            $url = 'https:'.$url;
+        } elseif (str_starts_with($url, '/')) {
+            $url = rtrim((string) config('app.url', 'https://gpswiss.pl'), '/').$url;
+        }
+
+        return filter_var($url, FILTER_VALIDATE_URL) !== false && $this->isLocalServerImageUrl($url) ? $url : null;
     }
 
     private function isLocalServerImageUrl(string $url): bool
@@ -290,7 +392,7 @@ class JarekGearboxToolController extends Controller
     /** @return array<int, string> */
     private function localImageHosts(): array
     {
-        $hosts = ['gpswiss.pl'];
+        $hosts = ['gpswiss.pl', 'www.gpswiss.pl', 'gpsystem.thecamels.pl'];
         $appHost = parse_url((string) config('app.url'), PHP_URL_HOST);
         if (is_string($appHost) && $appHost !== '') $hosts[] = mb_strtolower($appHost);
         return array_values(array_unique($hosts));
@@ -541,6 +643,24 @@ class JarekGearboxToolController extends Controller
     {
         $warnings = [];
         return $this->normalizeUrlList([$row->main_image_url ?? null, ...$this->decodedJsonArray($row->images ?? null)], 'images', $warnings);
+    }
+
+    /** @return array<int, string> */
+    private function rawJarekImageUrlCandidates(JarekGearbox $gearbox): array
+    {
+        $values = [$gearbox->main_image_url, ...$this->decodedJsonArray($gearbox->images)];
+        $urls = [];
+        foreach ($values as $item) {
+            $item = $this->decodedJsonValue($item);
+            if (is_object($item)) $item = (array) $item;
+            if (is_array($item)) {
+                $candidate = $item['url'] ?? $item['src'] ?? $item['href'] ?? data_get($item, 'image.url') ?? null;
+                if (filled($candidate) && is_scalar($candidate)) $urls[] = trim((string) $candidate);
+                continue;
+            }
+            if (filled($item) && is_scalar($item)) $urls[] = trim((string) $item);
+        }
+        return array_values(array_unique(array_filter($urls)));
     }
 
     /** @param array<int, string> $warnings */
