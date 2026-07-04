@@ -100,8 +100,17 @@ class EbayDescriptionTemplateRenderer
     {
         $value = (string) ($data['description'] ?? $data['description_block'] ?? $part->description ?? $part->short_description ?? '');
         $plain = trim(strip_tags($value));
+        $coreReturnNotice = trim(strip_tags((string) ($data['core_return_notice'] ?? '')));
 
-        return $plain === '' ? '' : '<p style="margin:0;color:#1f2937;font-size:16px;line-height:1.7;text-align:center;">'.e($plain).'</p>';
+        $description = $plain === ''
+            ? ''
+            : '<p style="margin:0;color:#1f2937;font-size:16px;line-height:1.7;text-align:center;">'.e($plain).'</p>';
+
+        if ($coreReturnNotice !== '') {
+            $description .= '<p style="margin:14px 0 0;color:#111827;font-size:16px;line-height:1.7;text-align:center;font-weight:700;">'.e($coreReturnNotice).'</p>';
+        }
+
+        return $description;
     }
 
     private function specificationRows(string $channel, Part $part, array $data): string
