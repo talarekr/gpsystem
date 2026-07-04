@@ -441,6 +441,22 @@ class JarekGearboxEbayDePreparePreviewTest extends TestCase
     }
 
 
+    public function test_ebay_de_revise_apply_is_locked_to_single_sku_and_exact_confirm(): void
+    {
+        $this->withoutMiddleware()
+            ->getJson('/admin/tools/jarek-gearboxes/ebay-de-revise-apply?confirm=jarek-ebay-de-revise-one&sku=JAREK-OTHER')
+            ->assertForbidden()
+            ->assertJsonPath('marketplace_write', false)
+            ->assertJsonPath('blockers.0', 'sku_not_allowed');
+
+        $this->withoutMiddleware()
+            ->getJson('/admin/tools/jarek-gearboxes/ebay-de-revise-apply?confirm=wrong&sku=JAREK-18727785496')
+            ->assertForbidden()
+            ->assertJsonPath('marketplace_write', false)
+            ->assertJsonPath('blockers.0', 'invalid_confirm');
+    }
+
+
     public function test_ebay_de_publish_apply_is_locked_to_single_sku_and_exact_confirm(): void
     {
         $this->withoutMiddleware()

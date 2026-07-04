@@ -269,6 +269,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::match(['get', 'post'], '/admin/tools/jarek-gearboxes/ebay-de-publish-apply', [JarekGearboxToolController::class, 'ebayDePublishApply'])->name('admin.tools.jarek-gearboxes.ebay-de-publish-apply');
     Route::get('/admin/tools/jarek-gearboxes/ebay-de-listing-diagnostics', [JarekGearboxToolController::class, 'ebayDeListingDiagnostics'])->name('admin.tools.jarek-gearboxes.ebay-de-listing-diagnostics');
     Route::get('/admin/tools/jarek-gearboxes/ebay-de-revise-preview', [JarekGearboxToolController::class, 'ebayDeRevisePreview'])->name('admin.tools.jarek-gearboxes.ebay-de-revise-preview');
+    Route::match(['get', 'post'], '/admin/tools/jarek-gearboxes/ebay-de-revise-apply', [JarekGearboxToolController::class, 'ebayDeReviseApply'])->name('admin.tools.jarek-gearboxes.ebay-de-revise-apply');
     Route::get('/admin/tools/jarek-gearboxes/storage-link-diagnostics', [JarekGearboxToolController::class, 'storageLinkDiagnostics'])->name('admin.tools.jarek-gearboxes.storage-link-diagnostics');
     Route::match(['get', 'post'], '/admin/tools/jarek-gearboxes/storage-link-apply', [JarekGearboxToolController::class, 'storageLinkApply'])->name('admin.tools.jarek-gearboxes.storage-link-apply');
     Route::get('/admin/tools/jarek-gearboxes/public-root-diagnostics', [JarekGearboxToolController::class, 'publicRootDiagnostics'])->name('admin.tools.jarek-gearboxes.public-root-diagnostics');

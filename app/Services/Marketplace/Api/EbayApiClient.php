@@ -744,6 +744,37 @@ class EbayApiClient extends AbstractMarketplaceApiClient
         return $result;
     }
 
+    public function reviseInventoryOffer(string $sku, string $offerId, array $inventoryPayload, array $offerPayload, ?string $contentLanguage = null): array
+    {
+        $base = rtrim((string) $this->account?->api_base_url, '/');
+        $token = $this->accessToken();
+        $headers = ['X-EBAY-C-MARKETPLACE-ID' => (string) ($offerPayload['marketplaceId'] ?? $this->marketplaceId())];
+        if (filled($contentLanguage)) $headers['Content-Language'] = (string) $contentLanguage;
+
+        $inventoryResponse = Http::withToken($token)->withHeaders($headers)->acceptJson()->asJson()->timeout(30)
+            ->put($base.'/sell/inventory/v1/inventory_item/'.rawurlencode($sku), $inventoryPayload);
+        if (! $inventoryResponse->successful()) return $this->writeResult('reviseInventoryItem', $inventoryResponse, $headers);
+
+        $offerPayload = array_diff_key($offerPayload, ['offerId' => true]);
+        $offerResponse = Http::withToken($token)->withHeaders($headers)->acceptJson()->asJson()->timeout(30)
+            ->put($base.'/sell/inventory/v1/offer/'.rawurlencode($offerId), $offerPayload);
+        $offerJson = $offerResponse->json();
+
+        return [
+            'ok' => $offerResponse->successful(),
+            'step' => 'updateOffer',
+            'http_status' => $offerResponse->status(),
+            'inventory_http_status' => $inventoryResponse->status(),
+            'offer_http_status' => $offerResponse->status(),
+            'offer_id' => $offerId,
+            'listing_id' => is_array($offerJson) ? ($offerJson['listingId'] ?? $offerPayload['listingId'] ?? null) : ($offerPayload['listingId'] ?? null),
+            'json' => is_array($offerJson) ? $offerJson : [],
+            'request_id' => $offerResponse->header('x-ebay-c-request-id') ?: $offerResponse->header('rlogid'),
+            'content_language' => $headers['Content-Language'] ?? null,
+            'marketplace_id' => $headers['X-EBAY-C-MARKETPLACE-ID'],
+        ];
+    }
+
     public function publishInventoryOffer(string $sku, array $inventoryPayload, array $offerPayload, ?string $contentLanguage = null): array
     {
         $base = rtrim((string) $this->account?->api_base_url, '/');
