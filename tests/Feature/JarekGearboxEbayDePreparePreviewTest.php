@@ -169,15 +169,18 @@ class JarekGearboxEbayDePreparePreviewTest extends TestCase
             ->assertJsonPath('core_return_notice_pl', 'Stara skrzynia biegów podlega zwrotowi')
             ->assertJsonPath('core_return_notice_de', 'Das Altgetriebe muss zurückgegeben werden.')
             ->assertJsonPath('core_return_notice_added_after_translation', true)
+            ->assertJsonPath('core_return_notice_location', 'payload_template_footer')
             ->assertJsonPath('source_description_pl_cleaned', 'Opis skrzyni')
             ->assertJsonPath('payload_preview.core_return_required', true)
             ->assertJsonPath('payload_preview.core_return_type', 'gearbox')
             ->assertJsonPath('payload_preview.core_return_notice_added_after_translation', true)
             ->assertJsonFragment(['gearbox_core_return_notice_added']);
 
-        $this->assertSame(1, substr_count($response->json('translated_description_de'), 'Das Altgetriebe muss zurückgegeben werden.'));
+        $this->assertSame(0, substr_count($response->json('translated_description_de'), 'Das Altgetriebe muss zurückgegeben werden.'));
+        $this->assertStringNotContainsString('Die alte Hinterachse muss zurückgegeben werden.', $response->json('translated_description_de'));
         $this->assertStringNotContainsString('Das alte Getriebe kann zurückgegeben werden.', $response->json('translated_description_de'));
         $this->assertSame(1, substr_count($response->json('rendered_description_de_template'), 'Das Altgetriebe muss zurückgegeben werden.'));
+        $this->assertSame(1, substr_count($response->json('payload_preview.description'), 'Das Altgetriebe muss zurückgegeben werden.'));
         $this->assertStringNotContainsString('Das alte Getriebe kann zurückgegeben werden.', $response->json('rendered_description_de_template'));
         $this->assertStringEndsWith('Das Altgetriebe muss zurückgegeben werden.', $response->json('rendered_description_de_template'));
     }
@@ -214,13 +217,16 @@ class JarekGearboxEbayDePreparePreviewTest extends TestCase
         $response->assertOk()
             ->assertJsonPath('ready', true)
             ->assertJsonPath('source_description_pl_cleaned', 'Opis skrzyni.')
-            ->assertJsonPath('core_return_notice_added_after_translation', true);
+            ->assertJsonPath('core_return_notice_added_after_translation', true)
+            ->assertJsonPath('core_return_notice_location', 'payload_template_footer');
 
         $this->assertStringNotContainsString('Stara skrzynia biegów podlega zwrotowi', $response->json('source_description_pl_cleaned'));
         $this->assertStringNotContainsString('Das alte Getriebe kann zurückgegeben werden.', $response->json('translated_description_de'));
-        $this->assertSame(1, substr_count($response->json('translated_description_de'), 'Das Altgetriebe muss zurückgegeben werden.'));
+        $this->assertStringNotContainsString('Die alte Hinterachse muss zurückgegeben werden.', $response->json('translated_description_de'));
+        $this->assertSame(0, substr_count($response->json('translated_description_de'), 'Das Altgetriebe muss zurückgegeben werden.'));
         $this->assertStringNotContainsString('Das alte Getriebe kann zurückgegeben werden.', $response->json('rendered_description_de_template'));
         $this->assertSame(1, substr_count($response->json('rendered_description_de_template'), 'Das Altgetriebe muss zurückgegeben werden.'));
+        $this->assertSame(1, substr_count($response->json('payload_preview.description'), 'Das Altgetriebe muss zurückgegeben werden.'));
         $this->assertStringEndsWith('Das Altgetriebe muss zurückgegeben werden.', $response->json('rendered_description_de_template'));
     }
 
@@ -251,8 +257,11 @@ class JarekGearboxEbayDePreparePreviewTest extends TestCase
             ->assertJsonPath('core_return_type', 'rear_axle')
             ->assertJsonPath('core_return_notice_added', true)
             ->assertJsonPath('core_return_notice_de', 'Die alte Hinterachse muss zurückgegeben werden.')
+            ->assertJsonPath('core_return_notice_location', 'payload_template_footer')
             ->assertJsonFragment(['rear_axle_core_return_notice_added']);
 
+        $this->assertStringNotContainsString('Die alte Hinterachse muss zurückgegeben werden.', $response->json('translated_description_de'));
+        $this->assertSame(1, substr_count($response->json('rendered_description_de_template'), 'Die alte Hinterachse muss zurückgegeben werden.'));
         $this->assertStringEndsWith('Die alte Hinterachse muss zurückgegeben werden.', $response->json('rendered_description_de_template'));
     }
 
