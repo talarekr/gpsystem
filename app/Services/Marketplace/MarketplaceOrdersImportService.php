@@ -16,7 +16,7 @@ use Throwable;
 
 class MarketplaceOrdersImportService
 {
-    public function __construct(private readonly MarketplaceOrderTimeService $timeService) {}
+    public function __construct(private readonly MarketplaceOrderTimeService $timeService, private readonly PartAvailabilityEventService $availabilityEvents) {}
     public const LIVE_BATCH = 'manual_marketplace_orders_live';
     public const TEST_BATCH = 'marketplace_orders_ui_test';
 
@@ -541,6 +541,18 @@ class MarketplaceOrdersImportService
         $created = ! $item->exists;
         $item->fill(['product_name' => (string) ($raw['offer']['name'] ?? $raw['title'] ?? $raw['name'] ?? $raw['legacyItemId'] ?? 'Marketplace item'), 'sku' => (string) ($raw['offer']['external']['id'] ?? $raw['sku'] ?? ''), 'offer_id' => (string) ($raw['offer']['id'] ?? $raw['part_id'] ?? $raw['ovoko_part_id'] ?? $raw['legacyItemId'] ?? ''), 'external_product_id' => (string) ($raw['productId'] ?? ''), 'unit_price' => $unit, 'quantity' => max(1, $qty), 'line_total' => $this->amountValue($raw['total_price'] ?? ($unit * max(1, $qty))), 'currency' => (string) ($raw['currency'] ?? (is_array($price) ? ($price['currency'] ?? null) : null) ?? $order->currency), 'raw_payload' => $raw['raw_payload'] ?? $raw])->save();
         $created ? $result['items_created']++ : $result['items_updated']++;
+
+        if ($order->test_import !== true) {
+            $this->availabilityEvents->sold([
+                'source_channel' => (string) $order->marketplace,
+                'source_order_id' => (string) $order->marketplace_order_id,
+                'source_order_item_id' => (string) $item->marketplace_item_id,
+                'source_marketplace_item_id' => (string) $item->marketplace_item_id,
+                'offer_id' => $item->offer_id,
+                'sku' => $item->sku,
+                'item_id' => $item->external_product_id,
+            ]);
+        }
     }
 
 
