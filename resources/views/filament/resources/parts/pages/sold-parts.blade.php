@@ -61,7 +61,7 @@
                             </div>
                         </div>
                     </div>
-                    <div class="gps-sold-part-col"><div class="gps-sold-part-value">@include('filament.resources.orders.partials.source-wordmark', ['marketplace' => $row['source'] ?: 'sklep'])</div></div>
+                    <div class="gps-sold-part-col"><div class="gps-sold-part-value">@include('filament.resources.orders.partials.source-wordmark', ['marketplace' => $row['source_label'] ?? ($row['source'] ?: 'sklep')])</div></div>
                     <div class="gps-sold-part-col"><div class="gps-sold-part-value">{{ $row['reference'] }}</div></div>
                     <div class="gps-sold-part-col"><div class="gps-sold-part-value">{{ $row['sold_at'] ? $row['sold_at']->format('Y-m-d H:i') : '—' }}</div></div>
                     <div class="gps-sold-part-col"><div class="gps-sold-part-total">{{ number_format((float) $row['price'], 2, ',', ' ') }} {{ $row['currency'] }}</div></div>
