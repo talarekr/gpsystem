@@ -266,6 +266,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/jarek-gearboxes/ebay-prepare-runner-batch', [JarekGearboxToolController::class, 'ebayPrepareRunnerBatch'])->name('admin.tools.jarek-gearboxes.ebay-prepare-runner-batch');
     Route::get('/admin/tools/jarek-gearboxes/publish-runner', [JarekGearboxToolController::class, 'publishRunner'])->name('admin.tools.jarek-gearboxes.publish-runner');
     Route::match(['get', 'post'], '/admin/tools/jarek-gearboxes/publish-runner-batch', [JarekGearboxToolController::class, 'publishRunnerBatch'])->name('admin.tools.jarek-gearboxes.publish-runner-batch');
+    Route::get('/admin/tools/jarek-gearboxes/publish-runner-scan-batch', [JarekGearboxToolController::class, 'publishRunnerScanBatch'])->name('admin.tools.jarek-gearboxes.publish-runner-scan-batch');
     Route::get('/admin/tools/jarek-gearboxes/allegro-import-dry-run', [JarekGearboxToolController::class, 'dryRun'])->name('admin.tools.jarek-gearboxes.allegro-import-dry-run');
     Route::get('/admin/tools/jarek-gearboxes/parts-import-dry-run', [JarekGearboxToolController::class, 'partsImportDryRun'])->name('admin.tools.jarek-gearboxes.parts-import-dry-run');
     Route::get('/admin/tools/jarek-gearboxes/parts-import-apply', [JarekGearboxToolController::class, 'partsImportApply'])->name('admin.tools.jarek-gearboxes.parts-import-apply');
