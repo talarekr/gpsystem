@@ -50,12 +50,22 @@ class OrderStatusMarketplaceSyncService
         ];
 
         if ($marketplace === 'allegro') {
-            $target = match ($status) {
+            $map = [
+                'new' => 'NEW',
                 'processing' => 'PROCESSING',
+                'ready_to_ship' => 'READY_FOR_SHIPMENT',
+                'ready_for_pickup' => 'READY_FOR_PICKUP',
                 'shipped' => 'SENT',
-                default => null,
-            };
-            return $base + ['target_marketplace_status' => $target, 'action' => self::ACTION, 'supported' => $target !== null, 'skipped_reason' => $target ? null : 'unsupported_status_for_marketplace'];
+                'picked_up' => 'PICKED_UP',
+            ];
+            $target = $map[$status] ?? null;
+            return $base + [
+                'target_marketplace_status' => $target,
+                'action' => self::ACTION,
+                'supported' => $target !== null,
+                'supported_marketplace_statuses' => array_values($map),
+                'skipped_reason' => $target ? null : 'unsupported_allegro_status',
+            ];
         }
 
         if ($marketplace === 'ebay') {
@@ -101,13 +111,39 @@ class OrderStatusMarketplaceSyncService
                 'previous_local_status' => $plan['previous_local_status'] ?? null,
                 'new_local_status' => $plan['new_local_status'] ?? $order->status,
                 'target_marketplace_status' => $plan['target_marketplace_status'] ?? null,
-                'request_summary' => $result['request_summary'] ?? [],
-                'response_summary' => $result['response_summary'] ?? [],
+                'request_summary' => $result['request_summary'] ?? $this->skipRequestSummary($order, $marketplace, $plan, $skippedReason),
+                'response_summary' => $result['response_summary'] ?? $this->skipResponseSummary($plan, $skippedReason),
                 'skipped_reason' => $skippedReason,
                 'retry_of_log_id' => $plan['retry_of_log_id'] ?? null,
             ],
             'created_at' => now(),
         ]);
+    }
+
+    private function skipRequestSummary(Order $order, string $marketplace, array $plan, ?string $skippedReason): array
+    {
+        return [
+            'method' => $marketplace === 'allegro' ? 'PUT' : null,
+            'endpoint' => $marketplace === 'allegro' ? 'PUT /order/checkout-forms/{checkoutFormId}/fulfillment' : null,
+            'marketplace' => $marketplace,
+            'checkout_form_id' => $marketplace === 'allegro' ? $order->marketplace_order_id : null,
+            'local_status' => $plan['new_local_status'] ?? $order->status,
+            'previous_local_status' => $plan['previous_local_status'] ?? null,
+            'target_marketplace_status' => $plan['target_marketplace_status'] ?? null,
+            'supported_marketplace_statuses' => $plan['supported_marketplace_statuses'] ?? null,
+            'skipped_reason' => $skippedReason,
+        ];
+    }
+
+    private function skipResponseSummary(array $plan, ?string $skippedReason): array
+    {
+        return [
+            'response' => null,
+            'error' => null,
+            'mapping_supported' => (bool) ($plan['supported'] ?? false),
+            'target_marketplace_status' => $plan['target_marketplace_status'] ?? null,
+            'skipped_reason' => $skippedReason,
+        ];
     }
 
     private function alreadySynced(Order $order, string $marketplace, array $plan): bool
