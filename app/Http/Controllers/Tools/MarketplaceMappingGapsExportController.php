@@ -28,9 +28,9 @@ class MarketplaceMappingGapsExportController extends Controller
         $format = strtolower((string) $request->query('format', 'json'));
         $visibleOnly = $request->boolean('visible_only');
 
-        Storage::disk('local')->makeDirectory('exports/tools');
+        Storage::disk('public')->makeDirectory('exports/tools');
         $relativePath = 'exports/tools/marketplace_mapping_gaps_'.now()->format('Ymd_His').'.csv';
-        $absolutePath = Storage::disk('local')->path($relativePath);
+        $absolutePath = Storage::disk('public')->path($relativePath);
         $handle = $format === 'csv' ? fopen($absolutePath, 'wb') : false;
         if ($format === 'csv' && $handle === false) {
             throw new \RuntimeException('Cannot open export file for writing: '.$absolutePath);
@@ -87,6 +87,7 @@ class MarketplaceMappingGapsExportController extends Controller
             fclose($handle);
             $summary['download_url'] = url('/storage/'.$relativePath);
             $summary['csv_url'] = $summary['download_url'];
+            $summary['file_relative_path'] = $relativePath;
             $summary['file'] = $absolutePath;
         }
         $summary['test_limit_50_url'] = url('/admin/tools/marketplace/mapping-gaps-export?format=csv&limit=50');
