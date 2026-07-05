@@ -39,7 +39,11 @@ class JarekGearboxPublishRunnerTest extends TestCase
             ->assertSee('next_offset=${data.next_offset}', false)
             ->assertSee('raw_response_preview')
             ->assertSee('http_status=${res.status}', false)
+            ->assertSee("method:'GET'", false)
+            ->assertSee("'X-Requested-With':'XMLHttpRequest'", false)
+            ->assertSee("credentials:'same-origin'", false)
+            ->assertSee('CSRF/session expired or missing token. Refresh the page and start the runner again.')
             ->assertSee('startFromInput')
-            ->assertDontSee('offset:0,total:1507,processed:0,summary:{},last:[]};$('.log').textContent='';log('start')', false);
+            ->assertDontSee("offset:0,total:1507,processed:0,summary:{},last:[]};\$('.log').textContent='';log('start')", false);
     }
 }
