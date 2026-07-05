@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class MarketplaceMappingGapsExportControllerTest extends TestCase
@@ -51,10 +50,9 @@ class MarketplaceMappingGapsExportControllerTest extends TestCase
             ->assertJsonPath('scanned_count', 1);
     }
 
-    public function test_csv_export_writes_to_public_disk_and_returns_downloadable_public_url(): void
+    public function test_csv_export_writes_to_public_html_storage_and_returns_downloadable_public_url(): void
     {
         $this->withoutMiddleware();
-        Storage::fake('public');
 
         DB::table('parts')->insert([
             $this->partRow(1, 'ready', 1, true),
@@ -62,12 +60,15 @@ class MarketplaceMappingGapsExportControllerTest extends TestCase
 
         $response = $this->getJson('/admin/tools/marketplace/mapping-gaps-export?format=csv&limit=10')
             ->assertOk()
-            ->assertJsonPath('disk_used', 'public')
+            ->assertJsonPath('disk_used', 'public_html_storage')
+            ->assertJsonPath('storage_mode', 'public_html_storage')
             ->assertJsonPath('file_exists_on_disk', true)
             ->assertJsonPath('file_relative_path', fn (string $path) => str_starts_with($path, 'exports/tools/marketplace_mapping_gaps_'))
+            ->assertJsonPath('public_file_path', fn (string $path) => str_contains($path, '/public_html/storage/exports/tools/marketplace_mapping_gaps_'))
             ->assertJsonPath('csv_url', fn (string $url) => str_contains($url, '/storage/exports/tools/marketplace_mapping_gaps_'));
 
-        Storage::disk('public')->assertExists($response->json('file_relative_path'));
+        $this->assertFileExists($response->json('public_file_path'));
+        @unlink($response->json('public_file_path'));
     }
 
     private function partRow(int $id, string $status, int $quantity, bool $visible): array
