@@ -12,6 +12,7 @@ use Illuminate\Support\Arr;
 class OrderStatusMarketplaceSyncService
 {
     public const ACTION = 'order_status_sync';
+    public const CODE_VERSION = 'bad2699';
 
     public function sync(Order $order, ?string $previousStatus = null, ?int $retryOfLogId = null): MarketplaceSyncLog
     {
@@ -47,6 +48,7 @@ class OrderStatusMarketplaceSyncService
             'retry_of_log_id' => $retryOfLogId,
             'supported' => false,
             'dry_run' => true,
+            'order_status_sync_code_version' => self::CODE_VERSION,
             'local_status_raw_value' => $status,
             'local_status_ui_label' => \App\Services\Admin\OrderStatusOptions::optionsForOrder($order)[$status] ?? null,
             'mapper_class' => self::class,
@@ -112,6 +114,7 @@ class OrderStatusMarketplaceSyncService
             'tracking_number' => $order->shipments()->latest('id')->value('tracking_number'),
             'payload' => [
                 'order_status_sync' => true,
+                'order_status_sync_code_version' => self::CODE_VERSION,
                 'marketplace_order_id' => $order->marketplace_order_id,
                 'previous_local_status' => $plan['previous_local_status'] ?? null,
                 'new_local_status' => $plan['new_local_status'] ?? $order->status,
@@ -146,6 +149,7 @@ class OrderStatusMarketplaceSyncService
             'supported_marketplace_statuses' => $plan['supported_marketplace_statuses'] ?? null,
             'mapper_class' => $plan['mapper_class'] ?? self::class,
             'mapper_method' => $plan['mapper_method'] ?? 'plan',
+            'order_status_sync_code_version' => self::CODE_VERSION,
             'skipped_reason' => $skippedReason,
         ];
     }
@@ -163,6 +167,7 @@ class OrderStatusMarketplaceSyncService
             'marketplace_order_id' => $plan['marketplace_order_id'] ?? null,
             'mapper_class' => $plan['mapper_class'] ?? self::class,
             'mapper_method' => $plan['mapper_method'] ?? 'plan',
+            'order_status_sync_code_version' => self::CODE_VERSION,
             'available_map' => $plan['available_map'] ?? null,
             'target_marketplace_status' => $plan['target_marketplace_status'] ?? null,
             'skipped_reason' => $skippedReason,

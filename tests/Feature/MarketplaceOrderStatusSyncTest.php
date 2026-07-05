@@ -72,6 +72,9 @@ class MarketplaceOrderStatusSyncTest extends TestCase
         $this->assertSame('skipped', $log->status);
         $this->assertSame('unsupported_allegro_status', $log->message);
         $this->assertSame('on_hold', $log->payload['request_summary']['local_status']);
+        $this->assertSame('bad2699', $log->payload['order_status_sync_code_version']);
+        $this->assertSame('bad2699', $log->payload['request_summary']['order_status_sync_code_version']);
+        $this->assertSame('bad2699', $log->payload['response_summary']['order_status_sync_code_version']);
         $this->assertSame('unsupported_allegro_status', $log->payload['response_summary']['skipped_reason']);
     }
 
@@ -150,6 +153,7 @@ class MarketplaceOrderStatusSyncTest extends TestCase
         $log = MarketplaceSyncLog::query()->where('order_id', 135)->latest('id')->firstOrFail();
         $this->assertSame('success', $log->status);
         $this->assertSame('processing', $log->payload['local_status_raw_value']);
+        $this->assertSame('bad2699', $log->payload['order_status_sync_code_version']);
         $this->assertSame('W REALIZACJI', $log->payload['local_status_ui_label']);
         $this->assertSame('new', $log->payload['previous_local_status']);
         $this->assertSame('allegro', $log->payload['marketplace']);
