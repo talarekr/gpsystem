@@ -2,17 +2,67 @@
   const body = document.body;
   const toggle = document.querySelector('[data-gps-sidebar-toggle]');
   const storageKey = 'gps-admin-sidebar-collapsed';
+  const mobileQuery = window.matchMedia('(max-width: 1023px)');
+
+  const ensureMobileOverlay = () => {
+    let overlay = document.querySelector('[data-gps-mobile-sidebar-overlay]');
+
+    if (!overlay) {
+      overlay = document.createElement('button');
+      overlay.type = 'button';
+      overlay.className = 'gps-admin-mobile-sidebar-overlay';
+      overlay.dataset.gpsMobileSidebarOverlay = '';
+      overlay.setAttribute('aria-label', 'Zamknij menu boczne');
+      overlay.addEventListener('click', closeMobileSidebar);
+      document.body.appendChild(overlay);
+    }
+
+    return overlay;
+  };
+
+  const setMobileSidebarState = (open) => {
+    body.classList.toggle('gps-admin-mobile-sidebar-open', open);
+    toggle?.setAttribute('aria-expanded', open ? 'true' : 'false');
+    document.querySelector('.fi-sidebar')?.setAttribute('aria-hidden', open ? 'false' : 'true');
+  };
+
+  function closeMobileSidebar() {
+    setMobileSidebarState(false);
+    document.querySelector('.fi-sidebar-close-overlay-button')?.click();
+  }
+
+  const openMobileSidebar = () => {
+    ensureMobileOverlay();
+    setMobileSidebarState(true);
+    document.querySelector('.fi-sidebar-open-button')?.click();
+  };
+
+  const syncResponsiveSidebarState = () => {
+    if (mobileQuery.matches) {
+      body.classList.remove('gps-admin-sidebar-collapsed');
+      setMobileSidebarState(false);
+      return;
+    }
+
+    setMobileSidebarState(false);
+    applySidebarState(localStorage.getItem(storageKey) === '1');
+  };
 
   const applySidebarState = (collapsed) => {
     body.classList.toggle('gps-admin-sidebar-collapsed', collapsed);
     toggle?.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
   };
 
-  applySidebarState(localStorage.getItem(storageKey) === '1');
+  if (mobileQuery.matches) {
+    toggle?.setAttribute('aria-expanded', 'false');
+    document.querySelector('.fi-sidebar')?.setAttribute('aria-hidden', 'true');
+  } else {
+    applySidebarState(localStorage.getItem(storageKey) === '1');
+  }
 
   toggle?.addEventListener('click', () => {
-    if (window.matchMedia('(max-width: 1023px)').matches) {
-      document.querySelector('.fi-sidebar-open-button')?.click();
+    if (mobileQuery.matches) {
+      body.classList.contains('gps-admin-mobile-sidebar-open') ? closeMobileSidebar() : openMobileSidebar();
       return;
     }
 
@@ -20,6 +70,20 @@
     localStorage.setItem(storageKey, collapsed ? '1' : '0');
     applySidebarState(collapsed);
   });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && body.classList.contains('gps-admin-mobile-sidebar-open')) {
+      closeMobileSidebar();
+    }
+  });
+
+  document.querySelector('.fi-sidebar')?.addEventListener('click', (event) => {
+    if (mobileQuery.matches && event.target.closest('a[href]')) {
+      closeMobileSidebar();
+    }
+  });
+
+  mobileQuery.addEventListener?.('change', syncResponsiveSidebarState);
 
   const root = document.querySelector('[data-gps-part-search]');
   if (!root) return;

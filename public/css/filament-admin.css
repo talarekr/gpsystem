@@ -2508,3 +2508,52 @@ body:has(.gps-admin-topbar) .fi-no {
         max-height: min(42rem, calc(100dvh - 12rem)) !important;
     }
 }
+
+@media (max-width: 1023px) {
+    body:has(.gps-admin-topbar) .fi-sidebar {
+        left: 0 !important;
+        right: auto !important;
+        z-index: 80 !important;
+        width: min(var(--sidebar-width), 86vw) !important;
+        max-width: min(var(--sidebar-width), 86vw) !important;
+        transform: translateX(-100%) !important;
+        visibility: hidden;
+        pointer-events: none;
+        transition: transform 180ms ease, visibility 180ms ease;
+    }
+
+    body.gps-admin-mobile-sidebar-open:has(.gps-admin-topbar) .fi-sidebar {
+        transform: translateX(0) !important;
+        visibility: visible;
+        pointer-events: auto;
+    }
+
+    body:has(.gps-admin-topbar) .fi-sidebar-close-overlay,
+    body:has(.gps-admin-topbar) .fi-sidebar-close-overlay-button,
+    .gps-admin-mobile-sidebar-overlay {
+        position: fixed;
+        inset: var(--gps-admin-topbar-height) 0 0 0;
+        z-index: 70;
+        display: none;
+        border: 0;
+        background: rgba(15, 23, 42, 0.35);
+        padding: 0;
+        pointer-events: auto;
+    }
+
+    body.gps-admin-mobile-sidebar-open .gps-admin-mobile-sidebar-overlay,
+    body.gps-admin-mobile-sidebar-open:has(.gps-admin-topbar) .fi-sidebar-close-overlay,
+    body.gps-admin-mobile-sidebar-open:has(.gps-admin-topbar) .fi-sidebar-close-overlay-button {
+        display: block;
+    }
+
+    body.gps-admin-mobile-sidebar-open:has(.gps-admin-topbar) .fi-main-ctn,
+    body.gps-admin-mobile-sidebar-open:has(.gps-admin-topbar) .gps-admin-topbar {
+        pointer-events: auto;
+    }
+
+    body:has(.gps-admin-topbar) .fi-sidebar a,
+    body:has(.gps-admin-topbar) .fi-sidebar button {
+        pointer-events: auto;
+    }
+}
