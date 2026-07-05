@@ -413,7 +413,22 @@ body,
 .gps-admin-topbar__user { gap: 0.5rem; min-height: 2.5rem; max-width: 13rem; padding: 0.35rem 0.65rem 0.35rem 0.4rem; }
 .gps-admin-topbar__user span { display: inline-flex; width: 1.85rem; height: 1.85rem; align-items: center; justify-content: center; border-radius: 999px; background: var(--gps-admin-navy); color: #fff; font-size: 0.78rem; font-weight: 800; }
 .gps-admin-topbar__user strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.85rem; }
-.gps-admin-topbar__action strong { display: inline-flex; min-width: 0; height: auto; align-items: center; justify-content: center; border-radius: 0; background: transparent; color: var(--gps-admin-order-accent); padding: 0; font-size: 0.875rem; font-weight: 800; line-height: 1; }
+.gps-admin-topbar__action strong {
+    display: inline !important;
+    min-width: 0 !important;
+    width: auto !important;
+    height: auto !important;
+    align-items: initial !important;
+    justify-content: initial !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    color: var(--gps-admin-order-accent) !important;
+    padding: 0 !important;
+    font-size: inherit !important;
+    font-weight: 800;
+    line-height: inherit !important;
+}
 
 
 @media (min-width: 1024px) {
@@ -487,8 +502,22 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 .gps-shop-events__tabs { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem; }
 .gps-shop-events__tab { display: inline-flex; align-items: center; gap: .38rem; border: 1px solid #dbe3ee; border-radius: 999px; background: #f8fafc; color: #334155; padding: 0.42rem 0.68rem; font-size: 0.85rem; font-weight: 400; text-decoration: none; }
 .gps-shop-events__tab:hover, .gps-shop-events__tab.is-active { border-color: #405f82; background: #edf3f8; color: var(--gps-admin-navy); }
-.gps-shop-events__tab-count { display: inline-flex; min-width: 0; height: auto; align-items: center; padding: 0; color: var(--gps-admin-order-accent); font-size: .82rem; font-weight: 800; line-height: 1; }
-.gps-shop-events__tab-count--action { color: var(--gps-admin-order-accent); }
+.gps-shop-events__tab .gps-shop-events__tab-count {
+    display: inline !important;
+    min-width: 0 !important;
+    width: auto !important;
+    height: auto !important;
+    align-items: initial !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    padding: 0 !important;
+    color: var(--gps-admin-order-accent) !important;
+    font-size: inherit !important;
+    font-weight: 800;
+    line-height: inherit !important;
+}
+.gps-shop-events__tab .gps-shop-events__tab-count--action { color: var(--gps-admin-order-accent) !important; }
 
 .gps-shop-events__empty { margin-top: 1rem; border: 1px dashed #cbd5e1; border-radius: 0.95rem; background: #f8fafc; padding: 1.2rem; color: #64748b; font-weight: 700; text-align: center; }
 .gps-shop-events__list { display: grid; gap: 0.45rem; margin-top: 1rem; }
