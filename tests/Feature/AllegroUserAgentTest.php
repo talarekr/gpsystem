@@ -56,7 +56,13 @@ class AllegroUserAgentTest extends TestCase
 
     public function test_public_api_info_page_exists_for_user_agent_url(): void
     {
-        $this->get('/api-info')->assertOk()->assertSee('GPswiss/v1.0 (+https://gpswiss.pl/api-info)');
+        $this->get('/api-info')
+            ->assertOk()
+            ->assertSee('Integracja API GPSwiss')
+            ->assertSee('GPswiss/v1.0 (+https://gpswiss.pl/api-info)')
+            ->assertSee('gregor1142@gmail.com')
+            ->assertDontSee('client_secret')
+            ->assertDontSee('access_token');
     }
 
     private function account(array $credentials = []): MarketplaceAccount
