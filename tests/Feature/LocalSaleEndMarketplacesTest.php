@@ -118,6 +118,15 @@ class LocalSaleEndMarketplacesTest extends TestCase
         $this->assertSame('Sprzedaż lokalna', Part::saleSourceLabel($part->sale_source));
     }
 
+    public function test_sold_parts_source_labels_are_human_readable(): void
+    {
+        $this->assertSame('Ręczna zmiana stanu magazynowego', Part::saleSourceLabel('Manual_stock_change'));
+        $this->assertSame('Ręczna zmiana stanu magazynowego', Part::saleSourceLabel('manual_stock_change'));
+        $this->assertSame('Allegro', Part::saleSourceLabel('allegro'));
+        $this->assertSame('eBay', Part::saleSourceLabel('eBay'));
+        $this->assertSame('Ovoko', Part::saleSourceLabel('ovoko'));
+    }
+
     private function user(): User
     {
         return User::query()->create(['name' => 'Admin', 'email' => uniqid('admin').'@example.test', 'password' => 'secret']);

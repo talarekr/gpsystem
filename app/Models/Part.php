@@ -99,6 +99,7 @@ class Part extends Model
 
         return match ($normalized) {
             'local_sale', 'local sale', 'sprzedaż lokalna', 'sprzedaz lokalna' => 'Sprzedaż lokalna',
+            'manual_stock_change', 'manual stock change' => 'Ręczna zmiana stanu magazynowego',
             'allegro' => 'Allegro',
             'ovoko' => 'Ovoko',
             'ebay', 'ebay_de', 'ebay_pl' => 'eBay',
