@@ -150,6 +150,24 @@ class StorageLocationModuleFoundationTest extends TestCase
     }
 
 
+
+    public function test_storage_location_list_status_uses_plain_text_styles(): void
+    {
+        $this->actingAsWarehouseUser();
+
+        StorageLocation::query()->create(['name' => 'ACTIVE-1', 'is_active' => true]);
+        StorageLocation::query()->create(['name' => 'INACTIVE-1', 'is_active' => false]);
+
+        Livewire::test(ListStorageLocations::class)
+            ->assertSee('ACTIVE-1')
+            ->assertSee('INACTIVE-1')
+            ->assertSee('gps-status gps-ok', false)
+            ->assertSee('gps-status gps-no', false)
+            ->assertDontSee('gps-badge', false)
+            ->assertDontSee('background:#dcfce7', false)
+            ->assertDontSee('background:#fee2e2', false);
+    }
+
     public function test_import_source_description_is_hidden_in_storage_location_ui(): void
     {
         $this->actingAsWarehouseUser();
