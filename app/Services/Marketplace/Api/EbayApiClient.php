@@ -41,6 +41,30 @@ class EbayApiClient extends AbstractMarketplaceApiClient
         ];
     }
 
+    public function setInventoryQuantity(string $sku, int $quantity, ?string $offerId = null): array
+    {
+        $base = rtrim((string) $this->account?->api_base_url, '/');
+        $marketplaceId = $this->marketplaceId();
+        $headers = ['X-EBAY-C-MARKETPLACE-ID' => $marketplaceId];
+        $endpoint = $base.'/sell/inventory/v1/bulk_update_price_quantity';
+        $payload = ['requests' => [[
+            'sku' => $sku,
+            'shipToLocationAvailability' => ['quantity' => max(0, $quantity)],
+        ]]];
+        $response = $this->postWithAuthRetry($endpoint, $payload, $headers, 20);
+        $json = $response->json();
+        $body = is_array($json) ? $json : [];
+
+        return [
+            'ok' => $response->successful(),
+            'action' => 'ebay_set_inventory_quantity',
+            'http_status' => $response->status(),
+            'message' => $response->successful() ? 'eBay inventory quantity updated.' : 'eBay inventory quantity update failed.',
+            'request_summary' => ['endpoint' => 'POST /sell/inventory/v1/bulk_update_price_quantity', 'sku' => $sku, 'offer_id' => $offerId, 'quantity' => max(0, $quantity), 'marketplace_id' => $marketplaceId, 'out_of_stock_control_required' => true, 'no_withdraw_or_relist' => true],
+            'response_summary' => ['top_level_keys' => array_slice(array_keys($body), 0, 20), 'responses_count' => is_countable($body['responses'] ?? null) ? count($body['responses']) : null, 'errors_count' => is_countable($body['errors'] ?? null) ? count($body['errors']) : 0, 'warnings_count' => is_countable($body['warnings'] ?? null) ? count($body['warnings']) : 0],
+        ];
+    }
+
     public function readOnlyDiagnostics(): array
     {
         $token = $this->accessToken();

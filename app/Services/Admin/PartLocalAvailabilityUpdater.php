@@ -3,11 +3,16 @@
 namespace App\Services\Admin;
 
 use App\Models\Part;
+use App\Services\Marketplace\PartAvailabilityEventService;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
 class PartLocalAvailabilityUpdater
 {
+    public function __construct(private readonly PartAvailabilityEventService $availabilityEvents)
+    {
+    }
+
     /**
      * @return array{ok: bool, part_id: int, old_status: ?string, new_status: ?string, old_availability: ?string, new_availability: ?string}
      */
@@ -40,6 +45,11 @@ class PartLocalAvailabilityUpdater
 
             $locked->save();
             $fresh = $locked->fresh();
+
+            if ($oldAvailability !== $fresh?->adminLocalAvailability()) {
+                $event = ['source_channel' => 'manual_stock_change', 'part_id' => $locked->id, 'reason' => 'admin_local_availability_toggle'];
+                (string) $availabilityFlag === '0' ? $this->availabilityEvents->sold($event) : $this->availabilityEvents->restored($event);
+            }
 
             return [
                 'ok' => true,

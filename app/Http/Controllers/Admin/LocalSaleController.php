@@ -6,7 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\LocalSale;
 use App\Models\Part;
 use App\Models\ShopEvent;
-use App\Services\Marketplace\LocalSaleEndMarketplacesService;
+use App\Services\Marketplace\PartAvailabilityEventService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -14,7 +14,7 @@ use Illuminate\Validation\ValidationException;
 
 class LocalSaleController extends Controller
 {
-    public function store(Request $request, LocalSaleEndMarketplacesService $marketplaceService): JsonResponse
+    public function store(Request $request, PartAvailabilityEventService $availabilityEvents): JsonResponse
     {
         $data = $request->validate([
             'part_id' => ['required', 'integer', 'exists:parts,id'],
@@ -63,7 +63,6 @@ class LocalSaleController extends Controller
 
                 $part->save();
 
-                // TODO: Przyszła integracja marketplace zdejmie oferty na podstawie local_sales.marketplace_sync_status = pending albo zmian Part quantity/status.
                 $localSale = LocalSale::query()->create([
                     'part_id' => $part->id,
                     'part_snapshot' => $partSnapshot,
@@ -121,7 +120,11 @@ class LocalSaleController extends Controller
             return response()->json(['message' => 'Nie udało się zapisać sprzedaży lokalnej.'], 500);
         }
 
-        $marketplaceSummary = $marketplaceService->apply($localSale->part()->firstOrFail());
+        $marketplaceSummary = $availabilityEvents->sold([
+            'source_channel' => 'local_sale',
+            'part_id' => $localSale->part_id,
+            'source_local_sale_id' => $localSale->id,
+        ]);
 
         return response()->json([
             'message' => 'Sprzedaż lokalna została zapisana, a część zdjęta ze stanu.',

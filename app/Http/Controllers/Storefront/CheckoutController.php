@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Storefront;
 
 use App\Http\Controllers\Controller;
 use App\Models\Order;
+use App\Services\Marketplace\PartAvailabilityEventService;
 use App\Services\Storefront\CartService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -13,7 +14,7 @@ use Illuminate\View\View;
 
 class CheckoutController extends Controller
 {
-    public function __construct(private readonly CartService $cart)
+    public function __construct(private readonly CartService $cart, private readonly PartAvailabilityEventService $availabilityEvents)
     {
     }
 
@@ -83,6 +84,18 @@ class CheckoutController extends Controller
 
             return $order;
         });
+
+        $order->load('items');
+        foreach ($order->items as $item) {
+            if ($item->part_id) {
+                $this->availabilityEvents->sold([
+                    'source_channel' => 'storefront',
+                    'part_id' => $item->part_id,
+                    'source_order_id' => (string) $order->id,
+                    'source_order_item_id' => (string) $item->id,
+                ]);
+            }
+        }
 
         $this->cart->clear();
 
