@@ -34,6 +34,41 @@ class MarketplaceOrderStatusSyncTest extends TestCase
     }
 
 
+
+    public function test_production_payload_39372_allegro_processing_is_supported_and_puts_fulfillment(): void
+    {
+        Http::fake(['https://allegro.test/*' => Http::response(['status' => 'PROCESSING'], 200, ['trace-id' => 'trace-39372'])]);
+        MarketplaceAccount::query()->create(['marketplace' => 'allegro', 'code' => 'allegro_main', 'name' => 'Allegro', 'api_enabled' => true, 'api_base_url' => 'https://allegro.test', 'api_mode' => 'live', 'api_credentials' => ['access_token' => 'token']]);
+        $order = Order::query()->create([
+            'order_number' => '39372',
+            'marketplace' => 'allegro',
+            'marketplace_order_id' => 'f2f054f0-7866-11f1-b5bc-398519c00320',
+            'status' => 'processing',
+        ]);
+
+        $plan = app(\App\Services\Marketplace\OrderStatusMarketplaceSyncService::class)->plan($order, 'new');
+
+        $this->assertSame('PROCESSING', $plan['target_marketplace_status']);
+        $this->assertTrue($plan['supported']);
+        $this->assertNull($plan['skipped_reason']);
+
+        app(\App\Services\Marketplace\OrderStatusMarketplaceSyncService::class)->sync($order, 'new');
+
+        Http::assertSent(fn ($request) => $request->method() === 'PUT'
+            && str_contains($request->url(), '/order/checkout-forms/f2f054f0-7866-11f1-b5bc-398519c00320/fulfillment')
+            && $request['status'] === 'PROCESSING');
+        $this->assertDatabaseMissing('marketplace_sync_logs', ['order_id' => $order->id, 'status' => 'skipped', 'message' => 'unsupported_status_for_marketplace']);
+
+        $log = MarketplaceSyncLog::query()->where('order_id', $order->id)->latest('id')->firstOrFail();
+        $this->assertSame('success', $log->status);
+        $this->assertSame('PROCESSING', $log->payload['target_marketplace_status']);
+        $this->assertTrue($log->payload['mapping_supported']);
+        $this->assertSame('PUT', $log->payload['request_summary']['method']);
+        $this->assertSame(['status' => 'PROCESSING'], $log->payload['request_summary']['payload']);
+        $this->assertSame(200, $log->payload['response_summary']['http_status']);
+        $this->assertSame(['status' => 'PROCESSING'], $log->payload['response_summary']['body']);
+    }
+
     public function test_allegro_supported_fulfillment_statuses_are_sent_to_allegro_only(): void
     {
         Http::fake(['https://allegro.test/*' => Http::response([], 204)]);
