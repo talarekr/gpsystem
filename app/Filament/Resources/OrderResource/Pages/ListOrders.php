@@ -11,6 +11,7 @@ use Filament\Support\Enums\MaxWidth;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Request;
 use Livewire\Attributes\Url;
 use Livewire\WithPagination;
 
@@ -40,7 +41,25 @@ class ListOrders extends Page
     #[Url(as: 'sort')]
     public string $sortDirection = 'desc';
 
+    #[Url(as: 'per_page')]
     public int $perPage = 10;
+
+    public array $perPageOptions = [10 => '10', 30 => '30', 50 => '50', 100 => '100'];
+
+    public function mount(): void
+    {
+        $requestedPerPage = $this->requestedPerPage();
+
+        if ($requestedPerPage !== null) {
+            $this->perPage = $requestedPerPage;
+
+            return;
+        }
+
+        if ($this->status === 'new') {
+            $this->perPage = 30;
+        }
+    }
 
     public function getTitle(): string|Htmlable
     {
@@ -113,7 +132,31 @@ class ListOrders extends Page
 
     public function getOrdersProperty(): LengthAwarePaginator
     {
-        return $this->getOrdersQuery()->paginate($this->perPage);
+        return $this->getOrdersQuery()->paginate($this->normalizedPerPage())->withQueryString();
+    }
+
+    protected function normalizedPerPage(): int
+    {
+        $perPage = (int) $this->perPage;
+
+        if (! array_key_exists($perPage, $this->perPageOptions)) {
+            return 10;
+        }
+
+        return $perPage;
+    }
+
+    protected function requestedPerPage(): ?int
+    {
+        foreach (['per_page', 'perPage', 'limit', 'pageSize', 'page_size'] as $parameter) {
+            $value = Request::query($parameter);
+
+            if ($value !== null && array_key_exists((int) $value, $this->perPageOptions)) {
+                return (int) $value;
+            }
+        }
+
+        return null;
     }
 
     protected function getOrdersQuery(): Builder
