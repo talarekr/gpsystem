@@ -26,6 +26,7 @@ class MarketplaceMappingGapsExportController extends Controller
         $limit = max(0, (int) $request->integer('limit', 0));
         $status = trim((string) $request->query('status', ''));
         $format = strtolower((string) $request->query('format', 'json'));
+        $visibleOnly = $request->boolean('visible_only');
 
         Storage::disk('local')->makeDirectory('exports/tools');
         $relativePath = 'exports/tools/marketplace_mapping_gaps_'.now()->format('Ymd_His').'.csv';
@@ -36,12 +37,20 @@ class MarketplaceMappingGapsExportController extends Controller
         }
         if ($handle !== false) fputcsv($handle, self::HEADER);
 
-        $summary = ['ok' => true, 'scanned_count' => 0, 'rows_count' => 0, 'missing_ovoko_count' => 0, 'missing_allegro_count' => 0, 'missing_both_count' => 0, 'preview' => []];
+        $summary = ['ok' => true, 'candidate_ready_count' => 0, 'visible_ready_count' => 0, 'visible_only' => $visibleOnly, 'scanned_count' => 0, 'rows_count' => 0, 'missing_ovoko_count' => 0, 'missing_allegro_count' => 0, 'missing_both_count' => 0, 'preview' => []];
         $columns = $this->partColumns();
         $processed = 0;
 
+        $candidateQuery = DB::table('parts');
+        $this->applyForSaleScope($candidateQuery, $status, false);
+        $summary['candidate_ready_count'] = (int) $candidateQuery->count();
+
+        $visibleQuery = DB::table('parts');
+        $this->applyForSaleScope($visibleQuery, $status, true);
+        $summary['visible_ready_count'] = (int) $visibleQuery->count();
+
         $query = DB::table('parts')->select(array_values($columns))->orderBy('id');
-        $this->applyForSaleScope($query, $status);
+        $this->applyForSaleScope($query, $status, $visibleOnly);
 
         $query->chunkById(500, function ($parts) use (&$summary, &$processed, $limit, $handle, $ovokoExtractor, $allegroExtractor): bool {
             $ids = $parts->pluck('id')->map(fn ($id) => (int) $id)->all();
@@ -82,16 +91,17 @@ class MarketplaceMappingGapsExportController extends Controller
         }
         $summary['test_limit_50_url'] = url('/admin/tools/marketplace/mapping-gaps-export?format=csv&limit=50');
         $summary['full_export_csv_url'] = url('/admin/tools/marketplace/mapping-gaps-export?format=csv');
+        $summary['full_export_visible_only_csv_url'] = url('/admin/tools/marketplace/mapping-gaps-export?format=csv&visible_only=1');
 
         return response()->json($summary);
     }
 
-    private function applyForSaleScope($query, string $status): void
+    private function applyForSaleScope($query, string $status, bool $visibleOnly = false): void
     {
         if ($status !== '' && $status !== 'all') $query->where('status', $status);
         else $query->whereIn('status', ['ready', 'published']);
         if (Schema::hasColumn('parts', 'quantity')) $query->where('quantity', '>', 0);
-        if (Schema::hasColumn('parts', 'is_visible_storefront')) $query->where('is_visible_storefront', true);
+        if ($visibleOnly && Schema::hasColumn('parts', 'is_visible_storefront')) $query->where('is_visible_storefront', true);
     }
 
     private function partColumns(): array
