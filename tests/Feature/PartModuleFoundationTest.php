@@ -912,6 +912,78 @@ class PartModuleFoundationTest extends TestCase
         $this->assertNull(PartResource::getNavigationIcon());
     }
 
+
+    public function test_local_sale_search_does_not_return_sold_part_with_zero_quantity(): void
+    {
+        $this->actingAsWarehouseUser();
+
+        $sold = Part::query()->create([
+            'name' => 'Troc sprzedany',
+            'sku' => 'TROC-SOLD',
+            'part_number' => 'TROC-0',
+            'status' => 'sold',
+            'quantity' => 0,
+        ]);
+
+        $this->getJson(route('admin.search.parts', ['q' => 'troc']))
+            ->assertOk()
+            ->assertJsonMissing(['id' => $sold->id])
+            ->assertJsonCount(0, 'data');
+    }
+
+    public function test_local_sale_search_returns_ready_part_with_positive_quantity(): void
+    {
+        $this->actingAsWarehouseUser();
+
+        $available = Part::query()->create([
+            'name' => 'Troc dostępny',
+            'sku' => 'TROC-READY',
+            'part_number' => 'TROC-1',
+            'status' => 'ready',
+            'quantity' => 2,
+            'price' => 123.45,
+        ]);
+
+        Part::query()->create([
+            'name' => 'Troc szkic',
+            'sku' => 'TROC-DRAFT',
+            'status' => 'draft',
+            'quantity' => 5,
+        ]);
+
+        $this->getJson(route('admin.search.parts', ['q' => 'troc']))
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $available->id)
+            ->assertJsonPath('data.0.status_value', 'ready')
+            ->assertJsonPath('data.0.quantity', 2)
+            ->assertJsonCount(1, 'data');
+    }
+
+    public function test_local_sale_store_rejects_unavailable_sold_part(): void
+    {
+        $this->actingAsWarehouseUser();
+
+        $sold = Part::query()->create([
+            'name' => 'Troc sprzedany lokalnie',
+            'sku' => 'TROC-LOCAL-SOLD',
+            'status' => 'sold',
+            'quantity' => 0,
+        ]);
+
+        $this->postJson(route('admin.local-sales.store'), [
+            'part_id' => $sold->id,
+            'amount' => 100,
+            'payment_method' => 'cash',
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('part_id')
+            ->assertJsonPath('errors.part_id.0', 'Ta część nie jest dostępna do sprzedaży.');
+
+        $this->assertDatabaseMissing('local_sales', ['part_id' => $sold->id]);
+        $this->assertSame('sold', $sold->fresh()->status);
+        $this->assertSame(0, (int) $sold->fresh()->quantity);
+    }
+
     private function actingAsWarehouseUser(): User
     {
         $this->seed(RoleSeeder::class);

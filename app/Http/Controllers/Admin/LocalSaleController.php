@@ -31,7 +31,7 @@ class LocalSaleController extends Controller
                 /** @var Part|null $part */
                 $part = Part::query()->whereKey($data['part_id'])->lockForUpdate()->first();
 
-                if (! $part || in_array($part->status, ['sold', 'archived'], true) || (int) $part->quantity <= 0) {
+                if (! $part || ! $part->isAvailableForLocalSale()) {
                     throw ValidationException::withMessages([
                         'part_id' => 'Ta część nie jest dostępna do sprzedaży.',
                     ]);

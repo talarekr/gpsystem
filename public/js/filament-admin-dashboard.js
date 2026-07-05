@@ -101,8 +101,7 @@
 
         function renderPart(part) {
             const img = part.image || part.thumbnail;
-            const unavailable = ['sold', 'archived'].includes(part.status_value) || Number(part.quantity) <= 0;
-            return '<button type="button" class="gps-local-sale-result" data-part-id="' + part.id + '"' + (unavailable ? ' data-unavailable="1"' : '') + '>' +
+            return '<button type="button" class="gps-local-sale-result" data-part-id="' + part.id + '">' +
                 (img ? '<img src="' + img + '" alt="">' : '<span class="gps-local-sale-result__placeholder">GPS</span>') +
                 '<span class="gps-local-sale-result__main"><strong>' + (part.name || 'Bez nazwy') + '</strong>' +
                 '<small>SKU: ' + (part.sku || '—') + ' / nr: ' + (part.part_number || '—') + '</small></span>' +

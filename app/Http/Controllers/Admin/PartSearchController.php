@@ -19,6 +19,7 @@ class PartSearchController extends Controller
         }
 
         $parts = Part::query()
+            ->availableForLocalSale()
             ->with('images')
             ->where(function ($builder) use ($query): void {
                 foreach (['sku', 'name', 'part_number', 'oem_number', 'manufacturer_code'] as $column) {
