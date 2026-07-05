@@ -70,46 +70,78 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
 
     public function endOffer(string $offerId): array
     {
-        $endpoint = rtrim((string) $this->account?->api_base_url, '/').'/sale/product-offers/'.rawurlencode($offerId);
-        $payload = ['publication' => ['status' => 'ENDED']];
-        $response = Http::withToken((string) $this->credentials()['access_token'])
-            ->accept('application/vnd.allegro.public.v1+json')
-            ->asJson()
-            ->timeout(20)
-            ->patch($endpoint, $payload);
-        $json = $response->json();
-        $body = is_array($json) ? $json : [];
-
-        return [
-            'ok' => $response->successful(),
-            'http_status' => $response->status(),
-            'action' => 'allegro_end_offer',
-            'message' => $response->successful() ? 'Allegro offer ended.' : 'Allegro end offer failed.',
-            'request_summary' => ['endpoint' => 'PATCH /sale/product-offers/{offerId}', 'offer_id' => $offerId, 'publication.status' => 'ENDED'],
-            'response_summary' => ['top_level_keys' => array_slice(array_keys($body), 0, 20), 'status' => $body['publication']['status'] ?? $body['status'] ?? null],
-        ];
+        return $this->patchOfferPublicationStatus($offerId, 'ENDED', 'allegro_end_offer', 'Allegro offer ended.', 'Allegro end offer failed.');
     }
 
     public function activateOffer(string $offerId): array
     {
-        $endpoint = rtrim((string) $this->account?->api_base_url, '/').'/sale/product-offers/'.rawurlencode($offerId);
-        $payload = ['publication' => ['status' => 'ACTIVE']];
-        $response = Http::withToken((string) $this->credentials()['access_token'])
-            ->accept('application/vnd.allegro.public.v1+json')
-            ->asJson()
-            ->timeout(20)
-            ->patch($endpoint, $payload);
-        $json = $response->json();
-        $body = is_array($json) ? $json : [];
+        return $this->patchOfferPublicationStatus($offerId, 'ACTIVE', 'allegro_activate_offer', 'Allegro offer activated.', 'Allegro activate offer failed.');
+    }
 
-        return [
-            'ok' => $response->successful(),
-            'action' => 'allegro_activate_offer',
-            'http_status' => $response->status(),
-            'message' => $response->successful() ? 'Allegro offer activated.' : 'Allegro activate offer failed.',
-            'request_summary' => ['endpoint' => 'PATCH /sale/product-offers/{offerId}', 'offer_id' => $offerId, 'publication.status' => 'ACTIVE'],
-            'response_summary' => ['top_level_keys' => array_slice(array_keys($body), 0, 20), 'status' => $body['publication']['status'] ?? $body['status'] ?? null],
+    private function patchOfferPublicationStatus(string $offerId, string $publicationStatus, string $action, string $successMessage, string $failureMessage): array
+    {
+        $mediaType = 'application/vnd.allegro.public.v1+json';
+        $path = '/sale/product-offers/'.rawurlencode($offerId);
+        $endpoint = rtrim((string) $this->account?->api_base_url, '/').$path;
+        $payload = ['publication' => ['status' => $publicationStatus]];
+        $requestSummary = [
+            'method' => 'PATCH',
+            'endpoint' => 'PATCH /sale/product-offers/{offerId}',
+            'url' => $endpoint,
+            'offer_id' => $offerId,
+            'headers' => [
+                'Accept' => $mediaType,
+                'Content-Type' => $mediaType,
+                'Authorization' => 'Bearer ***',
+            ],
+            'payload' => $payload,
         ];
+
+        try {
+            $response = Http::withToken((string) $this->credentials()['access_token'])
+                ->withHeaders([
+                    'Accept' => $mediaType,
+                    'Content-Type' => $mediaType,
+                ])
+                ->timeout(20)
+                ->patch($endpoint, $payload);
+            $json = $response->json();
+            $body = is_array($json) ? $json : [];
+            $bodyText = $body === [] ? $response->body() : null;
+
+            return [
+                'ok' => $response->successful(),
+                'http_status' => $response->status(),
+                'action' => $action,
+                'message' => $response->successful() ? $successMessage : $failureMessage,
+                'request_summary' => $requestSummary,
+                'response_summary' => $this->allegroOfferPatchResponseSummary($body, $bodyText, $response->header('trace-id') ?: $response->header('x-request-id')),
+            ];
+        } catch (\Throwable $exception) {
+            return [
+                'ok' => false,
+                'http_status' => null,
+                'action' => $action,
+                'message' => $failureMessage,
+                'request_summary' => $requestSummary,
+                'response_summary' => [
+                    'error_class' => $exception::class,
+                    'error_message_safe' => $exception->getMessage(),
+                ],
+            ];
+        }
+    }
+
+    private function allegroOfferPatchResponseSummary(array $body, ?string $bodyText, ?string $requestId): array
+    {
+        return array_filter([
+            'top_level_keys' => array_slice(array_keys($body), 0, 20),
+            'status' => $body['publication']['status'] ?? $body['status'] ?? null,
+            'errors' => $body['errors'] ?? null,
+            'message' => $body['message'] ?? $body['error_description'] ?? $body['error'] ?? null,
+            'body' => $body !== [] ? $body : ($bodyText !== null ? mb_substr($bodyText, 0, 2000) : null),
+            'request_id' => $requestId,
+        ], fn ($value) => $value !== null && $value !== []);
     }
 
     /**
