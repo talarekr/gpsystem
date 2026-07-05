@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use App\Models\MarketplaceAccount;
+use App\Models\Order;
+use App\Services\Marketplace\MarketplaceOrdersImportService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -147,6 +149,64 @@ class ImportMarketplaceOrdersControllerTest extends TestCase
         $this->assertDatabaseCount('orders', 0);
     }
 
+
+    public function test_ovoko_reimport_updates_marketplace_fields_without_overwriting_manual_local_status(): void
+    {
+        $this->createOvokoAccount();
+
+        Http::fake([
+            'ovoko.example.test/v2/get/orders/2026-07-01/2026-07-01' => Http::response([
+                'status_code' => 'R200',
+                'msg' => 'OK',
+                'list' => [$this->ovokoOrderPayload('new', 'Buyer Initial', '125.00')],
+            ], 200),
+        ]);
+
+        $first = app(MarketplaceOrdersImportService::class)->run([
+            'marketplace' => 'ovoko',
+            'dry_run' => false,
+            'live_import' => true,
+            'date_from' => '2026-07-01',
+            'date_to' => '2026-07-01',
+        ]);
+
+        $this->assertSame(1, $first['orders_created']);
+        $this->assertSame(0, $first['orders_updated']);
+
+        $order = Order::query()->where('marketplace', 'ovoko')->where('marketplace_order_id', 'OVO-REG-1')->firstOrFail();
+        $this->assertSame('new', $order->status);
+        $this->assertSame('new', $order->marketplace_status);
+
+        $order->forceFill(['status' => 'shipped'])->save();
+
+        Http::fake([
+            'ovoko.example.test/v2/get/orders/2026-07-01/2026-07-01' => Http::response([
+                'status_code' => 'R200',
+                'msg' => 'OK',
+                'list' => [$this->ovokoOrderPayload('new', 'Buyer Updated', '175.00')],
+            ], 200),
+        ]);
+
+        $second = app(MarketplaceOrdersImportService::class)->run([
+            'marketplace' => 'ovoko',
+            'dry_run' => false,
+            'live_import' => true,
+            'date_from' => '2026-07-01',
+            'date_to' => '2026-07-01',
+        ]);
+
+        $this->assertSame(0, $second['orders_created']);
+        $this->assertSame(1, $second['orders_updated']);
+        $this->assertDatabaseCount('orders', 1);
+        $this->assertDatabaseCount('order_items', 1);
+
+        $order->refresh();
+        $this->assertSame('shipped', $order->status);
+        $this->assertSame('new', $order->marketplace_status);
+        $this->assertSame('Buyer Updated', $order->customer_name);
+        $this->assertSame('175.00', $order->total);
+    }
+
     public function test_ebay_de_and_fr_order_import_is_normalized_to_single_ebay_feed(): void
     {
         Http::fake([
@@ -181,6 +241,31 @@ class ImportMarketplaceOrdersControllerTest extends TestCase
 
         Http::assertSentCount(2);
         $this->assertDatabaseCount('orders', 0);
+    }
+
+
+    private function ovokoOrderPayload(string $status, string $buyerName, string $total): array
+    {
+        return [
+            'order_id' => 'OVO-REG-1',
+            'order_status' => $status,
+            'order_date' => '2026-07-01 10:00:00',
+            'client_name' => $buyerName,
+            'client_email' => 'buyer@example.test',
+            'client_phone' => '123456789',
+            'client_address' => 'Main 1',
+            'client_postcode' => '00-001',
+            'client_city' => 'Warsaw',
+            'client_country' => 'PL',
+            'total_price' => ['seller' => ['amount' => $total, 'currency' => 'PLN']],
+            'shipping_price' => ['seller' => ['amount' => '25.00', 'currency' => 'PLN']],
+            'item_list' => [[
+                'item_id' => 'OVO-ITEM-1',
+                'title' => 'Ovoko part',
+                'quantity' => 1,
+                'sell_price' => ['seller' => ['amount' => '150.00', 'currency' => 'PLN']],
+            ]],
+        ];
     }
 
     private function createOvokoAccount(): void

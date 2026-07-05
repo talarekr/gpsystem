@@ -125,7 +125,7 @@ class OvokoOrdersImportDryRunService
         $summary = $this->summarizeImport($orders);
 
         Log::info('Ovoko orders import dry-run completed.', Arr::only($summary, [
-            'orders_count', 'order_items_count', 'existing_orders_count', 'would_create_orders_count', 'would_create_order_items_count', 'would_mark_sold_count',
+            'orders_count', 'order_items_count', 'existing_orders_count', 'would_create_orders_count', 'would_create_order_items_count', 'would_skip_existing_orders_count', 'would_mark_sold_count',
         ]) + ['from' => $from, 'to' => $to, 'truncated' => $truncated]);
 
         return array_merge($base, $summary, [
@@ -346,16 +346,12 @@ class OvokoOrdersImportDryRunService
     private function findExistingOrder(?string $ovokoOrderId): ?object
     {
         if (! $ovokoOrderId || ! Schema::hasTable('orders')) return null;
-        $query = DB::table('orders')->select('id');
-        if (Schema::hasColumn('orders', 'external_order_id')) {
-            $query->where('external_order_id', $ovokoOrderId);
-        } else {
-            $query->where(function ($q) use ($ovokoOrderId): void {
-                $q->where('meta->ovoko_order_id', $ovokoOrderId)
-                    ->orWhere('meta->external_order_id', $ovokoOrderId);
-            })->where('meta->source', 'ovoko');
-        }
-        return $query->first();
+
+        return DB::table('orders')
+            ->select('id')
+            ->where('marketplace', 'ovoko')
+            ->where('marketplace_order_id', $ovokoOrderId)
+            ->first();
     }
 
     private function orderImportSample(array $order, ?int $existingOrderId): array
