@@ -106,19 +106,24 @@
       return;
     }
 
-    results.innerHTML = items.map((item) => `
-      <a class="gps-admin-search__result" href="${item.url}">
-        <span class="gps-admin-search__thumb">${item.thumbnail ? `<img src="${item.thumbnail}" alt="">` : '—'}</span>
-        <span class="gps-admin-search__meta">
-          <strong>${escapeHtml(item.name || 'Część #' + item.id)}</strong>
-          <small>${escapeHtml([item.sku, item.part_number].filter(Boolean).join(' · ') || 'Brak numeru')}</small>
-        </span>
-        <span class="gps-admin-search__side">
-          <small>${escapeHtml(item.price || '')}</small>
-          <em>${escapeHtml(item.status || '')}</em>
-        </span>
-      </a>
-    `).join('');
+    results.innerHTML = items.map((item) => {
+      const location = item.storage_location || 'Brak lokalizacji';
+      const details = ['Magazyn: ' + location, item.part_number || '—'].filter(Boolean).join(' · ');
+
+      return `
+        <a class="gps-admin-search__result" href="${item.url}">
+          <span class="gps-admin-search__thumb">${item.thumbnail ? `<img src="${item.thumbnail}" alt="">` : '—'}</span>
+          <span class="gps-admin-search__meta">
+            <span class="gps-admin-search__title">${escapeHtml(item.name || 'Część #' + item.id)}</span>
+            <small>${escapeHtml(details)}</small>
+          </span>
+          <span class="gps-admin-search__side">
+            <span class="gps-admin-search__price">${escapeHtml(item.price || '')}</span>
+            <span class="gps-admin-search__status">${escapeHtml(item.status || '')}</span>
+          </span>
+        </a>
+      `;
+    }).join('');
     results.hidden = false;
   };
 

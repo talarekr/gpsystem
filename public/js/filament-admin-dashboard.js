@@ -101,12 +101,21 @@
 
         function renderPart(part) {
             const img = part.image || part.thumbnail;
+            const location = part.storage_location || 'Brak lokalizacji';
+            const details = ['Magazyn: ' + location, part.part_number || '—'].filter(Boolean).join(' · ');
+
             return '<button type="button" class="gps-local-sale-result" data-part-id="' + part.id + '">' +
-                (img ? '<img src="' + img + '" alt="">' : '<span class="gps-local-sale-result__placeholder">GPS</span>') +
-                '<span class="gps-local-sale-result__main"><strong>' + (part.name || 'Bez nazwy') + '</strong>' +
-                '<small>SKU: ' + (part.sku || '—') + ' / nr: ' + (part.part_number || '—') + '</small></span>' +
-                '<span class="gps-local-sale-result__meta"><b>' + (part.price || 'brak ceny') + '</b><small>Status: ' + (part.status || '—') + '</small><small>Ilość: ' + (part.quantity ?? '—') + '</small></span>' +
+                (img ? '<img src="' + escapeHtml(img) + '" alt="">' : '<span class="gps-local-sale-result__placeholder">GPS</span>') +
+                '<span class="gps-local-sale-result__main"><span class="gps-local-sale-result__title">' + escapeHtml(part.name || 'Bez nazwy') + '</span>' +
+                '<small>' + escapeHtml(details) + '</small></span>' +
+                '<span class="gps-local-sale-result__meta"><span class="gps-local-sale-result__price">' + escapeHtml(part.price || 'brak ceny') + '</span><span class="gps-local-sale-result__status">' + escapeHtml(part.status || '—') + '</span></span>' +
                 '</button>';
+        }
+
+        function escapeHtml(value) {
+            return String(value).replace(/[&<>'"]/g, (char) => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#039;', '"': '&quot;'
+            }[char]));
         }
 
         function selectPart(part) {

@@ -20,7 +20,7 @@ class PartSearchController extends Controller
 
         $parts = Part::query()
             ->availableForLocalSale()
-            ->with('images')
+            ->with(['images', 'storageLocation'])
             ->where(function ($builder) use ($query): void {
                 foreach (['sku', 'name', 'part_number', 'oem_number', 'manufacturer_code'] as $column) {
                     $builder->orWhere($column, 'like', '%'.$query.'%');
@@ -36,6 +36,7 @@ class PartSearchController extends Controller
                 'name' => $part->name,
                 'sku' => $part->sku,
                 'part_number' => $part->part_number,
+                'storage_location' => $part->storageLocation?->name,
                 'price' => $part->price !== null ? number_format((float) $part->price, 2, ',', ' ').' '.($part->currency ?: 'PLN') : null,
                 'price_value' => $part->price !== null ? (float) $part->price : null,
                 'currency' => $part->currency ?: 'PLN',
