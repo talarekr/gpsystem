@@ -76,7 +76,7 @@ class FailedMarketplaceAvailabilityActionRetryService
         if (! $listing) return $plan + ['blocker' => 'Marketplace listing is missing.'];
         if (blank($externalId)) return $plan + ['blocker' => 'External marketplace ID is missing.'];
 
-        return $plan + ['retryable' => true, 'blocker' => null];
+        return array_merge($plan, ['retryable' => true, 'blocker' => null]);
     }
 
     private function writeRetryLog(MarketplaceSyncLog $failedLog, array $plan, array $result, string $status): array
