@@ -32,6 +32,8 @@ class JarekGearboxToolController extends Controller
     private const JAREK_PREVIEW_MAX_IMAGE_DIAGNOSTIC_RECORDS = 10;
     private const JAREK_PREVIEW_MAX_STORAGE_CANDIDATE_PATHS_PER_RECORD = 20;
     private const JAREK_PREVIEW_MAX_FILE_EXISTS_CHECKS = 100;
+    private const JAREK_READY_REMAINING_SCAN_LIMIT = 100;
+    private const JAREK_READY_REMAINING_MAX_PAGES = 10;
 
     private int $jarekImageFileExistsChecks = 0;
     private bool $jarekImageFileExistsBudgetExceeded = false;
@@ -245,6 +247,8 @@ class JarekGearboxToolController extends Controller
         $confirm = (string) $request->input('confirm', $request->query('confirm', ''));
         $base = [
             'ok' => true,
+            'dry_run' => false,
+            'read_only' => false,
             'marketplace_write' => false,
             'applied' => false,
             'offset' => $offset,
@@ -308,6 +312,8 @@ class JarekGearboxToolController extends Controller
             }
 
             $base['ok'] = false;
+            $base['dry_run'] = true;
+            $base['read_only'] = true;
             $base['marketplace_write'] = $this->jarekPublishRunnerMarketplaceWriteStarted;
             $base['applied'] = false;
             $base['error'] = $e->getMessage();
@@ -351,9 +357,11 @@ class JarekGearboxToolController extends Controller
     {
         $remaining = 0;
         $scanOffset = 0;
-        $scanLimit = 100;
+        $scanLimit = self::JAREK_READY_REMAINING_SCAN_LIMIT;
+        $scannedPages = 0;
 
         do {
+            $scannedPages++;
             $previewRequest = Request::create($request->path(), 'GET', [
                 'offset' => $scanOffset,
                 'limit' => $scanLimit,
@@ -362,12 +370,16 @@ class JarekGearboxToolController extends Controller
                 '_skip_ready_remaining_count' => '1',
             ]);
             $preview = $this->ebayDeBulkPreparePublishPreview($previewRequest, $translateService, $renderer, $exchangeRateService)->getData(true);
+            if (! ($preview['ok'] ?? false)) {
+                break;
+            }
+
             $remaining += (int) data_get($preview, 'summary.ready_to_publish_count', 0);
             $hasMore = (bool) data_get($preview, 'summary.has_more', false);
             $nextOffset = (int) data_get($preview, 'summary.next_offset', $scanOffset + $scanLimit);
             if ($nextOffset <= $scanOffset) break;
             $scanOffset = $nextOffset;
-        } while ($hasMore);
+        } while ($hasMore && $scannedPages < self::JAREK_READY_REMAINING_MAX_PAGES);
 
         return $remaining;
     }
