@@ -14,6 +14,7 @@ use App\Filament\Pages\ImportMigration\WooProductImportPage;
 use App\Filament\Pages\MobileIntake;
 use App\Filament\Pages\Marketplace\MarketplaceOverview;
 use App\Filament\Pages\Marketplace\MarketplaceSyncLogs;
+use App\Filament\Pages\Marketplace\RetryFailedAvailabilityActions;
 use App\Filament\Pages\Orders;
 use App\Filament\Pages\Pricing;
 use App\Filament\Pages\ProductCatalog;
@@ -149,6 +150,7 @@ class AdminPanelProvider extends PanelProvider
                 AllegroIntegration::class,
                 MarketplaceOverview::class,
                 MarketplaceSyncLogs::class,
+                RetryFailedAvailabilityActions::class,
                 Settings::class,
                 CompanyShopIdentity::class,
                 UsersRoles::class,
