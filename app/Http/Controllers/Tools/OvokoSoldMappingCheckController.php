@@ -26,7 +26,7 @@ class OvokoSoldMappingCheckController extends Controller
             $ids = $this->requestedIds($request);
 
             if ($request->filled('debug_step')) {
-                return $this->debugStep((string) $request->query('debug_step'), $ids);
+                return $this->debugStep((string) $request->query('debug_step'), $ids, $request);
             }
 
             /** @var OvokoPartIdExtractor $extractor */
@@ -401,11 +401,12 @@ class OvokoSoldMappingCheckController extends Controller
         return count($partIds) === 0 ? 'missing' : (count($partIds) > 1 ? 'ambiguous' : (($localPartUse[(string) $partIds[0]] ?? 0) > 1 ? 'duplicate' : 'mapped'));
     }
 
-    private function debugStep(string $step, array $ids): JsonResponse
+    private function debugStep(string $step, array $ids, ?Request $request = null): JsonResponse
     {
         try {
             return match ($step) {
 
+            'inspect_local_parts' => $this->debugTry($step, fn (): array => $this->inspectLocalParts($request)),
             'full_start' => $this->debugTry($step, fn (): array => [
                 'parsed_ids' => $ids,
                 'count' => count($ids),
@@ -659,6 +660,192 @@ class OvokoSoldMappingCheckController extends Controller
             ], $callback()));
         } catch (Throwable $e) {
             return $this->debugThrowableResponse($step, $e);
+        }
+    }
+
+    private function inspectLocalParts(?Request $request): array
+    {
+        $warnings = [];
+        $errors = [];
+        $partIds = $this->requestedPartIds($request);
+        $expectedPairs = $this->expectedPairs($request);
+
+        if ($partIds === []) {
+            $partIds = array_values($expectedPairs);
+        }
+
+        $partColumns = $this->availableColumns('parts', [
+            'id',
+            'source_system',
+            'external_id',
+            'status',
+            'part_number',
+            'name',
+            'needs_listing',
+            'is_visible_storefront',
+            'legacy_payload',
+        ], $warnings, $errors);
+
+        $listingColumns = $this->availableColumns('marketplace_listings', [
+            'id',
+            'part_id',
+            'marketplace',
+            'external_offer_id',
+            'external_listing_id',
+            'external_inventory_id',
+            'raw_payload',
+        ], $warnings, $errors);
+
+        /** @var OvokoPartIdExtractor $extractor */
+        $extractor = app(OvokoPartIdExtractor::class);
+        $parts = in_array('id', $partColumns, true) && $partIds !== []
+            ? DB::table('parts')->select($partColumns)->whereIn('id', $partIds)->orderBy('id')->get()->keyBy('id')
+            : collect();
+        $listingsByPart = in_array('part_id', $listingColumns, true) && $partIds !== []
+            ? DB::table('marketplace_listings')->select($listingColumns)->whereIn('part_id', $partIds)->orderBy('id')->get()->groupBy('part_id')
+            : collect();
+
+        return [
+            'part_ids' => $partIds,
+            'expected_pairs' => collect($expectedPairs)->map(fn (int $partId, string $ovokoId): array => ['expected_ovoko_id' => $ovokoId, 'part_id' => $partId])->values()->all(),
+            'parts_columns_used' => $partColumns,
+            'marketplace_listings_columns_used' => $listingColumns,
+            'items' => collect($partIds)->map(function (int $partId) use ($parts, $listingsByPart, $expectedPairs, $extractor): array {
+                $part = $parts->get($partId);
+                $expectedOvokoId = array_search($partId, $expectedPairs, true);
+                $expectedOvokoId = $expectedOvokoId === false ? null : (string) $expectedOvokoId;
+                $legacyRaw = $part->legacy_payload ?? null;
+                $legacyDecoded = $this->decodePayloadWithMeta($legacyRaw);
+                $legacyExtraction = $this->safeExtractWithPath($extractor, $legacyRaw);
+                $foundIds = [];
+
+                if (($legacyExtraction['id'] ?? null) !== null) {
+                    $foundIds[] = ['source' => 'parts.legacy_payload.extractor', 'path' => $legacyExtraction['path'] ?? null, 'value' => (string) $legacyExtraction['id']];
+                }
+
+                $listings = collect($listingsByPart->get($partId, collect()))->map(function (object $listing) use ($extractor, &$foundIds): array {
+                    $raw = $listing->raw_payload ?? null;
+                    $decoded = $this->decodePayloadWithMeta($raw);
+                    $extracted = $this->safeExtractWithPath($extractor, $raw);
+                    foreach (['external_offer_id', 'external_listing_id', 'external_inventory_id'] as $column) {
+                        $value = $listing->{$column} ?? null;
+                        if ($value !== null && trim((string) $value) !== '') {
+                            $foundIds[] = ['source' => 'marketplace_listings.'.$column, 'path' => $column, 'value' => trim((string) $value), 'marketplace_listing_id' => $listing->id ?? null];
+                        }
+                    }
+                    if (($extracted['id'] ?? null) !== null) {
+                        $foundIds[] = ['source' => 'marketplace_listings.raw_payload.extractor', 'path' => $extracted['path'] ?? null, 'value' => (string) $extracted['id'], 'marketplace_listing_id' => $listing->id ?? null];
+                    }
+
+                    return [
+                        'id' => $listing->id ?? null,
+                        'part_id' => $listing->part_id ?? null,
+                        'marketplace' => $listing->marketplace ?? null,
+                        'external_offer_id' => $listing->external_offer_id ?? null,
+                        'external_listing_id' => $listing->external_listing_id ?? null,
+                        'external_inventory_id' => $listing->external_inventory_id ?? null,
+                        'raw_payload_type' => gettype($raw),
+                        'raw_payload_string_length' => is_string($raw) ? strlen($raw) : null,
+                        'raw_payload_json_error' => $decoded['json_error'],
+                        'raw_payload_decoded_type' => $decoded['decoded_type'],
+                        'raw_payload_top_keys' => $decoded['top_keys'],
+                        'raw_payload_extractor' => $extracted,
+                    ];
+                })->values()->all();
+
+                $foundIds = collect($foundIds)->unique(fn (array $row): string => ($row['source'] ?? '').'|'.($row['path'] ?? '').'|'.($row['value'] ?? '').'|'.($row['marketplace_listing_id'] ?? ''))->values()->all();
+
+                return [
+                    'part_id' => $partId,
+                    'found_part' => $part !== null,
+                    'expected_ovoko_id' => $expectedOvokoId,
+                    'parts' => $part ? [
+                        'id' => $part->id ?? null,
+                        'source_system' => $part->source_system ?? null,
+                        'external_id' => $part->external_id ?? null,
+                        'status' => $part->status ?? null,
+                        'part_number' => $part->part_number ?? null,
+                        'name' => $part->name ?? null,
+                        'needs_listing' => $part->needs_listing ?? null,
+                        'is_visible_storefront' => $part->is_visible_storefront ?? null,
+                    ] : null,
+                    'legacy_payload_type' => gettype($legacyRaw),
+                    'legacy_payload_string_length' => is_string($legacyRaw) ? strlen($legacyRaw) : null,
+                    'legacy_payload_json_error' => $legacyDecoded['json_error'],
+                    'legacy_payload_decoded_type' => $legacyDecoded['decoded_type'],
+                    'legacy_payload_top_keys' => $legacyDecoded['top_keys'],
+                    'legacy_payload_extractor' => $legacyExtraction,
+                    'marketplace_listings' => $listings,
+                    'extracted_ovoko_ids' => $foundIds,
+                    'expected_in_parts_external_id' => $expectedOvokoId !== null && $part && (string) ($part->external_id ?? '') === $expectedOvokoId,
+                    'expected_in_legacy_payload_text' => $expectedOvokoId !== null && is_string($legacyRaw) && str_contains($legacyRaw, $expectedOvokoId),
+                    'expected_in_marketplace_external_fields' => $expectedOvokoId !== null && collect($foundIds)->contains(fn (array $row): bool => in_array($row['source'] ?? '', ['marketplace_listings.external_offer_id', 'marketplace_listings.external_listing_id', 'marketplace_listings.external_inventory_id'], true) && (string) ($row['value'] ?? '') === $expectedOvokoId),
+                    'expected_in_marketplace_raw_payload_text' => $expectedOvokoId !== null && collect($listingsByPart->get($partId, collect()))->contains(fn (object $listing): bool => is_string($listing->raw_payload ?? null) && str_contains((string) $listing->raw_payload, $expectedOvokoId)),
+                    'missing_expected_ovoko_id' => $expectedOvokoId !== null && ! collect($foundIds)->contains(fn (array $row): bool => (string) ($row['value'] ?? '') === $expectedOvokoId) && ! ($part && (string) ($part->external_id ?? '') === $expectedOvokoId) && ! (is_string($legacyRaw) && str_contains($legacyRaw, $expectedOvokoId)) && ! collect($listingsByPart->get($partId, collect()))->contains(fn (object $listing): bool => is_string($listing->raw_payload ?? null) && str_contains((string) $listing->raw_payload, $expectedOvokoId)),
+                ];
+            })->values()->all(),
+            'warnings' => array_values(array_unique($warnings)),
+            'errors' => array_values(array_unique($errors)),
+        ];
+    }
+
+    /** @return array<int, int> */
+    private function requestedPartIds(?Request $request): array
+    {
+        return collect(explode(',', (string) ($request?->query('part_ids', '') ?? '')))
+            ->map(fn (string $id): string => trim($id))
+            ->filter(fn (string $id): bool => $id !== '' && ctype_digit($id))
+            ->map(fn (string $id): int => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /** @return array<string, int> */
+    private function expectedPairs(?Request $request): array
+    {
+        return collect(explode(',', (string) ($request?->query('expected_pairs', '') ?? '')))
+            ->map(fn (string $pair): array => array_map('trim', explode(':', $pair, 2)))
+            ->filter(fn (array $pair): bool => count($pair) === 2 && $pair[0] !== '' && ctype_digit($pair[1]))
+            ->mapWithKeys(fn (array $pair): array => [(string) $pair[0] => (int) $pair[1]])
+            ->all();
+    }
+
+    /** @return array{decoded_type: string, json_error: ?string, top_keys: array<int, string>} */
+    private function decodePayloadWithMeta(mixed $raw): array
+    {
+        $decoded = null;
+        $jsonError = null;
+
+        if (is_array($raw)) {
+            $decoded = $raw;
+        } elseif (is_object($raw)) {
+            $decoded = json_decode(json_encode($raw) ?: '[]', true);
+            $jsonError = json_last_error_msg();
+        } elseif (is_string($raw) && trim($raw) !== '') {
+            $decoded = json_decode($raw, true);
+            $jsonError = json_last_error_msg();
+        }
+
+        return [
+            'decoded_type' => gettype($decoded),
+            'json_error' => $jsonError,
+            'top_keys' => is_array($decoded) ? array_slice(array_map('strval', array_keys($decoded)), 0, 50) : [],
+        ];
+    }
+
+    /** @return array{id: ?string, path: ?string, error_class?: string, error_message?: string} */
+    private function safeExtractWithPath(OvokoPartIdExtractor $extractor, mixed $payload): array
+    {
+        try {
+            return $extractor->extractWithPath($payload);
+        } catch (Throwable $e) {
+            return [
+                'id' => null,
+                'path' => null,
+                'error_class' => get_class($e),
+                'error_message' => $e->getMessage(),
+            ];
         }
     }
 
