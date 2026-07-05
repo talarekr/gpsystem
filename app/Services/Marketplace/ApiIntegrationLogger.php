@@ -15,6 +15,10 @@ class ApiIntegrationLogger
 
     public function record(array $data): void
     {
+        if (($data['action'] ?? null) === OrderStatusMarketplaceSyncService::ACTION) {
+            $data = $this->withOrderStatusSyncMarkers($data);
+        }
+
         try {
             MarketplaceSyncLog::query()->create([
                 'marketplace' => (string) ($data['integration'] ?? $data['marketplace'] ?? 'unknown'),
@@ -74,6 +78,27 @@ class ApiIntegrationLogger
         }
 
         return $value;
+    }
+
+    private function withOrderStatusSyncMarkers(array $data): array
+    {
+        $markers = [
+            'order_status_sync_code_version' => OrderStatusMarketplaceSyncService::CODE_VERSION,
+            'code_version' => OrderStatusMarketplaceSyncService::CODE_VERSION,
+            'sync_writer' => self::class.'::record',
+        ];
+
+        foreach ($markers as $key => $value) {
+            $data[$key] ??= $value;
+        }
+
+        foreach (['request', 'response', 'error'] as $summaryKey) {
+            if (is_array($data[$summaryKey] ?? null)) {
+                $data[$summaryKey] = $markers + $data[$summaryKey];
+            }
+        }
+
+        return $data;
     }
 
     private function isSensitiveKey(string $key): bool

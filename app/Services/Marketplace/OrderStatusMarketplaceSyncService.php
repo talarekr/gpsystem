@@ -12,6 +12,7 @@ class OrderStatusMarketplaceSyncService
 {
     public const ACTION = 'order_status_sync';
     public const CODE_VERSION = '135-processing-debug';
+    public const SYNC_WRITER = self::class.'::log';
 
     public function sync(Order $order, ?string $previousStatus = null, ?int $retryOfLogId = null): MarketplaceSyncLog
     {
@@ -57,6 +58,7 @@ class OrderStatusMarketplaceSyncService
             'local_status_ui_label' => \App\Services\Admin\OrderStatusOptions::optionsForOrder($order)[$status] ?? null,
             'mapper_class' => self::class,
             'mapper_method' => 'plan',
+            'sync_writer' => self::SYNC_WRITER,
         ];
 
         if ($marketplace === 'allegro') {
@@ -125,6 +127,7 @@ class OrderStatusMarketplaceSyncService
                 'order_status_sync' => true,
                 'order_status_sync_code_version' => self::CODE_VERSION,
                 'code_version' => self::CODE_VERSION,
+                'sync_writer' => self::SYNC_WRITER,
                 'marketplace' => $marketplace,
                 'marketplace_raw_value' => $plan['marketplace_raw_value'] ?? $order->marketplace,
                 'normalized_marketplace' => $plan['normalized_marketplace'] ?? $marketplace,
@@ -158,6 +161,7 @@ class OrderStatusMarketplaceSyncService
             'mapper_branch' => $plan['mapper_branch'] ?? null,
             'code_version' => self::CODE_VERSION,
             'order_status_sync_code_version' => self::CODE_VERSION,
+            'sync_writer' => self::SYNC_WRITER,
         ];
     }
 
@@ -182,6 +186,7 @@ class OrderStatusMarketplaceSyncService
             'mapper_method' => $plan['mapper_method'] ?? 'plan',
             'order_status_sync_code_version' => self::CODE_VERSION,
             'code_version' => self::CODE_VERSION,
+            'sync_writer' => self::SYNC_WRITER,
             'skipped_reason' => $skippedReason,
         ];
     }
@@ -204,6 +209,7 @@ class OrderStatusMarketplaceSyncService
             'mapper_method' => $plan['mapper_method'] ?? 'plan',
             'order_status_sync_code_version' => self::CODE_VERSION,
             'code_version' => self::CODE_VERSION,
+            'sync_writer' => self::SYNC_WRITER,
             'available_map' => $plan['available_map'] ?? null,
             'target_marketplace_status' => $plan['target_marketplace_status'] ?? null,
             'skipped_reason' => $skippedReason,

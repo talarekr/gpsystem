@@ -75,6 +75,9 @@ class MarketplaceOrderStatusSyncTest extends TestCase
         $this->assertSame(\App\Services\Marketplace\OrderStatusMarketplaceSyncService::CODE_VERSION, $log->payload['order_status_sync_code_version']);
         $this->assertSame(\App\Services\Marketplace\OrderStatusMarketplaceSyncService::CODE_VERSION, $log->payload['request_summary']['order_status_sync_code_version']);
         $this->assertSame(\App\Services\Marketplace\OrderStatusMarketplaceSyncService::CODE_VERSION, $log->payload['response_summary']['order_status_sync_code_version']);
+        $this->assertSame(\App\Services\Marketplace\OrderStatusMarketplaceSyncService::SYNC_WRITER, $log->payload['sync_writer']);
+        $this->assertSame(\App\Services\Marketplace\OrderStatusMarketplaceSyncService::SYNC_WRITER, $log->payload['request_summary']['sync_writer']);
+        $this->assertSame(\App\Services\Marketplace\OrderStatusMarketplaceSyncService::SYNC_WRITER, $log->payload['response_summary']['sync_writer']);
         $this->assertSame('unsupported_allegro_status', $log->payload['response_summary']['skipped_reason']);
     }
 
@@ -162,6 +165,8 @@ class MarketplaceOrderStatusSyncTest extends TestCase
         $this->assertSame('plan', $log->payload['mapper_method']);
         $this->assertSame('PROCESSING', $log->payload['available_map']['processing']);
         $this->assertSame('PROCESSING', $log->payload['target_marketplace_status']);
+        $this->assertSame('allegro_fulfillment_status', $log->payload['mapper_branch']);
+        $this->assertSame(\App\Services\Marketplace\OrderStatusMarketplaceSyncService::SYNC_WRITER, $log->payload['sync_writer']);
     }
 
 
@@ -188,6 +193,29 @@ class MarketplaceOrderStatusSyncTest extends TestCase
         $this->assertSame('PROCESSING', $log->payload['target_marketplace_status']);
         $this->assertSame('allegro_fulfillment_status', $log->payload['mapper_branch']);
         $this->assertSame(\App\Services\Marketplace\OrderStatusMarketplaceSyncService::CODE_VERSION, $log->payload['code_version']);
+        $this->assertSame(\App\Services\Marketplace\OrderStatusMarketplaceSyncService::SYNC_WRITER, $log->payload['sync_writer']);
+    }
+
+    public function test_api_integration_logger_keeps_order_status_sync_markers_for_skipped_logs(): void
+    {
+        app(\App\Services\Marketplace\ApiIntegrationLogger::class)->record([
+            'integration' => 'allegro',
+            'action' => 'order_status_sync',
+            'status' => 'skipped',
+            'message' => 'unsupported_status_for_marketplace',
+            'order_id' => 135,
+            'external_id' => 'f2f054f0-7866-11f1-b5bc-398519c00320',
+            'request' => ['local_status_raw_value' => 'processing', 'mapper_branch' => 'legacy_fallback_probe'],
+            'response' => ['target_marketplace_status' => 'PROCESSING'],
+        ]);
+
+        $log = MarketplaceSyncLog::query()->latest('id')->firstOrFail();
+
+        $this->assertSame(\App\Services\Marketplace\OrderStatusMarketplaceSyncService::CODE_VERSION, $log->payload['meta']['order_status_sync_code_version']);
+        $this->assertSame(\App\Services\Marketplace\ApiIntegrationLogger::class.'::record', $log->payload['meta']['sync_writer']);
+        $this->assertSame(\App\Services\Marketplace\OrderStatusMarketplaceSyncService::CODE_VERSION, $log->payload['request']['order_status_sync_code_version']);
+        $this->assertSame('processing', $log->payload['request']['local_status_raw_value']);
+        $this->assertSame('PROCESSING', $log->payload['response']['target_marketplace_status']);
     }
 
 
