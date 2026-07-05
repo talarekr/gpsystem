@@ -30,8 +30,22 @@ class EbayApiClient extends AbstractMarketplaceApiClient
         $lineItems = $order->items()->get()->map(fn ($item): array => array_filter(['lineItemId' => $item->marketplace_item_id ?: data_get($item->raw_payload, 'lineItemId'), 'quantity' => (int) $item->quantity], fn ($value) => $value !== null && $value !== ''))->values()->all();
         $payload = array_filter(['lineItems' => $lineItems, 'shippedDate' => now()->toISOString(), 'shippingCarrierCode' => $shipment?->carrier, 'trackingNumber' => $shipment?->tracking_number], fn ($value) => $value !== null && $value !== '' && $value !== []);
         $endpoint = $base.'/sell/fulfillment/v1/order/'.rawurlencode($orderId).'/shipping_fulfillment';
-        $requestSummary = ['method' => 'POST', 'endpoint' => 'POST /sell/fulfillment/v1/order/{orderId}/shipping_fulfillment', 'order_id' => $orderId, 'payload' => $payload];
-        if ($orderId === '' || $lineItems === []) return ['ok' => false, 'http_status' => null, 'action' => 'ebay_create_shipping_fulfillment', 'message' => 'eBay shipping fulfillment prerequisites are missing.', 'request_summary' => $requestSummary, 'response_summary' => ['missing' => ['order_id' => $orderId === '', 'line_items' => $lineItems === []]]];
+        $missingReasons = array_values(array_filter([
+            $orderId === '' ? 'missing_marketplace_order_id' : null,
+            $lineItems === [] ? 'missing_line_items' : null,
+            blank($shipment?->carrier) ? 'missing_carrier' : null,
+            blank($shipment?->tracking_number) ? 'missing_tracking_number' : null,
+        ]));
+        $requestSummary = [
+            'method' => 'POST',
+            'endpoint' => 'POST /sell/fulfillment/v1/order/{orderId}/shipping_fulfillment',
+            'order_id' => $orderId,
+            'payload' => $payload,
+            'account_code' => $this->account?->code,
+            'account_marketplace' => $this->account?->marketplace,
+            'channel' => $this->channel,
+        ];
+        if ($missingReasons !== []) return ['ok' => false, 'http_status' => null, 'action' => 'ebay_create_shipping_fulfillment', 'message' => $missingReasons[0], 'request_summary' => $requestSummary, 'response_summary' => ['blocker' => $missingReasons[0], 'missing_reasons' => $missingReasons, 'missing' => ['order_id' => $orderId === '', 'line_items' => $lineItems === [], 'carrier' => blank($shipment?->carrier), 'tracking_number' => blank($shipment?->tracking_number)]]];
         try {
             $response = $this->postWithAuthRetry($endpoint, $payload, [], 20); $json = $response->json(); $body = is_array($json) ? $json : [];
             return ['ok' => $response->successful(), 'http_status' => $response->status(), 'action' => 'ebay_create_shipping_fulfillment', 'message' => $response->successful() ? 'eBay shipping fulfillment created.' : 'eBay shipping fulfillment failed.', 'request_summary' => $requestSummary, 'response_summary' => ['fulfillment_id' => $body['fulfillmentId'] ?? null, 'errors' => $body['errors'] ?? null, 'warnings' => $body['warnings'] ?? null, 'top_level_keys' => array_slice(array_keys($body), 0, 20)]];

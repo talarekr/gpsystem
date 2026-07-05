@@ -11,7 +11,7 @@ use App\Services\Marketplace\Api\EbayApiClient;
 class OrderStatusMarketplaceSyncService
 {
     public const ACTION = 'order_status_sync';
-    public const CODE_VERSION = '136-opcache-runtime-debug';
+    public const CODE_VERSION = '137-ebay-ovoko-status-audit';
     public const SYNC_WRITER = self::class.'::log';
 
     public function sync(Order $order, ?string $previousStatus = null, ?int $retryOfLogId = null): MarketplaceSyncLog
@@ -82,7 +82,15 @@ class OrderStatusMarketplaceSyncService
         }
 
         if ($marketplace === 'ebay') {
-            return $this->finalizePlan(array_merge($base, ['target_marketplace_status' => $status === 'shipped' ? 'shipping_fulfillment' : null, 'mapper_branch' => 'ebay_shipping_fulfillment', 'action' => 'ebay_create_shipping_fulfillment', 'supported' => $status === 'shipped', 'skipped_reason' => $status === 'shipped' ? null : 'unsupported_ebay_status']));
+            return $this->finalizePlan(array_merge($base, [
+                'target_marketplace_status' => $status === 'shipped' ? 'shipping_fulfillment' : null,
+                'target_marketplace_action' => $status === 'shipped' ? 'createShippingFulfillment' : null,
+                'mapper_branch' => 'ebay_shipping_fulfillment',
+                'action' => 'ebay_create_shipping_fulfillment',
+                'supported' => $status === 'shipped',
+                'supported_local_statuses' => ['shipped'],
+                'skipped_reason' => $status === 'shipped' ? null : 'unsupported_ebay_status',
+            ]));
         }
 
         if ($marketplace === 'ovoko') {
@@ -113,17 +121,35 @@ class OrderStatusMarketplaceSyncService
 
     private function dispatch(Order $order, string $marketplace, array $plan): array
     {
-        $account = MarketplaceAccount::query()->where('marketplace', $marketplace === 'ebay' ? 'like' : '=', $marketplace === 'ebay' ? 'ebay%' : $marketplace)->first();
+        $account = $this->accountFor($order, $marketplace);
 
         if ($marketplace === 'allegro') {
             return (new AllegroApiClient('allegro_main', $account))->updateOrderFulfillmentStatus((string) $order->marketplace_order_id, (string) $plan['target_marketplace_status'], data_get($order->raw_payload, 'checkoutForm.revision') ?? data_get($order->raw_payload, 'revision'));
         }
 
         if ($marketplace === 'ebay') {
-            return (new EbayApiClient((string) ($account?->marketplace ?: 'ebay'), $account))->createShippingFulfillment($order);
+            return (new EbayApiClient((string) ($account?->code ?: $order->marketplace ?: 'ebay_de'), $account))->createShippingFulfillment($order);
         }
 
         return ['ok' => false, 'message' => 'Unsupported marketplace order status dispatch.'];
+    }
+
+    private function accountFor(Order $order, string $marketplace): ?MarketplaceAccount
+    {
+        if ($marketplace === 'ebay') {
+            $orderMarketplace = strtolower(trim((string) $order->marketplace));
+
+            return MarketplaceAccount::query()
+                ->where(function ($query) use ($orderMarketplace) {
+                    $query->where('code', $orderMarketplace)
+                        ->orWhere('marketplace', $orderMarketplace);
+                })
+                ->first()
+                ?: MarketplaceAccount::query()->where('code', 'ebay_de')->first()
+                ?: MarketplaceAccount::query()->where('marketplace', 'like', 'ebay%')->orderBy('id')->first();
+        }
+
+        return MarketplaceAccount::query()->where('marketplace', $marketplace)->first();
     }
 
     private function log(Order $order, string $marketplace, array $plan, string $status, ?string $skippedReason = null, array $result = []): MarketplaceSyncLog
@@ -155,6 +181,7 @@ class OrderStatusMarketplaceSyncService
                 'local_status_raw_value' => $plan['local_status_raw_value'] ?? $order->status,
                 'local_status_ui_label' => $plan['local_status_ui_label'] ?? null,
                 'target_marketplace_status' => $plan['target_marketplace_status'] ?? null,
+                'target_marketplace_action' => $plan['target_marketplace_action'] ?? null,
                 'mapping_supported' => (bool) ($plan['supported'] ?? false),
                 'mapper_branch' => $plan['mapper_branch'] ?? null,
                 'mapper_class' => $plan['mapper_class'] ?? self::class,
@@ -177,6 +204,8 @@ class OrderStatusMarketplaceSyncService
             'marketplace_raw_value' => $plan['marketplace_raw_value'] ?? $order->marketplace,
             'normalized_marketplace' => $plan['normalized_marketplace'] ?? $marketplace,
             'target_marketplace_status' => $plan['target_marketplace_status'] ?? null,
+            'target_marketplace_action' => $plan['target_marketplace_action'] ?? null,
+            'mapping_supported' => (bool) ($plan['supported'] ?? false),
             'mapper_branch' => $plan['mapper_branch'] ?? null,
             'code_version' => self::CODE_VERSION,
             'order_status_sync_code_version' => self::CODE_VERSION,
@@ -198,9 +227,12 @@ class OrderStatusMarketplaceSyncService
             'local_status_ui_label' => $plan['local_status_ui_label'] ?? null,
             'previous_local_status' => $plan['previous_local_status'] ?? null,
             'target_marketplace_status' => $plan['target_marketplace_status'] ?? null,
+            'target_marketplace_action' => $plan['target_marketplace_action'] ?? null,
+            'mapping_supported' => (bool) ($plan['supported'] ?? false),
             'mapper_branch' => $plan['mapper_branch'] ?? null,
             'available_map' => $plan['available_map'] ?? null,
             'supported_marketplace_statuses' => $plan['supported_marketplace_statuses'] ?? null,
+            'supported_local_statuses' => $plan['supported_local_statuses'] ?? null,
             'mapper_class' => $plan['mapper_class'] ?? self::class,
             'mapper_method' => $plan['mapper_method'] ?? 'plan',
             'order_status_sync_code_version' => self::CODE_VERSION,
@@ -231,6 +263,7 @@ class OrderStatusMarketplaceSyncService
             'sync_writer' => self::SYNC_WRITER,
             'available_map' => $plan['available_map'] ?? null,
             'target_marketplace_status' => $plan['target_marketplace_status'] ?? null,
+            'target_marketplace_action' => $plan['target_marketplace_action'] ?? null,
             'skipped_reason' => $skippedReason,
         ];
     }
