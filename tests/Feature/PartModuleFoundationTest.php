@@ -611,6 +611,70 @@ class PartModuleFoundationTest extends TestCase
         $this->assertNull($sold->fresh()->internal_note);
     }
 
+
+    public function test_admin_can_update_part_local_availability_without_touching_marketplace_listing_payloads(): void
+    {
+        $this->actingAsWarehouseUser();
+
+        $part = Part::query()->create([
+            'name' => 'Część z lokalną dostępnością',
+            'status' => 'ready',
+            'quantity' => 2,
+            'is_visible_storefront' => true,
+            'needs_listing' => false,
+        ]);
+
+        $listing = MarketplaceListing::query()->create([
+            'part_id' => $part->id,
+            'marketplace' => 'ovoko',
+            'external_offer_id' => 'OVO-123',
+            'external_listing_id' => 'LIST-123',
+            'status' => 'active',
+            'sync_status' => 'mapped',
+            'raw_payload' => ['kept' => true],
+            'url' => 'https://example.test/listing',
+        ]);
+
+        Livewire::test(ListParts::class)
+            ->assertSee('gps-part-availability__summary', false)
+            ->assertSee('>0</option>', false)
+            ->assertSee('>1</option>', false)
+            ->call('updateLocalAvailability', $part->id, '0')
+            ->assertHasNoErrors();
+
+        $sold = $part->fresh();
+        $this->assertSame('sold', $sold->status);
+        $this->assertSame('sold', $sold->adminLocalAvailability());
+        $this->assertSame(0, (int) $sold->quantity);
+        $this->assertFalse((bool) $sold->is_visible_storefront);
+
+        $unchangedListing = $listing->fresh();
+        $this->assertSame('OVO-123', $unchangedListing->external_offer_id);
+        $this->assertSame('LIST-123', $unchangedListing->external_listing_id);
+        $this->assertSame(['kept' => true], $unchangedListing->raw_payload);
+
+        $this->patchJson(route('admin.parts.local-availability.update', $part), ['availability_flag' => 1])
+            ->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('part_id', $part->id)
+            ->assertJsonPath('old_status', 'sold')
+            ->assertJsonPath('new_status', 'ready')
+            ->assertJsonPath('old_availability', 'sold')
+            ->assertJsonPath('new_availability', 'for_sale');
+
+        $ready = $part->fresh();
+        $this->assertSame('ready', $ready->status);
+        $this->assertSame('for_sale', $ready->adminLocalAvailability());
+        $this->assertSame(1, (int) $ready->quantity);
+        $this->assertTrue((bool) $ready->is_visible_storefront);
+        $this->assertFalse((bool) $ready->needs_listing);
+
+        $stillUnchangedListing = $listing->fresh();
+        $this->assertSame('OVO-123', $stillUnchangedListing->external_offer_id);
+        $this->assertSame('LIST-123', $stillUnchangedListing->external_listing_id);
+        $this->assertSame(['kept' => true], $stillUnchangedListing->raw_payload);
+    }
+
     public function test_part_admin_view_and_edit_share_existing_images_and_safe_preview_actions(): void
     {
         $this->actingAsWarehouseUser();
