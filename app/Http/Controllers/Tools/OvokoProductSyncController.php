@@ -6,10 +6,12 @@ use App\Http\Controllers\Controller;
 use App\Models\MarketplaceCategory;
 use App\Models\MarketplaceCategoryMapping;
 use App\Models\MarketplaceListing;
+use App\Models\Order;
 use App\Models\Part;
 use App\Models\PartCategory;
 use App\Services\Marketplace\Api\MarketplaceApiManager;
 use App\Services\Marketplace\Api\OvokoApiClient;
+use App\Services\Marketplace\OrderStatusMarketplaceSyncService;
 use App\Services\Marketplace\LocalCategoryDeleteSafetyService;
 use App\Services\Storefront\CategoryTreeService;
 use Illuminate\Database\Eloquent\Builder;
@@ -676,15 +678,37 @@ HTML, 200, ['Content-Type' => 'text/html; charset=UTF-8']);
     {
         if (! $this->validToken($request)) return $this->invalidTokenResponse();
 
+        $orderId = $request->integer('order_id') ?: null;
+        $order = $orderId ? Order::query()->find($orderId) : null;
+
         return response()->json([
             'ok' => true,
             'app_env' => config('app.env'),
             'app_debug' => (bool) config('app.debug'),
+            'base_path' => base_path(),
+            'base_path_realpath' => realpath(base_path()) ?: null,
+            'public_path' => public_path(),
+            'public_path_realpath' => realpath(public_path()) ?: null,
             'php_version' => PHP_VERSION,
+            'php_sapi' => PHP_SAPI,
+            'server_software' => $_SERVER['SERVER_SOFTWARE'] ?? null,
+            'fpm_pool' => $_SERVER['PHP_FPM_POOL'] ?? $_SERVER['SERVER_NAME'] ?? null,
+            'opcache_enabled' => function_exists('opcache_get_status') ? (bool) (opcache_get_status(false)['opcache_enabled'] ?? false) : null,
+            'opcache_reset_available' => function_exists('opcache_reset'),
             'controller_exists' => class_exists(self::class),
+            'controller_file' => __FILE__,
+            'order_status_sync_service_file' => (new \ReflectionClass(OrderStatusMarketplaceSyncService::class))->getFileName(),
+            'order_status_sync_code_version' => OrderStatusMarketplaceSyncService::CODE_VERSION,
             'routes_loaded' => Route::has('tools.start-ovoko-category-mapping-autorun')
                 && Route::has('tools.ovoko-category-mapping-autorun-smoke')
                 && Route::has('tools.debug-ovoko-category-mapping-autorun-start-minimal'),
+            'requested_order' => $orderId ? [
+                'id' => $orderId,
+                'found' => $order !== null,
+                'status_raw' => $order?->status,
+                'marketplace' => $order?->marketplace,
+                'marketplace_order_id' => $order?->marketplace_order_id,
+            ] : null,
             'commit' => $this->currentCommitHash(),
             'time' => now()->toISOString(),
         ]);
@@ -707,6 +731,10 @@ HTML, 200, ['Content-Type' => 'text/html; charset=UTF-8']);
             'ok' => true,
             'command' => 'optimize:clear',
             'opcache_reset' => $opcacheReset,
+            'base_path' => base_path(),
+            'php_sapi' => PHP_SAPI,
+            'fpm_pool' => $_SERVER['PHP_FPM_POOL'] ?? $_SERVER['SERVER_NAME'] ?? null,
+            'order_status_sync_code_version' => OrderStatusMarketplaceSyncService::CODE_VERSION,
             'output' => trim(Artisan::output()),
             'time' => now()->toISOString(),
         ]);
