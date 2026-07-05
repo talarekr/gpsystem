@@ -45,21 +45,37 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
 
 
 
+    public const PART_STATUS_IN_STOCK = 0;
+    public const PART_STATUS_RESERVED = 1;
+    public const PART_STATUS_SOLD_OUT = 2;
+    public const PART_STATUS_RETURNED = 3;
+    public const PART_STATUS_WRITTEN_OFF = 4;
+
     public function deactivatePart(string $partId): array
     {
-        $endpoint = rtrim((string) $this->account?->api_base_url, '/').'/crm/updatePart';
-        $fields = $this->authFields() + ['part_id' => $partId, 'status' => 0, 'quantity' => 0];
+        return $this->changePartStatus($partId, self::PART_STATUS_SOLD_OUT, 'Ovoko part marked sold out.');
+    }
+
+    public function restorePart(string $partId): array
+    {
+        return $this->changePartStatus($partId, self::PART_STATUS_IN_STOCK, 'Ovoko part restored to stock.');
+    }
+
+    public function changePartStatus(string $partId, int $status, string $successMessage = 'Ovoko part status changed.'): array
+    {
+        $endpoint = rtrim((string) $this->account?->api_base_url, '/').'/crm/changePartStatus';
+        $fields = $this->authFields() + ['part_id' => $partId, 'status' => $status];
         $response = Http::asForm()->acceptJson()->timeout(20)->post($endpoint, $fields);
         $json = $response->json();
         $body = is_array($json) ? $json : [];
         $apiCode = $body['status_code'] ?? null;
-        $ok = $response->successful() && ($apiCode === 'R200' || $apiCode === 200 || $apiCode === null);
+        $ok = $response->successful() && ($apiCode === 'R200' || $apiCode === 200);
 
         return [
             'ok' => $ok,
             'http_status' => $response->status(),
-            'message' => $ok ? 'Ovoko part deactivated.' : (string) ($body['msg'] ?? $body['message'] ?? 'Ovoko deactivate part failed.'),
-            'request_summary' => ['endpoint' => 'POST /crm/updatePart', 'part_id' => $partId, 'status' => 0, 'quantity' => 0],
+            'message' => $ok ? $successMessage : (string) ($body['msg'] ?? $body['message'] ?? 'Ovoko change part status failed.'),
+            'request_summary' => ['endpoint' => 'POST /crm/changePartStatus', 'part_id' => $partId, 'status' => $status],
             'response_summary' => ['api_status_code' => $apiCode, 'message' => $body['msg'] ?? $body['message'] ?? null, 'top_level_keys' => array_slice(array_keys($body), 0, 20)],
         ];
     }
