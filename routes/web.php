@@ -78,6 +78,8 @@ use App\Http\Controllers\Tools\OvokoImportProductDataController;
 use App\Http\Controllers\Tools\MarketplaceMappingGapsExportController;
 use App\Http\Controllers\Tools\MarketplaceOrdersResetController;
 use App\Http\Controllers\Tools\MarketplaceOrdersSyncController;
+use App\Http\Controllers\Tools\MarketplaceOrdersPurgeToolController;
+use App\Http\Controllers\Tools\MarketplaceFulfillmentSyncToolController;
 use App\Http\Controllers\Tools\MarketplaceOrderFulfillmentSyncController;
 use App\Http\Controllers\Tools\MarketplaceOrdersTimezoneFixController;
 use App\Http\Controllers\Tools\ManualLinkMappingDiagnosticsController;
@@ -327,6 +329,8 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/marketplace/ebay-listing-audit-runner/status', [EbayListingAuditRunnerController::class, 'status'])->name('admin.tools.marketplace.ebay-listing-audit-runner.status');
     Route::match(['get', 'post'], '/admin/tools/marketplace/orders-reset', MarketplaceOrdersResetController::class)->name('admin.tools.marketplace.orders-reset');
     Route::match(['get', 'post'], '/admin/tools/marketplace/orders-sync', MarketplaceOrdersSyncController::class)->name('admin.tools.marketplace.orders-sync');
+    Route::match(['get', 'post'], '/admin/tools/marketplace/orders-purge', MarketplaceOrdersPurgeToolController::class)->name('admin.tools.marketplace.orders-purge');
+    Route::match(['get', 'post'], '/admin/tools/marketplace/fulfillment-status-sync', MarketplaceFulfillmentSyncToolController::class)->name('admin.tools.marketplace.fulfillment-status-sync');
     Route::match(['get', 'post'], '/admin/tools/marketplace/orders/{order}/fulfillment-sync', MarketplaceOrderFulfillmentSyncController::class)->name('admin.tools.marketplace.orders.fulfillment-sync');
     Route::get('/admin/tools/marketplace/orders-timezone-fix', MarketplaceOrdersTimezoneFixController::class)->name('admin.tools.marketplace.orders-timezone-fix');
     Route::get('/admin/tools/marketplace/allegro/responsible-producers', [MarketplaceListingDryRunController::class, 'allegroResponsibleProducers'])->name('admin.tools.marketplace.allegro.responsible-producers');
