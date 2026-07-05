@@ -51,9 +51,16 @@ class OvokoSoldMappingCheckController extends Controller
                 'dry_run' => true,
                 'local_update' => false,
                 'marketplace_write' => false,
+                'error_class' => get_class($e),
+                'error_message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace_head' => collect($e->getTrace())->take(5)->values()->all(),
                 'errors' => [[
                     'type' => get_class($e),
                     'message' => $e->getMessage(),
+                    'file' => $e->getFile(),
+                    'line' => $e->getLine(),
                 ]],
                 'warnings' => [],
                 'requested_count' => 0,
@@ -62,7 +69,7 @@ class OvokoSoldMappingCheckController extends Controller
         }
     }
 
-    private function collectMarketplaceListingMatches(array $ids, array &$warnings, array &$errors): array
+    private function collectMarketplaceListingMatches(array $ids, array &$warnings, array &$errors, bool $loadPartDetails = true): array
     {
         if (! $this->hasTable('marketplace_listings', $warnings, $errors)) {
             return [];
@@ -87,11 +94,13 @@ class OvokoSoldMappingCheckController extends Controller
                 ->get();
 
             $partIds = $rows->pluck('part_id')->filter()->unique()->values()->all();
-            $partsById = Part::query()
-                ->select(['id', 'status', 'part_number', 'name', 'needs_listing', 'is_visible_storefront'])
-                ->whereIn('id', $partIds)
-                ->get()
-                ->keyBy('id');
+            $partsById = $loadPartDetails
+                ? Part::query()
+                    ->select(['id', 'status', 'part_number', 'name', 'needs_listing', 'is_visible_storefront'])
+                    ->whereIn('id', $partIds)
+                    ->get()
+                    ->keyBy('id')
+                : collect();
 
             foreach ($rows as $listing) {
                 foreach ($this->listingCandidatesFromRow($listing, $available) as $candidate) {
@@ -114,7 +123,7 @@ class OvokoSoldMappingCheckController extends Controller
         }
     }
 
-    private function collectPartMatches(array $ids, array &$matches, OvokoPartIdExtractor $extractor, array &$warnings, array &$errors): void
+    private function collectPartMatches(array $ids, array &$matches, OvokoPartIdExtractor $extractor, array &$warnings, array &$errors, bool $loadPartDetails = true): void
     {
         if (! $this->hasTable('parts', $warnings, $errors)) {
             return;
@@ -127,7 +136,7 @@ class OvokoSoldMappingCheckController extends Controller
         }
 
         try {
-            $query = Part::query()->select($columns);
+            $query = ($loadPartDetails ? Part::query() : DB::table('parts'))->select($loadPartDetails ? $columns : array_values(array_intersect($columns, ['id', 'source_system', 'external_id', 'legacy_payload'])));
             $query->where(function ($query) use ($ids, $columns): void {
                 $hasExternal = in_array('source_system', $columns, true) && in_array('external_id', $columns, true);
                 $hasLegacy = in_array('legacy_payload', $columns, true);
@@ -147,14 +156,14 @@ class OvokoSoldMappingCheckController extends Controller
                 return;
             }
 
-            $query->get()->each(function (Part $part) use (&$matches, $ids, $extractor, $columns): void {
+            $query->get()->each(function (object $part) use (&$matches, $ids, $extractor, $columns, $loadPartDetails): void {
                 if (in_array('source_system', $columns, true) && in_array('external_id', $columns, true) && in_array((string) $part->external_id, $ids, true) && in_array((string) $part->source_system, ['ovoko', 'rrr'], true)) {
-                    $matches[(string) $part->external_id][] = ['part' => $part, 'part_id' => $part->id, 'source' => 'parts.source_system+parts.external_id', 'value' => (string) $part->external_id, 'listing_id' => null];
+                    $matches[(string) $part->external_id][] = ['part' => $loadPartDetails ? $part : null, 'part_id' => $part->id, 'source' => 'parts.source_system+parts.external_id', 'value' => (string) $part->external_id, 'listing_id' => null];
                 }
                 if (in_array('legacy_payload', $columns, true)) {
                     $legacy = $extractor->extractWithPath($part->legacy_payload);
                     if (($legacy['id'] ?? null) !== null && in_array((string) $legacy['id'], $ids, true)) {
-                        $matches[(string) $legacy['id']][] = ['part' => $part, 'part_id' => $part->id, 'source' => 'parts.legacy_payload.'.($legacy['path'] ?? 'ovoko_part_id'), 'value' => (string) $legacy['id'], 'listing_id' => null];
+                        $matches[(string) $legacy['id']][] = ['part' => $loadPartDetails ? $part : null, 'part_id' => $part->id, 'source' => 'parts.legacy_payload.'.($legacy['path'] ?? 'ovoko_part_id'), 'value' => (string) $legacy['id'], 'listing_id' => null];
                     }
                 }
             });
@@ -250,9 +259,135 @@ class OvokoSoldMappingCheckController extends Controller
         ];
     }
 
+
+    private function collectFullMatches(array $ids, bool $loadPartDetails = true): array
+    {
+        $warnings = [];
+        $errors = [];
+        /** @var OvokoPartIdExtractor $extractor */
+        $extractor = app(OvokoPartIdExtractor::class);
+        $matches = $this->collectMarketplaceListingMatches($ids, $warnings, $errors, $loadPartDetails);
+        $this->collectPartMatches($ids, $matches, $extractor, $warnings, $errors, $loadPartDetails);
+
+        return [$matches, $warnings, $errors];
+    }
+
+    private function rawMappings(array $ids, array $matches): array
+    {
+        return collect($ids)->mapWithKeys(fn (string $id): array => [$id => collect($matches[$id] ?? [])->map(fn (array $match): array => [
+            'part_id' => $match['part_id'] ?? null,
+            'source' => $match['source'] ?? null,
+            'value' => $match['value'] ?? null,
+            'marketplace_listing_id' => $match['listing_id'] ?? null,
+        ])->unique()->values()->all()])->all();
+    }
+
+    private function localPartUse(array $matches): array
+    {
+        $localPartUse = [];
+        foreach ($matches as $idMatches) {
+            foreach ($this->uniquePartIds($idMatches) as $partId) {
+                $localPartUse[(string) $partId] = ($localPartUse[(string) $partId] ?? 0) + 1;
+            }
+        }
+
+        return $localPartUse;
+    }
+
+    private function mappingStatus(array $matches, array $localPartUse): string
+    {
+        $partIds = $this->uniquePartIds($matches);
+
+        return count($partIds) === 0 ? 'missing' : (count($partIds) > 1 ? 'ambiguous' : (($localPartUse[(string) $partIds[0]] ?? 0) > 1 ? 'duplicate' : 'mapped'));
+    }
+
     private function debugStep(string $step, array $ids): JsonResponse
     {
         return match ($step) {
+
+            'full_start' => $this->debugTry($step, fn (): array => [
+                'parsed_ids' => $ids,
+                'count' => count($ids),
+            ]),
+            'full_marketplace_lookup' => $this->debugTry($step, function () use ($ids): array {
+                $warnings = [];
+                $errors = [];
+                $matches = $this->collectMarketplaceListingMatches($ids, $warnings, $errors, false);
+
+                return [
+                    'mappings' => $this->rawMappings($ids, $matches),
+                    'warnings' => array_values(array_unique($warnings)),
+                    'errors' => array_values(array_unique($errors)),
+                ];
+            }),
+            'full_parts_lookup' => $this->debugTry($step, function () use ($ids): array {
+                $warnings = [];
+                $errors = [];
+                $matches = [];
+                /** @var OvokoPartIdExtractor $extractor */
+                $extractor = app(OvokoPartIdExtractor::class);
+                $this->collectPartMatches($ids, $matches, $extractor, $warnings, $errors, false);
+
+                return [
+                    'mappings' => $this->rawMappings($ids, $matches),
+                    'warnings' => array_values(array_unique($warnings)),
+                    'errors' => array_values(array_unique($errors)),
+                ];
+            }),
+            'full_merge_mappings' => $this->debugTry($step, function () use ($ids): array {
+                [$matches, $warnings, $errors] = $this->collectFullMatches($ids, false);
+                $localPartUse = $this->localPartUse($matches);
+
+                return [
+                    'mappings' => collect($ids)->mapWithKeys(fn (string $id): array => [$id => [
+                        'status' => $this->mappingStatus($matches[$id] ?? [], $localPartUse),
+                        'part_ids' => $this->uniquePartIds($matches[$id] ?? []),
+                        'matches' => $this->rawMappings([$id], $matches)[$id] ?? [],
+                    ]])->all(),
+                    'warnings' => array_values(array_unique($warnings)),
+                    'errors' => array_values(array_unique($errors)),
+                ];
+            }),
+            'full_load_parts_details' => $this->debugTry($step, function () use ($ids): array {
+                [$matches, $warnings, $errors] = $this->collectFullMatches($ids, false);
+                $partIds = collect($matches)->flatMap(fn (array $idMatches): array => $this->uniquePartIds($idMatches))->unique()->values()->all();
+                $columns = $this->availableColumns('parts', ['id', 'source_system', 'external_id', 'legacy_payload', 'status', 'part_number', 'name', 'needs_listing', 'is_visible_storefront'], $warnings, $errors);
+
+                return [
+                    'part_ids' => $partIds,
+                    'parts' => $partIds === [] || ! in_array('id', $columns, true) ? [] : DB::table('parts')->select($columns)->whereIn('id', $partIds)->get(),
+                    'warnings' => array_values(array_unique($warnings)),
+                    'errors' => array_values(array_unique($errors)),
+                ];
+            }),
+            'full_build_items' => $this->debugTry($step, function () use ($ids): array {
+                [$matches, $warnings, $errors] = $this->collectFullMatches($ids);
+                $localPartUse = $this->localPartUse($matches);
+                $items = collect($ids)->map(fn (string $id): array => $this->buildItem($id, $matches[$id] ?? [], $localPartUse, $warnings))->values()->all();
+
+                return [
+                    'items' => $items,
+                    'warnings' => array_values(array_unique($warnings)),
+                    'errors' => array_values(array_unique($errors)),
+                ];
+            }),
+            'full_stats' => $this->debugTry($step, function () use ($ids): array {
+                [$matches, $warnings, $errors] = $this->collectFullMatches($ids);
+                $localPartUse = $this->localPartUse($matches);
+                $items = collect($ids)->map(fn (string $id): array => $this->buildItem($id, $matches[$id] ?? [], $localPartUse, $warnings))->values();
+                $summary = $this->buildSummary($items, $localPartUse);
+
+                return [
+                    'mapped' => $items->whereIn('match_status', ['found', 'duplicate_local_part'])->count(),
+                    'missing' => count($summary['missing_ovoko_ids']),
+                    'ambiguous' => count($summary['ambiguous_ovoko_ids']),
+                    'duplicate' => count($summary['duplicate_local_parts']),
+                    'already_sold' => count($summary['already_sold_ids']),
+                    'not_sold' => count($summary['would_mark_sold_ids']),
+                    'warnings' => array_values(array_unique($warnings)),
+                    'errors' => array_values(array_unique($errors)),
+                ];
+            }),
             'marketplace_probe' => response()->json(['ok' => true, 'step' => 'marketplace_probe']),
             'marketplace_count' => $this->debugTry($step, fn (): array => [
                 'count' => DB::table('marketplace_listings')->count(),
