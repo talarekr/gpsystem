@@ -29,6 +29,10 @@ class OvokoSoldMappingCheckController extends Controller
                 return $this->debugStep((string) $request->query('debug_step'), $ids, $request);
             }
 
+            if ($request->boolean('apply')) {
+                return $this->applyLocalSold($request, $ids);
+            }
+
             /** @var OvokoPartIdExtractor $extractor */
             $extractor = app(OvokoPartIdExtractor::class);
             $matchesById = $this->collectMarketplaceListingMatches($ids, $warnings, $errors);
@@ -67,6 +71,152 @@ class OvokoSoldMappingCheckController extends Controller
                 'items' => [],
             ], 200);
         }
+    }
+
+    private function applyLocalSold(Request $request, array $ids): JsonResponse
+    {
+        if ($request->query('confirm') !== 'mark_local_sold') {
+            return response()->json([
+                'ok' => false,
+                'dry_run' => false,
+                'local_update' => false,
+                'marketplace_write' => false,
+                'requested_count' => count($ids),
+                'eligible_count' => 0,
+                'updated_count' => 0,
+                'skipped_missing' => 0,
+                'skipped_ambiguous' => 0,
+                'skipped_already_sold' => 0,
+                'updated_items' => [],
+                'skipped_items' => [],
+                'errors' => ['confirm=mark_local_sold is required for apply'],
+            ], 422);
+        }
+
+        try {
+            $warnings = [];
+            $errors = [];
+            /** @var OvokoPartIdExtractor $extractor */
+            $extractor = app(OvokoPartIdExtractor::class);
+            $matchesById = $this->collectMarketplaceListingMatches($ids, $warnings, $errors);
+            $this->collectPartMatches($ids, $matchesById, $extractor, $warnings, $errors);
+
+            $localPartUse = [];
+            foreach ($matchesById as $matches) {
+                foreach ($this->uniquePartIds($matches) as $partId) {
+                    $localPartUse[(string) $partId] = ($localPartUse[(string) $partId] ?? 0) + 1;
+                }
+            }
+
+            $items = collect($ids)->map(fn (string $id): array => $this->buildItem($id, $matchesById[$id] ?? [], $localPartUse, $warnings))->values();
+
+            if ($errors !== []) {
+                return response()->json([
+                    'ok' => false,
+                    'dry_run' => false,
+                    'local_update' => false,
+                    'marketplace_write' => false,
+                    'requested_count' => count($ids),
+                    'eligible_count' => 0,
+                    'updated_count' => 0,
+                    'skipped_missing' => $items->where('match_status', 'missing')->count(),
+                    'skipped_ambiguous' => $items->whereIn('match_status', ['ambiguous', 'duplicate_local_part'])->count(),
+                    'skipped_already_sold' => $items->where('planned_action', 'no_change_already_sold')->count(),
+                    'updated_items' => [],
+                    'skipped_items' => $items->map(fn (array $item): array => $this->skippedApplyItem($item, 'blocked_by_mapping_errors'))->all(),
+                    'errors' => array_values(array_unique($errors)),
+                    'warnings' => array_values(array_unique($warnings)),
+                ], 500);
+            }
+
+            $eligible = $items->where('planned_action', 'would_mark_sold')->values();
+            $updatedItems = [];
+
+            DB::transaction(function () use ($eligible, &$updatedItems): void {
+                foreach ($eligible as $item) {
+                    /** @var Part|null $part */
+                    $part = Part::query()->whereKey($item['local_part_id'])->lockForUpdate()->first();
+
+                    if (! $part || $part->status === 'sold') {
+                        continue;
+                    }
+
+                    $oldWarnings = [];
+                    $oldStatus = $part->status;
+                    $oldAvailability = $this->safeAvailability($part, $oldWarnings);
+
+                    $part->markSoldViaLocalSale();
+                    $part->save();
+
+                    $fresh = $part->fresh();
+                    $newWarnings = [];
+
+                    $updatedItems[] = [
+                        'ovoko_product_id' => $item['ovoko_product_id'],
+                        'local_part_id' => $part->id,
+                        'old_status' => $oldStatus,
+                        'new_status' => $fresh?->status,
+                        'old_availability' => $oldAvailability,
+                        'new_availability' => $this->safeAvailability($fresh, $newWarnings),
+                    ];
+                }
+            });
+
+            return response()->json([
+                'ok' => true,
+                'dry_run' => false,
+                'local_update' => true,
+                'marketplace_write' => false,
+                'requested_count' => count($ids),
+                'eligible_count' => $eligible->count(),
+                'updated_count' => count($updatedItems),
+                'skipped_missing' => $items->where('match_status', 'missing')->count(),
+                'skipped_ambiguous' => $items->whereIn('match_status', ['ambiguous', 'duplicate_local_part'])->count(),
+                'skipped_already_sold' => $items->where('planned_action', 'no_change_already_sold')->count(),
+                'updated_items' => $updatedItems,
+                'skipped_items' => $items
+                    ->reject(fn (array $item): bool => $item['planned_action'] === 'would_mark_sold')
+                    ->map(fn (array $item): array => $this->skippedApplyItem($item))
+                    ->values()
+                    ->all(),
+                'warnings' => array_values(array_unique($warnings)),
+                'errors' => [],
+            ]);
+        } catch (Throwable $e) {
+            return response()->json([
+                'ok' => false,
+                'dry_run' => false,
+                'local_update' => false,
+                'marketplace_write' => false,
+                'requested_count' => count($ids),
+                'eligible_count' => 0,
+                'updated_count' => 0,
+                'skipped_missing' => 0,
+                'skipped_ambiguous' => 0,
+                'skipped_already_sold' => 0,
+                'updated_items' => [],
+                'skipped_items' => [],
+                'error_class' => get_class($e),
+                'error_message' => $e->getMessage(),
+                'errors' => [$this->formatThrowable('ovoko_sold_mapping_apply_error', $e)],
+            ], 500);
+        }
+    }
+
+    private function skippedApplyItem(array $item, ?string $forcedReason = null): array
+    {
+        return [
+            'ovoko_product_id' => $item['ovoko_product_id'] ?? null,
+            'local_part_id' => $item['local_part_id'] ?? null,
+            'planned_action' => $item['planned_action'] ?? null,
+            'match_status' => $item['match_status'] ?? null,
+            'reason' => $forcedReason ?: match ($item['planned_action'] ?? null) {
+                'no_change_already_sold' => 'already_sold',
+                'blocked_missing_mapping' => 'missing',
+                'blocked_ambiguous' => 'ambiguous',
+                default => $item['match_status'] ?? 'not_eligible',
+            },
+        ];
     }
 
     private function collectMarketplaceListingMatches(array $ids, array &$warnings, array &$errors, bool $loadPartDetails = true): array
