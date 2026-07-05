@@ -303,7 +303,8 @@ class OvokoSoldMappingCheckController extends Controller
 
     private function debugStep(string $step, array $ids): JsonResponse
     {
-        return match ($step) {
+        try {
+            return match ($step) {
 
             'full_start' => $this->debugTry($step, fn (): array => [
                 'parsed_ids' => $ids,
@@ -332,6 +333,105 @@ class OvokoSoldMappingCheckController extends Controller
                     'mappings' => $this->rawMappings($ids, $matches),
                     'warnings' => array_values(array_unique($warnings)),
                     'errors' => array_values(array_unique($errors)),
+                ];
+            }),
+            'parts_lookup_probe' => $this->debugTry($step, fn (): array => [
+                'message' => 'parts lookup debug endpoint is reachable',
+            ]),
+            'parts_source_external_count' => $this->debugTry($step, fn (): array => [
+                'count' => DB::table('parts')
+                    ->whereIn('source_system', ['ovoko', 'rrr'])
+                    ->whereNotNull('external_id')
+                    ->count(),
+            ]),
+            'parts_source_external_lookup' => $this->debugTry($step, function () use ($ids): array {
+                $ids = collect($ids)->map(fn (string $id): string => (string) $id)->take(20)->values()->all();
+
+                return [
+                    'sample_ids' => $ids,
+                    'rows' => DB::table('parts')
+                        ->select('id', 'source_system', 'external_id')
+                        ->whereIn('source_system', ['ovoko', 'rrr'])
+                        ->whereIn('external_id', $ids)
+                        ->limit(50)
+                        ->get(),
+                ];
+            }),
+            'parts_legacy_select_one' => $this->debugTry($step, fn (): array => [
+                'rows' => DB::table('parts')
+                    ->select('id', 'source_system', 'external_id', 'legacy_payload')
+                    ->whereNotNull('legacy_payload')
+                    ->limit(1)
+                    ->get()
+                    ->map(fn (object $row): array => $this->legacyPayloadRawRow($row))
+                    ->values(),
+            ]),
+            'parts_legacy_payload_scan_raw' => $this->debugTry($step, fn (): array => [
+                'rows' => DB::table('parts')
+                    ->select('id', 'legacy_payload')
+                    ->whereNotNull('legacy_payload')
+                    ->limit(20)
+                    ->get()
+                    ->map(fn (object $row): array => $this->legacyPayloadRawRow($row))
+                    ->values(),
+            ]),
+            'parts_legacy_payload_json_decode' => $this->debugTry($step, fn (): array => [
+                'rows' => DB::table('parts')
+                    ->select('id', 'legacy_payload')
+                    ->whereNotNull('legacy_payload')
+                    ->limit(20)
+                    ->get()
+                    ->map(fn (object $row): array => $this->legacyPayloadJsonDecodeRow($row))
+                    ->values(),
+            ]),
+            'parts_legacy_extractor_one' => $this->debugTry($step, function (): array {
+                $row = DB::table('parts')
+                    ->select('id', 'legacy_payload')
+                    ->whereNotNull('legacy_payload')
+                    ->limit(1)
+                    ->first();
+
+                return ['row' => $row ? $this->legacyExtractorRow($row) : null];
+            }),
+            'parts_legacy_extractor_scan' => $this->debugTry($step, fn (): array => [
+                'rows' => DB::table('parts')
+                    ->select('id', 'legacy_payload')
+                    ->whereNotNull('legacy_payload')
+                    ->limit(20)
+                    ->get()
+                    ->map(fn (object $row): array => $this->legacyExtractorRow($row))
+                    ->values(),
+            ]),
+            'parts_lookup_legacy_only' => $this->debugTry($step, function () use ($ids): array {
+                /** @var OvokoPartIdExtractor $extractor */
+                $extractor = app(OvokoPartIdExtractor::class);
+                $matches = [];
+                $errors = [];
+
+                DB::table('parts')
+                    ->select('id', 'legacy_payload')
+                    ->whereNotNull('legacy_payload')
+                    ->get()
+                    ->each(function (object $part) use ($ids, &$matches, &$errors, $extractor): void {
+                        try {
+                            $legacy = $extractor->extractWithPath($part->legacy_payload);
+                            if (($legacy['id'] ?? null) !== null && in_array((string) $legacy['id'], $ids, true)) {
+                                $matches[(string) $legacy['id']][] = [
+                                    'part' => null,
+                                    'part_id' => $part->id,
+                                    'source' => 'parts.legacy_payload.'.($legacy['path'] ?? 'ovoko_part_id'),
+                                    'value' => (string) $legacy['id'],
+                                    'listing_id' => null,
+                                ];
+                            }
+                        } catch (Throwable $e) {
+                            $errors[] = array_merge(['part_id' => $part->id], $this->debugThrowableData($e));
+                        }
+                    });
+
+                return [
+                    'mappings' => $this->rawMappings($ids, $matches),
+                    'errors' => $errors,
                 ];
             }),
             'full_merge_mappings' => $this->debugTry($step, function () use ($ids): array {
@@ -449,9 +549,15 @@ class OvokoSoldMappingCheckController extends Controller
             default => response()->json([
                 'ok' => false,
                 'step' => $step,
+                'dry_run' => true,
+                'local_update' => false,
+                'marketplace_write' => false,
                 'error_message' => 'Unknown debug_step.',
             ], 200),
         };
+        } catch (Throwable $e) {
+            return $this->debugThrowableResponse($step, $e);
+        }
     }
 
     private function debugTry(string $step, callable $callback): JsonResponse
@@ -465,19 +571,110 @@ class OvokoSoldMappingCheckController extends Controller
                 'marketplace_write' => false,
             ], $callback()));
         } catch (Throwable $e) {
-            return response()->json([
-                'ok' => false,
-                'step' => $step,
-                'dry_run' => true,
-                'local_update' => false,
-                'marketplace_write' => false,
-                'error_class' => get_class($e),
-                'error_message' => $e->getMessage(),
-                'file' => $e->getFile(),
-                'line' => $e->getLine(),
-                'trace_head' => collect($e->getTrace())->take(5)->values()->all(),
-            ], 200);
+            return $this->debugThrowableResponse($step, $e);
         }
+    }
+
+    private function debugThrowableResponse(string $step, Throwable $e): JsonResponse
+    {
+        return response()->json([
+            'ok' => false,
+            'step' => $step,
+            'dry_run' => true,
+            'local_update' => false,
+            'marketplace_write' => false,
+        ] + $this->debugThrowableData($e), 200);
+    }
+
+    private function debugThrowableData(Throwable $e): array
+    {
+        return [
+            'error_class' => get_class($e),
+            'error_message' => $e->getMessage(),
+            'file' => $e->getFile(),
+            'line' => $e->getLine(),
+            'trace_head' => collect($e->getTrace())->take(5)->values()->all(),
+        ];
+    }
+
+    private function legacyPayloadRawRow(object $row): array
+    {
+        $raw = $row->legacy_payload ?? null;
+
+        return [
+            'id' => $row->id ?? null,
+            'source_system' => $row->source_system ?? null,
+            'external_id' => $row->external_id ?? null,
+            'legacy_payload_type' => gettype($raw),
+            'legacy_payload_string_length' => is_string($raw) ? strlen($raw) : null,
+            'legacy_payload_preview' => is_string($raw) ? $this->safePreview($raw) : null,
+        ];
+    }
+
+    private function legacyPayloadJsonDecodeRow(object $row): array
+    {
+        $raw = $row->legacy_payload ?? null;
+        $decoded = null;
+        $jsonError = null;
+        $decodedType = null;
+
+        if ($raw === null) {
+            $decodedType = 'null';
+        } elseif (is_array($raw)) {
+            $decoded = $raw;
+            $decodedType = 'array';
+        } elseif (is_string($raw)) {
+            $decoded = json_decode($raw, true);
+            $jsonError = json_last_error_msg();
+            $decodedType = gettype($decoded);
+        } else {
+            $decodedType = gettype($raw);
+        }
+
+        return [
+            'id' => $row->id ?? null,
+            'legacy_payload_type' => gettype($raw),
+            'legacy_payload_string_length' => is_string($raw) ? strlen($raw) : null,
+            'legacy_payload_preview' => is_string($raw) ? $this->safePreview($raw) : null,
+            'json_error' => $jsonError,
+            'decoded_type' => $decodedType,
+            'decoded_is_array' => is_array($decoded),
+            'decoded_keys' => is_array($decoded) ? array_slice(array_keys($decoded), 0, 20) : [],
+        ];
+    }
+
+    private function legacyExtractorRow(object $row): array
+    {
+        try {
+            /** @var OvokoPartIdExtractor $extractor */
+            $extractor = app(OvokoPartIdExtractor::class);
+            $legacy = $extractor->extractWithPath($row->legacy_payload ?? null);
+
+            return [
+                'id' => $row->id ?? null,
+                'ok' => true,
+                'legacy_payload_type' => gettype($row->legacy_payload ?? null),
+                'legacy_payload_string_length' => is_string($row->legacy_payload ?? null) ? strlen($row->legacy_payload) : null,
+                'extracted' => $legacy,
+            ];
+        } catch (Throwable $e) {
+            return [
+                'id' => $row->id ?? null,
+                'ok' => false,
+                'legacy_payload_type' => gettype($row->legacy_payload ?? null),
+                'legacy_payload_string_length' => is_string($row->legacy_payload ?? null) ? strlen($row->legacy_payload) : null,
+            ] + $this->debugThrowableData($e);
+        }
+    }
+
+    private function safePreview(string $value, int $length = 300): string
+    {
+        $preview = substr($value, 0, $length);
+        if (function_exists('mb_scrub')) {
+            return mb_scrub($preview, 'UTF-8');
+        }
+
+        return preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $preview) ?? '';
     }
 
     private function decodeRawPayload(mixed $raw): array
