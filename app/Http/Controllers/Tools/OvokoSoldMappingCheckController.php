@@ -136,37 +136,27 @@ class OvokoSoldMappingCheckController extends Controller
         }
 
         try {
-            $query = ($loadPartDetails ? Part::query() : DB::table('parts'))->select($loadPartDetails ? $columns : array_values(array_intersect($columns, ['id', 'source_system', 'external_id', 'legacy_payload'])));
-            $query->where(function ($query) use ($ids, $columns): void {
-                $hasExternal = in_array('source_system', $columns, true) && in_array('external_id', $columns, true);
-                $hasLegacy = in_array('legacy_payload', $columns, true);
-
-                if ($hasExternal) {
-                    $query->where(function ($q) use ($ids): void {
-                        $q->whereIn('source_system', ['ovoko', 'rrr'])->whereIn('external_id', $ids);
-                    });
-                }
-                if ($hasLegacy) {
-                    $hasExternal ? $query->orWhereNotNull('legacy_payload') : $query->whereNotNull('legacy_payload');
-                }
-            });
-
             if (! in_array('source_system', $columns, true) && ! in_array('external_id', $columns, true) && ! in_array('legacy_payload', $columns, true)) {
                 $warnings[] = 'unavailable source: parts missing source_system/external_id and legacy_payload; skipped parts mapping';
                 return;
             }
 
-            $query->get()->each(function (object $part) use (&$matches, $ids, $extractor, $columns, $loadPartDetails): void {
-                if (in_array('source_system', $columns, true) && in_array('external_id', $columns, true) && in_array((string) $part->external_id, $ids, true) && in_array((string) $part->source_system, ['ovoko', 'rrr'], true)) {
-                    $matches[(string) $part->external_id][] = ['part' => $loadPartDetails ? $part : null, 'part_id' => $part->id, 'source' => 'parts.source_system+parts.external_id', 'value' => (string) $part->external_id, 'listing_id' => null];
-                }
-                if (in_array('legacy_payload', $columns, true)) {
-                    $legacy = $extractor->extractWithPath($part->legacy_payload);
-                    if (($legacy['id'] ?? null) !== null && in_array((string) $legacy['id'], $ids, true)) {
-                        $matches[(string) $legacy['id']][] = ['part' => $loadPartDetails ? $part : null, 'part_id' => $part->id, 'source' => 'parts.legacy_payload.'.($legacy['path'] ?? 'ovoko_part_id'), 'value' => (string) $legacy['id'], 'listing_id' => null];
-                    }
-                }
-            });
+            if (in_array('source_system', $columns, true) && in_array('external_id', $columns, true)) {
+                ($loadPartDetails ? Part::query() : DB::table('parts'))
+                    ->select($loadPartDetails ? $columns : array_values(array_intersect($columns, ['id', 'source_system', 'external_id'])))
+                    ->whereIn('source_system', ['ovoko', 'rrr'])
+                    ->whereIn('external_id', $ids)
+                    ->get()
+                    ->each(function (object $part) use (&$matches, $ids, $loadPartDetails): void {
+                        if (in_array((string) $part->external_id, $ids, true)) {
+                            $matches[(string) $part->external_id][] = ['part' => $loadPartDetails ? $part : null, 'part_id' => $part->id, 'source' => 'parts.source_system+parts.external_id', 'value' => (string) $part->external_id, 'listing_id' => null];
+                        }
+                    });
+            }
+
+            if (in_array('legacy_payload', $columns, true)) {
+                $this->collectLegacyPartMatches($ids, $matches, $extractor, $errors, $loadPartDetails, 5000);
+            }
         } catch (Throwable $e) {
             $errors[] = $this->formatThrowable('parts_mapping_error', $e);
         }
@@ -259,6 +249,116 @@ class OvokoSoldMappingCheckController extends Controller
         ];
     }
 
+    private function collectLegacyPartMatches(array $ids, array &$matches, OvokoPartIdExtractor $extractor, array &$errors, bool $loadPartDetails = true, int $maxScanned = 5000): array
+    {
+        $found = collect($matches)->filter(fn (array $idMatches): bool => $idMatches !== [])->keys()->map(fn ($id): string => (string) $id)->all();
+        $foundById = array_fill_keys($found, true);
+        $scanned = 0;
+        $stoppedReason = 'completed';
+
+        $query = $this->legacyCandidateQuery($ids)
+            ->select(['id', 'legacy_payload'])
+            ->orderBy('id');
+
+        $query->chunkById(200, function ($parts) use ($ids, &$matches, &$errors, $extractor, $loadPartDetails, &$foundById, &$scanned, $maxScanned, &$stoppedReason): bool {
+            foreach ($parts as $part) {
+                if ($scanned >= $maxScanned) {
+                    $stoppedReason = 'max_scanned_reached';
+                    return false;
+                }
+
+                $scanned++;
+
+                try {
+                    $legacy = $extractor->extractWithPath($part->legacy_payload);
+                    $legacyId = ($legacy['id'] ?? null) !== null ? (string) $legacy['id'] : null;
+
+                    if ($legacyId !== null && in_array($legacyId, $ids, true)) {
+                        $matches[$legacyId][] = [
+                            'part' => $loadPartDetails ? Part::query()->select(['id', 'status', 'part_number', 'name', 'needs_listing', 'is_visible_storefront'])->find($part->id) : null,
+                            'part_id' => $part->id,
+                            'source' => 'parts.legacy_payload.'.($legacy['path'] ?? 'ovoko_part_id'),
+                            'value' => $legacyId,
+                            'listing_id' => null,
+                        ];
+                        $foundById[$legacyId] = true;
+
+                        if (count($foundById) >= count($ids)) {
+                            $stoppedReason = 'all_ids_found';
+                            return false;
+                        }
+                    }
+                } catch (Throwable $e) {
+                    $errors[] = $this->formatThrowable('parts_legacy_payload_'.$part->id.'_extract_error', $e);
+                }
+            }
+
+            return true;
+        });
+
+        return [
+            'partial' => $stoppedReason === 'max_scanned_reached',
+            'scanned_count' => $scanned,
+            'found_count' => count($foundById),
+            'stopped_reason' => $stoppedReason,
+        ];
+    }
+
+    private function legacyCandidateQuery(array $ids)
+    {
+        return DB::table('parts')
+            ->whereNotNull('legacy_payload')
+            ->where(function ($query) use ($ids): void {
+                foreach ($this->legacyLikePatterns($ids) as $pattern) {
+                    $query->orWhere('legacy_payload', 'like', $pattern);
+                }
+            });
+    }
+
+    private function legacyLikeLookup(array $ids): array
+    {
+        $patterns = $this->legacyLikePatterns($ids);
+        $rows = $this->legacyCandidateQuery($ids)
+            ->select(['id', 'legacy_payload'])
+            ->orderBy('id')
+            ->limit(200)
+            ->get()
+            ->map(function (object $row) use ($patterns): array {
+                $payload = (string) ($row->legacy_payload ?? '');
+                $matched = collect($patterns)->first(fn (string $pattern): bool => str_contains($payload, trim($pattern, '%')));
+
+                return [
+                    'part_id' => $row->id,
+                    'matched_pattern' => $matched,
+                    'legacy_payload_string_length' => strlen($payload),
+                ];
+            })
+            ->values();
+
+        return [
+            'patterns' => $patterns,
+            'count' => $rows->count(),
+            'rows' => $rows,
+        ];
+    }
+
+    private function legacyLikePatterns(array $ids): array
+    {
+        return collect($ids)
+            ->flatMap(fn (string $id): array => [
+                '%"ovoko_part_id":"'.$id.'"%', '%"ovoko_part_id": "'.$id.'"%',
+                '%"ovoko_part_id":'.$id.'%', '%"ovoko_part_id": '.$id.'%',
+                '%\\"ovoko_part_id\\":\\"'.$id.'\\"%',
+            ])
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private function maxScanned(Request $request): int
+    {
+        return max(1, min(50000, (int) $request->query('max_scanned', 5000)));
+    }
 
     private function collectFullMatches(array $ids, bool $loadPartDetails = true): array
     {
@@ -402,35 +502,22 @@ class OvokoSoldMappingCheckController extends Controller
                     ->map(fn (object $row): array => $this->legacyExtractorRow($row))
                     ->values(),
             ]),
+            'parts_lookup_legacy_like_only' => $this->debugTry($step, function () use ($ids): array {
+                return $this->legacyLikeLookup($ids);
+            }),
             'parts_lookup_legacy_only' => $this->debugTry($step, function () use ($ids): array {
                 /** @var OvokoPartIdExtractor $extractor */
                 $extractor = app(OvokoPartIdExtractor::class);
                 $matches = [];
                 $errors = [];
-
-                DB::table('parts')
-                    ->select('id', 'legacy_payload')
-                    ->whereNotNull('legacy_payload')
-                    ->get()
-                    ->each(function (object $part) use ($ids, &$matches, &$errors, $extractor): void {
-                        try {
-                            $legacy = $extractor->extractWithPath($part->legacy_payload);
-                            if (($legacy['id'] ?? null) !== null && in_array((string) $legacy['id'], $ids, true)) {
-                                $matches[(string) $legacy['id']][] = [
-                                    'part' => null,
-                                    'part_id' => $part->id,
-                                    'source' => 'parts.legacy_payload.'.($legacy['path'] ?? 'ovoko_part_id'),
-                                    'value' => (string) $legacy['id'],
-                                    'listing_id' => null,
-                                ];
-                            }
-                        } catch (Throwable $e) {
-                            $errors[] = array_merge(['part_id' => $part->id], $this->debugThrowableData($e));
-                        }
-                    });
+                $stats = $this->collectLegacyPartMatches($ids, $matches, $extractor, $errors, false, $this->maxScanned(request()));
 
                 return [
                     'mappings' => $this->rawMappings($ids, $matches),
+                    'partial' => $stats['partial'],
+                    'scanned_count' => $stats['scanned_count'],
+                    'found_count' => $stats['found_count'],
+                    'stopped_reason' => $stats['stopped_reason'],
                     'errors' => $errors,
                 ];
             }),
