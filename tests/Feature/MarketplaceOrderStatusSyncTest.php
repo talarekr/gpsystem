@@ -72,9 +72,9 @@ class MarketplaceOrderStatusSyncTest extends TestCase
         $this->assertSame('skipped', $log->status);
         $this->assertSame('unsupported_allegro_status', $log->message);
         $this->assertSame('on_hold', $log->payload['request_summary']['local_status']);
-        $this->assertSame('bad2699', $log->payload['order_status_sync_code_version']);
-        $this->assertSame('bad2699', $log->payload['request_summary']['order_status_sync_code_version']);
-        $this->assertSame('bad2699', $log->payload['response_summary']['order_status_sync_code_version']);
+        $this->assertSame(\App\Services\Marketplace\OrderStatusMarketplaceSyncService::CODE_VERSION, $log->payload['order_status_sync_code_version']);
+        $this->assertSame(\App\Services\Marketplace\OrderStatusMarketplaceSyncService::CODE_VERSION, $log->payload['request_summary']['order_status_sync_code_version']);
+        $this->assertSame(\App\Services\Marketplace\OrderStatusMarketplaceSyncService::CODE_VERSION, $log->payload['response_summary']['order_status_sync_code_version']);
         $this->assertSame('unsupported_allegro_status', $log->payload['response_summary']['skipped_reason']);
     }
 
@@ -153,7 +153,7 @@ class MarketplaceOrderStatusSyncTest extends TestCase
         $log = MarketplaceSyncLog::query()->where('order_id', 135)->latest('id')->firstOrFail();
         $this->assertSame('success', $log->status);
         $this->assertSame('processing', $log->payload['local_status_raw_value']);
-        $this->assertSame('bad2699', $log->payload['order_status_sync_code_version']);
+        $this->assertSame(\App\Services\Marketplace\OrderStatusMarketplaceSyncService::CODE_VERSION, $log->payload['order_status_sync_code_version']);
         $this->assertSame('W REALIZACJI', $log->payload['local_status_ui_label']);
         $this->assertSame('new', $log->payload['previous_local_status']);
         $this->assertSame('allegro', $log->payload['marketplace']);
@@ -162,6 +162,32 @@ class MarketplaceOrderStatusSyncTest extends TestCase
         $this->assertSame('plan', $log->payload['mapper_method']);
         $this->assertSame('PROCESSING', $log->payload['available_map']['processing']);
         $this->assertSame('PROCESSING', $log->payload['target_marketplace_status']);
+    }
+
+
+    public function test_order_135_processing_uses_fresh_model_and_allegro_mapper_context(): void
+    {
+        Http::fake(['https://allegro.test/*' => Http::response([], 204)]);
+        MarketplaceAccount::query()->create(['marketplace' => 'allegro', 'code' => 'allegro_main', 'name' => 'Allegro', 'api_enabled' => true, 'api_base_url' => 'https://allegro.test', 'api_mode' => 'live', 'api_credentials' => ['access_token' => 'token']]);
+        $staleOrder = Order::query()->create(['id' => 135, 'order_number' => '135', 'marketplace' => 'Allegro', 'marketplace_order_id' => 'f2f054f0-7866-11f1-b5bc-398519c00320', 'status' => 'new']);
+
+        Order::query()->whereKey(135)->update(['status' => 'processing']);
+        app(\App\Services\Marketplace\OrderStatusMarketplaceSyncService::class)->sync($staleOrder, 'new');
+
+        Http::assertSent(fn ($request) => $request->method() === 'PUT'
+            && str_contains($request->url(), '/order/checkout-forms/f2f054f0-7866-11f1-b5bc-398519c00320/fulfillment')
+            && $request['status'] === 'PROCESSING');
+        $this->assertDatabaseMissing('marketplace_sync_logs', ['order_id' => 135, 'status' => 'skipped', 'message' => 'unsupported_status_for_marketplace']);
+
+        $log = MarketplaceSyncLog::query()->where('order_id', 135)->latest('id')->firstOrFail();
+        $this->assertSame('order_status_sync', $log->action);
+        $this->assertSame('success', $log->status);
+        $this->assertSame('processing', $log->payload['local_status_raw_value']);
+        $this->assertSame('Allegro', $log->payload['marketplace_raw_value']);
+        $this->assertSame('allegro', $log->payload['normalized_marketplace']);
+        $this->assertSame('PROCESSING', $log->payload['target_marketplace_status']);
+        $this->assertSame('allegro_fulfillment_status', $log->payload['mapper_branch']);
+        $this->assertSame(\App\Services\Marketplace\OrderStatusMarketplaceSyncService::CODE_VERSION, $log->payload['code_version']);
     }
 
 
