@@ -66,6 +66,28 @@ class StorageLocationModuleFoundationTest extends TestCase
         ]);
     }
 
+    public function test_storage_location_list_modal_create_action_creates_record_through_livewire(): void
+    {
+        $this->actingAsWarehouseUser();
+
+        Livewire::test(ListStorageLocations::class)
+            ->mountAction('create')
+            ->setActionData([
+                'name' => 'MODAL-1',
+                'description' => 'Utworzone z modala listy',
+                'is_active' => true,
+            ])
+            ->callMountedAction()
+            ->assertHasNoActionErrors()
+            ->assertSee('MODAL-1');
+
+        $this->assertDatabaseHas('storage_locations', [
+            'name' => 'MODAL-1',
+            'description' => 'Utworzone z modala listy',
+            'is_active' => true,
+        ]);
+    }
+
     public function test_storage_location_name_is_required(): void
     {
         $this->actingAsWarehouseUser();

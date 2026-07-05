@@ -36,7 +36,18 @@ class ListStorageLocations extends Page
 
     protected function getHeaderActions(): array
     {
-        return [Actions\CreateAction::make()->label('Dodaj miejsce składowania')];
+        return [
+            Actions\CreateAction::make()
+                ->label('Dodaj miejsce składowania')
+                ->modalHeading('Dodaj miejsce składowania')
+                ->model(StorageLocation::class)
+                ->form(StorageLocationResource::formSchema())
+                ->successNotificationTitle('Miejsce składowania zostało dodane')
+                ->createAnother(false)
+                ->after(function (): void {
+                    $this->resetPage();
+                }),
+        ];
     }
 
     public function updating(string $property): void
