@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\MarketplaceCategory;
 use App\Models\MarketplaceCategoryMapping;
 use App\Models\MarketplaceListing;
+use App\Models\MarketplaceSyncLog;
 use App\Models\Order;
 use App\Models\Part;
 use App\Models\PartCategory;
@@ -681,6 +682,34 @@ HTML, 200, ['Content-Type' => 'text/html; charset=UTF-8']);
         $orderId = $request->integer('order_id') ?: null;
         $order = $orderId ? Order::query()->find($orderId) : null;
 
+        $marketplaceSyncLogId = $request->integer('marketplace_sync_log_id') ?: $request->integer('log_id') ?: null;
+        $marketplaceSyncLog = $marketplaceSyncLogId ? MarketplaceSyncLog::query()->find($marketplaceSyncLogId) : null;
+
+        $orderStatusLogs = null;
+        if ($orderId && $request->boolean('include_order_status_logs', false)) {
+            $orderStatusLogs = MarketplaceSyncLog::query()
+                ->where('order_id', $orderId)
+                ->where('action', OrderStatusMarketplaceSyncService::ACTION)
+                ->latest('id')
+                ->limit(max(1, min(50, $request->integer('order_status_logs_limit', 10))))
+                ->get(['id', 'marketplace', 'action', 'status', 'http_status', 'message', 'request_id', 'external_id', 'tracking_number', 'payload', 'created_at'])
+                ->map(fn (MarketplaceSyncLog $log): array => [
+                    'id' => $log->id,
+                    'marketplace' => $log->marketplace,
+                    'action' => $log->action,
+                    'status' => $log->status,
+                    'http_status' => $log->http_status,
+                    'message' => $log->message,
+                    'request_id' => $log->request_id,
+                    'external_id' => $log->external_id,
+                    'tracking_number' => $log->tracking_number,
+                    'created_at' => optional($log->created_at)->toISOString(),
+                    'payload_raw' => $log->payload,
+                ])
+                ->values()
+                ->all();
+        }
+
         return response()->json([
             'ok' => true,
             'app_env' => config('app.env'),
@@ -709,6 +738,23 @@ HTML, 200, ['Content-Type' => 'text/html; charset=UTF-8']);
                 'marketplace' => $order?->marketplace,
                 'marketplace_order_id' => $order?->marketplace_order_id,
             ] : null,
+            'marketplace_sync_log' => $marketplaceSyncLogId ? [
+                'id' => $marketplaceSyncLogId,
+                'found' => $marketplaceSyncLog !== null,
+                'marketplace' => $marketplaceSyncLog?->marketplace,
+                'action' => $marketplaceSyncLog?->action,
+                'status' => $marketplaceSyncLog?->status,
+                'http_status' => $marketplaceSyncLog?->http_status,
+                'message' => $marketplaceSyncLog?->message,
+                'order_id' => $marketplaceSyncLog?->order_id,
+                'request_id' => $marketplaceSyncLog?->request_id,
+                'external_id' => $marketplaceSyncLog?->external_id,
+                'tracking_number' => $marketplaceSyncLog?->tracking_number,
+                'created_at' => optional($marketplaceSyncLog?->created_at)->toISOString(),
+                'payload_raw' => $marketplaceSyncLog?->payload,
+            ] : null,
+            'order_status_logs_included' => $orderStatusLogs !== null,
+            'order_status_logs' => $orderStatusLogs,
             'commit' => $this->currentCommitHash(),
             'time' => now()->toISOString(),
         ]);
