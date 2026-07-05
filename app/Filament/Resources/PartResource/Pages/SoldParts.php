@@ -168,11 +168,13 @@ class SoldParts extends Page
     private function partSaleRows(): Collection
     {
         $localSalePartIds = LocalSale::query()->whereNotNull('part_id')->pluck('part_id')->all();
+        $orderBackedPartIds = $this->orderBackedPartIds();
+        $excludedSyntheticPartIds = array_values(array_unique(array_merge($localSalePartIds, $orderBackedPartIds)));
 
         return Part::query()
             ->with(['images', 'storageLocation'])
             ->where('status', 'sold')
-            ->when($localSalePartIds !== [], fn ($query) => $query->whereNotIn('id', $localSalePartIds))
+            ->when($excludedSyntheticPartIds !== [], fn ($query) => $query->whereNotIn('id', $excludedSyntheticPartIds))
             ->latest('sold_at')
             ->latest('id')
             ->limit(500)
@@ -205,6 +207,33 @@ class SoldParts extends Page
                     ]),
                 ];
             });
+    }
+
+
+    /**
+     * @return array<int, int>
+     */
+    private function orderBackedPartIds(): array
+    {
+        return OrderItem::query()
+            ->with(['marketplaceListing:id,part_id,external_offer_id'])
+            ->whereHas('order', fn ($query) => $query->where('status', '!=', 'cancelled'))
+            ->where(function ($query): void {
+                $query->whereNotNull('part_id')
+                    ->orWhereHas('marketplaceListing', fn ($listingQuery) => $listingQuery->whereNotNull('part_id'));
+            })
+            ->latest('id')
+            ->limit(500)
+            ->get()
+            ->flatMap(fn (OrderItem $item): array => [
+                $item->part_id,
+                $item->marketplaceListing?->part_id,
+            ])
+            ->filter(fn ($partId): bool => filled($partId))
+            ->map(fn ($partId): int => (int) $partId)
+            ->unique()
+            ->values()
+            ->all();
     }
 
     private function filterRows(Collection $rows, string $search): Collection

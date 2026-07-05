@@ -7,9 +7,12 @@ use App\Filament\Resources\PartResource;
 use App\Filament\Resources\PartResource\Pages\EditPart;
 use App\Filament\Resources\PartResource\Pages\ListParts;
 use App\Filament\Resources\PartResource\Pages\PartsToList;
+use App\Filament\Resources\PartResource\Pages\SoldParts;
 use App\Filament\Resources\PartResource\Pages\ViewPart;
 use App\Models\Car;
 use App\Models\MarketplaceListing;
+use App\Models\Order;
+use App\Models\OrderItem;
 use App\Models\Part;
 use App\Models\PartCategory;
 use App\Models\PartImage;
@@ -562,6 +565,71 @@ class PartModuleFoundationTest extends TestCase
             ->assertJsonPath('samples_needs_listing_in_admin_all', []);
     }
 
+
+
+    public function test_sold_parts_prefers_marketplace_order_item_over_synthetic_part_sale_duplicate(): void
+    {
+        $this->actingAsWarehouseUser();
+
+        $soldAt = Carbon::parse('2026-07-04 12:30:00', 'UTC');
+        $part = Part::query()->create([
+            'name' => 'AUDI A4 B7 AVANT TUNEL ŚRODKOWY',
+            'sku' => '2727',
+            'status' => 'sold',
+            'sale_source' => 'ebay',
+            'sold_at' => $soldAt,
+            'price' => 400,
+            'currency' => 'PLN',
+            'quantity' => 0,
+        ]);
+
+        $order = Order::query()->create([
+            'order_number' => 'GPS-18-14843-53084',
+            'marketplace' => 'ebay',
+            'marketplace_order_id' => '18-14843-53084',
+            'marketplace_status' => 'paid',
+            'ordered_at' => $soldAt->copy()->addMinute(),
+            'status' => 'processing',
+            'currency' => 'EUR',
+            'subtotal' => 118.11,
+            'shipping_total' => 0,
+            'total' => 118.11,
+            'customer_name' => 'Marketplace Buyer',
+            'email' => 'buyer@example.test',
+            'phone' => '123456789',
+            'address_line1' => 'Market 1',
+            'postal_code' => '00-001',
+            'city' => 'Warszawa',
+            'country' => 'PL',
+        ]);
+
+        OrderItem::query()->create([
+            'order_id' => $order->id,
+            'marketplace' => 'ebay',
+            'marketplace_order_id' => '18-14843-53084',
+            'marketplace_item_id' => 'line-1',
+            'part_id' => $part->id,
+            'product_name' => $part->name,
+            'sku' => $part->sku,
+            'unit_price' => 118.11,
+            'quantity' => 1,
+            'line_total' => 118.11,
+            'currency' => 'EUR',
+        ]);
+
+        $rows = Livewire::test(SoldParts::class)->get('soldParts')->items();
+
+        $this->assertCount(1, $rows);
+        $this->assertSame('order_item', $rows[0]['type']);
+        $this->assertSame($part->id, $rows[0]['part_id']);
+        $this->assertSame('eBay', $rows[0]['source_label']);
+        $this->assertSame('18-14843-53084', $rows[0]['reference']);
+        $this->assertSame('118.11', (string) $rows[0]['price']);
+        $this->assertSame('EUR', $rows[0]['currency']);
+        $this->assertNotNull($rows[0]['order_url']);
+        $this->assertNotContains('part_sale', array_column($rows, 'type'));
+        $this->assertNotContains('—', array_column($rows, 'reference'));
+    }
 
 
     public function test_parts_lists_show_plain_status_text_and_inline_internal_note_editor(): void
