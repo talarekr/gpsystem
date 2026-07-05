@@ -32,8 +32,6 @@ class JarekGearboxToolController extends Controller
     private const JAREK_PREVIEW_MAX_IMAGE_DIAGNOSTIC_RECORDS = 10;
     private const JAREK_PREVIEW_MAX_STORAGE_CANDIDATE_PATHS_PER_RECORD = 20;
     private const JAREK_PREVIEW_MAX_FILE_EXISTS_CHECKS = 100;
-    private const JAREK_READY_REMAINING_SCAN_LIMIT = 100;
-    private const JAREK_READY_REMAINING_MAX_PAGES = 10;
 
     private int $jarekImageFileExistsChecks = 0;
     private bool $jarekImageFileExistsBudgetExceeded = false;
@@ -294,11 +292,11 @@ class JarekGearboxToolController extends Controller
 
             $base['marketplace_write'] = $this->jarekPublishRunnerMarketplaceWriteStarted;
             $base['applied'] = $base['batch_summary']['published_count'] > 0;
-            $base['ready_remaining_count'] = $this->countReadyMissingJarekEbayDePublishOffers($request, $translateService, $renderer, $exchangeRateService);
+            // Do not run a global ready-remaining scan here. The UI can run the
+            // read-only scan batch runner when an exact remaining count is needed.
             $base['published_total_count'] = $this->countJarekGearboxesWithPublishedEbayOffer();
-            $base['has_more'] = $base['ready_remaining_count'] > 0;
-            $base['completed'] = $base['ready_remaining_count'] === 0;
-            $base['batch_summary']['ready_remaining_count'] = $base['ready_remaining_count'];
+            $base['has_more'] = $base['batch_summary']['processed_count'] > 0;
+            $base['completed'] = $base['batch_summary']['processed_count'] === 0;
             $base['batch_summary']['published_total_count'] = $base['published_total_count'];
             return response()->json($base, 200);
         } catch (Throwable $e) {
@@ -327,61 +325,58 @@ class JarekGearboxToolController extends Controller
 
     private function firstReadyMissingJarekEbayDePublishOffers(Request $request, GoogleTranslateService $translateService, EbayDescriptionTemplateRenderer $renderer, NbpExchangeRateService $exchangeRateService, int $limit): array
     {
-        $offers = [];
-        $scanOffset = 0;
-        $scanLimit = max($limit, 50);
+        // Intentionally scan only one lightweight window. A batch that finds no ready
+        // rows is allowed to complete; the separate Scan Remaining runner performs
+        // exhaustive counting client-side in batches when needed.
+        $previewRequest = Request::create($request->path(), 'GET', [
+            'offset' => 0,
+            'limit' => $limit,
+            'missing_offer_id_only' => '1',
+            'only_ready' => '1',
+            '_skip_ready_remaining_count' => '1',
+        ]);
+        $preview = $this->ebayDeBulkPreparePublishPreview($previewRequest, $translateService, $renderer, $exchangeRateService)->getData(true);
 
-        do {
-            $previewRequest = Request::create($request->path(), 'GET', [
-                'offset' => $scanOffset,
-                'limit' => $scanLimit,
-                'missing_offer_id_only' => '1',
-                'only_ready' => '1',
-                '_skip_ready_remaining_count' => '1',
-            ]);
-            $preview = $this->ebayDeBulkPreparePublishPreview($previewRequest, $translateService, $renderer, $exchangeRateService)->getData(true);
-            foreach ((array) ($preview['offers'] ?? []) as $offer) {
-                $offers[] = (array) $offer;
-                if (count($offers) >= $limit) return $offers;
-            }
-            $hasMore = (bool) data_get($preview, 'summary.has_more', false);
-            $nextOffset = (int) data_get($preview, 'summary.next_offset', $scanOffset + $scanLimit);
-            if ($nextOffset <= $scanOffset) break;
-            $scanOffset = $nextOffset;
-        } while ($hasMore);
-
-        return $offers;
+        return array_slice(array_map(fn ($offer): array => (array) $offer, (array) ($preview['offers'] ?? [])), 0, $limit);
     }
 
-    private function countReadyMissingJarekEbayDePublishOffers(Request $request, GoogleTranslateService $translateService, EbayDescriptionTemplateRenderer $renderer, NbpExchangeRateService $exchangeRateService): int
+    public function publishRunnerScanBatch(Request $request, GoogleTranslateService $translateService, EbayDescriptionTemplateRenderer $renderer, NbpExchangeRateService $exchangeRateService): JsonResponse
     {
-        $remaining = 0;
-        $scanOffset = 0;
-        $scanLimit = self::JAREK_READY_REMAINING_SCAN_LIMIT;
-        $scannedPages = 0;
+        $limit = max(1, min(100, (int) $request->query('limit', 20)));
+        $offset = max(0, (int) $request->query('offset', 0));
+        $base = ['ok' => true, 'dry_run' => true, 'read_only' => true, 'marketplace_write' => false, 'offset' => $offset, 'limit' => $limit, 'next_offset' => $offset, 'has_more' => false, 'batch_summary' => ['scanned_count' => 0, 'ready_count' => 0, 'blocked_count' => 0, 'duplicate_existing_count' => 0, 'failed_count' => 0], 'items' => [], 'admin_diagnostics' => []];
 
-        do {
-            $scannedPages++;
+        try {
             $previewRequest = Request::create($request->path(), 'GET', [
-                'offset' => $scanOffset,
-                'limit' => $scanLimit,
-                'missing_offer_id_only' => '1',
-                'only_ready' => '1',
+                'offset' => $offset,
+                'limit' => $limit,
+                'missing_offer_id_only' => $request->boolean('missing_offer_id_only', true) ? '1' : '0',
+                'only_ready' => $request->boolean('only_ready') ? '1' : '0',
                 '_skip_ready_remaining_count' => '1',
             ]);
             $preview = $this->ebayDeBulkPreparePublishPreview($previewRequest, $translateService, $renderer, $exchangeRateService)->getData(true);
-            if (! ($preview['ok'] ?? false)) {
-                break;
+            $base['ok'] = (bool) ($preview['ok'] ?? true);
+            $base['next_offset'] = (int) data_get($preview, 'summary.next_offset', $offset);
+            $base['has_more'] = (bool) data_get($preview, 'summary.has_more', false);
+            $base['batch_summary']['scanned_count'] = max(0, $base['next_offset'] - $offset);
+
+            foreach ((array) ($preview['offers'] ?? []) as $offer) {
+                $blockers = (array) ($offer['blockers'] ?? []);
+                $ready = (bool) ($offer['ready_to_publish'] ?? false);
+                $failed = in_array('record_prepare_exception', $blockers, true);
+                $duplicate = filled($offer['existing_offer_id'] ?? null) || filled($offer['existing_listing_id'] ?? null) || in_array('existing_ebay_offer_or_listing_found', $blockers, true);
+                if ($ready) $base['batch_summary']['ready_count']++;
+                if (! $ready && ! $failed) $base['batch_summary']['blocked_count']++;
+                if ($duplicate) $base['batch_summary']['duplicate_existing_count']++;
+                if ($failed) $base['batch_summary']['failed_count']++;
+                $base['items'][] = ['sku' => $offer['sku'] ?? null, 'ready_to_publish' => $ready, 'blockers' => $blockers, 'existing_offer_id' => $offer['existing_offer_id'] ?? null, 'existing_listing_id' => $offer['existing_listing_id'] ?? null];
             }
+        } catch (Throwable $e) {
+            $base['ok'] = false;
+            $base['admin_diagnostics'] = ['error_class' => $e::class, 'error_message' => $e->getMessage()];
+        }
 
-            $remaining += (int) data_get($preview, 'summary.ready_to_publish_count', 0);
-            $hasMore = (bool) data_get($preview, 'summary.has_more', false);
-            $nextOffset = (int) data_get($preview, 'summary.next_offset', $scanOffset + $scanLimit);
-            if ($nextOffset <= $scanOffset) break;
-            $scanOffset = $nextOffset;
-        } while ($hasMore && $scannedPages < self::JAREK_READY_REMAINING_MAX_PAGES);
-
-        return $remaining;
+        return response()->json($base, 200);
     }
 
     private function countJarekGearboxesWithPublishedEbayOffer(): int
@@ -965,9 +960,6 @@ class JarekGearboxToolController extends Controller
                     $payload['summary']['ready_to_publish_count']++;
                     $payload['summary']['estimated_publish_count']++;
                 }
-            }
-            if ($missingOfferIdOnly && $onlyReady && ! $request->boolean('_skip_ready_remaining_count')) {
-                $payload['summary']['ready_remaining_count'] = $this->countReadyMissingJarekEbayDePublishOffers($request, $translateService, $renderer, $exchangeRateService);
             }
         } catch (Throwable $e) {
             $payload['ok'] = false;
