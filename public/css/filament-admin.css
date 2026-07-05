@@ -17,6 +17,7 @@
     --gps-admin-content-max-width: 80rem;
     --gps-admin-content-inline-padding: 2rem;
     --gps-admin-topbar-inline-padding: clamp(0.875rem, 2vw, 1.5rem);
+    --gps-admin-order-accent: #16a34a;
 }
 
 
@@ -412,7 +413,7 @@ body,
 .gps-admin-topbar__user { gap: 0.5rem; min-height: 2.5rem; max-width: 13rem; padding: 0.35rem 0.65rem 0.35rem 0.4rem; }
 .gps-admin-topbar__user span { display: inline-flex; width: 1.85rem; height: 1.85rem; align-items: center; justify-content: center; border-radius: 999px; background: var(--gps-admin-navy); color: #fff; font-size: 0.78rem; font-weight: 800; }
 .gps-admin-topbar__user strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.85rem; }
-.gps-admin-topbar__action strong { display: inline-flex; min-width: 1.15rem; height: 1.15rem; align-items: center; justify-content: center; border-radius: 999px; background: #dc2626; color: #fff; padding: 0 0.3rem; font-size: 0.68rem; line-height: 1; }
+.gps-admin-topbar__action strong { display: inline-flex; min-width: 0; height: auto; align-items: center; justify-content: center; border-radius: 0; background: transparent; color: var(--gps-admin-order-accent); padding: 0; font-size: 0.875rem; font-weight: 800; line-height: 1; }
 
 
 @media (min-width: 1024px) {
@@ -486,13 +487,13 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 .gps-shop-events__tabs { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem; }
 .gps-shop-events__tab { display: inline-flex; align-items: center; gap: .38rem; border: 1px solid #dbe3ee; border-radius: 999px; background: #f8fafc; color: #334155; padding: 0.42rem 0.68rem; font-size: 0.85rem; font-weight: 400; text-decoration: none; }
 .gps-shop-events__tab:hover, .gps-shop-events__tab.is-active { border-color: #405f82; background: #edf3f8; color: var(--gps-admin-navy); }
-.gps-shop-events__tab-count { display: inline-flex; min-width: 0; height: auto; align-items: center; padding: 0; color: #475569; font-size: .82rem; font-weight: 400; line-height: 1; }
-.gps-shop-events__tab-count--action { color: #dc2626; }
+.gps-shop-events__tab-count { display: inline-flex; min-width: 0; height: auto; align-items: center; padding: 0; color: var(--gps-admin-order-accent); font-size: .82rem; font-weight: 800; line-height: 1; }
+.gps-shop-events__tab-count--action { color: var(--gps-admin-order-accent); }
 
 .gps-shop-events__empty { margin-top: 1rem; border: 1px dashed #cbd5e1; border-radius: 0.95rem; background: #f8fafc; padding: 1.2rem; color: #64748b; font-weight: 700; text-align: center; }
 .gps-shop-events__list { display: grid; gap: 0.45rem; margin-top: 1rem; }
 .gps-shop-events__item { display: grid; grid-template-columns: minmax(0, 1fr) max-content; column-gap: 22px; align-items: center; min-width: 0; border: 1px solid #e2e8f0; border-left: 4px solid #94a3b8; border-radius: 0.8rem; background: #fff; color: #475569; padding: 0.32rem 0.75rem; font-size: 0.84rem; font-weight: 400; box-shadow: 0 1px 2px rgba(11, 31, 58, 0.035); }
-.gps-shop-events__item--success { border-left-color: #16a34a; }
+.gps-shop-events__item--success { border-left-color: var(--gps-admin-order-accent); }
 .gps-shop-events__item--warning { border-left-color: #86cfa3; }
 .gps-shop-events__item--danger { border-left-color: #dc2626; }
 .gps-shop-events__time { color: #475569; white-space: nowrap; }
