@@ -8,4 +8,5 @@ return [
     'ebay_description_revise_enabled' => env('GPS_EBAY_DESCRIPTION_REVISE_ENABLED', false),
     'allegro_publishing_enabled' => env('GPS_ALLEGRO_PUBLISHING_ENABLED', false),
     'ovoko_publishing_enabled' => env('GPS_OVOKO_PUBLISHING_ENABLED', false),
+    'allegro_user_agent' => env('GPS_ALLEGRO_USER_AGENT', 'GPswiss/v1.0 (+https://gpswiss.pl/api-info)'),
 ];

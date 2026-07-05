@@ -10,6 +10,7 @@ use App\Support\Marketplace\EbayOAuthConfig;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
+use App\Support\Marketplace\AllegroUserAgent;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -191,7 +192,7 @@ class MarketplaceOrdersImportService
 
     private function sendAllegroOrdersRequest(string $base, string $token, array $query): \Illuminate\Http\Client\Response
     {
-        return Http::withToken($token)->accept('application/vnd.allegro.public.v1+json')->timeout(25)->get($base.'/order/checkout-forms', $query);
+        return AllegroUserAgent::request()->withToken($token)->accept('application/vnd.allegro.public.v1+json')->timeout(25)->get($base.'/order/checkout-forms', $query);
     }
 
     private function sendEbayOrdersRequest(string $base, string $token, string $marketplaceId, array $query): \Illuminate\Http\Client\Response

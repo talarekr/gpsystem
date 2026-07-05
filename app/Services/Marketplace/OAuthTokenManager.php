@@ -5,6 +5,7 @@ namespace App\Services\Marketplace;
 use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceSyncLog;
 use App\Support\Marketplace\AllegroOAuthConfig;
+use App\Support\Marketplace\AllegroUserAgent;
 use App\Support\Marketplace\EbayOAuthConfig;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Carbon;
@@ -65,7 +66,7 @@ class OAuthTokenManager
     {
         $c = $this->credentials($account);
         if (! $this->has($c, ['client_id', 'client_secret', 'refresh_token'])) return $this->fail($account, null, 'Allegro token refresh prerequisites are missing.');
-        $response = Http::asForm()->withBasicAuth((string) $c['client_id'], (string) $c['client_secret'])->acceptJson()->timeout(20)->post(AllegroOAuthConfig::TOKEN_URL, ['grant_type' => 'refresh_token', 'refresh_token' => (string) $c['refresh_token']]);
+        $response = AllegroUserAgent::request()->asForm()->withBasicAuth((string) $c['client_id'], (string) $c['client_secret'])->acceptJson()->timeout(20)->post(AllegroOAuthConfig::TOKEN_URL, ['grant_type' => 'refresh_token', 'refresh_token' => (string) $c['refresh_token']]);
         return $this->storeRefreshResponse($account, $response, 'access_token_expires_at', fn ($expiresIn) => AllegroOAuthConfig::tokenExpiresAt($expiresIn), true);
     }
 
