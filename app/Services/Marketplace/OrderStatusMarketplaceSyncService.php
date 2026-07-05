@@ -7,15 +7,15 @@ use App\Models\MarketplaceSyncLog;
 use App\Models\Order;
 use App\Services\Marketplace\Api\AllegroApiClient;
 use App\Services\Marketplace\Api\EbayApiClient;
-use Illuminate\Support\Arr;
 
 class OrderStatusMarketplaceSyncService
 {
     public const ACTION = 'order_status_sync';
-    public const CODE_VERSION = 'bad2699';
+    public const CODE_VERSION = '135-processing-debug';
 
     public function sync(Order $order, ?string $previousStatus = null, ?int $retryOfLogId = null): MarketplaceSyncLog
     {
+        $order = $order->refresh();
         $marketplace = $this->normalizeMarketplace((string) $order->marketplace);
         $plan = $this->plan($order, $previousStatus, $retryOfLogId);
 
@@ -38,17 +38,21 @@ class OrderStatusMarketplaceSyncService
 
     public function plan(Order $order, ?string $previousStatus = null, ?int $retryOfLogId = null): array
     {
-        $marketplace = $this->normalizeMarketplace((string) $order->marketplace);
+        $marketplaceRaw = (string) $order->marketplace;
+        $marketplace = $this->normalizeMarketplace($marketplaceRaw);
         $status = (string) $order->status;
         $base = [
             'previous_local_status' => $previousStatus,
             'new_local_status' => $status,
+            'marketplace_raw_value' => $marketplaceRaw,
+            'normalized_marketplace' => $marketplace,
             'marketplace' => $marketplace,
             'marketplace_order_id' => $order->marketplace_order_id,
             'retry_of_log_id' => $retryOfLogId,
             'supported' => false,
             'dry_run' => true,
             'order_status_sync_code_version' => self::CODE_VERSION,
+            'code_version' => self::CODE_VERSION,
             'local_status_raw_value' => $status,
             'local_status_ui_label' => \App\Services\Admin\OrderStatusOptions::optionsForOrder($order)[$status] ?? null,
             'mapper_class' => self::class,
@@ -67,6 +71,7 @@ class OrderStatusMarketplaceSyncService
             $target = $map[$status] ?? null;
             return $base + [
                 'target_marketplace_status' => $target,
+                'mapper_branch' => 'allegro_fulfillment_status',
                 'action' => self::ACTION,
                 'supported' => $target !== null,
                 'available_map' => $map,
@@ -76,14 +81,14 @@ class OrderStatusMarketplaceSyncService
         }
 
         if ($marketplace === 'ebay') {
-            return $base + ['target_marketplace_status' => $status === 'shipped' ? 'shipping_fulfillment' : null, 'action' => 'ebay_create_shipping_fulfillment', 'supported' => $status === 'shipped', 'skipped_reason' => $status === 'shipped' ? null : 'unsupported_status_for_marketplace'];
+            return $base + ['target_marketplace_status' => $status === 'shipped' ? 'shipping_fulfillment' : null, 'mapper_branch' => 'ebay_shipping_fulfillment', 'action' => 'ebay_create_shipping_fulfillment', 'supported' => $status === 'shipped', 'skipped_reason' => $status === 'shipped' ? null : 'unsupported_status_for_marketplace'];
         }
 
         if ($marketplace === 'ovoko') {
-            return $base + ['target_marketplace_status' => null, 'action' => self::ACTION, 'supported' => false, 'skipped_reason' => 'ovoko_order_status_endpoint_not_confirmed_in_rrr_docs'];
+            return $base + ['target_marketplace_status' => null, 'mapper_branch' => 'ovoko_no_status_endpoint', 'action' => self::ACTION, 'supported' => false, 'skipped_reason' => 'ovoko_order_status_endpoint_not_confirmed_in_rrr_docs'];
         }
 
-        return $base + ['target_marketplace_status' => null, 'action' => self::ACTION, 'skipped_reason' => 'local_or_unsupported_marketplace'];
+        return $base + ['target_marketplace_status' => null, 'mapper_branch' => 'unsupported_marketplace', 'action' => self::ACTION, 'skipped_reason' => 'local_or_unsupported_marketplace'];
     }
 
     private function dispatch(Order $order, string $marketplace, array $plan): array
@@ -103,6 +108,10 @@ class OrderStatusMarketplaceSyncService
 
     private function log(Order $order, string $marketplace, array $plan, string $status, ?string $skippedReason = null, array $result = []): MarketplaceSyncLog
     {
+        $debugContext = $this->debugContext($order, $marketplace, $plan);
+        $requestSummary = array_merge($debugContext, $result['request_summary'] ?? $this->skipRequestSummary($order, $marketplace, $plan, $skippedReason));
+        $responseSummary = array_merge($debugContext, $result['response_summary'] ?? $this->skipResponseSummary($plan, $skippedReason));
+
         return MarketplaceSyncLog::query()->create([
             'marketplace' => $marketplace,
             'order_id' => $order->id,
@@ -115,22 +124,41 @@ class OrderStatusMarketplaceSyncService
             'payload' => [
                 'order_status_sync' => true,
                 'order_status_sync_code_version' => self::CODE_VERSION,
+                'code_version' => self::CODE_VERSION,
+                'marketplace' => $marketplace,
+                'marketplace_raw_value' => $plan['marketplace_raw_value'] ?? $order->marketplace,
+                'normalized_marketplace' => $plan['normalized_marketplace'] ?? $marketplace,
                 'marketplace_order_id' => $order->marketplace_order_id,
                 'previous_local_status' => $plan['previous_local_status'] ?? null,
                 'new_local_status' => $plan['new_local_status'] ?? $order->status,
                 'local_status_raw_value' => $plan['local_status_raw_value'] ?? $order->status,
                 'local_status_ui_label' => $plan['local_status_ui_label'] ?? null,
                 'target_marketplace_status' => $plan['target_marketplace_status'] ?? null,
+                'mapper_branch' => $plan['mapper_branch'] ?? null,
                 'mapper_class' => $plan['mapper_class'] ?? self::class,
                 'mapper_method' => $plan['mapper_method'] ?? 'plan',
                 'available_map' => $plan['available_map'] ?? null,
-                'request_summary' => $result['request_summary'] ?? $this->skipRequestSummary($order, $marketplace, $plan, $skippedReason),
-                'response_summary' => $result['response_summary'] ?? $this->skipResponseSummary($plan, $skippedReason),
+                'request_summary' => $requestSummary,
+                'response_summary' => $responseSummary,
                 'skipped_reason' => $skippedReason,
                 'retry_of_log_id' => $plan['retry_of_log_id'] ?? null,
             ],
             'created_at' => now(),
         ]);
+    }
+
+
+    private function debugContext(Order $order, string $marketplace, array $plan): array
+    {
+        return [
+            'local_status_raw_value' => $plan['local_status_raw_value'] ?? $order->status,
+            'marketplace_raw_value' => $plan['marketplace_raw_value'] ?? $order->marketplace,
+            'normalized_marketplace' => $plan['normalized_marketplace'] ?? $marketplace,
+            'target_marketplace_status' => $plan['target_marketplace_status'] ?? null,
+            'mapper_branch' => $plan['mapper_branch'] ?? null,
+            'code_version' => self::CODE_VERSION,
+            'order_status_sync_code_version' => self::CODE_VERSION,
+        ];
     }
 
     private function skipRequestSummary(Order $order, string $marketplace, array $plan, ?string $skippedReason): array
@@ -139,17 +167,21 @@ class OrderStatusMarketplaceSyncService
             'method' => $marketplace === 'allegro' ? 'PUT' : null,
             'endpoint' => $marketplace === 'allegro' ? 'PUT /order/checkout-forms/{checkoutFormId}/fulfillment' : null,
             'marketplace' => $marketplace,
+            'marketplace_raw_value' => $plan['marketplace_raw_value'] ?? $order->marketplace,
+            'normalized_marketplace' => $plan['normalized_marketplace'] ?? $marketplace,
             'checkout_form_id' => $marketplace === 'allegro' ? $order->marketplace_order_id : null,
             'local_status' => $plan['new_local_status'] ?? $order->status,
             'local_status_raw_value' => $plan['local_status_raw_value'] ?? $order->status,
             'local_status_ui_label' => $plan['local_status_ui_label'] ?? null,
             'previous_local_status' => $plan['previous_local_status'] ?? null,
             'target_marketplace_status' => $plan['target_marketplace_status'] ?? null,
+            'mapper_branch' => $plan['mapper_branch'] ?? null,
             'available_map' => $plan['available_map'] ?? null,
             'supported_marketplace_statuses' => $plan['supported_marketplace_statuses'] ?? null,
             'mapper_class' => $plan['mapper_class'] ?? self::class,
             'mapper_method' => $plan['mapper_method'] ?? 'plan',
             'order_status_sync_code_version' => self::CODE_VERSION,
+            'code_version' => self::CODE_VERSION,
             'skipped_reason' => $skippedReason,
         ];
     }
@@ -164,10 +196,14 @@ class OrderStatusMarketplaceSyncService
             'local_status_ui_label' => $plan['local_status_ui_label'] ?? null,
             'previous_local_status' => $plan['previous_local_status'] ?? null,
             'marketplace' => $plan['marketplace'] ?? null,
+            'marketplace_raw_value' => $plan['marketplace_raw_value'] ?? null,
+            'normalized_marketplace' => $plan['normalized_marketplace'] ?? null,
             'marketplace_order_id' => $plan['marketplace_order_id'] ?? null,
+            'mapper_branch' => $plan['mapper_branch'] ?? null,
             'mapper_class' => $plan['mapper_class'] ?? self::class,
             'mapper_method' => $plan['mapper_method'] ?? 'plan',
             'order_status_sync_code_version' => self::CODE_VERSION,
+            'code_version' => self::CODE_VERSION,
             'available_map' => $plan['available_map'] ?? null,
             'target_marketplace_status' => $plan['target_marketplace_status'] ?? null,
             'skipped_reason' => $skippedReason,
