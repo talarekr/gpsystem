@@ -725,12 +725,23 @@ HTML, 200, ['Content-Type' => 'text/html; charset=UTF-8']);
         }
 
         Artisan::call('optimize:clear');
-        $opcacheReset = function_exists('opcache_reset') ? @opcache_reset() : null;
+
+        $opcacheStatusBeforeReset = function_exists('opcache_get_status') ? @opcache_get_status(false) : null;
+        $opcacheResetAvailable = function_exists('opcache_reset');
+        $opcacheReset = $opcacheResetAvailable ? @opcache_reset() : null;
+        $opcacheStatusAfterReset = function_exists('opcache_get_status') ? @opcache_get_status(false) : null;
 
         return response()->json([
             'ok' => true,
             'command' => 'optimize:clear',
+            'opcache_reset_available' => $opcacheResetAvailable,
             'opcache_reset' => $opcacheReset,
+            'opcache_enabled_before_reset' => is_array($opcacheStatusBeforeReset) ? (bool) ($opcacheStatusBeforeReset['opcache_enabled'] ?? false) : null,
+            'opcache_restart_pending_before_reset' => is_array($opcacheStatusBeforeReset) ? (bool) ($opcacheStatusBeforeReset['restart_pending'] ?? false) : null,
+            'opcache_restart_in_progress_before_reset' => is_array($opcacheStatusBeforeReset) ? (bool) ($opcacheStatusBeforeReset['restart_in_progress'] ?? false) : null,
+            'opcache_enabled_after_reset' => is_array($opcacheStatusAfterReset) ? (bool) ($opcacheStatusAfterReset['opcache_enabled'] ?? false) : null,
+            'opcache_restart_pending_after_reset' => is_array($opcacheStatusAfterReset) ? (bool) ($opcacheStatusAfterReset['restart_pending'] ?? false) : null,
+            'opcache_restart_in_progress_after_reset' => is_array($opcacheStatusAfterReset) ? (bool) ($opcacheStatusAfterReset['restart_in_progress'] ?? false) : null,
             'base_path' => base_path(),
             'php_sapi' => PHP_SAPI,
             'fpm_pool' => $_SERVER['PHP_FPM_POOL'] ?? $_SERVER['SERVER_NAME'] ?? null,
