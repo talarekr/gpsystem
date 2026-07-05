@@ -3,6 +3,7 @@
     $source = match (true) {
         $source === '', in_array($source, ['sklep', 'local', 'store', 'storefront', 'shop'], true) => 'local',
         in_array($source, ['sprzedaż lokalna', 'sprzedaz lokalna', 'local_sale', 'local sale'], true) => 'local_sale',
+        in_array($source, ['ręczna zmiana stanu magazynowego', 'reczna zmiana stanu magazynowego', 'manual_stock_change', 'manual stock change'], true) => 'manual_stock_change',
         str_starts_with($source, 'allegro') => 'allegro',
         str_starts_with($source, 'ovoko') => 'ovoko',
         str_starts_with($source, 'ebay') => 'ebay',
@@ -43,7 +44,8 @@
         }
 
         .gps-order-source--local,
-        .gps-order-source--local_sale {
+        .gps-order-source--local_sale,
+        .gps-order-source--manual_stock_change {
             color: #334155;
             font-family: inherit;
             font-weight: 600;
@@ -51,7 +53,7 @@
     </style>
 @endonce
 
-<span class="gps-order-source gps-order-source--{{ $sourceClass }}" aria-label="Źródło: {{ $source === 'local' ? 'Sklep' : ($source === 'local_sale' ? 'Sprzedaż lokalna' : $source) }}">
+<span class="gps-order-source gps-order-source--{{ $sourceClass }}" aria-label="Źródło: {{ match ($source) { 'local' => 'Sklep', 'local_sale' => 'Sprzedaż lokalna', 'manual_stock_change' => 'Ręczna zmiana stanu magazynowego', default => $source } }}">
     @if ($source === 'ebay')
         <span style="color:#E53238">e</span><span style="color:#0064D2">B</span><span style="color:#F5AF02">a</span><span style="color:#86B817">y</span>
     @elseif ($source === 'allegro')
@@ -62,6 +64,8 @@
         Sklep
     @elseif ($source === 'local_sale')
         Sprzedaż lokalna
+    @elseif ($source === 'manual_stock_change')
+        Ręczna zmiana stanu magazynowego
     @else
         {{ ucfirst($source) }}
     @endif
