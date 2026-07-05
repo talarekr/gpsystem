@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceSyncLog;
 use App\Services\Marketplace\Api\EbayApiClient;
+use App\Support\Marketplace\AllegroUserAgent;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -162,6 +163,11 @@ class MarketplaceApiSettingsDiagnosticsController extends Controller
             if (empty($payload[$key])) $payload['blockers'][] = $message;
         }
         if (empty($payload['access_token_configured'])) $payload['warnings'][] = 'Access token missing or not connected yet.';
+        if ($code === 'allegro_main') {
+            $payload['user_agent'] = AllegroUserAgent::value();
+            $payload['user_agent_config_key'] = 'GPS_ALLEGRO_USER_AGENT';
+            $payload['user_agent_info_url'] = 'https://gpswiss.pl/api-info';
+        }
         if ($definition['need_site'] ?? false) $payload['marketplace_site_configured'] = filled($settings['marketplace_id'] ?? null) || filled($settings['site_id'] ?? null);
         return $payload;
     }

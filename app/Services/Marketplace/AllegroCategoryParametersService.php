@@ -4,6 +4,7 @@ namespace App\Services\Marketplace;
 
 use App\Models\MarketplaceAccount;
 use Illuminate\Support\Facades\DB;
+use App\Support\Marketplace\AllegroUserAgent;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 use App\Services\Marketplace\Api\AllegroApiClient;
@@ -27,12 +28,12 @@ class AllegroCategoryParametersService
         $base = rtrim((string) ($account?->api_base_url ?: 'https://api.allegro.pl'), '/');
         if ($token === '') return ['ok' => false, 'source' => 'none', 'blocker' => 'allegro_credentials_missing', 'parameters' => []];
         $endpoint = $base.'/sale/categories/'.$categoryId.'/parameters';
-        $response = Http::withToken($token)->accept('application/vnd.allegro.public.v1+json')->timeout(20)->get($endpoint);
+        $response = AllegroUserAgent::request()->withToken($token)->accept('application/vnd.allegro.public.v1+json')->timeout(20)->get($endpoint);
         if ($response->status() === 401 && filled(data_get($account, 'api_credentials.refresh_token'))) {
             $refresh = (new AllegroApiClient('allegro_main', $account))->refreshAccessToken();
             if (($refresh['ok'] ?? false) === true) {
                 $account->refresh();
-                $response = Http::withToken((string) data_get($account, 'api_credentials.access_token'))->accept('application/vnd.allegro.public.v1+json')->timeout(20)->get($endpoint);
+                $response = AllegroUserAgent::request()->withToken((string) data_get($account, 'api_credentials.access_token'))->accept('application/vnd.allegro.public.v1+json')->timeout(20)->get($endpoint);
             }
         }
         if ($response->status() === 401) {

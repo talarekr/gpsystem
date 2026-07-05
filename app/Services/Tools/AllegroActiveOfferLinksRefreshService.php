@@ -7,6 +7,7 @@ use App\Models\MarketplaceListing;
 use App\Models\Part;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
+use App\Support\Marketplace\AllegroUserAgent;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 
@@ -185,7 +186,7 @@ class AllegroActiveOfferLinksRefreshService
 
             $query = ['limit' => min(1000, $remaining), 'offset' => $offset];
             if ($status !== '') $query['publication.status'] = $status;
-            $response = Http::withToken($token)->accept('application/vnd.allegro.public.v1+json')->timeout(20)->get(rtrim((string) $account->api_base_url, '/').'/sale/offers', $query);
+            $response = AllegroUserAgent::request()->withToken($token)->accept('application/vnd.allegro.public.v1+json')->timeout(20)->get(rtrim((string) $account->api_base_url, '/').'/sale/offers', $query);
             if (! $response->successful()) { $blockers[] = 'Allegro /sale/offers read-only request failed with HTTP '.$response->status().'.'; break; }
             $json = $response->json();
             if (! is_array($json)) { $blockers[] = 'Allegro /sale/offers returned a non-JSON response.'; break; }

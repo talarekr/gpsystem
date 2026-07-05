@@ -7,6 +7,7 @@ use App\Models\Order;
 use App\Models\Shipment;
 use App\Services\Marketplace\ApiIntegrationLogger;
 use Illuminate\Support\Arr;
+use App\Support\Marketplace\AllegroUserAgent;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 
@@ -147,9 +148,9 @@ class MarketplaceOrderFulfillmentSyncService
     {
         $base = rtrim((string) $account->api_base_url, '/');
         $token = (string) data_get($account->api_credentials, 'access_token');
-        $shipment = Http::withToken($token)->accept('application/vnd.allegro.public.v1+json')->contentType('application/vnd.allegro.public.v1+json')->timeout(20)->post($base.'/order/checkout-forms/'.rawurlencode($this->externalOrderId($order)).'/shipments', $payload['shipment']);
+        $shipment = AllegroUserAgent::request()->withToken($token)->accept('application/vnd.allegro.public.v1+json')->contentType('application/vnd.allegro.public.v1+json')->timeout(20)->post($base.'/order/checkout-forms/'.rawurlencode($this->externalOrderId($order)).'/shipments', $payload['shipment']);
         if (! $shipment->successful()) throw new RuntimeException('Allegro shipment write failed HTTP '.$shipment->status());
-        $fulfillment = Http::withToken($token)->accept('application/vnd.allegro.public.v1+json')->contentType('application/vnd.allegro.public.v1+json')->timeout(20)->put($base.'/order/checkout-forms/'.rawurlencode($this->externalOrderId($order)).'/fulfillment', $payload['fulfillment']);
+        $fulfillment = AllegroUserAgent::request()->withToken($token)->accept('application/vnd.allegro.public.v1+json')->contentType('application/vnd.allegro.public.v1+json')->timeout(20)->put($base.'/order/checkout-forms/'.rawurlencode($this->externalOrderId($order)).'/fulfillment', $payload['fulfillment']);
         if (! $fulfillment->successful()) throw new RuntimeException('Allegro fulfillment write failed HTTP '.$fulfillment->status());
         return ['shipment_http_status' => $shipment->status(), 'fulfillment_http_status' => $fulfillment->status(), 'fulfillment_id' => data_get($shipment->json(), 'id')];
     }

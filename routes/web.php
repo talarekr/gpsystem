@@ -154,6 +154,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', [HomeController::class, 'index'])->name('storefront.home');
+Route::get('/api-info', fn () => response()->view('storefront.api-info'))->name('storefront.api-info');
 Route::get('/admin/brand/logo.png', function () {
     $candidates = [
         storage_path('app/imports/logo.png'),

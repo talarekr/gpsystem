@@ -4,7 +4,7 @@ namespace App\Services\Marketplace\Api;
 
 use App\Services\Marketplace\OAuthTokenManager;
 use App\Support\Marketplace\AllegroOAuthConfig;
-use Illuminate\Support\Facades\Http;
+use App\Support\Marketplace\AllegroUserAgent;
 
 class AllegroApiClient extends AbstractMarketplaceApiClient
 {
@@ -29,7 +29,7 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
             return ['ok' => false, 'status' => 'not_ready', 'message' => 'Allegro refresh token prerequisites are missing.'];
         }
 
-        $response = Http::asForm()
+        $response = AllegroUserAgent::request()->asForm()
             ->withBasicAuth($clientId, $clientSecret)
             ->acceptJson()
             ->timeout(20)
@@ -77,9 +77,9 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
         if ($revision !== null && $revision !== '') {
             $payload['checkoutForm'] = ['revision' => $revision];
         }
-        $requestSummary = ['method' => 'PUT', 'endpoint' => 'PUT /order/checkout-forms/{checkoutFormId}/fulfillment', 'url' => $endpoint, 'checkout_form_id' => $checkoutFormId, 'headers' => ['Accept' => $mediaType, 'Content-Type' => $mediaType, 'Authorization' => 'Bearer ***'], 'payload' => $payload];
+        $requestSummary = ['method' => 'PUT', 'endpoint' => 'PUT /order/checkout-forms/{checkoutFormId}/fulfillment', 'url' => $endpoint, 'checkout_form_id' => $checkoutFormId, 'headers' => ['Accept' => $mediaType, 'Content-Type' => $mediaType, 'Authorization' => 'Bearer ***', 'User-Agent' => AllegroUserAgent::value()], 'payload' => $payload];
         try {
-            $response = Http::withToken((string) $this->credentials()['access_token'])->withHeaders(['Accept' => $mediaType, 'Content-Type' => $mediaType])->timeout(20)->put($endpoint, $payload);
+            $response = AllegroUserAgent::request()->withToken((string) $this->credentials()['access_token'])->withHeaders(['Accept' => $mediaType, 'Content-Type' => $mediaType])->timeout(20)->put($endpoint, $payload);
             $json = $response->json(); $body = is_array($json) ? $json : [];
             $message = $response->status() === 409 ? 'Allegro fulfillment conflict: checkoutForm.revision may be stale; retry after refreshing order data.' : ($response->successful() ? 'Allegro order fulfillment status updated.' : 'Allegro order fulfillment status update failed.');
             return ['ok' => $response->successful(), 'http_status' => $response->status(), 'action' => 'order_status_sync', 'message' => $message, 'request_summary' => $requestSummary, 'response_summary' => ['http_status' => $response->status(), 'successful' => $response->successful(), 'body' => $body, 'top_level_keys' => array_slice(array_keys($body), 0, 20), 'errors' => $body['errors'] ?? null, 'message' => $body['message'] ?? $body['error_description'] ?? $body['error'] ?? null, 'request_id' => $response->header('trace-id') ?: $response->header('x-request-id'), 'revision_conflict' => $response->status() === 409]];
@@ -113,12 +113,13 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
                 'Accept' => $mediaType,
                 'Content-Type' => $mediaType,
                 'Authorization' => 'Bearer ***',
+                'User-Agent' => AllegroUserAgent::value(),
             ],
             'payload' => $payload,
         ];
 
         try {
-            $response = Http::withToken((string) $this->credentials()['access_token'])
+            $response = AllegroUserAgent::request()->withToken((string) $this->credentials()['access_token'])
                 ->withHeaders([
                     'Accept' => $mediaType,
                     'Content-Type' => $mediaType,
@@ -188,7 +189,7 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
 
         $resolved = [];
         foreach ($endpoints as $key => [$path, $listKeys]) {
-            $response = Http::withToken($token)
+            $response = AllegroUserAgent::request()->withToken($token)
                 ->accept('application/vnd.allegro.public.v1+json')
                 ->timeout(20)
                 ->get($base.$path);
@@ -240,7 +241,7 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
     public function responsibleProducers(): array
     {
         $base = rtrim((string) $this->account?->api_base_url, '/');
-        $response = Http::withToken((string) $this->credentials()['access_token'])
+        $response = AllegroUserAgent::request()->withToken((string) $this->credentials()['access_token'])
             ->accept('application/vnd.allegro.public.v1+json')
             ->timeout(20)
             ->get($base.'/sale/responsible-producers');
@@ -322,7 +323,7 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
     public function createProductOffer(array $payload): array
     {
         $base = rtrim((string) $this->account?->api_base_url, '/');
-        $response = Http::withToken((string) $this->credentials()['access_token'])
+        $response = AllegroUserAgent::request()->withToken((string) $this->credentials()['access_token'])
             ->accept('application/vnd.allegro.public.v1+json')
             ->contentType('application/vnd.allegro.public.v1+json')
             ->timeout(30)
@@ -341,7 +342,7 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
 
     public function updateProductOfferDescription(string $offerId, array $description): array
     {
-        $response = Http::withToken((string) $this->credentials()['access_token'])
+        $response = AllegroUserAgent::request()->withToken((string) $this->credentials()['access_token'])
             ->accept('application/vnd.allegro.public.v1+json')
             ->contentType('application/vnd.allegro.public.v1+json')
             ->timeout(30)
@@ -360,13 +361,13 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
 
     public function productOfferOperationStatus(string $location): array
     {
-        $response = Http::withToken((string) $this->credentials()['access_token'])->accept('application/vnd.allegro.public.v1+json')->timeout(20)->get($this->absoluteUrl($location));
+        $response = AllegroUserAgent::request()->withToken((string) $this->credentials()['access_token'])->accept('application/vnd.allegro.public.v1+json')->timeout(20)->get($this->absoluteUrl($location));
         return ['ok' => $response->successful(), 'http_status' => $response->status(), 'json' => is_array($response->json()) ? $response->json() : [], 'request_id' => $response->header('trace-id') ?: $response->header('x-request-id')];
     }
 
     public function productOffer(string $offerId): array
     {
-        $response = Http::withToken((string) $this->credentials()['access_token'])
+        $response = AllegroUserAgent::request()->withToken((string) $this->credentials()['access_token'])
             ->accept('application/vnd.allegro.public.v1+json')
             ->timeout(20)
             ->get($this->absoluteUrl('/sale/product-offers/'.rawurlencode($offerId)));
@@ -382,11 +383,11 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
 
     private function getWithAuthRetry(string $url, array $query = [], int $timeout = 20)
     {
-        $response = Http::withToken($this->accessToken())->accept('application/vnd.allegro.public.v1+json')->timeout($timeout)->get($url, $query);
+        $response = AllegroUserAgent::request()->withToken($this->accessToken())->accept('application/vnd.allegro.public.v1+json')->timeout($timeout)->get($url, $query);
         if ($response->status() === 401 && $this->account) {
             $refresh = app(OAuthTokenManager::class)->refresh($this->account);
             if (($refresh['ok'] ?? false) === true) {
-                $response = Http::withToken((string) $refresh['access_token'])->accept('application/vnd.allegro.public.v1+json')->timeout($timeout)->get($url, $query);
+                $response = AllegroUserAgent::request()->withToken((string) $refresh['access_token'])->accept('application/vnd.allegro.public.v1+json')->timeout($timeout)->get($url, $query);
             }
         }
         return $response;

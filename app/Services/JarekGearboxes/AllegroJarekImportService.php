@@ -6,6 +6,7 @@ use App\Models\JarekGearbox;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
+use App\Support\Marketplace\AllegroUserAgent;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 
@@ -352,7 +353,7 @@ class AllegroJarekImportService
             throw new RuntimeException('Missing .env/config key for Allegro Jarek: '.$status['missing'][0]);
         }
 
-        return Http::withToken((string) config('services.allegro_jarek.access_token'))
+        return AllegroUserAgent::request()->withToken((string) config('services.allegro_jarek.access_token'))
             ->accept('application/vnd.allegro.public.v1+json')
             ->timeout(20);
     }

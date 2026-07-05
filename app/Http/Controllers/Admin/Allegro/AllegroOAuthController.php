@@ -5,10 +5,10 @@ namespace App\Http\Controllers\Admin\Allegro;
 use App\Http\Controllers\Controller;
 use App\Models\MarketplaceAccount;
 use App\Support\Marketplace\AllegroOAuthConfig;
+use App\Support\Marketplace\AllegroUserAgent;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class AllegroOAuthController extends Controller
@@ -59,7 +59,7 @@ class AllegroOAuthController extends Controller
         }
 
         try {
-            $response = Http::asForm()
+            $response = AllegroUserAgent::request()->asForm()
                 ->withBasicAuth($clientId, $clientSecret)
                 ->acceptJson()
                 ->timeout(20)

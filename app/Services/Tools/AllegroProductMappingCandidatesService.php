@@ -6,6 +6,7 @@ use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceListing;
 use App\Models\Part;
 use Illuminate\Support\Arr;
+use App\Support\Marketplace\AllegroUserAgent;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -84,11 +85,11 @@ class AllegroProductMappingCandidatesService
             if ($status !== '') {
                 $query['publication.status'] = $status;
             }
-            $response = Http::withToken($token)->accept('application/vnd.allegro.public.v1+json')->timeout(20)->get(rtrim((string) $account->api_base_url, '/').'/sale/offers', $query);
+            $response = AllegroUserAgent::request()->withToken($token)->accept('application/vnd.allegro.public.v1+json')->timeout(20)->get(rtrim((string) $account->api_base_url, '/').'/sale/offers', $query);
             if (! $response->successful() && $status !== '' && in_array($response->status(), [400, 422], true)) {
                 $warnings[] = 'Allegro rejected publication.status filter; retried this page without status filter.';
                 unset($query['publication.status']);
-                $response = Http::withToken($token)->accept('application/vnd.allegro.public.v1+json')->timeout(20)->get(rtrim((string) $account->api_base_url, '/').'/sale/offers', $query);
+                $response = AllegroUserAgent::request()->withToken($token)->accept('application/vnd.allegro.public.v1+json')->timeout(20)->get(rtrim((string) $account->api_base_url, '/').'/sale/offers', $query);
             }
             if (! $response->successful()) {
                 $blockers[] = 'Allegro /sale/offers read-only request failed with HTTP '.$response->status().'.';

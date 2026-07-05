@@ -7,6 +7,7 @@ use App\Models\MarketplaceCategory;
 use App\Services\Marketplace\Api\MarketplaceApiManager;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use App\Support\Marketplace\AllegroUserAgent;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -481,7 +482,7 @@ class MarketplaceCategoryTreeImportService
         $endpoint = $base === '' ? null : $base.'/sale/categories';
         $meta = ['endpoint_used' => $endpoint, 'http_status' => null, 'raw_response_keys' => [], 'root_raw_count' => 0, 'empty_response' => true, 'safe_error_message' => null];
         if ($base === '' || $token === '') return ['roots' => [], 'children' => [], 'meta' => $meta];
-        $res = Http::withToken($token)->accept('application/vnd.allegro.public.v1+json')->timeout(30)->get($endpoint);
+        $res = AllegroUserAgent::request()->withToken($token)->accept('application/vnd.allegro.public.v1+json')->timeout(30)->get($endpoint);
         $json = $res->json() ?: [];
         $meta['http_status'] = $res->status();
         $meta['raw_response_keys'] = is_array($json) ? array_keys($json) : [];
@@ -499,7 +500,7 @@ class MarketplaceCategoryTreeImportService
     {
         $account = MarketplaceAccount::query()->where('code','allegro_main')->first(); $token = (string) data_get($account, 'api_credentials.access_token'); $base = rtrim((string) $account?->api_base_url, '/');
         if ($base === '' || $token === '') return [];
-        $res = Http::withToken($token)->accept('application/vnd.allegro.public.v1+json')->timeout(30)->get($base.'/sale/categories', ['parent.id' => $parentId]);
+        $res = AllegroUserAgent::request()->withToken($token)->accept('application/vnd.allegro.public.v1+json')->timeout(30)->get($base.'/sale/categories', ['parent.id' => $parentId]);
         $out = [];
         foreach (($res->json('categories') ?: []) as $c) {
             if (! is_array($c)) continue; $id = (string)($c['id'] ?? ''); if ($id === '') continue;
@@ -515,7 +516,7 @@ class MarketplaceCategoryTreeImportService
         $out = []; $queue = [[$parentId, $path, $level]];
         while ($queue) {
             [$parent, $parentPath, $lvl] = array_shift($queue);
-            $res = Http::withToken($token)->accept('application/vnd.allegro.public.v1+json')->timeout(30)->get($base.'/sale/categories', ['parent.id' => $parent]);
+            $res = AllegroUserAgent::request()->withToken($token)->accept('application/vnd.allegro.public.v1+json')->timeout(30)->get($base.'/sale/categories', ['parent.id' => $parent]);
             foreach (($res->json('categories') ?: []) as $c) {
                 if (! is_array($c)) continue; $id = (string)($c['id'] ?? ''); if ($id === '') continue;
                 $name = (string)($c['name'] ?? $id); $full = $parentPath.' > '.$name;
