@@ -8,8 +8,8 @@ use Illuminate\Support\Carbon;
 
 class SyncMarketplaceOrders extends Command
 {
-    protected $signature = 'marketplace:sync-orders {--channels=allegro,ebay_de,ebay_fr : Comma-separated channels} {--since= : Since timestamp in Europe/Warsaw} {--dry-run : Preview only; default mode} {--apply : Persist local orders} {--confirm= : Required confirmation token for apply} {--limit=50 : Max orders per channel request}';
-    protected $description = 'Manually import/sync read-only Allegro and eBay orders into local orders.';
+    protected $signature = 'marketplace:sync-orders {--channels=allegro,ebay_de,ebay_fr,ovoko : Comma-separated channels} {--since= : Since timestamp in Europe/Warsaw} {--dry-run : Preview only; default mode} {--apply : Persist local orders} {--confirm= : Required confirmation token for apply} {--limit=50 : Max orders per channel request}';
+    protected $description = 'Manually import/sync read-only marketplace orders into local orders.';
 
     public function handle(MarketplaceOrdersImportService $service): int
     {
@@ -30,6 +30,8 @@ class SyncMarketplaceOrders extends Command
         $summary = $service->run([
             'channels' => (string) $this->option('channels'),
             'since' => $since,
+            'date_from' => $since,
+            'date_to' => now('Europe/Warsaw')->format('Y-m-d H:i:s'),
             'limit' => (int) $this->option('limit'),
             'dry_run' => ! $apply,
             'live_import' => true,

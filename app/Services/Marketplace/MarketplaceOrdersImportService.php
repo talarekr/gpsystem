@@ -194,7 +194,7 @@ class MarketplaceOrdersImportService
 
     private function fetchOvokoOrders(string $base, array $credentials, array $options, array &$result): array
     {
-        $dateFrom = $this->dateString($options['date_from'] ?? null) ?? Carbon::today()->toDateString();
+        $dateFrom = $this->dateString($options['date_from'] ?? ($options['since'] ?? null)) ?? Carbon::today()->toDateString();
         $dateTo = $this->dateString($options['date_to'] ?? null) ?? Carbon::today()->toDateString();
         $endpointPath = '/v2/get/orders/'.$dateFrom.'/'.$dateTo;
         $endpoint = $base.$endpointPath;

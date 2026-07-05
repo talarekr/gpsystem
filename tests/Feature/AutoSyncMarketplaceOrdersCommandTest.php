@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Services\Marketplace\ApiIntegrationLogger;
 use App\Services\Marketplace\MarketplaceOrdersImportService;
+use Illuminate\Support\Carbon;
 use Mockery;
 use Tests\TestCase;
 
@@ -22,19 +23,23 @@ class AutoSyncMarketplaceOrdersCommandTest extends TestCase
 
     public function test_scheduler_command_syncs_configured_allegro_and_ebay_when_enabled(): void
     {
+        Carbon::setTestNow(Carbon::parse('2026-07-05 12:00:00', 'Europe/Warsaw'));
+
         config([
             'marketplace_order_sync.enabled' => true,
             'marketplace_order_sync.lookback_days' => 3,
-            'marketplace_order_sync.channels' => 'allegro,ebay',
+            'marketplace_order_sync.channels' => 'allegro,ebay,ovoko',
         ]);
 
         $service = Mockery::mock(MarketplaceOrdersImportService::class);
         $service->shouldReceive('run')->once()->with(Mockery::on(function (array $options): bool {
-            return $options['channels'] === 'allegro,ebay'
+            return $options['channels'] === 'allegro,ebay,ovoko'
+                && $options['date_from'] === '2026-07-02 12:00:00'
+                && $options['date_to'] === '2026-07-05 12:00:00'
                 && $options['dry_run'] === false
                 && $options['live_import'] === true
                 && $options['trigger'] === 'scheduler'
-                && isset($options['since']);
+                && $options['since'] === '2026-07-02 12:00:00';
         }))->andReturn([
             'orders_fetched' => 2,
             'orders_created' => 1,
@@ -49,7 +54,8 @@ class AutoSyncMarketplaceOrdersCommandTest extends TestCase
             $flags = $data['response']['safety_flags'] ?? [];
 
             return $data['action'] === 'scheduled_order_sync'
-                && $data['response']['channels'] === ['allegro', 'ebay']
+                && $data['response']['channels'] === ['allegro', 'ebay', 'ovoko']
+                && $data['response']['date_from'] === '2026-07-02 12:00:00'
                 && $data['response']['timezone'] === 'Europe/Warsaw'
                 && ($flags['read_only_marketplace_api'] ?? false) === true
                 && ($flags['no_stock_sync'] ?? false) === true
@@ -61,5 +67,7 @@ class AutoSyncMarketplaceOrdersCommandTest extends TestCase
         $this->app->instance(ApiIntegrationLogger::class, $logger);
 
         $this->artisan('marketplace:auto-sync-orders')->assertSuccessful();
+
+        Carbon::setTestNow();
     }
 }

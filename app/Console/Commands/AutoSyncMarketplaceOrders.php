@@ -11,7 +11,7 @@ use Illuminate\Support\Carbon;
 class AutoSyncMarketplaceOrders extends Command
 {
     protected $signature = 'marketplace:auto-sync-orders {--dry-run : Preview only without persisting local orders} {--limit=50 : Max orders per channel request}';
-    protected $description = 'Scheduled read-only Allegro/eBay order sync into local orders.';
+    protected $description = 'Scheduled read-only marketplace order sync into local orders.';
 
     public function handle(MarketplaceOrdersImportService $service, ApiIntegrationLogger $logger): int
     {
@@ -30,6 +30,8 @@ class AutoSyncMarketplaceOrders extends Command
         $summary = $service->run([
             'channels' => implode(',', $channels),
             'since' => $dateFrom,
+            'date_from' => $dateFrom,
+            'date_to' => $startedAt->format('Y-m-d H:i:s'),
             'limit' => (int) $this->option('limit'),
             'dry_run' => $dryRun,
             'live_import' => ! $dryRun,
@@ -56,8 +58,8 @@ class AutoSyncMarketplaceOrders extends Command
             'integration' => 'marketplace_orders',
             'action' => 'scheduled_order_sync',
             'status' => ($summary['errors'] ?? []) === [] ? 'success' : 'error',
-            'message' => 'Scheduled read-only Allegro/eBay order sync summary.',
-            'request' => ['channels' => $channels, 'date_from' => $dateFrom, 'limit' => (int) $this->option('limit')],
+            'message' => 'Scheduled read-only marketplace order sync summary.',
+            'request' => ['channels' => $channels, 'date_from' => $dateFrom, 'date_to' => $startedAt->format('Y-m-d H:i:s'), 'limit' => (int) $this->option('limit')],
             'response' => $logSummary,
         ]);
 
@@ -72,7 +74,7 @@ class AutoSyncMarketplaceOrders extends Command
             ? config('marketplace_order_sync.channels')
             : explode(',', (string) config('marketplace_order_sync.channels', 'allegro,ebay'));
 
-        return array_values(array_intersect(array_map('trim', $channels), ['allegro', 'ebay']));
+        return array_values(array_intersect(array_map('trim', $channels), ['allegro', 'ebay', 'ovoko']));
     }
 
     private function safetyFlags(bool $dryRun): array
