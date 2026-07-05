@@ -68,6 +68,26 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
 
 
 
+    public function updateOrderFulfillmentStatus(string $checkoutFormId, string $status, mixed $revision = null): array
+    {
+        $mediaType = 'application/vnd.allegro.public.v1+json';
+        $path = '/order/checkout-forms/'.rawurlencode($checkoutFormId).'/fulfillment';
+        $endpoint = rtrim((string) $this->account?->api_base_url, '/').$path;
+        $payload = ['status' => $status];
+        if ($revision !== null && $revision !== '') {
+            $payload['checkoutForm'] = ['revision' => $revision];
+        }
+        $requestSummary = ['method' => 'PUT', 'endpoint' => 'PUT /order/checkout-forms/{checkoutFormId}/fulfillment', 'checkout_form_id' => $checkoutFormId, 'headers' => ['Accept' => $mediaType, 'Content-Type' => $mediaType, 'Authorization' => 'Bearer ***'], 'payload' => $payload];
+        try {
+            $response = Http::withToken((string) $this->credentials()['access_token'])->withHeaders(['Accept' => $mediaType, 'Content-Type' => $mediaType])->timeout(20)->put($endpoint, $payload);
+            $json = $response->json(); $body = is_array($json) ? $json : [];
+            $message = $response->status() === 409 ? 'Allegro fulfillment conflict: checkoutForm.revision may be stale; retry after refreshing order data.' : ($response->successful() ? 'Allegro order fulfillment status updated.' : 'Allegro order fulfillment status update failed.');
+            return ['ok' => $response->successful(), 'http_status' => $response->status(), 'action' => 'order_status_sync', 'message' => $message, 'request_summary' => $requestSummary, 'response_summary' => ['top_level_keys' => array_slice(array_keys($body), 0, 20), 'errors' => $body['errors'] ?? null, 'message' => $body['message'] ?? $body['error_description'] ?? $body['error'] ?? null, 'request_id' => $response->header('trace-id') ?: $response->header('x-request-id'), 'revision_conflict' => $response->status() === 409]];
+        } catch (\Throwable $exception) {
+            return ['ok' => false, 'http_status' => null, 'action' => 'order_status_sync', 'message' => 'Allegro order fulfillment status update failed.', 'request_summary' => $requestSummary, 'response_summary' => ['error_class' => $exception::class, 'error_message_safe' => $exception->getMessage()]];
+        }
+    }
+
     public function endOffer(string $offerId): array
     {
         return $this->patchOfferPublicationStatus($offerId, 'ENDED', 'allegro_end_offer', 'Allegro offer ended.', 'Allegro end offer failed.');

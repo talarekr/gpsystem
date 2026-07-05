@@ -3,6 +3,7 @@
 namespace App\Services\Admin;
 
 use App\Models\Order;
+use App\Services\Marketplace\OrderStatusMarketplaceSyncService;
 use Illuminate\Support\Facades\Schema;
 use InvalidArgumentException;
 
@@ -17,6 +18,7 @@ class LocalOrderStatusUpdater
             throw new InvalidArgumentException('Wybrany status nie jest dostępny dla tego kanału sprzedaży.');
         }
 
+        $previousStatus = (string) $order->status;
         $updates = ['status' => $status];
 
         if ($order->status !== $status && Schema::hasColumn($order->getTable(), 'status_changed_at')) {
@@ -25,6 +27,12 @@ class LocalOrderStatusUpdater
 
         $order->forceFill($updates)->save();
 
-        return $order->refresh();
+        $order = $order->refresh();
+
+        if ($previousStatus !== $status) {
+            app(OrderStatusMarketplaceSyncService::class)->sync($order, $previousStatus);
+        }
+
+        return $order;
     }
 }
