@@ -136,6 +136,54 @@ class PartModuleFoundationTest extends TestCase
         $this->assertSame('1 562,50 zł', $pricesByKey['ebay']);
     }
 
+
+    public function test_sold_part_channel_rows_override_all_marketplaces_as_unavailable_without_links(): void
+    {
+        $part = Part::query()->create([
+            'name' => 'Sprzedana część z zachowanymi listingami',
+            'price' => 1250,
+            'ovoko_price' => 1300,
+            'quantity' => 0,
+            'status' => 'sold',
+        ]);
+
+        MarketplaceListing::query()->create([
+            'part_id' => $part->id,
+            'marketplace' => 'ovoko',
+            'external_offer_id' => 'OVOKO-5502',
+            'external_listing_id' => '11703',
+            'status' => 'published',
+            'url' => 'https://ovoko.pl/czesci-samochodowe/hgf11703',
+        ]);
+
+        MarketplaceListing::query()->create([
+            'part_id' => $part->id,
+            'marketplace' => 'ebay_de',
+            'external_listing_id' => 'EBAY-5502',
+            'status' => 'published',
+            'url' => 'https://www.ebay.de/itm/EBAY-5502',
+        ]);
+
+        $rows = app(\App\Services\Admin\PartMarketplaceStatusResolver::class)
+            ->rowsForPart($part->fresh('marketplaceListings'));
+
+        $this->assertSame(['storefront', 'allegro', 'ovoko', 'ebay'], collect($rows)->pluck('key')->all());
+
+        foreach ($rows as $row) {
+            $this->assertFalse($row['listed'], $row['key'].' should render a red unavailable marker for sold parts.');
+            $this->assertNull($row['url'], $row['key'].' should not expose a marketplace link for sold parts.');
+            $this->assertNull($row['external_offer_id'], $row['key'].' should not present saved listing ids as available for sold parts.');
+        }
+
+        $this->assertDatabaseHas('marketplace_listings', [
+            'part_id' => $part->id,
+            'marketplace' => 'ovoko',
+            'external_offer_id' => 'OVOKO-5502',
+            'external_listing_id' => '11703',
+            'url' => 'https://ovoko.pl/czesci-samochodowe/hgf11703',
+        ]);
+    }
+
     public function test_allegro_channel_shows_offer_link_while_publication_is_pending(): void
     {
         $part = Part::query()->create([

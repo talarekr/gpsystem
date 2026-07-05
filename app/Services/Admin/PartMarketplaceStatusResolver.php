@@ -13,6 +13,15 @@ class PartMarketplaceStatusResolver
      */
     public function rowsForPart(Part $part): array
     {
+        if ($this->isSold($part)) {
+            return [
+                $this->row('storefront', 'Sklep', $part->price, 'zł', false, null, null, 'Produkt sprzedany — niedostępny w sklepie'),
+                $this->row('allegro', 'Allegro', $part->allegro_price, 'zł', false, null, null, 'Produkt sprzedany — niedostępny na Allegro'),
+                $this->row('ovoko', 'Ovoko', $part->ovoko_price, 'zł', false, null, null, 'Produkt sprzedany — niedostępny na Ovoko'),
+                $this->row('ebay', 'eBay', $part->ebay_price, 'zł', false, null, null, 'Produkt sprzedany — niedostępny na eBay'),
+            ];
+        }
+
         $listings = $part->relationLoaded('marketplaceListings')
             ? $part->marketplaceListings
             : collect();
@@ -68,6 +77,12 @@ class PartMarketplaceStatusResolver
     /**
      * @param Collection<int, MarketplaceListing> $listings
      */
+    private function isSold(Part $part): bool
+    {
+        return $part->status === 'sold'
+            || $part->adminLocalAvailability() === 'sold';
+    }
+
     private function allegroListing(Collection $listings): ?MarketplaceListing
     {
         return $listings
