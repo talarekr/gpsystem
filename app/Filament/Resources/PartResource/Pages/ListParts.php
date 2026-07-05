@@ -99,7 +99,7 @@ class ListParts extends Page
     public ?string $createdBy = null;
 
     #[Url(as: 'sort')]
-    public string $sort = 'id_desc';
+    public string $sort = 'updated_desc';
 
     #[Url(as: 'per_page')]
     public string $perPage = '25';
@@ -333,6 +333,7 @@ class ListParts extends Page
             ->tap(fn (Builder $q) => $this->applyRange($q, 'price', $this->priceFrom, $this->priceUntil))
             ->tap(fn (Builder $q) => $this->applyRange($q, 'allegro_price', $this->allegroPriceFrom, $this->allegroPriceUntil))
             ->tap(fn (Builder $q) => $this->applyRange($q, 'ebay_price', $this->ebayPriceFrom, $this->ebayPriceUntil))
+            ->tap(fn (Builder $q) => $this->applyMarketplaceGapsFilter($q))
             ->tap(fn (Builder $q) => $this->applySort($q));
     }
 
@@ -367,6 +368,48 @@ class ListParts extends Page
         if (filled($until)) $query->where($field, '<=', $until);
     }
 
+    protected function applyMarketplaceGapsFilter(Builder $query): void
+    {
+        if ($this->sort !== 'marketplace_gaps') {
+            return;
+        }
+
+        $query
+            ->whereIn('status', ['ready', 'published'])
+            ->where('quantity', '>', 0)
+            ->where(fn (Builder $q) => $q
+                ->whereDoesntHave('marketplaceListings', fn (Builder $listing) => $this->activeListingConstraint($listing, ['allegro', 'allegro_main'], true))
+                ->orWhereDoesntHave('marketplaceListings', fn (Builder $listing) => $this->activeListingConstraint($listing, ['ovoko']))
+                ->orWhereDoesntHave('marketplaceListings', fn (Builder $listing) => $this->activeListingConstraint($listing, ['ebay_de', 'ebay_fr']))
+            );
+    }
+
+    /**
+     * @param array<int, string> $marketplaces
+     */
+    protected function activeListingConstraint(Builder $query, array $marketplaces, bool $allegroStrict = false): Builder
+    {
+        $endedStatuses = ['ended', 'inactive', 'deleted', 'archived', 'not_found', 'NOT_FOUND_IN_ACTIVE_API'];
+
+        $query
+            ->whereIn('marketplace', $marketplaces)
+            ->where(fn (Builder $q) => $q
+                ->whereRaw("NULLIF(TRIM(COALESCE(external_offer_id, '')), '') IS NOT NULL")
+                ->orWhereRaw("NULLIF(TRIM(COALESCE(external_listing_id, '')), '') IS NOT NULL")
+            )
+            ->where(fn (Builder $q) => $q->whereNull('status')->orWhereNotIn('status', $endedStatuses))
+            ->where(fn (Builder $q) => $q->whereNull('last_api_status')->orWhereNotIn('last_api_status', $endedStatuses));
+
+        if ($allegroStrict) {
+            $query->where(fn (Builder $q) => $q
+                ->where('last_api_status', 'ACTIVE')
+                ->orWhereIn('status', ['ACTIVE', 'published', 'publication_pending'])
+            );
+        }
+
+        return $query;
+    }
+
     protected function applySort(Builder $query): void
     {
         match ($this->sort) {
@@ -379,7 +422,8 @@ class ListParts extends Page
             'created_asc' => $query->orderBy('created_at')->orderByDesc('id'),
             'updated_desc' => $query->orderByDesc('updated_at')->orderByDesc('id'),
             'updated_asc' => $query->orderBy('updated_at')->orderByDesc('id'),
-            default => $query->orderByDesc('id'),
+            'marketplace_gaps' => $query->orderByDesc('updated_at')->orderByDesc('id'),
+            default => $query->orderByDesc('updated_at')->orderByDesc('id'),
         };
     }
 }

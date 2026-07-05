@@ -141,7 +141,14 @@ class PartMarketplaceStatusResolver
         return $listings
             ->whereIn('marketplace', $marketplaces)
             ->filter(fn (MarketplaceListing $listing): bool => $this->externalOfferId($listing) !== null)
+            ->filter(fn (MarketplaceListing $listing): bool => $this->isActiveMarketplaceListing($listing))
             ->values();
+    }
+
+    private function isActiveMarketplaceListing(MarketplaceListing $listing): bool
+    {
+        return ! in_array($listing->last_api_status, ['ended', 'inactive', 'deleted', 'archived', 'not_found', 'NOT_FOUND_IN_ACTIVE_API'], true)
+            && ! in_array($listing->status, ['ended', 'inactive', 'deleted', 'archived', 'not_found', 'NOT_FOUND_IN_ACTIVE_API'], true);
     }
 
     private function row(string $key, string $label, mixed $price, ?string $currency, bool $listed, ?string $externalOfferId, ?string $url, string $title, ?string $note = null): array

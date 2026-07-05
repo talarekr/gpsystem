@@ -1081,4 +1081,58 @@ class PartModuleFoundationTest extends TestCase
         $this->assertStringContainsString('text-amber-600', (string) PartResource::partTitleCharacterCounter(str_repeat('a', 82)));
     }
 
+
+    public function test_admin_parts_default_sort_is_updated_at_desc(): void
+    {
+        $this->actingAsWarehouseUser();
+
+        $older = Part::query()->create([
+            'name' => 'Starsza aktualizacja',
+            'status' => 'ready',
+            'updated_at' => Carbon::parse('2026-07-01 10:00:00'),
+        ]);
+
+        $newer = Part::query()->create([
+            'name' => 'Nowsza aktualizacja',
+            'status' => 'ready',
+            'updated_at' => Carbon::parse('2026-07-04 10:00:00'),
+        ]);
+
+        $component = Livewire::test(ListParts::class);
+
+        $this->assertSame('updated_desc', $component->get('sort'));
+        $this->assertSame([$newer->id, $older->id], collect($component->get('parts')->items())->pluck('id')->all());
+    }
+
+    public function test_admin_parts_marketplace_gaps_shows_only_for_sale_parts_missing_active_marketplace_listing(): void
+    {
+        $this->actingAsWarehouseUser();
+
+        $missingOvoko = Part::query()->create(['name' => 'Brak Ovoko', 'status' => 'ready', 'quantity' => 1, 'updated_at' => Carbon::parse('2026-07-04 10:00:00')]);
+        $complete = Part::query()->create(['name' => 'Komplet aukcji', 'status' => 'ready', 'quantity' => 1, 'updated_at' => Carbon::parse('2026-07-03 10:00:00')]);
+        $soldMissing = Part::query()->create(['name' => 'Sprzedana z brakami', 'status' => 'sold', 'quantity' => 0, 'updated_at' => Carbon::parse('2026-07-05 10:00:00')]);
+        $archivedMissing = Part::query()->create(['name' => 'Archiwalna z brakami', 'status' => 'archived', 'quantity' => 1, 'updated_at' => Carbon::parse('2026-07-06 10:00:00')]);
+        $endedEbay = Part::query()->create(['name' => 'Zakończony eBay', 'status' => 'published', 'quantity' => 1, 'updated_at' => Carbon::parse('2026-07-02 10:00:00')]);
+
+        foreach ([$missingOvoko, $complete, $soldMissing, $archivedMissing, $endedEbay] as $part) {
+            MarketplaceListing::query()->create(['part_id' => $part->id, 'marketplace' => 'allegro', 'external_offer_id' => 'ALG-'.$part->id, 'status' => 'published', 'last_api_status' => 'ACTIVE']);
+        }
+
+        foreach ([$complete, $soldMissing, $archivedMissing, $endedEbay] as $part) {
+            MarketplaceListing::query()->create(['part_id' => $part->id, 'marketplace' => 'ovoko', 'external_offer_id' => 'OVO-'.$part->id, 'status' => 'published']);
+        }
+
+        foreach ([$missingOvoko, $complete, $soldMissing, $archivedMissing] as $part) {
+            MarketplaceListing::query()->create(['part_id' => $part->id, 'marketplace' => 'ebay_de', 'external_listing_id' => 'EBAY-'.$part->id, 'status' => 'published']);
+        }
+        MarketplaceListing::query()->create(['part_id' => $endedEbay->id, 'marketplace' => 'ebay_de', 'external_listing_id' => 'EBAY-'.$endedEbay->id, 'status' => 'ended']);
+
+        $ids = collect(Livewire::test(ListParts::class)->set('sort', 'marketplace_gaps')->get('parts')->items())->pluck('id')->all();
+
+        $this->assertSame([$missingOvoko->id, $endedEbay->id], $ids);
+        $this->assertNotContains($soldMissing->id, $ids);
+        $this->assertNotContains($archivedMissing->id, $ids);
+        $this->assertNotContains($complete->id, $ids);
+    }
+
 }
