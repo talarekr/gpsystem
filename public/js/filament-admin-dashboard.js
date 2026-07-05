@@ -130,7 +130,7 @@
             const location = part.storage_location || 'Brak lokalizacji';
             const partNumber = part.part_number || '—';
             search.value = part.name || 'Bez nazwy';
-            selected.innerHTML = '<strong>Wybrano: ' + escapeHtml(part.name || 'Bez nazwy') + '</strong><span>Magazyn: ' + escapeHtml(location) + ' · ' + escapeHtml(partNumber) + '</span>';
+            selected.innerHTML = '<span class="gps-local-sale-selected__main"><strong>Wybrano: ' + escapeHtml(part.name || 'Bez nazwy') + '</strong><span>Magazyn: ' + escapeHtml(location) + ' · ' + escapeHtml(partNumber) + '</span></span><span class="gps-local-sale-selected__price">' + escapeHtml(part.price || 'brak ceny') + '</span>';
             selected.hidden = false;
             results.hidden = true;
             clearAlert();
