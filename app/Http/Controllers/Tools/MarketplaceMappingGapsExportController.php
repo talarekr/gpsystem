@@ -28,9 +28,11 @@ class MarketplaceMappingGapsExportController extends Controller
         $format = strtolower((string) $request->query('format', 'json'));
         $visibleOnly = $request->boolean('visible_only');
 
-        Storage::disk('local')->makeDirectory('exports/tools');
+        $exportDisk = Storage::disk('public');
+        $diskName = 'public';
+        $exportDisk->makeDirectory('exports/tools');
         $relativePath = 'exports/tools/marketplace_mapping_gaps_'.now()->format('Ymd_His').'.csv';
-        $absolutePath = Storage::disk('local')->path($relativePath);
+        $absolutePath = $exportDisk->path($relativePath);
         $handle = $format === 'csv' ? fopen($absolutePath, 'wb') : false;
         if ($format === 'csv' && $handle === false) {
             throw new \RuntimeException('Cannot open export file for writing: '.$absolutePath);
@@ -85,7 +87,11 @@ class MarketplaceMappingGapsExportController extends Controller
 
         if ($handle !== false) {
             fclose($handle);
-            $summary['download_url'] = url('/storage/'.$relativePath);
+            $summary['disk_used'] = $diskName;
+            $summary['file_relative_path'] = $relativePath;
+            $summary['file_exists_on_disk'] = $exportDisk->exists($relativePath);
+            $summary['public_path_checked'] = public_path('storage/'.$relativePath);
+            $summary['download_url'] = $exportDisk->url($relativePath);
             $summary['csv_url'] = $summary['download_url'];
             $summary['file'] = $absolutePath;
         }
