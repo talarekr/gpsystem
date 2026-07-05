@@ -673,7 +673,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 .gps-local-sale-selected__main span { display: block; }
 .gps-local-sale-selected__main strong { color: #334155; font-weight: 500; }
 .gps-local-sale-selected__main span { margin-top: .15rem; color: #64748b; font-size: .78rem; font-weight: 400; }
-.gps-local-sale-selected__price { flex: 0 0 auto; color: #000; font-size: 13px; font-weight: 400; line-height: 1.35; text-align: right; white-space: nowrap; }
+.gps-local-sale-selected__price { flex: 0 0 auto; color: #334155; font-family: inherit; font-size: inherit; font-weight: 500; line-height: inherit; text-align: right; white-space: nowrap; }
 .gps-local-sale-alert { padding: .75rem .9rem; border-radius: .75rem; font-weight: 700; }
 .gps-local-sale-alert--error { border: 1px solid #fecaca; background: #fef2f2; color: #991b1b; }
 .gps-local-sale-alert--success { border: 1px solid #bbf7d0; background: #f0fdf4; color: #166534; }
