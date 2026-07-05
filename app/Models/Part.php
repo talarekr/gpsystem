@@ -507,6 +507,18 @@ class Part extends Model
         return $query->where('quantity', '>', 0);
     }
 
+    public function scopeAvailableForLocalSale(Builder $query): Builder
+    {
+        return $query
+            ->where('status', 'ready')
+            ->where('quantity', '>', 0);
+    }
+
+    public function isAvailableForLocalSale(): bool
+    {
+        return $this->status === 'ready' && (int) $this->quantity > 0;
+    }
+
     public function scopeNotSold(Builder $query): Builder
     {
         return $query->where(fn (Builder $query): Builder => $query
