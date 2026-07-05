@@ -11,7 +11,7 @@ class Order extends Model
 {
     use HasFactory;
 
-    public const STATUSES = ['new', 'processing', 'shipped', 'completed', 'cancelled'];
+    public const STATUSES = ['new', 'processing', 'on_hold', 'ready_to_ship', 'ready_for_pickup', 'shipped', 'picked_up', 'completed', 'cancelled'];
 
     protected $fillable = [
         'order_number', 'customer_id', 'marketplace', 'marketplace_order_id', 'marketplace_status', 'ordered_at', 'status', 'status_changed_at', 'currency', 'subtotal', 'shipping_total', 'payment_status', 'delivery_method', 'total',
@@ -37,7 +37,7 @@ class Order extends Model
 
     public static function statusOptions(): array
     {
-        return ['new' => 'Nowe', 'processing' => 'W realizacji', 'shipped' => 'Wysłane', 'completed' => 'Zrealizowane', 'cancelled' => 'Anulowane'];
+        return ['new' => 'Nowe', 'processing' => 'W realizacji', 'on_hold' => 'Wstrzymane', 'ready_to_ship' => 'Do wysłania', 'ready_for_pickup' => 'Do odbioru', 'shipped' => 'Wysłane', 'picked_up' => 'Odebrane', 'completed' => 'Zrealizowane', 'cancelled' => 'Anulowane'];
     }
 
     public function items(): HasMany

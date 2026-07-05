@@ -28,6 +28,62 @@ class MarketplaceOrderStatusSyncTest extends TestCase
         $this->assertDatabaseHas('marketplace_sync_logs', ['order_id' => $order->id, 'marketplace' => 'allegro', 'action' => 'order_status_sync', 'status' => 'success', 'external_id' => 'cf-1']);
     }
 
+
+    public function test_allegro_supported_fulfillment_statuses_are_sent_to_allegro_only(): void
+    {
+        Http::fake(['https://allegro.test/*' => Http::response([], 204)]);
+        MarketplaceAccount::query()->create(['marketplace' => 'allegro', 'code' => 'allegro_main', 'name' => 'Allegro', 'api_enabled' => true, 'api_base_url' => 'https://allegro.test', 'api_mode' => 'live', 'api_credentials' => ['access_token' => 'token']]);
+
+        foreach ([
+            'new' => 'NEW',
+            'processing' => 'PROCESSING',
+            'ready_to_ship' => 'READY_FOR_SHIPMENT',
+            'ready_for_pickup' => 'READY_FOR_PICKUP',
+            'shipped' => 'SENT',
+            'picked_up' => 'PICKED_UP',
+        ] as $localStatus => $allegroStatus) {
+            $order = Order::query()->create(['order_number' => 'A-'.$localStatus, 'marketplace' => 'allegro', 'marketplace_order_id' => 'cf-'.$localStatus, 'status' => 'processing']);
+
+            app(LocalOrderStatusUpdater::class)->update($order, $localStatus);
+
+            Http::assertSent(fn ($request) => $request->method() === 'PUT'
+                && str_contains($request->url(), '/order/checkout-forms/cf-'.$localStatus.'/fulfillment')
+                && $request['status'] === $allegroStatus);
+        }
+
+        Http::assertSentCount(6);
+    }
+
+    public function test_allegro_unsupported_front_statuses_are_logged_with_mapping_context(): void
+    {
+        Http::fake();
+        MarketplaceAccount::query()->create(['marketplace' => 'allegro', 'code' => 'allegro_main', 'name' => 'Allegro', 'api_enabled' => true, 'api_base_url' => 'https://allegro.test', 'api_mode' => 'live', 'api_credentials' => ['access_token' => 'token']]);
+        $order = Order::query()->create(['order_number' => 'A-HOLD', 'marketplace' => 'allegro', 'marketplace_order_id' => 'cf-hold', 'status' => 'new']);
+
+        app(LocalOrderStatusUpdater::class)->update($order, 'on_hold');
+
+        Http::assertNothingSent();
+        $log = MarketplaceSyncLog::query()->where('order_id', $order->id)->latest('id')->firstOrFail();
+        $this->assertSame('skipped', $log->status);
+        $this->assertSame('unsupported_allegro_status', $log->message);
+        $this->assertSame('on_hold', $log->payload['request_summary']['local_status']);
+        $this->assertSame('unsupported_allegro_status', $log->payload['response_summary']['skipped_reason']);
+    }
+
+    public function test_log_39295_allegro_ui_w_realizacji_maps_to_processing(): void
+    {
+        Http::fake(['https://allegro.test/*' => Http::response([], 204)]);
+        MarketplaceAccount::query()->create(['marketplace' => 'allegro', 'code' => 'allegro_main', 'name' => 'Allegro', 'api_enabled' => true, 'api_base_url' => 'https://allegro.test', 'api_mode' => 'live', 'api_credentials' => ['access_token' => 'token']]);
+        $order = Order::query()->create(['id' => 135, 'order_number' => '135', 'marketplace' => 'allegro', 'marketplace_order_id' => 'f2f054f0-7866-11f1-b5bc-398519c00320', 'status' => 'new']);
+
+        app(LocalOrderStatusUpdater::class)->update($order, 'processing');
+
+        Http::assertSent(fn ($request) => $request['status'] === 'PROCESSING'
+            && str_contains($request->url(), '/order/checkout-forms/f2f054f0-7866-11f1-b5bc-398519c00320/fulfillment'));
+        $this->assertDatabaseMissing('marketplace_sync_logs', ['order_id' => 135, 'status' => 'skipped', 'message' => 'unsupported_status_for_marketplace']);
+        $this->assertDatabaseHas('marketplace_sync_logs', ['order_id' => 135, 'status' => 'success', 'message' => 'Allegro order fulfillment status updated.']);
+    }
+
     public function test_ebay_shipped_creates_shipping_fulfillment_only_for_ebay(): void
     {
         Http::fake(['https://ebay.test/*' => Http::response(['fulfillmentId' => 'f-1'], 201)]);
