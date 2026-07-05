@@ -407,6 +407,7 @@ class OvokoSoldMappingCheckController extends Controller
             return match ($step) {
 
             'inspect_local_parts' => $this->debugTry($step, fn (): array => $this->inspectLocalParts($request)),
+            'inspect_expected_id_context' => $this->debugTry($step, fn (): array => $this->inspectExpectedIdContext($request)),
             'full_start' => $this->debugTry($step, fn (): array => [
                 'parsed_ids' => $ids,
                 'count' => count($ids),
@@ -789,6 +790,85 @@ class OvokoSoldMappingCheckController extends Controller
         ];
     }
 
+    private function inspectExpectedIdContext(?Request $request): array
+    {
+        $warnings = [];
+        $errors = [];
+        $expectedPairs = $this->expectedPairs($request);
+        $partIds = array_values($expectedPairs);
+
+        $partColumns = $this->availableColumns('parts', [
+            'id',
+            'legacy_payload',
+        ], $warnings, $errors);
+        $listingColumns = $this->availableColumns('marketplace_listings', [
+            'id',
+            'part_id',
+            'marketplace',
+            'raw_payload',
+        ], $warnings, $errors);
+
+        $parts = in_array('id', $partColumns, true) && $partIds !== []
+            ? DB::table('parts')->select($partColumns)->whereIn('id', $partIds)->orderBy('id')->get()->keyBy('id')
+            : collect();
+        $listingsByPart = in_array('part_id', $listingColumns, true) && $partIds !== []
+            ? DB::table('marketplace_listings')->select($listingColumns)->whereIn('part_id', $partIds)->orderBy('id')->get()->groupBy('part_id')
+            : collect();
+
+        return [
+            'expected_pairs' => collect($expectedPairs)->map(fn (int $partId, string $ovokoId): array => [
+                'expected_ovoko_id' => $ovokoId,
+                'part_id' => $partId,
+            ])->values()->all(),
+            'context_window_chars' => 150,
+            'items' => collect($expectedPairs)->map(function (int $partId, string $ovokoId) use ($parts, $listingsByPart): array {
+                $part = $parts->get($partId);
+                $snippets = [];
+
+                if ($part !== null) {
+                    $legacyPayload = $this->payloadToSearchableString($part->legacy_payload ?? null);
+                    $snippets = array_merge($snippets, $this->contextSnippets(
+                        $legacyPayload,
+                        $ovokoId,
+                        ['source_field' => 'parts.legacy_payload']
+                    ));
+                }
+
+                foreach (collect($listingsByPart->get($partId, collect())) as $listing) {
+                    $rawPayload = $this->payloadToSearchableString($listing->raw_payload ?? null);
+                    $snippets = array_merge($snippets, $this->contextSnippets(
+                        $rawPayload,
+                        $ovokoId,
+                        [
+                            'source_field' => 'marketplace_listings.raw_payload',
+                            'marketplace_listing_id' => $listing->id ?? null,
+                            'marketplace' => $listing->marketplace ?? null,
+                        ]
+                    ));
+                }
+
+                return [
+                    'expected_ovoko_id' => $ovokoId,
+                    'part_id' => $partId,
+                    'found_part' => $part !== null,
+                    'occurrence_count' => count($snippets),
+                    'snippets' => $snippets,
+                ];
+            })->values()->all(),
+            'manual_mapping_recommendation' => [
+                'recommended_path' => 'Create a persistent ovoko_manual_part_mappings table with ovoko_part_id, part_id, source, note, created_by, timestamps, and a unique key on ovoko_part_id.',
+                'why' => 'A DB-backed manual map is auditable, repeatable for sold apply runs, and safer than one-off request parameters when the Ovoko ID is absent from stored payloads.',
+                'safe_workflow' => [
+                    'Keep sold apply dry-run by default and show manual mapping hits separately from extractor hits.',
+                    'Allow CSV import into the manual mapping table after validating that every part_id exists and every Ovoko ID is unique.',
+                    'Optionally accept a request-scoped manual mapping parameter for diagnostics only, but do not make it the primary apply mechanism.',
+                ],
+            ],
+            'warnings' => array_values(array_unique($warnings)),
+            'errors' => array_values(array_unique($errors)),
+        ];
+    }
+
     /** @return array<int, int> */
     private function requestedPartIds(?Request $request): array
     {
@@ -939,6 +1019,62 @@ class OvokoSoldMappingCheckController extends Controller
                 'legacy_payload_string_length' => is_string($row->legacy_payload ?? null) ? strlen($row->legacy_payload) : null,
             ] + $this->debugThrowableData($e);
         }
+    }
+
+    private function payloadToSearchableString(mixed $payload): ?string
+    {
+        if ($payload === null) {
+            return null;
+        }
+
+        if (is_string($payload)) {
+            return $payload;
+        }
+
+        if (is_scalar($payload)) {
+            return (string) $payload;
+        }
+
+        $encoded = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+        return $encoded === false ? null : $encoded;
+    }
+
+    private function contextSnippets(?string $payload, string $needle, array $source, int $window = 150): array
+    {
+        if ($payload === null || $needle === '') {
+            return [];
+        }
+
+        $snippets = [];
+        $offset = 0;
+        while (($position = strpos($payload, $needle, $offset)) !== false) {
+            $start = max(0, $position - $window);
+            $end = min(strlen($payload), $position + strlen($needle) + $window);
+            $snippet = substr($payload, $start, $end - $start);
+
+            $snippets[] = $source + [
+                'position' => $position,
+                'snippet_start' => $start,
+                'snippet_end' => $end,
+                'context_before_truncated' => $start > 0,
+                'context_after_truncated' => $end < strlen($payload),
+                'snippet' => $this->safeUtf8($snippet),
+            ];
+
+            $offset = $position + max(1, strlen($needle));
+        }
+
+        return $snippets;
+    }
+
+    private function safeUtf8(string $value): string
+    {
+        if (function_exists('mb_scrub')) {
+            return mb_scrub($value, 'UTF-8');
+        }
+
+        return preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $value) ?? '';
     }
 
     private function safePreview(string $value, int $length = 300): string
