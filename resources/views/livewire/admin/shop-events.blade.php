@@ -1,20 +1,11 @@
 <section class="gps-shop-events" aria-labelledby="gps-shop-events-title">
     <div class="gps-shop-events__header">
         <div class="gps-shop-events__title-group">
-            <span class="gps-shop-events__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M14.86 17.08a2.75 2.75 0 0 1-5.72 0M18 9.5a6 6 0 1 0-12 0c0 6-2 6.75-2 6.75h16s-2-.75-2-6.75Z" />
-                </svg>
-            </span>
             <div>
                 <h2 id="gps-shop-events-title">Dziennik obsługi</h2>
             </div>
         </div>
 
-        <label class="gps-shop-events__sound-toggle">
-            <input type="checkbox" data-gps-shop-event-sound-toggle>
-            <span>Dźwięk powiadomień</span>
-        </label>
     </div>
 
     <nav class="gps-shop-events__tabs" aria-label="Filtry dziennika obsługi">
