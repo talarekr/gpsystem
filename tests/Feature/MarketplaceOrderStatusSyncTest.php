@@ -218,6 +218,34 @@ class MarketplaceOrderStatusSyncTest extends TestCase
         $this->assertSame('PROCESSING', $log->payload['response']['target_marketplace_status']);
     }
 
+    public function test_app_deploy_debug_can_include_raw_order_status_logs(): void
+    {
+        $order = Order::query()->create(['id' => 135, 'order_number' => '135', 'marketplace' => 'allegro', 'marketplace_order_id' => 'cf-135', 'status' => 'processing']);
+        MarketplaceSyncLog::query()->create([
+            'marketplace' => 'allegro',
+            'order_id' => $order->id,
+            'action' => 'order_status_sync',
+            'status' => 'skipped',
+            'message' => 'unsupported_status_for_marketplace',
+            'external_id' => 'cf-135',
+            'payload' => [
+                'order_status_sync_code_version' => 'probe-version',
+                'sync_writer' => 'probe-writer',
+                'request_summary' => ['local_status_raw_value' => 'processing'],
+            ],
+            'created_at' => now(),
+        ]);
+
+        $response = $this->getJson('/tools/app-deploy-debug?token=gps_images_import_2026&order_id=135&include_order_status_logs=1');
+
+        $response->assertOk()
+            ->assertJsonPath('order_status_logs_included', true)
+            ->assertJsonPath('order_status_logs.0.message', 'unsupported_status_for_marketplace')
+            ->assertJsonPath('order_status_logs.0.payload_raw.order_status_sync_code_version', 'probe-version')
+            ->assertJsonPath('order_status_logs.0.payload_raw.sync_writer', 'probe-writer')
+            ->assertJsonPath('order_status_logs.0.payload_raw.request_summary.local_status_raw_value', 'processing');
+    }
+
 
     private function actingAsAdminUser(): User
     {
