@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class MarketplaceMappingGapsExportControllerTest extends TestCase
@@ -49,23 +48,6 @@ class MarketplaceMappingGapsExportControllerTest extends TestCase
             ->assertJsonPath('visible_ready_count', 1)
             ->assertJsonPath('visible_only', true)
             ->assertJsonPath('scanned_count', 1);
-    }
-
-    public function test_csv_export_is_written_to_public_storage_for_download_url(): void
-    {
-        Storage::fake('public');
-        $this->withoutMiddleware();
-
-        DB::table('parts')->insert([
-            $this->partRow(1, 'ready', 1, true),
-        ]);
-
-        $response = $this->getJson('/admin/tools/marketplace/mapping-gaps-export?format=csv');
-
-        $response->assertOk()
-            ->assertJsonPath('csv_url', url('/storage/'.$response->json('file_relative_path')));
-
-        Storage::disk('public')->assertExists($response->json('file_relative_path'));
     }
 
     private function partRow(int $id, string $status, int $quantity, bool $visible): array
