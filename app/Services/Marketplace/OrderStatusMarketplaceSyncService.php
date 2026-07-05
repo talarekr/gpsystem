@@ -47,6 +47,10 @@ class OrderStatusMarketplaceSyncService
             'retry_of_log_id' => $retryOfLogId,
             'supported' => false,
             'dry_run' => true,
+            'local_status_raw_value' => $status,
+            'local_status_ui_label' => \App\Services\Admin\OrderStatusOptions::optionsForOrder($order)[$status] ?? null,
+            'mapper_class' => self::class,
+            'mapper_method' => 'plan',
         ];
 
         if ($marketplace === 'allegro') {
@@ -63,6 +67,7 @@ class OrderStatusMarketplaceSyncService
                 'target_marketplace_status' => $target,
                 'action' => self::ACTION,
                 'supported' => $target !== null,
+                'available_map' => $map,
                 'supported_marketplace_statuses' => array_values($map),
                 'skipped_reason' => $target ? null : 'unsupported_allegro_status',
             ];
@@ -110,7 +115,12 @@ class OrderStatusMarketplaceSyncService
                 'marketplace_order_id' => $order->marketplace_order_id,
                 'previous_local_status' => $plan['previous_local_status'] ?? null,
                 'new_local_status' => $plan['new_local_status'] ?? $order->status,
+                'local_status_raw_value' => $plan['local_status_raw_value'] ?? $order->status,
+                'local_status_ui_label' => $plan['local_status_ui_label'] ?? null,
                 'target_marketplace_status' => $plan['target_marketplace_status'] ?? null,
+                'mapper_class' => $plan['mapper_class'] ?? self::class,
+                'mapper_method' => $plan['mapper_method'] ?? 'plan',
+                'available_map' => $plan['available_map'] ?? null,
                 'request_summary' => $result['request_summary'] ?? $this->skipRequestSummary($order, $marketplace, $plan, $skippedReason),
                 'response_summary' => $result['response_summary'] ?? $this->skipResponseSummary($plan, $skippedReason),
                 'skipped_reason' => $skippedReason,
@@ -128,9 +138,14 @@ class OrderStatusMarketplaceSyncService
             'marketplace' => $marketplace,
             'checkout_form_id' => $marketplace === 'allegro' ? $order->marketplace_order_id : null,
             'local_status' => $plan['new_local_status'] ?? $order->status,
+            'local_status_raw_value' => $plan['local_status_raw_value'] ?? $order->status,
+            'local_status_ui_label' => $plan['local_status_ui_label'] ?? null,
             'previous_local_status' => $plan['previous_local_status'] ?? null,
             'target_marketplace_status' => $plan['target_marketplace_status'] ?? null,
+            'available_map' => $plan['available_map'] ?? null,
             'supported_marketplace_statuses' => $plan['supported_marketplace_statuses'] ?? null,
+            'mapper_class' => $plan['mapper_class'] ?? self::class,
+            'mapper_method' => $plan['mapper_method'] ?? 'plan',
             'skipped_reason' => $skippedReason,
         ];
     }
@@ -141,6 +156,14 @@ class OrderStatusMarketplaceSyncService
             'response' => null,
             'error' => null,
             'mapping_supported' => (bool) ($plan['supported'] ?? false),
+            'local_status_raw_value' => $plan['local_status_raw_value'] ?? null,
+            'local_status_ui_label' => $plan['local_status_ui_label'] ?? null,
+            'previous_local_status' => $plan['previous_local_status'] ?? null,
+            'marketplace' => $plan['marketplace'] ?? null,
+            'marketplace_order_id' => $plan['marketplace_order_id'] ?? null,
+            'mapper_class' => $plan['mapper_class'] ?? self::class,
+            'mapper_method' => $plan['mapper_method'] ?? 'plan',
+            'available_map' => $plan['available_map'] ?? null,
             'target_marketplace_status' => $plan['target_marketplace_status'] ?? null,
             'skipped_reason' => $skippedReason,
         ];

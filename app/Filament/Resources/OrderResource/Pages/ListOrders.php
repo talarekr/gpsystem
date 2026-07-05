@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\OrderResource\Pages;
 
 use App\Filament\Resources\OrderResource;
+use App\Models\MarketplaceSyncLog;
 use App\Models\Order;
 use App\Services\Admin\LocalOrderStatusUpdater;
 use Filament\Notifications\Notification;
@@ -115,12 +116,9 @@ class ListOrders extends Page
         $order = Order::query()->findOrFail($orderId);
 
         try {
-            $updater->update($order, $status);
+            $result = $updater->updateWithSyncResult($order, $status);
 
-            Notification::make()
-                ->title('Status zamówienia został zapisany lokalnie.')
-                ->success()
-                ->send();
+            $this->sendStatusUpdateNotification($result['sync_log'] ?? null);
         } catch (\InvalidArgumentException $exception) {
             Notification::make()
                 ->title('Nie zapisano statusu')
@@ -144,6 +142,33 @@ class ListOrders extends Page
         }
 
         return $perPage;
+    }
+
+    private function sendStatusUpdateNotification(?MarketplaceSyncLog $syncLog): void
+    {
+        if ($syncLog === null) {
+            Notification::make()
+                ->title('Status lokalny bez zmian.')
+                ->body('Marketplace sync: nie uruchomiono, bo status lokalny się nie zmienił.')
+                ->success()
+                ->send();
+
+            return;
+        }
+
+        $level = $syncLog->status === 'error' ? 'danger' : 'success';
+        $statusLabel = match ($syncLog->status) {
+            'success' => 'success',
+            'skipped' => 'skipped',
+            'error' => 'error',
+            default => (string) $syncLog->status,
+        };
+
+        $notification = Notification::make()
+            ->title('Status lokalny zmieniony. Marketplace sync: '.$statusLabel.'.')
+            ->body('Szczegóły zapisano w logu API #'.$syncLog->id.'.'.($syncLog->message ? ' Powód: '.$syncLog->message.'.' : ''));
+
+        $notification->{$level}()->send();
     }
 
     protected function requestedPerPage(): ?int

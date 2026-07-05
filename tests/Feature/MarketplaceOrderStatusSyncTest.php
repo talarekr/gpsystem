@@ -2,14 +2,19 @@
 
 namespace Tests\Feature;
 
+use App\Enums\UserRole;
 use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceSyncLog;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Shipment;
+use App\Models\User;
 use App\Services\Admin\LocalOrderStatusUpdater;
+use Database\Seeders\RoleSeeder;
+use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
 
 class MarketplaceOrderStatusSyncTest extends TestCase
@@ -123,5 +128,54 @@ class MarketplaceOrderStatusSyncTest extends TestCase
 
         Http::assertNothingSent();
         $this->assertDatabaseHas('marketplace_sync_logs', ['order_id' => $order->id, 'status' => 'skipped', 'message' => 'already_synced']);
+    }
+
+    public function test_admin_new_orders_dropdown_path_sends_allegro_processing_and_logs_debug_context(): void
+    {
+        $this->actingAsAdminUser();
+        Http::fake(['https://allegro.test/*' => Http::response([], 204)]);
+        MarketplaceAccount::query()->create(['marketplace' => 'allegro', 'code' => 'allegro_main', 'name' => 'Allegro', 'api_enabled' => true, 'api_base_url' => 'https://allegro.test', 'api_mode' => 'live', 'api_credentials' => ['access_token' => 'token']]);
+        $order = Order::query()->create(['id' => 135, 'order_number' => '135', 'marketplace' => 'allegro', 'marketplace_order_id' => 'f2f054f0-7866-11f1-b5bc-398519c00320', 'status' => 'new']);
+
+        \Livewire\Livewire::withQueryParams(['status' => 'new'])
+            ->test(\App\Filament\Resources\OrderResource\Pages\ListOrders::class)
+            ->call('updateOrderStatus', $order->id, 'processing');
+
+        $order->refresh();
+        $this->assertSame('processing', $order->status);
+        Http::assertSent(fn ($request) => $request->method() === 'PUT'
+            && str_contains($request->url(), '/order/checkout-forms/f2f054f0-7866-11f1-b5bc-398519c00320/fulfillment')
+            && $request['status'] === 'PROCESSING');
+
+        $log = MarketplaceSyncLog::query()->where('order_id', 135)->latest('id')->firstOrFail();
+        $this->assertSame('success', $log->status);
+        $this->assertSame('processing', $log->payload['local_status_raw_value']);
+        $this->assertSame('W REALIZACJI', $log->payload['local_status_ui_label']);
+        $this->assertSame('new', $log->payload['previous_local_status']);
+        $this->assertSame('allegro', $log->payload['marketplace']);
+        $this->assertSame('f2f054f0-7866-11f1-b5bc-398519c00320', $log->payload['marketplace_order_id']);
+        $this->assertSame(\App\Services\Marketplace\OrderStatusMarketplaceSyncService::class, $log->payload['mapper_class']);
+        $this->assertSame('plan', $log->payload['mapper_method']);
+        $this->assertSame('PROCESSING', $log->payload['available_map']['processing']);
+        $this->assertSame('PROCESSING', $log->payload['target_marketplace_status']);
+    }
+
+
+    private function actingAsAdminUser(): User
+    {
+        $this->seed(RoleSeeder::class);
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+
+        $user = User::query()->create([
+            'name' => 'Owner Admin',
+            'email' => 'owner'.uniqid().'@example.test',
+            'password' => 'password',
+        ]);
+
+        $user->assignRole(UserRole::OwnerAdmin->value);
+        $this->actingAs($user);
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
+
+        return $user;
     }
 }

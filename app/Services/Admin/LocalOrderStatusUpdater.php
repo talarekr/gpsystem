@@ -9,7 +9,10 @@ use InvalidArgumentException;
 
 class LocalOrderStatusUpdater
 {
-    public function update(Order $order, string $status): Order
+    /**
+     * @return array{order: Order, sync_log: \App\Models\MarketplaceSyncLog|null}
+     */
+    public function updateWithSyncResult(Order $order, string $status): array
     {
         $status = trim($status);
         $options = OrderStatusOptions::optionsForOrder($order);
@@ -30,9 +33,14 @@ class LocalOrderStatusUpdater
         $order = $order->refresh();
 
         if ($previousStatus !== $status) {
-            app(OrderStatusMarketplaceSyncService::class)->sync($order, $previousStatus);
+            $syncLog = app(OrderStatusMarketplaceSyncService::class)->sync($order, $previousStatus);
         }
 
-        return $order;
+        return ['order' => $order, 'sync_log' => $syncLog ?? null];
+    }
+
+    public function update(Order $order, string $status): Order
+    {
+        return $this->updateWithSyncResult($order, $status)['order'];
     }
 }

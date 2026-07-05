@@ -701,10 +701,12 @@ HTML, 200, ['Content-Type' => 'text/html; charset=UTF-8']);
         }
 
         Artisan::call('optimize:clear');
+        $opcacheReset = function_exists('opcache_reset') ? @opcache_reset() : null;
 
         return response()->json([
             'ok' => true,
             'command' => 'optimize:clear',
+            'opcache_reset' => $opcacheReset,
             'output' => trim(Artisan::output()),
             'time' => now()->toISOString(),
         ]);
