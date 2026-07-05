@@ -402,6 +402,39 @@ class OvokoPublishAdapterTest extends TestCase
     }
 
 
+    public function test_ovoko_deactivate_uses_documented_change_part_status_sold_out(): void
+    {
+        $account = MarketplaceAccount::query()->create(['marketplace' => 'ovoko', 'code' => 'ovoko_main', 'name' => 'Ovoko main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'live', 'api_credentials' => ['username' => 'u', 'password' => 'p', 'user_token' => 't']]);
+        Http::fake(['https://ovoko.example.test/crm/changePartStatus' => Http::response(['msg' => 'OK', 'status_code' => 'R200'], 200)]);
+
+        $result = (new OvokoApiClient('ovoko', $account))->deactivatePart('288702');
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame('POST /crm/changePartStatus', $result['request_summary']['endpoint']);
+        $this->assertSame(2, $result['request_summary']['status']);
+        Http::assertSent(fn ($request) => $request->url() === 'https://ovoko.example.test/crm/changePartStatus'
+            && str_contains($request->body(), 'part_id=288702')
+            && str_contains($request->body(), 'status=2')
+            && ! str_contains($request->body(), 'quantity='));
+    }
+
+    public function test_ovoko_restore_uses_same_part_id_and_in_stock_status_without_reimport(): void
+    {
+        $account = MarketplaceAccount::query()->create(['marketplace' => 'ovoko', 'code' => 'ovoko_main', 'name' => 'Ovoko main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'live', 'api_credentials' => ['username' => 'u', 'password' => 'p', 'user_token' => 't']]);
+        Http::fake(['https://ovoko.example.test/crm/changePartStatus' => Http::response(['msg' => 'OK', 'status_code' => 'R200'], 200)]);
+
+        $result = (new OvokoApiClient('ovoko', $account))->restorePart('288702');
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame('POST /crm/changePartStatus', $result['request_summary']['endpoint']);
+        $this->assertSame(0, $result['request_summary']['status']);
+        Http::assertSent(fn ($request) => $request->url() === 'https://ovoko.example.test/crm/changePartStatus'
+            && str_contains($request->body(), 'part_id=288702')
+            && str_contains($request->body(), 'status=0')
+            && ! str_contains($request->body(), 'importPart')
+            && ! str_contains($request->body(), 'quantity='));
+    }
+
     public function test_ovoko_read_lookup_does_not_accept_first_candidate_when_ovoko_id_differs(): void
     {
         $account = MarketplaceAccount::query()->create(['marketplace' => 'ovoko', 'code' => 'ovoko_main', 'name' => 'Ovoko main', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://ovoko.example.test', 'api_mode' => 'read_only', 'api_credentials' => ['username' => 'u', 'password' => 'p', 'user_token' => 't']]);
