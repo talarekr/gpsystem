@@ -517,7 +517,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     font-weight: 800;
     line-height: inherit !important;
 }
-.gps-shop-events__tab .gps-shop-events__tab-count--action { color: var(--gps-admin-order-accent) !important; }
+.gps-shop-events__tab .gps-shop-events__tab-count--action { color: #dc2626 !important; }
 
 .gps-shop-events__empty { margin-top: 1rem; border: 1px dashed #cbd5e1; border-radius: 0.95rem; background: #f8fafc; padding: 1.2rem; color: #64748b; font-weight: 700; text-align: center; }
 .gps-shop-events__list { display: grid; gap: 0.45rem; margin-top: 1rem; }
