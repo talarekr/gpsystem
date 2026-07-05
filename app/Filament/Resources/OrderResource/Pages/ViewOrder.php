@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\OrderResource\Pages;
 
 use App\Filament\Resources\OrderResource;
+use App\Models\MarketplaceSyncLog;
 use App\Services\Admin\LocalOrderStatusUpdater;
 use Filament\Actions;
 use Filament\Notifications\Notification;
@@ -18,12 +19,10 @@ class ViewOrder extends ViewRecord
     public function updateOrderStatus(string $status, LocalOrderStatusUpdater $updater): void
     {
         try {
-            $this->record = $updater->update($this->record, $status);
+            $result = $updater->updateWithSyncResult($this->record, $status);
+            $this->record = $result['order'];
 
-            Notification::make()
-                ->title('Status zamówienia został zapisany lokalnie.')
-                ->success()
-                ->send();
+            $this->sendStatusUpdateNotification($result['sync_log'] ?? null);
         } catch (\InvalidArgumentException $exception) {
             Notification::make()
                 ->title('Nie zapisano statusu')
@@ -31,6 +30,33 @@ class ViewOrder extends ViewRecord
                 ->danger()
                 ->send();
         }
+    }
+
+    private function sendStatusUpdateNotification(?MarketplaceSyncLog $syncLog): void
+    {
+        if ($syncLog === null) {
+            Notification::make()
+                ->title('Status lokalny bez zmian.')
+                ->body('Marketplace sync: nie uruchomiono, bo status lokalny się nie zmienił.')
+                ->success()
+                ->send();
+
+            return;
+        }
+
+        $level = $syncLog->status === 'error' ? 'danger' : 'success';
+        $statusLabel = match ($syncLog->status) {
+            'success' => 'success',
+            'skipped' => 'skipped',
+            'error' => 'error',
+            default => (string) $syncLog->status,
+        };
+
+        $notification = Notification::make()
+            ->title('Status lokalny zmieniony. Marketplace sync: '.$statusLabel.'.')
+            ->body('Szczegóły zapisano w logu API #'.$syncLog->id.'.'.($syncLog->message ? ' Powód: '.$syncLog->message.'.' : ''));
+
+        $notification->{$level}()->send();
     }
 
     protected function getHeaderActions(): array
