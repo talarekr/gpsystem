@@ -145,6 +145,104 @@ class MarketplaceOrderStatusSyncTest extends TestCase
         $this->assertDatabaseHas('marketplace_sync_logs', ['order_id' => $order->id, 'marketplace' => 'ebay', 'action' => 'ebay_create_shipping_fulfillment', 'status' => 'success']);
     }
 
+    public function test_ebay_shipped_plan_is_supported_and_uses_order_channel_account(): void
+    {
+        Http::fake(['https://ebay-fr.test/*' => Http::response(['fulfillmentId' => 'f-fr'], 201)]);
+        MarketplaceAccount::query()->create(['marketplace' => 'ebay_de', 'code' => 'ebay_de', 'name' => 'eBay DE', 'api_enabled' => true, 'api_base_url' => 'https://ebay-de.test', 'api_mode' => 'live', 'api_credentials' => ['access_token' => 'de-token']]);
+        MarketplaceAccount::query()->create(['marketplace' => 'ebay_fr', 'code' => 'ebay_fr', 'name' => 'eBay FR', 'api_enabled' => true, 'api_base_url' => 'https://ebay-fr.test', 'api_mode' => 'live', 'api_credentials' => ['access_token' => 'fr-token']]);
+        $order = Order::query()->create(['order_number' => 'E-FR', 'marketplace' => 'ebay_fr', 'marketplace_order_id' => 'ebay-fr-order-1', 'status' => 'shipped']);
+        OrderItem::query()->create(['order_id' => $order->id, 'marketplace' => 'ebay_fr', 'marketplace_order_id' => 'ebay-fr-order-1', 'marketplace_item_id' => 'line-fr-1', 'product_name' => 'Part', 'quantity' => 1]);
+        Shipment::query()->create(['order_id' => $order->id, 'carrier' => 'La Poste', 'tracking_number' => 'FRTRACK1', 'shipment_status' => 'created']);
+
+        $plan = app(\App\Services\Marketplace\OrderStatusMarketplaceSyncService::class)->plan($order, 'processing');
+        $this->assertTrue($plan['supported']);
+        $this->assertSame('shipping_fulfillment', $plan['target_marketplace_status']);
+        $this->assertSame('createShippingFulfillment', $plan['target_marketplace_action']);
+        $this->assertSame('ebay_shipping_fulfillment', $plan['mapper_branch']);
+        $this->assertNull($plan['skipped_reason']);
+
+        app(\App\Services\Marketplace\OrderStatusMarketplaceSyncService::class)->sync($order, 'processing');
+
+        Http::assertSentCount(1);
+        Http::assertSent(fn ($request) => str_starts_with($request->url(), 'https://ebay-fr.test/')
+            && $request->method() === 'POST'
+            && str_contains($request->url(), '/sell/fulfillment/v1/order/ebay-fr-order-1/shipping_fulfillment')
+            && $request->hasHeader('Authorization', 'Bearer fr-token'));
+        $this->assertDatabaseMissing('marketplace_sync_logs', ['order_id' => $order->id, 'status' => 'skipped', 'message' => 'unsupported_status_for_marketplace']);
+    }
+
+    public function test_ebay_processing_skips_with_specific_reason_and_debug_context(): void
+    {
+        Http::fake();
+        $order = Order::query()->create(['order_number' => 'E-P', 'marketplace' => 'ebay_de', 'marketplace_order_id' => 'ebay-order-processing', 'status' => 'processing']);
+
+        app(\App\Services\Marketplace\OrderStatusMarketplaceSyncService::class)->sync($order, 'new');
+
+        Http::assertNothingSent();
+        $log = MarketplaceSyncLog::query()->where('order_id', $order->id)->latest('id')->firstOrFail();
+        $this->assertSame('skipped', $log->status);
+        $this->assertSame('unsupported_ebay_status', $log->message);
+        $this->assertFalse($log->payload['mapping_supported']);
+        $this->assertSame('processing', $log->payload['local_status_raw_value']);
+        $this->assertSame('ebay', $log->payload['normalized_marketplace']);
+        $this->assertSame('ebay_shipping_fulfillment', $log->payload['mapper_branch']);
+        $this->assertSame('unsupported_ebay_status', $log->payload['request_summary']['skipped_reason']);
+        $this->assertSame(\App\Services\Marketplace\OrderStatusMarketplaceSyncService::CODE_VERSION, $log->payload['response_summary']['code_version']);
+    }
+
+    public function test_ovoko_statuses_skip_with_endpoint_guard_and_full_debug_context(): void
+    {
+        Http::fake();
+
+        foreach (['processing', 'shipped'] as $status) {
+            $order = Order::query()->create(['order_number' => 'O-'.$status, 'marketplace' => 'ovoko', 'marketplace_order_id' => 'ovoko-'.$status, 'status' => $status]);
+
+            app(\App\Services\Marketplace\OrderStatusMarketplaceSyncService::class)->sync($order, 'new');
+
+            $log = MarketplaceSyncLog::query()->where('order_id', $order->id)->latest('id')->firstOrFail();
+            $this->assertSame('skipped', $log->status);
+            $this->assertSame('ovoko_order_status_endpoint_not_confirmed_in_rrr_docs', $log->message);
+            $this->assertSame($status, $log->payload['local_status_raw_value']);
+            $this->assertSame('ovoko', $log->payload['normalized_marketplace']);
+            $this->assertSame('ovoko-'.$status, $log->payload['marketplace_order_id']);
+            $this->assertSame('ovoko_no_status_endpoint', $log->payload['mapper_branch']);
+            $this->assertSame('ovoko_order_status_endpoint_not_confirmed_in_rrr_docs', $log->payload['request_summary']['skipped_reason']);
+            $this->assertSame(\App\Services\Marketplace\OrderStatusMarketplaceSyncService::CODE_VERSION, $log->payload['code_version']);
+        }
+
+        Http::assertNothingSent();
+    }
+
+    public function test_supported_target_plans_never_report_mapping_unsupported(): void
+    {
+        foreach ([['allegro', 'processing'], ['ebay_de', 'shipped']] as [$marketplace, $status]) {
+            $order = Order::query()->create(['order_number' => 'P-'.$marketplace.'-'.$status, 'marketplace' => $marketplace, 'marketplace_order_id' => 'external-'.$marketplace, 'status' => $status]);
+            $plan = app(\App\Services\Marketplace\OrderStatusMarketplaceSyncService::class)->plan($order, 'new');
+
+            $this->assertNotNull($plan['target_marketplace_status']);
+            $this->assertTrue($plan['supported']);
+        }
+    }
+
+    public function test_ebay_shipped_missing_fulfillment_data_logs_specific_blocker_not_unsupported(): void
+    {
+        Http::fake();
+        MarketplaceAccount::query()->create(['marketplace' => 'ebay_de', 'code' => 'ebay_de', 'name' => 'eBay DE', 'api_enabled' => true, 'api_base_url' => 'https://ebay.test', 'api_mode' => 'live', 'api_credentials' => ['access_token' => 'token']]);
+        $order = Order::query()->create(['order_number' => 'E-MISSING', 'marketplace' => 'ebay_de', 'marketplace_order_id' => 'ebay-order-missing', 'status' => 'shipped']);
+
+        app(\App\Services\Marketplace\OrderStatusMarketplaceSyncService::class)->sync($order, 'processing');
+
+        Http::assertNothingSent();
+        $log = MarketplaceSyncLog::query()->where('order_id', $order->id)->latest('id')->firstOrFail();
+        $this->assertSame('error', $log->status);
+        $this->assertSame('missing_line_items', $log->message);
+        $this->assertTrue($log->payload['mapping_supported']);
+        $this->assertSame('shipping_fulfillment', $log->payload['target_marketplace_status']);
+        $this->assertContains('missing_line_items', $log->payload['response_summary']['missing_reasons']);
+        $this->assertContains('missing_carrier', $log->payload['response_summary']['missing_reasons']);
+        $this->assertContains('missing_tracking_number', $log->payload['response_summary']['missing_reasons']);
+    }
+
     public function test_local_order_and_unsupported_status_are_logged_without_api_call(): void
     {
         Http::fake();
