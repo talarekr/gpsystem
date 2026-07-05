@@ -22,6 +22,24 @@ class EbayApiClient extends AbstractMarketplaceApiClient
     }
 
 
+    public function createShippingFulfillment(\App\Models\Order $order): array
+    {
+        $base = rtrim((string) $this->account?->api_base_url, '/');
+        $orderId = (string) $order->marketplace_order_id;
+        $shipment = $order->shipments()->latest('id')->first();
+        $lineItems = $order->items()->get()->map(fn ($item): array => array_filter(['lineItemId' => $item->marketplace_item_id ?: data_get($item->raw_payload, 'lineItemId'), 'quantity' => (int) $item->quantity], fn ($value) => $value !== null && $value !== ''))->values()->all();
+        $payload = array_filter(['lineItems' => $lineItems, 'shippedDate' => now()->toISOString(), 'shippingCarrierCode' => $shipment?->carrier, 'trackingNumber' => $shipment?->tracking_number], fn ($value) => $value !== null && $value !== '' && $value !== []);
+        $endpoint = $base.'/sell/fulfillment/v1/order/'.rawurlencode($orderId).'/shipping_fulfillment';
+        $requestSummary = ['method' => 'POST', 'endpoint' => 'POST /sell/fulfillment/v1/order/{orderId}/shipping_fulfillment', 'order_id' => $orderId, 'payload' => $payload];
+        if ($orderId === '' || $lineItems === []) return ['ok' => false, 'http_status' => null, 'action' => 'ebay_create_shipping_fulfillment', 'message' => 'eBay shipping fulfillment prerequisites are missing.', 'request_summary' => $requestSummary, 'response_summary' => ['missing' => ['order_id' => $orderId === '', 'line_items' => $lineItems === []]]];
+        try {
+            $response = $this->postWithAuthRetry($endpoint, $payload, [], 20); $json = $response->json(); $body = is_array($json) ? $json : [];
+            return ['ok' => $response->successful(), 'http_status' => $response->status(), 'action' => 'ebay_create_shipping_fulfillment', 'message' => $response->successful() ? 'eBay shipping fulfillment created.' : 'eBay shipping fulfillment failed.', 'request_summary' => $requestSummary, 'response_summary' => ['fulfillment_id' => $body['fulfillmentId'] ?? null, 'errors' => $body['errors'] ?? null, 'warnings' => $body['warnings'] ?? null, 'top_level_keys' => array_slice(array_keys($body), 0, 20)]];
+        } catch (\Throwable $exception) {
+            return ['ok' => false, 'http_status' => null, 'action' => 'ebay_create_shipping_fulfillment', 'message' => 'eBay shipping fulfillment failed.', 'request_summary' => $requestSummary, 'response_summary' => ['error_class' => $exception::class, 'error_message_safe' => $exception->getMessage()]];
+        }
+    }
+
     public function endOffer(string $offerIdOrSku, ?string $sku = null): array
     {
         $base = rtrim((string) $this->account?->api_base_url, '/');
