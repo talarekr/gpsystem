@@ -127,7 +127,10 @@
             if (part.price_value !== null && part.price_value !== undefined) {
                 amount.value = Number(part.price_value).toFixed(2);
             }
-            selected.innerHTML = '<strong>Wybrano:</strong> ' + (part.name || 'Bez nazwy') + ' <span>SKU: ' + (part.sku || '—') + ', ilość: ' + (part.quantity ?? '—') + '</span>';
+            const location = part.storage_location || 'Brak lokalizacji';
+            const partNumber = part.part_number || '—';
+            search.value = part.name || 'Bez nazwy';
+            selected.innerHTML = '<strong>Wybrano: ' + escapeHtml(part.name || 'Bez nazwy') + '</strong><span>Magazyn: ' + escapeHtml(location) + ' · ' + escapeHtml(partNumber) + '</span>';
             selected.hidden = false;
             results.hidden = true;
             clearAlert();
