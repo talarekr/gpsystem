@@ -12,6 +12,7 @@ use App\Http\Controllers\Admin\JarekGearboxes\JarekAllegroOAuthController;
 use App\Http\Controllers\Admin\JarekGearboxes\JarekGearboxToolController;
 use App\Http\Controllers\Admin\MarketplaceOAuthTokenHealthController;
 use App\Http\Controllers\Admin\PartSearchController;
+use App\Http\Controllers\Admin\PartLocalAvailabilityController;
 use App\Http\Controllers\Admin\ImportMigration\WooCategoryTreeController;
 use App\Http\Controllers\Admin\ImportMigration\WooProductImportRunController;
 use App\Http\Controllers\Admin\ImportMigration\WooStoragePublicController;
@@ -2314,6 +2315,7 @@ Route::get('/tools/post-domain-switch-check', PostDomainSwitchCheckController::c
 
 Route::middleware(Authenticate::class)->prefix('admin')->name('admin.')->group(function (): void {
     Route::get('/search/parts', PartSearchController::class)->name('search.parts');
+    Route::patch('/parts/{part}/local-availability', [PartLocalAvailabilityController::class, 'update'])->name('parts.local-availability.update');
     Route::get('/tools/marketplace/ebay-de-preview/{part}', EbayDePreviewController::class)->name('tools.marketplace.ebay-de-preview');
     Route::get('/tools/marketplace/allegro-duplicate-check', AllegroDuplicateCheckController::class)->name('tools.marketplace.allegro-duplicate-check');
     Route::post('/local-sales', [LocalSaleController::class, 'store'])->name('local-sales.store');

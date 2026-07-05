@@ -7,6 +7,7 @@ use App\Models\Car;
 use App\Models\Part;
 use App\Models\StorageLocation;
 use App\Services\Marketplace\ManualMarketplaceLinkMappingService;
+use App\Services\Admin\PartLocalAvailabilityUpdater;
 use App\Services\Marketplace\ManualMarketplaceMappingConflictException;
 use App\Services\Marketplace\PreparePartMarketplaceListingService;
 use Filament\Notifications\Notification;
@@ -125,6 +126,37 @@ class ListParts extends Page
         $this->resetPage();
     }
 
+
+
+    /**
+     * @return array{ok: bool, part_id: int, old_status: ?string, new_status: ?string, old_availability: ?string, new_availability: ?string}|null
+     */
+    public function updateLocalAvailability(int $partId, int|string $availabilityFlag): ?array
+    {
+        if (! in_array((string) $availabilityFlag, ['0', '1'], true)) {
+            $this->addError('availabilityFlag', 'Dozwolone wartości to 0 albo 1.');
+
+            return null;
+        }
+
+        $part = $this->getPartsBaseQuery()->whereKey($partId)->first();
+
+        if (! $part) {
+            $this->addError('availabilityFlag', 'Nie znaleziono części.');
+
+            return null;
+        }
+
+        $result = app(PartLocalAvailabilityUpdater::class)->update($part, $availabilityFlag);
+
+        Notification::make()
+            ->title((string) $availabilityFlag === '1' ? 'Część przywrócona lokalnie do sprzedaży.' : 'Część oznaczona lokalnie jako sprzedana.')
+            ->body('old_status='.$result['old_status'].' | new_status='.$result['new_status'].' | old_availability='.$result['old_availability'].' | new_availability='.$result['new_availability'].' | marketplace_write=false')
+            ->success()
+            ->send();
+
+        return $result;
+    }
 
     public function saveInternalNote(int $partId, ?string $note = null): void
     {
