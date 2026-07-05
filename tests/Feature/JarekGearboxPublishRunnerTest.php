@@ -21,16 +21,25 @@ class JarekGearboxPublishRunnerTest extends TestCase
             ->assertJsonPath('batch_summary.processed_count', 0);
     }
 
-    public function test_publish_runner_page_loads_with_default_test_batch_size(): void
+    public function test_publish_runner_page_loads_with_safe_publish_defaults(): void
     {
         $response = $this->withoutMiddleware()->get('/admin/tools/jarek-gearboxes/publish-runner');
 
         $response->assertOk()
             ->assertSee('Jarek Gearboxes eBay DE real publish runner')
-            ->assertSee('value="1"', false)
+            ->assertSee('Current offset / start offset')
+            ->assertSee('value="0"', false)
+            ->assertSee('value="3"', false)
             ->assertSee('value="10"', false)
+            ->assertSee('START FROM CURRENT OFFSET')
+            ->assertSee('RESET TO 0')
             ->assertSee('admin_diagnostics')
             ->assertSee('error_message')
-            ->assertSee('offset ${state.offset}, limit ${limit}, error_message=', false);
+            ->assertSee('request ${url}', false)
+            ->assertSee('next_offset=${data.next_offset}', false)
+            ->assertSee('raw_response_preview')
+            ->assertSee('http_status=${res.status}', false)
+            ->assertSee('startFromInput')
+            ->assertDontSee('offset:0,total:1507,processed:0,summary:{},last:[]};$('.log').textContent='';log('start')', false);
     }
 }
