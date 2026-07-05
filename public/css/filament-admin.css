@@ -399,10 +399,11 @@ body,
 .gps-admin-search__thumb { display: flex; width: 2.4rem; height: 2.4rem; align-items: center; justify-content: center; overflow: hidden; border-radius: 0.6rem; background: #eef2f7; color: #94a3b8; font-size: 0.8rem; }
 .gps-admin-search__thumb img { width: 100%; height: 100%; object-fit: cover; }
 .gps-admin-search__meta, .gps-admin-search__side { display: flex; flex-direction: column; min-width: 0; }
-.gps-admin-search__meta strong, .gps-admin-search__meta small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.gps-admin-search__meta small, .gps-admin-search__side small { color: #64748b; }
-.gps-admin-search__side { align-items: flex-end; gap: 0.15rem; font-size: 0.78rem; }
-.gps-admin-search__side em { border-radius: 999px; background: #edf3f8; padding: 0.1rem 0.45rem; color: #354d69; font-style: normal; font-weight: 700; }
+.gps-admin-search__title { display: -webkit-box; overflow: hidden; color: #1e293b; font-size: 13px; font-weight: 400; line-height: 1.35; text-overflow: ellipsis; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.gps-admin-search__meta small { overflow: hidden; color: #64748b; font-size: 12px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+.gps-admin-search__side { align-items: flex-end; gap: 0.15rem; font-size: 13px; }
+.gps-admin-search__price { color: #000; font-size: 13px; font-weight: 400; line-height: 1.35; }
+.gps-admin-search__status { color: #15803d; font-size: 13px; font-weight: 400; line-height: 1.35; }
 .gps-admin-search__empty { padding: 0.85rem 1rem; color: #64748b; }
 
 .gps-admin-topbar__parts-link,
@@ -656,11 +657,12 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 .gps-local-sale-result[data-unavailable="1"] { opacity: .58; }
 .gps-local-sale-result img,
 .gps-local-sale-result__placeholder { width: 3.5rem; height: 3.5rem; border-radius: .6rem; object-fit: cover; background: #e2e8f0; display: flex; align-items: center; justify-content: center; color: #475569; font-size: .75rem; }
-.gps-local-sale-result__main strong { display: block; font-weight: 800; }
-.gps-local-sale-result__main small,
-.gps-local-sale-result__meta small { display: block; color: #64748b; font-weight: 600; }
-.gps-local-sale-result__meta { text-align: right; white-space: nowrap; }
-.gps-local-sale-result__meta b { color: #122a66; }
+.gps-local-sale-result__main { min-width: 0; }
+.gps-local-sale-result__title { display: -webkit-box; overflow: hidden; color: #1e293b; font-size: 13px; font-weight: 400; line-height: 1.35; text-overflow: ellipsis; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.gps-local-sale-result__main small { display: block; overflow: hidden; color: #64748b; font-size: 12px; font-weight: 400; margin-top: 5px; text-overflow: ellipsis; white-space: nowrap; }
+.gps-local-sale-result__meta { display: flex; flex-direction: column; align-items: flex-end; gap: .15rem; text-align: right; white-space: nowrap; }
+.gps-local-sale-result__price { color: #000; font-size: 13px; font-weight: 400; line-height: 1.35; }
+.gps-local-sale-result__status { color: #15803d; font-size: 13px; font-weight: 400; line-height: 1.35; }
 .gps-local-sale-results__empty,
 .gps-local-sale-selected { padding: .75rem; color: #475569; }
 .gps-local-sale-selected { border: 1px solid #bfdbfe; border-radius: .75rem; background: #eff6ff; }
@@ -676,7 +678,7 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
 @media (max-width: 768px) {
     .gps-quick-actions__grid { grid-template-columns: 1fr; }
     .gps-local-sale-result { grid-template-columns: 3rem 1fr; }
-    .gps-local-sale-result__meta { grid-column: 2; text-align: left; }
+    .gps-local-sale-result__meta { grid-column: 2; align-items: flex-start; text-align: left; }
     .gps-local-sale-modal__footer { flex-direction: column-reverse; align-items: stretch; }
 }
 
