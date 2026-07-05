@@ -43,6 +43,41 @@ class MarketplaceAvailabilityRetryToolTest extends TestCase
         $this->assertSame($failed->id, data_get($retryLog->payload, 'retry_of_log_id'));
     }
 
+    /**
+     * @dataProvider allegroEndOfferDryRunRegressionProvider
+     */
+    public function test_allegro_end_offer_dry_run_is_retryable_for_regression_logs(int $logId, int $listingId, int $partId, string $offerId): void
+    {
+        $part = Part::query()->create(['id' => $partId, 'name' => 'Sold Allegro part '.$partId, 'status' => 'sold', 'quantity' => 0, 'is_visible_storefront' => false]);
+        $account = MarketplaceAccount::query()->create(['marketplace' => 'allegro', 'code' => 'allegro_main', 'name' => 'Allegro', 'api_enabled' => true, 'api_base_url' => 'https://allegro.test', 'api_mode' => 'live', 'api_credentials' => ['access_token' => 'token']]);
+        $listing = MarketplaceListing::query()->create(['id' => $listingId, 'marketplace' => 'allegro', 'marketplace_account_id' => $account->id, 'part_id' => $part->id, 'external_offer_id' => $offerId, 'quantity' => 1, 'status' => 'active', 'sync_status' => 'mapped']);
+        $failed = MarketplaceSyncLog::query()->create(['id' => $logId, 'marketplace' => 'allegro', 'marketplace_listing_id' => $listing->id, 'part_id' => $part->id, 'action' => 'allegro_end_offer', 'status' => 'error', 'http_status' => '415', 'message' => 'Unsupported Media Type', 'external_id' => $offerId, 'payload' => ['event_type' => 'sold'], 'created_at' => now()->subMinute()]);
+
+        $preview = app(FailedMarketplaceAvailabilityActionRetryService::class)->preview($failed);
+
+        $this->assertTrue($preview['retryable']);
+        $this->assertNull($preview['blocker']);
+        $this->assertSame($logId, $preview['original_log_id']);
+        $this->assertSame($listingId, $preview['marketplace_listing_id']);
+        $this->assertSame($partId, $preview['part_id']);
+        $this->assertSame('allegro', $preview['target_marketplace']);
+        $this->assertSame('allegro', $preview['listing_marketplace']);
+        $this->assertSame('sold', $preview['event_type']);
+        $this->assertSame('allegro_end_offer', $preview['action']);
+        $this->assertSame($offerId, $preview['external_id']);
+        $this->assertTrue($preview['dry_run']);
+        $this->assertFalse($preview['local_part_state_will_change']);
+        $this->assertFalse($preview['full_availability_event_will_run']);
+    }
+
+    public static function allegroEndOfferDryRunRegressionProvider(): array
+    {
+        return [
+            'log 39095 offer 17759363397' => [39095, 8706, 2727, '17759363397'],
+            'log 39099 offer 15959835863' => [39099, 11420, 5442, '15959835863'],
+        ];
+    }
+
     public function test_retry_page_is_owner_admin_only(): void
     {
         Role::findOrCreate(UserRole::OwnerAdmin->value, 'web');
