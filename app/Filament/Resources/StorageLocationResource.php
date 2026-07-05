@@ -38,29 +38,37 @@ class StorageLocationResource extends Resource
     public static function form(Form $form): Form
     {
         return $form
-            ->schema([
-                Section::make('Dane miejsca składowania')
-                    ->icon('heroicon-o-building-office-2')
-                    ->extraAttributes(['class' => 'gps-car-form-section'])
-                    ->columns(2)
-                    ->schema([
-                        Forms\Components\TextInput::make('name')
-                            ->label('Nazwa')
-                            ->placeholder('np. 1K3-1, 8KNS-1, GTR8')
-                            ->required()
-                            ->unique(ignoreRecord: true)
-                            ->maxLength(255),
-                        Forms\Components\Toggle::make('is_active')
-                            ->label('Aktywne')
-                            ->default(true)
-                            ->inline(false),
-                        Forms\Components\Textarea::make('description')
-                            ->label('Opis')
-                            ->placeholder('np. KASTRA 1K3, KONTENER 8KNS')
-                            ->rows(4)
-                            ->columnSpanFull(),
-                    ]),
-            ]);
+            ->schema(self::formSchema());
+    }
+
+    /**
+     * @return array<int, \Filament\Forms\Components\Component>
+     */
+    public static function formSchema(): array
+    {
+        return [
+            Section::make('Dane miejsca składowania')
+                ->icon('heroicon-o-building-office-2')
+                ->extraAttributes(['class' => 'gps-car-form-section'])
+                ->columns(2)
+                ->schema([
+                    Forms\Components\TextInput::make('name')
+                        ->label('Nazwa')
+                        ->placeholder('np. 1K3-1, 8KNS-1, GTR8')
+                        ->required()
+                        ->unique(ignoreRecord: true)
+                        ->maxLength(255),
+                    Forms\Components\Toggle::make('is_active')
+                        ->label('Aktywne')
+                        ->default(true)
+                        ->inline(false),
+                    Forms\Components\Textarea::make('description')
+                        ->label('Opis')
+                        ->placeholder('np. KASTRA 1K3, KONTENER 8KNS')
+                        ->rows(4)
+                        ->columnSpanFull(),
+                ]),
+        ];
     }
 
     public static function table(Table $table): Table
