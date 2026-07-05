@@ -50,7 +50,6 @@ class OrderStatusMarketplaceSyncService
             'marketplace' => $marketplace,
             'marketplace_order_id' => $order->marketplace_order_id,
             'retry_of_log_id' => $retryOfLogId,
-            'supported' => false,
             'dry_run' => true,
             'order_status_sync_code_version' => self::CODE_VERSION,
             'code_version' => self::CODE_VERSION,
@@ -71,7 +70,7 @@ class OrderStatusMarketplaceSyncService
                 'picked_up' => 'PICKED_UP',
             ];
             $target = $map[$status] ?? null;
-            return $base + [
+            return $this->finalizePlan(array_merge($base, [
                 'target_marketplace_status' => $target,
                 'mapper_branch' => 'allegro_fulfillment_status',
                 'action' => self::ACTION,
@@ -79,18 +78,37 @@ class OrderStatusMarketplaceSyncService
                 'available_map' => $map,
                 'supported_marketplace_statuses' => array_values($map),
                 'skipped_reason' => $target ? null : 'unsupported_allegro_status',
-            ];
+            ]));
         }
 
         if ($marketplace === 'ebay') {
-            return $base + ['target_marketplace_status' => $status === 'shipped' ? 'shipping_fulfillment' : null, 'mapper_branch' => 'ebay_shipping_fulfillment', 'action' => 'ebay_create_shipping_fulfillment', 'supported' => $status === 'shipped', 'skipped_reason' => $status === 'shipped' ? null : 'unsupported_status_for_marketplace'];
+            return $this->finalizePlan(array_merge($base, ['target_marketplace_status' => $status === 'shipped' ? 'shipping_fulfillment' : null, 'mapper_branch' => 'ebay_shipping_fulfillment', 'action' => 'ebay_create_shipping_fulfillment', 'supported' => $status === 'shipped', 'skipped_reason' => $status === 'shipped' ? null : 'unsupported_ebay_status']));
         }
 
         if ($marketplace === 'ovoko') {
-            return $base + ['target_marketplace_status' => null, 'mapper_branch' => 'ovoko_no_status_endpoint', 'action' => self::ACTION, 'supported' => false, 'skipped_reason' => 'ovoko_order_status_endpoint_not_confirmed_in_rrr_docs'];
+            return $this->finalizePlan(array_merge($base, ['target_marketplace_status' => null, 'mapper_branch' => 'ovoko_no_status_endpoint', 'action' => self::ACTION, 'supported' => false, 'skipped_reason' => 'ovoko_order_status_endpoint_not_confirmed_in_rrr_docs']));
         }
 
-        return $base + ['target_marketplace_status' => null, 'mapper_branch' => 'unsupported_marketplace', 'action' => self::ACTION, 'skipped_reason' => 'local_or_unsupported_marketplace'];
+        return $this->finalizePlan(array_merge($base, ['target_marketplace_status' => null, 'mapper_branch' => 'unsupported_marketplace', 'action' => self::ACTION, 'supported' => false, 'skipped_reason' => 'local_or_unsupported_marketplace']));
+    }
+
+
+    private function finalizePlan(array $plan): array
+    {
+        $marketplaceSupportsStatusSync = in_array((string) ($plan['normalized_marketplace'] ?? $plan['marketplace'] ?? ''), ['allegro', 'ebay'], true);
+
+        if ($marketplaceSupportsStatusSync && ($plan['target_marketplace_status'] ?? null) !== null) {
+            $plan['supported'] = true;
+            $plan['skipped_reason'] = null;
+        } else {
+            $plan['supported'] = (bool) ($plan['supported'] ?? false);
+        }
+
+        if (($plan['target_marketplace_status'] ?? null) !== null && ($plan['skipped_reason'] ?? null) === 'unsupported_status_for_marketplace') {
+            $plan['skipped_reason'] = null;
+        }
+
+        return $plan;
     }
 
     private function dispatch(Order $order, string $marketplace, array $plan): array
@@ -137,6 +155,7 @@ class OrderStatusMarketplaceSyncService
                 'local_status_raw_value' => $plan['local_status_raw_value'] ?? $order->status,
                 'local_status_ui_label' => $plan['local_status_ui_label'] ?? null,
                 'target_marketplace_status' => $plan['target_marketplace_status'] ?? null,
+                'mapping_supported' => (bool) ($plan['supported'] ?? false),
                 'mapper_branch' => $plan['mapper_branch'] ?? null,
                 'mapper_class' => $plan['mapper_class'] ?? self::class,
                 'mapper_method' => $plan['mapper_method'] ?? 'plan',
