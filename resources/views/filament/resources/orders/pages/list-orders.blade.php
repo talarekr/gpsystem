@@ -10,7 +10,7 @@
     <style>
         .gps-orders-toolbar {
             display: grid;
-            grid-template-columns: minmax(260px, 1fr) repeat(3, minmax(140px, 180px)) auto auto;
+            grid-template-columns: minmax(260px, 1fr) repeat(4, minmax(120px, 180px)) auto auto;
             gap: 12px;
             align-items: end;
             margin-bottom: 12px;
@@ -348,6 +348,15 @@
             </select>
         </div>
 
+        <div class="gps-orders-field">
+            <label for="orders-per-page">Na stronę</label>
+            <select id="orders-per-page" wire:model.live="perPage">
+                @foreach ($this->perPageOptions as $value => $label)
+                    <option value="{{ $value }}">{{ $label }}</option>
+                @endforeach
+            </select>
+        </div>
+
         <div class="gps-orders-filter-summary">Filtry: {{ $this->activeFiltersCount }}</div>
         <button class="gps-orders-reset-button" type="button" wire:click="resetFilters">Wyczyść filtry</button>
     </div>
@@ -467,6 +476,6 @@
     </div>
 
     <div class="gps-orders-pagination">
-        {{ $orders->links() }}
+        {{ $orders->links('vendor.pagination.gps-polish') }}
     </div>
 </x-filament-panels::page>
