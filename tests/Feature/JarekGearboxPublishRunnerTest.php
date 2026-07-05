@@ -20,7 +20,10 @@ class JarekGearboxPublishRunnerTest extends TestCase
             ->assertJsonPath('admin_diagnostics', [])
             ->assertJsonPath('batch_summary.processed_count', 0)
             ->assertJsonPath('completed', false)
-            ->assertJsonPath('ready_remaining_count', null);
+            ->assertJsonPath('ready_remaining_count', null)
+            ->assertJsonPath('scan_next_offset', 0)
+            ->assertJsonPath('scan_exhausted', false)
+            ->assertJsonPath('found_ready_count', 0);
     }
 
     public function test_publish_runner_page_loads_with_safe_publish_defaults(): void
@@ -29,7 +32,7 @@ class JarekGearboxPublishRunnerTest extends TestCase
 
         $response->assertOk()
             ->assertSee('Jarek Gearboxes eBay DE publish runner')
-            ->assertSee('Publish runner nie wykonuje globalnego liczenia remaining')
+            ->assertSee('find-next-ready')
             ->assertSee('value="3"', false)
             ->assertSee('value="10"', false)
             ->assertSee('Ready remaining')
@@ -40,6 +43,7 @@ class JarekGearboxPublishRunnerTest extends TestCase
             ->assertSee('error_message')
             ->assertSee('request ${url}', false)
             ->assertSee('next_offset=${d.next_offset}', false)
+            ->assertSee('scan_next_offset=${d.scan_next_offset??d.next_offset}', false)
             ->assertSee('ready_remaining=not_counted')
             ->assertSee('raw_response_preview')
             ->assertSee('http_status=${http}', false)

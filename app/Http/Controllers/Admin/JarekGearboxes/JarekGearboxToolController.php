@@ -242,6 +242,7 @@ class JarekGearboxToolController extends Controller
         $requiredConfirm = 'jarek-ebay-de-bulk-publish-ready';
         $limit = max(1, min(5, (int) $request->input('limit', $request->query('limit', 1))));
         $offset = max(0, (int) $request->input('offset', $request->query('offset', 0)));
+        $scanWindow = max($limit, min(100, max(1, (int) $request->input('scan_window', $request->query('scan_window', 50)))));
         $confirm = (string) $request->input('confirm', $request->query('confirm', ''));
         $base = [
             'ok' => true,
@@ -252,6 +253,10 @@ class JarekGearboxToolController extends Controller
             'offset' => $offset,
             'limit' => $limit,
             'next_offset' => $offset,
+            'scan_next_offset' => $offset,
+            'scan_exhausted' => false,
+            'scanned_count' => 0,
+            'found_ready_count' => 0,
             'has_more' => false,
             'completed' => false,
             'ready_remaining_count' => null,
@@ -267,15 +272,14 @@ class JarekGearboxToolController extends Controller
                 return response()->json($base + ['ok' => false, 'blockers' => ['missing_or_invalid_confirm_token'], 'error' => 'Missing or invalid confirm token.'], 200);
             }
 
-            // The publish runner works on a dynamic list: a successfully published row gets
-            // an ebay_offer_id/listing_id and immediately disappears from missing_offer_id_only.
-            // Never advance an offset on that shrinking list; always take the first currently
-            // ready rows and keep asking for offset=0 until no ready rows remain.
-            $base['offset'] = 0;
-            $offset = 0;
-            $offers = $this->firstReadyMissingJarekEbayDePublishOffers($request, $translateService, $renderer, $exchangeRateService, $limit);
-            $base['next_offset'] = 0;
-            $base['has_more'] = count($offers) > 0;
+            $scan = $this->findNextReadyMissingJarekEbayDePublishOffers($request, $translateService, $renderer, $exchangeRateService, $limit, $scanWindow, $offset);
+            $offers = $scan['offers'];
+            $base['next_offset'] = $scan['scan_next_offset'];
+            $base['scan_next_offset'] = $scan['scan_next_offset'];
+            $base['scan_exhausted'] = $scan['scan_exhausted'];
+            $base['scanned_count'] = $scan['scanned_count'];
+            $base['found_ready_count'] = count($offers);
+            $base['admin_diagnostics']['scan_window'] = $scanWindow;
             $account = Schema::hasTable('marketplace_accounts') ? MarketplaceAccount::query()->where('code', 'ebay_de')->first() : null;
             $client = new EbayApiClient('ebay_de', $account);
 
@@ -295,8 +299,10 @@ class JarekGearboxToolController extends Controller
             // Do not run a global ready-remaining scan here. The UI can run the
             // read-only scan batch runner when an exact remaining count is needed.
             $base['published_total_count'] = $this->countJarekGearboxesWithPublishedEbayOffer();
-            $base['has_more'] = $base['batch_summary']['processed_count'] > 0;
-            $base['completed'] = $base['batch_summary']['processed_count'] === 0;
+            $base['has_more'] = ! $base['scan_exhausted'] || $base['batch_summary']['processed_count'] > 0;
+            $base['completed'] = $base['scan_exhausted'] && $base['found_ready_count'] === 0;
+            $base['batch_summary']['scanned_count'] = $base['scanned_count'];
+            $base['batch_summary']['found_ready_count'] = $base['found_ready_count'];
             $base['batch_summary']['published_total_count'] = $base['published_total_count'];
             return response()->json($base, 200);
         } catch (Throwable $e) {
@@ -323,22 +329,44 @@ class JarekGearboxToolController extends Controller
     }
 
 
-    private function firstReadyMissingJarekEbayDePublishOffers(Request $request, GoogleTranslateService $translateService, EbayDescriptionTemplateRenderer $renderer, NbpExchangeRateService $exchangeRateService, int $limit): array
+    private function findNextReadyMissingJarekEbayDePublishOffers(Request $request, GoogleTranslateService $translateService, EbayDescriptionTemplateRenderer $renderer, NbpExchangeRateService $exchangeRateService, int $limit, int $scanWindow, int $startOffset): array
     {
-        // Intentionally scan only one lightweight window. A batch that finds no ready
-        // rows is allowed to complete; the separate Scan Remaining runner performs
-        // exhaustive counting client-side in batches when needed.
-        $previewRequest = Request::create($request->path(), 'GET', [
-            'offset' => 0,
-            'limit' => $limit,
-            'missing_offer_id_only' => '1',
-            'only_ready' => '1',
-            '_skip_ready_remaining_count' => '1',
-        ]);
-        $preview = $this->ebayDeBulkPreparePublishPreview($previewRequest, $translateService, $renderer, $exchangeRateService)->getData(true);
+        $offers = [];
+        $offset = $startOffset;
+        $scanned = 0;
+        $scanExhausted = false;
+        $retryFailed = $request->boolean('retry_failed');
 
-        return array_slice(array_map(fn ($offer): array => (array) $offer, (array) ($preview['offers'] ?? [])), 0, $limit);
+        while (count($offers) < $limit && ! $scanExhausted) {
+            $previewRequest = Request::create($request->path(), 'GET', [
+                'offset' => $offset,
+                'limit' => $scanWindow,
+                'missing_offer_id_only' => '1',
+                'only_ready' => '1',
+                'retry_failed' => $retryFailed ? '1' : '0',
+                '_skip_ready_remaining_count' => '1',
+            ]);
+            $preview = $this->ebayDeBulkPreparePublishPreview($previewRequest, $translateService, $renderer, $exchangeRateService)->getData(true);
+            $nextOffset = (int) data_get($preview, 'summary.next_offset', $offset);
+            $scanned += max(0, $nextOffset - $offset);
+
+            foreach ((array) ($preview['offers'] ?? []) as $offer) {
+                $offers[] = (array) $offer;
+                if (count($offers) >= $limit) break;
+            }
+
+            $scanExhausted = ! (bool) data_get($preview, 'summary.has_more', false) || $nextOffset <= $offset;
+            $offset = $nextOffset;
+        }
+
+        return [
+            'offers' => array_slice($offers, 0, $limit),
+            'scan_next_offset' => $offset,
+            'scan_exhausted' => $scanExhausted,
+            'scanned_count' => $scanned,
+        ];
     }
+
 
     public function publishRunnerScanBatch(Request $request, GoogleTranslateService $translateService, EbayDescriptionTemplateRenderer $renderer, NbpExchangeRateService $exchangeRateService): JsonResponse
     {
@@ -428,9 +456,16 @@ class JarekGearboxToolController extends Controller
                 $item['status'] = 'published';
                 $this->markJarekGearboxPublished($sku, $item['offer_id'], $item['listing_id'], $result);
             } else {
-                $item['status'] = str_contains(strtolower((string) json_encode($result)), 'exist') ? 'skipped_existing' : 'failed';
+                $encodedResult = strtolower((string) json_encode($result));
+                $item['status'] = str_contains($encodedResult, 'exist') ? 'skipped_existing' : 'failed';
                 $item['blockers'] = $item['status'] === 'skipped_existing' ? ['existing_ebay_offer_or_listing_found'] : [];
+                if ($item['status'] === 'failed' && str_contains($encodedResult, 'hersteller')) {
+                    $item['blockers'][] = 'missing_brand_manufacturer';
+                }
                 $item['errors'] = [$result['error'] ?? ($result['json'] ?? 'eBay publish failed')];
+                if ($item['status'] === 'failed' && blank($item['listing_id'] ?? null)) {
+                    $this->markJarekGearboxPublishFailed($sku, $item, $result);
+                }
             }
             $this->logPublishRunnerItem($item['status'] === 'published' ? 'success' : $item['status'], 'Jarek eBay DE publish runner per-SKU result.', $item + ['offer' => $offer], $started);
             return $item;
@@ -443,6 +478,24 @@ class JarekGearboxToolController extends Controller
         }
     }
 
+
+
+    private function markJarekGearboxPublishFailed(string $sku, array $item, array $result): void
+    {
+        if (! Schema::hasTable('jarek_gearboxes')) return;
+        $offerSourceId = preg_match('/^JAREK-(.+)$/', $sku, $matches) ? $matches[1] : $sku;
+        JarekGearbox::query()->where('allegro_offer_id', $offerSourceId)->update([
+            'ebay_inventory_sku' => $sku,
+            'ebay_status' => 'failed',
+            'ebay_payload_snapshot' => [
+                'publish_runner_status' => 'failed',
+                'blockers' => array_values((array) ($item['blockers'] ?? [])),
+                'errors' => array_values((array) ($item['errors'] ?? [])),
+                'result' => $result,
+                'failed_at' => now()->toISOString(),
+            ],
+        ]);
+    }
 
     private function markJarekGearboxPublished(string $sku, mixed $offerId, mixed $listingId, array $result): void
     {
@@ -858,6 +911,7 @@ class JarekGearboxToolController extends Controller
         $onlyReady = $request->boolean('only_ready');
         $onlyBlocked = $request->boolean('only_blocked');
         $missingOfferIdOnly = $request->boolean('missing_offer_id_only');
+        $retryFailed = $request->boolean('retry_failed');
 
         $payload = [
             'ok' => true,
@@ -875,6 +929,7 @@ class JarekGearboxToolController extends Controller
                 'only_ready' => $onlyReady,
                 'only_blocked' => $onlyBlocked,
                 'missing_offer_id_only' => $missingOfferIdOnly,
+                'retry_failed' => $retryFailed,
             ],
             'summary' => [
                 'total' => 0,
@@ -924,6 +979,11 @@ class JarekGearboxToolController extends Controller
                 $query->where(function ($query): void {
                     $query->whereNull('ebay_offer_id')->orWhere('ebay_offer_id', '');
                 });
+                if (! $retryFailed) {
+                    $query->where(function ($query): void {
+                        $query->whereNull('ebay_status')->orWhere('ebay_status', '<>', 'failed');
+                    });
+                }
             }
 
             $totalMatching = (clone $query)->count();
