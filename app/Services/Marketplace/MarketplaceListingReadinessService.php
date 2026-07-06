@@ -116,7 +116,8 @@ class MarketplaceListingReadinessService
             else { $notes['ebay_category_mapping'] = ['source' => 'marketplace_category_mappings', 'channel' => $categoryMapping->channel, 'external_category_id' => $categoryMapping->external_category_id]; }
             if (! $this->isGoogleTranslateConfigured()) { $missing[] = 'translation_credentials'; $warnings[] = 'Google Translate credentials are not configured for later title/description/condition translation dry-runs.'; }
             $preparedTranslation = $this->preparedTranslation($part, $channel);
-            if (($preparedTranslation['status'] ?? 'not_prepared') !== 'prepared') { $missing[] = 'prepared_translations'; $warnings[] = 'Tłumaczenia nieprzygotowane — użyj przycisku Przygotuj.'; $blockers[] = 'Brak przygotowanego tłumaczenia '.($channel === 'ebay_de' ? 'eBay DE' : 'eBay FR'); }
+            if (! $this->hasPublishableEbayTranslation($preparedTranslation)) { $missing[] = 'prepared_translations'; $warnings[] = 'Brak tytułu/opisu eBay dostępnego dla publish — użyj przycisku Przygotuj.'; $blockers[] = 'Brak przygotowanego tłumaczenia '.($channel === 'ebay_de' ? 'eBay DE' : 'eBay FR'); }
+            elseif (($preparedTranslation['status'] ?? 'not_prepared') !== 'prepared') { $warnings[] = 'Użyte istniejące tłumaczenie '.($channel === 'ebay_de' ? 'eBay DE' : 'eBay FR').' z fallbacku publish.'; }
             $titleSanitization = $this->ebayTitleSanitization($part, $channel, $preparedTranslation);
             if (($titleSanitization['blocker'] ?? null) === 'ebay_title_needs_review') { $missing[] = 'ebay_title'; $blockers[] = 'ebay_title_needs_review'; }
             $notes['ebay_title'] = $titleSanitization['diagnostics'] ?? null;
@@ -584,10 +585,31 @@ class MarketplaceListingReadinessService
     }
     private function preparedTranslation(Part $part, string $channel): array
     {
-        $data = data_get(is_array($part->review_metadata) ? $part->review_metadata : [], 'marketplace_prepared_translations.'.$channel, []);
-        return is_array($data) ? ['status' => $data['status'] ?? 'not_prepared', 'language' => $data['language'] ?? strtolower((string) $this->targetLanguageForChannel($channel)), 'fields' => is_array($data['fields'] ?? null) ? $data['fields'] : [], 'item_specifics' => is_array($data['item_specifics'] ?? null) ? $data['item_specifics'] : [], 'translated_fields' => $data['translated_fields'] ?? [], 'untranslated_fields' => $data['untranslated_fields'] ?? [], 'title_sanitization' => is_array($data['title_sanitization'] ?? null) ? $data['title_sanitization'] : null] : ['status' => 'not_prepared', 'language' => strtolower((string) $this->targetLanguageForChannel($channel)), 'fields' => [], 'item_specifics' => [], 'translated_fields' => [], 'untranslated_fields' => []];
+        $metadata = is_array($part->review_metadata) ? $part->review_metadata : [];
+        $data = data_get($metadata, 'marketplace_prepared_translations.'.$channel, []);
+        $translation = is_array($data)
+            ? ['status' => $data['status'] ?? 'not_prepared', 'language' => $data['language'] ?? strtolower((string) $this->targetLanguageForChannel($channel)), 'fields' => is_array($data['fields'] ?? null) ? $data['fields'] : [], 'item_specifics' => is_array($data['item_specifics'] ?? null) ? $data['item_specifics'] : [], 'translated_fields' => $data['translated_fields'] ?? [], 'untranslated_fields' => $data['untranslated_fields'] ?? [], 'title_sanitization' => is_array($data['title_sanitization'] ?? null) ? $data['title_sanitization'] : null]
+            : ['status' => 'not_prepared', 'language' => strtolower((string) $this->targetLanguageForChannel($channel)), 'fields' => [], 'item_specifics' => [], 'translated_fields' => [], 'untranslated_fields' => []];
+
+        if (! $this->hasPublishableEbayTranslation($translation)) {
+            $fallbackFields = (array) (data_get($metadata, 'marketplace_translations.'.$channel) ?: data_get($part->legacy_payload, 'marketplace_translations.'.$channel) ?: []);
+            if (filled($fallbackFields['title'] ?? null) && filled($fallbackFields['description'] ?? null)) {
+                $translation['status'] = 'existing_fallback';
+                $translation['fields'] = array_merge($translation['fields'], array_intersect_key($fallbackFields, array_flip(['title', 'description', 'condition_notes'])));
+                $translation['translated_fields'] = array_values(array_unique(array_merge((array) ($translation['translated_fields'] ?? []), array_keys($translation['fields']))));
+                $translation['source'] = data_get($metadata, 'marketplace_translations.'.$channel) ? 'review_metadata.marketplace_translations.'.$channel : 'legacy_payload.marketplace_translations.'.$channel;
+            }
+        }
+
+        return $translation;
     }
-    private function renderDataFromTranslation(array $translation, ?Part $part = null, ?string $channel = null): array { $fields = $translation['fields'] ?? []; if (! is_array($fields)) return []; $data = []; foreach ($fields as $key => $value) { $data[str_replace('vehicle.', '', $key)] = $value; } if ($part && blank($data['title'] ?? null)) $data['title'] = $part->name ?? ''; if ($part && $channel) foreach (($this->vehiclePayload($part, $channel)['attributes'] ?? []) as $key => $value) { $data[$key] ??= $value; } if (($translation['status'] ?? null) !== 'prepared') $data['translation_fallback_notice'] = 'Tłumaczenia nieprzygotowane — użyj przycisku Przygotuj.'; return $data; }
+
+    private function hasPublishableEbayTranslation(array $translation): bool
+    {
+        $fields = is_array($translation['fields'] ?? null) ? $translation['fields'] : [];
+        return filled($fields['title'] ?? null) && filled($fields['description'] ?? null);
+    }
+    private function renderDataFromTranslation(array $translation, ?Part $part = null, ?string $channel = null): array { $fields = $translation['fields'] ?? []; if (! is_array($fields)) return []; $data = []; foreach ($fields as $key => $value) { $data[str_replace('vehicle.', '', $key)] = $value; } if ($part && blank($data['title'] ?? null)) $data['title'] = $part->name ?? ''; if ($part && $channel) foreach (($this->vehiclePayload($part, $channel)['attributes'] ?? []) as $key => $value) { $data[$key] ??= $value; } if (($translation['status'] ?? null) !== 'prepared' && ! $this->hasPublishableEbayTranslation($translation)) $data['translation_fallback_notice'] = 'Tłumaczenia nieprzygotowane — użyj przycisku Przygotuj.'; return $data; }
     private function ebayTitleSanitization(Part $part, string $channel, array $translation): ?array { if ($channel !== 'ebay_de') return null; $title = $this->previewTitle($translation, $part); return $this->ebayTitleSanitizer->sanitizeForEbayDe($part, $title, (string) ($part->name ?? '')); }
     private function previewTitle(array $translation, Part $part): ?string { $fields = is_array($translation['fields'] ?? null) ? $translation['fields'] : []; if (filled($fields['title'] ?? null)) return (string) $fields['title']; return $part->name ?? null; }
     private function diagnosticsPayload(Part $part, string $channel, array $translation): array { $vehicle = $this->vehiclePayload($part, $channel, false); return ['vehicle_source' => $vehicle['source'], 'vehicle_present' => $vehicle['present'], 'vehicle_fields_present' => $vehicle['fields_present'], 'vehicle_fields_missing' => $vehicle['fields_missing'], 'translation_status' => $translation['status'], 'translation_language' => $translation['language'], 'translated_fields' => $translation['translated_fields'], 'untranslated_fields' => $translation['untranslated_fields']]; }

@@ -203,6 +203,35 @@ class MarketplacePublishPartFlowTest extends TestCase
         $this->assertDatabaseMissing('marketplace_listings', ['part_id' => $part->id, 'marketplace' => 'ebay_de', 'external_offer_id' => '199289364011']);
     }
 
+
+    public function test_ebay_readiness_accepts_existing_translation_fallback_without_prepared_status(): void
+    {
+        \Illuminate\Support\Facades\Http::fake([
+            'api.nbp.pl/*' => \Illuminate\Support\Facades\Http::response(['rates' => [['mid' => 4.3, 'effectiveDate' => '2026-07-06', 'no' => '001/A/NBP/2026']]], 200),
+        ]);
+        \App\Models\MarketplaceAccount::query()->create([
+            'marketplace' => 'ebay_de', 'code' => 'ebay_de', 'name' => 'eBay DE', 'status' => 'active', 'api_enabled' => true,
+            'api_base_url' => 'https://api.ebay.test', 'api_credentials' => ['access_token' => 'token'],
+            'api_settings' => ['marketplace_id' => 'EBAY_DE', 'merchant_location_key' => 'default', 'fulfillment_policy_id' => 'fulfillment', 'payment_policy_id' => 'payment', 'return_policy_id' => 'return'],
+        ]);
+        $category = PartCategory::query()->create(['name' => 'eBay category']);
+        $part = $this->completeLocalPart([
+            'category_id' => $category->id,
+            'review_metadata' => ['marketplace_translations' => ['ebay_de' => ['title' => 'Fallback DE title', 'description' => 'Fallback DE description.']]],
+        ]);
+        MarketplaceCategoryMapping::query()->create(['local_category_id' => $category->id, 'channel' => 'ebay_de', 'external_category_id' => '177697']);
+
+        $readiness = app(\App\Services\Marketplace\MarketplaceListingReadinessService::class)->checkPartReadiness($part, 'ebay_de');
+        $card = app(\App\Services\Marketplace\PartMarketplaceReadinessService::class)->check($part)['ebay'];
+
+        $this->assertNotContains('prepared_translations', $readiness['missing_fields']);
+        $this->assertNotContains('Brak przygotowanego tłumaczenia eBay DE', $readiness['blockers']);
+        $this->assertTrue($readiness['can_publish_later']);
+        $this->assertSame('Fallback DE title', $readiness['prepared_payload_preview_safe']['title']);
+        $this->assertTrue($card['ready']);
+        $this->assertNotContains('Brak przygotowanego tłumaczenia eBay DE', $card['missing']);
+    }
+
     private function completeEbayPart(array $overrides = []): Part
     {
         $category = PartCategory::query()->create(['name' => 'eBay category']);
