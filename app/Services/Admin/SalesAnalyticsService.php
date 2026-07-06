@@ -7,6 +7,7 @@ use App\Models\Order;
 use App\Services\Marketplace\NbpExchangeRateService;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 class SalesAnalyticsService
@@ -104,10 +105,19 @@ class SalesAnalyticsService
             $channels['ebay']['exchange_rate_unavailable'] = true;
         }
 
+        $excludedStatuses = ['cancelled', 'canceled', 'refunded', 'returned', 'rejected', 'failed'];
+
         $orders = Order::query()
             ->with('items:id,order_id,marketplace,currency')
-            ->whereBetween('created_at', [$startsAt, $endsAt])
-            ->whereIn('status', ['new', 'processing', 'completed'])
+            ->whereBetween(DB::raw('COALESCE(ordered_at, created_at)'), [$startsAt, $endsAt])
+            ->where(function ($query) use ($excludedStatuses): void {
+                $query->whereNull('status')
+                    ->orWhereNotIn(DB::raw('LOWER(status)'), $excludedStatuses);
+            })
+            ->where(function ($query) use ($excludedStatuses): void {
+                $query->whereNull('marketplace_status')
+                    ->orWhereNotIn(DB::raw('LOWER(marketplace_status)'), $excludedStatuses);
+            })
             ->get(['id', 'marketplace', 'currency', 'total', 'meta']);
 
         foreach ($orders as $order) {
