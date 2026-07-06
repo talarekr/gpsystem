@@ -15,6 +15,141 @@ class OvokoListingUrlBackfillService
     ) {}
 
 
+
+    /** @return array{mode:string,summary:array<string,int>,results:array<int,array<string,mixed>>,warnings:array<int,string>,limit_requested:int,limit_applied:int,offset_requested:int,offset_applied:int} */
+    public function runBrowserBackfill(bool $apply = false, bool $force = false, bool $missingOnly = true, int $limit = 100, int $offset = 0, ?int $partId = null): array
+    {
+        if (! Schema::hasTable('marketplace_listings')) {
+            throw new \RuntimeException('Required table marketplace_listings does not exist.');
+        }
+
+        $limit = max(1, $limit);
+        $offset = max(0, $offset);
+        $endedStatuses = ['ended', 'inactive', 'deleted', 'archived', 'not_found', 'NOT_FOUND_IN_ACTIVE_API'];
+
+        $summary = [
+            'scanned' => 0,
+            'matched' => 0,
+            'would_update_url' => 0,
+            'updated_url' => 0,
+            'would_update_price' => 0,
+            'updated_price' => 0,
+            'skipped' => 0,
+            'errors' => 0,
+        ];
+        $results = [];
+
+        $query = MarketplaceListing::query()
+            ->with('part:id,name,sku,part_number,oem_number,ovoko_price,currency,status,quantity,legacy_payload')
+            ->where('marketplace', 'ovoko')
+            ->whereNotNull('part_id')
+            ->where(fn ($query) => $query
+                ->whereRaw("NULLIF(TRIM(COALESCE(external_offer_id, '')), '') IS NOT NULL")
+                ->orWhereRaw("NULLIF(TRIM(COALESCE(external_listing_id, '')), '') IS NOT NULL")
+            )
+            ->where(fn ($query) => $query->whereNull('status')->orWhereNotIn('status', $endedStatuses))
+            ->where(fn ($query) => $query->whereNull('last_api_status')->orWhereNotIn('last_api_status', $endedStatuses))
+            ->whereHas('part', fn ($query) => $query
+                ->whereIn('status', ['ready', 'published'])
+                ->where(fn ($quantity) => $quantity->whereNull('quantity')->orWhere('quantity', '>', 0))
+            )
+            ->orderBy('marketplace_listings.id')
+            ->offset($offset)
+            ->limit($limit);
+
+        if ($partId !== null) {
+            $query->where('part_id', $partId);
+        }
+
+        if ($missingOnly && ! $force) {
+            $query->where(fn ($query) => $query
+                ->whereNull('url')
+                ->orWhere('url', '')
+                ->orWhereHas('part', fn ($part) => $part->whereNull('ovoko_price'))
+            );
+        }
+
+        foreach ($query->get() as $listing) {
+            $summary['scanned']++;
+            $oldUrl = $this->blankNull($listing->url);
+            $oldPrice = $listing->part?->ovoko_price;
+            $newPrice = is_numeric($listing->price) ? (float) $listing->price : null;
+            $ovokoId = $this->existingOvokoId($listing);
+            $newUrl = $this->generatedShopUrlFromOvokoPartId($ovokoId, $listing);
+            $actions = [];
+            $errors = [];
+
+            $canUpdateUrl = $newUrl !== null && ($force || $oldUrl === null);
+            $canUpdatePrice = $newPrice !== null && ($force || ! is_numeric($oldPrice));
+
+            if ($canUpdateUrl) {
+                $summary['would_update_url']++;
+                $actions[] = $apply ? 'update_url' : 'would_update_url';
+            }
+            if ($canUpdatePrice) {
+                $summary['would_update_price']++;
+                $actions[] = $apply ? 'update_price' : 'would_update_price';
+            }
+            if ($newUrl === null) {
+                $errors[] = 'missing_or_invalid_ovoko_id';
+            }
+            if ($oldUrl !== null && ! $force) {
+                $actions[] = 'skip_url_exists';
+            }
+            if (is_numeric($oldPrice) && ! $force) {
+                $actions[] = 'skip_price_exists';
+            }
+
+            if ($canUpdateUrl || $canUpdatePrice) {
+                $summary['matched']++;
+            } else {
+                $summary['skipped']++;
+                $actions[] = 'skipped';
+            }
+
+            if ($apply && ($canUpdateUrl || $canUpdatePrice)) {
+                try {
+                    if ($canUpdateUrl) {
+                        $listing->url = $newUrl;
+                        $listing->save();
+                        $summary['updated_url']++;
+                        $this->logGeneratedUrl($listing, (string) $ovokoId, $newUrl);
+                    }
+                    if ($canUpdatePrice && $listing->part) {
+                        $listing->part->forceFill(['ovoko_price' => $newPrice, 'currency' => $listing->part->currency ?: ($listing->currency ?: 'PLN')])->save();
+                        $summary['updated_price']++;
+                    }
+                } catch (\Throwable $exception) {
+                    $summary['errors']++;
+                    $errors[] = $exception->getMessage();
+                }
+            }
+
+            $results[] = [
+                'part_id' => $listing->part_id,
+                'marketplace_listing_id' => $listing->id,
+                'ovoko_id' => $ovokoId,
+                'old_url' => $oldUrl,
+                'new_url' => $newUrl,
+                'old_price' => $oldPrice,
+                'new_price' => $newPrice,
+                'action' => implode(',', array_values(array_unique($actions))),
+                'errors' => $errors,
+            ];
+        }
+
+        return [
+            'mode' => $apply ? 'apply' : 'dry_run',
+            'summary' => $summary,
+            'results' => array_slice($results, 0, 50),
+            'warnings' => [],
+            'limit_requested' => $limit,
+            'limit_applied' => $limit,
+            'offset_requested' => $offset,
+            'offset_applied' => $offset,
+        ];
+    }
+
     /** @return array{mode:string,summary:array<string,int>,results:array<int,array<string,mixed>>,warnings:array<int,string>} */
     public function runLocalGeneratedBulk(bool $apply = false, int $limit = 100, int $offset = 0, bool $onlyMissing = false, bool $includeExistingInvalid = false): array
     {

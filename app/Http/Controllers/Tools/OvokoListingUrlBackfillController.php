@@ -21,9 +21,24 @@ class OvokoListingUrlBackfillController extends Controller
         $user = $request->user();
         abort_unless($user && $user->canAccessPanel(Filament::getPanel('admin')), 403);
 
-        $apply = ($request->boolean('apply') || $request->is('admin/tools/ovoko/listing-url-backfill'))
-            && $request->query('confirm') === self::CONFIRMATION;
-        if (! $request->filled('listing_id') && ! $request->filled('part_id')) {
+        $isBrowserBackfill = $request->is('admin/tools/ovoko/backfill-links');
+        $apply = $isBrowserBackfill
+            ? $request->boolean('apply')
+            : (($request->boolean('apply') || $request->is('admin/tools/ovoko/listing-url-backfill'))
+                && $request->query('confirm') === self::CONFIRMATION);
+
+        if ($isBrowserBackfill) {
+            $limit = max(1, min(self::MAX_BULK_LIMIT, (int) $request->query('limit', self::DEFAULT_BULK_LIMIT)));
+            $offset = max(0, (int) $request->query('offset', $request->query('page') ? (((int) $request->query('page') - 1) * $limit) : 0));
+            $result = $backfill->runBrowserBackfill(
+                apply: $apply,
+                force: $request->boolean('force'),
+                missingOnly: $request->boolean('missing_only', $request->boolean('only_missing', true)),
+                limit: $limit,
+                offset: $offset,
+                partId: $request->filled('part_id') ? (int) $request->query('part_id') : null,
+            );
+        } elseif (! $request->filled('listing_id') && ! $request->filled('part_id')) {
             $limit = max(1, min(self::MAX_BULK_LIMIT, (int) $request->query('limit', self::DEFAULT_BULK_LIMIT)));
             $offset = max(0, (int) $request->query('offset', 0));
             $result = $backfill->runLocalGeneratedBulk(
@@ -62,6 +77,7 @@ class OvokoListingUrlBackfillController extends Controller
             'apply_requested' => $request->boolean('apply'),
             'apply_confirmed' => $apply,
             'force' => $request->boolean('force'),
+            'missing_only' => $request->boolean('missing_only', $request->boolean('only_missing', true)),
             'only_missing' => $request->boolean('only_missing'),
             'only_missing_semantics' => $result['only_missing_semantics'] ?? null,
             'limit_requested' => $result['limit_requested'] ?? $limit,
