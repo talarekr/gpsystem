@@ -72,6 +72,16 @@ class PartModuleFoundationTest extends TestCase
             'status' => 'sold',
         ]);
 
+
+        MarketplaceListing::query()->create([
+            'part_id' => $part->id,
+            'marketplace' => 'allegro',
+            'external_offer_id' => 'ALG-5502',
+            'external_listing_id' => 'ALG-5502',
+            'status' => 'active',
+            'url' => 'https://allegro.pl/oferta/ALG-5502',
+        ]);
+
         MarketplaceListing::query()->create([
             'part_id' => $part->id,
             'marketplace' => 'allegro',
@@ -152,6 +162,15 @@ class PartModuleFoundationTest extends TestCase
 
         MarketplaceListing::query()->create([
             'part_id' => $part->id,
+            'marketplace' => 'allegro',
+            'external_offer_id' => 'ALG-5502',
+            'external_listing_id' => 'ALG-5502',
+            'status' => 'active',
+            'url' => 'https://allegro.pl/oferta/ALG-5502',
+        ]);
+
+        MarketplaceListing::query()->create([
+            'part_id' => $part->id,
             'marketplace' => 'ovoko',
             'external_offer_id' => 'OVOKO-5502',
             'external_listing_id' => '11703',
@@ -175,12 +194,21 @@ class PartModuleFoundationTest extends TestCase
         $this->assertFalse($rows[0]['listed']);
         $this->assertNull($rows[0]['url']);
 
+        $allegro = collect($rows)->firstWhere('key', 'allegro');
         $ovoko = collect($rows)->firstWhere('key', 'ovoko');
         $ebay = collect($rows)->firstWhere('key', 'ebay');
 
-        $this->assertTrue($ovoko['listed']);
+        $this->assertTrue($allegro['has_link']);
+        $this->assertFalse($allegro['is_active']);
+        $this->assertSame('x', $allegro['icon']);
+        $this->assertSame('https://allegro.pl/oferta/ALG-5502', $allegro['url']);
+        $this->assertTrue($ovoko['has_link']);
+        $this->assertFalse($ovoko['is_active']);
+        $this->assertSame('x', $ovoko['icon']);
         $this->assertSame('https://ovoko.pl/czesci-samochodowe/hgf11703', $ovoko['url']);
-        $this->assertTrue($ebay['listed']);
+        $this->assertTrue($ebay['has_link']);
+        $this->assertFalse($ebay['is_active']);
+        $this->assertSame('x', $ebay['icon']);
         $this->assertSame('https://www.ebay.de/itm/EBAY-5502', $ebay['url']);
 
         $this->assertDatabaseHas('marketplace_listings', [
@@ -190,6 +218,37 @@ class PartModuleFoundationTest extends TestCase
             'external_listing_id' => '11703',
             'url' => 'https://ovoko.pl/czesci-samochodowe/hgf11703',
         ]);
+    }
+
+    public function test_ready_part_with_marketplace_link_and_sync_error_keeps_link_but_shows_x_icon(): void
+    {
+        $part = Part::query()->create([
+            'name' => 'Część z błędem synchronizacji',
+            'quantity' => 1,
+            'status' => 'ready',
+        ]);
+
+        MarketplaceListing::query()->create([
+            'part_id' => $part->id,
+            'marketplace' => 'ebay_de',
+            'external_listing_id' => 'EBAY-ERR-1',
+            'status' => 'active',
+            'quantity' => 1,
+            'sync_status' => 'error',
+            'last_error' => 'Relist failed',
+            'url' => 'https://www.ebay.de/itm/EBAY-ERR-1',
+        ]);
+
+        $ebay = collect(app(\App\Services\Admin\PartMarketplaceStatusResolver::class)
+            ->rowsForPart($part->fresh('marketplaceListings')))
+            ->firstWhere('key', 'ebay');
+
+        $this->assertTrue($ebay['has_link']);
+        $this->assertSame('https://www.ebay.de/itm/EBAY-ERR-1', $ebay['url']);
+        $this->assertFalse($ebay['is_active']);
+        $this->assertSame('x', $ebay['icon']);
+        $this->assertSame('✕', $ebay['display_icon']);
+        $this->assertSame('blocking_sync_error', $ebay['reason']);
     }
 
     public function test_allegro_channel_shows_offer_link_while_publication_is_pending(): void
@@ -218,7 +277,8 @@ class PartModuleFoundationTest extends TestCase
 
         $allegro = collect($rows)->firstWhere('key', 'allegro');
 
-        $this->assertTrue($allegro['listed']);
+        $this->assertFalse($allegro['is_active']);
+        $this->assertSame('x', $allegro['icon']);
         $this->assertSame('18723793233', $allegro['external_offer_id']);
         $this->assertSame('https://allegro.pl/oferta/18723793233', $allegro['url']);
     }
@@ -332,7 +392,8 @@ class PartModuleFoundationTest extends TestCase
         $rows = collect(app(\App\Services\Admin\PartMarketplaceStatusResolver::class)->rowsForPart($part));
 
         foreach (['allegro', 'ovoko', 'ebay'] as $channel) {
-            $this->assertTrue($rows->firstWhere('key', $channel)['listed'], $channel.' should not render a red X.');
+            $this->assertTrue($rows->firstWhere('key', $channel)['is_active'], $channel.' should not render a red X.');
+            $this->assertSame('check', $rows->firstWhere('key', $channel)['icon']);
         }
 
         $this->assertSame('https://allegro.pl/oferta/18478502462', $rows->firstWhere('key', 'allegro')['url']);
@@ -367,6 +428,10 @@ class PartModuleFoundationTest extends TestCase
             ->assertOk()
             ->assertJsonPath('part_marketplace_status_resolver.1.key', 'allegro')
             ->assertJsonPath('part_marketplace_status_resolver.1.listed', true)
+            ->assertJsonPath('part_marketplace_status_resolver.1.has_link', true)
+            ->assertJsonPath('part_marketplace_status_resolver.1.is_active', true)
+            ->assertJsonPath('part_marketplace_status_resolver.1.icon', 'check')
+            ->assertJsonPath('part_marketplace_status_resolver.1.reason', 'allegro_active')
             ->assertJsonPath('part_marketplace_status_resolver.1.url', 'https://allegro.pl/oferta/18478502462');
     }
 
