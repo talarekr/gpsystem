@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\DB;
 use App\Support\Marketplace\AllegroUserAgent;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Throwable;
 
 class MarketplaceOrdersImportService
@@ -33,6 +34,14 @@ class MarketplaceOrdersImportService
             $summary['warnings'][] = ['marketplace' => 'ebay', 'code' => 'ebay_shared_order_feed', 'message' => 'eBay DE/FR share the same order feed; orders were imported once as ebay.'];
             $options['ebay_shared_order_feed_warning'] = true;
         }
+
+        Log::info('Marketplace orders import selected channels.', [
+            'requested_channels' => $requestedChannels,
+            'normalized_channels' => $marketplaces,
+            'dry_run' => $dryRun,
+            'date_from' => $summary['date_from'],
+            'date_to' => $summary['date_to'],
+        ]);
 
         foreach ($marketplaces as $marketplace) {
             $summary['marketplaces'][$marketplace] = $this->runMarketplace($marketplace, $options, $dryRun);
@@ -84,6 +93,15 @@ class MarketplaceOrdersImportService
         if ($marketplace === 'ebay' && ($options['ebay_shared_order_feed_warning'] ?? false)) {
             $result['warnings'][] = ['marketplace' => 'ebay', 'code' => 'ebay_shared_order_feed', 'message' => 'eBay DE/FR share the same order feed; orders were imported once as ebay.'];
         }
+        Log::info('Marketplace orders import channel started.', [
+            'marketplace' => $marketplace,
+            'requested_channels' => $result['requested_channels'],
+            'normalized_channels' => $result['normalized_channels'],
+            'date_from' => $result['date_from'],
+            'date_to' => $result['date_to'],
+            'dry_run' => $dryRun,
+        ]);
+
         try {
             $orders = $this->dedupeFetchedOrders($marketplace, $this->fetchOrders($marketplace, $options, $result), $result);
             $result['orders_fetched'] = count($orders);
@@ -116,6 +134,15 @@ class MarketplaceOrdersImportService
             ]);
             $result['errors'][] = ['marketplace' => $marketplace, 'message' => 'Marketplace orders read failed without exposing secrets.', 'exception' => $e::class];
         }
+        Log::info('Marketplace orders import channel completed.', [
+            'marketplace' => $marketplace,
+            'orders_fetched' => (int) ($result['orders_fetched'] ?? 0),
+            'orders_created' => (int) ($result['orders_created'] ?? 0),
+            'orders_updated' => (int) ($result['orders_updated'] ?? 0),
+            'orders_skipped' => (int) ($result['orders_skipped'] ?? 0),
+            'errors_count' => count($result['errors'] ?? []),
+            'warnings_count' => count($result['warnings'] ?? []),
+        ]);
         if ($marketplace === 'ovoko') {
             $this->logOvokoImportProgress('completed', $result);
         }
@@ -126,7 +153,11 @@ class MarketplaceOrdersImportService
     {
         $account = $this->accountForOrders($marketplace);
         if (! $account || ! $account->api_enabled || blank($account->api_base_url)) {
-            $result['warnings'][] = 'Marketplace account API is not configured/enabled.';
+            $result['warnings'][] = [
+                'marketplace' => $marketplace,
+                'code' => 'marketplace_account_api_not_configured_or_disabled',
+                'message' => 'Marketplace account API is not configured/enabled.',
+            ];
             return [];
         }
         $credentials = is_array($account->api_credentials) ? $account->api_credentials : [];
@@ -208,6 +239,13 @@ class MarketplaceOrdersImportService
         $endpoint = $base.$endpointPath;
         $authFields = Arr::only($credentials, ['username', 'password', 'user_token']);
 
+        Log::info('Ovoko orders API request started.', [
+            'endpoint_path' => $endpointPath,
+            'date_from_used' => $dateFrom,
+            'date_to_used' => $dateTo,
+            'auth_fields_present' => array_keys(array_filter($authFields, fn ($value): bool => filled($value))),
+        ]);
+
         $response = Http::asForm()->acceptJson()->timeout(25)->post($endpoint, $authFields);
         $json = $response->json();
         $payload = is_array($json) ? $json : [];
@@ -219,6 +257,39 @@ class MarketplaceOrdersImportService
         $result['api_http_status'] = $response->status();
         $result['ovoko_status_code'] = $statusCode;
         $result['ovoko_msg'] = $msg;
+
+        app(ApiIntegrationLogger::class)->record([
+            'integration' => 'ovoko',
+            'action' => 'GET orders',
+            'status' => $response->successful() && $statusCode === 'R200' ? 'success' : 'error',
+            'http_status' => $response->status(),
+            'message' => 'Read-only Ovoko order fetch.',
+            'request' => [
+                'endpoint' => $endpointPath,
+                'method' => 'POST',
+                'date_from' => $dateFrom,
+                'date_to' => $dateTo,
+                'lookback_note' => 'Ovoko endpoint accepts whole-day YYYY-MM-DD range; scheduler date/time is converted to inclusive dates.',
+                'auth_fields_present' => array_keys(array_filter($authFields, fn ($value): bool => filled($value))),
+            ],
+            'response' => [
+                'ovoko_status_code' => $statusCode,
+                'ovoko_msg' => $msg,
+                'raw_response_keys' => array_values(array_slice(array_keys($payload), 0, 30)),
+                'raw_list_count' => is_array($list) ? count($list) : null,
+                'mapper_items_count' => count($orders),
+            ],
+        ]);
+
+        Log::info('Ovoko orders API request completed.', [
+            'endpoint_path' => $endpointPath,
+            'date_from_used' => $dateFrom,
+            'date_to_used' => $dateTo,
+            'api_http_status' => $response->status(),
+            'ovoko_status_code' => $statusCode,
+            'orders_fetched' => count($orders),
+            'empty_response_reason' => is_array($list) && count($list) === 0 ? 'status_code_R200_but_list_empty' : null,
+        ]);
 
         if ($options['include_debug'] ?? false) {
             $result['debug'] = [
@@ -573,7 +644,7 @@ class MarketplaceOrdersImportService
         ]);
     }
 
-    private function requestedChannels(string $marketplace): array { $requested = $marketplace === 'all' ? ['allegro', 'ebay_de', 'ebay_fr', 'ovoko'] : array_map('trim', explode(',', $marketplace)); return array_values(array_intersect($requested, ['allegro', 'ebay', 'ebay_de', 'ebay_fr', 'ovoko'])); }
+    private function requestedChannels(string $marketplace): array { $requested = $marketplace === 'all' ? ['allegro', 'ebay_de', 'ebay_fr', 'ovoko'] : array_map('trim', explode(',', $marketplace)); return collect($requested)->map(fn ($channel): string => Str::of((string) $channel)->trim()->lower()->replace('-', '_')->toString())->map(fn (string $channel): string => match ($channel) { 'allegro_main' => 'allegro', 'ebay_pl' => 'ebay', 'ovoko_main', 'ovoko_com', 'ovoko_marketplace', 'rrr' => 'ovoko', default => $channel, })->intersect(['allegro', 'ebay', 'ebay_de', 'ebay_fr', 'ovoko'])->unique()->values()->all(); }
     private function normalizeOrderImportChannels(array $requested): array { $normalized = []; foreach ($requested as $channel) { $normalized[] = in_array($channel, ['ebay_de', 'ebay_fr'], true) ? 'ebay' : $channel; } return array_values(array_unique($normalized)); }
     private function requestedEbayMarketChannels(array $requested): array { return array_values(array_intersect($requested, ['ebay_de', 'ebay_fr'])); }
     private function orderProvider(string $marketplace): string { return in_array($marketplace, ['ebay', 'ebay_de', 'ebay_fr'], true) ? 'ebay' : $marketplace; }
