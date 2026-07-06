@@ -150,6 +150,7 @@ use App\Services\ImportMigration\WooProductImport;
 use App\Support\ImportMigration\ManualImportFileResolver;
 use App\Support\ImportMigration\WooProductImportRunRepository;
 use Filament\Http\Middleware\Authenticate;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -217,6 +218,9 @@ Route::get('/koszyk', [CartController::class, 'index'])->name('storefront.cart.i
 
 Route::get('/login', fn () => redirect()->route('storefront.login'))->name('login');
 Route::get('/logowanie', [CustomerAuthController::class, 'loginForm'])->name('storefront.login');
+Route::get('/admin/csrf-token', fn (): JsonResponse => response()->json(['token' => csrf_token()]))
+    ->name('admin.csrf-token');
+
 Route::post('/logowanie', [CustomerAuthController::class, 'login'])->name('storefront.login.store');
 Route::get('/rejestracja', [CustomerAuthController::class, 'registerForm'])->name('storefront.register');
 Route::post('/rejestracja', [CustomerAuthController::class, 'register'])->name('storefront.register.store');

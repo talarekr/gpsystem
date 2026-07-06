@@ -75,7 +75,8 @@ class AdminPanelProvider extends PanelProvider
             ->breadcrumbs(false)
             ->renderHook(
                 'panels::head.end',
-                fn (): string => Blade::render('@include(\'filament.admin-ui-refinements\')'),
+                fn (): string => Blade::render('@include(\'filament.admin-ui-refinements\')')
+                    . Blade::render('@include(\'filament.admin-csrf-session-guard\')'),
             )
             ->renderHook(
                 'panels::body.start',
