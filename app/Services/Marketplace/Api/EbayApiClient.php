@@ -2,6 +2,7 @@
 
 namespace App\Services\Marketplace\Api;
 
+use App\Services\Marketplace\EbayApiErrorLogger;
 use App\Services\Marketplace\OAuthTokenManager;
 use App\Support\Marketplace\EbayOAuthConfig;
 use Illuminate\Support\Facades\Cache;
@@ -9,6 +10,13 @@ use Illuminate\Support\Facades\Http;
 
 class EbayApiClient extends AbstractMarketplaceApiClient
 {
+    private array $diagnosticContext = [];
+
+    public function withDiagnosticContext(array $context): self
+    {
+        $this->diagnosticContext = $context + $this->diagnosticContext;
+        return $this;
+    }
     protected function requiredCredentialKeys(): array { return ['access_token']; }
     protected function optionalCredentialKeys(): array { return ['client_id', 'client_secret', 'refresh_token', 'dev_id', 'ru_name']; }
     protected function endpointPath(): string { return '/sell/inventory/v1/inventory_item'; }
@@ -229,7 +237,10 @@ class EbayApiClient extends AbstractMarketplaceApiClient
     private function cachedEbayGet(string $key, string $path, array $query): array
     {
         return Cache::remember('ebay_readonly:'.$key, now()->addHours(24), function () use ($path, $query) {
-            $response = Http::withToken($this->accessToken())->withHeaders(['X-EBAY-C-MARKETPLACE-ID' => $this->marketplaceId()])->acceptJson()->timeout(20)->get(rtrim((string) $this->account?->api_base_url, '/').$path, $query);
+            $url = rtrim((string) $this->account?->api_base_url, '/').$path;
+            $headers = ['X-EBAY-C-MARKETPLACE-ID' => $this->marketplaceId()];
+            $response = Http::withToken($this->accessToken())->withHeaders($headers)->acceptJson()->timeout(20)->get($url, $query);
+            $this->logEbayHttpError($response, 'GET', $url, $query, $headers, str_contains($path, 'taxonomy') ? 'aspects' : 'category_policy');
             return ['ok' => $response->successful(), 'http_status' => $response->status(), 'json' => is_array($response->json()) ? $response->json() : [], 'path' => $path, 'query' => $query];
         });
     }
@@ -305,7 +316,10 @@ class EbayApiClient extends AbstractMarketplaceApiClient
         ];
 
         foreach ($endpoints as $type => $endpoint) {
-            $response = Http::withToken($token)->withHeaders($headers)->acceptJson()->timeout(15)->get($baseUrl.$endpoint['path'], ['marketplace_id' => $headers['X-EBAY-C-MARKETPLACE-ID']]);
+            $url = $baseUrl.$endpoint['path'];
+            $query = ['marketplace_id' => $headers['X-EBAY-C-MARKETPLACE-ID']];
+            $response = Http::withToken($token)->withHeaders($headers)->acceptJson()->timeout(15)->get($url, $query);
+            $this->logEbayHttpError($response, 'GET', $url, $query, $headers, $type.'_policy');
             $json = $response->json();
 
             if (! $response->successful()) {
@@ -657,10 +671,12 @@ class EbayApiClient extends AbstractMarketplaceApiClient
     private function getWithAuthRetry(string $url, array $query = [], array $headers = [], int $timeout = 20)
     {
         $response = Http::withToken($this->accessToken())->withHeaders($headers)->acceptJson()->timeout($timeout)->get($url, $query);
+        $this->logEbayHttpError($response, 'GET', $url, $query, $headers);
         if ($response->status() === 401 && $this->account) {
             $refresh = app(OAuthTokenManager::class)->refresh($this->account);
             if (($refresh['ok'] ?? false) === true) {
                 $response = Http::withToken((string) $refresh['access_token'])->withHeaders($headers)->acceptJson()->timeout($timeout)->get($url, $query);
+                $this->logEbayHttpError($response, 'GET', $url, $query, $headers + ['auth_retry' => true]);
             }
         }
         return $response;
@@ -670,13 +686,25 @@ class EbayApiClient extends AbstractMarketplaceApiClient
     private function postWithAuthRetry(string $url, array $payload = [], array $headers = [], int $timeout = 20)
     {
         $response = Http::withToken($this->accessToken())->withHeaders($headers)->acceptJson()->asJson()->timeout($timeout)->post($url, $payload);
+        $this->logEbayHttpError($response, 'POST', $url, $payload, $headers);
         if ($response->status() === 401 && $this->account) {
             $refresh = app(OAuthTokenManager::class)->refresh($this->account);
             if (($refresh['ok'] ?? false) === true) {
                 $response = Http::withToken((string) $refresh['access_token'])->withHeaders($headers)->acceptJson()->asJson()->timeout($timeout)->post($url, $payload);
+                $this->logEbayHttpError($response, 'POST', $url, $payload, $headers + ['auth_retry' => true]);
             }
         }
         return $response;
+    }
+
+
+    private function logEbayHttpError($response, string $method, string $url, array $payload = [], array $headers = [], ?string $stage = null): void
+    {
+        app(EbayApiErrorLogger::class)->logHttpError($response, $method, $url, $this->diagnosticContext + [
+            'account' => $this->account,
+            'channel' => $this->channel,
+            'stage' => $stage ?? ($this->diagnosticContext['stage'] ?? 'ebay_api'),
+        ], $payload, $headers);
     }
 
     private function refreshAccessToken(): string
@@ -807,13 +835,17 @@ class EbayApiClient extends AbstractMarketplaceApiClient
         $headers = ['X-EBAY-C-MARKETPLACE-ID' => (string) ($offerPayload['marketplaceId'] ?? $this->marketplaceId())];
         if (filled($contentLanguage)) $headers['Content-Language'] = (string) $contentLanguage;
 
+        $inventoryUrl = $base.'/sell/inventory/v1/inventory_item/'.rawurlencode($sku);
         $inventoryResponse = Http::withToken($token)->withHeaders($headers)->acceptJson()->asJson()->timeout(30)
-            ->put($base.'/sell/inventory/v1/inventory_item/'.rawurlencode($sku), $inventoryPayload);
+            ->put($inventoryUrl, $inventoryPayload);
+        $this->logEbayHttpError($inventoryResponse, 'PUT', $inventoryUrl, $inventoryPayload, $headers, 'inventory_item');
         if (! $inventoryResponse->successful()) return $this->writeResult('reviseInventoryItem', $inventoryResponse, $headers);
 
         $offerPayload = array_diff_key($offerPayload, ['offerId' => true]);
+        $offerUrl = $base.'/sell/inventory/v1/offer/'.rawurlencode($offerId);
         $offerResponse = Http::withToken($token)->withHeaders($headers)->acceptJson()->asJson()->timeout(30)
-            ->put($base.'/sell/inventory/v1/offer/'.rawurlencode($offerId), $offerPayload);
+            ->put($offerUrl, $offerPayload);
+        $this->logEbayHttpError($offerResponse, 'PUT', $offerUrl, $offerPayload, $headers, 'offer_update');
         $offerJson = $offerResponse->json();
 
         return [
@@ -837,12 +869,16 @@ class EbayApiClient extends AbstractMarketplaceApiClient
         $token = $this->accessToken();
         $headers = ['X-EBAY-C-MARKETPLACE-ID' => (string) ($offerPayload['marketplaceId'] ?? $this->marketplaceId())];
         if (filled($contentLanguage)) $headers['Content-Language'] = (string) $contentLanguage;
+        $inventoryUrl = $base.'/sell/inventory/v1/inventory_item/'.rawurlencode($sku);
         $inventoryResponse = Http::withToken($token)->withHeaders($headers)->acceptJson()->asJson()->timeout(30)
-            ->put($base.'/sell/inventory/v1/inventory_item/'.rawurlencode($sku), $inventoryPayload);
+            ->put($inventoryUrl, $inventoryPayload);
+        $this->logEbayHttpError($inventoryResponse, 'PUT', $inventoryUrl, $inventoryPayload, $headers, 'inventory_item');
         if (! $inventoryResponse->successful()) return $this->writeResult('createOrReplaceInventoryItem', $inventoryResponse, $headers);
 
+        $offerUrl = $base.'/sell/inventory/v1/offer';
         $offerResponse = Http::withToken($token)->withHeaders($headers)->acceptJson()->asJson()->timeout(30)
-            ->post($base.'/sell/inventory/v1/offer', $offerPayload);
+            ->post($offerUrl, $offerPayload);
+        $this->logEbayHttpError($offerResponse, 'POST', $offerUrl, $offerPayload, $headers, 'offer_create');
         if (! $offerResponse->successful()) {
             $createErrorJson = $offerResponse->json();
             $existingOfferId = $this->offerIdFromErrorResponse($createErrorJson);
@@ -862,8 +898,10 @@ class EbayApiClient extends AbstractMarketplaceApiClient
         $offerId = is_array($offerJson) ? (string) ($offerJson['offerId'] ?? '') : '';
         if ($offerId === '') return ['ok' => false, 'step' => 'createOffer', 'http_status' => $offerResponse->status(), 'json' => is_array($offerJson) ? $offerJson : [], 'error' => 'eBay createOffer response did not contain offerId.'];
 
+        $publishUrl = $base.'/sell/inventory/v1/offer/'.rawurlencode($offerId).'/publish';
         $publishResponse = Http::withToken($token)->withHeaders($headers)->acceptJson()->asJson()->timeout(30)
-            ->post($base.'/sell/inventory/v1/offer/'.rawurlencode($offerId).'/publish');
+            ->post($publishUrl);
+        $this->logEbayHttpError($publishResponse, 'POST', $publishUrl, [], $headers, 'publish');
         $publishJson = $publishResponse->json();
 
         return [
@@ -892,8 +930,10 @@ class EbayApiClient extends AbstractMarketplaceApiClient
     private function publishExistingOffer(string $offerId, array $headers, array $extra = []): array
     {
         $base = rtrim((string) $this->account?->api_base_url, '/');
+        $publishUrl = $base.'/sell/inventory/v1/offer/'.rawurlencode($offerId).'/publish';
         $publishResponse = Http::withToken($this->accessToken())->withHeaders($headers)->acceptJson()->asJson()->timeout(30)
-            ->post($base.'/sell/inventory/v1/offer/'.rawurlencode($offerId).'/publish');
+            ->post($publishUrl);
+        $this->logEbayHttpError($publishResponse, 'POST', $publishUrl, [], $headers, 'publish');
         $publishJson = $publishResponse->json();
         $listingId = is_array($publishJson) ? ($publishJson['listingId'] ?? $publishJson['itemId'] ?? null) : null;
 

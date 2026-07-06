@@ -95,7 +95,9 @@ class EbayPublishAdapter extends BaseMarketplacePublishAdapter
         $offer = ['sku' => $sku, 'marketplaceId' => $marketplaceId, 'format' => (string) ($settings['format'] ?? 'FIXED_PRICE'), 'listingDuration' => (string) ($settings['listing_duration'] ?? 'GTC'), 'availableQuantity' => (int) ($payload['quantity'] ?? $part->quantity ?? 1), 'categoryId' => (string) ($payload['category_id'] ?? ''), 'merchantLocationKey' => $merchantLocationKey, 'pricingSummary' => ['price' => ['value' => (string) ($payload['price_eur'] ?? $readiness['marketplace_price']), 'currency' => 'EUR']], 'listingPolicies' => ['fulfillmentPolicyId' => (string) ($policies['selected_fulfillment_policy_id'] ?? $this->settingForPolicy($settings, 'selected_fulfillment_policy_id') ?? ''), 'paymentPolicyId' => (string) ($policies['selected_payment_policy_id'] ?? $this->settingForPolicy($settings, 'selected_payment_policy_id') ?? ''), 'returnPolicyId' => (string) ($policies['selected_return_policy_id'] ?? $this->settingForPolicy($settings, 'selected_return_policy_id') ?? '')]];
         if ($listingDescription !== '') $offer['listingDescription'] = $listingDescription;
         $contentLanguage = $this->contentLanguage((string) $offer['marketplaceId']);
-        $result = (new EbayApiClient($this->accountCode(), $account))->publishInventoryOffer($sku, $inventory, $offer, $contentLanguage);
+        $result = (new EbayApiClient($this->accountCode(), $account))
+            ->withDiagnosticContext(['part_id' => $part->id, 'stage' => 'publish'])
+            ->publishInventoryOffer($sku, $inventory, $offer, $contentLanguage);
         if (($result['existing_offer_reused'] ?? false) && filled($result['offer_id'] ?? null)) {
             $existingLocal = $this->attachExistingOffer($part, $account, (string) $result['offer_id'], $result['listing_id'] ?? null, $sku, $payload, $readiness, $offer, $result);
             if ($existingLocal['conflict'] ?? false) {
