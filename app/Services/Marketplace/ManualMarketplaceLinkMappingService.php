@@ -59,9 +59,9 @@ class ManualMarketplaceLinkMappingService
             return $this->result($listing, $marketplace, $externalId, $url, 'updated');
         }
 
-        $duplicate = $this->findExistingListingByExternalId($marketplace, $externalId);
+        $duplicate = $this->findExistingListingByExternalId($marketplace, $externalId, (int) $part->getKey());
 
-        if ($duplicate) {
+        if ($duplicate && (int) $duplicate->part_id !== (int) $part->getKey()) {
             Log::warning('manual_marketplace_link_duplicate_external_id', [
                 'part_id' => $part->getKey(),
                 'marketplace' => $marketplace,
@@ -76,6 +76,14 @@ class ManualMarketplaceLinkMappingService
                 $duplicate->id,
                 $duplicate->part_id,
             );
+        }
+
+        if ($duplicate) {
+            $duplicate->forceFill($this->attributes($part, $marketplace, $externalId, $url, $duplicate->raw_payload ?? []) + [
+                'part_id' => $part->getKey(),
+            ])->save();
+
+            return $this->result($duplicate, $marketplace, $externalId, $url, 'updated');
         }
 
         $account = MarketplaceAccount::query()->firstOrCreate(
@@ -309,7 +317,7 @@ class ManualMarketplaceLinkMappingService
         ];
     }
 
-    private function findExistingListingByExternalId(string $marketplace, string $externalId): ?MarketplaceListing
+    private function findExistingListingByExternalId(string $marketplace, string $externalId, ?int $ignorePartId = null): ?MarketplaceListing
     {
         return MarketplaceListing::query()
             ->whereIn('marketplace', $marketplace === 'allegro' ? ['allegro', 'allegro_main'] : ['ovoko'])
@@ -317,6 +325,7 @@ class ManualMarketplaceLinkMappingService
                 $query->where('external_offer_id', $externalId)
                     ->orWhere('external_listing_id', $externalId);
             })
+            ->when($ignorePartId !== null, fn (Builder $query): Builder => $query->where(fn (Builder $inner): Builder => $inner->whereNull('part_id')->orWhere('part_id', '!=', $ignorePartId)))
             ->orderByDesc('id')
             ->first();
     }
