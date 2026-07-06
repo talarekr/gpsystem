@@ -24,6 +24,7 @@ use Filament\Tables;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\HtmlString;
 
@@ -452,25 +453,35 @@ class PartResource extends Resource
             ->modalCancelActionLabel('Zamknij')
             ->extraModalWindowAttributes(['class' => 'gps-vehicle-picker-modal'])
             ->slideOver()
-            ->fillForm(fn (Forms\Get $get): array => ['selected_car_id' => $get('car_id')])
+            ->fillForm(fn (Forms\Get $get): array => [
+                'selected_car_id' => $get('car_id') ?: self::lastSelectedCarId(),
+                'car_search' => '',
+            ])
             ->form([
-                Forms\Components\Select::make('selected_car_id')
-                    ->label('Wyszukaj samochód')
-                    ->placeholder('Wyszukaj samochód')
-                    ->searchable()
-                    ->preload()
-                    ->native(false)
-                    ->allowHtml()
-                    ->options(fn (): array => self::carPickerOptions())
-                    ->getSearchResultsUsing(fn (string $search): array => self::carPickerOptions($search))
-                    ->getOptionLabelUsing(fn ($value): ?string => self::carPickerOptionLabel($value))
-                    ->extraAttributes(['class' => 'gps-vehicle-picker-select'])
-                    ->helperText('Wpisz kilka słów, np. „bmw x4” albo „x4 f26”. Wyniki są ograniczone do 30 samochodów.')
+                Forms\Components\TextInput::make('car_search')
+                    ->label('Szukaj samochodu')
+                    ->placeholder('Np. Audi A3 8V, VIN, rejestracja albo kod silnika')
+                    ->live(debounce: 400)
+                    ->dehydrated(false)
+                    ->helperText('Pokazujemy maksymalnie 10 najlepiej pasujących samochodów.')
+                    ->columnSpanFull(),
+                Forms\Components\Hidden::make('selected_car_id'),
+                Forms\Components\ViewField::make('car_picker_results')
+                    ->hiddenLabel()
+                    ->dehydrated(false)
+                    ->view('filament.forms.car-picker')
+                    ->viewData(fn (Forms\Get $get): array => [
+                        'cars' => self::carPickerRows($get('car_search')),
+                        'selectedCarId' => $get('selected_car_id'),
+                        'search' => (string) $get('car_search'),
+                    ])
                     ->columnSpanFull(),
             ])
             ->action(function (array $data, Forms\Set $set): void {
                 if (! empty($data['selected_car_id'])) {
-                    $set('car_id', (int) $data['selected_car_id']);
+                    $carId = (int) $data['selected_car_id'];
+                    $set('car_id', $carId);
+                    self::rememberLastSelectedCarId($carId);
                 }
             });
     }
@@ -490,6 +501,7 @@ class PartResource extends Resource
             ->action(function (array $data, Forms\Set $set): void {
                 $car = Car::query()->create($data);
                 $set('car_id', $car->id);
+                self::rememberLastSelectedCarId((int) $car->id);
             });
     }
 
@@ -518,35 +530,66 @@ class PartResource extends Resource
         ];
     }
 
-    public static function carPickerOptions(?string $search = null): array
+    public static function carPickerRows(?string $search = null): array
     {
         $search = trim((string) $search);
+        $lastCarId = self::lastSelectedCarId();
 
-        return Car::query()
+        $cars = Car::query()
+            ->withCount('parts')
             ->searchPhrase($search)
+            ->when($search === '' && $lastCarId, fn (Builder $query): Builder => $query->orderByRaw('CASE WHEN id = ? THEN 0 ELSE 1 END', [$lastCarId]))
+            ->orderByDesc('parts_count')
             ->orderByDesc('id')
-            ->limit(30)
-            ->get()
-            ->mapWithKeys(fn (Car $car): array => [$car->id => self::carPickerOptionHtml($car)])
+            ->limit(10)
+            ->get();
+
+        return $cars
+            ->map(fn (Car $car): array => self::carPickerRow($car))
+            ->values()
             ->all();
     }
 
-    public static function carPickerOptionLabel($value): ?string
+    public static function carPickerRow(Car $car): array
     {
-        if (blank($value)) {
-            return null;
-        }
-
-        $car = Car::query()->find($value);
-
-        return $car ? self::carPickerOptionHtml($car) : null;
+        return [
+            'id' => $car->id,
+            'title' => trim(implode(' ', array_filter([$car->make, $car->model, $car->model_variant]))) ?: '#'.$car->id,
+            'details' => self::carPickerRowDetails($car),
+            'parts_count' => (int) ($car->parts_count ?? 0),
+        ];
     }
 
-    public static function carPickerOptionHtml(Car $car): string
+    public static function carPickerRowDetails(Car $car): array
     {
-        $details = self::carDetails($car);
+        return array_values(array_filter([
+            $car->production_year ?: $car->first_registration_year,
+            $car->engine_capacity_cm3 ? number_format(((float) $car->engine_capacity_cm3) / 1000, 1, '.', '').' '.$car->fuel_type : $car->fuel_type,
+            $car->engine_code,
+            $car->registration_number ? 'rej. '.$car->registration_number : null,
+            $car->vin ? 'VIN '.$car->vin : null,
+            'Ilość części: '.(int) ($car->parts_count ?? 0),
+        ], fn ($value): bool => filled($value)));
+    }
 
-        return '<div class="gps-vehicle-option"><span class="gps-vehicle-option__icon">🚗</span><span><strong>'.e(self::carLabel($car)).'</strong>'.($details ? '<small>'.e(implode(' · ', $details)).'</small>' : '').'</span></div>';
+    public static function lastSelectedCarId(): ?int
+    {
+        $key = self::lastSelectedCarSessionKey();
+        $carId = (int) session($key, 0);
+
+        return $carId > 0 && Car::query()->whereKey($carId)->exists() ? $carId : null;
+    }
+
+    public static function rememberLastSelectedCarId(int $carId): void
+    {
+        if ($carId > 0 && Car::query()->whereKey($carId)->exists()) {
+            session([self::lastSelectedCarSessionKey() => $carId]);
+        }
+    }
+
+    private static function lastSelectedCarSessionKey(): string
+    {
+        return 'parts.last_selected_car_id.'.(Auth::id() ?: 'guest');
     }
 
     public static function partTitleCharacterCounter(): HtmlString
