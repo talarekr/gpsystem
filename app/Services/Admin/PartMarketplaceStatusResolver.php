@@ -50,7 +50,7 @@ class PartMarketplaceStatusResolver
         return [
             $this->row('storefront', 'Sklep', $part->price, 'zł', $storefrontVisible, null, null, $storefrontVisible ? 'Widoczny w sklepie' : 'Niewidoczny w sklepie'),
             $this->row('allegro', 'Allegro', $part->allegro_price, 'zł', $allegroListed, $this->externalOfferId($allegro), $this->allegroUrl($allegro), $this->allegroTitle($allegro, $allegroListed)),
-            $this->row('ovoko', 'Ovoko', $part->ovoko_price, 'zł', $ovoko !== null, $this->externalOfferId($ovoko), $this->listingUrl($ovoko), $ovoko ? 'Oferta Ovoko wystawiona lokalnie' : 'Brak lokalnej oferty Ovoko'),
+            $this->row('ovoko', 'Ovoko', $part->ovoko_price ?? $ovoko?->price, $this->currencyLabel($ovoko?->currency), $ovoko !== null, $this->externalOfferId($ovoko), $this->ovokoUrl($ovoko, $part), $ovoko ? 'Oferta Ovoko wystawiona lokalnie' : 'Brak lokalnej oferty Ovoko'),
             $this->row('ebay', 'eBay', $part->ebay_price, 'zł', $ebay !== null, $this->externalOfferId($ebay), $this->listingUrl($ebayUrlListing), $ebay ? 'Oferta eBay wystawiona lokalnie' : 'Brak lokalnej oferty eBay', $ebayMarkets ?: null),
         ];
     }
@@ -168,6 +168,11 @@ class PartMarketplaceStatusResolver
         return number_format((float) $price, 2, ',', ' ').' '.($currency ?: 'zł');
     }
 
+    private function currencyLabel(?string $currency): string
+    {
+        return strtoupper((string) $currency) === 'PLN' || blank($currency) ? 'zł' : (string) $currency;
+    }
+
     private function externalOfferId(?MarketplaceListing $listing): ?string
     {
         foreach ([$listing?->external_offer_id, $listing?->external_listing_id] as $value) {
@@ -198,6 +203,21 @@ class PartMarketplaceStatusResolver
         }
 
         return null;
+    }
+
+    private function ovokoUrl(?MarketplaceListing $listing, Part $part): ?string
+    {
+        $offerId = $this->externalOfferId($listing);
+
+        return $this->listingUrl($listing) ?: ($offerId ? 'https://ovoko.pl/czesci-samochodowe/hgf'.$offerId.'-'.$this->ovokoSlug($part) : null);
+    }
+
+    private function ovokoSlug(Part $part): string
+    {
+        $base = trim((string) (($part->oem_number ?: $part->part_number ?: $part->sku ?: '').' '.$part->name));
+        $slug = str($base)->lower()->ascii()->replaceMatches('/[^a-z0-9]+/', '-')->trim('-')->toString();
+
+        return $slug !== '' ? $slug : 'czesc';
     }
 
     private function allegroUrl(?MarketplaceListing $listing): ?string

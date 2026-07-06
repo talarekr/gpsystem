@@ -162,7 +162,7 @@ class OvokoListingUrlBackfillService
         }
 
         $query = MarketplaceListing::query()
-            ->with('part:id,external_id,legacy_payload')
+            ->with('part:id,external_id,legacy_payload,name,sku,part_number,oem_number,ovoko_price,currency,status,quantity')
             ->where('marketplace', 'ovoko')
             ->whereNotNull('part_id')
             ->orderBy('id')
@@ -176,7 +176,7 @@ class OvokoListingUrlBackfillService
         }
 
         $results = [];
-        $summary = ['inspected' => 0, 'updated' => 0, 'would_update' => 0, 'skipped' => 0, 'missing_shop_url' => 0, 'ambiguous' => 0];
+        $summary = ['inspected' => 0, 'updated' => 0, 'would_update' => 0, 'skipped' => 0, 'missing_shop_url' => 0, 'ambiguous' => 0, 'missing_part_ovoko_price' => 0, 'would_update_price' => 0, 'updated_price' => 0];
 
         foreach ($query->get() as $listing) {
             $summary['inspected']++;
@@ -222,6 +222,15 @@ class OvokoListingUrlBackfillService
                 }
             }
 
+            $priceAction = $this->backfillPartOvokoPrice($listing, $apply);
+            if ($priceAction['candidate']) {
+                $summary['missing_part_ovoko_price']++;
+                $summary['would_update_price']++;
+                if ($apply && $priceAction['updated']) {
+                    $summary['updated_price']++;
+                }
+            }
+
             $results[] = [
                 'local_part_id' => $listing->part_id,
                 'marketplace_listing_id' => $listing->id,
@@ -254,6 +263,9 @@ class OvokoListingUrlBackfillService
                 'ovoko_read_api_attempts' => $diagnostics['ovoko_read_api_attempts'],
                 'resolution_attempts' => $diagnostics['resolution_attempts'],
                 'generated_rule' => $diagnostics['generated_rule'],
+                'price_backfill_action' => $priceAction['action'],
+                'listing_price' => $listing->price,
+                'part_ovoko_price' => $listing->part?->ovoko_price,
             ];
         }
 
@@ -346,10 +358,10 @@ class OvokoListingUrlBackfillService
             }
         }
 
-        $generatedUrl = $this->generatedShopUrlFromOvokoPartId($ovokoId);
+        $generatedUrl = $this->generatedShopUrlFromOvokoPartId($ovokoId, $listing);
         if ($generatedUrl !== null) {
             $diagnostics['resolution_attempts'][] = 'generated_from_ovoko_part_id';
-            $diagnostics['generated_rule'] = 'https://ovoko.pl/czesci-samochodowe/hgf{ovoko_part_id}';
+            $diagnostics['generated_rule'] = 'https://ovoko.pl/czesci-samochodowe/hgf{ovoko_part_id}-{oem_or_number}-{slug}';
             $diagnostics['accepted_shop_url_host'] = 'ovoko.pl';
             return [$generatedUrl, 'generated_from_ovoko_part_id', 'would_update', $diagnostics];
         }
@@ -446,14 +458,41 @@ class OvokoListingUrlBackfillService
         ]);
     }
 
-    private function generatedShopUrlFromOvokoPartId(?string $ovokoId): ?string
+    private function generatedShopUrlFromOvokoPartId(?string $ovokoId, ?MarketplaceListing $listing = null): ?string
     {
         $ovokoId = $this->blankNull($ovokoId);
         if ($ovokoId === null || preg_match('/^\d+$/', $ovokoId) !== 1) {
             return null;
         }
 
-        return 'https://ovoko.pl/czesci-samochodowe/hgf'.$ovokoId;
+        $slug = $this->ovokoSlug($listing);
+
+        return 'https://ovoko.pl/czesci-samochodowe/hgf'.$ovokoId.($slug !== '' ? '-'.$slug : '');
+    }
+
+    /** @return array{candidate:bool,updated:bool,action:string} */
+    private function backfillPartOvokoPrice(MarketplaceListing $listing, bool $apply): array
+    {
+        $part = $listing->part;
+        if (! $part || is_numeric($part->ovoko_price) || ! is_numeric($listing->price)) {
+            return ['candidate' => false, 'updated' => false, 'action' => 'skipped'];
+        }
+
+        if ($apply) {
+            $part->forceFill(['ovoko_price' => (float) $listing->price, 'currency' => $part->currency ?: ($listing->currency ?: 'PLN')])->save();
+            return ['candidate' => true, 'updated' => true, 'action' => 'updated'];
+        }
+
+        return ['candidate' => true, 'updated' => false, 'action' => 'would_update'];
+    }
+
+    private function ovokoSlug(?MarketplaceListing $listing): string
+    {
+        $part = $listing?->part;
+        $base = trim((string) (($part?->oem_number ?: $part?->part_number ?: $part?->sku ?: '').' '.($part?->name ?: $listing?->title ?: '')));
+        $slug = str($base)->lower()->ascii()->replaceMatches('/[^a-z0-9]+/', '-')->trim('-')->toString();
+
+        return $slug !== '' ? $slug : 'czesc';
     }
 
     private function validateShopUrl(string $url): array

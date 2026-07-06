@@ -210,6 +210,41 @@ class ManualMarketplaceLinkMappingTest extends TestCase
         $this->assertDatabaseCount('marketplace_sync_logs', 0);
     }
 
+
+    public function test_saving_same_ovoko_id_is_idempotent_and_refreshes_url(): void
+    {
+        $part = Part::query()->create(['name' => 'VOLVO XC60 sterownik moduł świateł xenon', 'sku' => 'GPS-7132', 'part_number' => '31427776', 'quantity' => 1, 'status' => 'ready', 'currency' => 'PLN']);
+        MarketplaceListing::query()->create(['part_id' => $part->id, 'marketplace' => 'ovoko', 'external_offer_id' => '7249', 'external_listing_id' => '7249', 'price' => 321.45, 'currency' => 'PLN', 'status' => 'imported', 'sync_status' => 'mapped', 'match_status' => 'confirmed']);
+
+        $url = 'https://ovoko.pl/czesci-samochodowe/hgf7249-31427776-volvo-xc60-sterownik-modul-swiatel-xenon';
+        $result = app(ManualMarketplaceLinkMappingService::class)->save($part, 'ovoko', $url);
+
+        $this->assertSame('updated', $result['action']);
+        $this->assertDatabaseHas('marketplace_listings', ['part_id' => $part->id, 'marketplace' => 'ovoko', 'external_offer_id' => '7249', 'external_listing_id' => '7249', 'url' => $url]);
+        $this->assertSame(1, MarketplaceListing::query()->where('marketplace', 'ovoko')->where('external_offer_id', '7249')->count());
+    }
+
+    public function test_ovoko_backfill_command_dry_run_and_apply_fill_missing_url_and_part_price(): void
+    {
+        $part = Part::query()->create(['name' => 'VOLVO XC60 sterownik moduł świateł xenon', 'sku' => 'GPS-7132', 'part_number' => '31427776', 'quantity' => 1, 'status' => 'ready', 'currency' => 'PLN', 'ovoko_price' => null]);
+        MarketplaceListing::query()->create(['part_id' => $part->id, 'marketplace' => 'ovoko', 'external_offer_id' => '7249', 'external_listing_id' => '7249', 'price' => 321.45, 'currency' => 'PLN', 'status' => 'imported', 'sync_status' => 'mapped', 'match_status' => 'confirmed']);
+
+        $this->artisan('marketplace:backfill-ovoko-links', ['--part-id' => $part->id, '--dry-run' => true])->assertSuccessful();
+        $this->assertDatabaseHas('marketplace_listings', ['part_id' => $part->id, 'marketplace' => 'ovoko', 'url' => null]);
+        $this->assertNull($part->fresh()->ovoko_price);
+
+        $this->artisan('marketplace:backfill-ovoko-links', ['--part-id' => $part->id, '--apply' => true])->assertSuccessful();
+
+        $part->refresh()->load('marketplaceListings');
+        $listing = $part->marketplaceListings->firstWhere('marketplace', 'ovoko');
+        $this->assertSame('https://ovoko.pl/czesci-samochodowe/hgf7249-31427776-volvo-xc60-sterownik-modul-swiatel-xenon', $listing->url);
+        $this->assertSame('321.45', (string) $part->ovoko_price);
+
+        $row = collect(app(PartMarketplaceStatusResolver::class)->rowsForPart($part))->firstWhere('key', 'ovoko');
+        $this->assertSame('321,45 zł', $row['price']);
+        $this->assertSame($listing->url, $row['url']);
+    }
+
     private function actingAsAdminUser(): User
     {
         $this->seed(RoleSeeder::class);
