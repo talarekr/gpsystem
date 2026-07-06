@@ -198,6 +198,8 @@ class PartMarketplaceReadinessController extends Controller
                     'ebay_de' => $this->readinessService->prepareEbayTranslations($part, 'ebay_de'),
                 ];
 
+                $part = $this->freshPartForMarketplaceReadiness($part);
+
                 if (! (bool) ($ebayResults['ebay_de']['ok'] ?? false)) {
                     $blockers = (array) ($ebayResults['ebay_de']['blockers'] ?? []);
 
@@ -218,7 +220,8 @@ class PartMarketplaceReadinessController extends Controller
                 }
             }
 
-            $card = $this->cardReadinessService->check($part->fresh())[$key] ?? [];
+            $part = $this->freshPartForMarketplaceReadiness($part);
+            $card = $this->cardReadinessService->check($part)[$key] ?? [];
             $presentation = (array) ($card['presentation'] ?? []);
             $ready = (bool) ($presentation['ready'] ?? $card['ready'] ?? false);
             $message = $ready ? 'Gotowe' : $this->humanReadablePrepareMessage((array) ($presentation['missing'] ?? $card['missing'] ?? []));
@@ -239,6 +242,19 @@ class PartMarketplaceReadinessController extends Controller
             if ($key === 'ebay') $this->logPrepareFailure($partId, $key, $e, $this->httpStatus($e), $this->failureSource($e));
             throw $e;
         }
+    }
+
+    private function freshPartForMarketplaceReadiness(Part $part): Part
+    {
+        return Part::query()
+            ->with(array_values(array_filter([
+                method_exists($part, 'images') ? 'images' : null,
+                method_exists($part, 'partImages') ? 'partImages' : null,
+                method_exists($part, 'category') ? 'category' : null,
+                method_exists($part, 'car') ? 'car' : null,
+                method_exists($part, 'marketplaceListings') ? (Schema::hasTable('marketplace_accounts') ? 'marketplaceListings.account' : 'marketplaceListings') : null,
+            ])))
+            ->findOrFail($part->getKey());
     }
 
     public function ebayPrepareDebug(Request $request, int $partId): JsonResponse

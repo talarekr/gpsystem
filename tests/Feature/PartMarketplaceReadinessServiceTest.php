@@ -51,6 +51,66 @@ class PartMarketplaceReadinessServiceTest extends TestCase
     }
 
 
+
+    public function test_first_prepare_ebay_card_response_reads_fresh_prepared_translation(): void
+    {
+        config(['services.google_translate.enabled' => true, 'services.google_translate.key' => 'test-key', 'services.google_translate.mode' => 'dry_run']);
+        Cache::put('nbp_table_a_eur_rate', ['rate' => 4.30, 'effective_date' => '2026-07-06', 'table_no' => '123/A/NBP/2026']);
+
+        $this->app->instance(GoogleTranslateService::class, new class extends GoogleTranslateService {
+            public function translate(string $text, string $target, ?string $source = null): array
+            {
+                return ['ok' => true, 'translated_text' => '['.$target.'] '.$text, 'blockers' => []];
+            }
+
+            public function isGoogleTranslateConfigured(): bool
+            {
+                return true;
+            }
+        });
+
+        $part = $this->ebayReadinessPart([
+            'name' => 'Alternator BMW E90',
+            'description' => 'Opis alternatora BMW.',
+            'condition_notes' => 'Używany, sprawny',
+            'ebay_price' => 125,
+            'review_metadata' => [],
+            'vehicle_snapshot' => ['make' => 'BMW', 'model' => '3'],
+        ]);
+
+        MarketplaceCategoryMapping::query()
+            ->where('local_category_id', $part->category_id)
+            ->where('channel', 'ebay_de')
+            ->update(['shipping_group' => 'de_30_eur', 'fulfillment_policy_id' => 'fulfillment-de-30']);
+
+        \App\Models\MarketplaceAccount::query()->create([
+            'marketplace' => 'ebay_de',
+            'name' => 'eBay DE',
+            'code' => 'ebay_de',
+            'status' => 'active',
+            'api_enabled' => true,
+            'api_settings' => [
+                'marketplace_id' => 'EBAY_DE',
+                'payment_policy_id' => 'payment-de',
+                'return_policy_id' => 'return-de',
+            ],
+        ]);
+
+        $this->assertSame('missing', app(PartMarketplaceReadinessService::class)->check($part->fresh())['ebay']['status']);
+        $this->assertNull(data_get($part->review_metadata, 'marketplace_prepared_translations.ebay_de'));
+
+        $response = $this->getJson('/tools/prepare-part-marketplace-card?token=gps_images_import_2026&part_id='.$part->id.'&channel=ebay')
+            ->assertOk()
+            ->assertJsonPath('ready', true)
+            ->assertJsonPath('status', 'ready')
+            ->assertJsonPath('message', 'Gotowe')
+            ->assertJsonPath('ebay_channels.ebay_de.translation_status', 'prepared');
+
+        $response->assertJsonMissing(['message' => 'Brak przygotowanego tłumaczenia eBay DE']);
+        $this->assertSame('prepared', data_get($part->refresh()->review_metadata, 'marketplace_prepared_translations.ebay_de.status'));
+        $this->assertSame('ready', app(PartMarketplaceReadinessService::class)->check($part->fresh())['ebay']['status']);
+    }
+
     public function test_prepare_ebay_card_creates_missing_de_translation_without_missing_translation_blocker(): void
     {
         $this->app->instance(GoogleTranslateService::class, new class extends GoogleTranslateService {
