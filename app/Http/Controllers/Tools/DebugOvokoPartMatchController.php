@@ -7,20 +7,22 @@ use App\Http\Controllers\Controller;
 use App\Models\MarketplaceListing;
 use App\Models\Part;
 use App\Services\Marketplace\OvokoPartIdExtractor;
+use App\Services\Marketplace\OvokoListingUrlBackfillService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
 
 class DebugOvokoPartMatchController extends Controller
 {
-    public function __invoke(Request $request, OvokoPartIdExtractor $extractor)
+    public function __invoke(Request $request, OvokoPartIdExtractor $extractor, OvokoListingUrlBackfillService $backfill)
     {
         if (! hash_equals('gps_images_import_2026', (string) $request->query('token', ''))) {
             return response()->json(['ok' => false, 'error_message' => 'Invalid diagnostics token.'], 403);
         }
 
         $ovokoPartId = trim((string) $request->query('ovoko_part_id', ''));
-        if ($ovokoPartId === '') {
-            return response()->json(['ok' => false, 'error_message' => 'Missing ovoko_part_id.'], 422);
+        $partId = $request->filled('part_id') ? (int) $request->query('part_id') : null;
+        if ($ovokoPartId === '' && $partId === null) {
+            return response()->json(['ok' => false, 'error_message' => 'Missing ovoko_part_id or part_id.'], 422);
         }
 
         if (! Schema::hasTable('parts') || ! Schema::hasTable('marketplace_listings')) {
@@ -29,10 +31,12 @@ class DebugOvokoPartMatchController extends Controller
 
         $listings = MarketplaceListing::query()
             ->where('marketplace', 'ovoko')
-            ->where('external_offer_id', $ovokoPartId)
+            ->when($ovokoPartId !== '', fn ($query) => $query->where('external_offer_id', $ovokoPartId))
+            ->when($partId !== null, fn ($query) => $query->where('part_id', $partId))
             ->get(['id', 'part_id', 'match_status', 'sync_status', 'title', 'match_reason', 'external_offer_id']);
 
-        $parts = $this->partsWithOvokoId($ovokoPartId, $extractor);
+        $parts = $ovokoPartId !== '' ? $this->partsWithOvokoId($ovokoPartId, $extractor) : [];
+        $diagnosticPart = $partId !== null ? Part::query()->find($partId) : null;
         $titleSamples = $this->titleSamples($extractor);
         $conflictListings = $listings->filter(fn (MarketplaceListing $listing): bool => $listing->sync_status === 'conflict' || $listing->match_status === 'conflict')->values();
 
@@ -51,6 +55,11 @@ class DebugOvokoPartMatchController extends Controller
                 'match_reason' => $listings->first()?->match_reason,
                 'all_matching_listings' => $listings->map(fn (MarketplaceListing $listing): array => $this->listingPayload($listing))->values(),
             ],
+            'part_id_diagnostics' => $diagnosticPart ? [
+                'part_id' => $diagnosticPart->id,
+                'legacy_ovoko_id_sources' => $backfill->partOvokoIdSources($diagnosticPart),
+                'selected_legacy_ovoko_id' => $backfill->ovokoIdFromPart($diagnosticPart),
+            ] : null,
             'parts_legacy_payload' => [
                 'known_ovoko_id_paths' => $extractor->knownPaths(),
                 'found_in_parts_count' => count($parts),

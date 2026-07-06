@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\MarketplaceListing;
 use App\Models\Part;
 use App\Services\Admin\PartMarketplaceStatusResolver;
+use App\Services\Marketplace\OvokoListingUrlBackfillService;
 use Filament\Facades\Filament;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -13,7 +14,7 @@ use Illuminate\Support\Facades\Schema;
 
 class OvokoListingUrlDiagnosticsController extends Controller
 {
-    public function __invoke(Request $request, PartMarketplaceStatusResolver $resolver): JsonResponse
+    public function __invoke(Request $request, PartMarketplaceStatusResolver $resolver, OvokoListingUrlBackfillService $backfill): JsonResponse
     {
         $user = $request->user();
         abort_unless($user && $user->canAccessPanel(Filament::getPanel('admin')), 403);
@@ -46,6 +47,8 @@ class OvokoListingUrlDiagnosticsController extends Controller
             'url' => $listing?->url,
             'metadata' => $listing?->raw_payload,
             'response_payload' => data_get($listing?->raw_payload, 'response_summary'),
+            'legacy_ovoko_id_sources' => $part ? $backfill->partOvokoIdSources($part) : [],
+            'selected_legacy_ovoko_id' => $part ? $backfill->ovokoIdFromPart($part) : null,
         ] + $resolved + [
             'ovoko_write' => false,
             'publish' => false,

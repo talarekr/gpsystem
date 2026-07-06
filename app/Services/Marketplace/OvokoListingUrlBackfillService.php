@@ -2,6 +2,7 @@
 
 namespace App\Services\Marketplace;
 
+use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceListing;
 use App\Models\Part;
 use App\Services\Marketplace\Api\MarketplaceApiManager;
@@ -38,6 +39,8 @@ class OvokoListingUrlBackfillService
             'updated_price' => 0,
             'skipped' => 0,
             'errors' => 0,
+            'would_create_listing' => 0,
+            'created_listing' => 0,
         ];
         $results = [];
 
@@ -77,8 +80,13 @@ class OvokoListingUrlBackfillService
             );
         }
 
+        $seenPartIds = [];
+
         foreach ($query->get() as $listing) {
             $summary['scanned']++;
+            if ($listing->part_id !== null) {
+                $seenPartIds[] = (int) $listing->part_id;
+            }
             $oldUrl = $this->blankNull($listing->url);
             $oldPrice = $listing->part?->ovoko_price;
             $newPrice = is_numeric($listing->price) ? (float) $listing->price : null;
@@ -141,6 +149,51 @@ class OvokoListingUrlBackfillService
                 'new_url' => $newUrl,
                 'old_price' => $oldPrice,
                 'new_price' => $newPrice,
+                'action' => implode(',', array_values(array_unique($actions))),
+                'errors' => $errors,
+            ];
+        }
+
+
+        foreach ($this->legacyPartCandidates($partId, $limit, $offset, $includeInactive, $seenPartIds) as $part) {
+            $summary['scanned']++;
+            $source = $this->ovokoIdFromPart($part);
+            $ovokoId = $source['id'];
+            $newUrl = $this->generatedShopUrlFromOvokoPartId($ovokoId);
+            $actions = [];
+            $errors = [];
+
+            if ($ovokoId === null || $newUrl === null) {
+                $summary['skipped']++;
+                $errors[] = 'missing_or_invalid_legacy_ovoko_id';
+                $actions[] = 'skipped';
+            } else {
+                $summary['matched']++;
+                $summary['would_create_listing']++;
+                $actions[] = $apply ? 'create_listing_from_legacy_ovoko_id' : 'would_create_listing_from_legacy_ovoko_id';
+
+                if ($apply) {
+                    try {
+                        $listing = $this->createOrUpdateLegacyOvokoListing($part, $ovokoId, $newUrl);
+                        $summary['created_listing']++;
+                        $this->logGeneratedUrl($listing, $ovokoId, $newUrl);
+                    } catch (\Throwable $exception) {
+                        $summary['errors']++;
+                        $errors[] = $exception->getMessage();
+                    }
+                }
+            }
+
+            $results[] = [
+                'part_id' => $part->id,
+                'marketplace_listing_id' => null,
+                'ovoko_id' => $ovokoId,
+                'ovoko_id_source' => $source['source'],
+                'ovoko_id_path' => $source['path'],
+                'old_url' => null,
+                'new_url' => $newUrl,
+                'old_price' => $part->ovoko_price,
+                'new_price' => $part->ovoko_price,
                 'action' => implode(',', array_values(array_unique($actions))),
                 'errors' => $errors,
             ];
@@ -426,6 +479,7 @@ class OvokoListingUrlBackfillService
             'marketplace_listings_for_part' => [],
             'listing_filter_diagnostics' => [],
             'panel_status_source' => 'PartMarketplaceStatusResolver reads the part->marketplaceListings relation, filters marketplace ovoko, and takes external_offer_id/external_listing_id from marketplace_listings.',
+            'legacy_ovoko_id_sources' => [],
         ];
 
         $debug['global'] = [
@@ -442,9 +496,10 @@ class OvokoListingUrlBackfillService
 
         if ($partId === null) return $debug;
 
-        $part = Part::query()->select(['id', 'name', 'sku', 'part_number', 'oem_number', 'ovoko_price', 'currency', 'status', 'quantity'])->find($partId);
+        $part = Part::query()->select(['id', 'source_system', 'external_id', 'legacy_payload', 'name', 'sku', 'part_number', 'oem_number', 'ovoko_price', 'currency', 'status', 'quantity', 'is_visible_storefront', 'needs_listing'])->find($partId);
         $debug['part_exists'] = $part !== null;
         $debug['part'] = $part?->toArray();
+        $debug['legacy_ovoko_id_sources'] = $part ? $this->partOvokoIdSources($part) : [];
 
         $listings = MarketplaceListing::query()->with('part:id,status,quantity,ovoko_price')->where('part_id', $partId)->orderBy('id')->get();
         $debug['marketplace_listings_for_part'] = $listings->map(fn (MarketplaceListing $listing): array => collect($listing->toArray())->only([
@@ -476,6 +531,90 @@ class OvokoListingUrlBackfillService
         }
 
         return $debug;
+    }
+
+
+    /** @return array<int, Part> */
+    private function legacyPartCandidates(?int $partId, int $limit, int $offset, bool $includeInactive, array $excludePartIds = []): array
+    {
+        $query = Part::query()->select(['id', 'source_system', 'external_id', 'legacy_payload', 'name', 'sku', 'part_number', 'ovoko_price', 'currency', 'status', 'quantity'])
+            ->whereNotIn('id', array_values(array_unique($excludePartIds)));
+
+        if ($partId !== null) {
+            $query->whereKey($partId);
+        } else {
+            $query->offset($offset)->limit($limit);
+        }
+
+        if (! $includeInactive) {
+            $query->whereIn('status', ['ready', 'published'])
+                ->where(fn ($q) => $q->whereNull('quantity')->orWhere('quantity', '>', 0));
+        }
+
+        return $query->orderBy('id')->get()->filter(fn (Part $part): bool => ($this->ovokoIdFromPart($part)['id'] ?? null) !== null)->values()->all();
+    }
+
+    /** @return array{id:?string,source:?string,path:?string,all:array<int,array<string,mixed>>} */
+    public function ovokoIdFromPart(Part $part): array
+    {
+        $sources = $this->partOvokoIdSources($part);
+        foreach ($sources as $source) {
+            if (($source['valid_numeric'] ?? false) === true) {
+                return ['id' => (string) $source['value'], 'source' => (string) $source['source'], 'path' => $source['path'] ?? null, 'all' => $sources];
+            }
+        }
+        return ['id' => null, 'source' => null, 'path' => null, 'all' => $sources];
+    }
+
+    /** @return array<int,array<string,mixed>> */
+    public function partOvokoIdSources(Part $part): array
+    {
+        $sources = [];
+        if (Schema::hasColumn('parts', 'source_system') && Schema::hasColumn('parts', 'external_id') && strtolower((string) $part->source_system) === 'ovoko') {
+            $sources[] = $this->sourceRow('parts.external_id', null, $part->external_id);
+        }
+        if (Schema::hasColumn('parts', 'legacy_payload')) {
+            $match = $this->extractor->extractWithPath($part->legacy_payload ?? null);
+            $sources[] = $this->sourceRow('parts.legacy_payload', $match['path'] ?? null, $match['id'] ?? null);
+        }
+        return $sources;
+    }
+
+    private function sourceRow(string $source, ?string $path, mixed $value): array
+    {
+        $value = $this->blankNull($value);
+        return ['source' => $source, 'path' => $path, 'value' => $value, 'valid_numeric' => $value !== null && preg_match('/^\d+$/', $value) === 1, 'generated_url' => $this->generatedShopUrlFromOvokoPartId($value)];
+    }
+
+    private function createOrUpdateLegacyOvokoListing(Part $part, string $ovokoId, string $url): MarketplaceListing
+    {
+        $account = MarketplaceAccount::query()->firstOrCreate(
+            ['code' => 'ovoko_main'],
+            ['marketplace' => 'ovoko', 'name' => 'Ovoko main', 'status' => 'active']
+        );
+        $listing = MarketplaceListing::query()->firstOrNew(['marketplace' => 'ovoko', 'part_id' => $part->id]);
+        $raw = is_array($listing->raw_payload) ? $listing->raw_payload : [];
+        $raw['legacy_ovoko_id_backfill'] = ['source' => 'parts_legacy_ovoko_id', 'ovoko_part_id' => $ovokoId, 'url' => $url, 'mapped_at' => now()->toISOString()];
+        $listing->forceFill([
+            'marketplace_account_id' => $listing->marketplace_account_id ?: $account->id,
+            'external_offer_id' => $ovokoId,
+            'external_listing_id' => $ovokoId,
+            'sku' => $part->sku,
+            'title' => $part->name,
+            'price' => is_numeric($part->ovoko_price) ? (float) $part->ovoko_price : null,
+            'quantity' => is_numeric($part->quantity) ? (int) $part->quantity : null,
+            'currency' => $part->currency ?: 'PLN',
+            'status' => 'imported',
+            'sync_status' => 'mapped',
+            'match_status' => 'confirmed',
+            'match_confidence' => 100,
+            'match_reason' => 'legacy_ovoko_id_backfill',
+            'url' => $url,
+            'raw_payload' => $raw,
+            'last_error' => null,
+            'last_synced_at' => now(),
+        ])->save();
+        return $listing;
     }
 
     private function existingOvokoId(MarketplaceListing $listing): ?string
@@ -567,7 +706,7 @@ class OvokoListingUrlBackfillService
         $generatedUrl = $this->generatedShopUrlFromOvokoPartId($ovokoId, $listing);
         if ($generatedUrl !== null) {
             $diagnostics['resolution_attempts'][] = 'generated_from_ovoko_part_id';
-            $diagnostics['generated_rule'] = 'https://ovoko.pl/czesci-samochodowe/hgf{ovoko_part_id}-{oem_or_number}-{slug}';
+            $diagnostics['generated_rule'] = 'https://ovoko.pl/czesci-samochodowe/hgf{ovoko_part_id}';
             $diagnostics['accepted_shop_url_host'] = 'ovoko.pl';
             return [$generatedUrl, 'generated_from_ovoko_part_id', 'would_update', $diagnostics];
         }
@@ -671,9 +810,7 @@ class OvokoListingUrlBackfillService
             return null;
         }
 
-        $slug = $this->ovokoSlug($listing);
-
-        return 'https://ovoko.pl/czesci-samochodowe/hgf'.$ovokoId.($slug !== '' ? '-'.$slug : '');
+        return 'https://ovoko.pl/czesci-samochodowe/hgf'.$ovokoId;
     }
 
     /** @return array{candidate:bool,updated:bool,action:string} */
