@@ -30,10 +30,11 @@
                 $ready = (bool) ($presentation['ready'] ?? false);
                 $category = $presentation['category'] ?? ['value' => 'Brak wybranej kategorii', 'mapped' => false];
                 $missing = $presentation['missing'] ?? [];
+                $blockingMissing = $ready ? [] : $missing;
                 $durablyPrepared = in_array($key, $durablePreparedChannels, true) || data_get((array) ($part?->review_metadata ?: []), 'marketplace_prepare_results.'.$key.'.status') === 'ready';
                 $showInitialStatus = $durablyPrepared && $ready;
                 $statusChecked = (bool) ($preparedStatusChecked[$key] ?? false);
-                $missingMessage = $humanizeMissing($missing[0] ?? null, $key);
+                $missingMessage = $humanizeMissing($blockingMissing[0] ?? null, $key);
                 $prepareUrl = $part ? route('tools.prepare-part-marketplace-card', ['token' => 'gps_images_import_2026', 'part_id' => $part->id, 'channel' => $key]) : null;
             @endphp
 

@@ -43,7 +43,8 @@ class PartMarketplaceReadinessService
             $missing = $this->polishFields($this->locallyRequiredMissingFields((array) ($readiness['missing_fields'] ?? [])));
             $warnings = $this->polishWarnings((array) ($readiness['warnings'] ?? []));
             $mapping = $this->categoryMapping($part, $mappingChannels, $channel);
-            $translationMissing = $requiresEbayTranslations ? $this->missingEbayTranslations($part) : [];
+            $canPublishLater = (bool) ($readiness['can_publish_later'] ?? false);
+            $translationMissing = $requiresEbayTranslations && ! $canPublishLater ? $this->missingEbayTranslations($part) : [];
 
             if (! $mapping) {
                 $missing[] = 'mapowanie kategorii '.$label;
