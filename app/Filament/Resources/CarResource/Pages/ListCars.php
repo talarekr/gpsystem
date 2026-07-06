@@ -4,7 +4,6 @@ namespace App\Filament\Resources\CarResource\Pages;
 
 use App\Filament\Resources\CarResource;
 use App\Models\Car;
-use Filament\Actions;
 use Filament\Resources\Pages\Page;
 use Filament\Support\Enums\MaxWidth;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -18,7 +17,7 @@ class ListCars extends Page
 
     protected static string $resource = CarResource::class;
     protected static string $view = 'filament.resources.cars.pages.list-cars';
-    protected static ?string $title = 'Wszystkie samochody';
+    protected static ?string $title = '';
 
     #[Url(as: 'search')]
     public string $search = '';
@@ -42,11 +41,6 @@ class ListCars extends Page
     public string $perPage = '25';
 
     public function getMaxContentWidth(): MaxWidth|string|null { return MaxWidth::Full; }
-
-    protected function getHeaderActions(): array
-    {
-        return [Actions\CreateAction::make()->label('Dodaj samochód')];
-    }
 
     public function updating(string $property): void
     {
@@ -84,7 +78,7 @@ class ListCars extends Page
     protected function getCarsQuery(): Builder
     {
         return Car::query()
-            ->with('createdBy:id,name')
+            ->withCount('parts')
             ->when(filled($this->search), fn (Builder $query) => $this->applySearch($query, trim($this->search)))
             ->when(filled($this->status), fn (Builder $query) => $query->where('status', $this->status))
             ->when(filled($this->fuelType), fn (Builder $query) => $query->where('fuel_type', $this->fuelType))
