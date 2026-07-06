@@ -7,6 +7,7 @@ use App\Models\MarketplaceListing;
 use App\Models\Part;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
 
 class ManualMarketplaceLinkMappingService
@@ -20,11 +21,16 @@ class ManualMarketplaceLinkMappingService
         $url = trim($url);
 
         if (! in_array($marketplace, ['allegro', 'ovoko'], true)) {
-            throw new InvalidArgumentException('unsupported_marketplace');
+            throw new InvalidArgumentException('Nieobsługiwany marketplace: '.$marketplace.'.');
         }
 
         if ($url === '' || ! filter_var($url, FILTER_VALIDATE_URL)) {
-            throw new InvalidArgumentException('invalid_url');
+            throw new InvalidArgumentException('Podaj poprawny adres URL.');
+        }
+
+        $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+        if (! in_array($scheme, ['http', 'https'], true)) {
+            throw new InvalidArgumentException('Link musi zaczynać się od http:// albo https://.');
         }
 
         $externalId = $marketplace === 'allegro'
@@ -32,7 +38,7 @@ class ManualMarketplaceLinkMappingService
             : $this->parseOvokoPartId($url);
 
         if ($externalId === null) {
-            throw new InvalidArgumentException('invalid_'.$marketplace.'_url');
+            throw new InvalidArgumentException('Nie udało się odczytać ID oferty z linku '.ucfirst($marketplace).'. Sprawdź, czy wklejony adres prowadzi do konkretnej oferty.');
         }
 
         $listing = MarketplaceListing::query()
@@ -51,6 +57,25 @@ class ManualMarketplaceLinkMappingService
             $listing->forceFill($this->attributes($part, $marketplace, $externalId, $url, $listing->raw_payload ?? []))->save();
 
             return $this->result($listing, $marketplace, $externalId, $url, 'updated');
+        }
+
+        $duplicate = $this->findExistingListingByExternalId($marketplace, $externalId);
+
+        if ($duplicate) {
+            Log::warning('manual_marketplace_link_duplicate_external_id', [
+                'part_id' => $part->getKey(),
+                'marketplace' => $marketplace,
+                'external_id' => $externalId,
+                'existing_listing_id' => $duplicate->id,
+                'existing_part_id' => $duplicate->part_id,
+            ]);
+
+            throw new ManualMarketplaceMappingConflictException(
+                $this->listingExternalId($duplicate) ?? $externalId,
+                $externalId,
+                $duplicate->id,
+                $duplicate->part_id,
+            );
         }
 
         $account = MarketplaceAccount::query()->firstOrCreate(
@@ -282,6 +307,18 @@ class ManualMarketplaceLinkMappingService
             'raw_payload' => $rawPayload,
             'last_api_status' => 'archived',
         ];
+    }
+
+    private function findExistingListingByExternalId(string $marketplace, string $externalId): ?MarketplaceListing
+    {
+        return MarketplaceListing::query()
+            ->whereIn('marketplace', $marketplace === 'allegro' ? ['allegro', 'allegro_main'] : ['ovoko'])
+            ->where(function (Builder $query) use ($externalId): void {
+                $query->where('external_offer_id', $externalId)
+                    ->orWhere('external_listing_id', $externalId);
+            })
+            ->orderByDesc('id')
+            ->first();
     }
 
     private function listingExternalId(MarketplaceListing $listing): ?string
