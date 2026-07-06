@@ -20,7 +20,7 @@ class OvokoListingUrlBackfillService
 
 
     /** @return array{mode:string,summary:array<string,int>,results:array<int,array<string,mixed>>,warnings:array<int,string>,limit_requested:int,limit_applied:int,offset_requested:int,offset_applied:int} */
-    public function runBrowserBackfill(bool $apply = false, bool $force = false, bool $missingOnly = true, int $limit = 100, int $offset = 0, ?int $partId = null, bool $includeInactive = false, bool $debug = false): array
+    public function runBrowserBackfill(bool $apply = false, bool $force = false, bool $missingOnly = true, int $limit = 100, int $offset = 0, ?int $partId = null, bool $includeInactive = false, bool $debug = false, bool $reattach = false): array
     {
         if (! Schema::hasTable('marketplace_listings')) {
             throw new \RuntimeException('Required table marketplace_listings does not exist.');
@@ -41,6 +41,9 @@ class OvokoListingUrlBackfillService
             'errors' => 0,
             'would_create_listing' => 0,
             'created_listing' => 0,
+            'conflict_existing_ovoko_listing' => 0,
+            'reattached_listing' => 0,
+            'restored_listing' => 0,
         ];
         $results = [];
 
@@ -162,31 +165,69 @@ class OvokoListingUrlBackfillService
             $newUrl = $this->generatedShopUrlFromOvokoPartId($ovokoId);
             $actions = [];
             $errors = [];
+            $reattachChanges = [];
+            $appliedListing = null;
 
             if ($ovokoId === null || $newUrl === null) {
                 $summary['skipped']++;
                 $errors[] = 'missing_or_invalid_legacy_ovoko_id';
                 $actions[] = 'skipped';
             } else {
-                $summary['matched']++;
-                $summary['would_create_listing']++;
-                $actions[] = $apply ? 'create_listing_from_legacy_ovoko_id' : 'would_create_listing_from_legacy_ovoko_id';
+                $existingMatch = $this->findExistingOvokoListingByLegacyId($ovokoId);
+                if ($existingMatch !== null && (int) $existingMatch->part_id !== (int) $part->id && ! $reattach) {
+                    $summary['conflict_existing_ovoko_listing']++;
+                    $summary['skipped']++;
+                    $actions[] = 'conflict_existing_ovoko_listing';
+                } else {
+                    $reattachBlocked = false;
+                    if ($existingMatch !== null && (int) $existingMatch->part_id !== (int) $part->id && $reattach) {
+                        $reattachDecision = $this->canReattachExistingOvokoListing($existingMatch, $part, $ovokoId);
+                        $reattachChanges['part_id'] = ['from' => $existingMatch->part_id, 'to' => $part->id, 'reason' => $reattachDecision['reason']];
+                        $actions[] = $reattachDecision['allowed'] ? ($apply ? 'reattach_existing_ovoko_listing' : 'would_reattach_existing_ovoko_listing') : 'reattach_not_allowed';
+                        $reattachBlocked = ! $reattachDecision['allowed'];
+                    }
 
-                if ($apply) {
-                    try {
-                        $listing = $this->createOrUpdateLegacyOvokoListing($part, $ovokoId, $newUrl);
-                        $summary['created_listing']++;
-                        $this->logGeneratedUrl($listing, $ovokoId, $newUrl);
-                    } catch (\Throwable $exception) {
-                        $summary['errors']++;
-                        $errors[] = $exception->getMessage();
+                    if ($reattachBlocked) {
+                        $summary['conflict_existing_ovoko_listing']++;
+                        $summary['skipped']++;
+                        $actions[] = 'conflict_existing_ovoko_listing';
+                    } else {
+                        $summary['matched']++;
+                        $summary['would_create_listing']++;
+                        $actions[] = $apply ? 'create_listing_from_legacy_ovoko_id' : 'would_create_listing_from_legacy_ovoko_id';
+
+                        if ($apply) {
+                            try {
+                                $legacyResult = $this->createOrUpdateLegacyOvokoListing($part, $ovokoId, $newUrl, $reattach);
+                                $listing = $legacyResult['listing'];
+                                $appliedListing = $listing;
+                                $reattachChanges = $legacyResult['changes'];
+                                if ($legacyResult['action'] === 'created_listing_from_legacy_ovoko_id') {
+                                    $summary['created_listing']++;
+                                } elseif ($legacyResult['action'] === 'reattached_existing_ovoko_listing') {
+                                    $summary['reattached_listing']++;
+                                } elseif ($legacyResult['action'] === 'restored_existing_ovoko_listing') {
+                                    $summary['restored_listing']++;
+                                }
+                                $actions[] = $legacyResult['action'];
+                                $this->logGeneratedUrl($listing, $ovokoId, $newUrl);
+                            } catch (\Throwable $exception) {
+                                $summary['errors']++;
+                                $errors[] = $exception->getMessage();
+                                if ($exception->getMessage() === 'conflict_existing_ovoko_listing') {
+                                    $summary['conflict_existing_ovoko_listing']++;
+                                }
+                            }
+                        }
                     }
                 }
             }
 
+            $existingMatch = $ovokoId !== null ? $this->findExistingOvokoListingByLegacyId($ovokoId) : null;
+
             $results[] = [
                 'part_id' => $part->id,
-                'marketplace_listing_id' => null,
+                'marketplace_listing_id' => $appliedListing?->id ?? $existingMatch?->id,
                 'ovoko_id' => $ovokoId,
                 'ovoko_id_source' => $source['source'],
                 'ovoko_id_path' => $source['path'],
@@ -196,6 +237,13 @@ class OvokoListingUrlBackfillService
                 'new_price' => $part->ovoko_price,
                 'action' => implode(',', array_values(array_unique($actions))),
                 'errors' => $errors,
+                'existing_ovoko_listing' => $existingMatch ? $this->listingDiagnosticRow($existingMatch) : null,
+                'requested_part_id' => $part->id,
+                'existing_listing_part_id' => $existingMatch?->part_id,
+                'reattach_requested' => $reattach,
+                'reattach_allowed' => $existingMatch ? $this->canReattachExistingOvokoListing($existingMatch, $part, $ovokoId)['allowed'] : null,
+                'reattach_reason' => $existingMatch ? $this->canReattachExistingOvokoListing($existingMatch, $part, $ovokoId)['reason'] : null,
+                'reattach_changes' => $reattachChanges,
             ];
         }
 
@@ -480,6 +528,7 @@ class OvokoListingUrlBackfillService
             'listing_filter_diagnostics' => [],
             'panel_status_source' => 'PartMarketplaceStatusResolver reads the part->marketplaceListings relation, filters marketplace ovoko, and takes external_offer_id/external_listing_id from marketplace_listings.',
             'legacy_ovoko_id_sources' => [],
+            'existing_ovoko_listings_by_legacy_id' => [],
         ];
 
         $debug['global'] = [
@@ -500,6 +549,12 @@ class OvokoListingUrlBackfillService
         $debug['part_exists'] = $part !== null;
         $debug['part'] = $part?->toArray();
         $debug['legacy_ovoko_id_sources'] = $part ? $this->partOvokoIdSources($part) : [];
+        $legacyOvokoId = $part ? ($this->ovokoIdFromPart($part)['id'] ?? null) : null;
+        if ($legacyOvokoId !== null) {
+            $debug['existing_ovoko_listings_by_legacy_id'] = $this->findExistingOvokoListingsByLegacyId($legacyOvokoId)
+                ->map(fn (MarketplaceListing $listing): array => $this->listingDiagnosticRow($listing))
+                ->all();
+        }
 
         $listings = MarketplaceListing::query()->with('part:id,status,quantity,ovoko_price')->where('part_id', $partId)->orderBy('id')->get();
         $debug['marketplace_listings_for_part'] = $listings->map(fn (MarketplaceListing $listing): array => collect($listing->toArray())->only([
@@ -586,13 +641,41 @@ class OvokoListingUrlBackfillService
         return ['source' => $source, 'path' => $path, 'value' => $value, 'valid_numeric' => $value !== null && preg_match('/^\d+$/', $value) === 1, 'generated_url' => $this->generatedShopUrlFromOvokoPartId($value)];
     }
 
-    private function createOrUpdateLegacyOvokoListing(Part $part, string $ovokoId, string $url): MarketplaceListing
+    /** @return array{listing:MarketplaceListing,action:string,changes:array<string,mixed>} */
+    private function createOrUpdateLegacyOvokoListing(Part $part, string $ovokoId, string $url, bool $reattach = false): array
     {
         $account = MarketplaceAccount::query()->firstOrCreate(
             ['code' => 'ovoko_main'],
             ['marketplace' => 'ovoko', 'name' => 'Ovoko main', 'status' => 'active']
         );
-        $listing = MarketplaceListing::query()->firstOrNew(['marketplace' => 'ovoko', 'part_id' => $part->id]);
+
+        $listing = $this->findExistingOvokoListingByLegacyId($ovokoId);
+        $action = 'created_listing_from_legacy_ovoko_id';
+        $changes = [];
+
+        if ($listing !== null) {
+            if ((int) $listing->part_id !== (int) $part->id) {
+                $reattachDecision = $this->canReattachExistingOvokoListing($listing, $part, $ovokoId);
+                if (! $reattach || ! $reattachDecision['allowed']) {
+                    throw new \RuntimeException('conflict_existing_ovoko_listing');
+                }
+
+                $changes['part_id'] = ['from' => $listing->part_id, 'to' => $part->id, 'reason' => $reattachDecision['reason']];
+                $listing->part_id = $part->id;
+                $action = 'reattached_existing_ovoko_listing';
+            } else {
+                $action = 'updated_existing_ovoko_listing';
+            }
+        } else {
+            $listing = MarketplaceListing::query()->firstOrNew(['marketplace' => 'ovoko', 'part_id' => $part->id]);
+        }
+
+        if (Schema::hasColumn('marketplace_listings', 'deleted_at') && $listing->getAttribute('deleted_at') !== null) {
+            $changes['deleted_at'] = ['from' => $listing->getAttribute('deleted_at'), 'to' => null];
+            $listing->setAttribute('deleted_at', null);
+            $action = $action === 'reattached_existing_ovoko_listing' ? $action : 'restored_existing_ovoko_listing';
+        }
+
         $raw = is_array($listing->raw_payload) ? $listing->raw_payload : [];
         $raw['legacy_ovoko_id_backfill'] = ['source' => 'parts_legacy_ovoko_id', 'ovoko_part_id' => $ovokoId, 'url' => $url, 'mapped_at' => now()->toISOString()];
         $listing->forceFill([
@@ -614,7 +697,55 @@ class OvokoListingUrlBackfillService
             'last_error' => null,
             'last_synced_at' => now(),
         ])->save();
-        return $listing;
+
+        return ['listing' => $listing, 'action' => $action, 'changes' => $changes];
+    }
+
+    private function findExistingOvokoListingByLegacyId(string $ovokoId): ?MarketplaceListing
+    {
+        return $this->findExistingOvokoListingsByLegacyId($ovokoId)->first();
+    }
+
+    private function findExistingOvokoListingsByLegacyId(string $ovokoId): \Illuminate\Support\Collection
+    {
+        $urlNeedle = '%hgf'.$ovokoId.'%';
+        $query = MarketplaceListing::query();
+        if (Schema::hasColumn('marketplace_listings', 'deleted_at') && in_array(\Illuminate\Database\Eloquent\SoftDeletes::class, class_uses_recursive(MarketplaceListing::class), true)) {
+            $query->withTrashed();
+        }
+
+        return $query
+            ->where('marketplace', 'like', '%ovoko%')
+            ->where(fn ($query) => $query
+                ->where('external_offer_id', $ovokoId)
+                ->orWhere('external_listing_id', $ovokoId)
+                ->orWhere('url', 'like', $urlNeedle)
+            )
+            ->orderByRaw('CASE WHEN external_offer_id = ? THEN 0 WHEN external_listing_id = ? THEN 1 ELSE 2 END', [$ovokoId, $ovokoId])
+            ->orderBy('id')
+            ->get();
+    }
+
+    /** @return array{allowed:bool,reason:string} */
+    private function canReattachExistingOvokoListing(MarketplaceListing $listing, Part $targetPart, string $ovokoId): array
+    {
+        if ($listing->part_id === null) {
+            return ['allowed' => true, 'reason' => 'existing_listing_has_no_part_id'];
+        }
+
+        $targetOvokoId = $this->ovokoIdFromPart($targetPart)['id'] ?? null;
+        if ($targetOvokoId === $ovokoId) {
+            return ['allowed' => true, 'reason' => 'target_part_has_matching_legacy_ovoko_id'];
+        }
+
+        return ['allowed' => false, 'reason' => 'existing_listing_has_different_part_and_target_part_legacy_ovoko_id_does_not_match'];
+    }
+
+    private function listingDiagnosticRow(MarketplaceListing $listing): array
+    {
+        return collect($listing->toArray())->only([
+            'id', 'part_id', 'status', 'sync_status', 'match_status', 'url', 'price', 'title', 'created_at', 'updated_at',
+        ])->put('listing_id', $listing->id)->all();
     }
 
     private function existingOvokoId(MarketplaceListing $listing): ?string

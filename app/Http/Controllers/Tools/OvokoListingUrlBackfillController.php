@@ -38,6 +38,7 @@ class OvokoListingUrlBackfillController extends Controller
             : $this->queryBool($request, 'only_missing', true);
         $parsedIncludeInactive = $this->queryBool($request, 'include_inactive');
         $parsedDebug = $this->queryBool($request, 'debug');
+        $parsedReattach = $this->queryBool($request, 'reattach');
         $parsedPartId = $request->filled('part_id') ? (int) $request->query('part_id') : null;
 
         $apply = $isBrowserBackfill
@@ -57,6 +58,7 @@ class OvokoListingUrlBackfillController extends Controller
                 partId: $parsedPartId,
                 includeInactive: $parsedIncludeInactive,
                 debug: $parsedDebug,
+                reattach: $parsedReattach,
             );
         } elseif (! $request->filled('listing_id') && ! $request->filled('part_id')) {
             $limit = max(1, min(self::MAX_BULK_LIMIT, (int) $request->query('limit', self::DEFAULT_BULK_LIMIT)));
@@ -103,6 +105,7 @@ class OvokoListingUrlBackfillController extends Controller
             'parsed_offset' => $offset ?? null,
             'debug' => $parsedDebug,
             'include_inactive' => $parsedIncludeInactive,
+            'reattach_requested' => $parsedReattach,
             'apply_requested' => $parsedApply,
             'apply_confirmed' => $apply,
             'force' => $parsedForce,
