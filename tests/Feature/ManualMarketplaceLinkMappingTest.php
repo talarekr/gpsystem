@@ -271,6 +271,41 @@ class ManualMarketplaceLinkMappingTest extends TestCase
             ->assertJsonPath('summary.updated_price', 1);
     }
 
+    public function test_browser_ovoko_backfill_accepts_comma_separated_part_ids(): void
+    {
+        $this->actingAsAdminUser();
+        $partA = Part::query()->create(['name' => 'Part A', 'sku' => 'GPS-A', 'part_number' => 'PA', 'quantity' => 1, 'status' => 'ready', 'currency' => 'PLN', 'ovoko_price' => null]);
+        $partB = Part::query()->create(['name' => 'Part B', 'sku' => 'GPS-B', 'part_number' => 'PB', 'quantity' => 1, 'status' => 'ready', 'currency' => 'PLN', 'ovoko_price' => null]);
+        MarketplaceListing::query()->create(['part_id' => $partA->id, 'marketplace' => 'ovoko', 'external_offer_id' => '7249', 'external_listing_id' => '7249', 'price' => 321.45, 'currency' => 'PLN', 'status' => 'active', 'sync_status' => 'mapped', 'match_status' => 'confirmed']);
+        MarketplaceListing::query()->create(['part_id' => $partB->id, 'marketplace' => 'ovoko', 'external_offer_id' => '7250', 'external_listing_id' => '7250', 'price' => 111.11, 'currency' => 'PLN', 'status' => 'active', 'sync_status' => 'mapped', 'match_status' => 'confirmed']);
+
+        $ids = $partA->id.','.$partB->id.',999999';
+
+        $this->getJson('/admin/tools/ovoko/backfill-links?part_ids='.$ids.'&apply=0')
+            ->assertOk()
+            ->assertJsonPath('dry_run', true)
+            ->assertJsonPath('parsed_part_ids.0', $partA->id)
+            ->assertJsonPath('parsed_part_ids.1', $partB->id)
+            ->assertJsonPath('summary.requested_parts', 3)
+            ->assertJsonPath('summary.would_update_url', 2)
+            ->assertJsonPath('results.0.part_exists', true)
+            ->assertJsonPath('results.0.legacy_ovoko_id', '7249')
+            ->assertJsonPath('results.0.existing_marketplace_listing.part_id', $partA->id)
+            ->assertJsonPath('results.2.part_exists', false)
+            ->assertJsonPath('results.2.action', 'part_not_found')
+            ->assertJsonPath('example_urls.apply_without_reattach', url('/admin/tools/ovoko/backfill-links').'?part_ids='.urlencode($ids).'&missing_only=1&force=0&include_inactive=0&reattach=0&apply=1');
+
+        $this->assertDatabaseHas('marketplace_listings', ['part_id' => $partA->id, 'marketplace' => 'ovoko', 'url' => null]);
+
+        $this->getJson('/admin/tools/ovoko/backfill-links?part_ids='.$ids.'&apply=1')
+            ->assertOk()
+            ->assertJsonPath('dry_run', false)
+            ->assertJsonPath('summary.updated_url', 2);
+
+        $this->assertDatabaseHas('marketplace_listings', ['part_id' => $partA->id, 'marketplace' => 'ovoko', 'url' => 'https://ovoko.pl/czesci-samochodowe/hgf7249']);
+        $this->assertDatabaseHas('marketplace_listings', ['part_id' => $partB->id, 'marketplace' => 'ovoko', 'url' => 'https://ovoko.pl/czesci-samochodowe/hgf7250']);
+    }
+
     private function actingAsAdminUser(): User
     {
         $this->seed(RoleSeeder::class);

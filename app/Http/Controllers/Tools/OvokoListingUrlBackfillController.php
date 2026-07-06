@@ -40,6 +40,7 @@ class OvokoListingUrlBackfillController extends Controller
         $parsedDebug = $this->queryBool($request, 'debug');
         $parsedReattach = $this->queryBool($request, 'reattach');
         $parsedPartId = $request->filled('part_id') ? (int) $request->query('part_id') : null;
+        $parsedPartIds = $this->parsePartIds((string) $request->query('part_ids', ''));
 
         $apply = $isBrowserBackfill
             ? $parsedApply
@@ -49,17 +50,28 @@ class OvokoListingUrlBackfillController extends Controller
         if ($isBrowserBackfill) {
             $limit = max(1, min(self::MAX_BULK_LIMIT, (int) $request->query('limit', self::DEFAULT_BULK_LIMIT)));
             $offset = max(0, (int) $request->query('offset', $request->query('page') ? (((int) $request->query('page') - 1) * $limit) : 0));
-            $result = $backfill->runBrowserBackfill(
-                apply: $apply,
-                force: $parsedForce,
-                missingOnly: $parsedMissingOnly,
-                limit: $limit,
-                offset: $offset,
-                partId: $parsedPartId,
-                includeInactive: $parsedIncludeInactive,
-                debug: $parsedDebug,
-                reattach: $parsedReattach,
-            );
+            $result = $parsedPartIds !== []
+                ? $backfill->runBrowserBackfillForPartIds(
+                    partIds: $parsedPartIds,
+                    apply: $apply,
+                    force: $parsedForce,
+                    missingOnly: $parsedMissingOnly,
+                    limit: $limit,
+                    includeInactive: $parsedIncludeInactive,
+                    debug: $parsedDebug,
+                    reattach: $parsedReattach,
+                )
+                : $backfill->runBrowserBackfill(
+                    apply: $apply,
+                    force: $parsedForce,
+                    missingOnly: $parsedMissingOnly,
+                    limit: $limit,
+                    offset: $offset,
+                    partId: $parsedPartId,
+                    includeInactive: $parsedIncludeInactive,
+                    debug: $parsedDebug,
+                    reattach: $parsedReattach,
+                );
         } elseif (! $request->filled('listing_id') && ! $request->filled('part_id')) {
             $limit = max(1, min(self::MAX_BULK_LIMIT, (int) $request->query('limit', self::DEFAULT_BULK_LIMIT)));
             $offset = max(0, (int) $request->query('offset', 0));
@@ -97,7 +109,10 @@ class OvokoListingUrlBackfillController extends Controller
             'mode' => $result['mode'],
             'dry_run' => ! $apply,
             'requested_part_id' => $request->query('part_id'),
+            'requested_part_ids' => $request->query('part_ids'),
             'parsed_part_id' => $parsedPartId,
+            'parsed_part_ids' => $parsedPartIds,
+
             'parsed_force' => $parsedForce,
             'parsed_missing_only' => $parsedMissingOnly,
             'parsed_apply' => $parsedApply,
@@ -131,6 +146,41 @@ class OvokoListingUrlBackfillController extends Controller
             'results' => $result['results'],
             'warnings' => $result['warnings'],
             'debug_info' => $result['debug'] ?? null,
+            'example_urls' => $parsedPartIds !== [] ? $this->exampleUrls($request, $parsedPartIds, $parsedForce, $parsedMissingOnly, $parsedIncludeInactive, $parsedReattach) : null,
         ]);
+    }
+
+    /** @return array<int,int> */
+    private function parsePartIds(string $value): array
+    {
+        if (trim($value) === '') {
+            return [];
+        }
+
+        return array_values(array_unique(array_filter(array_map(
+            fn (string $id): int => (int) trim($id),
+            explode(',', $value)
+        ), fn (int $id): bool => $id > 0)));
+    }
+
+    /** @param array<int,int> $partIds */
+    private function exampleUrls(Request $request, array $partIds, bool $force, bool $missingOnly, bool $includeInactive, bool $reattach): array
+    {
+        $base = $request->url();
+        $common = [
+            'part_ids' => implode(',', $partIds),
+            'missing_only' => $missingOnly ? 1 : 0,
+            'force' => $force ? 1 : 0,
+            'include_inactive' => $includeInactive ? 1 : 0,
+        ];
+        if ($reattach) {
+            $common['reattach'] = 1;
+        }
+
+        return [
+            'dry_run' => $base.'?'.http_build_query($common + ['apply' => 0]),
+            'apply_without_reattach' => $base.'?'.http_build_query(($common + ['reattach' => 0, 'apply' => 1])),
+            'apply_with_reattach' => $base.'?'.http_build_query(($common + ['reattach' => 1, 'apply' => 1])),
+        ];
     }
 }

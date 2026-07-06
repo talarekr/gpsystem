@@ -20,6 +20,71 @@ class OvokoListingUrlBackfillService
 
 
     /** @return array{mode:string,summary:array<string,int>,results:array<int,array<string,mixed>>,warnings:array<int,string>,limit_requested:int,limit_applied:int,offset_requested:int,offset_applied:int} */
+    public function runBrowserBackfillForPartIds(array $partIds, bool $apply = false, bool $force = false, bool $missingOnly = true, int $limit = 100, bool $includeInactive = false, bool $debug = false, bool $reattach = false): array
+    {
+        $partIds = array_values(array_unique(array_filter(array_map('intval', $partIds), fn (int $id): bool => $id > 0)));
+        $aggregate = [
+            'mode' => $apply ? 'apply' : 'dry_run',
+            'summary' => [],
+            'results' => [],
+            'warnings' => [],
+            'limit_requested' => count($partIds),
+            'limit_applied' => count($partIds),
+            'offset_requested' => 0,
+            'offset_applied' => 0,
+            'debug' => $debug ? ['part_ids' => []] : null,
+        ];
+
+        foreach ($partIds as $partId) {
+            $result = $this->runBrowserBackfill($apply, $force, $missingOnly, $limit, 0, $partId, $includeInactive, $debug, $reattach);
+            foreach ($result['summary'] as $key => $value) {
+                $aggregate['summary'][$key] = ($aggregate['summary'][$key] ?? 0) + (int) $value;
+            }
+            $aggregate['warnings'] = array_values(array_unique(array_merge($aggregate['warnings'], $result['warnings'])));
+            if ($debug) {
+                $aggregate['debug']['part_ids'][$partId] = $result['debug'];
+            }
+
+            $part = Part::query()->select(['id', 'legacy_payload', 'source_system', 'external_id'])->find($partId);
+            if ($result['results'] === []) {
+                $source = $part ? $this->ovokoIdFromPart($part) : ['id' => null, 'source' => null, 'path' => null];
+                $aggregate['summary']['missing_part'] = ($aggregate['summary']['missing_part'] ?? 0) + ($part ? 0 : 1);
+                $aggregate['summary']['skipped'] = ($aggregate['summary']['skipped'] ?? 0) + 1;
+                $aggregate['results'][] = [
+                    'part_id' => $partId,
+                    'part_exists' => $part !== null,
+                    'legacy_ovoko_id' => $source['id'],
+                    'ovoko_id' => $source['id'],
+                    'existing_marketplace_listing' => null,
+                    'existing_ovoko_listing' => null,
+                    'marketplace_listing_id' => null,
+                    'action' => $part ? 'skipped' : 'part_not_found',
+                    'reattach_allowed' => null,
+                    'reattach_reason' => null,
+                    'errors' => $part ? ['no_eligible_ovoko_listing_or_legacy_ovoko_id'] : ['part_not_found'],
+                ];
+                continue;
+            }
+
+            foreach ($result['results'] as $row) {
+                $listing = isset($row['marketplace_listing_id']) ? MarketplaceListing::query()->find($row['marketplace_listing_id']) : null;
+                $source = $part ? $this->ovokoIdFromPart($part) : ['id' => $row['ovoko_id'] ?? null];
+                $row['part_exists'] = $part !== null;
+                $row['legacy_ovoko_id'] = $source['id'] ?? ($row['ovoko_id'] ?? null);
+                $row['existing_marketplace_listing'] = $listing ? $this->listingDiagnosticRow($listing) : ($row['existing_ovoko_listing'] ?? null);
+                $row['reattach_allowed'] = $row['reattach_allowed'] ?? null;
+                $row['reattach_reason'] = $row['reattach_reason'] ?? null;
+                $aggregate['results'][] = $row;
+            }
+        }
+
+        $aggregate['summary']['requested_parts'] = count($partIds);
+        $aggregate['summary']['results_count'] = count($aggregate['results']);
+
+        return $aggregate;
+    }
+
+    /** @return array{mode:string,summary:array<string,int>,results:array<int,array<string,mixed>>,warnings:array<int,string>,limit_requested:int,limit_applied:int,offset_requested:int,offset_applied:int} */
     public function runBrowserBackfill(bool $apply = false, bool $force = false, bool $missingOnly = true, int $limit = 100, int $offset = 0, ?int $partId = null, bool $includeInactive = false, bool $debug = false, bool $reattach = false): array
     {
         if (! Schema::hasTable('marketplace_listings')) {
@@ -295,7 +360,7 @@ class OvokoListingUrlBackfillService
         return [
             'mode' => $apply ? 'apply' : 'dry_run',
             'summary' => $summary,
-            'results' => array_slice($results, 0, 50),
+            'results' => $partId !== null ? $results : array_slice($results, 0, 50),
             'warnings' => [],
             'limit_requested' => $limit,
             'limit_applied' => $limit,
