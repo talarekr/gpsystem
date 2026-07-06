@@ -15,7 +15,7 @@ class MarketplaceListingReadinessService
     private const DEFAULT_ALLEGRO_SAFETY_INFORMATION = 'Część używana pochodząca z demontażu pojazdu. Montaż powinien zostać wykonany przez wykwalifikowany warsztat lub osobę posiadającą odpowiednią wiedzę techniczną. Przed montażem należy porównać numer części i zgodność z pojazdem. Produkt nie jest zabawką.';
     public const CHANNELS = ['storefront', 'allegro_main', 'ovoko', 'ebay_de', 'ebay_fr'];
 
-    public function __construct(private readonly TranslationService $translationService, private readonly EbayDescriptionTemplateRenderer $ebayDescriptionTemplateRenderer, private readonly NbpExchangeRateService $exchangeRateService, private readonly EbayItemSpecificsService $ebayItemSpecificsService, private readonly AllegroCategoryParametersService $allegroCategoryParametersService, private readonly AllegroOfferParametersBuilder $allegroOfferParametersBuilder, private readonly MarketplaceImageSelectionService $marketplaceImageSelectionService, private readonly AllegroSalesSettingsResolver $allegroSalesSettingsResolver, private readonly AllegroDescriptionBuilder $allegroDescriptionBuilder, private readonly EbayTitleSanitizer $ebayTitleSanitizer) {}
+    public function __construct(private readonly TranslationService $translationService, private readonly EbayDescriptionTemplateRenderer $ebayDescriptionTemplateRenderer, private readonly NbpExchangeRateService $exchangeRateService, private readonly EbayItemSpecificsService $ebayItemSpecificsService, private readonly AllegroCategoryParametersService $allegroCategoryParametersService, private readonly AllegroOfferParametersBuilder $allegroOfferParametersBuilder, private readonly MarketplaceImageSelectionService $marketplaceImageSelectionService, private readonly AllegroSalesSettingsResolver $allegroSalesSettingsResolver, private readonly AllegroDescriptionBuilder $allegroDescriptionBuilder, private readonly EbayTitleSanitizer $ebayTitleSanitizer, private readonly EbayShippingPolicyResolutionService $ebayShippingPolicyResolutionService) {}
 
     /** @return array<string, mixed> */
     public function checkPartReadiness(Part $part, string $channel): array
@@ -373,22 +373,16 @@ class MarketplaceListingReadinessService
         $paymentPolicyId = $this->policyId($settings, 'payment');
         $returnPolicyId = $this->policyId($settings, 'return');
         $merchantLocationKey = $this->merchantLocationKey($settings, $config, $channel);
-        $shippingGroup = filled($mapping?->shipping_group) ? (string) $mapping->shipping_group : null;
-        $fulfillmentPolicyId = filled($mapping?->fulfillment_policy_id) ? (string) $mapping->fulfillment_policy_id : null;
-        $fulfillmentPolicyName = $this->fulfillmentPolicyName($fulfillmentPolicyId, $shippingGroup);
-        $categoryName = $part->relationLoaded('category') ? ($part->category?->name ?? $mapping?->local_category_name) : $mapping?->local_category_name;
-        $availablePolicyMapping = $this->availableShippingPolicyMapping($channel);
+        $shippingResolution = $this->ebayShippingPolicyResolutionService->resolve($part, $mapping, $channel);
+        $shippingGroup = $shippingResolution['shipping_group'] ?? null;
+        $fulfillmentPolicyId = $shippingResolution['selected_fulfillment_policy_id'] ?? null;
+        $fulfillmentPolicyName = $shippingResolution['selected_fulfillment_policy_name'] ?? null;
         $missing = [];
         $blockers = [];
 
-        if (blank($shippingGroup)) {
-            $missing[] = 'category_shipping_group';
-            $blockers[] = 'category_shipping_group';
-        }
-
-        if (blank($fulfillmentPolicyId)) {
-            $missing[] = 'shipping_policy_mapping';
-            $blockers[] = 'shipping_policy_mapping';
+        foreach ($shippingResolution['missing'] ?? [] as $missingShippingField) {
+            $missing[] = (string) $missingShippingField;
+            $blockers[] = (string) $missingShippingField;
         }
 
         if (blank($paymentPolicyId)) {
@@ -405,14 +399,8 @@ class MarketplaceListingReadinessService
             'missing' => $missing,
             'blockers' => $blockers,
             'shipping_policy_resolution' => [
-                'local_category_id' => $part->category_id ?? null,
-                'local_category_name' => $categoryName,
-                'shipping_group' => $shippingGroup,
-                'shipping_group_source' => $shippingGroup ? 'marketplace_category_mappings.shipping_group' : null,
-                'selected_fulfillment_policy_id' => $fulfillmentPolicyId,
-                'selected_fulfillment_policy_name' => $fulfillmentPolicyName,
-                'available_policy_mapping' => $availablePolicyMapping,
-                'missing' => array_values(array_intersect($missing, ['category_shipping_group', 'shipping_policy_mapping'])),
+                ...$shippingResolution,
+                'missing' => $shippingResolution['missing'] ?? [],
             ],
             'business_policies' => [
                 'selected_fulfillment_policy_id' => $fulfillmentPolicyId,
@@ -430,9 +418,7 @@ class MarketplaceListingReadinessService
     private function policyId(array $settings, string $type): ?string { foreach (["{$type}_policy_id", "default_{$type}_policy_id", "ebay_{$type}_policy_id"] as $key) if (filled($settings[$key] ?? null)) return (string) $settings[$key]; $policies = is_array($settings['business_policies'] ?? null) ? $settings['business_policies'] : []; return filled($policies[$type] ?? null) ? (string) $policies[$type] : null; }
     private function policyName(array $settings, string $type, ?string $id): ?string { if (blank($id)) return null; $policies = is_array($settings[$type.'_policies'] ?? null) ? $settings[$type.'_policies'] : []; foreach ($policies as $policy) if (is_array($policy) && (string) ($policy['id'] ?? '') === (string) $id) return $policy['name'] ?? null; return null; }
     private function merchantLocationKey(array $settings, array $config, ?string $channel = null): ?string { foreach (['merchant_location_key', 'merchantLocationKey', 'location_key', 'inventory_location_key'] as $key) if (filled($settings[$key] ?? null)) return (string) $settings[$key]; foreach (['merchant_location_key', 'merchantLocationKey', 'location_key', 'inventory_location_key'] as $key) if (filled($config[$key] ?? null)) return (string) $config[$key]; $defaults = array_merge((array) config('product-hub.ebay.default_location', []), (array) config('product-hub.ebay.accounts.'.($channel ?: 'ebay_de'), [])); foreach (['merchant_location_key', 'merchantLocationKey', 'location_key', 'inventory_location_key'] as $key) if (filled($defaults[$key] ?? null)) return (string) $defaults[$key]; return null; }
-    /** @return array<string, string> */
-    private function availableShippingPolicyMapping(string $channel): array { return $channel === 'ebay_fr' ? ['fr_55_eur' => '260547694013', 'fr_70_eur' => '260547464013', 'fr_130_eur' => '260547754013'] : ['de_30_eur' => '259264150013', 'de_50_eur' => '259677066013', 'de_130_eur' => '259636579013']; }
-    private function fulfillmentPolicyName(?string $policyId, ?string $shippingGroup): ?string { if (blank($policyId)) return null; return match ((string) $policyId) { '259264150013' => 'Wysyłka 30 euro', '259677066013' => 'Wysyłka 50 euro', '259636579013' => 'Wysyłka 130 euro', '260547694013' => 'Wysyłka FR 55 euro', '260547464013' => 'Wysyłka FR 70 euro', '260547754013' => 'Wysyłka FR 130 euro', default => $shippingGroup, }; }
+    private function fulfillmentPolicyName(?string $policyId, ?string $shippingGroup): ?string { return $this->ebayShippingPolicyResolutionService->fulfillmentPolicyName($policyId, $shippingGroup); }
 
     /** @return array<string, mixed> */
     private function resolveEbayPrice(?float $sourcePricePln): array
