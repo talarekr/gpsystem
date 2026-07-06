@@ -24,7 +24,7 @@ class AllegroDescriptionBuilder
     {
         $part->loadMissing(['car', 'images']);
         $blockers = [];
-        $description = $this->cleanText((string) ($part->description ?? ''));
+        $description = $this->cleanMultilineText((string) ($part->description ?? ''));
 
         if ($description === '') {
             $blockers[] = 'missing_part_description';
@@ -114,6 +114,24 @@ class AllegroDescriptionBuilder
     private function cleanText(string $value): string
     {
         return trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags($value), ENT_QUOTES | ENT_HTML5, 'UTF-8')) ?: '');
+    }
+
+    private function cleanMultilineText(string $value): string
+    {
+        $text = html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $text = preg_replace('~<\s*br\s*/?\s*>~iu', "\n", $text) ?? $text;
+        $text = preg_replace('~<\s*/\s*p\s*>~iu', "\n\n", $text) ?? $text;
+        $text = preg_replace('~<\s*p\b[^>]*>~iu', '', $text) ?? $text;
+        $text = preg_replace('~<\s*/\s*li\s*>~iu', "\n", $text) ?? $text;
+        $text = preg_replace('~<\s*li\b[^>]*>~iu', '- ', $text) ?? $text;
+        $text = preg_replace('~<\s*/?\s*(?:ul|ol)\b[^>]*>~iu', "\n", $text) ?? $text;
+        $text = html_entity_decode(strip_tags($text), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $text = str_replace(["\r\n", "\r"], "\n", $text);
+        $text = preg_replace('/[ \t]+/u', ' ', $text) ?? $text;
+        $text = preg_replace('/ *\n */u', "\n", $text) ?? $text;
+        $text = preg_replace('/\n{3,}/u', "\n\n", $text) ?? $text;
+
+        return trim($text);
     }
 
     /** @param array<string, mixed> $diagnostics @param array<string, string> $values */

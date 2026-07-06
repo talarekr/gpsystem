@@ -348,7 +348,7 @@ class AllegroSalesSettingsTest extends TestCase
         $this->assertSame('text_image_50_50', $result['request_summary']['description_template']);
         $this->assertGreaterThan(0, $result['request_summary']['description_sanitized_length']);
         Http::assertSent(fn ($request) => $request->url() === 'https://api.allegro.pl/sale/product-offers'
-            && str_contains((string) data_get($request->data(), 'description.sections.0.items.0.content'), 'Lokalny opis części 7897 Numer: ABC')
+            && str_contains((string) data_get($request->data(), 'description.sections.0.items.0.content'), 'Lokalny opis części 7897<br />Numer: ABC')
             && ! str_contains((string) data_get($request->data(), 'description.sections.0.items.0.content'), 'Cechy produktu')
             && ! str_contains((string) data_get($request->data(), 'description.sections.0.items.0.content'), 'marketingowy opis'));
     }

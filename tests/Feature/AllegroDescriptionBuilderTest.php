@@ -55,6 +55,34 @@ class AllegroDescriptionBuilderTest extends TestCase
         $this->assertStringNotContainsString('wysokiej jakości część zamienna', $content);
     }
 
+
+    public function test_part_description_preserves_editor_line_breaks_in_allegro_payload(): void
+    {
+        Http::fake($this->fakeAllegro());
+        $part = $this->readyPart();
+        $part->forceFill(['description' => "DRZWI W KOLOR\n\nKOMPLETNE\n\nMOŻNA ZAŁOŻYĆ BEZ MALOWANIA"])->save();
+
+        $content = $this->getJson('/tools/dry-run-marketplace-listing-payload?token=gps_images_import_2026&channel=allegro_main&part_id='.$part->id)
+            ->json('payload.description.sections.0.items.0.content');
+
+        $this->assertStringContainsString('<p><b>DRZWI W KOLOR</b></p><p><b>KOMPLETNE</b></p><p><b>MOŻNA ZAŁOŻYĆ BEZ MALOWANIA</b></p>', $content);
+        $this->assertStringNotContainsString('DRZWI W KOLORKOMPLETNE', $content);
+    }
+
+    public function test_part_description_converts_editor_html_breaks_and_lists_to_readable_lines(): void
+    {
+        Http::fake($this->fakeAllegro());
+        $part = $this->readyPart();
+        $part->forceFill(['description' => '<p>DRZWI W KOLOR<br>KOMPLETNE</p><ul><li>RYSA</li><li>SPRAWNE</li></ul>'])->save();
+
+        $content = $this->getJson('/tools/dry-run-marketplace-listing-payload?token=gps_images_import_2026&channel=allegro_main&part_id='.$part->id)
+            ->json('payload.description.sections.0.items.0.content');
+
+        $this->assertStringContainsString('<p><b>DRZWI W KOLOR<br />KOMPLETNE</b></p>', $content);
+        $this->assertStringContainsString('<p><b>- RYSA<br />- SPRAWNE</b></p>', $content);
+        $this->assertStringNotContainsString('KOLORKOMPLETNE', $content);
+    }
+
     public function test_gp_swiss_template_hides_duplicate_variant_from_model_line(): void
     {
         Http::fake($this->fakeAllegro());
