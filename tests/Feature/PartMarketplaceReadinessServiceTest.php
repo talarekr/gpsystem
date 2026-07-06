@@ -220,6 +220,47 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $this->assertStringContainsString('publishing || !prepareReady', $html);
     }
 
+    public function test_ebay_card_with_publish_button_does_not_render_old_missing_translation_as_red_blocker(): void
+    {
+        $part = Part::query()->create(['name' => 'Gotowa część eBay', 'price' => 100, 'quantity' => 1]);
+
+        $this->mock(PartMarketplaceReadinessService::class, function ($mock): void {
+            $mock->shouldReceive('check')->once()->andReturn([
+                'allegro' => [
+                    'presentation' => [
+                        'ready' => false,
+                        'missing' => [],
+                        'category' => ['value' => 'Wybierz kategorię', 'mapped' => false],
+                    ],
+                ],
+                'ovoko' => [
+                    'presentation' => [
+                        'ready' => false,
+                        'missing' => [],
+                        'category' => ['value' => 'Wybierz kategorię', 'mapped' => false],
+                    ],
+                ],
+                'ebay' => [
+                    'ready' => true,
+                    'presentation' => [
+                        'ready' => true,
+                        'message' => 'Gotowe',
+                        'missing' => ['Brak przygotowanego tłumaczenia eBay DE'],
+                        'category' => ['value' => 'eBay DE ID: 123', 'mapped' => true],
+                    ],
+                ],
+            ]);
+        });
+
+        $html = view('filament.resources.parts.marketplace-readiness-cards', ['part' => $part, 'preparedStatusChecked' => ['ebay']])->render();
+
+        $this->assertStringContainsString('data-marketplace-card="ebay" x-data="{ preparedStatusChecked: true,', $html);
+        $this->assertStringContainsString('prepareReady: true', $html);
+        $this->assertStringContainsString('Wystaw', $html);
+        $this->assertStringNotContainsString('prepareMessage: \'Brak przygotowanego tłumaczenia eBay DE\'', $html);
+        $this->assertStringNotContainsString('data-marketplace-prepare-result="blocked"', $html);
+    }
+
 
     private function visibleInitialStatusHtml(string $html): string
     {
