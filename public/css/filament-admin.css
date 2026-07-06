@@ -2564,3 +2564,99 @@ body:has(.gps-admin-topbar) .fi-no {
         pointer-events: auto;
     }
 }
+
+/* Mobile readability fix for the Part edit form only. Keep desktop compact labels
+   intact, but let Filament fields occupy a full safe row on phone widths. */
+@media (max-width: 640px) {
+    .gps-part-form {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+    }
+
+    .gps-part-form .gps-part-form-section--part-info,
+    .gps-part-form .gps-part-form-section--part-info :where(
+        .fi-section-content,
+        .fi-fo-component-ctn,
+        .grid,
+        [class*="grid-cols"],
+        [class*="col-span"],
+        .fi-fo-field-wrp,
+        .fi-input-wrp,
+        .fi-fo-select,
+        .fi-fo-select .choices,
+        .choices__inner,
+        .fi-fo-rich-editor,
+        .fi-rich-editor,
+        .fi-fo-markdown-editor
+    ) {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+    }
+
+    .gps-part-form .gps-part-form-section--part-info :where(.fi-fo-component-ctn, .grid) {
+        grid-template-columns: minmax(0, 1fr) !important;
+    }
+
+    .gps-part-form .gps-part-form-section--part-info :where([class*="col-span"]) {
+        grid-column: 1 / -1 !important;
+    }
+
+    .gps-part-form .gps-part-form-section--part-info .fi-fo-field-wrp {
+        padding-top: 0 !important;
+    }
+
+    .gps-part-form .gps-part-form-section--part-info .fi-fo-field-wrp-label {
+        position: static !important;
+        z-index: auto !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        margin: 0 0 0.35rem !important;
+        padding-inline: 0 !important;
+        background: transparent !important;
+        white-space: normal !important;
+        line-height: 1.25 !important;
+        pointer-events: auto !important;
+    }
+
+    .gps-part-form .gps-part-form-section--part-info .fi-fo-field-wrp-label span {
+        display: inline !important;
+        overflow-wrap: normal !important;
+        word-break: normal !important;
+        hyphens: none !important;
+        line-height: 1.25 !important;
+    }
+
+    .gps-part-form .gps-part-form-section--part-info :where(
+        .fi-input,
+        .fi-select-input,
+        .fi-textarea,
+        .choices__input,
+        .choices__inner,
+        .choices__list--single,
+        .choices__item,
+        .choices__item--selectable,
+        .fi-fo-rich-editor .ProseMirror,
+        .fi-rich-editor .ProseMirror,
+        .fi-fo-markdown-editor textarea
+    ) {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        overflow-wrap: normal !important;
+        word-break: normal !important;
+        hyphens: none !important;
+        white-space: normal !important;
+    }
+
+    .gps-part-form .gps-part-form-section--part-info :where(.fi-input, .fi-select-input, .choices__item, .choices__item--selectable) {
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+    }
+
+    .gps-part-form .gps-part-form-section--part-info :where(.fi-fo-rich-editor, .fi-rich-editor, .fi-fo-rich-editor .ProseMirror, .fi-rich-editor .ProseMirror) {
+        min-height: 9rem !important;
+    }
+}
