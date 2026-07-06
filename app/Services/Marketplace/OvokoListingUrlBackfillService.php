@@ -41,7 +41,12 @@ class OvokoListingUrlBackfillService
             'errors' => 0,
             'would_create_listing' => 0,
             'created_listing' => 0,
+            'would_update_existing_listing' => 0,
+            'updated_existing_listing' => 0,
+            'already_mapped' => 0,
+            'skipped_existing_complete' => 0,
             'conflict_existing_ovoko_listing' => 0,
+            'would_reattach_listing' => 0,
             'reattached_listing' => 0,
             'restored_listing' => 0,
         ];
@@ -174,17 +179,55 @@ class OvokoListingUrlBackfillService
                 $actions[] = 'skipped';
             } else {
                 $existingMatch = $this->findExistingOvokoListingByLegacyId($ovokoId);
-                if ($existingMatch !== null && (int) $existingMatch->part_id !== (int) $part->id && ! $reattach) {
+                if ($existingMatch !== null && (int) $existingMatch->part_id === (int) $part->id) {
+                    $existingUrl = $this->blankNull($existingMatch->url);
+                    $existingPrice = $existingMatch->price;
+                    $existingComplete = $existingUrl !== null && is_numeric($existingPrice);
+
+                    $summary['matched']++;
+
+                    if ($existingComplete && ! $force) {
+                        $summary['already_mapped']++;
+                        $summary['skipped_existing_complete']++;
+                        $actions[] = 'already_mapped';
+                        $actions[] = 'skip_existing_complete';
+                    } else {
+                        $summary['would_update_existing_listing']++;
+                        $actions[] = $apply ? 'update_existing_listing' : 'would_update_existing_listing';
+
+                        if ($apply) {
+                            try {
+                                $legacyResult = $this->createOrUpdateLegacyOvokoListing($part, $ovokoId, $newUrl, $reattach);
+                                $listing = $legacyResult['listing'];
+                                $appliedListing = $listing;
+                                $reattachChanges = $legacyResult['changes'];
+                                if ($legacyResult['action'] === 'updated_existing_ovoko_listing') {
+                                    $summary['updated_existing_listing']++;
+                                } elseif ($legacyResult['action'] === 'restored_existing_ovoko_listing') {
+                                    $summary['restored_listing']++;
+                                }
+                                $actions[] = $legacyResult['action'];
+                                $this->logGeneratedUrl($listing, $ovokoId, $newUrl);
+                            } catch (\Throwable $exception) {
+                                $summary['errors']++;
+                                $errors[] = $exception->getMessage();
+                            }
+                        }
+                    }
+                } elseif ($existingMatch !== null && ! $reattach) {
                     $summary['conflict_existing_ovoko_listing']++;
                     $summary['skipped']++;
                     $actions[] = 'conflict_existing_ovoko_listing';
                 } else {
                     $reattachBlocked = false;
-                    if ($existingMatch !== null && (int) $existingMatch->part_id !== (int) $part->id && $reattach) {
+                    if ($existingMatch !== null && $reattach) {
                         $reattachDecision = $this->canReattachExistingOvokoListing($existingMatch, $part, $ovokoId);
                         $reattachChanges['part_id'] = ['from' => $existingMatch->part_id, 'to' => $part->id, 'reason' => $reattachDecision['reason']];
                         $actions[] = $reattachDecision['allowed'] ? ($apply ? 'reattach_existing_ovoko_listing' : 'would_reattach_existing_ovoko_listing') : 'reattach_not_allowed';
                         $reattachBlocked = ! $reattachDecision['allowed'];
+                        if (! $reattachBlocked) {
+                            $summary['would_reattach_listing']++;
+                        }
                     }
 
                     if ($reattachBlocked) {
@@ -193,8 +236,10 @@ class OvokoListingUrlBackfillService
                         $actions[] = 'conflict_existing_ovoko_listing';
                     } else {
                         $summary['matched']++;
-                        $summary['would_create_listing']++;
-                        $actions[] = $apply ? 'create_listing_from_legacy_ovoko_id' : 'would_create_listing_from_legacy_ovoko_id';
+                        if ($existingMatch === null) {
+                            $summary['would_create_listing']++;
+                            $actions[] = $apply ? 'create_listing_from_legacy_ovoko_id' : 'would_create_listing_from_legacy_ovoko_id';
+                        }
 
                         if ($apply) {
                             try {
