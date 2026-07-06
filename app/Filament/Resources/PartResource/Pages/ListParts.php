@@ -18,6 +18,8 @@ use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Pagination\LengthAwarePaginator as LaravelLengthAwarePaginator;
 use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 use Livewire\Attributes\Url;
 use Livewire\WithPagination;
 
@@ -188,9 +190,23 @@ class ListParts extends Page
         try {
             $result = app(ManualMarketplaceLinkMappingService::class)->save($part, $marketplace, (string) $url);
         } catch (ManualMarketplaceMappingConflictException $exception) {
+            Log::warning('manual_marketplace_link_conflict', [
+                'part_id' => $partId,
+                'marketplace' => $marketplace,
+                'existing_id' => $exception->existingId,
+                'new_id' => $exception->newId,
+                'existing_listing_id' => $exception->existingListingId,
+                'existing_part_id' => $exception->existingPartId,
+            ]);
+
+            $body = 'Ten link jest już powiązany z innym rekordem albo część ma już inne ID oferty. Obecne ID: '.$exception->existingId.' | Nowe ID: '.$exception->newId;
+            if ($exception->existingPartId !== null) {
+                $body .= ' | istniejąca część ID: '.$exception->existingPartId;
+            }
+
             Notification::make()
-                ->title('existing_mapping_conflict')
-                ->body('Obecne ID: '.$exception->existingId.' | Nowe ID: '.$exception->newId)
+                ->title('Nie można zapisać linku marketplace.')
+                ->body($body)
                 ->danger()
                 ->send();
 
@@ -199,6 +215,21 @@ class ListParts extends Page
             Notification::make()
                 ->title('Nieprawidłowy link '.ucfirst($marketplace).'.')
                 ->body($exception->getMessage())
+                ->danger()
+                ->send();
+
+            return;
+        } catch (Throwable $exception) {
+            Log::error('manual_marketplace_link_save_failed', [
+                'part_id' => $partId,
+                'marketplace' => $marketplace,
+                'exception_class' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]);
+
+            Notification::make()
+                ->title('Nie udało się zapisać linku marketplace.')
+                ->body('Wystąpił błąd podczas zapisu linku. Sprawdź poprawność danych albo skontaktuj się z administratorem.')
                 ->danger()
                 ->send();
 
