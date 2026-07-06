@@ -37,9 +37,6 @@ class PublishPartToMarketplacesService
         if ($dryRun || ! $confirm || ! $enabled) return $base + ['part_id' => $part->id, 'blocked' => true, 'blockers' => $dryRun || ! $confirm ? ['marketplace_publish_not_confirmed'] : $this->blockingFlags($selected), 'channels' => [], 'publish_gates' => $this->publishGates($selected), 'readiness_ok' => false];
 
         $preview = $this->preview($part, $selected);
-        if (in_array('ebay', $selected, true)) {
-            app(EbayPanelActionAuditLogger::class)->step($part, 'readiness_checked', ['selected_step' => 'publish', 'selected_channels' => $selected]);
-        }
         $ready = array_keys(array_filter($preview['channels'], fn (array $result): bool => (bool) ($result['success'] ?? false)));
         $skipped = array_diff_key($preview['channels'], array_flip($ready));
 
