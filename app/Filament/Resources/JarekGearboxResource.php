@@ -23,6 +23,7 @@ class JarekGearboxResource extends Resource
     protected static ?string $navigationGroup = 'Części';
     protected static ?string $navigationIcon = null;
     protected static ?string $navigationLabel = 'Skrzynie Jarka';
+    protected static bool $shouldRegisterNavigation = false;
     protected static ?string $modelLabel = 'Skrzynia Jarka';
     protected static ?string $pluralModelLabel = 'Skrzynie Jarka';
     protected static ?int $navigationSort = 24;
@@ -190,6 +191,10 @@ class JarekGearboxResource extends Resource
 
     public static function getNavigationItems(): array
     {
+        if (! static::shouldRegisterNavigation()) {
+            return [];
+        }
+
         return [
             NavigationItem::make(static::navigationLabelWithCount(static::getNavigationLabel(), static::getJarekGearboxesNavigationCount()))
                 ->group(static::getNavigationGroup())
