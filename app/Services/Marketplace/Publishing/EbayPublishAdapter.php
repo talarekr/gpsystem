@@ -9,6 +9,7 @@ use App\Services\Marketplace\Api\EbayApiClient;
 use App\Services\Marketplace\EbaySkuResolver;
 use App\Services\Marketplace\EbayTitleSanitizer;
 use App\Services\Marketplace\Ebay\EbayConditionMapper;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 
 class EbayPublishAdapter extends BaseMarketplacePublishAdapter
@@ -95,7 +96,37 @@ class EbayPublishAdapter extends BaseMarketplacePublishAdapter
         if ($listingDescription !== '') $offer['listingDescription'] = $listingDescription;
         $contentLanguage = $this->contentLanguage((string) $offer['marketplaceId']);
         $result = (new EbayApiClient($this->accountCode(), $account))->publishInventoryOffer($sku, $inventory, $offer, $contentLanguage);
-        return ['ok' => $result['ok'] ?? false, 'action' => 'publishOffer', 'http_status' => $result['http_status'] ?? null, 'offer_id' => $result['offer_id'] ?? null, 'listing_id' => $result['listing_id'] ?? null, 'external_inventory_id' => $sku, 'resolved_sku' => $sku, 'url' => isset($result['listing_id']) ? $this->listingUrl((string) $offer['marketplaceId'], (string) $result['listing_id']) : null, 'request_id' => $result['request_id'] ?? null, 'request_summary' => $this->requestSummary($payload) + ['resolved_ebay_sku' => $sku, 'resolved_merchant_location_key' => $merchantLocationKey, 'merchantLocationKey' => $offer['merchantLocationKey'], 'aspects_diagnostics' => $aspectNormalization['diagnostics'], 'content_language' => $contentLanguage, 'marketplace_id' => $offer['marketplaceId'], 'inventory_description_source' => 'title', 'inventory_description_length' => mb_strlen($inventoryDescription), 'listing_description_length' => $listingDescription !== '' ? mb_strlen($listingDescription) : null], 'response_summary' => $this->responseSummary($result), 'json' => $result['json'] ?? [], 'error' => $this->ebayError($result), 'ui_error' => 'marketplace_api_error'];
+        if (($result['existing_offer_reused'] ?? false) && filled($result['offer_id'] ?? null)) {
+            $existingLocal = $this->attachExistingOffer($part, $account, (string) $result['offer_id'], $result['listing_id'] ?? null, $sku, $payload, $readiness, $offer, $result);
+            if ($existingLocal['conflict'] ?? false) {
+                return ['ok' => false, 'status' => 'ebay_offer_mapping_conflict', 'action' => 'publishOffer', 'http_status' => $result['http_status'] ?? null, 'offer_id' => $result['offer_id'], 'listing_id' => $result['listing_id'] ?? null, 'external_inventory_id' => $sku, 'resolved_sku' => $sku, 'request_id' => $result['request_id'] ?? null, 'request_summary' => $this->requestSummary($payload), 'response_summary' => $this->responseSummary($result), 'error' => 'Ta oferta eBay jest już przypisana do innej części. Sprawdź istniejące mapowanie.', 'ui_error' => 'Ta oferta eBay jest już przypisana do innej części. Sprawdź istniejące mapowanie.', 'log_context' => $existingLocal['log_context'] ?? []];
+            }
+            if (! ($result['ok'] ?? false)) {
+                return ['ok' => true, 'action' => 'publishOffer', 'status' => 'draft', 'listing_status' => 'draft', 'offer_id' => $result['offer_id'], 'listing_id' => null, 'external_inventory_id' => $sku, 'resolved_sku' => $sku, 'url' => null, 'marketplace_listing_id' => $existingLocal['listing_id'] ?? null, 'user_message' => 'Oferta eBay już istnieje jako szkic. Została podpięta lokalnie, ale nie ma jeszcze publicznego linku.', 'request_id' => $result['request_id'] ?? null, 'request_summary' => $this->requestSummary($payload), 'response_summary' => $this->responseSummary($result), 'json' => $result['json'] ?? [], 'log_context' => $existingLocal['log_context'] ?? []];
+            }
+        }
+        return ['ok' => $result['ok'] ?? false, 'action' => 'publishOffer', 'http_status' => $result['http_status'] ?? null, 'offer_id' => $result['offer_id'] ?? null, 'listing_id' => $result['listing_id'] ?? null, 'external_inventory_id' => $sku, 'resolved_sku' => $sku, 'url' => filled($result['listing_id'] ?? null) ? $this->listingUrl((string) $offer['marketplaceId'], (string) $result['listing_id']) : null, 'request_id' => $result['request_id'] ?? null, 'request_summary' => $this->requestSummary($payload) + ['resolved_ebay_sku' => $sku, 'resolved_merchant_location_key' => $merchantLocationKey, 'merchantLocationKey' => $offer['merchantLocationKey'], 'aspects_diagnostics' => $aspectNormalization['diagnostics'], 'content_language' => $contentLanguage, 'marketplace_id' => $offer['marketplaceId'], 'inventory_description_source' => 'title', 'inventory_description_length' => mb_strlen($inventoryDescription), 'listing_description_length' => $listingDescription !== '' ? mb_strlen($listingDescription) : null], 'response_summary' => $this->responseSummary($result), 'json' => $result['json'] ?? [], 'error' => $this->ebayError($result), 'ui_error' => 'marketplace_api_error', 'marketplace_listing_id' => ($existingLocal['listing_id'] ?? null), 'listing_status' => (($result['existing_offer_reused'] ?? false) && blank($result['listing_id'] ?? null)) ? 'draft' : 'published', 'user_message' => ($result['existing_offer_reused'] ?? false) ? (filled($result['listing_id'] ?? null) ? 'Oferta eBay już istniała. Została opublikowana i podpięta.' : 'Oferta eBay już istnieje jako szkic. Została podpięta lokalnie, ale nie ma jeszcze publicznego linku.') : null, 'log_context' => ($existingLocal['log_context'] ?? [])];
+    }
+
+    private function attachExistingOffer(Part $part, ?MarketplaceAccount $account, string $offerId, mixed $listingId, string $sku, array $payload, array $readiness, array $offer, array $result): array
+    {
+        $listingId = filled($listingId) ? (string) $listingId : null;
+        $conflict = MarketplaceListing::query()->where('marketplace', $this->marketplace())->where(function ($q) use ($offerId, $listingId): void {
+            $q->where('external_offer_id', $offerId);
+            if ($listingId !== null) $q->orWhere('external_listing_id', $listingId);
+        })->where('part_id', '<>', $part->id)->first();
+        if ($conflict) {
+            Log::warning('eBay existing offer mapping conflict', ['part_id' => $part->id, 'sku' => $sku, 'channel' => $this->accountCode(), 'offerId' => $offerId, 'listingId' => $listingId, 'conflict_listing_id' => $conflict->id, 'conflict_part_id' => $conflict->part_id]);
+            return ['conflict' => true, 'log_context' => ['ebay_existing_offer_conflict' => true, 'offer_id' => $offerId, 'external_listing_id' => $listingId, 'conflict_listing_id' => $conflict->id, 'conflict_part_id' => $conflict->part_id]];
+        }
+
+        $listing = MarketplaceListing::query()->firstOrNew(['marketplace' => $this->marketplace(), 'part_id' => $part->id]);
+        $created = ! $listing->exists;
+        $listing->fill(['marketplace_account_id' => $account?->id, 'external_offer_id' => $offerId, 'external_listing_id' => $listingId, 'external_inventory_id' => $sku, 'sku' => $sku, 'title' => $payload['title'] ?? $part->name, 'price' => $readiness['marketplace_price'] ?? $part->price, 'quantity' => $part->quantity, 'currency' => $readiness['currency'] ?? 'EUR', 'status' => $listingId ? 'published' : 'draft', 'sync_status' => $listingId ? 'published' : 'mapped', 'match_status' => 'matched', 'match_confidence' => 100, 'url' => $listingId ? $this->listingUrl((string) $offer['marketplaceId'], $listingId) : null, 'raw_payload' => ['request_summary' => $this->requestSummary($payload), 'response_summary' => $this->responseSummary($result)], 'last_synced_at' => now()]);
+        $listing->save();
+        Log::info('eBay existing offer attached locally', ['part_id' => $part->id, 'sku' => $sku, 'channel' => $this->accountCode(), 'offerId' => $offerId, 'listingId' => $listingId, 'local_listing_id' => $listing->id, 'local_listing_created' => $created, 'continued_publishOffer' => true]);
+
+        return ['conflict' => false, 'listing_id' => $listing->id, 'log_context' => ['ebay_existing_offer_reused' => true, 'offer_id' => $offerId, 'external_listing_id' => $listingId, 'local_listing_created' => $created, 'continued_publishOffer' => true]];
     }
 
     /**
@@ -229,8 +260,10 @@ class EbayPublishAdapter extends BaseMarketplacePublishAdapter
 
     protected function activeListing(Part $part): ?MarketplaceListing
     {
-        $listing = parent::activeListing($part);
-        if ($listing || ! Schema::hasTable('marketplace_listings')) return $listing;
+        if (! Schema::hasTable('marketplace_listings')) return null;
+
+        $listing = MarketplaceListing::query()->where('part_id', $part->id)->where('marketplace', $this->marketplace())->whereNotNull('external_listing_id')->whereNotIn('status', ['ended','failed','deleted','archived','cancelled','ENDED','FAILED','DELETED','ARCHIVED','CANCELLED'])->first();
+        if ($listing) return $listing;
 
         $sku = $this->skuResolver->resolve($part);
 
