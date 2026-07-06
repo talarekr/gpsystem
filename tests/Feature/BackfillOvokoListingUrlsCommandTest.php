@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\MarketplaceAccount;
+use App\Services\Marketplace\OvokoListingUrlBackfillService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -11,6 +12,42 @@ use Tests\TestCase;
 class BackfillOvokoListingUrlsCommandTest extends TestCase
 {
     use RefreshDatabase;
+
+
+    public function test_browser_backfill_does_not_report_create_when_existing_ovoko_listing_matches_same_part(): void
+    {
+        DB::table('parts')->insert(['id' => 7892, 'name' => 'PDC module', 'price' => 1, 'ovoko_price' => 12.34, 'quantity' => 1, 'status' => 'ready', 'legacy_payload' => json_encode(['ovoko_part_id' => '11700']), 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('marketplace_listings')->insert(['id' => 501, 'marketplace' => 'ovoko', 'part_id' => 7892, 'external_offer_id' => '11700', 'url' => 'https://ovoko.pl/czesci-samochodowe/hgf11700', 'price' => 123.45, 'created_at' => now(), 'updated_at' => now()]);
+
+        $result = app(OvokoListingUrlBackfillService::class)->runBrowserBackfill(
+            apply: false,
+            missingOnly: true,
+            limit: 100,
+            partId: 7892,
+        );
+
+        $this->assertSame(0, $result['summary']['would_create_listing']);
+        $this->assertSame(1, $result['summary']['already_mapped']);
+        $this->assertSame(1, $result['summary']['skipped_existing_complete']);
+        $this->assertSame('already_mapped,skip_existing_complete', $result['results'][0]['action']);
+    }
+
+    public function test_browser_backfill_reports_existing_listing_update_instead_of_create_when_same_part_is_incomplete(): void
+    {
+        DB::table('parts')->insert(['id' => 7892, 'name' => 'PDC module', 'price' => 1, 'quantity' => 1, 'status' => 'ready', 'legacy_payload' => json_encode(['ovoko_part_id' => '11700']), 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('marketplace_listings')->insert(['id' => 501, 'marketplace' => 'ovoko', 'part_id' => 7892, 'external_offer_id' => '11700', 'status' => 'inactive', 'created_at' => now(), 'updated_at' => now()]);
+
+        $result = app(OvokoListingUrlBackfillService::class)->runBrowserBackfill(
+            apply: false,
+            missingOnly: true,
+            limit: 100,
+            partId: 7892,
+        );
+
+        $this->assertSame(0, $result['summary']['would_create_listing']);
+        $this->assertSame(1, $result['summary']['would_update_existing_listing']);
+        $this->assertSame('would_update_existing_listing', $result['results'][0]['action']);
+    }
 
     public function test_dry_run_resolves_shop_url_from_read_only_ovoko_api_without_writing(): void
     {
