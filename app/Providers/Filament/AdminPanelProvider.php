@@ -46,6 +46,7 @@ use App\Filament\Pages\StagingItems;
 use App\Filament\Pages\StockLocations;
 use App\Filament\Pages\UsersRoles;
 use App\Filament\Pages\WooSyncPreparation;
+use App\Filament\Resources\StorageLocationResource;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
@@ -126,6 +127,12 @@ class AdminPanelProvider extends PanelProvider
                     ->collapsible(false),
             ])
             ->navigationItems([
+                NavigationItem::make('Dodaj magazyn')
+                    ->group('Magazyn')
+                    ->sort(40)
+                    ->url(fn (): string => StorageLocationResource::getUrl('create'))
+                    ->isActiveWhen(fn (): bool => request()->routeIs('filament.admin.resources.storage-locations.create'))
+                    ->visible(fn (): bool => StorageLocationResource::canCreate()),
                 NavigationItem::make('Mapowanie')
                     ->group('Kategorie')
                     ->sort(10)
