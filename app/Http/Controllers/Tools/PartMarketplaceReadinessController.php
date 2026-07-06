@@ -24,7 +24,7 @@ use Illuminate\Support\Str;
 
 class PartMarketplaceReadinessController extends Controller
 {
-    private const DEFAULT_TOOLS_TOKEN = 'gps_images_import_2026';
+    private const TOKEN = 'gps_images_import_2026';
 
     /**
      * Some imported marketplace trees (notably older eBay imports) mark root
@@ -180,18 +180,7 @@ class PartMarketplaceReadinessController extends Controller
 
         try {
             if (! $this->validToken($request)) {
-                if ($key === 'ebay') {
-                    $this->logPrepareFailure(
-                        $partId,
-                        $key,
-                        new \RuntimeException($request->query('token') === null ? 'Missing diagnostics token.' : 'Invalid diagnostics token.'),
-                        403,
-                        'local_app',
-                        $request,
-                        $request->query('token') === null ? 'missing_token' : 'invalid_token'
-                    );
-                }
-
+                if ($key === 'ebay') $this->logPrepareFailure($partId, $key, new \RuntimeException('Invalid diagnostics token.'), 403, 'local_app');
                 return $this->invalidTokenResponse();
             }
 
@@ -247,7 +236,7 @@ class PartMarketplaceReadinessController extends Controller
                 'ebay_channels' => $key === 'ebay' ? ($ebayResults ?? []) : null,
             ]);
         } catch (\Throwable $e) {
-            if ($key === 'ebay') $this->logPrepareFailure($partId, $key, $e, $this->httpStatus($e), $this->failureSource($e), $request, $this->failureReason($e, $request, $key));
+            if ($key === 'ebay') $this->logPrepareFailure($partId, $key, $e, $this->httpStatus($e), $this->failureSource($e));
             throw $e;
         }
     }
@@ -524,7 +513,7 @@ class PartMarketplaceReadinessController extends Controller
         };
     }
 
-    private function logPrepareFailure(int $partId, string $channel, \Throwable $e, ?int $httpStatus, string $source, ?Request $request = null, string $reason = 'other'): void
+    private function logPrepareFailure(int $partId, string $channel, \Throwable $e, ?int $httpStatus, string $source): void
     {
         $payload = [
             'action' => 'ebay_prepare_failed',
@@ -538,10 +527,6 @@ class PartMarketplaceReadinessController extends Controller
             'message' => $this->safeExceptionMessage($e),
             'code' => $e->getCode(),
             'http_status' => $httpStatus,
-            'expected_token_source' => $this->expectedTokenSource(),
-            'provided_token_present' => $request ? $request->query('token') !== null : null,
-            'provided_token_hash_prefix' => $request ? $this->tokenHashPrefix($request) : null,
-            'reason' => $reason,
             'endpoint_path' => $this->endpointPath($e),
             'sanitized_response_body' => $this->sanitizedResponseBody($e),
             'trace_first_3' => array_slice(array_map(fn (array $frame): array => ['file' => $frame['file'] ?? null, 'line' => $frame['line'] ?? null, 'function' => $frame['function'] ?? null, 'class' => $frame['class'] ?? null], $e->getTrace()), 0, 3),
@@ -558,31 +543,13 @@ class PartMarketplaceReadinessController extends Controller
     private function ebayCategoryMappingForPart(Part $part, string $channel): ?MarketplaceCategoryMapping { return Schema::hasTable('marketplace_category_mappings') && $part->category_id ? MarketplaceCategoryMapping::query()->where('local_category_id', $part->category_id)->where('channel', $channel)->first() : null; }
     private function httpStatus(\Throwable $e): ?int { return method_exists($e, 'getStatusCode') ? (int) $e->getStatusCode() : ($e->getCode() >= 400 && $e->getCode() < 600 ? (int) $e->getCode() : null); }
     private function failureSource(\Throwable $e): string { $message = strtolower($e->getMessage()); return str_contains($message, 'ebay') ? 'ebay_api' : ($this->httpStatus($e) ? 'local_app' : 'unknown'); }
-    private function failureReason(\Throwable $e, Request $request, string $channel): string { if (! in_array($channel, ['allegro', 'ovoko', 'ebay'], true)) return 'invalid_channel'; if ($request->query('token') === null) return 'missing_token'; if (! $this->validToken($request)) return 'invalid_token'; if ($this->httpStatus($e) === 419) return 'csrf'; if ($this->httpStatus($e) === 401) return 'unauthorized'; return 'other'; }
     private function endpointPath(\Throwable $e): ?string { preg_match('#https?://[^/]+([^\s?]+)#', $e->getMessage(), $m); return $m[1] ?? null; }
     private function sanitizedResponseBody(\Throwable $e): ?string { return Str::limit($this->safeExceptionMessage($e), 1000, '...'); }
     private function prepareDebugRecommendations(array $blockers): array { if ($blockers === []) return ['Open /tools/prepare-part-marketplace-card with the generated token and inspect Network status; this prepare path is local and should not write to eBay.']; return array_map(fn (string $blocker): string => 'Resolve blocker: '.$blocker, $blockers); }
 
     private function validToken(Request $request): bool
     {
-        return hash_equals($this->expectedToolsToken(), (string) $request->query('token', ''));
-    }
-
-    private function expectedToolsToken(): string
-    {
-        return (string) config('app.tools_token', self::DEFAULT_TOOLS_TOKEN);
-    }
-
-    private function expectedTokenSource(): string
-    {
-        return config('app.tools_token') !== null ? 'config:app.tools_token/env:TOOLS_TOKEN' : 'default:gps_images_import_2026';
-    }
-
-    private function tokenHashPrefix(Request $request): ?string
-    {
-        $token = $request->query('token');
-
-        return $token === null ? null : substr(hash('sha256', (string) $token), 0, 12);
+        return hash_equals(self::TOKEN, (string) $request->query('token', ''));
     }
 
     private function invalidTokenResponse(): JsonResponse
