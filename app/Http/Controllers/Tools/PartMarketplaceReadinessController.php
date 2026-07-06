@@ -3,7 +3,10 @@
 namespace App\Http\Controllers\Tools;
 
 use App\Http\Controllers\Controller;
+use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceCategory;
+use App\Models\MarketplaceCategoryMapping;
+use App\Models\MarketplaceSyncLog;
 use App\Models\Part;
 use App\Models\PartCategory;
 use App\Services\Marketplace\MarketplaceListingReadinessService;
@@ -14,7 +17,9 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\View\View;
 use Illuminate\Http\Exceptions\HttpResponseException;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class PartMarketplaceReadinessController extends Controller
@@ -170,57 +175,126 @@ class PartMarketplaceReadinessController extends Controller
 
     public function prepareCard(Request $request): JsonResponse
     {
-        if (! $this->validToken($request)) return $this->invalidTokenResponse();
-
-        $part = Part::query()->find((int) $request->query('part_id'));
-        if (! $part) return response()->json(['ok' => false, 'ready' => false, 'message' => 'Nie znaleziono części.', 'blockers' => ['part_not_found']], 404);
-
+        $partId = (int) $request->query('part_id');
         $key = (string) $request->query('channel', 'allegro');
-        if (! in_array($key, ['allegro', 'ovoko', 'ebay'], true)) {
-            return response()->json(['ok' => false, 'ready' => false, 'message' => 'Nieobsługiwany kanał sprzedaży.', 'blockers' => ['unsupported_channel']], 422);
-        }
 
-        if ($key === 'ebay') {
-            $ebayResults = [
-                'ebay_de' => $this->readinessService->prepareEbayTranslations($part, 'ebay_de'),
-            ];
-
-            if (! (bool) ($ebayResults['ebay_de']['ok'] ?? false)) {
-                $blockers = (array) ($ebayResults['ebay_de']['blockers'] ?? []);
-
-                return response()->json([
-                    'ok' => false,
-                    'ready' => false,
-                    'status' => 'blocked',
-                    'message' => (string) (($ebayResults['ebay_de']['blocker'] ?? null) ?: ($blockers[0] ?? 'translation_failed')),
-                    'part_id' => $part->id,
-                    'channel' => $key,
-                    'will_make_marketplace_request' => false,
-                    'publish' => false,
-                    'marketplace_listings' => false,
-                    'blocker' => $ebayResults['ebay_de']['blocker'] ?? ($blockers[0] ?? null),
-                    'blockers' => $blockers,
-                    'ebay_channels' => $ebayResults,
-                ]);
+        try {
+            if (! $this->validToken($request)) {
+                if ($key === 'ebay') $this->logPrepareFailure($partId, $key, new \RuntimeException('Invalid diagnostics token.'), 403, 'local_app');
+                return $this->invalidTokenResponse();
             }
+
+            $part = Part::query()->find($partId);
+            if (! $part) return response()->json(['ok' => false, 'ready' => false, 'message' => 'Nie znaleziono części.', 'blockers' => ['part_not_found']], 404);
+
+            if (! in_array($key, ['allegro', 'ovoko', 'ebay'], true)) {
+                return response()->json(['ok' => false, 'ready' => false, 'message' => 'Nieobsługiwany kanał sprzedaży.', 'blockers' => ['unsupported_channel']], 422);
+            }
+
+            if ($key === 'ebay') {
+                Log::debug('Starting lightweight eBay prepare action.', ['part_id' => $part->id, 'channel' => 'ebay_de']);
+
+                $ebayResults = [
+                    'ebay_de' => $this->readinessService->prepareEbayTranslations($part, 'ebay_de'),
+                ];
+
+                if (! (bool) ($ebayResults['ebay_de']['ok'] ?? false)) {
+                    $blockers = (array) ($ebayResults['ebay_de']['blockers'] ?? []);
+
+                    return response()->json([
+                        'ok' => false,
+                        'ready' => false,
+                        'status' => 'blocked',
+                        'message' => (string) (($ebayResults['ebay_de']['blocker'] ?? null) ?: ($blockers[0] ?? 'translation_failed')),
+                        'part_id' => $part->id,
+                        'channel' => $key,
+                        'will_make_marketplace_request' => false,
+                        'publish' => false,
+                        'marketplace_listings' => false,
+                        'blocker' => $ebayResults['ebay_de']['blocker'] ?? ($blockers[0] ?? null),
+                        'blockers' => $blockers,
+                        'ebay_channels' => $ebayResults,
+                    ]);
+                }
+            }
+
+            $card = $this->cardReadinessService->check($part->fresh())[$key] ?? [];
+            $presentation = (array) ($card['presentation'] ?? []);
+            $ready = (bool) ($presentation['ready'] ?? $card['ready'] ?? false);
+            $message = $ready ? 'Gotowe' : $this->humanReadablePrepareMessage((array) ($presentation['missing'] ?? $card['missing'] ?? []));
+
+            return response()->json([
+                'ok' => $ready,
+                'ready' => $ready,
+                'status' => $ready ? 'ready' : 'blocked',
+                'message' => $message,
+                'part_id' => $part->id,
+                'channel' => $key,
+                'will_make_marketplace_request' => false,
+                'publish' => false,
+                'marketplace_listings' => false,
+                'ebay_channels' => $key === 'ebay' ? ($ebayResults ?? []) : null,
+            ]);
+        } catch (\Throwable $e) {
+            if ($key === 'ebay') $this->logPrepareFailure($partId, $key, $e, $this->httpStatus($e), $this->failureSource($e));
+            throw $e;
+        }
+    }
+
+    public function ebayPrepareDebug(Request $request, int $partId): JsonResponse
+    {
+        $channel = (string) $request->query('channel', 'ebay_de');
+        $channel = $channel === 'ebay' ? 'ebay_de' : $channel;
+        $checks = [];
+        $blockers = [];
+
+        $part = Part::query()->with(['category'])->find($partId);
+        $checks[] = ['name' => 'part_exists', 'ok' => (bool) $part];
+        if (! $part) $blockers[] = 'part_not_found';
+
+        $account = $this->marketplaceAccount($channel);
+        $credentials = is_array($account?->api_credentials) ? $account->api_credentials : [];
+        $settings = is_array($account?->api_settings) ? $account->api_settings : [];
+        $checks[] = ['name' => 'channel_account_configured', 'ok' => (bool) $account, 'status' => $account?->status, 'api_enabled' => $account?->api_enabled];
+        if (! $account) $blockers[] = 'marketplace_account_missing';
+
+        $tokenExpiry = $credentials['access_token_expires_at'] ?? $credentials['expires_at'] ?? null;
+        $checks[] = ['name' => 'token_exists', 'ok' => filled($credentials['access_token'] ?? null) || filled($credentials['refresh_token'] ?? null), 'access_token_configured' => filled($credentials['access_token'] ?? null), 'refresh_token_configured' => filled($credentials['refresh_token'] ?? null), 'expiry' => $tokenExpiry];
+        if (blank($credentials['access_token'] ?? null) && blank($credentials['refresh_token'] ?? null)) $blockers[] = 'ebay_token_missing';
+
+        $mapping = $part ? $this->ebayCategoryMappingForPart($part, $channel) : null;
+        $checks[] = ['name' => 'local_category', 'ok' => filled($part?->category_id), 'category_id' => $part?->category_id, 'category_name' => $part?->category?->name];
+        $checks[] = ['name' => 'ebay_category_mapping', 'ok' => (bool) $mapping && ! (bool) ($mapping?->is_blocked), 'external_category_id' => $mapping?->external_category_id, 'external_category_name' => $mapping?->external_category_name, 'is_blocked' => $mapping?->is_blocked];
+        if ($part && ! $mapping) $blockers[] = 'ebay_category_mapping_missing';
+        if ($mapping?->is_blocked) $blockers[] = 'ebay_category_mapping_blocked';
+
+        foreach (['payment_policy_id', 'fulfillment_policy_id', 'return_policy_id'] as $key) {
+            $value = $key === 'fulfillment_policy_id' ? ($mapping?->fulfillment_policy_id ?: data_get($settings, $key)) : data_get($settings, $key);
+            $checks[] = ['name' => $key, 'ok' => filled($value), 'value' => filled($value) ? (string) $value : null];
+            if (blank($value)) $blockers[] = $key.'_missing';
         }
 
-        $card = $this->cardReadinessService->check($part->fresh())[$key] ?? [];
-        $presentation = (array) ($card['presentation'] ?? []);
-        $ready = (bool) ($presentation['ready'] ?? $card['ready'] ?? false);
-        $message = $ready ? 'Gotowe' : $this->humanReadablePrepareMessage((array) ($presentation['missing'] ?? $card['missing'] ?? []));
+        $checks[] = ['name' => 'shipping_group', 'ok' => filled($mapping?->shipping_group), 'value' => $mapping?->shipping_group];
+        if (blank($mapping?->shipping_group)) $blockers[] = 'shipping_group_missing';
+
+        $readiness = $part ? $this->readinessService->checkPartReadiness($part, $channel) : [];
+        $prepareBlockers = (array) ($readiness['blockers'] ?? []);
+        $blockers = array_values(array_unique(array_filter(array_merge($blockers, $prepareBlockers))));
 
         return response()->json([
-            'ok' => $ready,
-            'ready' => $ready,
-            'status' => $ready ? 'ready' : 'blocked',
-            'message' => $message,
-            'part_id' => $part->id,
-            'channel' => $key,
-            'will_make_marketplace_request' => false,
-            'publish' => false,
-            'marketplace_listings' => false,
-            'ebay_channels' => $key === 'ebay' ? ($ebayResults ?? []) : null,
+            'ok' => $blockers === [],
+            'dry_run' => true,
+            'marketplace_write' => false,
+            'part_id' => $partId,
+            'channel' => $channel,
+            'prepare_action_class' => self::class,
+            'prepare_action_method' => 'prepareCard',
+            'checks' => $checks,
+            'blockers' => $blockers,
+            'likely_cause' => $blockers === [] ? 'prepare_action_is_local_only; if UI returns 403, likely local_app route/auth/token before eBay API' : $blockers[0],
+            'recommendations' => $this->prepareDebugRecommendations($blockers),
+            'prepare_will_make_marketplace_request' => false,
+            'readiness' => ['can_prepare' => $readiness['can_prepare'] ?? null, 'missing_fields' => $readiness['missing_fields'] ?? [], 'warnings' => $readiness['warnings'] ?? []],
         ]);
     }
 
@@ -438,6 +512,40 @@ class PartMarketplaceReadinessController extends Controller
             default => filled($message) ? $message : 'Wymaga uzupełnienia',
         };
     }
+
+    private function logPrepareFailure(int $partId, string $channel, \Throwable $e, ?int $httpStatus, string $source): void
+    {
+        $payload = [
+            'action' => 'ebay_prepare_failed',
+            'part_id' => $partId ?: null,
+            'channel' => $channel === 'ebay' ? 'ebay_de' : $channel,
+            'user_id' => Auth::id(),
+            'class' => self::class,
+            'method' => 'prepareCard',
+            'source' => $source,
+            'exception_class' => $e::class,
+            'message' => $this->safeExceptionMessage($e),
+            'code' => $e->getCode(),
+            'http_status' => $httpStatus,
+            'endpoint_path' => $this->endpointPath($e),
+            'sanitized_response_body' => $this->sanitizedResponseBody($e),
+            'trace_first_3' => array_slice(array_map(fn (array $frame): array => ['file' => $frame['file'] ?? null, 'line' => $frame['line'] ?? null, 'function' => $frame['function'] ?? null, 'class' => $frame['class'] ?? null], $e->getTrace()), 0, 3),
+        ];
+
+        try {
+            MarketplaceSyncLog::query()->create(['marketplace' => 'ebay', 'part_id' => $partId ?: null, 'action' => 'ebay_prepare_failed', 'status' => 'failed', 'http_status' => $httpStatus, 'message' => $payload['message'], 'payload' => $payload, 'created_at' => now()]);
+        } catch (\Throwable) {
+            Log::warning('ebay_prepare_failed', $payload);
+        }
+    }
+
+    private function marketplaceAccount(string $channel): ?MarketplaceAccount { return Schema::hasTable('marketplace_accounts') ? MarketplaceAccount::query()->where('code', $channel)->first() : null; }
+    private function ebayCategoryMappingForPart(Part $part, string $channel): ?MarketplaceCategoryMapping { return Schema::hasTable('marketplace_category_mappings') && $part->category_id ? MarketplaceCategoryMapping::query()->where('local_category_id', $part->category_id)->where('channel', $channel)->first() : null; }
+    private function httpStatus(\Throwable $e): ?int { return method_exists($e, 'getStatusCode') ? (int) $e->getStatusCode() : ($e->getCode() >= 400 && $e->getCode() < 600 ? (int) $e->getCode() : null); }
+    private function failureSource(\Throwable $e): string { $message = strtolower($e->getMessage()); return str_contains($message, 'ebay') ? 'ebay_api' : ($this->httpStatus($e) ? 'local_app' : 'unknown'); }
+    private function endpointPath(\Throwable $e): ?string { preg_match('#https?://[^/]+([^\s?]+)#', $e->getMessage(), $m); return $m[1] ?? null; }
+    private function sanitizedResponseBody(\Throwable $e): ?string { return Str::limit($this->safeExceptionMessage($e), 1000, '...'); }
+    private function prepareDebugRecommendations(array $blockers): array { if ($blockers === []) return ['Open /tools/prepare-part-marketplace-card with the generated token and inspect Network status; this prepare path is local and should not write to eBay.']; return array_map(fn (string $blocker): string => 'Resolve blocker: '.$blocker, $blockers); }
 
     private function validToken(Request $request): bool
     {
