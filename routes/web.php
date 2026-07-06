@@ -123,7 +123,6 @@ use App\Http\Controllers\Tools\FixImportedImagesPublicFilesController;
 use App\Http\Controllers\Tools\GpswissPublicHtmlController;
 use App\Http\Controllers\Tools\GoogleTranslateDiagnosticsController;
 use App\Http\Controllers\Tools\EbayDescriptionTemplateController;
-use App\Http\Controllers\Tools\EbayDebugPartController;
 use App\Http\Controllers\Tools\ImportedImagesStorageReportController;
 use App\Http\Controllers\Tools\InspectLegacyPayloadKeysController;
 use App\Http\Controllers\Tools\PhotoStorageReportController;
@@ -303,7 +302,6 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/jarek-gearboxes/image-source-diagnostics', [JarekGearboxToolController::class, 'imageSourceDiagnostics'])->name('admin.tools.jarek-gearboxes.image-source-diagnostics');
     Route::get('/admin/tools/jarek-gearboxes/ebay-csv-download/{filename}', [JarekGearboxToolController::class, 'ebayCsvDownload'])->name('admin.tools.jarek-gearboxes.ebay-csv-download');
     Route::get('/admin/tools/jarek-gearboxes/{jarekGearbox}/ebay-preview', [JarekGearboxToolController::class, 'ebayPreview'])->name('admin.tools.jarek-gearboxes.ebay-preview');
-    Route::get('/admin/tools/ebay/debug-part/{partId}', EbayDebugPartController::class)->name('admin.tools.ebay.debug-part');
     Route::get('/admin/tools/marketplace/oauth-token-health', MarketplaceOAuthTokenHealthController::class)->name('admin.tools.marketplace.oauth-token-health');
     Route::get('/admin/tools/marketplace/ovoko-url-backfill', OvokoListingUrlBackfillController::class)->name('admin.tools.marketplace.ovoko-url-backfill');
     Route::get('/admin/tools/marketplace/mapping-gaps-export', MarketplaceMappingGapsExportController::class)->name('admin.tools.marketplace.mapping-gaps-export');
