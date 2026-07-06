@@ -22,6 +22,7 @@ class EbayListingDryRunService
         private readonly EbaySkuResolver $skuResolver,
         private readonly MarketplaceImageSelectionService $marketplaceImageSelectionService,
         private readonly EbayTitleSanitizer $ebayTitleSanitizer,
+        private readonly EbayShippingPolicyResolutionService $ebayShippingPolicyResolutionService,
     ) {}
 
     public function readiness(int $partId, string $channel): array
@@ -127,22 +128,7 @@ class EbayListingDryRunService
 
     private function shippingPolicyResolution(?Part $part, ?MarketplaceCategoryMapping $mapping, string $channel): array
     {
-        $shippingGroup = filled($mapping?->shipping_group) ? (string) $mapping->shipping_group : null;
-        $fulfillmentPolicyId = filled($mapping?->fulfillment_policy_id) ? (string) $mapping->fulfillment_policy_id : null;
-        $missing = [];
-        if (blank($shippingGroup)) $missing[] = 'category_shipping_group';
-        if (blank($fulfillmentPolicyId)) $missing[] = 'shipping_policy_mapping';
-
-        return [
-            'local_category_id' => $part?->category_id,
-            'local_category_name' => $part?->category?->name ?? $mapping?->local_category_name,
-            'shipping_group' => $shippingGroup,
-            'shipping_group_source' => $shippingGroup ? 'marketplace_category_mappings.shipping_group' : null,
-            'selected_fulfillment_policy_id' => $fulfillmentPolicyId,
-            'selected_fulfillment_policy_name' => $this->fulfillmentPolicyName($fulfillmentPolicyId, $shippingGroup),
-            'available_policy_mapping' => $channel === 'ebay_fr' ? ['fr_55_eur' => '260547694013', 'fr_70_eur' => '260547464013', 'fr_130_eur' => '260547754013'] : ['de_30_eur' => '259264150013', 'de_50_eur' => '259677066013', 'de_130_eur' => '259636579013'],
-            'missing' => $missing,
-        ];
+        return $this->ebayShippingPolicyResolutionService->resolve($part, $mapping, $channel);
     }
 
     private function businessPoliciesPayload(array $settings, ?MarketplaceCategoryMapping $mapping, ?string $paymentPolicyId, ?string $returnPolicyId, array $shippingPolicyResolution, string $channel): array
@@ -152,7 +138,7 @@ class EbayListingDryRunService
         if (blank($returnPolicyId)) $missing[] = 'return_policy';
 
         return [
-            'selected_fulfillment_policy_id' => filled($mapping?->fulfillment_policy_id) ? (string) $mapping->fulfillment_policy_id : null,
+            'selected_fulfillment_policy_id' => $shippingPolicyResolution['selected_fulfillment_policy_id'] ?? null,
             'selected_fulfillment_policy_name' => $shippingPolicyResolution['selected_fulfillment_policy_name'] ?? null,
             'selected_payment_policy_id' => $paymentPolicyId,
             'selected_payment_policy_name' => $this->policyName($settings, 'payment', $paymentPolicyId),
@@ -165,7 +151,7 @@ class EbayListingDryRunService
 
     private function policyName(array $settings, string $type, ?string $id): ?string { if (blank($id)) return null; $policies = is_array($settings[$type.'_policies'] ?? null) ? $settings[$type.'_policies'] : []; foreach ($policies as $policy) if (is_array($policy) && (string) ($policy['id'] ?? '') === (string) $id) return $policy['name'] ?? null; return null; }
     private function merchantLocationKey(array $settings, ?string $channel = null): ?string { foreach (['merchant_location_key', 'merchantLocationKey', 'location_key', 'inventory_location_key'] as $key) if (filled($settings[$key] ?? null)) return (string) $settings[$key]; $defaults = array_merge((array) config('product-hub.ebay.default_location', []), (array) config('product-hub.ebay.accounts.'.($channel ?: 'ebay_de'), [])); foreach (['merchant_location_key', 'merchantLocationKey', 'location_key', 'inventory_location_key'] as $key) if (filled($defaults[$key] ?? null)) return (string) $defaults[$key]; return null; }
-    private function fulfillmentPolicyName(?string $policyId, ?string $shippingGroup): ?string { if (blank($policyId)) return null; return match ((string) $policyId) { '259264150013' => 'Wysyłka 30 euro', '259677066013' => 'Wysyłka 50 euro', '259636579013' => 'Wysyłka 130 euro', '260547694013' => 'Wysyłka FR 55 euro', '260547464013' => 'Wysyłka FR 70 euro', '260547754013' => 'Wysyłka FR 130 euro', default => $shippingGroup, }; }
+    private function fulfillmentPolicyName(?string $policyId, ?string $shippingGroup): ?string { return $this->ebayShippingPolicyResolutionService->fulfillmentPolicyName($policyId, $shippingGroup); }
 
     public function dryRunPayload(int $partId, string $channel): array
     {
