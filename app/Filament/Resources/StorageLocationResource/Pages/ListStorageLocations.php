@@ -18,7 +18,7 @@ class ListStorageLocations extends Page
 
     protected static string $resource = StorageLocationResource::class;
     protected static string $view = 'filament.resources.storage-locations.pages.list-storage-locations';
-    protected static ?string $title = 'Miejsca składowania';
+    protected static ?string $title = '';
 
     #[Url(as: 'search')]
     public string $search = '';
