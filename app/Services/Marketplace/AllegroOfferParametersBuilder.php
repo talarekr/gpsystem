@@ -52,7 +52,7 @@ class AllegroOfferParametersBuilder
         }
         $m = $this->configuredMapping($part, $mapping, $def);
         if ($m) return $this->resolveValue($m['value'], $m['source'], $def);
-        if ($name === 'stronazabudowy') return $this->resolveValue($this->partPosition($part), 'part', $def);
+        if ($name === 'stronazabudowy') return $this->resolvePartPosition($part, $def);
         if ($name === 'typsamochodu') return $this->resolveCarType($part, $def);
         if ($vehicleField = $this->vehicleFieldForParameter($name)) return $this->resolveVehicleParameter($part, $def, $vehicleField);
         if ($this->isCatalogPartNumberParameter($def, $name) || (string) ($def['id'] ?? '') === '227345') {
@@ -248,13 +248,62 @@ class AllegroOfferParametersBuilder
         return data_get($part, $field) ?? data_get($part->vehicle_snapshot, Str::after($field, 'vehicle_snapshot.'));
     }
 
-    private function partPosition(Part $part): mixed
+    private function partPosition(Part $part): array
     {
-        foreach (['part_position', 'position', 'placement', 'side', 'legacy_payload.part_position', 'legacy_payload.position', 'review_metadata.part_position'] as $field) {
+        foreach (['review_metadata.part_position', 'part_position', 'position', 'placement', 'side', 'legacy_payload.part_position', 'legacy_payload.position'] as $field) {
             $value = data_get($part, $field);
-            if (filled($value)) return $value;
+            if (filled($value)) return ['value' => $value, 'source_field' => $field];
         }
-        return null;
+        return ['value' => null, 'source_field' => 'review_metadata.part_position'];
+    }
+
+    private function resolvePartPosition(Part $part, array $def): array
+    {
+        $position = $this->partPosition($part);
+        $sourceValue = $position['value'] ?? null;
+        $sourceField = $position['source_field'] ?? 'review_metadata.part_position';
+
+        if (blank($sourceValue)) {
+            return ['value' => null, 'source' => 'part_position', 'source_field' => $sourceField, 'source_value' => $sourceValue, 'reason' => 'Brak lub nieobsługiwana Pozycja części dla parametru Allegro: Strona zabudowy'];
+        }
+
+        if (($def['type'] ?? '') !== 'dictionary') {
+            return ['value' => (string) $sourceValue, 'source' => 'part_position', 'source_field' => $sourceField, 'source_value' => $sourceValue, 'normalized_value' => $this->norm($sourceValue)];
+        }
+
+        $candidates = $this->partPositionCandidates((string) $sourceValue);
+        foreach (($def['dictionary'] ?? []) as $allowed) {
+            foreach ($candidates as $candidate) {
+                if ((string) ($allowed['id'] ?? '') === $candidate || $this->matchesDictionaryLabel($allowed['value'] ?? '', $candidate)) {
+                    return ['type' => 'dictionary', 'value' => [(string) $allowed['id']], 'label' => $allowed['value'] ?? null, 'source' => 'part_position', 'source_field' => $sourceField, 'source_value' => $sourceValue, 'normalized_value' => $candidate, 'mapped_value_id' => (string) $allowed['id'], 'mapped_label' => $allowed['value'] ?? null];
+                }
+            }
+        }
+
+        return ['value' => null, 'source' => 'part_position', 'source_field' => $sourceField, 'source_value' => $sourceValue, 'normalized_value' => $this->norm($sourceValue), 'reason' => 'Brak lub nieobsługiwana Pozycja części dla parametru Allegro: Strona zabudowy', 'allowed_values_sample' => array_slice(array_map(fn ($allowed): array => ['id' => (string) ($allowed['id'] ?? ''), 'value' => (string) ($allowed['value'] ?? '')], $def['dictionary'] ?? []), 0, 20), 'allowed_values' => $this->allowedValuesDiagnostics($def)];
+    }
+
+    private function partPositionCandidates(string $value): array
+    {
+        $normalized = $this->norm($value);
+        $aliases = [
+            'lewyprzod' => ['lewy przód', 'przód lewa', 'przód strona lewa', 'lewa przednia', 'przedni lewy'],
+            'przodstronalewa' => ['lewy przód', 'przód lewa', 'przód strona lewa', 'lewa przednia', 'przedni lewy'],
+            'prawyprzod' => ['prawy przód', 'przód prawa', 'przód strona prawa', 'prawa przednia', 'przedni prawy'],
+            'przodstronaprawa' => ['prawy przód', 'przód prawa', 'przód strona prawa', 'prawa przednia', 'przedni prawy'],
+            'lewytyl' => ['lewy tył', 'tył lewa', 'tył strona lewa', 'lewa tylna', 'tylny lewy'],
+            'tylstronalewa' => ['lewy tył', 'tył lewa', 'tył strona lewa', 'lewa tylna', 'tylny lewy'],
+            'prawytyl' => ['prawy tył', 'tył prawa', 'tył strona prawa', 'prawa tylna', 'tylny prawy'],
+            'tylstronaprawa' => ['prawy tył', 'tył prawa', 'tył strona prawa', 'prawa tylna', 'tylny prawy'],
+            'lewastrona' => ['lewa', 'lewa strona'],
+            'lewa' => ['lewa', 'lewa strona'],
+            'prawastrona' => ['prawa', 'prawa strona'],
+            'prawa' => ['prawa', 'prawa strona'],
+            'przod' => ['przód', 'przod', 'przednia'],
+            'tyl' => ['tył', 'tyl', 'tylna'],
+        ];
+
+        return array_values(array_unique(array_filter(array_merge([$value], $aliases[$normalized] ?? []))));
     }
 
     private function resolveValue(mixed $value, string $source, array $def): array

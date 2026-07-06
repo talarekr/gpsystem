@@ -49,7 +49,8 @@ class AllegroCategoryParametersTest extends TestCase
 
         $this->assertContains('allegro_required_category_parameters_missing', $result['blockers']);
         $this->assertSame('Strona zabudowy', $result['prepared_payload_preview_safe']['missing_required_parameters'][0]['name']);
-        $this->assertSame('not_resolved', $result['prepared_payload_preview_safe']['missing_required_parameters'][0]['source']);
+        $this->assertSame('part_position', $result['prepared_payload_preview_safe']['missing_required_parameters'][0]['source']);
+        $this->assertSame('Brak lub nieobsługiwana Pozycja części dla parametru Allegro: Strona zabudowy', $result['prepared_payload_preview_safe']['missing_required_parameters'][0]['reason']);
         $this->assertDatabaseCount('marketplace_listings', 0);
     }
 
@@ -500,6 +501,34 @@ class AllegroCategoryParametersTest extends TestCase
             ['id' => '225693_3', 'value' => 'CVT'],
             ['id' => '225693_4', 'value' => 'DSG'],
         ];
+    }
+
+
+    public function test_required_allegro_door_side_maps_from_review_metadata_part_position(): void
+    {
+        $part = Part::query()->create(['name' => 'Drzwi Audi lewe przód', 'category_id' => 77, 'price' => 100, 'quantity' => 2, 'description' => 'Opis', 'review_metadata' => ['part_position' => 'Przód strona lewa'], 'is_visible_storefront' => true]);
+
+        $result = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, null, ['ok' => true, 'source' => 'cache', 'parameters' => [
+            ['id' => 'side', 'name' => 'Strona zabudowy', 'type' => 'dictionary', 'required' => true, 'dictionary' => [['id' => 'side_left_front', 'value' => 'Lewy przód'], ['id' => 'side_right_front', 'value' => 'Prawy przód']], 'options' => ['describesProduct' => false]],
+        ]]);
+
+        $this->assertSame([['id' => 'side', 'valuesIds' => ['side_left_front']]], $result['offer_parameters']);
+        $this->assertSame([], $result['missing_required_parameters']);
+        $this->assertSame('review_metadata.part_position', $result['offer_parameter_diagnostics'][0]['source_field']);
+    }
+
+    public function test_required_allegro_door_side_keeps_descriptive_blocker_for_unknown_part_position(): void
+    {
+        $part = Part::query()->create(['name' => 'Drzwi Audi', 'category_id' => 77, 'price' => 100, 'quantity' => 2, 'description' => 'Opis', 'review_metadata' => ['part_position' => 'Środek'], 'is_visible_storefront' => true]);
+
+        $result = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, null, ['ok' => true, 'source' => 'cache', 'parameters' => [
+            ['id' => 'side', 'name' => 'Strona zabudowy', 'type' => 'dictionary', 'required' => true, 'dictionary' => [['id' => 'side_left', 'value' => 'Lewa'], ['id' => 'side_right', 'value' => 'Prawa']], 'options' => ['describesProduct' => false]],
+        ]]);
+
+        $this->assertSame([], $result['offer_parameters']);
+        $this->assertSame('Strona zabudowy', $result['missing_required_parameters'][0]['name']);
+        $this->assertSame('Brak lub nieobsługiwana Pozycja części dla parametru Allegro: Strona zabudowy', $result['missing_required_parameters'][0]['reason']);
+        $this->assertSame('review_metadata.part_position', $result['missing_required_parameters'][0]['source_field']);
     }
 
     private function parametersPayload(bool $requireSide = false): array
