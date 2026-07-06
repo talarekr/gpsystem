@@ -6,6 +6,7 @@
     $marketplaceCategorySelections = $marketplaceCategorySelections ?? [];
     $preparedStatusChecked = array_fill_keys((array) ($preparedStatusChecked ?? []), true);
     $durablePreparedChannels = (array) data_get((array) ($part?->review_metadata ?: []), 'marketplace_prepared_channels', []);
+    $toolsToken = (string) config('app.tools_token', 'gps_images_import_2026');
     $humanizeMissing = function (?string $message, string $key): string {
         return match ($message) {
             'cena', 'cena Allegro', 'cena Ovoko' => 'Uzupełnij cenę',
@@ -34,7 +35,7 @@
                 $showInitialStatus = $durablyPrepared && $ready;
                 $statusChecked = (bool) ($preparedStatusChecked[$key] ?? false);
                 $missingMessage = $humanizeMissing($missing[0] ?? null, $key);
-                $prepareUrl = $part ? route('tools.prepare-part-marketplace-card', ['token' => 'gps_images_import_2026', 'part_id' => $part->id, 'channel' => $key]) : null;
+                $prepareUrl = $part ? route('tools.prepare-part-marketplace-card', ['token' => $toolsToken, 'part_id' => $part->id, 'channel' => $key]) : null;
             @endphp
 
             <div class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900" data-marketplace-card="{{ $key }}" x-data="{ preparedStatusChecked: @js($statusChecked || $showInitialStatus), preparing: false, publishing: false, prepareReady: @js($ready), prepareMessage: @js($ready ? 'Gotowe' : $missingMessage), publishMessage: '', async prepareMarketplace() { if (! @js((bool) $prepareUrl) || this.preparing) return; this.preparing = true; try { const response = await fetch(@js($prepareUrl), { headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } }); const data = await response.json(); this.prepareReady = !!data.ready; this.prepareMessage = data.message || (this.prepareReady ? 'Gotowe' : 'Wymaga uzupełnienia'); } catch (error) { this.prepareReady = false; this.prepareMessage = 'Nie udało się przygotować kanału. Spróbuj ponownie.'; } finally { this.preparedStatusChecked = true; this.preparing = false; } }, async publishMarketplaceChannel() { if (! this.preparedStatusChecked || ! this.prepareReady || this.publishing) return; this.publishing = true; this.publishMessage = ''; try { await $wire.publishMarketplaceChannel(@js($key)); } catch (error) { this.publishMessage = 'Nie udało się wystawić tego kanału. Spróbuj ponownie.'; } finally { this.publishing = false; } } }">
