@@ -3,7 +3,9 @@
 namespace App\Services\Marketplace;
 
 use App\Models\MarketplaceListing;
+use App\Models\Part;
 use App\Services\Marketplace\Api\MarketplaceApiManager;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 class OvokoListingUrlBackfillService
@@ -17,7 +19,7 @@ class OvokoListingUrlBackfillService
 
 
     /** @return array{mode:string,summary:array<string,int>,results:array<int,array<string,mixed>>,warnings:array<int,string>,limit_requested:int,limit_applied:int,offset_requested:int,offset_applied:int} */
-    public function runBrowserBackfill(bool $apply = false, bool $force = false, bool $missingOnly = true, int $limit = 100, int $offset = 0, ?int $partId = null): array
+    public function runBrowserBackfill(bool $apply = false, bool $force = false, bool $missingOnly = true, int $limit = 100, int $offset = 0, ?int $partId = null, bool $includeInactive = false, bool $debug = false): array
     {
         if (! Schema::hasTable('marketplace_listings')) {
             throw new \RuntimeException('Required table marketplace_listings does not exist.');
@@ -41,21 +43,27 @@ class OvokoListingUrlBackfillService
 
         $query = MarketplaceListing::query()
             ->with('part:id,name,sku,part_number,oem_number,ovoko_price,currency,status,quantity,legacy_payload')
-            ->where('marketplace', 'ovoko')
+            ->where('marketplace', 'like', '%ovoko%')
             ->whereNotNull('part_id')
             ->where(fn ($query) => $query
                 ->whereRaw("NULLIF(TRIM(COALESCE(external_offer_id, '')), '') IS NOT NULL")
                 ->orWhereRaw("NULLIF(TRIM(COALESCE(external_listing_id, '')), '') IS NOT NULL")
             )
-            ->where(fn ($query) => $query->whereNull('status')->orWhereNotIn('status', $endedStatuses))
-            ->where(fn ($query) => $query->whereNull('last_api_status')->orWhereNotIn('last_api_status', $endedStatuses))
-            ->whereHas('part', fn ($query) => $query
-                ->whereIn('status', ['ready', 'published'])
-                ->where(fn ($quantity) => $quantity->whereNull('quantity')->orWhere('quantity', '>', 0))
-            )
             ->orderBy('marketplace_listings.id')
             ->offset($offset)
             ->limit($limit);
+
+
+        if (! $includeInactive) {
+            $query->where(fn ($query) => $query->whereNull('status')->orWhereNotIn('status', $endedStatuses))
+                ->where(fn ($query) => $query->whereNull('last_api_status')->orWhereNotIn('last_api_status', $endedStatuses))
+                ->whereHas('part', fn ($query) => $query
+                    ->whereIn('status', ['ready', 'published'])
+                    ->where(fn ($quantity) => $quantity->whereNull('quantity')->orWhere('quantity', '>', 0))
+                );
+        } else {
+            $query->whereHas('part');
+        }
 
         if ($partId !== null) {
             $query->where('part_id', $partId);
@@ -147,6 +155,7 @@ class OvokoListingUrlBackfillService
             'limit_applied' => $limit,
             'offset_requested' => $offset,
             'offset_applied' => $offset,
+            'debug' => $debug ? $this->browserBackfillDebug($partId, $force, $missingOnly, $apply, $limit, $offset, $includeInactive, $endedStatuses) : null,
         ];
     }
 
@@ -405,6 +414,68 @@ class OvokoListingUrlBackfillService
         }
 
         return ['mode' => $apply ? 'apply' : 'dry_run', 'summary' => $summary, 'results' => $results, 'warnings' => $warnings];
+    }
+
+    private function browserBackfillDebug(?int $partId, bool $force, bool $missingOnly, bool $apply, int $limit, int $offset, bool $includeInactive, array $endedStatuses): array
+    {
+        $debug = [
+            'parsed' => compact('partId', 'force', 'missingOnly', 'apply', 'limit', 'offset', 'includeInactive'),
+            'global' => [],
+            'part_exists' => null,
+            'part' => null,
+            'marketplace_listings_for_part' => [],
+            'listing_filter_diagnostics' => [],
+            'panel_status_source' => 'PartMarketplaceStatusResolver reads the part->marketplaceListings relation, filters marketplace ovoko, and takes external_offer_id/external_listing_id from marketplace_listings.',
+        ];
+
+        $debug['global'] = [
+            'marketplace_listings_count' => DB::table('marketplace_listings')->count(),
+            'marketplace_like_ovoko_count' => DB::table('marketplace_listings')->where('marketplace', 'like', '%ovoko%')->count(),
+            'marketplace_values_like_ovoko' => DB::table('marketplace_listings')->select('marketplace', DB::raw('COUNT(*) as count'))->where('marketplace', 'like', '%ovoko%')->groupBy('marketplace')->orderBy('marketplace')->limit(50)->get()->map(fn ($r) => (array) $r)->all(),
+            'with_external_offer_id_count' => DB::table('marketplace_listings')->whereRaw("NULLIF(TRIM(COALESCE(external_offer_id, '')), '') IS NOT NULL")->count(),
+            'with_external_listing_id_count' => DB::table('marketplace_listings')->whereRaw("NULLIF(TRIM(COALESCE(external_listing_id, '')), '') IS NOT NULL")->count(),
+            'empty_url_count' => DB::table('marketplace_listings')->where(fn ($q) => $q->whereNull('url')->orWhere('url', ''))->count(),
+            'with_price_count' => DB::table('marketplace_listings')->whereNotNull('price')->count(),
+            'ovoko_empty_url_count' => DB::table('marketplace_listings')->where('marketplace', 'like', '%ovoko%')->where(fn ($q) => $q->whereNull('url')->orWhere('url', ''))->count(),
+            'ovoko_empty_parts_ovoko_price_count' => DB::table('marketplace_listings')->join('parts', 'parts.id', '=', 'marketplace_listings.part_id')->where('marketplace_listings.marketplace', 'like', '%ovoko%')->whereNull('parts.ovoko_price')->count(),
+        ];
+
+        if ($partId === null) return $debug;
+
+        $part = Part::query()->select(['id', 'name', 'sku', 'part_number', 'oem_number', 'ovoko_price', 'currency', 'status', 'quantity'])->find($partId);
+        $debug['part_exists'] = $part !== null;
+        $debug['part'] = $part?->toArray();
+
+        $listings = MarketplaceListing::query()->with('part:id,status,quantity,ovoko_price')->where('part_id', $partId)->orderBy('id')->get();
+        $debug['marketplace_listings_for_part'] = $listings->map(fn (MarketplaceListing $listing): array => collect($listing->toArray())->only([
+            'id', 'marketplace', 'part_id', 'external_offer_id', 'external_listing_id', 'price', 'currency', 'status', 'sync_status', 'match_status', 'url', 'created_at', 'updated_at',
+        ])->all())->all();
+
+        foreach ($listings as $listing) {
+            $ovokoId = $this->existingOvokoId($listing);
+            $oldUrl = $this->blankNull($listing->url);
+            $newPrice = is_numeric($listing->price) ? (float) $listing->price : null;
+            $rejections = [];
+            if (! str_contains(strtolower((string) $listing->marketplace), 'ovoko')) $rejections[] = 'marketplace';
+            if ($ovokoId === null) $rejections[] = 'missing_external_offer_id_or_external_listing_id';
+            if (! $includeInactive && (in_array($listing->status, $endedStatuses, true) || in_array($listing->last_api_status, $endedStatuses, true) || ! in_array($listing->part?->status, ['ready', 'published'], true) || ($listing->part?->quantity !== null && (int) $listing->part->quantity <= 0))) $rejections[] = 'status_sync_match_or_part_activity';
+            if ($missingOnly && ! $force && $oldUrl !== null && is_numeric($listing->part?->ovoko_price)) $rejections[] = 'missing_only';
+            if ($newPrice === null) $rejections[] = 'missing_price_for_price_backfill';
+            if (! $listing->part) $rejections[] = 'missing_related_part';
+            $debug['listing_filter_diagnostics'][] = [
+                'id' => $listing->id,
+                'ovoko_id_seen_by_backfill' => $ovokoId,
+                'generated_url' => $this->generatedShopUrlFromOvokoPartId($ovokoId, $listing),
+                'qualifies_for_scan' => ! in_array('marketplace', $rejections, true) && ! in_array('missing_external_offer_id_or_external_listing_id', $rejections, true) && ($includeInactive || ! in_array('status_sync_match_or_part_activity', $rejections, true)) && ! in_array('missing_only', $rejections, true) && ! in_array('missing_related_part', $rejections, true),
+                'filter_rejections' => $rejections,
+            ];
+        }
+
+        if ($listings->isEmpty()) {
+            $debug['listing_filter_diagnostics'][] = ['part_id' => $partId, 'qualifies_for_scan' => false, 'filter_rejections' => ['no_marketplace_listings_for_part']];
+        }
+
+        return $debug;
     }
 
     private function existingOvokoId(MarketplaceListing $listing): ?string
