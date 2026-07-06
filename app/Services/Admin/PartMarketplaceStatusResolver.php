@@ -13,21 +13,13 @@ class PartMarketplaceStatusResolver
      */
     public function rowsForPart(Part $part): array
     {
-        if ($this->isSold($part)) {
-            return [
-                $this->row('storefront', 'Sklep', $part->price, 'zł', false, null, null, 'Produkt sprzedany — niedostępny w sklepie'),
-                $this->row('allegro', 'Allegro', $part->allegro_price, 'zł', false, null, null, 'Produkt sprzedany — niedostępny na Allegro'),
-                $this->row('ovoko', 'Ovoko', $part->ovoko_price, 'zł', false, null, null, 'Produkt sprzedany — niedostępny na Ovoko'),
-                $this->row('ebay', 'eBay', $part->ebay_price, 'zł', false, null, null, 'Produkt sprzedany — niedostępny na eBay'),
-            ];
-        }
-
         $listings = $part->relationLoaded('marketplaceListings')
             ? $part->marketplaceListings
             : collect();
 
-        $ovoko = $this->listedListing($listings, ['ovoko']);
-        $ebayListings = $this->listedListings($listings, ['ebay_de', 'ebay_fr']);
+        $partSold = $this->isSold($part);
+        $ovoko = $partSold ? $this->mappedListing($listings, ['ovoko']) : $this->listedListing($listings, ['ovoko']);
+        $ebayListings = $partSold ? $this->mappedListings($listings, ['ebay_de', 'ebay_fr']) : $this->listedListings($listings, ['ebay_de', 'ebay_fr']);
         $ebay = $ebayListings->first();
         $ebayUrlListing = $ebayListings->first(fn (MarketplaceListing $listing): bool => $this->listingUrl($listing) !== null);
         $allegro = $this->allegroListing($listings);
@@ -49,9 +41,9 @@ class PartMarketplaceStatusResolver
 
         return [
             $this->row('storefront', 'Sklep', $part->price, 'zł', $storefrontVisible, null, null, $storefrontVisible ? 'Widoczny w sklepie' : 'Niewidoczny w sklepie'),
-            $this->row('allegro', 'Allegro', $part->allegro_price, 'zł', $allegroListed, $this->externalOfferId($allegro), $this->allegroUrl($allegro), $this->allegroTitle($allegro, $allegroListed)),
-            $this->row('ovoko', 'Ovoko', $part->ovoko_price ?? $ovoko?->price, $this->currencyLabel($ovoko?->currency), $ovoko !== null, $this->externalOfferId($ovoko), $this->ovokoUrl($ovoko, $part), $ovoko ? 'Oferta Ovoko wystawiona lokalnie' : 'Brak lokalnej oferty Ovoko'),
-            $this->row('ebay', 'eBay', $part->ebay_price, 'zł', $ebay !== null, $this->externalOfferId($ebay), $this->listingUrl($ebayUrlListing), $ebay ? 'Oferta eBay wystawiona lokalnie' : 'Brak lokalnej oferty eBay', $ebayMarkets ?: null),
+            $this->row('allegro', 'Allegro', $part->allegro_price, 'zł', $allegroListed, $this->externalOfferId($allegro), $this->allegroUrl($allegro), $partSold && $allegro ? 'Produkt sprzedany — zachowano historyczny link Allegro' : $this->allegroTitle($allegro, $allegroListed)),
+            $this->row('ovoko', 'Ovoko', $part->ovoko_price ?? $ovoko?->price, $this->currencyLabel($ovoko?->currency), $ovoko !== null, $this->externalOfferId($ovoko), $this->ovokoUrl($ovoko, $part), $partSold && $ovoko ? 'Produkt sprzedany — zachowano historyczny link Ovoko' : ($ovoko ? 'Oferta Ovoko wystawiona lokalnie' : 'Brak lokalnej oferty Ovoko')),
+            $this->row('ebay', 'eBay', $part->ebay_price, 'zł', $ebay !== null, $this->externalOfferId($ebay), $this->listingUrl($ebayUrlListing), $partSold && $ebay ? 'Produkt sprzedany — zachowano historyczny link eBay' : ($ebay ? 'Oferta eBay wystawiona lokalnie' : 'Brak lokalnej oferty eBay'), $ebayMarkets ?: null),
         ];
     }
 
@@ -63,7 +55,7 @@ class PartMarketplaceStatusResolver
         $row = collect($this->rowsForPart($part))->firstWhere('key', $channel);
         $listed = (bool) ($row['listed'] ?? false);
         $url = $row['url'] ?? null;
-        $linkVisible = $listed && filled($url);
+        $linkVisible = filled($url);
 
         return [
             'resolved_is_listed' => $listed,
@@ -120,6 +112,29 @@ class PartMarketplaceStatusResolver
         return $listed
             ? 'Oferta Allegro aktywna lub wystawiona lokalnie'
             : 'Oferta Allegro nie została znaleziona w ACTIVE API podczas ostatniego odświeżenia';
+    }
+
+
+    /**
+     * @param Collection<int, MarketplaceListing> $listings
+     * @param array<int, string> $marketplaces
+     */
+    private function mappedListing(Collection $listings, array $marketplaces): ?MarketplaceListing
+    {
+        return $this->mappedListings($listings, $marketplaces)->first();
+    }
+
+    /**
+     * @param Collection<int, MarketplaceListing> $listings
+     * @param array<int, string> $marketplaces
+     * @return Collection<int, MarketplaceListing>
+     */
+    private function mappedListings(Collection $listings, array $marketplaces): Collection
+    {
+        return $listings
+            ->whereIn('marketplace', $marketplaces)
+            ->filter(fn (MarketplaceListing $listing): bool => $this->externalOfferId($listing) !== null)
+            ->values();
     }
 
     /**

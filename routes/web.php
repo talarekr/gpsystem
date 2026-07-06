@@ -3,6 +3,8 @@
 use App\Http\Controllers\Admin\ImportMigration\PartImagePresentationController;
 use App\Http\Controllers\Admin\LocalSaleController;
 use App\Http\Controllers\Admin\LocalSaleEndMarketplacesController;
+use App\Http\Controllers\Admin\MarketplacePartDebugController;
+use App\Http\Controllers\Admin\MarketplaceRelistPartController;
 use App\Http\Controllers\Admin\AllegroDuplicateCheckController;
 use App\Http\Controllers\Admin\EbayDePreviewController;
 use App\Http\Controllers\Admin\MarketplaceCategoryMapperController;
@@ -2333,6 +2335,8 @@ Route::middleware(Authenticate::class)->prefix('admin')->name('admin.')->group(f
     Route::post('/local-sales', [LocalSaleController::class, 'store'])->name('local-sales.store');
     Route::get('/tools/parts/{part}/local-sale-end-marketplaces-dry-run', [LocalSaleEndMarketplacesController::class, 'dryRun'])->name('tools.parts.local-sale-end-marketplaces-dry-run');
     Route::get('/tools/parts/{part}/local-sale-end-marketplaces-apply', [LocalSaleEndMarketplacesController::class, 'apply'])->name('tools.parts.local-sale-end-marketplaces-apply');
+    Route::get('/tools/marketplace/debug-part', MarketplacePartDebugController::class)->name('tools.marketplace.debug-part');
+    Route::get('/tools/marketplace/relist-part', MarketplaceRelistPartController::class)->name('tools.marketplace.relist-part');
     Route::get('/marketplace-category-mapper', [MarketplaceCategoryMapperController::class, 'index'])->name('marketplace-category-mapper.index');
     Route::get('/marketplace-category-mapper/tree/local', [MarketplaceCategoryMapperController::class, 'localTree'])->name('marketplace-category-mapper.tree.local');
     Route::get('/marketplace-category-mapper/tree/{channel}', [MarketplaceCategoryMapperController::class, 'channelTree'])->name('marketplace-category-mapper.tree.channel');
