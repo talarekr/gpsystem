@@ -11,6 +11,15 @@ use Illuminate\Http\Request;
 
 class OvokoListingUrlBackfillController extends Controller
 {
+    private function queryBool(Request $request, string $key, bool $default = false): bool
+    {
+        if (! $request->query->has($key)) {
+            return $default;
+        }
+
+        return filter_var($request->query($key), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? $default;
+    }
+
     private const CONFIRMATION = 'ovoko-url-backfill';
     private const DEFAULT_BULK_LIMIT = 100;
     private const MAX_BULK_LIMIT = 6500;
@@ -22,9 +31,18 @@ class OvokoListingUrlBackfillController extends Controller
         abort_unless($user && $user->canAccessPanel(Filament::getPanel('admin')), 403);
 
         $isBrowserBackfill = $request->is('admin/tools/ovoko/backfill-links');
+        $parsedApply = $this->queryBool($request, 'apply');
+        $parsedForce = $this->queryBool($request, 'force');
+        $parsedMissingOnly = $request->query->has('missing_only')
+            ? $this->queryBool($request, 'missing_only', true)
+            : $this->queryBool($request, 'only_missing', true);
+        $parsedIncludeInactive = $this->queryBool($request, 'include_inactive');
+        $parsedDebug = $this->queryBool($request, 'debug');
+        $parsedPartId = $request->filled('part_id') ? (int) $request->query('part_id') : null;
+
         $apply = $isBrowserBackfill
-            ? $request->boolean('apply')
-            : (($request->boolean('apply') || $request->is('admin/tools/ovoko/listing-url-backfill'))
+            ? $parsedApply
+            : (($parsedApply || $request->is('admin/tools/ovoko/listing-url-backfill'))
                 && $request->query('confirm') === self::CONFIRMATION);
 
         if ($isBrowserBackfill) {
@@ -32,11 +50,13 @@ class OvokoListingUrlBackfillController extends Controller
             $offset = max(0, (int) $request->query('offset', $request->query('page') ? (((int) $request->query('page') - 1) * $limit) : 0));
             $result = $backfill->runBrowserBackfill(
                 apply: $apply,
-                force: $request->boolean('force'),
-                missingOnly: $request->boolean('missing_only', $request->boolean('only_missing', true)),
+                force: $parsedForce,
+                missingOnly: $parsedMissingOnly,
                 limit: $limit,
                 offset: $offset,
-                partId: $request->filled('part_id') ? (int) $request->query('part_id') : null,
+                partId: $parsedPartId,
+                includeInactive: $parsedIncludeInactive,
+                debug: $parsedDebug,
             );
         } elseif (! $request->filled('listing_id') && ! $request->filled('part_id')) {
             $limit = max(1, min(self::MAX_BULK_LIMIT, (int) $request->query('limit', self::DEFAULT_BULK_LIMIT)));
@@ -53,8 +73,8 @@ class OvokoListingUrlBackfillController extends Controller
 
             $result = $backfill->run(
                 apply: $apply,
-                force: $request->boolean('force'),
-                partId: $request->filled('part_id') ? (int) $request->query('part_id') : null,
+                force: $parsedForce,
+                partId: $parsedPartId,
                 limit: $limit,
                 listingId: $request->filled('listing_id') ? (int) $request->query('listing_id') : null,
                 maxPages: max(1, min(50, (int) $request->query('max_pages', 3))),
@@ -74,10 +94,19 @@ class OvokoListingUrlBackfillController extends Controller
             'ok' => true,
             'mode' => $result['mode'],
             'dry_run' => ! $apply,
-            'apply_requested' => $request->boolean('apply'),
+            'requested_part_id' => $request->query('part_id'),
+            'parsed_part_id' => $parsedPartId,
+            'parsed_force' => $parsedForce,
+            'parsed_missing_only' => $parsedMissingOnly,
+            'parsed_apply' => $parsedApply,
+            'parsed_limit' => $limit ?? null,
+            'parsed_offset' => $offset ?? null,
+            'debug' => $parsedDebug,
+            'include_inactive' => $parsedIncludeInactive,
+            'apply_requested' => $parsedApply,
             'apply_confirmed' => $apply,
-            'force' => $request->boolean('force'),
-            'missing_only' => $request->boolean('missing_only', $request->boolean('only_missing', true)),
+            'force' => $parsedForce,
+            'missing_only' => $parsedMissingOnly,
             'only_missing' => $request->boolean('only_missing'),
             'only_missing_semantics' => $result['only_missing_semantics'] ?? null,
             'limit_requested' => $result['limit_requested'] ?? $limit,
@@ -98,6 +127,7 @@ class OvokoListingUrlBackfillController extends Controller
             'summary' => $result['summary'],
             'results' => $result['results'],
             'warnings' => $result['warnings'],
+            'debug_info' => $result['debug'] ?? null,
         ]);
     }
 }

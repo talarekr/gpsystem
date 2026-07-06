@@ -245,6 +245,32 @@ class ManualMarketplaceLinkMappingTest extends TestCase
         $this->assertSame($listing->url, $row['url']);
     }
 
+    public function test_browser_ovoko_backfill_parses_flags_and_debugs_part_listings(): void
+    {
+        $this->actingAsAdminUser();
+        $part = Part::query()->create(['name' => 'VOLVO XC60 sterownik moduł świateł xenon', 'sku' => 'GPS-7132', 'part_number' => '31427776', 'quantity' => 0, 'status' => 'archived', 'currency' => 'PLN', 'ovoko_price' => null]);
+        MarketplaceListing::query()->create(['part_id' => $part->id, 'marketplace' => 'ovoko', 'external_offer_id' => '7249', 'external_listing_id' => '7249', 'price' => 321.45, 'currency' => 'PLN', 'status' => 'inactive', 'sync_status' => 'mapped', 'match_status' => 'confirmed']);
+
+        $this->getJson('/admin/tools/ovoko/backfill-links?part_id='.$part->id.'&missing_only=0&force=1&apply=0&debug=1')
+            ->assertOk()
+            ->assertJsonPath('parsed_part_id', $part->id)
+            ->assertJsonPath('parsed_force', true)
+            ->assertJsonPath('parsed_missing_only', false)
+            ->assertJsonPath('parsed_apply', false)
+            ->assertJsonPath('debug_info.part_exists', true)
+            ->assertJsonPath('debug_info.marketplace_listings_for_part.0.external_offer_id', '7249')
+            ->assertJsonPath('debug_info.listing_filter_diagnostics.0.ovoko_id_seen_by_backfill', '7249')
+            ->assertJsonPath('summary.scanned', 0);
+
+        $this->getJson('/admin/tools/ovoko/backfill-links?part_id='.$part->id.'&missing_only=0&force=1&include_inactive=1&apply=1')
+            ->assertOk()
+            ->assertJsonPath('parsed_force', true)
+            ->assertJsonPath('parsed_apply', true)
+            ->assertJsonPath('summary.scanned', 1)
+            ->assertJsonPath('summary.updated_url', 1)
+            ->assertJsonPath('summary.updated_price', 1);
+    }
+
     private function actingAsAdminUser(): User
     {
         $this->seed(RoleSeeder::class);
