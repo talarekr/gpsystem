@@ -41,7 +41,7 @@ class PartAvailabilityEventService
         $part = $this->resolvePart($source, $event);
         $eventKey = $this->eventKey($eventType, $source, $event, $part?->id);
 
-        if ($this->alreadyProcessed($eventKey)) {
+        if (! $this->isManualStockChangeWithoutExternalEventId($source, $event) && $this->alreadyProcessed($eventKey)) {
             $this->logEvent('local', null, $part?->id, $eventType, $source, 'availability_event', 'skipped', 'already_processed', $eventKey, $event, null);
             return ['ok' => true, 'status' => 'already_processed', 'part_id' => $part?->id, 'event_key' => $eventKey];
         }
@@ -155,6 +155,7 @@ class PartAvailabilityEventService
     { return match ($target) { 'allegro' => $listing->external_offer_id ?: $listing->external_listing_id, 'ovoko' => $listing->external_listing_id ?: $listing->external_offer_id ?: Arr::get($listing->raw_payload ?: [], 'metadata.ovoko_part_id'), 'ebay' => $listing->sku ?: $listing->external_offer_id ?: $listing->external_listing_id, default => null } ?: null; }
     private function targetAlreadyApplied(MarketplaceListing $listing, string $eventType): bool { return $eventType === self::EVENT_SOLD ? (int) $listing->quantity === 0 : (int) $listing->quantity === 1 && str_contains(strtolower((string) $listing->status), 'active'); }
     private function alreadyProcessed(string $eventKey): bool { return MarketplaceSyncLog::query()->where('action', 'availability_event')->where('status', 'success')->where('payload->event_key', $eventKey)->exists(); }
+    private function isManualStockChangeWithoutExternalEventId(string $source, array $event): bool { return $source === 'manual_stock_change' && blank($event['source_order_item_id'] ?? null) && blank($event['source_order_id'] ?? null) && blank($event['source_local_sale_id'] ?? null) && blank($event['source_marketplace_item_id'] ?? null); }
     private function eventKey(string $eventType, string $source, array $event, ?int $partId): string { return implode(':', array_filter([$eventType, $source, $event['source_order_item_id'] ?? null, $event['source_order_id'] ?? null, $event['source_local_sale_id'] ?? null, $event['source_marketplace_item_id'] ?? null, $partId])); }
     private function source(string $source): string { return match ($source) { 'sklep', 'store' => 'storefront', 'manual' => 'manual_stock_change', default => $source }; }
     private function matchesSourceTarget(string $source, string $target): bool { return $target === 'ebay' ? str_starts_with($source, 'ebay') : $source === $target; }
