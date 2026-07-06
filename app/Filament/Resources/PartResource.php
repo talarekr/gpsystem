@@ -9,6 +9,7 @@ use App\Models\Part;
 use App\Models\PartCategory;
 use App\Models\PartImage;
 use App\Services\Marketplace\AllegroSalesSettingsResolver;
+use App\Services\Marketplace\EbayPanelActionAuditLogger;
 use App\Services\Marketplace\PreparePartMarketplaceListingService;
 use App\Services\Parts\PartImageUploadService;
 use App\Models\StorageLocation;
@@ -750,12 +751,31 @@ class PartResource extends Resource
                 ->requiresConfirmation()
                 ->visible(fn (Part $record): bool => (bool) $record->needs_listing)
                 ->action(function (Part $record, PreparePartMarketplaceListingService $prepareService): void {
-                    if ($prepareService->localPublishBlockers($record) !== []) {
-                        return;
-                    }
+                    $auditLogger = app(EbayPanelActionAuditLogger::class);
+                    $auditContext = [
+                        'filament_action' => 'mark_listing_ready',
+                        'livewire_component' => static::class,
+                        'selected_channels' => ['ebay'],
+                        'class' => static::class,
+                        'method' => 'table.mark_listing_ready',
+                    ];
 
-                    $prepareService->preview($record, dryRun: true);
-                    $prepareService->markLocallyListed($record);
+                    try {
+                        $auditLogger->started($record, 'prepare', $auditContext);
+                        $auditLogger->step($record, 'readiness_checked', $auditContext + ['selected_step' => 'prepare']);
+
+                        if ($prepareService->localPublishBlockers($record) !== []) {
+                            $auditLogger->completed($record, 'prepare', $auditContext + ['blocked' => true, 'blocker_source' => 'localPublishBlockers']);
+                            return;
+                        }
+
+                        $prepareService->preview($record, dryRun: true);
+                        $prepareService->markLocallyListed($record);
+                        $auditLogger->completed($record, 'prepare', $auditContext);
+                    } catch (\Throwable $exception) {
+                        $auditLogger->failed($record, $exception, 'prepare', $auditContext);
+                        throw $exception;
+                    }
                 }),
         ])->defaultSort('id', 'desc');
     }

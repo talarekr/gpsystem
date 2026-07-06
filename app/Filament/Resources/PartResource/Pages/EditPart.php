@@ -6,6 +6,7 @@ use App\Filament\Resources\PartResource;
 use App\Models\MarketplaceCategory;
 use App\Models\PartCategory;
 use App\Models\PartImage;
+use App\Services\Marketplace\EbayPanelActionAuditLogger;
 use App\Services\Marketplace\PreparePartMarketplaceListingService;
 use App\Services\Marketplace\PublishPartToMarketplacesService;
 use Filament\Actions;
@@ -85,13 +86,13 @@ class EditPart extends EditRecord
         $currentIndex = $images->search(fn (PartImage $image): bool => (int) $image->getKey() === $imageId);
 
         if ($currentIndex === false) {
-            return;
+                return;
         }
 
         $targetIndex = $direction === 'left' ? $currentIndex - 1 : $currentIndex + 1;
 
         if (! $images->has($targetIndex)) {
-            return;
+                return;
         }
 
         $ordered = $images->values()->all();
@@ -401,58 +402,72 @@ class EditPart extends EditRecord
 
         $this->marketplacePublishInProgress = true;
 
+        $selectedStep = 'publish';
+        $auditContext = [
+            'filament_action' => $singleChannel ? 'publishMarketplaceChannel' : 'markListingReadyHeader/markListingReadyFooter',
+            'livewire_component' => static::class,
+            'selected_channels' => $channels,
+        ];
+        $auditLogger = app(EbayPanelActionAuditLogger::class);
+
         try {
-        $this->save(false, false);
-        $this->record->refresh();
+            $auditLogger->started($this->record, $selectedStep, $auditContext + ['class' => static::class, 'method' => __FUNCTION__]);
+            $this->save(false, false);
+            $this->record->refresh();
 
-        $enabled = (bool) config('marketplace.publish_enabled', false);
-        $result = $enabled
-            ? $publishService->confirm($this->record, $channels, dryRun: false, confirm: true)
-            : $publishService->preview($this->record, $channels, includePayload: true);
+            $enabled = (bool) config('marketplace.publish_enabled', false);
+            $result = $enabled
+                ? $publishService->confirm($this->record, $channels, dryRun: false, confirm: true)
+                : $publishService->preview($this->record, $channels, includePayload: true);
+            $auditLogger->step($this->record, 'readiness_checked', $auditContext + ['selected_step' => $selectedStep, 'marketplace_publish_enabled' => $enabled]);
+            $auditLogger->completed($this->record, $selectedStep, $auditContext + ['marketplace_publish_enabled' => $enabled]);
 
-        $published = $result['published_channels'] ?? $result['ready_channels'] ?? [];
-        $skipped = $result['skipped_channels'] ?? [];
-        $messages = collect($result['channels'] ?? [])->flatMap(fn (array $channel): array => $channel['errors'] ?? $channel['readiness']['blockers'] ?? [])->map(fn (mixed $message): string => $this->marketplacePublishMessage((string) $message))->filter()->values()->all();
-        $channelLabel = $singleChannel ? match ($singleChannel) {
-            'allegro_main', 'allegro' => 'Allegro',
-            'ebay_de', 'ebay' => 'eBay',
-            'ovoko', 'ovoko_main' => 'Ovoko',
-            default => ucfirst($singleChannel),
-        } : null;
+            $published = $result['published_channels'] ?? $result['ready_channels'] ?? [];
+            $skipped = $result['skipped_channels'] ?? [];
+            $messages = collect($result['channels'] ?? [])->flatMap(fn (array $channel): array => $channel['errors'] ?? $channel['readiness']['blockers'] ?? [])->map(fn (mixed $message): string => $this->marketplacePublishMessage((string) $message))->filter()->values()->all();
+            $channelLabel = $singleChannel ? match ($singleChannel) {
+                'allegro_main', 'allegro' => 'Allegro',
+                'ebay_de', 'ebay' => 'eBay',
+                'ovoko', 'ovoko_main' => 'Ovoko',
+                default => ucfirst($singleChannel),
+            } : null;
 
-        if (! $enabled) {
+            if (! $enabled) {
+                Notification::make()
+                    ->title('Realne wystawianie marketplace jest wyłączone — wykonano tylko preview.')
+                    ->body($messages === [] ? 'MARKETPLACE_PUBLISH_ENABLED=false. Nie wykonano żadnego zapisu do marketplace.' : implode(' | ', $messages))
+                    ->danger()
+                    ->send();
+                return;
+            }
+
+            if ($published !== [] && $skipped !== []) {
+                Notification::make()
+                    ->title($singleChannel ? 'Część zapisana. Wystawiono kanał '.$channelLabel.'.' : 'Część zapisana. Wystawiono gotowe kanały, a kanały z brakami pominięto.')
+                    ->body('Wystawione/przygotowane: '.implode(', ', $published).'. Pominięte: '.implode(', ', array_keys($skipped)).'. Powody: '.($messages === [] ? 'readiness wymaga uzupełnienia.' : implode(' | ', $messages)))
+                    ->warning()
+                    ->send();
+                return;
+            }
+
+            if (($result['blocked'] ?? false) || $published === []) {
+                Notification::make()
+                    ->title($singleChannel ? 'Nie udało się wystawić kanału '.$channelLabel.'.' : 'Nie udało się wystawić części.')
+                    ->body($messages === [] ? 'Readiness wymaga uzupełnienia.' : implode(' | ', $messages))
+                    ->danger()
+                    ->send();
+                return;
+            }
+
             Notification::make()
-                ->title('Realne wystawianie marketplace jest wyłączone — wykonano tylko preview.')
-                ->body($messages === [] ? 'MARKETPLACE_PUBLISH_ENABLED=false. Nie wykonano żadnego zapisu do marketplace.' : implode(' | ', $messages))
-                ->danger()
+                ->title($singleChannel ? 'Część zapisana i wystawiona w kanale '.$channelLabel.'.' : 'Część zapisana i wystawiona w gotowych kanałach.')
+                ->success()
                 ->send();
+
             return;
-        }
-
-        if ($published !== [] && $skipped !== []) {
-            Notification::make()
-                ->title($singleChannel ? 'Część zapisana. Wystawiono kanał '.$channelLabel.'.' : 'Część zapisana. Wystawiono gotowe kanały, a kanały z brakami pominięto.')
-                ->body('Wystawione/przygotowane: '.implode(', ', $published).'. Pominięte: '.implode(', ', array_keys($skipped)).'. Powody: '.($messages === [] ? 'readiness wymaga uzupełnienia.' : implode(' | ', $messages)))
-                ->warning()
-                ->send();
-            return;
-        }
-
-        if (($result['blocked'] ?? false) || $published === []) {
-            Notification::make()
-                ->title($singleChannel ? 'Nie udało się wystawić kanału '.$channelLabel.'.' : 'Nie udało się wystawić części.')
-                ->body($messages === [] ? 'Readiness wymaga uzupełnienia.' : implode(' | ', $messages))
-                ->danger()
-                ->send();
-            return;
-        }
-
-        Notification::make()
-            ->title($singleChannel ? 'Część zapisana i wystawiona w kanale '.$channelLabel.'.' : 'Część zapisana i wystawiona w gotowych kanałach.')
-            ->success()
-            ->send();
-
-        return;
+        } catch (\Throwable $exception) {
+            $auditLogger->failed($this->record, $exception, $selectedStep, $auditContext);
+            throw $exception;
         } finally {
             $this->marketplacePublishInProgress = false;
         }
