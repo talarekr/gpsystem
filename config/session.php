@@ -4,7 +4,7 @@ use Illuminate\Support\Str;
 
 return [
     'driver' => env('SESSION_DRIVER', 'database'),
-    'lifetime' => (int) env('SESSION_LIFETIME', 120),
+    'lifetime' => (int) env('SESSION_LIFETIME', 240),
     'expire_on_close' => env('SESSION_EXPIRE_ON_CLOSE', false),
     'encrypt' => env('SESSION_ENCRYPT', false),
     'files' => storage_path('framework/sessions'),
@@ -15,7 +15,7 @@ return [
     'cookie' => env('SESSION_COOKIE', Str::slug(env('APP_NAME', 'gps_product_hub'), '_').'_session'),
     'path' => env('SESSION_PATH', '/'),
     'domain' => env('SESSION_DOMAIN'),
-    'secure' => env('SESSION_SECURE_COOKIE'),
+    'secure' => env('SESSION_SECURE_COOKIE', env('APP_ENV') === 'production'),
     'http_only' => env('SESSION_HTTP_ONLY', true),
     'same_site' => env('SESSION_SAME_SITE', 'lax'),
     'partitioned' => env('SESSION_PARTITIONED_COOKIE', false),
