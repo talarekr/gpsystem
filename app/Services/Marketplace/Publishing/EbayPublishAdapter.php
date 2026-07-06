@@ -6,6 +6,7 @@ use App\Models\MarketplaceAccount;
 use App\Models\Part;
 use App\Models\MarketplaceListing;
 use App\Services\Marketplace\Api\EbayApiClient;
+use App\Services\Marketplace\EbayPanelActionAuditLogger;
 use App\Services\Marketplace\EbaySkuResolver;
 use App\Services\Marketplace\EbayTitleSanitizer;
 use App\Services\Marketplace\Ebay\EbayConditionMapper;
@@ -83,6 +84,7 @@ class EbayPublishAdapter extends BaseMarketplacePublishAdapter
         }
         foreach (['merchant_location_key' => 'eBay: brakuje merchantLocationKey', 'selected_fulfillment_policy_id' => 'eBay: brakuje fulfillmentPolicyId', 'selected_payment_policy_id' => 'eBay: brakuje paymentPolicyId', 'selected_return_policy_id' => 'eBay: brakuje returnPolicyId'] as $key => $message) if (blank($policies[$key] ?? $this->settingForPolicy($settings, $key))) $missing[] = $message;
         if ($missing !== []) return ['ok' => false, 'status' => 'payload_invalid', 'action' => 'publishOffer', 'error' => implode('; ', $missing), 'request_summary' => $this->requestSummary($payload), 'response_summary' => ['missing' => $missing]];
+        app(EbayPanelActionAuditLogger::class)->step($part, 'policies_resolved', ['selected_step' => 'publish', 'channel' => $this->accountCode(), 'marketplace_id' => $settings['marketplace_id'] ?? null]);
         $aspectNormalization = $this->normalizeAspects($payload['item_specifics'] ?? []);
         $marketplaceId = (string) ($settings['marketplace_id'] ?? ($this->accountCode() === 'ebay_fr' ? 'EBAY_FR' : 'EBAY_DE'));
         $inventoryDescription = $this->inventoryDescription($payload, $part, $sku, $marketplaceId);
@@ -95,6 +97,11 @@ class EbayPublishAdapter extends BaseMarketplacePublishAdapter
         $offer = ['sku' => $sku, 'marketplaceId' => $marketplaceId, 'format' => (string) ($settings['format'] ?? 'FIXED_PRICE'), 'listingDuration' => (string) ($settings['listing_duration'] ?? 'GTC'), 'availableQuantity' => (int) ($payload['quantity'] ?? $part->quantity ?? 1), 'categoryId' => (string) ($payload['category_id'] ?? ''), 'merchantLocationKey' => $merchantLocationKey, 'pricingSummary' => ['price' => ['value' => (string) ($payload['price_eur'] ?? $readiness['marketplace_price']), 'currency' => 'EUR']], 'listingPolicies' => ['fulfillmentPolicyId' => (string) ($policies['selected_fulfillment_policy_id'] ?? $this->settingForPolicy($settings, 'selected_fulfillment_policy_id') ?? ''), 'paymentPolicyId' => (string) ($policies['selected_payment_policy_id'] ?? $this->settingForPolicy($settings, 'selected_payment_policy_id') ?? ''), 'returnPolicyId' => (string) ($policies['selected_return_policy_id'] ?? $this->settingForPolicy($settings, 'selected_return_policy_id') ?? '')]];
         if ($listingDescription !== '') $offer['listingDescription'] = $listingDescription;
         $contentLanguage = $this->contentLanguage((string) $offer['marketplaceId']);
+        $auditLogger = app(EbayPanelActionAuditLogger::class);
+        $auditLogger->step($part, 'inventory_item_about_to_send', ['selected_step' => 'publish', 'channel' => $this->accountCode(), 'endpoint' => 'PUT /sell/inventory/v1/inventory_item/{sku}', 'sku' => $sku]);
+        $auditLogger->step($part, 'offer_create_about_to_send', ['selected_step' => 'publish', 'channel' => $this->accountCode(), 'endpoint' => 'POST /sell/inventory/v1/offer', 'sku' => $sku]);
+        $auditLogger->step($part, 'offer_update_about_to_send', ['selected_step' => 'publish', 'channel' => $this->accountCode(), 'endpoint' => 'PUT /sell/inventory/v1/offer/{offerId}', 'sku' => $sku]);
+        $auditLogger->step($part, 'publish_about_to_send', ['selected_step' => 'publish', 'channel' => $this->accountCode(), 'endpoint' => 'POST /sell/inventory/v1/offer/{offerId}/publish', 'sku' => $sku]);
         $result = (new EbayApiClient($this->accountCode(), $account))
             ->withDiagnosticContext(['part_id' => $part->id, 'stage' => 'publish'])
             ->publishInventoryOffer($sku, $inventory, $offer, $contentLanguage);
