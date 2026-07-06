@@ -140,7 +140,7 @@ class PartModuleFoundationTest extends TestCase
     }
 
 
-    public function test_sold_part_channel_rows_override_all_marketplaces_as_unavailable_without_links(): void
+    public function test_sold_part_channel_rows_keep_historical_marketplace_links(): void
     {
         $part = Part::query()->create([
             'name' => 'Sprzedana część z zachowanymi listingami',
@@ -172,11 +172,16 @@ class PartModuleFoundationTest extends TestCase
 
         $this->assertSame(['storefront', 'allegro', 'ovoko', 'ebay'], collect($rows)->pluck('key')->all());
 
-        foreach ($rows as $row) {
-            $this->assertFalse($row['listed'], $row['key'].' should render a red unavailable marker for sold parts.');
-            $this->assertNull($row['url'], $row['key'].' should not expose a marketplace link for sold parts.');
-            $this->assertNull($row['external_offer_id'], $row['key'].' should not present saved listing ids as available for sold parts.');
-        }
+        $this->assertFalse($rows[0]['listed']);
+        $this->assertNull($rows[0]['url']);
+
+        $ovoko = collect($rows)->firstWhere('key', 'ovoko');
+        $ebay = collect($rows)->firstWhere('key', 'ebay');
+
+        $this->assertTrue($ovoko['listed']);
+        $this->assertSame('https://ovoko.pl/czesci-samochodowe/hgf11703', $ovoko['url']);
+        $this->assertTrue($ebay['listed']);
+        $this->assertSame('https://www.ebay.de/itm/EBAY-5502', $ebay['url']);
 
         $this->assertDatabaseHas('marketplace_listings', [
             'part_id' => $part->id,
@@ -249,7 +254,7 @@ class PartModuleFoundationTest extends TestCase
         $this->assertSame('https://ovoko.pl/czesci-samochodowe/hgf11703', $ovoko['url']);
     }
 
-    public function test_ovoko_channel_diagnostics_explain_missing_url_for_listing_id_only_records(): void
+    public function test_ovoko_channel_diagnostics_generates_fallback_url_for_listing_id_only_records(): void
     {
         $part = Part::query()->create([
             'name' => 'Część #7897',
@@ -274,9 +279,95 @@ class PartModuleFoundationTest extends TestCase
             ->diagnosticsForPartChannel($part->fresh('marketplaceListings'), 'ovoko');
 
         $this->assertTrue($diagnostics['resolved_is_listed']);
-        $this->assertNull($diagnostics['resolved_url']);
-        $this->assertFalse($diagnostics['link_visible']);
-        $this->assertSame('missing_marketplace_listings_url', $diagnostics['link_hidden_reason']);
+        $this->assertSame('https://ovoko.pl/czesci-samochodowe/hgf11703-czesc-7897', $diagnostics['resolved_url']);
+        $this->assertTrue($diagnostics['link_visible']);
+        $this->assertNull($diagnostics['link_hidden_reason']);
+    }
+
+    public function test_ready_part_with_confirmed_marketplace_listing_urls_resolves_and_renders_all_channel_links(): void
+    {
+        $part = Part::query()->create([
+            'name' => 'Part #315',
+            'price' => 100,
+            'allegro_price' => 110,
+            'ovoko_price' => 120,
+            'ebay_price' => 130,
+            'quantity' => 1,
+            'status' => 'ready',
+        ]);
+
+        MarketplaceListing::query()->create([
+            'part_id' => $part->id,
+            'marketplace' => 'allegro',
+            'external_offer_id' => '18478502462',
+            'external_listing_id' => '18478502462',
+            'status' => 'active',
+            'sync_status' => 'synced',
+            'match_status' => 'confirmed',
+            'last_api_status' => 'success',
+            'url' => 'https://allegro.pl/oferta/18478502462',
+        ]);
+
+        MarketplaceListing::query()->create([
+            'part_id' => $part->id,
+            'marketplace' => 'ovoko',
+            'external_offer_id' => '9848',
+            'external_listing_id' => '22806',
+            'status' => 'active',
+            'sync_status' => 'mapped',
+            'match_status' => 'confirmed',
+            'url' => 'https://ovoko.pl/czesci-samochodowe/hgf9848-part',
+        ]);
+
+        MarketplaceListing::query()->create([
+            'part_id' => $part->id,
+            'marketplace' => 'ebay_de',
+            'external_listing_id' => '389993749782',
+            'status' => 'active',
+            'sync_status' => 'mapped',
+            'match_status' => 'confirmed',
+            'url' => 'https://www.ebay.de/itm/389993749782',
+        ]);
+
+        $rows = collect(app(\App\Services\Admin\PartMarketplaceStatusResolver::class)->rowsForPart($part));
+
+        foreach (['allegro', 'ovoko', 'ebay'] as $channel) {
+            $this->assertTrue($rows->firstWhere('key', $channel)['listed'], $channel.' should not render a red X.');
+        }
+
+        $this->assertSame('https://allegro.pl/oferta/18478502462', $rows->firstWhere('key', 'allegro')['url']);
+        $this->assertSame('https://ovoko.pl/czesci-samochodowe/hgf9848-part', $rows->firstWhere('key', 'ovoko')['url']);
+        $this->assertSame('https://www.ebay.de/itm/389993749782', $rows->firstWhere('key', 'ebay')['url']);
+
+        $html = view('filament.resources.parts.table-channels', ['part' => $part])->render();
+
+        $this->assertStringContainsString('https://allegro.pl/oferta/18478502462', $html);
+        $this->assertStringContainsString('https://ovoko.pl/czesci-samochodowe/hgf9848-part', $html);
+        $this->assertStringContainsString('https://www.ebay.de/itm/389993749782', $html);
+        $this->assertSame(3, substr_count($html, 'class="part-channel-link"'));
+    }
+
+    public function test_marketplace_debug_part_endpoint_includes_part_marketplace_status_resolver_output(): void
+    {
+        $this->actingAs(User::query()->create(['name' => 'Admin', 'email' => 'debug-admin@example.test', 'password' => 'secret']));
+
+        $part = Part::query()->create(['name' => 'Debug part #315', 'quantity' => 1, 'status' => 'ready']);
+
+        MarketplaceListing::query()->create([
+            'part_id' => $part->id,
+            'marketplace' => 'allegro',
+            'external_offer_id' => '18478502462',
+            'status' => 'active',
+            'sync_status' => 'synced',
+            'match_status' => 'confirmed',
+            'url' => 'https://allegro.pl/oferta/18478502462',
+        ]);
+
+        $this->getJson('/admin/tools/marketplace/debug-part?part_id='.$part->id)
+            ->assertOk()
+            ->assertJsonPath('part_marketplace_status_resolver.1.key', 'allegro')
+            ->assertJsonPath('part_marketplace_status_resolver.1.listed', true)
+            ->assertJsonPath('part_marketplace_status_resolver.1.url', 'https://allegro.pl/oferta/18478502462');
     }
 
     public function test_part_can_be_created_with_required_fields_and_safe_defaults(): void
