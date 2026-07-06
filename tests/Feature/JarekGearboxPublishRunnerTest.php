@@ -33,7 +33,7 @@ class JarekGearboxPublishRunnerTest extends TestCase
         $response->assertOk()
             ->assertSee('Jarek Gearboxes eBay DE publish runner')
             ->assertSee('find-next-ready')
-            ->assertSee('value="3"', false)
+            ->assertSee('max="50" value="50"', false)
             ->assertSee('value="10"', false)
             ->assertSee('Ready remaining')
             ->assertSee('Scan remaining ready')
