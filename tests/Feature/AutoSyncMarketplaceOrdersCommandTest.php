@@ -28,7 +28,7 @@ class AutoSyncMarketplaceOrdersCommandTest extends TestCase
         config([
             'marketplace_order_sync.enabled' => true,
             'marketplace_order_sync.lookback_days' => 3,
-            'marketplace_order_sync.channels' => 'allegro,ebay,ovoko',
+            'marketplace_order_sync.channels' => ' allegro_main, eBay-DE, rrr, ovoko_marketplace, ebay ',
         ]);
 
         $service = Mockery::mock(MarketplaceOrdersImportService::class);

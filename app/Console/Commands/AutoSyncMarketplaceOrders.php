@@ -7,6 +7,7 @@ use App\Services\Marketplace\MarketplaceOrderTimeService;
 use App\Services\Marketplace\MarketplaceOrdersImportService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Str;
 
 class AutoSyncMarketplaceOrders extends Command
 {
@@ -74,7 +75,18 @@ class AutoSyncMarketplaceOrders extends Command
             ? config('marketplace_order_sync.channels')
             : explode(',', (string) config('marketplace_order_sync.channels', 'allegro,ebay'));
 
-        return array_values(array_intersect(array_map('trim', $channels), ['allegro', 'ebay', 'ovoko']));
+        return collect($channels)
+            ->map(fn ($channel): string => Str::of((string) $channel)->trim()->lower()->replace('-', '_')->toString())
+            ->map(fn (string $channel): string => match ($channel) {
+                'ebay_de', 'ebay_fr', 'ebay_pl' => 'ebay',
+                'ovoko_main', 'ovoko_com', 'ovoko_marketplace', 'rrr' => 'ovoko',
+                'allegro_main' => 'allegro',
+                default => $channel,
+            })
+            ->intersect(['allegro', 'ebay', 'ovoko'])
+            ->unique()
+            ->values()
+            ->all();
     }
 
     private function safetyFlags(bool $dryRun): array
