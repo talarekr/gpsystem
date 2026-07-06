@@ -843,7 +843,20 @@ class EbayApiClient extends AbstractMarketplaceApiClient
 
         $offerResponse = Http::withToken($token)->withHeaders($headers)->acceptJson()->asJson()->timeout(30)
             ->post($base.'/sell/inventory/v1/offer', $offerPayload);
-        if (! $offerResponse->successful()) return $this->writeResult('createOffer', $offerResponse, $headers) + ['inventory_http_status' => $inventoryResponse->status(), 'offer_id' => $this->offerIdFromErrorResponse($offerResponse->json())];
+        if (! $offerResponse->successful()) {
+            $createErrorJson = $offerResponse->json();
+            $existingOfferId = $this->offerIdFromErrorResponse($createErrorJson);
+            if ($this->isExistingOfferError($createErrorJson) && filled($existingOfferId)) {
+                return $this->publishExistingOffer((string) $existingOfferId, $headers, [
+                    'inventory_http_status' => $inventoryResponse->status(),
+                    'offer_http_status' => $offerResponse->status(),
+                    'create_offer_json' => is_array($createErrorJson) ? $createErrorJson : [],
+                    'existing_offer_reused' => true,
+                ]);
+            }
+
+            return $this->writeResult('createOffer', $offerResponse, $headers) + ['inventory_http_status' => $inventoryResponse->status(), 'offer_id' => $existingOfferId];
+        }
 
         $offerJson = $offerResponse->json();
         $offerId = is_array($offerJson) ? (string) ($offerJson['offerId'] ?? '') : '';
@@ -866,6 +879,44 @@ class EbayApiClient extends AbstractMarketplaceApiClient
             'content_language' => $headers['Content-Language'] ?? null,
             'marketplace_id' => $headers['X-EBAY-C-MARKETPLACE-ID'],
         ];
+    }
+
+    public function publishExistingOfferById(string $offerId, ?string $marketplaceId = null, ?string $contentLanguage = null): array
+    {
+        $headers = ['X-EBAY-C-MARKETPLACE-ID' => $marketplaceId ?: $this->marketplaceId()];
+        if (filled($contentLanguage)) $headers['Content-Language'] = (string) $contentLanguage;
+
+        return $this->publishExistingOffer($offerId, $headers, ['existing_offer_reused' => true]);
+    }
+
+    private function publishExistingOffer(string $offerId, array $headers, array $extra = []): array
+    {
+        $base = rtrim((string) $this->account?->api_base_url, '/');
+        $publishResponse = Http::withToken($this->accessToken())->withHeaders($headers)->acceptJson()->asJson()->timeout(30)
+            ->post($base.'/sell/inventory/v1/offer/'.rawurlencode($offerId).'/publish');
+        $publishJson = $publishResponse->json();
+        $listingId = is_array($publishJson) ? ($publishJson['listingId'] ?? $publishJson['itemId'] ?? null) : null;
+
+        return $extra + [
+            'ok' => $publishResponse->successful(),
+            'step' => 'publishOffer',
+            'http_status' => $publishResponse->status(),
+            'offer_id' => $offerId,
+            'listing_id' => $listingId,
+            'json' => is_array($publishJson) ? $publishJson : [],
+            'request_id' => $publishResponse->header('x-ebay-c-request-id') ?: $publishResponse->header('rlogid'),
+            'content_language' => $headers['Content-Language'] ?? null,
+            'marketplace_id' => $headers['X-EBAY-C-MARKETPLACE-ID'] ?? null,
+        ];
+    }
+
+    private function isExistingOfferError(mixed $json): bool
+    {
+        foreach ((array) data_get($json, 'errors', []) as $error) {
+            if (is_array($error) && (string) ($error['errorId'] ?? '') === '25002') return true;
+        }
+
+        return false;
     }
 
     private function offerIdFromErrorResponse(mixed $json): ?string

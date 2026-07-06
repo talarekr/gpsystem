@@ -129,6 +129,88 @@ class MarketplacePublishPartFlowTest extends TestCase
         $this->assertSame(['allegro', 'ebay'], $service->normalizeChannels('allegro,ebay,unknown'));
     }
 
+    public function test_ebay_create_offer_existing_offer_id_is_attached_and_published_without_offer_url(): void
+    {
+        config(['marketplace.publish_enabled' => true]);
+        $part = $this->completeEbayPart(['sku' => 'GPS-7700-GJ322C405AF']);
+        \App\Models\MarketplaceAccount::query()->create([
+            'marketplace' => 'ebay_de', 'code' => 'ebay_de', 'name' => 'eBay DE', 'status' => 'active', 'api_enabled' => true,
+            'api_base_url' => 'https://api.ebay.test', 'api_credentials' => ['access_token' => 'token'],
+            'api_settings' => ['marketplace_id' => 'EBAY_DE', 'merchant_location_key' => 'default', 'fulfillment_policy_id' => 'fulfillment', 'payment_policy_id' => 'payment', 'return_policy_id' => 'return'],
+        ]);
+        \Illuminate\Support\Facades\Http::fake([
+            'api.ebay.test/sell/inventory/v1/inventory_item/*' => \Illuminate\Support\Facades\Http::response(null, 204),
+            'api.ebay.test/sell/inventory/v1/offer' => \Illuminate\Support\Facades\Http::response(['errors' => [[
+                'errorId' => 25002,
+                'message' => 'Preisangebot-Entität existiert bereits.',
+                'parameters' => [['name' => 'offerId', 'value' => '199289364011']],
+            ]]], 400),
+            'api.ebay.test/sell/inventory/v1/offer/199289364011/publish' => \Illuminate\Support\Facades\Http::response(['listingId' => '800113252568'], 200),
+        ]);
+
+        $result = app(PublishPartToMarketplacesService::class)->confirm($part, ['ebay'], dryRun: false, confirm: true);
+
+        $this->assertTrue($result['channels']['ebay']['success']);
+        $this->assertSame('Oferta eBay już istniała. Została opublikowana i podpięta.', $result['channels']['ebay']['channels']['ebay_de']['message'] ?? null);
+        $this->assertDatabaseHas('marketplace_listings', ['part_id' => $part->id, 'marketplace' => 'ebay_de', 'external_offer_id' => '199289364011', 'external_listing_id' => '800113252568', 'url' => 'https://www.ebay.de/itm/800113252568']);
+        $this->assertDatabaseMissing('marketplace_listings', ['part_id' => $part->id, 'marketplace' => 'ebay_de', 'url' => 'https://www.ebay.de/itm/199289364011']);
+    }
+
+
+    public function test_ebay_existing_offer_draft_does_not_build_public_url_from_offer_id(): void
+    {
+        config(['marketplace.publish_enabled' => true]);
+        $part = $this->completeEbayPart(['sku' => 'GPS-7700-GJ322C405AF']);
+        \App\Models\MarketplaceAccount::query()->create([
+            'marketplace' => 'ebay_de', 'code' => 'ebay_de', 'name' => 'eBay DE', 'status' => 'active', 'api_enabled' => true,
+            'api_base_url' => 'https://api.ebay.test', 'api_credentials' => ['access_token' => 'token'],
+            'api_settings' => ['marketplace_id' => 'EBAY_DE', 'merchant_location_key' => 'default', 'fulfillment_policy_id' => 'fulfillment', 'payment_policy_id' => 'payment', 'return_policy_id' => 'return'],
+        ]);
+        \Illuminate\Support\Facades\Http::fake([
+            'api.ebay.test/sell/inventory/v1/inventory_item/*' => \Illuminate\Support\Facades\Http::response(null, 204),
+            'api.ebay.test/sell/inventory/v1/offer' => \Illuminate\Support\Facades\Http::response(['errors' => [['errorId' => 25002, 'parameters' => [['name' => 'offerId', 'value' => '199289364011']]]]], 400),
+            'api.ebay.test/sell/inventory/v1/offer/199289364011/publish' => \Illuminate\Support\Facades\Http::response(['warnings' => [['message' => 'Still draft']]], 409),
+        ]);
+
+        $result = app(PublishPartToMarketplacesService::class)->confirm($part, ['ebay'], dryRun: false, confirm: true);
+
+        $this->assertTrue($result['channels']['ebay']['success']);
+        $this->assertSame('Oferta eBay już istnieje jako szkic. Została podpięta lokalnie, ale nie ma jeszcze publicznego linku.', $result['channels']['ebay']['channels']['ebay_de']['message'] ?? null);
+        $this->assertDatabaseHas('marketplace_listings', ['part_id' => $part->id, 'marketplace' => 'ebay_de', 'external_offer_id' => '199289364011', 'external_listing_id' => null, 'url' => null, 'status' => 'draft']);
+    }
+
+    public function test_ebay_existing_offer_conflict_is_controlled(): void
+    {
+        config(['marketplace.publish_enabled' => true]);
+        $part = $this->completeEbayPart(['sku' => 'GPS-7700-GJ322C405AF']);
+        $other = Part::query()->create(['name' => 'Other part', 'price' => 10, 'quantity' => 1]);
+        \App\Models\MarketplaceListing::query()->create(['part_id' => $other->id, 'marketplace' => 'ebay_de', 'external_offer_id' => '199289364011']);
+        \App\Models\MarketplaceAccount::query()->create([
+            'marketplace' => 'ebay_de', 'code' => 'ebay_de', 'name' => 'eBay DE', 'status' => 'active', 'api_enabled' => true,
+            'api_base_url' => 'https://api.ebay.test', 'api_credentials' => ['access_token' => 'token'],
+            'api_settings' => ['marketplace_id' => 'EBAY_DE', 'merchant_location_key' => 'default', 'fulfillment_policy_id' => 'fulfillment', 'payment_policy_id' => 'payment', 'return_policy_id' => 'return'],
+        ]);
+        \Illuminate\Support\Facades\Http::fake([
+            'api.ebay.test/sell/inventory/v1/inventory_item/*' => \Illuminate\Support\Facades\Http::response(null, 204),
+            'api.ebay.test/sell/inventory/v1/offer' => \Illuminate\Support\Facades\Http::response(['errors' => [['errorId' => 25002, 'parameters' => [['name' => 'offerId', 'value' => '199289364011']]]]], 400),
+            'api.ebay.test/sell/inventory/v1/offer/199289364011/publish' => \Illuminate\Support\Facades\Http::response(['listingId' => '800113252568'], 200),
+        ]);
+
+        $result = app(PublishPartToMarketplacesService::class)->confirm($part, ['ebay'], dryRun: false, confirm: true);
+
+        $this->assertFalse($result['channels']['ebay']['success']);
+        $this->assertSame('Ta oferta eBay jest już przypisana do innej części. Sprawdź istniejące mapowanie.', $result['channels']['ebay']['channels']['ebay_de']['errors'][0] ?? null);
+        $this->assertDatabaseMissing('marketplace_listings', ['part_id' => $part->id, 'marketplace' => 'ebay_de', 'external_offer_id' => '199289364011']);
+    }
+
+    private function completeEbayPart(array $overrides = []): Part
+    {
+        $category = PartCategory::query()->create(['name' => 'eBay category']);
+        $part = $this->completeLocalPart(array_merge(['category_id' => $category->id, 'review_metadata' => ['marketplace_prepared_translations' => ['ebay_de' => ['status' => 'prepared', 'language' => 'de', 'fields' => ['title' => 'Deutscher Titel', 'description' => 'Deutsche Beschreibung.']]]]], $overrides));
+        MarketplaceCategoryMapping::query()->create(['local_category_id' => $category->id, 'channel' => 'ebay_de', 'external_category_id' => '177697']);
+        return $part;
+    }
+
     private function completeLocalPart(array $overrides = []): Part
     {
         $part = Part::query()->create(array_merge([
