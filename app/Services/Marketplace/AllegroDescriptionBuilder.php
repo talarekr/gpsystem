@@ -24,7 +24,7 @@ class AllegroDescriptionBuilder
     {
         $part->loadMissing(['car', 'images']);
         $blockers = [];
-        $description = $this->cleanText((string) ($part->description ?? ''));
+        $description = $this->cleanDescription((string) ($part->description ?? ''));
 
         if ($description === '') {
             $blockers[] = 'missing_part_description';
@@ -114,6 +114,22 @@ class AllegroDescriptionBuilder
     private function cleanText(string $value): string
     {
         return trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags($value), ENT_QUOTES | ENT_HTML5, 'UTF-8')) ?: '');
+    }
+
+    private function cleanDescription(string $value): string
+    {
+        $value = str_replace(["\r\n", "\r"], "\n", $value);
+        $value = preg_replace('/<\s*br\s*\/?>/i', "\n", $value) ?? $value;
+        $value = preg_replace('/<\s*\/\s*(p|div|h[1-6]|tr|table|blockquote)\s*>/i', "\n\n", $value) ?? $value;
+        $value = preg_replace('/<\s*li\b[^>]*>/i', "\n- ", $value) ?? $value;
+        $value = preg_replace('/<\s*\/\s*li\s*>/i', "\n", $value) ?? $value;
+        $value = html_entity_decode(strip_tags($value), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $value = str_replace("\xc2\xa0", ' ', $value);
+        $value = preg_replace("/[ \t\f\v]+/u", ' ', $value) ?? $value;
+        $value = preg_replace("/ *\n */u", "\n", $value) ?? $value;
+        $value = preg_replace("/\n{3,}/u", "\n\n", $value) ?? $value;
+
+        return trim($value);
     }
 
     /** @param array<string, mixed> $diagnostics @param array<string, string> $values */

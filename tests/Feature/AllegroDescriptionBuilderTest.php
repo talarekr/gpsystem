@@ -88,6 +88,35 @@ class AllegroDescriptionBuilderTest extends TestCase
     }
 
 
+    public function test_part_description_line_breaks_are_preserved_for_allegro_payload(): void
+    {
+        Http::fake($this->fakeAllegro());
+        $part = $this->readyPart();
+        $part->forceFill(['description' => "DRZWI W KOLOR\n\nKOMPLETNE\n\nMOŻNA ZAŁOŻYĆ BEZ MALOWANIA\nMOGĄ POSIADAĆ DROBNE RYSY"])->save();
+
+        $content = $this->getJson('/tools/dry-run-marketplace-listing-payload?token=gps_images_import_2026&channel=allegro_main&part_id='.$part->id)
+            ->json('payload.description.sections.0.items.0.content');
+
+        $this->assertStringContainsString('<p><b>DRZWI W KOLOR</b></p><p><b>KOMPLETNE</b></p><p><b>MOŻNA ZAŁOŻYĆ BEZ MALOWANIA<br />MOGĄ POSIADAĆ DROBNE RYSY</b></p>', $content);
+        $this->assertStringNotContainsString('DRZWI W KOLORKOMPLETNE', $content);
+    }
+
+    public function test_html_part_description_is_converted_to_safe_allegro_paragraphs(): void
+    {
+        Http::fake($this->fakeAllegro());
+        $part = $this->readyPart();
+        $part->forceFill(['description' => '<p>DRZWI W KOLOR</p><p>KOMPLETNE<br>MOŻNA ZAŁOŻYĆ BEZ MALOWANIA</p><ul><li>MOGĄ POSIADAĆ DROBNE RYSY</li><li>OGÓLNIE BARDZO ŁADNE</li></ul>'])->save();
+
+        $content = $this->getJson('/tools/dry-run-marketplace-listing-payload?token=gps_images_import_2026&channel=allegro_main&part_id='.$part->id)
+            ->json('payload.description.sections.0.items.0.content');
+
+        $this->assertStringContainsString('<p><b>DRZWI W KOLOR</b></p>', $content);
+        $this->assertStringContainsString('<p><b>KOMPLETNE<br />MOŻNA ZAŁOŻYĆ BEZ MALOWANIA</b></p>', $content);
+        $this->assertStringContainsString('- MOGĄ POSIADAĆ DROBNE RYSY', $content);
+        $this->assertStringContainsString('- OGÓLNIE BARDZO ŁADNE', $content);
+        $this->assertStringNotContainsString('<script', $content);
+    }
+
     /** @dataProvider optionalVehicleFieldCases */
     public function test_missing_optional_vehicle_fields_are_warnings_and_omitted_from_description(string $field, string $label): void
     {
