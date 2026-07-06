@@ -15,11 +15,11 @@ class PartMarketplaceStatusResolver
     {
         $listings = $part->relationLoaded('marketplaceListings')
             ? $part->marketplaceListings
-            : collect();
+            : $part->loadMissing('marketplaceListings')->marketplaceListings;
 
         $partSold = $this->isSold($part);
-        $ovoko = $partSold ? $this->mappedListing($listings, ['ovoko']) : $this->listedListing($listings, ['ovoko']);
-        $ebayListings = $partSold ? $this->mappedListings($listings, ['ebay_de', 'ebay_fr']) : $this->listedListings($listings, ['ebay_de', 'ebay_fr']);
+        $ovoko = $partSold ? $this->mappedListing($listings, ['ovoko']) : $this->displayListing($listings, ['ovoko']);
+        $ebayListings = $partSold ? $this->mappedListings($listings, ['ebay_de', 'ebay_fr']) : $this->displayListings($listings, ['ebay_de', 'ebay_fr']);
         $ebay = $ebayListings->first();
         $ebayUrlListing = $ebayListings->first(fn (MarketplaceListing $listing): bool => $this->listingUrl($listing) !== null);
         $allegro = $this->allegroListing($listings);
@@ -43,7 +43,7 @@ class PartMarketplaceStatusResolver
             $this->row('storefront', 'Sklep', $part->price, 'zł', $storefrontVisible, null, null, $storefrontVisible ? 'Widoczny w sklepie' : 'Niewidoczny w sklepie'),
             $this->row('allegro', 'Allegro', $part->allegro_price, 'zł', $allegroListed, $this->externalOfferId($allegro), $this->allegroUrl($allegro), $partSold && $allegro ? 'Produkt sprzedany — zachowano historyczny link Allegro' : $this->allegroTitle($allegro, $allegroListed)),
             $this->row('ovoko', 'Ovoko', $part->ovoko_price ?? $ovoko?->price, $this->currencyLabel($ovoko?->currency), $ovoko !== null, $this->externalOfferId($ovoko), $this->ovokoUrl($ovoko, $part), $partSold && $ovoko ? 'Produkt sprzedany — zachowano historyczny link Ovoko' : ($ovoko ? 'Oferta Ovoko wystawiona lokalnie' : 'Brak lokalnej oferty Ovoko')),
-            $this->row('ebay', 'eBay', $part->ebay_price, 'zł', $ebay !== null, $this->externalOfferId($ebay), $this->listingUrl($ebayUrlListing), $partSold && $ebay ? 'Produkt sprzedany — zachowano historyczny link eBay' : ($ebay ? 'Oferta eBay wystawiona lokalnie' : 'Brak lokalnej oferty eBay'), $ebayMarkets ?: null),
+            $this->row('ebay', 'eBay', $part->ebay_price, 'zł', $ebay !== null, $this->externalOfferId($ebay), $this->ebayUrl($ebayUrlListing ?: $ebay), $partSold && $ebay ? 'Produkt sprzedany — zachowano historyczny link eBay' : ($ebay ? 'Oferta eBay wystawiona lokalnie' : 'Brak lokalnej oferty eBay'), $ebayMarkets ?: null),
         ];
     }
 
@@ -90,13 +90,8 @@ class PartMarketplaceStatusResolver
             return false;
         }
 
-        if (in_array($listing->last_api_status, ['ended', 'inactive', 'deleted', 'archived', 'not_found', 'NOT_FOUND_IN_ACTIVE_API'], true)
-            || in_array($listing->status, ['ended', 'inactive', 'deleted', 'archived', 'not_found', 'NOT_FOUND_IN_ACTIVE_API'], true)) {
-            return false;
-        }
-
-        return in_array($listing->last_api_status, ['ACTIVE'], true)
-            || in_array($listing->status, ['ACTIVE', 'published', 'publication_pending'], true);
+        return $this->isActiveMarketplaceListing($listing)
+            || $this->hasConfirmedMappingWithLink($listing);
     }
 
     private function allegroTitle(?MarketplaceListing $listing, bool $listed): string
@@ -141,9 +136,9 @@ class PartMarketplaceStatusResolver
      * @param Collection<int, MarketplaceListing> $listings
      * @param array<int, string> $marketplaces
      */
-    private function listedListing(Collection $listings, array $marketplaces): ?MarketplaceListing
+    private function displayListing(Collection $listings, array $marketplaces): ?MarketplaceListing
     {
-        return $this->listedListings($listings, $marketplaces)->first();
+        return $this->displayListings($listings, $marketplaces)->first();
     }
 
     /**
@@ -151,19 +146,28 @@ class PartMarketplaceStatusResolver
      * @param array<int, string> $marketplaces
      * @return Collection<int, MarketplaceListing>
      */
-    private function listedListings(Collection $listings, array $marketplaces): Collection
+    private function displayListings(Collection $listings, array $marketplaces): Collection
     {
         return $listings
             ->whereIn('marketplace', $marketplaces)
             ->filter(fn (MarketplaceListing $listing): bool => $this->externalOfferId($listing) !== null)
-            ->filter(fn (MarketplaceListing $listing): bool => $this->isActiveMarketplaceListing($listing))
+            ->filter(fn (MarketplaceListing $listing): bool => $this->isActiveMarketplaceListing($listing) || $this->hasConfirmedMappingWithLink($listing))
             ->values();
     }
 
     private function isActiveMarketplaceListing(MarketplaceListing $listing): bool
     {
-        return ! in_array($listing->last_api_status, ['ended', 'inactive', 'deleted', 'archived', 'not_found', 'NOT_FOUND_IN_ACTIVE_API'], true)
-            && ! in_array($listing->status, ['ended', 'inactive', 'deleted', 'archived', 'not_found', 'NOT_FOUND_IN_ACTIVE_API'], true);
+        $inactive = ['ended', 'inactive', 'deleted', 'archived', 'not_found', 'not_found_in_active_api'];
+
+        return ! in_array(strtolower((string) $listing->last_api_status), $inactive, true)
+            && ! in_array(strtolower((string) $listing->status), $inactive, true);
+    }
+
+    private function hasConfirmedMappingWithLink(MarketplaceListing $listing): bool
+    {
+        return ($this->listingUrl($listing) !== null || $this->externalOfferId($listing) !== null)
+            && in_array(strtolower((string) $listing->match_status), ['confirmed', 'mapped'], true)
+            && in_array(strtolower((string) $listing->sync_status), ['synced', 'mapped'], true);
     }
 
     private function row(string $key, string $label, mixed $price, ?string $currency, bool $listed, ?string $externalOfferId, ?string $url, string $title, ?string $note = null): array
@@ -240,5 +244,12 @@ class PartMarketplaceStatusResolver
         $offerId = $this->externalOfferId($listing);
 
         return $this->listingUrl($listing) ?: ($offerId ? 'https://allegro.pl/oferta/'.$offerId : null);
+    }
+
+    private function ebayUrl(?MarketplaceListing $listing): ?string
+    {
+        $offerId = $this->externalOfferId($listing);
+
+        return $this->listingUrl($listing) ?: ($offerId ? 'https://www.ebay.de/itm/'.$offerId : null);
     }
 }
