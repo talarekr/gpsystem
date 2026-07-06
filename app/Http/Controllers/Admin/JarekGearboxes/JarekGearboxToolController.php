@@ -240,7 +240,7 @@ class JarekGearboxToolController extends Controller
     {
         $started = microtime(true);
         $requiredConfirm = 'jarek-ebay-de-bulk-publish-ready';
-        $limit = max(1, min(5, (int) $request->input('limit', $request->query('limit', 1))));
+        $limit = max(1, min(50, (int) $request->input('limit', $request->query('limit', 50))));
         $offset = max(0, (int) $request->input('offset', $request->query('offset', 0)));
         $scanWindow = max($limit, min(100, max(1, (int) $request->input('scan_window', $request->query('scan_window', 50)))));
         $confirm = (string) $request->input('confirm', $request->query('confirm', ''));
@@ -370,7 +370,7 @@ class JarekGearboxToolController extends Controller
 
     public function publishRunnerScanBatch(Request $request, GoogleTranslateService $translateService, EbayDescriptionTemplateRenderer $renderer, NbpExchangeRateService $exchangeRateService): JsonResponse
     {
-        $limit = max(1, min(100, (int) $request->query('limit', 20)));
+        $limit = max(1, min(50, (int) $request->query('limit', 50)));
         $offset = max(0, (int) $request->query('offset', 0));
         $base = ['ok' => true, 'dry_run' => true, 'read_only' => true, 'marketplace_write' => false, 'offset' => $offset, 'limit' => $limit, 'next_offset' => $offset, 'has_more' => false, 'batch_summary' => ['scanned_count' => 0, 'ready_count' => 0, 'blocked_count' => 0, 'duplicate_existing_count' => 0, 'failed_count' => 0], 'items' => [], 'admin_diagnostics' => []];
 
