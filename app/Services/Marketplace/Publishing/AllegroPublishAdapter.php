@@ -42,7 +42,9 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
         if (($productNameDiagnostics['product_name_length'] ?? 0) < 12) return ['ok' => false, 'status' => 'blocked_product_name_too_short', 'errors' => ['allegro_product_name_too_short'], 'request_summary' => $productNameDiagnostics, 'write' => false];
         $productSet = $this->productSetPayload($settings, $payload, $productNameDiagnostics['product_name'], $offerImages[0] ?? null);
         $offerParameters = $this->offerParametersPayload($payload, $productSet);
-        $body = array_filter(['name' => (string) ($payload['title'] ?? $part->name), 'category' => ['id' => (string) ($payload['category_id'] ?? '')], 'productSet' => $productSet, 'parameters' => $offerParameters, 'images' => $offerImages, 'description' => $description, 'sellingMode' => $settings['sellingMode'] ?? ['format' => 'BUY_NOW', 'price' => ['amount' => (string) ($payload['price_pln'] ?? $readiness['marketplace_price']), 'currency' => 'PLN']], 'stock' => ['available' => (int) ($payload['quantity'] ?? $part->quantity ?? 1), 'unit' => 'UNIT'], 'publication' => ['status' => 'ACTIVE'], 'delivery' => $delivery, 'payments' => $this->paymentsPayload($settings['payments'] ?? null, $payload['payments'] ?? null), 'afterSalesServices' => $afterSales, 'location' => $settings['location'] ?? null, 'external' => filled($signature['allegro_signature_value']) ? ['id' => $signature['allegro_signature_value']] : null], fn ($v) => $v !== null && $v !== []);
+        $taxSettings = $this->validatedTaxSettings($client, (string) ($payload['category_id'] ?? ''));
+        if (($taxSettings['blockers'] ?? []) !== []) return ['ok' => false, 'status' => 'blocked_tax_settings', 'errors' => $taxSettings['blockers'], 'warnings' => $taxSettings['warnings'] ?? [], 'request_summary' => $this->requestSummary($payload, null, $part) + $productNameDiagnostics + $signature + ['allegro_sales_settings' => $this->salesSettingsSummary($salesSettings), 'allegro_tax_settings' => $taxSettings], 'write' => false];
+        $body = array_filter(['name' => (string) ($payload['title'] ?? $part->name), 'category' => ['id' => (string) ($payload['category_id'] ?? '')], 'productSet' => $productSet, 'parameters' => $offerParameters, 'images' => $offerImages, 'description' => $description, 'sellingMode' => $settings['sellingMode'] ?? ['format' => 'BUY_NOW', 'price' => ['amount' => (string) ($payload['price_pln'] ?? $readiness['marketplace_price']), 'currency' => 'PLN']], 'stock' => ['available' => (int) ($payload['quantity'] ?? $part->quantity ?? 1), 'unit' => 'UNIT'], 'publication' => ['status' => 'ACTIVE'], 'delivery' => $delivery, 'payments' => $this->paymentsPayload($settings['payments'] ?? null, $payload['payments'] ?? null), 'taxSettings' => $taxSettings['payload'] ?? null, 'afterSalesServices' => $afterSales, 'location' => $settings['location'] ?? null, 'external' => filled($signature['allegro_signature_value']) ? ['id' => $signature['allegro_signature_value']] : null], fn ($v) => $v !== null && $v !== []);
         $descriptionGuard = $this->assertGpSwissDescriptionTemplate($body, $builtDescription['diagnostics']);
         if (! $descriptionGuard['ok']) return ['ok' => false, 'status' => 'blocked', 'action' => 'createProductOffer', 'error' => 'allegro_description_template_not_applied', 'ui_error' => 'allegro_description_template_not_applied', 'request_summary' => $this->requestSummary($payload, $body, $part) + $productNameDiagnostics + $signature + ['allegro_sales_settings' => $this->salesSettingsSummary($salesSettings), 'description_guard' => $descriptionGuard], 'write' => false];
         $result = $client->createProductOffer($body);
@@ -50,7 +52,7 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
         $offerUrl = $offerId ? 'https://allegro.pl/oferta/'.$offerId : null;
         $async = (int) ($result['http_status'] ?? 0) === 202;
 
-        return ['ok' => $result['ok'] ?? false, 'action' => 'createProductOffer', 'http_status' => $result['http_status'] ?? null, 'offer_id' => $offerId, 'external_offer_id' => $offerId, 'external_listing_id' => $offerId, 'url' => $offerUrl, 'listing_status' => $async ? 'publication_pending' : 'published', 'request_id' => $result['request_id'] ?? null, 'operation_location' => $result['operation_location'] ?? null, 'async' => $async, 'log_context' => ['channel' => $this->channel(), 'allegro_offer_id' => $offerId, 'saved_url' => $offerUrl, 'operation_location' => $result['operation_location'] ?? null, 'async' => $async], 'request_summary' => $this->requestSummary($payload, $body, $part) + $productNameDiagnostics + $signature + ['allegro_sales_settings' => $this->salesSettingsSummary($salesSettings)], 'response_summary' => $this->responseSummary($result), 'json' => $result['json'] ?? [], 'error' => 'Allegro product-offers publish failed.', 'ui_error' => 'Uzupełnij ustawienia sprzedaży Allegro GPSWISS. Szczegóły są w Logach.'];
+        return ['ok' => $result['ok'] ?? false, 'action' => 'createProductOffer', 'http_status' => $result['http_status'] ?? null, 'offer_id' => $offerId, 'external_offer_id' => $offerId, 'external_listing_id' => $offerId, 'url' => $offerUrl, 'listing_status' => $async ? 'publication_pending' : 'published', 'request_id' => $result['request_id'] ?? null, 'operation_location' => $result['operation_location'] ?? null, 'async' => $async, 'log_context' => ['channel' => $this->channel(), 'allegro_offer_id' => $offerId, 'saved_url' => $offerUrl, 'operation_location' => $result['operation_location'] ?? null, 'async' => $async], 'request_summary' => $this->requestSummary($payload, $body, $part) + $productNameDiagnostics + $signature + ['allegro_sales_settings' => $this->salesSettingsSummary($salesSettings), 'allegro_tax_settings' => $taxSettings], 'response_summary' => $this->responseSummary($result), 'json' => $result['json'] ?? [], 'error' => 'Allegro product-offers publish failed.', 'ui_error' => 'Uzupełnij ustawienia sprzedaży Allegro GPSWISS. Szczegóły są w Logach.'];
     }
 
     /** @return array<string, mixed> */
@@ -254,6 +256,73 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
             ])->all();
     }
 
+    /** @return array{payload: array<string, mixed>|null, warnings: array<int, string>, blockers: array<int, string>, lookup: array<string, mixed>} */
+    private function validatedTaxSettings(AllegroApiClient $client, string $categoryId): array
+    {
+        $desired = [
+            ['countryCode' => 'PL', 'rate' => '23.00'],
+            ['countryCode' => 'CZ', 'rate' => '21.00'],
+            ['countryCode' => 'SK', 'rate' => '23.00'],
+            ['countryCode' => 'HU', 'rate' => '27.00'],
+            ['countryCode' => 'LT', 'rate' => '21.00'],
+        ];
+        $lookup = $categoryId !== '' ? $client->taxSettings($categoryId) : ['ok' => false, 'http_status' => null, 'json' => [], 'error' => 'Missing Allegro category id for tax settings lookup.'];
+        $warnings = [];
+        $blockers = [];
+        if (($lookup['ok'] ?? false) !== true) {
+            $blockers[] = 'allegro_tax_settings_lookup_failed';
+            return ['payload' => null, 'warnings' => $warnings, 'blockers' => $blockers, 'lookup' => $this->taxSettingsLookupSummary($lookup)];
+        }
+
+        $json = is_array($lookup['json'] ?? null) ? $lookup['json'] : [];
+        if (! $this->taxSubjectSupported($json, 'GOODS')) $blockers[] = 'allegro_tax_settings_subject_goods_not_supported';
+        $unsupported = array_values(array_filter($desired, fn (array $rate): bool => ! $this->taxRateSupported($json, $rate['countryCode'], $rate['rate'])));
+        foreach ($unsupported as $rate) $warnings[] = 'allegro_tax_rate_not_supported:'.$rate['countryCode'].':'.$rate['rate'];
+        if ($unsupported !== []) $blockers[] = 'allegro_tax_settings_rates_not_supported';
+
+        return [
+            'payload' => $blockers === [] ? ['subject' => 'GOODS', 'rates' => $desired] : null,
+            'warnings' => $warnings,
+            'blockers' => $blockers,
+            'lookup' => $this->taxSettingsLookupSummary($lookup),
+            'desired' => ['subject' => 'GOODS', 'rates' => $desired],
+        ];
+    }
+
+    private function taxSubjectSupported(array $json, string $subject): bool
+    {
+        $subjects = $json['subjects'] ?? $json['availableSubjects'] ?? $json['taxSettings']['subjects'] ?? [];
+        if ($subjects === []) return true;
+        foreach ((array) $subjects as $row) {
+            $value = is_array($row) ? ($row['subject'] ?? $row['id'] ?? $row['value'] ?? $row['name'] ?? null) : $row;
+            if (strtoupper((string) $value) === $subject) return true;
+        }
+        return false;
+    }
+
+    private function taxRateSupported(array $json, string $countryCode, string $rate): bool
+    {
+        $rows = $json['rates'] ?? $json['taxRates'] ?? $json['taxSettings']['rates'] ?? [];
+        if ($rows === []) return true;
+        foreach ((array) $rows as $row) {
+            if (! is_array($row)) continue;
+            $country = strtoupper((string) ($row['countryCode'] ?? $row['country'] ?? ''));
+            $rowRate = number_format((float) str_replace(',', '.', (string) ($row['rate'] ?? $row['value'] ?? '')), 2, '.', '');
+            if ($country === $countryCode && $rowRate === $rate) return true;
+        }
+        return false;
+    }
+
+    private function taxSettingsLookupSummary(array $lookup): array
+    {
+        return [
+            'ok' => (bool) ($lookup['ok'] ?? false),
+            'http_status' => $lookup['http_status'] ?? null,
+            'request_id' => $lookup['request_id'] ?? null,
+            'top_level_keys' => array_slice(array_keys(is_array($lookup['json'] ?? null) ? $lookup['json'] : []), 0, 20),
+        ];
+    }
+
     /** @return array<int, string> */
     private function paymentsPayload(mixed $settingsPayments, mixed $payloadPayments): ?array
     {
@@ -261,6 +330,8 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
         if (is_array($payloadPayments) && filled($payloadPayments['invoice'] ?? null)) {
             $payments['invoice'] = (string) $payloadPayments['invoice'];
         }
+
+        $payments['invoice'] = 'VAT';
 
         return $payments === [] ? null : $payments;
     }

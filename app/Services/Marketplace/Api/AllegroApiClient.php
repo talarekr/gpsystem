@@ -320,6 +320,21 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
         return ['ok' => $response->successful(), 'http_status' => $response->status(), 'json' => is_array($json) ? $json : [], 'request_id' => $response->header('trace-id') ?: $response->header('x-request-id')];
     }
 
+
+    public function taxSettings(string $categoryId): array
+    {
+        $response = $this->getWithAuthRetry($this->absoluteUrl('/sale/tax-settings'), ['category.id' => $categoryId]);
+        $json = $response->json();
+
+        return [
+            'ok' => $response->successful(),
+            'http_status' => $response->status(),
+            'json' => is_array($json) ? $json : [],
+            'request_id' => $response->header('trace-id') ?: $response->header('x-request-id'),
+            'error' => $response->successful() ? null : 'Allegro tax settings lookup failed.',
+        ];
+    }
+
     public function createProductOffer(array $payload): array
     {
         $base = rtrim((string) $this->account?->api_base_url, '/');
