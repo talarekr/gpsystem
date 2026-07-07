@@ -44,6 +44,7 @@ use App\Http\Controllers\Tools\MarketplaceApiSettingsDiagnosticsController;
 use App\Http\Controllers\Tools\MarketplaceApiFoundationController;
 use App\Http\Controllers\Tools\MarketplaceListingDryRunController;
 use App\Http\Controllers\Tools\AllegroCompatibilityDryRunController;
+use App\Http\Controllers\Tools\AllegroMarketplaceDiagnoseController;
 use App\Http\Controllers\Tools\OvokoCarMappingController;
 use App\Http\Controllers\Tools\MarketplaceListingUrlBackfillController;
 use App\Http\Controllers\Tools\EbayListingAuditController;
@@ -335,6 +336,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/marketplace/listing-url-backfill', MarketplaceListingUrlBackfillController::class)->name('admin.tools.marketplace.listing-url-backfill');
     Route::get('/admin/tools/marketplace/manual-link-mapping/diagnostics', ManualLinkMappingDiagnosticsController::class)->name('admin.tools.marketplace.manual-link-mapping.diagnostics');
     Route::get('/admin/tools/marketplace/ovoko-diagnose', OvokoMarketplaceDiagnoseController::class)->name('admin.tools.marketplace.ovoko-diagnose');
+    Route::get('/admin/tools/marketplace/allegro-diagnose', AllegroMarketplaceDiagnoseController::class)->name('admin.tools.marketplace.allegro-diagnose');
     Route::get('/admin/tools/marketplace/manual-link-mapping/replace-dry-run', [ManualLinkMappingReplaceController::class, 'dryRun'])->name('admin.tools.marketplace.manual-link-mapping.replace-dry-run');
     Route::get('/admin/tools/marketplace/manual-link-mapping/replace-apply', [ManualLinkMappingReplaceController::class, 'apply'])->name('admin.tools.marketplace.manual-link-mapping.replace-apply');
     Route::get('/admin/tools/marketplace/ebay-listing-audit', EbayListingAuditController::class)->name('admin.tools.marketplace.ebay-listing-audit');
