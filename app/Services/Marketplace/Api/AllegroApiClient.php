@@ -323,7 +323,7 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
 
     public function taxSettings(string $categoryId): array
     {
-        $response = $this->getWithAuthRetry($this->absoluteUrl('/sale/tax-settings'), ['category.id' => $categoryId]);
+        $response = $this->getWithAuthRetry($this->absoluteUrl('/sale/tax-settings'), ['category.id' => $categoryId], 20, 'application/vnd.allegro.beta.v1+json');
         $json = $response->json();
 
         return [
@@ -396,13 +396,13 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
         return (string) ($result['access_token'] ?? ($this->credentials()['access_token'] ?? ''));
     }
 
-    private function getWithAuthRetry(string $url, array $query = [], int $timeout = 20)
+    private function getWithAuthRetry(string $url, array $query = [], int $timeout = 20, string $accept = 'application/vnd.allegro.public.v1+json')
     {
-        $response = AllegroUserAgent::request()->withToken($this->accessToken())->accept('application/vnd.allegro.public.v1+json')->timeout($timeout)->get($url, $query);
+        $response = AllegroUserAgent::request()->withToken($this->accessToken())->accept($accept)->timeout($timeout)->get($url, $query);
         if ($response->status() === 401 && $this->account) {
             $refresh = app(OAuthTokenManager::class)->refresh($this->account);
             if (($refresh['ok'] ?? false) === true) {
-                $response = AllegroUserAgent::request()->withToken((string) $refresh['access_token'])->accept('application/vnd.allegro.public.v1+json')->timeout($timeout)->get($url, $query);
+                $response = AllegroUserAgent::request()->withToken((string) $refresh['access_token'])->accept($accept)->timeout($timeout)->get($url, $query);
             }
         }
         return $response;
