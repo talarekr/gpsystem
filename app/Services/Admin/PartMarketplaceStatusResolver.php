@@ -176,6 +176,10 @@ class PartMarketplaceStatusResolver
         $status = strtolower((string) $listing->status);
         $apiStatus = strtolower((string) $listing->last_api_status);
 
+        if ($this->ebayEndDateIsPast($listing)) {
+            return false;
+        }
+
         if (! in_array($status, ['active', 'published', 'live'], true)) {
             return false;
         }
@@ -189,6 +193,18 @@ class PartMarketplaceStatusResolver
         }
 
         return ($listing->quantity === null || (int) $listing->quantity > 0);
+    }
+
+    private function ebayEndDateIsPast(MarketplaceListing $listing): bool
+    {
+        $endDate = data_get($listing->raw_payload, 'itemEndDate')
+            ?? data_get($listing->raw_payload, 'item_end_date')
+            ?? data_get($listing->raw_payload, 'api.end_date')
+            ?? data_get($listing->raw_payload, 'response_summary.itemEndDate');
+
+        return filled($endDate)
+            && strtotime((string) $endDate) !== false
+            && strtotime((string) $endDate) < now()->timestamp;
     }
 
     private function hasListingReference(MarketplaceListing $listing, string $channel): bool

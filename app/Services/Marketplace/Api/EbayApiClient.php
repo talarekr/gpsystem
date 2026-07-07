@@ -631,7 +631,7 @@ class EbayApiClient extends AbstractMarketplaceApiClient
         $availability = strtoupper((string) data_get($payload, 'estimatedAvailabilities.0.estimatedAvailabilityStatus', ''));
         $endDate = $payload['itemEndDate'] ?? null;
         $endDateIsPast = filled($endDate) && strtotime((string) $endDate) !== false && strtotime((string) $endDate) < now()->timestamp;
-        if ($endDateIsPast && ! in_array($availability, ['IN_STOCK', 'LIMITED_STOCK'], true)) return 'ended';
+        if ($endDateIsPast) return 'ended';
         if (in_array($availability, ['IN_STOCK', 'LIMITED_STOCK'], true)) return 'active';
         if (in_array($availability, ['OUT_OF_STOCK', 'UNAVAILABLE'], true)) return 'inactive';
         return filled($payload['itemId'] ?? null) ? 'active' : 'unknown';

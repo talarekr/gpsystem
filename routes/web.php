@@ -307,7 +307,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/jarek-gearboxes/ebay-csv-download/{filename}', [JarekGearboxToolController::class, 'ebayCsvDownload'])->name('admin.tools.jarek-gearboxes.ebay-csv-download');
     Route::get('/admin/tools/jarek-gearboxes/{jarekGearbox}/ebay-preview', [JarekGearboxToolController::class, 'ebayPreview'])->name('admin.tools.jarek-gearboxes.ebay-preview');
     Route::get('/admin/tools/ebay/prepare-debug/{partId}', [PartMarketplaceReadinessController::class, 'ebayPrepareDebug'])->name('admin.tools.ebay.prepare-debug');
-    Route::get('/admin/tools/ebay/marketplace-diagnose', EbayMarketplaceDiagnoseController::class)->name('admin.tools.ebay.marketplace-diagnose');
+    Route::match(['get', 'post'], '/admin/tools/ebay/marketplace-diagnose', EbayMarketplaceDiagnoseController::class)->name('admin.tools.ebay.marketplace-diagnose');
     Route::get('/admin/tools/marketplace/oauth-token-health', MarketplaceOAuthTokenHealthController::class)->name('admin.tools.marketplace.oauth-token-health');
     Route::get('/admin/tools/marketplace/ovoko-url-backfill', OvokoListingUrlBackfillController::class)->name('admin.tools.marketplace.ovoko-url-backfill');
     Route::get('/admin/tools/marketplace/mapping-gaps-export', MarketplaceMappingGapsExportController::class)->name('admin.tools.marketplace.mapping-gaps-export');
