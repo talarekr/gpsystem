@@ -205,8 +205,12 @@ class EbayMarketplaceDiagnoseControllerTest extends TestCase
             ->assertJsonPath('rows.0.marketplace_listings.0.seller_offer_id', '123456789')
             ->assertJsonPath('rows.0.marketplace_listings.0.seller_listing_id', '800116033033')
             ->assertJsonPath('rows.0.marketplace_listings.0.seller_listing_id_matches_public_item_id', true)
+            ->assertJsonPath('rows.0.marketplace_listings.0.requested_listing_id', '800116033033')
+            ->assertJsonPath('rows.0.marketplace_listings.0.offer_listing_id', '800116033033')
             ->assertJsonPath('rows.0.marketplace_listings.0.seller_listing_status', 'PUBLICLY_READABLE')
-            ->assertJsonPath('rows.0.marketplace_listings.0.seller_offer_status', 'PUBLISHED');
+            ->assertJsonPath('rows.0.marketplace_listings.0.seller_offer_status', 'PUBLISHED')
+            ->assertJsonPath('rows.0.public_item_id', '800116033033')
+            ->assertJsonPath('rows.0.seller_listing_id_matches_public_item_id', true);
 
         $listing->refresh();
         $this->assertSame('active', $listing->status);
@@ -249,7 +253,14 @@ class EbayMarketplaceDiagnoseControllerTest extends TestCase
             ->assertJsonPath('rows.0.duplicate_guard_would_block', true)
             ->assertJsonPath('rows.0.marketplace_listings.0.public_item_id', '389993224459')
             ->assertJsonPath('rows.0.marketplace_listings.0.seller_listing_id', '800116033033')
+            ->assertJsonPath('rows.0.marketplace_listings.0.requested_listing_id', '389993224459')
+            ->assertJsonPath('rows.0.marketplace_listings.0.offer_listing_id', '800116033033')
             ->assertJsonPath('rows.0.marketplace_listings.0.seller_listing_id_matches_public_item_id', false)
+            ->assertJsonPath('rows.0.public_item_id', '389993224459')
+            ->assertJsonPath('rows.0.seller_listing_id', '800116033033')
+            ->assertJsonPath('rows.0.requested_listing_id', '389993224459')
+            ->assertJsonPath('rows.0.offer_listing_id', '800116033033')
+            ->assertJsonPath('rows.0.seller_listing_id_matches_public_item_id', false)
             ->assertJsonPath('rows.0.marketplace_listings.0.public_item_end_past', false)
             ->assertJsonPath('rows.0.marketplace_listings.0.api.seller_side_verified_active', null);
     }

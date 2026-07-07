@@ -98,7 +98,7 @@ class EbayMarketplaceDiagnoseController extends Controller
                 $listing->forceFill(['status' => 'ended', 'sync_status' => 'historical', 'last_api_status' => $api['api_listing_status'], 'not_seen_in_active_api_at' => now()])->save();
             }
             return [
-                'id' => $listing->id, 'marketplace' => $listing->marketplace, 'status' => $listing->status, 'sync_status' => $listing->sync_status, 'match_status' => $listing->match_status, 'last_api_status' => $listing->last_api_status, 'last_error' => $listing->last_error, 'external_offer_id' => $listing->external_offer_id, 'external_listing_id' => $listing->external_listing_id, 'external_inventory_id' => $listing->external_inventory_id, 'sku' => $listing->sku, 'url' => $listing->url, 'resolved_listingUrl' => $listing->url, 'resolved_externalOfferId' => $listing->external_offer_id ?: $listing->external_listing_id, 'public_item_id' => $publicItemId, 'seller_offer_id' => $listing->external_offer_id, 'seller_listing_id' => data_get($api, 'seller_side.listing_id', $listing->external_listing_id), 'seller_listing_id_matches_public_item_id' => $this->sellerListingMatchesPublicItem(data_get($api, 'seller_side', []), $publicItemId), 'public_item_end_date' => $api['end_date'] ?? null, 'public_item_end_past' => (bool) ($api['end_date_is_past'] ?? false), 'seller_listing_status' => data_get($api, 'seller_side.listing_status'), 'seller_offer_status' => data_get($api, 'seller_side.offer_status'), 'listing_exists' => filled($listing->external_listing_id) || filled($listing->external_offer_id) || filled($listing->url), 'api' => $api, 'duplicate_guard_would_block' => $this->isBlockingDuplicate($listing, $api),
+                'id' => $listing->id, 'marketplace' => $listing->marketplace, 'status' => $listing->status, 'sync_status' => $listing->sync_status, 'match_status' => $listing->match_status, 'last_api_status' => $listing->last_api_status, 'last_error' => $listing->last_error, 'external_offer_id' => $listing->external_offer_id, 'external_listing_id' => $listing->external_listing_id, 'external_inventory_id' => $listing->external_inventory_id, 'sku' => $listing->sku, 'url' => $listing->url, 'resolved_listingUrl' => $listing->url, 'resolved_externalOfferId' => $listing->external_offer_id ?: $listing->external_listing_id, 'public_item_id' => $publicItemId, 'seller_offer_id' => $listing->external_offer_id, 'seller_listing_id' => data_get($api, 'seller_side.listing_id'), 'requested_listing_id' => data_get($api, 'seller_side.requested_listing_id'), 'offer_listing_id' => data_get($api, 'seller_side.offer_listing_id'), 'seller_listing_id_matches_public_item_id' => $this->sellerListingMatchesPublicItem(data_get($api, 'seller_side', []), $publicItemId), 'public_item_end_date' => $api['end_date'] ?? null, 'public_item_end_past' => (bool) ($api['end_date_is_past'] ?? false), 'seller_listing_status' => data_get($api, 'seller_side.listing_status'), 'seller_offer_status' => data_get($api, 'seller_side.offer_status'), 'listing_exists' => filled($listing->external_listing_id) || filled($listing->external_offer_id) || filled($listing->url), 'api' => $api, 'duplicate_guard_would_block' => $this->isBlockingDuplicate($listing, $api),
             ];
         })->all();
 
@@ -120,7 +120,9 @@ class EbayMarketplaceDiagnoseController extends Controller
             $resolverEbay['title'] = 'Status eBay wymaga weryfikacji: '.$resolverEbay['reason'];
         }
 
-        return ['part' => ['id' => $part->id, 'sku' => $part->sku, 'part_number' => $part->part_number, 'status' => $part->status, 'quantity' => $part->quantity, 'adminLocalAvailability' => $part->adminLocalAvailability()], 'marketplace_listings' => $listingRows, 'ebay_de_status' => $ebayDe['status'], 'ebay_de_url' => $ebayDe['url'], 'ebay_fr_status' => $ebayFr['status'], 'ebay_fr_url' => $ebayFr['url'], 'ebay_overall' => $classification, 'needs_ebay_de_publish' => $endedOrStale && $this->needsEbayDePublish($part, $ebayDe['status']), 'resolver_ebay' => $resolverEbay, 'duplicate_guard_would_block' => $endedOrStale ? false : collect($ebayDe['listings'])->contains('duplicate_guard_would_block', true), 'audit_classification' => $classification];
+        $diagnosticListing = $ebayDe['preferred'] ?? null;
+
+        return ['part' => ['id' => $part->id, 'sku' => $part->sku, 'part_number' => $part->part_number, 'status' => $part->status, 'quantity' => $part->quantity, 'adminLocalAvailability' => $part->adminLocalAvailability()], 'marketplace_listings' => $listingRows, 'public_item_id' => $diagnosticListing['public_item_id'] ?? null, 'seller_offer_id' => $diagnosticListing['seller_offer_id'] ?? null, 'seller_listing_id' => $diagnosticListing['seller_listing_id'] ?? null, 'requested_listing_id' => $diagnosticListing['requested_listing_id'] ?? null, 'offer_listing_id' => $diagnosticListing['offer_listing_id'] ?? null, 'seller_listing_id_matches_public_item_id' => $diagnosticListing['seller_listing_id_matches_public_item_id'] ?? null, 'public_item_end_date' => $diagnosticListing['public_item_end_date'] ?? null, 'public_item_end_past' => $diagnosticListing['public_item_end_past'] ?? null, 'seller_listing_status' => $diagnosticListing['seller_listing_status'] ?? null, 'seller_offer_status' => $diagnosticListing['seller_offer_status'] ?? null, 'ebay_de_status' => $ebayDe['status'], 'ebay_de_url' => $ebayDe['url'], 'ebay_fr_status' => $ebayFr['status'], 'ebay_fr_url' => $ebayFr['url'], 'ebay_overall' => $classification, 'needs_ebay_de_publish' => $endedOrStale && $this->needsEbayDePublish($part, $ebayDe['status']), 'resolver_ebay' => $resolverEbay, 'duplicate_guard_would_block' => $endedOrStale ? false : collect($ebayDe['listings'])->contains('duplicate_guard_would_block', true), 'audit_classification' => $classification];
     }
 
 
@@ -134,6 +136,7 @@ class EbayMarketplaceDiagnoseController extends Controller
             'status' => $rows->isEmpty() ? 'missing' : ($active ? $this->activeStatus($active) : ($this->hasUnavailableButNotEnded($rows->all()) ? 'unavailable_not_ended_needs_review' : ($preferred && $this->rowIsEndedOrStale($preferred) ? $this->endedStatus($preferred) : 'active_state_uncertain'))),
             'url' => $preferred['url'] ?? null,
             'listings' => $rows->all(),
+            'preferred' => $preferred,
         ];
     }
 
@@ -180,10 +183,16 @@ class EbayMarketplaceDiagnoseController extends Controller
 
     private function sellerListingMatchesPublicItem(array $sellerSide, ?string $publicItemId): bool
     {
-        $sellerListingId = $this->digitsOnly($sellerSide['listing_id'] ?? null);
         $publicItemId = $this->digitsOnly($publicItemId);
+        if ($publicItemId === null) return false;
 
-        return $sellerListingId !== null && $publicItemId !== null && $sellerListingId === $publicItemId;
+        $offerListingId = $this->digitsOnly($sellerSide['offer_listing_id'] ?? null);
+        if ($offerListingId !== null) return $offerListingId === $publicItemId;
+
+        $requestedListingId = $this->digitsOnly($sellerSide['requested_listing_id'] ?? null);
+        $sellerListingId = $this->digitsOnly($sellerSide['listing_id'] ?? null);
+
+        return $sellerListingId !== null && ($requestedListingId === null || $requestedListingId !== $sellerListingId) && $sellerListingId === $publicItemId;
     }
 
     private function needsEbayDePublish(Part $part, string $ebayDeStatus): bool
