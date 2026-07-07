@@ -124,6 +124,42 @@ class EbayMarketplaceDiagnoseControllerTest extends TestCase
     }
 
 
+    public function test_unavailable_without_past_end_date_needs_review_and_is_not_historical_candidate(): void
+    {
+        $this->actingAsAdminUser();
+
+        $part = Part::query()->create(['name' => 'Unclear eBay', 'sku' => 'EB-UNAVAILABLE', 'quantity' => 1, 'status' => 'ready']);
+        $listing = MarketplaceListing::query()->create([
+            'part_id' => $part->id,
+            'marketplace' => 'ebay_de',
+            'external_listing_id' => '800116181167',
+            'url' => 'https://www.ebay.de/itm/800116181167',
+            'status' => 'active',
+            'last_api_status' => 'active',
+        ]);
+
+        Http::fake(['*' => Http::response([
+            'itemId' => 'v1|800116181167|0',
+            'estimatedAvailabilities' => [['estimatedAvailabilityStatus' => 'UNAVAILABLE']],
+            'itemWebUrl' => 'https://www.ebay.de/itm/800116181167',
+            'title' => 'Visible listing',
+        ], 200)]);
+
+        $this->postJson('/admin/tools/ebay/marketplace-diagnose?action=apply_inactive&part_ids='.$part->id.'&check_api=1&confirm_apply_inactive=1&format=json')
+            ->assertOk()
+            ->assertJsonPath('rows.0.audit_classification', 'ebay_unavailable_but_not_ended_needs_review needs_review')
+            ->assertJsonPath('rows.0.needs_ebay_de_publish', false)
+            ->assertJsonPath('rows.0.duplicate_guard_would_block', true)
+            ->assertJsonPath('rows.0.resolver_ebay.reason', 'ebay_unavailable_but_not_ended_needs_review')
+            ->assertJsonPath('rows.0.marketplace_listings.0.api.end_date_is_past', false)
+            ->assertJsonPath('rows.0.marketplace_listings.0.api.availability_status', 'UNAVAILABLE');
+
+        $listing->refresh();
+        $this->assertSame('active', $listing->status);
+        $this->assertNotSame('historical', $listing->sync_status);
+    }
+
+
     public function test_active_ebay_fr_does_not_satisfy_main_ebay_or_de_publish_need(): void
     {
         $this->actingAsAdminUser();
