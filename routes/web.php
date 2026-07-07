@@ -342,6 +342,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/marketplace/ovoko-diagnose', OvokoMarketplaceDiagnoseController::class)->name('admin.tools.marketplace.ovoko-diagnose');
     Route::get('/admin/tools/marketplace/allegro-diagnose', AllegroMarketplaceDiagnoseController::class)->name('admin.tools.marketplace.allegro-diagnose');
     Route::post('/admin/tools/marketplace/allegro-diagnose/refresh-status', [AllegroMarketplaceDiagnoseController::class, 'refresh'])->name('admin.tools.marketplace.allegro-diagnose.refresh-status');
+    Route::match(['get', 'post'], '/admin/tools/marketplace/allegro-diagnose/refresh-pending', [AllegroMarketplaceDiagnoseController::class, 'refreshPending'])->name('admin.tools.marketplace.allegro-diagnose.refresh-pending');
     Route::get('/admin/tools/marketplace/manual-link-mapping/replace-dry-run', [ManualLinkMappingReplaceController::class, 'dryRun'])->name('admin.tools.marketplace.manual-link-mapping.replace-dry-run');
     Route::get('/admin/tools/marketplace/manual-link-mapping/replace-apply', [ManualLinkMappingReplaceController::class, 'apply'])->name('admin.tools.marketplace.manual-link-mapping.replace-apply');
     Route::get('/admin/tools/marketplace/ebay-listing-audit', EbayListingAuditController::class)->name('admin.tools.marketplace.ebay-listing-audit');

@@ -120,4 +120,64 @@ class AllegroListingStatusRefreshTest extends TestCase
         $this->assertDatabaseHas('parts', ['id' => $part->id, 'status' => 'ready']);
     }
 
+    public function test_pending_allegro_refresh_preview_and_apply_are_scoped_and_safe(): void
+    {
+        $account = MarketplaceAccount::query()->create([
+            'code' => 'allegro_main',
+            'marketplace' => 'allegro',
+            'name' => 'Allegro',
+            'status' => 'active',
+            'api_enabled' => true,
+            'api_base_url' => 'https://api.allegro.test',
+            'api_credentials' => ['access_token' => 'token'],
+        ]);
+        $part = Part::query()->create(['name' => 'Allegro batch part', 'sku' => 'ALG-BATCH', 'quantity' => 1, 'status' => 'ready']);
+        $listing = MarketplaceListing::query()->create([
+            'marketplace_account_id' => $account->id,
+            'part_id' => $part->id,
+            'marketplace' => 'allegro',
+            'external_offer_id' => '18741244687',
+            'url' => 'https://allegro.pl/oferta/18741244687',
+            'status' => 'publication_pending',
+            'sync_status' => 'published',
+            'updated_at' => now()->subMinutes(5),
+        ]);
+        MarketplaceListing::query()->create([
+            'marketplace' => 'ovoko',
+            'part_id' => $part->id,
+            'external_offer_id' => '999',
+            'status' => 'publication_pending',
+            'updated_at' => now()->subMinutes(5),
+        ]);
+
+        $this->withoutMiddleware()
+            ->getJson('/admin/tools/marketplace/allegro-diagnose/refresh-pending?format=json&older_than_minutes=2')
+            ->assertOk()
+            ->assertJsonPath('mode', 'preview')
+            ->assertJsonPath('count', 1)
+            ->assertJsonPath('rows.0.listing_id', $listing->id)
+            ->assertJsonPath('read_only', true);
+
+        Http::fake([
+            'https://api.allegro.test/sale/product-offers/18741244687' => Http::response([
+                'id' => '18741244687',
+                'publication' => ['status' => 'ACTIVE'],
+                'stock' => ['available' => 1],
+            ], 200),
+        ]);
+
+        $this->withoutMiddleware()
+            ->postJson('/admin/tools/marketplace/allegro-diagnose/refresh-pending?format=json', ['apply' => 1, 'older_than_minutes' => 2])
+            ->assertOk()
+            ->assertJsonPath('mode', 'apply')
+            ->assertJsonPath('applied.0.after.status', 'active')
+            ->assertJsonPath('publishing_triggered', false)
+            ->assertJsonPath('ending_triggered', false)
+            ->assertJsonPath('links_deleted', false)
+            ->assertJsonPath('part_status_changed', false);
+
+        $this->assertDatabaseHas('marketplace_listings', ['id' => $listing->id, 'status' => 'active', 'last_api_status' => 'ACTIVE', 'url' => 'https://allegro.pl/oferta/18741244687']);
+        $this->assertDatabaseHas('parts', ['id' => $part->id, 'status' => 'ready']);
+    }
+
 }
