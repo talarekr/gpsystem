@@ -49,6 +49,7 @@ use App\Http\Controllers\Tools\OvokoCarMappingController;
 use App\Http\Controllers\Tools\OvokoCrossChannelDiagnoseController;
 use App\Http\Controllers\Tools\OvokoOrderItemPartBackfillController;
 use App\Http\Controllers\Tools\MarketplaceListingUrlBackfillController;
+use App\Http\Controllers\Tools\MarketplaceLinkRepairController;
 use App\Http\Controllers\Tools\EbayListingAuditController;
 use App\Http\Controllers\Tools\EbayDescriptionAuditController;
 use App\Http\Controllers\Tools\EbayListingAuditRunnerController;
@@ -337,6 +338,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/ovoko-stock-sync-runner/status/{run}', [OvokoStockSyncRunnerController::class, 'status'])->name('admin.tools.ovoko-stock-sync-runner.status');
     Route::get('/admin/tools/ovoko-stock-sync-runner/results/{run}', [OvokoStockSyncRunnerController::class, 'results'])->name('admin.tools.ovoko-stock-sync-runner.results');
     Route::match(['get', 'post'], '/admin/tools/ovoko-stock-sync-runner/cancel/{run}', [OvokoStockSyncRunnerController::class, 'cancel'])->name('admin.tools.ovoko-stock-sync-runner.cancel');
+    Route::match(['get', 'post'], '/admin/tools/marketplace/link-repair', MarketplaceLinkRepairController::class)->name('admin.tools.marketplace.link-repair');
     Route::get('/admin/tools/marketplace/listing-url-backfill', MarketplaceListingUrlBackfillController::class)->name('admin.tools.marketplace.listing-url-backfill');
     Route::get('/admin/tools/marketplace/manual-link-mapping/diagnostics', ManualLinkMappingDiagnosticsController::class)->name('admin.tools.marketplace.manual-link-mapping.diagnostics');
     Route::get('/admin/tools/marketplace/ovoko-diagnose', OvokoMarketplaceDiagnoseController::class)->name('admin.tools.marketplace.ovoko-diagnose');
