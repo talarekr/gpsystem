@@ -21,6 +21,7 @@ class EbayListingAuditRunnerController extends Controller
             start: $request->boolean('start'),
             cancel: $request->boolean('cancel'),
             confirmedCancel: $request->query('confirm') === 'cancel-ebay-audit-runner',
+            apply: $request->isMethod('post') && $request->input('confirm') === 'mark-ebay-ended-historical',
         );
 
         if ($request->boolean('auto')) {
@@ -52,6 +53,6 @@ class EbayListingAuditRunnerController extends Controller
         $next = $result['completed'] ? null : e($result['next_url'].'&auto=1');
         $json = e(json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
         $refresh = $next ? '<meta http-equiv="refresh" content="3;url='.$next.'">' : '';
-        return '<!doctype html><html lang="pl"><head><meta charset="utf-8"><title>eBay listing audit runner</title>'.$refresh.'<style>body{font-family:system-ui;margin:24px}pre{background:#111;color:#eee;padding:16px;overflow:auto}.ok{color:#087f23}.run{color:#b26a00}</style></head><body><h1>eBay listing audit runner</h1><p>Status: <strong class="'.($result['completed']?'ok':'run').'">'.e($result['status']).'</strong></p><p>Run ID: <code>'.e($result['run_id']).'</code></p><p>Postęp: '.e((string)$result['offset_after']).' / '.e((string)$result['total_count']).'</p>'.($next ? '<p>Następna paczka uruchomi się automatycznie za 3 sekundy. <a href="'.$next.'">Uruchom teraz</a></p>' : '<p>Completed. <a href="'.e($result['status_url']).'">Status JSON</a> · <a href="'.e($result['problems_url']).'">Problemy JSON</a></p>').'<pre>'.$json.'</pre></body></html>';
+        return '<!doctype html><html lang="pl"><head><meta charset="utf-8"><title>eBay listing audit runner</title>'.$refresh.'<style>body{font-family:system-ui;margin:24px}pre{background:#111;color:#eee;padding:16px;overflow:auto}.ok{color:#087f23}.run{color:#b26a00}</style></head><body><h1>eBay listing audit runner</h1><p>GET is read-only. Local historical marking requires POST + CSRF + <code>confirm=mark-ebay-ended-historical</code>; it never deletes URLs and never relists old eBay auctions.</p><p>Status: <strong class="'.($result['completed']?'ok':'run').'">'.e($result['status']).'</strong></p><p>Run ID: <code>'.e($result['run_id']).'</code></p><p>Postęp: '.e((string)$result['offset_after']).' / '.e((string)$result['total_count']).'</p>'.($next ? '<p>Następna paczka uruchomi się automatycznie za 3 sekundy. <a href="'.$next.'">Uruchom teraz</a></p>' : '<p>Completed. <a href="'.e($result['status_url']).'">Status JSON</a> · <a href="'.e($result['problems_url']).'">Problemy JSON</a></p>').'<pre>'.$json.'</pre></body></html>';
     }
 }

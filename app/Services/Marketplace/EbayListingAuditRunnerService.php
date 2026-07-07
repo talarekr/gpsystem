@@ -15,7 +15,7 @@ class EbayListingAuditRunnerService
 
     public function __construct(private EbayListingAuditService $audit) {}
 
-    public function startOrContinue(string $channel, int $batchSize = 20, ?string $runId = null, bool $start = false, bool $cancel = false, bool $confirmedCancel = false): array
+    public function startOrContinue(string $channel, int $batchSize = 20, ?string $runId = null, bool $start = false, bool $cancel = false, bool $confirmedCancel = false, bool $apply = false): array
     {
         abort_unless(in_array($channel, ['ebay_de', 'ebay_fr', 'ebay'], true), 422, 'Supported eBay channel values: ebay_de, ebay_fr, ebay.');
         $batchSize = max(1, min(self::MAX_BATCH_SIZE, $batchSize));
@@ -32,7 +32,7 @@ class EbayListingAuditRunnerService
 
         $run = $runId ? $this->load($runId) : null;
         if (! $run || $start) {
-            $run = $this->newRun($channel);
+            $run = $this->newRun($channel, $apply);
         }
 
         if (($run['status'] ?? null) === 'completed') {
@@ -40,7 +40,7 @@ class EbayListingAuditRunnerService
         }
 
         $offsetBefore = (int) ($run['offset'] ?? 0);
-        $result = $this->audit->run(channel: $channel, limit: $batchSize, offset: $offsetBefore, partId: null, apply: false, checkApi: true);
+        $result = $this->audit->run(channel: $channel, limit: $batchSize, offset: $offsetBefore, partId: null, apply: $apply, checkApi: true);
         $rows = $result['results'] ?? [];
         $processed = count($rows);
         $offsetAfter = $offsetBefore + $processed;
@@ -62,32 +62,37 @@ class EbayListingAuditRunnerService
         return $run ? $this->response($run, (int) ($run['batch_size'] ?? 20), (int) $run['offset'], (int) $run['offset'], 0) : null;
     }
 
-    private function newRun(string $channel): array
+    private function newRun(string $channel, bool $apply = false): array
     {
-        $total = Schema::hasTable('marketplace_listings') ? MarketplaceListing::query()->where('marketplace', $channel)->count() : 0;
-        $run = ['run_id' => (string) Str::uuid(), 'channel' => $channel, 'total_count' => $total, 'processed_count' => 0, 'offset' => 0, 'started_at' => now()->toISOString(), 'finished_at' => null, 'status' => 'running', 'dry_run' => true, 'marketplace_write' => false, 'publish' => false, 'revise' => false, 'relist' => false, 'end' => false, 'stock_order_price_sync' => false, 'summary' => $this->emptySummary($channel) + ['total_eBay_de_listings' => $total], 'problem_samples' => []];
+        $total = Schema::hasTable('marketplace_listings') ? MarketplaceListing::query()->where('marketplace', $channel)->whereNotNull('url')->whereHas('part', fn ($q) => $q->where('status', 'ready')->where('quantity', '>', 0))->count() : 0;
+        $run = ['run_id' => (string) Str::uuid(), 'channel' => $channel, 'total_count' => $total, 'processed_count' => 0, 'offset' => 0, 'started_at' => now()->toISOString(), 'finished_at' => null, 'status' => 'running', 'dry_run' => ! $apply, 'marketplace_write' => false, 'publish' => false, 'revise' => false, 'relist' => false, 'end' => false, 'stock_order_price_sync' => false, 'summary' => $this->emptySummary($channel) + ['total_eBay_de_listings' => $total], 'problem_samples' => []];
         $this->save($run);
         return $run;
     }
 
     private function emptySummary(string $channel): array
     {
-        return ['total_eBay_de_listings' => 0, 'processed_count' => 0, 'confirmed_active_listings' => 0, 'confirmed_ended_listings' => 0, 'api_inactive' => 0, 'api_not_found' => 0, 'needs_manual_review' => 0, 'gpsw_external_id_count' => 0, 'suspected_stale_ended_listings' => 0, 'candidates_for_local_fix_high_confidence' => 0, 'errors_count' => 0];
+        return ['total_eBay_de_listings' => 0, 'processed_count' => 0, 'active_ok' => 0, 'ended_stale' => 0, 'not_found' => 0, 'api_public_check_error' => 0, 'needs_review' => 0, 'confirmed_active_listings' => 0, 'confirmed_ended_listings' => 0, 'api_inactive' => 0, 'api_not_found' => 0, 'needs_manual_review' => 0, 'gpsw_external_id_count' => 0, 'suspected_stale_ended_listings' => 0, 'candidates_for_local_fix_high_confidence' => 0, 'errors_count' => 0];
     }
 
     private function mergeSummary(array $summary, array $rows, int $processed): array
     {
         $c = collect($rows);
         $summary['processed_count'] = (int) ($summary['processed_count'] ?? 0) + $processed;
+        $summary['active_ok'] += $c->where('final_panel_status', 'active')->count();
+        $summary['ended_stale'] += $c->where('final_panel_status', 'ended')->count();
+        $summary['not_found'] += $c->where('final_panel_status', 'not_found')->count();
+        $summary['api_public_check_error'] += $c->where('action', 'api_public_check_error')->count();
+        $summary['needs_review'] += $c->where('action', 'needs_review')->count();
         $summary['confirmed_active_listings'] += $c->where('final_panel_status', 'active')->count();
         $summary['confirmed_ended_listings'] += $c->where('final_panel_status', 'ended')->count();
         $summary['api_inactive'] += $c->whereIn('api_listing_status', ['inactive', 'ended'])->count();
         $summary['api_not_found'] += $c->whereIn('api_listing_status', ['not_found', 'unavailable'])->count();
-        $summary['needs_manual_review'] += $c->whereIn('action', ['needs_manual_review', 'api_needs_verification', 'invalid_external_id'])->count();
+        $summary['needs_manual_review'] += $c->whereIn('action', ['needs_manual_review', 'needs_review', 'invalid_external_id'])->count();
         $summary['gpsw_external_id_count'] += $c->filter(fn($r) => preg_match('/^GPSW-\d+$/i', (string)($r['external_offer_id'] ?? '')) || preg_match('/^GPSW-\d+$/i', (string)($r['external_listing_id'] ?? '')))->count();
-        $summary['suspected_stale_ended_listings'] += $c->where('action', 'stale_ended_listing')->count();
+        $summary['suspected_stale_ended_listings'] += $c->whereIn('action', ['stale_ended_listing', 'mark_historical_ended', 'mark_historical_not_found', 'marked_historical_ended', 'marked_historical_not_found'])->count();
         $summary['candidates_for_local_fix_high_confidence'] += $c->where('action', 'would_update_url')->where('confidence', 'high')->count();
-        $summary['errors_count'] += $c->filter(fn($r) => filled(data_get($r, 'api_check.error_message_safe')))->count();
+        $summary['errors_count'] += $c->filter(fn($r) => filled(data_get($r, 'api_check.error_message_safe')) || filled(data_get($r, 'public_check.error_message_safe')))->count();
         return $summary;
     }
 
