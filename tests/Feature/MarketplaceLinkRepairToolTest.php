@@ -81,6 +81,45 @@ class MarketplaceLinkRepairToolTest extends TestCase
         $this->assertSame('x', $row['icon']);
     }
 
+    public function test_ovoko_does_not_extract_id_from_gpswiss_url_or_mercedes_w176_text(): void
+    {
+        $this->actingAsAdminUser();
+        $other = Part::query()->create(['name' => 'Other Ovoko 176', 'quantity' => 1, 'status' => 'ready']);
+        MarketplaceListing::query()->create(['part_id' => $other->id, 'marketplace' => 'ovoko', 'external_offer_id' => '176', 'external_listing_id' => '176']);
+        $part = Part::query()->create([
+            'id' => 756,
+            'name' => 'Mercedes-Benz A45 W176 2.0T AMG 4MATIC rozrusznik A6549060800',
+            'legacy_url' => 'https://gpswiss.pl/produkt/mercedes-benz-a45-w176-2-0t-amg-4matic-rozrusznik-a6549060800/',
+            'quantity' => 1,
+            'status' => 'ready',
+            'currency' => 'PLN',
+        ]);
+
+        $this->getJson('/admin/tools/marketplace/link-repair?format=json&channel=ovoko&part_id='.$part->id)
+            ->assertOk()
+            ->assertJsonPath('rows.0.action', 'skip')
+            ->assertJsonPath('rows.0.reason', 'missing_id')
+            ->assertJsonPath('rows.0.external_id', null);
+    }
+
+    public function test_ovoko_extracts_id_only_from_ovoko_hgf_url(): void
+    {
+        $this->actingAsAdminUser();
+        $part = Part::query()->create([
+            'name' => 'Mercedes-Benz A45 W176 rozrusznik',
+            'legacy_url' => 'https://ovoko.pl/czesci-samochodowe/hgf9992-a6549060800-mercedes-benz-a-w176-rozrusznik',
+            'quantity' => 1,
+            'status' => 'ready',
+            'currency' => 'PLN',
+        ]);
+
+        $this->getJson('/admin/tools/marketplace/link-repair?format=json&channel=ovoko&part_id='.$part->id)
+            ->assertOk()
+            ->assertJsonPath('rows.0.action', 'create')
+            ->assertJsonPath('rows.0.external_id', '9992')
+            ->assertJsonPath('rows.0.current_id_link.source', 'ovoko_url');
+    }
+
     private function actingAsAdminUser(): User
     {
         $this->seed(RoleSeeder::class);
