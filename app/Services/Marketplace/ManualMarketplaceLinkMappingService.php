@@ -111,6 +111,44 @@ class ManualMarketplaceLinkMappingService
     /**
      * @return array{listing: MarketplaceListing, marketplace: string, external_id: string, url: string, action: string, mapping_ready: bool, marketplace_write: bool, sync_triggered: bool}
      */
+    public function saveIdempotentSameExternalId(Part $part, string $marketplace, string $url, string $externalId): array
+    {
+        $marketplace = strtolower(trim($marketplace));
+        $url = trim($url);
+        $externalId = (string) $this->normalizeResolvedExternalId($externalId, $marketplace);
+
+        if (! in_array($marketplace, ['allegro', 'ovoko'], true) || $externalId === '') {
+            throw new InvalidArgumentException('unsupported_idempotent_mapping_repair');
+        }
+
+        $listing = MarketplaceListing::query()
+            ->where('part_id', $part->getKey())
+            ->whereIn('marketplace', $marketplace === 'allegro' ? ['allegro', 'allegro_main'] : ['ovoko'])
+            ->orderByDesc('id')
+            ->get()
+            ->first(fn (MarketplaceListing $listing): bool => $this->sameResolvedExternalId($this->resolvedListingExternalId($listing, $marketplace), $externalId, $marketplace));
+
+        if (! $listing) {
+            $account = MarketplaceAccount::query()->firstOrCreate(
+                ['code' => $marketplace === 'allegro' ? 'allegro_main' : 'ovoko_main'],
+                ['marketplace' => $marketplace, 'name' => $marketplace === 'allegro' ? 'Allegro main' : 'Ovoko main', 'status' => 'active']
+            );
+
+            $listing = MarketplaceListing::query()->create([
+                'marketplace_account_id' => $account->id,
+                'part_id' => $part->getKey(),
+                'marketplace' => $marketplace,
+            ]);
+        }
+
+        $listing->forceFill($this->attributes($part, $marketplace, $externalId, $url, $listing->raw_payload ?? []))->save();
+
+        return $this->result($listing, $marketplace, $externalId, $url, $listing->wasRecentlyCreated ? 'created' : 'updated');
+    }
+
+    /**
+     * @return array{listing: MarketplaceListing, marketplace: string, external_id: string, url: string, action: string, mapping_ready: bool, marketplace_write: bool, sync_triggered: bool}
+     */
     private function result(MarketplaceListing $listing, string $marketplace, string $externalId, string $url, string $action): array
     {
         return [
