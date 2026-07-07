@@ -82,12 +82,19 @@ class EbayMarketplaceDiagnoseController extends Controller
         $listings = $part->marketplaceListings->whereIn('marketplace', ['ebay_de', 'ebay_fr', 'ebay'])->values();
         $listingRows = $listings->map(function (MarketplaceListing $listing) use ($checkApi, $applyInactive): array {
             $api = $checkApi ? $this->apiStatus($listing) : ['api_listing_status' => 'not_checked'];
+            if ($checkApi && $this->apiNeedsSellerSideVerification($api)) {
+                $api['seller_side'] = $this->sellerSideApiStatus($listing);
+                if ($this->sellerSideConfirmsActive($api['seller_side'])) {
+                    $api['api_listing_status'] = 'active_seller_verified';
+                    $api['seller_side_verified_active'] = true;
+                }
+            }
             if (($api['end_date_is_past'] ?? false) === true && ($api['api_listing_status'] ?? null) === 'active') $api['api_listing_status'] = 'ended';
             if ($applyInactive && in_array($listing->marketplace, ['ebay_de', 'ebay'], true) && $this->apiIsCertainEndedForHistory($api)) {
                 $listing->forceFill(['status' => 'ended', 'sync_status' => 'historical', 'last_api_status' => $api['api_listing_status'], 'not_seen_in_active_api_at' => now()])->save();
             }
             return [
-                'id' => $listing->id, 'marketplace' => $listing->marketplace, 'status' => $listing->status, 'sync_status' => $listing->sync_status, 'match_status' => $listing->match_status, 'last_api_status' => $listing->last_api_status, 'last_error' => $listing->last_error, 'external_offer_id' => $listing->external_offer_id, 'external_listing_id' => $listing->external_listing_id, 'url' => $listing->url, 'resolved_listingUrl' => $listing->url, 'resolved_externalOfferId' => $listing->external_offer_id ?: $listing->external_listing_id, 'api' => $api, 'duplicate_guard_would_block' => $this->isBlockingDuplicate($listing, $api),
+                'id' => $listing->id, 'marketplace' => $listing->marketplace, 'status' => $listing->status, 'sync_status' => $listing->sync_status, 'match_status' => $listing->match_status, 'last_api_status' => $listing->last_api_status, 'last_error' => $listing->last_error, 'external_offer_id' => $listing->external_offer_id, 'external_listing_id' => $listing->external_listing_id, 'external_inventory_id' => $listing->external_inventory_id, 'sku' => $listing->sku, 'url' => $listing->url, 'resolved_listingUrl' => $listing->url, 'resolved_externalOfferId' => $listing->external_offer_id ?: $listing->external_listing_id, 'listing_exists' => filled($listing->external_listing_id) || filled($listing->external_offer_id) || filled($listing->url), 'api' => $api, 'duplicate_guard_would_block' => $this->isBlockingDuplicate($listing, $api),
             ];
         })->all();
 
@@ -120,15 +127,54 @@ class EbayMarketplaceDiagnoseController extends Controller
         $preferred = $active ?: $rows->first(fn ($row): bool => $this->rowIsEndedOrStale($row)) ?: $rows->first();
 
         return [
-            'status' => $rows->isEmpty() ? 'missing' : ($active ? 'active' : ($preferred && $this->rowIsEndedOrStale($preferred) ? $this->endedStatus($preferred) : 'not_active')),
+            'status' => $rows->isEmpty() ? 'missing' : ($active ? $this->activeStatus($active) : ($this->hasUnavailableButNotEnded($rows->all()) ? 'unavailable_not_ended_needs_review' : ($preferred && $this->rowIsEndedOrStale($preferred) ? $this->endedStatus($preferred) : 'active_state_uncertain'))),
             'url' => $preferred['url'] ?? null,
             'listings' => $rows->all(),
         ];
     }
 
+
+    private function activeStatus(array $row): string
+    {
+        return data_get($row, 'api.api_listing_status') === 'active_seller_verified' ? 'active_seller_verified' : 'active';
+    }
+
+    private function apiNeedsSellerSideVerification(array $api): bool
+    {
+        $apiStatus = strtolower((string) ($api['api_listing_status'] ?? ''));
+        $availability = strtoupper((string) ($api['availability_status'] ?? ''));
+
+        return ! (bool) ($api['end_date_is_past'] ?? false)
+            && ($apiStatus === 'unavailable' || ($apiStatus === 'inactive' && $availability === 'UNAVAILABLE'));
+    }
+
+    private function sellerSideApiStatus(MarketplaceListing $listing): array
+    {
+        $account = $listing->account ?: MarketplaceAccount::query()->where('code', $listing->marketplace)->orWhere('marketplace', $listing->marketplace)->first();
+        if (! $account) return ['ok' => false, 'read_only' => true, 'blocker' => 'missing_marketplace_account'];
+        $sku = (string) ($listing->external_inventory_id ?: $listing->sku ?: $listing->part?->sku ?: '');
+        if (blank($sku) && blank($listing->external_offer_id)) return ['ok' => false, 'read_only' => true, 'blocker' => 'missing_offer_id_or_inventory_sku'];
+
+        try {
+            return (new EbayApiClient($listing->marketplace, $account))->readOnlyInventoryOfferListingDiagnostics($sku, $listing->external_offer_id, $listing->external_listing_id);
+        } catch (\Throwable $e) {
+            return ['ok' => false, 'read_only' => true, 'blocker' => 'seller_side_api_error', 'error' => $e->getMessage(), 'exception' => $e::class];
+        }
+    }
+
+    private function sellerSideConfirmsActive(array $sellerSide): bool
+    {
+        $offerStatus = strtoupper((string) ($sellerSide['offer_status'] ?? ''));
+        $listingStatus = strtoupper((string) ($sellerSide['listing_status'] ?? ''));
+
+        return in_array($offerStatus, ['PUBLISHED', 'ACTIVE'], true)
+            || in_array($listingStatus, ['ACTIVE', 'PUBLICLY_READABLE'], true)
+            || (($sellerSide['offer_exists'] ?? false) && filled($sellerSide['listing_id'] ?? null) && ! in_array($offerStatus, ['ENDED', 'UNPUBLISHED', 'DELETED'], true));
+    }
+
     private function needsEbayDePublish(Part $part, string $ebayDeStatus): bool
     {
-        return in_array($part->status, ['ready'], true) && (int) $part->quantity > 0 && $part->adminLocalAvailability() !== 'sold' && $ebayDeStatus !== 'active';
+        return in_array($part->status, ['ready'], true) && (int) $part->quantity > 0 && $part->adminLocalAvailability() !== 'sold' && ! in_array($ebayDeStatus, ['active', 'active_seller_verified', 'unavailable_not_ended_needs_review'], true);
     }
 
     private function rowIsActive(array $row): bool
@@ -156,8 +202,17 @@ class EbayMarketplaceDiagnoseController extends Controller
     private function classification(array $listingRows): string
     {
         if (collect($listingRows)->contains(fn ($row) => ($row['api']['end_date_is_past'] ?? false) === true)) return 'ended/stale should_show_x_and_allow_new_publish';
+
         $apiStatuses = collect($listingRows)->pluck('api.api_listing_status')->filter()->values()->all();
-        return in_array('active', $apiStatuses, true) ? 'active OK' : (in_array('not_found', $apiStatuses, true) ? 'not_found should_show_x_and_allow_new_publish' : (in_array('ended', $apiStatuses, true) ? 'ended/stale should_show_x_and_allow_new_publish' : ($this->hasUnavailableButNotEnded($listingRows) ? 'ebay_unavailable_but_not_ended_needs_review needs_review' : (in_array('error', $apiStatuses, true) ? 'api_error needs_review' : 'local_only needs_review'))));
+
+        if (in_array('active_seller_verified', $apiStatuses, true)) return 'active_seller_verified active OK';
+        if (in_array('active', $apiStatuses, true)) return 'active OK';
+        if (in_array('not_found', $apiStatuses, true)) return 'not_found should_show_x_and_allow_new_publish';
+        if (in_array('ended', $apiStatuses, true)) return 'ended/stale should_show_x_and_allow_new_publish';
+        if ($this->hasUnavailableButNotEnded($listingRows)) return 'ebay_unavailable_but_not_ended_needs_review needs_review';
+        if (in_array('error', $apiStatuses, true)) return 'api_error needs_review';
+
+        return 'local_only needs_review';
     }
 
     private function hasUnavailableButNotEnded(array $listingRows): bool
@@ -167,7 +222,7 @@ class EbayMarketplaceDiagnoseController extends Controller
             $availability = strtoupper((string) data_get($row, 'api.availability_status', ''));
 
             return ! (bool) data_get($row, 'api.end_date_is_past', false)
-                && ($apiStatus === 'unavailable' || ($apiStatus === 'inactive' && $availability === 'UNAVAILABLE'));
+                && (in_array($apiStatus, ['unavailable', 'active_state_uncertain'], true) || ($apiStatus === 'inactive' && $availability === 'UNAVAILABLE'));
         });
     }
 
@@ -198,5 +253,5 @@ class EbayMarketplaceDiagnoseController extends Controller
 
     private function itemId(MarketplaceListing $listing): ?string { if (preg_match('#/itm/(\d+)#', (string) $listing->url, $m)) return $m[1]; foreach ([$listing->external_listing_id, $listing->external_offer_id, data_get($listing->raw_payload, 'ebay.item_id'), data_get($listing->raw_payload, 'item_id')] as $id) if (filled($id)) return (string) $id; return null; }
     private function partIds(Request $request): array { $raw = $request->input('part_ids', $request->input('part_id', '')); return collect(is_array($raw) ? $raw : preg_split('/[\s,;]+/', (string) $raw))->filter()->map(fn ($v) => (int) $v)->filter()->unique()->values()->all(); }
-    private function summary(array $rows): array { $counts = collect($rows)->countBy('audit_classification')->all(); return $counts + ['total_parts' => count($rows), 'active_OK' => $counts['active OK'] ?? 0, 'ended_stale' => collect($rows)->filter(fn ($r) => str_contains($r['audit_classification'], 'ended/stale'))->count(), 'not_found' => collect($rows)->filter(fn ($r) => str_contains($r['audit_classification'], 'not_found'))->count(), 'api_error' => collect($rows)->filter(fn ($r) => str_contains($r['audit_classification'], 'api_error'))->count(), 'needs_review' => collect($rows)->filter(fn ($r) => str_contains($r['audit_classification'], 'needs_review'))->count(), 'duplicate_guard_would_block' => collect($rows)->where('duplicate_guard_would_block', true)->count()]; }
+    private function summary(array $rows): array { $counts = collect($rows)->countBy('audit_classification')->all(); return $counts + ['total_parts' => count($rows), 'active_OK' => collect($rows)->filter(fn ($r) => str_contains($r['audit_classification'], 'active OK'))->count(), 'ended_stale' => collect($rows)->filter(fn ($r) => str_contains($r['audit_classification'], 'ended/stale'))->count(), 'not_found' => collect($rows)->filter(fn ($r) => str_contains($r['audit_classification'], 'not_found'))->count(), 'api_error' => collect($rows)->filter(fn ($r) => str_contains($r['audit_classification'], 'api_error'))->count(), 'needs_review' => collect($rows)->filter(fn ($r) => str_contains($r['audit_classification'], 'needs_review'))->count(), 'duplicate_guard_would_block' => collect($rows)->where('duplicate_guard_would_block', true)->count()]; }
 }
