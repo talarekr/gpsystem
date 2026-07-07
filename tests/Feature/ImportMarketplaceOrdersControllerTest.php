@@ -243,6 +243,79 @@ class ImportMarketplaceOrdersControllerTest extends TestCase
         $this->assertDatabaseCount('orders', 0);
     }
 
+    public function test_ovoko_live_import_maps_item_by_marketplace_item_id_and_dispatches_sold_flow(): void
+    {
+        $this->createOvokoAccount();
+        \Illuminate\Support\Facades\DB::table('parts')->insert([
+            'id' => 7820,
+            'sku' => 'GPS-GMAIL-60958',
+            'name' => 'Czujnik kąta skrętu',
+            'quantity' => 1,
+            'status' => 'ready',
+            'is_visible_storefront' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        \App\Models\MarketplaceListing::query()->create([
+            'id' => 6006,
+            'marketplace' => 'ovoko',
+            'part_id' => 7820,
+            'external_offer_id' => '11672',
+            'sku' => 'GPS-GMAIL-60958',
+            'status' => 'imported',
+            'sync_status' => 'mapped',
+            'match_status' => 'confirmed',
+        ]);
+
+        $this->mock(\App\Services\Marketplace\PartAvailabilityEventService::class, function ($mock): void {
+            $mock->shouldReceive('sold')->once()->with(\Mockery::on(fn (array $event): bool =>
+                $event['source_channel'] === 'ovoko'
+                && $event['part_id'] === 7820
+                && $event['source_order_id'] === '8755665'
+                && $event['source_marketplace_item_id'] === '11672'
+                && $event['external_listing_id'] === '11672'
+            ))->andReturn(['ok' => true, 'status' => 'processed', 'part_id' => 7820]);
+        });
+
+        \Illuminate\Support\Facades\Http::fake([
+            'ovoko.example.test/v2/get/orders/2026-07-07/2026-07-07' => \Illuminate\Support\Facades\Http::response([
+                'status_code' => 'R200',
+                'msg' => 'OK',
+                'list' => [[
+                    'order_id' => '8755665',
+                    'order_status' => 'NEW',
+                    'order_date' => '2026-07-07 13:37:42',
+                    'client_name' => 'Buyer',
+                    'total_price' => ['seller' => ['amount' => '100.00', 'currency' => 'PLN']],
+                    'item_list' => [[
+                        'item_id' => '11672',
+                        'title' => 'Czujnik kąta skrętu',
+                        'quantity' => 1,
+                        'sell_price' => ['seller' => ['amount' => '100.00', 'currency' => 'PLN']],
+                    ]],
+                ]],
+            ], 200),
+        ]);
+
+        $result = app(\App\Services\Marketplace\MarketplaceOrdersImportService::class)->run([
+            'marketplace' => 'ovoko',
+            'dry_run' => false,
+            'live_import' => true,
+            'date_from' => '2026-07-07',
+            'date_to' => '2026-07-07',
+        ]);
+
+        $this->assertSame(1, $result['orders_created']);
+        $this->assertDatabaseHas('order_items', [
+            'marketplace' => 'ovoko',
+            'marketplace_order_id' => '8755665',
+            'marketplace_item_id' => '11672',
+            'part_id' => 7820,
+            'sku' => '',
+            'offer_id' => '',
+        ]);
+    }
+
 
     private function ovokoOrderPayload(string $status, string $buyerName, string $total): array
     {
