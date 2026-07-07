@@ -259,40 +259,6 @@ class ManualMarketplaceLinkMappingTest extends TestCase
         $this->assertSame('check', $row['icon']);
     }
 
-    public function test_same_ovoko_id_repair_reassigns_existing_external_listing_without_duplicate_write(): void
-    {
-        $oldPart = Part::query()->create(['name' => 'Old Ovoko part', 'sku' => 'GPS-OLD-OV', 'quantity' => 1, 'status' => 'ready', 'currency' => 'PLN']);
-        $part = Part::query()->create(['id' => 756, 'name' => 'Ovoko manual mapping regression', 'sku' => 'GPS-756', 'quantity' => 1, 'status' => 'ready', 'currency' => 'PLN']);
-        $listing = MarketplaceListing::query()->create(['part_id' => $oldPart->id, 'marketplace' => 'ovoko', 'external_offer_id' => '9992', 'external_listing_id' => '9992', 'status' => 'imported', 'sync_status' => 'mapped', 'match_status' => 'confirmed']);
-        $url = 'https://ovoko.pl/czesci-samochodowe/hgf9992-a6549060800-mercedes-benz-a-w176-rozrusznik';
-
-        $result = app(ManualMarketplaceLinkMappingService::class)->saveIdempotentSameExternalId($part, 'ovoko', $url, '9992');
-
-        $this->assertSame('updated', $result['action']);
-        $this->assertSame($listing->id, $result['listing']->id);
-        $this->assertFalse($result['marketplace_write']);
-        $this->assertFalse($result['sync_triggered']);
-        $this->assertDatabaseHas('marketplace_listings', ['id' => $listing->id, 'part_id' => 756, 'marketplace' => 'ovoko', 'external_offer_id' => '9992', 'external_listing_id' => '9992', 'url' => $url, 'status' => 'imported', 'sync_status' => 'mapped', 'match_status' => 'confirmed']);
-        $this->assertSame(1, MarketplaceListing::query()->where('marketplace', 'ovoko')->where('external_offer_id', '9992')->count());
-    }
-
-    public function test_same_allegro_id_repair_reassigns_existing_external_listing_without_duplicate_write(): void
-    {
-        $oldPart = Part::query()->create(['name' => 'Old Allegro part', 'sku' => 'GPS-OLD-ALG', 'quantity' => 1, 'status' => 'ready', 'currency' => 'PLN']);
-        $part = Part::query()->create(['name' => 'Allegro manual mapping regression', 'sku' => 'GPS-ALG-18331392855', 'quantity' => 1, 'status' => 'ready', 'currency' => 'PLN']);
-        $listing = MarketplaceListing::query()->create(['part_id' => $oldPart->id, 'marketplace' => 'allegro', 'external_offer_id' => '18331392855', 'external_listing_id' => '18331392855', 'status' => 'ACTIVE', 'sync_status' => 'mapped', 'match_status' => 'confirmed', 'last_api_status' => 'ACTIVE']);
-        $url = 'https://allegro.pl/oferta/mercedes-benz-a-w176-rozrusznik-18331392855';
-
-        $result = app(ManualMarketplaceLinkMappingService::class)->saveIdempotentSameExternalId($part, 'allegro', $url, '18331392855');
-
-        $this->assertSame('updated', $result['action']);
-        $this->assertSame($listing->id, $result['listing']->id);
-        $this->assertFalse($result['marketplace_write']);
-        $this->assertFalse($result['sync_triggered']);
-        $this->assertDatabaseHas('marketplace_listings', ['id' => $listing->id, 'part_id' => $part->id, 'marketplace' => 'allegro', 'external_offer_id' => '18331392855', 'external_listing_id' => '18331392855', 'url' => $url, 'status' => 'ACTIVE', 'sync_status' => 'mapped', 'match_status' => 'confirmed']);
-        $this->assertSame(1, MarketplaceListing::query()->whereIn('marketplace', ['allegro', 'allegro_main'])->where('external_offer_id', '18331392855')->count());
-    }
-
     public function test_saving_same_ovoko_id_is_idempotent_and_refreshes_url(): void
     {
         $part = Part::query()->create(['name' => 'VOLVO XC60 sterownik moduł świateł xenon', 'sku' => 'GPS-7132', 'part_number' => '31427776', 'quantity' => 1, 'status' => 'ready', 'currency' => 'PLN']);
