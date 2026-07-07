@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceListing;
+use App\Models\MarketplaceSyncLog;
 use App\Models\Part;
 use App\Services\Admin\PartMarketplaceStatusResolver;
 use App\Services\Marketplace\AllegroListingStatusRefreshService;
@@ -178,6 +179,76 @@ class AllegroListingStatusRefreshTest extends TestCase
 
         $this->assertDatabaseHas('marketplace_listings', ['id' => $listing->id, 'status' => 'active', 'last_api_status' => 'ACTIVE', 'url' => 'https://allegro.pl/oferta/18741244687']);
         $this->assertDatabaseHas('parts', ['id' => $part->id, 'status' => 'ready']);
+    }
+
+    public function test_diagnostics_distinguish_scheduled_from_executed_refresh(): void
+    {
+        $account = MarketplaceAccount::query()->create([
+            'code' => 'allegro_main',
+            'marketplace' => 'allegro',
+            'name' => 'Allegro',
+            'status' => 'active',
+            'api_enabled' => true,
+            'api_base_url' => 'https://api.allegro.test',
+            'api_credentials' => ['access_token' => 'token'],
+        ]);
+        $part = Part::query()->create(['name' => 'Allegro diagnostic part', 'sku' => 'ALG-DIAG', 'quantity' => 1, 'status' => 'ready']);
+        $listing = MarketplaceListing::query()->create([
+            'marketplace_account_id' => $account->id,
+            'part_id' => $part->id,
+            'marketplace' => 'allegro',
+            'external_offer_id' => '18741244688',
+            'status' => 'publication_pending',
+        ]);
+        MarketplaceSyncLog::query()->create([
+            'marketplace' => 'allegro',
+            'marketplace_listing_id' => $listing->id,
+            'part_id' => $part->id,
+            'external_id' => '18741244688',
+            'action' => 'allegro_post_publish_status_refresh_scheduled',
+            'status' => 'success',
+            'message' => 'scheduled',
+            'payload' => ['meta' => ['attempt' => 1]],
+            'created_at' => now(),
+        ]);
+
+        $this->withoutMiddleware()
+            ->getJson('/admin/tools/marketplace/allegro-diagnose?format=json&part_id='.$part->id)
+            ->assertOk()
+            ->assertJsonPath('results.0.post_publish_refresh.last_job_status', 'scheduled')
+            ->assertJsonPath('results.0.post_publish_refresh.refresh_state', 'refresh_scheduled')
+            ->assertJsonPath('results.0.post_publish_refresh.refresh_scheduled', true)
+            ->assertJsonPath('results.0.post_publish_refresh.refresh_executed_success', false);
+    }
+
+    public function test_fallback_command_logs_last_run_counts_for_diagnostics(): void
+    {
+        MarketplaceAccount::query()->create([
+            'code' => 'allegro_main',
+            'marketplace' => 'allegro',
+            'name' => 'Allegro',
+            'status' => 'active',
+            'api_enabled' => true,
+            'api_base_url' => 'https://api.allegro.test',
+            'api_credentials' => ['access_token' => 'token'],
+        ]);
+        $part = Part::query()->create(['name' => 'Allegro cron part', 'sku' => 'ALG-CRON', 'quantity' => 1, 'status' => 'ready']);
+        MarketplaceListing::query()->create([
+            'part_id' => $part->id,
+            'marketplace' => 'allegro',
+            'external_offer_id' => '18741244689',
+            'status' => 'publication_pending',
+            'updated_at' => now()->subMinutes(5),
+        ]);
+
+        $this->artisan('allegro:refresh-pending-listings', ['--dry-run' => true, '--older-than-minutes' => 2])->assertSuccessful();
+
+        $this->withoutMiddleware()
+            ->getJson('/admin/tools/marketplace/allegro-diagnose?format=json&part_id='.$part->id)
+            ->assertOk()
+            ->assertJsonPath('queue_diagnostics.fallback_cron.last_status', 'success')
+            ->assertJsonPath('queue_diagnostics.fallback_cron.last_pending_count', 1)
+            ->assertJsonPath('queue_diagnostics.fallback_cron.last_refreshed_count', 0);
     }
 
 }

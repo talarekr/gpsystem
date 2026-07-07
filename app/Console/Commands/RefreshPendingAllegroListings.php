@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\MarketplaceListing;
 use App\Services\Marketplace\AllegroListingStatusRefreshService;
+use App\Services\Marketplace\ApiIntegrationLogger;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Schema;
 
@@ -16,7 +17,7 @@ class RefreshPendingAllegroListings extends Command
 
     protected $description = 'Fallback cron refresh for Allegro publication_pending listings with an external offer ID.';
 
-    public function handle(AllegroListingStatusRefreshService $service): int
+    public function handle(AllegroListingStatusRefreshService $service, ApiIntegrationLogger $logger): int
     {
         if (! Schema::hasTable('marketplace_listings')) {
             $this->error('Missing marketplace_listings table.');
@@ -40,6 +41,7 @@ class RefreshPendingAllegroListings extends Command
 
         $listings = $query->get();
         $rows = [];
+        $refreshedCount = 0;
 
         foreach ($listings as $listing) {
             $row = [
@@ -52,8 +54,12 @@ class RefreshPendingAllegroListings extends Command
 
             if (! $dryRun) {
                 $result = $service->refresh($listing, null, true);
+                $ok = (bool) ($result['ok'] ?? false);
+                if ($ok) {
+                    $refreshedCount++;
+                }
                 $row += [
-                    'ok' => (bool) ($result['ok'] ?? false),
+                    'ok' => $ok,
                     'api_publication_status' => data_get($result, 'api.publication_status'),
                     'after_status' => data_get($result, 'after.status'),
                     'after_last_api_status' => data_get($result, 'after.last_api_status'),
@@ -63,13 +69,24 @@ class RefreshPendingAllegroListings extends Command
             $rows[] = $row;
         }
 
-        $this->line(json_encode([
+        $payload = [
             'dry_run' => $dryRun,
             'filters' => ['marketplace' => 'allegro', 'status' => 'publication_pending', 'external_offer_id_required' => true, 'older_than_minutes' => $olderThanMinutes, 'limit' => $limit],
             'count' => count($rows),
+            'pending_count' => count($rows),
+            'refreshed_count' => $refreshedCount,
             'rows' => $rows,
             'safety' => ['publish' => false, 'end_offers' => false, 'delete_links' => false, 'part_status_changed' => false],
-        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+        ];
+
+        $logger->success('allegro', 'allegro_refresh_pending_listings_cron', 'Allegro pending listings fallback refresh completed.', [
+            'dry_run' => $dryRun,
+            'pending_count' => count($rows),
+            'refreshed_count' => $refreshedCount,
+            'filters' => $payload['filters'],
+        ]);
+
+        $this->line(json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
 
         return self::SUCCESS;
     }
