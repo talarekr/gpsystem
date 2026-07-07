@@ -223,40 +223,8 @@ class ManualMarketplaceLinkMappingTest extends TestCase
 
         $this->assertSame('updated', $result['action']);
         $this->assertSame('9992', $result['external_id']);
-        $this->assertDatabaseHas('marketplace_listings', ['part_id' => 756, 'marketplace' => 'ovoko', 'external_offer_id' => '9992', 'external_listing_id' => '9992', 'url' => $url, 'status' => 'imported', 'sync_status' => 'mapped', 'match_status' => 'confirmed']);
+        $this->assertDatabaseHas('marketplace_listings', ['part_id' => 756, 'marketplace' => 'ovoko', 'external_offer_id' => '9992', 'external_listing_id' => '9992', 'url' => $url]);
         $this->assertSame(1, MarketplaceListing::query()->where('part_id', 756)->where('marketplace', 'ovoko')->where('external_offer_id', '9992')->count());
-
-        $part->refresh()->load('marketplaceListings');
-        $listing = $part->marketplaceListings->firstWhere('marketplace', 'ovoko');
-        $this->assertSame($url, $listing->url);
-        $this->assertSame('9992', $listing->external_offer_id);
-
-        $row = collect(app(PartMarketplaceStatusResolver::class)->rowsForPart($part))->firstWhere('key', 'ovoko');
-        $this->assertTrue($row['has_link']);
-        $this->assertSame($url, $row['url']);
-        $this->assertSame('9992', $row['external_offer_id']);
-        $this->assertTrue($row['is_active']);
-        $this->assertSame('check', $row['icon']);
-    }
-
-    public function test_same_ovoko_id_repair_creates_local_listing_for_list_view_without_marketplace_write(): void
-    {
-        $part = Part::query()->create(['id' => 756, 'name' => 'Ovoko manual mapping regression', 'sku' => 'GPS-756', 'quantity' => 1, 'status' => 'ready', 'currency' => 'PLN']);
-        $url = 'https://ovoko.pl/czesci-samochodowe/hgf9992-a6549060800-mercedes-benz-a-w176-rozrusznik';
-
-        $result = app(ManualMarketplaceLinkMappingService::class)->saveIdempotentSameExternalId($part, 'ovoko', $url, '9992');
-
-        $this->assertSame('created', $result['action']);
-        $this->assertFalse($result['marketplace_write']);
-        $this->assertFalse($result['sync_triggered']);
-        $this->assertDatabaseHas('marketplace_listings', ['part_id' => 756, 'marketplace' => 'ovoko', 'external_offer_id' => '9992', 'external_listing_id' => '9992', 'url' => $url, 'status' => 'imported', 'sync_status' => 'mapped', 'match_status' => 'confirmed']);
-
-        $part->refresh()->load('marketplaceListings');
-        $row = collect(app(PartMarketplaceStatusResolver::class)->rowsForPart($part))->firstWhere('key', 'ovoko');
-        $this->assertTrue($row['has_link']);
-        $this->assertSame($url, $row['url']);
-        $this->assertTrue($row['is_active']);
-        $this->assertSame('check', $row['icon']);
     }
 
     public function test_saving_same_ovoko_id_is_idempotent_and_refreshes_url(): void

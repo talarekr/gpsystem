@@ -200,30 +200,9 @@ class ListParts extends Page
                     'existing_part_id' => $exception->existingPartId,
                 ]);
 
-                try {
-                    $result = app(ManualMarketplaceLinkMappingService::class)->saveIdempotentSameExternalId($part, $marketplace, (string) $url, $exception->newId);
-                } catch (Throwable $repairException) {
-                    Log::error('manual_marketplace_link_same_id_repair_failed', [
-                        'part_id' => $partId,
-                        'marketplace' => $marketplace,
-                        'existing_id' => $exception->existingId,
-                        'new_id' => $exception->newId,
-                        'exception_class' => $repairException::class,
-                        'message' => $repairException->getMessage(),
-                    ]);
-
-                    Notification::make()
-                        ->title('Nie udało się uzupełnić lokalnego mapowania marketplace.')
-                        ->body('current_external_id='.$exception->existingId.' | new_external_id='.$exception->newId.' | marketplace_write=false | sync_triggered=false')
-                        ->danger()
-                        ->send();
-
-                    return;
-                }
-
                 Notification::make()
                     ->title('Lokalne mapowanie '.ucfirst($marketplace).' zapisane.')
-                    ->body('current_external_id='.$exception->existingId.' | new_external_id='.$exception->newId.' | saved_listing_id='.$result['listing']->id.' | mapping_ready=true | marketplace_write=false | sync_triggered=false')
+                    ->body('current_external_id='.$exception->existingId.' | new_external_id='.$exception->newId.' | marketplace_write=false | sync_triggered=false')
                     ->success()
                     ->send();
 
