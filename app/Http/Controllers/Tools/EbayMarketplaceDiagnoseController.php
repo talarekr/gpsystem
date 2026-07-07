@@ -87,6 +87,9 @@ class EbayMarketplaceDiagnoseController extends Controller
             $api = $this->withLocalEndDateFallback($listing, $api);
             if ($checkApi && $this->apiNeedsSellerSideVerification($api)) {
                 $api['seller_side'] = $this->sellerSideApiStatus($listing);
+                if ($this->realSellerListingId($api['seller_side']) === null && blank($api['seller_side']['offer_status'] ?? null) && blank($api['seller_side']['listing_status'] ?? null)) {
+                    $api['seller_side']['verification_reason'] = $api['seller_side']['blocker'] ?? 'seller_verification_unavailable';
+                }
                 $api['seller_listing_id_matches_public_item_id'] = $this->sellerListingMatchesPublicItem($api['seller_side'], $publicItemId);
                 if ($this->sellerSideConfirmsActive($api['seller_side'], $publicItemId)) {
                     $api['api_listing_status'] = 'active_seller_verified';
@@ -98,7 +101,7 @@ class EbayMarketplaceDiagnoseController extends Controller
                 $listing->forceFill(['status' => 'ended', 'sync_status' => 'historical', 'last_api_status' => $api['api_listing_status'], 'not_seen_in_active_api_at' => now()])->save();
             }
             return [
-                'id' => $listing->id, 'marketplace' => $listing->marketplace, 'status' => $listing->status, 'sync_status' => $listing->sync_status, 'match_status' => $listing->match_status, 'last_api_status' => $listing->last_api_status, 'last_error' => $listing->last_error, 'external_offer_id' => $listing->external_offer_id, 'external_listing_id' => $listing->external_listing_id, 'external_inventory_id' => $listing->external_inventory_id, 'sku' => $listing->sku, 'url' => $listing->url, 'resolved_listingUrl' => $listing->url, 'resolved_externalOfferId' => $listing->external_offer_id ?: $listing->external_listing_id, 'public_item_id' => $publicItemId, 'seller_offer_id' => $listing->external_offer_id, 'seller_listing_id' => data_get($api, 'seller_side.listing_id'), 'requested_listing_id' => data_get($api, 'seller_side.requested_listing_id'), 'offer_listing_id' => data_get($api, 'seller_side.offer_listing_id'), 'seller_listing_id_matches_public_item_id' => $this->sellerListingMatchesPublicItem(data_get($api, 'seller_side', []), $publicItemId), 'public_item_end_date' => $api['end_date'] ?? null, 'public_item_end_past' => (bool) ($api['end_date_is_past'] ?? false), 'seller_listing_status' => data_get($api, 'seller_side.listing_status'), 'seller_offer_status' => data_get($api, 'seller_side.offer_status'), 'listing_exists' => filled($listing->external_listing_id) || filled($listing->external_offer_id) || filled($listing->url), 'api' => $api, 'duplicate_guard_would_block' => $this->isBlockingDuplicate($listing, $api),
+                'id' => $listing->id, 'marketplace' => $listing->marketplace, 'status' => $listing->status, 'sync_status' => $listing->sync_status, 'match_status' => $listing->match_status, 'last_api_status' => $listing->last_api_status, 'last_error' => $listing->last_error, 'external_offer_id' => $listing->external_offer_id, 'external_listing_id' => $listing->external_listing_id, 'external_inventory_id' => $listing->external_inventory_id, 'sku' => $listing->sku, 'url' => $listing->url, 'resolved_listingUrl' => $listing->url, 'resolved_externalOfferId' => $listing->external_offer_id ?: $listing->external_listing_id, 'public_item_id' => $publicItemId, 'seller_offer_id' => data_get($api, 'seller_side.offer_id'), 'seller_listing_id' => $this->realSellerListingId(data_get($api, 'seller_side', [])), 'requested_listing_id' => data_get($api, 'seller_side.requested_listing_id'), 'offer_listing_id' => data_get($api, 'seller_side.offer_listing_id'), 'seller_listing_id_matches_public_item_id' => $this->sellerListingMatchesPublicItem(data_get($api, 'seller_side', []), $publicItemId), 'public_item_end_date' => $api['end_date'] ?? null, 'public_item_end_date_source' => $api['end_date_source'] ?? 'unavailable', 'public_item_end_past' => (bool) ($api['end_date_is_past'] ?? false), 'seller_listing_status' => data_get($api, 'seller_side.listing_status'), 'seller_offer_status' => data_get($api, 'seller_side.offer_status'), 'seller_verification_reason' => data_get($api, 'seller_side.verification_reason'), 'listing_exists' => filled($listing->external_listing_id) || filled($listing->external_offer_id) || filled($listing->url), 'api' => $api, 'duplicate_guard_would_block' => $this->isBlockingDuplicate($listing, $api),
             ];
         })->all();
 
@@ -116,13 +119,16 @@ class EbayMarketplaceDiagnoseController extends Controller
             $resolverEbay['reason'] = collect($listingRows)->contains(fn ($row) => ($row['api']['end_date_is_past'] ?? false) === true) ? 'ebay_end_date_in_past' : 'ebay_ended_stale';
             $resolverEbay['title'] = 'Oferta eBay nieaktywna: '.$resolverEbay['reason'];
         } elseif ($this->hasUnavailableButNotEnded($ebayDe['listings'])) {
+            $resolverEbay['is_active'] = false;
+            $resolverEbay['icon'] = 'x';
+            $resolverEbay['display_icon'] = '✕';
             $resolverEbay['reason'] = 'ebay_unavailable_but_not_ended_needs_review';
             $resolverEbay['title'] = 'Status eBay wymaga weryfikacji: '.$resolverEbay['reason'];
         }
 
         $diagnosticListing = $ebayDe['preferred'] ?? null;
 
-        return ['part' => ['id' => $part->id, 'sku' => $part->sku, 'part_number' => $part->part_number, 'status' => $part->status, 'quantity' => $part->quantity, 'adminLocalAvailability' => $part->adminLocalAvailability()], 'marketplace_listings' => $listingRows, 'public_item_id' => $diagnosticListing['public_item_id'] ?? null, 'seller_offer_id' => $diagnosticListing['seller_offer_id'] ?? null, 'seller_listing_id' => $diagnosticListing['seller_listing_id'] ?? null, 'requested_listing_id' => $diagnosticListing['requested_listing_id'] ?? null, 'offer_listing_id' => $diagnosticListing['offer_listing_id'] ?? null, 'seller_listing_id_matches_public_item_id' => $diagnosticListing['seller_listing_id_matches_public_item_id'] ?? null, 'public_item_end_date' => $diagnosticListing['public_item_end_date'] ?? null, 'public_item_end_past' => $diagnosticListing['public_item_end_past'] ?? null, 'seller_listing_status' => $diagnosticListing['seller_listing_status'] ?? null, 'seller_offer_status' => $diagnosticListing['seller_offer_status'] ?? null, 'ebay_de_status' => $ebayDe['status'], 'ebay_de_url' => $ebayDe['url'], 'ebay_fr_status' => $ebayFr['status'], 'ebay_fr_url' => $ebayFr['url'], 'ebay_overall' => $classification, 'needs_ebay_de_publish' => $endedOrStale && $this->needsEbayDePublish($part, $ebayDe['status']), 'resolver_ebay' => $resolverEbay, 'duplicate_guard_would_block' => $endedOrStale ? false : collect($ebayDe['listings'])->contains('duplicate_guard_would_block', true), 'audit_classification' => $classification];
+        return ['part' => ['id' => $part->id, 'sku' => $part->sku, 'part_number' => $part->part_number, 'status' => $part->status, 'quantity' => $part->quantity, 'adminLocalAvailability' => $part->adminLocalAvailability()], 'marketplace_listings' => $listingRows, 'public_item_id' => $diagnosticListing['public_item_id'] ?? null, 'seller_offer_id' => $diagnosticListing['seller_offer_id'] ?? null, 'seller_listing_id' => $diagnosticListing['seller_listing_id'] ?? null, 'requested_listing_id' => $diagnosticListing['requested_listing_id'] ?? null, 'offer_listing_id' => $diagnosticListing['offer_listing_id'] ?? null, 'seller_listing_id_matches_public_item_id' => $diagnosticListing['seller_listing_id_matches_public_item_id'] ?? null, 'public_item_end_date' => $diagnosticListing['public_item_end_date'] ?? null, 'public_item_end_date_source' => $diagnosticListing['public_item_end_date_source'] ?? 'unavailable', 'public_item_end_past' => $diagnosticListing['public_item_end_past'] ?? null, 'seller_listing_status' => $diagnosticListing['seller_listing_status'] ?? null, 'seller_offer_status' => $diagnosticListing['seller_offer_status'] ?? null, 'seller_verification_reason' => $diagnosticListing['seller_verification_reason'] ?? null, 'ebay_de_status' => $ebayDe['status'], 'ebay_de_url' => $ebayDe['url'], 'ebay_fr_status' => $ebayFr['status'], 'ebay_fr_url' => $ebayFr['url'], 'ebay_overall' => $classification, 'needs_ebay_de_publish' => $endedOrStale && $this->needsEbayDePublish($part, $ebayDe['status']), 'resolver_ebay' => $resolverEbay, 'duplicate_guard_would_block' => ($endedOrStale || $this->hasUnavailableButNotEnded($ebayDe['listings'])) ? false : collect($ebayDe['listings'])->contains('duplicate_guard_would_block', true), 'audit_classification' => $classification];
     }
 
 
@@ -179,6 +185,18 @@ class EbayMarketplaceDiagnoseController extends Controller
         return in_array($offerStatus, ['PUBLISHED', 'ACTIVE'], true)
             || in_array($listingStatus, ['ACTIVE', 'PUBLICLY_READABLE'], true)
             || (($sellerSide['offer_exists'] ?? false) && filled($sellerSide['listing_id'] ?? null) && ! in_array($offerStatus, ['ENDED', 'UNPUBLISHED', 'DELETED'], true));
+    }
+
+    private function realSellerListingId(array $sellerSide): ?string
+    {
+        if (filled($sellerSide['offer_listing_id'] ?? null)) return (string) $sellerSide['offer_listing_id'];
+
+        $hasSellerProof = filled($sellerSide['offer_id'] ?? null)
+            || filled($sellerSide['offer_status'] ?? null)
+            || filled($sellerSide['listing_status'] ?? null)
+            || (bool) ($sellerSide['offer_exists'] ?? false);
+
+        return $hasSellerProof && filled($sellerSide['listing_id'] ?? null) ? (string) $sellerSide['listing_id'] : null;
     }
 
     private function sellerListingMatchesPublicItem(array $sellerSide, ?string $publicItemId): bool
@@ -270,6 +288,7 @@ class EbayMarketplaceDiagnoseController extends Controller
     private function isBlockingDuplicate(MarketplaceListing $listing, array $api = []): bool
     {
         if ($this->apiIsCertainEndedForHistory($api)) return false;
+        if ($this->apiNeedsSellerSideVerification($api) && ! ($api['seller_side_verified_active'] ?? false)) return false;
         $status = strtolower((string) $listing->status); $lastApi = strtolower((string) $listing->last_api_status);
         return in_array($status, ['active', 'published', 'live'], true) && ! in_array($lastApi, ['ended', 'inactive', 'deleted', 'archived', 'not_found', 'unavailable', 'failed', 'error'], true) && $listing->not_seen_in_active_api_at === null && (filled($listing->external_listing_id) || filled($listing->external_offer_id));
     }
@@ -277,7 +296,7 @@ class EbayMarketplaceDiagnoseController extends Controller
     private function publicItemId(MarketplaceListing $listing): ?string { if (preg_match('#/itm/(\d+)#', (string) $listing->url, $m)) return $m[1]; return $this->digitsOnly($listing->external_listing_id); }
     private function itemId(MarketplaceListing $listing): ?string { if ($id = $this->publicItemId($listing)) return $id; foreach ([$listing->external_listing_id, $listing->external_offer_id, data_get($listing->raw_payload, 'ebay.item_id'), data_get($listing->raw_payload, 'item_id')] as $id) if (filled($id)) return (string) $id; return null; }
     private function digitsOnly(mixed $value): ?string { if (! filled($value)) return null; return preg_match('/\d+/', (string) $value, $m) ? $m[0] : null; }
-    private function withLocalEndDateFallback(MarketplaceListing $listing, array $api): array { if (filled($api['end_date'] ?? null)) return $api; $endDate = data_get($listing->raw_payload, 'itemEndDate') ?? data_get($listing->raw_payload, 'end_date') ?? data_get($listing->raw_payload, 'ended_at'); if (! filled($endDate)) return $api; $api['end_date'] = (string) $endDate; $api['end_date_source'] = 'marketplace_listings.raw_payload'; $api['end_date_is_past'] = strtotime((string) $endDate) !== false && strtotime((string) $endDate) < now()->timestamp; return $api; }
+    private function withLocalEndDateFallback(MarketplaceListing $listing, array $api): array { if (filled($api['end_date'] ?? null)) { $api['end_date_source'] = $api['end_date_source'] ?? 'browse_api'; return $api; } $endDate = data_get($listing->raw_payload, 'itemEndDate') ?? data_get($listing->raw_payload, 'end_date') ?? data_get($listing->raw_payload, 'ended_at') ?? data_get($listing->raw_payload, 'api.itemEndDate') ?? data_get($listing->raw_payload, 'browse.itemEndDate') ?? data_get($listing->raw_payload, 'listing_snapshot.itemEndDate'); if (! filled($endDate)) { $api['end_date_source'] = $api['end_date_source'] ?? 'unavailable'; return $api; } $api['end_date'] = (string) $endDate; $api['end_date_source'] = 'local_raw_payload'; $api['end_date_is_past'] = strtotime((string) $endDate) !== false && strtotime((string) $endDate) < now()->timestamp; return $api; }
     private function partIds(Request $request): array { $raw = $request->input('part_ids', $request->input('part_id', '')); return collect(is_array($raw) ? $raw : preg_split('/[\s,;]+/', (string) $raw))->filter()->map(fn ($v) => (int) $v)->filter()->unique()->values()->all(); }
     private function summary(array $rows): array { $counts = collect($rows)->countBy('audit_classification')->all(); return $counts + ['total_parts' => count($rows), 'active_OK' => collect($rows)->filter(fn ($r) => str_contains($r['audit_classification'], 'active OK'))->count(), 'ended_stale' => collect($rows)->filter(fn ($r) => str_contains($r['audit_classification'], 'ended/stale'))->count(), 'not_found' => collect($rows)->filter(fn ($r) => str_contains($r['audit_classification'], 'not_found'))->count(), 'api_error' => collect($rows)->filter(fn ($r) => str_contains($r['audit_classification'], 'api_error'))->count(), 'needs_review' => collect($rows)->filter(fn ($r) => str_contains($r['audit_classification'], 'needs_review'))->count(), 'duplicate_guard_would_block' => collect($rows)->where('duplicate_guard_would_block', true)->count()]; }
 }
