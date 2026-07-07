@@ -62,7 +62,10 @@ class ManualMarketplaceLinkMappingService
                 throw new ManualMarketplaceMappingConflictException($existingId, $externalId);
             }
 
-            $listing->forceFill($this->attributes($part, $marketplace, $externalId, $url, $listing->raw_payload ?? []))->save();
+            $listing->forceFill($this->attributes($part, $marketplace, $externalId, $url, $listing->raw_payload ?? []) + [
+                'part_id' => $part->getKey(),
+                'marketplace' => $marketplace,
+            ])->save();
 
             return $this->result($listing, $marketplace, $externalId, $url, 'updated');
         }
@@ -129,6 +132,10 @@ class ManualMarketplaceLinkMappingService
             ->first(fn (MarketplaceListing $listing): bool => $this->sameResolvedExternalId($this->resolvedListingExternalId($listing, $marketplace), $externalId, $marketplace));
 
         if (! $listing) {
+            $listing = $this->findExistingListingByExternalId($marketplace, $externalId);
+        }
+
+        if (! $listing) {
             $account = MarketplaceAccount::query()->firstOrCreate(
                 ['code' => $marketplace === 'allegro' ? 'allegro_main' : 'ovoko_main'],
                 ['marketplace' => $marketplace, 'name' => $marketplace === 'allegro' ? 'Allegro main' : 'Ovoko main', 'status' => 'active']
@@ -141,9 +148,13 @@ class ManualMarketplaceLinkMappingService
             ]);
         }
 
-        $listing->forceFill($this->attributes($part, $marketplace, $externalId, $url, $listing->raw_payload ?? []))->save();
+        $created = $listing->wasRecentlyCreated;
+        $listing->forceFill($this->attributes($part, $marketplace, $externalId, $url, $listing->raw_payload ?? []) + [
+            'part_id' => $part->getKey(),
+            'marketplace' => $marketplace,
+        ])->save();
 
-        return $this->result($listing, $marketplace, $externalId, $url, $listing->wasRecentlyCreated ? 'created' : 'updated');
+        return $this->result($listing, $marketplace, $externalId, $url, $created ? 'created' : 'updated');
     }
 
     /**
@@ -230,6 +241,33 @@ class ManualMarketplaceLinkMappingService
         });
 
         return $payload;
+    }
+
+    /** @return array<string, mixed> */
+    public function repairDiagnostics(Part $part, string $marketplace, string $url, string $externalId, ?MarketplaceListing $listing = null): array
+    {
+        $marketplace = strtolower(trim($marketplace));
+        $externalId = (string) $this->normalizeResolvedExternalId($externalId, $marketplace);
+        $listing ??= MarketplaceListing::query()
+            ->where('part_id', $part->getKey())
+            ->whereIn('marketplace', $marketplace === 'allegro' ? ['allegro', 'allegro_main'] : ['ovoko'])
+            ->orderByDesc('id')
+            ->get()
+            ->first(fn (MarketplaceListing $candidate): bool => $this->sameResolvedExternalId($this->resolvedListingExternalId($candidate, $marketplace), $externalId, $marketplace))
+            ?: $this->findExistingListingByExternalId($marketplace, $externalId);
+        $attributes = $this->attributes($part, $marketplace, $externalId, trim($url), is_array($listing?->raw_payload) ? $listing->raw_payload : []);
+
+        return [
+            'listing_id' => $listing?->id,
+            'part_id' => $part->getKey(),
+            'marketplace' => $marketplace,
+            'attempted_external_offer_id' => $attributes['external_offer_id'],
+            'attempted_external_listing_id' => $attributes['external_listing_id'],
+            'attempted_url' => $attributes['url'],
+            'attempted_status' => $attributes['status'],
+            'attempted_sync_status' => $attributes['sync_status'],
+            'attempted_match_status' => $attributes['match_status'],
+        ];
     }
 
     /** @param array<string, mixed> $rawPayload @return array<string, mixed> */
