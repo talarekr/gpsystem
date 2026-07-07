@@ -774,7 +774,10 @@ class EbayApiClient extends AbstractMarketplaceApiClient
             $offerResponse = Http::withToken($token)->withHeaders($headers)->acceptJson()->timeout(20)->get($baseUrl.'/sell/inventory/v1/offer/'.rawurlencode((string) $offerId));
             $offerJson = $offerResponse->json();
             $offer = is_array($offerJson) ? $offerJson : [];
-            $listingId = $listingId ?: ($offer['listingId'] ?? null);
+            $offerListingId = $offer['listingId'] ?? null;
+            $result['requested_listing_id'] = $listingId;
+            $result['offer_listing_id'] = $offerListingId;
+            $listingId = filled($offerListingId) ? (string) $offerListingId : $listingId;
             $result['offer_status'] = $offer['status'] ?? $offer['listingStatus'] ?? null;
             $result['listing_id'] = $listingId;
             $result['read_only_ebay_api_responses']['get_offer'] = ['http_status' => $offerResponse->status(), 'json' => $offer];

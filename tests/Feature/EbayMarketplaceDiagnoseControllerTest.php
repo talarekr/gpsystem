@@ -200,11 +200,58 @@ class EbayMarketplaceDiagnoseControllerTest extends TestCase
             ->assertJsonPath('rows.0.needs_ebay_de_publish', false)
             ->assertJsonPath('rows.0.duplicate_guard_would_block', true)
             ->assertJsonPath('rows.0.marketplace_listings.0.api.seller_side_verified_active', true)
-            ->assertJsonPath('rows.0.marketplace_listings.0.api.seller_side.offer_status', 'PUBLISHED');
+            ->assertJsonPath('rows.0.marketplace_listings.0.api.seller_side.offer_status', 'PUBLISHED')
+            ->assertJsonPath('rows.0.marketplace_listings.0.public_item_id', '800116033033')
+            ->assertJsonPath('rows.0.marketplace_listings.0.seller_offer_id', '123456789')
+            ->assertJsonPath('rows.0.marketplace_listings.0.seller_listing_id', '800116033033')
+            ->assertJsonPath('rows.0.marketplace_listings.0.seller_listing_id_matches_public_item_id', true)
+            ->assertJsonPath('rows.0.marketplace_listings.0.seller_listing_status', 'PUBLICLY_READABLE')
+            ->assertJsonPath('rows.0.marketplace_listings.0.seller_offer_status', 'PUBLISHED');
 
         $listing->refresh();
         $this->assertSame('active', $listing->status);
         $this->assertNotSame('historical', $listing->sync_status);
+    }
+
+    public function test_seller_side_active_for_different_listing_does_not_override_public_item(): void
+    {
+        $this->actingAsAdminUser();
+
+        $part = Part::query()->create(['name' => 'Seller mismatch eBay', 'sku' => 'EB-SELLER-MISMATCH', 'quantity' => 1, 'status' => 'ready']);
+        MarketplaceListing::query()->create([
+            'part_id' => $part->id,
+            'marketplace' => 'ebay_de',
+            'external_listing_id' => '389993224459',
+            'external_offer_id' => '123456789',
+            'external_inventory_id' => 'EB-SELLER-MISMATCH',
+            'url' => 'https://www.ebay.de/itm/389993224459',
+            'status' => 'active',
+            'last_api_status' => 'active',
+        ]);
+
+        Http::fakeSequence()
+            ->push([
+                'itemId' => 'v1|389993224459|0',
+                'estimatedAvailabilities' => [['estimatedAvailabilityStatus' => 'UNAVAILABLE']],
+                'itemWebUrl' => 'https://www.ebay.de/itm/389993224459',
+                'title' => 'Ended listing',
+            ], 200)
+            ->push(['availability' => ['shipToLocationAvailability' => ['quantity' => 1]]], 200)
+            ->push(['offers' => [['offerId' => '123456789', 'listingId' => '800116033033', 'status' => 'PUBLISHED']]], 200)
+            ->push(['offerId' => '123456789', 'listingId' => '800116033033', 'status' => 'PUBLISHED'], 200)
+            ->push(['itemWebUrl' => 'https://www.ebay.de/itm/800116033033'], 200);
+
+        $this->postJson('/admin/tools/ebay/marketplace-diagnose?action=apply_inactive&part_ids='.$part->id.'&check_api=1&confirm_apply_inactive=1&format=json')
+            ->assertOk()
+            ->assertJsonPath('rows.0.ebay_de_status', 'unavailable_not_ended_needs_review')
+            ->assertJsonPath('rows.0.audit_classification', 'ebay_unavailable_but_not_ended_needs_review needs_review')
+            ->assertJsonPath('rows.0.needs_ebay_de_publish', false)
+            ->assertJsonPath('rows.0.duplicate_guard_would_block', true)
+            ->assertJsonPath('rows.0.marketplace_listings.0.public_item_id', '389993224459')
+            ->assertJsonPath('rows.0.marketplace_listings.0.seller_listing_id', '800116033033')
+            ->assertJsonPath('rows.0.marketplace_listings.0.seller_listing_id_matches_public_item_id', false)
+            ->assertJsonPath('rows.0.marketplace_listings.0.public_item_end_past', false)
+            ->assertJsonPath('rows.0.marketplace_listings.0.api.seller_side_verified_active', null);
     }
 
 
