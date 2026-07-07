@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Tools;
 use App\Http\Controllers\Controller;
 use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceListing;
+use App\Models\MarketplaceSyncLog;
 use App\Models\Part;
 use App\Services\Admin\PartMarketplaceStatusResolver;
 use App\Services\Marketplace\Api\AllegroApiClient;
@@ -12,6 +13,8 @@ use App\Services\Marketplace\AllegroListingStatusRefreshService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\View\View;
 use Throwable;
 
@@ -35,6 +38,7 @@ class AllegroMarketplaceDiagnoseController extends Controller
             'input' => $input,
             'offer_id' => $offerId,
             'check_api' => $checkApi,
+            'queue_diagnostics' => $this->queueDiagnostics(),
             'part_ids' => $partIds,
             'results' => $results,
         ];
@@ -44,6 +48,52 @@ class AllegroMarketplaceDiagnoseController extends Controller
         }
 
         return view('admin.tools.marketplace.allegro-diagnose', $payload);
+    }
+
+    public function refreshPending(Request $request, AllegroListingStatusRefreshService $service): JsonResponse|View
+    {
+        $apply = $request->isMethod('post') && $request->boolean('apply');
+        $limit = max(1, min(100, (int) $request->input('limit', 25)));
+        $olderThanMinutes = max(0, (int) $request->input('older_than_minutes', 2));
+
+        $candidates = $this->pendingRefreshQuery($olderThanMinutes)->limit($limit)->get();
+        $rows = $candidates->map(fn (MarketplaceListing $listing): array => [
+            'listing_id' => $listing->id,
+            'part_id' => $listing->part_id,
+            'offer_id' => $listing->external_offer_id,
+            'status' => $listing->status,
+            'last_api_status' => $listing->last_api_status,
+            'updated_at' => optional($listing->updated_at)->toISOString(),
+            'would_refresh' => true,
+        ])->values()->all();
+
+        $applied = [];
+        if ($apply) {
+            foreach ($candidates as $listing) {
+                $applied[] = $service->refresh($listing, null, true);
+            }
+        }
+
+        $payload = [
+            'ok' => true,
+            'mode' => $apply ? 'apply' : 'preview',
+            'read_only' => ! $apply,
+            'marketplace_write' => false,
+            'publishing_triggered' => false,
+            'ending_triggered' => false,
+            'links_deleted' => false,
+            'part_status_changed' => false,
+            'filters' => ['marketplace' => 'allegro', 'status' => 'publication_pending', 'external_offer_id_required' => true, 'older_than_minutes' => $olderThanMinutes, 'limit' => $limit],
+            'count' => count($rows),
+            'rows' => $rows,
+            'applied' => $applied,
+        ];
+
+        if ($request->expectsJson() || $request->query('format') === 'json') {
+            return response()->json($payload);
+        }
+
+        return view('admin.tools.marketplace.allegro-pending-refresh', $payload);
     }
 
 
@@ -106,6 +156,7 @@ class AllegroMarketplaceDiagnoseController extends Controller
             $listingRows = $part->marketplaceListings->map(fn (MarketplaceListing $listing): array => $this->listing($listing))->values()->all();
             $resolverRow = collect($resolver->rowsForPart($part))->firstWhere('key', 'allegro') ?? [];
             $resolvedOfferId = $this->resolvedOfferId($explicitOfferId, $resolverRow, $listingRows);
+            $postPublishRefresh = $this->postPublishRefreshDiagnostics($partId, $listingRows, $resolvedOfferId);
 
             return [
                 'part_id' => $partId,
@@ -126,6 +177,7 @@ class AllegroMarketplaceDiagnoseController extends Controller
                     'reason' => $resolverRow['reason'] ?? null,
                 ],
                 'allegro_api' => $checkApi ? $this->apiOfferStatus($resolvedOfferId) : ['checked' => false, 'offer_id' => $resolvedOfferId ?: null],
+                'post_publish_refresh' => $postPublishRefresh,
             ];
         })->all();
     }
@@ -171,6 +223,95 @@ class AllegroMarketplaceDiagnoseController extends Controller
             'url' => $listing->url,
             'last_api_status' => $listing->last_api_status,
             'last_error' => $listing->last_error,
+            'post_publish_refresh' => $this->postPublishRefreshDiagnostics((int) $listing->part_id, [['id' => $listing->id]], $listing->external_offer_id ?: $listing->external_listing_id),
+        ];
+    }
+
+    private function pendingRefreshQuery(int $olderThanMinutes)
+    {
+        return MarketplaceListing::query()
+            ->where('marketplace', 'allegro')
+            ->where('status', 'publication_pending')
+            ->whereNotNull('external_offer_id')
+            ->where('external_offer_id', '<>', '')
+            ->when($olderThanMinutes > 0, fn ($query) => $query->where('updated_at', '<=', now()->subMinutes($olderThanMinutes)))
+            ->orderBy('updated_at')
+            ->orderBy('id');
+    }
+
+    /** @param array<int, array<string, mixed>> $listingRows */
+    private function postPublishRefreshDiagnostics(int $partId, array $listingRows, ?string $offerId): array
+    {
+        $listingIds = collect($listingRows)->pluck('id')->filter()->map(fn ($id): int => (int) $id)->values()->all();
+        if (! Schema::hasTable('marketplace_sync_logs')) {
+            return [
+                'has_logs' => false,
+                'last_job_status' => null,
+                'last_attempt_time' => null,
+                'last_attempt_number' => null,
+                'api_publication_status' => null,
+                'before_local_listing_status' => null,
+                'after_local_listing_status' => null,
+                'queue' => $this->queuedJobDiagnostics($listingIds, $offerId),
+                'logs' => [],
+                'warning' => 'marketplace_sync_logs table does not exist',
+            ];
+        }
+        $logs = MarketplaceSyncLog::query()
+            ->where('marketplace', 'allegro')
+            ->whereIn('action', ['allegro_post_publish_status_refresh_scheduled', 'allegro_post_publish_status_refresh_executed', 'allegro_post_publish_status_refresh_skipped'])
+            ->when($listingIds !== [], fn ($query) => $query->whereIn('marketplace_listing_id', $listingIds))
+            ->when($listingIds === [], fn ($query) => $query->where('part_id', $partId))
+            ->latest('created_at')
+            ->limit(10)
+            ->get();
+        $lastExecuted = $logs->firstWhere('action', 'allegro_post_publish_status_refresh_executed');
+
+        return [
+            'has_logs' => $logs->isNotEmpty(),
+            'last_job_status' => $lastExecuted?->status ?? $logs->first()?->status,
+            'last_attempt_time' => optional($logs->first()?->created_at)->toISOString(),
+            'last_attempt_number' => data_get($logs->first()?->payload, 'meta.attempt'),
+            'api_publication_status' => data_get($lastExecuted?->payload, 'meta.api_publication_status') ?? data_get($lastExecuted?->payload, 'meta.api.publication_status'),
+            'before_local_listing_status' => data_get($lastExecuted?->payload, 'meta.before_local_listing_status') ?? data_get($lastExecuted?->payload, 'meta.changes.status.before'),
+            'after_local_listing_status' => data_get($lastExecuted?->payload, 'meta.after_local_listing_status') ?? data_get($lastExecuted?->payload, 'meta.changes.status.after'),
+            'queue' => $this->queuedJobDiagnostics($listingIds, $offerId),
+            'logs' => $logs->map(fn (MarketplaceSyncLog $log): array => [
+                'id' => $log->id,
+                'action' => $log->action,
+                'status' => $log->status,
+                'message' => $log->message,
+                'listing_id' => $log->marketplace_listing_id,
+                'offer_id' => $log->external_id,
+                'attempt' => data_get($log->payload, 'meta.attempt'),
+                'created_at' => optional($log->created_at)->toISOString(),
+            ])->values()->all(),
+        ];
+    }
+
+    private function queuedJobDiagnostics(array $listingIds, ?string $offerId): array
+    {
+        $out = ['connection' => config('queue.default'), 'jobs_table_exists' => Schema::hasTable('jobs'), 'failed_jobs_table_exists' => Schema::hasTable('failed_jobs'), 'pending_delayed_jobs' => [], 'failed_jobs' => []];
+        if (Schema::hasTable('jobs')) {
+            $out['pending_delayed_jobs'] = DB::table('jobs')->where('payload', 'like', '%RefreshAllegroListingStatusAfterPublish%')->orderByDesc('id')->limit(20)->get()->filter(function ($job) use ($listingIds, $offerId): bool {
+                $payload = (string) $job->payload;
+                return $listingIds === [] || collect($listingIds)->contains(fn ($id) => str_contains($payload, (string) $id)) || ($offerId && str_contains($payload, $offerId));
+            })->map(fn ($job): array => ['id' => $job->id, 'queue' => $job->queue, 'attempts' => $job->attempts, 'available_at' => $job->available_at, 'reserved_at' => $job->reserved_at, 'created_at' => $job->created_at])->values()->all();
+        }
+        if (Schema::hasTable('failed_jobs')) {
+            $out['failed_jobs'] = DB::table('failed_jobs')->where('payload', 'like', '%RefreshAllegroListingStatusAfterPublish%')->orderByDesc('id')->limit(10)->get()->map(fn ($job): array => ['id' => $job->id, 'queue' => $job->queue ?? null, 'failed_at' => $job->failed_at ?? null, 'exception' => mb_substr((string) ($job->exception ?? ''), 0, 500)])->values()->all();
+        }
+        return $out;
+    }
+
+    private function queueDiagnostics(): array
+    {
+        return [
+            'queue_default' => config('queue.default'),
+            'db_jobs_table_exists' => Schema::hasTable('jobs'),
+            'failed_jobs_table_exists' => Schema::hasTable('failed_jobs'),
+            'pending_refresh_jobs_count' => Schema::hasTable('jobs') ? DB::table('jobs')->where('payload', 'like', '%RefreshAllegroListingStatusAfterPublish%')->count() : null,
+            'note' => 'Delayed jobs require a running queue worker for the configured queue connection. Cron fallback is scheduled via allegro:refresh-pending-listings.',
         ];
     }
 

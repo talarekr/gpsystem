@@ -14,6 +14,7 @@
     <div class="card safe">
         <p><b>Diagnostyka GET jest read-only.</b> Osobna akcja POST „Odśwież status z Allegro” aktualizuje wyłącznie lokalne pola status/last_api_status/last_error w marketplace_listing.</p>
         <p class="muted">GET bez parametrów pokazuje tylko ten formularz — bez Allegro API calls i bez mutacji.</p>
+        <p><a href="{{ route('admin.tools.marketplace.allegro-diagnose.refresh-pending') }}">Odśwież pending Allegro</a> — preview GET albo POST + CSRF apply dla listingów <span class="mono">publication_pending</span>.</p>
         <p>Przykład użycia: <a href="{{ route('admin.tools.marketplace.allegro-diagnose', ['part_id' => 8061, 'offer_id' => '18741244685', 'check_api' => 1]) }}"><span class="mono">/admin/tools/marketplace/allegro-diagnose?part_id=8061&amp;offer_id=18741244685&amp;check_api=1</span></a></p>
     </div>
     <div class="card">
@@ -43,6 +44,10 @@
                 <span class="muted">POST + CSRF; nie publikuje, nie kończy oferty, nie usuwa linku i nie zmienia statusu części.</span>
             </form>
         @endif
+    </div>
+    <div class="card">
+        <h2>Queue / scheduler diagnostics</h2>
+        <pre>{{ json_encode($queue_diagnostics ?? [], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) }}</pre>
     </div>
 
     @if($part_ids === [])
@@ -97,6 +102,8 @@
                             <div><b>is_ended:</b> <span class="mono">{{ ($api['is_ended'] ?? false) ? 'true' : 'false' }}</span></div>
                             <div><b>http_status:</b> <span class="mono">{{ $api['http_status'] ?? 'null' }}</span></div>
                             <div><b>error:</b> <span class="mono">{{ $api['error'] ?? 'null' }}</span></div>
+                            <div style="margin-top:10px"><b>post-publish refresh:</b></div>
+                            <pre>{{ json_encode($result['post_publish_refresh'] ?? [], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) }}</pre>
                         </td>
                     </tr>
                 @endforeach

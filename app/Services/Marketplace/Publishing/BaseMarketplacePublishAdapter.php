@@ -88,7 +88,20 @@ abstract class BaseMarketplacePublishAdapter implements MarketplacePublishAdapte
         if ($this->marketplace() === 'allegro' && filled($listing->external_offer_id ?: $listing->external_listing_id)) {
             \Illuminate\Support\Facades\DB::afterCommit(function () use ($listing, $part): void {
                 RefreshAllegroListingStatusAfterPublish::dispatch($listing->id)->delay(now()->addMinutes(RefreshAllegroListingStatusAfterPublish::RETRY_DELAY_MINUTES));
-                $this->logger->success('allegro', 'allegro_post_publish_status_refresh_scheduled', 'Allegro post-publish status refresh scheduled.', ['marketplace_listing_id' => $listing->id, 'part_id' => $part->id, 'external_id' => $listing->external_offer_id ?: $listing->external_listing_id, 'attempt' => 1, 'delay_minutes' => RefreshAllegroListingStatusAfterPublish::RETRY_DELAY_MINUTES, 'max_attempts' => RefreshAllegroListingStatusAfterPublish::MAX_ATTEMPTS]);
+                $offerId = $listing->external_offer_id ?: $listing->external_listing_id;
+                $this->logger->success('allegro', 'allegro_post_publish_status_refresh_scheduled', 'Allegro post-publish status refresh scheduled.', [
+                    'post_publish_refresh_scheduled' => true,
+                    'marketplace_listing_id' => $listing->id,
+                    'listing_id' => $listing->id,
+                    'part_id' => $part->id,
+                    'external_id' => $offerId,
+                    'offer_id' => $offerId,
+                    'attempt' => 1,
+                    'delay_minutes' => RefreshAllegroListingStatusAfterPublish::RETRY_DELAY_MINUTES,
+                    'delay_seconds' => RefreshAllegroListingStatusAfterPublish::RETRY_DELAY_MINUTES * 60,
+                    'max_attempts' => RefreshAllegroListingStatusAfterPublish::MAX_ATTEMPTS,
+                    'queue_connection' => config('queue.default'),
+                ]);
             });
         }
         return new MarketplacePublishResult($this->channel(), ['channel' => $this->channel(), 'marketplace' => $this->marketplace(), 'success' => true, 'status' => $listing->status, 'external_offer_id' => $listing->external_offer_id, 'external_listing_id' => $listing->external_listing_id, 'write' => true, 'listing_id' => $listing->id, 'message' => $result['user_message'] ?? null]);
