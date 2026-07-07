@@ -111,8 +111,8 @@ class WorkshopQuickPartController extends Controller
                 isset($validated['storage_location_id']) ? (int) $validated['storage_location_id'] : null,
             );
 
-            $part = Part::query()->create([
-                'name' => 'Część do wystawienia '.$validated['part_number'],
+            $part = new Part([
+                'name' => trim($validated['part_number']),
                 'part_number' => trim($validated['part_number']),
                 'storage_location_id' => $location->id,
                 'description' => filled($validated['internal_note'] ?? null) ? trim($validated['internal_note']) : null,
@@ -123,6 +123,8 @@ class WorkshopQuickPartController extends Controller
                 'needs_listing' => true,
                 'needs_review' => false,
             ]);
+            $part->skipCategorySuggestion = true;
+            $part->save();
 
             if (filled($steeringSide)) {
                 $part->forceFill(['vehicle_snapshot' => ['steering_side' => trim($steeringSide)]])->saveQuietly();
