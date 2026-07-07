@@ -138,21 +138,69 @@ class EbayMarketplaceDiagnoseControllerTest extends TestCase
             'last_api_status' => 'active',
         ]);
 
-        Http::fake(['*' => Http::response([
-            'itemId' => 'v1|800116181167|0',
-            'estimatedAvailabilities' => [['estimatedAvailabilityStatus' => 'UNAVAILABLE']],
-            'itemWebUrl' => 'https://www.ebay.de/itm/800116181167',
-            'title' => 'Visible listing',
-        ], 200)]);
+        Http::fakeSequence()
+            ->push([
+                'itemId' => 'v1|800116181167|0',
+                'estimatedAvailabilities' => [['estimatedAvailabilityStatus' => 'UNAVAILABLE']],
+                'itemWebUrl' => 'https://www.ebay.de/itm/800116181167',
+                'title' => 'Visible listing',
+            ], 200)
+            ->push([], 404)
+            ->push(['offers' => []], 200)
+            ->push([], 404);
 
         $this->postJson('/admin/tools/ebay/marketplace-diagnose?action=apply_inactive&part_ids='.$part->id.'&check_api=1&confirm_apply_inactive=1&format=json')
             ->assertOk()
+            ->assertJsonPath('rows.0.ebay_de_status', 'unavailable_not_ended_needs_review')
             ->assertJsonPath('rows.0.audit_classification', 'ebay_unavailable_but_not_ended_needs_review needs_review')
             ->assertJsonPath('rows.0.needs_ebay_de_publish', false)
+            ->assertJsonPath('rows.0.marketplace_listings.0.listing_exists', true)
             ->assertJsonPath('rows.0.duplicate_guard_would_block', true)
             ->assertJsonPath('rows.0.resolver_ebay.reason', 'ebay_unavailable_but_not_ended_needs_review')
             ->assertJsonPath('rows.0.marketplace_listings.0.api.end_date_is_past', false)
             ->assertJsonPath('rows.0.marketplace_listings.0.api.availability_status', 'UNAVAILABLE');
+
+        $listing->refresh();
+        $this->assertSame('active', $listing->status);
+        $this->assertNotSame('historical', $listing->sync_status);
+    }
+
+    public function test_seller_side_active_overrides_browse_unavailable(): void
+    {
+        $this->actingAsAdminUser();
+
+        $part = Part::query()->create(['name' => 'Seller verified eBay', 'sku' => 'EB-SELLER-ACTIVE', 'quantity' => 1, 'status' => 'ready']);
+        $listing = MarketplaceListing::query()->create([
+            'part_id' => $part->id,
+            'marketplace' => 'ebay_de',
+            'external_listing_id' => '800116033033',
+            'external_offer_id' => '123456789',
+            'external_inventory_id' => 'EB-SELLER-ACTIVE',
+            'url' => 'https://www.ebay.de/itm/800116033033',
+            'status' => 'active',
+            'last_api_status' => 'active',
+        ]);
+
+        Http::fakeSequence()
+            ->push([
+                'itemId' => 'v1|800116033033|0',
+                'estimatedAvailabilities' => [['estimatedAvailabilityStatus' => 'UNAVAILABLE']],
+                'itemWebUrl' => 'https://www.ebay.de/itm/800116033033',
+                'title' => 'Visible listing',
+            ], 200)
+            ->push(['availability' => ['shipToLocationAvailability' => ['quantity' => 1]]], 200)
+            ->push(['offers' => [['offerId' => '123456789', 'listingId' => '800116033033', 'status' => 'PUBLISHED']]], 200)
+            ->push(['offerId' => '123456789', 'listingId' => '800116033033', 'status' => 'PUBLISHED'], 200)
+            ->push(['itemWebUrl' => 'https://www.ebay.de/itm/800116033033'], 200);
+
+        $this->postJson('/admin/tools/ebay/marketplace-diagnose?action=apply_inactive&part_ids='.$part->id.'&check_api=1&confirm_apply_inactive=1&format=json')
+            ->assertOk()
+            ->assertJsonPath('rows.0.ebay_de_status', 'active_seller_verified')
+            ->assertJsonPath('rows.0.audit_classification', 'active_seller_verified active OK')
+            ->assertJsonPath('rows.0.needs_ebay_de_publish', false)
+            ->assertJsonPath('rows.0.duplicate_guard_would_block', true)
+            ->assertJsonPath('rows.0.marketplace_listings.0.api.seller_side_verified_active', true)
+            ->assertJsonPath('rows.0.marketplace_listings.0.api.seller_side.offer_status', 'PUBLISHED');
 
         $listing->refresh();
         $this->assertSame('active', $listing->status);
