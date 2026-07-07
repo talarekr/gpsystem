@@ -133,9 +133,48 @@ class MarketplaceLinkRepairService
 
     private function resolveLocalId(Part $part, string $channel): array
     {
+        if ($channel === 'ovoko') {
+            return $this->resolveOvokoLocalId($part);
+        }
+
         $texts = [$part->legacy_url, json_encode($part->legacy_payload), $part->external_id, $part->sku];
-        foreach ($part->marketplaceListings->whereIn('marketplace', $channel === 'allegro' ? ['allegro','allegro_main'] : ['ovoko']) as $l) array_push($texts, $l->external_offer_id, $l->external_listing_id, $l->url, json_encode($l->raw_payload));
-        foreach ($texts as $text) { $s = (string) $text; if ($channel === 'ovoko' && preg_match('/(?:hgf)?(\d{3,})/i', $s, $m)) return ['id' => $m[1], 'url' => preg_match('~https?://\S+~', $s, $u) ? rtrim($u[0], '"\'<>),') : null, 'source' => 'local_text']; if ($channel === 'allegro' && preg_match('/(?:oferta\/[^\s"\']*?)(\d{6,})|\b(\d{6,})\b/i', $s, $m)) return ['id' => $m[1] ?: $m[2], 'url' => preg_match('~https?://\S+~', $s, $u) ? rtrim($u[0], '"\'<>),') : null, 'source' => 'local_text']; }
+        foreach ($part->marketplaceListings->whereIn('marketplace', ['allegro','allegro_main']) as $l) array_push($texts, $l->external_offer_id, $l->external_listing_id, $l->url, json_encode($l->raw_payload));
+        foreach ($texts as $text) { $s = (string) $text; if (preg_match('/(?:oferta\/[^\s"\']*?)(\d{6,})|\b(\d{6,})\b/i', $s, $m)) return ['id' => $m[1] ?: $m[2], 'url' => preg_match('~https?://\S+~', $s, $u) ? rtrim($u[0], '"\'<>),') : null, 'source' => 'local_text']; }
+        return ['id' => null, 'url' => null, 'source' => null];
+    }
+
+    private function resolveOvokoLocalId(Part $part): array
+    {
+        foreach ($part->marketplaceListings->whereIn('marketplace', ['ovoko']) as $listing) {
+            $id = $this->listingId($listing, 'ovoko');
+            if ($id !== null) return ['id' => $id, 'url' => $listing->url, 'source' => 'marketplace_listing'];
+        }
+
+        $texts = [$part->legacy_url, json_encode($part->legacy_payload), $part->external_id, $part->sku];
+        foreach ($texts as $text) {
+            $resolved = $this->resolveOvokoIdFromText((string) $text);
+            if ($resolved['id'] !== null) return $resolved;
+        }
+
+        return ['id' => null, 'url' => null, 'source' => null];
+    }
+
+    private function resolveOvokoIdFromText(string $text): array
+    {
+        if ($text === '') return ['id' => null, 'url' => null, 'source' => null];
+
+        if (preg_match('~https?://(?:www\.)?ovoko\.pl/[^\s"\'<>]*?/hgf(\d{3,})(?:\b|[-_/?.#])[^\s"\'<>]*~i', $text, $match)) {
+            return ['id' => $match[1], 'url' => rtrim($match[0], '"\'<>),'), 'source' => 'ovoko_url'];
+        }
+
+        if (preg_match('/\b(?:ovoko(?:\s+(?:id|offer|listing))?|ovoko_id|ovokoPartId|ovoko_part_id|hgf)\s*[:=#-]?\s*hgf?(\d{3,})\b/i', $text, $match)) {
+            return ['id' => $match[1], 'url' => null, 'source' => 'explicit_ovoko_text'];
+        }
+
+        if (preg_match('/\bhgf(\d{3,})\b/i', $text, $match) && preg_match('/\bovoko\b/i', $text)) {
+            return ['id' => $match[1], 'url' => null, 'source' => 'explicit_ovoko_text'];
+        }
+
         return ['id' => null, 'url' => null, 'source' => null];
     }
 
