@@ -8,6 +8,7 @@ use App\Models\MarketplaceSyncLog;
 use App\Services\Marketplace\Api\EbayApiClient;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Http;
 
 class EbayListingAuditService
 {
@@ -17,7 +18,11 @@ class EbayListingAuditService
     public function run(string $channel = 'ebay_de', int $limit = 100, int $offset = 0, ?int $partId = null, bool $apply = false, bool $checkApi = false): array
     {
         abort_unless(in_array($channel, ['ebay_de', 'ebay_fr', 'ebay'], true), 422, 'Supported eBay channel values: ebay_de, ebay_fr, ebay.');
-        $query = MarketplaceListing::query()->with('account:id,code,marketplace,api_enabled,api_base_url,api_mode,api_credentials,api_settings')->where('marketplace', $channel);
+        $query = MarketplaceListing::query()
+            ->with('account:id,code,marketplace,api_enabled,api_base_url,api_mode,api_credentials,api_settings')
+            ->where('marketplace', $channel)
+            ->whereNotNull('url')
+            ->whereHas('part', fn ($q) => $q->where('status', 'ready')->where('quantity', '>', 0));
         if ($partId !== null) $query->where('part_id', $partId);
 
         $all = (clone $query)->get();
@@ -26,12 +31,15 @@ class EbayListingAuditService
         $apiChecks = [];
         $results = $rows->map(function (MarketplaceListing $listing) use ($apply, $checkApi, &$applied, &$apiChecks): array {
             $apiCheck = $checkApi ? $this->apiCheckListing($listing) : null;
-            $row = $this->auditListing($listing, $apiCheck);
+            $publicCheck = $checkApi ? $this->publicCheckListing($listing) : null;
+            $row = $this->auditListing($listing, $apiCheck, $publicCheck);
             if ($apiCheck !== null) $apiChecks[] = $apiCheck;
-            if ($apply && $row['action'] === 'would_update_url' && $row['confidence'] === 'high' && filled($row['new_item_id']) && filled($row['new_url'])) {
-                $listing->forceFill(['url' => $row['new_url'], 'external_listing_id' => $row['new_item_id'], 'external_offer_id' => $row['new_item_id'], 'status' => 'active']);
+            if ($apply && in_array($row['action'], ['mark_historical_ended', 'mark_historical_not_found'], true)) {
+                $raw = $listing->raw_payload ?: [];
+                data_set($raw, 'ebay_diagnose_historical', ['marked_at' => now()->toISOString(), 'reason' => $row['action'], 'public_item_id' => $row['url_item_id']]);
+                $listing->forceFill(['status' => 'ended', 'last_api_status' => $row['final_panel_status'] === 'not_found' ? 'not_found' : 'ended', 'not_seen_in_active_api_at' => now(), 'raw_payload' => $raw]);
                 $listing->save();
-                $row['action'] = 'updated_locally';
+                $row['action'] = $row['action'] === 'mark_historical_not_found' ? 'marked_historical_not_found' : 'marked_historical_ended';
                 $applied++;
             }
             return $row;
@@ -50,14 +58,14 @@ class EbayListingAuditService
     }
 
     /** @return array<string,mixed> */
-    public function auditListing(MarketplaceListing $listing, ?array $apiCheck = null): array
+    public function auditListing(MarketplaceListing $listing, ?array $apiCheck = null, ?array $publicCheck = null): array
     {
         $raw = $listing->raw_payload ?: [];
         $ids = $this->rawIds($raw);
         $urlItemId = $this->itemIdFromUrl($listing->url);
         $resolved = $this->firstFilled([$listing->external_listing_id, $listing->external_offer_id, $this->columnValue($listing, 'external_id'), $urlItemId, ...array_values($ids)]);
         $localStatus = $this->normalizedStatus($listing, $raw);
-        $status = $this->finalPanelStatus($localStatus, $apiCheck);
+        $status = $this->finalPanelStatus($localStatus, $apiCheck, $publicCheck);
         $candidate = $status !== 'active' && $apiCheck === null ? $this->newerCandidate($listing) : null;
         $action = $this->action($listing, $resolved, $status, $candidate);
 
@@ -71,6 +79,7 @@ class EbayListingAuditService
             'local_status' => $listing->status,
             'local_panel_status' => $localStatus,
             'api_listing_status' => $apiCheck['api_listing_status'] ?? null,
+            'public_listing_status' => $publicCheck['public_listing_status'] ?? null,
             'final_panel_status' => $status,
             'panel_listing_status' => $status,
             'external_offer_id' => $listing->external_offer_id,
@@ -97,8 +106,9 @@ class EbayListingAuditService
             'match_source' => $candidate['match_source'] ?? null,
             'confidence' => $candidate['confidence'] ?? ($action === 'needs_manual_review' ? 'low' : null),
             'api_check' => $apiCheck,
+            'public_check' => $publicCheck,
             'should_panel_show_active' => $status === 'active',
-            'final_decision' => $apiCheck['final_decision'] ?? ($status === 'active' ? 'local_active_without_api_check' : 'local_not_active_without_api_check'),
+            'final_decision' => $publicCheck['final_decision'] ?? $apiCheck['final_decision'] ?? ($status === 'active' ? 'local_active_without_api_check' : 'local_not_active_without_api_check'),
             'action' => $action,
         ];
     }
@@ -109,7 +119,7 @@ class EbayListingAuditService
             'total_eBay_de_listings' => $all->count(), 'listings_with_url' => $all->whereNotNull('url')->count(), 'listings_missing_url' => $all->whereNull('url')->count(),
             'listings_with_numeric_item_id' => $all->filter(fn($l) => preg_match('/^\d+$/', (string) $this->firstFilled([$l->external_listing_id, $l->external_offer_id, $this->itemIdFromUrl($l->url)])) === 1)->count(),
             'listings_with_gpsw_external_id' => $all->filter(fn($l) => $this->isGpsw($l->external_offer_id) || $this->isGpsw($l->external_listing_id))->count(),
-            'suspected_stale_ended_listings' => collect($results)->whereIn('action', ['stale_ended_listing','would_update_url'])->count(),
+            'suspected_stale_ended_listings' => collect($results)->whereIn('action', ['mark_historical_ended','mark_historical_not_found','marked_historical_ended','marked_historical_not_found'])->count(),
             'confirmed_active_listings' => collect($results)->where('panel_listing_status', 'active')->count(),
             'confirmed_ended_listings' => collect($results)->where('panel_listing_status', 'ended')->count(),
             'needs_manual_review' => collect($results)->where('action', 'needs_manual_review')->count(),
@@ -119,10 +129,12 @@ class EbayListingAuditService
 
     private function action(MarketplaceListing $l, ?string $id, string $status, ?array $candidate): string
     {
-        if ($status === 'api_not_active') return 'api_needs_verification';
+        if ($status === 'api_public_check_error') return 'api_public_check_error';
+        if ($status === 'api_not_active') return 'needs_review';
         if ($this->isGpsw($l->external_offer_id) || $this->isGpsw($l->external_listing_id) || ($id !== null && ! ctype_digit($id))) return 'invalid_external_id';
         if ($candidate && ($candidate['confidence'] ?? null) === 'high') return 'would_update_url';
-        if ($status === 'ended' || $status === 'not_found') return 'stale_ended_listing';
+        if ($status === 'not_found') return 'mark_historical_not_found';
+        if ($status === 'ended') return 'mark_historical_ended';
         if ($status === 'unknown') return 'needs_manual_review';
         return 'ok_active';
     }
@@ -144,7 +156,7 @@ class EbayListingAuditService
         $s = strtolower((string) $this->firstFilled([$l->last_api_status, $l->status, Arr::get($raw, 'status'), Arr::get($raw, 'listing.status'), Arr::get($raw, 'ebay.status'), Arr::get($raw, 'meta.status')]));
         if (in_array($s, ['active','published','live','active_listing'], true)) return 'active';
         if (str_contains($s, 'end') || in_array($s, ['completed','inactive','deleted','archived','not_found','not found'], true)) return $s === 'not_found' || $s === 'not found' ? 'not_found' : 'ended';
-        if ($this->dateFrom($raw, ['ended_at','endedAt','endTime','listing.ended_at','ebay.ended_at','meta.ended_at'])) return 'ended';
+        if ($this->dateIsPast($this->dateFrom($raw, ['ended_at','endedAt','endTime','listing.ended_at','ebay.ended_at','meta.ended_at','itemEndDate','item_end_date','api.end_date','response_summary.itemEndDate']))) return 'ended';
         return 'unknown';
     }
 
@@ -176,14 +188,43 @@ class EbayListingAuditService
         ];
     }
 
-    private function finalPanelStatus(string $localStatus, ?array $apiCheck): string
+    private function finalPanelStatus(string $localStatus, ?array $apiCheck, ?array $publicCheck = null): string
     {
-        if ($apiCheck === null) return $localStatus;
-        return match ((string) ($apiCheck['api_listing_status'] ?? 'unknown')) {
-            'active' => 'active',
-            'ended', 'inactive', 'not_found', 'unavailable' => 'ended',
-            default => 'api_not_active',
-        };
+        if ($apiCheck === null && $publicCheck === null) return $localStatus;
+        $api = (string) ($apiCheck['api_listing_status'] ?? 'unknown');
+        $public = (string) ($publicCheck['public_listing_status'] ?? 'unknown');
+        if ($api === 'active' || $public === 'active') return 'active';
+        if (in_array($api, ['not_found'], true) || in_array($public, ['not_found'], true)) return 'not_found';
+        if (in_array($api, ['ended', 'inactive'], true) || in_array($public, ['ended', 'inactive'], true)) return 'ended';
+        if ($api === 'unavailable') return in_array($public, ['active', 'ended', 'inactive', 'not_found'], true) ? ($public === 'inactive' ? 'ended' : $public) : 'api_public_check_error';
+        if (in_array($public, ['error', 'unknown'], true)) return 'api_public_check_error';
+        return 'unknown';
+    }
+
+    private function publicCheckListing(MarketplaceListing $listing): array
+    {
+        $itemId = $this->itemIdFromUrl($listing->url);
+        if (! $itemId) return ['checked' => false, 'public_listing_status' => 'unknown', 'final_decision' => 'manual_review_public_status_required', 'error_message_safe' => 'No public eBay item id in URL.'];
+        $url = $listing->url ?: (($listing->marketplace === 'ebay_fr' ? 'https://www.ebay.fr/itm/' : 'https://www.ebay.de/itm/').$itemId);
+        try {
+            $response = Http::withHeaders(['User-Agent' => 'Mozilla/5.0 GPSwiss listing audit'])->timeout(15)->get($url);
+            $body = mb_strtolower(substr($response->body(), 0, 250000));
+            $status = $this->publicStatusFromHtml($response->status(), $body, $itemId);
+            return ['checked' => true, 'url' => $url, 'item_id' => $itemId, 'http_status' => $response->status(), 'public_listing_status' => $status, 'final_decision' => $status === 'active' ? 'public_link_confirms_active' : ($status === 'unknown' ? 'manual_review_public_status_required' : 'public_link_confirms_not_active')];
+        } catch (\Throwable $e) {
+            return ['checked' => false, 'url' => $url, 'item_id' => $itemId, 'http_status' => null, 'public_listing_status' => 'error', 'final_decision' => 'public_check_error', 'error_message_safe' => $e->getMessage()];
+        }
+    }
+
+    private function publicStatusFromHtml(int $httpStatus, string $body, string $itemId): string
+    {
+        if ($httpStatus === 404) return 'not_found';
+        if ($httpStatus >= 500 || $body === '') return 'error';
+        if (str_contains($body, 'itemid="'.$itemId.'"') || str_contains($body, '/itm/'.$itemId) || str_contains($body, 'itemid\":\"'.$itemId)) {
+            foreach (['sofort-kaufen', 'in den warenkorb', 'buy it now', 'add to cart', 'preisvorschlag senden', 'make offer'] as $needle) if (str_contains($body, $needle)) return 'active';
+        }
+        foreach (['dieses angebot wurde beendet', 'angebot beendet', 'this listing was ended', 'this item is out of stock', 'nicht mehr verfügbar', 'is no longer available', 'objet terminé'] as $needle) if (str_contains($body, $needle)) return 'ended';
+        return 'unknown';
     }
 
     private function rawIds(array $raw): array { return array_filter(['item_id'=>Arr::get($raw,'ebay.item_id') ?? Arr::get($raw,'item_id'), 'listing_id'=>Arr::get($raw,'ebay.listing_id') ?? Arr::get($raw,'listing_id'), 'offer_id'=>Arr::get($raw,'offerId') ?? Arr::get($raw,'offer_id'), 'inventory_id'=>Arr::get($raw,'inventoryItemGroupKey') ?? Arr::get($raw,'inventory_id')], fn($v)=>filled($v)); }
@@ -193,4 +234,5 @@ class EbayListingAuditService
     private function columnValue(MarketplaceListing $l, string $column): ?string { return Schema::hasColumn('marketplace_listings', $column) ? $this->firstFilled([$l->{$column}]) : null; }
     private function firstFilled(array $values): ?string { foreach ($values as $v) { if (filled($v)) return (string)$v; } return null; }
     private function dateFrom(array $raw, array $keys): ?string { foreach ($keys as $key) { $v = Arr::get($raw, $key); if (filled($v)) return (string)$v; } return null; }
+    private function dateIsPast(?string $date): bool { return filled($date) && strtotime((string) $date) !== false && strtotime((string) $date) < now()->timestamp; }
 }

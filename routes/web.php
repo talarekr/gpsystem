@@ -349,7 +349,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/marketplace/manual-link-mapping/replace-apply', [ManualLinkMappingReplaceController::class, 'apply'])->name('admin.tools.marketplace.manual-link-mapping.replace-apply');
     Route::get('/admin/tools/marketplace/ebay-listing-audit', EbayListingAuditController::class)->name('admin.tools.marketplace.ebay-listing-audit');
     Route::get('/admin/tools/marketplace/ebay-description-audit', EbayDescriptionAuditController::class)->name('admin.tools.marketplace.ebay-description-audit');
-    Route::get('/admin/tools/marketplace/ebay-listing-audit-runner', EbayListingAuditRunnerController::class)->name('admin.tools.marketplace.ebay-listing-audit-runner');
+    Route::match(['get', 'post'], '/admin/tools/marketplace/ebay-listing-audit-runner', EbayListingAuditRunnerController::class)->name('admin.tools.marketplace.ebay-listing-audit-runner');
     Route::get('/admin/tools/marketplace/ebay-listing-audit-runner/status', [EbayListingAuditRunnerController::class, 'status'])->name('admin.tools.marketplace.ebay-listing-audit-runner.status');
     Route::match(['get', 'post'], '/admin/tools/marketplace/orders-reset', MarketplaceOrdersResetController::class)->name('admin.tools.marketplace.orders-reset');
     Route::match(['get', 'post'], '/admin/tools/marketplace/orders-sync', MarketplaceOrdersSyncController::class)->name('admin.tools.marketplace.orders-sync');
