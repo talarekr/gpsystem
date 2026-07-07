@@ -11,6 +11,7 @@ use App\Services\Marketplace\ManualMarketplaceLinkMappingService;
 use App\Services\Marketplace\ManualMarketplaceMappingConflictException;
 use Database\Seeders\RoleSeeder;
 use Filament\Facades\Filament;
+use Livewire\Livewire;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
@@ -236,6 +237,68 @@ class ManualMarketplaceLinkMappingTest extends TestCase
         $this->assertSame('updated', $result['action']);
         $this->assertDatabaseHas('marketplace_listings', ['part_id' => $part->id, 'marketplace' => 'ovoko', 'external_offer_id' => '7249', 'external_listing_id' => '7249', 'url' => $url]);
         $this->assertSame(1, MarketplaceListing::query()->where('marketplace', 'ovoko')->where('external_offer_id', '7249')->count());
+    }
+
+
+    public function test_manual_form_path_updates_same_ovoko_id_9992_without_conflict(): void
+    {
+        $this->actingAsAdminUser();
+        $part = Part::query()->create(['id' => 756, 'name' => 'Ovoko manual mapping regression', 'sku' => 'GPS-756', 'quantity' => 1, 'status' => 'ready', 'currency' => 'PLN']);
+        MarketplaceListing::query()->create(['part_id' => $part->id, 'marketplace' => 'ovoko', 'external_offer_id' => '9992', 'external_listing_id' => '9992', 'url' => 'https://old.example/ovoko-9992', 'status' => 'imported', 'sync_status' => 'mapped', 'match_status' => 'confirmed']);
+
+        $url = 'https://ovoko.pl/czesci-samochodowe/hgf9992-a6549060800-mercedes-benz-a-w176-rozrusznik';
+
+        Livewire::test(\App\Filament\Resources\PartResource\Pages\ListParts::class)
+            ->call('saveManualMarketplaceLink', 756, 'ovoko', $url)
+            ->assertHasNoErrors();
+
+        $this->assertDatabaseHas('marketplace_listings', ['part_id' => 756, 'marketplace' => 'ovoko', 'external_offer_id' => '9992', 'external_listing_id' => '9992', 'url' => $url]);
+        $this->assertSame(1, MarketplaceListing::query()->where('part_id', 756)->where('marketplace', 'ovoko')->where('external_offer_id', '9992')->count());
+    }
+
+    public function test_manual_form_path_updates_same_allegro_id_without_conflict(): void
+    {
+        $this->actingAsAdminUser();
+        $part = Part::query()->create(['name' => 'Allegro manual mapping regression', 'sku' => 'GPS-ALG-18303148717', 'quantity' => 1, 'status' => 'ready', 'currency' => 'PLN']);
+        MarketplaceListing::query()->create(['part_id' => $part->id, 'marketplace' => 'allegro', 'external_offer_id' => '18303148717', 'external_listing_id' => '18303148717', 'url' => 'https://old.example/allegro-18303148717', 'status' => 'ACTIVE', 'sync_status' => 'mapped', 'match_status' => 'confirmed', 'last_api_status' => 'ACTIVE']);
+
+        $url = 'https://allegro.pl/oferta/mercedes-benz-a-w176-rozrusznik-18303148717';
+
+        Livewire::test(\App\Filament\Resources\PartResource\Pages\ListParts::class)
+            ->call('saveManualMarketplaceLink', $part->id, 'allegro', $url)
+            ->assertHasNoErrors();
+
+        $this->assertDatabaseHas('marketplace_listings', ['part_id' => $part->id, 'marketplace' => 'allegro', 'external_offer_id' => '18303148717', 'external_listing_id' => '18303148717', 'url' => $url]);
+        $this->assertSame(1, MarketplaceListing::query()->where('part_id', $part->id)->whereIn('marketplace', ['allegro', 'allegro_main'])->where('external_offer_id', '18303148717')->count());
+    }
+
+    public function test_manual_form_path_blocks_same_part_different_allegro_id(): void
+    {
+        $this->actingAsAdminUser();
+        $part = Part::query()->create(['name' => 'Allegro conflict regression', 'sku' => 'GPS-ALG-CONFLICT', 'quantity' => 1, 'status' => 'ready', 'currency' => 'PLN']);
+        MarketplaceListing::query()->create(['part_id' => $part->id, 'marketplace' => 'allegro', 'external_offer_id' => '18303148717', 'external_listing_id' => '18303148717', 'url' => 'https://old.example/allegro-18303148717', 'status' => 'ACTIVE', 'sync_status' => 'mapped', 'match_status' => 'confirmed', 'last_api_status' => 'ACTIVE']);
+
+        Livewire::test(\App\Filament\Resources\PartResource\Pages\ListParts::class)
+            ->call('saveManualMarketplaceLink', $part->id, 'allegro', 'https://allegro.pl/oferta/other-part-18303148718')
+            ->assertHasNoErrors();
+
+        $this->assertDatabaseHas('marketplace_listings', ['part_id' => $part->id, 'marketplace' => 'allegro', 'external_offer_id' => '18303148717', 'url' => 'https://old.example/allegro-18303148717']);
+        $this->assertDatabaseMissing('marketplace_listings', ['part_id' => $part->id, 'marketplace' => 'allegro', 'external_offer_id' => '18303148718']);
+    }
+
+    public function test_manual_form_path_blocks_external_id_assigned_to_another_part(): void
+    {
+        $this->actingAsAdminUser();
+        $existingPart = Part::query()->create(['name' => 'Existing owner', 'sku' => 'GPS-OWNER', 'quantity' => 1, 'status' => 'ready', 'currency' => 'PLN']);
+        $newPart = Part::query()->create(['name' => 'New owner', 'sku' => 'GPS-NEW', 'quantity' => 1, 'status' => 'ready', 'currency' => 'PLN']);
+        MarketplaceListing::query()->create(['part_id' => $existingPart->id, 'marketplace' => 'allegro', 'external_offer_id' => '18303148717', 'external_listing_id' => '18303148717', 'url' => 'https://allegro.pl/oferta/existing-18303148717', 'status' => 'ACTIVE', 'sync_status' => 'mapped', 'match_status' => 'confirmed', 'last_api_status' => 'ACTIVE']);
+
+        Livewire::test(\App\Filament\Resources\PartResource\Pages\ListParts::class)
+            ->call('saveManualMarketplaceLink', $newPart->id, 'allegro', 'https://allegro.pl/oferta/new-18303148717')
+            ->assertHasNoErrors();
+
+        $this->assertDatabaseMissing('marketplace_listings', ['part_id' => $newPart->id, 'marketplace' => 'allegro', 'external_offer_id' => '18303148717']);
+        $this->assertDatabaseHas('marketplace_listings', ['part_id' => $existingPart->id, 'marketplace' => 'allegro', 'external_offer_id' => '18303148717']);
     }
 
     public function test_ovoko_backfill_command_dry_run_and_apply_fill_missing_url_and_part_price(): void
