@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Mail\WorkshopPartCreatedMail;
 use App\Models\Part;
+use App\Models\PartCategory;
 use App\Models\PartImage;
 use App\Models\StorageLocation;
 use App\Models\User;
@@ -95,6 +96,40 @@ class WorkshopQuickPartControllerTest extends TestCase
             $this->assertSame('/storage/'.$image->path, $image->relativePublicUrl());
             Storage::disk('public')->assertExists($image->path);
         }
+    }
+
+    public function test_workshop_creation_uses_part_code_as_title_and_leaves_category_empty(): void
+    {
+        $this->actingAs(User::factory()->create());
+        Storage::fake('public');
+
+        $bumper = PartCategory::query()->create([
+            'name' => 'Zderzak tylny',
+            'category_path' => 'Zderzak tylny',
+        ]);
+
+        Part::query()->create([
+            'name' => 'Część do wystawienia zderzak tylny wzorzec 1',
+            'category_id' => $bumper->id,
+            'quantity' => 1,
+        ]);
+        Part::query()->create([
+            'name' => 'Część do wystawienia zderzak tylny wzorzec 2',
+            'category_id' => $bumper->id,
+            'quantity' => 1,
+        ]);
+
+        $this->post('/warsztat', [
+            'photos' => [UploadedFile::fake()->image('front.jpg')],
+            'storage_location' => 'A1-P2',
+            'part_number' => '0207156',
+        ])->assertRedirect('/warsztat');
+
+        $part = Part::query()->where('part_number', '0207156')->firstOrFail();
+
+        $this->assertSame('0207156', $part->name);
+        $this->assertNull($part->category_id);
+        $this->assertNull($part->suggested_category_id);
     }
 
     public function test_workshop_creation_without_quality_saves_used_default(): void

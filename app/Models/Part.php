@@ -15,6 +15,8 @@ class Part extends Model
 {
     use HasFactory;
 
+    public bool $skipCategorySuggestion = false;
+
     /** @var array<string, bool> */
     private static array $columnExistsCache = [];
 
@@ -61,7 +63,9 @@ class Part extends Model
             $part->needs_listing ??= false;
             $part->needs_review ??= false;
             $part->fillVehicleSnapshot();
-            app(PartCategorySuggestionService::class)->suggest($part);
+            if (! $part->skipCategorySuggestion) {
+                app(PartCategorySuggestionService::class)->suggest($part);
+            }
         });
 
         static::saving(function (Part $part): void {
