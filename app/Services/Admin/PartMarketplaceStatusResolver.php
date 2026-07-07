@@ -23,7 +23,7 @@ class PartMarketplaceStatusResolver
         $allegro = $this->preferredListing($listings, ['allegro', 'allegro_main'], 'allegro', $partAvailable);
         $ovoko = $this->preferredListing($listings, ['ovoko'], 'ovoko', $partAvailable);
         $ebayListings = $this->mappedListings($listings, ['ebay_de', 'ebay_fr']);
-        $ebay = $this->preferredListing($listings, ['ebay_de', 'ebay_fr'], 'ebay', $partAvailable);
+        $ebay = $this->preferredEbayListing($ebayListings, $partAvailable);
         $ebayUrlListing = $ebayListings->first(fn (MarketplaceListing $listing): bool => $this->listingUrl($listing) !== null);
 
         $allegroState = $this->channelState($part, $allegro, 'allegro');
@@ -97,6 +97,22 @@ class PartMarketplaceStatusResolver
     }
 
     /**
+     * @param Collection<int, MarketplaceListing> $ebayListings
+     */
+    private function preferredEbayListing(Collection $ebayListings, bool $partAvailable): ?MarketplaceListing
+    {
+        return $ebayListings
+            ->sortBy(function (MarketplaceListing $listing) use ($partAvailable): int {
+                if ($this->isEndedOrStaleEbayListing($listing)) {
+                    return 0;
+                }
+
+                return $this->channelStateForAvailablePart($listing, 'ebay', $partAvailable)['is_active'] ? 1 : 2;
+            })
+            ->first();
+    }
+
+    /**
      * @param Collection<int, MarketplaceListing> $listings
      * @param array<int, string> $marketplaces
      * @return Collection<int, MarketplaceListing>
@@ -152,9 +168,11 @@ class PartMarketplaceStatusResolver
             'ovoko' => $this->isActiveOvokoListing($listing)
                 ? ['is_active' => true, 'reason' => 'ovoko_active']
                 : ['is_active' => false, 'reason' => 'ovoko_not_active'],
-            'ebay' => $this->isActiveEbayListing($listing)
-                ? ['is_active' => true, 'reason' => 'ebay_active_with_inventory']
-                : ['is_active' => false, 'reason' => 'ebay_not_active_or_no_inventory'],
+            'ebay' => $this->isEndedOrStaleEbayListing($listing)
+                ? ['is_active' => false, 'reason' => $this->ebayEndDateIsPast($listing) ? 'ebay_end_date_in_past' : 'ebay_ended_stale']
+                : ($this->isActiveEbayListing($listing)
+                    ? ['is_active' => true, 'reason' => 'ebay_active_with_inventory']
+                    : ['is_active' => false, 'reason' => 'ebay_not_active_or_no_inventory']),
             default => ['is_active' => false, 'reason' => 'unknown_channel'],
         };
     }
@@ -171,12 +189,23 @@ class PartMarketplaceStatusResolver
             || ($status === 'imported' && $syncStatus === 'mapped' && $matchStatus === 'confirmed');
     }
 
+    private function isEndedOrStaleEbayListing(MarketplaceListing $listing): bool
+    {
+        $status = strtolower((string) $listing->status);
+        $apiStatus = strtolower((string) $listing->last_api_status);
+
+        return $this->ebayEndDateIsPast($listing)
+            || in_array($status, ['ended', 'inactive', 'deleted', 'archived', 'not_found', 'unavailable'], true)
+            || in_array($apiStatus, ['ended', 'inactive', 'deleted', 'archived', 'not_found', 'unavailable'], true)
+            || $listing->not_seen_in_active_api_at !== null;
+    }
+
     private function isActiveEbayListing(MarketplaceListing $listing): bool
     {
         $status = strtolower((string) $listing->status);
         $apiStatus = strtolower((string) $listing->last_api_status);
 
-        if ($this->ebayEndDateIsPast($listing)) {
+        if ($this->isEndedOrStaleEbayListing($listing)) {
             return false;
         }
 

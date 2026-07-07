@@ -93,8 +93,18 @@ class EbayMarketplaceDiagnoseController extends Controller
 
         $resolverRow = collect($resolver->rowsForPart($part))->firstWhere('key', 'ebay') ?: [];
         $classification = $this->classification($listingRows);
+        $endedOrStale = str_contains($classification, 'ended/stale') || str_contains($classification, 'not_found');
+        $resolverEbay = ['has_link' => $resolverRow['has_link'] ?? false, 'url' => $resolverRow['url'] ?? null, 'is_active' => $resolverRow['is_active'] ?? false, 'icon' => $resolverRow['icon'] ?? null, 'display_icon' => $resolverRow['display_icon'] ?? null, 'reason' => $resolverRow['reason'] ?? null, 'title' => $resolverRow['title'] ?? null];
 
-        return ['part' => ['id' => $part->id, 'sku' => $part->sku, 'part_number' => $part->part_number, 'status' => $part->status, 'quantity' => $part->quantity, 'adminLocalAvailability' => $part->adminLocalAvailability()], 'marketplace_listings' => $listingRows, 'resolver_ebay' => ['has_link' => $resolverRow['has_link'] ?? false, 'url' => $resolverRow['url'] ?? null, 'is_active' => $resolverRow['is_active'] ?? false, 'icon' => $resolverRow['icon'] ?? null, 'display_icon' => $resolverRow['display_icon'] ?? null, 'reason' => $resolverRow['reason'] ?? null, 'title' => $resolverRow['title'] ?? null], 'duplicate_guard_would_block' => collect($listingRows)->contains('duplicate_guard_would_block', true), 'audit_classification' => $classification];
+        if ($endedOrStale) {
+            $resolverEbay['is_active'] = false;
+            $resolverEbay['icon'] = 'x';
+            $resolverEbay['display_icon'] = '✕';
+            $resolverEbay['reason'] = collect($listingRows)->contains(fn ($row) => ($row['api']['end_date_is_past'] ?? false) === true) ? 'ebay_end_date_in_past' : 'ebay_ended_stale';
+            $resolverEbay['title'] = 'Oferta eBay nieaktywna: '.$resolverEbay['reason'];
+        }
+
+        return ['part' => ['id' => $part->id, 'sku' => $part->sku, 'part_number' => $part->part_number, 'status' => $part->status, 'quantity' => $part->quantity, 'adminLocalAvailability' => $part->adminLocalAvailability()], 'marketplace_listings' => $listingRows, 'resolver_ebay' => $resolverEbay, 'duplicate_guard_would_block' => $endedOrStale ? false : collect($listingRows)->contains('duplicate_guard_would_block', true), 'audit_classification' => $classification];
     }
 
     private function classification(array $listingRows): string
