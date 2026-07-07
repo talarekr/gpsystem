@@ -78,7 +78,8 @@ class EbayMarketplaceDiagnoseControllerTest extends TestCase
             ->assertJsonPath('rows.0.audit_classification', 'ended/stale should_show_x_and_allow_new_publish')
             ->assertJsonPath('rows.0.duplicate_guard_would_block', false)
             ->assertJsonPath('rows.0.marketplace_listings.0.api.api_listing_status', 'ended')
-            ->assertJsonPath('rows.0.marketplace_listings.0.api.end_date_is_past', true);
+            ->assertJsonPath('rows.0.marketplace_listings.0.api.end_date_is_past', true)
+            ->assertJsonPath('rows.0.public_item_end_date_source', 'browse_api');
     }
 
 
@@ -155,7 +156,8 @@ class EbayMarketplaceDiagnoseControllerTest extends TestCase
             ->assertJsonPath('rows.0.audit_classification', 'ebay_unavailable_but_not_ended_needs_review needs_review')
             ->assertJsonPath('rows.0.needs_ebay_de_publish', false)
             ->assertJsonPath('rows.0.marketplace_listings.0.listing_exists', true)
-            ->assertJsonPath('rows.0.duplicate_guard_would_block', true)
+            ->assertJsonPath('rows.0.duplicate_guard_would_block', false)
+            ->assertJsonPath('rows.0.resolver_ebay.display_icon', '✕')
             ->assertJsonPath('rows.0.resolver_ebay.reason', 'ebay_unavailable_but_not_ended_needs_review')
             ->assertJsonPath('rows.0.marketplace_listings.0.api.end_date_is_past', false)
             ->assertJsonPath('rows.0.marketplace_listings.0.api.availability_status', 'UNAVAILABLE');
@@ -250,7 +252,8 @@ class EbayMarketplaceDiagnoseControllerTest extends TestCase
             ->assertJsonPath('rows.0.ebay_de_status', 'unavailable_not_ended_needs_review')
             ->assertJsonPath('rows.0.audit_classification', 'ebay_unavailable_but_not_ended_needs_review needs_review')
             ->assertJsonPath('rows.0.needs_ebay_de_publish', false)
-            ->assertJsonPath('rows.0.duplicate_guard_would_block', true)
+            ->assertJsonPath('rows.0.duplicate_guard_would_block', false)
+            ->assertJsonPath('rows.0.resolver_ebay.display_icon', '✕')
             ->assertJsonPath('rows.0.marketplace_listings.0.public_item_id', '389993224459')
             ->assertJsonPath('rows.0.marketplace_listings.0.seller_listing_id', '800116033033')
             ->assertJsonPath('rows.0.marketplace_listings.0.requested_listing_id', '389993224459')
@@ -262,7 +265,44 @@ class EbayMarketplaceDiagnoseControllerTest extends TestCase
             ->assertJsonPath('rows.0.offer_listing_id', '800116033033')
             ->assertJsonPath('rows.0.seller_listing_id_matches_public_item_id', false)
             ->assertJsonPath('rows.0.marketplace_listings.0.public_item_end_past', false)
+            ->assertJsonPath('rows.0.marketplace_listings.0.public_item_end_date_source', 'unavailable')
             ->assertJsonPath('rows.0.marketplace_listings.0.api.seller_side_verified_active', null);
+    }
+
+
+    public function test_local_raw_payload_end_date_fallback_marks_public_item_ended(): void
+    {
+        $this->actingAsAdminUser();
+
+        $part = Part::query()->create(['name' => 'Ended public URL', 'sku' => 'EB-PUBLIC-END', 'quantity' => 1, 'status' => 'ready']);
+        MarketplaceListing::query()->create([
+            'part_id' => $part->id,
+            'marketplace' => 'ebay_de',
+            'external_listing_id' => '389993224459',
+            'url' => 'https://www.ebay.de/itm/389993224459',
+            'status' => 'active',
+            'last_api_status' => 'active',
+            'raw_payload' => ['itemEndDate' => '2026-05-31T21:00:00.000Z'],
+        ]);
+
+        Http::fake(['*' => Http::response([
+            'itemId' => 'v1|389993224459|0',
+            'estimatedAvailabilities' => [['estimatedAvailabilityStatus' => 'UNAVAILABLE']],
+            'itemWebUrl' => 'https://www.ebay.de/itm/389993224459',
+            'title' => 'Ended listing without Browse itemEndDate',
+        ], 200)]);
+
+        $this->getJson('/admin/tools/ebay/marketplace-diagnose?action=part&part_ids='.$part->id.'&check_api=1&format=json')
+            ->assertOk()
+            ->assertJsonPath('rows.0.ebay_de_status', 'ended')
+            ->assertJsonPath('rows.0.audit_classification', 'ended/stale should_show_x_and_allow_new_publish')
+            ->assertJsonPath('rows.0.duplicate_guard_would_block', false)
+            ->assertJsonPath('rows.0.public_item_end_date', '2026-05-31T21:00:00.000Z')
+            ->assertJsonPath('rows.0.public_item_end_date_source', 'local_raw_payload')
+            ->assertJsonPath('rows.0.public_item_end_past', true)
+            ->assertJsonPath('rows.0.seller_offer_id', null)
+            ->assertJsonPath('rows.0.seller_listing_id', null)
+            ->assertJsonPath('rows.0.resolver_ebay.display_icon', '✕');
     }
 
 
