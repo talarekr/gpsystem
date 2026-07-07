@@ -22,7 +22,7 @@ class PartMarketplaceStatusResolver
 
         $allegro = $this->preferredListing($listings, ['allegro', 'allegro_main'], 'allegro', $partAvailable);
         $ovoko = $this->preferredListing($listings, ['ovoko'], 'ovoko', $partAvailable);
-        $ebayListings = $this->mappedListings($listings, ['ebay_de', 'ebay_fr']);
+        $ebayListings = $this->mappedListings($listings, ['ebay_de', 'ebay']);
         $ebay = $this->preferredEbayListing($ebayListings, $partAvailable);
 
         $allegroState = $this->channelState($part, $allegro, 'allegro');
@@ -37,7 +37,7 @@ class PartMarketplaceStatusResolver
             ->pluck('marketplace')
             ->map(fn (string $marketplace): string => match ($marketplace) {
                 'ebay_de' => 'DE',
-                'ebay_fr' => 'FR',
+                'ebay' => 'DE',
                 default => $marketplace,
             })
             ->unique()
