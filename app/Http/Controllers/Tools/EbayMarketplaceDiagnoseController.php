@@ -101,7 +101,7 @@ class EbayMarketplaceDiagnoseController extends Controller
                 $listing->forceFill(['status' => 'ended', 'sync_status' => 'historical', 'last_api_status' => $api['api_listing_status'], 'not_seen_in_active_api_at' => now()])->save();
             }
             return [
-                'id' => $listing->id, 'marketplace' => $listing->marketplace, 'status' => $listing->status, 'sync_status' => $listing->sync_status, 'match_status' => $listing->match_status, 'last_api_status' => $listing->last_api_status, 'last_error' => $listing->last_error, 'external_offer_id' => $listing->external_offer_id, 'external_listing_id' => $listing->external_listing_id, 'external_inventory_id' => $listing->external_inventory_id, 'sku' => $listing->sku, 'url' => $listing->url, 'resolved_listingUrl' => $listing->url, 'resolved_externalOfferId' => $listing->external_offer_id ?: $listing->external_listing_id, 'public_item_id' => $publicItemId, 'seller_offer_id' => data_get($api, 'seller_side.offer_id'), 'seller_listing_id' => $this->realSellerListingId(data_get($api, 'seller_side', [])), 'requested_listing_id' => data_get($api, 'seller_side.requested_listing_id'), 'offer_listing_id' => data_get($api, 'seller_side.offer_listing_id'), 'seller_listing_id_matches_public_item_id' => $this->sellerListingMatchesPublicItem(data_get($api, 'seller_side', []), $publicItemId), 'public_item_end_date' => $api['end_date'] ?? null, 'public_item_end_date_source' => $api['end_date_source'] ?? 'unavailable', 'public_item_end_past' => (bool) ($api['end_date_is_past'] ?? false), 'seller_listing_status' => data_get($api, 'seller_side.listing_status'), 'seller_offer_status' => data_get($api, 'seller_side.offer_status'), 'seller_verification_reason' => data_get($api, 'seller_side.verification_reason'), 'listing_exists' => filled($listing->external_listing_id) || filled($listing->external_offer_id) || filled($listing->url), 'api' => $api, 'duplicate_guard_would_block' => $this->isBlockingDuplicate($listing, $api),
+                'id' => $listing->id, 'marketplace' => $listing->marketplace, 'status' => $listing->status, 'sync_status' => $listing->sync_status, 'match_status' => $listing->match_status, 'last_api_status' => $listing->last_api_status, 'last_error' => $listing->last_error, 'external_offer_id' => $listing->external_offer_id, 'external_listing_id' => $listing->external_listing_id, 'external_inventory_id' => $listing->external_inventory_id, 'sku' => $listing->sku, 'url' => $listing->url, 'resolved_listingUrl' => $listing->url, 'resolved_externalOfferId' => $listing->external_offer_id ?: $listing->external_listing_id, 'public_item_id' => $publicItemId, 'seller_offer_id' => data_get($api, 'seller_side.offer_id'), 'seller_listing_id' => $this->realSellerListingId(data_get($api, 'seller_side', [])), 'requested_listing_id' => data_get($api, 'seller_side.requested_listing_id'), 'offer_listing_id' => data_get($api, 'seller_side.offer_listing_id'), 'seller_listing_id_matches_public_item_id' => $this->sellerListingMatchesPublicItem(data_get($api, 'seller_side', []), $publicItemId), 'public_item_end_date' => $api['end_date'] ?? null, 'public_item_end_date_source' => $api['end_date_source'] ?? 'unavailable', 'public_item_end_past' => (bool) ($api['end_date_is_past'] ?? false), 'raw_payload_diagnostics' => $this->rawPayloadDiagnostics($listing, $api), 'seller_listing_status' => data_get($api, 'seller_side.listing_status'), 'seller_offer_status' => data_get($api, 'seller_side.offer_status'), 'seller_verification_reason' => data_get($api, 'seller_side.verification_reason'), 'listing_exists' => filled($listing->external_listing_id) || filled($listing->external_offer_id) || filled($listing->url), 'api' => $api, 'duplicate_guard_would_block' => $this->isBlockingDuplicate($listing, $api),
             ];
         })->all();
 
@@ -128,7 +128,7 @@ class EbayMarketplaceDiagnoseController extends Controller
 
         $diagnosticListing = $ebayDe['preferred'] ?? null;
 
-        return ['part' => ['id' => $part->id, 'sku' => $part->sku, 'part_number' => $part->part_number, 'status' => $part->status, 'quantity' => $part->quantity, 'adminLocalAvailability' => $part->adminLocalAvailability()], 'marketplace_listings' => $listingRows, 'public_item_id' => $diagnosticListing['public_item_id'] ?? null, 'seller_offer_id' => $diagnosticListing['seller_offer_id'] ?? null, 'seller_listing_id' => $diagnosticListing['seller_listing_id'] ?? null, 'requested_listing_id' => $diagnosticListing['requested_listing_id'] ?? null, 'offer_listing_id' => $diagnosticListing['offer_listing_id'] ?? null, 'seller_listing_id_matches_public_item_id' => $diagnosticListing['seller_listing_id_matches_public_item_id'] ?? null, 'public_item_end_date' => $diagnosticListing['public_item_end_date'] ?? null, 'public_item_end_date_source' => $diagnosticListing['public_item_end_date_source'] ?? 'unavailable', 'public_item_end_past' => $diagnosticListing['public_item_end_past'] ?? null, 'seller_listing_status' => $diagnosticListing['seller_listing_status'] ?? null, 'seller_offer_status' => $diagnosticListing['seller_offer_status'] ?? null, 'seller_verification_reason' => $diagnosticListing['seller_verification_reason'] ?? null, 'ebay_de_status' => $ebayDe['status'], 'ebay_de_url' => $ebayDe['url'], 'ebay_fr_status' => $ebayFr['status'], 'ebay_fr_url' => $ebayFr['url'], 'ebay_overall' => $classification, 'needs_ebay_de_publish' => $endedOrStale && $this->needsEbayDePublish($part, $ebayDe['status']), 'resolver_ebay' => $resolverEbay, 'duplicate_guard_would_block' => ($endedOrStale || $this->hasUnavailableButNotEnded($ebayDe['listings'])) ? false : collect($ebayDe['listings'])->contains('duplicate_guard_would_block', true), 'audit_classification' => $classification];
+        return ['part' => ['id' => $part->id, 'sku' => $part->sku, 'part_number' => $part->part_number, 'status' => $part->status, 'quantity' => $part->quantity, 'adminLocalAvailability' => $part->adminLocalAvailability()], 'marketplace_listings' => $listingRows, 'public_item_id' => $diagnosticListing['public_item_id'] ?? null, 'seller_offer_id' => $diagnosticListing['seller_offer_id'] ?? null, 'seller_listing_id' => $diagnosticListing['seller_listing_id'] ?? null, 'requested_listing_id' => $diagnosticListing['requested_listing_id'] ?? null, 'offer_listing_id' => $diagnosticListing['offer_listing_id'] ?? null, 'seller_listing_id_matches_public_item_id' => $diagnosticListing['seller_listing_id_matches_public_item_id'] ?? null, 'public_item_end_date' => $diagnosticListing['public_item_end_date'] ?? null, 'public_item_end_date_source' => $diagnosticListing['public_item_end_date_source'] ?? 'unavailable', 'public_item_end_past' => $diagnosticListing['public_item_end_past'] ?? null, 'seller_listing_status' => $diagnosticListing['seller_listing_status'] ?? null, 'seller_offer_status' => $diagnosticListing['seller_offer_status'] ?? null, 'seller_verification_reason' => $diagnosticListing['seller_verification_reason'] ?? null, 'ebay_de_status' => $ebayDe['status'], 'ebay_de_url' => $ebayDe['url'], 'ebay_fr_status' => $ebayFr['status'], 'ebay_fr_url' => $ebayFr['url'], 'ebay_overall' => $classification, 'needs_ebay_de_publish' => $this->needsEbayDePublishFlag($part, $ebayDe['status'], $ebayDe['listings'], $endedOrStale), 'resolver_ebay' => $resolverEbay, 'duplicate_guard_would_block' => ($endedOrStale || $this->hasUnavailableButNotEnded($ebayDe['listings'])) ? false : collect($ebayDe['listings'])->contains('duplicate_guard_would_block', true), 'audit_classification' => $classification];
     }
 
 
@@ -213,9 +213,16 @@ class EbayMarketplaceDiagnoseController extends Controller
         return $sellerListingId !== null && ($requestedListingId === null || $requestedListingId !== $sellerListingId) && $sellerListingId === $publicItemId;
     }
 
+    private function needsEbayDePublishFlag(Part $part, string $ebayDeStatus, array $listingRows, bool $endedOrStale): ?bool
+    {
+        if ($this->hasUnavailableButNotEndedWithoutEndDate($listingRows)) return null;
+
+        return $endedOrStale && $this->needsEbayDePublish($part, $ebayDeStatus);
+    }
+
     private function needsEbayDePublish(Part $part, string $ebayDeStatus): bool
     {
-        return in_array($part->status, ['ready'], true) && (int) $part->quantity > 0 && $part->adminLocalAvailability() !== 'sold' && ! in_array($ebayDeStatus, ['active', 'active_seller_verified', 'unavailable_not_ended_needs_review'], true);
+        return in_array($part->status, ['ready'], true) && (int) $part->quantity > 0 && $part->adminLocalAvailability() !== 'sold' && ! in_array($ebayDeStatus, ['active', 'active_seller_verified', 'unavailable_not_ended_needs_review', 'manual_review_public_status_required'], true);
     }
 
     private function rowIsActive(array $row): bool
@@ -250,6 +257,7 @@ class EbayMarketplaceDiagnoseController extends Controller
         if (in_array('active', $apiStatuses, true)) return 'active OK';
         if (in_array('not_found', $apiStatuses, true)) return 'not_found should_show_x_and_allow_new_publish';
         if (in_array('ended', $apiStatuses, true)) return 'ended/stale should_show_x_and_allow_new_publish';
+        if ($this->hasUnavailableButNotEndedWithoutEndDate($listingRows)) return 'manual_review_public_status_required needs_review needs_manual_review_public_ended_unknown_api';
         if ($this->hasUnavailableButNotEnded($listingRows)) return 'ebay_unavailable_but_not_ended_needs_review needs_review';
         if (in_array('error', $apiStatuses, true)) return 'api_error needs_review';
 
@@ -265,6 +273,12 @@ class EbayMarketplaceDiagnoseController extends Controller
             return ! (bool) data_get($row, 'api.end_date_is_past', false)
                 && (in_array($apiStatus, ['unavailable', 'active_state_uncertain'], true) || ($apiStatus === 'inactive' && $availability === 'UNAVAILABLE'));
         });
+    }
+
+    private function hasUnavailableButNotEndedWithoutEndDate(array $listingRows): bool
+    {
+        return $this->hasUnavailableButNotEnded($listingRows)
+            && collect($listingRows)->contains(fn ($row): bool => ($row['public_item_end_date_source'] ?? data_get($row, 'api.end_date_source')) === 'unavailable');
     }
 
     private function apiIsCertainEndedForHistory(array $api): bool
@@ -296,7 +310,24 @@ class EbayMarketplaceDiagnoseController extends Controller
     private function publicItemId(MarketplaceListing $listing): ?string { if (preg_match('#/itm/(\d+)#', (string) $listing->url, $m)) return $m[1]; return $this->digitsOnly($listing->external_listing_id); }
     private function itemId(MarketplaceListing $listing): ?string { if ($id = $this->publicItemId($listing)) return $id; foreach ([$listing->external_listing_id, $listing->external_offer_id, data_get($listing->raw_payload, 'ebay.item_id'), data_get($listing->raw_payload, 'item_id')] as $id) if (filled($id)) return (string) $id; return null; }
     private function digitsOnly(mixed $value): ?string { if (! filled($value)) return null; return preg_match('/\d+/', (string) $value, $m) ? $m[0] : null; }
-    private function withLocalEndDateFallback(MarketplaceListing $listing, array $api): array { if (filled($api['end_date'] ?? null)) { $api['end_date_source'] = $api['end_date_source'] ?? 'browse_api'; return $api; } $endDate = data_get($listing->raw_payload, 'itemEndDate') ?? data_get($listing->raw_payload, 'end_date') ?? data_get($listing->raw_payload, 'ended_at') ?? data_get($listing->raw_payload, 'api.itemEndDate') ?? data_get($listing->raw_payload, 'browse.itemEndDate') ?? data_get($listing->raw_payload, 'listing_snapshot.itemEndDate'); if (! filled($endDate)) { $api['end_date_source'] = $api['end_date_source'] ?? 'unavailable'; return $api; } $api['end_date'] = (string) $endDate; $api['end_date_source'] = 'local_raw_payload'; $api['end_date_is_past'] = strtotime((string) $endDate) !== false && strtotime((string) $endDate) < now()->timestamp; return $api; }
+    private function rawPayloadDiagnostics(MarketplaceListing $listing, array $api): array
+    {
+        $raw = is_array($listing->raw_payload) ? $listing->raw_payload : [];
+        $dateKeys = ['itemEndDate', 'endDate', 'end_date', 'listingEndDate', 'ended_at', 'api.itemEndDate', 'api.endDate', 'browse.itemEndDate', 'browse.endDate', 'listing_snapshot.itemEndDate', 'listing_snapshot.endDate'];
+        $contains = [];
+        foreach ($dateKeys as $key) $contains[$key] = filled(data_get($raw, $key));
+
+        return [
+            'raw_payload_keys' => array_values(array_map('strval', array_keys($raw))),
+            'date_key_presence' => $contains,
+            'contains_any_end_date' => in_array(true, $contains, true),
+            'extracted_end_date' => $api['end_date'] ?? null,
+            'end_date_source' => $api['end_date_source'] ?? 'unavailable',
+            'message' => in_array(true, $contains, true) ? null : 'raw_payload does not contain itemEndDate/endDate/end_date/listingEndDate',
+        ];
+    }
+
+    private function withLocalEndDateFallback(MarketplaceListing $listing, array $api): array { if (filled($api['end_date'] ?? null)) { $api['end_date_source'] = $api['end_date_source'] ?? 'browse_api'; return $api; } $endDate = data_get($listing->raw_payload, 'itemEndDate') ?? data_get($listing->raw_payload, 'endDate') ?? data_get($listing->raw_payload, 'end_date') ?? data_get($listing->raw_payload, 'listingEndDate') ?? data_get($listing->raw_payload, 'ended_at') ?? data_get($listing->raw_payload, 'api.itemEndDate') ?? data_get($listing->raw_payload, 'api.endDate') ?? data_get($listing->raw_payload, 'browse.itemEndDate') ?? data_get($listing->raw_payload, 'browse.endDate') ?? data_get($listing->raw_payload, 'listing_snapshot.itemEndDate') ?? data_get($listing->raw_payload, 'listing_snapshot.endDate'); if (! filled($endDate)) { $api['end_date_source'] = $api['end_date_source'] ?? 'unavailable'; return $api; } $api['end_date'] = (string) $endDate; $api['end_date_source'] = 'local_raw_payload'; $api['end_date_is_past'] = strtotime((string) $endDate) !== false && strtotime((string) $endDate) < now()->timestamp; return $api; }
     private function partIds(Request $request): array { $raw = $request->input('part_ids', $request->input('part_id', '')); return collect(is_array($raw) ? $raw : preg_split('/[\s,;]+/', (string) $raw))->filter()->map(fn ($v) => (int) $v)->filter()->unique()->values()->all(); }
     private function summary(array $rows): array { $counts = collect($rows)->countBy('audit_classification')->all(); return $counts + ['total_parts' => count($rows), 'active_OK' => collect($rows)->filter(fn ($r) => str_contains($r['audit_classification'], 'active OK'))->count(), 'ended_stale' => collect($rows)->filter(fn ($r) => str_contains($r['audit_classification'], 'ended/stale'))->count(), 'not_found' => collect($rows)->filter(fn ($r) => str_contains($r['audit_classification'], 'not_found'))->count(), 'api_error' => collect($rows)->filter(fn ($r) => str_contains($r['audit_classification'], 'api_error'))->count(), 'needs_review' => collect($rows)->filter(fn ($r) => str_contains($r['audit_classification'], 'needs_review'))->count(), 'duplicate_guard_would_block' => collect($rows)->where('duplicate_guard_would_block', true)->count()]; }
 }
