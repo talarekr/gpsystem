@@ -275,42 +275,103 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
         }
 
         $json = is_array($lookup['json'] ?? null) ? $lookup['json'] : [];
-        if (! $this->taxSubjectSupported($json, 'GOODS')) $blockers[] = 'allegro_tax_settings_subject_goods_not_supported';
-        $unsupported = array_values(array_filter($desired, fn (array $rate): bool => ! $this->taxRateSupported($json, $rate['countryCode'], $rate['rate'])));
-        foreach ($unsupported as $rate) $warnings[] = 'allegro_tax_rate_not_supported:'.$rate['countryCode'].':'.$rate['rate'];
-        if ($unsupported !== []) $blockers[] = 'allegro_tax_settings_rates_not_supported';
+        $allowed = $this->allowedTaxSettings($json);
+        $subject = $this->matchedTaxSubject($allowed['subjects'], 'GOODS');
+        if ($subject === null) $blockers[] = 'allegro_tax_settings_subject_goods_not_supported';
+        $matches = [];
+        $matchedRates = [];
+        foreach ($desired as $rate) {
+            $match = $this->matchedTaxRate($allowed['rates'], $rate['countryCode'], $rate['rate']);
+            $matches[] = [
+                'countryCode' => $rate['countryCode'],
+                'requested_rate' => $rate['rate'],
+                'requested_rate_normalized' => $this->normalizeTaxRate($rate['rate']),
+                'matched' => $match !== null,
+                'matched_allowed_value' => $match['payload_value'] ?? null,
+                'matched_allowed_rate' => $match['sanitized'] ?? null,
+                'reason' => $match === null ? 'requested_vat_rate_not_present_in_allegro_allowed_values_for_country' : null,
+            ];
+            if ($match === null) {
+                $warnings[] = 'allegro_tax_rate_not_supported:'.$rate['countryCode'].':'.$rate['rate'];
+                continue;
+            }
+            $rate['rate'] = $match['payload_value'];
+            $matchedRates[] = $rate;
+        }
+        if (count($matchedRates ?? []) !== count($desired)) $blockers[] = 'allegro_tax_settings_rates_not_supported';
 
         return [
-            'payload' => $blockers === [] ? ['subject' => 'GOODS', 'rates' => $desired] : null,
+            'payload' => $blockers === [] ? ['subject' => $subject['payload_value'] ?? 'GOODS', 'rates' => $matchedRates] : null,
             'warnings' => $warnings,
             'blockers' => $blockers,
             'lookup' => $this->taxSettingsLookupSummary($lookup),
+            'allowed' => $allowed,
             'desired' => ['subject' => 'GOODS', 'rates' => $desired],
+            'matches' => $matches,
         ];
     }
 
-    private function taxSubjectSupported(array $json, string $subject): bool
+    private function matchedTaxSubject(array $subjects, string $subject): ?array
     {
-        $subjects = $json['subjects'] ?? $json['availableSubjects'] ?? $json['taxSettings']['subjects'] ?? [];
-        if ($subjects === []) return true;
-        foreach ((array) $subjects as $row) {
-            $value = is_array($row) ? ($row['subject'] ?? $row['id'] ?? $row['value'] ?? $row['name'] ?? null) : $row;
-            if (strtoupper((string) $value) === $subject) return true;
+        if ($subjects === []) return ['payload_value' => $subject];
+        foreach ($subjects as $row) {
+            if (strtoupper((string) ($row['value'] ?? $row['id'] ?? $row['subject'] ?? $row['name'] ?? '')) === $subject) return $row + ['payload_value' => (string) ($row['value'] ?? $subject)];
         }
-        return false;
+        return null;
     }
 
-    private function taxRateSupported(array $json, string $countryCode, string $rate): bool
+    private function matchedTaxRate(array $rates, string $countryCode, string $rate): ?array
     {
-        $rows = $json['rates'] ?? $json['taxRates'] ?? $json['taxSettings']['rates'] ?? [];
-        if ($rows === []) return true;
-        foreach ((array) $rows as $row) {
+        if ($rates === []) return ['payload_value' => $rate, 'sanitized' => ['rate' => $rate]];
+        $needle = $this->normalizeTaxRate($rate);
+        foreach ($rates as $row) {
+            if (strtoupper((string) ($row['countryCode'] ?? '')) !== strtoupper($countryCode)) continue;
+            if (($row['normalized_rate'] ?? null) === $needle) return $row;
+        }
+        return null;
+    }
+
+    private function normalizeTaxRate(mixed $rate): ?string
+    {
+        $value = trim(str_replace(['%', ','], ['', '.'], (string) $rate));
+        if ($value === '' || ! is_numeric($value)) return null;
+        return number_format((float) $value, 2, '.', '');
+    }
+
+    private function allowedTaxSettings(array $json): array
+    {
+        $subjects = array_values(array_filter(array_map(fn ($row) => $this->sanitizeTaxAllowedRow($row), (array) ($json['subjects'] ?? $json['availableSubjects'] ?? data_get($json, 'taxSettings.subjects', [])))));
+        $rates = [];
+        foreach ((array) ($json['rates'] ?? $json['taxRates'] ?? data_get($json, 'taxSettings.rates', [])) as $row) {
             if (! is_array($row)) continue;
             $country = strtoupper((string) ($row['countryCode'] ?? $row['country'] ?? ''));
-            $rowRate = number_format((float) str_replace(',', '.', (string) ($row['rate'] ?? $row['value'] ?? '')), 2, '.', '');
-            if ($country === $countryCode && $rowRate === $rate) return true;
+            $values = is_array($row['values'] ?? null) ? $row['values'] : [$row];
+            foreach ($values as $valueRow) {
+                if (! is_array($valueRow)) continue;
+                $sanitized = $this->sanitizeTaxAllowedRow($valueRow + ['countryCode' => $country]);
+                $payloadValue = $valueRow['value'] ?? $valueRow['rate'] ?? $valueRow['id'] ?? ($valueRow['label'] ?? null);
+                $normalized = $this->normalizeTaxRate($payloadValue);
+                if ($country === '' || $normalized === null) continue;
+                $rates[] = ['countryCode' => $country, 'normalized_rate' => $normalized, 'payload_value' => (string) $payloadValue, 'sanitized' => $sanitized];
+            }
         }
-        return false;
+        $exemptions = array_values(array_filter(array_map(fn ($row) => $this->sanitizeTaxAllowedRow($row), (array) ($json['exemptions'] ?? data_get($json, 'taxSettings.exemptions', [])))));
+        return ['subjects' => $subjects, 'rates' => $rates, 'exemptions' => $exemptions];
+    }
+
+    private function sanitizeTaxAllowedRow(mixed $row): ?array
+    {
+        if (! is_array($row)) return $row === null || $row === '' ? null : ['value' => (string) $row];
+        return array_filter([
+            'countryCode' => $row['countryCode'] ?? $row['country'] ?? null,
+            'rate' => $row['rate'] ?? null,
+            'value' => $row['value'] ?? null,
+            'label' => $row['label'] ?? null,
+            'id' => $row['id'] ?? null,
+            'subject' => $row['subject'] ?? null,
+            'name' => $row['name'] ?? null,
+            'exemptionRequired' => $row['exemptionRequired'] ?? null,
+        ], fn ($value) => $value !== null && $value !== '');
     }
 
     private function taxSettingsLookupSummary(array $lookup): array

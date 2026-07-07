@@ -193,6 +193,50 @@ class AllegroSalesSettingsTest extends TestCase
         });
     }
 
+    public function test_allegro_live_publish_matches_beta_tax_settings_values_from_allowed_list(): void
+    {
+        Http::fake(array_merge($this->fakeAllegro(), [
+            'https://api.allegro.pl/sale/tax-settings*' => Http::response([
+                'subjects' => [['label' => 'Towar', 'value' => 'GOODS']],
+                'rates' => [
+                    ['countryCode' => 'PL', 'values' => [['label' => '23%', 'value' => '23.00', 'exemptionRequired' => false]]],
+                    ['countryCode' => 'CZ', 'values' => [['label' => '21%', 'value' => '21.00', 'exemptionRequired' => false]]],
+                    ['countryCode' => 'SK', 'values' => [['label' => '23%', 'value' => '23.00', 'exemptionRequired' => false]]],
+                    ['countryCode' => 'HU', 'values' => [['label' => '27%', 'value' => '27.00', 'exemptionRequired' => false]]],
+                    ['countryCode' => 'LT', 'values' => [['label' => '21%', 'value' => '21.00', 'exemptionRequired' => false]]],
+                ],
+                'exemptions' => [['label' => 'Procedura marży', 'value' => 'MARGIN_SCHEME']],
+            ], 200),
+            'https://api.allegro.pl/sale/product-offers' => Http::response(['id' => 'offer-123'], 201),
+        ]));
+        $part = $this->part('KURIER DPD');
+        $payload = [
+            'title' => 'Błotnik Audi',
+            'category_id' => '123',
+            'price_pln' => 100,
+            'quantity' => 1,
+            'image_urls' => ['https://gpswiss.pl/storage/parts/photos/imported/7890/kuyJdjAM4xzYvW7Hoy0YQ7WlCKE8nRfkSUskHyT0.jpg'],
+            'allegro_parameters' => ['payload_parameters' => [], 'product_parameters' => []],
+        ];
+
+        $adapter = new class(app(MarketplaceListingReadinessService::class), app(MarketplacePublishGate::class), app(ApiIntegrationLogger::class), app(AllegroSalesSettingsResolver::class)) extends AllegroPublishAdapter {
+            public function callPerformLivePublish(Part $part, array $readiness, array $payload, MarketplaceAccount $account): array { return $this->performLivePublish($part, $readiness, $payload, $account); }
+        };
+
+        $result = $adapter->callPerformLivePublish($part, ['marketplace_price' => 100], $payload, MarketplaceAccount::query()->where('code', 'allegro_main')->firstOrFail());
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame('GOODS', data_get($result, 'request_summary.allegro_tax_settings.payload.subject'));
+        $this->assertSame('27.00', data_get($result, 'request_summary.allegro_tax_settings.payload.rates.3.rate'));
+        $this->assertSame('23.00', data_get($result, 'request_summary.allegro_tax_settings.matches.0.matched_allowed_value'));
+        $this->assertSame('MARGIN_SCHEME', data_get($result, 'request_summary.allegro_tax_settings.allowed.exemptions.0.value'));
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/sale/tax-settings') && $request->hasHeader('Accept', 'application/vnd.allegro.beta.v1+json'));
+        Http::assertSent(fn ($request) => $request->url() === 'https://api.allegro.pl/sale/product-offers'
+            && data_get($request->data(), 'payments.invoice') === 'VAT'
+            && data_get($request->data(), 'taxSettings.subject') === 'GOODS'
+            && data_get($request->data(), 'taxSettings.rates.3.rate') === '27.00');
+    }
+
 
     public function test_live_publish_payload_removes_product_scoped_duplicates_from_offer_parameters(): void
     {
