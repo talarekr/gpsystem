@@ -41,25 +41,48 @@ class CheckoutController extends Controller
         }
 
         $validated = $request->validate([
-            'customer_name' => ['required', 'string', 'max:255'],
-            'company_name' => ['nullable', 'string', 'max:255'],
-            'email' => ['required', 'email', 'max:255'],
-            'phone' => ['required', 'string', 'max:50'],
-            'address_line1' => ['required', 'string', 'max:255'],
-            'postal_code' => ['required', 'string', 'max:20'],
-            'city' => ['required', 'string', 'max:255'],
-            'country' => ['required', 'string', 'max:2'],
-            'nip' => ['nullable', 'string', 'max:30'],
+            'customer_type' => ['required', 'in:private,company'],
+            'billing_first_name' => ['required', 'string', 'max:120'],
+            'billing_last_name' => ['required', 'string', 'max:120'],
+            'billing_company_name' => ['required_if:customer_type,company', 'nullable', 'string', 'max:255'],
+            'billing_nip' => ['required_if:customer_type,company', 'nullable', 'string', 'max:30'],
+            'billing_street' => ['required', 'string', 'max:255'],
+            'billing_building_number' => ['required', 'string', 'max:40'],
+            'billing_postal_code' => ['required', 'string', 'max:20'],
+            'billing_city' => ['required', 'string', 'max:255'],
+            'billing_phone' => ['required', 'string', 'max:50'],
+            'billing_email' => ['required', 'email', 'max:255'],
+            'shipping_same_as_billing' => ['required', 'boolean'],
+            'shipping_first_name' => ['required_if:shipping_same_as_billing,0', 'nullable', 'string', 'max:120'],
+            'shipping_last_name' => ['required_if:shipping_same_as_billing,0', 'nullable', 'string', 'max:120'],
+            'shipping_street' => ['required_if:shipping_same_as_billing,0', 'nullable', 'string', 'max:255'],
+            'shipping_building_number' => ['required_if:shipping_same_as_billing,0', 'nullable', 'string', 'max:40'],
+            'shipping_postal_code' => ['required_if:shipping_same_as_billing,0', 'nullable', 'string', 'max:20'],
+            'shipping_city' => ['required_if:shipping_same_as_billing,0', 'nullable', 'string', 'max:255'],
+            'shipping_country' => ['required_if:shipping_same_as_billing,0', 'nullable', 'string', 'max:2'],
+            'shipping_method' => ['required', 'in:courier,courier_cod,pickup'],
             'notes' => ['nullable', 'string', 'max:5000'],
             'payment_method' => ['required', 'in:payu,blik'],
             'terms' => ['accepted'],
         ]);
 
+        $billingName = trim($validated['billing_first_name'].' '.$validated['billing_last_name']);
+        $billingAddress = trim($validated['billing_street'].' '.$validated['billing_building_number']);
+        $shippingSameAsBilling = (bool) $validated['shipping_same_as_billing'];
+        $shippingData = $shippingSameAsBilling ? null : [
+            'first_name' => $validated['shipping_first_name'],
+            'last_name' => $validated['shipping_last_name'],
+            'street' => $validated['shipping_street'],
+            'building_number' => $validated['shipping_building_number'],
+            'postal_code' => $validated['shipping_postal_code'],
+            'city' => $validated['shipping_city'],
+            'country' => $validated['shipping_country'] ?? 'PL',
+        ];
+
         $subtotal = round((float) $items->sum('line_total'), 2);
 
-        $order = DB::transaction(function () use ($validated, $items, $subtotal, $request): Order {
+        $order = DB::transaction(function () use ($validated, $items, $subtotal, $request, $billingName, $billingAddress, $shippingSameAsBilling, $shippingData): Order {
             $order = Order::query()->create([
-                ...collect($validated)->except('terms', 'payment_method')->all(),
                 'order_number' => $this->nextOrderNumber(),
                 'customer_id' => $request->user()?->id,
                 'status' => 'new',
@@ -68,7 +91,39 @@ class CheckoutController extends Controller
                 'shipping_total' => 0,
                 'total' => $subtotal,
                 'payment_status' => 'pending',
-                'meta' => ['source' => 'storefront', 'payment_method' => $validated['payment_method']],
+                'delivery_method' => $validated['shipping_method'],
+                'customer_name' => $billingName,
+                'email' => $validated['billing_email'],
+                'phone' => $validated['billing_phone'],
+                'company_name' => $validated['customer_type'] === 'company' ? $validated['billing_company_name'] : null,
+                'nip' => $validated['customer_type'] === 'company' ? $validated['billing_nip'] : null,
+                'address_line1' => $billingAddress,
+                'postal_code' => $validated['billing_postal_code'],
+                'city' => $validated['billing_city'],
+                'country' => 'PL',
+                'notes' => $validated['notes'] ?? null,
+                'invoice_data' => [
+                    'customer_type' => $validated['customer_type'],
+                    'first_name' => $validated['billing_first_name'],
+                    'last_name' => $validated['billing_last_name'],
+                    'company_name' => $validated['customer_type'] === 'company' ? $validated['billing_company_name'] : null,
+                    'nip' => $validated['customer_type'] === 'company' ? $validated['billing_nip'] : null,
+                    'street' => $validated['billing_street'],
+                    'building_number' => $validated['billing_building_number'],
+                    'postal_code' => $validated['billing_postal_code'],
+                    'city' => $validated['billing_city'],
+                    'country' => 'PL',
+                    'phone' => $validated['billing_phone'],
+                    'email' => $validated['billing_email'],
+                ],
+                'meta' => [
+                    'source' => 'storefront',
+                    'customer_type' => $validated['customer_type'],
+                    'shipping_same_as_billing' => $shippingSameAsBilling,
+                    'shipping' => $shippingData,
+                    'shipping_method' => $validated['shipping_method'],
+                    'payment_method' => $validated['payment_method'],
+                ],
             ]);
 
             foreach ($items as $item) {
