@@ -320,6 +320,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/ovoko/linked-products-check', OvokoLinkedProductsCheckController::class)->name('admin.tools.ovoko.linked-products-check');
     Route::get('/admin/tools/ovoko/sold-mapping-check', OvokoSoldMappingCheckController::class)->name('admin.tools.ovoko.sold-mapping-check');
     Route::get('/admin/tools/orders/ovoko-cross-channel-diagnose', OvokoCrossChannelDiagnoseController::class)->name('admin.tools.orders.ovoko-cross-channel-diagnose');
+    Route::match(['get', 'post'], '/admin/tools/orders/ovoko-order-item-part-backfill', [OvokoOrderItemPartBackfillController::class, 'admin'])->name('admin.tools.orders.ovoko-order-item-part-backfill');
     Route::get('/admin/tools/ovoko/sold-mapping-check-ping', function () {
         return response()->json(['ok' => true, 'tool' => 'sold-mapping-check-ping']);
     })->name('admin.tools.ovoko.sold-mapping-check-ping');
