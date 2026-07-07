@@ -47,7 +47,7 @@ class ManualMarketplaceLinkMappingService
             ->orderByDesc('id')
             ->get();
 
-        $matchingListing = $listings->first(fn (MarketplaceListing $listing): bool => $this->resolvedListingExternalId($listing, $marketplace) === $externalId);
+        $matchingListing = $listings->first(fn (MarketplaceListing $listing): bool => $this->listingExternalId($listing) === $externalId);
         if ($matchingListing) {
             $matchingListing->forceFill($this->attributes($part, $marketplace, $externalId, $url, $matchingListing->raw_payload ?? []))->save();
 
@@ -56,7 +56,7 @@ class ManualMarketplaceLinkMappingService
 
         $listing = $listings->first();
         if ($listing) {
-            $existingId = $this->resolvedListingExternalId($listing, $marketplace);
+            $existingId = $this->listingExternalId($listing);
 
             if ($existingId !== null && $existingId !== $externalId) {
                 throw new ManualMarketplaceMappingConflictException($existingId, $externalId);
@@ -79,7 +79,7 @@ class ManualMarketplaceLinkMappingService
             ]);
 
             throw new ManualMarketplaceMappingConflictException(
-                $this->resolvedListingExternalId($duplicate, $marketplace) ?? $externalId,
+                $this->listingExternalId($duplicate) ?? $externalId,
                 $externalId,
                 $duplicate->id,
                 $duplicate->part_id,
@@ -323,40 +323,6 @@ class ManualMarketplaceLinkMappingService
             'raw_payload' => $rawPayload,
             'last_api_status' => 'archived',
         ];
-    }
-
-    private function resolvedListingExternalId(MarketplaceListing $listing, string $marketplace): ?string
-    {
-        $externalId = $this->listingExternalId($listing);
-
-        if ($marketplace === 'ovoko') {
-            $normalizedExternalId = $externalId !== null ? $this->normalizeOvokoId($externalId) : null;
-            if ($normalizedExternalId !== null) {
-                return $normalizedExternalId;
-            }
-
-            $url = trim((string) ($listing->url ?? ''));
-            if ($url !== '') {
-                return $this->parseOvokoPartId($url);
-            }
-        }
-
-        return $externalId;
-    }
-
-    private function normalizeOvokoId(string $value): ?string
-    {
-        $value = trim($value);
-
-        if ($value === '') {
-            return null;
-        }
-
-        if (preg_match('/^\d+$/', $value) === 1) {
-            return $value;
-        }
-
-        return preg_match('/hgf(\d+)/i', $value, $matches) === 1 ? $matches[1] : null;
     }
 
     private function findExistingListingByExternalId(string $marketplace, string $externalId, ?int $ignorePartId = null): ?MarketplaceListing

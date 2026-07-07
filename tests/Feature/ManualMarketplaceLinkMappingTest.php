@@ -216,7 +216,7 @@ class ManualMarketplaceLinkMappingTest extends TestCase
         $part = Part::query()->create(['id' => 756, 'name' => 'Ovoko manual mapping regression', 'sku' => 'GPS-756', 'quantity' => 1, 'status' => 'ready', 'currency' => 'PLN']);
         MarketplaceListing::query()->create(['part_id' => $part->id, 'marketplace' => 'ovoko', 'external_offer_id' => '9992', 'external_listing_id' => '9992', 'url' => 'https://old.example/ovoko-9992', 'status' => 'imported', 'sync_status' => 'mapped', 'match_status' => 'confirmed']);
 
-        $url = 'https://ovoko.pl/czesci-samochodowe/hgf9992-a6549060800-mercedes-benz-a-w176-rozrusznik';
+        $url = 'https://ovoko.pl/czesci-samochodowe/hgf9992-manual-regression';
         $result = app(ManualMarketplaceLinkMappingService::class)->save($part, 'ovoko', $url);
 
         $this->assertSame('updated', $result['action']);
