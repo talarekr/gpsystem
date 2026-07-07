@@ -47,7 +47,7 @@ class ManualMarketplaceLinkMappingService
             ->orderByDesc('id')
             ->get();
 
-        $matchingListing = $listings->first(fn (MarketplaceListing $listing): bool => $this->resolvedListingExternalId($listing, $marketplace) === $externalId);
+        $matchingListing = $listings->first(fn (MarketplaceListing $listing): bool => $this->sameResolvedExternalId($this->resolvedListingExternalId($listing, $marketplace), $externalId, $marketplace));
         if ($matchingListing) {
             $matchingListing->forceFill($this->attributes($part, $marketplace, $externalId, $url, $matchingListing->raw_payload ?? []))->save();
 
@@ -58,7 +58,7 @@ class ManualMarketplaceLinkMappingService
         if ($listing) {
             $existingId = $this->resolvedListingExternalId($listing, $marketplace);
 
-            if ($existingId !== null && $existingId !== $externalId) {
+            if ($existingId !== null && ! $this->sameResolvedExternalId($existingId, $externalId, $marketplace)) {
                 throw new ManualMarketplaceMappingConflictException($existingId, $externalId);
             }
 
@@ -341,6 +341,18 @@ class ManualMarketplaceLinkMappingService
             }
         }
 
+        if ($marketplace === 'allegro') {
+            $normalizedExternalId = $this->normalizeResolvedExternalId($externalId, $marketplace);
+            if ($normalizedExternalId !== null) {
+                return $normalizedExternalId;
+            }
+
+            $url = trim((string) ($listing->url ?? ''));
+            if ($url !== '') {
+                return $this->parseAllegroOfferId($url);
+            }
+        }
+
         return $externalId;
     }
 
@@ -367,7 +379,7 @@ class ManualMarketplaceLinkMappingService
             ->orderByDesc('id');
 
         if ($marketplace === 'ovoko') {
-            return $query->get()->first(fn (MarketplaceListing $listing): bool => $this->resolvedListingExternalId($listing, $marketplace) === $externalId);
+            return $query->get()->first(fn (MarketplaceListing $listing): bool => $this->sameResolvedExternalId($this->resolvedListingExternalId($listing, $marketplace), $externalId, $marketplace));
         }
 
         return $query
@@ -388,5 +400,32 @@ class ManualMarketplaceLinkMappingService
         }
 
         return null;
+    }
+
+    private function sameResolvedExternalId(?string $currentId, ?string $newId, string $marketplace): bool
+    {
+        $currentId = $this->normalizeResolvedExternalId($currentId, $marketplace);
+        $newId = $this->normalizeResolvedExternalId($newId, $marketplace);
+
+        return $currentId !== null && $newId !== null && $currentId === $newId;
+    }
+
+    private function normalizeResolvedExternalId(?string $value, string $marketplace): ?string
+    {
+        $value = trim((string) ($value ?? ''));
+
+        if ($value === '') {
+            return null;
+        }
+
+        if ($marketplace === 'ovoko') {
+            return $this->normalizeOvokoId($value);
+        }
+
+        if (preg_match('/^\d+$/', $value) === 1) {
+            return $value;
+        }
+
+        return preg_match('/(\d{6,})$/', $value, $matches) === 1 ? $matches[1] : $value;
     }
 }
