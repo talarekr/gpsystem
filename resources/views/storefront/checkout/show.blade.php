@@ -1,6 +1,10 @@
 @extends('layouts.storefront')
 
 @section('content')
+@php
+    $checkoutCustomerType = old('customer_type', 'private');
+    $checkoutShippingSameAsBilling = old('shipping_same_as_billing', '1') !== '0';
+@endphp
 <div class="sf-container sf-page sf-cart-page sf-checkout-page">
     @include('storefront.partials.breadcrumbs')
     <div class="sf-cart-head">
@@ -26,14 +30,14 @@
                     @error('customer_type')<small class="sf-checkout-error">{{ $message }}</small>@enderror
 
                     <div class="sf-checkout-grid sf-checkout-grid--spaced">
-                        <label class="sf-field sf-field--half sf-company-field">
+                        <label class="sf-field sf-field--half sf-company-field" @if($checkoutCustomerType !== 'company') hidden aria-hidden="true" @endif>
                             <span>NIP</span>
-                            <input name="billing_nip" value="{{ old('billing_nip') }}" autocomplete="off">
+                            <input name="billing_nip" @if($checkoutCustomerType !== 'company') disabled @endif value="{{ old('billing_nip') }}" autocomplete="off">
                             @error('billing_nip')<small>{{ $message }}</small>@enderror
                         </label>
-                        <label class="sf-field sf-field--half sf-company-field">
+                        <label class="sf-field sf-field--half sf-company-field" @if($checkoutCustomerType !== 'company') hidden aria-hidden="true" @endif>
                             <span>Nazwa firmy</span>
-                            <input name="billing_company_name" value="{{ old('billing_company_name') }}" autocomplete="organization">
+                            <input name="billing_company_name" @if($checkoutCustomerType !== 'company') disabled @endif value="{{ old('billing_company_name') }}" autocomplete="organization">
                             @error('billing_company_name')<small>{{ $message }}</small>@enderror
                         </label>
                         <label class="sf-field sf-field--half">
@@ -87,14 +91,14 @@
                     </div>
                     @error('shipping_same_as_billing')<small class="sf-checkout-error">{{ $message }}</small>@enderror
 
-                    <div class="sf-checkout-grid sf-shipping-fields">
-                        <label class="sf-field sf-field--half"><span>Imię</span><input name="shipping_first_name" value="{{ old('shipping_first_name') }}" autocomplete="shipping given-name">@error('shipping_first_name')<small>{{ $message }}</small>@enderror</label>
-                        <label class="sf-field sf-field--half"><span>Nazwisko</span><input name="shipping_last_name" value="{{ old('shipping_last_name') }}" autocomplete="shipping family-name">@error('shipping_last_name')<small>{{ $message }}</small>@enderror</label>
-                        <label class="sf-field sf-field--half"><span>Nazwa ulicy</span><input name="shipping_street" value="{{ old('shipping_street') }}" autocomplete="shipping address-line1">@error('shipping_street')<small>{{ $message }}</small>@enderror</label>
-                        <label class="sf-field sf-field--third"><span>Numer budynku</span><input name="shipping_building_number" value="{{ old('shipping_building_number') }}" autocomplete="shipping address-line2">@error('shipping_building_number')<small>{{ $message }}</small>@enderror</label>
-                        <label class="sf-field sf-field--third"><span>Kod pocztowy</span><input name="shipping_postal_code" value="{{ old('shipping_postal_code') }}" autocomplete="shipping postal-code">@error('shipping_postal_code')<small>{{ $message }}</small>@enderror</label>
-                        <label class="sf-field sf-field--half"><span>Miasto</span><input name="shipping_city" value="{{ old('shipping_city') }}" autocomplete="shipping address-level2">@error('shipping_city')<small>{{ $message }}</small>@enderror</label>
-                        <label class="sf-field sf-field--half"><span>Kraj</span><input name="shipping_country" value="{{ old('shipping_country', 'PL') }}" maxlength="2" autocomplete="shipping country">@error('shipping_country')<small>{{ $message }}</small>@enderror</label>
+                    <div class="sf-checkout-grid sf-shipping-fields" @if($checkoutShippingSameAsBilling) hidden aria-hidden="true" @endif>
+                        <label class="sf-field sf-field--half"><span>Imię</span><input name="shipping_first_name" @if($checkoutShippingSameAsBilling) disabled @endif value="{{ old('shipping_first_name') }}" autocomplete="shipping given-name">@error('shipping_first_name')<small>{{ $message }}</small>@enderror</label>
+                        <label class="sf-field sf-field--half"><span>Nazwisko</span><input name="shipping_last_name" @if($checkoutShippingSameAsBilling) disabled @endif value="{{ old('shipping_last_name') }}" autocomplete="shipping family-name">@error('shipping_last_name')<small>{{ $message }}</small>@enderror</label>
+                        <label class="sf-field sf-field--half"><span>Nazwa ulicy</span><input name="shipping_street" @if($checkoutShippingSameAsBilling) disabled @endif value="{{ old('shipping_street') }}" autocomplete="shipping address-line1">@error('shipping_street')<small>{{ $message }}</small>@enderror</label>
+                        <label class="sf-field sf-field--third"><span>Numer budynku</span><input name="shipping_building_number" @if($checkoutShippingSameAsBilling) disabled @endif value="{{ old('shipping_building_number') }}" autocomplete="shipping address-line2">@error('shipping_building_number')<small>{{ $message }}</small>@enderror</label>
+                        <label class="sf-field sf-field--third"><span>Kod pocztowy</span><input name="shipping_postal_code" @if($checkoutShippingSameAsBilling) disabled @endif value="{{ old('shipping_postal_code') }}" autocomplete="shipping postal-code">@error('shipping_postal_code')<small>{{ $message }}</small>@enderror</label>
+                        <label class="sf-field sf-field--half"><span>Miasto</span><input name="shipping_city" @if($checkoutShippingSameAsBilling) disabled @endif value="{{ old('shipping_city') }}" autocomplete="shipping address-level2">@error('shipping_city')<small>{{ $message }}</small>@enderror</label>
+                        <label class="sf-field sf-field--half"><span>Kraj</span><input name="shipping_country" @if($checkoutShippingSameAsBilling) disabled @endif value="{{ old('shipping_country', 'PL') }}" maxlength="2" autocomplete="shipping country">@error('shipping_country')<small>{{ $message }}</small>@enderror</label>
                     </div>
                 </div>
 
@@ -148,12 +152,21 @@
     (() => {
         const form = document.querySelector('.sf-checkout-layout');
         if (! form) return;
+        const setGroupVisibility = (container, isVisible) => {
+            if (! container) return;
+            container.hidden = ! isVisible;
+            container.setAttribute('aria-hidden', isVisible ? 'false' : 'true');
+            container.querySelectorAll('input, select, textarea').forEach((field) => {
+                field.disabled = ! isVisible;
+            });
+        };
+
         const update = () => {
             const isCompany = form.querySelector('input[name="customer_type"]:checked')?.value === 'company';
-            form.querySelectorAll('.sf-company-field').forEach((field) => field.hidden = ! isCompany);
+            form.querySelectorAll('.sf-company-field').forEach((field) => setGroupVisibility(field, isCompany));
+
             const customShipping = form.querySelector('input[name="shipping_same_as_billing"]:checked')?.value === '0';
-            const shippingFields = form.querySelector('.sf-shipping-fields');
-            if (shippingFields) shippingFields.hidden = ! customShipping;
+            setGroupVisibility(form.querySelector('.sf-shipping-fields'), customShipping);
         };
         form.addEventListener('change', (event) => {
             if (event.target.matches('input[name="customer_type"], input[name="shipping_same_as_billing"]')) update();
