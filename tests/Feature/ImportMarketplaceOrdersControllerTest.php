@@ -150,6 +150,38 @@ class ImportMarketplaceOrdersControllerTest extends TestCase
     }
 
 
+
+    public function test_ovoko_utc_order_date_is_displayed_in_warsaw_timezone(): void
+    {
+        Http::fake([
+            'ovoko.example.test/v2/get/orders/2026-07-07/2026-07-07' => Http::response([
+                'status_code' => 'R200',
+                'msg' => 'OK',
+                'list' => [[
+                    'order_id' => '8755665',
+                    'order_status' => 'NEW',
+                    'order_date' => '2026-07-07T13:37:42Z',
+                    'client_name' => 'Buyer',
+                    'total_price' => ['seller' => ['amount' => '100.00', 'currency' => 'PLN']],
+                    'item_list' => [],
+                ]],
+            ], 200),
+        ]);
+
+        $this->createOvokoAccount();
+
+        $response = $this->getJson('/tools/import-marketplace-orders?token=gps_images_import_2026&marketplace=ovoko&dry_run=1&date_from=2026-07-07&date_to=2026-07-07&include_debug=1');
+
+        $response->assertOk()
+            ->assertJsonPath('marketplaces.ovoko.would_import.0.ordered_at', '2026-07-07 15:37:42')
+            ->assertJsonPath('marketplaces.ovoko.would_import.0.ordered_at_utc', '2026-07-07T13:37:42.000Z')
+            ->assertJsonPath('marketplaces.ovoko.would_import.0.ordered_at_local', '2026-07-07 15:37:42')
+            ->assertJsonPath('marketplaces.ovoko.would_import.0.ordered_at_diagnostics.raw_timestamp', '2026-07-07T13:37:42Z')
+            ->assertJsonPath('marketplaces.ovoko.would_import.0.ordered_at_diagnostics.parsed_utc', '2026-07-07T13:37:42.000Z')
+            ->assertJsonPath('marketplaces.ovoko.would_import.0.ordered_at_diagnostics.displayed_at', '2026-07-07 15:37:42')
+            ->assertJsonPath('marketplaces.ovoko.would_import.0.ordered_at_diagnostics.displayed_timezone', 'Europe/Warsaw');
+    }
+
     public function test_ovoko_reimport_updates_marketplace_fields_without_overwriting_manual_local_status(): void
     {
         $this->createOvokoAccount();
