@@ -153,8 +153,8 @@ class EbayMarketplaceDiagnoseControllerTest extends TestCase
         $this->postJson('/admin/tools/ebay/marketplace-diagnose?action=apply_inactive&part_ids='.$part->id.'&check_api=1&confirm_apply_inactive=1&format=json')
             ->assertOk()
             ->assertJsonPath('rows.0.ebay_de_status', 'unavailable_not_ended_needs_review')
-            ->assertJsonPath('rows.0.audit_classification', 'ebay_unavailable_but_not_ended_needs_review needs_review')
-            ->assertJsonPath('rows.0.needs_ebay_de_publish', false)
+            ->assertJsonPath('rows.0.audit_classification', 'manual_review_public_status_required needs_review needs_manual_review_public_ended_unknown_api')
+            ->assertJsonPath('rows.0.needs_ebay_de_publish', null)
             ->assertJsonPath('rows.0.marketplace_listings.0.listing_exists', true)
             ->assertJsonPath('rows.0.duplicate_guard_would_block', false)
             ->assertJsonPath('rows.0.resolver_ebay.display_icon', '✕')
@@ -250,8 +250,8 @@ class EbayMarketplaceDiagnoseControllerTest extends TestCase
         $this->postJson('/admin/tools/ebay/marketplace-diagnose?action=apply_inactive&part_ids='.$part->id.'&check_api=1&confirm_apply_inactive=1&format=json')
             ->assertOk()
             ->assertJsonPath('rows.0.ebay_de_status', 'unavailable_not_ended_needs_review')
-            ->assertJsonPath('rows.0.audit_classification', 'ebay_unavailable_but_not_ended_needs_review needs_review')
-            ->assertJsonPath('rows.0.needs_ebay_de_publish', false)
+            ->assertJsonPath('rows.0.audit_classification', 'manual_review_public_status_required needs_review needs_manual_review_public_ended_unknown_api')
+            ->assertJsonPath('rows.0.needs_ebay_de_publish', null)
             ->assertJsonPath('rows.0.duplicate_guard_would_block', false)
             ->assertJsonPath('rows.0.resolver_ebay.display_icon', '✕')
             ->assertJsonPath('rows.0.marketplace_listings.0.public_item_id', '389993224459')
@@ -266,6 +266,9 @@ class EbayMarketplaceDiagnoseControllerTest extends TestCase
             ->assertJsonPath('rows.0.seller_listing_id_matches_public_item_id', false)
             ->assertJsonPath('rows.0.marketplace_listings.0.public_item_end_past', false)
             ->assertJsonPath('rows.0.marketplace_listings.0.public_item_end_date_source', 'unavailable')
+            ->assertJsonPath('rows.0.marketplace_listings.0.raw_payload_diagnostics.contains_any_end_date', false)
+            ->assertJsonPath('rows.0.marketplace_listings.0.raw_payload_diagnostics.extracted_end_date', null)
+            ->assertJsonPath('rows.0.marketplace_listings.0.raw_payload_diagnostics.message', 'raw_payload does not contain itemEndDate/endDate/end_date/listingEndDate')
             ->assertJsonPath('rows.0.marketplace_listings.0.api.seller_side_verified_active', null);
     }
 
