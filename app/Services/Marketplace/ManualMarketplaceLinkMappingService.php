@@ -41,12 +41,20 @@ class ManualMarketplaceLinkMappingService
             throw new InvalidArgumentException('Nie udało się odczytać ID oferty z linku '.ucfirst($marketplace).'. Sprawdź, czy wklejony adres prowadzi do konkretnej oferty.');
         }
 
-        $listing = MarketplaceListing::query()
+        $listings = MarketplaceListing::query()
             ->where('part_id', $part->getKey())
             ->whereIn('marketplace', $marketplace === 'allegro' ? ['allegro', 'allegro_main'] : ['ovoko'])
             ->orderByDesc('id')
-            ->first();
+            ->get();
 
+        $matchingListing = $listings->first(fn (MarketplaceListing $listing): bool => $this->listingExternalId($listing) === $externalId);
+        if ($matchingListing) {
+            $matchingListing->forceFill($this->attributes($part, $marketplace, $externalId, $url, $matchingListing->raw_payload ?? []))->save();
+
+            return $this->result($matchingListing, $marketplace, $externalId, $url, 'updated');
+        }
+
+        $listing = $listings->first();
         if ($listing) {
             $existingId = $this->listingExternalId($listing);
 

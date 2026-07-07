@@ -211,6 +211,20 @@ class ManualMarketplaceLinkMappingTest extends TestCase
     }
 
 
+    public function test_saving_same_ovoko_id_9992_for_same_part_passes_without_conflict(): void
+    {
+        $part = Part::query()->create(['id' => 756, 'name' => 'Ovoko manual mapping regression', 'sku' => 'GPS-756', 'quantity' => 1, 'status' => 'ready', 'currency' => 'PLN']);
+        MarketplaceListing::query()->create(['part_id' => $part->id, 'marketplace' => 'ovoko', 'external_offer_id' => '9992', 'external_listing_id' => '9992', 'url' => 'https://old.example/ovoko-9992', 'status' => 'imported', 'sync_status' => 'mapped', 'match_status' => 'confirmed']);
+
+        $url = 'https://ovoko.pl/czesci-samochodowe/hgf9992-manual-regression';
+        $result = app(ManualMarketplaceLinkMappingService::class)->save($part, 'ovoko', $url);
+
+        $this->assertSame('updated', $result['action']);
+        $this->assertSame('9992', $result['external_id']);
+        $this->assertDatabaseHas('marketplace_listings', ['part_id' => 756, 'marketplace' => 'ovoko', 'external_offer_id' => '9992', 'external_listing_id' => '9992', 'url' => $url]);
+        $this->assertSame(1, MarketplaceListing::query()->where('part_id', 756)->where('marketplace', 'ovoko')->where('external_offer_id', '9992')->count());
+    }
+
     public function test_saving_same_ovoko_id_is_idempotent_and_refreshes_url(): void
     {
         $part = Part::query()->create(['name' => 'VOLVO XC60 sterownik moduł świateł xenon', 'sku' => 'GPS-7132', 'part_number' => '31427776', 'quantity' => 1, 'status' => 'ready', 'currency' => 'PLN']);
