@@ -65,6 +65,60 @@ class MarketplaceLinkRepairToolTest extends TestCase
         $this->assertDatabaseHas('marketplace_listings', ['id' => $savedListingId, 'part_id' => $part->id, 'marketplace' => 'allegro', 'external_offer_id' => '18331392855', 'external_listing_id' => '18331392855', 'url' => 'https://allegro.pl/oferta/18331392855', 'status' => 'ACTIVE', 'sync_status' => 'mapped', 'match_status' => 'confirmed']);
     }
 
+
+    public function test_allegro_apply_updates_target_listing_and_verifies_from_database(): void
+    {
+        $this->actingAsAdminUser();
+        $part = Part::query()->create([
+            'id' => 756,
+            'name' => 'Allegro target listing',
+            'legacy_payload' => ['legacy_payload_json' => ['_allegro_offer_id' => '18331392855']],
+            'quantity' => 1,
+            'status' => 'ready',
+            'currency' => 'PLN',
+        ]);
+        $listing = MarketplaceListing::query()->create([
+            'id' => 22837,
+            'part_id' => $part->id,
+            'marketplace' => 'allegro',
+            'external_offer_id' => '18331392855',
+            'external_listing_id' => null,
+            'url' => null,
+            'status' => null,
+            'sync_status' => 'imported',
+            'match_status' => 'unmatched',
+        ]);
+
+        $this->postJson('/admin/tools/marketplace/link-repair?format=json', [
+            'channel' => 'allegro',
+            'part_id' => $part->id,
+            'listing_id' => $listing->id,
+            'confirm' => 'apply-marketplace-link-repair',
+        ])
+            ->assertOk()
+            ->assertJsonPath('report.updated', 1)
+            ->assertJsonPath('rows.0.action', 'update')
+            ->assertJsonPath('rows.0.saved_listing_id', 22837)
+            ->assertJsonPath('rows.0.actual_after_write.saved_listing_id', 22837)
+            ->assertJsonPath('rows.0.actual_after_write.saved_fields.id', 22837)
+            ->assertJsonPath('rows.0.actual_after_write.saved_fields.external_offer_id', '18331392855')
+            ->assertJsonPath('rows.0.actual_after_write.saved_fields.url', 'https://allegro.pl/oferta/18331392855')
+            ->assertJsonPath('rows.0.actual_after_write.resolver.has_link', true)
+            ->assertJsonPath('rows.0.actual_after_write.resolver.icon', 'check');
+
+        $this->assertDatabaseHas('marketplace_listings', [
+            'id' => 22837,
+            'part_id' => 756,
+            'marketplace' => 'allegro',
+            'external_offer_id' => '18331392855',
+            'external_listing_id' => '18331392855',
+            'url' => 'https://allegro.pl/oferta/18331392855',
+            'status' => 'ACTIVE',
+            'sync_status' => 'mapped',
+            'match_status' => 'confirmed',
+        ]);
+    }
+
     public function test_same_id_for_same_part_updates_without_conflict(): void
     {
         $this->actingAsAdminUser();
