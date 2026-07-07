@@ -46,6 +46,7 @@ use App\Http\Controllers\Tools\MarketplaceListingDryRunController;
 use App\Http\Controllers\Tools\AllegroCompatibilityDryRunController;
 use App\Http\Controllers\Tools\AllegroMarketplaceDiagnoseController;
 use App\Http\Controllers\Tools\OvokoCarMappingController;
+use App\Http\Controllers\Tools\OvokoCrossChannelDiagnoseController;
 use App\Http\Controllers\Tools\MarketplaceListingUrlBackfillController;
 use App\Http\Controllers\Tools\EbayListingAuditController;
 use App\Http\Controllers\Tools\EbayDescriptionAuditController;
@@ -317,6 +318,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/ovoko/listing-url-diagnostics', OvokoListingUrlDiagnosticsController::class)->name('admin.tools.ovoko.listing-url-diagnostics');
     Route::get('/admin/tools/ovoko/linked-products-check', OvokoLinkedProductsCheckController::class)->name('admin.tools.ovoko.linked-products-check');
     Route::get('/admin/tools/ovoko/sold-mapping-check', OvokoSoldMappingCheckController::class)->name('admin.tools.ovoko.sold-mapping-check');
+    Route::get('/admin/tools/orders/ovoko-cross-channel-diagnose', OvokoCrossChannelDiagnoseController::class)->name('admin.tools.orders.ovoko-cross-channel-diagnose');
     Route::get('/admin/tools/ovoko/sold-mapping-check-ping', function () {
         return response()->json(['ok' => true, 'tool' => 'sold-mapping-check-ping']);
     })->name('admin.tools.ovoko.sold-mapping-check-ping');
