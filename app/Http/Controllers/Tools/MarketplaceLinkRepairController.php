@@ -33,6 +33,7 @@ class MarketplaceLinkRepairController extends Controller
         return [
             'channel' => in_array($request->input('channel', 'both'), ['ovoko', 'allegro', 'both'], true) ? $request->input('channel', 'both') : 'both',
             'part_id' => $request->filled('part_id') ? (int) $request->input('part_id') : null,
+            'listing_id' => $request->filled('listing_id') ? (int) $request->input('listing_id') : ($request->filled('marketplace_listing_id') ? (int) $request->input('marketplace_listing_id') : null),
             'ready_only' => $request->boolean('ready_only', false),
             'only_resolver_broken' => $request->boolean('only_resolver_broken', false),
             'limit' => max(1, min(100, (int) $request->input('limit', 50))),
