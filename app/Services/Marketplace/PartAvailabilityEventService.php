@@ -127,8 +127,8 @@ class PartAvailabilityEventService
         if (filled($event['part_id'] ?? null)) return Part::query()->find((int) $event['part_id']);
         $query = MarketplaceListing::query();
         if ($source === 'allegro' && filled($event['offer_id'] ?? null)) $query->where('marketplace', 'allegro')->where('external_offer_id', (string) $event['offer_id']);
-        elseif ($source === 'ovoko' && filled($event['external_listing_id'] ?? $event['offer_id'] ?? null)) {
-            $id = (string) ($event['external_listing_id'] ?? $event['offer_id']);
+        elseif ($source === 'ovoko' && filled($event['external_listing_id'] ?? $event['offer_id'] ?? $event['source_marketplace_item_id'] ?? null)) {
+            $id = (string) ($event['external_listing_id'] ?? $event['offer_id'] ?? $event['source_marketplace_item_id']);
             $query->where('marketplace', 'ovoko')->where(fn ($q) => $q->where('external_listing_id', $id)->orWhere('external_offer_id', $id));
         }
         elseif (str_starts_with($source, 'ebay')) $query->where('marketplace', 'like', 'ebay%')->where(function ($q) use ($event): void { $q->when(filled($event['sku'] ?? null), fn ($qq) => $qq->orWhere('sku', (string) $event['sku']))->when(filled($event['offer_id'] ?? null), fn ($qq) => $qq->orWhere('external_offer_id', (string) $event['offer_id']))->when(filled($event['item_id'] ?? null), fn ($qq) => $qq->orWhere('external_listing_id', (string) $event['item_id'])); });

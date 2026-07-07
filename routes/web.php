@@ -47,6 +47,7 @@ use App\Http\Controllers\Tools\AllegroCompatibilityDryRunController;
 use App\Http\Controllers\Tools\AllegroMarketplaceDiagnoseController;
 use App\Http\Controllers\Tools\OvokoCarMappingController;
 use App\Http\Controllers\Tools\OvokoCrossChannelDiagnoseController;
+use App\Http\Controllers\Tools\OvokoOrderItemPartBackfillController;
 use App\Http\Controllers\Tools\MarketplaceListingUrlBackfillController;
 use App\Http\Controllers\Tools\EbayListingAuditController;
 use App\Http\Controllers\Tools\EbayDescriptionAuditController;
@@ -522,6 +523,8 @@ Route::get('/tools/debug-order-item-thumbnail', DebugOrderItemThumbnailControlle
 Route::get('/tools/delete-test-marketplace-orders', DeleteTestMarketplaceOrdersController::class)->name('tools.delete-test-marketplace-orders');
 Route::get('/tools/ovoko-orders-dry-run', OvokoOrdersDryRunController::class)->name('tools.ovoko-orders-dry-run');
 Route::get('/tools/import-ovoko-orders-dry-run', ImportOvokoOrdersDryRunController::class)->name('tools.import-ovoko-orders-dry-run');
+Route::get('/tools/ovoko-order-item-part-backfill/preview', [OvokoOrderItemPartBackfillController::class, 'preview'])->name('tools.ovoko-order-item-part-backfill.preview');
+Route::post('/tools/ovoko-order-item-part-backfill', [OvokoOrderItemPartBackfillController::class, 'apply'])->name('tools.ovoko-order-item-part-backfill.apply');
 Route::get('/tools/inspect-ovoko-orders-structure', [OvokoOrdersDryRunController::class, 'inspect'])->name('tools.inspect-ovoko-orders-structure');
 Route::get('/tools/check-marketplace-mappings', CheckOvokoMappingController::class)->name('tools.check-marketplace-mappings');
 Route::get('/tools/check-allegro-channels', CheckAllegroChannelsController::class)->name('tools.check-allegro-channels');

@@ -18,7 +18,7 @@ use Throwable;
 
 class MarketplaceOrdersImportService
 {
-    public function __construct(private readonly MarketplaceOrderTimeService $timeService, private readonly PartAvailabilityEventService $availabilityEvents) {}
+    public function __construct(private readonly MarketplaceOrderTimeService $timeService, private readonly PartAvailabilityEventService $availabilityEvents, private readonly OvokoOrderItemPartMappingService $ovokoItemMapper) {}
     public const LIVE_BATCH = 'manual_marketplace_orders_live';
     public const TEST_BATCH = 'marketplace_orders_ui_test';
 
@@ -611,8 +611,13 @@ class MarketplaceOrdersImportService
         $unit = $this->amountValue($price ?: ($raw['unit_price'] ?? 0));
         $item = $order->items()->firstOrNew(['marketplace' => $order->marketplace, 'marketplace_order_id' => $order->marketplace_order_id, 'marketplace_item_id' => $id]);
         $created = ! $item->exists;
-        $item->fill(['product_name' => (string) ($raw['offer']['name'] ?? $raw['title'] ?? $raw['name'] ?? $raw['legacyItemId'] ?? 'Marketplace item'), 'sku' => (string) ($raw['offer']['external']['id'] ?? $raw['sku'] ?? ''), 'offer_id' => (string) ($raw['offer']['id'] ?? $raw['part_id'] ?? $raw['ovoko_part_id'] ?? $raw['legacyItemId'] ?? ''), 'external_product_id' => (string) ($raw['productId'] ?? ''), 'unit_price' => $unit, 'quantity' => max(1, $qty), 'line_total' => $this->amountValue($raw['total_price'] ?? ($unit * max(1, $qty))), 'currency' => (string) ($raw['currency'] ?? (is_array($price) ? ($price['currency'] ?? null) : null) ?? $order->currency), 'raw_payload' => $raw['raw_payload'] ?? $raw])->save();
+        $item->fill(['part_id' => $item->part_id, 'product_name' => (string) ($raw['offer']['name'] ?? $raw['title'] ?? $raw['name'] ?? $raw['legacyItemId'] ?? 'Marketplace item'), 'sku' => (string) ($raw['offer']['external']['id'] ?? $raw['sku'] ?? ''), 'offer_id' => (string) ($raw['offer']['id'] ?? $raw['part_id'] ?? $raw['ovoko_part_id'] ?? $raw['legacyItemId'] ?? ''), 'external_product_id' => (string) ($raw['productId'] ?? ''), 'unit_price' => $unit, 'quantity' => max(1, $qty), 'line_total' => $this->amountValue($raw['total_price'] ?? ($unit * max(1, $qty))), 'currency' => (string) ($raw['currency'] ?? (is_array($price) ? ($price['currency'] ?? null) : null) ?? $order->currency), 'raw_payload' => $raw['raw_payload'] ?? $raw])->save();
         $created ? $result['items_created']++ : $result['items_updated']++;
+
+        $mapping = $this->ovokoItemMapper->mapImportedItem($order, $item, $order->test_import !== true);
+        if (($mapping['mapped'] ?? false) === true) {
+            return;
+        }
 
         if ($order->test_import !== true) {
             $this->availabilityEvents->sold([
