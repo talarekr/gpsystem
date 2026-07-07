@@ -8,6 +8,7 @@ use App\Models\MarketplaceListing;
 use App\Models\Part;
 use App\Services\Admin\PartMarketplaceStatusResolver;
 use App\Services\Marketplace\Api\AllegroApiClient;
+use App\Services\Marketplace\AllegroListingStatusRefreshService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
@@ -43,6 +44,28 @@ class AllegroMarketplaceDiagnoseController extends Controller
         }
 
         return view('admin.tools.marketplace.allegro-diagnose', $payload);
+    }
+
+
+    public function refresh(Request $request, AllegroListingStatusRefreshService $service): JsonResponse
+    {
+        $listing = $this->listingForRefresh($request);
+        if (! $listing) {
+            return response()->json(['ok' => false, 'message' => 'No local Allegro listing found for the given part_id/offer_id.'], 404);
+        }
+
+        $result = $service->refresh($listing, trim((string) $request->input('offer_id', '')) ?: null);
+
+        return response()->json([
+            'ok' => (bool) ($result['ok'] ?? false),
+            'write' => 'local_marketplace_listing_status_only',
+            'marketplace_write' => false,
+            'publishing_triggered' => false,
+            'ending_triggered' => false,
+            'links_deleted' => false,
+            'part_status_changed' => false,
+            'result' => $result,
+        ], ($result['ok'] ?? false) ? 200 : 422);
     }
 
     /** @return array<int, int> */
@@ -105,6 +128,21 @@ class AllegroMarketplaceDiagnoseController extends Controller
                 'allegro_api' => $checkApi ? $this->apiOfferStatus($resolvedOfferId) : ['checked' => false, 'offer_id' => $resolvedOfferId ?: null],
             ];
         })->all();
+    }
+
+
+    private function listingForRefresh(Request $request): ?MarketplaceListing
+    {
+        $partId = $request->integer('part_id');
+        $offerId = trim((string) $request->input('offer_id', ''));
+
+        return MarketplaceListing::query()
+            ->whereIn('marketplace', ['allegro', 'allegro_main'])
+            ->when($partId > 0, fn ($query) => $query->where('part_id', $partId))
+            ->when($offerId !== '', fn ($query) => $query->where(fn ($inner) => $inner->where('external_offer_id', $offerId)->orWhere('external_listing_id', $offerId)))
+            ->with('account')
+            ->latest('id')
+            ->first();
     }
 
     /** @param array<string, mixed> $resolverRow @param array<int, array<string, mixed>> $listingRows */

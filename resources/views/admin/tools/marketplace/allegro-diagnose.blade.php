@@ -12,7 +12,7 @@
 <div class="wrap">
     <h1>Allegro marketplace diagnose</h1>
     <div class="card safe">
-        <p><b>Read-only:</b> narzędzie nie zmienia bazy, nie publikuje, nie kończy ofert, nie usuwa linków i nie zmienia lokalnego statusu części.</p>
+        <p><b>Diagnostyka GET jest read-only.</b> Osobna akcja POST „Odśwież status z Allegro” aktualizuje wyłącznie lokalne pola status/last_api_status/last_error w marketplace_listing.</p>
         <p class="muted">GET bez parametrów pokazuje tylko ten formularz — bez Allegro API calls i bez mutacji.</p>
         <p>Przykład użycia: <a href="{{ route('admin.tools.marketplace.allegro-diagnose', ['part_id' => 8061, 'offer_id' => '18741244685', 'check_api' => 1]) }}"><span class="mono">/admin/tools/marketplace/allegro-diagnose?part_id=8061&amp;offer_id=18741244685&amp;check_api=1</span></a></p>
     </div>
@@ -34,6 +34,15 @@
                 @endif
             </div>
         </form>
+        @if(count($part_ids) === 1)
+            <form method="post" action="{{ route('admin.tools.marketplace.allegro-diagnose.refresh-status') }}" style="margin-top:12px">
+                @csrf
+                <input type="hidden" name="part_id" value="{{ $part_ids[0] }}">
+                <input type="hidden" name="offer_id" value="{{ $offer_id }}">
+                <button class="btn" type="submit" style="background:#16a34a">Odśwież status z Allegro</button>
+                <span class="muted">POST + CSRF; nie publikuje, nie kończy oferty, nie usuwa linku i nie zmienia statusu części.</span>
+            </form>
+        @endif
     </div>
 
     @if($part_ids === [])
