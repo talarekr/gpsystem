@@ -119,6 +119,9 @@ class MarketplaceOrdersImportService
                     $preview['ordered_at_utc'] = $normalized['ordered_at_utc'] ?? null;
                     $preview['ordered_at_local'] = $normalized['ordered_at_local'] ?? null;
                     $preview['timezone'] = MarketplaceOrderTimeService::LOCAL_TIMEZONE;
+                    if (isset($normalized['ordered_at_diagnostics'])) {
+                        $preview['ordered_at_diagnostics'] = $normalized['ordered_at_diagnostics'];
+                    }
                     $result['would_import'][] = $preview;
                     continue;
                 }
@@ -398,11 +401,19 @@ class MarketplaceOrdersImportService
             }
         }
 
+        $rawOrderedAt = $raw['order_date'] ?? ($raw['created_at'] ?? ($raw['date'] ?? null));
+        $orderedAtUtc = $this->validDateString($rawOrderedAt);
+        $orderedAtLocal = $this->timeService->marketplaceUtcToLocalStorage($orderedAtUtc);
+        $orderedAtDiagnostics = $this->timeService->marketplaceUtcDiagnostics($rawOrderedAt);
+
         return [
             'marketplace' => 'ovoko',
             'marketplace_order_id' => (string) ($raw['order_id'] ?? ''),
             'marketplace_status' => (string) ($raw['order_status'] ?? ''),
-            'ordered_at' => $this->validDateString($raw['order_date'] ?? null),
+            'ordered_at_utc' => $this->timeService->marketplaceUtcIso($orderedAtUtc),
+            'ordered_at_local' => $orderedAtLocal,
+            'ordered_at' => $orderedAtLocal,
+            'ordered_at_diagnostics' => $orderedAtDiagnostics,
             'buyer_name' => (string) ($raw['client_name'] ?? ''),
             'buyer_email' => (string) ($raw['client_email'] ?? ''),
             'buyer_phone' => (string) ($raw['client_phone'] ?? ''),
@@ -588,7 +599,7 @@ class MarketplaceOrdersImportService
                 'currency' => substr($n['currency'], 0, 3), 'subtotal' => max(0, $n['total_amount'] - $n['delivery_amount']), 'shipping_total' => $n['delivery_amount'], 'total' => $n['total_amount'],
                 'payment_status' => $n['payment_status'], 'delivery_method' => $n['delivery_method'], 'customer_name' => $n['buyer_name'], 'email' => $n['buyer_email'] ?: 'marketplace-'.$n['marketplace_order_id'].'@example.invalid',
                 'phone' => $n['buyer_phone'] ?: '-', 'address_line1' => $n['delivery_address'] ?: '-', 'postal_code' => $n['delivery_postcode'] ?: '-', 'city' => $n['delivery_city'] ?: '-', 'country' => substr($n['delivery_country'] ?: 'PL', 0, 2),
-                'invoice_data' => $n['invoice_data'], 'raw_payload' => $raw, 'imported_at' => $order->imported_at ?: now(), 'test_import' => ! $liveImport, 'source_batch' => $liveImport ? self::LIVE_BATCH : self::TEST_BATCH,
+                'invoice_data' => $n['invoice_data'], 'raw_payload' => $raw, 'meta' => array_filter(['ordered_at_diagnostics' => $n['ordered_at_diagnostics'] ?? null]), 'imported_at' => $order->imported_at ?: now(), 'test_import' => ! $liveImport, 'source_batch' => $liveImport ? self::LIVE_BATCH : self::TEST_BATCH,
                 'notes' => trim(($liveImport ? '' : 'TEST IMPORT marketplace order. ').(string) ($order->notes ?? '')),
             ];
             if ($created) {

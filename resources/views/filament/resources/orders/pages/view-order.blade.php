@@ -18,6 +18,7 @@
     };
     $shipmentRequiredFields = ['Waga', 'Długość', 'Szerokość', 'Wysokość', 'Typ paczki / gabaryt', 'Opis na etykiecie / referencja'];
     $orderedAt = $order->ordered_at ? $order->ordered_at->format('Y-m-d H:i') : '—';
+    $orderedAtDiagnostics = is_array($order->meta) ? data_get($order->meta, 'ordered_at_diagnostics') : null;
     $statusOptions = OrderStatusOptions::optionsForOrder($order);
     $selectedStatus = OrderStatusOptions::selectedValueForOrder($order);
     $total = OrderResource::formatOrderTotal($order);
@@ -259,6 +260,10 @@
                 <div class="gps-order-detail-fact">
                     <div class="gps-order-detail-label">Data i kanał sprzedaży</div>
                     <div class="gps-order-detail-date">{{ $orderedAt }}</div>
+                    @if (is_array($orderedAtDiagnostics))
+                        <div class="gps-order-detail-source-row">Raw: {{ data_get($orderedAtDiagnostics, 'raw_timestamp') ?: '—' }}</div>
+                        <div class="gps-order-detail-source-row">UTC: {{ data_get($orderedAtDiagnostics, 'parsed_utc') ?: '—' }} → Europe/Warsaw: {{ data_get($orderedAtDiagnostics, 'displayed_at') ?: '—' }}</div>
+                    @endif
                     <div class="gps-order-detail-source-row">Źródło: @include('filament.resources.orders.partials.source-wordmark', ['marketplace' => $marketplace])</div>
                 </div>
             </div>
