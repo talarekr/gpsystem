@@ -134,7 +134,7 @@ class PartMarketplaceStatusResolver
             return ['is_active' => false, 'reason' => 'part_not_available'];
         }
 
-        if (! $listing || $this->externalOfferId($listing) === null) {
+        if (! $listing || ! $this->hasListingReference($listing, $channel)) {
             return ['is_active' => false, 'reason' => 'missing_listing'];
         }
 
@@ -149,15 +149,35 @@ class PartMarketplaceStatusResolver
             'allegro' => in_array($status, ['active'], true) && ! in_array($apiStatus, ['error', 'failed'], true)
                 ? ['is_active' => true, 'reason' => 'allegro_active']
                 : ['is_active' => false, 'reason' => 'allegro_not_active'],
-            'ovoko' => in_array($status, ['active', 'published', 'in_stock', 'in-stock', 'for_sale', 'for-sale'], true)
-                || in_array(strtolower((string) $listing->sync_status), ['in_stock', 'in-stock', 'active', 'for_sale', 'for-sale'], true)
-                    ? ['is_active' => true, 'reason' => 'ovoko_active']
-                    : ['is_active' => false, 'reason' => 'ovoko_not_active'],
+            'ovoko' => $this->isActiveOvokoListing($listing)
+                ? ['is_active' => true, 'reason' => 'ovoko_active']
+                : ['is_active' => false, 'reason' => 'ovoko_not_active'],
             'ebay' => in_array($status, ['active', 'published'], true) && ($listing->quantity === null || (int) $listing->quantity > 0)
                 ? ['is_active' => true, 'reason' => 'ebay_active_with_inventory']
                 : ['is_active' => false, 'reason' => 'ebay_not_active_or_no_inventory'],
             default => ['is_active' => false, 'reason' => 'unknown_channel'],
         };
+    }
+
+    private function isActiveOvokoListing(MarketplaceListing $listing): bool
+    {
+        $activeStatuses = ['active', 'published', 'in_stock', 'in-stock', 'for_sale', 'for-sale'];
+        $status = strtolower((string) $listing->status);
+        $syncStatus = strtolower((string) $listing->sync_status);
+        $matchStatus = strtolower((string) $listing->match_status);
+
+        return in_array($status, $activeStatuses, true)
+            || in_array($syncStatus, $activeStatuses, true)
+            || ($status === 'imported' && $syncStatus === 'mapped' && $matchStatus === 'confirmed');
+    }
+
+    private function hasListingReference(MarketplaceListing $listing, string $channel): bool
+    {
+        if ($this->externalOfferId($listing) !== null) {
+            return true;
+        }
+
+        return $channel === 'ovoko' && $this->listingUrl($listing) !== null;
     }
 
     private function hasBlockingError(MarketplaceListing $listing): bool

@@ -344,6 +344,39 @@ class PartModuleFoundationTest extends TestCase
         $this->assertNull($diagnostics['link_hidden_reason']);
     }
 
+
+    public function test_ready_available_part_with_confirmed_imported_ovoko_mapping_renders_active_check_icon(): void
+    {
+        $part = Part::query()->create([
+            'name' => 'Ovoko imported mapped part',
+            'quantity' => 1,
+            'status' => 'ready',
+            'needs_listing' => false,
+        ]);
+
+        $this->assertSame('for_sale', $part->adminLocalAvailability());
+
+        MarketplaceListing::query()->create([
+            'part_id' => $part->id,
+            'marketplace' => 'ovoko',
+            'external_offer_id' => '11041',
+            'status' => 'imported',
+            'sync_status' => 'mapped',
+            'match_status' => 'confirmed',
+            'last_error' => null,
+            'last_api_status' => null,
+            'url' => 'https://ovoko.pl/czesci-samochodowe/hgf11041-imported-part',
+        ]);
+
+        $row = collect(app(\App\Services\Admin\PartMarketplaceStatusResolver::class)->rowsForPart($part->fresh('marketplaceListings')))
+            ->firstWhere('key', 'ovoko');
+
+        $this->assertTrue($row['has_link']);
+        $this->assertTrue($row['is_active']);
+        $this->assertSame('check', $row['icon']);
+        $this->assertSame('ovoko_active', $row['reason']);
+    }
+
     public function test_ready_part_with_confirmed_marketplace_listing_urls_resolves_and_renders_all_channel_links(): void
     {
         $part = Part::query()->create([
