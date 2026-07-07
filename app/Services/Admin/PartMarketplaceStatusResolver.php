@@ -152,7 +152,7 @@ class PartMarketplaceStatusResolver
             'ovoko' => $this->isActiveOvokoListing($listing)
                 ? ['is_active' => true, 'reason' => 'ovoko_active']
                 : ['is_active' => false, 'reason' => 'ovoko_not_active'],
-            'ebay' => in_array($status, ['active', 'published'], true) && ($listing->quantity === null || (int) $listing->quantity > 0)
+            'ebay' => $this->isActiveEbayListing($listing)
                 ? ['is_active' => true, 'reason' => 'ebay_active_with_inventory']
                 : ['is_active' => false, 'reason' => 'ebay_not_active_or_no_inventory'],
             default => ['is_active' => false, 'reason' => 'unknown_channel'],
@@ -171,13 +171,33 @@ class PartMarketplaceStatusResolver
             || ($status === 'imported' && $syncStatus === 'mapped' && $matchStatus === 'confirmed');
     }
 
+    private function isActiveEbayListing(MarketplaceListing $listing): bool
+    {
+        $status = strtolower((string) $listing->status);
+        $apiStatus = strtolower((string) $listing->last_api_status);
+
+        if (! in_array($status, ['active', 'published', 'live'], true)) {
+            return false;
+        }
+
+        if (in_array($apiStatus, ['ended', 'inactive', 'deleted', 'archived', 'not_found', 'unavailable', 'failed', 'error'], true)) {
+            return false;
+        }
+
+        if ($listing->not_seen_in_active_api_at !== null) {
+            return false;
+        }
+
+        return ($listing->quantity === null || (int) $listing->quantity > 0);
+    }
+
     private function hasListingReference(MarketplaceListing $listing, string $channel): bool
     {
         if ($this->externalOfferId($listing) !== null) {
             return true;
         }
 
-        return $channel === 'ovoko' && $this->listingUrl($listing) !== null;
+        return in_array($channel, ['ovoko', 'ebay'], true) && $this->listingUrl($listing) !== null;
     }
 
     private function hasBlockingError(MarketplaceListing $listing): bool
