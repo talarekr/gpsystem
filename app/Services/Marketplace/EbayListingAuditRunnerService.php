@@ -111,7 +111,7 @@ class EbayListingAuditRunnerService
     private function response(array $run, int $batchSize, int $offsetBefore, int $offsetAfter, int $processed, ?array $batchSummary = null): array
     {
         $completed = ($run['status'] ?? null) === 'completed';
-        $base = '/admin/tools/marketplace/ebay-listing-audit-runner';
+        $base = '/admin/tools/ebay/listing-audit-runner';
         return ['run_id' => $run['run_id'], 'status' => $run['status'], 'batch_size' => $batchSize, 'offset_before' => $offsetBefore, 'offset_after' => $offsetAfter, 'processed_in_batch' => $processed, 'total_count' => $run['total_count'], 'remaining_count' => max(0, (int)$run['total_count'] - (int)$run['offset']), 'completed' => $completed, 'next_url' => $completed ? null : $base.'?channel='.$run['channel'].'&batch_size='.$batchSize.'&run_id='.$run['run_id'], 'summary_total' => $run['summary'], 'summary_batch' => $batchSummary ?? $this->emptySummary($run['channel']), 'problem_samples' => $run['problem_samples'], 'status_url' => $base.'/status?run_id='.$run['run_id'], 'problems_url' => $base.'/status?run_id='.$run['run_id'].'&problems=1'];
     }
 

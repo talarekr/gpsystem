@@ -312,6 +312,11 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/jarek-gearboxes/{jarekGearbox}/ebay-preview', [JarekGearboxToolController::class, 'ebayPreview'])->name('admin.tools.jarek-gearboxes.ebay-preview');
     Route::get('/admin/tools/ebay/prepare-debug/{partId}', [PartMarketplaceReadinessController::class, 'ebayPrepareDebug'])->name('admin.tools.ebay.prepare-debug');
     Route::match(['get', 'post'], '/admin/tools/ebay/marketplace-diagnose', EbayMarketplaceDiagnoseController::class)->name('admin.tools.ebay.marketplace-diagnose');
+    Route::match(['get', 'post'], '/admin/tools/ebay/listing-audit-runner', EbayListingAuditRunnerController::class)->name('admin.tools.ebay.listing-audit-runner');
+    Route::get('/admin/tools/ebay/listing-audit-runner/status', [EbayListingAuditRunnerController::class, 'status'])->name('admin.tools.ebay.listing-audit-runner.status');
+    Route::get('/admin/tools/ebay-listing-audit-runner', fn (Request $request) => redirect()->to('/admin/tools/ebay/listing-audit-runner'.($request->getQueryString() ? '?'.$request->getQueryString() : '')))->name('admin.tools.ebay-listing-audit-runner.redirect');
+    Route::post('/admin/tools/ebay-listing-audit-runner', EbayListingAuditRunnerController::class)->name('admin.tools.ebay-listing-audit-runner.alias');
+    Route::get('/admin/tools/ebay-listing-audit-runner/status', fn (Request $request) => redirect()->to('/admin/tools/ebay/listing-audit-runner/status'.($request->getQueryString() ? '?'.$request->getQueryString() : '')))->name('admin.tools.ebay-listing-audit-runner.status.redirect');
     Route::get('/admin/tools/marketplace/oauth-token-health', MarketplaceOAuthTokenHealthController::class)->name('admin.tools.marketplace.oauth-token-health');
     Route::get('/admin/tools/marketplace/ovoko-url-backfill', OvokoListingUrlBackfillController::class)->name('admin.tools.marketplace.ovoko-url-backfill');
     Route::get('/admin/tools/marketplace/mapping-gaps-export', MarketplaceMappingGapsExportController::class)->name('admin.tools.marketplace.mapping-gaps-export');
@@ -349,8 +354,9 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/marketplace/manual-link-mapping/replace-apply', [ManualLinkMappingReplaceController::class, 'apply'])->name('admin.tools.marketplace.manual-link-mapping.replace-apply');
     Route::get('/admin/tools/marketplace/ebay-listing-audit', EbayListingAuditController::class)->name('admin.tools.marketplace.ebay-listing-audit');
     Route::get('/admin/tools/marketplace/ebay-description-audit', EbayDescriptionAuditController::class)->name('admin.tools.marketplace.ebay-description-audit');
-    Route::match(['get', 'post'], '/admin/tools/marketplace/ebay-listing-audit-runner', EbayListingAuditRunnerController::class)->name('admin.tools.marketplace.ebay-listing-audit-runner');
-    Route::get('/admin/tools/marketplace/ebay-listing-audit-runner/status', [EbayListingAuditRunnerController::class, 'status'])->name('admin.tools.marketplace.ebay-listing-audit-runner.status');
+    Route::get('/admin/tools/marketplace/ebay-listing-audit-runner', fn (Request $request) => redirect()->to('/admin/tools/ebay/listing-audit-runner'.($request->getQueryString() ? '?'.$request->getQueryString() : '')))->name('admin.tools.marketplace.ebay-listing-audit-runner.redirect');
+    Route::post('/admin/tools/marketplace/ebay-listing-audit-runner', EbayListingAuditRunnerController::class)->name('admin.tools.marketplace.ebay-listing-audit-runner.alias');
+    Route::get('/admin/tools/marketplace/ebay-listing-audit-runner/status', fn (Request $request) => redirect()->to('/admin/tools/ebay/listing-audit-runner/status'.($request->getQueryString() ? '?'.$request->getQueryString() : '')))->name('admin.tools.marketplace.ebay-listing-audit-runner.status.redirect');
     Route::match(['get', 'post'], '/admin/tools/marketplace/orders-reset', MarketplaceOrdersResetController::class)->name('admin.tools.marketplace.orders-reset');
     Route::match(['get', 'post'], '/admin/tools/marketplace/orders-sync', MarketplaceOrdersSyncController::class)->name('admin.tools.marketplace.orders-sync');
     Route::match(['get', 'post'], '/admin/tools/marketplace/orders-purge', MarketplaceOrdersPurgeToolController::class)->name('admin.tools.marketplace.orders-purge');
