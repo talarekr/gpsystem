@@ -136,12 +136,12 @@
                 <span class="part-channel-label {{ ($row['key'] ?? '') === 'storefront' ? 'is-storefront-label' : '' }}">@if (in_array($row['key'] ?? '', ['allegro', 'ovoko', 'ebay'], true))@include('filament.resources.orders.partials.source-wordmark', ['marketplace' => $row['key']])@else{{ $row['label'] }}@endif:</span>
                 <span class="part-channel-price">{{ $row['price'] }}</span>
                 <span
-                    class="part-channel-status {{ $row['listed'] ? 'is-listed' : 'is-not-listed' }}"
+                    class="part-channel-status {{ ($row['is_active'] ?? $row['listed']) ? 'is-listed' : 'is-not-listed' }}"
                     title="{{ $row['title'] }}"
                     aria-label="{{ $row['title'] }}"
-                >{{ $row['listed'] ? '✓' : '✕' }}</span>
+                >{{ $row['display_icon'] ?? (($row['is_active'] ?? $row['listed']) ? '✓' : '✕') }}</span>
                 <span class="part-channel-link-slot">
-                    @if ($row['listed'] && filled($row['url'] ?? null))
+                    @if (($row['has_link'] ?? filled($row['url'] ?? null)) && filled($row['url'] ?? null))
                         <a
                             class="part-channel-link"
                             href="{{ $row['url'] }}"
