@@ -201,24 +201,20 @@ class ListParts extends Page
                 ]);
 
                 try {
-                    $mappingService = app(ManualMarketplaceLinkMappingService::class);
-                    $result = $mappingService->saveIdempotentSameExternalId($part, $marketplace, (string) $url, $exception->newId);
+                    $result = app(ManualMarketplaceLinkMappingService::class)->saveIdempotentSameExternalId($part, $marketplace, (string) $url, $exception->newId);
                 } catch (Throwable $repairException) {
-                    $diagnostics = app(ManualMarketplaceLinkMappingService::class)->repairDiagnostics($part, $marketplace, (string) $url, $exception->newId);
-                    $reason = $repairException::class.': '.$repairException->getMessage();
-
-                    Log::error('manual_marketplace_link_same_id_repair_failed', $diagnostics + [
+                    Log::error('manual_marketplace_link_same_id_repair_failed', [
+                        'part_id' => $partId,
+                        'marketplace' => $marketplace,
                         'existing_id' => $exception->existingId,
                         'new_id' => $exception->newId,
-                        'existing_listing_id' => $exception->existingListingId,
-                        'existing_part_id' => $exception->existingPartId,
                         'exception_class' => $repairException::class,
-                        'exception_message' => $repairException->getMessage(),
+                        'message' => $repairException->getMessage(),
                     ]);
 
                     Notification::make()
                         ->title('Nie udało się uzupełnić lokalnego mapowania marketplace.')
-                        ->body('reason='.$reason.' | listing_id='.($diagnostics['listing_id'] ?? 'null').' | part_id='.$diagnostics['part_id'].' | marketplace='.$diagnostics['marketplace'].' | attempted_external_offer_id='.$diagnostics['attempted_external_offer_id'].' | attempted_external_listing_id='.$diagnostics['attempted_external_listing_id'].' | attempted_url='.$diagnostics['attempted_url'].' | attempted_status='.$diagnostics['attempted_status'].' | attempted_sync_status='.$diagnostics['attempted_sync_status'].' | attempted_match_status='.$diagnostics['attempted_match_status'].' | current_external_id='.$exception->existingId.' | new_external_id='.$exception->newId.' | marketplace_write=false | sync_triggered=false')
+                        ->body('current_external_id='.$exception->existingId.' | new_external_id='.$exception->newId.' | marketplace_write=false | sync_triggered=false')
                         ->danger()
                         ->send();
 
