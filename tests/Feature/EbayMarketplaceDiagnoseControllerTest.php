@@ -123,6 +123,36 @@ class EbayMarketplaceDiagnoseControllerTest extends TestCase
             ->assertJsonPath('rows.0.resolver_ebay.reason', 'ebay_end_date_in_past');
     }
 
+
+    public function test_active_ebay_fr_does_not_satisfy_main_ebay_or_de_publish_need(): void
+    {
+        $this->actingAsAdminUser();
+
+        $part = Part::query()->create(['name' => 'French only eBay', 'sku' => 'EB-FR', 'quantity' => 1, 'status' => 'ready']);
+        MarketplaceListing::query()->create([
+            'part_id' => $part->id,
+            'marketplace' => 'ebay_fr',
+            'external_listing_id' => '987654321098',
+            'url' => 'https://www.ebay.fr/itm/987654321098',
+            'status' => 'active',
+            'last_api_status' => 'active',
+        ]);
+
+        $resolverRow = collect(app(PartMarketplaceStatusResolver::class)->rowsForPart($part->fresh('marketplaceListings')))->firstWhere('key', 'ebay');
+        $this->assertSame('✕', $resolverRow['display_icon']);
+        $this->assertSame('missing_listing', $resolverRow['reason']);
+        $this->assertNull($resolverRow['url']);
+
+        $this->getJson('/admin/tools/ebay/marketplace-diagnose?action=part&part_ids='.$part->id.'&format=json')
+            ->assertOk()
+            ->assertJsonPath('rows.0.ebay_de_status', 'missing')
+            ->assertJsonPath('rows.0.ebay_de_url', null)
+            ->assertJsonPath('rows.0.ebay_fr_status', 'active')
+            ->assertJsonPath('rows.0.ebay_fr_url', 'https://www.ebay.fr/itm/987654321098')
+            ->assertJsonPath('rows.0.needs_ebay_de_publish', true)
+            ->assertJsonPath('rows.0.resolver_ebay.display_icon', '✕');
+    }
+
     public function test_apply_inactive_is_not_allowed_by_get(): void
     {
         $this->actingAsAdminUser();

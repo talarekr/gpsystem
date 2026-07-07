@@ -83,7 +83,7 @@ class EbayMarketplaceDiagnoseController extends Controller
         $listingRows = $listings->map(function (MarketplaceListing $listing) use ($checkApi, $applyInactive): array {
             $api = $checkApi ? $this->apiStatus($listing) : ['api_listing_status' => 'not_checked'];
             if (($api['end_date_is_past'] ?? false) === true && ($api['api_listing_status'] ?? null) === 'active') $api['api_listing_status'] = 'ended';
-            if ($applyInactive && in_array((string) ($api['api_listing_status'] ?? ''), ['ended', 'inactive', 'not_found', 'unavailable'], true)) {
+            if ($applyInactive && in_array($listing->marketplace, ['ebay_de', 'ebay'], true) && in_array((string) ($api['api_listing_status'] ?? ''), ['ended', 'inactive', 'not_found', 'unavailable'], true)) {
                 $listing->forceFill(['status' => 'ended', 'sync_status' => 'historical', 'last_api_status' => $api['api_listing_status'], 'not_seen_in_active_api_at' => now()])->save();
             }
             return [
@@ -92,7 +92,9 @@ class EbayMarketplaceDiagnoseController extends Controller
         })->all();
 
         $resolverRow = collect($resolver->rowsForPart($part))->firstWhere('key', 'ebay') ?: [];
-        $classification = $this->classification($listingRows);
+        $ebayDe = $this->channelReport($listingRows, ['ebay_de', 'ebay']);
+        $ebayFr = $this->channelReport($listingRows, ['ebay_fr']);
+        $classification = $this->classification($ebayDe['listings']);
         $endedOrStale = str_contains($classification, 'ended/stale') || str_contains($classification, 'not_found');
         $resolverEbay = ['has_link' => $resolverRow['has_link'] ?? false, 'url' => $resolverRow['url'] ?? null, 'is_active' => $resolverRow['is_active'] ?? false, 'icon' => $resolverRow['icon'] ?? null, 'display_icon' => $resolverRow['display_icon'] ?? null, 'reason' => $resolverRow['reason'] ?? null, 'title' => $resolverRow['title'] ?? null];
 
@@ -104,7 +106,48 @@ class EbayMarketplaceDiagnoseController extends Controller
             $resolverEbay['title'] = 'Oferta eBay nieaktywna: '.$resolverEbay['reason'];
         }
 
-        return ['part' => ['id' => $part->id, 'sku' => $part->sku, 'part_number' => $part->part_number, 'status' => $part->status, 'quantity' => $part->quantity, 'adminLocalAvailability' => $part->adminLocalAvailability()], 'marketplace_listings' => $listingRows, 'resolver_ebay' => $resolverEbay, 'duplicate_guard_would_block' => $endedOrStale ? false : collect($listingRows)->contains('duplicate_guard_would_block', true), 'audit_classification' => $classification];
+        return ['part' => ['id' => $part->id, 'sku' => $part->sku, 'part_number' => $part->part_number, 'status' => $part->status, 'quantity' => $part->quantity, 'adminLocalAvailability' => $part->adminLocalAvailability()], 'marketplace_listings' => $listingRows, 'ebay_de_status' => $ebayDe['status'], 'ebay_de_url' => $ebayDe['url'], 'ebay_fr_status' => $ebayFr['status'], 'ebay_fr_url' => $ebayFr['url'], 'ebay_overall' => $classification, 'needs_ebay_de_publish' => $this->needsEbayDePublish($part, $ebayDe['status']), 'resolver_ebay' => $resolverEbay, 'duplicate_guard_would_block' => $endedOrStale ? false : collect($ebayDe['listings'])->contains('duplicate_guard_would_block', true), 'audit_classification' => $classification];
+    }
+
+
+    private function channelReport(array $listingRows, array $marketplaces): array
+    {
+        $rows = collect($listingRows)->filter(fn ($row): bool => in_array((string) ($row['marketplace'] ?? ''), $marketplaces, true))->values();
+        $active = $rows->first(fn ($row): bool => ! $this->rowIsEndedOrStale($row) && $this->rowIsActive($row));
+        $preferred = $active ?: $rows->first(fn ($row): bool => $this->rowIsEndedOrStale($row)) ?: $rows->first();
+
+        return [
+            'status' => $rows->isEmpty() ? 'missing' : ($active ? 'active' : ($preferred && $this->rowIsEndedOrStale($preferred) ? $this->endedStatus($preferred) : 'not_active')),
+            'url' => $preferred['url'] ?? null,
+            'listings' => $rows->all(),
+        ];
+    }
+
+    private function needsEbayDePublish(Part $part, string $ebayDeStatus): bool
+    {
+        return in_array($part->status, ['ready'], true) && (int) $part->quantity > 0 && $part->adminLocalAvailability() !== 'sold' && $ebayDeStatus !== 'active';
+    }
+
+    private function rowIsActive(array $row): bool
+    {
+        $status = strtolower((string) ($row['status'] ?? ''));
+        $apiStatus = strtolower((string) data_get($row, 'api.api_listing_status', $row['last_api_status'] ?? ''));
+
+        return in_array($status, ['active', 'published', 'live'], true) && ! in_array($apiStatus, ['ended', 'inactive', 'deleted', 'archived', 'not_found', 'unavailable', 'failed', 'error'], true);
+    }
+
+    private function rowIsEndedOrStale(array $row): bool
+    {
+        $status = strtolower((string) ($row['status'] ?? ''));
+        $apiStatus = strtolower((string) data_get($row, 'api.api_listing_status', $row['last_api_status'] ?? ''));
+
+        return (bool) data_get($row, 'api.end_date_is_past', false) || in_array($status, ['ended', 'inactive', 'deleted', 'archived', 'not_found', 'unavailable'], true) || in_array($apiStatus, ['ended', 'inactive', 'deleted', 'archived', 'not_found', 'unavailable'], true);
+    }
+
+    private function endedStatus(array $row): string
+    {
+        $apiStatus = strtolower((string) data_get($row, 'api.api_listing_status', ''));
+        return in_array($apiStatus, ['not_found', 'ended', 'inactive', 'unavailable'], true) ? $apiStatus : 'ended';
     }
 
     private function classification(array $listingRows): string
