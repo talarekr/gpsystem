@@ -112,7 +112,7 @@
             <div class="sf-checkout-summary__items">
                 @foreach($items as $item)
                     <div class="sf-checkout-summary__row sf-checkout-summary__row--product">
-                        <span>{{ $item['name'] }} <em>× {{ $item['quantity'] }}</em></span>
+                        <span class="sf-checkout-summary__product-title">{{ $item['name'] }} <em>× {{ $item['quantity'] }}</em></span>
                         <strong>{{ number_format((float) $item['line_total'], 2, ',', ' ') }} {{ $item['currency'] }}</strong>
                     </div>
                 @endforeach
