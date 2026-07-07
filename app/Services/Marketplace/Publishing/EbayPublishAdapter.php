@@ -73,6 +73,9 @@ class EbayPublishAdapter extends BaseMarketplacePublishAdapter
         $settings = is_array($account->api_settings) ? $account->api_settings : [];
         $policies = $payload['business_policies'] ?? [];
         $sku = $this->skuFor($part, $payload);
+        if ($this->hasHistoricalEbayListing($part)) {
+            $sku = $this->freshSkuForHistoricalListing($sku, $part);
+        }
         $payload['sku'] = $sku;
         $missing = [];
         foreach (['category_id' => 'eBay: brakuje categoryId dla wybranej kategorii', 'title' => 'eBay: brakuje title'] as $key => $message) if (blank($payload[$key] ?? null) && ($key !== 'title' || blank($part->name ?? null))) $missing[] = $message;
@@ -127,6 +130,29 @@ class EbayPublishAdapter extends BaseMarketplacePublishAdapter
         Log::info('eBay existing offer attached locally', ['part_id' => $part->id, 'sku' => $sku, 'channel' => $this->accountCode(), 'offerId' => $offerId, 'listingId' => $listingId, 'local_listing_id' => $listing->id, 'local_listing_created' => $created, 'continued_publishOffer' => true]);
 
         return ['conflict' => false, 'listing_id' => $listing->id, 'log_context' => ['ebay_existing_offer_reused' => true, 'offer_id' => $offerId, 'external_listing_id' => $listingId, 'local_listing_created' => $created, 'continued_publishOffer' => true]];
+    }
+
+    private function hasHistoricalEbayListing(Part $part): bool
+    {
+        if (! Schema::hasTable('marketplace_listings')) return false;
+
+        return MarketplaceListing::query()
+            ->where('marketplace', $this->marketplace())
+            ->where('part_id', $part->id)
+            ->where(function ($query): void {
+                $query->whereIn('status', ['ended', 'failed', 'deleted', 'archived', 'cancelled', 'ENDED', 'FAILED', 'DELETED', 'ARCHIVED', 'CANCELLED'])
+                    ->orWhereIn('last_api_status', ['ended', 'inactive', 'deleted', 'archived', 'not_found', 'unavailable', 'failed', 'error', 'ENDED', 'INACTIVE', 'DELETED', 'ARCHIVED', 'NOT_FOUND', 'UNAVAILABLE', 'FAILED', 'ERROR'])
+                    ->orWhereNotNull('not_seen_in_active_api_at');
+            })
+            ->exists();
+    }
+
+    private function freshSkuForHistoricalListing(string $sku, Part $part): string
+    {
+        $suffix = '-NEW'.now()->format('ymdHis');
+        $base = $sku !== '' ? $sku : 'GPSW-'.$part->id;
+
+        return mb_substr($base, 0, max(1, 50 - mb_strlen($suffix))).$suffix;
     }
 
     /**
