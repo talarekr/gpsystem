@@ -74,6 +74,7 @@ use App\Http\Controllers\Tools\OvokoStockSyncController;
 use App\Http\Controllers\Tools\OvokoStockSyncRunnerController;
 use App\Http\Controllers\Tools\OvokoListingUrlBackfillController;
 use App\Http\Controllers\Tools\OvokoListingUrlDiagnosticsController;
+use App\Http\Controllers\Tools\OvokoMarketplaceDiagnoseController;
 use App\Http\Controllers\Tools\OvokoLinkedProductsCheckController;
 use App\Http\Controllers\Tools\OvokoSoldMappingCheckController;
 use App\Http\Controllers\Tools\OvokoImportProductDataController;
@@ -331,6 +332,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::match(['get', 'post'], '/admin/tools/ovoko-stock-sync-runner/cancel/{run}', [OvokoStockSyncRunnerController::class, 'cancel'])->name('admin.tools.ovoko-stock-sync-runner.cancel');
     Route::get('/admin/tools/marketplace/listing-url-backfill', MarketplaceListingUrlBackfillController::class)->name('admin.tools.marketplace.listing-url-backfill');
     Route::get('/admin/tools/marketplace/manual-link-mapping/diagnostics', ManualLinkMappingDiagnosticsController::class)->name('admin.tools.marketplace.manual-link-mapping.diagnostics');
+    Route::get('/admin/tools/marketplace/ovoko-diagnose', OvokoMarketplaceDiagnoseController::class)->name('admin.tools.marketplace.ovoko-diagnose');
     Route::get('/admin/tools/marketplace/manual-link-mapping/replace-dry-run', [ManualLinkMappingReplaceController::class, 'dryRun'])->name('admin.tools.marketplace.manual-link-mapping.replace-dry-run');
     Route::get('/admin/tools/marketplace/manual-link-mapping/replace-apply', [ManualLinkMappingReplaceController::class, 'apply'])->name('admin.tools.marketplace.manual-link-mapping.replace-apply');
     Route::get('/admin/tools/marketplace/ebay-listing-audit', EbayListingAuditController::class)->name('admin.tools.marketplace.ebay-listing-audit');
