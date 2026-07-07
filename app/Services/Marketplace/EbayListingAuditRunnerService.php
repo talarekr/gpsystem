@@ -102,7 +102,7 @@ class EbayListingAuditRunnerService
     {
         foreach ($rows as $row) {
             if (($row['should_panel_show_active'] ?? false) && ($row['action'] ?? 'ok_active') === 'ok_active') continue;
-            $existing[] = collect($row)->only(['local_part_id','marketplace_listing_id','sku','old_item_id','old_url','api_listing_status','final_panel_status','action'])->all();
+            $existing[] = collect($row)->only(['local_part_id','marketplace_listing_id','sku','old_item_id','old_url','api_listing_status','public_listing_status','final_panel_status','action','public_check'])->all();
             if (count($existing) >= self::PROBLEM_LIMIT) break;
         }
         return array_slice($existing, 0, self::PROBLEM_LIMIT);
@@ -112,7 +112,7 @@ class EbayListingAuditRunnerService
     {
         $completed = ($run['status'] ?? null) === 'completed';
         $base = '/admin/tools/ebay/listing-audit-runner';
-        return ['run_id' => $run['run_id'], 'status' => $run['status'], 'batch_size' => $batchSize, 'offset_before' => $offsetBefore, 'offset_after' => $offsetAfter, 'processed_in_batch' => $processed, 'total_count' => $run['total_count'], 'remaining_count' => max(0, (int)$run['total_count'] - (int)$run['offset']), 'completed' => $completed, 'next_url' => $completed ? null : $base.'?channel='.$run['channel'].'&batch_size='.$batchSize.'&run_id='.$run['run_id'], 'summary_total' => $run['summary'], 'summary_batch' => $batchSummary ?? $this->emptySummary($run['channel']), 'problem_samples' => $run['problem_samples'], 'status_url' => $base.'/status?run_id='.$run['run_id'], 'problems_url' => $base.'/status?run_id='.$run['run_id'].'&problems=1'];
+        return ['run_id' => $run['run_id'], 'status' => $run['status'], 'batch_size' => $batchSize, 'offset_before' => $offsetBefore, 'offset_after' => $offsetAfter, 'processed_count' => (int) $run['processed_count'], 'processed_in_batch' => $processed, 'total_count' => $run['total_count'], 'remaining_count' => max(0, (int)$run['total_count'] - (int)$run['offset']), 'completed' => $completed, 'next_url' => $completed ? null : $base.'?channel='.$run['channel'].'&batch_size='.$batchSize.'&run_id='.$run['run_id'], 'summary_total' => $run['summary'], 'summary_batch' => $batchSummary ?? $this->emptySummary($run['channel']), 'problem_samples' => $run['problem_samples'], 'status_url' => $base.'/status?run_id='.$run['run_id'], 'problems_url' => $base.'/status?run_id='.$run['run_id'].'&problems=1'];
     }
 
     private function load(string $runId): ?array { return $runId !== '' ? Cache::get(self::CACHE_PREFIX.$runId) : null; }

@@ -196,35 +196,74 @@ class EbayListingAuditService
         if ($api === 'active' || $public === 'active') return 'active';
         if (in_array($api, ['not_found'], true) || in_array($public, ['not_found'], true)) return 'not_found';
         if (in_array($api, ['ended', 'inactive'], true) || in_array($public, ['ended', 'inactive'], true)) return 'ended';
-        if ($api === 'unavailable') return in_array($public, ['active', 'ended', 'inactive', 'not_found'], true) ? ($public === 'inactive' ? 'ended' : $public) : 'api_public_check_error';
-        if (in_array($public, ['error', 'unknown'], true)) return 'api_public_check_error';
+        if ($api === 'unavailable') return in_array($public, ['active', 'ended', 'inactive', 'not_found'], true) ? ($public === 'inactive' ? 'ended' : $public) : ($public === 'error' ? 'api_public_check_error' : 'unknown');
+        if ($public === 'error') return 'api_public_check_error';
         return 'unknown';
     }
 
     private function publicCheckListing(MarketplaceListing $listing): array
     {
         $itemId = $this->itemIdFromUrl($listing->url);
-        if (! $itemId) return ['checked' => false, 'public_listing_status' => 'unknown', 'final_decision' => 'manual_review_public_status_required', 'error_message_safe' => 'No public eBay item id in URL.'];
+        if (! $itemId) return $this->publicCheckResult(false, $listing->url, null, null, 'unknown', 'missing_public_item_id', [], null, null, 'No public eBay item id in URL.');
         $url = $listing->url ?: (($listing->marketplace === 'ebay_fr' ? 'https://www.ebay.fr/itm/' : 'https://www.ebay.de/itm/').$itemId);
         try {
-            $response = Http::withHeaders(['User-Agent' => 'Mozilla/5.0 GPSwiss listing audit'])->timeout(15)->get($url);
-            $body = mb_strtolower(substr($response->body(), 0, 250000));
-            $status = $this->publicStatusFromHtml($response->status(), $body, $itemId);
-            return ['checked' => true, 'url' => $url, 'item_id' => $itemId, 'http_status' => $response->status(), 'public_listing_status' => $status, 'final_decision' => $status === 'active' ? 'public_link_confirms_active' : ($status === 'unknown' ? 'manual_review_public_status_required' : 'public_link_confirms_not_active')];
+            $response = Http::withHeaders(['User-Agent' => 'Mozilla/5.0 (compatible; GPSwiss listing audit; +https://gpswiss.ch)', 'Accept-Language' => $listing->marketplace === 'ebay_fr' ? 'fr-FR,fr;q=0.9,en;q=0.8' : 'de-DE,de;q=0.9,en;q=0.8'])->timeout(15)->get($url);
+            $raw = $response->body();
+            $normalized = $this->normalizePublicText($raw);
+            $finalUrl = method_exists($response, 'effectiveUri') ? (string) $response->effectiveUri() : (string) ($response->handlerStats()['url'] ?? $url);
+            $parsed = $this->publicStatusFromHtml($response->status(), $normalized, $itemId, $finalUrl);
+            return $this->publicCheckResult(true, $url, $itemId, $response->status(), $parsed['status'], $parsed['reason'], $parsed['signals'], $finalUrl, $normalized);
         } catch (\Throwable $e) {
-            return ['checked' => false, 'url' => $url, 'item_id' => $itemId, 'http_status' => null, 'public_listing_status' => 'error', 'final_decision' => 'public_check_error', 'error_message_safe' => $e->getMessage()];
+            return $this->publicCheckResult(false, $url, $itemId, null, 'error', 'fetch_exception', [], null, null, $e->getMessage());
         }
     }
 
-    private function publicStatusFromHtml(int $httpStatus, string $body, string $itemId): string
+    private function publicCheckResult(bool $checked, ?string $url, ?string $itemId, ?int $httpStatus, string $status, string $reason, array $signals, ?string $finalUrl, ?string $normalizedText, ?string $error = null): array
     {
-        if ($httpStatus === 404) return 'not_found';
-        if ($httpStatus >= 500 || $body === '') return 'error';
-        if (str_contains($body, 'itemid="'.$itemId.'"') || str_contains($body, '/itm/'.$itemId) || str_contains($body, 'itemid\":\"'.$itemId)) {
-            foreach (['sofort-kaufen', 'in den warenkorb', 'buy it now', 'add to cart', 'preisvorschlag senden', 'make offer'] as $needle) if (str_contains($body, $needle)) return 'active';
-        }
-        foreach (['dieses angebot wurde beendet', 'angebot beendet', 'this listing was ended', 'this item is out of stock', 'nicht mehr verfügbar', 'is no longer available', 'objet terminé'] as $needle) if (str_contains($body, $needle)) return 'ended';
-        return 'unknown';
+        $decision = $status === 'error' ? 'public_check_error' : ($status === 'active' ? 'public_link_confirms_active' : ($status === 'unknown' ? 'manual_review_public_status_required' : 'public_link_confirms_not_active'));
+        return [
+            'checked' => $checked,
+            'url' => $url,
+            'item_id' => $itemId,
+            'http_status' => $httpStatus,
+            'public_check_http_status' => $httpStatus,
+            'public_check_url_final' => $finalUrl,
+            'public_check_error_message' => $error,
+            'error_message_safe' => $error,
+            'public_listing_status' => $status,
+            'public_status_reason' => $reason,
+            'public_parser_matched_signals' => $signals,
+            'public_normalized_text_sample' => $normalizedText !== null ? mb_substr($normalizedText, 0, 1000) : null,
+            'final_decision' => $decision,
+        ];
+    }
+
+    private function publicStatusFromHtml(int $httpStatus, string $body, string $itemId, string $finalUrl): array
+    {
+        if ($httpStatus === 404) return ['status' => 'not_found', 'reason' => 'http_404', 'signals' => ['http_404']];
+        if ($httpStatus >= 500 || $body === '') return ['status' => 'error', 'reason' => $body === '' ? 'empty_response_body' : 'http_'.$httpStatus, 'signals' => []];
+        $signals = [];
+        foreach (['captcha','robot check','verify you are human','g-recaptcha'] as $needle) if (str_contains($body, $needle)) $signals[] = 'blocked:'.$needle;
+        foreach (['consent','privacy preferences','cookie settings','gdpr'] as $needle) if (str_contains($body, $needle)) $signals[] = 'consent:'.$needle;
+        if (! str_contains($finalUrl, '/itm/') && ! str_contains($body, '/itm/'.$itemId)) $signals[] = 'redirected_away_from_listing';
+        if (str_contains($body, 'itemid="'.$itemId.'"') || str_contains($body, '/itm/'.$itemId) || str_contains($body, 'itemid":"'.$itemId)) $signals[] = 'item_id_present';
+        foreach (['sofort-kaufen', 'in den warenkorb', 'buy it now', 'add to cart', 'preisvorschlag senden', 'make offer'] as $needle) if (str_contains($body, $needle)) $signals[] = 'active:'.$needle;
+        foreach (['dieses angebot wurde beendet', 'angebot beendet', 'this listing was ended', 'this item is out of stock', 'nicht mehr verfügbar', 'is no longer available', 'objet terminé'] as $needle) if (str_contains($body, $needle)) $signals[] = 'ended:'.$needle;
+        if (in_array('item_id_present', $signals, true) && collect($signals)->contains(fn($s) => str_starts_with($s, 'active:'))) return ['status' => 'active', 'reason' => 'listing_page_active_signal', 'signals' => $signals];
+        if (collect($signals)->contains(fn($s) => str_starts_with($s, 'ended:'))) return ['status' => 'ended', 'reason' => 'ended_signal', 'signals' => $signals];
+        if (collect($signals)->contains(fn($s) => str_starts_with($s, 'blocked:'))) return ['status' => 'unknown', 'reason' => 'blocked_or_captcha_html', 'signals' => $signals];
+        if (collect($signals)->contains(fn($s) => str_starts_with($s, 'consent:'))) return ['status' => 'unknown', 'reason' => 'consent_or_cookie_html', 'signals' => $signals];
+        if (in_array('redirected_away_from_listing', $signals, true)) return ['status' => 'unknown', 'reason' => 'redirected_away_from_listing', 'signals' => $signals];
+        return ['status' => 'unknown', 'reason' => 'no_known_public_status_signal', 'signals' => $signals];
+    }
+
+    private function normalizePublicText(string $html): string
+    {
+        $text = preg_replace('/<script\b[^>]*>.*?<\/script>/is', ' ', $html) ?? $html;
+        $text = preg_replace('/<style\b[^>]*>.*?<\/style>/is', ' ', $text) ?? $text;
+        $text = html_entity_decode(strip_tags($text), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $text = mb_strtolower($text);
+        return trim(preg_replace('/\s+/u', ' ', $text) ?? $text);
     }
 
     private function rawIds(array $raw): array { return array_filter(['item_id'=>Arr::get($raw,'ebay.item_id') ?? Arr::get($raw,'item_id'), 'listing_id'=>Arr::get($raw,'ebay.listing_id') ?? Arr::get($raw,'listing_id'), 'offer_id'=>Arr::get($raw,'offerId') ?? Arr::get($raw,'offer_id'), 'inventory_id'=>Arr::get($raw,'inventoryItemGroupKey') ?? Arr::get($raw,'inventory_id')], fn($v)=>filled($v)); }
