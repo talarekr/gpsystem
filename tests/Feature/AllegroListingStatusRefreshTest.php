@@ -74,4 +74,50 @@ class AllegroListingStatusRefreshTest extends TestCase
         $this->assertSame('✓', $after['display_icon']);
         $this->assertSame('https://allegro.pl/oferta/18741244685', $after['url']);
     }
+
+    public function test_post_publish_safe_refresh_does_not_end_listing_when_api_reports_ended(): void
+    {
+        $account = MarketplaceAccount::query()->create([
+            'code' => 'allegro_main',
+            'marketplace' => 'allegro',
+            'name' => 'Allegro',
+            'status' => 'active',
+            'api_enabled' => true,
+            'api_base_url' => 'https://api.allegro.test',
+            'api_credentials' => ['access_token' => 'token'],
+        ]);
+        $part = Part::query()->create(['name' => 'Allegro safe refresh part', 'sku' => 'ALG-SAFE', 'quantity' => 1, 'status' => 'ready']);
+        $listing = MarketplaceListing::query()->create([
+            'marketplace_account_id' => $account->id,
+            'part_id' => $part->id,
+            'marketplace' => 'allegro',
+            'external_offer_id' => '18741244686',
+            'external_listing_id' => '18741244686',
+            'url' => 'https://allegro.pl/oferta/18741244686',
+            'status' => 'publication_pending',
+            'sync_status' => 'published',
+            'match_status' => 'matched',
+        ]);
+
+        Http::fake([
+            'https://api.allegro.test/sale/product-offers/18741244686' => Http::response([
+                'id' => '18741244686',
+                'publication' => ['status' => 'ENDED'],
+                'stock' => ['available' => 0],
+            ], 200),
+        ]);
+
+        $result = app(AllegroListingStatusRefreshService::class)->refresh($listing, null, true);
+
+        $this->assertTrue($result['ok']);
+        $this->assertArrayNotHasKey('status', $result['changes']);
+        $this->assertDatabaseHas('marketplace_listings', [
+            'id' => $listing->id,
+            'status' => 'publication_pending',
+            'last_api_status' => 'ENDED',
+            'url' => 'https://allegro.pl/oferta/18741244686',
+        ]);
+        $this->assertDatabaseHas('parts', ['id' => $part->id, 'status' => 'ready']);
+    }
+
 }

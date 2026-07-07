@@ -9,7 +9,7 @@ use Illuminate\Support\Arr;
 
 class AllegroListingStatusRefreshService
 {
-    public function refresh(MarketplaceListing $listing, ?string $offerId = null): array
+    public function refresh(MarketplaceListing $listing, ?string $offerId = null, bool $postPublishSafe = false): array
     {
         $offerId = $this->offerId($listing, $offerId);
         $before = $this->snapshot($listing);
@@ -40,7 +40,7 @@ class AllegroListingStatusRefreshService
             $updates['status'] = 'active';
         } elseif (! $apiOk) {
             $updates['last_error'] = $json['message'] ?? $json['error'] ?? 'Allegro status refresh failed.';
-        } elseif (strtoupper($publicationStatus) === 'ENDED') {
+        } elseif (! $postPublishSafe && strtoupper($publicationStatus) === 'ENDED') {
             $updates['status'] = 'ended';
         } elseif (strtoupper($publicationStatus) === 'ACTIVE') {
             $updates['last_error'] = 'Allegro offer is ACTIVE but stock.available is not greater than 0.';
