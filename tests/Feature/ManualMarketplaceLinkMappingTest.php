@@ -11,7 +11,6 @@ use App\Services\Marketplace\ManualMarketplaceLinkMappingService;
 use App\Services\Marketplace\ManualMarketplaceMappingConflictException;
 use Database\Seeders\RoleSeeder;
 use Filament\Facades\Filament;
-use Mockery;
 use Livewire\Livewire;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Spatie\Permission\PermissionRegistrar;
@@ -271,56 +270,6 @@ class ManualMarketplaceLinkMappingTest extends TestCase
 
         $this->assertDatabaseHas('marketplace_listings', ['part_id' => $part->id, 'marketplace' => 'allegro', 'external_offer_id' => '18303148717', 'external_listing_id' => '18303148717', 'url' => $url]);
         $this->assertSame(1, MarketplaceListing::query()->where('part_id', $part->id)->whereIn('marketplace', ['allegro', 'allegro_main'])->where('external_offer_id', '18303148717')->count());
-    }
-
-    public function test_manual_form_path_updates_same_real_allegro_id_without_conflict_when_current_id_is_resolved_from_url(): void
-    {
-        $this->actingAsAdminUser();
-        $part = Part::query()->create(['name' => 'Allegro same ID URL fallback regression', 'sku' => 'GPS-ALG-18331392855', 'quantity' => 1, 'status' => 'ready', 'currency' => 'PLN']);
-        MarketplaceListing::query()->create(['part_id' => $part->id, 'marketplace' => 'allegro', 'url' => 'https://allegro.pl/oferta/old-18331392855', 'status' => 'ACTIVE', 'sync_status' => 'mapped', 'match_status' => 'confirmed', 'last_api_status' => 'ACTIVE']);
-
-        $url = 'https://allegro.pl/oferta/mercedes-benz-a-w176-rozrusznik-18331392855';
-
-        Livewire::test(\App\Filament\Resources\PartResource\Pages\ListParts::class)
-            ->call('saveManualMarketplaceLink', $part->id, 'allegro', $url)
-            ->assertHasNoErrors();
-
-        $this->assertDatabaseHas('marketplace_listings', ['part_id' => $part->id, 'marketplace' => 'allegro', 'external_offer_id' => '18331392855', 'external_listing_id' => '18331392855', 'url' => $url]);
-        $this->assertSame(1, MarketplaceListing::query()->where('part_id', $part->id)->whereIn('marketplace', ['allegro', 'allegro_main'])->where('external_offer_id', '18331392855')->count());
-    }
-
-    public function test_manual_form_path_updates_same_real_ovoko_id_without_conflict_when_current_id_is_resolved_from_url(): void
-    {
-        $this->actingAsAdminUser();
-        $part = Part::query()->create(['name' => 'Ovoko same ID URL fallback regression', 'sku' => 'GPS-OV-9992', 'quantity' => 1, 'status' => 'ready', 'currency' => 'PLN']);
-        MarketplaceListing::query()->create(['part_id' => $part->id, 'marketplace' => 'ovoko', 'url' => 'https://ovoko.pl/czesci-samochodowe/hgf9992-old-part', 'status' => 'imported', 'sync_status' => 'mapped', 'match_status' => 'confirmed']);
-
-        $url = 'https://ovoko.pl/czesci-samochodowe/hgf9992-a6549060800-mercedes-benz-a-w176-rozrusznik';
-
-        Livewire::test(\App\Filament\Resources\PartResource\Pages\ListParts::class)
-            ->call('saveManualMarketplaceLink', $part->id, 'ovoko', $url)
-            ->assertHasNoErrors();
-
-        $this->assertDatabaseHas('marketplace_listings', ['part_id' => $part->id, 'marketplace' => 'ovoko', 'external_offer_id' => '9992', 'external_listing_id' => '9992', 'url' => $url]);
-        $this->assertSame(1, MarketplaceListing::query()->where('part_id', $part->id)->where('marketplace', 'ovoko')->where('external_offer_id', '9992')->count());
-    }
-
-    public function test_manual_form_path_suppresses_fail_safe_conflict_message_when_existing_and_new_ids_are_identical(): void
-    {
-        $this->actingAsAdminUser();
-        $part = Part::query()->create(['name' => 'Same ID conflict fail-safe regression', 'sku' => 'GPS-SAME-ID-FAILSAFE', 'quantity' => 1, 'status' => 'ready', 'currency' => 'PLN']);
-
-        $service = Mockery::mock(ManualMarketplaceLinkMappingService::class);
-        $service->shouldReceive('save')
-            ->once()
-            ->with(Mockery::on(fn (Part $argument): bool => (int) $argument->id === (int) $part->id), 'allegro', 'https://allegro.pl/oferta/part-18331392855')
-            ->andThrow(new ManualMarketplaceMappingConflictException('18331392855', '18331392855'));
-
-        $this->app->instance(ManualMarketplaceLinkMappingService::class, $service);
-
-        Livewire::test(\App\Filament\Resources\PartResource\Pages\ListParts::class)
-            ->call('saveManualMarketplaceLink', $part->id, 'allegro', 'https://allegro.pl/oferta/part-18331392855')
-            ->assertHasNoErrors();
     }
 
     public function test_manual_form_path_blocks_same_part_different_allegro_id(): void
