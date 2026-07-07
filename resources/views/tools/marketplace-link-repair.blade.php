@@ -21,11 +21,11 @@
     <button type="submit">Apply repair</button>
 </form>
 <table border="1" cellpadding="4">
-<thead><tr><th>part_id</th><th>channel</th><th>current ID/link</th><th>listing</th><th>missing</th><th>planned</th><th>before</th><th>after</th><th>action</th></tr></thead>
+<thead><tr><th>part_id</th><th>channel</th><th>current ID/link</th><th>listing</th><th>missing</th><th>planned</th><th>before</th><th>after</th><th>actual after write</th><th>action</th></tr></thead>
 <tbody>
 @foreach($rows as $row)
 <tr>
-<td>{{ $row['part_id'] }}</td><td>{{ $row['channel'] }}</td><td><pre>{{ json_encode($row['current_id_link'], JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE) }}</pre></td><td>{{ $row['existing_listing_id'] ?? 'brak' }}</td><td>{{ implode(', ', $row['missing_fields']) }}</td><td><pre>{{ json_encode($row['planned_changes'], JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE) }}</pre></td><td><pre>{{ json_encode($row['resolver_before'], JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE) }}</pre></td><td><pre>{{ json_encode($row['resolver_after'], JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE) }}</pre></td><td>{{ $row['action'] }} {{ $row['reason'] ?? '' }}</td>
+<td>{{ $row['part_id'] }}</td><td>{{ $row['channel'] }}</td><td><pre>{{ json_encode($row['current_id_link'], JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE) }}</pre></td><td>{{ $row['existing_listing_id'] ?? 'brak' }}</td><td>{{ implode(', ', $row['missing_fields']) }}</td><td><pre>{{ json_encode($row['planned_changes'], JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE) }}</pre></td><td><pre>{{ json_encode($row['resolver_before'], JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE) }}</pre></td><td><pre>{{ json_encode($row['resolver_after'], JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE) }}</pre></td><td><pre>{{ json_encode($row['actual_after_write'] ?? null, JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE) }}</pre></td><td>{{ $row['action'] }} {{ $row['reason'] ?? '' }} @if(isset($row['error']))<pre>{{ json_encode($row['error'], JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE) }}</pre>@endif</td>
 </tr>
 @endforeach
 </tbody></table>

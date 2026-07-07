@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Throwable;
 
 class MarketplaceLinkRepairService
 {
@@ -55,6 +56,7 @@ class MarketplaceLinkRepairService
         $rows = [];
 
         foreach ($preview['rows'] as $row) {
+            $attemptedAction = $row['action'];
             if (! in_array($row['action'], ['create', 'update'], true)) {
                 $report[$row['action'] === 'conflict' ? 'conflicts' : 'skipped']++;
                 $rows[] = $row;
@@ -74,16 +76,28 @@ class MarketplaceLinkRepairService
                         : new MarketplaceListing(['part_id' => $part->id, 'marketplace' => $replanned['marketplace']]);
                     $listing->forceFill($this->attributes($part, $replanned['channel'], $replanned['external_id'], $replanned['planned_url'], $listing));
                     $listing->save();
+                    $savedListingId = (int) $listing->id;
+
                     $part->refresh()->load('marketplaceListings');
                     $row = $this->plan($part, $replanned['channel'], false) ?: $replanned;
                     $row['applied'] = true;
-                    $row['applied_listing_id'] = $listing->id;
+                    $row['applied_action'] = $replanned['action'];
+                    $row['applied_listing_id'] = $savedListingId;
+                    $row['saved_listing_id'] = $savedListingId;
+                    $row['actual_after_write'] = $this->actualAfterWrite($savedListingId, $replanned['channel']);
                 });
-                $report[$row['action'] === 'create' ? 'created' : 'updated']++;
-            } catch (\Throwable $e) {
+                $report[$attemptedAction === 'create' ? 'created' : 'updated']++;
+            } catch (Throwable $e) {
                 $report['errors']++;
                 $row['applied'] = false;
                 $row['error_message'] = $e->getMessage();
+                $row['error'] = [
+                    'class' => $e::class,
+                    'message' => $e->getMessage(),
+                    'code' => $e->getCode(),
+                    'file' => $e->getFile(),
+                    'line' => $e->getLine(),
+                ];
             }
             $rows[] = $row;
         }
@@ -182,7 +196,51 @@ class MarketplaceLinkRepairService
     private function listingId(MarketplaceListing $l, string $c): ?string { $v = trim((string) ($l->external_offer_id ?: $l->external_listing_id)); if ($v !== '') return $c === 'ovoko' && preg_match('/hgf(\d+)/i',$v,$m) ? $m[1] : $v; $url = (string) $l->url; if ($c === 'ovoko' && preg_match('/hgf(\d+)/i', $url, $m)) return $m[1]; if ($c === 'allegro' && preg_match('/(\d{6,})\/?$/', $url, $m)) return $m[1]; return null; }
     private function defaultUrl(string $c, string $id): string { return $c === 'ovoko' ? 'https://ovoko.pl/czesci-samochodowe/hgf'.$id : 'https://allegro.pl/oferta/'.$id; }
     private function channels(string $c): array { return match ($c) { 'ovoko' => ['ovoko'], 'allegro' => ['allegro'], default => ['ovoko', 'allegro'] }; }
-    private function resolverRow(Part $p, string $c): array { $r = collect($this->resolver->rowsForPart($p))->firstWhere('key', $c) ?: []; return Arr::only($r, ['has_link','is_active','icon','reason','url','external_offer_id']); }
+    private function resolverRow(Part $p, string $c): array { $r = collect($this->resolver->rowsForPart($p))->firstWhere('key', $c) ?: []; return Arr::only($r, ['has_link','is_active','icon','display_icon','reason','url','external_offer_id','title']); }
+
+    private function actualAfterWrite(int $listingId, string $channel): array
+    {
+        $listing = MarketplaceListing::query()->find($listingId);
+
+        if (! $listing) {
+            return [
+                'saved_listing_id' => $listingId,
+                'saved_fields' => null,
+                'resolver' => null,
+                'error' => 'saved_listing_not_found_after_write',
+            ];
+        }
+
+        $part = Part::query()->with('marketplaceListings')->find($listing->part_id);
+        $resolverRow = $part ? $this->resolverRow($part, $channel) : [];
+
+        return [
+            'saved_listing_id' => $listingId,
+            'saved_fields' => Arr::only($listing->toArray(), [
+                'id',
+                'part_id',
+                'marketplace',
+                'status',
+                'sync_status',
+                'match_status',
+                'last_api_status',
+                'last_error',
+                'external_offer_id',
+                'external_listing_id',
+                'url',
+            ]),
+            'resolver' => Arr::only($resolverRow, [
+                'has_link',
+                'url',
+                'is_active',
+                'icon',
+                'display_icon',
+                'reason',
+                'title',
+            ]),
+        ];
+    }
+
     private function simulatedPart(Part $p, ?MarketplaceListing $old, array $attrs): Part { $clone = $p->replicate(); $clone->id = $p->id; $listings = $p->marketplaceListings->reject(fn($l) => $old && $l->id === $old->id)->values(); $new = $old ? $old->replicate() : new MarketplaceListing(); $new->forceFill($attrs); $new->id = $old?->id ?: 0; $listings->push($new); $clone->setRelation('marketplaceListings', $listings); return $clone; }
     private function missingFields(?MarketplaceListing $l, array $attrs): array { if (!$l) return array_keys(Arr::only($attrs, ['external_offer_id','external_listing_id','url','status','sync_status','match_status'])); $m=[]; foreach (['external_offer_id','external_listing_id','url','status','sync_status','match_status'] as $f) if (blank($l->$f) || ($f === 'status' && strtolower((string)$l->$f) !== strtolower((string)$attrs[$f]))) $m[]=$f; return $m; }
     private function row(Part $p,string $c,array $res,?MarketplaceListing $l,array $missing,array $attrs,array $before,array $after,string $action,?string $reason): array { return ['part_id'=>$p->id,'channel'=>$c,'marketplace'=>$attrs['marketplace'] ?? $c,'external_id'=>$res['id'],'current_id_link'=>$res,'existing_listing_id'=>$l?->id,'missing_fields'=>$missing,'planned_changes'=>Arr::only($attrs, ['marketplace','external_offer_id','external_listing_id','url','status','sync_status','match_status']),'planned_url'=>$attrs['url'] ?? null,'resolver_before'=>$before,'resolver_after'=>$after,'action'=>$action,'reason'=>$reason]; }
