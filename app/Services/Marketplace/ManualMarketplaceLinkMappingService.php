@@ -361,20 +361,14 @@ class ManualMarketplaceLinkMappingService
 
     private function findExistingListingByExternalId(string $marketplace, string $externalId, ?int $ignorePartId = null): ?MarketplaceListing
     {
-        $query = MarketplaceListing::query()
+        return MarketplaceListing::query()
             ->whereIn('marketplace', $marketplace === 'allegro' ? ['allegro', 'allegro_main'] : ['ovoko'])
-            ->when($ignorePartId !== null, fn (Builder $query): Builder => $query->where(fn (Builder $inner): Builder => $inner->whereNull('part_id')->orWhere('part_id', '!=', $ignorePartId)))
-            ->orderByDesc('id');
-
-        if ($marketplace === 'ovoko') {
-            return $query->get()->first(fn (MarketplaceListing $listing): bool => $this->resolvedListingExternalId($listing, $marketplace) === $externalId);
-        }
-
-        return $query
             ->where(function (Builder $query) use ($externalId): void {
                 $query->where('external_offer_id', $externalId)
                     ->orWhere('external_listing_id', $externalId);
             })
+            ->when($ignorePartId !== null, fn (Builder $query): Builder => $query->where(fn (Builder $inner): Builder => $inner->whereNull('part_id')->orWhere('part_id', '!=', $ignorePartId)))
+            ->orderByDesc('id')
             ->first();
     }
 

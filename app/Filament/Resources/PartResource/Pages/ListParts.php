@@ -199,10 +199,9 @@ class ListParts extends Page
                 'existing_part_id' => $exception->existingPartId,
             ]);
 
+            $body = 'Ten link jest już powiązany z innym rekordem albo część ma już inne ID oferty. Obecne ID: '.$exception->existingId.' | Nowe ID: '.$exception->newId;
             if ($exception->existingPartId !== null) {
-                $body = 'Ten link jest już powiązany z inną częścią. ID oferty: '.$exception->newId.' | istniejąca część ID: '.$exception->existingPartId;
-            } else {
-                $body = 'Część ma już inne ID oferty. Obecne ID: '.$exception->existingId.' | Nowe ID: '.$exception->newId;
+                $body .= ' | istniejąca część ID: '.$exception->existingPartId;
             }
 
             Notification::make()
