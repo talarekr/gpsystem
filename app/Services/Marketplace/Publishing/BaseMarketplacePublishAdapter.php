@@ -6,6 +6,7 @@ use App\Jobs\RefreshAllegroListingStatusAfterPublish;
 use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceListing;
 use App\Models\Part;
+use App\Services\Marketplace\AllegroListingStatusRefreshService;
 use App\Services\Marketplace\ApiIntegrationLogger;
 use App\Services\Marketplace\MarketplaceListingReadinessService;
 use App\Services\Marketplace\MarketplacePublishGate;
@@ -86,25 +87,63 @@ abstract class BaseMarketplacePublishAdapter implements MarketplacePublishAdapte
             $this->logger->success('ovoko', filled($listing->url) ? 'ovoko_listing_url_resolved' : 'missing_shop_url', filled($listing->url) ? 'Ovoko listing URL stored after publish.' : 'Ovoko crm/importPart returned no public listing URL; use read-only URL diagnostic/backfill.', ['marketplace_listing_id' => $listing->id, 'part_id' => $part->id, 'external_id' => $listing->external_offer_id ?: $listing->external_listing_id, 'ovoko_part_id' => $listing->external_offer_id ?: $listing->external_listing_id, 'ovoko_listing_url' => $listing->url, 'ovoko_listing_url_source' => filled($listing->url) ? ($result['response_summary']['ovoko_listing_url_source'] ?? $result['response_summary']['ovoko_shop_url_source'] ?? 'unknown') : null, 'response' => $result['response_summary'] ?? [], 'stored_listing_url' => $listing->url]);
         }
         if ($this->marketplace() === 'allegro' && filled($listing->external_offer_id ?: $listing->external_listing_id)) {
-            \Illuminate\Support\Facades\DB::afterCommit(function () use ($listing, $part): void {
-                RefreshAllegroListingStatusAfterPublish::dispatch($listing->id)->delay(now()->addMinutes(RefreshAllegroListingStatusAfterPublish::RETRY_DELAY_MINUTES));
-                $offerId = $listing->external_offer_id ?: $listing->external_listing_id;
-                $this->logger->success('allegro', 'allegro_post_publish_status_refresh_scheduled', 'Allegro post-publish status refresh scheduled.', [
-                    'post_publish_refresh_scheduled' => true,
-                    'marketplace_listing_id' => $listing->id,
-                    'listing_id' => $listing->id,
-                    'part_id' => $part->id,
-                    'external_id' => $offerId,
-                    'offer_id' => $offerId,
-                    'attempt' => 1,
-                    'delay_minutes' => RefreshAllegroListingStatusAfterPublish::RETRY_DELAY_MINUTES,
-                    'delay_seconds' => RefreshAllegroListingStatusAfterPublish::RETRY_DELAY_MINUTES * 60,
-                    'max_attempts' => RefreshAllegroListingStatusAfterPublish::MAX_ATTEMPTS,
-                    'queue_connection' => config('queue.default'),
-                ]);
-            });
+            $immediateRefresh = $this->attemptImmediateAllegroPostPublishRefresh($listing, $part);
+            $shouldScheduleRetry = ! (bool) data_get($immediateRefresh, 'api.is_active_with_stock', false);
+
+            if ($shouldScheduleRetry) {
+                \Illuminate\Support\Facades\DB::afterCommit(function () use ($listing, $part): void {
+                    RefreshAllegroListingStatusAfterPublish::dispatch($listing->id)->delay(now()->addMinutes(RefreshAllegroListingStatusAfterPublish::RETRY_DELAY_MINUTES));
+                    $offerId = $listing->external_offer_id ?: $listing->external_listing_id;
+                    $this->logger->success('allegro', 'allegro_post_publish_status_refresh_scheduled', 'Allegro post-publish status refresh scheduled.', [
+                        'post_publish_refresh_scheduled' => true,
+                        'marketplace_listing_id' => $listing->id,
+                        'listing_id' => $listing->id,
+                        'part_id' => $part->id,
+                        'external_id' => $offerId,
+                        'offer_id' => $offerId,
+                        'attempt' => 1,
+                        'delay_minutes' => RefreshAllegroListingStatusAfterPublish::RETRY_DELAY_MINUTES,
+                        'delay_seconds' => RefreshAllegroListingStatusAfterPublish::RETRY_DELAY_MINUTES * 60,
+                        'max_attempts' => RefreshAllegroListingStatusAfterPublish::MAX_ATTEMPTS,
+                        'queue_connection' => config('queue.default'),
+                    ]);
+                });
+            }
         }
         return new MarketplacePublishResult($this->channel(), ['channel' => $this->channel(), 'marketplace' => $this->marketplace(), 'success' => true, 'status' => $listing->status, 'external_offer_id' => $listing->external_offer_id, 'external_listing_id' => $listing->external_listing_id, 'write' => true, 'listing_id' => $listing->id, 'message' => $result['user_message'] ?? null]);
+    }
+
+    private function attemptImmediateAllegroPostPublishRefresh(MarketplaceListing $listing, Part $part): array
+    {
+        $offerId = $listing->external_offer_id ?: $listing->external_listing_id;
+        $beforeStatus = $listing->status;
+        $result = app(AllegroListingStatusRefreshService::class)->refresh($listing, $offerId, true);
+        $listing->refresh();
+        $afterStatus = $listing->status;
+        $isActiveWithStock = (bool) data_get($result, 'api.is_active_with_stock', false);
+        $delayedRetryScheduled = ! $isActiveWithStock;
+
+        $this->logger->success('allegro', 'immediate_post_publish_refresh_attempted', 'Immediate read-only Allegro post-publish status refresh attempted.', [
+            'immediate_post_publish_refresh_attempted' => true,
+            'marketplace_listing_id' => $listing->id,
+            'listing_id' => $listing->id,
+            'part_id' => $part->id,
+            'external_id' => $offerId,
+            'offer_id' => $offerId,
+            'api_publication_status' => data_get($result, 'api.publication_status'),
+            'api_stock_available' => data_get($result, 'api.stock_available'),
+            'api_is_active_with_stock' => $isActiveWithStock,
+            'before_local_listing_status' => $beforeStatus,
+            'after_local_listing_status' => $afterStatus,
+            'delayed_retry_scheduled' => $delayedRetryScheduled,
+            'post_publish_refresh_scheduled' => $delayedRetryScheduled,
+            'job_status' => ($result['ok'] ?? false) ? 'executed' : 'api_error',
+            'api' => $result['api'] ?? null,
+            'changes' => $result['changes'] ?? [],
+            'read_only' => true,
+        ]);
+
+        return $result;
     }
 
     protected function blocked(string $reason, array $extra = []): MarketplacePublishResult { return new MarketplacePublishResult($this->channel(), array_merge(['channel' => $this->channel(), 'marketplace' => $this->marketplace(), 'success' => false, 'status' => 'blocked', 'blocked' => true, 'errors' => [$reason], 'warnings' => [], 'write' => false], $extra)); }
