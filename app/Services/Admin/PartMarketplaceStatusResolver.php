@@ -24,7 +24,6 @@ class PartMarketplaceStatusResolver
         $ovoko = $this->preferredListing($listings, ['ovoko'], 'ovoko', $partAvailable);
         $ebayListings = $this->mappedListings($listings, ['ebay_de', 'ebay_fr']);
         $ebay = $this->preferredEbayListing($ebayListings, $partAvailable);
-        $ebayUrlListing = $ebayListings->first(fn (MarketplaceListing $listing): bool => $this->listingUrl($listing) !== null);
 
         $allegroState = $this->channelState($part, $allegro, 'allegro');
         $ovokoState = $this->channelState($part, $ovoko, 'ovoko');
@@ -48,7 +47,7 @@ class PartMarketplaceStatusResolver
             $this->row('storefront', 'Sklep', $part->price, 'zł', $storefrontVisible, null, null, $storefrontVisible ? 'Widoczny w sklepie' : 'Niewidoczny w sklepie'),
             $this->row('allegro', 'Allegro', $part->allegro_price, 'zł', $allegroState['is_active'], $this->externalOfferId($allegro), $this->allegroUrl($allegro), $this->channelTitle('Allegro', $allegroState), null, $allegroState),
             $this->row('ovoko', 'Ovoko', $part->ovoko_price ?? $ovoko?->price, $this->currencyLabel($ovoko?->currency), $ovokoState['is_active'], $this->externalOfferId($ovoko), $this->ovokoUrl($ovoko, $part), $this->channelTitle('Ovoko', $ovokoState), null, $ovokoState),
-            $this->row('ebay', 'eBay', $part->ebay_price, 'zł', $ebayState['is_active'], $this->externalOfferId($ebay), $this->ebayUrl($ebayUrlListing ?: $ebay), $this->channelTitle('eBay', $ebayState), $ebayMarkets ?: null, $ebayState),
+            $this->row('ebay', 'eBay', $part->ebay_price, 'zł', $ebayState['is_active'], $this->externalOfferId($ebay), $this->ebayUrl($ebay), $this->channelTitle('eBay', $ebayState), $ebayMarkets ?: null, $ebayState),
         ];
     }
 
@@ -102,14 +101,21 @@ class PartMarketplaceStatusResolver
     private function preferredEbayListing(Collection $ebayListings, bool $partAvailable): ?MarketplaceListing
     {
         return $ebayListings
-            ->sortBy(function (MarketplaceListing $listing) use ($partAvailable): int {
-                if ($this->isEndedOrStaleEbayListing($listing)) {
-                    return 0;
-                }
-
-                return $this->channelStateForAvailablePart($listing, 'ebay', $partAvailable)['is_active'] ? 1 : 2;
-            })
+            ->sortByDesc(fn (MarketplaceListing $listing): int => $this->ebayListingPriority($listing, $partAvailable))
             ->first();
+    }
+
+    private function ebayListingPriority(MarketplaceListing $listing, bool $partAvailable): int
+    {
+        if ($this->channelStateForAvailablePart($listing, 'ebay', $partAvailable)['is_active']) {
+            return 3000000 + (int) $listing->id;
+        }
+
+        if (! $this->isEndedOrStaleEbayListing($listing)) {
+            return 2000000 + (int) $listing->id;
+        }
+
+        return 1000000 + (int) $listing->id;
     }
 
     /**

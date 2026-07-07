@@ -74,6 +74,43 @@ class PartMarketplaceRelistTest extends TestCase
         $this->assertSame(1, MarketplaceListing::query()->where('part_id', $part->id)->count());
     }
 
+
+    public function test_ebay_resolver_prefers_new_published_listing_over_historical_ended_link(): void
+    {
+        $part = Part::query()->create(['name' => 'Relisted eBay part', 'status' => 'ready', 'quantity' => 1, 'ebay_price' => 123.45]);
+        $this->listing($part, 'ebay_de', [
+            'external_offer_id' => 'OLD-OFFER-886',
+            'external_listing_id' => 'OLD-ITEM-886',
+            'status' => 'ended',
+            'sync_status' => 'ended',
+            'last_api_status' => 'ended',
+            'url' => 'https://www.ebay.de/itm/OLD-ITEM-886',
+        ]);
+        $newListing = $this->listing($part, 'ebay_de', [
+            'external_offer_id' => '201340167011',
+            'external_listing_id' => '800300579197',
+            'status' => 'published',
+            'sync_status' => 'published',
+            'last_api_status' => null,
+            'url' => 'https://www.ebay.de/itm/800300579197',
+            'quantity' => 1,
+        ]);
+
+        $part->refresh()->load('marketplaceListings');
+        $row = collect(app(PartMarketplaceStatusResolver::class)->rowsForPart($part))->firstWhere('key', 'ebay');
+
+        $this->assertSame('W sprzedaży', $part->adminStatusLabel());
+        $this->assertSame('✓', $row['display_icon']);
+        $this->assertSame('check', $row['icon']);
+        $this->assertTrue($row['listed']);
+        $this->assertTrue($row['is_active']);
+        $this->assertSame('ebay_active_with_inventory', $row['reason']);
+        $this->assertSame('201340167011', $row['external_offer_id']);
+        $this->assertSame('https://www.ebay.de/itm/800300579197', $row['url']);
+        $this->assertDatabaseHas('marketplace_listings', ['part_id' => $part->id, 'marketplace' => 'ebay_de', 'external_listing_id' => 'OLD-ITEM-886', 'status' => 'ended']);
+        $this->assertDatabaseHas('marketplace_listings', ['id' => $newListing->id, 'part_id' => $part->id, 'marketplace' => 'ebay_de', 'external_offer_id' => '201340167011', 'external_listing_id' => '800300579197', 'url' => 'https://www.ebay.de/itm/800300579197', 'status' => 'published']);
+    }
+
     private function listing(Part $part, string $marketplace, array $attrs): MarketplaceListing
     {
         $base = $marketplace === 'allegro' ? 'https://allegro.test' : ($marketplace === 'ovoko' ? 'https://ovoko.test' : 'https://ebay.test');
