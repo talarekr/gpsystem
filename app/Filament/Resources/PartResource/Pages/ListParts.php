@@ -190,6 +190,25 @@ class ListParts extends Page
         try {
             $result = app(ManualMarketplaceLinkMappingService::class)->save($part, $marketplace, (string) $url);
         } catch (ManualMarketplaceMappingConflictException $exception) {
+            if ($this->sameManualMarketplaceConflictId($exception->existingId, $exception->newId)) {
+                Log::warning('manual_marketplace_link_same_id_conflict_suppressed', [
+                    'part_id' => $partId,
+                    'marketplace' => $marketplace,
+                    'existing_id' => $exception->existingId,
+                    'new_id' => $exception->newId,
+                    'existing_listing_id' => $exception->existingListingId,
+                    'existing_part_id' => $exception->existingPartId,
+                ]);
+
+                Notification::make()
+                    ->title('Lokalne mapowanie '.ucfirst($marketplace).' zapisane.')
+                    ->body('current_external_id='.$exception->existingId.' | new_external_id='.$exception->newId.' | marketplace_write=false | sync_triggered=false')
+                    ->success()
+                    ->send();
+
+                return;
+            }
+
             Log::warning('manual_marketplace_link_conflict', [
                 'part_id' => $partId,
                 'marketplace' => $marketplace,
@@ -242,6 +261,14 @@ class ListParts extends Page
             ->body('marketplace='.$result['marketplace'].' | extracted_external_id='.$result['external_id'].' | saved_listing_id='.$result['listing']->id.' | mapping_ready='.(($result['mapping_ready'] ?? false) ? 'true' : 'false').' | marketplace_write=false | sync_triggered=false')
             ->success()
             ->send();
+    }
+
+    private function sameManualMarketplaceConflictId(string $existingId, string $newId): bool
+    {
+        $existingId = trim($existingId);
+        $newId = trim($newId);
+
+        return $existingId !== '' && $newId !== '' && $existingId === $newId;
     }
 
     public function markListingReady(int $partId): void
