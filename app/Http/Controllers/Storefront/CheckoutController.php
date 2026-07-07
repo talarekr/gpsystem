@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Storefront;
 use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Services\Marketplace\PartAvailabilityEventService;
+use App\Services\Payments\PayuService;
 use App\Services\Storefront\CartService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -14,7 +15,7 @@ use Illuminate\View\View;
 
 class CheckoutController extends Controller
 {
-    public function __construct(private readonly CartService $cart, private readonly PartAvailabilityEventService $availabilityEvents)
+    public function __construct(private readonly CartService $cart, private readonly PartAvailabilityEventService $availabilityEvents, private readonly PayuService $payu)
     {
     }
 
@@ -50,6 +51,7 @@ class CheckoutController extends Controller
             'country' => ['required', 'string', 'max:2'],
             'nip' => ['nullable', 'string', 'max:30'],
             'notes' => ['nullable', 'string', 'max:5000'],
+            'payment_method' => ['required', 'in:payu,blik'],
             'terms' => ['accepted'],
         ]);
 
@@ -57,7 +59,7 @@ class CheckoutController extends Controller
 
         $order = DB::transaction(function () use ($validated, $items, $subtotal, $request): Order {
             $order = Order::query()->create([
-                ...collect($validated)->except('terms')->all(),
+                ...collect($validated)->except('terms', 'payment_method')->all(),
                 'order_number' => $this->nextOrderNumber(),
                 'customer_id' => $request->user()?->id,
                 'status' => 'new',
@@ -65,7 +67,8 @@ class CheckoutController extends Controller
                 'subtotal' => $subtotal,
                 'shipping_total' => 0,
                 'total' => $subtotal,
-                'meta' => ['source' => 'storefront'],
+                'payment_status' => 'pending',
+                'meta' => ['source' => 'storefront', 'payment_method' => $validated['payment_method']],
             ]);
 
             foreach ($items as $item) {
@@ -95,6 +98,33 @@ class CheckoutController extends Controller
                     'source_order_item_id' => (string) $item->id,
                 ]);
             }
+        }
+
+        if (in_array($validated['payment_method'], ['payu', 'blik'], true)) {
+            $payuOrder = $this->payu->createOrder($order, $request->ip() ?: '127.0.0.1');
+            $response = $payuOrder['response'];
+            $meta = $order->meta ?? [];
+            data_set($meta, 'payu', [
+                'provider' => 'payu',
+                'order_id' => $response['orderId'] ?? null,
+                'ext_order_id' => $payuOrder['payload']['extOrderId'] ?? null,
+                'redirect_uri' => $payuOrder['redirectUri'],
+                'status_desc' => data_get($response, 'status.statusDesc'),
+                'correlation_id' => data_get($response, 'status.correlationId'),
+                'request' => $payuOrder['payload'],
+                'response' => $response,
+                'created_at' => now()->toIso8601String(),
+            ]);
+            $order->update([
+                'marketplace' => 'payu',
+                'marketplace_order_id' => $response['orderId'] ?? null,
+                'marketplace_status' => data_get($response, 'status.statusCode'),
+                'payment_status' => 'pending',
+                'meta' => $meta,
+            ]);
+            $this->cart->clear();
+
+            return redirect()->away($payuOrder['redirectUri']);
         }
 
         $this->cart->clear();

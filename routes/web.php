@@ -30,10 +30,13 @@ use App\Http\Controllers\Storefront\Auth\PasswordResetController;
 use App\Http\Controllers\Storefront\CustomerAccountController;
 use App\Http\Controllers\Storefront\HomeController;
 use App\Http\Controllers\Storefront\PartController;
+use App\Http\Controllers\Storefront\PayuReturnController;
+use App\Http\Controllers\Payments\PayuNotifyController;
 use App\Http\Controllers\Storefront\PrivacyPolicyController;
 use App\Http\Controllers\Storefront\SearchController;
 use App\Http\Controllers\Storefront\TermsController;
 use App\Http\Controllers\Tools\CheckOrdersFlowController;
+use App\Http\Controllers\Tools\PayuDiagnosticsController;
 use App\Http\Controllers\Tools\DebugOrderItemThumbnailController;
 use App\Http\Controllers\Tools\WorkshopQuickPartController;
 use App\Http\Controllers\Tools\BackfillPartDefaultConditionAndSteeringController;
@@ -256,6 +259,8 @@ Route::post('/koszyk/wyczysc', [CartController::class, 'clear'])->name('storefro
 Route::get('/zamowienie', [CheckoutController::class, 'show'])->name('storefront.checkout.show');
 Route::post('/zamowienie', [CheckoutController::class, 'store'])->name('storefront.checkout.store');
 Route::get('/zamowienie/dziekujemy/{order}', [CheckoutController::class, 'thankYou'])->name('storefront.checkout.thank-you');
+Route::get('/zamowienie/payu/powrot', PayuReturnController::class)->name('storefront.checkout.payu-return');
+Route::post('/payu/notify', PayuNotifyController::class)->name('payu.notify');
 Route::get('/produkt/{slug}', [PartController::class, 'show'])->name('storefront.product');
 Route::get('/kategoria-produktu/{path}', [CategoryController::class, 'show'])->where('path', '.*')->name('storefront.category');
 
@@ -271,6 +276,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/parts-to-list/storage-location-backfill-dry-run', [PartsToListStorageLocationBackfillController::class, 'dryRun'])->name('admin.tools.parts-to-list.storage-location-backfill-dry-run');
     Route::match(['get', 'post'], '/admin/tools/parts-to-list/storage-location-backfill-apply', [PartsToListStorageLocationBackfillController::class, 'apply'])->name('admin.tools.parts-to-list.storage-location-backfill-apply');
     Route::get('/admin/tools/parts-to-list/storage-location-backfill-results', [PartsToListStorageLocationBackfillController::class, 'results'])->name('admin.tools.parts-to-list.storage-location-backfill-results');
+    Route::get('/admin/tools/payu-diagnostics', PayuDiagnosticsController::class)->name('admin.tools.payu-diagnostics');
     Route::get('/admin/tools/jarek-gearboxes/ping', [JarekGearboxToolController::class, 'ping'])->name('admin.tools.jarek-gearboxes.ping');
     Route::get('/admin/tools/jarek-gearboxes/allegro-import-runner', [JarekGearboxToolController::class, 'runner'])->name('admin.tools.jarek-gearboxes.allegro-import-runner');
     Route::get('/admin/tools/jarek-gearboxes/runner', [JarekGearboxToolController::class, 'jarekRunner'])->name('admin.tools.jarek-gearboxes.runner');

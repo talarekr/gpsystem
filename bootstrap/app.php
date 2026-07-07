@@ -20,6 +20,9 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->web(append: [
             FrontendMaintenanceMode::class,
         ]);
+        $middleware->validateCsrfTokens(except: [
+            'payu/notify',
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->render(function (TokenMismatchException $exception, Request $request) {

@@ -83,6 +83,20 @@
                 </div>
             </section>
 
+
+            <section class="sf-checkout-card">
+                <h2>Płatność</h2>
+                <label class="sf-checkout-terms">
+                    <input type="radio" name="payment_method" value="payu" @checked(old('payment_method', 'payu') === 'payu') required>
+                    <span>PayU Checkout (karty, szybkie przelewy, BLIK)</span>
+                </label>
+                <label class="sf-checkout-terms">
+                    <input type="radio" name="payment_method" value="blik" @checked(old('payment_method') === 'blik') required>
+                    <span>BLIK przez PayU Checkout</span>
+                </label>
+                @error('payment_method')<small class="sf-checkout-error">{{ $message }}</small>@enderror
+            </section>
+
             <section class="sf-checkout-card">
                 <h2>Akceptacje</h2>
                 <label class="sf-checkout-terms">
@@ -105,7 +119,7 @@
             </div>
             <div class="sf-checkout-summary__row"><span>Dostawa</span><strong>0,00 {{ $items->first()['currency'] ?? 'PLN' }}</strong></div>
             <div class="sf-checkout-summary__row sf-checkout-summary__row--total"><span>Razem</span><strong>{{ number_format((float) $subtotal, 2, ',', ' ') }} {{ $items->first()['currency'] ?? 'PLN' }}</strong></div>
-            <button class="sf-btn" type="submit">Złóż zamówienie</button>
+            <button class="sf-btn" type="submit">Złóż zamówienie i zapłać</button>
         </aside>
     </form>
 </div>
