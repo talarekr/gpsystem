@@ -81,6 +81,48 @@ class EbayMarketplaceDiagnoseControllerTest extends TestCase
             ->assertJsonPath('rows.0.marketplace_listings.0.api.end_date_is_past', true);
     }
 
+
+    public function test_ended_target_ebay_listing_is_not_overridden_by_active_other_ebay_marketplace(): void
+    {
+        $this->actingAsAdminUser();
+
+        $part = Part::query()->create(['name' => 'Mixed eBay', 'sku' => 'EB-MIX', 'quantity' => 1, 'status' => 'ready']);
+        MarketplaceListing::query()->create([
+            'part_id' => $part->id,
+            'marketplace' => 'ebay_de',
+            'external_listing_id' => '123456789012',
+            'status' => 'active',
+            'last_api_status' => 'active',
+            'raw_payload' => ['itemEndDate' => '2026-05-31T10:00:00.000Z'],
+        ]);
+        MarketplaceListing::query()->create([
+            'part_id' => $part->id,
+            'marketplace' => 'ebay_fr',
+            'external_listing_id' => '987654321098',
+            'status' => 'active',
+            'last_api_status' => 'active',
+        ]);
+
+        $resolverRow = collect(app(PartMarketplaceStatusResolver::class)->rowsForPart($part->fresh('marketplaceListings')))->firstWhere('key', 'ebay');
+        $this->assertSame('✕', $resolverRow['display_icon']);
+        $this->assertSame('ebay_end_date_in_past', $resolverRow['reason']);
+
+        Http::fake(function ($request) {
+            $url = (string) $request->url();
+
+            return str_contains($url, '123456789012')
+                ? Http::response(['itemId' => 'v1|123456789012|0', 'itemEndDate' => '2026-05-31T10:00:00.000Z'], 200)
+                : Http::response(['itemId' => 'v1|987654321098|0', 'estimatedAvailabilities' => [['estimatedAvailabilityStatus' => 'IN_STOCK']]], 200);
+        });
+
+        $this->getJson('/admin/tools/ebay/marketplace-diagnose?action=part&part_ids='.$part->id.'&check_api=1&format=json')
+            ->assertOk()
+            ->assertJsonPath('rows.0.audit_classification', 'ended/stale should_show_x_and_allow_new_publish')
+            ->assertJsonPath('rows.0.duplicate_guard_would_block', false)
+            ->assertJsonPath('rows.0.resolver_ebay.display_icon', '✕')
+            ->assertJsonPath('rows.0.resolver_ebay.reason', 'ebay_end_date_in_past');
+    }
+
     public function test_apply_inactive_is_not_allowed_by_get(): void
     {
         $this->actingAsAdminUser();
