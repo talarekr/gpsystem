@@ -74,6 +74,7 @@ class AllegroSalesSettingsTest extends TestCase
         Http::fake([
             'https://api.allegro.pl/sale/categories/123/parameters' => Http::response(['parameters' => []], 200),
             'https://api.allegro.pl/sale/shipping-rates' => Http::response(['errors' => []], 403),
+            'https://api.allegro.pl/sale/tax-settings*' => Http::response(['subjects' => ['GOODS'], 'rates' => [['countryCode' => 'PL', 'rate' => '23.00'], ['countryCode' => 'CZ', 'rate' => '21.00'], ['countryCode' => 'SK', 'rate' => '23.00'], ['countryCode' => 'HU', 'rate' => '27.00'], ['countryCode' => 'LT', 'rate' => '21.00']]], 200),
             'https://api.allegro.pl/after-sales-service-conditions/return-policies' => Http::response(['errors' => []], 403),
             'https://api.allegro.pl/after-sales-service-conditions/implied-warranties' => Http::response(['errors' => []], 403),
             'https://api.allegro.pl/after-sales-service-conditions/warranties' => Http::response(['errors' => []], 403),
@@ -110,6 +111,9 @@ class AllegroSalesSettingsTest extends TestCase
         $this->assertSame('imp-1', data_get($payload, 'afterSalesServices.impliedWarranty.id'));
         $this->assertSame('war-1', data_get($payload, 'afterSalesServices.warranty.id'));
         $this->assertSame('Błotnik Audi', data_get($payload, 'productSet.0.product.name'));
+        $this->assertSame('VAT', data_get($payload, 'payments.invoice'));
+        $this->assertSame('GOODS', data_get($payload, 'taxSettings.subject'));
+        $this->assertSame('27.00', data_get($payload, 'taxSettings.rates.3.rate'));
         $this->assertSame([$payload['image_urls'][0]], data_get($payload, 'productSet.0.product.images'));
         $this->assertSame(1, $response->json('payload_summary.productSet_0_product_images_count'));
         $this->assertTrue($response->json('payload_summary.productSet_0_product_main_image_present'));
@@ -170,6 +174,10 @@ class AllegroSalesSettingsTest extends TestCase
             $data = $request->data();
 
             return $data['images'] === ['https://gpswiss.pl/storage/parts/photos/imported/7890/kuyJdjAM4xzYvW7Hoy0YQ7WlCKE8nRfkSUskHyT0.jpg', 'https://gpswiss.example.test/parts/7890/two.jpg']
+                && data_get($data, 'payments.invoice') === 'VAT'
+                && data_get($data, 'taxSettings.subject') === 'GOODS'
+                && data_get($data, 'taxSettings.rates.0.countryCode') === 'PL'
+                && data_get($data, 'taxSettings.rates.3.rate') === '27.00'
                 && data_get($data, 'delivery.shippingRates.id') === 'ship-dpd'
                 && data_get($data, 'afterSalesServices.returnPolicy.id') === 'ret-1'
                 && data_get($data, 'afterSalesServices.impliedWarranty.id') === 'imp-1'
@@ -223,6 +231,8 @@ class AllegroSalesSettingsTest extends TestCase
 
         Http::assertSent(fn ($request) => $request->url() === 'https://api.allegro.pl/sale/product-offers'
             && array_column($request->data()['parameters'], 'id') === ['11323']
+            && data_get($request->data(), 'payments.invoice') === 'VAT'
+            && data_get($request->data(), 'taxSettings.rates.1.countryCode') === 'CZ'
             && array_column(data_get($request->data(), 'productSet.0.product.parameters'), 'id') === ['129591']);
     }
 
@@ -413,6 +423,36 @@ class AllegroSalesSettingsTest extends TestCase
             && str_contains((string) data_get($request->data(), 'description.sections.0.items.0.content'), 'Witam oferta dotyczy'));
     }
 
+
+    public function test_allegro_live_publish_blocks_when_tax_rate_is_not_supported_by_category(): void
+    {
+        Http::fake(array_merge($this->fakeAllegro(), [
+            'https://api.allegro.pl/sale/tax-settings*' => Http::response(['subjects' => ['GOODS'], 'rates' => [['countryCode' => 'PL', 'rate' => '23.00']]], 200),
+            'https://api.allegro.pl/sale/product-offers' => Http::response(['id' => 'offer-should-not-be-created'], 201),
+        ]));
+        $part = $this->part('KURIER DPD');
+        $payload = [
+            'title' => 'Błotnik Audi',
+            'category_id' => '123',
+            'price_pln' => 100,
+            'quantity' => 1,
+            'image_urls' => ['https://gpswiss.pl/storage/parts/photos/imported/7890/kuyJdjAM4xzYvW7Hoy0YQ7WlCKE8nRfkSUskHyT0.jpg'],
+            'allegro_parameters' => ['payload_parameters' => [], 'product_parameters' => []],
+        ];
+
+        $adapter = new class(app(MarketplaceListingReadinessService::class), app(MarketplacePublishGate::class), app(ApiIntegrationLogger::class), app(AllegroSalesSettingsResolver::class)) extends AllegroPublishAdapter {
+            public function callPerformLivePublish(Part $part, array $readiness, array $payload, MarketplaceAccount $account): array { return $this->performLivePublish($part, $readiness, $payload, $account); }
+        };
+
+        $result = $adapter->callPerformLivePublish($part, ['marketplace_price' => 100], $payload, MarketplaceAccount::query()->where('code', 'allegro_main')->firstOrFail());
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('blocked_tax_settings', $result['status']);
+        $this->assertContains('allegro_tax_settings_rates_not_supported', $result['errors']);
+        $this->assertContains('allegro_tax_rate_not_supported:CZ:21.00', $result['warnings']);
+        Http::assertNotSent(fn ($request) => $request->url() === 'https://api.allegro.pl/sale/product-offers');
+    }
+
     private function part(?string $shippingRateName): Part
     {
         config(['app.url' => 'https://gpswiss.pl']);
@@ -427,6 +467,7 @@ class AllegroSalesSettingsTest extends TestCase
     {
         return [
             'https://api.allegro.pl/sale/categories/123/parameters' => Http::response(['parameters' => []], 200),
+            'https://api.allegro.pl/sale/tax-settings*' => Http::response(['subjects' => ['GOODS'], 'rates' => [['countryCode' => 'PL', 'rate' => '23.00'], ['countryCode' => 'CZ', 'rate' => '21.00'], ['countryCode' => 'SK', 'rate' => '23.00'], ['countryCode' => 'HU', 'rate' => '27.00'], ['countryCode' => 'LT', 'rate' => '21.00']]], 200),
             'https://api.allegro.pl/sale/shipping-rates' => Http::response(['shippingRates' => [
                 ['id' => 'ship-dpd', 'name' => 'KURIER DPD', 'status' => 'ACTIVE'],
                 ['id' => 'inactive', 'name' => 'GABARYTY CZ SK HU', 'status' => 'INACTIVE'],

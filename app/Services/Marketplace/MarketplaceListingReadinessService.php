@@ -520,7 +520,9 @@ class MarketplaceListingReadinessService
             $preview['allegro_offer_parameters'] = $allegroParameters['offer_parameters'] ?? [];
             $preview['allegro_payload_parameters'] = $allegroParameters['payload_parameters'] ?? $allegroParameters['offer_parameters'] ?? [];
             $preview['parameters'] = $preview['allegro_payload_parameters'];
-            $preview['payments'] = $allegroParameters['payments'] ?? [];
+            $preview['payments'] = ['invoice' => 'VAT'] + ($allegroParameters['payments'] ?? []);
+            $preview['taxSettings'] = ['subject' => 'GOODS', 'rates' => [['countryCode' => 'PL', 'rate' => '23.00'], ['countryCode' => 'CZ', 'rate' => '21.00'], ['countryCode' => 'SK', 'rate' => '23.00'], ['countryCode' => 'HU', 'rate' => '27.00'], ['countryCode' => 'LT', 'rate' => '21.00']]];
+            $preview['allegro_tax_settings_note'] = 'Live publish validates these rates with GET /sale/tax-settings?category.id={categoryId} before POST /sale/product-offers.';
             $preview['allegro_payment_diagnostics'] = $allegroParameters['payment_diagnostics'] ?? [];
             $preview['allegro_parameter_diagnostics'] = [
                 'productSet[0].product.parameters' => $allegroParameters['product_parameter_diagnostics'] ?? [],
