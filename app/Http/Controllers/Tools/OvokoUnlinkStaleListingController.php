@@ -21,13 +21,10 @@ use Throwable;
 class OvokoUnlinkStaleListingController extends Controller
 {
     private const CONFIRM = 'unlink-stale-ovoko-listing';
-    private const CODE_MARKER = 'ovoko_unlink_apply_diagnostics_b600094';
 
     public function __invoke(Request $request, PartMarketplaceStatusResolver $resolver, PublishPartToMarketplacesService $publisher, OvokoStaleListingService $stale): JsonResponse|View
     {
-        if ($request->isMethod('post')) {
-            return $this->apply($request, $resolver, $publisher, $stale);
-        }
+        if ($request->isMethod('post')) return $this->apply($request, $resolver, $publisher, $stale);
 
         $payload = $this->preview($request, $resolver, $publisher, $stale);
         return $request->boolean('json') || $request->expectsJson() ? response()->json($payload) : view('admin.tools.ovoko.unlink-stale-listing', $payload);
@@ -35,21 +32,12 @@ class OvokoUnlinkStaleListingController extends Controller
 
     private function apply(Request $request, PartMarketplaceStatusResolver $resolver, PublishPartToMarketplacesService $publisher, OvokoStaleListingService $stale): JsonResponse|View
     {
-        $failedStep = 'enter_apply';
-        $partId = null;
-        $marketplaceListingId = null;
+        $failedStep = 'validate_request';
+        $partId = (int) $request->input('part_id');
+        $marketplaceListingId = $request->filled('marketplace_listing_id') ? (int) $request->input('marketplace_listing_id') : null;
 
         try {
-            $failedStep = 'read_part_id';
-            $partId = (int) $request->input('part_id');
-
-            $failedStep = 'read_marketplace_listing_id';
-            $marketplaceListingId = $request->filled('marketplace_listing_id') ? (int) $request->input('marketplace_listing_id') : null;
-
-            $failedStep = 'validate_confirm';
             abort_unless($request->input('confirm') === self::CONFIRM, 422, 'Missing confirm=unlink-stale-ovoko-listing.');
-
-            $failedStep = 'validate_part_id';
             abort_if($partId <= 0, 422, 'Invalid part_id.');
 
             $failedStep = 'build_preview';
@@ -87,11 +75,10 @@ class OvokoUnlinkStaleListingController extends Controller
 
             $failedStep = 'build_after_preview';
             $after = $this->preview($request, $resolver, $publisher, $stale);
-            $failedStep = 'render_success_response';
             $payload = ['applied' => true, 'changed' => $changed, 'safety' => ['ovoko_write' => false, 'remote_delete' => false, 'local_only' => true], 'after' => $after];
             return $this->respond($request, $payload + $after);
         } catch (Throwable $e) {
-            $payload = $this->errorPayload($request, $e, $failedStep, $partId, $marketplaceListingId);
+            $payload = $this->errorPayload($e, $failedStep, $partId, $marketplaceListingId);
             Log::error('Ovoko unlink stale listing apply failed', $payload);
 
             $status = $e instanceof HttpExceptionInterface ? $e->getStatusCode() : 500;
@@ -102,25 +89,18 @@ class OvokoUnlinkStaleListingController extends Controller
 
     private function respond(Request $request, array $payload, int $status = 200): JsonResponse|View
     {
-        if ($request->boolean('json') || $request->boolean('return_json') || $request->expectsJson()) {
-            return response()->json($payload, $status);
-        }
-
-        try {
-            return response()->view('admin.tools.ovoko.unlink-stale-listing', $payload, $status);
-        } catch (Throwable $viewException) {
-            $payload['view_render_exception_class'] = $viewException::class;
-            $payload['view_render_message'] = $this->safeExceptionMessage($viewException);
-
-            return response('<!doctype html><meta charset="utf-8"><title>Ovoko unlink stale listing error</title><h1>Ovoko unlink stale listing error</h1><pre>'.e(json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)).'</pre>', $status);
-        }
+        return $request->boolean('json') || $request->expectsJson()
+            ? response()->json($payload, $status)
+            : response()->view('admin.tools.ovoko.unlink-stale-listing', $payload, $status);
     }
 
     private function listingUpdatePayload(array $raw): array
     {
         $payload = ['raw_payload' => $raw];
-        if (Schema::hasColumn('marketplace_listings', 'last_error')) {
-            $payload['last_error'] = null;
+        foreach (['status' => 'historical', 'sync_status' => 'stale', 'last_error' => null] as $column => $value) {
+            if (Schema::hasColumn('marketplace_listings', $column)) {
+                $payload[$column] = $value;
+            }
         }
 
         return $payload;
@@ -137,22 +117,9 @@ class OvokoUnlinkStaleListingController extends Controller
         MarketplaceSyncLog::query()->create(array_intersect_key($row, $columns));
     }
 
-    private function errorPayload(Request $request, Throwable $e, string $failedStep, ?int $partId, ?int $marketplaceListingId): array
+    private function errorPayload(Throwable $e, string $failedStep, int $partId, ?int $marketplaceListingId): array
     {
-        return [
-            'code_marker' => self::CODE_MARKER,
-            'applied' => false,
-            'error' => true,
-            'exception_class' => $e::class,
-            'message' => $this->safeExceptionMessage($e),
-            'failed_step' => $failedStep,
-            'part_id' => $partId ?: null,
-            'marketplace_listing_id' => $marketplaceListingId,
-            'request_has_csrf' => $request->has('_token'),
-            'confirm_received' => $request->input('confirm'),
-            'route_name' => optional($request->route())->getName(),
-            'controller_action' => static::class.'::__invoke',
-        ];
+        return ['applied' => false, 'error' => true, 'exception_class' => $e::class, 'message' => $this->safeExceptionMessage($e), 'failed_step' => $failedStep, 'part_id' => $partId ?: null, 'marketplace_listing_id' => $marketplaceListingId];
     }
 
     private function safeExceptionMessage(Throwable $e): string
@@ -176,6 +143,6 @@ class OvokoUnlinkStaleListingController extends Controller
         $preview = $part ? ($publisher->preview($part, ['ovoko'], false)['channels']['ovoko'] ?? []) : [];
         $guardBlocks = $listings->contains(fn (MarketplaceListing $l) => ! $stale->ignoredForPublish($l) && (filled($l->external_offer_id) || filled($l->external_listing_id)) && ! in_array(strtolower((string) $l->status), ['historical', 'stale', 'unlinked', 'ended', 'failed', 'deleted', 'archived'], true));
         $qualified = $rows->where('qualifies_for_unlink', true)->values()->all();
-        return ['code_marker' => self::CODE_MARKER, 'read_only' => true, 'confirm_required' => self::CONFIRM, 'part_id' => $partId ?: null, 'found' => (bool) $part, 'local_part' => $part ? ['part_id' => $part->id, 'status' => $part->status, 'quantity' => $part->quantity, 'price' => $part->price, 'ovoko_price' => $part->ovoko_price, 'needs_listing' => (bool) $part->needs_listing, 'admin_local_availability' => $part->adminLocalAvailability()] : null, 'marketplace_listings' => $rows->all(), 'qualified_listings' => $qualified, 'duplicate_guard_currently_would_block' => $guardBlocks, 'what_changes_after_apply' => ['status' => 'unchanged', 'sync_status' => 'unchanged', 'metadata_flag' => 'metadata.ovoko_unlinked_for_republish=true', 'external_id_and_url_preserved' => true, 'ovoko_api_requests' => false], 'decision_after_apply' => ['existing_ovoko_listing_detected' => false, 'stale_history_listing_detected' => count($qualified) > 0, 'ignored_for_publish' => true, 'decision_if_clicked_publish_now' => ($preview['success'] ?? false) ? 'create_new_ovoko_ready' : 'create_new_ovoko_after_readiness_fixes', 'will_create_new_listing' => (bool) ($preview['success'] ?? false), 'will_update_existing_ovoko_listing' => false, 'duplicate_guard_blocks' => false], 'readiness_preview' => $preview];
+        return ['read_only' => true, 'confirm_required' => self::CONFIRM, 'part_id' => $partId ?: null, 'found' => (bool) $part, 'local_part' => $part ? ['part_id' => $part->id, 'status' => $part->status, 'quantity' => $part->quantity, 'price' => $part->price, 'ovoko_price' => $part->ovoko_price, 'needs_listing' => (bool) $part->needs_listing, 'admin_local_availability' => $part->adminLocalAvailability()] : null, 'marketplace_listings' => $rows->all(), 'qualified_listings' => $qualified, 'duplicate_guard_currently_would_block' => $guardBlocks, 'what_changes_after_apply' => ['status' => 'historical', 'sync_status' => 'stale', 'metadata_flag' => 'metadata.ovoko_unlinked_for_republish=true', 'external_id_and_url_preserved' => true, 'ovoko_api_requests' => false], 'decision_after_apply' => ['existing_ovoko_listing_detected' => false, 'stale_history_listing_detected' => count($qualified) > 0, 'ignored_for_publish' => true, 'decision_if_clicked_publish_now' => ($preview['success'] ?? false) ? 'create_new_ovoko_ready' : 'create_new_ovoko_after_readiness_fixes', 'will_create_new_listing' => (bool) ($preview['success'] ?? false), 'will_update_existing_ovoko_listing' => false, 'duplicate_guard_blocks' => false], 'readiness_preview' => $preview];
     }
 }
