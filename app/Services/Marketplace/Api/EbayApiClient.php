@@ -4,6 +4,7 @@ namespace App\Services\Marketplace\Api;
 
 use App\Services\Marketplace\OAuthTokenManager;
 use App\Support\Marketplace\EbayOAuthConfig;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 
@@ -828,8 +829,7 @@ class EbayApiClient extends AbstractMarketplaceApiClient
     {
         $base = rtrim((string) $this->account?->api_base_url, '/');
         $token = $this->accessToken();
-        $headers = ['X-EBAY-C-MARKETPLACE-ID' => (string) ($offerPayload['marketplaceId'] ?? $this->marketplaceId())];
-        if (filled($contentLanguage)) $headers['Content-Language'] = (string) $contentLanguage;
+        $headers = $this->inventoryWriteHeaders((string) ($offerPayload['marketplaceId'] ?? $this->marketplaceId()), $contentLanguage);
 
         $inventoryResponse = Http::withToken($token)->withHeaders($headers)->acceptJson()->asJson()->timeout(30)
             ->put($base.'/sell/inventory/v1/inventory_item/'.rawurlencode($sku), $inventoryPayload);
@@ -851,7 +851,10 @@ class EbayApiClient extends AbstractMarketplaceApiClient
             'json' => is_array($offerJson) ? $offerJson : [],
             'request_id' => $offerResponse->header('x-ebay-c-request-id') ?: $offerResponse->header('rlogid'),
             'content_language' => $headers['Content-Language'] ?? null,
+            'accept_language' => $headers['Accept-Language'] ?? null,
             'marketplace_id' => $headers['X-EBAY-C-MARKETPLACE-ID'],
+            'locale' => $this->localeForMarketplace((string) ($headers['X-EBAY-C-MARKETPLACE-ID'] ?? '')),
+            'request_headers_summary' => $this->safeHeadersSummary($headers),
         ];
     }
 
@@ -859,8 +862,7 @@ class EbayApiClient extends AbstractMarketplaceApiClient
     {
         $base = rtrim((string) $this->account?->api_base_url, '/');
         $token = $this->accessToken();
-        $headers = ['X-EBAY-C-MARKETPLACE-ID' => (string) ($offerPayload['marketplaceId'] ?? $this->marketplaceId())];
-        if (filled($contentLanguage)) $headers['Content-Language'] = (string) $contentLanguage;
+        $headers = $this->inventoryWriteHeaders((string) ($offerPayload['marketplaceId'] ?? $this->marketplaceId()), $contentLanguage);
         $inventoryResponse = Http::withToken($token)->withHeaders($headers)->acceptJson()->asJson()->timeout(30)
             ->put($base.'/sell/inventory/v1/inventory_item/'.rawurlencode($sku), $inventoryPayload);
         if (! $inventoryResponse->successful()) return $this->writeResult('createOrReplaceInventoryItem', $inventoryResponse, $headers);
@@ -901,14 +903,16 @@ class EbayApiClient extends AbstractMarketplaceApiClient
             'json' => is_array($publishJson) ? $publishJson : [],
             'request_id' => $publishResponse->header('x-ebay-c-request-id') ?: $publishResponse->header('rlogid'),
             'content_language' => $headers['Content-Language'] ?? null,
+            'accept_language' => $headers['Accept-Language'] ?? null,
             'marketplace_id' => $headers['X-EBAY-C-MARKETPLACE-ID'],
+            'locale' => $this->localeForMarketplace((string) ($headers['X-EBAY-C-MARKETPLACE-ID'] ?? '')),
+            'request_headers_summary' => $this->safeHeadersSummary($headers),
         ];
     }
 
     public function publishExistingOfferById(string $offerId, ?string $marketplaceId = null, ?string $contentLanguage = null): array
     {
-        $headers = ['X-EBAY-C-MARKETPLACE-ID' => $marketplaceId ?: $this->marketplaceId()];
-        if (filled($contentLanguage)) $headers['Content-Language'] = (string) $contentLanguage;
+        $headers = $this->inventoryWriteHeaders($marketplaceId ?: $this->marketplaceId(), $contentLanguage);
 
         return $this->publishExistingOffer($offerId, $headers, ['existing_offer_reused' => true]);
     }
@@ -930,7 +934,10 @@ class EbayApiClient extends AbstractMarketplaceApiClient
             'json' => is_array($publishJson) ? $publishJson : [],
             'request_id' => $publishResponse->header('x-ebay-c-request-id') ?: $publishResponse->header('rlogid'),
             'content_language' => $headers['Content-Language'] ?? null,
+            'accept_language' => $headers['Accept-Language'] ?? null,
             'marketplace_id' => $headers['X-EBAY-C-MARKETPLACE-ID'] ?? null,
+            'locale' => $this->localeForMarketplace((string) ($headers['X-EBAY-C-MARKETPLACE-ID'] ?? '')),
+            'request_headers_summary' => $this->safeHeadersSummary($headers),
         ];
     }
 
@@ -964,10 +971,36 @@ class EbayApiClient extends AbstractMarketplaceApiClient
         return null;
     }
 
+
+    private function inventoryWriteHeaders(string $marketplaceId, ?string $contentLanguage = null): array
+    {
+        $marketplaceId = $marketplaceId !== '' ? $marketplaceId : $this->marketplaceId();
+        $locale = filled($contentLanguage) ? (string) $contentLanguage : $this->localeForMarketplace($marketplaceId);
+
+        return [
+            'X-EBAY-C-MARKETPLACE-ID' => $marketplaceId,
+            'Content-Language' => $locale,
+            'Accept-Language' => $locale,
+        ];
+    }
+
+    private function localeForMarketplace(string $marketplaceId): string
+    {
+        return match ($marketplaceId) {
+            'EBAY_FR' => 'fr-FR',
+            default => 'de-DE',
+        };
+    }
+
+    private function safeHeadersSummary(array $headers): array
+    {
+        return Arr::only($headers, ['X-EBAY-C-MARKETPLACE-ID', 'Content-Language', 'Accept-Language']);
+    }
+
     private function writeResult(string $step, $response, array $headers = []): array
     {
         $json = $response->json();
-        return ['ok' => false, 'step' => $step, 'http_status' => $response->status(), 'json' => is_array($json) ? $json : [], 'request_id' => $response->header('x-ebay-c-request-id') ?: $response->header('rlogid'), 'content_language' => $headers['Content-Language'] ?? null, 'marketplace_id' => $headers['X-EBAY-C-MARKETPLACE-ID'] ?? null];
+        return ['ok' => false, 'step' => $step, 'http_status' => $response->status(), 'json' => is_array($json) ? $json : [], 'request_id' => $response->header('x-ebay-c-request-id') ?: $response->header('rlogid'), 'content_language' => $headers['Content-Language'] ?? null, 'accept_language' => $headers['Accept-Language'] ?? null, 'marketplace_id' => $headers['X-EBAY-C-MARKETPLACE-ID'] ?? null, 'locale' => $this->localeForMarketplace((string) ($headers['X-EBAY-C-MARKETPLACE-ID'] ?? '')), 'request_headers_summary' => $this->safeHeadersSummary($headers)];
     }
 
     protected function extractOffers(array $payload): array
