@@ -11,7 +11,12 @@ class OvokoStaleListingService
 
     public function ignoredForPublish(MarketplaceListing $listing): bool
     {
-        return $listing->marketplace === 'ovoko' && (bool) data_get($listing->raw_payload, self::UNLINK_FLAG, false);
+        if ($listing->marketplace !== 'ovoko') {
+            return false;
+        }
+
+        return (bool) ($listing->getAttribute('ignored_for_publish') ?? false)
+            || (bool) data_get($listing->raw_payload, self::UNLINK_FLAG, false);
     }
 
     public function qualifies(Part $part, MarketplaceListing $listing, bool $activeByResolver): array

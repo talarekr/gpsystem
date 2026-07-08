@@ -56,6 +56,43 @@ class OvokoUnlinkStaleListingControllerTest extends TestCase
         $this->assertSame(1, MarketplaceSyncLog::query()->where('action', 'ovoko_unlink_stale_listing_for_republish')->count());
     }
 
+
+    public function test_resolver_hides_ignored_ovoko_listing_as_current_link_but_keeps_historical_url(): void
+    {
+        $part = Part::query()->create([
+            'name' => 'Ovoko stale history',
+            'sku' => 'OV-HIST-1',
+            'quantity' => 1,
+            'status' => 'ready',
+            'needs_listing' => true,
+            'ovoko_price' => 10,
+        ]);
+
+        MarketplaceListing::query()->create([
+            'part_id' => $part->id,
+            'marketplace' => 'ovoko',
+            'external_offer_id' => '11419',
+            'external_listing_id' => '11419',
+            'status' => 'historical',
+            'sync_status' => 'stale',
+            'match_status' => 'confirmed',
+            'url' => 'https://ovoko.pl/czesci-samochodowe/hgf11419',
+            'raw_payload' => ['metadata' => ['ovoko_unlinked_for_republish' => true]],
+        ]);
+
+        $row = collect(app(\App\Services\Admin\PartMarketplaceStatusResolver::class)->rowsForPart($part->fresh('marketplaceListings')))
+            ->firstWhere('key', 'ovoko');
+
+        $this->assertFalse($row['has_link']);
+        $this->assertNull($row['url']);
+        $this->assertNull($row['current_url']);
+        $this->assertSame('https://ovoko.pl/czesci-samochodowe/hgf11419', $row['historical_url']);
+        $this->assertFalse($row['is_active']);
+        $this->assertSame('✕', $row['display_icon']);
+        $this->assertSame('x', $row['icon']);
+        $this->assertTrue($row['stale_history_listing_detected']);
+    }
+
     public function test_apply_returns_readable_json_error_instead_of_blank_500(): void
     {
         $this->actingAsAdminUser();

@@ -23,6 +23,7 @@ class PartMarketplaceStatusResolver
 
         $allegro = $this->preferredListing($listings, ['allegro', 'allegro_main'], 'allegro', $partAvailable);
         $ovoko = $this->preferredListing($listings, ['ovoko'], 'ovoko', $partAvailable);
+        $ovokoHistorical = $this->historicalIgnoredListing($listings, ['ovoko']);
         $ebayListings = $this->mappedListings($listings, ['ebay_de', 'ebay']);
         $ebay = $this->preferredEbayListing($ebayListings, $partAvailable);
 
@@ -47,7 +48,7 @@ class PartMarketplaceStatusResolver
         return [
             $this->row('storefront', 'Sklep', $part->price, 'zł', $storefrontVisible, null, null, $storefrontVisible ? 'Widoczny w sklepie' : 'Niewidoczny w sklepie'),
             $this->row('allegro', 'Allegro', $part->allegro_price, 'zł', $allegroState['is_active'], $this->externalOfferId($allegro), $this->allegroUrl($allegro), $this->channelTitle('Allegro', $allegroState), null, $allegroState),
-            $this->row('ovoko', 'Ovoko', $part->ovoko_price ?? $ovoko?->price, $this->currencyLabel($ovoko?->currency), $ovokoState['is_active'], $this->externalOfferId($ovoko), $this->ovokoUrl($ovoko, $part), $this->channelTitle('Ovoko', $ovokoState), null, $ovokoState),
+            $this->row('ovoko', 'Ovoko', $part->ovoko_price ?? $ovoko?->price ?? $ovokoHistorical?->price, $this->currencyLabel($ovoko?->currency ?? $ovokoHistorical?->currency), $ovokoState['is_active'], $this->externalOfferId($ovoko), $this->ovokoUrl($ovoko, $part), $this->channelTitle('Ovoko', $ovokoState), null, $ovokoState, $this->ovokoUrl($ovokoHistorical, $part), $ovokoHistorical !== null),
             $this->row('ebay', 'eBay', $part->ebay_price, 'zł', $ebayState['is_active'], $this->externalOfferId($ebay), $this->ebayUrl($ebay), $this->channelTitle('eBay', $ebayState), $ebayMarkets ?: null, $ebayState),
         ];
     }
@@ -60,7 +61,7 @@ class PartMarketplaceStatusResolver
         $row = collect($this->rowsForPart($part))->firstWhere('key', $channel);
         $listed = (bool) ($row['listed'] ?? false);
         $url = $row['url'] ?? null;
-        $linkVisible = filled($url);
+        $linkVisible = (bool) ($row['has_link'] ?? false) && filled($url);
 
         return [
             'resolved_is_listed' => $listed,
@@ -130,6 +131,19 @@ class PartMarketplaceStatusResolver
             ->whereIn('marketplace', $marketplaces)
             ->filter(fn (MarketplaceListing $listing): bool => ! app(OvokoStaleListingService::class)->ignoredForPublish($listing) && ($this->externalOfferId($listing) !== null || $this->listingUrl($listing) !== null))
             ->values();
+    }
+
+    /**
+     * @param Collection<int, MarketplaceListing> $listings
+     * @param array<int, string> $marketplaces
+     */
+    private function historicalIgnoredListing(Collection $listings, array $marketplaces): ?MarketplaceListing
+    {
+        return $listings
+            ->whereIn('marketplace', $marketplaces)
+            ->filter(fn (MarketplaceListing $listing): bool => app(OvokoStaleListingService::class)->ignoredForPublish($listing) && ($this->externalOfferId($listing) !== null || $this->listingUrl($listing) !== null))
+            ->sortByDesc('id')
+            ->first();
     }
 
     /**
@@ -273,13 +287,16 @@ class PartMarketplaceStatusResolver
             : 'Oferta '.$label.' nieaktywna: '.$state['reason'];
     }
 
-    private function row(string $key, string $label, mixed $price, ?string $currency, bool $listed, ?string $externalOfferId, ?string $url, string $title, ?string $note = null, ?array $state = null): array
+    private function row(string $key, string $label, mixed $price, ?string $currency, bool $listed, ?string $externalOfferId, ?string $url, string $title, ?string $note = null, ?array $state = null, ?string $historicalUrl = null, bool $staleHistoryListingDetected = false): array
     {
         $isActive = $state['is_active'] ?? $listed;
         $hasLink = filled($url);
         $displayIcon = $isActive ? '✓' : '✕';
 
         return compact('key', 'label', 'listed', 'externalOfferId', 'url', 'title', 'note') + [
+            'current_url' => $url,
+            'historical_url' => $historicalUrl,
+            'stale_history_listing_detected' => $staleHistoryListingDetected,
             'price' => $this->formatPrice($price, $currency),
             'external_offer_id' => $externalOfferId,
             'has_link' => $hasLink,
