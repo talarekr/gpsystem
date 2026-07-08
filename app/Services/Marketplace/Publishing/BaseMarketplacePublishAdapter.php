@@ -61,7 +61,7 @@ abstract class BaseMarketplacePublishAdapter implements MarketplacePublishAdapte
         if (! (bool) ($readiness['can_publish_later'] ?? false)) return new MarketplacePublishResult($this->channel(), ['channel' => $this->channel(), 'marketplace' => $this->marketplace(), 'success' => false, 'status' => 'blocked_readiness', 'errors' => $readiness['blockers'] ?? [], 'warnings' => $readiness['warnings'] ?? [], 'write' => false]);
 
         $payload = $readiness['prepared_payload_preview_safe'] ?? [];
-        $imageSelection = app(\App\Services\Marketplace\MarketplaceImageSelectionService::class)->selectForPart($part, 5, true);
+        $imageSelection = app(\App\Services\Marketplace\MarketplaceImageSelectionService::class)->selectForPart($part, 0, true, $this->channel());
         $payload['image_urls'] = $imageSelection['urls'];
         $payload['marketplace_image_diagnostics'] = $imageSelection['diagnostics'];
         $account = MarketplaceAccount::query()->where('code', $this->accountCode())->first();

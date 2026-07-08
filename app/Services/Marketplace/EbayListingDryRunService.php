@@ -88,7 +88,7 @@ class EbayListingDryRunService
         $warnings = array_merge($warnings, $template['warnings'] ?? []);
         $preview = $part && isset(self::CHANNELS[$channel]) ? $this->templateService->preview($part->id, $channel) : [];
 
-        $imageSelection = $part ? $this->marketplaceImageSelectionService->selectForPart($part, 5) : ['urls' => [], 'diagnostics' => []];
+        $imageSelection = $part ? $this->marketplaceImageSelectionService->selectForPart($part, 0, false, $channel) : ['urls' => [], 'diagnostics' => []];
         $imageUrls = collect($imageSelection['urls']);
         if ($part && $imageUrls->isEmpty()) $blockers[] = 'No public product images available.';
         $translation = $this->translation($channel, $preview);
@@ -160,7 +160,7 @@ class EbayListingDryRunService
         $preview = $part && isset(self::CHANNELS[$channel]) ? $this->templateService->preview($part->id, $channel) : [];
         $sku = $part ? $this->skuResolver->resolve($part) : 'GPS-'.$partId;
         $publishable = ($ready['ready'] ?? false) && ! ($ready['category']['is_blocked'] ?? false);
-        $imageSelection = $part ? $this->marketplaceImageSelectionService->selectForPart($part, 5) : ['urls' => [], 'diagnostics' => []];
+        $imageSelection = $part ? $this->marketplaceImageSelectionService->selectForPart($part, 0, false, $channel) : ['urls' => [], 'diagnostics' => []];
         $imageUrls = $imageSelection['urls'];
         $titleSanitization = $part && $channel === 'ebay_de' ? $this->ebayTitleSanitizer->sanitizeForEbayDe($part, (string) ($preview['title'] ?? $part?->name ?? ''), (string) ($part?->name ?? '')) : null;
         $title = (string) ($titleSanitization['final_title'] ?? ($preview['title'] ?? $part?->name ?? ''));

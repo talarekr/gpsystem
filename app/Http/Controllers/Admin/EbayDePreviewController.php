@@ -49,7 +49,7 @@ class EbayDePreviewController extends Controller
         $preparedReady = ($prepared['status'] ?? 'not_prepared') === 'prepared';
         $preparedFields = is_array($prepared['fields'] ?? null) ? $prepared['fields'] : [];
         $safePayload = is_array($readiness['prepared_payload_preview_safe'] ?? null) ? $readiness['prepared_payload_preview_safe'] : [];
-        $imageSelection = $imageSelectionService->selectForPart($part, 5, (bool) $request->boolean('check_images'));
+        $imageSelection = $imageSelectionService->selectForPart($part, 0, (bool) $request->boolean('check_images'), 'ebay_de');
         $imageUrls = $imageSelection['urls'];
         $renderData = $this->renderData($preparedFields, $part, $preparedReady);
         $listingDescription = $renderer->render(self::CHANNEL, $part, $renderData);
