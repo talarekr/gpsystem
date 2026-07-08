@@ -14,9 +14,11 @@ class MarketplaceListingImageRefreshController extends Controller
         $this->authorizeOwnerAdmin($request);
         $partId = (int) $request->input('part_id', 8015);
         $channel = (string) $request->input('channel', 'allegro_main');
-        $result = $request->isMethod('post')
-            ? $service->apply($partId, $channel, (string) $request->input('confirm'))
-            : $service->preview($partId, $channel);
+        $result = $request->isMethod('post') && $request->input('action') === 'repair_ebay_mapping'
+            ? $service->repairEbayMapping($partId, $channel, (string) $request->input('public_url'), (string) $request->input('confirm'))
+            : ($request->isMethod('post')
+                ? $service->apply($partId, $channel, (string) $request->input('confirm'))
+                : $service->preview($partId, $channel));
 
         if ($request->wantsJson() || $request->boolean('json')) return response()->json($result);
 
