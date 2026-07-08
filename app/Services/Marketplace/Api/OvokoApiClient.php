@@ -114,17 +114,6 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
         ];
     }
 
-
-    /**
-     * Update an existing Ovoko/RRR CRM part by sending the normal importPart form
-     * with the existing Ovoko part_id. The integration already uses this CRM form
-     * shape for part publication, and the explicit part_id prevents creating a new part.
-     */
-    public function updateExistingPart(string $partId, array $fields, int $timeoutSeconds = 30): array
-    {
-        return $this->importPart(['part_id' => $partId] + $fields, $timeoutSeconds) + ['update_target_id' => $partId];
-    }
-
     /**
      * Candidate donor-car import endpoint. This is intentionally used only by the guarded
      * admin per-car mapping tool and never by part publish/stock/price/order flows.

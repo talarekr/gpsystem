@@ -3,7 +3,6 @@
 namespace App\Services\Marketplace\Publishing;
 
 use App\Models\MarketplaceAccount;
-use App\Models\MarketplaceListing;
 use App\Models\Part;
 use App\Services\Marketplace\Api\OvokoApiClient;
 use Illuminate\Support\Facades\Http;
@@ -20,17 +19,14 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
 
     protected function performLivePublish(Part $part, array $readiness, array $payload, ?MarketplaceAccount $account): array
     {
-        $updateCandidate = $this->existingUpdateCandidate($part);
-        $updateTargetId = $updateCandidate ? (string) ($updateCandidate->external_offer_id ?: $updateCandidate->external_listing_id) : null;
-
         if (! $account || ! $account->api_enabled || blank($account->api_base_url)) {
-            return ['ok' => false, 'status' => 'not_configured', 'action' => ($updateTargetId ? 'crm/importPart:updateExisting' : 'crm/importPart'), 'error' => 'Ovoko API account is not configured.', 'request_summary' => $this->requestSummary($payload), 'response_summary' => ['missing' => ['ovoko_main account/api_base_url/api_enabled']]];
+            return ['ok' => false, 'status' => 'not_configured', 'action' => 'crm/importPart', 'error' => 'Ovoko API account is not configured.', 'request_summary' => $this->requestSummary($payload), 'response_summary' => ['missing' => ['ovoko_main account/api_base_url/api_enabled']]];
         }
 
         $credentials = is_array($account->api_credentials) ? $account->api_credentials : [];
         foreach (['username', 'password', 'user_token'] as $key) {
             if (blank($credentials[$key] ?? null)) {
-                return ['ok' => false, 'status' => 'not_configured', 'action' => ($updateTargetId ? 'crm/importPart:updateExisting' : 'crm/importPart'), 'error' => 'Ovoko API credentials are not configured.', 'request_summary' => $this->requestSummary($payload), 'response_summary' => ['missing' => [$key]]];
+                return ['ok' => false, 'status' => 'not_configured', 'action' => 'crm/importPart', 'error' => 'Ovoko API credentials are not configured.', 'request_summary' => $this->requestSummary($payload), 'response_summary' => ['missing' => [$key]]];
             }
         }
 
@@ -38,22 +34,18 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
         $formDiagnostics = $this->formDiagnostics($form['fields'] ?? [], $form['diagnostics'] ?? []);
         $photoDiagnostics = $this->photoDiagnostics($form['fields'] ?? []) + $formDiagnostics;
         if (($form['ok'] ?? false) === true && ! ($photoDiagnostics['any_photo_accessible_publicly'] ?? false)) {
-            return ['ok' => false, 'status' => 'payload_invalid', 'action' => ($updateTargetId ? 'crm/importPart:updateExisting' : 'crm/importPart'), 'error' => 'Ovoko photo is not publicly accessible.', 'ui_error' => 'Ovoko nie może pobrać zdjęcia części. Szczegóły są w Logach.', 'request_summary' => $this->requestSummary($payload) + ['ovoko_form_keys' => array_keys($form['fields'] ?? []), 'ovoko_photo' => $photoDiagnostics], 'response_summary' => ['ovoko_photo' => $photoDiagnostics]];
+            return ['ok' => false, 'status' => 'payload_invalid', 'action' => 'crm/importPart', 'error' => 'Ovoko photo is not publicly accessible.', 'ui_error' => 'Ovoko nie może pobrać zdjęcia części. Szczegóły są w Logach.', 'request_summary' => $this->requestSummary($payload) + ['ovoko_form_keys' => array_keys($form['fields'] ?? []), 'ovoko_photo' => $photoDiagnostics], 'response_summary' => ['ovoko_photo' => $photoDiagnostics]];
         }
 
         if (($form['ok'] ?? false) !== true) {
-            return ['ok' => false, 'status' => 'payload_invalid', 'action' => ($updateTargetId ? 'crm/importPart:updateExisting' : 'crm/importPart'), 'error' => (string) ($form['error'] ?? 'Ovoko publish payload is incomplete.'), 'request_summary' => $this->requestSummary($payload) + ['ovoko_form_keys' => array_keys($form['fields'] ?? []), 'ovoko_photo' => $photoDiagnostics] + $formDiagnostics, 'response_summary' => ['missing' => $form['missing'] ?? [], 'diagnostics' => $formDiagnostics]];
+            return ['ok' => false, 'status' => 'payload_invalid', 'action' => 'crm/importPart', 'error' => (string) ($form['error'] ?? 'Ovoko publish payload is incomplete.'), 'request_summary' => $this->requestSummary($payload) + ['ovoko_form_keys' => array_keys($form['fields'] ?? []), 'ovoko_photo' => $photoDiagnostics] + $formDiagnostics, 'response_summary' => ['missing' => $form['missing'] ?? [], 'diagnostics' => $formDiagnostics]];
         }
 
-        $apiClient = new OvokoApiClient('ovoko', $account);
-        $result = $updateTargetId ? $apiClient->updateExistingPart($updateTargetId, $form['fields']) : $apiClient->importPart($form['fields']);
-        $externalId = $updateTargetId ?: (filled($result['part_id'] ?? null) ? (string) $result['part_id'] : null);
-        $shopUrl = $updateCandidate?->url ?: $this->ovokoListingUrl($externalId);
+        $result = (new OvokoApiClient('ovoko', $account))->importPart($form['fields']);
+        $externalId = filled($result['part_id'] ?? null) ? (string) $result['part_id'] : null;
+        $shopUrl = $this->ovokoListingUrl($externalId);
         $summary = [
             'endpoint' => $result['endpoint_used'] ?? null,
-            'method' => $updateTargetId ? 'updateExistingPart' : 'importPart',
-            'update_existing_ovoko' => (bool) $updateTargetId,
-            'ovoko_update_target_id' => $updateTargetId,
             'ovoko_status_code' => $result['api_status_code'] ?? null,
             'message' => $result['message'] ?? null,
             'ovoko_part_id' => $externalId,
@@ -72,26 +64,11 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
         ];
 
         if (! ($result['api_ok'] ?? false) || ! $externalId) {
-            return ['ok' => false, 'status' => 'api_error', 'action' => ($updateTargetId ? 'crm/importPart:updateExisting' : 'crm/importPart'), 'http_status' => $result['http_status'] ?? null, 'error' => (string) ($result['message'] ?? 'Ovoko/RRR importPart failed.'), 'request_summary' => $this->requestSummary($payload) + ['ovoko_form_keys' => array_keys($form['fields']), 'ovoko_photo' => $photoDiagnostics] + $formDiagnostics, 'response_summary' => $summary];
+            return ['ok' => false, 'status' => 'api_error', 'action' => 'crm/importPart', 'http_status' => $result['http_status'] ?? null, 'error' => (string) ($result['message'] ?? 'Ovoko/RRR importPart failed.'), 'request_summary' => $this->requestSummary($payload) + ['ovoko_form_keys' => array_keys($form['fields']), 'ovoko_photo' => $photoDiagnostics] + $formDiagnostics, 'response_summary' => $summary];
         }
 
-        return ['ok' => true, 'status' => 'published', 'listing_status' => 'published', 'sync_status' => 'published', 'match_status' => 'confirmed', 'marketplace_listing_id' => $updateCandidate?->id, 'last_api_status' => 'published', 'action' => ($updateTargetId ? 'crm/importPart:updateExisting' : 'crm/importPart'), 'http_status' => $result['http_status'] ?? null, 'external_offer_id' => $externalId, 'external_listing_id' => $externalId, 'url' => $shopUrl, 'request_summary' => $this->requestSummary($payload) + ['ovoko_form_keys' => array_keys($form['fields']), 'ovoko_photo' => $photoDiagnostics] + $formDiagnostics, 'response_summary' => $summary, 'metadata' => ['update_existing_ovoko' => (bool) $updateTargetId, 'updated_existing_external_offer_id' => $updateTargetId], 'log_context' => ['ovoko_part_id' => $externalId, 'ovoko_shop_url_present' => filled($shopUrl),
+        return ['ok' => true, 'status' => 'published', 'listing_status' => 'published', 'action' => 'crm/importPart', 'http_status' => $result['http_status'] ?? null, 'external_offer_id' => $externalId, 'external_listing_id' => $externalId, 'url' => $shopUrl, 'request_summary' => $this->requestSummary($payload) + ['ovoko_form_keys' => array_keys($form['fields']), 'ovoko_photo' => $photoDiagnostics] + $formDiagnostics, 'response_summary' => $summary, 'log_context' => ['ovoko_part_id' => $externalId, 'ovoko_shop_url_present' => filled($shopUrl),
             'ovoko_shop_url_source' => filled($externalId) ? 'generated_from_ovoko_part_id' : null, 'ovoko_shop_url' => $shopUrl, 'ovoko_listing_url' => $shopUrl, 'ovoko_listing_url_source' => filled($externalId) ? 'generated_from_ovoko_part_id' : null]];
-    }
-
-
-    private function existingUpdateCandidate(Part $part): ?MarketplaceListing
-    {
-        return MarketplaceListing::query()
-            ->where('part_id', $part->id)
-            ->where('marketplace', 'ovoko')
-            ->where(function ($q) { $q->whereNotNull('external_offer_id')->orWhereNotNull('external_listing_id'); })
-            ->whereIn('sync_status', ['mapped', 'published'])
-            ->where('match_status', 'confirmed')
-            ->whereIn('status', ['imported', 'mapped', 'published', 'incomplete'])
-            ->where(function ($q) { $q->whereNull('price')->orWhereNull('last_api_status')->orWhereIn('last_api_status', ['imported', 'mapped', 'incomplete', 'inactive', 'not_found']); })
-            ->orderByDesc('id')
-            ->first();
     }
 
 
