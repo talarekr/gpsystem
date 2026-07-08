@@ -15,5 +15,6 @@ class RoleSeeder extends Seeder
         }
 
         $this->call(AdminUserSeeder::class);
+        $this->call(DeactivateLegacyGpsystemUserSeeder::class);
     }
 }
