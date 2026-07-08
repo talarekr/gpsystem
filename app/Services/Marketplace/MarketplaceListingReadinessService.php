@@ -39,7 +39,6 @@ class MarketplaceListingReadinessService
         $ebayPrice = str_starts_with($channel, 'ebay_') ? $this->resolveEbayPrice($price) : null;
         $images = $this->imagesFor($part);
         $imagesCount = $images->count();
-        $existingOvokoUpdate = $channel === 'ovoko' ? $this->ovokoExistingUpdateCandidate($part) : null;
         $hasActiveListing = $marketplace ? $this->hasActiveListing($part, $marketplace, $channel) : false;
         $categoryMapping = match (true) {
             str_starts_with($channel, 'ebay_') => $this->ebayCategoryMapping($part, $channel),
@@ -131,10 +130,6 @@ class MarketplaceListingReadinessService
             $notes['translation'] = ['source_language' => 'PL', 'target_language' => $this->targetLanguageForChannel($channel), 'fields' => ['title', 'description', 'condition_notes']];
         }
 
-        if ($channel === 'ovoko') {
-            $notes['ovoko_publish_decision'] = $this->ovokoPublishDecision($existingOvokoUpdate, $blockers);
-        }
-
         $blockers = array_values(array_unique($blockers));
         $warnings = array_values(array_unique($warnings));
         $missing = array_values(array_unique($missing));
@@ -160,17 +155,6 @@ class MarketplaceListingReadinessService
             'title_ready' => $titleReady,
             'stock_ready' => $stockReady,
             'external_mapping_exists' => $hasActiveListing,
-            'existing_ovoko_listing_detected' => (bool) $existingOvokoUpdate,
-            'update_existing_ovoko' => (bool) $existingOvokoUpdate,
-            'create_new_ovoko' => $channel === 'ovoko' ? ! (bool) $existingOvokoUpdate : null,
-            'ovoko_external_offer_id' => $existingOvokoUpdate?->external_offer_id ?: $existingOvokoUpdate?->external_listing_id,
-            'local_listing_id' => $existingOvokoUpdate?->id,
-            'will_update_existing_ovoko_listing' => (bool) $existingOvokoUpdate,
-            'will_create_new_listing' => $channel === 'ovoko' ? ! (bool) $existingOvokoUpdate : null,
-            'duplicate_guard' => $channel === 'ovoko' ? ($existingOvokoUpdate ? 'candidate_for_update_existing_ovoko' : ($hasActiveListing ? 'active_listing_blocks_duplicate_create' : 'no_local_ovoko_listing_reference_found')) : null,
-            'ovoko_update_target_id' => $existingOvokoUpdate?->external_offer_id ?: $existingOvokoUpdate?->external_listing_id,
-            'update_payload_preview' => $channel === 'ovoko' && $existingOvokoUpdate ? $this->safePayloadPreview($part, $channel, $price, $categoryMapping, $ebayPrice, $allegroParameters, $allegroSalesSettings) : null,
-            'ovoko_update_endpoint_method' => $channel === 'ovoko' && $existingOvokoUpdate ? 'POST /crm/importPart with existing part_id' : null,
             'notes' => $notes,
         ];
     }
@@ -494,42 +478,6 @@ class MarketplaceListingReadinessService
         ]);
         return $mapping;
     }
-
-    private function ovokoExistingUpdateCandidate(Part $part): ?MarketplaceListing
-    {
-        if (! Schema::hasTable('marketplace_listings')) return null;
-
-        return MarketplaceListing::query()
-            ->where('part_id', $part->id)
-            ->where('marketplace', 'ovoko')
-            ->where(function ($q) { $q->whereNotNull('external_offer_id')->orWhereNotNull('external_listing_id'); })
-            ->whereIn('sync_status', ['mapped', 'published'])
-            ->where('match_status', 'confirmed')
-            ->whereIn('status', ['imported', 'mapped', 'published', 'incomplete'])
-            ->where(function ($q) { $q->whereNull('price')->orWhereNull('last_api_status')->orWhereIn('last_api_status', ['imported', 'mapped', 'incomplete', 'inactive', 'not_found']); })
-            ->orderByDesc('id')
-            ->first();
-    }
-
-    private function ovokoPublishDecision(?MarketplaceListing $candidate, array $blockers): array
-    {
-        if (! $candidate) return ['decision_if_clicked_publish_now' => 'create_or_import_via_crm_importPart', 'duplicate_guard' => 'no_local_ovoko_listing_reference_found'];
-
-        return [
-            'existing_ovoko_listing_detected' => true,
-            'update_existing_ovoko' => true,
-            'create_new_ovoko' => false,
-            'ovoko_external_offer_id' => $candidate->external_offer_id ?: $candidate->external_listing_id,
-            'local_listing_id' => $candidate->id,
-            'decision_if_clicked_publish_now' => $blockers === [] ? 'update_existing_ovoko_ready' : 'update_existing_ovoko_blocked_until_ready',
-            'will_update_existing_ovoko_listing' => true,
-            'will_create_new_listing' => false,
-            'duplicate_guard' => 'candidate_for_update_existing_ovoko',
-            'ovoko_update_target_id' => $candidate->external_offer_id ?: $candidate->external_listing_id,
-            'endpoint_method' => 'POST /crm/importPart with existing part_id',
-        ];
-    }
-
     private function hasActiveListing(Part $part, ?string $marketplace, string $channel): bool { if (! $marketplace || ! Schema::hasTable('marketplace_listings')) return false; return MarketplaceListing::query()->where('part_id', $part->id)->where('marketplace', $marketplace)->where(function ($q) { $q->whereNotNull('external_listing_id')->orWhereNotNull('external_offer_id'); })->where(function ($q) { $q->whereNull('external_listing_id')->orWhere('external_listing_id', 'not like', 'GPSW-%'); })->where(function ($q) { $q->whereNull('external_offer_id')->orWhere('external_offer_id', 'not like', 'GPSW-%'); })->whereIn('status', ['published','active','ACTIVE','live'])->whereNotIn('last_api_status', ['ended','inactive','deleted','archived','not_found','unavailable','failed','error'])->whereNull('not_seen_in_active_api_at')->exists(); }
     /** @return array<string, mixed> */
     private function safePayloadPreview(Part $part, string $channel, ?float $price, ?MarketplaceCategoryMapping $categoryMapping = null, ?array $ebayPrice = null, ?array $allegroParameters = null, ?array $allegroSalesSettings = null): array
