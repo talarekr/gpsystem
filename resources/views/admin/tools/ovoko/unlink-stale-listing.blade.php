@@ -3,6 +3,7 @@
 @section('content')
 <div class="container">
     <h1>Ovoko: odpięcie starego/importowanego powiązania</h1>
+    <p><small>Tool marker: <code>{{ $code_marker ?? 'missing-code-marker' }}</code></small></p>
     <p><b>GET jest read-only.</b> POST zmienia wyłącznie lokalny rekord marketplace_listings; nie wysyła requestów do Ovoko i nie usuwa produktu na Ovoko.</p>
 
     <form method="get" action="{{ route('admin.tools.ovoko.unlink-stale-listing') }}">
@@ -15,7 +16,7 @@
 
     @if(!empty($error))
         <h2>Błąd apply</h2>
-        <pre>{{ json_encode(['exception_class' => $exception_class ?? null, 'message' => $message ?? null, 'failed_step' => $failed_step ?? null, 'part_id' => $part_id ?? null, 'marketplace_listing_id' => $marketplace_listing_id ?? null], JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE) }}</pre>
+        <pre>{{ json_encode(['code_marker' => $code_marker ?? null, 'exception_class' => $exception_class ?? null, 'message' => $message ?? null, 'failed_step' => $failed_step ?? null, 'part_id' => $part_id ?? null, 'marketplace_listing_id' => $marketplace_listing_id ?? null, 'request_has_csrf' => $request_has_csrf ?? null, 'confirm_received' => $confirm_received ?? null, 'route_name' => $route_name ?? null, 'controller_action' => $controller_action ?? null], JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE) }}</pre>
     @endif
 
     @if(!empty($applied))
@@ -61,6 +62,7 @@
                     <input type="hidden" name="marketplace_listing_id" value="{{ $qualifiedListing['id'] }}">
                     <input type="hidden" name="confirm" value="unlink-stale-ovoko-listing">
                     <button type="submit">Odepnij lokalnie listing #{{ $qualifiedListing['id'] }}</button>
+                    <p><small>POST: <code>method=POST</code>, action <code>/admin/tools/ovoko/unlink-stale-listing</code>, CSRF included, part_id <code>{{ $part_id }}</code>, marketplace_listing_id <code>{{ $qualifiedListing['id'] }}</code>, confirm <code>unlink-stale-ovoko-listing</code>. For JSON response add <code>?return_json=1</code> to the form action or submit <code>return_json=1</code>.</small></p>
                 </form>
             @endforeach
         @endif
