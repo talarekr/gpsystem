@@ -35,13 +35,6 @@ class OvokoUnlinkStaleListingController extends Controller
 
     private function apply(Request $request, PartMarketplaceStatusResolver $resolver, PublishPartToMarketplacesService $publisher, OvokoStaleListingService $stale): JsonResponse|View
     {
-        Log::info('entered_ovoko_unlink_post', [
-            'part_id' => $request->input('part_id'),
-            'request_method' => $request->method(),
-            'route_name' => optional($request->route())->getName(),
-            'user_id' => optional($request->user())->id,
-        ]);
-
         $failedStep = 'enter_apply';
         $partId = null;
         $marketplaceListingId = null;
@@ -69,8 +62,28 @@ class OvokoUnlinkStaleListingController extends Controller
             abort_if($candidates->isEmpty(), 422, 'No qualified stale Ovoko listing found for this part_id.');
             abort_if($marketplaceListingId === null && $candidates->count() !== 1, 422, 'Provide marketplace_listing_id; bulk unlink is not allowed by this tool.');
 
-            $failedStep = 'apply_local_unlink';
-            $changed = $this->applyLocalUnlink($request, $partId, $candidates);
+            $changed = [];
+            foreach ($candidates as $candidate) {
+                $failedStep = 'load_listing';
+                $listing = MarketplaceListing::query()->where('part_id', $partId)->where('marketplace', 'ovoko')->findOrFail($candidate['id']);
+                $marketplaceListingId = (int) $listing->id;
+                $before = $listing->only(['id', 'status', 'sync_status', 'match_status', 'external_offer_id', 'external_listing_id', 'url', 'price', 'last_error']);
+                $raw = $listing->raw_payload ?: [];
+                Arr::set($raw, 'metadata.ovoko_unlinked_for_republish', true);
+                Arr::set($raw, 'metadata.unlinked_at', now()->toISOString());
+                Arr::set($raw, 'metadata.unlinked_by_admin_id', optional($request->user())->id);
+                Arr::set($raw, 'metadata.previous_external_offer_id', $listing->external_offer_id ?: $listing->external_listing_id);
+                Arr::set($raw, 'metadata.previous_url', $listing->url);
+                Arr::set($raw, 'metadata.reason', 'stale_imported_incomplete_ovoko_listing');
+
+                $failedStep = 'save_listing';
+                $listing->forceFill($this->listingUpdatePayload($raw))->save();
+
+                $failedStep = 'write_sync_log';
+                $this->writeSyncLog($listing, $partId, $before);
+
+                $changed[] = ['marketplace_listing_id' => $listing->id, 'previous_external_offer_id' => $before['external_offer_id'] ?: $before['external_listing_id'], 'previous_url' => $before['url']];
+            }
 
             $failedStep = 'build_after_preview';
             $after = $this->preview($request, $resolver, $publisher, $stale);
@@ -85,79 +98,6 @@ class OvokoUnlinkStaleListingController extends Controller
 
             return $this->respond($request, $payload, $status);
         }
-    }
-
-    public function debugApply(Request $request, PartMarketplaceStatusResolver $resolver, PublishPartToMarketplacesService $publisher, OvokoStaleListingService $stale): JsonResponse
-    {
-        try {
-            $failedStep = 'enter_debug_apply';
-            $partId = null;
-            $marketplaceListingId = null;
-
-            $failedStep = 'read_part_id';
-            $partId = (int) $request->query('part_id');
-
-            $failedStep = 'read_marketplace_listing_id';
-            $marketplaceListingId = $request->filled('marketplace_listing_id') ? (int) $request->query('marketplace_listing_id') : null;
-
-            $failedStep = 'validate_confirm';
-            abort_unless($request->query('confirm') === self::CONFIRM, 422, 'Missing confirm=unlink-stale-ovoko-listing.');
-
-            $failedStep = 'validate_part_id';
-            abort_if($partId <= 0, 422, 'Invalid part_id.');
-            abort_if($marketplaceListingId === null || $marketplaceListingId <= 0, 422, 'debug-apply requires one marketplace_listing_id.');
-
-            Log::warning('entered_ovoko_unlink_debug_apply_get', [
-                'part_id' => $partId,
-                'marketplace_listing_id' => $marketplaceListingId,
-                'request_method' => $request->method(),
-                'route_name' => optional($request->route())->getName(),
-                'user_id' => optional($request->user())->id,
-            ]);
-
-            $failedStep = 'build_preview';
-            $preview = $this->preview($request, $resolver, $publisher, $stale);
-            $candidates = collect($preview['qualified_listings'] ?? [])->where('id', $marketplaceListingId)->values();
-            abort_if($candidates->isEmpty(), 422, 'Requested marketplace_listing_id is not qualified for unlink.');
-            abort_if($candidates->count() !== 1, 422, 'debug-apply refuses bulk unlink.');
-
-            $failedStep = 'apply_local_unlink';
-            $changed = $this->applyLocalUnlink($request, $partId, $candidates);
-
-            $failedStep = 'build_after_preview';
-            $after = $this->preview($request, $resolver, $publisher, $stale);
-
-            return response()->json(['code_marker' => self::CODE_MARKER, 'debug_apply' => true, 'applied' => true, 'changed' => $changed, 'safety' => ['ovoko_write' => false, 'remote_delete' => false, 'local_only' => true, 'bulk' => false], 'after' => $after]);
-        } catch (Throwable $e) {
-            $payload = $this->errorPayload($request, $e, $failedStep ?? 'debug_apply_uncaught', $partId ?? null, $marketplaceListingId ?? null);
-            $payload['debug_apply'] = true;
-            Log::error('Ovoko unlink stale listing debug apply failed', $payload);
-
-            return response()->json($payload, $e instanceof HttpExceptionInterface ? $e->getStatusCode() : 500);
-        }
-    }
-
-    private function applyLocalUnlink(Request $request, int $partId, iterable $candidates): array
-    {
-        $changed = [];
-        foreach ($candidates as $candidate) {
-            $listing = MarketplaceListing::query()->where('part_id', $partId)->where('marketplace', 'ovoko')->findOrFail($candidate['id']);
-            $before = $listing->only(['id', 'status', 'sync_status', 'match_status', 'external_offer_id', 'external_listing_id', 'url', 'price', 'last_error']);
-            $raw = $listing->raw_payload ?: [];
-            Arr::set($raw, 'metadata.ovoko_unlinked_for_republish', true);
-            Arr::set($raw, 'metadata.unlinked_at', now()->toISOString());
-            Arr::set($raw, 'metadata.unlinked_by_admin_id', optional($request->user())->id);
-            Arr::set($raw, 'metadata.previous_external_offer_id', $listing->external_offer_id ?: $listing->external_listing_id);
-            Arr::set($raw, 'metadata.previous_url', $listing->url);
-            Arr::set($raw, 'metadata.reason', 'stale_imported_incomplete_ovoko_listing');
-
-            $listing->forceFill($this->listingUpdatePayload($raw))->save();
-            $this->writeSyncLog($listing, $partId, $before);
-
-            $changed[] = ['marketplace_listing_id' => $listing->id, 'previous_external_offer_id' => $before['external_offer_id'] ?: $before['external_listing_id'], 'previous_url' => $before['url']];
-        }
-
-        return $changed;
     }
 
     private function respond(Request $request, array $payload, int $status = 200): JsonResponse|View
