@@ -362,6 +362,54 @@ class OvokoPublishAdapterTest extends TestCase
         Http::assertNothingSent();
     }
 
+
+    public function test_imported_mapped_ovoko_listing_updates_existing_part_without_creating_new_listing(): void
+    {
+        $part = $this->readyPart();
+        $this->enableFlags();
+        $listing = MarketplaceListing::query()->create(['marketplace' => 'ovoko', 'part_id' => $part->id, 'external_offer_id' => '11351', 'external_listing_id' => '11351', 'sku' => 'GPS-GMAIL-61309', 'url' => 'https://ovoko.pl/czesci-samochodowe/hgf11351', 'status' => 'imported', 'sync_status' => 'mapped', 'match_status' => 'confirmed', 'price' => null]);
+        Http::fake(['https://ovoko.example.test/crm/importPart' => Http::response(['part_id' => 11351, 'msg' => 'OK', 'status_code' => 'R200'], 200)]);
+
+        $result = app(PublishPartToMarketplacesService::class)->confirm($part, ['ovoko'], dryRun: false, confirm: true);
+
+        $this->assertTrue($result['channels']['ovoko']['success']);
+        $this->assertSame($listing->id, $result['channels']['ovoko']['listing_id']);
+        $this->assertSame(1, MarketplaceListing::query()->where('part_id', $part->id)->where('marketplace', 'ovoko')->count());
+        $this->assertDatabaseHas('marketplace_listings', ['id' => $listing->id, 'external_offer_id' => '11351', 'external_listing_id' => '11351', 'url' => 'https://ovoko.pl/czesci-samochodowe/hgf11351', 'status' => 'published', 'sync_status' => 'published', 'match_status' => 'confirmed', 'price' => 120, 'quantity' => 1, 'last_error' => null]);
+        Http::assertSent(fn ($request): bool => $request->url() === 'https://ovoko.example.test/crm/importPart' && str_contains($request->body(), 'part_id=11351'));
+    }
+
+    public function test_ovoko_readiness_routes_imported_mapped_missing_price_listing_to_existing_update(): void
+    {
+        $part = $this->readyPart(['ovoko_price' => null]);
+        $listing = MarketplaceListing::query()->create(['marketplace' => 'ovoko', 'part_id' => $part->id, 'external_offer_id' => '11351', 'external_listing_id' => '11351', 'url' => 'https://ovoko.pl/czesci-samochodowe/hgf11351', 'status' => 'imported', 'sync_status' => 'mapped', 'match_status' => 'confirmed', 'price' => null]);
+
+        $readiness = app(\App\Services\Marketplace\MarketplaceListingReadinessService::class)->checkPartReadiness($part->fresh(), 'ovoko');
+
+        $this->assertTrue($readiness['existing_ovoko_listing_detected']);
+        $this->assertTrue($readiness['update_existing_ovoko']);
+        $this->assertFalse($readiness['create_new_ovoko']);
+        $this->assertSame('11351', $readiness['ovoko_update_target_id']);
+        $this->assertSame($listing->id, $readiness['local_listing_id']);
+        $this->assertSame('candidate_for_update_existing_ovoko', $readiness['duplicate_guard']);
+        $this->assertContains('price', $readiness['missing_fields']);
+        $this->assertContains('price', implode(' ', $readiness['missing_fields']));
+        $this->assertNotContains('Part already has an active marketplace listing for this channel.', $readiness['blockers']);
+    }
+
+    public function test_historical_ovoko_listing_does_not_block_new_import_flow(): void
+    {
+        $part = $this->readyPart();
+        $this->enableFlags();
+        MarketplaceListing::query()->create(['marketplace' => 'ovoko', 'part_id' => $part->id, 'external_offer_id' => 'OLD', 'external_listing_id' => 'OLD', 'status' => 'archived', 'sync_status' => 'mapped', 'match_status' => 'confirmed', 'last_api_status' => 'archived']);
+        Http::fake(['https://ovoko.example.test/crm/importPart' => Http::response(['part_id' => 123, 'msg' => 'OK', 'status_code' => 'R200'], 200)]);
+
+        $result = app(PublishPartToMarketplacesService::class)->confirm($part, ['ovoko'], dryRun: false, confirm: true);
+
+        $this->assertTrue($result['channels']['ovoko']['success']);
+        Http::assertSent(fn ($request): bool => $request->url() === 'https://ovoko.example.test/crm/importPart' && ! str_contains($request->body(), 'part_id=OLD'));
+    }
+
     public function test_single_ovoko_publish_does_not_run_ebay_or_allegro(): void
     {
         $part = $this->readyPart();
