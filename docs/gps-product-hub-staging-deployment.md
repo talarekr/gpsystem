@@ -111,7 +111,7 @@ When dependencies change or vendor is missing:
 
 1. Run Composer locally in a compatible PHP environment.
 2. Create `vendor.zip` containing a top-level `vendor/` directory.
-3. Either commit it at repository root for a one-time dependency deployment or upload it to the server-side expected path:
+3. Upload it to:
 
    ```text
    /home/gpsystem/domains/gpsystem.thecamels.pl/app/vendor.zip
@@ -119,7 +119,7 @@ When dependencies change or vendor is missing:
 
 4. Run the normal browser deploy URL.
 
-The helper looks for `vendor.zip` at `/app/vendor.zip` first and then in the downloaded repository package root. It extracts to a temporary directory, verifies `vendor/autoload.php`, backs up the old `/app/vendor`, swaps the new vendor into place, verifies `/app/vendor/autoload.php`, and restores the previous vendor if the swap fails. If no archive is found, the output warns that Composer dependencies may be missing and Socialite may not be installed. The post-deploy diagnostics print `socialite_installed`, Google OAuth env-key presence booleans, and whether `migrate` executed without exposing secret values.
+The helper removes the old `/app/vendor`, extracts `vendor.zip` into `/app/vendor`, supports either an archive with top-level `vendor/` or an archive whose root is the vendor directory itself, normalizes Windows ZIP path separators, and deletes `vendor.zip` after successful extraction.
 
 ### 6. Prepare generated public assets when needed
 
