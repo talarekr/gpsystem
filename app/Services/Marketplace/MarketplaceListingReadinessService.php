@@ -504,6 +504,7 @@ class MarketplaceListingReadinessService
             ->where('marketplace', 'ovoko')
             ->where(function ($q) { $q->whereNotNull('external_offer_id')->orWhereNotNull('external_listing_id'); })
             ->whereIn('sync_status', ['mapped', 'published'])
+            ->where(function ($q) { $q->whereNull('raw_payload->metadata->ovoko_unlinked_for_republish')->orWhere('raw_payload->metadata->ovoko_unlinked_for_republish', false); })
             ->where('match_status', 'confirmed')
             ->whereIn('status', ['imported', 'mapped', 'published', 'incomplete'])
             ->where(function ($q) { $q->whereNull('price')->orWhereNull('last_api_status')->orWhereIn('last_api_status', ['imported', 'mapped', 'incomplete', 'inactive', 'not_found']); })
@@ -530,7 +531,7 @@ class MarketplaceListingReadinessService
         ];
     }
 
-    private function hasActiveListing(Part $part, ?string $marketplace, string $channel): bool { if (! $marketplace || ! Schema::hasTable('marketplace_listings')) return false; return MarketplaceListing::query()->where('part_id', $part->id)->where('marketplace', $marketplace)->where(function ($q) { $q->whereNotNull('external_listing_id')->orWhereNotNull('external_offer_id'); })->where(function ($q) { $q->whereNull('external_listing_id')->orWhere('external_listing_id', 'not like', 'GPSW-%'); })->where(function ($q) { $q->whereNull('external_offer_id')->orWhere('external_offer_id', 'not like', 'GPSW-%'); })->whereIn('status', ['published','active','ACTIVE','live'])->whereNotIn('last_api_status', ['ended','inactive','deleted','archived','not_found','unavailable','failed','error'])->whereNull('not_seen_in_active_api_at')->exists(); }
+    private function hasActiveListing(Part $part, ?string $marketplace, string $channel): bool { if (! $marketplace || ! Schema::hasTable('marketplace_listings')) return false; return MarketplaceListing::query()->where('part_id', $part->id)->where('marketplace', $marketplace)->when($marketplace === 'ovoko', fn ($q) => $q->where(function ($qq) { $qq->whereNull('raw_payload->metadata->ovoko_unlinked_for_republish')->orWhere('raw_payload->metadata->ovoko_unlinked_for_republish', false); }))->where(function ($q) { $q->whereNotNull('external_listing_id')->orWhereNotNull('external_offer_id'); })->where(function ($q) { $q->whereNull('external_listing_id')->orWhere('external_listing_id', 'not like', 'GPSW-%'); })->where(function ($q) { $q->whereNull('external_offer_id')->orWhere('external_offer_id', 'not like', 'GPSW-%'); })->whereIn('status', ['published','active','ACTIVE','live'])->whereNotIn('last_api_status', ['ended','inactive','deleted','archived','not_found','unavailable','failed','error'])->whereNull('not_seen_in_active_api_at')->exists(); }
     /** @return array<string, mixed> */
     private function safePayloadPreview(Part $part, string $channel, ?float $price, ?MarketplaceCategoryMapping $categoryMapping = null, ?array $ebayPrice = null, ?array $allegroParameters = null, ?array $allegroSalesSettings = null): array
     {

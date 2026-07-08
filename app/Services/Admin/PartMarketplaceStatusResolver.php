@@ -127,6 +127,7 @@ class PartMarketplaceStatusResolver
     {
         return $listings
             ->whereIn('marketplace', $marketplaces)
+            ->filter(fn (MarketplaceListing $listing): bool => ! $this->isUnlinkedOvokoHistory($listing))
             ->filter(fn (MarketplaceListing $listing): bool => $this->externalOfferId($listing) !== null || $this->listingUrl($listing) !== null)
             ->values();
     }
@@ -185,6 +186,10 @@ class PartMarketplaceStatusResolver
 
     private function isActiveOvokoListing(MarketplaceListing $listing): bool
     {
+        if ($this->isUnlinkedOvokoHistory($listing)) {
+            return false;
+        }
+
         $activeStatuses = ['active', 'published', 'in_stock', 'in-stock', 'for_sale', 'for-sale'];
         $status = strtolower((string) $listing->status);
         $syncStatus = strtolower((string) $listing->sync_status);
@@ -240,6 +245,13 @@ class PartMarketplaceStatusResolver
         return filled($endDate)
             && strtotime((string) $endDate) !== false
             && strtotime((string) $endDate) < now()->timestamp;
+    }
+
+
+    private function isUnlinkedOvokoHistory(MarketplaceListing $listing): bool
+    {
+        return $listing->marketplace === 'ovoko'
+            && (bool) data_get($listing->raw_payload, 'metadata.ovoko_unlinked_for_republish', false);
     }
 
     private function hasListingReference(MarketplaceListing $listing, string $channel): bool

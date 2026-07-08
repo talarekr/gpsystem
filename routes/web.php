@@ -85,6 +85,7 @@ use App\Http\Controllers\Tools\OvokoListingUrlBackfillController;
 use App\Http\Controllers\Tools\OvokoListingUrlDiagnosticsController;
 use App\Http\Controllers\Tools\OvokoMarketplaceDiagnoseController;
 use App\Http\Controllers\Tools\OvokoListingDiagnoseController;
+use App\Http\Controllers\Tools\OvokoUnlinkStaleListingController;
 use App\Http\Controllers\Tools\OvokoLinkedProductsCheckController;
 use App\Http\Controllers\Tools\OvokoSoldMappingCheckController;
 use App\Http\Controllers\Tools\OvokoImportProductDataController;
@@ -333,6 +334,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/ovoko/backfill-links', OvokoListingUrlBackfillController::class)->name('admin.tools.ovoko.backfill-links');
     Route::get('/admin/tools/ovoko/listing-url-diagnostics', OvokoListingUrlDiagnosticsController::class)->name('admin.tools.ovoko.listing-url-diagnostics');
     Route::get('/admin/tools/ovoko/listing-diagnose', OvokoListingDiagnoseController::class)->name('admin.tools.ovoko.listing-diagnose');
+    Route::match(['get', 'post'], '/admin/tools/ovoko/unlink-stale-listing', OvokoUnlinkStaleListingController::class)->name('admin.tools.ovoko.unlink-stale-listing');
     Route::get('/admin/tools/ovoko/linked-products-check', OvokoLinkedProductsCheckController::class)->name('admin.tools.ovoko.linked-products-check');
     Route::get('/admin/tools/ovoko/sold-mapping-check', OvokoSoldMappingCheckController::class)->name('admin.tools.ovoko.sold-mapping-check');
     Route::get('/admin/tools/orders/ovoko-cross-channel-diagnose', OvokoCrossChannelDiagnoseController::class)->name('admin.tools.orders.ovoko-cross-channel-diagnose');

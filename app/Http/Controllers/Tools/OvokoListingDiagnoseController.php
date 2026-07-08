@@ -65,6 +65,8 @@ class OvokoListingDiagnoseController extends Controller
             'found' => (bool) $part,
             'local_part' => $part ? $this->partPayload($part) : null,
             'marketplace_listings' => $ovokoListings->map(fn (MarketplaceListing $listing): array => $this->listingPayload($listing))->all(),
+            'stale_history_listing_detected' => $ovokoListings->contains(fn (MarketplaceListing $listing): bool => (bool) data_get($listing->raw_payload, 'metadata.ovoko_unlinked_for_republish', false)),
+            'ignored_for_publish_listing_ids' => $ovokoListings->filter(fn (MarketplaceListing $listing): bool => (bool) data_get($listing->raw_payload, 'metadata.ovoko_unlinked_for_republish', false))->pluck('id')->values()->all(),
             'ovoko_api_mapping' => [
                 'account_configured' => (bool) $account,
                 'api_enabled' => (bool) ($account?->api_enabled),
@@ -123,6 +125,8 @@ class OvokoListingDiagnoseController extends Controller
             'last_api_status' => $listing->last_api_status,
             'last_error' => $listing->last_error,
             'metadata' => $listing->raw_payload,
+            'stale_history_listing_detected' => (bool) data_get($listing->raw_payload, 'metadata.ovoko_unlinked_for_republish', false),
+            'ignored_for_publish' => (bool) data_get($listing->raw_payload, 'metadata.ovoko_unlinked_for_republish', false),
             'created_at' => optional($listing->created_at)->toISOString(),
             'updated_at' => optional($listing->updated_at)->toISOString(),
         ];
@@ -206,8 +210,10 @@ class OvokoListingDiagnoseController extends Controller
             'create_new_ovoko' => (bool) ($readiness['create_new_ovoko'] ?? false),
             'ovoko_external_offer_id' => $readiness['ovoko_external_offer_id'] ?? null,
             'local_listing_id' => $readiness['local_listing_id'] ?? null,
-            'decision_if_clicked_publish_now' => $decision['decision_if_clicked_publish_now'] ?? ($hasExisting ? 'blocked_by_duplicate_guard_existing_listing' : 'create_or_import_via_crm_importPart'),
+            'decision_if_clicked_publish_now' => $decision['decision_if_clicked_publish_now'] ?? (($readiness['can_publish_later'] ?? false) && ! $willUpdate ? 'create_new_ovoko_ready' : ($hasExisting ? 'blocked_by_duplicate_guard_existing_listing' : 'create_or_import_via_crm_importPart')), 
             'will_update_existing_ovoko_listing' => $willUpdate,
+            'stale_history_listing_detected' => $listings->contains(fn ($l) => (bool) data_get($l->raw_payload, 'metadata.ovoko_unlinked_for_republish', false)),
+            'ignored_for_publish' => $listings->contains(fn ($l) => (bool) data_get($l->raw_payload, 'metadata.ovoko_unlinked_for_republish', false)) && ! $willUpdate,
             'will_create_new_listing' => (bool) ($readiness['will_create_new_listing'] ?? (! $hasExisting && (bool) ($preview['success'] ?? false))),
             'duplicate_guard' => $readiness['duplicate_guard'] ?? ($hasExisting ? 'would_block_before_api_call' : 'no_local_ovoko_listing_reference_found'),
             'ovoko_update_target_id' => $readiness['ovoko_update_target_id'] ?? null,
@@ -222,9 +228,11 @@ class OvokoListingDiagnoseController extends Controller
 
     private function linkResolver(array $row, $listings): array
     {
-        $source = $listings->first(fn ($l) => filled($l->external_offer_id) || filled($l->external_listing_id) || filled($l->url));
+        $source = $listings->first(fn ($l) => ! (bool) data_get($l->raw_payload, 'metadata.ovoko_unlinked_for_republish', false) && (filled($l->external_offer_id) || filled($l->external_listing_id) || filled($l->url)));
+        $history = $listings->filter(fn ($l) => (bool) data_get($l->raw_payload, 'metadata.ovoko_unlinked_for_republish', false))->pluck('id')->values()->all();
         return [
             'source_listing_id' => $source?->id,
+            'stale_history_listing_ids' => $history,
             'source_url' => $row['url'] ?? $source?->url,
             'source_external_offer_id' => $row['external_offer_id'] ?? $source?->external_offer_id,
             'historical_or_current' => $source && $source->updated_at && $source->last_synced_at && $source->updated_at->gt($source->last_synced_at) ? 'possibly_historical_after_local_edits' : 'current_local_resolver_value',

@@ -86,6 +86,7 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
             ->where('part_id', $part->id)
             ->where('marketplace', 'ovoko')
             ->where(function ($q) { $q->whereNotNull('external_offer_id')->orWhereNotNull('external_listing_id'); })
+            ->where(function ($q) { $q->whereNull('raw_payload->metadata->ovoko_unlinked_for_republish')->orWhere('raw_payload->metadata->ovoko_unlinked_for_republish', false); })
             ->whereIn('sync_status', ['mapped', 'published'])
             ->where('match_status', 'confirmed')
             ->whereIn('status', ['imported', 'mapped', 'published', 'incomplete'])
