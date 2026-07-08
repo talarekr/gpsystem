@@ -334,6 +334,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/ovoko/backfill-links', OvokoListingUrlBackfillController::class)->name('admin.tools.ovoko.backfill-links');
     Route::get('/admin/tools/ovoko/listing-url-diagnostics', OvokoListingUrlDiagnosticsController::class)->name('admin.tools.ovoko.listing-url-diagnostics');
     Route::get('/admin/tools/ovoko/listing-diagnose', OvokoListingDiagnoseController::class)->name('admin.tools.ovoko.listing-diagnose');
+    Route::get('/admin/tools/ovoko/unlink-stale-listing/debug-apply', [OvokoUnlinkStaleListingController::class, 'debugApply'])->name('admin.tools.ovoko.unlink-stale-listing.debug-apply');
     Route::match(['get', 'post'], '/admin/tools/ovoko/unlink-stale-listing', OvokoUnlinkStaleListingController::class)->name('admin.tools.ovoko.unlink-stale-listing');
     Route::get('/admin/tools/ovoko/linked-products-check', OvokoLinkedProductsCheckController::class)->name('admin.tools.ovoko.linked-products-check');
     Route::get('/admin/tools/ovoko/sold-mapping-check', OvokoSoldMappingCheckController::class)->name('admin.tools.ovoko.sold-mapping-check');

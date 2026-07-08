@@ -56,14 +56,36 @@
         @if(!empty($qualified_listings))
             <h2>Apply</h2>
             @foreach($qualified_listings as $qualifiedListing)
-                <form method="post" action="{{ route('admin.tools.ovoko.unlink-stale-listing') }}">
+                @php
+                    $postAction = route('admin.tools.ovoko.unlink-stale-listing');
+                    $debugApplyUrl = route('admin.tools.ovoko.unlink-stale-listing.debug-apply', [
+                        'part_id' => $part_id,
+                        'marketplace_listing_id' => $qualifiedListing['id'],
+                        'confirm' => 'unlink-stale-ovoko-listing',
+                    ]);
+                @endphp
+                <div style="border:1px solid #ddd;padding:12px;margin:12px 0;">
+                <form method="post" action="{{ $postAction }}">
                     @csrf
                     <input type="hidden" name="part_id" value="{{ $part_id }}">
                     <input type="hidden" name="marketplace_listing_id" value="{{ $qualifiedListing['id'] }}">
                     <input type="hidden" name="confirm" value="unlink-stale-ovoko-listing">
                     <button type="submit">Odepnij lokalnie listing #{{ $qualifiedListing['id'] }}</button>
-                    <p><small>POST: <code>method=POST</code>, action <code>/admin/tools/ovoko/unlink-stale-listing</code>, CSRF included, part_id <code>{{ $part_id }}</code>, marketplace_listing_id <code>{{ $qualifiedListing['id'] }}</code>, confirm <code>unlink-stale-ovoko-listing</code>. For JSON response add <code>?return_json=1</code> to the form action or submit <code>return_json=1</code>.</small></p>
                 </form>
+                <h3>Debug formularza POST</h3>
+                <pre>{{ json_encode([
+                    'normal_post_action_url' => $postAction,
+                    'normal_post_method' => 'POST',
+                    'hidden_part_id' => $part_id,
+                    'hidden_marketplace_listing_id' => $qualifiedListing['id'],
+                    'hidden_confirm' => 'unlink-stale-ovoko-listing',
+                    'csrf_token_rendered' => csrf_token() !== '',
+                    'route_name' => 'admin.tools.ovoko.unlink-stale-listing',
+                    'debug_apply_get_url' => $debugApplyUrl,
+                ], JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE) }}</pre>
+                <p><a href="{{ $debugApplyUrl }}" target="_blank" rel="noopener" onclick="return confirm('To jest awaryjny GET debug-apply i zmieni lokalny rekord marketplace_listings. Bez Ovoko API. Kontynuować?')">Awaryjny debug-apply GET JSON dla listing #{{ $qualifiedListing['id'] }}</a></p>
+                <p><small>Debug-apply GET jest tymczasowym endpointem diagnostycznym, wymaga zalogowanego admina oraz dokładnego parametru <code>confirm=unlink-stale-ovoko-listing</code>, nie robi bulk i nie wysyła requestów do Ovoko.</small></p>
+                </div>
             @endforeach
         @endif
     @elseif(($part_id ?? null))
