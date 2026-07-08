@@ -48,6 +48,7 @@ use App\Http\Controllers\Tools\MarketplaceApiFoundationController;
 use App\Http\Controllers\Tools\MarketplaceListingDryRunController;
 use App\Http\Controllers\Tools\AllegroCompatibilityDryRunController;
 use App\Http\Controllers\Tools\AllegroMarketplaceDiagnoseController;
+use App\Http\Controllers\Tools\MarketplaceListingImageRefreshController;
 use App\Http\Controllers\Tools\OvokoCarMappingController;
 use App\Http\Controllers\Tools\OvokoCrossChannelDiagnoseController;
 use App\Http\Controllers\Tools\OvokoOrderItemPartBackfillController;
@@ -325,6 +326,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/ebay-listing-audit-runner/status', fn (Request $request) => redirect()->to('/admin/tools/ebay/listing-audit-runner/status'.($request->getQueryString() ? '?'.$request->getQueryString() : '')))->name('admin.tools.ebay-listing-audit-runner.status.redirect');
     Route::get('/admin/tools/marketplace/oauth-token-health', MarketplaceOAuthTokenHealthController::class)->name('admin.tools.marketplace.oauth-token-health');
     Route::get('/admin/tools/marketplace/ovoko-url-backfill', OvokoListingUrlBackfillController::class)->name('admin.tools.marketplace.ovoko-url-backfill');
+    Route::match(['get', 'post'], '/admin/tools/marketplace/listing-image-refresh', MarketplaceListingImageRefreshController::class)->name('admin.tools.marketplace.listing-image-refresh');
     Route::get('/admin/tools/marketplace/mapping-gaps-export', MarketplaceMappingGapsExportController::class)->name('admin.tools.marketplace.mapping-gaps-export');
     Route::get('/admin/tools/ovoko/listing-url-backfill', OvokoListingUrlBackfillController::class)->name('admin.tools.ovoko.listing-url-backfill');
     Route::get('/admin/tools/ovoko/backfill-links', OvokoListingUrlBackfillController::class)->name('admin.tools.ovoko.backfill-links');

@@ -355,6 +355,27 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
     }
 
 
+    public function updateProductOfferImages(string $offerId, array $imageUrls): array
+    {
+        $payload = ['images' => array_values($imageUrls)];
+        $response = AllegroUserAgent::request()->withToken((string) $this->credentials()['access_token'])
+            ->accept('application/vnd.allegro.public.v1+json')
+            ->contentType('application/vnd.allegro.public.v1+json')
+            ->timeout(30)
+            ->patch($this->absoluteUrl('/sale/product-offers/'.rawurlencode($offerId)), $payload);
+        $json = $response->json();
+
+        return [
+            'ok' => $response->successful(),
+            'http_status' => $response->status(),
+            'offer_id' => $offerId,
+            'json' => is_array($json) ? $json : [],
+            'request_id' => $response->header('trace-id') ?: $response->header('x-request-id'),
+            'request_summary' => ['endpoint' => 'PATCH /sale/product-offers/{offerId}', 'payload' => $payload, 'images_only' => true, 'no_relist' => true, 'no_end_offer' => true, 'no_new_offer' => true],
+        ];
+    }
+
+
     public function updateProductOfferDescription(string $offerId, array $description): array
     {
         $response = AllegroUserAgent::request()->withToken((string) $this->credentials()['access_token'])
