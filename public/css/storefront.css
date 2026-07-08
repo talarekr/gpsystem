@@ -326,16 +326,42 @@
 
 
 /* Account dropdown layering/positioning fix */
+.sf-storefront-header,
 .sf-top,
 .sf-top__inner,
-.sf-main-row {
+.sf-main-row,
+.sf-nav {
     overflow: visible;
+}
+
+.sf-storefront-header {
+    position: relative;
+    z-index: 200;
+}
+
+.sf-top {
+    position: relative;
+    z-index: 210;
+}
+
+.sf-main-row {
+    position: relative;
+    z-index: 220;
+}
+
+.sf-nav {
+    position: relative;
+    z-index: 100;
 }
 
 .sf-profile {
     position: relative;
-    z-index: 40;
+    z-index: 230;
     overflow: visible;
+}
+
+.sf-profile[open] {
+    z-index: 300;
 }
 
 .sf-profile > summary {
@@ -348,7 +374,7 @@
     top: calc(100% + 8px);
     left: 0;
     transform: none;
-    z-index: 70;
+    z-index: 310;
     display: grid;
     gap: 8px;
     width: calc(100% + 64px);
