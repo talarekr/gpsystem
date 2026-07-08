@@ -73,7 +73,8 @@ class MarketplaceListingImageRefreshService
             $offer = $preview['api_snapshot']['offer_payload_for_revise'] ?? [];
             $inventory = $preview['api_snapshot']['inventory_payload_for_revise'] ?? [];
             data_set($inventory, 'product.imageUrls', $urls);
-            $result = (new EbayApiClient($preview['channel'], $account))->reviseInventoryOffer((string) ($listing->external_inventory_id ?: $listing->sku), (string) $listing->external_offer_id, $inventory, $offer);
+            $contentLanguage = $this->contentLanguage((string) ($offer['marketplaceId'] ?? $preview['planned_request']['marketplace_id'] ?? 'EBAY_DE'));
+            $result = (new EbayApiClient($preview['channel'], $account))->reviseInventoryOffer((string) ($listing->external_inventory_id ?: $listing->sku), (string) $listing->external_offer_id, $inventory, $offer, $contentLanguage);
         }
 
         return $this->log($preview, $result);
@@ -98,7 +99,31 @@ class MarketplaceListingImageRefreshService
         return $r + ['api_confirms_active_offer' => in_array(($offer['status'] ?? null), ['PUBLISHED', 'PUBLISHED_WITH_WARNINGS'], true) || filled($offer['listingId'] ?? null), 'before_image_count' => is_countable(data_get($inv, 'product.imageUrls')) ? count(data_get($inv, 'product.imageUrls')) : null, 'offer_payload_for_revise' => $offer, 'inventory_payload_for_revise' => $inv];
     }
 
-    private function plannedRequest(?MarketplaceListing $l, string $channel, array $urls, array $api): array { return $channel === 'allegro_main' ? ['method'=>'PATCH','endpoint'=>'/sale/product-offers/{offerId}','payload'=>['images'=>$urls], 'preserves'=>'price,title,stock,VAT,category,description'] : ['method'=>'PUT','endpoints'=>['/sell/inventory/v1/inventory_item/{sku}','/sell/inventory/v1/offer/{offerId}'],'payload_changes_only'=>['inventory_item.product.imageUrls'=>$urls], 'full_payload_preserves'=>'offer price, quantity, title/listingDescription, policies, category']; }
+    private function plannedRequest(?MarketplaceListing $l, string $channel, array $urls, array $api): array
+    {
+        if ($channel === 'allegro_main') {
+            return ['method'=>'PATCH','endpoint'=>'/sale/product-offers/{offerId}','payload'=>['images'=>$urls], 'preserves'=>'price,title,stock,VAT,category,description'];
+        }
+
+        $marketplaceId = (string) (($api['offer_payload_for_revise']['marketplaceId'] ?? null) ?: ($api['marketplace_id'] ?? ($channel === 'ebay_fr' ? 'EBAY_FR' : 'EBAY_DE')));
+        $locale = $this->contentLanguage($marketplaceId);
+
+        return [
+            'method'=>'PUT',
+            'endpoints'=>['/sell/inventory/v1/inventory_item/{sku}','/sell/inventory/v1/offer/{offerId}'],
+            'payload_changes_only'=>['inventory_item.product.imageUrls'=>$urls],
+            'full_payload_preserves'=>'offer price, quantity, title/listingDescription, policies, category',
+            'content_language' => $locale,
+            'accept_language' => $locale,
+            'marketplace_id' => $marketplaceId,
+            'locale' => $locale,
+            'request_headers_summary' => [
+                'X-EBAY-C-MARKETPLACE-ID' => $marketplaceId,
+                'Content-Language' => $locale,
+                'Accept-Language' => $locale,
+            ],
+        ];
+    }
     private function blockers(?MarketplaceListing $l, ?MarketplaceAccount $a, array $urls, array $api): array { return array_values(array_filter([!$l?'missing_listing':null, !$a?'missing_account':null, $urls===[]?'no_eligible_images':null, !$this->localActive($l)?'local_listing_not_active':null, !($api['api_confirms_active_offer']??false)?'api_offer_not_confirmed_active':null])); }
     public function repairEbayMapping(int $partId, string $channel, ?string $publicUrl = null, string $confirm = ''): array
     {
@@ -223,6 +248,7 @@ class MarketplaceListingImageRefreshService
     private function account(?MarketplaceListing $l, string $c): ?MarketplaceAccount { return $l?->account ?: MarketplaceAccount::query()->where('code',$c)->first(); }
     private function normalizeChannel(string $c): string { if (in_array($c, ['allegro','allegro_main'], true)) return 'allegro_main'; return $c === 'ebay_fr' ? 'ebay_fr' : 'ebay_de'; }
     private function localActive(?MarketplaceListing $l): bool { return $l && in_array($l->status, ['published','active','publication_pending','live'], true) && !in_array($l->sync_status, ['ended','withdrawn'], true); }
+    private function contentLanguage(string $marketplaceId): string { return $marketplaceId === 'EBAY_FR' ? 'fr-FR' : 'de-DE'; }
     private function apiConfirmsActiveEbay(array $api): bool { return in_array((string) ($api['offer_status'] ?? ''), ['PUBLISHED', 'PUBLISHED_WITH_WARNINGS'], true) || (bool) ($api['is_publicly_visible'] ?? false); }
     private function itemIdFromUrl(?string $url): ?string { return is_string($url) && preg_match('~/itm/(\d+)~', $url, $m) ? $m[1] : null; }
 }

@@ -91,4 +91,57 @@ class MarketplaceListingImageRefreshServiceTest extends TestCase
             'match_status' => 'confirmed',
         ]);
     }
+
+    public function test_ebay_de_apply_sends_inventory_revise_with_german_language_headers_and_image_only_payload_change(): void
+    {
+        config(['app.url' => 'https://gps.test', 'marketplace.external_api_writes_enabled' => true]);
+        $account = MarketplaceAccount::query()->create([
+            'marketplace' => 'ebay',
+            'code' => 'ebay_de',
+            'name' => 'eBay DE',
+            'api_enabled' => true,
+            'api_base_url' => 'https://api.ebay.test',
+            'api_mode' => 'live',
+            'api_credentials' => ['access_token' => 'token'],
+            'api_settings' => ['marketplace_id' => 'EBAY_DE'],
+        ]);
+        $part = Part::query()->create(['name' => 'Part', 'sku' => 'GPS-8015-FOTELE', 'quantity' => 1, 'status' => 'ready', 'currency' => 'PLN']);
+        DB::table('part_images')->insert(['part_id' => $part->id, 'path' => 'https://cdn.example.test/8015-new.jpg', 'sort_order' => 1, 'is_primary' => true, 'created_at' => now(), 'updated_at' => now()]);
+        MarketplaceListing::query()->create(['part_id' => $part->id, 'marketplace_account_id' => $account->id, 'marketplace' => 'ebay_de', 'external_offer_id' => '201864448011', 'external_listing_id' => '800303796518', 'external_inventory_id' => 'GPS-8015-FOTELE', 'sku' => 'GPS-8015-FOTELE', 'url' => 'https://www.ebay.de/itm/800303796518', 'status' => 'active']);
+
+        Http::fake([
+            'api.ebay.test/sell/inventory/v1/offer/201864448011' => Http::sequence()
+                ->push(['offerId' => '201864448011', 'listingId' => '800303796518', 'status' => 'PUBLISHED', 'marketplaceId' => 'EBAY_DE', 'pricingSummary' => ['price' => ['value' => '100.00', 'currency' => 'EUR']]], 200)
+                ->push(['offerId' => '201864448011', 'listingId' => '800303796518', 'status' => 'PUBLISHED'], 200),
+            'api.ebay.test/sell/inventory/v1/inventory_item/GPS-8015-FOTELE' => Http::sequence()
+                ->push(['product' => ['title' => 'Seat', 'imageUrls' => ['https://old.example.test/1.jpg']], 'condition' => 'USED_EXCELLENT'], 200)
+                ->push(null, 204),
+        ]);
+
+        $result = app(MarketplaceListingImageRefreshService::class)->apply($part->id, 'ebay_de', MarketplaceListingImageRefreshService::CONFIRM);
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame('de-DE', $result['planned_request']['content_language']);
+        $this->assertSame('de-DE', $result['planned_request']['accept_language']);
+        $this->assertSame('EBAY_DE', $result['planned_request']['marketplace_id']);
+        $this->assertSame('de-DE', $result['apply_result']['content_language']);
+        $this->assertSame('de-DE', $result['apply_result']['accept_language']);
+        $this->assertSame('EBAY_DE', $result['apply_result']['marketplace_id']);
+
+        Http::assertSent(function ($request): bool {
+            if ($request->method() !== 'PUT' || ! str_contains($request->url(), '/sell/inventory/v1/inventory_item/GPS-8015-FOTELE')) {
+                return false;
+            }
+
+            $payload = $request->data();
+
+            return $request->hasHeader('Content-Language', 'de-DE')
+                && $request->hasHeader('Accept-Language', 'de-DE')
+                && $request->hasHeader('X-EBAY-C-MARKETPLACE-ID', 'EBAY_DE')
+                && data_get($payload, 'product.title') === 'Seat'
+                && data_get($payload, 'condition') === 'USED_EXCELLENT'
+                && data_get($payload, 'product.imageUrls') === ['https://cdn.example.test/8015-new.jpg'];
+        });
+    }
+
 }
