@@ -509,15 +509,30 @@ function extractOptionalArchive(string $zipPath, string $destinationDir, string 
     logLine($label . ' extracted into ' . $destinationDir . '. Files: ' . $files . '; directories: ' . $dirs . '. Archive deleted.', 'ok');
 }
 
-function extractVendorArchive(string $zipPath, string $appDir): void
+function findVendorArchive(array $candidatePaths): ?string
 {
-    if (!file_exists($zipPath)) {
-        logLine('vendor.zip not found; preserving existing /app/vendor.', 'warn');
+    foreach ($candidatePaths as $candidatePath) {
+        if (is_string($candidatePath) && file_exists($candidatePath)) {
+            return $candidatePath;
+        }
+    }
+
+    return null;
+}
+
+function extractVendorArchive(array $candidatePaths, string $appDir): void
+{
+    $zipPath = findVendorArchive($candidatePaths);
+
+    if ($zipPath === null) {
+        logLine('vendor.zip not found; composer dependencies may be missing; Socialite may not be installed. Preserving existing /app/vendor.', 'warn');
         return;
     }
 
     $vendorDir = $appDir . DIRECTORY_SEPARATOR . 'vendor';
+    $backupVendorDir = $appDir . DIRECTORY_SEPARATOR . '.deploy-vendor-backup-' . date('Ymd-His') . '-' . bin2hex(random_bytes(4));
     $tempVendorDir = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'gpsystem-vendor-' . date('Ymd-His') . '-' . bin2hex(random_bytes(4));
+    $vendorMovedToBackup = false;
 
     try {
         logLine('Found vendor.zip: ' . $zipPath);
@@ -531,7 +546,14 @@ function extractVendorArchive(string $zipPath, string $appDir): void
             throw new RuntimeException('vendor.zip must contain vendor/autoload.php or autoload.php at the archive root.');
         }
 
-        removePath($vendorDir);
+        if (file_exists($vendorDir) || is_link($vendorDir)) {
+            if (!@rename($vendorDir, $backupVendorDir)) {
+                throw new RuntimeException('Unable to move existing /app/vendor to backup for atomic vendor swap.');
+            }
+            $vendorMovedToBackup = true;
+            logLine('Existing /app/vendor moved to backup: ' . basename($backupVendorDir), 'ok');
+        }
+
         ensureDirectory(dirname($vendorDir));
 
         if (!@rename($preparedVendorDir, $vendorDir)) {
@@ -539,13 +561,33 @@ function extractVendorArchive(string $zipPath, string $appDir): void
             logLine('vendor.zip fallback copied vendor files: ' . $copied, 'warn');
         }
 
-        if (!@unlink($zipPath)) {
+        if (!file_exists($vendorDir . DIRECTORY_SEPARATOR . 'autoload.php')) {
+            throw new RuntimeException('Extracted vendor.zip but /app/vendor/autoload.php is missing.');
+        }
+
+        if ($vendorMovedToBackup) {
+            removePath($backupVendorDir);
+            $vendorMovedToBackup = false;
+            logLine('Old /app/vendor backup removed after successful vendor swap.', 'ok');
+        }
+
+        if ($zipPath === $appDir . DIRECTORY_SEPARATOR . 'vendor.zip' && !@unlink($zipPath)) {
             throw new RuntimeException('Extracted vendor.zip but could not delete archive: ' . $zipPath);
         }
 
-        logLine('vendor.zip extracted into /app/vendor. Files: ' . $files . '; directories: ' . $dirs . '. Archive deleted.', 'ok');
+        logLine('vendor.zip extracted into /app/vendor. Files: ' . $files . '; directories: ' . $dirs . '.', 'ok');
+    } catch (Throwable $exception) {
+        if ($vendorMovedToBackup) {
+            removePath($vendorDir);
+            @rename($backupVendorDir, $vendorDir);
+            logLine('Restored previous /app/vendor backup after vendor.zip failure.', 'warn');
+        }
+        throw $exception;
     } finally {
         removePath($tempVendorDir);
+        if ($vendorMovedToBackup && (file_exists($backupVendorDir) || is_link($backupVendorDir))) {
+            removePath($backupVendorDir);
+        }
     }
 }
 
@@ -582,14 +624,14 @@ function callArtisan(object $kernel, string $command, array $parameters = [], bo
     }
 }
 
-function runLaravelMaintenance(string $appDir, bool $seedRoles): void
+function runLaravelMaintenance(string $appDir, bool $seedRoles): bool
 {
     $autoloadPath = $appDir . DIRECTORY_SEPARATOR . 'vendor' . DIRECTORY_SEPARATOR . 'autoload.php';
     $bootstrapPath = $appDir . DIRECTORY_SEPARATOR . 'bootstrap' . DIRECTORY_SEPARATOR . 'app.php';
 
     if (!file_exists($autoloadPath)) {
         logLine('Laravel vendor/autoload.php is missing; migrations skipped. Upload /app/vendor.zip when dependencies changed or vendor is missing.', 'warn');
-        return;
+        return false;
     }
 
     if (!file_exists($bootstrapPath)) {
@@ -618,6 +660,41 @@ function runLaravelMaintenance(string $appDir, bool $seedRoles): void
     callArtisan($kernel, 'view:clear', [], false);
     callArtisan($kernel, 'config:clear', [], false);
     callArtisan($kernel, 'cache:clear', [], false);
+
+    return true;
+}
+
+function logGoogleLoginDiagnostics(string $appDir, bool $migrateRan): void
+{
+    $autoloadPath = $appDir . DIRECTORY_SEPARATOR . 'vendor' . DIRECTORY_SEPARATOR . 'autoload.php';
+
+    if (file_exists($autoloadPath)) {
+        require_once $autoloadPath;
+    }
+
+    $socialiteInstalled = class_exists('Laravel\\Socialite\\Facades\\Socialite');
+
+    logLine('Post-deploy diagnostics: socialite_installed: ' . ($socialiteInstalled ? 'true' : 'false'), $socialiteInstalled ? 'ok' : 'warn');
+    logLine('Post-deploy diagnostics: GOOGLE_CLIENT_ID present: ' . (deployEnvPresent('GOOGLE_CLIENT_ID') ? 'true' : 'false'));
+    logLine('Post-deploy diagnostics: GOOGLE_CLIENT_SECRET present: ' . (deployEnvPresent('GOOGLE_CLIENT_SECRET') ? 'true' : 'false'));
+    logLine('Post-deploy diagnostics: GOOGLE_REDIRECT_URI present: ' . (deployEnvPresent('GOOGLE_REDIRECT_URI') ? 'true' : 'false'));
+    logLine('Post-deploy diagnostics: migrate executed: ' . ($migrateRan ? 'true' : 'false'), $migrateRan ? 'ok' : 'warn');
+}
+
+function deployEnvPresent(string $key): bool
+{
+    if (function_exists('env')) {
+        $value = env($key);
+        return is_string($value) ? trim($value) !== '' : !empty($value);
+    }
+
+    foreach ([$_ENV[$key] ?? null, $_SERVER[$key] ?? null, getenv($key)] as $value) {
+        if (is_string($value) && trim($value) !== '') {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 function acquireDeployLock(string $lockPath, int $staleSeconds): mixed
@@ -711,7 +788,10 @@ try {
 
     ensureRuntimeDirectories($appDir);
 
-    extractVendorArchive($appDir . DIRECTORY_SEPARATOR . 'vendor.zip', $appDir);
+    extractVendorArchive([
+        $appDir . DIRECTORY_SEPARATOR . 'vendor.zip',
+        $sourceDir . DIRECTORY_SEPARATOR . 'vendor.zip',
+    ], $appDir);
 
     $repoPublicDir = $appDir . DIRECTORY_SEPARATOR . 'public';
     if (is_dir($repoPublicDir)) {
@@ -731,7 +811,8 @@ try {
     );
 
     logLine('Running migrations through Laravel Console Kernel without shell/proc_open.');
-    runLaravelMaintenance($appDir, (bool) $config['seed_roles']);
+    $migrateRan = runLaravelMaintenance($appDir, (bool) $config['seed_roles']);
+    logGoogleLoginDiagnostics($appDir, $migrateRan);
 
     logLine('Cleaning up temporary files.');
     removePath($tempZip);
