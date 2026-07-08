@@ -2,13 +2,18 @@
     "name": "gps/product-hub",
     "type": "project",
     "description": "GPS Product Hub Laravel modular monolith foundation.",
-    "keywords": ["laravel", "filament", "product-hub"],
+    "keywords": [
+        "laravel",
+        "filament",
+        "product-hub"
+    ],
     "license": "proprietary",
     "require": {
-        "php": "^8.3",
         "filament/filament": "^3.2",
         "laravel/framework": "^11.0",
+        "laravel/socialite": "^5.16",
         "laravel/tinker": "^2.9",
+        "php": "^8.3",
         "spatie/laravel-permission": "^6.0"
     },
     "require-dev": {
