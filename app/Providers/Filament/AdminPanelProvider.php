@@ -58,7 +58,6 @@ use Filament\PanelProvider;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Support\Facades\Blade;
-use Illuminate\Support\HtmlString;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Session\Middleware\StartSession;
@@ -83,10 +82,6 @@ class AdminPanelProvider extends PanelProvider
             ->renderHook(
                 'panels::body.start',
                 fn (): string => Blade::render('@include(\'filament.admin-topbar\')'),
-            )
-            ->renderHook(
-                'panels::body.end',
-                fn (): string => Blade::render('@include(\'filament.admin-logout-form\')'),
             )
             ->colors([
                 'primary' => [
@@ -143,15 +138,6 @@ class AdminPanelProvider extends PanelProvider
                     ->sort(10)
                     ->url(fn (): string => route('admin.marketplace-category-mapper.index'))
                     ->isActiveWhen(fn (): bool => request()->routeIs('admin.marketplace-category-mapper.*')),
-                NavigationItem::make('Wyloguj się')
-                    ->group('Administracja marketplace')
-                    ->sort(999)
-                    ->url('#')
-                    ->icon('heroicon-o-arrow-left-on-rectangle')
-                    ->extraSidebarAttributes([
-                        'onclick' => new HtmlString("event.preventDefault(); document.getElementById('gps-admin-logout-form')?.requestSubmit();"),
-                        'role' => 'button',
-                    ]),
             ])
             ->pages([
                 Dashboard::class,
