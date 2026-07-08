@@ -3,8 +3,14 @@
     use App\Filament\Resources\OrderResource;
     use App\Models\Order;
     use Illuminate\Database\QueryException;
+    use Illuminate\Support\Facades\Auth;
     use Illuminate\Support\Facades\Schema;
 
+    $shouldRenderAdminTopbar = Auth::check() && ! request()->routeIs('filament.admin.auth.login');
+@endphp
+
+@if ($shouldRenderAdminTopbar)
+@php
     $partsIndexUrl = PartResource::getUrl('index');
     $ordersUrl = class_exists(OrderResource::class) ? OrderResource::getUrl('index') : '#';
     $ordersCount = 0;
@@ -49,3 +55,4 @@
         </a>
     </div>
 </div>
+@endif

@@ -13,5 +13,7 @@ class RoleSeeder extends Seeder
         foreach (UserRole::cases() as $role) {
             Role::findOrCreate($role->value, 'web');
         }
+
+        $this->call(AdminUserSeeder::class);
     }
 }
