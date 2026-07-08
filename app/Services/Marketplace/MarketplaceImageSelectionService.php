@@ -12,26 +12,36 @@ class MarketplaceImageSelectionService
     /**
      * @return array{urls: array<int, string>, selected: array<int, array<string, mixed>>, diagnostics: array<string, mixed>}
      */
-    public function selectForPart(Part $part, int $limit = 5, bool $withHttpChecks = false): array
+    public function selectForPart(Part $part, int $limit = 0, bool $withHttpChecks = false, ?string $channel = null): array
     {
+        $limit = $this->resolveLimit($limit, $channel);
         $images = $this->orderedImages($part);
         $selected = [];
+        $skipped = [];
+        $eligibleCount = 0;
 
         foreach ($images as $image) {
             $choice = $this->selectForImage($image);
-            if ($choice === null) {
-                continue;
-            }
-
-            $selected[] = $choice + [
+            $base = [
                 'part_image_id' => $image->id,
                 'is_primary' => (bool) $image->is_primary,
                 'sort_order' => $image->sort_order,
+                'path' => $image->path,
             ];
 
-            if (count($selected) >= $limit) {
-                break;
+            if ($choice === null) {
+                $skipped[] = $base + ['reason' => 'no_https_marketplace_url'];
+                continue;
             }
+
+            $eligibleCount++;
+
+            if (count($selected) >= $limit) {
+                $skipped[] = $base + ['reason' => 'marketplace_image_limit_reached', 'selected_image_url' => $choice['selected_image_url']];
+                continue;
+            }
+
+            $selected[] = $choice + $base;
         }
 
         $urls = array_values(array_map(fn (array $image): string => $image['selected_image_url'], $selected));
@@ -47,6 +57,14 @@ class MarketplaceImageSelectionService
                 'selected_image_variant' => $first['selected_image_variant'] ?? null,
                 'selected_image_source_path' => $first['selected_image_source_path'] ?? null,
                 'selected_image_url' => $first['selected_image_url'] ?? null,
+                'part_images_count' => $images->count(),
+                'eligible_images_count' => $eligibleCount,
+                'skipped_images_count' => count($skipped),
+                'skipped_images_reasons' => collect($skipped)->countBy('reason')->all(),
+                'skipped_images' => $skipped,
+                'final_marketplace_image_urls' => $urls,
+                'marketplace_image_limit_used' => $limit,
+                'channel' => $channel,
                 'selected_images_count' => count($urls),
                 'main_image_preserved_as_first' => $mainPreserved,
                 'fallback_reason' => $first['fallback_reason'] ?? null,
@@ -54,6 +72,20 @@ class MarketplaceImageSelectionService
                 'http_checks' => $checks,
             ],
         ];
+    }
+
+    private function resolveLimit(int $limit, ?string $channel): int
+    {
+        if ($limit > 0) {
+            return $limit;
+        }
+
+        return match ($channel) {
+            'allegro', 'allegro_main' => max(1, (int) config('marketplace.allegro_max_images', 16)),
+            'ebay', 'ebay_de', 'ebay_fr' => max(1, (int) config('marketplace.ebay_max_images', 24)),
+            'ovoko' => max(1, (int) config('marketplace.ovoko_max_images', 10)),
+            default => 10,
+        };
     }
 
     private function orderedImages(Part $part): \Illuminate\Support\Collection

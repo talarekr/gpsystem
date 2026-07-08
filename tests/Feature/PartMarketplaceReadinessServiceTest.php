@@ -1108,7 +1108,7 @@ class PartMarketplaceReadinessServiceTest extends TestCase
     {
         Cache::put('nbp_table_a_eur_rate', ['rate' => 4.30, 'effective_date' => '2026-06-27']);
         $this->app->instance(\App\Services\Marketplace\MarketplaceImageSelectionService::class, new class extends \App\Services\Marketplace\MarketplaceImageSelectionService {
-            public function selectForPart(\App\Models\Part $part, int $limit = 5, bool $withHttpChecks = false): array
+            public function selectForPart(\App\Models\Part $part, int $limit = 5, bool $withHttpChecks = false, ?string $channel = null): array
             {
                 return ['urls' => ['https://cdn.example.test/selected.jpg'], 'selected' => [], 'diagnostics' => ['selected_image_variant' => 'test_double']];
             }
