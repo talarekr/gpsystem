@@ -803,6 +803,27 @@ class EbayApiClient extends AbstractMarketplaceApiClient
         return $result;
     }
 
+    public function readInventoryOfferAndItem(string $offerId, string $sku): array
+    {
+        $base = rtrim((string) $this->account?->api_base_url, '/');
+        $token = $this->accessToken();
+        $headers = ['X-EBAY-C-MARKETPLACE-ID' => $this->marketplaceId()];
+        $offerResponse = Http::withToken($token)->withHeaders($headers)->acceptJson()->timeout(20)->get($base.'/sell/inventory/v1/offer/'.rawurlencode($offerId));
+        $inventoryResponse = Http::withToken($token)->withHeaders($headers)->acceptJson()->timeout(20)->get($base.'/sell/inventory/v1/inventory_item/'.rawurlencode($sku));
+        $offer = $offerResponse->json();
+        $inventory = $inventoryResponse->json();
+
+        return [
+            'ok' => $offerResponse->successful() && $inventoryResponse->successful(),
+            'offer_http_status' => $offerResponse->status(),
+            'inventory_http_status' => $inventoryResponse->status(),
+            'offer_payload' => is_array($offer) ? $offer : [],
+            'inventory_payload' => is_array($inventory) ? $inventory : [],
+            'marketplace_id' => $headers['X-EBAY-C-MARKETPLACE-ID'],
+        ];
+    }
+
+
     public function reviseInventoryOffer(string $sku, string $offerId, array $inventoryPayload, array $offerPayload, ?string $contentLanguage = null): array
     {
         $base = rtrim((string) $this->account?->api_base_url, '/');
