@@ -32,9 +32,37 @@ class MarketplaceListingImageRefreshServiceTest extends TestCase
 
         $this->assertSame($listing->id, $preview['marketplace_listing_id']);
         $this->assertSame('800303796518', $preview['item_id']);
+        $this->assertSame(['ebay_de', 'ebay'], $preview['queried_marketplaces']);
+        $this->assertSame(1, $preview['listings_found_count']);
+        $this->assertSame($listing->id, $preview['all_candidate_listings'][0]['id']);
+        $this->assertTrue($preview['all_candidate_listings'][0]['accepted']);
+        $this->assertContains('selected_for_preview', $preview['all_candidate_listings'][0]['reasons']);
         $this->assertTrue($preview['local_listing_active']);
         $this->assertTrue($preview['api_confirms_active_offer']);
         $this->assertNotContains('missing_listing', $preview['blockers']);
+    }
+
+
+    public function test_ebay_preview_lists_all_part_candidates_without_channel_filter(): void
+    {
+        config(['app.url' => 'https://gps.test']);
+        MarketplaceAccount::query()->create(['marketplace' => 'ebay', 'code' => 'ebay_de', 'name' => 'eBay DE', 'api_enabled' => true, 'api_base_url' => 'https://api.ebay.test', 'api_mode' => 'read_only', 'api_credentials' => ['access_token' => 'token']]);
+        $part = Part::query()->create(['name' => 'Part', 'sku' => 'GPSW-8015', 'quantity' => 1, 'status' => 'ready', 'currency' => 'PLN']);
+        DB::table('part_images')->insert(['part_id' => $part->id, 'path' => 'https://cdn.example.test/8015.jpg', 'sort_order' => 1, 'is_primary' => true, 'created_at' => now(), 'updated_at' => now()]);
+        $ebay = MarketplaceListing::query()->create(['part_id' => $part->id, 'marketplace' => 'ebay', 'external_offer_id' => 'offer-8015', 'external_listing_id' => '800303796518', 'external_inventory_id' => 'GPSW-8015', 'sku' => 'GPSW-8015', 'url' => 'https://www.ebay.de/itm/800303796518', 'status' => 'ended', 'sync_status' => 'ended']);
+        $ovoko = MarketplaceListing::query()->create(['part_id' => $part->id, 'marketplace' => 'ovoko', 'external_offer_id' => '11701', 'sku' => 'GPSW-8015', 'status' => 'active']);
+
+        $preview = app(MarketplaceListingImageRefreshService::class)->preview($part->id, 'ebay_de');
+
+        $this->assertNull($preview['marketplace_listing_id']);
+        $this->assertSame(['ebay_de', 'ebay'], $preview['queried_marketplaces']);
+        $this->assertSame(2, $preview['listings_found_count']);
+        $this->assertEqualsCanonicalizing([$ebay->id, $ovoko->id], collect($preview['all_candidate_listings'])->pluck('id')->all());
+        $ebayCandidate = collect($preview['all_candidate_listings'])->firstWhere('id', $ebay->id);
+        $ovokoCandidate = collect($preview['all_candidate_listings'])->firstWhere('id', $ovoko->id);
+        $this->assertContains('accepted_channel_match', $ebayCandidate['reasons']);
+        $this->assertContains('rejected_local_status_not_active', $ebayCandidate['reasons']);
+        $this->assertContains('rejected_marketplace_not_queried_for_channel', $ovokoCandidate['reasons']);
     }
 
     public function test_repair_ebay_mapping_only_writes_after_seller_api_confirms_public_item(): void

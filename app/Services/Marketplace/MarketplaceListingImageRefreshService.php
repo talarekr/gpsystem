@@ -22,6 +22,7 @@ class MarketplaceListingImageRefreshService
         $channel = $this->normalizeChannel($channel);
         $part = Part::query()->with('images')->findOrFail($partId);
         $listing = $this->listing($part, $channel);
+        $listingDiagnostics = $this->listingDiagnostics($part->id, $channel, $listing);
         $selection = $this->images->selectForPart($part, 0, false, $channel);
         $account = $this->account($listing, $channel);
         $api = $this->apiSnapshot($listing, $account, $channel);
@@ -34,7 +35,10 @@ class MarketplaceListingImageRefreshService
             'marketplace_listing_id' => $listing?->id,
             'external_offer_id' => $listing?->external_offer_id,
             'item_id' => str_starts_with($channel, 'ebay') ? ($listing?->external_listing_id ?: $this->itemIdFromUrl($listing?->url)) : null,
-            'resolved_listing_source' => $listing?->raw_payload['image_refresh_resolver_source'] ?? null,
+            'resolved_listing_source' => $listing?->raw_payload['image_refresh_resolver_source'] ?? ($listing ? 'existing_local_listing' : null),
+            'queried_marketplaces' => $listingDiagnostics['queried_marketplaces'],
+            'listings_found_count' => $listingDiagnostics['listings_found_count'],
+            'all_candidate_listings' => $listingDiagnostics['all_candidate_listings'],
             'current_database_image_count' => $part->images->count(),
             'eligible_images_count' => $selection['diagnostics']['eligible_images_count'] ?? 0,
             'selected_images_count' => count($selection['urls']),
@@ -152,10 +156,64 @@ class MarketplaceListingImageRefreshService
         return ['ok' => true, 'marketplace_listing_id' => $row->id, 'public_item_id' => (string) $apiListingId, 'external_offer_id' => (string) $apiOfferId, 'api_snapshot' => $api];
     }
 
+
+    private function listingDiagnostics(int $partId, string $channel, ?MarketplaceListing $selected): array
+    {
+        $queriedMarketplaces = $this->queriedMarketplaces($channel);
+        $candidates = MarketplaceListing::query()
+            ->where('part_id', $partId)
+            ->orderByRaw('case when marketplace in ('.implode(',', array_fill(0, count($queriedMarketplaces), '?')).') then 0 else 1 end', $queriedMarketplaces)
+            ->latest('updated_at')
+            ->latest('id')
+            ->get();
+
+        return [
+            'queried_marketplaces' => $queriedMarketplaces,
+            'listings_found_count' => $candidates->count(),
+            'all_candidate_listings' => $candidates->map(fn (MarketplaceListing $listing): array => $this->candidateDiagnostics($listing, $channel, $queriedMarketplaces, $selected))->values()->all(),
+        ];
+    }
+
+    private function candidateDiagnostics(MarketplaceListing $listing, string $channel, array $queriedMarketplaces, ?MarketplaceListing $selected): array
+    {
+        $reasons = [];
+        $channelMatches = in_array($listing->marketplace, $queriedMarketplaces, true);
+        $active = $this->localActive($listing);
+
+        $reasons[] = $channelMatches ? 'accepted_channel_match' : 'rejected_marketplace_not_queried_for_channel';
+        $reasons[] = $active ? 'accepted_local_status_active' : 'rejected_local_status_not_active';
+        $reasons[] = $selected && $selected->id === $listing->id ? 'selected_for_preview' : 'not_selected_for_preview';
+
+        return [
+            'id' => $listing->id,
+            'marketplace' => $listing->marketplace,
+            'channel' => $listing->marketplace,
+            'status' => $listing->status,
+            'sync_status' => $listing->sync_status,
+            'match_status' => $listing->match_status,
+            'external_offer_id' => $listing->external_offer_id,
+            'external_listing_id' => $listing->external_listing_id,
+            'external_inventory_id' => $listing->external_inventory_id,
+            'sku' => $listing->sku,
+            'url' => $listing->url,
+            'last_api_status' => $listing->last_api_status,
+            'created_at' => $listing->created_at?->toISOString(),
+            'updated_at' => $listing->updated_at?->toISOString(),
+            'accepted' => $selected && $selected->id === $listing->id,
+            'reasons' => $reasons,
+        ];
+    }
+
+    private function queriedMarketplaces(string $channel): array
+    {
+        if (str_starts_with($channel, 'allegro')) return ['allegro'];
+        return $channel === 'ebay_fr' ? ['ebay_fr'] : ['ebay_de', 'ebay'];
+    }
+
     private function listing(Part $p, string $c, bool $includeInactive = false): ?MarketplaceListing
     {
         if (str_starts_with($c, 'allegro')) return MarketplaceListing::query()->where('part_id', $p->id)->where('marketplace', 'allegro')->latest('id')->first();
-        $channels = $c === 'ebay_fr' ? ['ebay_fr'] : ['ebay_de', 'ebay'];
+        $channels = $this->queriedMarketplaces($c);
         $query = MarketplaceListing::query()->where('part_id', $p->id)->whereIn('marketplace', $channels);
         if (! $includeInactive) {
             $query->where(fn ($q) => $q->whereIn('status', ['published', 'active', 'publication_pending', 'live'])->orWhereIn('last_api_status', ['active', 'published', 'PUBLISHED']));
