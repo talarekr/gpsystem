@@ -9,6 +9,8 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Laravel\Socialite\Facades\Socialite;
+use Laravel\Socialite\Two\InvalidStateException;
 
 class GoogleAuthController extends Controller
 {
@@ -19,7 +21,7 @@ class GoogleAuthController extends Controller
                 ->with('warning', 'Logowanie Google nie jest jeszcze skonfigurowane. Uzupełnij GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET i GOOGLE_REDIRECT_URI.');
         }
 
-        return \Laravel\Socialite\Facades\Socialite::driver('google')
+        return Socialite::driver('google')
             ->scopes(['openid', 'profile', 'email'])
             ->redirect();
     }
@@ -32,8 +34,8 @@ class GoogleAuthController extends Controller
         }
 
         try {
-            $googleUser = \Laravel\Socialite\Facades\Socialite::driver('google')->user();
-        } catch (\Laravel\Socialite\Two\InvalidStateException) {
+            $googleUser = Socialite::driver('google')->user();
+        } catch (InvalidStateException) {
             return redirect()->route('storefront.login')
                 ->with('warning', 'Sesja logowania Google wygasła albo jest nieprawidłowa. Spróbuj ponownie.');
         } catch (\Throwable) {
@@ -82,8 +84,7 @@ class GoogleAuthController extends Controller
 
     private function isConfigured(): bool
     {
-        return class_exists('Laravel\\Socialite\\Facades\\Socialite')
-            && filled(config('services.google.client_id'))
+        return filled(config('services.google.client_id'))
             && filled(config('services.google.client_secret'))
             && filled(config('services.google.redirect'));
     }
