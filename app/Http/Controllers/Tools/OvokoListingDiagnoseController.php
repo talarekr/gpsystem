@@ -195,15 +195,27 @@ class OvokoListingDiagnoseController extends Controller
     {
         $preview = $publisher->preview($part, ['ovoko'], false)['channels']['ovoko'] ?? [];
         $hasExisting = $listings->contains(fn ($l) => filled($l->external_offer_id) || filled($l->external_listing_id));
+        $readiness = $preview['readiness'] ?? [];
+        $decision = data_get($readiness, 'notes.ovoko_publish_decision', []);
+        $willUpdate = (bool) ($readiness['will_update_existing_ovoko_listing'] ?? false);
         return [
-            'current_flow' => 'PublishPartToMarketplacesService -> OvokoPublishAdapter -> crm/importPart',
+            'current_flow' => $willUpdate ? 'PublishPartToMarketplacesService -> OvokoPublishAdapter -> updateExistingPart via crm/importPart part_id' : 'PublishPartToMarketplacesService -> OvokoPublishAdapter -> crm/importPart',
             'will_detect_existing_local_listing' => $hasExisting,
-            'decision_if_clicked_publish_now' => $hasExisting ? 'blocked_by_duplicate_guard_existing_listing' : 'create_or_import_via_crm_importPart',
-            'will_update_existing_ovoko_listing' => false,
-            'will_create_new_listing' => ! $hasExisting && (bool) ($preview['success'] ?? false),
-            'duplicate_guard' => $hasExisting ? 'would_block_before_api_call' : 'no_local_ovoko_listing_reference_found',
+            'existing_ovoko_listing_detected' => (bool) ($readiness['existing_ovoko_listing_detected'] ?? false),
+            'update_existing_ovoko' => (bool) ($readiness['update_existing_ovoko'] ?? false),
+            'create_new_ovoko' => (bool) ($readiness['create_new_ovoko'] ?? false),
+            'ovoko_external_offer_id' => $readiness['ovoko_external_offer_id'] ?? null,
+            'local_listing_id' => $readiness['local_listing_id'] ?? null,
+            'decision_if_clicked_publish_now' => $decision['decision_if_clicked_publish_now'] ?? ($hasExisting ? 'blocked_by_duplicate_guard_existing_listing' : 'create_or_import_via_crm_importPart'),
+            'will_update_existing_ovoko_listing' => $willUpdate,
+            'will_create_new_listing' => (bool) ($readiness['will_create_new_listing'] ?? (! $hasExisting && (bool) ($preview['success'] ?? false))),
+            'duplicate_guard' => $readiness['duplicate_guard'] ?? ($hasExisting ? 'would_block_before_api_call' : 'no_local_ovoko_listing_reference_found'),
+            'ovoko_update_target_id' => $readiness['ovoko_update_target_id'] ?? null,
+            'update_payload_preview' => $readiness['update_payload_preview'] ?? null,
+            'endpoint_method' => $readiness['ovoko_update_endpoint_method'] ?? null,
+            'blockers' => $readiness['blockers'] ?? [],
             'url_to_be_saved' => $hasExisting ? ($listings->first()?->url) : 'generated from Ovoko part_id returned by crm/importPart, if API returns part_id',
-            'why' => $hasExisting ? 'Base publish adapter only skips when a local Ovoko listing already has an external ID; it does not search Ovoko by SKU before publish.' : 'No local external Ovoko ID was found, so the live adapter would call crm/importPart after readiness passes.',
+            'why' => $willUpdate ? 'Local Ovoko listing is mapped/confirmed but incomplete or missing price, so publish updates that existing Ovoko part_id instead of creating a duplicate.' : ($hasExisting ? 'An active local Ovoko listing blocks duplicate creation.' : 'No local external Ovoko ID was found, so the live adapter would call crm/importPart after readiness passes.'),
             'readiness_preview' => $preview,
         ];
     }
