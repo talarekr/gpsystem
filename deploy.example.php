@@ -612,12 +612,22 @@ function runLaravelMaintenance(string $appDir, bool $seedRoles): void
         callArtisan($kernel, 'db:seed', ['--class' => 'RoleSeeder', '--force' => true], false);
     }
 
-    logLine('Clearing Laravel caches after deploy: optimize:clear, route:clear, view:clear, config:clear.');
+    logLine('Clearing Laravel caches after deploy: optimize:clear, route:clear, view:clear, config:clear, cache:clear.');
     callArtisan($kernel, 'optimize:clear', [], false);
     callArtisan($kernel, 'route:clear', [], false);
     callArtisan($kernel, 'view:clear', [], false);
     callArtisan($kernel, 'config:clear', [], false);
     callArtisan($kernel, 'cache:clear', [], false);
+
+    if (function_exists('opcache_reset')) {
+        if (@opcache_reset()) {
+            logLine('PHP OPcache reset after deploy.', 'ok');
+        } else {
+            logLine('PHP OPcache reset was requested but not completed by the runtime.', 'warn');
+        }
+    } else {
+        logLine('PHP OPcache reset skipped: opcache_reset() is unavailable.', 'warn');
+    }
 }
 
 function acquireDeployLock(string $lockPath, int $staleSeconds): mixed
