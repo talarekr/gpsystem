@@ -5,6 +5,7 @@ namespace App\Services\Admin;
 use App\Models\MarketplaceListing;
 use App\Models\Part;
 use Illuminate\Support\Collection;
+use App\Services\Marketplace\OvokoStaleListingService;
 
 class PartMarketplaceStatusResolver
 {
@@ -127,7 +128,7 @@ class PartMarketplaceStatusResolver
     {
         return $listings
             ->whereIn('marketplace', $marketplaces)
-            ->filter(fn (MarketplaceListing $listing): bool => $this->externalOfferId($listing) !== null || $this->listingUrl($listing) !== null)
+            ->filter(fn (MarketplaceListing $listing): bool => ! app(OvokoStaleListingService::class)->ignoredForPublish($listing) && ($this->externalOfferId($listing) !== null || $this->listingUrl($listing) !== null))
             ->values();
     }
 
@@ -185,6 +186,10 @@ class PartMarketplaceStatusResolver
 
     private function isActiveOvokoListing(MarketplaceListing $listing): bool
     {
+        if (app(OvokoStaleListingService::class)->ignoredForPublish($listing)) {
+            return false;
+        }
+
         $activeStatuses = ['active', 'published', 'in_stock', 'in-stock', 'for_sale', 'for-sale'];
         $status = strtolower((string) $listing->status);
         $syncStatus = strtolower((string) $listing->sync_status);

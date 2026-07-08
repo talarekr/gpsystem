@@ -9,6 +9,7 @@ use App\Models\Part;
 use App\Services\Admin\PartMarketplaceStatusResolver;
 use App\Services\Marketplace\Api\OvokoApiClient;
 use App\Services\Marketplace\PublishPartToMarketplacesService;
+use App\Services\Marketplace\OvokoStaleListingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -194,11 +195,15 @@ class OvokoListingDiagnoseController extends Controller
     private function publishDecision(Part $part, $listings, PublishPartToMarketplacesService $publisher): array
     {
         $preview = $publisher->preview($part, ['ovoko'], false)['channels']['ovoko'] ?? [];
-        $hasExisting = $listings->contains(fn ($l) => filled($l->external_offer_id) || filled($l->external_listing_id));
+        $hasExisting = $listings->contains(fn ($l) => ! app(OvokoStaleListingService::class)->ignoredForPublish($l) && (filled($l->external_offer_id) || filled($l->external_listing_id)));
+        $hasStaleHistory = $listings->contains(fn ($l) => app(OvokoStaleListingService::class)->ignoredForPublish($l));
         return [
             'current_flow' => 'PublishPartToMarketplacesService -> OvokoPublishAdapter -> crm/importPart',
             'will_detect_existing_local_listing' => $hasExisting,
-            'decision_if_clicked_publish_now' => $hasExisting ? 'blocked_by_duplicate_guard_existing_listing' : 'create_or_import_via_crm_importPart',
+            'existing_ovoko_listing_detected' => $hasExisting,
+            'stale_history_listing_detected' => $hasStaleHistory,
+            'ignored_for_publish' => $hasStaleHistory && ! $hasExisting,
+            'decision_if_clicked_publish_now' => $hasExisting ? 'blocked_by_duplicate_guard_existing_listing' : ((bool) ($preview['success'] ?? false) ? 'create_new_ovoko_ready' : 'create_or_import_via_crm_importPart'),
             'will_update_existing_ovoko_listing' => false,
             'will_create_new_listing' => ! $hasExisting && (bool) ($preview['success'] ?? false),
             'duplicate_guard' => $hasExisting ? 'would_block_before_api_call' : 'no_local_ovoko_listing_reference_found',
@@ -210,7 +215,7 @@ class OvokoListingDiagnoseController extends Controller
 
     private function linkResolver(array $row, $listings): array
     {
-        $source = $listings->first(fn ($l) => filled($l->external_offer_id) || filled($l->external_listing_id) || filled($l->url));
+        $source = $listings->first(fn ($l) => ! app(OvokoStaleListingService::class)->ignoredForPublish($l) && (filled($l->external_offer_id) || filled($l->external_listing_id) || filled($l->url)));
         return [
             'source_listing_id' => $source?->id,
             'source_url' => $row['url'] ?? $source?->url,
