@@ -124,16 +124,16 @@ When dependencies change or vendor is missing:
        └── ...
    ```
 
-3. Upload the archive to:
+3. Either commit the archive at repository root as `vendor.zip` for a one-time dependency deployment, or upload the archive to the server-side expected path:
 
    ```text
    /home/gpsystem/domains/gpsystem.thecamels.pl/app/vendor.zip
    ```
 
 4. Open the normal deploy URL.
-5. The helper detects `vendor.zip`, removes the old `/app/vendor`, extracts the archive into `/app/vendor`, supports either archive layout, normalizes Windows-style ZIP path separators, and deletes `vendor.zip` after successful extraction.
+5. The helper detects `vendor.zip` first at `/app/vendor.zip` and then in the freshly downloaded repository package root. It extracts to a temporary directory, verifies `vendor/autoload.php`, moves the old `/app/vendor` to a timestamped backup, swaps the new vendor into place, verifies `/app/vendor/autoload.php`, and only then removes the old backup. If the swap fails, the previous vendor is restored.
 
-If `vendor/autoload.php` is still missing after deployment, migrations are skipped with a clear browser warning because Laravel cannot boot without dependencies.
+If `vendor.zip` is absent, the browser output explicitly warns that Composer dependencies may be missing and Socialite may not be installed. If `vendor/autoload.php` is still missing after deployment, migrations are skipped with a clear browser warning because Laravel cannot boot without dependencies. The post-deploy diagnostics also print `socialite_installed`, Google OAuth env-key presence booleans, and whether `migrate` executed without exposing secret values.
 
 ## Public assets handling
 
