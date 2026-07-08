@@ -13,11 +13,6 @@
         @endif
     </form>
 
-    @if(!empty($error))
-        <h2>Błąd apply</h2>
-        <pre>{{ json_encode(['exception_class' => $exception_class ?? null, 'message' => $message ?? null, 'failed_step' => $failed_step ?? null, 'part_id' => $part_id ?? null, 'marketplace_listing_id' => $marketplace_listing_id ?? null], JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE) }}</pre>
-    @endif
-
     @if(!empty($applied))
         <h2>Apply wykonany</h2>
         <pre>{{ json_encode($changed ?? [], JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE) }}</pre>
@@ -54,15 +49,13 @@
 
         @if(!empty($qualified_listings))
             <h2>Apply</h2>
-            @foreach($qualified_listings as $qualifiedListing)
-                <form method="post" action="{{ route('admin.tools.ovoko.unlink-stale-listing') }}">
-                    @csrf
-                    <input type="hidden" name="part_id" value="{{ $part_id }}">
-                    <input type="hidden" name="marketplace_listing_id" value="{{ $qualifiedListing['id'] }}">
-                    <input type="hidden" name="confirm" value="unlink-stale-ovoko-listing">
-                    <button type="submit">Odepnij lokalnie listing #{{ $qualifiedListing['id'] }}</button>
-                </form>
-            @endforeach
+            <form method="post" action="{{ route('admin.tools.ovoko.unlink-stale-listing') }}">
+                @csrf
+                <input type="hidden" name="part_id" value="{{ $part_id }}">
+                <label>marketplace_listing_id opcjonalnie <input name="marketplace_listing_id" placeholder="np. {{ $qualified_listings[0]['id'] ?? '' }}"></label>
+                <label>confirm <input name="confirm" value="unlink-stale-ovoko-listing"></label>
+                <button type="submit">Odepnij lokalnie zakwalifikowane stale Ovoko listingi</button>
+            </form>
         @endif
     @elseif(($part_id ?? null))
         <p>Nie znaleziono części.</p>
