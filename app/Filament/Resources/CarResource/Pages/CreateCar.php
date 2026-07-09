@@ -11,6 +11,15 @@ class CreateCar extends CreateRecord
 
     protected static ?string $title = 'Dodaj samochód';
 
+    /**
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    protected function mutateFormDataBeforeCreate(array $data): array
+    {
+        return CarResource::normalizeOvokoLocalMappingData($data);
+    }
+
     protected function getCreatedNotificationTitle(): ?string
     {
         return 'Samochód został dodany';

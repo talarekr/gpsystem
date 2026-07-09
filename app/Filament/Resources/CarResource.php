@@ -5,7 +5,11 @@ namespace App\Filament\Resources;
 use App\Enums\UserRole;
 use App\Filament\Resources\CarResource\Pages;
 use App\Models\Car;
+use App\Models\OvokoCarDictionaryEntry;
+use App\Services\Marketplace\Ovoko\OvokoCarDictionaryService;
 use Filament\Forms;
+use Filament\Forms\Get;
+use Filament\Forms\Set;
 use Filament\Forms\Components\Grid;
 use Filament\Forms\Components\Section;
 use Filament\Forms\Form;
@@ -45,15 +49,58 @@ class CarResource extends Resource
                     ->extraAttributes(['class' => 'gps-car-form-section'])
                     ->columns(4)
                     ->schema([
-                        Forms\Components\TextInput::make('make')
+                        Forms\Components\Placeholder::make('ovoko_local_only_notice')
+                            ->label('Ovoko')
+                            ->content('To auto zostanie zapisane lokalnie. Utworzenie samochodu w Ovoko nie jest jeszcze wykonywane.')
+                            ->columnSpanFull(),
+                        Forms\Components\Select::make('legacy_payload.ovoko_brand_id')
                             ->label('Marka')
-                            ->maxLength(255),
-                        Forms\Components\TextInput::make('model')
+                            ->searchable()
+                            ->preload()
+                            ->native(false)
+                            ->options(static fn (): array => OvokoCarDictionaryEntry::query()
+                                ->where('dictionary', 'brands')
+                                ->orderBy('name')
+                                ->pluck('name', 'ovoko_id')
+                                ->all())
+                            ->afterStateUpdated(function (?string $state, Set $set): void {
+                                $brand = $state ? OvokoCarDictionaryEntry::query()->where('dictionary', 'brands')->where('ovoko_id', $state)->first() : null;
+                                $set('make', $brand?->name);
+                                $set('model', null);
+                                $set('model_variant', null);
+                                $set('legacy_payload.ovoko_model_group_label', null);
+                                $set('legacy_payload.ovoko_car_model_id', null);
+                            })
+                            ->live()
+                            ->helperText('Wybór z lokalnego cache Ovoko brands; zapisuje ovoko_brand_id.'),
+                        Forms\Components\Hidden::make('make'),
+                        Forms\Components\Select::make('legacy_payload.ovoko_model_group_label')
                             ->label('Model samochodu')
-                            ->maxLength(255),
-                        Forms\Components\TextInput::make('model_variant')
+                            ->searchable()
+                            ->native(false)
+                            ->options(static fn (Get $get): array => self::ovokoModelGroupOptions($get('legacy_payload.ovoko_brand_id')))
+                            ->afterStateUpdated(function (?string $state, Set $set): void {
+                                $set('model', $state);
+                                $set('model_variant', null);
+                                $set('legacy_payload.ovoko_car_model_id', null);
+                            })
+                            ->live()
+                            ->disabled(static fn (Get $get): bool => blank($get('legacy_payload.ovoko_brand_id')))
+                            ->helperText('Lokalna grupa/filtrowanie z cache models, bez osobnego ID Ovoko.'),
+                        Forms\Components\Hidden::make('model'),
+                        Forms\Components\Select::make('legacy_payload.ovoko_car_model_id')
                             ->label('Modyfikacja modelu samochodu')
-                            ->maxLength(255),
+                            ->searchable()
+                            ->native(false)
+                            ->options(static fn (Get $get): array => self::ovokoModelModificationOptions($get('legacy_payload.ovoko_brand_id'), $get('legacy_payload.ovoko_model_group_label')))
+                            ->afterStateUpdated(function (?string $state, Set $set, Get $get): void {
+                                $modification = self::ovokoModelModification($get('legacy_payload.ovoko_brand_id'), $state);
+                                $set('model_variant', $modification ? app(OvokoCarDictionaryService::class)->modelGroupSampleModification($modification)['display_name'] : null);
+                            })
+                            ->live()
+                            ->disabled(static fn (Get $get): bool => blank($get('legacy_payload.ovoko_brand_id')) || blank($get('legacy_payload.ovoko_model_group_label')))
+                            ->helperText(static fn (Get $get): string => filled($get('legacy_payload.ovoko_car_model_id')) ? 'Ovoko model ID: '.$get('legacy_payload.ovoko_car_model_id') : 'Wybór zapisuje realne ovoko_car_model_id dla przyszłego importCar.'),
+                        Forms\Components\Hidden::make('model_variant'),
                         Forms\Components\TextInput::make('production_year')
                             ->label('Rok produkcji samochodu')
                             ->numeric()
@@ -173,6 +220,105 @@ class CarResource extends Resource
                             ->maxLength(255),
                     ]),
             ]);
+    }
+
+    /**
+     * Normalize Ovoko dictionary selections into the legacy visible car identity fields.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    public static function normalizeOvokoLocalMappingData(array $data): array
+    {
+        $payload = is_array($data['legacy_payload'] ?? null) ? $data['legacy_payload'] : [];
+        $brandId = (string) ($payload['ovoko_brand_id'] ?? '');
+        $modelId = (string) ($payload['ovoko_car_model_id'] ?? '');
+
+        if ($brandId !== '') {
+            $brand = OvokoCarDictionaryEntry::query()
+                ->where('dictionary', 'brands')
+                ->where('ovoko_id', $brandId)
+                ->first();
+
+            if ($brand) {
+                $data['make'] = $brand->name;
+            }
+        }
+
+        if (filled($payload['ovoko_model_group_label'] ?? null)) {
+            $data['model'] = $payload['ovoko_model_group_label'];
+        }
+
+        if ($brandId !== '' && $modelId !== '') {
+            $modification = self::ovokoModelModification($brandId, $modelId);
+
+            if ($modification) {
+                $data['model_variant'] = app(OvokoCarDictionaryService::class)->modelGroupSampleModification($modification)['display_name'];
+            }
+        }
+
+        unset($payload['ovoko_car_id']);
+        $data['legacy_payload'] = $payload;
+
+        return $data;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private static function ovokoModelGroupOptions(?string $brandId): array
+    {
+        if (blank($brandId)) {
+            return [];
+        }
+
+        $service = app(OvokoCarDictionaryService::class);
+
+        return OvokoCarDictionaryEntry::query()
+            ->where('dictionary', 'models')
+            ->where('ovoko_brand_id', (string) $brandId)
+            ->orderBy('name')
+            ->get(['name'])
+            ->map(fn (OvokoCarDictionaryEntry $model): string => $service->modelGroupForName((string) $model->name)['model_group_label'])
+            ->unique()
+            ->sort(SORT_NATURAL | SORT_FLAG_CASE)
+            ->mapWithKeys(fn (string $label): array => [$label => $label])
+            ->all();
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private static function ovokoModelModificationOptions(?string $brandId, ?string $groupLabel): array
+    {
+        if (blank($brandId) || blank($groupLabel)) {
+            return [];
+        }
+
+        $service = app(OvokoCarDictionaryService::class);
+
+        return OvokoCarDictionaryEntry::query()
+            ->where('dictionary', 'models')
+            ->where('ovoko_brand_id', (string) $brandId)
+            ->orderBy('year_from')
+            ->orderBy('name')
+            ->get(['ovoko_id', 'name', 'year_from', 'year_to'])
+            ->filter(fn (OvokoCarDictionaryEntry $model): bool => $service->modelGroupForName((string) $model->name)['model_group_label'] === $groupLabel)
+            ->mapWithKeys(fn (OvokoCarDictionaryEntry $model): array => [(string) $model->ovoko_id => $service->modelGroupSampleModification($model)['display_name']])
+            ->all();
+    }
+
+    private static function ovokoModelModification(?string $brandId, ?string $modelId): ?OvokoCarDictionaryEntry
+    {
+        if (blank($brandId) || blank($modelId)) {
+            return null;
+        }
+
+        return OvokoCarDictionaryEntry::query()
+            ->where('dictionary', 'models')
+            ->where('ovoko_brand_id', (string) $brandId)
+            ->where('ovoko_id', (string) $modelId)
+            ->first();
     }
 
     public static function table(Table $table): Table
