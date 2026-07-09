@@ -38,13 +38,6 @@ class OvokoLocalCarReadinessControllerTest extends TestCase
             'synced_at' => now(),
         ]);
 
-        OvokoCarDictionaryEntry::query()->create([
-            'dictionary' => 'car_status',
-            'ovoko_id' => '1',
-            'name' => 'kupiony',
-            'synced_at' => now(),
-        ]);
-
         $car = Car::query()->create([
             'make' => 'BMW',
             'model' => 'Series 5',
@@ -55,7 +48,6 @@ class OvokoLocalCarReadinessControllerTest extends TestCase
                 'ovoko_brand_id' => '1',
                 'ovoko_model_group_label' => 'Series 5',
                 'ovoko_car_model_id' => '2600',
-                'ovoko_status_id' => '1',
             ],
         ]);
 
@@ -75,9 +67,6 @@ class OvokoLocalCarReadinessControllerTest extends TestCase
             ->assertJsonPath('mapping_ids_exist_in_cache.ovoko_car_model_id', true)
             ->assertJsonPath('planned_import_car_payload.car_model', '2600')
             ->assertJsonPath('planned_import_car_payload.car_years', 2007)
-            ->assertJsonPath('planned_import_car_payload.status', '1')
-            ->assertJsonPath('ovoko_status_id', '1')
-            ->assertJsonPath('ovoko_status_id_exists_in_cache', true)
             ->assertJsonPath('ready_for_future_import_car', true)
             ->assertJsonPath('safety_flags.no_import_car', true)
             ->assertJsonPath('safety_flags.no_import_part', true)
@@ -115,8 +104,7 @@ class OvokoLocalCarReadinessControllerTest extends TestCase
             ->assertJsonPath('ovoko_car_model_id_exists_in_cache', true)
             ->assertJsonPath('ready_for_future_import_car', false)
             ->assertJsonFragment(['car_years'])
-            ->assertJsonFragment(['ovoko_status_id'])
-            ->assertJsonPath('planned_import_car_payload.missing_status', true);
+            ->assertJsonFragment(['status']);
     }
 
     private function actingAsAdminUser(): User

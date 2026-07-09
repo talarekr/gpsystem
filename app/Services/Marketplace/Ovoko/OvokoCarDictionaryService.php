@@ -111,7 +111,6 @@ class OvokoCarDictionaryService
         $payload = array_filter([
             'car_model' => $ids['ovoko_car_model_id'] ?? null,
             'car_years' => $car->production_year ?? $car->first_registration_year,
-            'status' => $ids['ovoko_status_id'] ?? null,
             'car_fuel' => $ids['ovoko_fuel_id'] ?? null,
             'car_engine_code' => $car->engine_code,
             'vin' => $car->vin,
@@ -123,9 +122,8 @@ class OvokoCarDictionaryService
             $missing[] = 'car_years';
         }
 
-        if (blank($ids['ovoko_status_id'] ?? null) || ! ($exists['ovoko_status_id'] ?? false)) {
-            $missing[] = 'ovoko_status_id';
-            $payload['missing_status'] = true;
+        if (blank($car->status)) {
+            $missing[] = 'status';
         }
 
         $ovokoCarIdSet = filled($ids['ovoko_car_id']);
@@ -146,9 +144,6 @@ class OvokoCarDictionaryService
             'ovoko_model_group_label' => data_get($car->legacy_payload, 'ovoko_model_group_label'),
             'ovoko_car_model_id' => $ids['ovoko_car_model_id'],
             'ovoko_car_model_id_exists_in_cache' => $exists['ovoko_car_model_id'] ?? false,
-            'ovoko_status_id' => $ids['ovoko_status_id'],
-            'ovoko_status_id_exists_in_cache' => $exists['ovoko_status_id'] ?? false,
-            'available_ovoko_statuses_from_cache' => $this->sample('car_status', null, 100),
             'ovoko_mappings' => $ids,
             'mapping_ids_exist_in_cache' => $exists,
             'missing_fields_for_future_import_car' => $missing,
@@ -220,7 +215,7 @@ class OvokoCarDictionaryService
     {
         return [
             'source' => 'official_docs_and_static_code_review',
-            'required_fields_from_docs' => ['car_model', 'status'],
+            'required_fields_from_docs' => ['car_model'],
             'car_model_field_meaning' => 'modification_or_generation',
             'car_model_expected_source' => '/get/car_models/{brand_id}',
             'separate_general_model_field_found' => false,
@@ -233,7 +228,6 @@ class OvokoCarDictionaryService
                     'car_model' => '1548',
                     'car_years' => '2004',
                     'car_fuel' => '1',
-                    'status' => '1',
                     'external_id' => 'gps-car-123',
                 ],
                 'car_model_example_matches_cached_car_models_id' => true,
