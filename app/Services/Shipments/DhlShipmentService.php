@@ -3,6 +3,7 @@
 namespace App\Services\Shipments;
 
 use App\Models\Order;
+use App\Models\MarketplaceSyncLog;
 use App\Models\Shipment;
 use App\Services\Marketplace\ApiIntegrationLogger;
 use Illuminate\Support\Arr;
@@ -264,6 +265,11 @@ class DhlShipmentService
             data_set($form, 'service.drop_off_type', 'REGULAR_PICKUP');
         }
 
+        $duplicateGuard = $this->duplicateCreateShipmentGuard((int) ($form['order_id'] ?? 0));
+        if ($duplicateGuard['would_create_duplicate_if_clicked_again']) {
+            throw new RuntimeException('DHL shipment appears to have been created remotely in previous attempt. Use recovery instead of creating a duplicate shipment.');
+        }
+
         $payload = null;
         $serviceSelection = $this->serviceSelectionDiagnostics($form, data_get($form, 'service.service_type'));
         $startedAt = microtime(true);
@@ -282,8 +288,9 @@ class DhlShipmentService
             ]);
             throw $exception;
         }
-        $waybill = (string) ($response['shipmentNotificationNumber'] ?? $response['wayBill'] ?? $response['tracking_number'] ?? '');
-        $labelContent = (string) ($response['labelContent'] ?? '');
+        $parsedResponse = $this->parseCreateShipmentResponse($response);
+        $waybill = (string) ($parsedResponse['tracking_number'] ?? '');
+        $labelContent = (string) ($parsedResponse['label_content'] ?? '');
 
         if ($waybill === '' || $labelContent === '') {
             $exception = new RuntimeException('DHL nie zwrócił numeru przesyłki lub zawartości etykiety PDF.');
@@ -292,7 +299,12 @@ class DhlShipmentService
                 'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
                 'request' => $payload,
                 'dhl_service_selection' => $serviceSelection,
-                'response' => Arr::except($response, ['labelContent']),
+                'response' => $this->createShipmentResponseForLog($response),
+                'remote_created' => $parsedResponse['remote_created'],
+                'remote_tracking_number' => $parsedResponse['tracking_number'],
+                'label_content_present' => $parsedResponse['has_label_content'],
+                'local_persistence_success' => false,
+                'failure_classification' => $parsedResponse['remote_created'] ? 'dhl_response_success_local_persist_failed' : 'dhl_response_missing_required_fields',
             ]);
             throw $exception;
         }
@@ -307,30 +319,35 @@ class DhlShipmentService
                 'external_id' => $waybill,
                 'request' => $payload,
                 'dhl_service_selection' => $serviceSelection,
-                'response' => Arr::except($response, ['labelContent']),
+                'response' => $this->createShipmentResponseForLog($response),
+                'remote_created' => $parsedResponse['remote_created'],
+                'remote_tracking_number' => $parsedResponse['tracking_number'],
+                'label_content_present' => $parsedResponse['has_label_content'],
+                'local_persistence_success' => false,
+                'failure_classification' => $parsedResponse['remote_created'] ? 'dhl_response_success_local_persist_failed' : 'dhl_response_missing_required_fields',
             ]);
             throw $exception;
         }
 
-        $path = 'shipments/labels/dhl/'.$waybill.'.pdf';
-        Storage::disk('local')->put($path, $labelBinary);
-
-        $shipment = Shipment::query()->create([
-            'order_id' => $form['order_id'] ?? null,
-            'carrier' => 'dhl',
-            'service_code' => data_get($payload, 'shipment.shipmentInfo.serviceType', data_get($form, 'service.service_type', 'AH')),
-            'shipment_status' => 'label_created',
-            'tracking_number' => $waybill,
-            'carrier_shipment_id' => $waybill,
-            'label_path' => $path,
-            'label_format' => $response['labelFormat'] ?? 'application/pdf',
-            'sender_snapshot' => $form['shipper'] ?? [],
-            'receiver_snapshot' => $form['receiver'] ?? [],
-            'parcel_snapshot' => $form['parcel'] ?? [],
-            'request_payload' => $this->sanitize($payload),
-            'response_payload' => $this->sanitize(Arr::except($response, ['labelContent'])),
-            'test_mode' => (bool) config('services.dhl.test_mode', true),
-        ]);
+        try {
+            $shipment = $this->persistCreatedShipment($form, $payload ?? [], $response, $parsedResponse, $labelBinary);
+            $path = $shipment->label_path;
+        } catch (\Throwable $exception) {
+            app(ApiIntegrationLogger::class)->error('dhl', 'createShipment', $exception, [
+                'order_id' => $form['order_id'] ?? null,
+                'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+                'tracking_number' => $waybill,
+                'external_id' => $waybill,
+                'request' => $payload,
+                'response' => $this->createShipmentResponseForLog($response),
+                'failure_classification' => 'dhl_response_success_local_persist_failed',
+                'remote_created' => true,
+                'remote_tracking_number' => $waybill,
+                'label_content_present' => true,
+                'local_persistence_success' => false,
+            ]);
+            throw $exception;
+        }
 
         app(ApiIntegrationLogger::class)->success('dhl', 'createShipment', 'DHL shipment created.', [
             'order_id' => $shipment->order_id,
@@ -342,10 +359,115 @@ class DhlShipmentService
             'service_type' => data_get($payload, 'shipment.shipmentInfo.serviceType'),
             'receiver_country' => data_get($payload, 'shipment.ship.receiver.address.country'),
             'dhl_service_selection' => $serviceSelection,
-            'response' => Arr::except($response, ['labelContent']) + ['label_path' => $path],
+            'response' => $this->createShipmentResponseForLog($response) + ['label_path' => $path],
         ]);
 
         return $shipment;
+    }
+
+
+    public function recoverCreatedShipmentFromLog(int $orderId, ?int $logId = null): Shipment
+    {
+        $existing = Shipment::query()->where('order_id', $orderId)->where('carrier', 'dhl')->latest('id')->first();
+        if ($existing) return $existing;
+        $log = $logId ? MarketplaceSyncLog::query()->find($logId) : $this->lastCreateShipmentLog($orderId);
+        if (! $log || $log->order_id !== $orderId || $log->marketplace !== 'dhl' || $log->action !== 'createShipment') {
+            throw new RuntimeException('DHL createShipment log was not found for this order.');
+        }
+        $response = data_get($log->payload ?? [], 'response');
+        $parsed = $this->parseCreateShipmentResponse($response);
+        if (! $parsed['remote_created']) throw new RuntimeException('Stored DHL log does not contain shipment tracking number.');
+        if (! $parsed['has_label_content']) throw new RuntimeException('Stored log response is sanitized and does not contain labelContent. Remote DHL shipment was created, but PDF cannot be recovered from local logs.');
+        $labelBinary = base64_decode((string) $parsed['label_content'], true);
+        if ($labelBinary === false) throw new RuntimeException('Stored DHL labelContent is not valid base64.');
+        $shipment = $this->persistCreatedShipment(['order_id' => $orderId], (array) data_get($log->payload ?? [], 'request', []), $response, $parsed, $labelBinary, true);
+        app(ApiIntegrationLogger::class)->success('dhl', 'recoverCreatedShipment', 'DHL shipment recovered from createShipment log.', [
+            'order_id' => $orderId, 'shipment_id' => $shipment->id, 'tracking_number' => $shipment->tracking_number,
+            'external_id' => $shipment->carrier_shipment_id, 'recovery_from_log_id' => $log->id, 'remote_created' => true,
+            'local_persistence_success' => true, 'code_marker' => 'dhl_response_parser_recovery_v1',
+        ]);
+        return $shipment;
+    }
+
+    private function persistCreatedShipment(array $form, array $payload, mixed $response, array $parsedResponse, string $labelBinary, bool $recovery = false): Shipment
+    {
+        $waybill = (string) $parsedResponse['tracking_number'];
+        $path = 'shipments/labels/dhl/'.$waybill.'.pdf';
+        Storage::disk('local')->put($path, $labelBinary);
+        return Shipment::query()->create([
+            'order_id' => $form['order_id'] ?? null, 'carrier' => 'dhl',
+            'service_code' => data_get($payload, 'shipment.shipmentInfo.serviceType', data_get($form, 'service.service_type', 'AH')),
+            'shipment_status' => 'label_created', 'tracking_number' => $waybill, 'carrier_shipment_id' => $waybill,
+            'label_path' => $path, 'label_format' => $parsedResponse['label_format'] ?? 'application/pdf',
+            'sender_snapshot' => $form['shipper'] ?? [], 'receiver_snapshot' => $form['receiver'] ?? [], 'parcel_snapshot' => $form['parcel'] ?? [],
+            'request_payload' => $this->sanitize($payload),
+            'response_payload' => $this->sanitize($this->createShipmentResponseForLog($response) + ['recovered_from_dhl_create_shipment_log' => $recovery, 'code_marker' => 'dhl_response_parser_recovery_v1']),
+            'test_mode' => (bool) config('services.dhl.test_mode', true),
+        ]);
+    }
+
+    /** @return array{tracking_number:?string,package_tracking_number:?string,label_content:?string,label_format:?string,label_type:?string,has_label_content:bool,remote_created:bool,result:mixed} */
+    public function parseCreateShipmentResponse(mixed $response): array
+    {
+        $array = $this->toArray($response);
+        $result = data_get($array, 'createShipmentResult', $array);
+        $tracking = data_get($result, 'shipmentTrackingNumber') ?: data_get($result, 'shipmentNotificationNumber') ?: data_get($result, 'wayBill') ?: data_get($result, 'tracking_number');
+        $labelContent = data_get($result, 'label.labelContent') ?: data_get($result, 'labelContent');
+        $labelFormat = data_get($result, 'label.labelFormat') ?: data_get($result, 'labelFormat');
+        $labelType = data_get($result, 'label.labelType') ?: data_get($result, 'labelType');
+
+        return [
+            'tracking_number' => filled($tracking) ? (string) $tracking : null,
+            'package_tracking_number' => filled(data_get($result, 'packagesTrackingNumbers')) ? (string) data_get($result, 'packagesTrackingNumbers') : null,
+            'label_content' => filled($labelContent) ? (string) $labelContent : null,
+            'label_format' => filled($labelFormat) ? (string) $labelFormat : null,
+            'label_type' => filled($labelType) ? (string) $labelType : null,
+            'has_label_content' => filled($labelContent) && $labelContent !== '[redacted]',
+            'remote_created' => filled($tracking),
+            'result' => $result,
+        ];
+    }
+
+    public function duplicateCreateShipmentGuard(?int $orderId): array
+    {
+        if (! $orderId) return ['would_create_duplicate_if_clicked_again' => false];
+        $shipment = Shipment::query()->where('order_id', $orderId)->where('carrier', 'dhl')->latest('id')->first();
+        $log = $this->lastCreateShipmentLog($orderId);
+        $parsed = $log ? $this->parseCreateShipmentResponse(data_get($log->payload ?? [], 'response')) : null;
+        $labelExists = $shipment?->label_path ? Storage::disk('local')->exists($shipment->label_path) : false;
+        $remoteCreatedInLog = (bool) ($parsed && $parsed['remote_created'] && $parsed['has_label_content']);
+        return [
+            'would_create_duplicate_if_clicked_again' => (bool) ($shipment?->tracking_number || $shipment || $labelExists || $remoteCreatedInLog),
+            'local_shipment_exists' => (bool) $shipment,
+            'local_label_exists' => $labelExists,
+            'last_log_id' => $log?->id,
+            'remote_created_in_last_log' => $remoteCreatedInLog,
+        ];
+    }
+
+    public function lastCreateShipmentLog(?int $orderId): ?MarketplaceSyncLog
+    {
+        return MarketplaceSyncLog::query()->where('marketplace', 'dhl')->where('action', 'createShipment')
+            ->when($orderId, fn ($q) => $q->where('order_id', $orderId))->latest('created_at')->latest('id')->first();
+    }
+
+    public function createShipmentResponseForLog(mixed $response): array
+    {
+        return $this->redactLabelContent($this->toArray($response));
+    }
+
+    private function redactLabelContent(array $value): array
+    {
+        foreach ($value as $key => $item) {
+            if (strtolower((string) $key) === 'labelcontent') $value[$key] = '[redacted]';
+            elseif (is_array($item)) $value[$key] = $this->redactLabelContent($item);
+        }
+        return $value;
+    }
+
+    private function toArray(mixed $value): array
+    {
+        return json_decode(json_encode($value), true) ?: [];
     }
 
     public function payload(array $form): array

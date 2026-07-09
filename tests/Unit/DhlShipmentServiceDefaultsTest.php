@@ -168,5 +168,27 @@ class DhlShipmentServiceDefaultsTest extends TestCase
 
         $service->payload($form);
     }
+    public function test_parser_accepts_nested_create_shipment_result_label_content(): void
+    {
+        $parsed = app(DhlShipmentService::class)->parseCreateShipmentResponse([
+            'createShipmentResult' => [
+                'shipmentNotificationNumber' => 'fallback',
+                'shipmentTrackingNumber' => '31294120912',
+                'packagesTrackingNumbers' => 'JJD000030249582000000000373',
+                'label' => [
+                    'labelType' => 'LBLP',
+                    'labelFormat' => 'application/pdf',
+                    'labelContent' => base64_encode('%PDF-1.4 test'),
+                ],
+            ],
+        ]);
+
+        $this->assertSame('31294120912', $parsed['tracking_number']);
+        $this->assertSame('JJD000030249582000000000373', $parsed['package_tracking_number']);
+        $this->assertSame('application/pdf', $parsed['label_format']);
+        $this->assertSame('LBLP', $parsed['label_type']);
+        $this->assertTrue($parsed['has_label_content']);
+    }
+
 }
 
