@@ -41,6 +41,7 @@ use App\Http\Controllers\Tools\DebugOrderItemThumbnailController;
 use App\Http\Controllers\Tools\DhlConfigDiagnoseController;
 use App\Http\Controllers\Tools\OrderViewDiagnoseController;
 use App\Http\Controllers\Tools\ShipmentDiagnoseController;
+use App\Http\Controllers\Tools\ShipmentMissingLabelRepairController;
 use App\Http\Controllers\Tools\DhlRecoverCreatedShipmentController;
 use App\Http\Controllers\Tools\DeployDiagnoseController;
 use App\Http\Controllers\Tools\WorkshopQuickPartController;
@@ -291,6 +292,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/orders/dhl-diagnose', DhlConfigDiagnoseController::class)->name('admin.tools.orders.dhl-diagnose');
     Route::get('/admin/tools/orders/view-diagnose', OrderViewDiagnoseController::class)->name('admin.tools.orders.view-diagnose');
     Route::get('/admin/tools/shipments/diagnose', ShipmentDiagnoseController::class)->name('admin.tools.shipments.diagnose');
+    Route::post('/admin/tools/shipments/repair-missing-label', ShipmentMissingLabelRepairController::class)->name('admin.tools.shipments.repair-missing-label');
     Route::get('/admin/tools/shipments/diagnose-minimal', static fn () => response()->json([
         'code_marker' => 'shipment_diagnose_minimal_probe_v1',
         'order_id' => request('order_id'),

@@ -47,7 +47,16 @@
         $shipmentCarrierShipmentId = $shipment && is_scalar($shipment->carrier_shipment_id) ? trim((string) $shipment->carrier_shipment_id) : '';
         $shipmentLabelPath = $shipment && is_scalar($shipment->label_path) ? trim((string) $shipment->label_path) : '';
         $shipmentStatus = $shipment && is_scalar($shipment->shipment_status) ? trim((string) $shipment->shipment_status) : '';
-        $shipmentLabelExists = $shipmentLabelPath !== '' && Storage::disk('local')->exists($shipmentLabelPath);
+        $shipmentLabelExists = false;
+        if ($shipmentLabelPath !== '' && ! str_contains($shipmentLabelPath, "\0") && preg_match('/^[a-z]+:\/\//i', $shipmentLabelPath) !== 1) {
+            try {
+                $shipmentLabelExists = Storage::disk('local')->exists($shipmentLabelPath);
+            } catch (\Throwable $exception) {
+                report($exception);
+                $shipmentLabelExists = false;
+            }
+        }
+        $shipmentLabelMissing = $shipmentLabelPath !== '' && ! $shipmentLabelExists;
         $shipmentCanShowActions = $shipmentSectionError === null && (! $shipment || (($shipment->carrier === null || is_scalar($shipment->carrier)) && ($shipment->tracking_number === null || is_scalar($shipment->tracking_number)) && ($shipment->carrier_shipment_id === null || is_scalar($shipment->carrier_shipment_id)) && ($shipment->label_path === null || is_scalar($shipment->label_path)) && ($shipment->shipment_status === null || is_scalar($shipment->shipment_status))));
     } catch (\Throwable $exception) {
         report($exception);
@@ -58,6 +67,7 @@
         $shipmentStatus = '';
         $shipmentLabelExists = false;
         $shipmentCanShowActions = false;
+        $shipmentLabelMissing = false;
         $shipmentSectionError = $shipmentSectionError ?: $exception;
     }
     $deliveryMethod = trim((string) ($deliveryLabel ?: $carrier ?: $order->delivery_method));
@@ -443,10 +453,16 @@
                                     <div>Status lokalny: {{ $shipmentStatus !== '' ? $shipmentStatus : '—' }}</div>
                                     <div>Utworzono: {{ $shipment->created_at?->format('Y-m-d H:i') ?: '—' }}</div>
                                     <div>DHL: numer {{ $shipmentTrackingNumber !== '' ? $shipmentTrackingNumber : ($shipmentCarrierShipmentId !== '' ? $shipmentCarrierShipmentId : '—') }}</div>
+                                    @if ($shipmentTrackingNumber !== '' || $shipmentCarrierShipmentId !== '')
+                                        <div><a href="https://www.dhl.com/pl-pl/home/tracking/tracking-parcel.html?submit=1&tracking-id={{ urlencode($shipmentTrackingNumber !== '' ? $shipmentTrackingNumber : $shipmentCarrierShipmentId) }}" target="_blank" rel="noopener noreferrer">Śledź przesyłkę DHL</a></div>
+                                    @endif
+                                    @if ($shipmentLabelMissing)
+                                        <div class="gps-order-detail-muted">Lokalny rekord przesyłki istnieje, ale plik etykiety PDF nie istnieje.</div>
+                                    @endif
                                     <div>Marketplace: {{ $marketplaceFulfillmentStatus === 'synced' ? 'tracking wysłany' : ($marketplaceFulfillmentStatus === 'error' ? 'błąd' : 'tracking nie wysłany') }}</div>
                                 </div>
                                 <div class="gps-order-shipment-actions">
-                                    @if ($shipmentLabelExists)<a class="fi-btn fi-color-primary fi-btn-color-primary fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-primary-500 focus-visible:ring-2 focus-visible:ring-primary-600 dark:bg-primary-500 dark:hover:bg-primary-400 dark:focus-visible:ring-primary-500" href="{{ route('tools.download-shipment-label', $shipment) }}">Pobierz etykietę PDF</a>@elseif ($shipmentLabelPath !== '')<span class="gps-order-detail-muted">Brak pliku etykiety</span>@endif
+                                    @if ($shipmentLabelExists)<a class="fi-btn fi-color-primary fi-btn-color-primary fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-primary-500 focus-visible:ring-2 focus-visible:ring-primary-600 dark:bg-primary-500 dark:hover:bg-primary-400 dark:focus-visible:ring-primary-500" href="{{ route('tools.download-shipment-label', $shipment) }}">Pobierz etykietę PDF</a>@elseif ($shipmentLabelPath !== '')<span class="gps-order-detail-muted">Brak pliku etykiety</span><button type="button" disabled class="fi-btn fi-color-gray fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-gray-300 px-3 py-2 text-sm font-semibold text-gray-700">Napraw etykietę DHL (preview)</button>@endif
                                     <a class="fi-btn fi-color-gray fi-btn-color-gray fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-gray-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-gray-500 focus-visible:ring-2 focus-visible:ring-gray-600 dark:bg-gray-500 dark:hover:bg-gray-400 dark:focus-visible:ring-gray-500" href="{{ \App\Filament\Pages\ShipmentDetails::getUrl(['shipment' => $shipment->id]) }}">Szczegóły</a>
                                 </div>
                             </div>

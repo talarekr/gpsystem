@@ -105,9 +105,18 @@ class ShipmentToolsController
 
     public function download(Shipment $shipment)
     {
-        abort_unless($shipment->label_path && Storage::disk('local')->exists($shipment->label_path), 404, 'Label not found.');
+        $path = is_scalar($shipment->label_path) ? trim((string) $shipment->label_path) : '';
+        abort_unless($path !== '' && ! str_contains($path, "\0") && preg_match('/^[a-z]+:\/\//i', $path) !== 1, 404, 'Label not found.');
 
-        return Storage::disk('local')->download($shipment->label_path, 'shipment-'.$shipment->id.'-'.($shipment->carrier ?: 'carrier').'.pdf');
+        try {
+            abort_unless(Storage::disk('local')->exists($path), 404, 'Label not found.');
+
+            return Storage::disk('local')->download($path, 'shipment-'.$shipment->id.'-'.(is_scalar($shipment->carrier) && $shipment->carrier ? $shipment->carrier : 'carrier').'.pdf');
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpException $exception) {
+            throw $exception;
+        } catch (\Throwable) {
+            abort(404, 'Label not found.');
+        }
     }
 
     public function deleteTest(Shipment $shipment)
