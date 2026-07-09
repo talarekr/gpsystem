@@ -76,6 +76,26 @@ class ShipmentDiagnoseController extends Controller
             ], 200);
         }
 
+        if ($request->query('section') === 'table_discovery') {
+            $payload = $this->emptyPayload($orderId, $request);
+            $this->probeTables($payload);
+            $status = $payload['errors'] === [] ? 'ok' : 'partial';
+
+            return $this->safeJsonResponse([
+                'code_marker' => self::CODE_MARKER,
+                'section_only' => 'table_discovery',
+                'status' => $status,
+                'section_result' => $payload['table_discovery'],
+                'errors' => $payload['errors'],
+                'diagnostics_health' => [
+                    'ok' => $status === 'ok',
+                    'status' => $status,
+                    'sections_completed' => ['table_discovery'],
+                    'sections_failed' => [],
+                ],
+            ], 200);
+        }
+
         if ($request->query('section') === 'app') {
             return $this->safeJsonResponse([
                 'code_marker' => self::CODE_MARKER,
@@ -169,7 +189,7 @@ class ShipmentDiagnoseController extends Controller
     /** @return array<int, string> */
     private function allSections(): array
     {
-        return ['input', 'app', 'table_discovery', 'shipments_probe', 'labels_probe', 'last_exceptions_probe', 'candidate_tables'];
+        return ['input', 'app', 'table_discovery', 'shipments_probe', 'labels_probe', 'last_exceptions_probe'];
     }
 
     /** @return array<int, string> */
@@ -194,7 +214,6 @@ class ShipmentDiagnoseController extends Controller
             'input' => fn () => $this->probeInput($payload, $request, $orderId),
             'app' => fn () => $this->probeApp($payload),
             'table_discovery' => fn () => $this->probeTables($payload),
-            'candidate_tables' => fn () => $this->probeCandidateTables($payload),
             'shipments_probe' => fn () => $this->probeShipments($payload, $orderId),
             'labels_probe' => fn () => $this->probeLabels($payload, $orderId),
             'last_exceptions_probe' => fn () => $this->probeLastExceptions($payload, $orderId),
@@ -235,8 +254,8 @@ class ShipmentDiagnoseController extends Controller
             'app' => ['environment' => null, 'php_version' => null, 'laravel_version' => null],
             'known_tracking_context' => $this->knownTrackingContext($orderId),
             'table_discovery' => ['candidate_tables_checked' => $this->candidateTables(), 'tables' => [], 'columns' => []],
-            'shipments_probe' => ['records_for_order' => [], 'records_for_tracking' => [], 'recent_records' => [], 'partial_or_suspicious_records' => []],
-            'labels_probe' => ['records_for_order_or_shipment' => [], 'empty_paths' => []],
+            'shipments_probe' => ['records_for_order' => [], 'records_for_tracking' => [], 'recent_records' => [], 'partial_or_suspicious_records' => [], 'warnings' => []],
+            'labels_probe' => ['records_for_order_or_shipment' => [], 'empty_paths' => [], 'warnings' => []],
             'last_exceptions_probe' => ['admin_shipments' => null, 'admin_order' => null, 'shipment_diagnose' => null, 'view_diagnose' => null, 'integration_logs' => []],
             'diagnostics_health' => ['ok' => false, 'status' => 'unknown', 'sections_completed' => [], 'sections_failed' => []],
             'errors' => [],
@@ -369,6 +388,11 @@ class ShipmentDiagnoseController extends Controller
     {
         $this->ensureDiscovery($payload);
         $shipmentTables = array_values(array_filter(['shipments', 'order_shipments'], fn (string $table): bool => $this->tableExists($payload, $table)));
+        if (! $this->hasExistingCandidateTable($payload)) {
+            $payload['shipments_probe']['warnings'] = ['No candidate shipment tables found'];
+            return;
+        }
+
         $trackingColumns = ['tracking_number', 'tracking', 'shipment_tracking_number', 'external_id', 'external_tracking_number', 'carrier_shipment_id'];
 
         foreach ($shipmentTables as $table) {
@@ -407,6 +431,11 @@ class ShipmentDiagnoseController extends Controller
     private function probeLabels(array &$payload, int $orderId): void
     {
         $this->ensureDiscovery($payload);
+        if (! $this->hasExistingCandidateTable($payload)) {
+            $payload['labels_probe']['warnings'] = ['No candidate shipment tables found'];
+            return;
+        }
+
         $shipmentIds = collect($payload['shipments_probe']['records_for_order'])->flatten(1)->pluck('id')->filter()->unique()->values()->all();
         $labelTables = array_values(array_filter(['shipment_labels', 'shipping_labels', 'labels'], fn (string $table): bool => $this->tableExists($payload, $table)));
         $pathColumns = ['label_path', 'label_file_path', 'path', 'file_path'];
@@ -533,6 +562,17 @@ class ShipmentDiagnoseController extends Controller
         return $payload['table_discovery']['tables'][$table]['columns'] ?? $payload['table_discovery']['columns'][$table] ?? [];
     }
 
+    private function hasExistingCandidateTable(array $payload): bool
+    {
+        foreach ($payload['table_discovery']['tables'] ?? [] as $table) {
+            if (($table['exists'] ?? false) === true) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private function ensureDiscovery(array &$payload): void
     {
         $missingTableDetails = false;
@@ -624,6 +664,7 @@ class ShipmentDiagnoseController extends Controller
         try {
             $payload['table_discovery']['tables'][$table]['exists'] = (bool) Schema::hasTable($table);
         } catch (Throwable $e) {
+            $payload['table_discovery']['tables'][$table]['exists'] = null;
             $error = $this->errorArray('table_discovery.'.$table.'.has_table', $e);
             $payload['table_discovery']['tables'][$table]['error'] = $error;
             $payload['errors'][] = $error;
@@ -702,9 +743,9 @@ class ShipmentDiagnoseController extends Controller
         ];
     }
 
-    private function safeJsonResponse(array $payload): JsonResponse
+    private function safeJsonResponse(array $payload, int $status = 200): JsonResponse
     {
-        return response()->json($this->sanitizeValue($payload), 200, [], $this->jsonFlags());
+        return response()->json($this->sanitizeValue($payload), $status, [], $this->jsonFlags());
     }
 
     private function looksJsonContainer(mixed $value): bool
