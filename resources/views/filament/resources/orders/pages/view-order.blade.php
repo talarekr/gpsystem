@@ -411,23 +411,9 @@
                                 <div style="margin-top:10px;font-size:12px;">code_marker = {{ $dhlShipmentUiState['code_marker'] ?? 'dhl_order_shipment_ui_remote_created_v1' }}</div>
                             </div>
                         </div>
-                        @php($dhlExistingFetch = app(\App\Services\Shipments\DhlShipmentService::class)->existingLabelFetchDiagnostics((int) $order->id, $dhlShipmentUiState['remote_tracking_number'] ?? null, $dhlShipmentUiState['remote_package_tracking_number'] ?? null, 'LBLP'))
                         <div class="gps-order-shipment-actions">
-                            @if ($dhlExistingFetch['can_fetch_label_without_createShipment'] ?? false)
-                                <form method="POST" action="{{ route('admin.tools.dhl.fetch-existing-label') }}" onsubmit="return confirm('Pobrać istniejącą etykietę DHL bez tworzenia nowej przesyłki?');" style="display:inline-flex;gap:8px;align-items:center;">
-                                    @csrf
-                                    <input type="hidden" name="order_id" value="{{ $order->id }}">
-                                    <input type="hidden" name="tracking_number" value="{{ $dhlShipmentUiState['remote_tracking_number'] ?? '' }}">
-                                    <input type="hidden" name="package_tracking_number" value="{{ $dhlShipmentUiState['remote_package_tracking_number'] ?? '' }}">
-                                    <input type="hidden" name="label_type" value="LBLP">
-                                    <input type="hidden" name="confirm" value="fetch-existing-dhl-label">
-                                    <button type="submit" class="fi-btn fi-color-primary fi-btn-color-primary fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm">Odzyskaj etykietę DHL</button>
-                                </form>
-                                <span style="font-size:12px;color:#92400e;">Bezpieczny POST getLabels; nie wywołuje createShipment. code_marker = dhl_existing_label_fetch_v1</span>
-                            @else
-                                <button type="button" disabled class="fi-btn fi-color-gray fi-btn-color-gray fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-gray-300 px-3 py-2 text-sm font-semibold text-gray-700 shadow-sm dark:bg-gray-700 dark:text-gray-200">Odzyskaj etykietę DHL</button>
-                                <span style="font-size:12px;color:#92400e;">{{ implode(' ', $dhlExistingFetch['blocking_reasons'] ?? []) ?: 'Pobieranie istniejącej etykiety DHL nie jest dostępne. Pobierz etykietę ręcznie z panelu DHL24.' }}</span>
-                            @endif
+                            <button type="button" disabled class="fi-btn fi-color-gray fi-btn-color-gray fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-gray-300 px-3 py-2 text-sm font-semibold text-gray-700 shadow-sm dark:bg-gray-700 dark:text-gray-200">Odzyskaj etykietę DHL</button>
+                            <span style="font-size:12px;color:#92400e;">Najpierw wdrożyć pobieranie istniejącej etykiety DHL. Nie twórz nowej przesyłki.</span>
                         </div>
                     @elseif (! $shipment)
                         <div class="gps-order-detail-value">Brak przesyłki dla tego zamówienia.</div>
