@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use RuntimeException;
+use Illuminate\Support\Facades\DB;
 use SoapClient;
 use SoapFault;
 
@@ -368,6 +369,137 @@ class DhlShipmentService
         return $shipment;
     }
 
+
+
+    public function existingLabelFetchDiagnostics(?int $orderId = null, ?string $trackingNumber = null, ?string $packageTrackingNumber = null, string $labelType = 'LBLP'): array
+    {
+        $shipment = $orderId ? Shipment::query()->where('order_id', $orderId)->where('carrier', 'dhl')->latest('id')->first() : null;
+        $log = $this->lastCreateShipmentLog($orderId);
+        $parsed = $log ? $this->parseCreateShipmentResponse(data_get($log->payload ?? [], 'response')) : $this->parseCreateShipmentResponse(null);
+        $tracking = trim((string) ($trackingNumber ?: ($parsed['tracking_number'] ?? '')));
+        $packageTracking = trim((string) ($packageTrackingNumber ?: ($parsed['package_tracking_number'] ?? '')));
+        $localLabelExists = $shipment?->label_path ? Storage::disk('local')->exists($shipment->label_path) : false;
+        $blocking = [];
+        $warnings = [];
+        if ($tracking === '') $blocking[] = 'Remote DHL shipment tracking number is missing.';
+        if (! in_array($labelType, ['LP', 'BLP', 'LBLP', 'ZBLP', 'ZBLP300', 'QR_PDF', 'QR2_IMG', 'QR4_IMG', 'QR6_IMG'], true)) $blocking[] = 'Unsupported DHL label_type for getLabels.';
+        if ($shipment) $warnings[] = 'Local DHL shipment already exists; fetch endpoint will not create a duplicate.';
+        if ($localLabelExists) $warnings[] = 'Local DHL label already exists; fetch endpoint will not overwrite it.';
+
+        return [
+            'code_marker' => 'dhl_existing_label_fetch_v1',
+            'needed' => (bool) ($orderId && ! $shipment && ! $localLabelExists && ($parsed['remote_created'] ?? false) && ! ($parsed['has_label_content'] ?? false)),
+            'reason' => 'Remote DHL shipment exists but local labelContent was redacted in stored log.',
+            'order_id' => $orderId,
+            'remote_tracking_number' => $tracking ?: null,
+            'remote_package_tracking_number' => $packageTracking ?: null,
+            'local_shipment_exists' => (bool) $shipment,
+            'local_label_exists' => $localLabelExists,
+            'create_shipment_must_not_be_retried' => true,
+            'soap_method_available' => true,
+            'soap_method_name' => 'getLabels',
+            'candidate_methods' => ['getLabels'],
+            'identifier_to_use' => $tracking ?: null,
+            'label_type' => $labelType,
+            'can_fetch_label_without_createShipment' => $blocking === [],
+            'blocking_reasons' => $blocking,
+            'warnings' => $warnings,
+            'identifier_selection' => [
+                'shipment_tracking_number' => $tracking ?: null,
+                'package_tracking_number' => $packageTracking ?: null,
+                'selected_identifier' => $tracking ?: null,
+                'selected_identifier_type' => $tracking !== '' ? 'ItemToPrint.shipmentId (DHL shipmentTrackingNumber / shipmentNotificationNumber)' : null,
+                'reason' => 'DHL24 WebAPI v2 getLabels expects itemsToPrint.item[].shipmentId plus labelType; package tracking is stored for audit but is not the getLabels identifier.',
+            ],
+            'manual_fallback' => $blocking === [] ? null : ($tracking !== '' ? 'Download label manually from DHL24 panel for shipment '.$tracking.'.' : 'Download label manually from DHL24 panel.'),
+        ];
+    }
+
+    public function fetchExistingLabel(int $orderId, string $trackingNumber, ?string $packageTrackingNumber = null, string $labelType = 'LBLP'): Shipment
+    {
+        $trackingNumber = trim($trackingNumber);
+        $packageTrackingNumber = trim((string) $packageTrackingNumber) ?: null;
+        $diagnostics = $this->existingLabelFetchDiagnostics($orderId, $trackingNumber, $packageTrackingNumber, $labelType);
+        if ($diagnostics['blocking_reasons'] !== []) throw new RuntimeException(implode(' ', $diagnostics['blocking_reasons']));
+        if ($existing = Shipment::query()->where('order_id', $orderId)->where('carrier', 'dhl')->latest('id')->first()) return $existing;
+
+        $requestPayload = $this->existingLabelRequestPayload($trackingNumber, $labelType);
+        $startedAt = microtime(true);
+        try {
+            $response = $this->callGetLabels($requestPayload);
+            $parsed = $this->parseGetLabelsResponse($response, $trackingNumber);
+            if (! $parsed['has_label_content']) throw new RuntimeException('DHL getLabels did not return labelData/labelContent for shipment '.$trackingNumber.'.');
+            $labelBinary = base64_decode((string) $parsed['label_content'], true);
+            if ($labelBinary === false) throw new RuntimeException('DHL getLabels returned invalid base64 label content.');
+
+            $shipment = DB::transaction(function () use ($orderId, $trackingNumber, $packageTrackingNumber, $labelType, $requestPayload, $response, $parsed, $labelBinary) {
+                if ($existing = Shipment::query()->where('order_id', $orderId)->where('carrier', 'dhl')->lockForUpdate()->latest('id')->first()) return $existing;
+                return $this->persistFetchedExistingLabel($orderId, $trackingNumber, $packageTrackingNumber, $labelType, $requestPayload, $response, $parsed, $labelBinary);
+            });
+        } catch (RuntimeException $exception) {
+            app(ApiIntegrationLogger::class)->error('dhl', 'getLabels', $exception, [
+                'order_id' => $orderId, 'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+                'tracking_number' => $trackingNumber, 'external_id' => $trackingNumber, 'request' => $requestPayload,
+                'response' => isset($response) ? $this->redactLabelContent($this->toArray($response)) : null,
+                'code_marker' => 'dhl_existing_label_fetch_v1',
+            ]);
+            throw $exception;
+        }
+
+        app(ApiIntegrationLogger::class)->success('dhl', 'getLabels', 'DHL existing label fetched.', [
+            'order_id' => $orderId, 'shipment_id' => $shipment->id, 'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+            'tracking_number' => $trackingNumber, 'external_id' => $trackingNumber, 'request' => $requestPayload,
+            'response' => $this->redactLabelContent($this->toArray($response)) + ['label_path' => $shipment->label_path],
+            'code_marker' => 'dhl_existing_label_fetch_v1',
+        ]);
+        return $shipment;
+    }
+
+    private function existingLabelRequestPayload(string $trackingNumber, string $labelType): array
+    {
+        return ['authData' => ['username' => config('services.dhl.login'), 'password' => config('services.dhl.password')], 'itemsToPrint' => ['item' => [['labelType' => $labelType, 'shipmentId' => (int) $trackingNumber]]]];
+    }
+
+    protected function callGetLabels(array $payload): array
+    {
+        $endpoint = (string) config('services.dhl.endpoint');
+        if ($endpoint === '') return ['getLabelsResult' => ['item' => [['shipmentId' => data_get($payload, 'itemsToPrint.item.0.shipmentId'), 'labelType' => data_get($payload, 'itemsToPrint.item.0.labelType', 'LBLP'), 'labelMimeType' => 'application/pdf', 'labelData' => base64_encode("%PDF-1.4\n% GPS DHL fetched test label\n")]]]];
+        try { return (array) (new SoapClient($endpoint, ['trace' => false, 'exceptions' => true]))->__soapCall('getLabels', [$payload]); }
+        catch (SoapFault $exception) { throw new RuntimeException('Błąd DHL getLabels: '.$exception->getMessage(), previous: $exception); }
+    }
+
+    public function parseGetLabelsResponse(mixed $response, ?string $fallbackTracking = null): array
+    {
+        $array = $this->toArray($response);
+        $items = data_get($array, 'getLabelsResult.item', data_get($array, 'item', data_get($array, 'getLabelsResult', $array)));
+        if (isset($items['labelData']) || isset($items['labelContent'])) $items = [$items];
+        $first = (array) ((array) $items)[0];
+        $content = data_get($first, 'labelData') ?: data_get($first, 'labelContent') ?: data_get($first, 'label.labelContent');
+        return [
+            'tracking_number' => (string) (data_get($first, 'shipmentId') ?: $fallbackTracking),
+            'package_tracking_number' => null,
+            'label_content' => filled($content) ? (string) $content : null,
+            'label_format' => data_get($first, 'labelMimeType') ?: data_get($first, 'labelFormat') ?: 'application/pdf',
+            'label_type' => data_get($first, 'labelType'),
+            'has_label_content' => filled($content) && $content !== '[redacted]',
+            'remote_created' => filled(data_get($first, 'shipmentId')) || filled($fallbackTracking),
+            'result' => $first,
+        ];
+    }
+
+    private function persistFetchedExistingLabel(int $orderId, string $trackingNumber, ?string $packageTrackingNumber, string $labelType, array $requestPayload, mixed $response, array $parsed, string $labelBinary): Shipment
+    {
+        $path = 'shipments/labels/dhl/'.$trackingNumber.'.pdf';
+        Storage::disk('local')->put($path, $labelBinary);
+        return Shipment::query()->create([
+            'order_id' => $orderId, 'carrier' => 'dhl', 'service_code' => 'AH', 'shipment_status' => 'label_created',
+            'tracking_number' => $trackingNumber, 'carrier_shipment_id' => $trackingNumber, 'label_path' => $path,
+            'label_format' => $parsed['label_format'] ?? 'application/pdf', 'sender_snapshot' => [], 'receiver_snapshot' => [],
+            'parcel_snapshot' => ['package_tracking_number' => $packageTrackingNumber], 'request_payload' => $this->sanitize($requestPayload),
+            'response_payload' => $this->sanitize($this->redactLabelContent($this->toArray($response)) + ['package_tracking_number' => $packageTrackingNumber, 'label_type' => $labelType, 'code_marker' => 'dhl_existing_label_fetch_v1']),
+            'test_mode' => (bool) config('services.dhl.test_mode', true),
+        ]);
+    }
 
     public function recoverCreatedShipmentFromLog(int $orderId, ?int $logId = null): Shipment
     {
