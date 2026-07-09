@@ -29,8 +29,28 @@
     $paymentLabel = $shippingPaymentLines['payment'] ?? null;
     $deliveryLabel = $shippingPaymentLines['delivery'] ?? $order->delivery_method;
     $shipmentSectionError = null;
+    $shipmentLooksLikeDhl = function (?Shipment $candidate): bool {
+        if (! $candidate) {
+            return false;
+        }
+
+        $carrierKey = is_scalar($candidate->carrier) ? Str::lower(trim((string) $candidate->carrier)) : '';
+
+        if ($carrierKey === 'dhl') {
+            return true;
+        }
+
+        $payloadHaystack = Str::lower(json_encode([
+            'label_path' => is_scalar($candidate->label_path) ? $candidate->label_path : null,
+            'request_payload' => is_array($candidate->request_payload) ? $candidate->request_payload : [],
+            'response_payload' => is_array($candidate->response_payload) ? $candidate->response_payload : [],
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '');
+
+        return str_contains($payloadHaystack, 'dhl');
+    };
     try {
-        $shipment = $order->shipments->sortByDesc('id')->first();
+        $shipment = $order->shipments->sortByDesc('id')->first(fn (Shipment $candidate): bool => $shipmentLooksLikeDhl($candidate))
+            ?: $order->shipments->sortByDesc('id')->first();
     } catch (\Throwable $exception) {
         report($exception);
         $shipment = null;
@@ -43,12 +63,24 @@
     try {
         $shipmentCarrierKey = $shipment && is_scalar($shipment->carrier) ? trim((string) $shipment->carrier) : '';
         $shipmentCarrierNormalized = Str::lower($shipmentCarrierKey);
-        $carrier = $shipmentCarrierNormalized !== '' ? (Shipment::CARRIERS[$shipmentCarrierNormalized] ?? null) : null;
         $shipmentTrackingNumber = $shipment && is_scalar($shipment->tracking_number) ? trim((string) $shipment->tracking_number) : '';
         $shipmentCarrierShipmentId = $shipment && is_scalar($shipment->carrier_shipment_id) ? trim((string) $shipment->carrier_shipment_id) : '';
         $shipmentLabelPath = $shipment && is_scalar($shipment->label_path) ? trim((string) $shipment->label_path) : '';
-        $shipmentStatus = $shipment && is_scalar($shipment->shipment_status) ? trim((string) $shipment->shipment_status) : '';
         $shipmentTrackingDisplay = $shipmentTrackingNumber !== '' ? $shipmentTrackingNumber : $shipmentCarrierShipmentId;
+        $shipmentCarrierPayloadHaystack = Str::lower(json_encode([
+            'tracking_number' => $shipmentTrackingNumber,
+            'carrier_shipment_id' => $shipmentCarrierShipmentId,
+            'label_path' => $shipmentLabelPath,
+            'request_payload' => $shipment && is_array($shipment->request_payload) ? $shipment->request_payload : [],
+            'response_payload' => $shipment && is_array($shipment->response_payload) ? $shipment->response_payload : [],
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '');
+        $carrier = match (true) {
+            $shipmentCarrierNormalized === 'dhl' => 'DHL',
+            $shipmentCarrierNormalized === 'dpd' => 'DPD',
+            $shipmentCarrierNormalized !== '' => Shipment::CARRIERS[$shipmentCarrierNormalized] ?? Str::upper($shipmentCarrierKey),
+            str_contains($shipmentCarrierPayloadHaystack, 'dhl') => 'DHL',
+            default => null,
+        };
         $shipmentTrackingUrl = $shipmentTrackingDisplay !== ''
             ? 'https://www.dhl.com/pl-pl/home/tracking/tracking-parcel.html?submit=1&tracking-id='.urlencode($shipmentTrackingDisplay)
             : null;
@@ -61,7 +93,6 @@
                 $shipmentLabelExists = false;
             }
         }
-        $shipmentLabelMissing = $shipmentLabelPath !== '' && ! $shipmentLabelExists;
         $shipmentCanShowActions = $shipmentSectionError === null && (! $shipment || (($shipment->carrier === null || is_scalar($shipment->carrier)) && ($shipment->tracking_number === null || is_scalar($shipment->tracking_number)) && ($shipment->carrier_shipment_id === null || is_scalar($shipment->carrier_shipment_id)) && ($shipment->label_path === null || is_scalar($shipment->label_path)) && ($shipment->shipment_status === null || is_scalar($shipment->shipment_status))));
     } catch (\Throwable $exception) {
         report($exception);
@@ -69,10 +100,8 @@
         $shipmentTrackingNumber = '';
         $shipmentCarrierShipmentId = '';
         $shipmentLabelPath = '';
-        $shipmentStatus = '';
         $shipmentLabelExists = false;
         $shipmentCanShowActions = false;
-        $shipmentLabelMissing = false;
         $shipmentTrackingDisplay = '';
         $shipmentTrackingUrl = null;
         $shipmentSectionError = $shipmentSectionError ?: $exception;
@@ -191,12 +220,6 @@
 
         return '';
     };
-    $joinFilled = function (array $values): string {
-        return trim(implode(' ', array_filter(array_map(
-            fn (mixed $value): string => (is_scalar($value) || $value instanceof \Stringable) ? trim((string) $value) : '',
-            $values,
-        ), fn (string $value): bool => $value !== '' && $value !== '-')));
-    };
     $buyerMarketplaceId = $firstFilled([
         data_get($order->raw_payload, 'buyer.id'),
         data_get($order->raw_payload, 'buyer.login'),
@@ -213,77 +236,6 @@
     ], fn ($value) => filled($value)));
     $deliveryLines = app(\App\Support\OrderDeliveryDisplayResolver::class)->resolve($order);
     $addressLines = app(\App\Support\OrderShippingAddressDisplayResolver::class)->resolve($order);
-    $shipmentReceiverSnapshot = $shipment && is_array($shipment->receiver_snapshot) ? $shipment->receiver_snapshot : [];
-    $shipmentRequestReceiver = $shipment && is_array($shipment->request_payload) ? (array) data_get($shipment->request_payload, 'shipment.ship.receiver', []) : [];
-    $shipmentReceiverAddress = (array) data_get($shipmentReceiverSnapshot, 'address', []);
-    $shipmentRequestReceiverAddress = (array) data_get($shipmentRequestReceiver, 'address', []);
-    $shipmentReceiverName = $firstFilled([
-        data_get($shipmentReceiverSnapshot, 'person_name'),
-        data_get($shipmentReceiverSnapshot, 'personName'),
-        data_get($shipmentReceiverSnapshot, 'name'),
-        data_get($shipmentReceiverAddress, 'name'),
-        data_get($shipmentRequestReceiver, 'person_name'),
-        data_get($shipmentRequestReceiver, 'personName'),
-        data_get($shipmentRequestReceiver, 'name'),
-        data_get($shipmentRequestReceiverAddress, 'name'),
-        $order->customer_name,
-    ]);
-    $shipmentReceiverStreet = $firstFilled([
-        $joinFilled([data_get($shipmentReceiverSnapshot, 'street'), data_get($shipmentReceiverSnapshot, 'house_number')]),
-        $joinFilled([data_get($shipmentReceiverSnapshot, 'street'), data_get($shipmentReceiverSnapshot, 'houseNumber')]),
-        data_get($shipmentReceiverSnapshot, 'address'),
-        $joinFilled([data_get($shipmentReceiverAddress, 'street'), data_get($shipmentReceiverAddress, 'house_number')]),
-        $joinFilled([data_get($shipmentReceiverAddress, 'street'), data_get($shipmentReceiverAddress, 'houseNumber')]),
-        $joinFilled([data_get($shipmentRequestReceiver, 'street'), data_get($shipmentRequestReceiver, 'house_number')]),
-        $joinFilled([data_get($shipmentRequestReceiver, 'street'), data_get($shipmentRequestReceiver, 'houseNumber')]),
-        data_get($shipmentRequestReceiver, 'address'),
-        $joinFilled([data_get($shipmentRequestReceiverAddress, 'street'), data_get($shipmentRequestReceiverAddress, 'house_number')]),
-        $joinFilled([data_get($shipmentRequestReceiverAddress, 'street'), data_get($shipmentRequestReceiverAddress, 'houseNumber')]),
-        $order->address_line1,
-    ]);
-    $shipmentReceiverPostalCity = $joinFilled([
-        $firstFilled([
-            data_get($shipmentReceiverSnapshot, 'postal_code'),
-            data_get($shipmentReceiverSnapshot, 'postalCode'),
-            data_get($shipmentReceiverAddress, 'postal_code'),
-            data_get($shipmentReceiverAddress, 'postalCode'),
-            data_get($shipmentRequestReceiver, 'postal_code'),
-            data_get($shipmentRequestReceiver, 'postalCode'),
-            data_get($shipmentRequestReceiverAddress, 'postal_code'),
-            data_get($shipmentRequestReceiverAddress, 'postalCode'),
-            $order->postal_code,
-        ]),
-        $firstFilled([
-            data_get($shipmentReceiverSnapshot, 'city'),
-            data_get($shipmentReceiverAddress, 'city'),
-            data_get($shipmentRequestReceiver, 'city'),
-            data_get($shipmentRequestReceiverAddress, 'city'),
-            $order->city,
-        ]),
-    ]);
-    $shipmentReceiverCountry = $firstFilled([
-        data_get($shipmentReceiverSnapshot, 'country'),
-        data_get($shipmentReceiverAddress, 'country'),
-        data_get($shipmentRequestReceiver, 'country'),
-        data_get($shipmentRequestReceiverAddress, 'country'),
-        $order->country,
-    ]);
-    $shipmentReceiverPhone = $firstFilled([
-        data_get($shipmentReceiverSnapshot, 'phone'),
-        data_get($shipmentReceiverSnapshot, 'phone_number'),
-        data_get($shipmentReceiverSnapshot, 'phoneNumber'),
-        data_get($shipmentRequestReceiver, 'phone'),
-        data_get($shipmentRequestReceiver, 'phone_number'),
-        data_get($shipmentRequestReceiver, 'phoneNumber'),
-        $order->phone,
-    ]);
-    $shipmentReceiverLines = array_values(array_filter([
-        $shipmentReceiverName,
-        $shipmentReceiverStreet,
-        $shipmentReceiverPostalCity,
-        $shipmentReceiverCountry,
-        $shipmentReceiverPhone,
-    ], fn ($line): bool => $line !== ''));
     $invoiceDisplay = app(\App\Support\OrderInvoiceDisplayResolver::class)->resolve($order);
     $invoiceLines = $invoiceDisplay['lines'];
     $hasInvoiceData = $invoiceDisplay['has_invoice'];
@@ -526,35 +478,14 @@
                             <a class="fi-btn fi-color-primary fi-btn-color-primary fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-primary-500 focus-visible:ring-2 focus-visible:ring-primary-600 dark:bg-primary-500 dark:hover:bg-primary-400 dark:focus-visible:ring-primary-500" href="{{ \App\Filament\Pages\CreateOrderShipment::getUrl(['order' => $order]) }}">Dodaj przesyłkę DHL</a>
                         </div>
                     @else
-                        <div class="gps-order-detail-two">
-                            {{-- code_marker = order_shipment_dhl_display_cleanup_v2 --}}
-                            <div class="gps-order-detail-fact">
-                                <div class="gps-order-detail-label">Podsumowanie</div>
-                                <div class="gps-order-detail-value">
-                                    <div>Przewoźnik: {{ $carrier ?: '—' }}</div>
-                                    <div>Przesyłka: @if ($shipmentTrackingUrl)<a class="underline text-primary-600 hover:text-primary-500 dark:text-primary-400 dark:hover:text-primary-300" href="{{ $shipmentTrackingUrl }}" target="_blank" rel="noopener noreferrer">{{ $shipmentTrackingDisplay }}</a>@else—@endif</div>
-                                    <div>Utworzono: {{ $shipment->created_at?->format('Y-m-d H:i') ?: '—' }}</div>
-                                    @if ($shipmentLabelMissing)
-                                        <div class="gps-order-detail-muted">Numer listu DHL: {{ $shipmentTrackingNumber !== '' ? $shipmentTrackingNumber : $shipmentCarrierShipmentId }}</div>
-                                        <div class="gps-order-detail-muted">Lokalny rekord przesyłki istnieje, ale plik etykiety PDF nie istnieje.</div>
-                                        <div class="gps-order-detail-muted">Nie twórz nowej przesyłki DHL.</div>
-                                    @endif
-                                </div>
-                                <div class="gps-order-shipment-actions">
-                                    @if ($shipmentLabelExists)<a class="fi-btn fi-color-primary fi-btn-color-primary fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-primary-500 focus-visible:ring-2 focus-visible:ring-primary-600 dark:bg-primary-500 dark:hover:bg-primary-400 dark:focus-visible:ring-primary-500" href="{{ route('tools.download-shipment-label', $shipment) }}">Pobierz etykietę PDF</a>@elseif ($shipmentLabelPath !== '')<span class="gps-order-detail-muted">Brak pliku etykiety</span><button type="button" disabled class="fi-btn fi-color-gray fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-gray-300 px-3 py-2 text-sm font-semibold text-gray-700">Napraw etykietę DHL (preview)</button>@endif
-                                    <a class="fi-btn fi-color-gray fi-btn-color-gray fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-gray-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-gray-500 focus-visible:ring-2 focus-visible:ring-gray-600 dark:bg-gray-500 dark:hover:bg-gray-400 dark:focus-visible:ring-gray-500" href="{{ \App\Filament\Pages\ShipmentDetails::getUrl(['shipment' => $shipment->id]) }}">Szczegóły</a>
-                                </div>
-                            </div>
-                            <div class="gps-order-detail-fact">
-                                <div class="gps-order-detail-label">Adres dostawy</div>
-                                <div class="gps-order-detail-value">
-                                    @forelse ($shipmentReceiverLines as $line)
-                                        <div>{{ $line }}</div>
-                                    @empty
-                                        <div>—</div>
-                                    @endforelse
-                                </div>
-                            </div>
+                        {{-- code_marker = order_shipment_section_simplified_v3 --}}
+                        <div class="gps-order-detail-value">
+                            <div>Przewoźnik: {{ $carrier ?: '—' }}</div>
+                            <div>Przesyłka: @if ($shipmentTrackingUrl)<a class="underline text-primary-600 hover:text-primary-500 dark:text-primary-400 dark:hover:text-primary-300" href="{{ $shipmentTrackingUrl }}" target="_blank" rel="noopener noreferrer">{{ $shipmentTrackingDisplay }}</a>@else—@endif</div>
+                            <div>Utworzono: {{ $shipment->created_at?->format('Y-m-d H:i') ?: '—' }}</div>
+                        </div>
+                        <div class="gps-order-shipment-actions">
+                            @if ($shipmentLabelExists)<a class="fi-btn fi-color-primary fi-btn-color-primary fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-primary-500 focus-visible:ring-2 focus-visible:ring-primary-600 dark:bg-primary-500 dark:hover:bg-primary-400 dark:focus-visible:ring-primary-500" href="{{ route('tools.download-shipment-label', $shipment) }}">Pobierz etykietę PDF</a>@elseif ($shipmentLabelPath !== '')<span class="gps-order-detail-muted">Brak pliku etykiety</span>@endif
                         </div>
                     @endif
                 @else
