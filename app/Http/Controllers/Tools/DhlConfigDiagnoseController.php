@@ -134,7 +134,6 @@ class DhlConfigDiagnoseController extends Controller
             ],
             'dhl_service_selection' => $serviceSelection,
             'dhl_response_parse_diagnostics' => $this->responseParseDiagnostics($request),
-            'dhl_existing_label_fetch' => app(DhlShipmentService::class)->existingLabelFetchDiagnostics($request->integer('order_id') ?: null, $request->query('tracking_number'), $request->query('package_tracking_number'), (string) $request->query('label_type', 'LBLP')),
             'admin_order_shipment_ui_state' => $this->adminOrderShipmentUiState($request),
             'last_dhl_create_shipment_error' => $lastError,
             'probable_causes' => $this->probableCauses($login, $password, $accountNumber, $modeMatchesEndpoint, $lastError),
