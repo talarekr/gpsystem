@@ -18,7 +18,7 @@ class OvokoCarDictionaryService
     public const DICTIONARIES = ['brands', 'models', 'fuel', 'gearbox_type', 'body_type', 'wheel', 'wheel_drive', 'car_status', 'car_class'];
     public const ENUMS = ['fuel', 'gearbox_type', 'body_type', 'wheel', 'wheel_drive', 'car_status', 'car_class'];
 
-    public function diagnostics(?string $brandSearch = null): array
+    public function diagnostics(?string $brandSearch = null, ?string $brandId = null, int $modelsLimit = 5): array
     {
         $account = $this->account();
         $credentials = $account?->api_credentials ?? [];
@@ -30,7 +30,7 @@ class OvokoCarDictionaryService
             $lastSynced[$dictionary] = (clone $query)->max('synced_at');
         }
 
-        $firstBrand = OvokoCarDictionaryEntry::query()->where('dictionary', 'brands')->orderBy('name')->first();
+        $sampleBrand = $this->sampleBrand($brandId);
 
         return [
             'ok' => true,
@@ -52,7 +52,12 @@ class OvokoCarDictionaryService
             'last_synced_at' => $lastSynced,
             'samples' => [
                 'brands' => $this->sample('brands'),
-                'models_for_brand' => $firstBrand ? ['ovoko_brand_id' => $firstBrand->ovoko_id, 'brand_name' => $firstBrand->name, 'models' => $this->sample('models', $firstBrand->ovoko_id)] : null,
+                'models_for_brand' => $sampleBrand ? [
+                    'ovoko_brand_id' => (string) $sampleBrand->ovoko_id,
+                    'brand_name' => $sampleBrand->name,
+                    'models_count' => OvokoCarDictionaryEntry::query()->where('dictionary', 'models')->where('ovoko_brand_id', (string) $sampleBrand->ovoko_id)->count(),
+                    'models' => $this->sample('models', (string) $sampleBrand->ovoko_id, $modelsLimit),
+                ] : null,
             ],
             'last_sync_error' => $this->lastSyncError(),
             'brand_search' => $this->brandSearchDiagnostics($brandSearch),
@@ -174,7 +179,8 @@ class OvokoCarDictionaryService
     private function scopeDictionaries(string $scope, ?string $brandId): array { return match ($scope) { 'brands' => ['brands'], 'models' => ['models'], 'enums' => self::ENUMS, default => array_merge(['brands'], self::ENUMS, ['models']) }; }
     private function account(): ?MarketplaceAccount { return MarketplaceAccount::query()->where('code', 'ovoko_main')->first(); }
     private function storeRows(string $dictionary, array $rows, ?string $brandId = null): int { $count = 0; $brandKey = (string) ($brandId ?? ''); foreach ($rows as $row) { $id = (string) ($row['id'] ?? $row['value'] ?? $row['code'] ?? $row['car_model_id'] ?? $row['model_id'] ?? ''); if ($id === '') continue; OvokoCarDictionaryEntry::query()->updateOrCreate(['dictionary' => $dictionary, 'ovoko_id' => $id, 'ovoko_brand_id' => $brandKey], ['name' => $row['name'] ?? $row['title'] ?? $row['label'] ?? $row['value_name'] ?? null, 'year_from' => $row['year_from'] ?? $row['from_year'] ?? null, 'year_to' => $row['year_to'] ?? $row['to_year'] ?? null, 'raw_payload' => $row, 'synced_at' => now()]); $count++; } return $count; }
-    private function sample(string $dictionary, ?string $brandId = null): array { return OvokoCarDictionaryEntry::query()->where('dictionary', $dictionary)->when($brandId, fn ($q) => $q->where('ovoko_brand_id', $brandId))->orderBy('name')->limit(5)->get(['ovoko_id', 'name', 'ovoko_brand_id', 'year_from', 'year_to', 'synced_at'])->toArray(); }
+    private function sampleBrand(?string $brandId = null): ?OvokoCarDictionaryEntry { $brandId = trim((string) $brandId); return OvokoCarDictionaryEntry::query()->where('dictionary', 'brands')->when($brandId !== '', fn ($q) => $q->where('ovoko_id', $brandId))->orderBy('name')->first(); }
+    private function sample(string $dictionary, ?string $brandId = null, int $limit = 5): array { $limit = max(1, min($limit, 100)); return OvokoCarDictionaryEntry::query()->where('dictionary', $dictionary)->when($brandId, fn ($q) => $q->where('ovoko_brand_id', $brandId))->orderBy('name')->limit($limit)->get(['ovoko_id', 'name', 'ovoko_brand_id', 'year_from', 'year_to', 'synced_at'])->toArray(); }
     private function lastSyncError(): ?array { return MarketplaceSyncLog::query()->where('marketplace', 'ovoko')->where('action', 'ovoko_car_dictionary_sync_error')->latest('created_at')->first()?->only(['status', 'message', 'payload', 'created_at']); }
     private function safeError(\Throwable $e): string { return Str::of($e->getMessage())->replaceMatches('/(password|user_token|token|secret|authorization|username)=([^&\s]+)/i', '$1=***')->limit(500)->toString(); }
     private function log(string $status, string $action, string $message, array $payload): void { MarketplaceSyncLog::query()->create(['marketplace' => 'ovoko', 'action' => $action, 'status' => $status, 'message' => $message, 'payload' => $payload, 'created_at' => now()]); }
