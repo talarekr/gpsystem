@@ -27,12 +27,36 @@
     $shippingPaymentLines = app(\App\Support\OrderShippingPaymentDisplayResolver::class)->resolve($order, includeAmount: true);
     $paymentLabel = $shippingPaymentLines['payment'] ?? null;
     $deliveryLabel = $shippingPaymentLines['delivery'] ?? $order->delivery_method;
-    $shipment = $order->shipments->sortByDesc('id')->first();
+    $shipmentSectionError = null;
+    try {
+        $shipment = $order->shipments->sortByDesc('id')->first();
+    } catch (\Throwable $exception) {
+        report($exception);
+        $shipment = null;
+        $shipmentSectionError = $exception;
+    }
     $isEbayOrder = Str::startsWith($marketplaceKey, 'ebay');
     $isFulfillmentMarketplaceOrder = in_array($marketplaceKey, ['allegro', 'ebay', 'ebay_de', 'ebay_fr'], true);
     $fulfillmentMeta = is_array($order->meta) ? $order->meta : [];
     $marketplaceFulfillmentStatus = $fulfillmentMeta['marketplace_fulfillment_status'] ?? null;
-    $carrier = $shipment ? (Shipment::CARRIERS[$shipment->carrier] ?? $shipment->carrier) : null;
+    try {
+        $shipmentCarrierKey = $shipment && is_scalar($shipment->carrier) ? (string) $shipment->carrier : '';
+        $carrier = $shipment ? (Shipment::CARRIERS[$shipmentCarrierKey] ?? ($shipmentCarrierKey !== '' ? $shipmentCarrierKey : null)) : null;
+        $shipmentTrackingNumber = $shipment && is_scalar($shipment->tracking_number) ? trim((string) $shipment->tracking_number) : '';
+        $shipmentCarrierShipmentId = $shipment && is_scalar($shipment->carrier_shipment_id) ? trim((string) $shipment->carrier_shipment_id) : '';
+        $shipmentLabelPath = $shipment && is_scalar($shipment->label_path) ? trim((string) $shipment->label_path) : '';
+        $shipmentStatus = $shipment && is_scalar($shipment->shipment_status) ? trim((string) $shipment->shipment_status) : '';
+        $shipmentCanShowActions = $shipmentSectionError === null && (! $shipment || (($shipment->carrier === null || is_scalar($shipment->carrier)) && ($shipment->tracking_number === null || is_scalar($shipment->tracking_number)) && ($shipment->carrier_shipment_id === null || is_scalar($shipment->carrier_shipment_id)) && ($shipment->label_path === null || is_scalar($shipment->label_path)) && ($shipment->shipment_status === null || is_scalar($shipment->shipment_status))));
+    } catch (\Throwable $exception) {
+        report($exception);
+        $carrier = null;
+        $shipmentTrackingNumber = '';
+        $shipmentCarrierShipmentId = '';
+        $shipmentLabelPath = '';
+        $shipmentStatus = '';
+        $shipmentCanShowActions = false;
+        $shipmentSectionError = $shipmentSectionError ?: $exception;
+    }
     $deliveryMethod = trim((string) ($deliveryLabel ?: $carrier ?: $order->delivery_method));
     $deliveryType = trim((string) data_get($order->raw_payload, 'delivery.type', data_get($order->raw_payload, 'delivery_type', data_get($order->raw_payload, 'shipping_type'))));
     $deliveryPhone = trim((string) (data_get($order->raw_payload, 'delivery.address.phoneNumber') ?: data_get($order->raw_payload, 'delivery.address.phone') ?: $order->phone));
@@ -396,7 +420,12 @@
             <div class="gps-order-detail-fact">
                 <div class="gps-order-detail-label">Przesyłka</div>
                 @if ($isFulfillmentMarketplaceOrder)
-                    @if (! $shipment)
+                    @if ($shipmentSectionError || ! $shipmentCanShowActions)
+                        <div class="gps-order-detail-value">
+                            <div>Nie udało się załadować sekcji przesyłki DHL dla tego zamówienia.</div>
+                            <div>Nie twórz nowej przesyłki. Sprawdź diagnostykę DHL/order.</div>
+                        </div>
+                    @elseif (! $shipment)
                         <div class="gps-order-detail-value">Brak przesyłki dla tego zamówienia.</div>
                         <div class="gps-order-shipment-actions">
                             <a class="fi-btn fi-color-primary fi-btn-color-primary fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-primary-500 focus-visible:ring-2 focus-visible:ring-primary-600 dark:bg-primary-500 dark:hover:bg-primary-400 dark:focus-visible:ring-primary-500" href="{{ \App\Filament\Pages\CreateOrderShipment::getUrl(['order' => $order]) }}">Dodaj przesyłkę DHL</a>
@@ -406,15 +435,15 @@
                             <div class="gps-order-detail-fact">
                                 <div class="gps-order-detail-label">Podsumowanie</div>
                                 <div class="gps-order-detail-value">
-                                    <div>Przewoźnik: {{ $carrier ?: strtoupper($shipment->carrier ?: '—') }}</div>
-                                    <div>Tracking: {{ $shipment->tracking_number ?: $shipment->carrier_shipment_id ?: '—' }}</div>
-                                    <div>Status lokalny: {{ $shipment->shipment_status ?: '—' }}</div>
+                                    <div>Przewoźnik: {{ $carrier ?: ($shipmentCarrierKey !== '' ? strtoupper($shipmentCarrierKey) : '—') }}</div>
+                                    <div>Tracking: {{ $shipmentTrackingNumber !== '' ? $shipmentTrackingNumber : ($shipmentCarrierShipmentId !== '' ? $shipmentCarrierShipmentId : '—') }}</div>
+                                    <div>Status lokalny: {{ $shipmentStatus !== '' ? $shipmentStatus : '—' }}</div>
                                     <div>Utworzono: {{ $shipment->created_at?->format('Y-m-d H:i') ?: '—' }}</div>
-                                    <div>DHL: numer {{ $shipment->tracking_number ?: $shipment->carrier_shipment_id ?: '—' }}</div>
+                                    <div>DHL: numer {{ $shipmentTrackingNumber !== '' ? $shipmentTrackingNumber : ($shipmentCarrierShipmentId !== '' ? $shipmentCarrierShipmentId : '—') }}</div>
                                     <div>Marketplace: {{ $marketplaceFulfillmentStatus === 'synced' ? 'tracking wysłany' : ($marketplaceFulfillmentStatus === 'error' ? 'błąd' : 'tracking nie wysłany') }}</div>
                                 </div>
                                 <div class="gps-order-shipment-actions">
-                                    @if ($shipment->label_path)<a class="fi-btn fi-color-primary fi-btn-color-primary fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-primary-500 focus-visible:ring-2 focus-visible:ring-primary-600 dark:bg-primary-500 dark:hover:bg-primary-400 dark:focus-visible:ring-primary-500" href="{{ route('tools.download-shipment-label', $shipment) }}">Pobierz etykietę PDF</a>@endif
+                                    @if ($shipmentLabelPath !== '')<a class="fi-btn fi-color-primary fi-btn-color-primary fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-primary-500 focus-visible:ring-2 focus-visible:ring-primary-600 dark:bg-primary-500 dark:hover:bg-primary-400 dark:focus-visible:ring-primary-500" href="{{ route('tools.download-shipment-label', $shipment) }}">Pobierz etykietę PDF</a>@endif
                                     <a class="fi-btn fi-color-gray fi-btn-color-gray fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-gray-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-gray-500 focus-visible:ring-2 focus-visible:ring-gray-600 dark:bg-gray-500 dark:hover:bg-gray-400 dark:focus-visible:ring-gray-500" href="{{ \App\Filament\Pages\ShipmentDetails::getUrl(['shipment' => $shipment->id]) }}">Szczegóły</a>
                                 </div>
                             </div>
