@@ -291,6 +291,12 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/orders/dhl-diagnose', DhlConfigDiagnoseController::class)->name('admin.tools.orders.dhl-diagnose');
     Route::get('/admin/tools/orders/view-diagnose', OrderViewDiagnoseController::class)->name('admin.tools.orders.view-diagnose');
     Route::get('/admin/tools/shipments/diagnose', ShipmentDiagnoseController::class)->name('admin.tools.shipments.diagnose');
+    Route::get('/admin/tools/shipments/diagnose-minimal', static fn () => response()->json([
+        'code_marker' => 'shipment_diagnose_minimal_probe_v1',
+        'order_id' => request('order_id'),
+        'php_version' => PHP_VERSION,
+        'app_env' => app()->environment(),
+    ]))->name('admin.tools.shipments.diagnose-minimal');
     Route::get('/admin/tools/jarek-gearboxes/ping', [JarekGearboxToolController::class, 'ping'])->name('admin.tools.jarek-gearboxes.ping');
     Route::get('/admin/tools/jarek-gearboxes/allegro-import-runner', [JarekGearboxToolController::class, 'runner'])->name('admin.tools.jarek-gearboxes.allegro-import-runner');
     Route::get('/admin/tools/jarek-gearboxes/runner', [JarekGearboxToolController::class, 'jarekRunner'])->name('admin.tools.jarek-gearboxes.runner');
