@@ -189,7 +189,7 @@ class ShipmentDiagnoseController extends Controller
     /** @return array<int, string> */
     private function allSections(): array
     {
-        return ['input', 'app', 'table_discovery', 'shipments_probe', 'labels_probe', 'last_exceptions_probe'];
+        return ['input', 'app', 'table_discovery', 'shipments_probe', 'shipments_table_audit', 'shipments_filament_render_risk', 'labels_probe', 'last_exceptions_probe'];
     }
 
     /** @return array<int, string> */
@@ -215,6 +215,8 @@ class ShipmentDiagnoseController extends Controller
             'app' => fn () => $this->probeApp($payload),
             'table_discovery' => fn () => $this->probeTables($payload),
             'shipments_probe' => fn () => $this->probeShipments($payload, $orderId),
+            'shipments_table_audit' => fn () => $this->probeShipmentsTableAudit($payload),
+            'shipments_filament_render_risk' => fn () => $this->probeShipmentsFilamentRenderRisk($payload),
             'labels_probe' => fn () => $this->probeLabels($payload, $orderId),
             'last_exceptions_probe' => fn () => $this->probeLastExceptions($payload, $orderId),
             default => fn () => null,
@@ -252,6 +254,8 @@ class ShipmentDiagnoseController extends Controller
             'table_discovery' => ['candidate_tables_checked' => $this->candidateTables(), 'tables' => [], 'columns' => []],
             'safe_flow_debug' => ['used_direct_app_builder' => true, 'used_direct_table_discovery_builder' => false, 'table_discovery_tables_count' => 0, 'existing_tables' => []],
             'shipments_probe' => ['records_for_order' => [], 'records_for_tracking' => [], 'records_for_carrier_shipment_id' => [], 'records_for_package_tracking' => [], 'recent_records' => [], 'partial_or_suspicious_records' => [], 'warnings' => []],
+            'shipments_table_audit' => ['total_count' => null, 'recent_records' => [], 'records_with_empty_tracking' => [], 'records_with_empty_label_path' => [], 'records_with_non_empty_missing_label_file' => [], 'records_with_invalid_scalar_fields' => [], 'records_with_suspicious_json_payloads' => [], 'records_that_may_break_filament' => [], 'warnings' => [], 'errors' => []],
+            'shipments_filament_render_risk' => ['page_class_exists' => null, 'view_file_exists' => null, 'view_contains_label_download_link' => null, 'view_contains_storage_exists_call' => null, 'view_contains_route_download_label' => null, 'columns_or_fields_using_label_path' => [], 'suspected_crash_points' => [], 'safe_recommendations' => []],
             'labels_probe' => ['records_for_order_or_shipment' => [], 'empty_paths' => [], 'non_empty_paths' => [], 'file_checks' => [], 'warnings' => []],
             'last_exceptions_probe' => ['admin_shipments' => null, 'admin_order' => null, 'shipment_diagnose' => null, 'view_diagnose' => null, 'integration_logs' => []],
             'diagnostics_health' => ['ok' => false, 'status' => 'unknown', 'sections_completed' => [], 'sections_failed' => []],
@@ -460,6 +464,116 @@ class ShipmentDiagnoseController extends Controller
             ->filter(fn (array $record): bool => blank($record['tracking_number'] ?? $record['tracking'] ?? null) || blank($record['label_path'] ?? $record['label_file_path'] ?? $record['path'] ?? null) || $this->looksJsonContainer($record['carrier'] ?? null) || $this->looksJsonContainer($record['shipment_status'] ?? $record['status'] ?? null) || $this->looksJsonContainer($record['service_code'] ?? $record['service'] ?? null))
             ->values()
             ->all();
+    }
+
+
+    private function probeShipmentsTableAudit(array &$payload): void
+    {
+        $this->ensureDiscovery($payload);
+        if (! $this->tableExists($payload, 'shipments')) {
+            $payload['shipments_table_audit']['warnings'][] = 'Table shipments does not exist.';
+            return;
+        }
+
+        $columns = $this->columns($payload, 'shipments');
+        $required = ['id', 'order_id', 'carrier', 'service_code', 'shipment_status', 'tracking_number', 'carrier_shipment_id', 'label_path', 'label_format', 'created_at', 'updated_at'];
+        $select = $this->safeSelect($columns, $required);
+        $audit = &$payload['shipments_table_audit'];
+
+        try {
+            $audit['total_count'] = DB::table('shipments')->count();
+            $rows = DB::table('shipments')->select($select)->orderByDesc(in_array('id', $columns, true) ? 'id' : 'created_at')->limit(50)->get()->map(fn ($row): array => $this->sanitizeRow((array) $row))->all();
+            $audit['recent_records'] = $rows;
+        } catch (Throwable $e) {
+            $audit['errors'][] = $this->errorArray('shipments_table_audit.query', $e);
+            return;
+        }
+
+        foreach ($audit['recent_records'] as $row) {
+            $id = $row['id'] ?? null;
+            $reasons = [];
+            $tracking = $row['tracking_number'] ?? ($row['carrier_shipment_id'] ?? null);
+            $labelPath = $row['label_path'] ?? null;
+
+            if ($this->blankScalar($tracking)) {
+                $audit['records_with_empty_tracking'][] = $row;
+                $reasons[] = 'tracking_number/carrier_shipment_id is null or empty';
+            }
+            if ($this->blankScalar($labelPath)) {
+                $audit['records_with_empty_label_path'][] = $row;
+                $reasons[] = 'label_path is null or empty; UI must not build download link';
+            } elseif (! is_string($labelPath) || str_contains((string) $labelPath, "\0") || preg_match('/^[a-z]+:\/\//i', (string) $labelPath) === 1) {
+                $audit['records_with_invalid_scalar_fields'][] = ['id' => $id, 'field' => 'label_path', 'value' => $labelPath, 'reason' => 'invalid label_path type or format'];
+                $reasons[] = 'label_path has suspicious type or format';
+            } elseif ($this->safeFileExists((string) $labelPath) !== true) {
+                $audit['records_with_non_empty_missing_label_file'][] = $row + ['label_file_exists' => false];
+                $reasons[] = 'label_path is non-empty but label file is missing';
+            }
+
+            foreach (['carrier', 'shipment_status', 'service_code', 'label_format'] as $field) {
+                if (array_key_exists($field, $row) && $row[$field] !== null && ! is_scalar($row[$field])) {
+                    $audit['records_with_invalid_scalar_fields'][] = ['id' => $id, 'field' => $field, 'value' => $row[$field], 'reason' => 'non-scalar field'];
+                    $reasons[] = $field.' is non-scalar';
+                }
+                if (in_array($field, ['carrier', 'shipment_status'], true) && $this->blankScalar($row[$field] ?? null)) {
+                    $reasons[] = $field.' is null or empty';
+                }
+                if ($this->looksJsonContainer($row[$field] ?? null)) {
+                    $audit['records_with_suspicious_json_payloads'][] = ['id' => $id, 'field' => $field, 'value' => $row[$field]];
+                    $reasons[] = $field.' looks like JSON, not a display scalar';
+                }
+            }
+
+            if (array_key_exists('order_id', $row) && $row['order_id'] !== null && Schema::hasTable('orders') && ! DB::table('orders')->where('id', $row['order_id'])->exists()) {
+                $reasons[] = 'order_id points to missing order';
+            }
+            foreach (['created_at', 'updated_at'] as $field) {
+                if ($this->blankScalar($row[$field] ?? null) || strtotime((string) $row[$field]) === false) {
+                    $reasons[] = $field.' is null or not parseable';
+                }
+            }
+
+            if ($reasons !== []) {
+                $audit['records_that_may_break_filament'][] = ['id' => $id, 'reasons' => array_values(array_unique($reasons)), 'record' => $row];
+            }
+        }
+    }
+
+    private function probeShipmentsFilamentRenderRisk(array &$payload): void
+    {
+        $page = app_path('Filament/Pages/Shipments.php');
+        $view = resource_path('views/filament/pages/shipments.blade.php');
+        $pageText = is_readable($page) ? (file_get_contents($page) ?: '') : '';
+        $viewText = is_readable($view) ? (file_get_contents($view) ?: '') : '';
+        $combined = $pageText."\n".$viewText;
+
+        $risk = &$payload['shipments_filament_render_risk'];
+        $risk['page_class_exists'] = class_exists(\App\Filament\Pages\Shipments::class);
+        $risk['view_file_exists'] = is_readable($view);
+        $risk['view_contains_label_download_link'] = str_contains($viewText, 'Pobierz etykietę') || str_contains($viewText, 'downloadLabel');
+        $risk['view_contains_storage_exists_call'] = str_contains($viewText, 'Storage::') || str_contains($pageText, 'Storage::disk') || str_contains($pageText, '->exists(');
+        $risk['view_contains_route_download_label'] = str_contains($viewText, "route('tools.download-shipment-label'") || str_contains($viewText, 'route("tools.download-shipment-label"');
+        foreach (explode("\n", $combined) as $lineNo => $line) {
+            if (str_contains($line, 'label_path') || str_contains($line, 'labelExists') || str_contains($line, 'downloadLabel')) {
+                $risk['columns_or_fields_using_label_path'][] = ['line' => $lineNo + 1, 'text' => trim($line)];
+            }
+        }
+        if ($risk['view_contains_storage_exists_call']) {
+            $risk['suspected_crash_points'][] = 'Storage::exists/download can throw if label_path is null, empty, non-scalar, contains NUL, or points outside the expected disk.';
+        }
+        if ($risk['view_contains_route_download_label']) {
+            $risk['suspected_crash_points'][] = 'Download route must only be rendered when a non-empty label_path has an existing file.';
+        }
+        $risk['safe_recommendations'] = [
+            'Cast carrier, shipment_status, tracking_number, carrier_shipment_id and label_path through a null-safe scalar formatter before rendering.',
+            'Call Storage::exists only after label_path is a non-empty safe string.',
+            'Render Brak pliku etykiety when label_path is non-empty but the file is missing, and render — when label_path is empty.',
+        ];
+    }
+
+    private function blankScalar(mixed $value): bool
+    {
+        return ! is_scalar($value) || trim((string) $value) === '';
     }
 
     private function probeLabels(array &$payload, int $orderId): void

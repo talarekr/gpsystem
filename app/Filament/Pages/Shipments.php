@@ -165,7 +165,15 @@ class Shipments extends Page
     {
         $path = $this->safeString($shipment->label_path);
 
-        return $path !== null && Storage::disk('local')->exists($path);
+        if ($path === null || str_contains($path, "\0") || preg_match('/^[a-z]+:\/\//i', $path) === 1) {
+            return false;
+        }
+
+        try {
+            return Storage::disk('local')->exists($path);
+        } catch (\Throwable) {
+            return false;
+        }
     }
 
     protected function normalizedPerPage(): int

@@ -8,7 +8,9 @@ use App\Models\Order;
 use App\Models\Shipment;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Str;
@@ -29,6 +31,8 @@ class OrderViewDiagnoseController extends Controller
         $payload = $this->emptyPayload($orderId);
 
         try {
+            $this->guard($payload['order_153_db_probe']['items_probe_errors'], 'order_db_probe', fn () => $this->orderDbProbe($orderId, $payload));
+
             $order = null;
         $this->guard($payload['relations_probe']['errors'], 'order_load', function () use (&$order, &$payload, $orderId): void {
             $order = Order::query()->find($orderId);
@@ -93,6 +97,7 @@ class OrderViewDiagnoseController extends Controller
         return [
             'code_marker' => self::CODE_MARKER,
             'order' => ['id' => $orderId, 'exists' => false, 'source' => null, 'number' => null, 'status' => null, 'payment_status' => null, 'shipping_status' => null, 'created_at' => null],
+            'order_153_db_probe' => ['order_exists' => false, 'order_scalar' => [], 'raw_payload_present' => null, 'raw_payload_type' => null, 'meta_present' => null, 'meta_type' => null, 'items_count' => null, 'items_probe_errors' => [], 'possible_view_crash_points' => []],
             'relations_probe' => ['customer_loads' => null, 'shipping_address_loads' => null, 'items_load' => null, 'shipments_load' => null, 'labels_load' => null, 'marketplace_logs_load' => null, 'errors' => []],
             'shipment_state' => ['local_shipments_count' => null, 'local_shipment_ids' => [], 'local_tracking_numbers' => [], 'local_label_paths' => [], 'local_label_files_exist' => [], 'has_partial_shipment_without_label' => null, 'has_label_record_without_file' => null, 'has_empty_or_invalid_label_path' => null, 'has_empty_or_invalid_tracking_number' => null],
             'dhl_state' => ['last_create_shipment_log_id' => null, 'last_create_shipment_status' => null, 'remote_created_detected' => null, 'remote_tracking_number' => null, 'remote_package_tracking_number' => null, 'last_fetch_existing_label_log_id' => null, 'last_fetch_existing_label_status' => null, 'last_fetch_existing_label_error' => null],
@@ -102,6 +107,92 @@ class OrderViewDiagnoseController extends Controller
             'errors' => [],
             'safe_recommendation' => null,
         ];
+    }
+
+
+    private function orderDbProbe(int $orderId, array &$payload): void
+    {
+        $probe = &$payload['order_153_db_probe'];
+        if (! Schema::hasTable('orders')) {
+            $probe['possible_view_crash_points'][] = 'orders table is missing';
+            return;
+        }
+
+        $orderColumns = Schema::getColumnListing('orders');
+        $select = array_values(array_intersect([
+            'id', 'order_number', 'marketplace', 'marketplace_order_id', 'status', 'payment_status', 'customer_name', 'company_name', 'email', 'phone', 'address_line1', 'postal_code', 'city', 'country', 'delivery_method', 'shipping_method', 'raw_payload', 'meta', 'created_at', 'updated_at'
+        ], $orderColumns));
+        $row = DB::table('orders')->select($select ?: ['id'])->where('id', $orderId)->first();
+        $probe['order_exists'] = $row !== null;
+        if (! $row) {
+            $probe['possible_view_crash_points'][] = 'Order not found by DB query.';
+            return;
+        }
+
+        $data = (array) $row;
+        foreach ($data as $key => $value) {
+            if (in_array($key, ['raw_payload', 'meta'], true)) {
+                continue;
+            }
+            $probe['order_scalar'][$key] = $this->diagnosticValue($value);
+            if ($value !== null && ! is_scalar($value)) {
+                $probe['possible_view_crash_points'][] = $key.' is not scalar.';
+            }
+        }
+
+        foreach (['raw_payload', 'meta'] as $field) {
+            $value = $data[$field] ?? null;
+            $probe[$field.'_present'] = $value !== null && $value !== '';
+            $probe[$field.'_type'] = get_debug_type($value);
+            if (is_string($value) && $value !== '') {
+                json_decode($value, true);
+                if (json_last_error() !== JSON_ERROR_NONE) {
+                    $probe['possible_view_crash_points'][] = $field.' contains invalid JSON: '.json_last_error_msg();
+                }
+                if (function_exists('mb_check_encoding') && ! mb_check_encoding($value, 'UTF-8')) {
+                    $probe['possible_view_crash_points'][] = $field.' contains invalid UTF-8.';
+                }
+            } elseif ($value !== null && ! is_scalar($value) && ! is_array($value)) {
+                $probe['possible_view_crash_points'][] = $field.' has unsupported type '.get_debug_type($value).'.';
+            }
+        }
+
+        if (Schema::hasTable('order_items')) {
+            $itemColumns = Schema::getColumnListing('order_items');
+            $probe['items_count'] = in_array('order_id', $itemColumns, true) ? DB::table('order_items')->where('order_id', $orderId)->count() : null;
+            $itemSelect = array_values(array_intersect(['id', 'order_id', 'name', 'sku', 'quantity', 'unit_price', 'total_price', 'raw_payload', 'meta', 'created_at'], $itemColumns));
+            if (in_array('order_id', $itemColumns, true)) {
+                $items = DB::table('order_items')->select($itemSelect ?: ['id'])->where('order_id', $orderId)->orderByDesc(in_array('id', $itemColumns, true) ? 'id' : 'order_id')->limit(20)->get();
+                foreach ($items as $item) {
+                    foreach ((array) $item as $field => $value) {
+                        if ($value === null && in_array($field, ['name', 'quantity'], true)) {
+                            $probe['possible_view_crash_points'][] = 'order_items.'.$field.' is null for item '.(((array) $item)['id'] ?? '?').'.';
+                        }
+                        if (in_array($field, ['raw_payload', 'meta'], true) && is_string($value) && $value !== '') {
+                            json_decode($value, true);
+                            if (json_last_error() !== JSON_ERROR_NONE) {
+                                $probe['items_probe_errors'][] = ['item_id' => ((array) $item)['id'] ?? null, 'field' => $field, 'error' => json_last_error_msg()];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private function diagnosticValue(mixed $value): mixed
+    {
+        if ($value === null || is_bool($value) || is_int($value) || is_float($value)) {
+            return $value;
+        }
+        if (is_string($value)) {
+            if (function_exists('mb_check_encoding') && function_exists('mb_convert_encoding')) {
+                return mb_check_encoding($value, 'UTF-8') ? $value : mb_convert_encoding($value, 'UTF-8', 'UTF-8');
+            }
+
+            return iconv('UTF-8', 'UTF-8//IGNORE', $value) ?: '';
+        }
+        return json_encode($value, JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR);
     }
 
     private function probeRelations(Order $order, array &$payload): void
