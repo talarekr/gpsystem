@@ -11,6 +11,6 @@ class OvokoCarDictionariesDiagnoseController extends Controller
 {
     public function __invoke(Request $request, OvokoCarDictionaryService $service): JsonResponse
     {
-        return response()->json($service->diagnostics());
+        return response()->json($service->diagnostics($request->string('brand_search')->toString()));
     }
 }
