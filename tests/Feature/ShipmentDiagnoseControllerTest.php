@@ -117,4 +117,22 @@ class ShipmentDiagnoseControllerTest extends TestCase
             ->assertJsonStructure(['app' => ['environment', 'php_version', 'laravel_version']])
             ->assertJsonStructure(['table_discovery' => ['tables' => ['shipments' => ['exists', 'columns', 'relevant_columns_present', 'error']]]]);
     }
+
+    public function test_safe_diagnostics_reuses_direct_table_discovery_builder(): void
+    {
+        $direct = $this->withoutMiddleware()->getJson('/admin/tools/shipments/diagnose?order_id=153&json=1&section=table_discovery');
+        $safe = $this->withoutMiddleware()->getJson('/admin/tools/shipments/diagnose?order_id=153&json=1&safe=1');
+
+        $direct->assertOk()
+            ->assertJsonPath('section_result.tables.shipments.exists', true);
+
+        $safe->assertOk()
+            ->assertJsonPath('table_discovery.tables.shipments.exists', true)
+            ->assertJsonPath('safe_flow_debug.used_direct_table_discovery_builder', true);
+
+        $this->assertSame(
+            $direct->json('section_result.tables.shipments.exists'),
+            $safe->json('table_discovery.tables.shipments.exists')
+        );
+    }
 }

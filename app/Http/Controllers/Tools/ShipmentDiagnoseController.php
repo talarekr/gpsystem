@@ -168,6 +168,10 @@ class ShipmentDiagnoseController extends Controller
             ]);
         }
 
+        $payload['app'] = $this->buildAppInfo();
+        $payload['table_discovery'] = $this->buildTableDiscovery($payload['errors']);
+        $payload['safe_flow_debug'] = $this->buildSafeFlowDebug($payload['table_discovery']);
+
         foreach ($sections as $section) {
             $this->runSection($payload, $section, $request, $orderId);
         }
@@ -395,7 +399,7 @@ class ShipmentDiagnoseController extends Controller
         return [
             'used_direct_app_builder' => true,
             'used_direct_table_discovery_builder' => true,
-            'table_discovery_tables_count' => count($tableDiscovery['candidate_tables_checked'] ?? []),
+            'table_discovery_tables_count' => count($tableDiscovery['tables'] ?? []),
             'existing_tables' => array_values(array_keys(array_filter($tableDiscovery['tables'] ?? [], fn (array $table): bool => ($table['exists'] ?? false) === true))),
         ];
     }
