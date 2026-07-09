@@ -40,6 +40,7 @@ use App\Http\Controllers\Tools\PayuDiagnosticsController;
 use App\Http\Controllers\Tools\DebugOrderItemThumbnailController;
 use App\Http\Controllers\Tools\DhlConfigDiagnoseController;
 use App\Http\Controllers\Tools\OrderViewDiagnoseController;
+use App\Http\Controllers\Tools\ShipmentDiagnoseController;
 use App\Http\Controllers\Tools\DhlRecoverCreatedShipmentController;
 use App\Http\Controllers\Tools\DeployDiagnoseController;
 use App\Http\Controllers\Tools\WorkshopQuickPartController;
@@ -289,6 +290,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/deploy-diagnose', DeployDiagnoseController::class)->name('admin.tools.deploy-diagnose');
     Route::get('/admin/tools/orders/dhl-diagnose', DhlConfigDiagnoseController::class)->name('admin.tools.orders.dhl-diagnose');
     Route::get('/admin/tools/orders/view-diagnose', OrderViewDiagnoseController::class)->name('admin.tools.orders.view-diagnose');
+    Route::get('/admin/tools/shipments/diagnose', ShipmentDiagnoseController::class)->name('admin.tools.shipments.diagnose');
     Route::get('/admin/tools/jarek-gearboxes/ping', [JarekGearboxToolController::class, 'ping'])->name('admin.tools.jarek-gearboxes.ping');
     Route::get('/admin/tools/jarek-gearboxes/allegro-import-runner', [JarekGearboxToolController::class, 'runner'])->name('admin.tools.jarek-gearboxes.allegro-import-runner');
     Route::get('/admin/tools/jarek-gearboxes/runner', [JarekGearboxToolController::class, 'jarekRunner'])->name('admin.tools.jarek-gearboxes.runner');

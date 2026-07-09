@@ -94,9 +94,10 @@ class Shipments extends Page
     public function downloadLabel(int $shipmentId)
     {
         $shipment = Shipment::query()->findOrFail($shipmentId);
-        abort_unless($shipment->label_path && Storage::disk('local')->exists($shipment->label_path), 404);
+        $path = $this->safeString($shipment->label_path);
+        abort_unless($path !== null && Storage::disk('local')->exists($path), 404, 'Label not found.');
 
-        return Storage::disk('local')->download($shipment->label_path, 'dhl-'.$shipment->tracking_number.'.pdf');
+        return Storage::disk('local')->download($path, 'dhl-'.($this->safeString($shipment->tracking_number) ?: $shipment->id).'.pdf');
     }
 
     public function generateLabel(string $carrier, ?int $shipmentId = null, bool $confirm = false): void
@@ -147,6 +148,24 @@ class Shipments extends Page
     public function getPerPageOptionsProperty(): array
     {
         return ['25' => '25', '50' => '50', '100' => '100'];
+    }
+
+    public function safeString(mixed $value): ?string
+    {
+        if (! is_scalar($value)) {
+            return null;
+        }
+
+        $value = trim((string) $value);
+
+        return $value !== '' ? $value : null;
+    }
+
+    public function labelExists(Shipment $shipment): bool
+    {
+        $path = $this->safeString($shipment->label_path);
+
+        return $path !== null && Storage::disk('local')->exists($path);
     }
 
     protected function normalizedPerPage(): int

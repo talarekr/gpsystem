@@ -4,6 +4,7 @@
     use App\Models\Shipment;
     use App\Services\Admin\OrderStatusOptions;
     use Illuminate\Support\Str;
+    use Illuminate\Support\Facades\Storage;
 
     $order = $record;
     $order->loadMissing(['items.part.images', 'items.part.storageLocation', 'items.marketplaceListing.part.images', 'items.marketplaceListing.part.storageLocation', 'shipments']);
@@ -46,6 +47,7 @@
         $shipmentCarrierShipmentId = $shipment && is_scalar($shipment->carrier_shipment_id) ? trim((string) $shipment->carrier_shipment_id) : '';
         $shipmentLabelPath = $shipment && is_scalar($shipment->label_path) ? trim((string) $shipment->label_path) : '';
         $shipmentStatus = $shipment && is_scalar($shipment->shipment_status) ? trim((string) $shipment->shipment_status) : '';
+        $shipmentLabelExists = $shipmentLabelPath !== '' && Storage::disk('local')->exists($shipmentLabelPath);
         $shipmentCanShowActions = $shipmentSectionError === null && (! $shipment || (($shipment->carrier === null || is_scalar($shipment->carrier)) && ($shipment->tracking_number === null || is_scalar($shipment->tracking_number)) && ($shipment->carrier_shipment_id === null || is_scalar($shipment->carrier_shipment_id)) && ($shipment->label_path === null || is_scalar($shipment->label_path)) && ($shipment->shipment_status === null || is_scalar($shipment->shipment_status))));
     } catch (\Throwable $exception) {
         report($exception);
@@ -54,6 +56,7 @@
         $shipmentCarrierShipmentId = '';
         $shipmentLabelPath = '';
         $shipmentStatus = '';
+        $shipmentLabelExists = false;
         $shipmentCanShowActions = false;
         $shipmentSectionError = $shipmentSectionError ?: $exception;
     }
@@ -422,7 +425,7 @@
                 @if ($isFulfillmentMarketplaceOrder)
                     @if ($shipmentSectionError || ! $shipmentCanShowActions)
                         <div class="gps-order-detail-value">
-                            <div>Nie udało się załadować sekcji przesyłki DHL dla tego zamówienia.</div>
+                            <div>Nie udało się załadować sekcji przesyłki DHL. Nie twórz nowej przesyłki.</div>
                             <div>Nie twórz nowej przesyłki. Sprawdź diagnostykę DHL/order.</div>
                         </div>
                     @elseif (! $shipment)
@@ -443,7 +446,7 @@
                                     <div>Marketplace: {{ $marketplaceFulfillmentStatus === 'synced' ? 'tracking wysłany' : ($marketplaceFulfillmentStatus === 'error' ? 'błąd' : 'tracking nie wysłany') }}</div>
                                 </div>
                                 <div class="gps-order-shipment-actions">
-                                    @if ($shipmentLabelPath !== '')<a class="fi-btn fi-color-primary fi-btn-color-primary fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-primary-500 focus-visible:ring-2 focus-visible:ring-primary-600 dark:bg-primary-500 dark:hover:bg-primary-400 dark:focus-visible:ring-primary-500" href="{{ route('tools.download-shipment-label', $shipment) }}">Pobierz etykietę PDF</a>@endif
+                                    @if ($shipmentLabelExists)<a class="fi-btn fi-color-primary fi-btn-color-primary fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-primary-500 focus-visible:ring-2 focus-visible:ring-primary-600 dark:bg-primary-500 dark:hover:bg-primary-400 dark:focus-visible:ring-primary-500" href="{{ route('tools.download-shipment-label', $shipment) }}">Pobierz etykietę PDF</a>@elseif ($shipmentLabelPath !== '')<span class="gps-order-detail-muted">Brak pliku etykiety</span>@endif
                                     <a class="fi-btn fi-color-gray fi-btn-color-gray fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-gray-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-gray-500 focus-visible:ring-2 focus-visible:ring-gray-600 dark:bg-gray-500 dark:hover:bg-gray-400 dark:focus-visible:ring-gray-500" href="{{ \App\Filament\Pages\ShipmentDetails::getUrl(['shipment' => $shipment->id]) }}">Szczegóły</a>
                                 </div>
                             </div>

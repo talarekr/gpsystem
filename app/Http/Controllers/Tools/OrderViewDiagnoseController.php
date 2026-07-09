@@ -10,19 +10,26 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Foundation\Application;
 use Illuminate\Support\Str;
 use Throwable;
 
 class OrderViewDiagnoseController extends Controller
 {
-    private const CODE_MARKER = 'order_153_view_crash_diagnostics_v1';
+    private const CODE_MARKER = 'shipment_module_crash_diagnostics_safe_v1';
 
     public function __invoke(Request $request): JsonResponse
     {
         $orderId = (int) $request->integer('order_id');
+
+        if ($request->boolean('minimal')) {
+            return response()->json($this->minimalPayload($orderId));
+        }
+
         $payload = $this->emptyPayload($orderId);
 
-        $order = null;
+        try {
+            $order = null;
         $this->guard($payload['relations_probe']['errors'], 'order_load', function () use (&$order, &$payload, $orderId): void {
             $order = Order::query()->find($orderId);
             $payload['order']['exists'] = $order !== null;
@@ -46,10 +53,39 @@ class OrderViewDiagnoseController extends Controller
             $this->viewRiskChecks($order, $payload);
         }
 
-        $payload['last_exception_for_order_view'] = $this->lastOrderViewException($orderId);
-        $payload['safe_recommendation'] = $this->recommendation($payload);
+            $payload['last_exception_for_order_view'] = $this->lastOrderViewException($orderId);
+            $payload['safe_recommendation'] = $this->recommendation($payload);
+            $payload['diagnostics_health']['status'] = empty($payload['relations_probe']['errors']) && empty($payload['view_risk_checks']['errors']) ? 'ok' : 'partial';
+            $payload['diagnostics_health']['sections_completed'][] = 'full';
+        } catch (Throwable $e) {
+            $payload['diagnostics_health']['ok'] = false;
+            $payload['diagnostics_health']['status'] = 'failed';
+            $payload['diagnostics_health']['sections_failed'][] = ['stage' => 'top_level', 'class' => $e::class, 'message' => $e->getMessage(), 'file' => $e->getFile(), 'line' => $e->getLine()];
+            $payload['errors'][] = ['stage' => 'top_level', 'class' => $e::class, 'message' => $e->getMessage(), 'file' => $e->getFile(), 'line' => $e->getLine()];
+        }
 
         return response()->json($payload);
+    }
+
+    private function minimalPayload(int $orderId): array
+    {
+        return [
+            'code_marker' => self::CODE_MARKER,
+            'minimal' => true,
+            'order_id' => $orderId,
+            'app' => [
+                'environment' => app()->environment(),
+                'php_version' => PHP_VERSION,
+                'laravel_version' => Application::VERSION,
+            ],
+            'diagnostics_health' => [
+                'ok' => true,
+                'status' => 'ok',
+                'sections_completed' => ['minimal'],
+                'sections_failed' => [],
+            ],
+            'errors' => [],
+        ];
     }
 
     private function emptyPayload(int $orderId): array
@@ -62,6 +98,8 @@ class OrderViewDiagnoseController extends Controller
             'dhl_state' => ['last_create_shipment_log_id' => null, 'last_create_shipment_status' => null, 'remote_created_detected' => null, 'remote_tracking_number' => null, 'remote_package_tracking_number' => null, 'last_fetch_existing_label_log_id' => null, 'last_fetch_existing_label_status' => null, 'last_fetch_existing_label_error' => null],
             'view_risk_checks' => ['tracking_url_can_be_built' => null, 'shipment_component_can_compute_state' => null, 'download_label_url_can_be_built' => null, 'dhl_ui_state_can_be_built' => null, 'order_items_component_can_render_data' => null, 'customer_component_can_render_data' => null, 'errors' => []],
             'last_exception_for_order_view' => ['found' => false, 'class' => null, 'message' => null, 'file' => null, 'line' => null],
+            'diagnostics_health' => ['ok' => true, 'status' => 'running', 'sections_completed' => [], 'sections_failed' => []],
+            'errors' => [],
             'safe_recommendation' => null,
         ];
     }
