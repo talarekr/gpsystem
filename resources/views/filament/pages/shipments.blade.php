@@ -1,4 +1,5 @@
 @php
+    use App\Filament\Resources\OrderResource;
     use App\Models\Shipment;
 
     $shipments = $this->shipments;
@@ -21,34 +22,34 @@
     </div>
 
     <div class="space-y-3">
-        <div class="gps-shipments-grid gps-header"><div>ID</div><div>Zamówienie</div><div>Kurier</div><div>Status</div><div>Tracking</div><div>Etykieta</div><div>Akcje</div></div>
+        <div class="gps-shipments-grid gps-header"><div>ID</div><div>Zamówienie</div><div>Kurier</div><div>Numer przesyłki</div><div>Etykieta</div><div>Akcje</div></div>
         @forelse ($shipments as $shipment)
             @php
                 $carrier = $this->safeString($shipment->carrier);
-                $status = $this->safeString($shipment->shipment_status);
                 $tracking = $this->safeString($shipment->tracking_number) ?: $this->safeString($shipment->carrier_shipment_id);
-                $labelPath = $this->safeString($shipment->label_path);
+                $trackingUrl = $this->trackingUrl($shipment);
+                $order = $shipment->order;
+                $orderNumber = $order ? OrderResource::displayOrderNumber($order) : '—';
+                $marketplace = $this->marketplaceLabel($order?->marketplace);
                 $labelExists = $this->labelExists($shipment);
-                $isDhlShipment = strtolower($carrier ?? '') === 'dhl';
             @endphp
             <div class="gps-card gps-shipments-grid" wire:key="shipment-{{ $shipment->id }}">
                 <div class="gps-cell gps-cell-text">#{{ $shipment->id }}</div>
                 <div class="gps-cell">
-                    <div class="gps-cell-text gps-cell-strong">{{ $this->safeString($shipment->order?->order_number) ?: '—' }}</div>
+                    <div class="gps-cell-text gps-shipment-order-line">
+                        <span class="gps-shipment-order-number">{{ $orderNumber }}</span>
+                        @if($marketplace)
+                            <span class="gps-muted">·</span>
+                            @include('filament.resources.orders.partials.source-wordmark', ['marketplace' => $marketplace])
+                        @endif
+                    </div>
                     <div class="gps-muted">{{ $this->safeString($shipment->order?->customer_name) ?: 'Brak klienta' }}</div>
                 </div>
-                <div class="gps-cell"><span class="gps-badge">{{ $carrier ? strtoupper($carrier) : '—' }}</span></div>
-                <div class="gps-cell"><span class="gps-badge">{{ $status ?: '—' }}</span></div>
-                <div class="gps-cell gps-cell-text">{{ $tracking ?: '—' }}</div>
-                <div class="gps-cell">@if($labelExists)<a class="gps-action" href="{{ route('tools.download-shipment-label', ['shipment' => $shipment->id]) }}">Pobierz etykietę</a>@elseif($labelPath)<span class="gps-muted">Brak pliku etykiety</span>@else <span class="gps-muted">Brak etykiety</span> @endif</div>
+                <div class="gps-cell gps-cell-text gps-shipment-carrier">{{ in_array(strtolower($carrier ?? ''), ['dhl', 'dpd'], true) ? strtoupper($carrier) : '—' }}</div>
+                <div class="gps-cell gps-cell-text">@if($tracking && $trackingUrl)<a class="gps-link" href="{{ $trackingUrl }}" target="_blank" rel="noopener">{{ $tracking }}</a>@else{{ $tracking ?: '—' }}@endif</div>
+                <div class="gps-cell">@if($labelExists)<a class="gps-link" href="{{ route('tools.download-shipment-label', ['shipment' => $shipment->id]) }}">Pobierz etykietę</a>@else<span class="gps-muted">Brak pliku etykiety</span>@endif</div>
                 <div class="gps-cell gps-actions">
                     <a href="{{ \App\Filament\Pages\ShipmentDetails::getUrl(['shipment' => $shipment->id]) }}" class="gps-action">Szczegóły</a>
-                    @if($labelExists)<button type="button" wire:click="downloadLabel({{ $shipment->id }})" class="gps-action">Pobierz etykietę PDF</button>@endif
-                    @if(! $isDhlShipment)
-                        <button type="button" wire:click="generateLabel('dpd', {{ $shipment->id }}, false)" class="gps-action">Podgląd DPD</button>
-                        <button type="button" wire:click="generateLabel('dpd', {{ $shipment->id }}, true)" wire:confirm="confirm=1: wygenerować etykietę DPD bez pickup/mail/marketplace?" class="gps-action">Generuj DPD</button>
-                    @endif
-                    @if(! $tracking)<button type="button" wire:click="openDhlForm(null, {{ $shipment->id }})" class="gps-action">Utwórz DHL</button>@endif
                 </div>
             </div>
         @empty
