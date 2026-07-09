@@ -44,6 +44,7 @@ return [
         'test_mode' => env('DHL_TEST_MODE', env('DHL24_MODE', 'test') !== 'production'),
         'label_type' => env('DHL_LABEL_TYPE', env('DHL24_LABEL_TYPE', 'LBLP')),
         'drop_off_type' => env('DHL_DROP_OFF_TYPE', env('DHL24_DEFAULT_DROP_OFF_TYPE', 'REGULAR_PICKUP')),
+        'tracking_url_template' => env('DHL_TRACKING_URL_TEMPLATE', 'https://www.dhl.com/pl-pl/home/tracking/tracking-parcel.html?submit=1&tracking-id={tracking}'),
     ],
 
     'dpd' => [
