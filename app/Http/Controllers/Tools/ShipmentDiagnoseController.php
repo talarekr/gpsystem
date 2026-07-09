@@ -77,16 +77,16 @@ class ShipmentDiagnoseController extends Controller
         }
 
         if ($request->query('section') === 'table_discovery') {
-            $payload = $this->emptyPayload($orderId, $request);
-            $this->probeTables($payload);
-            $status = $payload['errors'] === [] ? 'ok' : 'partial';
+            $errors = [];
+            $tableDiscovery = $this->buildTableDiscovery($errors);
+            $status = $errors === [] ? 'ok' : 'partial';
 
             return $this->safeJsonResponse([
                 'code_marker' => self::CODE_MARKER,
                 'section_only' => 'table_discovery',
                 'status' => $status,
-                'section_result' => $payload['table_discovery'],
-                'errors' => $payload['errors'],
+                'section_result' => $tableDiscovery,
+                'errors' => $errors,
                 'diagnostics_health' => [
                     'ok' => $status === 'ok',
                     'status' => $status,
@@ -101,11 +101,7 @@ class ShipmentDiagnoseController extends Controller
                 'code_marker' => self::CODE_MARKER,
                 'section_only' => 'app',
                 'status' => 'ok',
-                'section_result' => [
-                    'environment' => $this->safeAppEnvironment(),
-                    'php_version' => PHP_VERSION,
-                    'laravel_version' => $this->safeLaravelVersion(),
-                ],
+                'section_result' => $this->buildAppInfo(),
                 'errors' => [],
                 'diagnostics_health' => [
                     'ok' => true,
@@ -227,11 +223,7 @@ class ShipmentDiagnoseController extends Controller
             'code_marker' => self::CODE_MARKER,
             'minimal' => true,
             'order_id' => $orderId,
-            'app' => [
-                'environment' => app()->environment(),
-                'php_version' => PHP_VERSION,
-                'laravel_version' => app()->version(),
-            ],
+            'app' => $this->buildAppInfo(),
             'diagnostics_health' => [
                 'ok' => true,
                 'status' => 'ok',
@@ -251,11 +243,12 @@ class ShipmentDiagnoseController extends Controller
             'status' => 'unknown',
             'order_id' => $orderId,
             'input' => ['order_id' => $orderId, 'safe' => $request ? $this->booleanQuery($request, 'safe') : false, 'section' => $request?->query('section'), 'until' => $request?->query('until')],
-            'app' => ['environment' => null, 'php_version' => null, 'laravel_version' => null],
+            'app' => $this->buildAppInfo(),
             'known_tracking_context' => $this->knownTrackingContext($orderId),
             'table_discovery' => ['candidate_tables_checked' => $this->candidateTables(), 'tables' => [], 'columns' => []],
-            'shipments_probe' => ['records_for_order' => [], 'records_for_tracking' => [], 'recent_records' => [], 'partial_or_suspicious_records' => [], 'warnings' => []],
-            'labels_probe' => ['records_for_order_or_shipment' => [], 'empty_paths' => [], 'warnings' => []],
+            'safe_flow_debug' => ['used_direct_app_builder' => true, 'used_direct_table_discovery_builder' => false, 'table_discovery_tables_count' => 0, 'existing_tables' => []],
+            'shipments_probe' => ['records_for_order' => [], 'records_for_tracking' => [], 'records_for_carrier_shipment_id' => [], 'records_for_package_tracking' => [], 'recent_records' => [], 'partial_or_suspicious_records' => [], 'warnings' => []],
+            'labels_probe' => ['records_for_order_or_shipment' => [], 'empty_paths' => [], 'non_empty_paths' => [], 'file_checks' => [], 'warnings' => []],
             'last_exceptions_probe' => ['admin_shipments' => null, 'admin_order' => null, 'shipment_diagnose' => null, 'view_diagnose' => null, 'integration_logs' => []],
             'diagnostics_health' => ['ok' => false, 'status' => 'unknown', 'sections_completed' => [], 'sections_failed' => []],
             'errors' => [],
@@ -355,13 +348,19 @@ class ShipmentDiagnoseController extends Controller
         ];
     }
 
-    private function probeApp(array &$payload): void
+    private function buildAppInfo(): array
     {
-        $payload['app'] = [
+        return [
             'environment' => $this->safeAppEnvironment(),
             'php_version' => PHP_VERSION,
             'laravel_version' => $this->safeLaravelVersion(),
         ];
+    }
+
+    private function probeApp(array &$payload): void
+    {
+        $payload['app'] = $this->buildAppInfo();
+        $payload['safe_flow_debug']['used_direct_app_builder'] = true;
     }
 
     private function probeCandidateTables(array &$payload): void
@@ -374,14 +373,31 @@ class ShipmentDiagnoseController extends Controller
         ];
     }
 
-    private function probeTables(array &$payload): void
+    private function buildTableDiscovery(array &$errors = []): array
     {
-        $candidates = $this->candidateTables();
-        $payload['table_discovery']['candidate_tables_checked'] = $candidates;
+        $payload = ['table_discovery' => ['candidate_tables_checked' => $this->candidateTables(), 'tables' => [], 'columns' => []], 'errors' => &$errors];
 
-        foreach ($candidates as $table) {
+        foreach ($this->candidateTables() as $table) {
             $this->discoverTable($payload, $table);
         }
+
+        return $payload['table_discovery'];
+    }
+
+    private function probeTables(array &$payload): void
+    {
+        $payload['table_discovery'] = $this->buildTableDiscovery($payload['errors']);
+        $payload['safe_flow_debug'] = $this->buildSafeFlowDebug($payload['table_discovery']);
+    }
+
+    private function buildSafeFlowDebug(array $tableDiscovery): array
+    {
+        return [
+            'used_direct_app_builder' => true,
+            'used_direct_table_discovery_builder' => true,
+            'table_discovery_tables_count' => count($tableDiscovery['candidate_tables_checked'] ?? []),
+            'existing_tables' => array_values(array_keys(array_filter($tableDiscovery['tables'] ?? [], fn (array $table): bool => ($table['exists'] ?? false) === true))),
+        ];
     }
 
     private function probeShipments(array &$payload, int $orderId): void
@@ -393,7 +409,8 @@ class ShipmentDiagnoseController extends Controller
             return;
         }
 
-        $trackingColumns = ['tracking_number', 'tracking', 'shipment_tracking_number', 'external_id', 'external_tracking_number', 'carrier_shipment_id'];
+        $trackingColumns = ['tracking_number', 'tracking', 'shipment_tracking_number', 'external_id', 'external_tracking_number'];
+        $payloadColumns = ['payload', 'metadata', 'meta', 'raw_payload', 'request_payload', 'response_payload'];
 
         foreach ($shipmentTables as $table) {
             $columns = $this->columns($payload, $table);
@@ -408,9 +425,20 @@ class ShipmentDiagnoseController extends Controller
             if ($presentTrackingColumns !== []) {
                 $payload['shipments_probe']['records_for_tracking'][$table] = $this->rows((clone $base)->where(function ($query) use ($presentTrackingColumns): void {
                     foreach ($presentTrackingColumns as $column) {
-                        foreach ([self::TRACKING, self::PACKAGE_TRACKING] as $tracking) {
-                            $query->orWhere($column, $tracking);
-                        }
+                        $query->orWhere($column, self::TRACKING);
+                    }
+                }), $columns);
+            }
+
+            if (in_array('carrier_shipment_id', $columns, true)) {
+                $payload['shipments_probe']['records_for_carrier_shipment_id'][$table] = $this->rows((clone $base)->where('carrier_shipment_id', self::TRACKING), $columns);
+            }
+
+            $packageSearchColumns = array_values(array_intersect(array_merge($trackingColumns, ['carrier_shipment_id'], $payloadColumns), $columns));
+            if ($packageSearchColumns !== []) {
+                $payload['shipments_probe']['records_for_package_tracking'][$table] = $this->rows((clone $base)->where(function ($query) use ($packageSearchColumns): void {
+                    foreach ($packageSearchColumns as $column) {
+                        $query->orWhere($column, 'like', '%'.self::PACKAGE_TRACKING.'%');
                     }
                 }), $columns);
             }
@@ -422,6 +450,8 @@ class ShipmentDiagnoseController extends Controller
 
         $payload['shipments_probe']['partial_or_suspicious_records'] = collect($payload['shipments_probe']['records_for_order'])->flatten(1)
             ->merge(collect($payload['shipments_probe']['records_for_tracking'])->flatten(1))
+            ->merge(collect($payload['shipments_probe']['records_for_carrier_shipment_id'])->flatten(1))
+            ->merge(collect($payload['shipments_probe']['records_for_package_tracking'])->flatten(1))
             ->merge(collect($payload['shipments_probe']['recent_records'])->flatten(1))
             ->filter(fn (array $record): bool => blank($record['tracking_number'] ?? $record['tracking'] ?? null) || blank($record['label_path'] ?? $record['label_file_path'] ?? $record['path'] ?? null) || $this->looksJsonContainer($record['carrier'] ?? null) || $this->looksJsonContainer($record['shipment_status'] ?? $record['status'] ?? null) || $this->looksJsonContainer($record['service_code'] ?? $record['service'] ?? null))
             ->values()
@@ -437,7 +467,7 @@ class ShipmentDiagnoseController extends Controller
         }
 
         $shipmentIds = collect($payload['shipments_probe']['records_for_order'])->flatten(1)->pluck('id')->filter()->unique()->values()->all();
-        $labelTables = array_values(array_filter(['shipment_labels', 'shipping_labels', 'labels'], fn (string $table): bool => $this->tableExists($payload, $table)));
+        $labelTables = array_values(array_filter(['shipments', 'shipment_labels', 'shipping_labels', 'labels'], fn (string $table): bool => $this->tableExists($payload, $table)));
         $pathColumns = ['label_path', 'label_file_path', 'path', 'file_path'];
 
         foreach ($labelTables as $table) {
@@ -470,7 +500,9 @@ class ShipmentDiagnoseController extends Controller
 
                 foreach (($payload['labels_probe']['records_for_order_or_shipment'][$table] ?? []) as $row) {
                     if (! blank($row[$pathColumn] ?? null)) {
-                        $payload['labels_probe']['file_checks'][] = ['table' => $table, 'id' => $row['id'] ?? null, 'column' => $pathColumn, 'path' => $row[$pathColumn], 'exists' => $this->safeFileExists((string) $row[$pathColumn])];
+                        $pathCheck = ['table' => $table, 'id' => $row['id'] ?? null, 'column' => $pathColumn, 'path' => $row[$pathColumn], 'exists' => $this->safeFileExists((string) $row[$pathColumn])];
+                        $payload['labels_probe']['non_empty_paths'][] = $pathCheck;
+                        $payload['labels_probe']['file_checks'][] = $pathCheck;
                     }
                 }
             }
@@ -516,7 +548,8 @@ class ShipmentDiagnoseController extends Controller
                 }
                 foreach (['tracking_number', 'tracking', 'external_id', 'external_tracking_number', 'payload', 'metadata', 'meta', 'raw_payload', 'request_payload', 'response_payload'] as $column) {
                     if (in_array($column, $columns, true)) {
-                        $where->orWhere($column, 'like', '%'.self::TRACKING.'%');
+                        $where->orWhere($column, 'like', '%'.self::TRACKING.'%')
+                            ->orWhere($column, 'like', '%'.self::PACKAGE_TRACKING.'%');
                         $hasCondition = true;
                     }
                 }
