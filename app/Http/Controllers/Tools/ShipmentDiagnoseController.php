@@ -96,6 +96,26 @@ class ShipmentDiagnoseController extends Controller
             ], 200);
         }
 
+        if ($request->query('section') === 'shipments_table_audit') {
+            $errors = [];
+            $result = $this->buildShipmentsTableAudit($this->buildTableDiscovery($errors));
+            $status = $errors === [] && ($result['errors'] ?? []) === [] ? 'ok' : 'partial';
+
+            return $this->safeJsonResponse([
+                'code_marker' => self::CODE_MARKER,
+                'section_only' => 'shipments_table_audit',
+                'status' => $status,
+                'section_result' => $result,
+                'errors' => $errors,
+                'diagnostics_health' => [
+                    'ok' => $status === 'ok',
+                    'status' => $status,
+                    'sections_completed' => ['shipments_table_audit'],
+                    'sections_failed' => [],
+                ],
+            ], 200);
+        }
+
         if ($request->query('section') === 'app') {
             return $this->safeJsonResponse([
                 'code_marker' => self::CODE_MARKER,
@@ -254,7 +274,7 @@ class ShipmentDiagnoseController extends Controller
             'table_discovery' => ['candidate_tables_checked' => $this->candidateTables(), 'tables' => [], 'columns' => []],
             'safe_flow_debug' => ['used_direct_app_builder' => true, 'used_direct_table_discovery_builder' => false, 'table_discovery_tables_count' => 0, 'existing_tables' => []],
             'shipments_probe' => ['records_for_order' => [], 'records_for_tracking' => [], 'records_for_carrier_shipment_id' => [], 'records_for_package_tracking' => [], 'recent_records' => [], 'partial_or_suspicious_records' => [], 'warnings' => []],
-            'shipments_table_audit' => ['total_count' => null, 'recent_records' => [], 'records_with_empty_tracking' => [], 'records_with_empty_label_path' => [], 'records_with_non_empty_missing_label_file' => [], 'records_with_invalid_scalar_fields' => [], 'records_with_suspicious_json_payloads' => [], 'records_that_may_break_filament' => [], 'warnings' => [], 'errors' => []],
+            'shipments_table_audit' => $this->emptyShipmentsTableAudit(),
             'shipments_filament_render_risk' => ['page_class_exists' => null, 'view_file_exists' => null, 'view_contains_label_download_link' => null, 'view_contains_storage_exists_call' => null, 'view_contains_route_download_label' => null, 'columns_or_fields_using_label_path' => [], 'suspected_crash_points' => [], 'safe_recommendations' => []],
             'labels_probe' => ['records_for_order_or_shipment' => [], 'empty_paths' => [], 'non_empty_paths' => [], 'file_checks' => [], 'warnings' => []],
             'last_exceptions_probe' => ['admin_shipments' => null, 'admin_order' => null, 'shipment_diagnose' => null, 'view_diagnose' => null, 'integration_logs' => []],
@@ -470,23 +490,73 @@ class ShipmentDiagnoseController extends Controller
     private function probeShipmentsTableAudit(array &$payload): void
     {
         $this->ensureDiscovery($payload);
-        if (! $this->tableExists($payload, 'shipments')) {
-            $payload['shipments_table_audit']['warnings'][] = 'Table shipments does not exist.';
-            return;
+        $payload['shipments_table_audit'] = $this->buildShipmentsTableAudit($payload['table_discovery']);
+    }
+
+    private function emptyShipmentsTableAudit(): array
+    {
+        return [
+            'total_count' => null,
+            'recent_records' => [],
+            'records_with_empty_tracking' => [],
+            'records_with_empty_label_path' => [],
+            'records_with_non_empty_missing_label_file' => [],
+            'records_with_invalid_scalar_fields' => [],
+            'records_with_suspicious_json_payloads' => [],
+            'records_that_may_break_filament' => [],
+            'warnings' => [],
+            'errors' => [],
+            'audit_debug' => [
+                'used_real_builder' => true,
+                'shipments_table_exists' => false,
+                'selected_columns' => [],
+                'count_query_attempted' => false,
+                'recent_query_attempted' => false,
+            ],
+        ];
+    }
+
+    private function buildShipmentsTableAudit(array $tableDiscovery): array
+    {
+        $audit = $this->emptyShipmentsTableAudit();
+        $tableExists = (bool) ($tableDiscovery['tables']['shipments']['exists'] ?? false);
+        $columns = $tableDiscovery['tables']['shipments']['columns'] ?? $tableDiscovery['columns']['shipments'] ?? [];
+        $required = ['id', 'order_id', 'carrier', 'service_code', 'shipment_status', 'tracking_number', 'carrier_shipment_id', 'label_path', 'label_format', 'created_at', 'updated_at'];
+        $select = array_values(array_intersect($required, $columns));
+
+        $audit['audit_debug']['shipments_table_exists'] = $tableExists;
+        $audit['audit_debug']['selected_columns'] = $select;
+
+        if (! $tableExists) {
+            $audit['warnings'][] = 'shipments table does not exist';
+
+            return $audit;
         }
 
-        $columns = $this->columns($payload, 'shipments');
-        $required = ['id', 'order_id', 'carrier', 'service_code', 'shipment_status', 'tracking_number', 'carrier_shipment_id', 'label_path', 'label_format', 'created_at', 'updated_at'];
-        $select = $this->safeSelect($columns, $required);
-        $audit = &$payload['shipments_table_audit'];
+        try {
+            $audit['audit_debug']['count_query_attempted'] = true;
+            $audit['total_count'] = DB::table('shipments')->count();
+        } catch (Throwable $e) {
+            $audit['errors'][] = $this->operationErrorArray('count', $e);
+
+            return $audit;
+        }
 
         try {
-            $audit['total_count'] = DB::table('shipments')->count();
-            $rows = DB::table('shipments')->select($select)->orderByDesc(in_array('id', $columns, true) ? 'id' : 'created_at')->limit(50)->get()->map(fn ($row): array => $this->sanitizeRow((array) $row))->all();
+            $audit['audit_debug']['recent_query_attempted'] = true;
+            $orderColumn = in_array('created_at', $columns, true) ? 'created_at' : 'id';
+            $rows = DB::table('shipments')
+                ->select($select !== [] ? $select : [DB::raw('1 as probe')])
+                ->orderByDesc($orderColumn)
+                ->limit(50)
+                ->get()
+                ->map(fn ($row): array => $this->sanitizeRow((array) $row))
+                ->all();
             $audit['recent_records'] = $rows;
         } catch (Throwable $e) {
-            $audit['errors'][] = $this->errorArray('shipments_table_audit.query', $e);
-            return;
+            $audit['errors'][] = $this->operationErrorArray('recent_records', $e);
+
+            return $audit;
         }
 
         foreach ($audit['recent_records'] as $row) {
@@ -537,6 +607,8 @@ class ShipmentDiagnoseController extends Controller
                 $audit['records_that_may_break_filament'][] = ['id' => $id, 'reasons' => array_values(array_unique($reasons)), 'record' => $row];
             }
         }
+
+        return $audit;
     }
 
     private function probeShipmentsFilamentRenderRisk(array &$payload): void
@@ -881,6 +953,16 @@ class ShipmentDiagnoseController extends Controller
         }
 
         return iconv('UTF-8', 'UTF-8//IGNORE', $value) ?: '';
+    }
+
+
+    private function operationErrorArray(string $operation, Throwable $e): array
+    {
+        return [
+            'operation' => $operation,
+            'class' => get_class($e),
+            'message' => $this->safeString($e->getMessage()),
+        ];
     }
 
     private function errorArray(string $section, Throwable $e): array

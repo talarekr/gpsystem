@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class ShipmentDiagnoseControllerTest extends TestCase
@@ -135,4 +136,47 @@ class ShipmentDiagnoseControllerTest extends TestCase
             $safe->json('table_discovery.tables.shipments.exists')
         );
     }
+
+    public function test_shipments_table_audit_section_uses_real_builder_and_counts_shipments(): void
+    {
+        DB::table('shipments')->insert([
+            'order_id' => null,
+            'carrier' => 'DHL',
+            'service_code' => 'AH',
+            'shipment_status' => 'created',
+            'tracking_number' => 'TRACK123',
+            'carrier_shipment_id' => 'SHIP123',
+            'label_path' => '',
+            'label_format' => 'pdf',
+            'created_at' => '2026-07-09 12:00:00',
+            'updated_at' => '2026-07-09 12:00:00',
+        ]);
+
+        $response = $this->withoutMiddleware()->getJson('/admin/tools/shipments/diagnose?order_id=153&json=1&section=shipments_table_audit');
+
+        $response->assertOk()
+            ->assertJsonPath('section_only', 'shipments_table_audit')
+            ->assertJsonPath('status', 'ok')
+            ->assertJsonPath('section_result.total_count', 1)
+            ->assertJsonPath('section_result.audit_debug.used_real_builder', true)
+            ->assertJsonPath('section_result.audit_debug.shipments_table_exists', true)
+            ->assertJsonPath('section_result.audit_debug.selected_columns', [
+                'id',
+                'order_id',
+                'carrier',
+                'service_code',
+                'shipment_status',
+                'tracking_number',
+                'carrier_shipment_id',
+                'label_path',
+                'label_format',
+                'created_at',
+                'updated_at',
+            ])
+            ->assertJsonPath('section_result.audit_debug.count_query_attempted', true)
+            ->assertJsonPath('section_result.audit_debug.recent_query_attempted', true)
+            ->assertJsonPath('section_result.errors', [])
+            ->assertJsonCount(1, 'section_result.recent_records');
+    }
+
 }
