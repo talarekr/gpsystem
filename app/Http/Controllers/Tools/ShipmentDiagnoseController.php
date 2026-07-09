@@ -15,6 +15,18 @@ class ShipmentDiagnoseController extends Controller
     private const TRACKING = '31294120912';
     private const PACKAGE_TRACKING = 'JJD000030249582000000000373';
     private const RECENT_SINCE = '2026-07-09 10:39:00';
+    private const CANDIDATE_TABLES = [
+        'shipments',
+        'shipment_labels',
+        'shipping_labels',
+        'order_shipments',
+        'orders',
+        'marketplace_sync_logs',
+        'api_integration_logs',
+        'integration_logs',
+        'order_logs',
+        'labels',
+    ];
 
     public function __invoke(Request $request): JsonResponse
     {
@@ -243,18 +255,7 @@ class ShipmentDiagnoseController extends Controller
     /** @return array<int, string> */
     private function candidateTables(): array
     {
-        return array_values(array_unique([
-            'shipments',
-            'shipment_labels',
-            'shipping_labels',
-            'order_shipments',
-            'orders',
-            'marketplace_sync_logs',
-            'api_integration_logs',
-            'integration_logs',
-            'order_logs',
-            'labels',
-        ]));
+        return self::CANDIDATE_TABLES;
     }
 
     /** @return array<int, string> */
@@ -284,8 +285,11 @@ class ShipmentDiagnoseController extends Controller
 
     private function probeCandidateTables(array &$payload): void
     {
+        $candidates = $this->candidateTables();
+
         $payload['candidate_tables'] = [
-            'candidate_tables_checked' => $this->candidateTables(),
+            'candidate_tables_checked' => $candidates,
+            'count' => count($candidates),
         ];
     }
 
@@ -434,6 +438,15 @@ class ShipmentDiagnoseController extends Controller
     {
         try {
             $callback();
+            if (! array_key_exists($section, $payload) || $payload[$section] === null) {
+                $payload['diagnostics_health']['sections_failed'][] = $section;
+                $payload['errors'][] = [
+                    'section' => $section,
+                    'message' => 'Section returned null',
+                ];
+                return;
+            }
+
             $payload['diagnostics_health']['sections_completed'][] = $section;
         } catch (Throwable $e) {
             $payload['diagnostics_health']['sections_failed'][] = $section;
