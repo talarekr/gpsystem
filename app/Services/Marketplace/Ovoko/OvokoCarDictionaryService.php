@@ -18,7 +18,7 @@ class OvokoCarDictionaryService
     public const DICTIONARIES = ['brands', 'models', 'fuel', 'gearbox_type', 'body_type', 'wheel', 'wheel_drive', 'car_status', 'car_class'];
     public const ENUMS = ['fuel', 'gearbox_type', 'body_type', 'wheel', 'wheel_drive', 'car_status', 'car_class'];
 
-    public function diagnostics(): array
+    public function diagnostics(?string $brandSearch = null): array
     {
         $account = $this->account();
         $credentials = $account?->api_credentials ?? [];
@@ -55,6 +55,8 @@ class OvokoCarDictionaryService
                 'models_for_brand' => $firstBrand ? ['ovoko_brand_id' => $firstBrand->ovoko_id, 'brand_name' => $firstBrand->name, 'models' => $this->sample('models', $firstBrand->ovoko_id)] : null,
             ],
             'last_sync_error' => $this->lastSyncError(),
+            'brand_search' => $this->brandSearchDiagnostics($brandSearch),
+            'model_modification_diagnostics' => $this->modelModificationDiagnostics(),
             'safety_flags' => ['read_only_diagnose' => true, 'no_import_car' => true, 'no_import_part' => true, 'no_parts_mutation' => true, 'no_local_cars_mutation' => true],
         ];
     }
@@ -119,6 +121,53 @@ class OvokoCarDictionaryService
             'ready_for_future_import_car' => $missing === [],
             'planned_import_car_payload' => $payload,
             'safety_flags' => ['read_only' => true, 'no_import_car' => true, 'no_import_part' => true, 'no_mutation' => true],
+        ];
+    }
+
+    private function brandSearchDiagnostics(?string $query): ?array
+    {
+        $query = trim((string) $query);
+        if ($query === '') {
+            return null;
+        }
+
+        $matches = OvokoCarDictionaryEntry::query()
+            ->where('dictionary', 'brands')
+            ->where('name', 'like', '%'.$query.'%')
+            ->orderByRaw('CASE WHEN LOWER(name) = ? THEN 0 ELSE 1 END', [strtolower($query)])
+            ->orderBy('name')
+            ->limit(10)
+            ->get(['ovoko_id', 'name', 'synced_at'])
+            ->map(fn (OvokoCarDictionaryEntry $brand): array => [
+                'ovoko_id' => (string) $brand->ovoko_id,
+                'name' => $brand->name,
+                'synced_at' => optional($brand->synced_at)->toISOString(),
+                'models_count_in_cache' => OvokoCarDictionaryEntry::query()
+                    ->where('dictionary', 'models')
+                    ->where('ovoko_brand_id', (string) $brand->ovoko_id)
+                    ->count(),
+            ])
+            ->values()
+            ->all();
+
+        return ['query' => $query, 'matches' => $matches];
+    }
+
+    private function modelModificationDiagnostics(): array
+    {
+        $modelRowsWithYears = OvokoCarDictionaryEntry::query()
+            ->where('dictionary', 'models')
+            ->where(function ($query): void {
+                $query->whereNotNull('year_from')->orWhereNotNull('year_to');
+            })
+            ->count();
+
+        return [
+            'known_endpoint' => null,
+            'car_models_endpoint' => '/get/car_models/{brand_id}',
+            'car_models_endpoint_may_represent' => 'unknown',
+            'cache_models_with_years_count' => $modelRowsWithYears,
+            'notes' => 'Static code review found only /get/car_models/{brand_id} for the cached models dictionary. No separate local endpoint/client method for the Ovoko model modification field was found, and this read-only diagnostic does not call Ovoko, import cars, import parts, or mutate local data.',
         ];
     }
 
