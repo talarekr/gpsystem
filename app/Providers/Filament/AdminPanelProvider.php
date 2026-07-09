@@ -22,6 +22,7 @@ use App\Filament\Pages\ProductCommandCenter;
 use App\Filament\Pages\Readiness;
 use App\Filament\Pages\Settings;
 use App\Filament\Pages\Shipments;
+use App\Filament\Pages\ShipmentDetails;
 use App\Filament\Pages\Settings\AllegroSettings;
 use App\Filament\Pages\Settings\AttributesParameters;
 use App\Filament\Pages\Settings\AuditLog;
@@ -154,6 +155,7 @@ class AdminPanelProvider extends PanelProvider
                 CreateShipment::class,
                 CreateOrderShipment::class,
                 Shipments::class,
+                ShipmentDetails::class,
                 ErrorCenter::class,
                 AllegroIntegration::class,
                 MarketplaceOverview::class,
