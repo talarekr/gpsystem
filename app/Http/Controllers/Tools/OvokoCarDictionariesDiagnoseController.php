@@ -17,6 +17,8 @@ class OvokoCarDictionariesDiagnoseController extends Controller
             $request->integer('models_limit', 5),
             $request->boolean('include_raw'),
             $request->boolean('include_model_groups'),
+            $request->string('model_group_search')->toString(),
+            $request->integer('model_groups_limit', $request->integer('models_limit', 5)),
         ));
     }
 }
