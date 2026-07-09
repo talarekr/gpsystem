@@ -18,7 +18,7 @@ class OvokoCarDictionaryService
     public const DICTIONARIES = ['brands', 'models', 'fuel', 'gearbox_type', 'body_type', 'wheel', 'wheel_drive', 'car_status', 'car_class'];
     public const ENUMS = ['fuel', 'gearbox_type', 'body_type', 'wheel', 'wheel_drive', 'car_status', 'car_class'];
 
-    public function diagnostics(?string $brandSearch = null, ?string $brandId = null, int $modelsLimit = 5, bool $includeRaw = false): array
+    public function diagnostics(?string $brandSearch = null, ?string $brandId = null, int $modelsLimit = 5, bool $includeRaw = false, bool $includeModelGroups = false): array
     {
         $account = $this->account();
         $credentials = $account?->api_credentials ?? [];
@@ -32,7 +32,7 @@ class OvokoCarDictionaryService
 
         $sampleBrand = $this->sampleBrand($brandId);
 
-        return [
+        $diagnostics = [
             'ok' => true,
             'marker' => self::MARKER,
             'credentials' => [
@@ -65,6 +65,12 @@ class OvokoCarDictionaryService
             'import_car_model_requirements' => $this->importCarModelRequirements(),
             'safety_flags' => ['read_only_diagnose' => true, 'no_import_car' => true, 'no_import_part' => true, 'no_parts_mutation' => true, 'no_local_cars_mutation' => true],
         ];
+
+        if ($includeModelGroups) {
+            $diagnostics['model_groups'] = $this->modelGroupsDiagnostics($sampleBrand, $modelsLimit);
+        }
+
+        return $diagnostics;
     }
 
     public function sync(string $scope, ?string $brandId = null): array
@@ -213,9 +219,122 @@ class OvokoCarDictionaryService
         ];
     }
 
+    private function modelGroupsDiagnostics(?OvokoCarDictionaryEntry $brand, int $modelsLimit): ?array
+    {
+        if (! $brand) {
+            return null;
+        }
+
+        $groups = [];
+        $uncertainGroups = [];
+
+        OvokoCarDictionaryEntry::query()
+            ->where('dictionary', 'models')
+            ->where('ovoko_brand_id', (string) $brand->ovoko_id)
+            ->orderBy('name')
+            ->get(['ovoko_id', 'name', 'year_from', 'year_to'])
+            ->each(function (OvokoCarDictionaryEntry $model) use (&$groups, &$uncertainGroups): void {
+                $group = $this->modelGroupForName((string) $model->name);
+                $key = $group['model_group_key'];
+
+                if (! isset($groups[$key])) {
+                    $groups[$key] = [
+                        'model_group_key' => $key,
+                        'model_group_label' => $group['model_group_label'],
+                        'confidence' => $group['confidence'],
+                        'modification_count' => 0,
+                        'sample_modifications' => [],
+                    ];
+                }
+
+                if ($groups[$key]['confidence'] !== 'low' && $group['confidence'] === 'low') {
+                    $groups[$key]['confidence'] = 'low';
+                }
+
+                $groups[$key]['modification_count']++;
+
+                if (count($groups[$key]['sample_modifications']) < 5) {
+                    $groups[$key]['sample_modifications'][] = $this->modelGroupSampleModification($model);
+                }
+
+                if ($group['confidence'] === 'low') {
+                    $uncertainGroups[$key] = [
+                        'model_group_key' => $key,
+                        'model_group_label' => $group['model_group_label'],
+                        'reason' => $group['reason'],
+                    ];
+                }
+            });
+
+        $groups = array_values($groups);
+        usort($groups, fn (array $a, array $b): int => strnatcasecmp($a['model_group_label'], $b['model_group_label']));
+
+        $modelsLimit = max(1, min($modelsLimit, 100));
+
+        return [
+            'ovoko_brand_id' => (string) $brand->ovoko_id,
+            'brand_name' => $brand->name,
+            'source' => 'local_cache_heuristic_from_model_name',
+            'groups_count' => count($groups),
+            'groups' => array_slice($groups, 0, $modelsLimit),
+            'uncertain_groups' => array_values($uncertainGroups),
+        ];
+    }
+
+    private function modelGroupForName(string $name): array
+    {
+        $name = trim($name);
+
+        if (preg_match('/^[1-9]\s/', $name) === 1) {
+            $series = substr($name, 0, 1);
+
+            return ['model_group_key' => $series, 'model_group_label' => 'Series '.$series, 'confidence' => 'heuristic', 'reason' => null];
+        }
+
+        if (preg_match('/^(X\d+M?)\s/i', $name, $matches) === 1) {
+            $key = strtoupper($matches[1]);
+
+            return ['model_group_key' => $key, 'model_group_label' => $key, 'confidence' => 'heuristic', 'reason' => null];
+        }
+
+        if (preg_match('/^(M\d+)\b/i', $name, $matches) === 1) {
+            $key = strtoupper($matches[1]);
+
+            return ['model_group_key' => $key, 'model_group_label' => $key, 'confidence' => 'heuristic', 'reason' => null];
+        }
+
+        if (preg_match('/^\d+(?:\s+\d+)+\b/', $name) === 1) {
+            return ['model_group_key' => $name, 'model_group_label' => $name, 'confidence' => 'low', 'reason' => 'numeric_historical_or_ambiguous_name'];
+        }
+
+        $key = Str::before($name, ' ');
+        $key = $key === '' ? $name : $key;
+
+        return ['model_group_key' => $key, 'model_group_label' => $key, 'confidence' => 'heuristic', 'reason' => null];
+    }
+
+    private function modelGroupSampleModification(OvokoCarDictionaryEntry $model): array
+    {
+        $yearFrom = $model->year_from ? (string) $model->year_from : null;
+        $yearTo = $model->year_to ? (string) $model->year_to : null;
+        $displayName = (string) $model->name;
+
+        if ($yearFrom || $yearTo) {
+            $displayName .= ' ('.($yearFrom ?? '').' - '.($yearTo ?? '').')';
+        }
+
+        return [
+            'ovoko_id' => (string) $model->ovoko_id,
+            'name' => $model->name,
+            'display_name' => $displayName,
+            'year_start' => $yearFrom,
+            'year_end' => $yearTo,
+        ];
+    }
+
     private function scopeDictionaries(string $scope, ?string $brandId): array { return match ($scope) { 'brands' => ['brands'], 'models' => ['models'], 'enums' => self::ENUMS, default => array_merge(['brands'], self::ENUMS, ['models']) }; }
     private function account(): ?MarketplaceAccount { return MarketplaceAccount::query()->where('code', 'ovoko_main')->first(); }
-    private function storeRows(string $dictionary, array $rows, ?string $brandId = null): int { $count = 0; $brandKey = (string) ($brandId ?? ''); foreach ($rows as $row) { $id = (string) ($row['id'] ?? $row['value'] ?? $row['code'] ?? $row['car_model_id'] ?? $row['model_id'] ?? ''); if ($id === '') continue; OvokoCarDictionaryEntry::query()->updateOrCreate(['dictionary' => $dictionary, 'ovoko_id' => $id, 'ovoko_brand_id' => $brandKey], ['name' => $row['name'] ?? $row['title'] ?? $row['label'] ?? $row['value_name'] ?? null, 'year_from' => $row['year_from'] ?? $row['from_year'] ?? null, 'year_to' => $row['year_to'] ?? $row['to_year'] ?? null, 'raw_payload' => $row, 'synced_at' => now()]); $count++; } return $count; }
+    private function storeRows(string $dictionary, array $rows, ?string $brandId = null): int { $count = 0; $brandKey = (string) ($brandId ?? ''); foreach ($rows as $row) { $id = (string) ($row['id'] ?? $row['value'] ?? $row['code'] ?? $row['car_model_id'] ?? $row['model_id'] ?? ''); if ($id === '') continue; OvokoCarDictionaryEntry::query()->updateOrCreate(['dictionary' => $dictionary, 'ovoko_id' => $id, 'ovoko_brand_id' => $brandKey], ['name' => $row['name'] ?? $row['title'] ?? $row['label'] ?? $row['value_name'] ?? null, 'year_from' => $row['year_from'] ?? $row['from_year'] ?? $row['year_start'] ?? null, 'year_to' => $row['year_to'] ?? $row['to_year'] ?? (filled($row['year_end'] ?? null) ? $row['year_end'] : null), 'raw_payload' => $row, 'synced_at' => now()]); $count++; } return $count; }
     private function sampleBrand(?string $brandId = null): ?OvokoCarDictionaryEntry { $brandId = trim((string) $brandId); return OvokoCarDictionaryEntry::query()->where('dictionary', 'brands')->when($brandId !== '', fn ($q) => $q->where('ovoko_id', $brandId))->orderBy('name')->first(); }
     private function sample(string $dictionary, ?string $brandId = null, int $limit = 5, bool $includeRaw = false): array { $limit = max(1, min($limit, 100)); $columns = ['ovoko_id', 'name', 'ovoko_brand_id', 'year_from', 'year_to', 'synced_at']; if ($includeRaw) $columns[] = 'raw_payload'; return OvokoCarDictionaryEntry::query()->where('dictionary', $dictionary)->when($brandId, fn ($q) => $q->where('ovoko_brand_id', $brandId))->orderBy('name')->limit($limit)->get($columns)->toArray(); }
     private function lastSyncError(): ?array { return MarketplaceSyncLog::query()->where('marketplace', 'ovoko')->where('action', 'ovoko_car_dictionary_sync_error')->latest('created_at')->first()?->only(['status', 'message', 'payload', 'created_at']); }

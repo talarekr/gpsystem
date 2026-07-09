@@ -16,6 +16,7 @@ class OvokoCarDictionariesDiagnoseController extends Controller
             $request->string('brand_id')->toString(),
             $request->integer('models_limit', 5),
             $request->boolean('include_raw'),
+            $request->boolean('include_model_groups'),
         ));
     }
 }
