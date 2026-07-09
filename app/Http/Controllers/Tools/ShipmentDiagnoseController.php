@@ -55,6 +55,68 @@ class ShipmentDiagnoseController extends Controller
             return $this->safeJsonResponse($this->minimalPayload($orderId));
         }
 
+        if ($request->query('section') === 'candidate_tables') {
+            $tables = self::CANDIDATE_TABLES;
+
+            return $this->safeJsonResponse([
+                'code_marker' => 'shipment_module_crash_diagnostics_safe_v4_candidate_direct',
+                'section_only' => 'candidate_tables',
+                'status' => 'ok',
+                'section_result' => [
+                    'candidate_tables_checked' => array_values($tables),
+                    'count' => count($tables),
+                ],
+                'errors' => [],
+                'diagnostics_health' => [
+                    'ok' => true,
+                    'status' => 'ok',
+                    'sections_completed' => ['candidate_tables'],
+                    'sections_failed' => [],
+                ],
+            ], 200);
+        }
+
+        if ($request->query('section') === 'app') {
+            return $this->safeJsonResponse([
+                'code_marker' => self::CODE_MARKER,
+                'section_only' => 'app',
+                'status' => 'ok',
+                'section_result' => [
+                    'environment' => $this->safeAppEnvironment(),
+                    'php_version' => PHP_VERSION,
+                    'laravel_version' => $this->safeLaravelVersion(),
+                ],
+                'errors' => [],
+                'diagnostics_health' => [
+                    'ok' => true,
+                    'status' => 'ok',
+                    'sections_completed' => ['app'],
+                    'sections_failed' => [],
+                ],
+            ], 200);
+        }
+
+        if ($request->query('section') === 'input') {
+            return $this->safeJsonResponse([
+                'code_marker' => self::CODE_MARKER,
+                'section_only' => 'input',
+                'status' => 'ok',
+                'section_result' => [
+                    'order_id' => $orderId,
+                    'safe' => $this->booleanQuery($request, 'safe'),
+                    'section' => $request->query('section'),
+                    'until' => $request->query('until'),
+                ],
+                'errors' => [],
+                'diagnostics_health' => [
+                    'ok' => true,
+                    'status' => 'ok',
+                    'sections_completed' => ['input'],
+                    'sections_failed' => [],
+                ],
+            ], 200);
+        }
+
         $sections = $this->sectionsFor($request);
         $sectionOnly = $request->query('section');
         $payload = $this->emptyPayload($orderId, $request);
