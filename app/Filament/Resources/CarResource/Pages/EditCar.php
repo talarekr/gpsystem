@@ -12,6 +12,15 @@ class EditCar extends EditRecord
 
     protected static ?string $title = 'Edytuj samochód';
 
+    /**
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    protected function mutateFormDataBeforeSave(array $data): array
+    {
+        return CarResource::normalizeOvokoLocalMappingData($data);
+    }
+
     protected function getHeaderActions(): array
     {
         return [

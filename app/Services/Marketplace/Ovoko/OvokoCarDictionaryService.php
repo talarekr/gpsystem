@@ -118,6 +118,13 @@ class OvokoCarDictionaryService
             'external_id' => 'gps-car-'.$car->id,
         ], fn ($value): bool => filled($value));
         $missing = array_values(array_filter(['ovoko_car_model_id'], fn ($field) => blank($ids[$field] ?? null) || ! ($exists[$field] ?? false)));
+        if (blank($car->production_year ?? $car->first_registration_year)) {
+            $missing[] = 'car_years';
+        }
+
+        if (blank($car->status)) {
+            $missing[] = 'status';
+        }
 
         return [
             'ok' => true,
@@ -127,6 +134,10 @@ class OvokoCarDictionaryService
             'ovoko_car_id_set' => filled($ids['ovoko_car_id']),
             'looks_historically_imported_from_ovoko' => filled($ids['ovoko_car_id']) && (($car->source_system === 'ovoko') || ((string) $car->external_id === (string) $ids['ovoko_car_id'])),
             'local' => ['make' => $car->make, 'model' => $car->model, 'year' => $car->production_year ?? $car->first_registration_year, 'fuel_type' => $car->fuel_type, 'gearbox_type' => $car->gearbox_type, 'body_type' => $car->body_type, 'steering_side' => $car->steering_side, 'drivetrain' => $car->drivetrain, 'status' => $car->status],
+            'ovoko_brand_id' => $ids['ovoko_brand_id'],
+            'ovoko_model_group_label' => data_get($car->legacy_payload, 'ovoko_model_group_label'),
+            'ovoko_car_model_id' => $ids['ovoko_car_model_id'],
+            'ovoko_car_model_id_exists_in_cache' => $exists['ovoko_car_model_id'] ?? false,
             'ovoko_mappings' => $ids,
             'mapping_ids_exist_in_cache' => $exists,
             'missing_fields_for_future_import_car' => $missing,
@@ -302,7 +313,7 @@ class OvokoCarDictionaryService
         ];
     }
 
-    private function modelGroupForName(string $name): array
+    public function modelGroupForName(string $name): array
     {
         $name = trim($name);
 
@@ -334,7 +345,7 @@ class OvokoCarDictionaryService
         return ['model_group_key' => $key, 'model_group_label' => $key, 'confidence' => 'heuristic', 'reason' => null];
     }
 
-    private function modelGroupSampleModification(OvokoCarDictionaryEntry $model): array
+    public function modelGroupSampleModification(OvokoCarDictionaryEntry $model): array
     {
         $yearFrom = $model->year_from ? (string) $model->year_from : null;
         $yearTo = $model->year_to ? (string) $model->year_to : null;
