@@ -33,6 +33,7 @@
     $fulfillmentMeta = is_array($order->meta) ? $order->meta : [];
     $marketplaceFulfillmentStatus = $fulfillmentMeta['marketplace_fulfillment_status'] ?? null;
     $carrier = $shipment ? (Shipment::CARRIERS[$shipment->carrier] ?? $shipment->carrier) : null;
+    $dhlShipmentUiState = app(\App\Services\Shipments\DhlShipmentService::class)->adminOrderShipmentUiState((int) $order->id);
     $deliveryMethod = trim((string) ($deliveryLabel ?: $carrier ?: $order->delivery_method));
     $deliveryType = trim((string) data_get($order->raw_payload, 'delivery.type', data_get($order->raw_payload, 'delivery_type', data_get($order->raw_payload, 'shipping_type'))));
     $deliveryPhone = trim((string) (data_get($order->raw_payload, 'delivery.address.phoneNumber') ?: data_get($order->raw_payload, 'delivery.address.phone') ?: $order->phone));
@@ -396,7 +397,25 @@
             <div class="gps-order-detail-fact">
                 <div class="gps-order-detail-label">Przesyłka</div>
                 @if ($isFulfillmentMarketplaceOrder)
-                    @if (! $shipment)
+                    @if (! $shipment && ($dhlShipmentUiState['should_show_remote_created_warning'] ?? false))
+                        <div class="gps-order-detail-value">
+                            <div style="border:1px solid #f59e0b;background:#fffbeb;color:#92400e;border-radius:10px;padding:14px 16px;line-height:1.55;">
+                                <div style="font-weight:700;margin-bottom:8px;">Przesyłka DHL została utworzona zdalnie, ale nie została zapisana lokalnie.</div>
+                                @if (! blank($dhlShipmentUiState['remote_tracking_number'] ?? null))
+                                    <div>Numer listu przewozowego: <a style="font-weight:700;text-decoration:underline;" href="{{ $dhlShipmentUiState['tracking_url'] }}" target="_blank" rel="noopener noreferrer">{{ $dhlShipmentUiState['remote_tracking_number'] }}</a></div>
+                                @endif
+                                @if (! blank($dhlShipmentUiState['remote_package_tracking_number'] ?? null))
+                                    <div>Numer paczki DHL: {{ $dhlShipmentUiState['remote_package_tracking_number'] }}</div>
+                                @endif
+                                <div style="margin-top:8px;">Nie twórz nowej przesyłki. Odzyskaj etykietę albo pobierz ją z panelu DHL.</div>
+                                <div style="margin-top:10px;font-size:12px;">code_marker = {{ $dhlShipmentUiState['code_marker'] ?? 'dhl_order_shipment_ui_remote_created_v1' }}</div>
+                            </div>
+                        </div>
+                        <div class="gps-order-shipment-actions">
+                            <button type="button" disabled class="fi-btn fi-color-gray fi-btn-color-gray fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-gray-300 px-3 py-2 text-sm font-semibold text-gray-700 shadow-sm dark:bg-gray-700 dark:text-gray-200">Odzyskaj etykietę DHL</button>
+                            <span style="font-size:12px;color:#92400e;">Najpierw wdrożyć pobieranie istniejącej etykiety DHL. Nie twórz nowej przesyłki.</span>
+                        </div>
+                    @elseif (! $shipment)
                         <div class="gps-order-detail-value">Brak przesyłki dla tego zamówienia.</div>
                         <div class="gps-order-shipment-actions">
                             <a class="fi-btn fi-color-primary fi-btn-color-primary fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-primary-500 focus-visible:ring-2 focus-visible:ring-primary-600 dark:bg-primary-500 dark:hover:bg-primary-400 dark:focus-visible:ring-primary-500" href="{{ \App\Filament\Pages\CreateOrderShipment::getUrl(['order' => $order]) }}">Dodaj przesyłkę DHL</a>
@@ -407,7 +426,8 @@
                                 <div class="gps-order-detail-label">Podsumowanie</div>
                                 <div class="gps-order-detail-value">
                                     <div>Przewoźnik: {{ $carrier ?: strtoupper($shipment->carrier ?: '—') }}</div>
-                                    <div>Tracking: {{ $shipment->tracking_number ?: $shipment->carrier_shipment_id ?: '—' }}</div>
+                                    @php($localDhlTrackingUrl = app(\App\Services\Shipments\DhlShipmentService::class)->trackingUrl($shipment->tracking_number ?: $shipment->carrier_shipment_id))
+                                    <div>Tracking: @if($localDhlTrackingUrl)<a href="{{ $localDhlTrackingUrl }}" target="_blank" rel="noopener noreferrer">{{ $shipment->tracking_number ?: $shipment->carrier_shipment_id }}</a>@else{{ $shipment->tracking_number ?: $shipment->carrier_shipment_id ?: '—' }}@endif</div>
                                     <div>Status lokalny: {{ $shipment->shipment_status ?: '—' }}</div>
                                     <div>Utworzono: {{ $shipment->created_at?->format('Y-m-d H:i') ?: '—' }}</div>
                                     <div>DHL: numer {{ $shipment->tracking_number ?: $shipment->carrier_shipment_id ?: '—' }}</div>
