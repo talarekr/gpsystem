@@ -18,7 +18,7 @@ class OvokoCarDictionaryService
     public const DICTIONARIES = ['brands', 'models', 'fuel', 'gearbox_type', 'body_type', 'wheel', 'wheel_drive', 'car_status', 'car_class'];
     public const ENUMS = ['fuel', 'gearbox_type', 'body_type', 'wheel', 'wheel_drive', 'car_status', 'car_class'];
 
-    public function diagnostics(): array
+    public function diagnostics(?string $brandSearch = null, ?string $brandId = null): array
     {
         $account = $this->account();
         $credentials = $account?->api_credentials ?? [];
@@ -32,7 +32,7 @@ class OvokoCarDictionaryService
 
         $firstBrand = OvokoCarDictionaryEntry::query()->where('dictionary', 'brands')->orderBy('name')->first();
 
-        return [
+        $payload = [
             'ok' => true,
             'marker' => self::MARKER,
             'credentials' => [
@@ -55,8 +55,14 @@ class OvokoCarDictionaryService
                 'models_for_brand' => $firstBrand ? ['ovoko_brand_id' => $firstBrand->ovoko_id, 'brand_name' => $firstBrand->name, 'models' => $this->sample('models', $firstBrand->ovoko_id)] : null,
             ],
             'last_sync_error' => $this->lastSyncError(),
-            'safety_flags' => ['read_only_diagnose' => true, 'no_import_car' => true, 'no_import_part' => true, 'no_parts_mutation' => true, 'no_local_cars_mutation' => true],
+            'safety_flags' => ['read_only_diagnose' => true, 'no_ovoko_requests_in_get' => true, 'local_cache_only' => true, 'no_import_car' => true, 'no_import_part' => true, 'no_parts_mutation' => true, 'no_local_cars_mutation' => true],
         ];
+
+        if (filled($brandSearch)) {
+            $payload['brand_search'] = $this->brandSearch((string) $brandSearch, $brandId);
+        }
+
+        return $payload;
     }
 
     public function sync(string $scope, ?string $brandId = null): array
@@ -122,6 +128,37 @@ class OvokoCarDictionaryService
         ];
     }
 
+    private function brandSearch(string $query, ?string $brandId = null): array
+    {
+        $query = trim($query);
+        $needle = Str::lower($query)->toString();
+
+        $matches = OvokoCarDictionaryEntry::query()
+            ->where('dictionary', 'brands')
+            ->when(filled($brandId), fn ($q) => $q->where('ovoko_id', (string) $brandId))
+            ->when($needle !== '', fn ($q) => $q->whereRaw('LOWER(name) LIKE ?', ['%'.$needle.'%']))
+            ->orderByRaw('LOWER(name) = ? DESC', [$needle])
+            ->orderBy('name')
+            ->limit(20)
+            ->get(['ovoko_id', 'name', 'synced_at'])
+            ->map(fn (OvokoCarDictionaryEntry $brand): array => [
+                'ovoko_id' => $brand->ovoko_id,
+                'name' => $brand->name,
+                'synced_at' => $brand->synced_at?->toJSON(),
+                'models_count_in_cache' => OvokoCarDictionaryEntry::query()
+                    ->where('dictionary', 'models')
+                    ->where('ovoko_brand_id', (string) $brand->ovoko_id)
+                    ->count(),
+            ])
+            ->values()
+            ->all();
+
+        return [
+            'query' => $query,
+            'brand_id' => filled($brandId) ? (string) $brandId : null,
+            'matches' => $matches,
+        ];
+    }
     private function scopeDictionaries(string $scope, ?string $brandId): array { return match ($scope) { 'brands' => ['brands'], 'models' => ['models'], 'enums' => self::ENUMS, default => array_merge(['brands'], self::ENUMS, ['models']) }; }
     private function account(): ?MarketplaceAccount { return MarketplaceAccount::query()->where('code', 'ovoko_main')->first(); }
     private function storeRows(string $dictionary, array $rows, ?string $brandId = null): int { $count = 0; $brandKey = (string) ($brandId ?? ''); foreach ($rows as $row) { $id = (string) ($row['id'] ?? $row['value'] ?? $row['code'] ?? $row['car_model_id'] ?? $row['model_id'] ?? ''); if ($id === '') continue; OvokoCarDictionaryEntry::query()->updateOrCreate(['dictionary' => $dictionary, 'ovoko_id' => $id, 'ovoko_brand_id' => $brandKey], ['name' => $row['name'] ?? $row['title'] ?? $row['label'] ?? $row['value_name'] ?? null, 'year_from' => $row['year_from'] ?? $row['from_year'] ?? null, 'year_to' => $row['year_to'] ?? $row['to_year'] ?? null, 'raw_payload' => $row, 'synced_at' => now()]); $count++; } return $count; }
