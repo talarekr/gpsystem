@@ -11,7 +11,7 @@ use Throwable;
 
 class ShipmentDiagnoseController extends Controller
 {
-    private const CODE_MARKER = 'shipment_module_crash_diagnostics_safe_v2';
+    private const CODE_MARKER = 'shipment_module_crash_diagnostics_safe_v3';
     private const TRACKING = '31294120912';
     private const PACKAGE_TRACKING = 'JJD000030249582000000000373';
     private const RECENT_SINCE = '2026-07-09 10:39:00';
@@ -19,46 +19,110 @@ class ShipmentDiagnoseController extends Controller
     public function __invoke(Request $request): JsonResponse
     {
         try {
-            $orderId = (int) $request->integer('order_id');
-
-            if ($request->boolean('minimal')) {
-                return response()->json($this->minimalPayload($orderId), 200, [], $this->jsonFlags());
-            }
-
-            $payload = $this->emptyPayload($orderId);
-
-            $this->guard($payload, 'input', fn () => $this->probeInput($payload, $request, $orderId));
-            $this->guard($payload, 'app', fn () => $this->probeApp($payload));
-            $this->guard($payload, 'table_discovery', fn () => $this->probeTables($payload));
-            $this->guard($payload, 'shipments_probe', fn () => $this->probeShipments($payload, $orderId));
-            $this->guard($payload, 'labels_probe', fn () => $this->probeLabels($payload, $orderId));
-            $this->guard($payload, 'last_exceptions_probe', fn () => $this->probeLastExceptions($payload, $orderId));
-
-            $failed = $payload['diagnostics_health']['sections_failed'];
-            $payload['diagnostics_health']['ok'] = $failed === [];
-            $payload['diagnostics_health']['status'] = $failed === [] ? 'ok' : 'partial';
-            $payload['status'] = $payload['diagnostics_health']['status'];
-
-            return response()->json($payload, 200, [], $this->jsonFlags());
+            return $this->handleSafely($request);
         } catch (Throwable $e) {
-            return response()->json([
+            return $this->safeJsonResponse([
                 'code_marker' => self::CODE_MARKER,
                 'status' => 'error',
-                'errors' => [[
-                    'section' => 'top_level',
-                    'class' => get_class($e),
-                    'message' => $e->getMessage(),
-                    'file' => $e->getFile(),
-                    'line' => $e->getLine(),
-                ]],
+                'errors' => [$this->errorArray('top_level', $e)],
                 'diagnostics_health' => [
                     'ok' => false,
                     'status' => 'error',
                     'sections_completed' => [],
                     'sections_failed' => ['top_level'],
                 ],
-            ], 200);
+            ]);
         }
+    }
+
+    private function handleSafely(Request $request): JsonResponse
+    {
+        $orderId = (int) $request->integer('order_id');
+
+        if ($request->boolean('minimal')) {
+            return $this->safeJsonResponse($this->minimalPayload($orderId));
+        }
+
+        $sections = $this->sectionsFor($request);
+        $sectionOnly = $request->query('section');
+        $payload = $this->emptyPayload($orderId);
+
+        if (is_string($sectionOnly) && $sectionOnly !== '') {
+            if (! in_array($sectionOnly, $this->allSections(), true)) {
+                return $this->safeJsonResponse([
+                    'code_marker' => self::CODE_MARKER,
+                    'section_only' => $sectionOnly,
+                    'status' => 'error',
+                    'section_result' => null,
+                    'errors' => [[
+                        'section' => 'input',
+                        'class' => 'InvalidArgumentException',
+                        'message' => 'Unknown section. Allowed: '.implode(', ', $this->allSections()),
+                    ]],
+                ]);
+            }
+
+            $this->runSection($payload, $sectionOnly, $request, $orderId);
+            $failed = in_array($sectionOnly, $payload['diagnostics_health']['sections_failed'], true);
+            $status = $failed ? 'error' : ($payload['errors'] === [] ? 'ok' : 'partial');
+
+            return $this->safeJsonResponse([
+                'code_marker' => self::CODE_MARKER,
+                'section_only' => $sectionOnly,
+                'status' => $status,
+                'section_result' => $payload[$sectionOnly] ?? null,
+                'errors' => $payload['errors'],
+                'diagnostics_health' => $payload['diagnostics_health'],
+            ]);
+        }
+
+        foreach ($sections as $section) {
+            $this->runSection($payload, $section, $request, $orderId);
+        }
+
+        $failed = $payload['diagnostics_health']['sections_failed'];
+        $payload['diagnostics_health']['ok'] = $failed === [] && $payload['errors'] === [];
+        $payload['diagnostics_health']['status'] = $failed === [] && $payload['errors'] === [] ? 'ok' : 'partial';
+        $payload['status'] = $payload['diagnostics_health']['status'];
+        $payload['safe'] = $request->boolean('safe');
+        $payload['until'] = $request->query('until');
+
+        return $this->safeJsonResponse($payload);
+    }
+
+    /** @return array<int, string> */
+    private function allSections(): array
+    {
+        return ['input', 'app', 'table_discovery', 'shipments_probe', 'labels_probe', 'last_exceptions_probe'];
+    }
+
+    /** @return array<int, string> */
+    private function sectionsFor(Request $request): array
+    {
+        if ($request->boolean('safe')) {
+            return ['input', 'app', 'table_discovery'];
+        }
+
+        $sections = $this->allSections();
+        $until = $request->query('until');
+        if (is_string($until) && $until !== '' && in_array($until, $sections, true)) {
+            return array_slice($sections, 0, array_search($until, $sections, true) + 1);
+        }
+
+        return $sections;
+    }
+
+    private function runSection(array &$payload, string $section, Request $request, int $orderId): void
+    {
+        $this->guard($payload, $section, match ($section) {
+            'input' => fn () => $this->probeInput($payload, $request, $orderId),
+            'app' => fn () => $this->probeApp($payload),
+            'table_discovery' => fn () => $this->probeTables($payload),
+            'shipments_probe' => fn () => $this->probeShipments($payload, $orderId),
+            'labels_probe' => fn () => $this->probeLabels($payload, $orderId),
+            'last_exceptions_probe' => fn () => $this->probeLastExceptions($payload, $orderId),
+            default => fn () => null,
+        });
     }
 
     private function minimalPayload(int $orderId): array
@@ -125,14 +189,16 @@ class ShipmentDiagnoseController extends Controller
         $payload['table_discovery']['candidate_tables_checked'] = $candidates;
 
         foreach ($candidates as $table) {
-            $exists = Schema::hasTable($table);
-            $payload['table_discovery']['tables'][$table] = $exists;
-            $payload['table_discovery']['columns'][$table] = $exists ? Schema::getColumnListing($table) : [];
+            $this->discoverTable($payload, $table);
         }
     }
 
     private function probeShipments(array &$payload, int $orderId): void
     {
+        if (! array_key_exists('shipments', $payload['table_discovery']['tables'])) {
+            $this->discoverTable($payload, 'shipments');
+        }
+
         if (! $this->tableExists($payload, 'shipments')) {
             return;
         }
@@ -177,6 +243,10 @@ class ShipmentDiagnoseController extends Controller
             }
         }
 
+        if (! array_key_exists('shipment_labels', $payload['table_discovery']['tables'])) {
+            $this->discoverTable($payload, 'shipment_labels');
+        }
+
         if (! $this->tableExists($payload, 'shipment_labels')) {
             return;
         }
@@ -216,13 +286,7 @@ class ShipmentDiagnoseController extends Controller
             $payload['diagnostics_health']['sections_completed'][] = $section;
         } catch (Throwable $e) {
             $payload['diagnostics_health']['sections_failed'][] = $section;
-            $payload['errors'][] = [
-                'section' => $section,
-                'class' => get_class($e),
-                'message' => $e->getMessage(),
-                'file' => $e->getFile(),
-                'line' => $e->getLine(),
-            ];
+            $payload['errors'][] = $this->errorArray($section, $e);
         }
     }
 
@@ -230,7 +294,7 @@ class ShipmentDiagnoseController extends Controller
     {
         $query = in_array('id', $columns, true) ? $query->orderByDesc('id') : $query;
 
-        return $query->limit($limit)->get()->map(fn ($row): array => (array) $row)->all();
+        return $query->limit($limit)->get()->map(fn ($row): array => $this->sanitizeRow((array) $row))->all();
     }
 
     private function tableExists(array $payload, string $table): bool
@@ -271,14 +335,122 @@ class ShipmentDiagnoseController extends Controller
 
     private function logTail(): string
     {
-        $path = storage_path('logs/laravel.log');
-        if (! is_string($path) || ! is_readable($path)) {
+        try {
+            $path = storage_path('logs/laravel.log');
+            if (! is_string($path) || ! file_exists($path) || ! is_readable($path)) {
+                return '';
+            }
+
+            $size = filesize($path);
+            if ($size === false || $size <= 0) {
+                return '';
+            }
+
+            $handle = fopen($path, 'rb');
+            if ($handle === false) {
+                return '';
+            }
+
+            $bytes = 200 * 1024;
+            fseek($handle, -min($bytes, $size), SEEK_END);
+            $tail = stream_get_contents($handle);
+            fclose($handle);
+
+            return $this->safeString($tail === false ? '' : $tail);
+        } catch (Throwable) {
             return '';
         }
+    }
 
-        $lines = file($path);
+    private function discoverTable(array &$payload, string $table): void
+    {
+        try {
+            $exists = Schema::hasTable($table);
+            $payload['table_discovery']['tables'][$table] = (bool) $exists;
+        } catch (Throwable $e) {
+            $payload['table_discovery']['tables'][$table] = false;
+            $payload['table_discovery']['columns'][$table] = [];
+            $payload['errors'][] = $this->errorArray('table_discovery.'.$table.'.has_table', $e);
 
-        return $lines === false ? '' : implode('', array_slice($lines, -1500));
+            return;
+        }
+
+        if (! $payload['table_discovery']['tables'][$table]) {
+            $payload['table_discovery']['columns'][$table] = [];
+
+            return;
+        }
+
+        try {
+            $payload['table_discovery']['columns'][$table] = array_values(array_map(
+                fn ($column): string => (string) $column,
+                Schema::getColumnListing($table)
+            ));
+        } catch (Throwable $e) {
+            $payload['table_discovery']['columns'][$table] = [];
+            $payload['errors'][] = $this->errorArray('table_discovery.'.$table.'.columns', $e);
+        }
+    }
+
+    /** @param array<string, mixed> $row */
+    private function sanitizeRow(array $row): array
+    {
+        $safe = [];
+        foreach ($row as $key => $value) {
+            $safe[(string) $key] = $this->sanitizeValue($value);
+        }
+
+        return $safe;
+    }
+
+    private function sanitizeValue(mixed $value): mixed
+    {
+        if ($value === null || is_bool($value) || is_int($value) || is_float($value)) {
+            return $value;
+        }
+
+        if (is_string($value)) {
+            return $this->safeString($value);
+        }
+
+        if ($value instanceof \DateTimeInterface) {
+            return $value->format(DATE_ATOM);
+        }
+
+        if ($value instanceof Throwable) {
+            return $this->errorArray('value', $value);
+        }
+
+        if (is_array($value)) {
+            return array_map(fn ($item) => $this->sanitizeValue($item), $value);
+        }
+
+        return $this->safeString((string) json_encode($value, JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR));
+    }
+
+    private function safeString(string $value): string
+    {
+        if (function_exists('mb_convert_encoding')) {
+            return mb_convert_encoding($value, 'UTF-8', 'UTF-8');
+        }
+
+        return iconv('UTF-8', 'UTF-8//IGNORE', $value) ?: '';
+    }
+
+    private function errorArray(string $section, Throwable $e): array
+    {
+        return [
+            'section' => $section,
+            'class' => get_class($e),
+            'message' => $this->safeString($e->getMessage()),
+            'file' => $this->safeString($e->getFile()),
+            'line' => $e->getLine(),
+        ];
+    }
+
+    private function safeJsonResponse(array $payload): JsonResponse
+    {
+        return response()->json($this->sanitizeValue($payload), 200, [], $this->jsonFlags());
     }
 
     private function looksJsonContainer(mixed $value): bool
@@ -288,6 +460,6 @@ class ShipmentDiagnoseController extends Controller
 
     private function jsonFlags(): int
     {
-        return JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES;
+        return JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR;
     }
 }
