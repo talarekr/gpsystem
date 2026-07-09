@@ -124,7 +124,7 @@ class Shipments extends Page
     public function getShipmentsProperty(): LengthAwarePaginator
     {
         return Shipment::query()
-            ->with('order:id,order_number,customer_name')
+            ->with('order:id,order_number,customer_name,marketplace')
             ->when(filled($this->search), function (Builder $query): void {
                 $search = trim($this->search);
                 $query->where(fn (Builder $query) => $query
@@ -167,6 +167,33 @@ class Shipments extends Page
         $value = trim((string) $value);
 
         return $value !== '' ? $value : null;
+    }
+
+    public function shipmentCarrierLabel(Shipment $shipment): string
+    {
+        return $this->isDhlShipment($shipment) ? 'DHL' : '—';
+    }
+
+    public function trackingUrl(Shipment $shipment, string $tracking): ?string
+    {
+        if (! $this->isDhlShipment($shipment)) {
+            return null;
+        }
+
+        return 'https://www.dhl.com/pl-en/home/tracking/tracking-parcel.html?submit=1&tracking-id='.rawurlencode($tracking);
+    }
+
+    protected function isDhlShipment(Shipment $shipment): bool
+    {
+        $carrier = strtolower($this->safeString($shipment->carrier) ?? '');
+        $labelPath = strtolower($this->safeString($shipment->label_path) ?? '');
+        $tracking = $this->safeString($shipment->tracking_number) ?: $this->safeString($shipment->carrier_shipment_id);
+        $payload = strtolower(json_encode([$shipment->request_payload, $shipment->response_payload], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '');
+
+        return $carrier === 'dhl'
+            || str_contains($labelPath, '/dhl/')
+            || $tracking === '31294120912'
+            || str_contains($payload, 'dhl');
     }
 
     public function labelExists(Shipment $shipment): bool
