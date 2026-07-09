@@ -124,7 +124,7 @@ class Shipments extends Page
     public function getShipmentsProperty(): LengthAwarePaginator
     {
         return Shipment::query()
-            ->with('order:id,order_number,marketplace_order_id,marketplace,customer_name')
+            ->with('order:id,order_number,customer_name')
             ->when(filled($this->search), function (Builder $query): void {
                 $search = trim($this->search);
                 $query->where(fn (Builder $query) => $query
@@ -167,32 +167,6 @@ class Shipments extends Page
         $value = trim((string) $value);
 
         return $value !== '' ? $value : null;
-    }
-
-
-    public function marketplaceLabel(?string $marketplace): ?string
-    {
-        $marketplace = $this->safeString($marketplace);
-
-        return $marketplace ?: null;
-    }
-
-    public function trackingUrl(Shipment $shipment): ?string
-    {
-        $tracking = $this->safeString($shipment->tracking_number) ?: $this->safeString($shipment->carrier_shipment_id);
-        $carrier = strtolower($this->safeString($shipment->carrier) ?? '');
-
-        if ($tracking === null) {
-            return null;
-        }
-
-        $encodedTracking = rawurlencode($tracking);
-
-        return match ($carrier) {
-            'dhl' => 'https://dhl24.com.pl/sledzenie/przesylki/?search='.$encodedTracking,
-            'dpd' => 'https://tracktrace.dpd.com.pl/parcelDetails?typ=1&p1='.$encodedTracking,
-            default => null,
-        };
     }
 
     public function labelExists(Shipment $shipment): bool
