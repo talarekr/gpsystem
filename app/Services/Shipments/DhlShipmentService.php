@@ -9,6 +9,7 @@ use App\Services\Marketplace\ApiIntegrationLogger;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
+use Throwable;
 use Illuminate\Support\Str;
 use RuntimeException;
 use SoapClient;
@@ -267,7 +268,7 @@ class DhlShipmentService
 
         $duplicateGuard = $this->duplicateCreateShipmentGuard((int) ($form['order_id'] ?? 0));
         if ($duplicateGuard['would_create_duplicate_if_clicked_again']) {
-            throw new RuntimeException('DHL shipment appears to have been created remotely in previous attempt. Use recovery instead of creating a duplicate shipment.');
+            throw new RuntimeException($duplicateGuard['message'] ?? 'DHL shipment appears to have been created remotely in previous attempt. Use recovery instead of creating a duplicate shipment.');
         }
 
         $payload = null;
@@ -434,15 +435,34 @@ class DhlShipmentService
         $shipment = Shipment::query()->where('order_id', $orderId)->where('carrier', 'dhl')->latest('id')->first();
         $log = $this->lastCreateShipmentLog($orderId);
         $parsed = $log ? $this->parseCreateShipmentResponse(data_get($log->payload ?? [], 'response')) : null;
-        $labelExists = $shipment?->label_path ? Storage::disk('local')->exists($shipment->label_path) : false;
+        $labelExists = $this->safeLocalLabelExists($shipment?->label_path);
         $remoteCreatedInLog = (bool) ($parsed && $parsed['remote_created'] && $parsed['has_label_content']);
         return [
             'would_create_duplicate_if_clicked_again' => (bool) ($shipment?->tracking_number || $shipment || $labelExists || $remoteCreatedInLog),
+            'message' => $shipment?->tracking_number ? 'DHL shipment '.$shipment->tracking_number.' already exists locally/remotely. Do not create a duplicate. Repair or fetch the missing label instead.' : null,
             'local_shipment_exists' => (bool) $shipment,
             'local_label_exists' => $labelExists,
             'last_log_id' => $log?->id,
             'remote_created_in_last_log' => $remoteCreatedInLog,
         ];
+    }
+
+    private function safeLocalLabelExists(mixed $path): bool
+    {
+        if (! is_scalar($path)) {
+            return false;
+        }
+
+        $path = trim((string) $path);
+        if ($path === '' || str_contains($path, "\0") || preg_match('/^[a-z]+:\/\//i', $path) === 1) {
+            return false;
+        }
+
+        try {
+            return Storage::disk('local')->exists($path);
+        } catch (Throwable) {
+            return false;
+        }
     }
 
     public function lastCreateShipmentLog(?int $orderId): ?MarketplaceSyncLog

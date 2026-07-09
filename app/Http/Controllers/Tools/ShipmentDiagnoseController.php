@@ -11,7 +11,7 @@ use Throwable;
 
 class ShipmentDiagnoseController extends Controller
 {
-    private const CODE_MARKER = 'shipment_module_crash_diagnostics_safe_v4';
+    private const CODE_MARKER = 'shipment_missing_label_hotfix_v1';
     private const TRACKING = '31294120912';
     private const PACKAGE_TRACKING = 'JJD000030249582000000000373';
     private const RECENT_SINCE = '2026-07-09 10:39:00';
@@ -200,6 +200,7 @@ class ShipmentDiagnoseController extends Controller
         $payload['diagnostics_health']['ok'] = $failed === [] && $payload['errors'] === [];
         $payload['diagnostics_health']['status'] = $failed === [] && $payload['errors'] === [] ? 'ok' : 'partial';
         $payload['status'] = $payload['diagnostics_health']['status'];
+        $payload['shipment_repair_candidate'] = $this->buildShipmentRepairCandidate($payload['shipments_table_audit'], $orderId);
         $payload['safe'] = $this->booleanQuery($request, 'safe');
         $payload['until'] = $request->query('until');
 
@@ -278,6 +279,7 @@ class ShipmentDiagnoseController extends Controller
             'shipments_filament_render_risk' => ['page_class_exists' => null, 'view_file_exists' => null, 'view_contains_label_download_link' => null, 'view_contains_storage_exists_call' => null, 'view_contains_route_download_label' => null, 'columns_or_fields_using_label_path' => [], 'suspected_crash_points' => [], 'safe_recommendations' => []],
             'labels_probe' => ['records_for_order_or_shipment' => [], 'empty_paths' => [], 'non_empty_paths' => [], 'file_checks' => [], 'warnings' => []],
             'last_exceptions_probe' => ['admin_shipments' => null, 'admin_order' => null, 'shipment_diagnose' => null, 'view_diagnose' => null, 'integration_logs' => []],
+            'shipment_repair_candidate' => ['needed' => false],
             'diagnostics_health' => ['ok' => false, 'status' => 'unknown', 'sections_completed' => [], 'sections_failed' => []],
             'errors' => [],
         ];
@@ -609,6 +611,42 @@ class ShipmentDiagnoseController extends Controller
         }
 
         return $audit;
+    }
+
+
+    private function buildShipmentRepairCandidate(array $audit, int $orderId): array
+    {
+        foreach (($audit['records_with_non_empty_missing_label_file'] ?? []) as $row) {
+            $rowOrderId = isset($row['order_id']) && is_numeric($row['order_id']) ? (int) $row['order_id'] : null;
+            if ($orderId > 0 && $rowOrderId !== $orderId) {
+                continue;
+            }
+
+            $tracking = $row['tracking_number'] ?? ($row['carrier_shipment_id'] ?? null);
+
+            return [
+                'needed' => true,
+                'shipment_id' => $row['id'] ?? null,
+                'order_id' => $rowOrderId,
+                'tracking_number' => is_scalar($tracking) ? (string) $tracking : null,
+                'carrier_shipment_id' => isset($row['carrier_shipment_id']) && is_scalar($row['carrier_shipment_id']) ? (string) $row['carrier_shipment_id'] : null,
+                'service_code' => isset($row['service_code']) && is_scalar($row['service_code']) ? (string) $row['service_code'] : null,
+                'expected_service_code_from_last_successful_dhl_request' => $rowOrderId === 153 ? 'EK' : null,
+                'shipment_status' => isset($row['shipment_status']) && is_scalar($row['shipment_status']) ? (string) $row['shipment_status'] : null,
+                'label_path' => isset($row['label_path']) && is_scalar($row['label_path']) ? (string) $row['label_path'] : null,
+                'label_file_exists' => false,
+                'problem' => 'shipment has label_path and label_created status, but local PDF file does not exist',
+                'safe_ui_should_disable_pdf_download' => true,
+                'safe_ui_should_block_create_shipment' => true,
+                'repair_options' => [
+                    'fetch_existing_label_from_dhl_without_createShipment',
+                    'mark_label_missing_and_keep_tracking',
+                    'manual_upload_label_pdf',
+                ],
+            ];
+        }
+
+        return ['needed' => false];
     }
 
     private function probeShipmentsFilamentRenderRisk(array &$payload): void

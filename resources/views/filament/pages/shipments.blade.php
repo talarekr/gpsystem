@@ -37,12 +37,12 @@
                 <div><span class="gps-badge">{{ $carrier ? strtoupper($carrier) : '—' }}</span></div>
                 <div><span class="gps-badge">{{ $status ?: '—' }}</span></div>
                 <div>{{ $tracking ?: '—' }}</div>
-                <div>@if($labelExists)<a class="gps-action" href="{{ route('tools.download-shipment-label', ['shipment' => $shipment->id]) }}">Pobierz etykietę</a>@elseif($labelPath)<span class="gps-muted">Brak pliku etykiety</span>@else <span class="gps-muted">—</span> @endif</div>
+                <div>@if($labelExists)<a class="gps-action" href="{{ route('tools.download-shipment-label', ['shipment' => $shipment->id]) }}">Pobierz etykietę</a>@elseif($labelPath)<span class="gps-muted">Brak pliku etykiety</span>@else <span class="gps-muted">Brak etykiety</span> @endif</div>
                 <div class="gps-actions">
                     <a href="{{ \App\Filament\Pages\ShipmentDetails::getUrl(['shipment' => $shipment->id]) }}" class="gps-action">Szczegóły</a>
                     @if($labelExists)<button type="button" wire:click="downloadLabel({{ $shipment->id }})" class="gps-action">Pobierz etykietę PDF</button>@endif
                     <button type="button" wire:click="generateLabel('dpd', {{ $shipment->id }}, false)" class="gps-action">Podgląd DPD</button>
-                    <button type="button" wire:click="openDhlForm(null, {{ $shipment->id }})" class="gps-action">Utwórz DHL</button>
+                    @if(! $tracking)<button type="button" wire:click="openDhlForm(null, {{ $shipment->id }})" class="gps-action">Utwórz DHL</button>@else<span class="gps-muted">DHL już istnieje — napraw etykietę</span>@endif
                     <button type="button" wire:click="generateLabel('dpd', {{ $shipment->id }}, true)" wire:confirm="confirm=1: wygenerować etykietę DPD bez pickup/mail/marketplace?" class="gps-action">Generuj DPD</button>
                 </div>
             </div>
