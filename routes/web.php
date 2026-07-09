@@ -38,6 +38,7 @@ use App\Http\Controllers\Storefront\TermsController;
 use App\Http\Controllers\Tools\CheckOrdersFlowController;
 use App\Http\Controllers\Tools\PayuDiagnosticsController;
 use App\Http\Controllers\Tools\DebugOrderItemThumbnailController;
+use App\Http\Controllers\Tools\DhlConfigDiagnoseController;
 use App\Http\Controllers\Tools\WorkshopQuickPartController;
 use App\Http\Controllers\Tools\BackfillPartDefaultConditionAndSteeringController;
 use App\Http\Controllers\Tools\BackfillPartMarketplacePricesController;
@@ -280,6 +281,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::match(['get', 'post'], '/admin/tools/parts-to-list/storage-location-backfill-apply', [PartsToListStorageLocationBackfillController::class, 'apply'])->name('admin.tools.parts-to-list.storage-location-backfill-apply');
     Route::get('/admin/tools/parts-to-list/storage-location-backfill-results', [PartsToListStorageLocationBackfillController::class, 'results'])->name('admin.tools.parts-to-list.storage-location-backfill-results');
     Route::get('/admin/tools/payu-diagnostics', PayuDiagnosticsController::class)->name('admin.tools.payu-diagnostics');
+    Route::get('/admin/tools/dhl/config-diagnose', DhlConfigDiagnoseController::class)->name('admin.tools.dhl.config-diagnose');
     Route::get('/admin/tools/jarek-gearboxes/ping', [JarekGearboxToolController::class, 'ping'])->name('admin.tools.jarek-gearboxes.ping');
     Route::get('/admin/tools/jarek-gearboxes/allegro-import-runner', [JarekGearboxToolController::class, 'runner'])->name('admin.tools.jarek-gearboxes.allegro-import-runner');
     Route::get('/admin/tools/jarek-gearboxes/runner', [JarekGearboxToolController::class, 'jarekRunner'])->name('admin.tools.jarek-gearboxes.runner');
