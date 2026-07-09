@@ -8,6 +8,8 @@ use App\Services\Shipments\DhlShipmentService;
 use App\Services\Shipments\ShipmentLabelService;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Filament\Support\Enums\MaxWidth;
+use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Storage;
@@ -21,7 +23,7 @@ class Shipments extends Page
     protected static ?string $navigationGroup = 'Przesyłki';
     protected static ?string $navigationIcon = null;
     protected static ?string $navigationLabel = 'Przesyłki';
-    protected static ?string $title = 'Przesyłki';
+    protected static ?string $title = '';
     protected static ?int $navigationSort = 70;
     protected static string $view = 'filament.pages.shipments';
 
@@ -42,6 +44,12 @@ class Shipments extends Page
 
     #[Url(as: 'per_page')]
     public string $perPage = '25';
+
+    public function getMaxContentWidth(): MaxWidth|string|null { return MaxWidth::Full; }
+
+    public function getTitle(): string|Htmlable { return ''; }
+
+    public function getHeading(): string|Htmlable { return ''; }
 
     public function updating(string $property): void
     {
