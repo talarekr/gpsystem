@@ -267,10 +267,7 @@ class DhlShipmentService
 
         $duplicateGuard = $this->duplicateCreateShipmentGuard((int) ($form['order_id'] ?? 0));
         if ($duplicateGuard['would_create_duplicate_if_clicked_again']) {
-            $tracking = $duplicateGuard['remote_tracking_number'] ?? $duplicateGuard['local_tracking_number'] ?? null;
-            throw new RuntimeException($tracking
-                ? 'DHL shipment '.$tracking.' already exists remotely for this order. Fetch existing label instead of creating a duplicate shipment.'
-                : 'DHL shipment already exists for this order. Fetch existing label instead of creating a duplicate shipment.');
+            throw new RuntimeException('DHL shipment appears to have been created remotely in previous attempt. Use recovery instead of creating a duplicate shipment.');
         }
 
         $payload = null;
@@ -438,51 +435,13 @@ class DhlShipmentService
         $log = $this->lastCreateShipmentLog($orderId);
         $parsed = $log ? $this->parseCreateShipmentResponse(data_get($log->payload ?? [], 'response')) : null;
         $labelExists = $shipment?->label_path ? Storage::disk('local')->exists($shipment->label_path) : false;
-        $remoteCreatedInLog = (bool) ($parsed && $parsed['remote_created']);
+        $remoteCreatedInLog = (bool) ($parsed && $parsed['remote_created'] && $parsed['has_label_content']);
         return [
             'would_create_duplicate_if_clicked_again' => (bool) ($shipment?->tracking_number || $shipment || $labelExists || $remoteCreatedInLog),
             'local_shipment_exists' => (bool) $shipment,
             'local_label_exists' => $labelExists,
             'last_log_id' => $log?->id,
             'remote_created_in_last_log' => $remoteCreatedInLog,
-            'remote_tracking_number' => $parsed['tracking_number'] ?? null,
-            'remote_package_tracking_number' => $parsed['package_tracking_number'] ?? null,
-            'local_tracking_number' => $shipment?->tracking_number ?: $shipment?->carrier_shipment_id,
-        ];
-    }
-
-    public function trackingUrl(?string $tracking): ?string
-    {
-        $tracking = trim((string) $tracking);
-        if ($tracking === '') return null;
-
-        return str_replace('{tracking}', rawurlencode($tracking), (string) config('services.dhl.tracking_url_template'));
-    }
-
-    public function adminOrderShipmentUiState(int $orderId): array
-    {
-        $shipment = Shipment::query()->where('order_id', $orderId)->where('carrier', 'dhl')->latest('id')->first();
-        $log = $this->lastCreateShipmentLog($orderId);
-        $parsed = $log ? $this->parseCreateShipmentResponse(data_get($log->payload ?? [], 'response')) : $this->parseCreateShipmentResponse(null);
-        $localShipmentExists = (bool) $shipment;
-        $remoteDetected = ! $localShipmentExists && (bool) $parsed['remote_created'];
-        $tracking = $parsed['tracking_number'] ?? null;
-
-        return [
-            'order_id' => $orderId,
-            'local_shipment_exists' => $localShipmentExists,
-            'remote_dhl_shipment_detected' => $remoteDetected,
-            'remote_tracking_number' => $tracking,
-            'remote_package_tracking_number' => $parsed['package_tracking_number'] ?? null,
-            'should_show_no_shipment_message' => ! $localShipmentExists && ! $remoteDetected,
-            'should_show_add_dhl_shipment_button' => ! $localShipmentExists && ! $remoteDetected,
-            'should_show_remote_created_warning' => $remoteDetected,
-            'should_show_tracking_link' => $remoteDetected && filled($tracking),
-            'tracking_url' => $this->trackingUrl($tracking),
-            'should_show_fetch_existing_label_action' => $remoteDetected,
-            'create_shipment_blocked_to_prevent_duplicate' => $remoteDetected,
-            'last_dhl_create_shipment_log_id' => $log?->id,
-            'code_marker' => 'dhl_order_shipment_ui_remote_created_v1',
         ];
     }
 
