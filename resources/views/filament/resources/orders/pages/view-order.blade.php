@@ -41,8 +41,9 @@
     $fulfillmentMeta = is_array($order->meta) ? $order->meta : [];
     $marketplaceFulfillmentStatus = $fulfillmentMeta['marketplace_fulfillment_status'] ?? null;
     try {
-        $shipmentCarrierKey = $shipment && is_scalar($shipment->carrier) ? (string) $shipment->carrier : '';
-        $carrier = $shipment ? (Shipment::CARRIERS[$shipmentCarrierKey] ?? ($shipmentCarrierKey !== '' ? $shipmentCarrierKey : null)) : null;
+        $shipmentCarrierKey = $shipment && is_scalar($shipment->carrier) ? trim((string) $shipment->carrier) : '';
+        $shipmentCarrierNormalized = Str::lower($shipmentCarrierKey);
+        $carrier = $shipmentCarrierNormalized !== '' ? (Shipment::CARRIERS[$shipmentCarrierNormalized] ?? null) : null;
         $shipmentTrackingNumber = $shipment && is_scalar($shipment->tracking_number) ? trim((string) $shipment->tracking_number) : '';
         $shipmentCarrierShipmentId = $shipment && is_scalar($shipment->carrier_shipment_id) ? trim((string) $shipment->carrier_shipment_id) : '';
         $shipmentLabelPath = $shipment && is_scalar($shipment->label_path) ? trim((string) $shipment->label_path) : '';
@@ -177,6 +178,10 @@
         : '—';
     $firstFilled = function (array $values): string {
         foreach ($values as $value) {
+            if (! is_scalar($value) && ! $value instanceof \Stringable) {
+                continue;
+            }
+
             $value = trim((string) $value);
 
             if ($value !== '' && $value !== '-') {
@@ -188,7 +193,7 @@
     };
     $joinFilled = function (array $values): string {
         return trim(implode(' ', array_filter(array_map(
-            fn (mixed $value): string => trim((string) $value),
+            fn (mixed $value): string => (is_scalar($value) || $value instanceof \Stringable) ? trim((string) $value) : '',
             $values,
         ), fn (string $value): bool => $value !== '' && $value !== '-')));
     };
@@ -208,6 +213,77 @@
     ], fn ($value) => filled($value)));
     $deliveryLines = app(\App\Support\OrderDeliveryDisplayResolver::class)->resolve($order);
     $addressLines = app(\App\Support\OrderShippingAddressDisplayResolver::class)->resolve($order);
+    $shipmentReceiverSnapshot = $shipment && is_array($shipment->receiver_snapshot) ? $shipment->receiver_snapshot : [];
+    $shipmentRequestReceiver = $shipment && is_array($shipment->request_payload) ? (array) data_get($shipment->request_payload, 'shipment.ship.receiver', []) : [];
+    $shipmentReceiverAddress = (array) data_get($shipmentReceiverSnapshot, 'address', []);
+    $shipmentRequestReceiverAddress = (array) data_get($shipmentRequestReceiver, 'address', []);
+    $shipmentReceiverName = $firstFilled([
+        data_get($shipmentReceiverSnapshot, 'person_name'),
+        data_get($shipmentReceiverSnapshot, 'personName'),
+        data_get($shipmentReceiverSnapshot, 'name'),
+        data_get($shipmentReceiverAddress, 'name'),
+        data_get($shipmentRequestReceiver, 'person_name'),
+        data_get($shipmentRequestReceiver, 'personName'),
+        data_get($shipmentRequestReceiver, 'name'),
+        data_get($shipmentRequestReceiverAddress, 'name'),
+        $order->customer_name,
+    ]);
+    $shipmentReceiverStreet = $firstFilled([
+        $joinFilled([data_get($shipmentReceiverSnapshot, 'street'), data_get($shipmentReceiverSnapshot, 'house_number')]),
+        $joinFilled([data_get($shipmentReceiverSnapshot, 'street'), data_get($shipmentReceiverSnapshot, 'houseNumber')]),
+        data_get($shipmentReceiverSnapshot, 'address'),
+        $joinFilled([data_get($shipmentReceiverAddress, 'street'), data_get($shipmentReceiverAddress, 'house_number')]),
+        $joinFilled([data_get($shipmentReceiverAddress, 'street'), data_get($shipmentReceiverAddress, 'houseNumber')]),
+        $joinFilled([data_get($shipmentRequestReceiver, 'street'), data_get($shipmentRequestReceiver, 'house_number')]),
+        $joinFilled([data_get($shipmentRequestReceiver, 'street'), data_get($shipmentRequestReceiver, 'houseNumber')]),
+        data_get($shipmentRequestReceiver, 'address'),
+        $joinFilled([data_get($shipmentRequestReceiverAddress, 'street'), data_get($shipmentRequestReceiverAddress, 'house_number')]),
+        $joinFilled([data_get($shipmentRequestReceiverAddress, 'street'), data_get($shipmentRequestReceiverAddress, 'houseNumber')]),
+        $order->address_line1,
+    ]);
+    $shipmentReceiverPostalCity = $joinFilled([
+        $firstFilled([
+            data_get($shipmentReceiverSnapshot, 'postal_code'),
+            data_get($shipmentReceiverSnapshot, 'postalCode'),
+            data_get($shipmentReceiverAddress, 'postal_code'),
+            data_get($shipmentReceiverAddress, 'postalCode'),
+            data_get($shipmentRequestReceiver, 'postal_code'),
+            data_get($shipmentRequestReceiver, 'postalCode'),
+            data_get($shipmentRequestReceiverAddress, 'postal_code'),
+            data_get($shipmentRequestReceiverAddress, 'postalCode'),
+            $order->postal_code,
+        ]),
+        $firstFilled([
+            data_get($shipmentReceiverSnapshot, 'city'),
+            data_get($shipmentReceiverAddress, 'city'),
+            data_get($shipmentRequestReceiver, 'city'),
+            data_get($shipmentRequestReceiverAddress, 'city'),
+            $order->city,
+        ]),
+    ]);
+    $shipmentReceiverCountry = $firstFilled([
+        data_get($shipmentReceiverSnapshot, 'country'),
+        data_get($shipmentReceiverAddress, 'country'),
+        data_get($shipmentRequestReceiver, 'country'),
+        data_get($shipmentRequestReceiverAddress, 'country'),
+        $order->country,
+    ]);
+    $shipmentReceiverPhone = $firstFilled([
+        data_get($shipmentReceiverSnapshot, 'phone'),
+        data_get($shipmentReceiverSnapshot, 'phone_number'),
+        data_get($shipmentReceiverSnapshot, 'phoneNumber'),
+        data_get($shipmentRequestReceiver, 'phone'),
+        data_get($shipmentRequestReceiver, 'phone_number'),
+        data_get($shipmentRequestReceiver, 'phoneNumber'),
+        $order->phone,
+    ]);
+    $shipmentReceiverLines = array_values(array_filter([
+        $shipmentReceiverName,
+        $shipmentReceiverStreet,
+        $shipmentReceiverPostalCity,
+        $shipmentReceiverCountry,
+        $shipmentReceiverPhone,
+    ], fn ($line): bool => $line !== ''));
     $invoiceDisplay = app(\App\Support\OrderInvoiceDisplayResolver::class)->resolve($order);
     $invoiceLines = $invoiceDisplay['lines'];
     $hasInvoiceData = $invoiceDisplay['has_invoice'];
@@ -451,13 +527,12 @@
                         </div>
                     @else
                         <div class="gps-order-detail-two">
-                            {{-- code_marker = order_shipment_section_ui_cleanup_v1 --}}
+                            {{-- code_marker = order_shipment_dhl_display_cleanup_v2 --}}
                             <div class="gps-order-detail-fact">
                                 <div class="gps-order-detail-label">Podsumowanie</div>
                                 <div class="gps-order-detail-value">
-                                    <div>Przewoźnik: {{ $carrier ?: ($shipmentCarrierKey !== '' ? strtoupper($shipmentCarrierKey) : '—') }}</div>
-                                    <div>Tracking: @if ($shipmentTrackingUrl)<a href="{{ $shipmentTrackingUrl }}" target="_blank" rel="noopener noreferrer">{{ $shipmentTrackingDisplay }}</a>@else—@endif</div>
-                                    <div>Status lokalny: {{ $shipmentStatus !== '' ? $shipmentStatus : '—' }}</div>
+                                    <div>Przewoźnik: {{ $carrier ?: '—' }}</div>
+                                    <div>Przesyłka: @if ($shipmentTrackingUrl)<a class="underline text-primary-600 hover:text-primary-500 dark:text-primary-400 dark:hover:text-primary-300" href="{{ $shipmentTrackingUrl }}" target="_blank" rel="noopener noreferrer">{{ $shipmentTrackingDisplay }}</a>@else—@endif</div>
                                     <div>Utworzono: {{ $shipment->created_at?->format('Y-m-d H:i') ?: '—' }}</div>
                                     @if ($shipmentLabelMissing)
                                         <div class="gps-order-detail-muted">Numer listu DHL: {{ $shipmentTrackingNumber !== '' ? $shipmentTrackingNumber : $shipmentCarrierShipmentId }}</div>
@@ -473,7 +548,11 @@
                             <div class="gps-order-detail-fact">
                                 <div class="gps-order-detail-label">Adres dostawy</div>
                                 <div class="gps-order-detail-value">
-                                    <div>jak w zamówieniu</div>
+                                    @forelse ($shipmentReceiverLines as $line)
+                                        <div>{{ $line }}</div>
+                                    @empty
+                                        <div>—</div>
+                                    @endforelse
                                 </div>
                             </div>
                         </div>
