@@ -510,6 +510,7 @@ class ShipmentDiagnoseController extends Controller
             'errors' => [],
             'audit_debug' => [
                 'used_real_builder' => true,
+                'received_table_discovery_shipments_exists' => false,
                 'shipments_table_exists' => false,
                 'selected_columns' => [],
                 'count_query_attempted' => false,
@@ -526,6 +527,7 @@ class ShipmentDiagnoseController extends Controller
         $required = ['id', 'order_id', 'carrier', 'service_code', 'shipment_status', 'tracking_number', 'carrier_shipment_id', 'label_path', 'label_format', 'created_at', 'updated_at'];
         $select = array_values(array_intersect($required, $columns));
 
+        $audit['audit_debug']['received_table_discovery_shipments_exists'] = $tableExists;
         $audit['audit_debug']['shipments_table_exists'] = $tableExists;
         $audit['audit_debug']['selected_columns'] = $select;
 
