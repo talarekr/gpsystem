@@ -494,7 +494,11 @@ class DhlShipmentService
     public function duplicateCreateShipmentGuard(?int $orderId): array
     {
         if (! $orderId) return ['would_create_duplicate_if_clicked_again' => false];
-        $shipment = Shipment::query()->where('order_id', $orderId)->where('carrier', 'dhl')->latest('id')->first();
+        $shipment = Shipment::query()
+            ->where('order_id', $orderId)
+            ->whereRaw('LOWER(carrier) = ?', ['dhl'])
+            ->latest('id')
+            ->first();
         $log = $this->lastCreateShipmentLog($orderId);
         $parsed = $log ? $this->parseCreateShipmentResponse(data_get($log->payload ?? [], 'response')) : null;
         $labelExists = $this->safeLocalLabelExists($shipment?->label_path);

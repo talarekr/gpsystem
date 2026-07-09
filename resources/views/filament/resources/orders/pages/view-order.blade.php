@@ -457,7 +457,9 @@
                                         <div><a href="https://www.dhl.com/pl-pl/home/tracking/tracking-parcel.html?submit=1&tracking-id={{ urlencode($shipmentTrackingNumber !== '' ? $shipmentTrackingNumber : $shipmentCarrierShipmentId) }}" target="_blank" rel="noopener noreferrer">Śledź przesyłkę DHL</a></div>
                                     @endif
                                     @if ($shipmentLabelMissing)
+                                        <div class="gps-order-detail-muted">Numer listu DHL: {{ $shipmentTrackingNumber !== '' ? $shipmentTrackingNumber : $shipmentCarrierShipmentId }}</div>
                                         <div class="gps-order-detail-muted">Lokalny rekord przesyłki istnieje, ale plik etykiety PDF nie istnieje.</div>
+                                        <div class="gps-order-detail-muted">Nie twórz nowej przesyłki DHL.</div>
                                     @endif
                                     <div>Marketplace: {{ $marketplaceFulfillmentStatus === 'synced' ? 'tracking wysłany' : ($marketplaceFulfillmentStatus === 'error' ? 'błąd' : 'tracking nie wysłany') }}</div>
                                 </div>
