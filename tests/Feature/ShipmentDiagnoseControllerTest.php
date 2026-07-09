@@ -159,6 +159,7 @@ class ShipmentDiagnoseControllerTest extends TestCase
             ->assertJsonPath('status', 'ok')
             ->assertJsonPath('section_result.total_count', 1)
             ->assertJsonPath('section_result.audit_debug.used_real_builder', true)
+            ->assertJsonPath('section_result.audit_debug.received_table_discovery_shipments_exists', true)
             ->assertJsonPath('section_result.audit_debug.shipments_table_exists', true)
             ->assertJsonPath('section_result.audit_debug.selected_columns', [
                 'id',
@@ -177,6 +178,79 @@ class ShipmentDiagnoseControllerTest extends TestCase
             ->assertJsonPath('section_result.audit_debug.recent_query_attempted', true)
             ->assertJsonPath('section_result.errors', [])
             ->assertJsonCount(1, 'section_result.recent_records');
+    }
+
+    public function test_safe_diagnostics_shipments_table_audit_matches_section_and_builds_repair_candidate(): void
+    {
+        DB::table('orders')->insert([
+            'id' => 153,
+            'order_number' => 'TEST-153',
+            'status' => 'new',
+            'currency' => 'PLN',
+            'subtotal' => 0,
+            'shipping_total' => 0,
+            'total' => 0,
+            'customer_name' => 'Test Customer',
+            'email' => 'test@example.test',
+            'phone' => '+48123123123',
+            'address_line1' => 'Test 1',
+            'postal_code' => '00-000',
+            'city' => 'Testowo',
+            'country' => 'PL',
+            'created_at' => '2026-07-09 12:00:00',
+            'updated_at' => '2026-07-09 12:00:00',
+        ]);
+
+        DB::table('shipments')->insert([
+            'id' => 1,
+            'order_id' => 153,
+            'carrier' => 'dhl',
+            'service_code' => 'AH',
+            'shipment_status' => 'label_created',
+            'tracking_number' => '31294120912',
+            'carrier_shipment_id' => '31294120912',
+            'label_path' => 'shipments/labels/dhl/31294120912.pdf',
+            'label_format' => 'application/pdf',
+            'created_at' => '2026-07-09 12:00:00',
+            'updated_at' => '2026-07-09 12:00:00',
+        ]);
+
+        $section = $this->withoutMiddleware()->getJson('/admin/tools/shipments/diagnose?order_id=153&json=1&section=shipments_table_audit');
+        $safe = $this->withoutMiddleware()->getJson('/admin/tools/shipments/diagnose?order_id=153&json=1&safe=1');
+
+        $section->assertOk()
+            ->assertJsonPath('section_result.total_count', 1)
+            ->assertJsonCount(1, 'section_result.records_with_non_empty_missing_label_file');
+
+        $safe->assertOk()
+            ->assertJsonPath('shipments_table_audit.total_count', 1)
+            ->assertJsonPath('shipments_table_audit.audit_debug.used_real_builder', true)
+            ->assertJsonPath('shipments_table_audit.audit_debug.received_table_discovery_shipments_exists', true)
+            ->assertJsonPath('shipments_table_audit.audit_debug.shipments_table_exists', true)
+            ->assertJsonPath('shipments_table_audit.audit_debug.count_query_attempted', true)
+            ->assertJsonPath('shipments_table_audit.audit_debug.recent_query_attempted', true)
+            ->assertJsonCount(1, 'shipments_table_audit.records_with_non_empty_missing_label_file')
+            ->assertJsonPath('shipment_repair_candidate.needed', true)
+            ->assertJsonPath('shipment_repair_candidate.shipment_id', 1)
+            ->assertJsonPath('shipment_repair_candidate.order_id', 153)
+            ->assertJsonPath('shipment_repair_candidate.tracking_number', '31294120912')
+            ->assertJsonPath('shipment_repair_candidate.carrier_shipment_id', '31294120912')
+            ->assertJsonPath('shipment_repair_candidate.service_code', 'AH')
+            ->assertJsonPath('shipment_repair_candidate.shipment_status', 'label_created')
+            ->assertJsonPath('shipment_repair_candidate.label_path', 'shipments/labels/dhl/31294120912.pdf')
+            ->assertJsonPath('shipment_repair_candidate.label_file_exists', false)
+            ->assertJsonPath('shipment_repair_candidate.problem', 'shipment has label_path and label_created status, but local PDF file does not exist')
+            ->assertJsonPath('shipment_repair_candidate.safe_ui_should_disable_pdf_download', true)
+            ->assertJsonPath('shipment_repair_candidate.safe_ui_should_block_create_shipment', true);
+
+        $this->assertSame(
+            $section->json('section_result.total_count'),
+            $safe->json('shipments_table_audit.total_count')
+        );
+        $this->assertSame(
+            $section->json('section_result.records_with_non_empty_missing_label_file'),
+            $safe->json('shipments_table_audit.records_with_non_empty_missing_label_file')
+        );
     }
 
 }
