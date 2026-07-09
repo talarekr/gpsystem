@@ -33,11 +33,11 @@
             @endphp
             <div class="gps-card gps-shipments-grid" wire:key="shipment-{{ $shipment->id }}">
                 <div class="gps-title">#{{ $shipment->id }}</div>
-                <div><div class="gps-title">{{ $shipment->order?->order_number ?? '—' }}</div><div class="gps-muted">{{ $shipment->order?->customer_name ?? 'Brak klienta' }}</div></div>
+                <div><div class="gps-title">{{ $this->safeString($shipment->order?->order_number) ?: '—' }}</div><div class="gps-muted">{{ $this->safeString($shipment->order?->customer_name) ?: 'Brak klienta' }}</div></div>
                 <div><span class="gps-badge">{{ $carrier ? strtoupper($carrier) : '—' }}</span></div>
                 <div><span class="gps-badge">{{ $status ?: '—' }}</span></div>
                 <div>{{ $tracking ?: '—' }}</div>
-                <div>@if($labelExists)<a class="gps-action" href="{{ route('tools.download-shipment-label', $shipment) }}">Pobierz etykietę</a>@elseif($labelPath)<span class="gps-muted">Brak pliku etykiety</span>@else <span class="gps-muted">—</span> @endif</div>
+                <div>@if($labelExists)<a class="gps-action" href="{{ route('tools.download-shipment-label', ['shipment' => $shipment->id]) }}">Pobierz etykietę</a>@elseif($labelPath)<span class="gps-muted">Brak pliku etykiety</span>@else <span class="gps-muted">—</span> @endif</div>
                 <div class="gps-actions">
                     <a href="{{ \App\Filament\Pages\ShipmentDetails::getUrl(['shipment' => $shipment->id]) }}" class="gps-action">Szczegóły</a>
                     @if($labelExists)<button type="button" wire:click="downloadLabel({{ $shipment->id }})" class="gps-action">Pobierz etykietę PDF</button>@endif
