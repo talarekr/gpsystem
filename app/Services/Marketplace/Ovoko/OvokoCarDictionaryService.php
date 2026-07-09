@@ -62,6 +62,7 @@ class OvokoCarDictionaryService
             'last_sync_error' => $this->lastSyncError(),
             'brand_search' => $this->brandSearchDiagnostics($brandSearch),
             'model_modification_diagnostics' => $this->modelModificationDiagnostics(),
+            'import_car_model_requirements' => $this->importCarModelRequirements(),
             'safety_flags' => ['read_only_diagnose' => true, 'no_import_car' => true, 'no_import_part' => true, 'no_parts_mutation' => true, 'no_local_cars_mutation' => true],
         ];
     }
@@ -183,6 +184,32 @@ class OvokoCarDictionaryService
             ],
             'cache_models_with_years_count' => $modelRowsWithYears,
             'notes' => 'Static code review found only /get/car_models/{brand_id} for the cached models dictionary. The local cache has no dedicated parent/model/series columns, but raw_payload can now be included with include_raw=1 to inspect whether Ovoko returns such fields. No separate local endpoint/client method for a general model level or a modification level was found, and this read-only diagnostic does not call Ovoko, import cars, import parts, or mutate local data.',
+        ];
+    }
+
+
+    private function importCarModelRequirements(): array
+    {
+        return [
+            'source' => 'official_docs_and_static_code_review',
+            'required_fields_from_docs' => ['car_model'],
+            'car_model_field_meaning' => 'modification_or_generation',
+            'car_model_expected_source' => '/get/car_models/{brand_id}',
+            'separate_general_model_field_found' => false,
+            'separate_modification_field_found' => false,
+            'separate_general_model_endpoint_found' => false,
+            'separate_modification_endpoint_found' => false,
+            'docs_example' => [
+                'endpoint' => 'POST /crm/importCar',
+                'fields' => [
+                    'car_model' => '1548',
+                    'car_years' => '2004',
+                    'car_fuel' => '1',
+                    'external_id' => 'gps-car-123',
+                ],
+                'car_model_example_matches_cached_car_models_id' => true,
+            ],
+            'notes' => 'Official Ovoko/RRR importCar documentation and the current client surface expose car_model as the required model identifier for POST /crm/importCar. The only implemented/read-only dictionary source for that identifier is /get/car_models/{brand_id}. Those dictionary rows include generation-like names and years (for example BMW 3 E46 / X4 F26 style entries), so this diagnostic treats car_model as the modification/generation-level ID rather than a separate parent model/series label. No documented/importCar field or current client/cache support was found for an additional general-model field separate from car_model, and no separate endpoint for parent/general models or model modifications is implemented in this codebase. This endpoint is read-only and does not call importCar, importPart, or mutate cars/parts.',
         ];
     }
 
