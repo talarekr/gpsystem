@@ -247,9 +247,19 @@ class OvokoCarDictionariesDiagnoseControllerTest extends TestCase
             'name' => '5 E60 E61',
             'year_start' => '2004',
             'year_end' => '2010',
+        ], [
+            'id' => '9999',
+            'name' => 'Missing years',
+            'year_start' => ' ',
+            'year_end' => 'not-a-year',
+        ], [
+            'id' => '10000',
+            'name' => 'Zero years',
+            'year_start' => '0',
+            'year_end' => null,
         ]], '1');
 
-        $this->assertSame(2, $stored);
+        $this->assertSame(4, $stored);
         $this->assertDatabaseHas('ovoko_car_dictionary_entries', [
             'dictionary' => 'models',
             'ovoko_id' => '1548',
@@ -263,6 +273,20 @@ class OvokoCarDictionariesDiagnoseControllerTest extends TestCase
             'ovoko_brand_id' => '1',
             'year_from' => 2004,
             'year_to' => 2010,
+        ]);
+        $this->assertDatabaseHas('ovoko_car_dictionary_entries', [
+            'dictionary' => 'models',
+            'ovoko_id' => '9999',
+            'ovoko_brand_id' => '1',
+            'year_from' => null,
+            'year_to' => null,
+        ]);
+        $this->assertDatabaseHas('ovoko_car_dictionary_entries', [
+            'dictionary' => 'models',
+            'ovoko_id' => '10000',
+            'ovoko_brand_id' => '1',
+            'year_from' => null,
+            'year_to' => null,
         ]);
     }
 
