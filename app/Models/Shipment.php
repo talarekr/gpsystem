@@ -11,7 +11,7 @@ class Shipment extends Model
     use HasFactory;
 
     public const CARRIERS = ['dhl' => 'DHL', 'dpd' => 'DPD'];
-    public const STATUSES = ['draft', 'previewed', 'created', 'label_created', 'label_missing', 'failed'];
+    public const STATUSES = ['draft', 'previewed', 'created', 'label_created', 'label_missing', 'remote_created_label_missing', 'failed'];
 
     protected $fillable = [
         'order_id', 'carrier', 'service_code', 'shipment_status', 'tracking_number', 'carrier_shipment_id', 'label_path', 'label_format',

@@ -4,11 +4,13 @@ namespace Tests\Unit;
 
 use App\Models\Order;
 use App\Services\Shipments\DhlShipmentService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use RuntimeException;
 use Tests\TestCase;
 
 class DhlShipmentServiceDefaultsTest extends TestCase
 {
+    use RefreshDatabase;
     public function test_defaults_use_current_sender_configuration(): void
     {
         config()->set('services.shipments.sender', [
@@ -188,6 +190,64 @@ class DhlShipmentServiceDefaultsTest extends TestCase
         $this->assertSame('application/pdf', $parsed['label_format']);
         $this->assertSame('LBLP', $parsed['label_type']);
         $this->assertTrue($parsed['has_label_content']);
+
+        $arrayParsed = app(DhlShipmentService::class)->parseCreateShipmentResponse([
+            'createShipmentResult' => [[
+                'shipmentTrackingNumber' => '31294120912',
+                'label' => ['labelContent' => 'base64'],
+            ]],
+        ]);
+
+        $this->assertSame('31294120912', $arrayParsed['tracking_number']);
+        $this->assertSame('base64', $arrayParsed['label_content']);
+    }
+
+    public function test_create_does_not_mark_label_created_when_pdf_save_fails(): void
+    {
+        config()->set('services.dhl.endpoint', '');
+
+        $service = new class extends DhlShipmentService {
+            protected function callCreateShipment(array $payload): array
+            {
+                return [
+                    'createShipmentResult' => [
+                        'shipmentTrackingNumber' => '31294120912',
+                        'packagesTrackingNumbers' => 'JJD000030249582000000000373',
+                        'label' => [
+                            'labelFormat' => 'application/pdf',
+                            'labelContent' => base64_encode('%PDF-1.4 test'),
+                        ],
+                    ],
+                ];
+            }
+
+            protected function writeDhlLabelFile(string $path, string $labelBinary): bool
+            {
+                return false;
+            }
+        };
+
+        $form = $service->defaults();
+        $form['order_id'] = null;
+        $form['receiver']['name'] = 'Jan Test';
+        $form['receiver']['country'] = 'PL';
+        $form['receiver']['postal_code'] = '00-001';
+        $form['receiver']['city'] = 'Warszawa';
+        $form['receiver']['street'] = 'Testowa';
+        $form['receiver']['house_number'] = '1';
+
+        try {
+            $service->create($form);
+            $this->fail('Expected failed local PDF save to throw.');
+        } catch (RuntimeException $exception) {
+            $this->assertStringContainsString('local label PDF was not saved', $exception->getMessage());
+        }
+
+        $shipment = \App\Models\Shipment::query()->where('tracking_number', '31294120912')->first();
+        $this->assertNotNull($shipment);
+        $this->assertSame('remote_created_label_missing', $shipment->shipment_status);
+        $this->assertNull($shipment->label_path);
+        $this->assertSame('31294120912', $shipment->carrier_shipment_id);
     }
 
 }
