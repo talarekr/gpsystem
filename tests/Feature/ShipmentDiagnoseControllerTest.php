@@ -64,6 +64,30 @@ class ShipmentDiagnoseControllerTest extends TestCase
             ->assertJsonPath('diagnostics_health.sections_completed', ['input']);
     }
 
+    public function test_table_discovery_section_returns_candidate_table_details(): void
+    {
+        $expected = [
+            'shipments',
+            'shipment_labels',
+            'shipping_labels',
+            'order_shipments',
+            'orders',
+            'marketplace_sync_logs',
+            'api_integration_logs',
+            'integration_logs',
+            'order_logs',
+            'labels',
+        ];
+
+        $response = $this->withoutMiddleware()->getJson('/admin/tools/shipments/diagnose?order_id=153&json=1&section=table_discovery');
+
+        $response->assertOk()
+            ->assertJsonPath('code_marker', 'shipment_module_crash_diagnostics_safe_v4')
+            ->assertJsonPath('section_only', 'table_discovery')
+            ->assertJsonPath('section_result.candidate_tables_checked', $expected)
+            ->assertJsonStructure(['section_result' => ['tables' => ['shipments' => ['exists', 'columns', 'relevant_columns_present', 'error']]]]);
+    }
+
     public function test_safe_diagnostics_uses_same_candidate_table_list_for_build_and_discovery(): void
     {
         $expected = [
@@ -84,8 +108,10 @@ class ShipmentDiagnoseControllerTest extends TestCase
         $response->assertOk()
             ->assertJsonPath('code_marker', 'shipment_module_crash_diagnostics_safe_v4')
             ->assertJsonPath('table_discovery.candidate_tables_checked', $expected)
-            ->assertJsonPath('candidate_tables.candidate_tables_checked', $expected)
-            ->assertJsonPath('candidate_tables.count', 10)
-            ->assertJsonPath('diagnostics_build.candidate_table_list_count', 10);
+            ->assertJsonPath('diagnostics_build.candidate_table_list_count', 10)
+            ->assertJsonMissingPath('candidate_tables')
+            ->assertJsonMissing(['sections_failed' => ['candidate_tables']])
+            ->assertJsonStructure(['app' => ['environment', 'php_version', 'laravel_version']])
+            ->assertJsonStructure(['table_discovery' => ['tables' => ['shipments' => ['exists', 'columns', 'relevant_columns_present', 'error']]]]);
     }
 }
