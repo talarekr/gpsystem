@@ -72,8 +72,8 @@ class DhlConfigDiagnoseController extends Controller
                 'DHL24_MODE',
                 'DHL_DEFAULT_SERVICE',
                 'DHL24_DEFAULT_SERVICE_TYPE',
-                'DHL_DEFAULT_INTERNATIONAL_SERVICE',
                 'DHL24_DEFAULT_INTERNATIONAL_SERVICE_TYPE',
+                'DHL_DEFAULT_INTERNATIONAL_SERVICE',
                 'DHL_LABEL_TYPE',
                 'DHL24_LABEL_TYPE',
                 'DHL_DROP_OFF_TYPE',
@@ -85,6 +85,12 @@ class DhlConfigDiagnoseController extends Controller
                 'config:services.dhl.test_mode',
                 'config:services.dhl.default_service',
                 'config:services.dhl.default_international_service',
+            ],
+            'diagnostic_routes' => [
+                'canonical' => url('/admin/tools/dhl/config-diagnose'),
+                'orders_alias' => url('/admin/tools/orders/dhl-diagnose'),
+                'canonical_route_name' => 'admin.tools.dhl.config-diagnose',
+                'orders_alias_route_name' => 'admin.tools.orders.dhl-diagnose',
             ],
             'dhl_config_runtime' => [
                 'enabled' => filled($endpoint) && filled($login) && filled($password) && filled($accountNumber),
