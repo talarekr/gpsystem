@@ -46,14 +46,12 @@ class OvokoImportCarControllerTest extends TestCase
             && $request['user_token'] === 'token'
             && $request['car_model'] === '2600'
             && (int) $request['car_years'] === 2007
-            && $request['status'] === '1'
             && $request['external_id'] === 'gps-car-'.$car->id
             && ! isset($request['part_id']));
 
         $car->refresh();
         $this->assertSame('RRR-499', data_get($car->legacy_payload, 'ovoko_car_id'));
         $this->assertSame('2600', data_get($car->legacy_payload, 'import_car_request_payload.car_model'));
-        $this->assertSame('1', data_get($car->legacy_payload, 'import_car_request_payload.status'));
         $this->assertSame('R200', data_get($car->legacy_payload, 'status_code'));
     }
 
@@ -70,24 +68,6 @@ class OvokoImportCarControllerTest extends TestCase
             ->assertJsonPath('blocked', true)
             ->assertJsonPath('reason', 'local_car_already_has_ovoko_car_id')
             ->assertJsonPath('ovoko_car_id', 'EXISTING-1');
-    }
-
-
-    public function test_import_car_is_blocked_without_ovoko_status_id_and_does_not_call_ovoko(): void
-    {
-        $this->actingAsAdminUser();
-        $car = $this->readyCar(['ovoko_status_id' => null]);
-        $this->ovokoAccount();
-        Http::fake(function (): void { $this->fail('Cars without ovoko_status_id must not call Ovoko importCar.'); });
-
-        $this->postJson('/admin/tools/ovoko/import-car', ['car_id' => $car->id, 'confirm' => 'import-ovoko-car'])
-            ->assertStatus(422)
-            ->assertJsonPath('ok', false)
-            ->assertJsonPath('blocked', true)
-            ->assertJsonPath('reason', 'local_car_not_ready_for_import_car')
-            ->assertJsonFragment(['ovoko_status_id']);
-
-        Http::assertNothingSent();
     }
 
     public function test_readiness_after_imported_car_marks_payload_as_already_imported(): void
@@ -108,7 +88,6 @@ class OvokoImportCarControllerTest extends TestCase
     {
         OvokoCarDictionaryEntry::query()->firstOrCreate(['dictionary' => 'brands', 'ovoko_id' => '1', 'ovoko_brand_id' => ''], ['name' => 'BMW', 'synced_at' => now()]);
         OvokoCarDictionaryEntry::query()->firstOrCreate(['dictionary' => 'models', 'ovoko_id' => '2600', 'ovoko_brand_id' => '1'], ['name' => '5 E60 E61', 'year_from' => 2004, 'year_to' => 2010, 'synced_at' => now()]);
-        OvokoCarDictionaryEntry::query()->firstOrCreate(['dictionary' => 'car_status', 'ovoko_id' => '1', 'ovoko_brand_id' => ''], ['name' => 'kupiony', 'synced_at' => now()]);
 
         return Car::query()->create([
             'make' => 'BMW',
@@ -119,7 +98,6 @@ class OvokoImportCarControllerTest extends TestCase
                 'ovoko_brand_id' => '1',
                 'ovoko_model_group_label' => 'Series 5',
                 'ovoko_car_model_id' => '2600',
-                'ovoko_status_id' => '1',
             ], $legacyOverrides),
         ]);
     }

@@ -175,21 +175,7 @@ class CarResource extends Resource
                             ->label('Status samochodu / zakupu')
                             ->options(Car::statusOptions())
                             ->default('kupiony')
-                            ->native(false)
-                            ->afterStateUpdated(function (?string $state, Set $set, Get $get): void {
-                                if ($state === 'kupiony' && blank($get('legacy_payload.ovoko_status_id'))) {
-                                    $set('legacy_payload.ovoko_status_id', self::defaultOvokoStatusIdForPurchasedLocalStatus());
-                                }
-                            })
-                            ->live(),
-                        Forms\Components\Select::make('legacy_payload.ovoko_status_id')
-                            ->label('Status Ovoko')
-                            ->searchable()
-                            ->preload()
-                            ->native(false)
-                            ->options(static fn (): array => self::ovokoCarStatusOptions())
-                            ->default(static fn (): ?string => self::defaultOvokoStatusIdForPurchasedLocalStatus())
-                            ->helperText('Wymagane dla importCar. Wybór korzysta z lokalnego cache Ovoko car_status i zapisuje ovoko_status_id.'),
+                            ->native(false),
                         Forms\Components\DatePicker::make('purchase_date')
                             ->label('Data zakupu')
                             ->native(false),
@@ -275,33 +261,6 @@ class CarResource extends Resource
         $data['legacy_payload'] = $payload;
 
         return $data;
-    }
-
-    /**
-     * @return array<string, string>
-     */
-    private static function ovokoCarStatusOptions(): array
-    {
-        return OvokoCarDictionaryEntry::query()
-            ->where('dictionary', 'car_status')
-            ->orderBy('name')
-            ->pluck('name', 'ovoko_id')
-            ->all();
-    }
-
-    private static function defaultOvokoStatusIdForPurchasedLocalStatus(): ?string
-    {
-        $status = OvokoCarDictionaryEntry::query()
-            ->where('dictionary', 'car_status')
-            ->where(function (Builder $query): void {
-                $query->whereRaw('LOWER(name) = ?', ['kupiony'])
-                    ->orWhereRaw('LOWER(name) = ?', ['purchased'])
-                    ->orWhereRaw('LOWER(name) = ?', ['bought']);
-            })
-            ->orderByRaw('CASE WHEN LOWER(name) = ? THEN 0 ELSE 1 END', ['kupiony'])
-            ->first(['ovoko_id']);
-
-        return $status ? (string) $status->ovoko_id : null;
     }
 
     /**
