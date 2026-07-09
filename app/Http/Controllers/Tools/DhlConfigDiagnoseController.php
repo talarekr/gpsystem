@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\Storage;
 
 class DhlConfigDiagnoseController extends Controller
 {
-    private const CODE_MARKER = 'dhl_order_shipment_ui_remote_created_v1';
+    private const CODE_MARKER = 'dhl_response_parser_recovery_v1';
 
     public function __invoke(Request $request): JsonResponse
     {
@@ -86,7 +86,6 @@ class DhlConfigDiagnoseController extends Controller
                 'config:services.dhl.test_mode',
                 'config:services.dhl.default_service',
                 'config:services.dhl.default_international_service',
-                'config:services.dhl.tracking_url_template',
             ],
             'diagnostic_routes' => [
                 'canonical' => url('/admin/tools/dhl/config-diagnose'),
@@ -134,7 +133,6 @@ class DhlConfigDiagnoseController extends Controller
             ],
             'dhl_service_selection' => $serviceSelection,
             'dhl_response_parse_diagnostics' => $this->responseParseDiagnostics($request),
-            'admin_order_shipment_ui_state' => $this->adminOrderShipmentUiState($request),
             'last_dhl_create_shipment_error' => $lastError,
             'probable_causes' => $this->probableCauses($login, $password, $accountNumber, $modeMatchesEndpoint, $lastError),
             'what_user_should_check_in_env' => [
@@ -151,31 +149,6 @@ class DhlConfigDiagnoseController extends Controller
     }
 
 
-
-    private function adminOrderShipmentUiState(Request $request): array
-    {
-        $orderId = $request->integer('order_id') ?: null;
-
-        if (! $orderId) {
-            return [
-                'order_id' => null,
-                'local_shipment_exists' => false,
-                'remote_dhl_shipment_detected' => false,
-                'remote_tracking_number' => null,
-                'remote_package_tracking_number' => null,
-                'should_show_no_shipment_message' => true,
-                'should_show_add_dhl_shipment_button' => true,
-                'should_show_remote_created_warning' => false,
-                'should_show_tracking_link' => false,
-                'tracking_url' => null,
-                'should_show_fetch_existing_label_action' => false,
-                'create_shipment_blocked_to_prevent_duplicate' => false,
-                'code_marker' => self::CODE_MARKER,
-            ];
-        }
-
-        return app(DhlShipmentService::class)->adminOrderShipmentUiState($orderId);
-    }
 
     private function responseParseDiagnostics(Request $request): array
     {
