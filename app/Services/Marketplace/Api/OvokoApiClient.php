@@ -45,6 +45,74 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
 
 
 
+
+    /**
+     * Fetch read-only Ovoko/RRR car dictionaries using form credentials.
+     */
+    public function fetchCarDictionary(string $dictionary, ?string $brandId = null, int $timeoutSeconds = 30): array
+    {
+        $paths = [
+            'brands' => '/get/car_brands',
+            'models' => '/get/car_models/'.rawurlencode((string) $brandId),
+            'fuel' => '/get/fuel',
+            'gearbox_type' => '/get/gearbox_type',
+            'body_type' => '/get/car_body_type',
+            'wheel' => '/get/wheel',
+            'wheel_drive' => '/get/wheel_drive',
+            'car_status' => '/get/car_status',
+            'car_class' => '/get/car_class',
+        ];
+
+        if (! isset($paths[$dictionary])) {
+            throw new \InvalidArgumentException('Unsupported Ovoko/RRR car dictionary.');
+        }
+
+        if ($dictionary === 'models' && blank($brandId)) {
+            throw new \InvalidArgumentException('Ovoko/RRR car models dictionary requires brand_id.');
+        }
+
+        $endpoint = rtrim((string) $this->account?->api_base_url, '/').$paths[$dictionary];
+        $response = Http::asForm()->acceptJson()->timeout(max(1, $timeoutSeconds))->post($endpoint, $this->authFields());
+        $json = $response->json();
+        $payload = is_array($json) ? $json : [];
+        $statusCode = $payload['status_code'] ?? null;
+        $apiOk = $response->successful() && ($statusCode === 'R200' || $statusCode === 200 || $statusCode === null);
+
+        return [
+            'http_status' => $response->status(),
+            'api_status_code' => $statusCode,
+            'api_ok' => $apiOk,
+            'endpoint_used' => $endpoint,
+            'dictionary' => $dictionary,
+            'brand_id' => $brandId,
+            'rows' => $this->extractDictionaryRows($payload),
+            'error' => $apiOk ? null : ($payload['msg'] ?? $payload['message'] ?? 'Ovoko/RRR dictionary endpoint did not return a success status.'),
+            'response_top_level_keys' => array_values(array_slice(array_keys($payload), 0, 30)),
+        ];
+    }
+
+    private function extractDictionaryRows(array $payload): array
+    {
+        $rows = $payload['list'] ?? $payload['data'] ?? $payload['items'] ?? $payload['result'] ?? null;
+        if ($rows === null && ! array_key_exists('status_code', $payload) && ! array_key_exists('msg', $payload) && ! array_key_exists('message', $payload)) {
+            $rows = $payload;
+        }
+        if (! is_array($rows)) return [];
+
+        $normalized = [];
+        foreach ($rows as $key => $row) {
+            if (is_array($row)) {
+                $normalized[] = $row + (is_string($key) || is_int($key) ? ['id' => $row['id'] ?? $key] : []);
+                continue;
+            }
+            if (is_string($row) || is_numeric($row)) {
+                $normalized[] = ['id' => $key, 'name' => $row];
+            }
+        }
+
+        return array_values(array_filter($normalized, 'is_array'));
+    }
+
     public const PART_STATUS_IN_STOCK = 0;
     public const PART_STATUS_RESERVED = 1;
     public const PART_STATUS_SOLD_OUT = 2;
