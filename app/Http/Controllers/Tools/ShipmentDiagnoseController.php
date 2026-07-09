@@ -2,146 +2,292 @@
 
 namespace App\Http\Controllers\Tools;
 
-use App\Filament\Pages\Shipments as ShipmentsPage;
 use App\Http\Controllers\Controller;
-use App\Models\Shipment;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
-use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
 use Throwable;
 
 class ShipmentDiagnoseController extends Controller
 {
-    private const CODE_MARKER = 'shipment_module_crash_diagnostics_safe_v1';
+    private const CODE_MARKER = 'shipment_module_crash_diagnostics_safe_v2';
     private const TRACKING = '31294120912';
     private const PACKAGE_TRACKING = 'JJD000030249582000000000373';
     private const RECENT_SINCE = '2026-07-09 10:39:00';
 
     public function __invoke(Request $request): JsonResponse
     {
-        $orderId = (int) $request->integer('order_id');
-        $payload = $this->emptyPayload($orderId);
+        try {
+            $orderId = (int) $request->integer('order_id');
 
-        $this->guard($payload['shipment_tables']['errors'], 'shipment_tables', fn () => $this->probeTables($payload));
-        $this->guard($payload['shipments_probe']['errors'], 'shipments_probe', fn () => $this->probeShipments($payload, $orderId));
-        $this->guard($payload['labels_probe']['errors'], 'labels_probe', fn () => $this->probeLabels($payload, $orderId));
-        $this->guard($payload['filament_shipments_risk']['errors'], 'filament_risk', fn () => $this->probeFilamentRisk($payload));
-        $this->guard($payload['last_exceptions']['errors'], 'last_exceptions', fn () => $this->probeLastExceptions($payload, $orderId));
+            if ($request->boolean('minimal')) {
+                return response()->json($this->minimalPayload($orderId), 200, [], $this->jsonFlags());
+            }
 
-        $payload['safe_recommendation'] = $this->recommendation($payload);
+            $payload = $this->emptyPayload($orderId);
 
-        return response()->json($payload, 200, [], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $this->guard($payload, 'input', fn () => $this->probeInput($payload, $request, $orderId));
+            $this->guard($payload, 'app', fn () => $this->probeApp($payload));
+            $this->guard($payload, 'table_discovery', fn () => $this->probeTables($payload));
+            $this->guard($payload, 'shipments_probe', fn () => $this->probeShipments($payload, $orderId));
+            $this->guard($payload, 'labels_probe', fn () => $this->probeLabels($payload, $orderId));
+            $this->guard($payload, 'last_exceptions_probe', fn () => $this->probeLastExceptions($payload, $orderId));
+
+            $failed = $payload['diagnostics_health']['sections_failed'];
+            $payload['diagnostics_health']['ok'] = $failed === [];
+            $payload['diagnostics_health']['status'] = $failed === [] ? 'ok' : 'partial';
+            $payload['status'] = $payload['diagnostics_health']['status'];
+
+            return response()->json($payload, 200, [], $this->jsonFlags());
+        } catch (Throwable $e) {
+            return response()->json([
+                'code_marker' => self::CODE_MARKER,
+                'status' => 'error',
+                'errors' => [[
+                    'section' => 'top_level',
+                    'class' => get_class($e),
+                    'message' => $e->getMessage(),
+                    'file' => $e->getFile(),
+                    'line' => $e->getLine(),
+                ]],
+                'diagnostics_health' => [
+                    'ok' => false,
+                    'status' => 'error',
+                    'sections_completed' => [],
+                    'sections_failed' => ['top_level'],
+                ],
+            ], 200);
+        }
+    }
+
+    private function minimalPayload(int $orderId): array
+    {
+        return [
+            'code_marker' => self::CODE_MARKER,
+            'minimal' => true,
+            'order_id' => $orderId,
+            'app' => [
+                'environment' => app()->environment(),
+                'php_version' => PHP_VERSION,
+                'laravel_version' => app()->version(),
+            ],
+            'diagnostics_health' => [
+                'ok' => true,
+                'status' => 'ok',
+                'sections_completed' => ['minimal'],
+                'sections_failed' => [],
+            ],
+            'errors' => [],
+        ];
     }
 
     private function emptyPayload(int $orderId): array
     {
         return [
             'code_marker' => self::CODE_MARKER,
+            'minimal' => false,
+            'status' => 'unknown',
             'order_id' => $orderId,
-            'shipment_tables' => ['candidate_tables_checked' => [], 'shipments_table_exists' => null, 'shipment_labels_table_exists' => null, 'errors' => []],
-            'shipments_probe' => ['records_for_order' => [], 'records_for_tracking' => [], 'recent_records' => [], 'partial_or_suspicious_records' => [], 'errors' => []],
-            'labels_probe' => ['records_for_order_or_shipment' => [], 'missing_files' => [], 'empty_paths' => [], 'errors' => []],
-            'filament_shipments_risk' => ['resource_class_exists' => null, 'model_class_exists' => null, 'table_columns_checked' => [], 'suspected_crash_points' => [], 'errors' => []],
-            'last_exceptions' => ['admin_shipments' => null, 'admin_order_153' => null, 'view_diagnose' => null, 'errors' => []],
-            'safe_recommendation' => null,
+            'input' => [],
+            'app' => [],
+            'table_discovery' => ['candidate_tables_checked' => [], 'tables' => [], 'columns' => []],
+            'shipments_probe' => ['records_for_order' => [], 'records_for_tracking' => [], 'recent_records' => [], 'partial_or_suspicious_records' => []],
+            'labels_probe' => ['records_for_order_or_shipment' => [], 'empty_paths' => []],
+            'last_exceptions_probe' => ['admin_shipments' => null, 'admin_order' => null, 'shipment_diagnose' => null, 'view_diagnose' => null],
+            'diagnostics_health' => ['ok' => false, 'status' => 'unknown', 'sections_completed' => [], 'sections_failed' => []],
+            'errors' => [],
+        ];
+    }
+
+    private function probeInput(array &$payload, Request $request, int $orderId): void
+    {
+        $payload['input'] = [
+            'order_id' => $orderId,
+            'json' => $request->query('json'),
+            'minimal' => $request->query('minimal'),
+            'path' => $request->path(),
+        ];
+    }
+
+    private function probeApp(array &$payload): void
+    {
+        $payload['app'] = [
+            'environment' => app()->environment(),
+            'php_version' => PHP_VERSION,
+            'laravel_version' => app()->version(),
         ];
     }
 
     private function probeTables(array &$payload): void
     {
         $candidates = ['shipments', 'shipment_labels', 'labels'];
-        $payload['shipment_tables']['candidate_tables_checked'] = $candidates;
-        $payload['shipment_tables']['shipments_table_exists'] = Schema::hasTable('shipments');
-        $payload['shipment_tables']['shipment_labels_table_exists'] = Schema::hasTable('shipment_labels');
+        $payload['table_discovery']['candidate_tables_checked'] = $candidates;
+
+        foreach ($candidates as $table) {
+            $exists = Schema::hasTable($table);
+            $payload['table_discovery']['tables'][$table] = $exists;
+            $payload['table_discovery']['columns'][$table] = $exists ? Schema::getColumnListing($table) : [];
+        }
     }
 
     private function probeShipments(array &$payload, int $orderId): void
     {
-        if (! Schema::hasTable('shipments')) return;
+        if (! $this->tableExists($payload, 'shipments')) {
+            return;
+        }
 
-        $columns = Schema::getColumnListing('shipments');
-        $select = array_values(array_intersect($columns, ['id', 'order_id', 'carrier', 'service_code', 'shipment_status', 'tracking_number', 'carrier_shipment_id', 'label_path', 'label_format', 'created_at', 'updated_at', 'response_payload', 'request_payload']));
-        $base = DB::table('shipments')->select($select ?: ['*']);
-        $payload['shipments_probe']['records_for_order'] = (clone $base)->where('order_id', $orderId)->latest('id')->limit(20)->get()->map(fn ($r) => (array) $r)->all();
-        $payload['shipments_probe']['records_for_tracking'] = (clone $base)->where(function ($q): void {
-            $q->where('tracking_number', self::TRACKING)->orWhere('carrier_shipment_id', self::TRACKING)->orWhere('tracking_number', self::PACKAGE_TRACKING)->orWhere('carrier_shipment_id', self::PACKAGE_TRACKING);
-        })->latest('id')->limit(20)->get()->map(fn ($r) => (array) $r)->all();
+        $columns = $this->columns($payload, 'shipments');
+        $select = $this->safeSelect($columns, ['id', 'order_id', 'carrier', 'service_code', 'shipment_status', 'tracking_number', 'carrier_shipment_id', 'label_path', 'label_format', 'created_at', 'updated_at', 'response_payload', 'request_payload']);
+        $base = DB::table('shipments')->select($select);
+
+        if (in_array('order_id', $columns, true)) {
+            $payload['shipments_probe']['records_for_order'] = $this->rows((clone $base)->where('order_id', $orderId), $columns);
+        }
+
+        $trackingColumns = array_values(array_intersect($columns, ['tracking_number', 'carrier_shipment_id']));
+        if ($trackingColumns !== []) {
+            $payload['shipments_probe']['records_for_tracking'] = $this->rows((clone $base)->where(function ($query) use ($trackingColumns): void {
+                foreach ($trackingColumns as $index => $column) {
+                    foreach ([self::TRACKING, self::PACKAGE_TRACKING] as $tracking) {
+                        $index === 0 ? $query->orWhere($column, $tracking) : $query->orWhere($column, $tracking);
+                    }
+                }
+            }), $columns);
+        }
+
         if (in_array('created_at', $columns, true)) {
-            $payload['shipments_probe']['recent_records'] = (clone $base)->where('created_at', '>=', self::RECENT_SINCE)->latest('id')->limit(30)->get()->map(fn ($r) => (array) $r)->all();
+            $payload['shipments_probe']['recent_records'] = $this->rows((clone $base)->where('created_at', '>=', self::RECENT_SINCE), $columns, 30);
         }
 
         $payload['shipments_probe']['partial_or_suspicious_records'] = collect($payload['shipments_probe']['records_for_order'])
             ->merge($payload['shipments_probe']['records_for_tracking'])
             ->merge($payload['shipments_probe']['recent_records'])
             ->unique('id')
-            ->filter(fn (array $r): bool => blank($r['tracking_number'] ?? null) || blank($r['label_path'] ?? null) || $this->looksJsonContainer($r['carrier'] ?? null) || $this->looksJsonContainer($r['shipment_status'] ?? null) || $this->looksJsonContainer($r['service_code'] ?? null))
-            ->values()->all();
+            ->filter(fn (array $record): bool => blank($record['tracking_number'] ?? null) || blank($record['label_path'] ?? null) || $this->looksJsonContainer($record['carrier'] ?? null) || $this->looksJsonContainer($record['shipment_status'] ?? null) || $this->looksJsonContainer($record['service_code'] ?? null))
+            ->values()
+            ->all();
     }
 
     private function probeLabels(array &$payload, int $orderId): void
     {
-        $shipmentIds = collect($payload['shipments_probe']['records_for_order'])->pluck('id')->filter()->values()->all();
         foreach ($payload['shipments_probe']['records_for_order'] as $record) {
-            $path = $record['label_path'] ?? null;
-            if (blank($path)) { $payload['labels_probe']['empty_paths'][] = $record; continue; }
-            if (is_scalar($path) && ! Storage::disk('local')->exists((string) $path)) $payload['labels_probe']['missing_files'][] = ['shipment_id' => $record['id'] ?? null, 'path' => (string) $path];
+            if (array_key_exists('label_path', $record) && blank($record['label_path'])) {
+                $payload['labels_probe']['empty_paths'][] = ['shipment_id' => $record['id'] ?? null, 'label_path' => $record['label_path'] ?? null];
+            }
         }
-        if (Schema::hasTable('shipment_labels')) {
-            $query = DB::table('shipment_labels');
-            if (Schema::hasColumn('shipment_labels', 'order_id')) $query->where('order_id', $orderId);
-            elseif ($shipmentIds && Schema::hasColumn('shipment_labels', 'shipment_id')) $query->whereIn('shipment_id', $shipmentIds);
-            $payload['labels_probe']['records_for_order_or_shipment'] = $query->latest('id')->limit(20)->get()->map(fn ($r) => (array) $r)->all();
-        }
-    }
 
-    private function probeFilamentRisk(array &$payload): void
-    {
-        $payload['filament_shipments_risk']['resource_class_exists'] = class_exists(ShipmentsPage::class);
-        $payload['filament_shipments_risk']['model_class_exists'] = class_exists(Shipment::class);
-        $payload['filament_shipments_risk']['table_columns_checked'] = ['carrier', 'shipment_status', 'tracking_number', 'carrier_shipment_id', 'label_path'];
-        $payload['filament_shipments_risk']['suspected_crash_points'] = ['label download link when path is empty/missing', 'string formatting when carrier/status/tracking are non-scalar', 'Storage::exists with invalid label_path'];
+        if (! $this->tableExists($payload, 'shipment_labels')) {
+            return;
+        }
+
+        $columns = $this->columns($payload, 'shipment_labels');
+        $select = $this->safeSelect($columns, ['id', 'order_id', 'shipment_id', 'label_path', 'path', 'format', 'created_at', 'updated_at']);
+        $query = DB::table('shipment_labels')->select($select);
+
+        if (in_array('order_id', $columns, true)) {
+            $query->where('order_id', $orderId);
+        } elseif (in_array('shipment_id', $columns, true)) {
+            $shipmentIds = collect($payload['shipments_probe']['records_for_order'])->pluck('id')->filter()->values()->all();
+            if ($shipmentIds === []) {
+                return;
+            }
+            $query->whereIn('shipment_id', $shipmentIds);
+        } else {
+            return;
+        }
+
+        $payload['labels_probe']['records_for_order_or_shipment'] = $this->rows($query, $columns);
     }
 
     private function probeLastExceptions(array &$payload, int $orderId): void
     {
         $tail = $this->logTail();
-        $payload['last_exceptions']['admin_shipments'] = $this->findException($tail, '/admin/shipments');
-        $payload['last_exceptions']['admin_order_153'] = $this->findException($tail, '/admin/orders/'.$orderId);
-        $payload['last_exceptions']['view_diagnose'] = $this->findException($tail, '/admin/tools/orders/view-diagnose');
+        $payload['last_exceptions_probe']['admin_shipments'] = $this->findException($tail, '/admin/shipments');
+        $payload['last_exceptions_probe']['admin_order'] = $this->findException($tail, '/admin/orders/'.$orderId);
+        $payload['last_exceptions_probe']['shipment_diagnose'] = $this->findException($tail, '/admin/tools/shipments/diagnose');
+        $payload['last_exceptions_probe']['view_diagnose'] = $this->findException($tail, '/admin/tools/orders/view-diagnose');
+    }
+
+    private function guard(array &$payload, string $section, callable $callback): void
+    {
+        try {
+            $callback();
+            $payload['diagnostics_health']['sections_completed'][] = $section;
+        } catch (Throwable $e) {
+            $payload['diagnostics_health']['sections_failed'][] = $section;
+            $payload['errors'][] = [
+                'section' => $section,
+                'class' => get_class($e),
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ];
+        }
+    }
+
+    private function rows($query, array $columns, int $limit = 20): array
+    {
+        $query = in_array('id', $columns, true) ? $query->orderByDesc('id') : $query;
+
+        return $query->limit($limit)->get()->map(fn ($row): array => (array) $row)->all();
+    }
+
+    private function tableExists(array $payload, string $table): bool
+    {
+        return (bool) ($payload['table_discovery']['tables'][$table] ?? false);
+    }
+
+    private function columns(array $payload, string $table): array
+    {
+        return $payload['table_discovery']['columns'][$table] ?? [];
+    }
+
+    private function safeSelect(array $columns, array $preferred): array
+    {
+        $select = array_values(array_intersect($preferred, $columns));
+
+        return $select !== [] ? $select : [DB::raw('1 as probe')];
     }
 
     private function findException(string $tail, string $needle): ?array
     {
         $pos = strrpos($tail, $needle);
-        if ($pos === false) return null;
+        if ($pos === false) {
+            return null;
+        }
+
         $chunk = substr($tail, max(0, $pos - 6000), 12000);
-        preg_match('/\[object\]\s+\(([^:]+)::([^:]+):(\d+)\).*?Stack trace:\n(.*?)(?:\n\[previous exception\]|\n\[\d{4}-\d{2}-\d{2}|$)/s', $chunk, $m);
-        return ['class' => $m[1] ?? null, 'message' => null, 'file' => $m[2] ?? null, 'line' => isset($m[3]) ? (int) $m[3] : null, 'top_10_stack_trace' => isset($m[4]) ? array_slice(explode("\n", trim($m[4])), 0, 10) : []];
+        preg_match('/\[object\]\s+\(([^:]+)::([^:]+):(\d+)\).*?Stack trace:\n(.*?)(?:\n\[previous exception\]|\n\[\d{4}-\d{2}-\d{2}|$)/s', $chunk, $matches);
+
+        return [
+            'class' => $matches[1] ?? null,
+            'message' => null,
+            'file' => $matches[2] ?? null,
+            'line' => isset($matches[3]) ? (int) $matches[3] : null,
+            'top_10_stack_trace' => isset($matches[4]) ? array_slice(explode("\n", trim($matches[4])), 0, 10) : [],
+        ];
     }
 
     private function logTail(): string
     {
         $path = storage_path('logs/laravel.log');
-        return is_readable($path) ? implode('', array_slice(file($path) ?: [], -1500)) : '';
-    }
+        if (! is_string($path) || ! is_readable($path)) {
+            return '';
+        }
 
-    private function recommendation(array $payload): string
-    {
-        return $payload['shipments_probe']['partial_or_suspicious_records'] || $payload['labels_probe']['missing_files'] || $payload['labels_probe']['empty_paths']
-            ? 'Wykryto możliwy partial/broken shipment/label. Nie naprawiać automatycznie; przygotować osobny POST+CSRF repair endpoint z exact confirm tylko dla order_id=153, bez requestów DHL.'
-            : 'Brak jednoznacznego partial shipment w probach DB-only. Wkleić last_exceptions oraz probes do dalszej analizy.';
-    }
+        $lines = file($path);
 
-    private function guard(array &$errors, string $stage, callable $callback): void
-    {
-        try { $callback(); } catch (Throwable $e) { $errors[] = ['stage' => $stage, 'class' => $e::class, 'message' => $e->getMessage(), 'file' => $e->getFile(), 'line' => $e->getLine()]; }
+        return $lines === false ? '' : implode('', array_slice($lines, -1500));
     }
 
     private function looksJsonContainer(mixed $value): bool
     {
         return is_string($value) && preg_match('/^\s*[\[{]/', $value) === 1;
+    }
+
+    private function jsonFlags(): int
+    {
+        return JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES;
     }
 }
