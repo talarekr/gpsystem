@@ -98,6 +98,45 @@ class OvokoCarDictionariesDiagnoseControllerTest extends TestCase
             ->assertJsonPath('safety_flags.no_local_cars_mutation', true);
     }
 
+    public function test_include_raw_adds_cached_model_raw_payload_without_external_calls(): void
+    {
+        $this->actingAsAdminUser();
+
+        $brand = OvokoCarDictionaryEntry::query()->create([
+            'dictionary' => 'brands',
+            'ovoko_id' => '1',
+            'name' => 'BMW',
+            'synced_at' => now(),
+        ]);
+
+        OvokoCarDictionaryEntry::query()->create([
+            'dictionary' => 'models',
+            'ovoko_id' => '1548',
+            'ovoko_brand_id' => $brand->ovoko_id,
+            'name' => '3 E46',
+            'raw_payload' => ['id' => '1548', 'name' => '3 E46', 'model' => 'Series 3', 'parent_id' => '3'],
+            'synced_at' => now(),
+        ]);
+
+        Http::fake(function (): void {
+            $this->fail('Diagnostics with include_raw must remain local-cache-only and must not call external HTTP endpoints.');
+        });
+
+        $this->getJson('/admin/tools/ovoko/car-dictionaries-diagnose?json=1&brand_search=BMW&brand_id=1&models_limit=20&include_raw=1')
+            ->assertOk()
+            ->assertJsonPath('samples.models_for_brand.models.0.ovoko_id', '1548')
+            ->assertJsonPath('samples.models_for_brand.models.0.name', '3 E46')
+            ->assertJsonPath('samples.models_for_brand.models.0.raw_payload.model', 'Series 3')
+            ->assertJsonPath('samples.models_for_brand.models.0.raw_payload.parent_id', '3')
+            ->assertJsonPath('model_modification_diagnostics.static_code_review.separate_general_model_endpoint_found', false)
+            ->assertJsonPath('model_modification_diagnostics.static_code_review.cached_raw_payload_available_for_review', true)
+            ->assertJsonPath('safety_flags.read_only_diagnose', true)
+            ->assertJsonPath('safety_flags.no_import_car', true)
+            ->assertJsonPath('safety_flags.no_import_part', true)
+            ->assertJsonPath('safety_flags.no_parts_mutation', true)
+            ->assertJsonPath('safety_flags.no_local_cars_mutation', true);
+    }
+
     private function actingAsAdminUser(): User
     {
         $this->seed(RoleSeeder::class);
