@@ -12,6 +12,8 @@
     $externalOrderId = trim((string) ($order->marketplace_order_id ?: $order->order_number));
     $marketplace = trim((string) $order->marketplace) ?: 'Sklep';
     $marketplaceKey = Str::lower($marketplace);
+    $orderMarketplaceSourceKey = Str::lower(trim((string) ($order->marketplace ?? $order->source ?? '')));
+    $isOvokoOrder = $orderMarketplaceSourceKey === 'ovoko';
     $shipmentPreviewUrl = match ($marketplaceKey) {
         'allegro' => route('tools.debug-allegro-shipment-preview', ['token' => 'gps_images_import_2026', 'order_id' => $order->id]),
         'ovoko' => route('tools.debug-ovoko-shipment-preview', ['token' => 'gps_images_import_2026', 'order_id' => $order->id]),
@@ -303,6 +305,16 @@
         .gps-order-shipment-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
         .gps-order-shipment-fields { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
         .gps-order-shipment-field { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 999px; color: #334155; font-size: 12px; font-weight: 700; padding: 6px 9px; }
+        .gps-ovoko-shipment-modal-backdrop { align-items: center; display: flex; background: rgba(15, 23, 42, .48); inset: 0; justify-content: center; padding: 18px; position: fixed; z-index: 50; }
+        .gps-ovoko-shipment-modal { background: #fff; border-radius: 22px; box-shadow: 0 24px 70px rgba(15, 23, 42, .28); max-width: 560px; padding: 24px; width: min(100%, 560px); }
+        .gps-ovoko-shipment-modal-title { color: #0f172a; font-size: 19px; font-weight: 800; margin: 0 0 14px; }
+        .gps-ovoko-shipment-modal-copy { color: #475569; display: grid; gap: 10px; font-size: 13px; line-height: 1.55; margin-bottom: 18px; }
+        .gps-ovoko-shipment-form { display: grid; gap: 14px; }
+        .gps-ovoko-shipment-form-grid { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .gps-ovoko-shipment-form label { color: #334155; display: grid; font-size: 12px; font-weight: 800; gap: 6px; }
+        .gps-ovoko-shipment-form input, .gps-ovoko-shipment-form select { background: #fff; border: 1px solid #cbd5e1; border-radius: 12px; color: #0f172a; font-size: 14px; min-height: 40px; padding: 8px 10px; width: 100%; }
+        .gps-ovoko-shipment-modal-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+        .gps-ovoko-shipment-notice { background: #fffbeb; border: 1px solid #fde68a; border-radius: 14px; color: #92400e; font-size: 13px; line-height: 1.45; margin-top: 14px; padding: 10px 12px; }
         .gps-order-tech summary { cursor: pointer; color: #334155; font-weight: 800; }
         .gps-order-tech dl { display: grid; grid-template-columns: max-content minmax(0,1fr); gap: 8px 16px; margin-top: 14px; }
         .gps-order-tech dt { color: #64748b; font-size: 12px; font-weight: 700; } .gps-order-tech dd { color: #0f172a; font-size: 13px; margin: 0; overflow-wrap: anywhere; }
@@ -492,23 +504,54 @@
                             @if ($shipmentLabelExists)<a class="fi-btn fi-color-primary fi-btn-color-primary fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-primary-500 focus-visible:ring-2 focus-visible:ring-primary-600 dark:bg-primary-500 dark:hover:bg-primary-400 dark:focus-visible:ring-primary-500" href="{{ route('tools.download-shipment-label', $shipment) }}">Pobierz etykietę PDF</a>@elseif ($shipmentLabelPath !== '')<span class="gps-order-detail-muted">Brak pliku etykiety</span>@endif
                         </div>
                     @endif
+                @elseif ($isOvokoOrder)
+                    {{-- code_marker = ovoko_order_shipment_modal_frontend_v1 --}}
+                    <div x-data="{ open: false, notice: false }" class="gps-order-detail-value">
+                        <div class="gps-order-shipment-actions">
+                            <button type="button" class="fi-btn fi-color-primary fi-btn-color-primary fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-primary-500 focus-visible:ring-2 focus-visible:ring-primary-600 dark:bg-primary-500 dark:hover:bg-primary-400 dark:focus-visible:ring-primary-500" x-on:click="open = true; notice = false">
+                                Wprowadź typ i wagę przesyłki
+                            </button>
+                        </div>
+
+                        <div x-cloak x-show="notice" class="gps-ovoko-shipment-notice">
+                            Zapis danych przesyłki Ovoko nie jest jeszcze podłączony do API.
+                        </div>
+
+                        <div x-cloak x-show="open" x-transition.opacity class="gps-ovoko-shipment-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="gps-ovoko-shipment-modal-title" x-on:keydown.escape.window="open = false">
+                            <div class="gps-ovoko-shipment-modal" x-on:click.outside="open = false">
+                                <h2 id="gps-ovoko-shipment-modal-title" class="gps-ovoko-shipment-modal-title">Wprowadź typ i wagę przesyłki</h2>
+                                <div class="gps-ovoko-shipment-modal-copy">
+                                    <p>Przed podaniem długości, szerokości, wysokości i wagi paczki należy ją zmierzyć i zważyć.</p>
+                                    <p>W przypadku wprowadzenia niepoprawnych wymiarów przesyłki, dodatkowe opłaty poniesione przez Ovoko, mogą zostać przeniesione na sprzedawcę.</p>
+                                </div>
+                                <form class="gps-ovoko-shipment-form" x-on:submit.prevent="notice = true; open = false">
+                                    <label>
+                                        Typ
+                                        <select required>
+                                            <option value="">Wybierz typ</option>
+                                            <option value="package">Opakowanie</option>
+                                            <option value="pallet">Paleta</option>
+                                        </select>
+                                    </label>
+                                    <div class="gps-ovoko-shipment-form-grid">
+                                        <label>Długość (cm)<input type="number" min="0" step="0.01" required></label>
+                                        <label>Szerokość (cm)<input type="number" min="0" step="0.01" required></label>
+                                        <label>Wysokość (cm)<input type="number" min="0" step="0.01" required></label>
+                                        <label>Waga (kg)<input type="number" min="0" step="0.001" required></label>
+                                    </div>
+                                    <div class="gps-ovoko-shipment-modal-actions">
+                                        <button type="button" class="fi-btn fi-color-gray fi-btn-color-gray fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-gray-100 px-3 py-2 text-sm font-semibold text-gray-700 shadow-sm outline-none transition duration-75 hover:bg-gray-200" x-on:click="open = false">Zamknij</button>
+                                        <button type="submit" class="fi-btn fi-color-primary fi-btn-color-primary fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-primary-500 focus-visible:ring-2 focus-visible:ring-primary-600 dark:bg-primary-500 dark:hover:bg-primary-400 dark:focus-visible:ring-primary-500">Zapisz</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
                 @else
                     <div class="gps-order-detail-two">
                         <div class="gps-order-detail-fact">
                             <div class="gps-order-detail-label">Flow marketplace</div>
-                            <div class="gps-order-detail-value">
-                                @if ($marketplaceKey === 'allegro')
-                                    Allegro shipment-management: dry-run payloadu, potem osobno utworzenie przesyłki, etykieta i pickup.
-                                @elseif ($marketplaceKey === 'ovoko')
-                                    Ovoko/RRR: dry-run danych paczki do crm/importPostData, potem osobno pobranie etykiety.
-                                @else
-                                    Brak aktywnego flow przesyłek marketplace dla tego źródła.
-                                @endif
-                            </div>
-                            @if ($shipmentPreviewUrl)
-                                <div class="gps-order-shipment-actions"><a class="fi-btn fi-color-primary fi-btn-color-primary fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-primary-500 focus-visible:ring-2 focus-visible:ring-primary-600 dark:bg-primary-500 dark:hover:bg-primary-400 dark:focus-visible:ring-primary-500" href="{{ $shipmentPreviewUrl }}" target="_blank" rel="noopener noreferrer">{{ $marketplaceKey === 'allegro' ? 'Dodaj przesyłkę Allegro' : 'Przygotuj przesyłkę Ovoko' }}</a></div>
-                                <div class="gps-order-detail-muted">Przycisk prowadzi wyłącznie do read-only preview/formularza dry-run.</div>
-                            @endif
+                            <div class="gps-order-detail-value">Brak aktywnego flow przesyłek marketplace dla tego źródła.</div>
                         </div>
                         <div class="gps-order-detail-fact">
                             <div class="gps-order-detail-label">Pola formularza paczki</div>
