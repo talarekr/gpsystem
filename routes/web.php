@@ -39,6 +39,7 @@ use App\Http\Controllers\Tools\CheckOrdersFlowController;
 use App\Http\Controllers\Tools\PayuDiagnosticsController;
 use App\Http\Controllers\Tools\DebugOrderItemThumbnailController;
 use App\Http\Controllers\Tools\DhlConfigDiagnoseController;
+use App\Http\Controllers\Tools\DhlRecoverCreatedShipmentController;
 use App\Http\Controllers\Tools\DeployDiagnoseController;
 use App\Http\Controllers\Tools\WorkshopQuickPartController;
 use App\Http\Controllers\Tools\BackfillPartDefaultConditionAndSteeringController;
@@ -283,6 +284,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/parts-to-list/storage-location-backfill-results', [PartsToListStorageLocationBackfillController::class, 'results'])->name('admin.tools.parts-to-list.storage-location-backfill-results');
     Route::get('/admin/tools/payu-diagnostics', PayuDiagnosticsController::class)->name('admin.tools.payu-diagnostics');
     Route::get('/admin/tools/dhl/config-diagnose', DhlConfigDiagnoseController::class)->name('admin.tools.dhl.config-diagnose');
+    Route::post('/admin/tools/dhl/recover-created-shipment', DhlRecoverCreatedShipmentController::class)->name('admin.tools.dhl.recover-created-shipment');
     Route::get('/admin/tools/deploy-diagnose', DeployDiagnoseController::class)->name('admin.tools.deploy-diagnose');
     Route::get('/admin/tools/orders/dhl-diagnose', DhlConfigDiagnoseController::class)->name('admin.tools.orders.dhl-diagnose');
     Route::get('/admin/tools/jarek-gearboxes/ping', [JarekGearboxToolController::class, 'ping'])->name('admin.tools.jarek-gearboxes.ping');

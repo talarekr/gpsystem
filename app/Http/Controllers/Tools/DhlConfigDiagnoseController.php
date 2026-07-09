@@ -9,10 +9,11 @@ use App\Services\Shipments\DhlShipmentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Storage;
 
 class DhlConfigDiagnoseController extends Controller
 {
-    private const CODE_MARKER = 'dhl_service_selection_country_v1';
+    private const CODE_MARKER = 'dhl_response_parser_recovery_v1';
 
     public function __invoke(Request $request): JsonResponse
     {
@@ -131,6 +132,7 @@ class DhlConfigDiagnoseController extends Controller
                 ],
             ],
             'dhl_service_selection' => $serviceSelection,
+            'dhl_response_parse_diagnostics' => $this->responseParseDiagnostics($request),
             'last_dhl_create_shipment_error' => $lastError,
             'probable_causes' => $this->probableCauses($login, $password, $accountNumber, $modeMatchesEndpoint, $lastError),
             'what_user_should_check_in_env' => [
@@ -146,6 +148,46 @@ class DhlConfigDiagnoseController extends Controller
         ]);
     }
 
+
+
+    private function responseParseDiagnostics(Request $request): array
+    {
+        $orderId = $request->integer('order_id') ?: null;
+        $dhl = app(DhlShipmentService::class);
+        $log = $dhl->lastCreateShipmentLog($orderId);
+        $response = $log ? data_get($log->payload ?? [], 'response') : null;
+        $parsed = $dhl->parseCreateShipmentResponse($response);
+        $shipment = $orderId ? \App\Models\Shipment::query()->where('order_id', $orderId)->where('carrier', 'dhl')->latest('id')->first() : null;
+        $localLabelExists = $shipment?->label_path ? Storage::disk('local')->exists($shipment->label_path) : false;
+        $hasResult = is_array($response) && array_key_exists('createShipmentResult', $response);
+        $hasLabel = filled(data_get($response, 'createShipmentResult.label')) || filled(data_get($response, 'label'));
+        $storedSanitized = $parsed['remote_created'] && filled(data_get($response, 'createShipmentResult.label.labelContent', data_get($response, 'labelContent'))) && ! $parsed['has_label_content'];
+        $recoveryAvailable = (bool) ($parsed['remote_created'] && $parsed['has_label_content'] && ! $shipment && ! $localLabelExists);
+        $warnings = [];
+        if ($parsed['remote_created'] && ! $shipment) $warnings[] = 'DHL returned tracking and labelContent, but local persistence failed after parsing/validation.';
+        $diagnostics = [
+            'last_create_shipment_log_found' => (bool) $log,
+            'last_create_shipment_log_id' => $log?->id,
+            'last_create_shipment_status' => $log?->status,
+            'response_has_createShipmentResult' => $hasResult,
+            'response_tracking_number' => $parsed['tracking_number'],
+            'response_package_tracking_number' => $parsed['package_tracking_number'],
+            'response_has_label' => $hasLabel,
+            'response_label_format' => $parsed['label_format'],
+            'response_has_label_content' => $parsed['has_label_content'],
+            'parser_currently_would_accept_response' => (bool) ($parsed['tracking_number'] && $parsed['has_label_content']),
+            'local_shipment_exists' => (bool) $shipment,
+            'local_label_exists' => $localLabelExists,
+            'recovery_available' => $recoveryAvailable,
+            'would_create_duplicate_if_clicked_again' => (bool) ($parsed['remote_created'] || $shipment || $localLabelExists),
+            'warnings' => $warnings,
+        ];
+        if ($storedSanitized) {
+            $diagnostics['recovery_available'] = false;
+            $diagnostics['reason'] = 'Stored log response is sanitized and does not contain labelContent. Remote DHL shipment was created, but PDF cannot be recovered from local logs.';
+        }
+        return $diagnostics;
+    }
 
     private function serviceSelection(Request $request, array $lastError): array
     {
