@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Storage;
 
 class OvokoOrderShipmentDiagnoseController extends Controller
 {
-    private const CODE_MARKER = 'ovoko_package_draft_local_save_v1';
+    private const CODE_MARKER = 'ovoko_import_post_data_send_v1';
 
     public function __invoke(Request $request): JsonResponse
     {
@@ -58,18 +58,15 @@ class OvokoOrderShipmentDiagnoseController extends Controller
                 'exists_locally' => $order ? true : ($localOrderId || $marketplaceOrderId ? false : null),
             ],
             'ovoko_api_capabilities' => [
-                'can_set_package_type_and_dimensions' => null,
+                'can_set_package_type_and_dimensions' => true,
                 'can_mark_shipment_prepared' => null,
-                'can_fetch_label' => null,
+                'can_fetch_label' => true,
                 'docs_or_methods_found' => $methodsFound,
             ],
             'package_type_mapping' => [
                 'supported_in_our_panel' => ['package', 'pallet'],
-                'ovoko_values' => ['package' => null, 'pallet' => null],
-                'source' => 'unknown',
-                'warnings' => [
-                    'UI labels Opakowanie and Paleta are intentionally not mapped to API enum values until confirmed in Ovoko docs or captured existing requests.',
-                ],
+                'ovoko_values' => ['package' => 1, 'pallet' => 2],
+                'source' => 'official_docs',
             ],
             'required_fields' => [
                 'type' => true,
@@ -79,20 +76,50 @@ class OvokoOrderShipmentDiagnoseController extends Controller
                 'weight_kg' => true,
             ],
             'current_local_shipment_data' => $this->localShipmentData($shipment),
+            'rrr_order_id_source' => [
+                'api_field' => 'order_id',
+                'uses_local_column' => 'orders.marketplace_order_id',
+                'example' => ['local_order_id' => 154, 'marketplace_order_id_sent_to_rrr' => '8769937'],
+            ],
             'planned_flow' => [
-                'step_1_save_package_dimensions' => ['method' => null, 'endpoint' => null, 'payload_shape_sanitized' => null],
+                'step_1_save_package_dimensions' => ['method' => 'POST', 'endpoint' => 'https://api.rrr.lt/crm/importPostData', 'payload_shape_sanitized' => $this->plannedImportPayload($order, $shipment)],
                 'step_2_mark_shipment_prepared' => ['method' => null, 'endpoint' => null, 'payload_shape_sanitized' => null],
-                'step_3_fetch_label' => ['method' => null, 'endpoint' => null, 'response_type' => null],
+                'step_3_fetch_label' => ['method' => 'POST', 'endpoint' => 'https://api.rrr.lt/get/print_shipping_label/{order_id}', 'response_type' => 'application/pdf'],
             ],
             'blocking_reasons' => [
-                'No confirmed Ovoko API endpoint/payload has been found for setting package type, dimensions, weight, prepared state, or label download.',
-                'Existing OvokoShipmentAdapter sendPackageData() deliberately throws and performs no mutation.',
+                'Official RRR/Ovoko docs confirm crm/importPostData for package dimensions and get/print_shipping_label/{order_id} for label download.',
             ],
             'warnings' => [
-                'Endpoint performs no Ovoko HTTP calls, no database writes, no label generation, and no shipment-prepared transition.',
-                'Do not implement mutating UI buttons until endpoint, payload, CSRF/confirmation, and package type enum values are confirmed.',
+                'Diagnostics are read-only. The separate POST endpoint sends package data only after CSRF and exact confirmation.',
             ],
         ]);
+    }
+
+    private function plannedImportPayload(?Order $order, ?Shipment $shipment): array
+    {
+        $data = $this->localShipmentData($shipment);
+        $type = $data['type'] ?? null;
+        $packingType = $type === 'pallet' ? 2 : 1;
+        $weightKg = is_numeric($data['weight_kg'] ?? null) ? (float) $data['weight_kg'] : 12.5;
+
+        return [
+            'username' => '[redacted]',
+            'password' => '[redacted]',
+            'user_token' => '[redacted]',
+            // RRR/Ovoko order_id is the marketplace_order_id stored on our local order, never local orders.id.
+            'order_id' => (string) ($order?->marketplace_order_id ?? '8769937'),
+            'packing_type' => $packingType,
+            'length' => is_numeric($data['length_cm'] ?? null) ? $this->number($data['length_cm']) : 120,
+            'width' => is_numeric($data['width_cm'] ?? null) ? $this->number($data['width_cm']) : 40,
+            'height' => is_numeric($data['height_cm'] ?? null) ? $this->number($data['height_cm']) : 30,
+            'weight' => (int) round($weightKg * 1000),
+        ];
+    }
+
+    private function number(mixed $value): int|float
+    {
+        $number = (float) $value;
+        return fmod($number, 1.0) === 0.0 ? (int) $number : $number;
     }
 
     private function findOrder(?int $localOrderId, ?string $marketplaceOrderId): ?Order
