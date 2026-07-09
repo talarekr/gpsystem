@@ -293,8 +293,8 @@ class DhlShipmentService
         $waybill = (string) ($parsedResponse['tracking_number'] ?? '');
         $labelContent = (string) ($parsedResponse['label_content'] ?? '');
 
-        if ($waybill === '' || $labelContent === '') {
-            $exception = new RuntimeException('DHL nie zwrócił numeru przesyłki lub zawartości etykiety PDF.');
+        if ($waybill === '') {
+            $exception = new RuntimeException('DHL nie zwrócił numeru przesyłki.');
             app(ApiIntegrationLogger::class)->error('dhl', 'createShipment', $exception, [
                 'order_id' => $form['order_id'] ?? null,
                 'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
@@ -305,16 +305,41 @@ class DhlShipmentService
                 'remote_tracking_number' => $parsedResponse['tracking_number'],
                 'label_content_present' => $parsedResponse['has_label_content'],
                 'local_persistence_success' => false,
-                'failure_classification' => $parsedResponse['remote_created'] ? 'dhl_response_success_local_persist_failed' : 'dhl_response_missing_required_fields',
+                'failure_classification' => 'dhl_create_response_parse_failed',
+                'code_marker' => 'dhl_create_shipment_atomic_label_v1',
+            ]);
+            throw $exception;
+        }
+
+        if ($labelContent === '') {
+            $shipment = $this->persistIncompleteRemoteCreatedShipment($form, $payload ?? [], $response, $parsedResponse, 'DHL createShipment returned tracking without labelContent.');
+            $exception = new RuntimeException('DHL nie zwrócił zawartości etykiety PDF.');
+            app(ApiIntegrationLogger::class)->error('dhl', 'createShipment', $exception, [
+                'order_id' => $form['order_id'] ?? null,
+                'shipment_id' => $shipment->id,
+                'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+                'tracking_number' => $waybill,
+                'external_id' => $waybill,
+                'request' => $payload,
+                'dhl_service_selection' => $serviceSelection,
+                'response' => $this->createShipmentResponseForLog($response),
+                'remote_created' => true,
+                'remote_tracking_number' => $waybill,
+                'label_content_present' => false,
+                'local_persistence_success' => false,
+                'failure_classification' => 'dhl_create_remote_created_local_incomplete',
+                'code_marker' => 'dhl_create_shipment_atomic_label_v1',
             ]);
             throw $exception;
         }
 
         $labelBinary = base64_decode($labelContent, true);
         if ($labelBinary === false) {
+            $incompleteShipment = $this->persistIncompleteRemoteCreatedShipment($form, $payload ?? [], $response, $parsedResponse, 'DHL createShipment returned invalid base64 labelContent.');
             $exception = new RuntimeException('DHL zwrócił niepoprawną etykietę base64.');
             app(ApiIntegrationLogger::class)->error('dhl', 'createShipment', $exception, [
                 'order_id' => $form['order_id'] ?? null,
+                'shipment_id' => $incompleteShipment->id,
                 'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
                 'tracking_number' => $waybill,
                 'external_id' => $waybill,
@@ -325,7 +350,8 @@ class DhlShipmentService
                 'remote_tracking_number' => $parsedResponse['tracking_number'],
                 'label_content_present' => $parsedResponse['has_label_content'],
                 'local_persistence_success' => false,
-                'failure_classification' => $parsedResponse['remote_created'] ? 'dhl_response_success_local_persist_failed' : 'dhl_response_missing_required_fields',
+                'failure_classification' => 'dhl_create_success_label_save_failed',
+                'code_marker' => 'dhl_create_shipment_atomic_label_v1',
             ]);
             throw $exception;
         }
@@ -334,18 +360,21 @@ class DhlShipmentService
             $shipment = $this->persistCreatedShipment($form, $payload ?? [], $response, $parsedResponse, $labelBinary);
             $path = $shipment->label_path;
         } catch (\Throwable $exception) {
+            $incompleteShipment = $this->persistIncompleteRemoteCreatedShipment($form, $payload ?? [], $response, $parsedResponse, 'DHL remote shipment was created, but local PDF storage failed.');
             app(ApiIntegrationLogger::class)->error('dhl', 'createShipment', $exception, [
                 'order_id' => $form['order_id'] ?? null,
+                'shipment_id' => $incompleteShipment->id,
                 'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
                 'tracking_number' => $waybill,
                 'external_id' => $waybill,
                 'request' => $payload,
                 'response' => $this->createShipmentResponseForLog($response),
-                'failure_classification' => 'dhl_response_success_local_persist_failed',
+                'failure_classification' => 'dhl_create_success_label_save_failed',
                 'remote_created' => true,
                 'remote_tracking_number' => $waybill,
                 'label_content_present' => true,
                 'local_persistence_success' => false,
+                'code_marker' => 'dhl_create_shipment_atomic_label_v1',
             ]);
             throw $exception;
         }
@@ -361,6 +390,8 @@ class DhlShipmentService
             'receiver_country' => data_get($payload, 'shipment.ship.receiver.address.country'),
             'dhl_service_selection' => $serviceSelection,
             'response' => $this->createShipmentResponseForLog($response) + ['label_path' => $path],
+            'failure_classification' => 'dhl_create_success_local_persist_success',
+            'code_marker' => 'dhl_create_shipment_atomic_label_v1',
         ]);
 
         return $shipment;
@@ -394,7 +425,10 @@ class DhlShipmentService
     {
         $waybill = (string) $parsedResponse['tracking_number'];
         $path = 'shipments/labels/dhl/'.$waybill.'.pdf';
-        Storage::disk('local')->put($path, $labelBinary);
+        if (! $this->writeDhlLabelFile($path, $labelBinary) || ! $this->safeLocalLabelExists($path)) {
+            throw new RuntimeException('DHL remote shipment was created, but local label PDF was not saved.');
+        }
+
         return Shipment::query()->create([
             'order_id' => $form['order_id'] ?? null, 'carrier' => 'dhl',
             'service_code' => data_get($payload, 'shipment.shipmentInfo.serviceType', data_get($form, 'service.service_type', 'AH')),
@@ -402,9 +436,34 @@ class DhlShipmentService
             'label_path' => $path, 'label_format' => $parsedResponse['label_format'] ?? 'application/pdf',
             'sender_snapshot' => $form['shipper'] ?? [], 'receiver_snapshot' => $form['receiver'] ?? [], 'parcel_snapshot' => $form['parcel'] ?? [],
             'request_payload' => $this->sanitize($payload),
-            'response_payload' => $this->sanitize($this->createShipmentResponseForLog($response) + ['recovered_from_dhl_create_shipment_log' => $recovery, 'code_marker' => 'dhl_response_parser_recovery_v1']),
+            'response_payload' => $this->sanitize($this->createShipmentResponseForLog($response) + ['recovered_from_dhl_create_shipment_log' => $recovery, 'code_marker' => 'dhl_create_shipment_atomic_label_v1']),
             'test_mode' => (bool) config('services.dhl.test_mode', true),
         ]);
+    }
+
+    private function persistIncompleteRemoteCreatedShipment(array $form, array $payload, mixed $response, array $parsedResponse, string $reason): Shipment
+    {
+        $waybill = (string) $parsedResponse['tracking_number'];
+
+        return Shipment::query()->firstOrCreate(
+            ['order_id' => $form['order_id'] ?? null, 'carrier' => 'dhl', 'tracking_number' => $waybill],
+            [
+                'service_code' => data_get($payload, 'shipment.shipmentInfo.serviceType', data_get($form, 'service.service_type', 'AH')),
+                'shipment_status' => 'remote_created_label_missing',
+                'carrier_shipment_id' => $waybill,
+                'label_path' => null,
+                'label_format' => $parsedResponse['label_format'] ?? null,
+                'sender_snapshot' => $form['shipper'] ?? [], 'receiver_snapshot' => $form['receiver'] ?? [], 'parcel_snapshot' => $form['parcel'] ?? [],
+                'request_payload' => $this->sanitize($payload),
+                'response_payload' => $this->sanitize($this->createShipmentResponseForLog($response) + ['local_incomplete_reason' => $reason, 'code_marker' => 'dhl_create_shipment_atomic_label_v1']),
+                'test_mode' => (bool) config('services.dhl.test_mode', true),
+            ]
+        );
+    }
+
+    protected function writeDhlLabelFile(string $path, string $labelBinary): bool
+    {
+        return Storage::disk('local')->put($path, $labelBinary) !== false;
     }
 
     /** @return array{tracking_number:?string,package_tracking_number:?string,label_content:?string,label_format:?string,label_type:?string,has_label_content:bool,remote_created:bool,result:mixed} */
@@ -412,6 +471,9 @@ class DhlShipmentService
     {
         $array = $this->toArray($response);
         $result = data_get($array, 'createShipmentResult', $array);
+        if (is_array($result) && array_is_list($result)) {
+            $result = $result[0] ?? [];
+        }
         $tracking = data_get($result, 'shipmentTrackingNumber') ?: data_get($result, 'shipmentNotificationNumber') ?: data_get($result, 'wayBill') ?: data_get($result, 'tracking_number');
         $labelContent = data_get($result, 'label.labelContent') ?: data_get($result, 'labelContent');
         $labelFormat = data_get($result, 'label.labelFormat') ?: data_get($result, 'labelFormat');
@@ -438,8 +500,8 @@ class DhlShipmentService
         $labelExists = $this->safeLocalLabelExists($shipment?->label_path);
         $remoteCreatedInLog = (bool) ($parsed && $parsed['remote_created'] && $parsed['has_label_content']);
         return [
-            'would_create_duplicate_if_clicked_again' => (bool) ($shipment?->tracking_number || $shipment || $labelExists || $remoteCreatedInLog),
-            'message' => $shipment?->tracking_number ? 'DHL shipment '.$shipment->tracking_number.' already exists locally/remotely. Do not create a duplicate. Repair or fetch the missing label instead.' : null,
+            'would_create_duplicate_if_clicked_again' => (bool) ($shipment?->tracking_number || $labelExists || $remoteCreatedInLog),
+            'message' => $shipment?->tracking_number ? 'DHL shipment already exists for this order. Do not create a duplicate. Repair or upload the missing label instead.' : null,
             'local_shipment_exists' => (bool) $shipment,
             'local_label_exists' => $labelExists,
             'last_log_id' => $log?->id,
