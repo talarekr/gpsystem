@@ -4,13 +4,15 @@ namespace App\Http\Controllers\Tools;
 
 use App\Http\Controllers\Controller;
 use App\Models\MarketplaceSyncLog;
+use App\Models\Order;
+use App\Services\Shipments\DhlShipmentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 
 class DhlConfigDiagnoseController extends Controller
 {
-    private const CODE_MARKER = 'dhl_auth_config_diagnostics_v1';
+    private const CODE_MARKER = 'dhl_service_selection_country_v1';
 
     public function __invoke(Request $request): JsonResponse
     {
@@ -22,6 +24,7 @@ class DhlConfigDiagnoseController extends Controller
         $mode = $this->mode($testMode);
         $endpointClassification = $this->classifyEndpoint($endpoint);
         $lastError = $this->lastCreateShipmentError();
+        $serviceSelection = $this->serviceSelection($request, $lastError);
 
         $missing = [];
         foreach ([
@@ -69,6 +72,8 @@ class DhlConfigDiagnoseController extends Controller
                 'DHL24_MODE',
                 'DHL_DEFAULT_SERVICE',
                 'DHL24_DEFAULT_SERVICE_TYPE',
+                'DHL_DEFAULT_INTERNATIONAL_SERVICE',
+                'DHL24_DEFAULT_INTERNATIONAL_SERVICE_TYPE',
                 'DHL_LABEL_TYPE',
                 'DHL24_LABEL_TYPE',
                 'DHL_DROP_OFF_TYPE',
@@ -78,6 +83,8 @@ class DhlConfigDiagnoseController extends Controller
                 'config:services.dhl.password',
                 'config:services.dhl.account_number',
                 'config:services.dhl.test_mode',
+                'config:services.dhl.default_service',
+                'config:services.dhl.default_international_service',
             ],
             'dhl_config_runtime' => [
                 'enabled' => filled($endpoint) && filled($login) && filled($password) && filled($accountNumber),
@@ -117,6 +124,7 @@ class DhlConfigDiagnoseController extends Controller
                     'billingAccountNumber is read from config services.dhl.account_number; costsCenter is read from the shipment form parcel.mpk, not from a DHL env key.',
                 ],
             ],
+            'dhl_service_selection' => $serviceSelection,
             'last_dhl_create_shipment_error' => $lastError,
             'probable_causes' => $this->probableCauses($login, $password, $accountNumber, $modeMatchesEndpoint, $lastError),
             'what_user_should_check_in_env' => [
@@ -125,10 +133,29 @@ class DhlConfigDiagnoseController extends Controller
                 'Check that DHL_TEST_MODE/DHL24_MODE matches the endpoint environment.',
                 'Check that DHL_ACCOUNT_NUMBER=2520734 or DHL24_ACCOUNT_NUMBER=2520734 is the correct billing account for these DHL credentials.',
                 'Check that the shipment MPK/costsCenter value 1142 is valid for this DHL account if DHL requires it.',
+                'For PL to non-PL shipments set DHL24_DEFAULT_INTERNATIONAL_SERVICE_TYPE (or DHL_DEFAULT_INTERNATIONAL_SERVICE) to an export service enabled on the DHL account, e.g. EK.',
                 'After changing .env, run php artisan config:clear (or rebuild config cache) before retrying.',
                 'Verify that test credentials are not used with a production endpoint, and production credentials are not used with a sandbox endpoint.',
             ],
         ]);
+    }
+
+
+    private function serviceSelection(Request $request, array $lastError): array
+    {
+        $orderId = $request->integer('order_id') ?: null;
+        $order = $orderId ? Order::query()->find($orderId) : null;
+        $dhl = app(DhlShipmentService::class);
+        $form = $dhl->defaults($order);
+
+        if (! $order && $orderId) {
+            $diagnostics = $dhl->serviceSelectionDiagnostics($form, data_get($lastError, 'service_type'));
+            $diagnostics['blocking_reasons'][] = 'Order '.$orderId.' was not found; using default DHL form values for diagnostics.';
+
+            return $diagnostics;
+        }
+
+        return $dhl->serviceSelectionDiagnostics($form, data_get($lastError, 'service_type'));
     }
 
     private function mode(mixed $testMode): string
@@ -171,6 +198,8 @@ class DhlConfigDiagnoseController extends Controller
             'attempted_at' => optional($log->created_at)->format('Y-m-d H:i:s'),
             'message' => $log->message,
             'duration_ms' => $log->duration_ms,
+            'service_type' => data_get($request, 'shipment.shipmentInfo.serviceType'),
+            'receiver_country' => data_get($request, 'shipment.ship.receiver.address.country'),
             'billing_account_number' => data_get($request, 'shipment.shipmentInfo.billing.billingAccountNumber'),
             'costs_center' => data_get($request, 'shipment.shipmentInfo.billing.costsCenter'),
             'request_had_auth_data' => array_key_exists('authData', (array) $request),

@@ -4,6 +4,7 @@ namespace Tests\Unit;
 
 use App\Models\Order;
 use App\Services\Shipments\DhlShipmentService;
+use RuntimeException;
 use Tests\TestCase;
 
 class DhlShipmentServiceDefaultsTest extends TestCase
@@ -113,10 +114,59 @@ class DhlShipmentServiceDefaultsTest extends TestCase
         $this->assertSame('IT', $defaults['receiver']['country']);
         $this->assertSame('3487617910', $defaults['receiver']['phone']);
         $this->assertSame('STELLA SRL', $defaults['receiver']['person_name']);
+        $this->assertSame('EK', $defaults['service']['service_type']);
         $this->assertNull($defaults['receiver']['email']);
 
         $payload = app(DhlShipmentService::class)->payload($defaults);
 
         $this->assertSame('C', $payload['shipment']['ship']['receiver']['address']['addressType']);
+        $this->assertSame('EK', $payload['shipment']['shipmentInfo']['serviceType']);
+    }
+
+    public function test_payload_uses_configured_international_service_for_non_polish_receiver(): void
+    {
+        config()->set('services.dhl.default_service', 'AH');
+        config()->set('services.dhl.default_international_service', 'PI');
+
+        $service = app(DhlShipmentService::class);
+        $form = $service->defaults();
+        $form['receiver']['country'] = 'IT';
+        $form['service']['service_type'] = 'AH';
+
+        $payload = $service->payload($form);
+        $diagnostics = $service->serviceSelectionDiagnostics($form, 'AH');
+
+        $this->assertSame('PI', $payload['shipment']['shipmentInfo']['serviceType']);
+        $this->assertFalse($diagnostics['is_domestic']);
+        $this->assertSame('PI', $diagnostics['selected_service_type']);
+        $this->assertTrue($diagnostics['service_type_changed_for_country']);
+        $this->assertSame([], $diagnostics['blocking_reasons']);
+    }
+
+    public function test_payload_blocks_domestic_service_for_international_receiver(): void
+    {
+        config()->set('services.dhl.default_international_service', 'AH');
+
+        $service = app(DhlShipmentService::class);
+        $form = $service->defaults();
+        $form['receiver']['country'] = 'IT';
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('DHL serviceType AH is domestic and cannot be used for receiver country IT. Configure DHL24_DEFAULT_INTERNATIONAL_SERVICE_TYPE.');
+
+        $service->payload($form);
+    }
+
+    public function test_payload_blocks_missing_receiver_country(): void
+    {
+        $service = app(DhlShipmentService::class);
+        $form = $service->defaults();
+        $form['receiver']['country'] = '';
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('DHL receiver country is missing');
+
+        $service->payload($form);
     }
 }
+

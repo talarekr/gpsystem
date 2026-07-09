@@ -15,6 +15,10 @@ use SoapFault;
 
 class DhlShipmentService
 {
+    private const DOMESTIC_COUNTRY = 'PL';
+
+    private const DOMESTIC_SERVICE_TYPES = ['AH', '09', '12', 'DW', 'SP'];
+
     public function defaults(?Order $order = null, ?Shipment $shipment = null): array
     {
         $senderAddress = $this->splitStreet((string) config('services.shipments.sender.address'));
@@ -71,7 +75,11 @@ class DhlShipmentService
                 'reference' => $reference,
             ],
             'service' => [
-                'service_type' => config('services.dhl.default_service', 'AH'),
+                'service_type' => $this->selectServiceTypeForCountries(
+                    (string) config('services.shipments.sender.country', self::DOMESTIC_COUNTRY),
+                    (string) ($receiver['country'] ?? ''),
+                    (string) config('services.dhl.default_service', 'AH')
+                ),
                 'shipment_date' => now()->toDateString(),
                 'shipment_start_hour' => '12:00',
                 'shipment_end_hour' => '15:00',
@@ -256,15 +264,21 @@ class DhlShipmentService
             data_set($form, 'service.drop_off_type', 'REGULAR_PICKUP');
         }
 
-        $payload = $this->payload($form);
+        $payload = null;
+        $serviceSelection = $this->serviceSelectionDiagnostics($form, data_get($form, 'service.service_type'));
         $startedAt = microtime(true);
         try {
+            $payload = $this->payload($form);
+            $serviceSelection = $this->serviceSelectionDiagnostics($form, data_get($payload, 'shipment.shipmentInfo.serviceType'));
             $response = $this->callCreateShipment($payload);
         } catch (RuntimeException $exception) {
             app(ApiIntegrationLogger::class)->error('dhl', 'createShipment', $exception, [
                 'order_id' => $form['order_id'] ?? null,
                 'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
                 'request' => $payload,
+                'service_type' => data_get($payload, 'shipment.shipmentInfo.serviceType', $serviceSelection['selected_service_type'] ?? null),
+                'receiver_country' => data_get($payload, 'shipment.ship.receiver.address.country', $serviceSelection['receiver_country'] ?? null),
+                'dhl_service_selection' => $serviceSelection,
             ]);
             throw $exception;
         }
@@ -277,6 +291,7 @@ class DhlShipmentService
                 'order_id' => $form['order_id'] ?? null,
                 'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
                 'request' => $payload,
+                'dhl_service_selection' => $serviceSelection,
                 'response' => Arr::except($response, ['labelContent']),
             ]);
             throw $exception;
@@ -291,6 +306,7 @@ class DhlShipmentService
                 'tracking_number' => $waybill,
                 'external_id' => $waybill,
                 'request' => $payload,
+                'dhl_service_selection' => $serviceSelection,
                 'response' => Arr::except($response, ['labelContent']),
             ]);
             throw $exception;
@@ -302,7 +318,7 @@ class DhlShipmentService
         $shipment = Shipment::query()->create([
             'order_id' => $form['order_id'] ?? null,
             'carrier' => 'dhl',
-            'service_code' => data_get($form, 'service.service_type', 'AH'),
+            'service_code' => data_get($payload, 'shipment.shipmentInfo.serviceType', data_get($form, 'service.service_type', 'AH')),
             'shipment_status' => 'label_created',
             'tracking_number' => $waybill,
             'carrier_shipment_id' => $waybill,
@@ -323,6 +339,9 @@ class DhlShipmentService
             'tracking_number' => $waybill,
             'external_id' => $waybill,
             'request' => $payload,
+            'service_type' => data_get($payload, 'shipment.shipmentInfo.serviceType'),
+            'receiver_country' => data_get($payload, 'shipment.ship.receiver.address.country'),
+            'dhl_service_selection' => $serviceSelection,
             'response' => Arr::except($response, ['labelContent']) + ['label_path' => $path],
         ]);
 
@@ -332,13 +351,14 @@ class DhlShipmentService
     public function payload(array $form): array
     {
         $dropOffType = data_get($form, 'service.order_courier') ? 'REQUEST_COURIER' : 'REGULAR_PICKUP';
+        $serviceType = $this->selectedServiceType($form);
 
         return [
             'authData' => ['username' => config('services.dhl.login'), 'password' => config('services.dhl.password')],
             'shipment' => $this->filled([
                 'shipmentInfo' => [
                     'dropOffType' => $dropOffType,
-                    'serviceType' => data_get($form, 'service.service_type', 'AH'),
+                    'serviceType' => $serviceType,
                     'billing' => [
                         'shippingPaymentType' => 'SHIPPER',
                         'billingAccountNumber' => config('services.dhl.account_number'),
@@ -360,6 +380,85 @@ class DhlShipmentService
                 'pieceList' => ['item' => [$this->piece($form['parcel'] ?? [])]],
             ]),
         ];
+    }
+
+
+    public function serviceSelectionDiagnostics(array $form, ?string $previousFailedServiceType = null): array
+    {
+        $shipperCountry = $this->normalizeCountry((string) data_get($form, 'shipper.country', config('services.shipments.sender.country', self::DOMESTIC_COUNTRY)));
+        $receiverCountry = $this->normalizeCountry((string) data_get($form, 'receiver.country', ''));
+        $domesticServiceType = $this->normalizeServiceType((string) config('services.dhl.default_service', 'AH')) ?: 'AH';
+        $internationalServiceType = $this->normalizeServiceType((string) config('services.dhl.default_international_service', 'EK')) ?: 'EK';
+        $blockingReasons = [];
+        $warnings = [];
+
+        if ($shipperCountry === '') {
+            $shipperCountry = self::DOMESTIC_COUNTRY;
+            $warnings[] = 'DHL shipper country is blank; defaulting to PL.';
+        }
+
+        if ($receiverCountry === '') {
+            $blockingReasons[] = 'DHL receiver country is missing; cannot create shipment until receiver country is known.';
+        }
+
+        $isDomestic = $receiverCountry !== '' && $shipperCountry === self::DOMESTIC_COUNTRY && $receiverCountry === self::DOMESTIC_COUNTRY;
+        $selectedServiceType = $receiverCountry === '' ? null : ($isDomestic ? $domesticServiceType : $internationalServiceType);
+
+        if ($receiverCountry !== '' && ! $isDomestic && $this->isDomesticServiceType($selectedServiceType)) {
+            $blockingReasons[] = sprintf(
+                'DHL serviceType %s is domestic and cannot be used for receiver country %s. Configure DHL24_DEFAULT_INTERNATIONAL_SERVICE_TYPE.',
+                $selectedServiceType,
+                $receiverCountry
+            );
+        }
+
+        return [
+            'shipper_country' => $shipperCountry,
+            'receiver_country' => $receiverCountry ?: null,
+            'is_domestic' => $isDomestic,
+            'configured_domestic_service_type' => $domesticServiceType,
+            'configured_international_service_type' => $internationalServiceType,
+            'selected_service_type' => $selectedServiceType,
+            'previous_failed_service_type' => $previousFailedServiceType ? $this->normalizeServiceType($previousFailedServiceType) : null,
+            'service_type_changed_for_country' => $previousFailedServiceType !== null && $selectedServiceType !== null && $this->normalizeServiceType($previousFailedServiceType) !== $selectedServiceType,
+            'blocking_reasons' => $blockingReasons,
+            'warnings' => $warnings,
+        ];
+    }
+
+    protected function selectedServiceType(array $form): string
+    {
+        $selection = $this->serviceSelectionDiagnostics($form, data_get($form, 'service.service_type'));
+        if ($selection['blocking_reasons'] !== []) {
+            throw new RuntimeException(implode(' ', $selection['blocking_reasons']));
+        }
+
+        return (string) $selection['selected_service_type'];
+    }
+
+    protected function selectServiceTypeForCountries(string $shipperCountry, string $receiverCountry, ?string $currentServiceType = null): string
+    {
+        return $this->selectedServiceType([
+            'shipper' => ['country' => $shipperCountry],
+            'receiver' => ['country' => $receiverCountry],
+            'service' => ['service_type' => $currentServiceType],
+        ]);
+    }
+
+    protected function normalizeCountry(string $country): string
+    {
+        return strtoupper(trim($country));
+    }
+
+    protected function normalizeServiceType(?string $serviceType): ?string
+    {
+        $serviceType = strtoupper(trim((string) $serviceType));
+        return $serviceType !== '' ? $serviceType : null;
+    }
+
+    protected function isDomesticServiceType(?string $serviceType): bool
+    {
+        return in_array($this->normalizeServiceType($serviceType), self::DOMESTIC_SERVICE_TYPES, true);
     }
 
 
