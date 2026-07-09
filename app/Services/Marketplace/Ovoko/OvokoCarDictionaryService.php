@@ -18,7 +18,7 @@ class OvokoCarDictionaryService
     public const DICTIONARIES = ['brands', 'models', 'fuel', 'gearbox_type', 'body_type', 'wheel', 'wheel_drive', 'car_status', 'car_class'];
     public const ENUMS = ['fuel', 'gearbox_type', 'body_type', 'wheel', 'wheel_drive', 'car_status', 'car_class'];
 
-    public function diagnostics(?string $brandSearch = null, ?string $brandId = null, int $modelsLimit = 5, bool $includeRaw = false, bool $includeModelGroups = false): array
+    public function diagnostics(?string $brandSearch = null, ?string $brandId = null, int $modelsLimit = 5, bool $includeRaw = false, bool $includeModelGroups = false, ?string $modelGroupSearch = null, int $modelGroupsLimit = 5): array
     {
         $account = $this->account();
         $credentials = $account?->api_credentials ?? [];
@@ -67,7 +67,7 @@ class OvokoCarDictionaryService
         ];
 
         if ($includeModelGroups) {
-            $diagnostics['model_groups'] = $this->modelGroupsDiagnostics($sampleBrand, $modelsLimit);
+            $diagnostics['model_groups'] = $this->modelGroupsDiagnostics($sampleBrand, $modelGroupsLimit, $modelGroupSearch);
         }
 
         return $diagnostics;
@@ -219,7 +219,7 @@ class OvokoCarDictionaryService
         ];
     }
 
-    private function modelGroupsDiagnostics(?OvokoCarDictionaryEntry $brand, int $modelsLimit): ?array
+    private function modelGroupsDiagnostics(?OvokoCarDictionaryEntry $brand, int $modelGroupsLimit, ?string $modelGroupSearch = null): ?array
     {
         if (! $brand) {
             return null;
@@ -267,16 +267,37 @@ class OvokoCarDictionaryService
             });
 
         $groups = array_values($groups);
+        $modelGroupSearch = trim((string) $modelGroupSearch);
+
+        if ($modelGroupSearch !== '') {
+            $search = Str::lower($modelGroupSearch);
+            $groups = array_values(array_filter($groups, function (array $group) use ($search): bool {
+                if (Str::contains(Str::lower((string) $group['model_group_key']), $search) || Str::contains(Str::lower((string) $group['model_group_label']), $search)) {
+                    return true;
+                }
+
+                foreach ($group['sample_modifications'] as $modification) {
+                    if (Str::contains(Str::lower((string) ($modification['name'] ?? '')), $search) || Str::contains(Str::lower((string) ($modification['display_name'] ?? '')), $search)) {
+                        return true;
+                    }
+                }
+
+                return false;
+            }));
+        }
+
         usort($groups, fn (array $a, array $b): int => strnatcasecmp($a['model_group_label'], $b['model_group_label']));
 
-        $modelsLimit = max(1, min($modelsLimit, 100));
+        $modelGroupsLimit = max(1, min($modelGroupsLimit, 100));
 
         return [
             'ovoko_brand_id' => (string) $brand->ovoko_id,
             'brand_name' => $brand->name,
             'source' => 'local_cache_heuristic_from_model_name',
             'groups_count' => count($groups),
-            'groups' => array_slice($groups, 0, $modelsLimit),
+            'groups_limit' => $modelGroupsLimit,
+            'model_group_search' => $modelGroupSearch !== '' ? $modelGroupSearch : null,
+            'groups' => array_slice($groups, 0, $modelGroupsLimit),
             'uncertain_groups' => array_values($uncertainGroups),
         ];
     }

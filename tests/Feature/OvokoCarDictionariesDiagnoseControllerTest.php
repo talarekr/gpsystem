@@ -231,6 +231,93 @@ class OvokoCarDictionariesDiagnoseControllerTest extends TestCase
             ->assertJsonPath('safety_flags.no_import_part', true);
     }
 
+
+    public function test_model_group_search_filters_groups_by_key_label_and_sample_modifications(): void
+    {
+        $this->actingAsAdminUser();
+
+        $brand = OvokoCarDictionaryEntry::query()->create([
+            'dictionary' => 'brands',
+            'ovoko_id' => '1',
+            'name' => 'BMW',
+            'synced_at' => now(),
+        ]);
+
+        foreach ([
+            ['ovoko_id' => '2600', 'name' => '5 E60 E61', 'year_from' => 2004, 'year_to' => 2010],
+            ['ovoko_id' => '2601', 'name' => '5 F10', 'year_from' => 2010, 'year_to' => 2017],
+            ['ovoko_id' => '3000', 'name' => 'X4 F26', 'year_from' => 2014, 'year_to' => 2017],
+            ['ovoko_id' => '3200', 'name' => 'M5 F90', 'year_from' => 2017, 'year_to' => 2023],
+        ] as $model) {
+            OvokoCarDictionaryEntry::query()->create([
+                'dictionary' => 'models',
+                'ovoko_id' => $model['ovoko_id'],
+                'ovoko_brand_id' => $brand->ovoko_id,
+                'name' => $model['name'],
+                'year_from' => $model['year_from'],
+                'year_to' => $model['year_to'],
+                'synced_at' => now(),
+            ]);
+        }
+
+        Http::fake(function (): void {
+            $this->fail('Model group search diagnostics must remain local-cache-only and must not call external HTTP endpoints.');
+        });
+
+        $this->getJson('/admin/tools/ovoko/car-dictionaries-diagnose?json=1&brand_search=BMW&brand_id=1&include_model_groups=1&model_group_search=Series%205')
+            ->assertOk()
+            ->assertJsonPath('model_groups.model_group_search', 'Series 5')
+            ->assertJsonPath('model_groups.groups_count', 1)
+            ->assertJsonPath('model_groups.groups.0.model_group_key', '5')
+            ->assertJsonPath('model_groups.groups.0.model_group_label', 'Series 5')
+            ->assertJsonMissing(['model_group_key' => 'X4'])
+            ->assertJsonPath('safety_flags.read_only_diagnose', true);
+
+        $this->getJson('/admin/tools/ovoko/car-dictionaries-diagnose?json=1&brand_search=BMW&brand_id=1&include_model_groups=1&model_group_search=X4')
+            ->assertOk()
+            ->assertJsonPath('model_groups.model_group_search', 'X4')
+            ->assertJsonPath('model_groups.groups_count', 1)
+            ->assertJsonPath('model_groups.groups.0.model_group_key', 'X4')
+            ->assertJsonPath('model_groups.groups.0.sample_modifications.0.display_name', 'X4 F26 (2014 - 2017)')
+            ->assertJsonMissing(['model_group_key' => '5']);
+    }
+
+    public function test_model_groups_limit_controls_returned_group_count(): void
+    {
+        $this->actingAsAdminUser();
+
+        $brand = OvokoCarDictionaryEntry::query()->create([
+            'dictionary' => 'brands',
+            'ovoko_id' => '1',
+            'name' => 'BMW',
+            'synced_at' => now(),
+        ]);
+
+        foreach (range(1, 7) as $series) {
+            OvokoCarDictionaryEntry::query()->create([
+                'dictionary' => 'models',
+                'ovoko_id' => (string) (1000 + $series),
+                'ovoko_brand_id' => $brand->ovoko_id,
+                'name' => $series.' F'.(10 + $series),
+                'year_from' => 2000 + $series,
+                'year_to' => 2005 + $series,
+                'synced_at' => now(),
+            ]);
+        }
+
+        Http::fake(function (): void {
+            $this->fail('Model groups limit diagnostics must remain local-cache-only and must not call external HTTP endpoints.');
+        });
+
+        $this->getJson('/admin/tools/ovoko/car-dictionaries-diagnose?json=1&brand_search=BMW&brand_id=1&include_model_groups=1&model_groups_limit=6')
+            ->assertOk()
+            ->assertJsonPath('model_groups.groups_count', 7)
+            ->assertJsonPath('model_groups.groups_limit', 6)
+            ->assertJsonCount(6, 'model_groups.groups')
+            ->assertJsonPath('safety_flags.no_import_car', true)
+            ->assertJsonPath('safety_flags.no_import_part', true);
+    }
+
     public function test_model_sync_cache_maps_year_start_and_year_end_to_top_level_year_columns(): void
     {
         $service = app(OvokoCarDictionaryService::class);
