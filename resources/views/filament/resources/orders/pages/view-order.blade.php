@@ -47,6 +47,10 @@
         $shipmentCarrierShipmentId = $shipment && is_scalar($shipment->carrier_shipment_id) ? trim((string) $shipment->carrier_shipment_id) : '';
         $shipmentLabelPath = $shipment && is_scalar($shipment->label_path) ? trim((string) $shipment->label_path) : '';
         $shipmentStatus = $shipment && is_scalar($shipment->shipment_status) ? trim((string) $shipment->shipment_status) : '';
+        $shipmentTrackingDisplay = $shipmentTrackingNumber !== '' ? $shipmentTrackingNumber : $shipmentCarrierShipmentId;
+        $shipmentTrackingUrl = $shipmentTrackingDisplay !== ''
+            ? 'https://www.dhl.com/pl-pl/home/tracking/tracking-parcel.html?submit=1&tracking-id='.urlencode($shipmentTrackingDisplay)
+            : null;
         $shipmentLabelExists = false;
         if ($shipmentLabelPath !== '' && ! str_contains($shipmentLabelPath, "\0") && preg_match('/^[a-z]+:\/\//i', $shipmentLabelPath) !== 1) {
             try {
@@ -68,6 +72,8 @@
         $shipmentLabelExists = false;
         $shipmentCanShowActions = false;
         $shipmentLabelMissing = false;
+        $shipmentTrackingDisplay = '';
+        $shipmentTrackingUrl = null;
         $shipmentSectionError = $shipmentSectionError ?: $exception;
     }
     $deliveryMethod = trim((string) ($deliveryLabel ?: $carrier ?: $order->delivery_method));
@@ -445,23 +451,19 @@
                         </div>
                     @else
                         <div class="gps-order-detail-two">
+                            {{-- code_marker = order_shipment_section_ui_cleanup_v1 --}}
                             <div class="gps-order-detail-fact">
                                 <div class="gps-order-detail-label">Podsumowanie</div>
                                 <div class="gps-order-detail-value">
                                     <div>Przewoźnik: {{ $carrier ?: ($shipmentCarrierKey !== '' ? strtoupper($shipmentCarrierKey) : '—') }}</div>
-                                    <div>Tracking: {{ $shipmentTrackingNumber !== '' ? $shipmentTrackingNumber : ($shipmentCarrierShipmentId !== '' ? $shipmentCarrierShipmentId : '—') }}</div>
+                                    <div>Tracking: @if ($shipmentTrackingUrl)<a href="{{ $shipmentTrackingUrl }}" target="_blank" rel="noopener noreferrer">{{ $shipmentTrackingDisplay }}</a>@else—@endif</div>
                                     <div>Status lokalny: {{ $shipmentStatus !== '' ? $shipmentStatus : '—' }}</div>
                                     <div>Utworzono: {{ $shipment->created_at?->format('Y-m-d H:i') ?: '—' }}</div>
-                                    <div>DHL: numer {{ $shipmentTrackingNumber !== '' ? $shipmentTrackingNumber : ($shipmentCarrierShipmentId !== '' ? $shipmentCarrierShipmentId : '—') }}</div>
-                                    @if ($shipmentTrackingNumber !== '' || $shipmentCarrierShipmentId !== '')
-                                        <div><a href="https://www.dhl.com/pl-pl/home/tracking/tracking-parcel.html?submit=1&tracking-id={{ urlencode($shipmentTrackingNumber !== '' ? $shipmentTrackingNumber : $shipmentCarrierShipmentId) }}" target="_blank" rel="noopener noreferrer">Śledź przesyłkę DHL</a></div>
-                                    @endif
                                     @if ($shipmentLabelMissing)
                                         <div class="gps-order-detail-muted">Numer listu DHL: {{ $shipmentTrackingNumber !== '' ? $shipmentTrackingNumber : $shipmentCarrierShipmentId }}</div>
                                         <div class="gps-order-detail-muted">Lokalny rekord przesyłki istnieje, ale plik etykiety PDF nie istnieje.</div>
                                         <div class="gps-order-detail-muted">Nie twórz nowej przesyłki DHL.</div>
                                     @endif
-                                    <div>Marketplace: {{ $marketplaceFulfillmentStatus === 'synced' ? 'tracking wysłany' : ($marketplaceFulfillmentStatus === 'error' ? 'błąd' : 'tracking nie wysłany') }}</div>
                                 </div>
                                 <div class="gps-order-shipment-actions">
                                     @if ($shipmentLabelExists)<a class="fi-btn fi-color-primary fi-btn-color-primary fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-primary-500 focus-visible:ring-2 focus-visible:ring-primary-600 dark:bg-primary-500 dark:hover:bg-primary-400 dark:focus-visible:ring-primary-500" href="{{ route('tools.download-shipment-label', $shipment) }}">Pobierz etykietę PDF</a>@elseif ($shipmentLabelPath !== '')<span class="gps-order-detail-muted">Brak pliku etykiety</span><button type="button" disabled class="fi-btn fi-color-gray fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-gray-300 px-3 py-2 text-sm font-semibold text-gray-700">Napraw etykietę DHL (preview)</button>@endif
@@ -471,10 +473,7 @@
                             <div class="gps-order-detail-fact">
                                 <div class="gps-order-detail-label">Adres dostawy</div>
                                 <div class="gps-order-detail-value">
-                                    <div>{{ $order->customer_name ?: $order->company_name ?: '—' }}</div>
-                                    <div>{{ $order->address_line1 ?: '—' }}</div>
-                                    <div>{{ trim(($order->postal_code ?? '').' '.($order->city ?? '')) ?: '—' }}</div>
-                                    <div>{{ $order->country ?: '—' }}</div>
+                                    <div>jak w zamówieniu</div>
                                 </div>
                             </div>
                         </div>
