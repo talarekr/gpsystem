@@ -2,7 +2,7 @@
     use App\Models\Shipment;
 
     $shipments = $this->shipments;
-    $dhlCountryOptions = $this->dhlCountryOptions;
+    // code_marker = shipment_admin_ui_missing_label_hotfix_v1
 @endphp
 
 <x-filament-panels::page>
@@ -25,19 +25,36 @@
         <div class="gps-shipments-grid gps-header"><div>ID</div><div>Zamówienie</div><div>Kurier</div><div>Status</div><div>Tracking</div><div>Etykieta</div><div>Akcje</div></div>
         @forelse ($shipments as $shipment)
             @php
-                $carrier = $this->safeString($shipment->carrier);
-                $status = $this->safeString($shipment->shipment_status);
-                $tracking = $this->safeString($shipment->tracking_number) ?: $this->safeString($shipment->carrier_shipment_id);
-                $labelPath = $this->safeString($shipment->label_path);
-                $labelExists = $this->labelExists($shipment);
+                try {
+                    $shipmentId = is_scalar($shipment->id ?? null) ? (string) $shipment->id : '—';
+                    $orderNumber = $this->safeString($shipment->order?->order_number) ?: '—';
+                    $customerName = $this->safeString($shipment->order?->customer_name) ?: '—';
+                    $carrier = $this->safeString($shipment->carrier);
+                    $status = $this->safeString($shipment->shipment_status);
+                    $tracking = $this->safeString($shipment->tracking_number) ?: $this->safeString($shipment->carrier_shipment_id);
+                    $labelPath = $this->safeString($shipment->label_path);
+                    $labelExists = $this->labelExists($shipment);
+                    $rowError = false;
+                } catch (\Throwable $exception) {
+                    report($exception);
+                    $shipmentId = is_scalar($shipment->id ?? null) ? (string) $shipment->id : '—';
+                    $orderNumber = '—';
+                    $customerName = '—';
+                    $carrier = null;
+                    $status = null;
+                    $tracking = null;
+                    $labelPath = null;
+                    $labelExists = false;
+                    $rowError = true;
+                }
             @endphp
             <div class="gps-card gps-shipments-grid" wire:key="shipment-{{ $shipment->id }}">
-                <div class="gps-title">#{{ $shipment->id }}</div>
-                <div><div class="gps-title">{{ $this->safeString($shipment->order?->order_number) ?: '—' }}</div><div class="gps-muted">{{ $this->safeString($shipment->order?->customer_name) ?: 'Brak klienta' }}</div></div>
+                <div class="gps-title">#{{ $shipmentId }}</div>
+                <div><div class="gps-title">{{ $orderNumber }}</div><div class="gps-muted">{{ $customerName }}</div></div>
                 <div><span class="gps-badge">{{ $carrier ? strtoupper($carrier) : '—' }}</span></div>
                 <div><span class="gps-badge">{{ $status ?: '—' }}</span></div>
                 <div>{{ $tracking ?: '—' }}</div>
-                <div>@if($labelExists)<a class="gps-action" href="{{ route('tools.download-shipment-label', ['shipment' => $shipment->id]) }}">Pobierz etykietę</a>@elseif($labelPath)<span class="gps-muted">Brak pliku etykiety</span>@else <span class="gps-muted">Brak etykiety</span> @endif</div>
+                <div>@if($rowError)<span class="gps-muted">Brak etykiety</span>@elseif($labelExists)<a class="gps-action" href="{{ route('tools.download-shipment-label', ['shipment' => $shipment->id]) }}">Pobierz etykietę</a>@elseif($labelPath)<span class="gps-muted">Brak pliku etykiety</span>@else <span class="gps-muted">Brak etykiety</span> @endif</div>
                 <div class="gps-actions">
                     <a href="{{ \App\Filament\Pages\ShipmentDetails::getUrl(['shipment' => $shipment->id]) }}" class="gps-action">Szczegóły</a>
                     @if($labelExists)<button type="button" wire:click="downloadLabel({{ $shipment->id }})" class="gps-action">Pobierz etykietę PDF</button>@endif

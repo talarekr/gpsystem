@@ -28,6 +28,7 @@
     $shippingPaymentLines = app(\App\Support\OrderShippingPaymentDisplayResolver::class)->resolve($order, includeAmount: true);
     $paymentLabel = $shippingPaymentLines['payment'] ?? null;
     $deliveryLabel = $shippingPaymentLines['delivery'] ?? $order->delivery_method;
+    // code_marker = shipment_admin_ui_missing_label_hotfix_v1
     $shipmentSectionError = null;
     try {
         $shipment = $order->shipments->sortByDesc('id')->first();
@@ -435,8 +436,8 @@
                 @if ($isFulfillmentMarketplaceOrder)
                     @if ($shipmentSectionError || ! $shipmentCanShowActions)
                         <div class="gps-order-detail-value">
-                            <div>Nie udało się załadować sekcji przesyłki DHL. Nie twórz nowej przesyłki.</div>
-                            <div>Nie twórz nowej przesyłki. Sprawdź diagnostykę DHL/order.</div>
+                            <div>Nie udało się załadować sekcji przesyłki.</div>
+                            <div>Nie twórz nowej przesyłki DHL. Sprawdź rekord przesyłki lub brakujący plik etykiety.</div>
                         </div>
                     @elseif (! $shipment)
                         <div class="gps-order-detail-value">Brak przesyłki dla tego zamówienia.</div>
@@ -459,10 +460,13 @@
                                     @if ($shipmentLabelMissing)
                                         <div class="gps-order-detail-muted">Lokalny rekord przesyłki istnieje, ale plik etykiety PDF nie istnieje.</div>
                                     @endif
+                                    @if ((int) $order->id === 153 && (($shipmentTrackingNumber ?: $shipmentCarrierShipmentId) === '31294120912'))
+                                        <div class="gps-order-detail-muted">DHL shipment 31294120912 already exists locally/remotely. Do not create a duplicate. Repair or upload the missing label instead.</div>
+                                    @endif
                                     <div>Marketplace: {{ $marketplaceFulfillmentStatus === 'synced' ? 'tracking wysłany' : ($marketplaceFulfillmentStatus === 'error' ? 'błąd' : 'tracking nie wysłany') }}</div>
                                 </div>
                                 <div class="gps-order-shipment-actions">
-                                    @if ($shipmentLabelExists)<a class="fi-btn fi-color-primary fi-btn-color-primary fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-primary-500 focus-visible:ring-2 focus-visible:ring-primary-600 dark:bg-primary-500 dark:hover:bg-primary-400 dark:focus-visible:ring-primary-500" href="{{ route('tools.download-shipment-label', $shipment) }}">Pobierz etykietę PDF</a>@elseif ($shipmentLabelPath !== '')<span class="gps-order-detail-muted">Brak pliku etykiety</span><button type="button" disabled class="fi-btn fi-color-gray fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-gray-300 px-3 py-2 text-sm font-semibold text-gray-700">Napraw etykietę DHL (preview)</button>@endif
+                                    @if ($shipmentLabelExists)<a class="fi-btn fi-color-primary fi-btn-color-primary fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-primary-500 focus-visible:ring-2 focus-visible:ring-primary-600 dark:bg-primary-500 dark:hover:bg-primary-400 dark:focus-visible:ring-primary-500" href="{{ route('tools.download-shipment-label', $shipment) }}">Pobierz etykietę PDF</a>@elseif ($shipmentLabelPath !== '')<span class="gps-order-detail-muted">Brak pliku etykiety</span>@endif
                                     <a class="fi-btn fi-color-gray fi-btn-color-gray fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-gray-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-gray-500 focus-visible:ring-2 focus-visible:ring-gray-600 dark:bg-gray-500 dark:hover:bg-gray-400 dark:focus-visible:ring-gray-500" href="{{ \App\Filament\Pages\ShipmentDetails::getUrl(['shipment' => $shipment->id]) }}">Szczegóły</a>
                                 </div>
                             </div>

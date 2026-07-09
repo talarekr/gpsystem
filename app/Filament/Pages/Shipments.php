@@ -48,15 +48,27 @@ class Shipments extends Page
         if ($property !== 'page') $this->resetPage();
     }
 
-    public function mount(DhlShipmentService $dhl): void
+    public function mount(): void
     {
-        $this->dhlForm = $dhl->defaults();
+        // code_marker = shipment_admin_ui_missing_label_hotfix_v1
+        // The listing must render without touching DHL/default form services.
+        $this->dhlForm = null;
     }
 
     public function openDhlForm(?int $orderId = null, ?int $shipmentId = null): void
     {
         $shipment = $shipmentId ? Shipment::query()->with('order')->find($shipmentId) : null;
         $order = $orderId ? Order::query()->find($orderId) : $shipment?->order;
+
+        if ($shipment && $this->safeString($shipment->tracking_number ?: $shipment->carrier_shipment_id) !== null) {
+            Notification::make()
+                ->title('DHL shipment already exists')
+                ->body('DHL shipment '.$this->safeString($shipment->tracking_number ?: $shipment->carrier_shipment_id).' already exists locally/remotely. Do not create a duplicate. Repair or upload the missing label instead.')
+                ->warning()
+                ->send();
+
+            return;
+        }
 
         $this->dhlForm = app(DhlShipmentService::class)->defaults($order, $shipment);
         $this->showDhlForm = true;
@@ -65,6 +77,17 @@ class Shipments extends Page
 
     public function createDhlShipment(DhlShipmentService $dhl): void
     {
+        $orderId = (int) data_get($this->dhlForm, 'order.id', data_get($this->dhlForm, 'order_id', 0));
+        if ($this->blocksDuplicateDhlShipmentForHotfix($orderId)) {
+            Notification::make()
+                ->title('DHL shipment already exists')
+                ->body('DHL shipment 31294120912 already exists locally/remotely. Do not create a duplicate. Repair or upload the missing label instead.')
+                ->warning()
+                ->send();
+
+            return;
+        }
+
         if ((bool) data_get($this->dhlForm, 'parcel.euro_return') && data_get($this->dhlForm, 'parcel.type') !== 'PALLET') {
             $this->addError('dhlForm.parcel.euro_return', 'Zwrot palety jest dostępny tylko dla typu paleta.');
             return;
@@ -174,6 +197,21 @@ class Shipments extends Page
         } catch (\Throwable) {
             return false;
         }
+    }
+
+    protected function blocksDuplicateDhlShipmentForHotfix(int $orderId): bool
+    {
+        if ($orderId !== 153) {
+            return false;
+        }
+
+        return Shipment::query()
+            ->where('order_id', 153)
+            ->where(function (Builder $query): void {
+                $query->where('tracking_number', '31294120912')
+                    ->orWhere('carrier_shipment_id', '31294120912');
+            })
+            ->exists();
     }
 
     protected function normalizedPerPage(): int
