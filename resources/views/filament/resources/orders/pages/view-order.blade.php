@@ -112,6 +112,35 @@
         $shipmentTrackingUrl = null;
         $shipmentSectionError = $shipmentSectionError ?: $exception;
     }
+    $ovokoShipmentDraft = $isOvokoOrder ? $order->shipments->sortByDesc('id')->first(function (Shipment $candidate): bool {
+        $carrierKey = is_scalar($candidate->carrier) ? Str::lower(trim((string) $candidate->carrier)) : '';
+        $payloadHaystack = Str::lower(json_encode([
+            'service_code' => is_scalar($candidate->service_code) ? $candidate->service_code : null,
+            'request_payload' => is_array($candidate->request_payload) ? $candidate->request_payload : [],
+            'parcel_snapshot' => is_array($candidate->parcel_snapshot) ? $candidate->parcel_snapshot : [],
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '');
+
+        return $carrierKey === 'ovoko' || str_contains($payloadHaystack, 'ovoko');
+    }) : null;
+    $ovokoDraftParcel = is_array($ovokoShipmentDraft?->parcel_snapshot) ? $ovokoShipmentDraft->parcel_snapshot : [];
+    $ovokoDraftRequestPackage = is_array($ovokoShipmentDraft?->request_payload) ? (array) data_get($ovokoShipmentDraft->request_payload, 'package', []) : [];
+    $ovokoDraftValue = fn (string $key, array $aliases = []) => collect([$key, ...$aliases])
+        ->map(fn (string $candidate) => data_get($ovokoDraftParcel, $candidate, data_get($ovokoDraftRequestPackage, $candidate)))
+        ->first(fn ($value) => filled($value));
+    $ovokoDraftType = $ovokoDraftValue('type', ['package_type']);
+    $ovokoDraftTypeLabel = $ovokoDraftValue('type_label') ?: match ($ovokoDraftType) {
+        'package' => 'Opakowanie',
+        'pallet' => 'Paleta',
+        default => null,
+    };
+    $ovokoDraftLength = $ovokoDraftValue('length_cm', ['length']);
+    $ovokoDraftWidth = $ovokoDraftValue('width_cm', ['width']);
+    $ovokoDraftHeight = $ovokoDraftValue('height_cm', ['height']);
+    $ovokoDraftWeight = $ovokoDraftValue('weight_kg', ['weight']);
+    $ovokoDraftExists = $isOvokoOrder && $ovokoShipmentDraft && filled($ovokoDraftType) && filled($ovokoDraftLength) && filled($ovokoDraftWidth) && filled($ovokoDraftHeight) && filled($ovokoDraftWeight);
+    $formatOvokoDimension = fn ($value): string => fmod((float) $value, 1.0) === 0.0 ? number_format((float) $value, 0, '.', '') : number_format((float) $value, 2, '.', '');
+    $formatOvokoWeight = fn ($value): string => number_format((float) $value, 3, '.', '');
+    // code_marker = ovoko_package_draft_local_save_v1
     $deliveryMethod = trim((string) ($deliveryLabel ?: $carrier ?: $order->delivery_method));
     $deliveryType = trim((string) data_get($order->raw_payload, 'delivery.type', data_get($order->raw_payload, 'delivery_type', data_get($order->raw_payload, 'shipping_type'))));
     $deliveryPhone = trim((string) (data_get($order->raw_payload, 'delivery.address.phoneNumber') ?: data_get($order->raw_payload, 'delivery.address.phone') ?: $order->phone));
@@ -505,17 +534,25 @@
                         </div>
                     @endif
                 @elseif ($isOvokoOrder)
-                    {{-- code_marker = ovoko_order_shipment_modal_frontend_v1 --}}
-                    <div x-data="{ open: false, notice: false }" class="gps-order-detail-value">
+                    <div x-data="{ open: false }" class="gps-order-detail-value">
+                        @if (session('success'))
+                            <div class="gps-ovoko-shipment-notice">{{ session('success') }}</div>
+                        @endif
                         <div class="gps-order-shipment-actions">
-                            <button type="button" class="fi-btn fi-color-primary fi-btn-color-primary fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-primary-500 focus-visible:ring-2 focus-visible:ring-primary-600 dark:bg-primary-500 dark:hover:bg-primary-400 dark:focus-visible:ring-primary-500" x-on:click="open = true; notice = false">
+                            <button type="button" class="fi-btn fi-color-primary fi-btn-color-primary fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-primary-500 focus-visible:ring-2 focus-visible:ring-primary-600 dark:bg-primary-500 dark:hover:bg-primary-400 dark:focus-visible:ring-primary-500" x-on:click="open = true">
                                 Wprowadź typ i wagę przesyłki
                             </button>
                         </div>
-
-                        <div x-cloak x-show="notice" class="gps-ovoko-shipment-notice">
-                            Zapis danych przesyłki Ovoko nie jest jeszcze podłączony do API.
-                        </div>
+                        @if ($ovokoDraftExists)
+                            <div class="gps-ovoko-shipment-notice">
+                                <strong>Dane paczki Ovoko</strong>
+                                <div>Typ: {{ $ovokoDraftTypeLabel }}</div>
+                                <div>Wymiary: {{ $formatOvokoDimension($ovokoDraftLength) }} × {{ $formatOvokoDimension($ovokoDraftWidth) }} × {{ $formatOvokoDimension($ovokoDraftHeight) }} cm</div>
+                                <div>Waga: {{ $formatOvokoWeight($ovokoDraftWeight) }} kg</div>
+                                <div>Status: dane paczki zapisane lokalnie</div>
+                                <div>Wysyłka danych do Ovoko API nie jest jeszcze podłączona.</div>
+                            </div>
+                        @endif
 
                         <div x-cloak x-show="open" x-transition.opacity class="gps-ovoko-shipment-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="gps-ovoko-shipment-modal-title" x-on:keydown.escape.window="open = false">
                             <div class="gps-ovoko-shipment-modal" x-on:click.outside="open = false">
@@ -524,20 +561,24 @@
                                     <p>Przed podaniem długości, szerokości, wysokości i wagi paczki należy ją zmierzyć i zważyć.</p>
                                     <p>W przypadku wprowadzenia niepoprawnych wymiarów przesyłki, dodatkowe opłaty poniesione przez Ovoko, mogą zostać przeniesione na sprzedawcę.</p>
                                 </div>
-                                <form class="gps-ovoko-shipment-form" x-on:submit.prevent="notice = true; open = false">
+                                <form class="gps-ovoko-shipment-form" method="POST" action="{{ route('admin.tools.ovoko.order-shipment-package-draft') }}">
+                                    @csrf
+                                    <input type="hidden" name="order_id" value="{{ $order->id }}">
+                                    <input type="hidden" name="marketplace_order_id" value="{{ $order->marketplace_order_id }}">
+                                    <input type="hidden" name="confirm" value="save-ovoko-package-draft">
                                     <label>
                                         Typ
-                                        <select required>
+                                        <select name="type" required>
                                             <option value="">Wybierz typ</option>
-                                            <option value="package">Opakowanie</option>
-                                            <option value="pallet">Paleta</option>
+                                            <option value="package" @selected($ovokoDraftType === 'package')>Opakowanie</option>
+                                            <option value="pallet" @selected($ovokoDraftType === 'pallet')>Paleta</option>
                                         </select>
                                     </label>
                                     <div class="gps-ovoko-shipment-form-grid">
-                                        <label>Długość (cm)<input type="number" min="0" step="0.01" required></label>
-                                        <label>Szerokość (cm)<input type="number" min="0" step="0.01" required></label>
-                                        <label>Wysokość (cm)<input type="number" min="0" step="0.01" required></label>
-                                        <label>Waga (kg)<input type="number" min="0" step="0.001" required></label>
+                                        <label>Długość (cm)<input name="length_cm" type="number" min="0" step="0.01" value="{{ $ovokoDraftLength }}" required></label>
+                                        <label>Szerokość (cm)<input name="width_cm" type="number" min="0" step="0.01" value="{{ $ovokoDraftWidth }}" required></label>
+                                        <label>Wysokość (cm)<input name="height_cm" type="number" min="0" step="0.01" value="{{ $ovokoDraftHeight }}" required></label>
+                                        <label>Waga (kg)<input name="weight_kg" type="number" min="0" step="0.001" value="{{ $ovokoDraftWeight }}" required></label>
                                     </div>
                                     <div class="gps-ovoko-shipment-modal-actions">
                                         <button type="button" class="fi-btn fi-color-gray fi-btn-color-gray fi-size-sm inline-flex items-center justify-center gap-1.5 rounded-lg bg-gray-100 px-3 py-2 text-sm font-semibold text-gray-700 shadow-sm outline-none transition duration-75 hover:bg-gray-200" x-on:click="open = false">Zamknij</button>

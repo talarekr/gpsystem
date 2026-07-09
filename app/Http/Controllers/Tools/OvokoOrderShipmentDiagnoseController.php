@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Storage;
 
 class OvokoOrderShipmentDiagnoseController extends Controller
 {
-    private const CODE_MARKER = 'ovoko_order_shipment_label_diagnostics_v1';
+    private const CODE_MARKER = 'ovoko_package_draft_local_save_v1';
 
     public function __invoke(Request $request): JsonResponse
     {
@@ -114,15 +114,26 @@ class OvokoOrderShipmentDiagnoseController extends Controller
     private function localShipmentData(?Shipment $shipment): array
     {
         $parcel = (array) ($shipment?->parcel_snapshot ?? []);
+        $requestPackage = (array) data_get(is_array($shipment?->request_payload) ? $shipment->request_payload : [], 'package', []);
+        $value = fn (string $key, array $aliases = []) => collect([$key, ...$aliases])
+            ->map(fn (string $candidate) => data_get($parcel, $candidate, data_get($requestPackage, $candidate)))
+            ->first(fn ($candidate) => filled($candidate));
+        $type = $value('type', ['package_type']);
         $labelPath = is_scalar($shipment?->label_path) ? trim((string) $shipment->label_path) : null;
 
         return [
             'exists' => $shipment !== null,
-            'type' => $parcel['type'] ?? $parcel['package_type'] ?? null,
-            'length_cm' => $parcel['length_cm'] ?? $parcel['length'] ?? null,
-            'width_cm' => $parcel['width_cm'] ?? $parcel['width'] ?? null,
-            'height_cm' => $parcel['height_cm'] ?? $parcel['height'] ?? null,
-            'weight_kg' => $parcel['weight_kg'] ?? $parcel['weight'] ?? null,
+            'type' => $type,
+            'type_label' => $value('type_label') ?: match ($type) {
+                'package' => 'Opakowanie',
+                'pallet' => 'Paleta',
+                default => null,
+            },
+            'length_cm' => $value('length_cm', ['length']),
+            'width_cm' => $value('width_cm', ['width']),
+            'height_cm' => $value('height_cm', ['height']),
+            'weight_kg' => $value('weight_kg', ['weight']),
+            'status' => $shipment?->shipment_status ?? $value('status'),
             'label_exists' => filled($labelPath) && Storage::disk('local')->exists($labelPath),
             'label_path' => $labelPath ?: null,
         ];

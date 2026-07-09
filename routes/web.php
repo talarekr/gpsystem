@@ -96,6 +96,7 @@ use App\Http\Controllers\Tools\OvokoLinkedProductsCheckController;
 use App\Http\Controllers\Tools\OvokoSoldMappingCheckController;
 use App\Http\Controllers\Tools\OvokoImportProductDataController;
 use App\Http\Controllers\Tools\OvokoOrderShipmentDiagnoseController;
+use App\Http\Controllers\Tools\OvokoOrderShipmentPackageDraftController;
 use App\Http\Controllers\Tools\MarketplaceMappingGapsExportController;
 use App\Http\Controllers\Tools\MarketplaceOrdersResetController;
 use App\Http\Controllers\Tools\MarketplaceOrdersSyncController;
@@ -364,6 +365,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     })->name('admin.tools.ovoko.sold-mapping-check-ping');
     Route::get('/admin/tools/ovoko/import-product-data', OvokoImportProductDataController::class)->name('admin.tools.ovoko.import-product-data');
     Route::get('/admin/tools/ovoko/order-shipment-diagnose', OvokoOrderShipmentDiagnoseController::class)->name('admin.tools.ovoko.order-shipment-diagnose');
+    Route::post('/admin/tools/ovoko/order-shipment-package-draft', OvokoOrderShipmentPackageDraftController::class)->name('admin.tools.ovoko.order-shipment-package-draft');
     Route::get('/admin/tools/ovoko-stock-sync-dry-run', [OvokoStockSyncController::class, 'dryRun'])->name('admin.tools.ovoko-stock-sync-dry-run');
     Route::match(['get', 'post'], '/admin/tools/ovoko-stock-sync-apply', [OvokoStockSyncController::class, 'apply'])->name('admin.tools.ovoko-stock-sync-apply');
     Route::get('/admin/tools/ovoko-stock-sync-runner', [OvokoStockSyncRunnerController::class, 'index'])->name('admin.tools.ovoko-stock-sync-runner.index');
