@@ -16,8 +16,9 @@ class CreateShipment extends Shipments
 
     public function mount(DhlShipmentService $dhl): void
     {
-        parent::mount($dhl);
+        parent::mount();
 
+        $this->dhlForm = $dhl->defaults();
         $this->showDhlForm = true;
     }
 }
