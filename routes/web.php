@@ -357,6 +357,8 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/marketplace/mapping-gaps-export', MarketplaceMappingGapsExportController::class)->name('admin.tools.marketplace.mapping-gaps-export');
     Route::get('/admin/tools/ovoko/car-dictionaries-diagnose', OvokoCarDictionariesDiagnoseController::class)->name('admin.tools.ovoko.car-dictionaries-diagnose');
     Route::post('/admin/tools/ovoko/sync-car-dictionaries', OvokoSyncCarDictionariesController::class)->name('admin.tools.ovoko.sync-car-dictionaries');
+    Route::options('/admin/tools/ovoko/sync-car-dictionaries', static fn () => response()->noContent()->withHeaders(['Allow' => 'POST, OPTIONS']))
+        ->name('admin.tools.ovoko.sync-car-dictionaries.options');
     Route::get('/admin/tools/ovoko/local-car-ovoko-readiness', OvokoLocalCarReadinessController::class)->name('admin.tools.ovoko.local-car-ovoko-readiness');
     Route::get('/admin/tools/ovoko/listing-url-backfill', OvokoListingUrlBackfillController::class)->name('admin.tools.ovoko.listing-url-backfill');
     Route::get('/admin/tools/ovoko/backfill-links', OvokoListingUrlBackfillController::class)->name('admin.tools.ovoko.backfill-links');
