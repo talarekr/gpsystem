@@ -53,6 +53,51 @@ class OvokoCarDictionariesDiagnoseControllerTest extends TestCase
             ->assertJsonPath('safety_flags.no_import_part', true);
     }
 
+    public function test_models_sample_can_target_brand_id_and_models_limit_without_external_calls(): void
+    {
+        $this->actingAsAdminUser();
+
+        OvokoCarDictionaryEntry::query()->create([
+            'dictionary' => 'brands',
+            'ovoko_id' => '142',
+            'name' => 'AC',
+            'synced_at' => now(),
+        ]);
+        $brand = OvokoCarDictionaryEntry::query()->create([
+            'dictionary' => 'brands',
+            'ovoko_id' => '1',
+            'name' => 'BMW',
+            'synced_at' => now(),
+        ]);
+
+        for ($i = 1; $i <= 25; $i++) {
+            OvokoCarDictionaryEntry::query()->create([
+                'dictionary' => 'models',
+                'ovoko_id' => (string) (1000 + $i),
+                'ovoko_brand_id' => $brand->ovoko_id,
+                'name' => sprintf('BMW Model %02d', $i),
+                'synced_at' => now(),
+            ]);
+        }
+
+        Http::fake(function (): void {
+            $this->fail('Diagnostics must remain local-cache-only and must not call Ovoko or any external HTTP endpoint.');
+        });
+
+        $this->getJson('/admin/tools/ovoko/car-dictionaries-diagnose?json=1&brand_search=BMW&brand_id=1&models_limit=20')
+            ->assertOk()
+            ->assertJsonPath('samples.models_for_brand.ovoko_brand_id', '1')
+            ->assertJsonPath('samples.models_for_brand.brand_name', 'BMW')
+            ->assertJsonPath('samples.models_for_brand.models_count', 25)
+            ->assertJsonCount(20, 'samples.models_for_brand.models')
+            ->assertJsonPath('samples.models_for_brand.models.0.ovoko_brand_id', '1')
+            ->assertJsonPath('safety_flags.read_only_diagnose', true)
+            ->assertJsonPath('safety_flags.no_import_car', true)
+            ->assertJsonPath('safety_flags.no_import_part', true)
+            ->assertJsonPath('safety_flags.no_parts_mutation', true)
+            ->assertJsonPath('safety_flags.no_local_cars_mutation', true);
+    }
+
     private function actingAsAdminUser(): User
     {
         $this->seed(RoleSeeder::class);
