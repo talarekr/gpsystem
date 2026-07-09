@@ -195,13 +195,18 @@ class OvokoApiClient extends AbstractMarketplaceApiClient
         $statusCode = $payload['status_code'] ?? null;
         $apiOk = $response->successful() && ($statusCode === 'R200' || $statusCode === 200);
 
+        $carId = $payload['car_id'] ?? $payload['id'] ?? data_get($payload, 'data.car_id') ?? data_get($payload, 'data.id') ?? null;
+        $message = $payload['msg'] ?? $payload['message'] ?? null;
+        $idempotentExisting = is_string($message) && (stripos($message, 'CAR exist') !== false || stripos($message, 'already') !== false || stripos($message, 'exist') !== false) && filled($carId);
+
         return [
             'http_status' => $response->status(),
             'api_status_code' => $statusCode,
-            'api_ok' => $apiOk,
+            'api_ok' => $apiOk || $idempotentExisting,
             'endpoint_used' => $endpoint,
-            'car_id' => $payload['car_id'] ?? $payload['id'] ?? null,
-            'message' => $payload['msg'] ?? $payload['message'] ?? null,
+            'car_id' => $carId,
+            'message' => $message,
+            'idempotent_existing_car' => $idempotentExisting,
             'response_top_level_keys' => array_values(array_slice(array_keys($payload), 0, 30)),
             'payload' => $payload,
         ];

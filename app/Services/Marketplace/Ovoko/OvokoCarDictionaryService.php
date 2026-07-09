@@ -126,6 +126,12 @@ class OvokoCarDictionaryService
             $missing[] = 'status';
         }
 
+        $ovokoCarIdSet = filled($ids['ovoko_car_id']);
+        if ($ovokoCarIdSet) {
+            $missing[] = 'local_car_already_has_ovoko_car_id';
+            $payload = null;
+        }
+
         return [
             'ok' => true,
             'marker' => self::MARKER,
@@ -142,7 +148,7 @@ class OvokoCarDictionaryService
             'mapping_ids_exist_in_cache' => $exists,
             'missing_fields_for_future_import_car' => $missing,
             'ready_for_future_import_car' => $missing === [],
-            'planned_import_car_payload' => $payload,
+            'planned_import_car_payload' => $ovokoCarIdSet ? ['already_imported' => true] : $payload,
             'safety_flags' => ['read_only' => true, 'no_import_car' => true, 'no_import_part' => true, 'no_mutation' => true],
         ];
     }
