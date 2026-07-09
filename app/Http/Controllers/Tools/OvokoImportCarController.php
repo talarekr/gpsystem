@@ -72,7 +72,19 @@ class OvokoImportCarController extends Controller
             ], 422);
         }
 
-        $payload = Arr::only((array) ($readiness['planned_import_car_payload'] ?? []), ['car_model', 'car_years', 'external_id']);
+        $payload = Arr::only((array) ($readiness['planned_import_car_payload'] ?? []), ['car_model', 'car_years', 'status', 'external_id']);
+
+        if (blank($payload['status'] ?? null)) {
+            return response()->json([
+                'ok' => false,
+                'blocked' => true,
+                'reason' => 'local_car_missing_ovoko_status_id',
+                'local_car_id' => $car->id,
+                'missing_fields_for_future_import_car' => ['ovoko_status_id'],
+                'readiness' => $readiness,
+                'marker' => self::MARKER,
+            ], 422);
+        }
 
         try {
             /** @var OvokoApiClient $client */
