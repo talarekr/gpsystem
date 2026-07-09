@@ -26,23 +26,6 @@ class CreateOrderShipment extends CreateShipment
         abort_unless(in_array(strtolower((string) $order->marketplace), ['allegro', 'ebay', 'ebay_de', 'ebay_fr'], true), 404);
 
         $this->order = $order;
-
-        if ((int) $order->id === 153 && Shipment::query()->where('order_id', 153)->where(function ($query): void {
-            $query->where('tracking_number', '31294120912')
-                ->orWhere('carrier_shipment_id', '31294120912');
-        })->exists()) {
-            Notification::make()
-                ->title('DHL shipment already exists')
-                ->body('DHL shipment 31294120912 already exists locally/remotely. Do not create a duplicate. Repair or upload the missing label instead.')
-                ->warning()
-                ->send();
-
-            $this->dhlForm = null;
-            $this->showDhlForm = false;
-
-            return;
-        }
-
         $this->dhlForm = $dhl->defaults($order);
         $this->showDhlForm = true;
     }
