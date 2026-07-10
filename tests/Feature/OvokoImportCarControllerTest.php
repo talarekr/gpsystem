@@ -36,6 +36,10 @@ class OvokoImportCarControllerTest extends TestCase
             ->assertJsonPath('ovoko_car_id', 'RRR-499')
             ->assertJsonPath('status_code', 'R200')
             ->assertJsonPath('external_id', 'gps-car-'.$car->id)
+            ->assertJsonPath('request_payload_without_auth.car_model', '2600')
+            ->assertJsonPath('request_payload_without_auth.car_years', 2007)
+            ->assertJsonPath('request_payload_without_auth.status', '1')
+            ->assertJsonPath('request_payload_without_auth.external_id', 'gps-car-'.$car->id)
             ->assertJsonPath('marker', 'ovoko_import_car_admin_tool_v1');
 
         Http::assertSentCount(1);
@@ -46,12 +50,14 @@ class OvokoImportCarControllerTest extends TestCase
             && $request['user_token'] === 'token'
             && $request['car_model'] === '2600'
             && (int) $request['car_years'] === 2007
+            && $request['status'] === '1'
             && $request['external_id'] === 'gps-car-'.$car->id
             && ! isset($request['part_id']));
 
         $car->refresh();
         $this->assertSame('RRR-499', data_get($car->legacy_payload, 'ovoko_car_id'));
         $this->assertSame('2600', data_get($car->legacy_payload, 'import_car_request_payload.car_model'));
+        $this->assertSame('1', data_get($car->legacy_payload, 'import_car_request_payload.status'));
         $this->assertSame('R200', data_get($car->legacy_payload, 'status_code'));
     }
 
