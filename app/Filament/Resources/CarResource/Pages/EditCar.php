@@ -25,7 +25,9 @@ class EditCar extends EditRecord
      */
     protected function mutateFormDataBeforeSave(array $data): array
     {
-        return CarResource::normalizeOvokoLocalMappingData($data);
+        $existingLegacyPayload = is_array($this->record->legacy_payload) ? $this->record->legacy_payload : [];
+
+        return CarResource::normalizeOvokoLocalMappingData($data, $existingLegacyPayload);
     }
 
     protected function getHeaderActions(): array
