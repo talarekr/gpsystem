@@ -17,6 +17,10 @@ class EbayListingStatusBatchRunnerService
     public const STATE_INITIALIZATION_FIX_MARKER = 'ebay_listing_status_batch_runner_state_initialization_fix_v3';
     public const DELAY_COUNTDOWN_FIX_MARKER = 'ebay_listing_status_batch_runner_delay_countdown_fix_v4';
     public const CACHE_KEY = 'admin_tools:ebay_listing_status_sync:v1';
+    public const RETRY_CACHE_KEY = 'admin_tools:ebay_listing_status_sync:transient_retry:v1';
+    public const TRANSIENT_RETRY_MARKER = 'ebay_listing_status_transient_retry_runner_v1';
+    public const RATE_LIMIT_BACKOFF_MARKER = 'ebay_listing_status_rate_limit_backoff_v1';
+    public const RETRY_DIAGNOSE_MARKER = 'ebay_listing_status_retry_diagnose_v1';
 
     public function __construct(private readonly EbayListingStatusNormalizer $normalizer) {}
 
@@ -58,6 +62,8 @@ class EbayListingStatusBatchRunnerService
     public function runNextBatch(array $input): array
     {
         if (($input['confirm'] ?? null) !== 'run-next-ebay-listing-status-sync-batch') return ['ok' => false, 'reason' => 'missing_confirm_token'];
+        $retryState = $this->retryState();
+        if (in_array($retryState['status'], ['running','waiting_rate_limit'], true)) return $this->runNextRetryBatch($input);
         $state = $this->state();
         if ($state['status'] !== 'running') return array_merge($this->publicStatus($state), ['ok' => false, 'reason' => 'not_running', 'batch_executed' => false, 'completed' => $state['status'] === 'completed' && empty($state['remaining_ids']) && (int) $state['remaining'] === 0]);
         if (empty($state['remaining_ids'])) return array_merge($this->complete($state), ['ok' => true, 'batch_executed' => false, 'completed' => true]);
@@ -79,7 +85,76 @@ class EbayListingStatusBatchRunnerService
         return array_merge($this->publicStatus($state), ['ok' => true, 'batch_executed' => true, 'completed' => $state['status'] === 'completed', 'should_wait' => $state['status'] === 'running', 'retry_after_seconds' => $state['status'] === 'running' ? (int) $state['delay_seconds'] : 0, 'next_batch_allowed_at' => $state['status'] === 'running' ? CarbonImmutable::parse($state['last_batch_at'])->addSeconds((int) $state['delay_seconds'])->toISOString() : null, 'clock_skew_detected' => false]);
     }
 
-    public function status(): array { return array_merge($this->publicStatus($this->state()), ['ok' => true]); }
+    public function status(): array { return array_merge($this->publicStatus($this->state()), ['ok' => true, 'retry' => $this->publicRetryStatus($this->retryState())]); }
+
+    public function retryDiagnose(): array
+    {
+        $state = $this->state();
+        $retryIds = $this->transientFailureIdsFromState($state);
+        $results = array_values($state['results_by_listing_id'] ?? []);
+        $transient = array_values(array_filter($results, fn ($r) => $this->isTransientFailure($r)));
+
+        return [
+            'ok' => true,
+            'marker' => self::RETRY_DIAGNOSE_MARKER,
+            'no_mutation' => true,
+            'no_ebay_request' => true,
+            'full_retry_id_list_available' => ! empty($state['transient_failure_ids']) || ! empty($state['results_by_listing_id']),
+            'unique_transient_failure_ids' => count($retryIds),
+            'can_retry_without_full_rescan' => count($retryIds) > 0,
+            'retry_data_source' => ! empty($state['transient_failure_ids']) ? 'cache.transient_failure_ids' : (! empty($state['results_by_listing_id']) ? 'cache.results_by_listing_id' : 'unavailable'),
+            'error_type_breakdown' => array_count_values(array_map(fn ($r) => (string) ($r['error_type'] ?? 'none'), $transient)),
+            'http_status_breakdown' => array_count_values(array_map(fn ($r) => (string) ($r['http_status'] ?? 'none'), $transient)),
+            'sample' => array_slice($transient, 0, 20),
+            'limitation' => count($retryIds) === 0 ? 'Full transient failure ID list is not present in the current cache; do not infer IDs from recent_results or rescan all listings without explicit approval.' : null,
+        ];
+    }
+
+    public function retryTransient(array $input): array
+    {
+        if (($input['confirm'] ?? null) !== 'retry-ebay-listing-status-transient-failures') return ['ok' => false, 'reason' => 'missing_confirm_token'];
+        if (($input['scope'] ?? 'previous_transient_failures') !== 'previous_transient_failures') return ['ok' => false, 'reason' => 'invalid_scope'];
+        if (! filter_var($input['dry_run'] ?? true, FILTER_VALIDATE_BOOLEAN)) return ['ok' => false, 'reason' => 'live_mode_disabled'];
+        $ids = $this->transientFailureIdsFromState($this->state());
+        if ($ids === []) return ['ok' => false, 'reason' => 'no_full_transient_failure_id_list_available'];
+        $batch = max(1, min((int) ($input['batch_size'] ?? 2), 5));
+        $delay = max(20, (int) ($input['delay_seconds'] ?? 30));
+        $max = max(1, (int) ($input['max_attempts_per_item'] ?? 3));
+        $state = array_merge($this->baseRetryState('running'), ['batch_size'=>$batch,'delay_seconds'=>$delay,'max_attempts_per_item'=>$max,'retry_scope_total'=>count($ids),'pending'=>count($ids),'pending_ids'=>$ids,'started_at'=>now()->toISOString(),'original_summary'=>$this->firstSessionSummary($this->state())]);
+        Cache::put(self::RETRY_CACHE_KEY, $state, now()->addHours(12));
+        return array_merge($this->publicRetryStatus($state), ['ok'=>true]);
+    }
+
+    public function runNextRetryBatch(array $input): array
+    {
+        if (($input['confirm'] ?? null) !== 'run-next-ebay-listing-status-sync-batch') return ['ok'=>false,'reason'=>'missing_confirm_token'];
+        $state = $this->retryState();
+        if (! in_array($state['status'], ['running','waiting_rate_limit'], true)) return array_merge($this->publicRetryStatus($state), ['ok'=>false,'reason'=>'not_running','batch_executed'=>false]);
+        if (($wait = $this->retryWaitSeconds($state)) > 0) return array_merge($this->publicRetryStatus($state), ['ok'=>true,'reason'=>'rate_limit_wait','batch_executed'=>false,'should_wait'=>true]);
+        $state['status'] = 'running';
+        $batchIds = array_slice($state['pending_ids'], 0, (int) $state['batch_size']);
+        foreach (MarketplaceListing::query()->whereIn('id', $batchIds)->orderBy('id')->get() as $listing) {
+            $id = (int) $listing->id; $state['attempts'][$id] = (int)($state['attempts'][$id] ?? 0) + 1;
+            $result = $this->checkListing($listing); $result['retry_attempt'] = $state['attempts'][$id];
+            $state['retry_results_by_listing_id'][$id] = $result;
+            if (($result['error_type'] ?? null) === 'rate_limited') {
+                $state['rate_limit_hits']++; $state['last_error']='rate_limited';
+                $seconds = $this->rateLimitDelaySeconds($result['retry_after'] ?? null, $state['attempts'][$id]);
+                $state['retry_after_seconds']=$seconds; $state['next_retry_at']=now()->addSeconds($seconds)->toISOString(); $state['status']='waiting_rate_limit';
+                if ($state['attempts'][$id] >= (int)$state['max_attempts_per_item']) $state=$this->markRetryUnresolved($state,$id,$result); else $state['technical_status_by_listing_id'][$id]='retry_wait';
+                break;
+            }
+            if ($this->isTransientFailure($result)) {
+                if ($state['attempts'][$id] >= (int)$state['max_attempts_per_item']) $state=$this->markRetryUnresolved($state,$id,$result); else $state['technical_status_by_listing_id'][$id]='pending_retry';
+                continue;
+            }
+            $state = $this->markRetryResolved($state, $id, $result);
+        }
+        $state['pending']=count($state['pending_ids']);
+        if ($state['pending'] === 0) { $state['status']='completed'; $state['finished_at']=now()->toISOString(); }
+        Cache::put(self::RETRY_CACHE_KEY,$state,now()->addHours(12));
+        return array_merge($this->publicRetryStatus($state), ['ok'=>true,'batch_executed'=>true]);
+    }
 
     private function eligibleListingIds(): array
     {
@@ -105,7 +180,7 @@ class EbayListingStatusBatchRunnerService
             'part_id' => $listing->part_id, 'marketplace_listing_id' => $listing->id, 'ebay_item_id' => $itemId,
             'local_status' => $listing->status, 'normalized_status' => $normalized['normalized_status'],
             'currently_blocks_relisting' => $this->blocksRelisting($listing), 'should_allow_relisting' => $normalized['should_allow_relisting'],
-            'http_status' => $api['http_status'] ?? null, 'error_type' => $errorType,
+            'http_status' => $api['http_status'] ?? null, 'error_type' => $errorType, 'retry_after' => $api['retry_after'] ?? null,
         ];
     }
 
@@ -119,7 +194,7 @@ class EbayListingStatusBatchRunnerService
 
     private function blocksRelisting(MarketplaceListing $l): bool { return in_array(strtolower((string) $l->status), ['active','published','live'], true) && ! in_array(strtolower((string) $l->last_api_status), ['ended','failed','deleted','archived','not_found','inactive','unavailable','error'], true) && $l->not_seen_in_active_api_at === null; }
     private function errorType(array $api, array $n): ?string { $h=(int)($api['http_status']??0); return match(true){in_array($h,[401,403],true)=>'auth_error',$h===429=>'rate_limited',in_array($h,[500,502,503,504],true)=>'remote_error',($api['error_type']??null)==='transient_error'=>'transient_error',default=>$n['error_type']}; }
-    private function recordResult(array $s, array $r): array { $k=$r['normalized_status']; if(isset($s[$k]))$s[$k]++; if($r['error_type'])$s['failed']++; $s['recent_results']=array_slice(array_merge([$r],$s['recent_results']),0,50); if($r['error_type'])$s['last_error']=$r['error_type']; return $s; }
+    private function recordResult(array $s, array $r): array { $k=$r['normalized_status']; if(isset($s[$k]))$s[$k]++; if($r['error_type'])$s['failed']++; $id=(int)$r['marketplace_listing_id']; $s['results_by_listing_id'][$id]=$r; if($r['normalized_status']==='unknown')$s['unknown_ids']=array_values(array_unique(array_merge($s['unknown_ids']??[],[$id]))); if($r['error_type'])$s['failed_ids']=array_values(array_unique(array_merge($s['failed_ids']??[],[$id]))); if($this->isTransientFailure($r))$s['transient_failure_ids']=array_values(array_unique(array_merge($s['transient_failure_ids']??[],[$id]))); $s['unknown_items']=(int)($s['unknown']??0); $s['failed_requests']=(int)($s['failed']??0); $s['unique_unresolved_items']=count(array_unique($s['unknown_ids']??[])); $s['recent_results']=array_slice(array_merge([$r],$s['recent_results']),0,50); if($r['error_type'])$s['last_error']=$r['error_type']; return $s; }
     private function delayDiagnostics(array $s): array
     {
         $now = CarbonImmutable::now('UTC');
@@ -145,6 +220,20 @@ class EbayListingStatusBatchRunnerService
 
     private function complete(array $s, bool $put=true): array { if(!empty($s['remaining_ids']) || (int)$s['remaining'] > 0) return $this->publicStatus($s); $s['status']='completed'; $s['finished_at']=$s['finished_at']??now()->toISOString(); if($put)Cache::put(self::CACHE_KEY,$s,now()->addHours(12)); return $this->publicStatus($s); }
     private function state(): array { $state = Cache::get(self::CACHE_KEY); return is_array($state) ? array_merge($this->baseState('idle'), $state) : $this->baseState('idle'); }
-    private function baseState(string $status): array { return ['status'=>$status,'marker'=>self::MARKER,'state_initialization_fix_marker'=>self::STATE_INITIALIZATION_FIX_MARKER,'dry_run'=>true,'batch_size'=>10,'delay_seconds'=>5,'total'=>0,'processed'=>0,'remaining'=>0,'active'=>0,'ended'=>0,'not_found'=>0,'invalid'=>0,'unknown'=>0,'failed'=>0,'started_at'=>null,'finished_at'=>null,'last_batch_at'=>null,'last_error'=>null,'recent_results'=>[],'remaining_ids'=>[],'processed_ids'=>[]]; }
+    private function baseState(string $status): array { return ['status'=>$status,'marker'=>self::MARKER,'state_initialization_fix_marker'=>self::STATE_INITIALIZATION_FIX_MARKER,'dry_run'=>true,'batch_size'=>10,'delay_seconds'=>5,'total'=>0,'processed'=>0,'remaining'=>0,'active'=>0,'ended'=>0,'not_found'=>0,'invalid'=>0,'unknown'=>0,'failed'=>0,'started_at'=>null,'finished_at'=>null,'last_batch_at'=>null,'last_error'=>null,'recent_results'=>[],'remaining_ids'=>[],'processed_ids'=>[],'failed_ids'=>[],'unknown_ids'=>[],'transient_failure_ids'=>[],'results_by_listing_id'=>[],'unknown_items'=>0,'failed_requests'=>0,'unique_unresolved_items'=>0]; }
+
+
+    private function isTransientFailure(array $r): bool { $h=(int)($r['http_status']??0); return ($r['normalized_status']??null)==='unknown' && in_array((string)($r['error_type']??''), ['rate_limited','timeout','network','remote_error','transient_error'], true) || in_array($h,[429,500,502,503,504],true); }
+    private function transientFailureIdsFromState(array $s): array { $ids=$s['transient_failure_ids']??[]; if($ids===[] && !empty($s['results_by_listing_id'])) foreach($s['results_by_listing_id'] as $id=>$r) if($this->isTransientFailure($r)) $ids[]=(int)$id; return array_values(array_unique(array_map('intval',$ids))); }
+    private function retryState(): array { $s=Cache::get(self::RETRY_CACHE_KEY); return is_array($s)?array_merge($this->baseRetryState('idle'),$s):$this->baseRetryState('idle'); }
+    private function baseRetryState(string $status): array { return ['status'=>$status,'marker'=>self::TRANSIENT_RETRY_MARKER,'rate_limit_backoff_marker'=>self::RATE_LIMIT_BACKOFF_MARKER,'dry_run'=>true,'batch_size'=>2,'delay_seconds'=>30,'max_attempts_per_item'=>3,'retry_scope_total'=>0,'resolved'=>0,'pending'=>0,'resolved_active'=>0,'resolved_ended'=>0,'resolved_not_found'=>0,'unresolved_after_max_attempts'=>0,'rate_limit_hits'=>0,'retry_after_seconds'=>0,'next_retry_at'=>null,'pending_ids'=>[],'resolved_ids'=>[],'unresolved_ids'=>[],'attempts'=>[],'technical_status_by_listing_id'=>[],'retry_results_by_listing_id'=>[],'started_at'=>null,'finished_at'=>null,'last_error'=>null,'original_summary'=>[]]; }
+    private function publicRetryStatus(array $s): array { $wait=$this->retryWaitSeconds($s); if($wait===0 && ($s['status']??null)==='waiting_rate_limit') $s['status']='running'; unset($s['pending_ids'],$s['resolved_ids'],$s['unresolved_ids'],$s['attempts']); return array_merge($s,['retry_after_seconds'=>$wait,'consolidated_report'=>$this->consolidatedReport($s)]); }
+    private function retryWaitSeconds(array $s): int { if(empty($s['next_retry_at'])) return 0; return max(0, CarbonImmutable::parse($s['next_retry_at'])->getTimestamp()-now()->timestamp); }
+    private function rateLimitDelaySeconds(?string $retryAfter, int $attempt): int { $base=null; if(filled($retryAfter)){ if(ctype_digit(trim($retryAfter))) $base=(int)trim($retryAfter); elseif(($ts=strtotime($retryAfter))!==false) $base=max(0,$ts-now()->timestamp); } $base ??= [1=>60,2=>120][min($attempt,2)] ?? 300; return max(1, $base + random_int(1,5)); }
+    private function markRetryResolved(array $s, int $id, array $r): array { $s['pending_ids']=array_values(array_diff($s['pending_ids'],[$id])); $s['resolved_ids'][]=$id; $s['resolved']=count(array_unique($s['resolved_ids'])); $map=['active'=>'resolved_active','ended'=>'resolved_ended','not_found'=>'resolved_not_found']; $key=$map[$r['normalized_status']]??null; if($key)$s[$key]++; $s['technical_status_by_listing_id'][$id]=$key ?? 'resolved_unknown'; return $s; }
+    private function markRetryUnresolved(array $s, int $id, array $r): array { $s['pending_ids']=array_values(array_diff($s['pending_ids'],[$id])); $s['unresolved_ids'][]=$id; $s['unresolved_after_max_attempts']=count(array_unique($s['unresolved_ids'])); $s['technical_status_by_listing_id'][$id]='unresolved_after_max_attempts'; return $s; }
+    private function firstSessionSummary(array $s): array { return collect($s)->only(['active','ended','not_found','unknown','failed','unknown_items','failed_requests','unique_unresolved_items'])->all(); }
+    private function consolidatedReport(array $s): array { $o=$s['original_summary']??[]; return ['active'=>(int)($o['active']??0)+(int)($s['resolved_active']??0),'ended'=>(int)($o['ended']??0)+(int)($s['resolved_ended']??0),'not_found'=>(int)($o['not_found']??0)+(int)($s['resolved_not_found']??0),'unresolved'=>(int)($s['unresolved_after_max_attempts']??0)]; }
+
     private function publicStatus(array $s): array { $inconsistent = ($s['status'] ?? null) === 'completed' && (!empty($s['remaining_ids']) || (int)($s['remaining'] ?? 0) > 0); $delay=$this->delayDiagnostics($s); unset($s['remaining_ids'],$s['processed_ids']); $s = array_merge($s, ['dry_run_marker'=>self::DRY_RUN_MARKER, 'browser_autorun_marker'=>self::BROWSER_AUTORUN_MARKER, 'delay_countdown_fix_marker'=>self::DELAY_COUNTDOWN_FIX_MARKER], $delay); if($inconsistent) $s = array_merge($s, ['state_inconsistent'=>true, 'reason'=>'completed_with_remaining_items']); return $s; }
 }
