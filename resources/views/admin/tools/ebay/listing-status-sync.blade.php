@@ -22,6 +22,35 @@
         <pre id="rawStatus">{{ json_encode($status, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}</pre>
         <p><a href="{{ route('admin.tools.ebay.listing-status-sync.diagnose', ['json' => 1]) }}">Diagnostyka read-only JSON</a> | <a href="{{ route('admin.tools.ebay.listing-status-sync.retry-diagnose', ['json' => 1]) }}">Retry diagnose read-only JSON</a></p>
     </div>
+
+    <div class="panel" data-marker="ebay_listing_status_persistent_scan_v1" data-results-marker="ebay_listing_status_persistent_results_v1" data-rate-limit-marker="ebay_listing_status_persistent_rate_limit_pause_v1" data-ended-marker="ebay_listing_status_persistent_ended_results_v1">
+        <h2>Persistent full scan (dry-run only)</h2>
+        <p class="muted">Pełny trwały raport per marketplace_listing_id. Bez trybu live, bez mutacji lokalnych, bez mutacji eBay.</p>
+        <p><a href="{{ route('admin.tools.ebay.listing-status-sync.persistent-scan.diagnose', ['json' => 1]) }}">Persistent diagnose JSON</a> | <a href="{{ route('admin.tools.ebay.listing-status-sync.persistent-scan.ended-results', ['json' => 1]) }}">Persistent ended-results JSON</a></p>
+        <form id="persistentStartForm" method="POST" action="{{ route('admin.tools.ebay.listing-status-sync.start-persistent-scan') }}">
+            @csrf
+            <input type="hidden" name="confirm" value="start-persistent-ebay-listing-status-scan">
+            <input type="hidden" name="scope" value="products_with_ebay_item_id">
+            <input type="hidden" name="dry_run" value="1">
+            <input type="hidden" name="stop_on_rate_limit" value="1">
+            <input type="hidden" name="persist_full_report" value="1">
+            <input type="hidden" name="max_attempts_per_item" value="3">
+            <label>Batch size <input name="batch_size" value="2" type="number" min="1" max="3"></label>
+            <label>Delay seconds <input name="delay_seconds" value="20" type="number" min="15"></label>
+            <button id="persistentStartButton" type="submit">Start persistent dry-run</button>
+        </form>
+        <form id="persistentRunNextForm" method="POST" action="{{ route('admin.tools.ebay.listing-status-sync.persistent-scan.run-next-batch') }}">
+            @csrf
+            <input type="hidden" name="confirm" value="run-next-persistent-ebay-listing-status-scan-batch">
+            <button id="persistentRunNextButton" type="submit">Uruchom persistent batch</button>
+        </form>
+        <form id="persistentStopForm" method="POST" action="{{ route('admin.tools.ebay.listing-status-sync.persistent-scan.stop') }}">
+            @csrf
+            <input type="hidden" name="confirm" value="stop-persistent-ebay-listing-status-scan">
+            <button type="submit">Stop persistent scan</button>
+        </form>
+        <pre id="persistentRawStatus">{}</pre>
+    </div>
     <div class="panel">
         <h2>Akcje runnera</h2>
         <form id="startForm" method="POST" action="{{ route('admin.tools.ebay.listing-status-sync.start') }}">
@@ -62,6 +91,17 @@
     const runNextBatchUrl = @json(route('admin.tools.ebay.listing-status-sync.run-next-batch'));
     const stopUrl = @json(route('admin.tools.ebay.listing-status-sync.stop'));
     const retryTransientUrl = @json(route('admin.tools.ebay.listing-status-sync.retry-transient'));
+
+    const persistentStatusUrl = @json(route('admin.tools.ebay.listing-status-sync.persistent-scan.status', ['json' => 1]));
+    const persistentStartUrl = @json(route('admin.tools.ebay.listing-status-sync.start-persistent-scan'));
+    const persistentRunNextBatchUrl = @json(route('admin.tools.ebay.listing-status-sync.persistent-scan.run-next-batch'));
+    const persistentStopUrl = @json(route('admin.tools.ebay.listing-status-sync.persistent-scan.stop'));
+    const persistentLockKey = 'ebay_listing_status_persistent_scan_browser_autorun_lock_v1';
+    let persistentInFlight = false;
+    let persistentTimerId = null;
+    function renderPersistentStatus(status) { const el = document.getElementById('persistentRawStatus'); if (el) el.textContent = JSON.stringify(status || {}, null, 2); }
+    async function fetchPersistentStatus() { return readResponse(await fetch(persistentStatusUrl, {credentials: 'same-origin', headers: {'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest'}})); }
+    async function persistentStep() { if (persistentInFlight) return; persistentInFlight = true; try { const status = await fetchPersistentStatus(); renderPersistentStatus(status); if (['completed', 'stopped', 'failed'].includes(status.status)) return; if (status.status === 'running') renderPersistentStatus(await apiPost(persistentRunNextBatchUrl, {confirm: 'run-next-persistent-ebay-listing-status-scan-batch'})); const next = Math.max(1, Number(status.retry_after_seconds || status.settings?.delay_seconds || 20)); persistentTimerId = window.setTimeout(persistentStep, next * 1000); } catch(e) { setMessage(e.message || 'Błąd persistent scan', 'error'); } finally { persistentInFlight = false; } }
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || document.querySelector('input[name="_token"]')?.value || '';
     const tabId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const lockKey = 'ebay_listing_status_sync_browser_autorun_lock_v2';
@@ -193,7 +233,12 @@
     document.getElementById('runNextForm').addEventListener('submit', async (event) => { event.preventDefault(); if (autoRunActive || requestInFlight) return; requestInFlight = true; try { renderStatus(await apiPost(runNextBatchUrl, {confirm: 'run-next-ebay-listing-status-sync-batch'})); } catch (e) { setMessage(e.message || 'Błąd ręcznego batcha', 'error'); } finally { requestInFlight = false; runNextButton.disabled = false; } });
     document.getElementById('retryTransientForm').addEventListener('submit', async (event) => { event.preventDefault(); if (requestInFlight) return; requestInFlight = true; try { const result = await apiPost(retryTransientUrl, {batch_size: 2, delay_seconds: 30, max_attempts_per_item: 3, scope: 'previous_transient_failures', dry_run: true, confirm: 'retry-ebay-listing-status-transient-failures'}); renderStatus({...(await fetchStatus()), retry: result}); setMessage('Retry błędów przejściowych uruchomiony', 'ok'); } catch (e) { setMessage(e.message || 'Błąd retry', 'error'); } finally { requestInFlight = false; } });
     document.getElementById('stopForm').addEventListener('submit', async (event) => { event.preventDefault(); clearTimer(); autoRunActive = false; releaseLock(); requestInFlight = true; try { renderStatus(await apiPost(stopUrl, {confirm: 'stop-ebay-listing-status-sync'})); setMessage('Runner zatrzymany', 'ok'); renderStatus(await fetchStatus()); } catch (e) { stopAutoRun(e.message || 'Błąd — auto-run zatrzymany', 'error'); } finally { requestInFlight = false; runNextButton.disabled = false; } });
-    window.addEventListener('beforeunload', releaseLock);
+
+    document.getElementById('persistentStartForm').addEventListener('submit', async (event) => { event.preventDefault(); if (persistentInFlight) return; persistentInFlight = true; try { const data = Object.fromEntries(new FormData(event.currentTarget).entries()); const result = await apiPost(persistentStartUrl, {batch_size: Number(data.batch_size || 2), delay_seconds: Number(data.delay_seconds || 20), scope: 'products_with_ebay_item_id', dry_run: true, stop_on_rate_limit: true, max_attempts_per_item: 3, persist_full_report: true, confirm: 'start-persistent-ebay-listing-status-scan'}); renderPersistentStatus(result); if (persistentTimerId) window.clearTimeout(persistentTimerId); persistentTimerId = window.setTimeout(persistentStep, 0); } catch(e) { setMessage(e.message || 'Błąd persistent start', 'error'); } finally { persistentInFlight = false; } });
+    document.getElementById('persistentRunNextForm').addEventListener('submit', async (event) => { event.preventDefault(); if (persistentInFlight) return; persistentInFlight = true; try { renderPersistentStatus(await apiPost(persistentRunNextBatchUrl, {confirm: 'run-next-persistent-ebay-listing-status-scan-batch'})); } catch(e) { setMessage(e.message || 'Błąd persistent batch', 'error'); } finally { persistentInFlight = false; } });
+    document.getElementById('persistentStopForm').addEventListener('submit', async (event) => { event.preventDefault(); if (persistentTimerId) window.clearTimeout(persistentTimerId); try { renderPersistentStatus(await apiPost(persistentStopUrl, {confirm: 'stop-persistent-ebay-listing-status-scan'})); } catch(e) { setMessage(e.message || 'Błąd persistent stop', 'error'); } });
+    fetchPersistentStatus().then(s => { renderPersistentStatus(s); if (['running','waiting_rate_limit'].includes(s.status) && !localStorage.getItem(persistentLockKey)) { localStorage.setItem(persistentLockKey, String(Date.now())); persistentStep(); } });
+    window.addEventListener('beforeunload', () => { releaseLock(); localStorage.removeItem(persistentLockKey); });
 
     const initialStatus = @json($status);
     renderStatus(initialStatus);
