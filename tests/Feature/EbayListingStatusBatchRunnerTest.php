@@ -351,69 +351,6 @@ class EbayListingStatusBatchRunnerTest extends TestCase
         Http::assertSentCount(1);
     }
 
-
-    public function test_confirmed_ended_diagnose_and_preview_require_full_ended_http_200_list(): void
-    {
-        $this->actingAsAdminUser();
-        $ended = $this->listing('171717171717');
-        $unknown = $this->listing('181818181818');
-        $notFound = $this->listing('191919191919');
-        $active = $this->listing('202020202021');
-        Cache::put(EbayListingStatusBatchRunnerService::CACHE_KEY, ['status'=>'completed','ended'=>1,'results_by_listing_id'=>[
-            $ended->id=>['part_id'=>$ended->part_id,'marketplace_listing_id'=>$ended->id,'ebay_item_id'=>'171717171717','local_status'=>'published','normalized_status'=>'ended','http_status'=>200,'error_type'=>null],
-            $unknown->id=>['marketplace_listing_id'=>$unknown->id,'normalized_status'=>'unknown','http_status'=>429,'error_type'=>'rate_limited'],
-            $notFound->id=>['marketplace_listing_id'=>$notFound->id,'normalized_status'=>'not_found','http_status'=>404,'error_type'=>null],
-            $active->id=>['marketplace_listing_id'=>$active->id,'normalized_status'=>'active','http_status'=>200,'error_type'=>null],
-        ]], now()->addHour());
-        Http::fake(fn () => throw new \RuntimeException('eBay API must not be called'));
-
-        $this->getJson('/admin/tools/ebay/listing-status-sync/ended-results-diagnose?json=1')->assertOk()
-            ->assertJsonPath('marker','ebay_confirmed_ended_results_diagnose_v1')->assertJsonPath('no_mutation', true)->assertJsonPath('no_ebay_request', true)
-            ->assertJsonPath('expected_ended_count',378)->assertJsonPath('available_ended_id_count',1)->assertJsonPath('full_ended_id_list_available',false)->assertJsonPath('can_apply_without_rescan',false);
-        $this->postJson('/admin/tools/ebay/listing-status-sync/apply-confirmed-ended', ['source'=>'completed_dry_run','expected_count'=>378,'dry_run'=>false,'confirm'=>'apply-confirmed-ebay-ended-listings'])->assertStatus(422)->assertJsonPath('reason','full_confirmed_ended_id_list_unavailable');
-        $this->assertSame('published', $ended->fresh()->status);
-        Http::assertSentCount(0);
-    }
-
-    public function test_confirmed_ended_preview_and_apply_mutate_only_confirmed_batch_preserving_history_and_not_calling_ebay(): void
-    {
-        $this->actingAsAdminUser();
-        $rows = [];
-        $first = null; $unknown = $this->listing('292929292929', ['raw_payload'=>['keep'=>'unknown']]);
-        for ($i = 0; $i < 378; $i++) {
-            $item = (string) (300000000000 + $i);
-            $listing = $this->listing($item, ['url'=>'https://www.ebay.de/itm/'.$item, 'raw_payload'=>['keep'=>'yes']]);
-            $first ??= $listing;
-            $rows[$listing->id] = ['part_id'=>$listing->part_id,'marketplace_listing_id'=>$listing->id,'ebay_item_id'=>$item,'local_status'=>'published','normalized_status'=>'ended','http_status'=>200,'error_type'=>null,'itemEndDate'=>'2026-05-31T10:00:00.000Z'];
-        }
-        $otherActive = $this->listing('399999999999', ['part_id'=>$first->part_id, 'status'=>'published']);
-        Cache::put(EbayListingStatusBatchRunnerService::CACHE_KEY, ['status'=>'completed','ended'=>378,'results_by_listing_id'=>$rows + [$unknown->id=>['marketplace_listing_id'=>$unknown->id,'normalized_status'=>'unknown','http_status'=>429,'error_type'=>'rate_limited']]], now()->addHour());
-        Http::fake(fn () => throw new \RuntimeException('eBay API must not be called'));
-        $before = MarketplaceListing::query()->orderBy('id')->get()->keyBy('id')->map(fn ($l) => $l->getAttributes())->all();
-
-        $this->getJson('/admin/tools/ebay/listing-status-sync/apply-confirmed-ended-preview?json=1')->assertOk()
-            ->assertJsonPath('marker','ebay_confirmed_ended_apply_preview_v1')->assertJsonPath('no_mutation', true)->assertJsonPath('no_ebay_request', true)
-            ->assertJsonPath('candidate_count',378)->assertJsonPath('currently_blocks_relisting',378)->assertJsonPath('sample.0.planned_local_status','ended')
-            ->assertJsonPath('sample.0.has_another_active_ebay_listing', true)->assertJsonPath('sample.0.will_unblock_relisting', false);
-        $this->assertSame($before, MarketplaceListing::query()->orderBy('id')->get()->keyBy('id')->map(fn ($l) => $l->getAttributes())->all());
-
-        $this->postJson('/admin/tools/ebay/listing-status-sync/apply-confirmed-ended', ['source'=>'completed_dry_run','expected_count'=>377,'dry_run'=>false,'confirm'=>'apply-confirmed-ebay-ended-listings'])->assertStatus(422)->assertJsonPath('reason','expected_count_mismatch');
-        $this->postJson('/admin/tools/ebay/listing-status-sync/apply-confirmed-ended', ['source'=>'completed_dry_run','expected_count'=>378,'dry_run'=>false,'confirm'=>'apply-confirmed-ebay-ended-listings'])->assertOk()->assertJsonPath('updated_count',20)->assertJsonPath('no_ebay_request', true);
-
-        $fresh = $first->fresh();
-        $this->assertSame('ended', $fresh->status);
-        $this->assertSame('ended', $fresh->last_api_status);
-        $this->assertSame((string)(300000000000), $fresh->external_listing_id);
-        $this->assertSame('https://www.ebay.de/itm/300000000000', $fresh->url);
-        $this->assertSame('yes', $fresh->raw_payload['keep']);
-        $this->assertSame('2026-05-31T10:00:00.000Z', $fresh->raw_payload['itemEndDate']);
-        $this->assertSame('published', $unknown->fresh()->status);
-        $this->assertSame('published', $otherActive->fresh()->status);
-        $changed = MarketplaceListing::query()->where('status','ended')->pluck('id')->all();
-        $this->assertCount(20, $changed);
-        Http::assertSentCount(0);
-    }
-
     private function listing(string $itemId, array $overrides = []): MarketplaceListing
     {
         $part = Part::query()->create(['name' => 'Part '.$itemId, 'sku' => 'SKU-'.$itemId, 'quantity' => 1, 'status' => 'ready']);

@@ -40,7 +40,7 @@ class EbayListingStatusBatchRunnerController extends Controller
             'exception_line' => null,
         ];
 
-        foreach (['index', 'status', 'start', 'run-next-batch', 'stop', 'diagnose', 'retry-transient', 'retry-diagnose', 'ended-results-diagnose', 'apply-confirmed-ended-preview', 'apply-confirmed-ended'] as $suffix) {
+        foreach (['index', 'status', 'start', 'run-next-batch', 'stop', 'diagnose', 'retry-transient', 'retry-diagnose'] as $suffix) {
             $name = 'admin.tools.ebay.listing-status-sync.'.$suffix;
             $diagnostics['route_names_exist'][$name] = Route::has($name);
         }
@@ -87,21 +87,6 @@ class EbayListingStatusBatchRunnerController extends Controller
     public function retryDiagnose(EbayListingStatusBatchRunnerService $service): JsonResponse
     {
         return response()->json($service->retryDiagnose());
-    }
-
-    public function endedResultsDiagnose(EbayListingStatusBatchRunnerService $service): JsonResponse
-    {
-        return response()->json($service->confirmedEndedDiagnose());
-    }
-
-    public function applyConfirmedEndedPreview(EbayListingStatusBatchRunnerService $service): JsonResponse
-    {
-        return response()->json($service->confirmedEndedPreview());
-    }
-
-    public function applyConfirmedEnded(Request $request, EbayListingStatusBatchRunnerService $service): JsonResponse|RedirectResponse
-    {
-        return $this->respond($request, $service->applyConfirmedEnded($request->only(['source', 'expected_count', 'dry_run', 'confirm'])), 'Potwierdzone zakończone aukcje eBay zostały oznaczone lokalnie.');
     }
 
     public function retryTransient(Request $request, EbayListingStatusBatchRunnerService $service): JsonResponse|RedirectResponse
