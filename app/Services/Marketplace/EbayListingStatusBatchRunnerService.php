@@ -108,7 +108,7 @@ class EbayListingStatusBatchRunnerService
     private function errorType(array $api, array $n): ?string { $h=(int)($api['http_status']??0); return match(true){in_array($h,[401,403],true)=>'auth_error',$h===429=>'rate_limited',in_array($h,[500,502,503,504],true)=>'remote_error',($api['error_type']??null)==='transient_error'=>'transient_error',default=>$n['error_type']}; }
     private function recordResult(array $s, array $r): array { $k=$r['normalized_status']; if(isset($s[$k]))$s[$k]++; if($r['error_type'])$s['failed']++; $s['recent_results']=array_slice(array_merge([$r],$s['recent_results']),0,50); if($r['error_type'])$s['last_error']=$r['error_type']; return $s; }
     private function complete(array $s, bool $put=true): array { $s['status']='completed'; $s['finished_at']=$s['finished_at']??now()->toISOString(); if($put)Cache::put(self::KEY,$s,now()->addHours(12)); return $this->publicStatus($s); }
-    private function state(): array { return Cache::get(self::KEY, $this->baseState('idle')); }
+    private function state(): array { $state = Cache::get(self::KEY); return is_array($state) ? ($state + $this->baseState('idle')) : $this->baseState('idle'); }
     private function baseState(string $status): array { return ['status'=>$status,'marker'=>self::MARKER,'dry_run'=>true,'batch_size'=>10,'delay_seconds'=>5,'total'=>0,'processed'=>0,'remaining'=>0,'active'=>0,'ended'=>0,'not_found'=>0,'invalid'=>0,'unknown'=>0,'failed'=>0,'started_at'=>null,'finished_at'=>null,'last_batch_at'=>null,'last_error'=>null,'recent_results'=>[],'remaining_ids'=>[],'processed_ids'=>[]]; }
     private function publicStatus(array $s): array { unset($s['remaining_ids'],$s['processed_ids']); return $s + ['dry_run_marker'=>self::DRY_RUN_MARKER]; }
 }

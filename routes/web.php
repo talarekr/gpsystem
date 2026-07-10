@@ -355,6 +355,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::match(['get', 'post'], '/admin/tools/ebay/listing-audit-runner', EbayListingAuditRunnerController::class)->name('admin.tools.ebay.listing-audit-runner');
     Route::get('/admin/tools/ebay/listing-status-diagnose', EbayListingStatusDiagnoseController::class)->name('admin.tools.ebay.listing-status-diagnose');
     Route::get('/admin/tools/ebay/listing-status-sync', [EbayListingStatusBatchRunnerController::class, 'index'])->name('admin.tools.ebay.listing-status-sync.index');
+    Route::get('/admin/tools/ebay/listing-status-sync/diagnose', [EbayListingStatusBatchRunnerController::class, 'diagnose'])->name('admin.tools.ebay.listing-status-sync.diagnose');
     Route::get('/admin/tools/ebay/listing-status-sync/status', [EbayListingStatusBatchRunnerController::class, 'status'])->name('admin.tools.ebay.listing-status-sync.status');
     Route::post('/admin/tools/ebay/listing-status-sync/start', [EbayListingStatusBatchRunnerController::class, 'start'])->name('admin.tools.ebay.listing-status-sync.start');
     Route::post('/admin/tools/ebay/listing-status-sync/run-next-batch', [EbayListingStatusBatchRunnerController::class, 'runNextBatch'])->name('admin.tools.ebay.listing-status-sync.run-next-batch');
