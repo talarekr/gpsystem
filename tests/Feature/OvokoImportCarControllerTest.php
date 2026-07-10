@@ -42,8 +42,11 @@ class OvokoImportCarControllerTest extends TestCase
             ->assertJsonPath('request_payload_without_auth.external_id', 'gps-car-'.$car->id)
             ->assertJsonPath('request_payload_without_auth.car_fuel', '2')
             ->assertJsonPath('request_payload_without_auth.car_engine_code', 'N47')
-            ->assertJsonPath('request_payload_without_auth.vin', 'WBA12345678901234')
-            ->assertJsonPath('request_payload_without_auth.mileage', 123456)
+            ->assertJsonPath('request_payload_without_auth.car_body_number', 'WBA12345678901234')
+            ->assertJsonPath('request_payload_without_auth.car_mileage', 123456)
+            ->assertJsonPath('request_payload_without_auth.car_gearbox_type', '1')
+            ->assertJsonPath('request_payload_without_auth.car_body_type', '4')
+            ->assertJsonPath('request_payload_without_auth.car_wheel_drive', '1')
             ->assertJsonPath('marker', 'ovoko_import_car_admin_tool_v1');
 
         Http::assertSentCount(1);
@@ -58,8 +61,13 @@ class OvokoImportCarControllerTest extends TestCase
             && $request['external_id'] === 'gps-car-'.$car->id
             && $request['car_fuel'] === '2'
             && $request['car_engine_code'] === 'N47'
-            && $request['vin'] === 'WBA12345678901234'
-            && (int) $request['mileage'] === 123456
+            && $request['car_body_number'] === 'WBA12345678901234'
+            && (int) $request['car_mileage'] === 123456
+            && $request['car_gearbox_type'] === '1'
+            && $request['car_body_type'] === '4'
+            && $request['car_wheel_drive'] === '1'
+            && ! isset($request['vin'])
+            && ! isset($request['mileage'])
             && ! isset($request['gearbox'])
             && ! isset($request['body_type'])
             && ! isset($request['wheel_drive'])
@@ -71,6 +79,8 @@ class OvokoImportCarControllerTest extends TestCase
         $this->assertSame('1', data_get($car->legacy_payload, 'import_car_request_payload.status'));
         $this->assertSame('2', data_get($car->legacy_payload, 'import_car_request_payload.car_fuel'));
         $this->assertSame('N47', data_get($car->legacy_payload, 'import_car_request_payload.car_engine_code'));
+        $this->assertSame('WBA12345678901234', data_get($car->legacy_payload, 'import_car_request_payload.car_body_number'));
+        $this->assertSame(123456, data_get($car->legacy_payload, 'import_car_request_payload.car_mileage'));
         $this->assertSame('R200', data_get($car->legacy_payload, 'status_code'));
     }
 

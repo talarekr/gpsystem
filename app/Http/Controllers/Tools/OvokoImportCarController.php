@@ -72,7 +72,7 @@ class OvokoImportCarController extends Controller
             ], 422);
         }
 
-        $payload = Arr::only((array) ($readiness['planned_import_car_payload'] ?? []), ['car_model', 'car_years', 'status', 'external_id', 'car_fuel', 'car_engine_code', 'vin', 'mileage']);
+        $payload = Arr::only((array) ($readiness['planned_import_car_payload'] ?? []), ['car_model', 'car_years', 'status', 'external_id', 'car_fuel', 'car_gearbox_type', 'car_body_type', 'car_wheel_drive', 'car_wheel_type', 'car_engine_cubic_capacity', 'car_engine_power', 'car_mileage', 'car_engine_code', 'car_gearbox_code', 'car_color', 'car_color_code', 'car_interior', 'car_price', 'defectation_notes', 'purchase_date', 'dismantling_at', 'car_body_number']);
 
         if (blank($payload['status'] ?? null)) {
             return response()->json([

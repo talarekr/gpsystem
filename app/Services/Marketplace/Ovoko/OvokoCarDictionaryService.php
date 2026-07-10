@@ -16,7 +16,7 @@ class OvokoCarDictionaryService
     public const MARKER = 'ovoko_car_dictionaries_cache_diagnostics_v1';
     public const CAR_STATUS_DIAGNOSTICS_MARKER = 'ovoko_car_status_dictionary_diagnostics_v1';
     public const CAR_STATUS_MAPPING_READINESS_MARKER = 'ovoko_car_status_mapping_readiness_v1';
-    public const IMPORT_CAR_PAYLOAD_MARKER = 'ovoko_import_car_payload_include_filled_supported_fields_v2';
+    public const IMPORT_CAR_PAYLOAD_MARKER = 'ovoko_import_car_full_confirmed_docs_mapping_v3';
     public const CONFIRM = 'sync-ovoko-car-dictionaries';
     public const DICTIONARIES = ['brands', 'models', 'fuel', 'gearbox_type', 'body_type', 'wheel', 'wheel_drive', 'car_status', 'car_class'];
     public const ENUMS = ['fuel', 'gearbox_type', 'body_type', 'wheel', 'wheel_drive', 'car_status', 'car_class'];
@@ -117,9 +117,23 @@ class OvokoCarDictionaryService
         foreach ($ids as $key => $value) $exists[$key] = filled($value) ? $this->idExists($key, (string) $value, $ids['ovoko_brand_id'] ?? null) : false;
         $supportedOptionalFields = [
             'car_fuel' => ['value' => $ids['ovoko_fuel_id'] ?? null, 'source' => 'legacy_payload.ovoko_fuel_id'],
+            'car_gearbox_type' => ['value' => $ids['ovoko_gearbox_type_id'] ?? null, 'source' => 'legacy_payload.ovoko_gearbox_type_id'],
+            'car_body_type' => ['value' => $ids['ovoko_body_type_id'] ?? null, 'source' => 'legacy_payload.ovoko_body_type_id'],
+            'car_wheel_drive' => ['value' => $ids['ovoko_wheel_drive_id'] ?? null, 'source' => 'legacy_payload.ovoko_wheel_drive_id'],
+            'car_wheel_type' => ['value' => $ids['ovoko_wheel_id'] ?? null, 'source' => 'legacy_payload.ovoko_wheel_id'],
+            'car_engine_cubic_capacity' => ['value' => $car->engine_capacity_cm3, 'source' => 'engine_capacity_cm3'],
+            'car_engine_power' => ['value' => $car->engine_power_kw, 'source' => 'engine_power_kw'],
+            'car_mileage' => ['value' => $car->mileage_km, 'source' => 'mileage_km'],
             'car_engine_code' => ['value' => $car->engine_code, 'source' => 'engine_code'],
-            'vin' => ['value' => $car->vin, 'source' => 'vin'],
-            'mileage' => ['value' => $car->mileage_km, 'source' => 'mileage_km'],
+            'car_gearbox_code' => ['value' => $car->gearbox_code, 'source' => 'gearbox_code'],
+            'car_color' => ['value' => $car->color, 'source' => 'color'],
+            'car_color_code' => ['value' => $car->color_code, 'source' => 'color_code'],
+            'car_interior' => ['value' => $car->interior, 'source' => 'interior'],
+            'car_price' => ['value' => $car->purchase_price, 'source' => 'purchase_price'],
+            'defectation_notes' => ['value' => $car->defects_notes, 'source' => 'defects_notes'],
+            'purchase_date' => ['value' => $this->formatImportCarDate($car->purchase_date), 'source' => 'purchase_date'],
+            'dismantling_at' => ['value' => $this->formatImportCarDate($car->dismantled_at), 'source' => 'dismantled_at'],
+            'car_body_number' => ['value' => $car->vin, 'source' => 'vin'],
         ];
 
         $payload = array_filter([
@@ -129,12 +143,7 @@ class OvokoCarDictionaryService
             'external_id' => 'gps-car-'.$car->id,
         ] + array_map(fn (array $field): mixed => $field['value'], $supportedOptionalFields), fn ($value): bool => filled($value));
 
-        $optionalDiagnostics = $this->optionalImportFieldDiagnostics($supportedOptionalFields, [
-            'gearbox' => ['value' => $ids['ovoko_gearbox_type_id'] ?? null, 'source' => 'legacy_payload.ovoko_gearbox_type_id'],
-            'body_type' => ['value' => $ids['ovoko_body_type_id'] ?? null, 'source' => 'legacy_payload.ovoko_body_type_id'],
-            'wheel_drive' => ['value' => $ids['ovoko_wheel_drive_id'] ?? null, 'source' => 'legacy_payload.ovoko_wheel_drive_id'],
-            'wheel' => ['value' => $ids['ovoko_wheel_id'] ?? null, 'source' => 'legacy_payload.ovoko_wheel_id'],
-        ]);
+        $optionalDiagnostics = $this->optionalImportFieldDiagnostics($supportedOptionalFields, []);
         $missing = array_values(array_filter(['ovoko_car_model_id', 'ovoko_status_id'], fn ($field) => blank($ids[$field] ?? null) || ! ($exists[$field] ?? false)));
         if (blank($car->production_year ?? $car->first_registration_year)) {
             $missing[] = 'car_years';
@@ -177,6 +186,19 @@ class OvokoCarDictionaryService
         ];
     }
 
+
+    private function formatImportCarDate(mixed $value): ?string
+    {
+        if (blank($value)) {
+            return null;
+        }
+
+        if ($value instanceof \DateTimeInterface) {
+            return $value->format('Y-m-d H:i:s');
+        }
+
+        return date('Y-m-d H:i:s', strtotime((string) $value));
+    }
 
     private function optionalImportFieldDiagnostics(array $supportedFields, array $unconfirmedDictionaryFields): array
     {
