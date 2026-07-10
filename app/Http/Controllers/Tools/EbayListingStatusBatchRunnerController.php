@@ -16,7 +16,6 @@ use Throwable;
 class EbayListingStatusBatchRunnerController extends Controller
 {
     public const PAGE_MARKER = 'ebay_listing_status_batch_runner_admin_page_v1';
-    private const CACHE_KEY = 'admin_tools:ebay_listing_status_sync:v1';
 
     public function index(EbayListingStatusBatchRunnerService $service): View
     {
@@ -49,7 +48,7 @@ class EbayListingStatusBatchRunnerController extends Controller
         try {
             app(EbayListingStatusBatchRunnerService::class);
             $diagnostics['service_resolvable'] = true;
-            $state = Cache::get(self::CACHE_KEY);
+            $state = Cache::get(EbayListingStatusBatchRunnerService::CACHE_KEY);
             $diagnostics['current_runner_state_readable'] = $state === null || is_array($state);
         } catch (Throwable $e) {
             $diagnostics['exception_class'] = $e::class;
