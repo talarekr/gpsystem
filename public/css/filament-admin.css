@@ -3128,3 +3128,34 @@ body:has(.gps-admin-topbar) .fi-no {
 .gps-car-form .fi-fo-field-wrp.gps-car-floating-field .fi-fo-field-wrp-label {
     top: 14px !important;
 }
+
+
+/* car_create_form_cleanup_required_center_values_v18 */
+.fi-fo-field-wrp.gps-car-floating-field .fi-input-wrp,
+.fi-fo-field-wrp.gps-car-floating-field.fi-fo-select .fi-input-wrp,
+.fi-fo-field-wrp.gps-car-floating-field .fi-fo-select .fi-input-wrp {
+    min-height: 3rem !important;
+    display: flex !important;
+    align-items: center !important;
+}
+
+.fi-fo-field-wrp.gps-car-floating-field :where(.fi-input, .fi-select-input, .fi-fo-date-time-picker input) {
+    min-height: 3rem !important;
+    height: 3rem !important;
+    padding-top: 0.85rem !important;
+    padding-bottom: 0.25rem !important;
+    line-height: 1.25rem !important;
+}
+
+.fi-fo-field-wrp.gps-car-floating-field .choices__inner,
+.fi-fo-field-wrp.gps-car-floating-field .choices__list--single {
+    min-height: 3rem !important;
+    height: 3rem !important;
+    align-items: center !important;
+}
+
+.fi-fo-field-wrp.gps-car-floating-field .choices__list--single {
+    padding-top: 0.85rem !important;
+    padding-bottom: 0.25rem !important;
+    line-height: 1.25rem !important;
+}

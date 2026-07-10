@@ -9,7 +9,7 @@ class CreateCar extends CreateRecord
 {
     protected static string $resource = CarResource::class;
 
-    protected static ?string $title = 'Dodaj samochód';
+    protected static ?string $title = '';
 
     /**
      * @param  array<string, mixed>  $data

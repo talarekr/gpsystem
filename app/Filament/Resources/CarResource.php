@@ -50,10 +50,6 @@ class CarResource extends Resource
                     ->extraAttributes(['class' => 'gps-car-form-section gps-car-form-section--vehicle gps-admin-compact-section gps-admin-floating-label-section'])
                     ->columns(['default' => 1, 'md' => 12])
                     ->schema([
-                        Forms\Components\Placeholder::make('ovoko_local_only_notice')
-                            ->label('Ovoko')
-                            ->content('Samochód zostanie zapisany lokalnie. Utworzenie w Ovoko wykonujemy osobnym krokiem.')
-                            ->columnSpanFull(),
                         Forms\Components\Select::make('legacy_payload.ovoko_brand_id')
                             ->label('Marka')
                             ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
@@ -61,6 +57,7 @@ class CarResource extends Resource
                             ->searchable()
                             ->preload()
                             ->native(false)
+                            ->required()
                             ->options(static fn (): array => OvokoCarDictionaryEntry::query()
                                 ->where('dictionary', 'brands')
                                 ->orderBy('name')
@@ -82,6 +79,7 @@ class CarResource extends Resource
                             ->columnSpan(['default' => 1, 'md' => 12])
                             ->searchable()
                             ->native(false)
+                            ->required()
                             ->options(static fn (Get $get): array => self::ovokoModelGroupOptions($get('legacy_payload.ovoko_brand_id')))
                             ->afterStateUpdated(function (?string $state, Set $set): void {
                                 $set('model', $state);
@@ -97,6 +95,7 @@ class CarResource extends Resource
                             ->columnSpan(['default' => 1, 'md' => 12])
                             ->searchable()
                             ->native(false)
+                            ->required()
                             ->options(static fn (Get $get): array => self::ovokoModelModificationOptions($get('legacy_payload.ovoko_brand_id'), $get('legacy_payload.ovoko_model_group_label')))
                             ->afterStateUpdated(function (?string $state, Set $set, Get $get): void {
                                 $modification = self::ovokoModelModification($get('legacy_payload.ovoko_brand_id'), $state);
@@ -109,6 +108,7 @@ class CarResource extends Resource
                             ->label('Rok produkcji samochodu')
                             ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
+                            ->required()
                             ->numeric()
                             ->minValue(1900)
                             ->maxValue((int) date('Y') + 1),
@@ -211,6 +211,7 @@ class CarResource extends Resource
                             ->label('Status samochodu / zakupu')
                             ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
+                            ->required()
                             ->options(Car::statusOptions())
                             ->default('kupiony')
                             ->native(false)
@@ -242,6 +243,7 @@ class CarResource extends Resource
                     ]),
 
                 Section::make('Dane sprzedawcy i zakupu')
+                    ->visible(static fn (?Model $record): bool => $record !== null)
                     ->icon('heroicon-o-clipboard-document-list')
                     ->extraAttributes(['class' => 'gps-car-form-section gps-car-form-section--seller'])
                     ->columns(['default' => 1, 'md' => 2, 'xl' => 3])
