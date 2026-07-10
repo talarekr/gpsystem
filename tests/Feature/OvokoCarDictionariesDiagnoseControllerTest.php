@@ -148,6 +148,49 @@ class OvokoCarDictionariesDiagnoseControllerTest extends TestCase
             ->assertJsonPath('safety_flags.no_local_cars_mutation', true);
     }
 
+    public function test_car_status_dictionary_diagnostics_includes_cached_raw_payload_without_external_calls(): void
+    {
+        $this->actingAsAdminUser();
+
+        OvokoCarDictionaryEntry::query()->create([
+            'dictionary' => 'car_status',
+            'ovoko_id' => '1',
+            'name' => null,
+            'raw_payload' => ['id' => '1', 'status_name' => 'For dismantling', 'code' => 'dismantling'],
+            'synced_at' => now(),
+        ]);
+        OvokoCarDictionaryEntry::query()->create([
+            'dictionary' => 'car_status',
+            'ovoko_id' => '2',
+            'name' => null,
+            'raw_payload' => ['id' => '2', 'status_name' => 'For sale', 'code' => 'sale'],
+            'synced_at' => now(),
+        ]);
+
+        Http::fake(function (): void {
+            $this->fail('Car status dictionary diagnostics must remain local-cache-only and must not call external HTTP endpoints.');
+        });
+
+        $this->getJson('/admin/tools/ovoko/car-dictionaries-diagnose?json=1&dictionary=car_status&include_raw=1')
+            ->assertOk()
+            ->assertJsonPath('marker', 'ovoko_car_dictionaries_cache_diagnostics_v1')
+            ->assertJsonPath('dictionary_diagnostics.marker', 'ovoko_car_status_dictionary_diagnostics_v1')
+            ->assertJsonPath('dictionary_diagnostics.dictionary', 'car_status')
+            ->assertJsonPath('dictionary_diagnostics.count', 2)
+            ->assertJsonPath('dictionary_diagnostics.entries.0.ovoko_id', '1')
+            ->assertJsonPath('dictionary_diagnostics.entries.0.name', null)
+            ->assertJsonPath('dictionary_diagnostics.entries.0.raw_payload.status_name', 'For dismantling')
+            ->assertJsonPath('dictionary_diagnostics.name_extraction_candidates.fields_seen', ['code', 'id', 'status_name'])
+            ->assertJsonPath('dictionary_diagnostics.name_extraction_candidates.likely_name_field', 'status_name')
+            ->assertJsonPath('safety_flags.read_only_diagnose', true)
+            ->assertJsonPath('safety_flags.local_cache_only', true)
+            ->assertJsonPath('safety_flags.no_ovoko_request', true)
+            ->assertJsonPath('safety_flags.no_import_car', true)
+            ->assertJsonPath('safety_flags.no_import_part', true)
+            ->assertJsonPath('safety_flags.no_cars_mutation', true)
+            ->assertJsonPath('safety_flags.no_parts_mutation', true);
+    }
+
     public function test_include_model_groups_builds_read_only_local_cache_heuristic_groups(): void
     {
         $this->actingAsAdminUser();
