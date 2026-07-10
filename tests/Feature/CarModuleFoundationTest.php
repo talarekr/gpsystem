@@ -6,6 +6,7 @@ use App\Enums\UserRole;
 use App\Filament\Resources\CarResource;
 use App\Filament\Resources\PartResource;
 use App\Models\Car;
+use App\Models\OvokoCarDictionaryEntry;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -51,6 +52,56 @@ class CarModuleFoundationTest extends TestCase
         ], Car::statusOptions());
     }
 
+    public function test_car_edit_normalization_preserves_existing_ovoko_mapping_ids_when_edit_form_omits_them(): void
+    {
+        foreach ([
+            ['fuel', '2', 'Benzyna'],
+            ['gearbox_type', '1', 'Automatyczny'],
+            ['body_type', '1', 'Sedan'],
+            ['wheel_drive', '3', 'AWD'],
+        ] as [$dictionary, $ovokoId, $name]) {
+            OvokoCarDictionaryEntry::query()->create([
+                'dictionary' => $dictionary,
+                'ovoko_id' => $ovokoId,
+                'name' => $name,
+            ]);
+        }
+
+        $existingLegacyPayload = [
+            'ovoko_fuel_id' => '2',
+            'ovoko_gearbox_type_id' => '1',
+            'ovoko_body_type_id' => '1',
+            'ovoko_wheel_drive_id' => '3',
+            'ovoko_car_id' => 'RRR-502',
+            'untouched_key' => 'keep-me',
+        ];
+
+        $normalized = CarResource::normalizeOvokoLocalMappingData([
+            'legacy_payload' => [
+                'ovoko_fuel_id' => null,
+                'ovoko_gearbox_type_id' => null,
+                'ovoko_body_type_id' => null,
+                'ovoko_wheel_drive_id' => null,
+                'ovoko_status_id' => '1',
+            ],
+            'fuel_type' => 'Benzyna',
+            'gearbox_type' => 'Automatyczny',
+            'body_type' => 'Sedan',
+            'drivetrain' => 'AWD',
+            'status' => 'kupiony',
+        ], $existingLegacyPayload);
+
+        $this->assertSame('2', data_get($normalized, 'legacy_payload.ovoko_fuel_id'));
+        $this->assertSame('1', data_get($normalized, 'legacy_payload.ovoko_gearbox_type_id'));
+        $this->assertSame('1', data_get($normalized, 'legacy_payload.ovoko_body_type_id'));
+        $this->assertSame('3', data_get($normalized, 'legacy_payload.ovoko_wheel_drive_id'));
+        $this->assertSame('RRR-502', data_get($normalized, 'legacy_payload.ovoko_car_id'));
+        $this->assertSame('keep-me', data_get($normalized, 'legacy_payload.untouched_key'));
+        $this->assertSame('Benzyna', $normalized['fuel_type']);
+        $this->assertSame('Automatyczny', $normalized['gearbox_type']);
+        $this->assertSame('Sedan', $normalized['body_type']);
+        $this->assertSame('AWD', $normalized['drivetrain']);
+    }
 
     public function test_car_search_phrase_matches_multiple_words_across_vehicle_fields(): void
     {

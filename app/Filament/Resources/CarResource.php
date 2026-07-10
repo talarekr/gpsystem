@@ -356,11 +356,24 @@ class CarResource extends Resource
      * Normalize Ovoko dictionary selections into the legacy visible car identity fields.
      *
      * @param  array<string, mixed>  $data
+     * @param  array<string, mixed>|null  $existingLegacyPayload
      * @return array<string, mixed>
      */
-    public static function normalizeOvokoLocalMappingData(array $data): array
+    public static function normalizeOvokoLocalMappingData(array $data, ?array $existingLegacyPayload = null): array
     {
-        $payload = is_array($data['legacy_payload'] ?? null) ? $data['legacy_payload'] : [];
+        $formPayload = is_array($data['legacy_payload'] ?? null) ? $data['legacy_payload'] : [];
+
+        foreach (['ovoko_fuel_id', 'ovoko_gearbox_type_id', 'ovoko_body_type_id', 'ovoko_wheel_drive_id'] as $mappingKey) {
+            if (
+                $existingLegacyPayload !== null
+                && filled($existingLegacyPayload[$mappingKey] ?? null)
+                && blank($formPayload[$mappingKey] ?? null)
+            ) {
+                unset($formPayload[$mappingKey]);
+            }
+        }
+
+        $payload = array_replace($existingLegacyPayload ?? [], $formPayload);
         $brandId = (string) ($payload['ovoko_brand_id'] ?? '');
         $modelId = (string) ($payload['ovoko_car_model_id'] ?? '');
 
@@ -418,7 +431,10 @@ class CarResource extends Resource
             }
         }
 
-        unset($payload['ovoko_car_id']);
+        if ($existingLegacyPayload === null) {
+            unset($payload['ovoko_car_id']);
+        }
+
         $data['legacy_payload'] = $payload;
 
         return $data;
