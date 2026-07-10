@@ -51,11 +51,19 @@ class OvokoLocalCarReadinessControllerTest extends TestCase
             'model_variant' => '5 E60 E61 (2004 - 2010)',
             'production_year' => 2007,
             'status' => 'kupiony',
+            'fuel_type' => 'Benzyna',
+            'engine_code' => 'ABC',
+            'vin' => 'TESTVIN1234567890',
+            'mileage_km' => 98765,
             'legacy_payload' => [
                 'ovoko_brand_id' => '1',
                 'ovoko_model_group_label' => 'Series 5',
                 'ovoko_car_model_id' => '2600',
                 'ovoko_status_id' => '1',
+                'ovoko_fuel_id' => '2',
+                'ovoko_gearbox_type_id' => '0',
+                'ovoko_body_type_id' => '1',
+                'ovoko_wheel_drive_id' => '1',
             ],
         ]);
 
@@ -79,6 +87,14 @@ class OvokoLocalCarReadinessControllerTest extends TestCase
             ->assertJsonPath('planned_import_car_payload.car_model', '2600')
             ->assertJsonPath('planned_import_car_payload.car_years', 2007)
             ->assertJsonPath('planned_import_car_payload.status', '1')
+            ->assertJsonPath('planned_import_car_payload.car_fuel', '2')
+            ->assertJsonPath('planned_import_car_payload.car_engine_code', 'ABC')
+            ->assertJsonPath('planned_import_car_payload.vin', 'TESTVIN1234567890')
+            ->assertJsonPath('planned_import_car_payload.mileage', 98765)
+            ->assertJsonPath('included_optional_fields.car_fuel.reason', 'filled_supported_confirmed_api_param')
+            ->assertJsonPath('skipped_optional_fields.gearbox.reason', 'missing_confirmed_api_param')
+            ->assertJsonPath('skipped_optional_fields.body_type.reason', 'missing_confirmed_api_param')
+            ->assertJsonPath('skipped_optional_fields.wheel_drive.reason', 'missing_confirmed_api_param')
             ->assertJsonPath('ready_for_future_import_car', true)
             ->assertJsonPath('safety_flags.no_import_car', true)
             ->assertJsonPath('safety_flags.no_import_part', true)
@@ -145,6 +161,10 @@ class OvokoLocalCarReadinessControllerTest extends TestCase
             'model' => 'Car',
             'production_year' => 2007,
             'status' => 'kupiony',
+            'fuel_type' => 'Benzyna',
+            'engine_code' => 'ABC',
+            'vin' => 'TESTVIN1234567890',
+            'mileage_km' => 98765,
             'legacy_payload' => [
                 'ovoko_brand_id' => '1',
                 'ovoko_car_model_id' => '1391',

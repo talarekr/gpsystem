@@ -16,6 +16,7 @@ class OvokoCarDictionaryService
     public const MARKER = 'ovoko_car_dictionaries_cache_diagnostics_v1';
     public const CAR_STATUS_DIAGNOSTICS_MARKER = 'ovoko_car_status_dictionary_diagnostics_v1';
     public const CAR_STATUS_MAPPING_READINESS_MARKER = 'ovoko_car_status_mapping_readiness_v1';
+    public const IMPORT_CAR_PAYLOAD_MARKER = 'ovoko_import_car_payload_include_filled_supported_fields_v2';
     public const CONFIRM = 'sync-ovoko-car-dictionaries';
     public const DICTIONARIES = ['brands', 'models', 'fuel', 'gearbox_type', 'body_type', 'wheel', 'wheel_drive', 'car_status', 'car_class'];
     public const ENUMS = ['fuel', 'gearbox_type', 'body_type', 'wheel', 'wheel_drive', 'car_status', 'car_class'];
@@ -114,16 +115,26 @@ class OvokoCarDictionaryService
         $ids = $this->mappedIds($car);
         $exists = [];
         foreach ($ids as $key => $value) $exists[$key] = filled($value) ? $this->idExists($key, (string) $value, $ids['ovoko_brand_id'] ?? null) : false;
+        $supportedOptionalFields = [
+            'car_fuel' => ['value' => $ids['ovoko_fuel_id'] ?? null, 'source' => 'legacy_payload.ovoko_fuel_id'],
+            'car_engine_code' => ['value' => $car->engine_code, 'source' => 'engine_code'],
+            'vin' => ['value' => $car->vin, 'source' => 'vin'],
+            'mileage' => ['value' => $car->mileage_km, 'source' => 'mileage_km'],
+        ];
+
         $payload = array_filter([
             'car_model' => $ids['ovoko_car_model_id'] ?? null,
             'car_years' => $car->production_year ?? $car->first_registration_year,
-            'car_fuel' => $ids['ovoko_fuel_id'] ?? null,
-            'car_engine_code' => $car->engine_code,
-            'vin' => $car->vin,
-            'mileage' => $car->mileage_km,
             'status' => $ids['ovoko_status_id'] ?? null,
             'external_id' => 'gps-car-'.$car->id,
-        ], fn ($value): bool => filled($value));
+        ] + array_map(fn (array $field): mixed => $field['value'], $supportedOptionalFields), fn ($value): bool => filled($value));
+
+        $optionalDiagnostics = $this->optionalImportFieldDiagnostics($supportedOptionalFields, [
+            'gearbox' => ['value' => $ids['ovoko_gearbox_type_id'] ?? null, 'source' => 'legacy_payload.ovoko_gearbox_type_id'],
+            'body_type' => ['value' => $ids['ovoko_body_type_id'] ?? null, 'source' => 'legacy_payload.ovoko_body_type_id'],
+            'wheel_drive' => ['value' => $ids['ovoko_wheel_drive_id'] ?? null, 'source' => 'legacy_payload.ovoko_wheel_drive_id'],
+            'wheel' => ['value' => $ids['ovoko_wheel_id'] ?? null, 'source' => 'legacy_payload.ovoko_wheel_id'],
+        ]);
         $missing = array_values(array_filter(['ovoko_car_model_id', 'ovoko_status_id'], fn ($field) => blank($ids[$field] ?? null) || ! ($exists[$field] ?? false)));
         if (blank($car->production_year ?? $car->first_registration_year)) {
             $missing[] = 'car_years';
@@ -142,6 +153,7 @@ class OvokoCarDictionaryService
         return [
             'ok' => true,
             'marker' => self::CAR_STATUS_MAPPING_READINESS_MARKER,
+            'import_car_payload_marker' => self::IMPORT_CAR_PAYLOAD_MARKER,
             'local_car_id' => $car->id,
             'ovoko_car_id' => $ids['ovoko_car_id'],
             'ovoko_car_id_set' => filled($ids['ovoko_car_id']),
@@ -158,10 +170,35 @@ class OvokoCarDictionaryService
             'missing_fields_for_future_import_car' => $missing,
             'ready_for_future_import_car' => $missing === [],
             'planned_import_car_payload' => $ovokoCarIdSet ? ['already_imported' => true] : $payload,
+            'optional_import_fields' => $optionalDiagnostics,
+            'included_optional_fields' => $optionalDiagnostics['included'],
+            'skipped_optional_fields' => $optionalDiagnostics['skipped'],
             'safety_flags' => ['read_only' => true, 'no_import_car' => true, 'no_import_part' => true, 'no_mutation' => true],
         ];
     }
 
+
+    private function optionalImportFieldDiagnostics(array $supportedFields, array $unconfirmedDictionaryFields): array
+    {
+        $included = [];
+        $skipped = [];
+
+        foreach ($supportedFields as $param => $field) {
+            $value = $field['value'] ?? null;
+            if (filled($value)) {
+                $included[$param] = ['source' => $field['source'] ?? null, 'reason' => 'filled_supported_confirmed_api_param'];
+            } else {
+                $skipped[$param] = ['source' => $field['source'] ?? null, 'reason' => 'missing_value'];
+            }
+        }
+
+        foreach ($unconfirmedDictionaryFields as $param => $field) {
+            $value = $field['value'] ?? null;
+            $skipped[$param] = ['source' => $field['source'] ?? null, 'reason' => filled($value) ? 'missing_confirmed_api_param' : 'missing_value'];
+        }
+
+        return ['included' => $included, 'skipped' => $skipped];
+    }
 
     private function dictionaryDiagnostics(string $dictionary): array
     {
