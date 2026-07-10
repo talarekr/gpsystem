@@ -2819,6 +2819,55 @@ body:has(.gps-admin-topbar) .fi-no {
 }
 
 /* car_create_form_floating_label_selector_fix_v4 */
+.gps-car-floating-field {
+    position: relative;
+    padding-top: 0.36rem;
+}
+
+.gps-car-floating-field .fi-fo-field-wrp-label {
+    position: absolute !important;
+    top: 0.48rem;
+    left: 0.75rem;
+    z-index: 5;
+    width: max-content;
+    max-width: calc(100% - 1.5rem);
+    margin: 0 !important;
+    padding-inline: 0.25rem;
+    background: #ffffff;
+    line-height: 1;
+    pointer-events: none;
+}
+
+.gps-car-floating-field .fi-fo-field-wrp-label span {
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1;
+    color: var(--gps-admin-compact-field-label, #64748b);
+}
+
+.gps-car-floating-field .fi-input-wrp {
+    border: 1px solid var(--gps-admin-compact-field-border, #a8b0bb);
+    border-radius: var(--gps-admin-compact-field-radius, 5px);
+    background: #ffffff;
+    box-shadow: none;
+}
+
+.gps-car-floating-field :where(.fi-input, .fi-select-input, .fi-textarea, .choices__input, .choices__list--single) {
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    outline: none;
+}
+
+.gps-car-floating-field.fi-fo-select .fi-input-wrp,
+.gps-car-floating-field .fi-fo-select .fi-input-wrp {
+    border: 1px solid var(--gps-admin-compact-field-border, #a8b0bb);
+    border-radius: var(--gps-admin-compact-field-radius, 5px);
+    background: #ffffff;
+    box-shadow: none;
+}
+
+/* car_create_form_explicit_field_wrapper_labels_v5 */
 .gps-admin-floating-label-section .fi-fo-field-wrp:not(.fi-fo-toggle) {
     position: relative;
     min-width: 0;
