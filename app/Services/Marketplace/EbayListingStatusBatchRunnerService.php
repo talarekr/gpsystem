@@ -8,6 +8,7 @@ use App\Services\Marketplace\Api\EbayApiClient;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 
 class EbayListingStatusBatchRunnerService
 {
@@ -21,6 +22,11 @@ class EbayListingStatusBatchRunnerService
     public const TRANSIENT_RETRY_MARKER = 'ebay_listing_status_transient_retry_runner_v1';
     public const RATE_LIMIT_BACKOFF_MARKER = 'ebay_listing_status_rate_limit_backoff_v1';
     public const RETRY_DIAGNOSE_MARKER = 'ebay_listing_status_retry_diagnose_v1';
+    public const CONFIRMED_ENDED_DIAGNOSE_MARKER = 'ebay_confirmed_ended_results_diagnose_v1';
+    public const CONFIRMED_ENDED_PREVIEW_MARKER = 'ebay_confirmed_ended_apply_preview_v1';
+    public const CONFIRMED_ENDED_APPLY_MARKER = 'ebay_confirmed_ended_local_status_apply_v1';
+    public const CONFIRMED_ENDED_RELISTING_MARKER = 'ebay_confirmed_ended_relisting_unblock_v1';
+    public const EXPECTED_CONFIRMED_ENDED_COUNT = 378;
 
     public function __construct(private readonly EbayListingStatusNormalizer $normalizer) {}
 
@@ -86,6 +92,93 @@ class EbayListingStatusBatchRunnerService
     }
 
     public function status(): array { return array_merge($this->publicStatus($this->state()), ['ok' => true, 'retry' => $this->publicRetryStatus($this->retryState())]); }
+
+
+    public function confirmedEndedDiagnose(): array
+    {
+        $candidates = $this->confirmedEndedCandidatesFromState($this->state());
+        $ids = $candidates['ids'];
+        $full = count($ids) === self::EXPECTED_CONFIRMED_ENDED_COUNT && ! $candidates['has_duplicates'] && ! $candidates['has_unqualified'];
+
+        return [
+            'ok' => true,
+            'marker' => self::CONFIRMED_ENDED_DIAGNOSE_MARKER,
+            'no_mutation' => true,
+            'no_ebay_request' => true,
+            'expected_ended_count' => self::EXPECTED_CONFIRMED_ENDED_COUNT,
+            'full_ended_id_list_available' => $full,
+            'available_ended_id_count' => count($ids),
+            'unique_marketplace_listing_ids' => count(array_unique($ids)),
+            'data_source' => $candidates['data_source'],
+            'sample' => array_slice($this->confirmedEndedRows($ids, $candidates['results']), 0, 20),
+            'can_apply_without_rescan' => $full,
+            'has_duplicate_ids' => $candidates['has_duplicates'],
+            'has_unqualified_results' => $candidates['has_unqualified'],
+        ];
+    }
+
+    public function confirmedEndedPreview(): array
+    {
+        $diag = $this->confirmedEndedDiagnose();
+        if (! $diag['can_apply_without_rescan']) {
+            return array_merge($diag, [
+                'marker' => self::CONFIRMED_ENDED_PREVIEW_MARKER,
+                'candidate_count' => 0,
+                'can_apply' => false,
+                'reason' => 'full_confirmed_ended_id_list_unavailable',
+            ]);
+        }
+
+        $candidates = $this->confirmedEndedCandidatesFromState($this->state());
+        $rows = $this->confirmedEndedRows($candidates['ids'], $candidates['results']);
+        $productIds = array_values(array_unique(array_map(fn ($r) => (int) $r['part_id'], $rows)));
+        $withOtherActive = collect($rows)->filter(fn ($r) => $this->partHasAnotherActiveEbayListing((int) $r['part_id'], (int) $r['marketplace_listing_id']))->count();
+        $blocking = collect($rows)->filter(fn ($r) => (bool) $r['currently_blocks_relisting'])->count();
+        $activeLocal = collect($rows)->filter(fn ($r) => in_array(strtolower((string) $r['current_local_status']), ['published','active','live'], true))->count();
+
+        return [
+            'ok' => true,
+            'marker' => self::CONFIRMED_ENDED_PREVIEW_MARKER,
+            'relisting_marker' => self::CONFIRMED_ENDED_RELISTING_MARKER,
+            'no_mutation' => true,
+            'no_ebay_request' => true,
+            'can_apply' => true,
+            'candidate_count' => count($rows),
+            'unique_products' => count($productIds),
+            'locally_still_published_active_live' => $activeLocal,
+            'currently_blocks_relisting' => $blocking,
+            'products_with_another_active_ebay_listing' => $withOtherActive,
+            'products_will_be_unblocked' => collect($rows)->filter(fn ($r) => (bool) $r['will_unblock_relisting'])->count(),
+            'sample' => array_slice($rows, 0, 50),
+        ];
+    }
+
+    public function applyConfirmedEnded(array $input): array
+    {
+        if (($input['confirm'] ?? null) !== 'apply-confirmed-ebay-ended-listings') return ['ok' => false, 'reason' => 'missing_confirm_token'];
+        if (($input['source'] ?? null) !== 'completed_dry_run') return ['ok' => false, 'reason' => 'invalid_source'];
+        if ((int) ($input['expected_count'] ?? 0) !== self::EXPECTED_CONFIRMED_ENDED_COUNT) return ['ok' => false, 'reason' => 'expected_count_mismatch'];
+        if (filter_var($input['dry_run'] ?? true, FILTER_VALIDATE_BOOLEAN)) return ['ok' => false, 'reason' => 'dry_run_required_false_for_apply'];
+        $diag = $this->confirmedEndedDiagnose();
+        if (! $diag['can_apply_without_rescan']) return ['ok' => false, 'reason' => 'full_confirmed_ended_id_list_unavailable', 'diagnostics' => $diag];
+
+        $candidates = $this->confirmedEndedCandidatesFromState($this->state());
+        $ids = array_slice($candidates['ids'], 0, 20);
+        $updated = []; $errors = [];
+        foreach ($ids as $id) {
+            try {
+                DB::transaction(function () use ($id, $candidates, &$updated) {
+                    $listing = MarketplaceListing::query()->lockForUpdate()->findOrFail($id);
+                    $result = $candidates['results'][$id] ?? [];
+                    $raw = $listing->raw_payload ?: [];
+                    if (! empty($result['itemEndDate'])) $raw['itemEndDate'] = $result['itemEndDate'];
+                    $listing->forceFill(['status'=>'ended','last_api_status'=>'ended','last_synced_at'=>now(),'last_seen_at'=>now(),'not_seen_in_active_api_at'=>now(),'raw_payload'=>$raw])->save();
+                    $updated[] = $id;
+                });
+            } catch (\Throwable $e) { $errors[] = ['marketplace_listing_id'=>$id, 'error'=>$e->getMessage()]; }
+        }
+        return ['ok'=>empty($errors),'marker'=>self::CONFIRMED_ENDED_APPLY_MARKER,'no_ebay_request'=>true,'batch_limit'=>20,'updated_count'=>count($updated),'updated_ids'=>$updated,'errors'=>$errors,'remaining_after_batch'=>count($candidates['ids'])-count($updated)];
+    }
 
     public function retryDiagnose(): array
     {
@@ -156,6 +249,46 @@ class EbayListingStatusBatchRunnerService
         return array_merge($this->publicRetryStatus($state), ['ok'=>true,'batch_executed'=>true]);
     }
 
+
+    private function confirmedEndedCandidatesFromState(array $s): array
+    {
+        $source = 'unavailable'; $rows = [];
+        if (! empty($s['ended_ids']) && is_array($s['ended_ids'])) {
+            $source = 'ended_ids';
+            foreach (array_map('intval', $s['ended_ids']) as $id) {
+                $result = (array) ($s['results_by_listing_id'][$id] ?? []);
+                if ($this->isConfirmedEndedResult($result)) $rows[$id] = $result;
+            }
+        } elseif (! empty($s['results_by_listing_id']) && is_array($s['results_by_listing_id'])) {
+            $source = 'results_by_listing_id';
+            foreach ($s['results_by_listing_id'] as $id => $r) if ($this->isConfirmedEndedResult((array) $r)) $rows[(int)$id] = (array) $r;
+        }
+        $ids = array_map('intval', array_keys($rows));
+        $rawIds = $source === 'ended_ids' ? array_map('intval', $s['ended_ids']) : $ids;
+        $results = [];
+        foreach ($ids as $id) $results[$id] = is_array($rows[$id] ?? null) ? $rows[$id] : (array)($s['results_by_listing_id'][$id] ?? []);
+        $hasUnqualified = false; foreach ($results as $r) if ($r !== [] && ! $this->isConfirmedEndedResult($r)) $hasUnqualified = true;
+        return ['ids'=>array_values(array_unique($ids)), 'results'=>$results, 'data_source'=>$source, 'has_duplicates'=>count($rawIds) !== count(array_unique($rawIds)), 'has_unqualified'=>$hasUnqualified];
+    }
+
+    private function isConfirmedEndedResult(array $r): bool { return ($r['normalized_status'] ?? null) === 'ended' && (int)($r['http_status'] ?? 0) === 200 && ($r['error_type'] ?? null) === null; }
+
+    private function confirmedEndedRows(array $ids, array $results): array
+    {
+        $listings = MarketplaceListing::query()->whereIn('id', $ids)->get()->keyBy('id');
+        return collect($ids)->map(function (int $id) use ($listings, $results) {
+            $l = $listings->get($id); $r = $results[$id] ?? [];
+            $other = $l ? $this->partHasAnotherActiveEbayListing((int)$l->part_id, (int)$l->id) : false;
+            $blocks = $l ? $this->blocksRelisting($l) : false;
+            return ['part_id'=>$l?->part_id ?? ($r['part_id'] ?? null),'marketplace_listing_id'=>$id,'ebay_item_id'=>$r['ebay_item_id'] ?? $this->itemId($l),'local_status'=>$l?->status ?? ($r['local_status'] ?? null),'current_local_status'=>$l?->status ?? ($r['local_status'] ?? null),'planned_local_status'=>'ended','normalized_status'=>$r['normalized_status'] ?? null,'http_status'=>$r['http_status'] ?? null,'has_another_active_ebay_listing'=>$other,'currently_blocks_relisting'=>$blocks,'will_unblock_relisting'=>$blocks && ! $other];
+        })->all();
+    }
+
+    private function partHasAnotherActiveEbayListing(int $partId, int $excludeId): bool
+    {
+        return MarketplaceListing::query()->where('part_id',$partId)->where('id','!=',$excludeId)->whereIn('marketplace',['ebay','ebay_de'])->get()->contains(fn ($l) => $this->blocksRelisting($l));
+    }
+
     private function eligibleListingIds(): array
     {
         return MarketplaceListing::query()->whereIn('marketplace', ['ebay', 'ebay_de'])->where(function ($q) {
@@ -180,7 +313,7 @@ class EbayListingStatusBatchRunnerService
             'part_id' => $listing->part_id, 'marketplace_listing_id' => $listing->id, 'ebay_item_id' => $itemId,
             'local_status' => $listing->status, 'normalized_status' => $normalized['normalized_status'],
             'currently_blocks_relisting' => $this->blocksRelisting($listing), 'should_allow_relisting' => $normalized['should_allow_relisting'],
-            'http_status' => $api['http_status'] ?? null, 'error_type' => $errorType, 'retry_after' => $api['retry_after'] ?? null,
+            'http_status' => $api['http_status'] ?? null, 'error_type' => $errorType, 'retry_after' => $api['retry_after'] ?? null, 'itemEndDate' => $api['itemEndDate'] ?? $api['item_end_date'] ?? null,
         ];
     }
 
