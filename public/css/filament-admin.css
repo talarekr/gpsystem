@@ -3124,7 +3124,9 @@ body:has(.gps-admin-topbar) .fi-no {
     }
 }
 
-/* car_create_form_label_top_final_override_v14 */
+/* car_create_form_label_no_white_box_v15 */
 .gps-car-form .fi-fo-field-wrp.gps-car-floating-field .fi-fo-field-wrp-label {
-    top: 1rem !important;
+    top: 1.375rem !important;
+    background: transparent;
+    box-shadow: none;
 }
