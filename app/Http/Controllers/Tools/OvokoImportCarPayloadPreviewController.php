@@ -50,9 +50,23 @@ class OvokoImportCarPayloadPreviewController extends Controller
             'status',
             'external_id',
             'car_fuel',
+            'car_gearbox_type',
+            'car_body_type',
+            'car_wheel_drive',
+            'car_wheel_type',
+            'car_engine_cubic_capacity',
+            'car_engine_power',
+            'car_mileage',
             'car_engine_code',
-            'vin',
-            'mileage',
+            'car_gearbox_code',
+            'car_color',
+            'car_color_code',
+            'car_interior',
+            'car_price',
+            'defectation_notes',
+            'purchase_date',
+            'dismantling_at',
+            'car_body_number',
         ]);
 
         $response = [
@@ -76,50 +90,7 @@ class OvokoImportCarPayloadPreviewController extends Controller
 
     private function skippedFields(Car $car, array $readiness): array
     {
-        $mappings = (array) ($readiness['ovoko_mappings'] ?? []);
-
-        return [
-            'gearbox' => [
-                'source' => 'legacy_payload.ovoko_gearbox_type_id',
-                'value' => $mappings['ovoko_gearbox_type_id'] ?? null,
-                'reason' => filled($mappings['ovoko_gearbox_type_id'] ?? null) ? 'missing_confirmed_api_param' : 'missing_value',
-            ],
-            'body_type' => [
-                'source' => 'legacy_payload.ovoko_body_type_id',
-                'value' => $mappings['ovoko_body_type_id'] ?? null,
-                'reason' => filled($mappings['ovoko_body_type_id'] ?? null) ? 'missing_confirmed_api_param' : 'missing_value',
-            ],
-            'wheel_drive' => [
-                'source' => 'legacy_payload.ovoko_wheel_drive_id',
-                'value' => $mappings['ovoko_wheel_drive_id'] ?? null,
-                'reason' => filled($mappings['ovoko_wheel_drive_id'] ?? null) ? 'missing_confirmed_api_param' : 'missing_value',
-            ],
-            'wheel' => [
-                'source' => 'legacy_payload.ovoko_wheel_id',
-                'value' => $mappings['ovoko_wheel_id'] ?? null,
-                'reason' => filled($mappings['ovoko_wheel_id'] ?? null) ? 'missing_confirmed_api_param' : 'missing_value',
-            ],
-            'color' => [
-                'source' => 'color',
-                'value' => $car->color,
-                'reason' => 'missing_confirmed_api_param_or_no_ovoko_dictionary',
-            ],
-            'color_code' => [
-                'source' => 'color_code',
-                'value' => $car->color_code,
-                'reason' => 'missing_confirmed_api_param',
-            ],
-            'engine_power_kw' => [
-                'source' => 'engine_power_kw',
-                'value' => $car->engine_power_kw,
-                'reason' => 'missing_confirmed_api_param',
-            ],
-            'engine_capacity_cm3' => [
-                'source' => 'engine_capacity_cm3',
-                'value' => $car->engine_capacity_cm3,
-                'reason' => 'missing_confirmed_api_param',
-            ],
-        ];
+        return (array) ($readiness['skipped_optional_fields'] ?? []);
     }
 
     private function safetyFlags(): array

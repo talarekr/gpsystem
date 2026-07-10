@@ -53,8 +53,18 @@ class OvokoLocalCarReadinessControllerTest extends TestCase
             'status' => 'kupiony',
             'fuel_type' => 'Benzyna',
             'engine_code' => 'ABC',
+            'engine_power_kw' => 140,
+            'engine_capacity_cm3' => 1995,
+            'gearbox_code' => 'GS6-53DZ',
             'vin' => 'TESTVIN1234567890',
             'mileage_km' => 98765,
+            'color' => 'Black',
+            'color_code' => '475',
+            'interior' => 'Leather',
+            'purchase_price' => '1234.56',
+            'defects_notes' => 'Front damage',
+            'purchase_date' => '2026-01-02',
+            'dismantled_at' => '2026-01-03',
             'legacy_payload' => [
                 'ovoko_brand_id' => '1',
                 'ovoko_model_group_label' => 'Series 5',
@@ -64,6 +74,7 @@ class OvokoLocalCarReadinessControllerTest extends TestCase
                 'ovoko_gearbox_type_id' => '0',
                 'ovoko_body_type_id' => '1',
                 'ovoko_wheel_drive_id' => '1',
+                'ovoko_wheel_id' => '2',
             ],
         ]);
 
@@ -89,12 +100,27 @@ class OvokoLocalCarReadinessControllerTest extends TestCase
             ->assertJsonPath('planned_import_car_payload.status', '1')
             ->assertJsonPath('planned_import_car_payload.car_fuel', '2')
             ->assertJsonPath('planned_import_car_payload.car_engine_code', 'ABC')
-            ->assertJsonPath('planned_import_car_payload.vin', 'TESTVIN1234567890')
-            ->assertJsonPath('planned_import_car_payload.mileage', 98765)
+            ->assertJsonPath('planned_import_car_payload.car_body_number', 'TESTVIN1234567890')
+            ->assertJsonPath('planned_import_car_payload.car_mileage', 98765)
+            ->assertJsonPath('planned_import_car_payload.car_gearbox_type', '0')
+            ->assertJsonPath('planned_import_car_payload.car_body_type', '1')
+            ->assertJsonPath('planned_import_car_payload.car_wheel_drive', '1')
+            ->assertJsonPath('planned_import_car_payload.car_wheel_type', '2')
+            ->assertJsonPath('planned_import_car_payload.car_engine_cubic_capacity', 1995)
+            ->assertJsonPath('planned_import_car_payload.car_engine_power', 140)
+            ->assertJsonPath('planned_import_car_payload.car_gearbox_code', 'GS6-53DZ')
+            ->assertJsonPath('planned_import_car_payload.car_color', 'Black')
+            ->assertJsonPath('planned_import_car_payload.car_color_code', '475')
+            ->assertJsonPath('planned_import_car_payload.car_interior', 'Leather')
+            ->assertJsonPath('planned_import_car_payload.car_price', '1234.56')
+            ->assertJsonPath('planned_import_car_payload.defectation_notes', 'Front damage')
+            ->assertJsonPath('planned_import_car_payload.purchase_date', '2026-01-02 00:00:00')
+            ->assertJsonPath('planned_import_car_payload.dismantling_at', '2026-01-03 00:00:00')
             ->assertJsonPath('included_optional_fields.car_fuel.reason', 'filled_supported_confirmed_api_param')
-            ->assertJsonPath('skipped_optional_fields.gearbox.reason', 'missing_confirmed_api_param')
-            ->assertJsonPath('skipped_optional_fields.body_type.reason', 'missing_confirmed_api_param')
-            ->assertJsonPath('skipped_optional_fields.wheel_drive.reason', 'missing_confirmed_api_param')
+            ->assertJsonPath('included_optional_fields.car_gearbox_type.reason', 'filled_supported_confirmed_api_param')
+            ->assertJsonMissingPath('skipped_optional_fields.gearbox')
+            ->assertJsonMissingPath('planned_import_car_payload.mileage')
+            ->assertJsonMissingPath('planned_import_car_payload.vin')
             ->assertJsonPath('ready_for_future_import_car', true)
             ->assertJsonPath('safety_flags.no_import_car', true)
             ->assertJsonPath('safety_flags.no_import_part', true)
