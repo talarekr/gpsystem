@@ -175,7 +175,15 @@ class CarResource extends Resource
                             ->label('Status samochodu / zakupu')
                             ->options(Car::statusOptions())
                             ->default('kupiony')
-                            ->native(false),
+                            ->native(false)
+                            ->live(),
+                        Forms\Components\Select::make('legacy_payload.ovoko_status_id')
+                            ->label('Status Ovoko')
+                            ->searchable()
+                            ->preload()
+                            ->native(false)
+                            ->options(static fn (): array => self::ovokoCarStatusOptions())
+                            ->helperText('Wybór zapisuje techniczne legacy_payload.ovoko_status_id dla przyszłego importCar.'),
                         Forms\Components\DatePicker::make('purchase_date')
                             ->label('Data zakupu')
                             ->native(false),
@@ -257,10 +265,36 @@ class CarResource extends Resource
             }
         }
 
+        if (blank($payload['ovoko_status_id'] ?? null) && ($data['status'] ?? null) === 'kupiony') {
+            $boughtStatus = OvokoCarDictionaryEntry::query()
+                ->where('dictionary', 'car_status')
+                ->where('name', 'Kupiony')
+                ->where('ovoko_id', '1')
+                ->first();
+
+            if ($boughtStatus) {
+                $payload['ovoko_status_id'] = (string) $boughtStatus->ovoko_id;
+            }
+        }
+
         unset($payload['ovoko_car_id']);
         $data['legacy_payload'] = $payload;
 
         return $data;
+    }
+
+
+    /**
+     * @return array<string, string>
+     */
+    private static function ovokoCarStatusOptions(): array
+    {
+        return OvokoCarDictionaryEntry::query()
+            ->where('dictionary', 'car_status')
+            ->orderBy('ovoko_id')
+            ->get(['ovoko_id', 'name'])
+            ->mapWithKeys(fn (OvokoCarDictionaryEntry $status): array => [(string) $status->ovoko_id => $status->name ?: (string) $status->ovoko_id])
+            ->all();
     }
 
     /**
