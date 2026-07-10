@@ -88,6 +88,7 @@ class OvokoImportCarControllerTest extends TestCase
     {
         OvokoCarDictionaryEntry::query()->firstOrCreate(['dictionary' => 'brands', 'ovoko_id' => '1', 'ovoko_brand_id' => ''], ['name' => 'BMW', 'synced_at' => now()]);
         OvokoCarDictionaryEntry::query()->firstOrCreate(['dictionary' => 'models', 'ovoko_id' => '2600', 'ovoko_brand_id' => '1'], ['name' => '5 E60 E61', 'year_from' => 2004, 'year_to' => 2010, 'synced_at' => now()]);
+        OvokoCarDictionaryEntry::query()->firstOrCreate(['dictionary' => 'car_status', 'ovoko_id' => '1', 'ovoko_brand_id' => ''], ['name' => 'Kupiony', 'synced_at' => now()]);
 
         return Car::query()->create([
             'make' => 'BMW',
@@ -98,6 +99,7 @@ class OvokoImportCarControllerTest extends TestCase
                 'ovoko_brand_id' => '1',
                 'ovoko_model_group_label' => 'Series 5',
                 'ovoko_car_model_id' => '2600',
+                'ovoko_status_id' => '1',
             ], $legacyOverrides),
         ]);
     }

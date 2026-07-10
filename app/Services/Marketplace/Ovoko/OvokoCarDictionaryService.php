@@ -15,6 +15,7 @@ class OvokoCarDictionaryService
 {
     public const MARKER = 'ovoko_car_dictionaries_cache_diagnostics_v1';
     public const CAR_STATUS_DIAGNOSTICS_MARKER = 'ovoko_car_status_dictionary_diagnostics_v1';
+    public const CAR_STATUS_MAPPING_READINESS_MARKER = 'ovoko_car_status_mapping_readiness_v1';
     public const CONFIRM = 'sync-ovoko-car-dictionaries';
     public const DICTIONARIES = ['brands', 'models', 'fuel', 'gearbox_type', 'body_type', 'wheel', 'wheel_drive', 'car_status', 'car_class'];
     public const ENUMS = ['fuel', 'gearbox_type', 'body_type', 'wheel', 'wheel_drive', 'car_status', 'car_class'];
@@ -120,9 +121,10 @@ class OvokoCarDictionaryService
             'car_engine_code' => $car->engine_code,
             'vin' => $car->vin,
             'mileage' => $car->mileage_km,
+            'status' => $ids['ovoko_status_id'] ?? null,
             'external_id' => 'gps-car-'.$car->id,
         ], fn ($value): bool => filled($value));
-        $missing = array_values(array_filter(['ovoko_car_model_id'], fn ($field) => blank($ids[$field] ?? null) || ! ($exists[$field] ?? false)));
+        $missing = array_values(array_filter(['ovoko_car_model_id', 'ovoko_status_id'], fn ($field) => blank($ids[$field] ?? null) || ! ($exists[$field] ?? false)));
         if (blank($car->production_year ?? $car->first_registration_year)) {
             $missing[] = 'car_years';
         }
@@ -139,7 +141,7 @@ class OvokoCarDictionaryService
 
         return [
             'ok' => true,
-            'marker' => self::MARKER,
+            'marker' => self::CAR_STATUS_MAPPING_READINESS_MARKER,
             'local_car_id' => $car->id,
             'ovoko_car_id' => $ids['ovoko_car_id'],
             'ovoko_car_id_set' => filled($ids['ovoko_car_id']),
@@ -149,6 +151,8 @@ class OvokoCarDictionaryService
             'ovoko_model_group_label' => data_get($car->legacy_payload, 'ovoko_model_group_label'),
             'ovoko_car_model_id' => $ids['ovoko_car_model_id'],
             'ovoko_car_model_id_exists_in_cache' => $exists['ovoko_car_model_id'] ?? false,
+            'ovoko_status_id' => $ids['ovoko_status_id'],
+            'ovoko_status_id_exists_in_cache' => $exists['ovoko_status_id'] ?? false,
             'ovoko_mappings' => $ids,
             'mapping_ids_exist_in_cache' => $exists,
             'missing_fields_for_future_import_car' => $missing,
