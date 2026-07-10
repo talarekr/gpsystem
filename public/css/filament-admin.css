@@ -2818,14 +2818,15 @@ body:has(.gps-admin-topbar) .fi-no {
     --gps-admin-compact-field-placeholder: #a8b0bb;
 }
 
-/* car_create_form_floating_label_selector_fix_v3 */
+/* car_create_form_floating_label_selector_fix_v4 */
 .gps-admin-floating-label-section .fi-fo-field-wrp:not(.fi-fo-toggle) {
     position: relative;
     min-width: 0;
     padding-top: 0.36rem;
 }
 
-.gps-admin-floating-label-section .fi-fo-field-wrp:not(.fi-fo-toggle) .fi-fo-field-wrp-label {
+.gps-admin-floating-label-section .fi-fo-field-wrp:not(.fi-fo-toggle) .fi-fo-field-wrp-label,
+.gps-car-form .gps-car-form-section--vehicle .fi-fo-field-wrp-label {
     position: absolute !important;
     top: 0.48rem;
     left: 0.75rem;
@@ -2839,7 +2840,8 @@ body:has(.gps-admin-topbar) .fi-no {
     pointer-events: none;
 }
 
-.gps-admin-floating-label-section .fi-fo-field-wrp:not(.fi-fo-toggle) .fi-fo-field-wrp-label span {
+.gps-admin-floating-label-section .fi-fo-field-wrp:not(.fi-fo-toggle) .fi-fo-field-wrp-label span,
+.gps-car-form .gps-car-form-section--vehicle .fi-fo-field-wrp-label span {
     color: var(--gps-admin-compact-field-label) !important;
     font-size: 0.75rem !important;
     font-weight: 500 !important;
