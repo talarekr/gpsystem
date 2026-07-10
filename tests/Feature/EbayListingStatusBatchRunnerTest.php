@@ -7,9 +7,11 @@ use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceListing;
 use App\Models\Part;
 use App\Models\User;
+use App\Services\Marketplace\EbayListingStatusBatchRunnerService;
 use Database\Seeders\RoleSeeder;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
@@ -17,6 +19,109 @@ use Tests\TestCase;
 class EbayListingStatusBatchRunnerTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_start_creates_consistent_running_state_with_payload_values(): void
+    {
+        $this->actingAsAdminUser();
+        $listings = [$this->listing('101010101010'), $this->listing('202020202020'), $this->listing('303030303030')];
+
+        $this->postJson('/admin/tools/ebay/listing-status-sync/start', [
+            'batch_size' => 5, 'delay_seconds' => 10, 'scope' => 'products_with_ebay_item_id', 'dry_run' => true, 'confirm' => 'start-ebay-listing-status-sync',
+        ])->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('status', 'running')
+            ->assertJsonPath('dry_run', true)
+            ->assertJsonPath('batch_size', 5)
+            ->assertJsonPath('delay_seconds', 10)
+            ->assertJsonPath('total', 3)
+            ->assertJsonPath('processed', 0)
+            ->assertJsonPath('remaining', 3)
+            ->assertJsonPath('completed', false)
+            ->assertJsonPath('state_initialization_fix_marker', 'ebay_listing_status_batch_runner_state_initialization_fix_v3')
+            ->assertJsonStructure(['started_at']);
+
+        $state = Cache::get(EbayListingStatusBatchRunnerService::CACHE_KEY);
+        $this->assertSame(3, $state['total']);
+        $this->assertSame(3, count($state['remaining_ids']));
+        $this->assertSame($listings[0]->id, $state['remaining_ids'][0]);
+        $this->assertSame([], $state['processed_ids']);
+        $this->assertNotNull($state['started_at']);
+        $this->assertNull($state['finished_at']);
+        $this->assertNull($state['last_batch_at']);
+    }
+
+    public function test_status_base_state_does_not_overwrite_saved_state(): void
+    {
+        $this->actingAsAdminUser();
+        Cache::put(EbayListingStatusBatchRunnerService::CACHE_KEY, [
+            'status' => 'running', 'batch_size' => 5, 'delay_seconds' => 10, 'total' => 3, 'processed' => 0, 'remaining' => 3,
+            'remaining_ids' => [11, 22, 33], 'processed_ids' => [], 'started_at' => '2026-07-10T16:00:00Z',
+        ], now()->addHour());
+
+        $this->getJson('/admin/tools/ebay/listing-status-sync/status')
+            ->assertOk()
+            ->assertJsonPath('status', 'running')
+            ->assertJsonPath('batch_size', 5)
+            ->assertJsonPath('delay_seconds', 10)
+            ->assertJsonPath('total', 3)
+            ->assertJsonPath('remaining', 3)
+            ->assertJsonPath('started_at', '2026-07-10T16:00:00Z');
+    }
+
+    public function test_completed_state_with_remaining_items_is_reported_inconsistent_without_mutating_cache(): void
+    {
+        $this->actingAsAdminUser();
+        $broken = [
+            'status' => 'completed', 'batch_size' => 5, 'delay_seconds' => 10, 'total' => 3, 'processed' => 0, 'remaining' => 3,
+            'remaining_ids' => [11, 22, 33], 'processed_ids' => [], 'started_at' => null, 'finished_at' => '2026-07-10T16:32:43Z',
+        ];
+        Cache::put(EbayListingStatusBatchRunnerService::CACHE_KEY, $broken, now()->addHour());
+
+        $this->getJson('/admin/tools/ebay/listing-status-sync/status')
+            ->assertOk()
+            ->assertJsonPath('status', 'completed')
+            ->assertJsonPath('remaining', 3)
+            ->assertJsonPath('state_inconsistent', true)
+            ->assertJsonPath('reason', 'completed_with_remaining_items');
+
+        $this->assertSame($broken, Cache::get(EbayListingStatusBatchRunnerService::CACHE_KEY));
+    }
+
+    public function test_new_start_overwrites_broken_completed_state_and_returns_fresh_running_state(): void
+    {
+        $this->actingAsAdminUser();
+        $this->listing('404040404040');
+        $this->listing('505050505050');
+        Cache::put(EbayListingStatusBatchRunnerService::CACHE_KEY, [
+            'status' => 'completed', 'total' => 0, 'processed' => 0, 'remaining' => 2, 'remaining_ids' => [1, 2], 'processed_ids' => [],
+        ], now()->addHour());
+
+        $this->postJson('/admin/tools/ebay/listing-status-sync/start', [
+            'batch_size' => 5, 'delay_seconds' => 10, 'scope' => 'products_with_ebay_item_id', 'dry_run' => true, 'confirm' => 'start-ebay-listing-status-sync',
+        ])->assertOk()
+            ->assertJsonPath('status', 'running')
+            ->assertJsonPath('batch_size', 5)
+            ->assertJsonPath('delay_seconds', 10)
+            ->assertJsonPath('total', 2)
+            ->assertJsonPath('remaining', 2)
+            ->assertJsonPath('completed', false)
+            ->assertJsonMissing(['state_inconsistent' => true]);
+
+        $state = Cache::get(EbayListingStatusBatchRunnerService::CACHE_KEY);
+        $this->assertSame('running', $state['status']);
+        $this->assertSame(2, $state['total']);
+        $this->assertSame($state['total'], count($state['remaining_ids']));
+    }
+
+    public function test_controller_diagnose_reads_same_cache_key_as_runner_endpoints(): void
+    {
+        $this->actingAsAdminUser();
+        Cache::put(EbayListingStatusBatchRunnerService::CACHE_KEY, ['status' => 'running'], now()->addHour());
+
+        $this->getJson('/admin/tools/ebay/listing-status-sync/diagnose?json=1')
+            ->assertOk()
+            ->assertJsonPath('current_runner_state_readable', true);
+    }
 
     public function test_dry_run_start_clamps_batch_size_and_delay_and_stop(): void
     {
