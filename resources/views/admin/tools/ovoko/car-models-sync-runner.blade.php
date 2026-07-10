@@ -30,7 +30,7 @@
     </div>
 
     <div class="card">
-        <h2>Status <span id="statusBadge" class="badge {{ $status['status'] ?? 'idle' }}">{{ $status['status'] ?? 'idle' }}</span></h2>
+        <h2>Status <span class="muted">active run_id: <code id="activeRunId">{{ $runId ?? '—' }}</code></span> <span id="statusBadge" class="badge {{ $status['status'] ?? 'idle' }}">{{ $status['status'] ?? 'idle' }}</span></h2>
         <div class="bar"><span id="progressBar"></span></div>
         <p class="muted"><span id="progressText">—</span></p>
         <div class="grid" id="statusGrid"></div>
@@ -50,7 +50,7 @@
     <div class="card">
         <h2>Runner modeli</h2>
         <div class="row">
-            <form method="POST" action="{{ route('admin.tools.ovoko.car-models-sync-runner.start') }}" onsubmit="return confirm('Uruchomić Ovoko car models sync runner?');">
+            <form id="startRunnerForm" method="POST" action="{{ route('admin.tools.ovoko.car-models-sync-runner.start') }}" onsubmit="return confirm('Uruchomić Ovoko car models sync runner?');">
                 @csrf
                 <input type="hidden" name="confirm" value="start-ovoko-car-models-sync-runner">
                 <label>batch_size <input type="number" name="batch_size" value="5" min="1" max="10"></label>
@@ -61,7 +61,8 @@
                     <span><input type="checkbox" name="only_missing" value="1" checked> Tylko marki bez modeli</span>
                     <span class="helper">Zaznaczone: pobiera modele tylko dla marek, które nie mają jeszcze żadnych modeli w cache. Odznaczone: odświeża modele dla wszystkich marek.</span>
                 </label>
-                <button class="btn primary" type="submit">Start</button>
+                <button id="startRunnerButton" class="btn primary" type="submit">Start</button>
+                <span id="startRunnerBlockedMessage" class="helper hidden">Runner już aktywny — kontynuuj active run_id pokazany w panelu.</span>
             </form>
             <form method="POST" action="{{ route('admin.tools.ovoko.car-models-sync-runner.stop') }}" onsubmit="return confirm('Zatrzymać Ovoko car models sync runner?');">
                 @csrf
@@ -78,6 +79,7 @@
     </div>
 
     {{-- ovoko_car_models_sync_runner_500_recovery_v6 --}}
+    {{-- ovoko_car_models_sync_runner_autorun_stop_condition_v8 --}}
     <div id="browserAutoRunCard" class="card autorun-off">
         <h2>Browser fallback auto-runner</h2>
         <label class="inline-check">
@@ -117,7 +119,8 @@ let consecutiveAutoRunErrors = 0;
 function esc(v){return String(v ?? '—').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c]));}
 function asInt(v){const n = Number(v || 0); return Number.isFinite(n) ? Math.trunc(n) : 0;}
 function delayMs(data){return Math.max(5, asInt(data?.delay_seconds || 10)) * 1000;}
-function canAutoRun(data){return runnableStatuses.includes(data?.status || 'idle') && asInt(data?.remaining_brand_count) > 0;}
+function isCompletedByStatus(data){return (data?.status || 'idle') === 'completed' || asInt(data?.remaining_brand_count) <= 0 || data?.completed_at != null;}
+function canAutoRun(data){return runnableStatuses.includes(data?.status || 'idle') && asInt(data?.remaining_brand_count) > 0 && data?.completed_at == null;}
 function autoRunChecked(){return document.getElementById('browserAutoRunEnabled')?.checked === true;}
 function formatTime(date){return date ? date.toLocaleTimeString() : '—';}
 function asArray(value){return Array.isArray(value) ? value : (value && typeof value === 'object' ? Object.values(value) : []);}
@@ -167,7 +170,8 @@ function scheduleAutoRun(data){
         autoRunTimer = null;
         nextAutoRunAt = null;
         const status = data?.status || 'idle';
-        return updateAutoRunPanel(terminalStatuses.includes(status) || asInt(data?.remaining_brand_count) <= 0 ? 'zatrzymany — koniec pracy' : 'nieaktywny');
+        if (isCompletedByStatus(data)) return updateAutoRunPanel('zatrzymany — koniec pracy');
+        return updateAutoRunPanel(terminalStatuses.includes(status) ? `zatrzymany — status ${status}` : 'nieaktywny');
     }
     if (autoRunInFlight || autoRunTimer) return updateAutoRunPanel();
     const ms = delayMs(data);
@@ -193,7 +197,7 @@ async function runNextBatchAutomatically(){
             body
         });
         const result = await res.json().catch(() => ({}));
-        lastAutoRunResult = res.ok && result.ok ? `OK, remaining=${result.remaining_brand_count ?? '—'}` : `Błąd: ${diagnosticMessage(result) || result.reason || res.status}`;
+        lastAutoRunResult = res.ok && result.ok ? `OK, status pobieram…` : `Błąd: ${diagnosticMessage(result) || result.reason || res.status}`;
         if (!res.ok || !result.ok) {
             consecutiveAutoRunErrors += 1;
             autoRunInFlight = false;
@@ -206,6 +210,9 @@ async function runNextBatchAutomatically(){
         clearPanelError();
         autoRunInFlight = false;
         await refresh(false);
+        const remaining = asInt(latestStatus?.remaining_brand_count);
+        lastAutoRunResult = isCompletedByStatus(latestStatus) ? `OK, remaining=${remaining}` : `OK, remaining=${remaining} — kontynuuję za ${Math.max(5, asInt(latestStatus?.delay_seconds || 10))} s`;
+        updateAutoRunPanel();
     } catch (e) {
         lastAutoRunResult = `Błąd: ${e?.message || e}`;
         consecutiveAutoRunErrors += 1;
@@ -232,7 +239,20 @@ function render(data){
     document.getElementById('errors').innerHTML = errors.length ? `<table><thead><tr><th>brand_id</th><th>brand_name</th><th>error</th><th>diagnostics</th></tr></thead><tbody>${errors.map(e => `<tr><td class="mono">${esc(e.brand_id)}</td><td>${esc(e.brand_name)}</td><td>${esc(diagnosticMessage(e))}</td><td class="mono">${esc(diagnosticMeta(e))}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">Brak błędów.</p>';
     document.getElementById('rawStatus').textContent = JSON.stringify(data, null, 2);
     document.getElementById('runNextForm').classList.toggle('hidden', !runnableStatuses.includes(status));
-    if (data.run_id) document.getElementById('runIdInput').value = data.run_id;
+    if (data.run_id) {
+        document.getElementById('runIdInput').value = data.run_id;
+        document.getElementById('activeRunId').textContent = data.run_id;
+    } else {
+        document.getElementById('activeRunId').textContent = '—';
+    }
+    const activeRun = runnableStatuses.includes(status) && remaining > 0 && data.completed_at == null;
+    const startButton = document.getElementById('startRunnerButton');
+    const startBlocked = document.getElementById('startRunnerBlockedMessage');
+    if (startButton) {
+        startButton.disabled = activeRun;
+        startButton.textContent = activeRun ? 'Runner już aktywny' : 'Start';
+    }
+    startBlocked?.classList.toggle('hidden', !activeRun);
     clearTimeout(refreshTimer); if (runnableStatuses.includes(status)) refreshTimer = setTimeout(() => refresh(true), 7000);
     scheduleAutoRun(data);
 }
