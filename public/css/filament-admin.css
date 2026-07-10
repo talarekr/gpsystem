@@ -3124,7 +3124,7 @@ body:has(.gps-admin-topbar) .fi-no {
     }
 }
 
-/* car_create_form_label_top_15px_v16 */
+/* car_create_form_label_top_14px_v17 */
 .gps-car-form .fi-fo-field-wrp.gps-car-floating-field .fi-fo-field-wrp-label {
-    top: 15px !important;
+    top: 14px !important;
 }
