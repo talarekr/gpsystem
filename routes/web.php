@@ -58,6 +58,7 @@ use App\Http\Controllers\Tools\MarketplaceListingImageRefreshController;
 use App\Http\Controllers\Tools\OvokoCarMappingController;
 use App\Http\Controllers\Tools\OvokoCarDictionariesDiagnoseController;
 use App\Http\Controllers\Tools\OvokoLocalCarReadinessController;
+use App\Http\Controllers\Tools\OvokoSetCarStatusMappingController;
 use App\Http\Controllers\Tools\OvokoImportCarController;
 use App\Http\Controllers\Tools\OvokoSyncCarDictionariesController;
 use App\Http\Controllers\Tools\OvokoCrossChannelDiagnoseController;
@@ -361,6 +362,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::options('/admin/tools/ovoko/sync-car-dictionaries', static fn () => response()->noContent()->withHeaders(['Allow' => 'POST, OPTIONS']))
         ->name('admin.tools.ovoko.sync-car-dictionaries.options');
     Route::get('/admin/tools/ovoko/local-car-ovoko-readiness', OvokoLocalCarReadinessController::class)->name('admin.tools.ovoko.local-car-ovoko-readiness');
+    Route::post('/admin/tools/ovoko/cars/set-status-mapping', OvokoSetCarStatusMappingController::class)->name('admin.tools.ovoko.cars.set-status-mapping');
     Route::post('/admin/tools/ovoko/import-car', OvokoImportCarController::class)->name('admin.tools.ovoko.import-car');
     Route::get('/admin/tools/ovoko/listing-url-backfill', OvokoListingUrlBackfillController::class)->name('admin.tools.ovoko.listing-url-backfill');
     Route::get('/admin/tools/ovoko/backfill-links', OvokoListingUrlBackfillController::class)->name('admin.tools.ovoko.backfill-links');
