@@ -56,6 +56,7 @@ class CarResource extends Resource
                             ->columnSpanFull(),
                         Forms\Components\Select::make('legacy_payload.ovoko_brand_id')
                             ->label('Marka')
+                            ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 12])
                             ->searchable()
                             ->preload()
@@ -77,6 +78,7 @@ class CarResource extends Resource
                         Forms\Components\Hidden::make('make'),
                         Forms\Components\Select::make('legacy_payload.ovoko_model_group_label')
                             ->label('Model samochodu')
+                            ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 12])
                             ->searchable()
                             ->native(false)
@@ -91,6 +93,7 @@ class CarResource extends Resource
                         Forms\Components\Hidden::make('model'),
                         Forms\Components\Select::make('legacy_payload.ovoko_car_model_id')
                             ->label('Modyfikacja modelu samochodu')
+                            ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 12])
                             ->searchable()
                             ->native(false)
@@ -104,81 +107,98 @@ class CarResource extends Resource
                         Forms\Components\Hidden::make('model_variant'),
                         Forms\Components\TextInput::make('production_year')
                             ->label('Rok produkcji samochodu')
+                            ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
                             ->numeric()
                             ->minValue(1900)
                             ->maxValue((int) date('Y') + 1),
                         Forms\Components\TextInput::make('first_registration_year')
                             ->label('Rok pierwszej rejestracji')
+                            ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
                             ->numeric()
                             ->minValue(1900)
                             ->maxValue((int) date('Y') + 1),
                         Forms\Components\TextInput::make('registration_number')
                             ->label('Tablica rejestracyjna')
+                            ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
                             ->maxLength(255),
                         Forms\Components\Select::make('steering_side')
                             ->label('Strona kierownicy')
+                            ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
                             ->options(Car::steeringSideOptions())
                             ->native(false),
                         Forms\Components\TextInput::make('mileage_km')
                             ->label('Przebieg km')
+                            ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
                             ->numeric()
                             ->minValue(0),
                         Forms\Components\Select::make('fuel_type')
                             ->label('Rodzaj paliwa')
+                            ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
                             ->options(Car::fuelTypeOptions())
                             ->native(false),
                         Forms\Components\TextInput::make('engine_power_kw')
                             ->label('Moc silnika kW')
+                            ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
                             ->numeric()
                             ->minValue(0),
                         Forms\Components\TextInput::make('engine_capacity_cm3')
                             ->label('Pojemność silnika cm3')
+                            ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
                             ->numeric()
                             ->minValue(0),
                         Forms\Components\TextInput::make('engine_code')
                             ->label('Kod silnika')
+                            ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
                             ->maxLength(255),
                         Forms\Components\Select::make('drivetrain')
                             ->label('Napęd')
+                            ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
                             ->options(Car::drivetrainOptions())
                             ->native(false),
                         Forms\Components\Select::make('gearbox_type')
                             ->label('Typ skrzyni biegów')
+                            ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
                             ->options(Car::gearboxTypeOptions())
                             ->native(false),
                         Forms\Components\TextInput::make('gearbox_code')
                             ->label('Kod skrzyni biegów')
+                            ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
                             ->maxLength(255),
                         Forms\Components\TextInput::make('body_type')
                             ->label('Typ nadwozia')
+                            ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
                             ->maxLength(255),
                         Forms\Components\TextInput::make('color_code')
                             ->label('Kod koloru')
+                            ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
                             ->maxLength(255),
                         Forms\Components\TextInput::make('color')
                             ->label('Kolor')
+                            ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
                             ->maxLength(255),
                         Forms\Components\TextInput::make('interior')
                             ->label('Wnętrze')
+                            ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
                             ->maxLength(255),
                         Forms\Components\TextInput::make('purchase_price')
                             ->label('Cena samochodu')
+                            ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
                             ->numeric()
                             ->prefix('PLN')
@@ -189,6 +209,7 @@ class CarResource extends Resource
                             ->inline(false),
                         Forms\Components\Select::make('status')
                             ->label('Status samochodu / zakupu')
+                            ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
                             ->options(Car::statusOptions())
                             ->default('kupiony')
@@ -196,6 +217,7 @@ class CarResource extends Resource
                             ->live(),
                         Forms\Components\Select::make('legacy_payload.ovoko_status_id')
                             ->label('Status Ovoko')
+                            ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
                             ->searchable()
                             ->preload()
@@ -204,14 +226,17 @@ class CarResource extends Resource
                             ->helperText('Wymagany do utworzenia samochodu w Ovoko.'),
                         Forms\Components\DatePicker::make('purchase_date')
                             ->label('Data zakupu')
+                            ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
                             ->native(false),
                         Forms\Components\DatePicker::make('dismantled_at')
                             ->label('Data demontażu')
+                            ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
                             ->native(false),
                         Forms\Components\Textarea::make('defects_notes')
                             ->label('Notatki dotyczące wad')
+                            ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->rows(4)
                             ->columnSpanFull(),
                     ]),
