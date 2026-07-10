@@ -44,12 +44,11 @@ class CarResource extends Resource
     {
         return $form
             ->columns(1)
-            ->extraAttributes(['class' => 'gps-car-form'])
+            ->extraAttributes(['class' => 'gps-car-form gps-admin-compact-form'])
             ->schema([
                 Section::make('Informacje o samochodzie')
-                    ->icon('heroicon-o-truck')
-                    ->extraAttributes(['class' => 'gps-car-form-section gps-car-form-section--vehicle'])
-                    ->columns(['default' => 1, 'md' => 2, 'xl' => 3])
+                    ->extraAttributes(['class' => 'gps-car-form-section gps-car-form-section--vehicle gps-admin-compact-section gps-admin-floating-label-section'])
+                    ->columns(['default' => 1, 'md' => 12])
                     ->schema([
                         Forms\Components\Placeholder::make('ovoko_local_only_notice')
                             ->label('Ovoko')
@@ -57,6 +56,7 @@ class CarResource extends Resource
                             ->columnSpanFull(),
                         Forms\Components\Select::make('legacy_payload.ovoko_brand_id')
                             ->label('Marka')
+                            ->columnSpan(['default' => 1, 'md' => 12])
                             ->searchable()
                             ->preload()
                             ->native(false)
@@ -77,6 +77,7 @@ class CarResource extends Resource
                         Forms\Components\Hidden::make('make'),
                         Forms\Components\Select::make('legacy_payload.ovoko_model_group_label')
                             ->label('Model samochodu')
+                            ->columnSpan(['default' => 1, 'md' => 12])
                             ->searchable()
                             ->native(false)
                             ->options(static fn (Get $get): array => self::ovokoModelGroupOptions($get('legacy_payload.ovoko_brand_id')))
@@ -90,6 +91,7 @@ class CarResource extends Resource
                         Forms\Components\Hidden::make('model'),
                         Forms\Components\Select::make('legacy_payload.ovoko_car_model_id')
                             ->label('Modyfikacja modelu samochodu')
+                            ->columnSpan(['default' => 1, 'md' => 12])
                             ->searchable()
                             ->native(false)
                             ->options(static fn (Get $get): array => self::ovokoModelModificationOptions($get('legacy_payload.ovoko_brand_id'), $get('legacy_payload.ovoko_model_group_label')))
@@ -102,82 +104,99 @@ class CarResource extends Resource
                         Forms\Components\Hidden::make('model_variant'),
                         Forms\Components\TextInput::make('production_year')
                             ->label('Rok produkcji samochodu')
+                            ->columnSpan(['default' => 1, 'md' => 6])
                             ->numeric()
                             ->minValue(1900)
                             ->maxValue((int) date('Y') + 1),
                         Forms\Components\TextInput::make('first_registration_year')
                             ->label('Rok pierwszej rejestracji')
+                            ->columnSpan(['default' => 1, 'md' => 6])
                             ->numeric()
                             ->minValue(1900)
                             ->maxValue((int) date('Y') + 1),
                         Forms\Components\TextInput::make('registration_number')
                             ->label('Tablica rejestracyjna')
+                            ->columnSpan(['default' => 1, 'md' => 6])
                             ->maxLength(255),
                         Forms\Components\Select::make('steering_side')
                             ->label('Strona kierownicy')
+                            ->columnSpan(['default' => 1, 'md' => 6])
                             ->options(Car::steeringSideOptions())
                             ->native(false),
                         Forms\Components\TextInput::make('mileage_km')
                             ->label('Przebieg km')
+                            ->columnSpan(['default' => 1, 'md' => 6])
                             ->numeric()
                             ->minValue(0),
                         Forms\Components\Select::make('fuel_type')
                             ->label('Rodzaj paliwa')
+                            ->columnSpan(['default' => 1, 'md' => 6])
                             ->options(Car::fuelTypeOptions())
                             ->native(false),
                         Forms\Components\TextInput::make('engine_power_kw')
                             ->label('Moc silnika kW')
+                            ->columnSpan(['default' => 1, 'md' => 6])
                             ->numeric()
                             ->minValue(0),
                         Forms\Components\TextInput::make('engine_capacity_cm3')
                             ->label('Pojemność silnika cm3')
+                            ->columnSpan(['default' => 1, 'md' => 6])
                             ->numeric()
                             ->minValue(0),
                         Forms\Components\TextInput::make('engine_code')
                             ->label('Kod silnika')
+                            ->columnSpan(['default' => 1, 'md' => 6])
                             ->maxLength(255),
                         Forms\Components\Select::make('drivetrain')
                             ->label('Napęd')
+                            ->columnSpan(['default' => 1, 'md' => 6])
                             ->options(Car::drivetrainOptions())
                             ->native(false),
                         Forms\Components\Select::make('gearbox_type')
                             ->label('Typ skrzyni biegów')
+                            ->columnSpan(['default' => 1, 'md' => 6])
                             ->options(Car::gearboxTypeOptions())
                             ->native(false),
                         Forms\Components\TextInput::make('gearbox_code')
                             ->label('Kod skrzyni biegów')
+                            ->columnSpan(['default' => 1, 'md' => 6])
                             ->maxLength(255),
                         Forms\Components\TextInput::make('body_type')
                             ->label('Typ nadwozia')
+                            ->columnSpan(['default' => 1, 'md' => 6])
                             ->maxLength(255),
                         Forms\Components\TextInput::make('color_code')
                             ->label('Kod koloru')
+                            ->columnSpan(['default' => 1, 'md' => 6])
                             ->maxLength(255),
                         Forms\Components\TextInput::make('color')
                             ->label('Kolor')
+                            ->columnSpan(['default' => 1, 'md' => 6])
                             ->maxLength(255),
                         Forms\Components\TextInput::make('interior')
                             ->label('Wnętrze')
+                            ->columnSpan(['default' => 1, 'md' => 6])
                             ->maxLength(255),
-                        Grid::make(['default' => 1, 'md' => 2])
-                            ->schema([
-                                Forms\Components\TextInput::make('purchase_price')
-                                    ->label('Cena samochodu')
-                                    ->numeric()
-                                    ->prefix('PLN')
-                                    ->minValue(0),
-                                Forms\Components\Toggle::make('includes_vat')
-                                    ->label('Zawiera podatek VAT')
-                                    ->inline(false),
-                            ]),
+                        Forms\Components\TextInput::make('purchase_price')
+                            ->label('Cena samochodu')
+                            ->columnSpan(['default' => 1, 'md' => 6])
+                            ->numeric()
+                            ->prefix('PLN')
+                            ->minValue(0),
+                        Forms\Components\Toggle::make('includes_vat')
+                            ->label('Zawiera podatek VAT')
+                            ->columnSpan(['default' => 1, 'md' => 6])
+                            ->inline(false),
                         Forms\Components\Select::make('status')
                             ->label('Status samochodu / zakupu')
+                            ->columnSpan(['default' => 1, 'md' => 6])
                             ->options(Car::statusOptions())
                             ->default('kupiony')
                             ->native(false)
                             ->live(),
                         Forms\Components\Select::make('legacy_payload.ovoko_status_id')
                             ->label('Status Ovoko')
+                            ->columnSpan(['default' => 1, 'md' => 6])
                             ->searchable()
                             ->preload()
                             ->native(false)
@@ -185,9 +204,11 @@ class CarResource extends Resource
                             ->helperText('Wymagany do utworzenia samochodu w Ovoko.'),
                         Forms\Components\DatePicker::make('purchase_date')
                             ->label('Data zakupu')
+                            ->columnSpan(['default' => 1, 'md' => 6])
                             ->native(false),
                         Forms\Components\DatePicker::make('dismantled_at')
                             ->label('Data demontażu')
+                            ->columnSpan(['default' => 1, 'md' => 6])
                             ->native(false),
                         Forms\Components\Textarea::make('defects_notes')
                             ->label('Notatki dotyczące wad')
