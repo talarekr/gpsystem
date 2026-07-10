@@ -144,11 +144,11 @@ class CarResource extends Resource
                             ->preload()
                             ->options(static fn (): array => self::ovokoDictionaryOptions('fuel'))
                             ->live()
-                            ->afterStateUpdated(static fn (?string $state, Set $set): null => $set('fuel_type', self::ovokoDictionaryName('fuel', $state)))
+                            ->afterStateUpdated(static function (?string $state, Set $set): void {
+                                $set('fuel_type', self::ovokoDictionaryName('fuel', $state));
+                            })
                             ->native(false)
                             ->visible(static fn (string $operation): bool => $operation === 'create')
-                            ->dehydrated(static fn (string $operation): bool => $operation === 'create'),
-                        Forms\Components\Hidden::make('fuel_type')
                             ->dehydrated(static fn (string $operation): bool => $operation === 'create'),
                         Forms\Components\Select::make('fuel_type')
                             ->label('Rodzaj paliwa')
@@ -183,11 +183,11 @@ class CarResource extends Resource
                             ->preload()
                             ->options(static fn (): array => self::ovokoDictionaryOptions('wheel_drive'))
                             ->live()
-                            ->afterStateUpdated(static fn (?string $state, Set $set): null => $set('drivetrain', self::ovokoDictionaryName('wheel_drive', $state)))
+                            ->afterStateUpdated(static function (?string $state, Set $set): void {
+                                $set('drivetrain', self::ovokoDictionaryName('wheel_drive', $state));
+                            })
                             ->native(false)
                             ->visible(static fn (string $operation): bool => $operation === 'create')
-                            ->dehydrated(static fn (string $operation): bool => $operation === 'create'),
-                        Forms\Components\Hidden::make('drivetrain')
                             ->dehydrated(static fn (string $operation): bool => $operation === 'create'),
                         Forms\Components\Select::make('drivetrain')
                             ->label('Napęd')
@@ -205,11 +205,11 @@ class CarResource extends Resource
                             ->preload()
                             ->options(static fn (): array => self::ovokoDictionaryOptions('gearbox_type'))
                             ->live()
-                            ->afterStateUpdated(static fn (?string $state, Set $set): null => $set('gearbox_type', self::ovokoDictionaryName('gearbox_type', $state)))
+                            ->afterStateUpdated(static function (?string $state, Set $set): void {
+                                $set('gearbox_type', self::ovokoDictionaryName('gearbox_type', $state));
+                            })
                             ->native(false)
                             ->visible(static fn (string $operation): bool => $operation === 'create')
-                            ->dehydrated(static fn (string $operation): bool => $operation === 'create'),
-                        Forms\Components\Hidden::make('gearbox_type')
                             ->dehydrated(static fn (string $operation): bool => $operation === 'create'),
                         Forms\Components\Select::make('gearbox_type')
                             ->label('Typ skrzyni biegów')
@@ -232,11 +232,11 @@ class CarResource extends Resource
                             ->preload()
                             ->options(static fn (): array => self::ovokoDictionaryOptions('body_type'))
                             ->live()
-                            ->afterStateUpdated(static fn (?string $state, Set $set): null => $set('body_type', self::ovokoDictionaryName('body_type', $state)))
+                            ->afterStateUpdated(static function (?string $state, Set $set): void {
+                                $set('body_type', self::ovokoDictionaryName('body_type', $state));
+                            })
                             ->native(false)
                             ->visible(static fn (string $operation): bool => $operation === 'create')
-                            ->dehydrated(static fn (string $operation): bool => $operation === 'create'),
-                        Forms\Components\Hidden::make('body_type')
                             ->dehydrated(static fn (string $operation): bool => $operation === 'create'),
                         Forms\Components\TextInput::make('body_type')
                             ->label('Typ nadwozia')
@@ -452,10 +452,13 @@ class CarResource extends Resource
             return null;
         }
 
-        return OvokoCarDictionaryEntry::query()
+        $ovokoId = (string) $ovokoId;
+        $name = OvokoCarDictionaryEntry::query()
             ->where('dictionary', $dictionary)
-            ->where('ovoko_id', (string) $ovokoId)
+            ->where('ovoko_id', $ovokoId)
             ->value('name');
+
+        return filled($name) ? (string) $name : $ovokoId;
     }
 
     /**
