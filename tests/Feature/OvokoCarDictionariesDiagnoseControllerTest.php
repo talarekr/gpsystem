@@ -420,6 +420,56 @@ class OvokoCarDictionariesDiagnoseControllerTest extends TestCase
         ]);
     }
 
+    public function test_enum_sync_cache_extracts_multilingual_names_preferring_polish(): void
+    {
+        $service = app(OvokoCarDictionaryService::class);
+        $method = new \ReflectionMethod($service, 'storeRows');
+        $method->setAccessible(true);
+
+        $stored = $method->invoke($service, 'car_status', [[
+            'en' => 'Purchased',
+            'lt' => 'Nupirktas',
+            'lv' => 'Iegādāts',
+            'ru' => 'Купленный',
+            'pl' => 'Kupiony',
+            'es' => 'Comprado',
+            'fr' => 'Acheté',
+            'it' => 'Acquistato',
+            'id' => 1,
+        ], [
+            'id' => 2,
+            'pl' => 'Do demontażu',
+            'en' => 'For dismantling',
+        ], [
+            'id' => 3,
+            'en' => 'For resale',
+        ], [
+            'id' => 4,
+        ]]);
+
+        $this->assertSame(4, $stored);
+        $this->assertDatabaseHas('ovoko_car_dictionary_entries', [
+            'dictionary' => 'car_status',
+            'ovoko_id' => '1',
+            'name' => 'Kupiony',
+        ]);
+        $this->assertDatabaseHas('ovoko_car_dictionary_entries', [
+            'dictionary' => 'car_status',
+            'ovoko_id' => '2',
+            'name' => 'Do demontażu',
+        ]);
+        $this->assertDatabaseHas('ovoko_car_dictionary_entries', [
+            'dictionary' => 'car_status',
+            'ovoko_id' => '3',
+            'name' => 'For resale',
+        ]);
+        $this->assertDatabaseHas('ovoko_car_dictionary_entries', [
+            'dictionary' => 'car_status',
+            'ovoko_id' => '4',
+            'name' => '4',
+        ]);
+    }
+
     private function actingAsAdminUser(): User
     {
         $this->seed(RoleSeeder::class);
