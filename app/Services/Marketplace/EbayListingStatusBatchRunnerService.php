@@ -16,6 +16,8 @@ class EbayListingStatusBatchRunnerService
     public const BROWSER_AUTORUN_MARKER = 'ebay_listing_status_batch_runner_browser_autorun_v2';
     public const STATE_INITIALIZATION_FIX_MARKER = 'ebay_listing_status_batch_runner_state_initialization_fix_v3';
     public const DELAY_COUNTDOWN_FIX_MARKER = 'ebay_listing_status_batch_runner_delay_countdown_fix_v4';
+    public const ENDED_PRODUCT_IDS_MARKER = 'ebay_listing_status_ended_product_ids_v1';
+    public const ENDED_PRODUCTS_EXPORT_MARKER = 'ebay_listing_status_ended_products_export_v1';
     public const CACHE_KEY = 'admin_tools:ebay_listing_status_sync:v1';
 
     public function __construct(private readonly EbayListingStatusNormalizer $normalizer) {}
@@ -119,7 +121,31 @@ class EbayListingStatusBatchRunnerService
 
     private function blocksRelisting(MarketplaceListing $l): bool { return in_array(strtolower((string) $l->status), ['active','published','live'], true) && ! in_array(strtolower((string) $l->last_api_status), ['ended','failed','deleted','archived','not_found','inactive','unavailable','error'], true) && $l->not_seen_in_active_api_at === null; }
     private function errorType(array $api, array $n): ?string { $h=(int)($api['http_status']??0); return match(true){in_array($h,[401,403],true)=>'auth_error',$h===429=>'rate_limited',in_array($h,[500,502,503,504],true)=>'remote_error',($api['error_type']??null)==='transient_error'=>'transient_error',default=>$n['error_type']}; }
-    private function recordResult(array $s, array $r): array { $k=$r['normalized_status']; if(isset($s[$k]))$s[$k]++; if($r['error_type'])$s['failed']++; $s['recent_results']=array_slice(array_merge([$r],$s['recent_results']),0,50); if($r['error_type'])$s['last_error']=$r['error_type']; return $s; }
+    private function recordResult(array $s, array $r): array
+    {
+        $k = $r['normalized_status'];
+        if (isset($s[$k])) $s[$k]++;
+        if ($r['error_type']) $s['failed']++;
+        $s['recent_results'] = array_slice(array_merge([$r], $s['recent_results']), 0, 50);
+        if (($r['normalized_status'] ?? null) === 'ended' && (int) ($r['http_status'] ?? 0) === 200 && ($r['error_type'] ?? null) === null && ($r['part_id'] ?? null) !== null) {
+            $listingId = (int) $r['marketplace_listing_id'];
+            $partId = (int) $r['part_id'];
+            $s['ended_marketplace_listing_ids'] = array_values(array_unique(array_merge($s['ended_marketplace_listing_ids'] ?? [], [$listingId])));
+            $s['ended_part_ids'] = array_values(array_unique(array_merge($s['ended_part_ids'] ?? [], [$partId])));
+            sort($s['ended_part_ids'], SORT_NUMERIC);
+            $s['ended_results_by_listing_id'][(string) $listingId] = [
+                'marketplace_listing_id' => $listingId,
+                'part_id' => $partId,
+                'ebay_item_id' => $r['ebay_item_id'],
+                'local_status' => $r['local_status'],
+                'normalized_status' => $r['normalized_status'],
+                'http_status' => $r['http_status'],
+                'error_type' => $r['error_type'],
+            ];
+        }
+        if ($r['error_type']) $s['last_error'] = $r['error_type'];
+        return $s;
+    }
     private function delayDiagnostics(array $s): array
     {
         $now = CarbonImmutable::now('UTC');
@@ -145,6 +171,41 @@ class EbayListingStatusBatchRunnerService
 
     private function complete(array $s, bool $put=true): array { if(!empty($s['remaining_ids']) || (int)$s['remaining'] > 0) return $this->publicStatus($s); $s['status']='completed'; $s['finished_at']=$s['finished_at']??now()->toISOString(); if($put)Cache::put(self::CACHE_KEY,$s,now()->addHours(12)); return $this->publicStatus($s); }
     private function state(): array { $state = Cache::get(self::CACHE_KEY); return is_array($state) ? array_merge($this->baseState('idle'), $state) : $this->baseState('idle'); }
-    private function baseState(string $status): array { return ['status'=>$status,'marker'=>self::MARKER,'state_initialization_fix_marker'=>self::STATE_INITIALIZATION_FIX_MARKER,'dry_run'=>true,'batch_size'=>10,'delay_seconds'=>5,'total'=>0,'processed'=>0,'remaining'=>0,'active'=>0,'ended'=>0,'not_found'=>0,'invalid'=>0,'unknown'=>0,'failed'=>0,'started_at'=>null,'finished_at'=>null,'last_batch_at'=>null,'last_error'=>null,'recent_results'=>[],'remaining_ids'=>[],'processed_ids'=>[]]; }
-    private function publicStatus(array $s): array { $inconsistent = ($s['status'] ?? null) === 'completed' && (!empty($s['remaining_ids']) || (int)($s['remaining'] ?? 0) > 0); $delay=$this->delayDiagnostics($s); unset($s['remaining_ids'],$s['processed_ids']); $s = array_merge($s, ['dry_run_marker'=>self::DRY_RUN_MARKER, 'browser_autorun_marker'=>self::BROWSER_AUTORUN_MARKER, 'delay_countdown_fix_marker'=>self::DELAY_COUNTDOWN_FIX_MARKER], $delay); if($inconsistent) $s = array_merge($s, ['state_inconsistent'=>true, 'reason'=>'completed_with_remaining_items']); return $s; }
+    private function baseState(string $status): array { return ['status'=>$status,'marker'=>self::MARKER,'state_initialization_fix_marker'=>self::STATE_INITIALIZATION_FIX_MARKER,'dry_run'=>true,'batch_size'=>10,'delay_seconds'=>5,'total'=>0,'processed'=>0,'remaining'=>0,'active'=>0,'ended'=>0,'not_found'=>0,'invalid'=>0,'unknown'=>0,'failed'=>0,'started_at'=>null,'finished_at'=>null,'last_batch_at'=>null,'last_error'=>null,'recent_results'=>[],'ended_marketplace_listing_ids'=>[],'ended_part_ids'=>[],'ended_results_by_listing_id'=>[],'remaining_ids'=>[],'processed_ids'=>[]]; }
+    public function endedProducts(): array
+    {
+        $raw = Cache::get(self::CACHE_KEY);
+        $s = is_array($raw) ? array_merge($this->baseState('idle'), $raw) : $this->baseState('idle');
+        $available = ($s['status'] ?? null) === 'completed' && is_array($raw) && array_key_exists('ended_results_by_listing_id', $raw) && is_array($raw['ended_results_by_listing_id']);
+        $results = $available ? array_values($s['ended_results_by_listing_id']) : [];
+        $partIds = array_values(array_unique(array_filter(array_map(fn ($r) => $r['part_id'] ?? null, $results), fn ($id) => $id !== null)));
+        sort($partIds, SORT_NUMERIC);
+        return [
+            'ok' => true,
+            'read_only' => true,
+            'no_mutation' => true,
+            'no_ebay_request' => true,
+            'marker' => self::ENDED_PRODUCT_IDS_MARKER,
+            'export_marker' => self::ENDED_PRODUCTS_EXPORT_MARKER,
+            'runner_status' => $s['status'] ?? 'idle',
+            'full_ended_results_available' => $available,
+            'source' => $available ? 'runner_state_ended_results_by_listing_id' : 'unavailable',
+            'limitation' => $available ? null : 'Current completed run contains only counters/recent_results. Start a new dry-run after this fix to collect the full ended product ID list.',
+            'ended_listing_count' => $available ? count($results) : 0,
+            'ended_products_count' => $available ? count($partIds) : 0,
+            'ended_part_ids' => $available ? $partIds : [],
+            'ended_results' => $available ? $results : [],
+        ];
+    }
+
+    public function endedProductsCsv(): string
+    {
+        $rows = [['part_id','marketplace_listing_id','ebay_item_id','normalized_status','http_status']];
+        foreach ($this->endedProducts()['ended_results'] as $r) {
+            $rows[] = [$r['part_id'], $r['marketplace_listing_id'], $r['ebay_item_id'], $r['normalized_status'], $r['http_status']];
+        }
+        return implode("\n", array_map(fn ($row) => implode(',', array_map(fn ($v) => str_replace([',', "\n", "\r"], [' ', ' ', ' '], (string) $v), $row)), $rows))."\n";
+    }
+
+    private function publicStatus(array $s): array { $inconsistent = ($s['status'] ?? null) === 'completed' && (!empty($s['remaining_ids']) || (int)($s['remaining'] ?? 0) > 0); $delay=$this->delayDiagnostics($s); $endedResults=array_values($s['ended_results_by_listing_id'] ?? []); $endedPartIds=array_values(array_unique(array_filter($s['ended_part_ids'] ?? [], fn($id)=>$id!==null))); sort($endedPartIds, SORT_NUMERIC); unset($s['remaining_ids'],$s['processed_ids']); $s = array_merge($s, ['dry_run_marker'=>self::DRY_RUN_MARKER, 'browser_autorun_marker'=>self::BROWSER_AUTORUN_MARKER, 'delay_countdown_fix_marker'=>self::DELAY_COUNTDOWN_FIX_MARKER, 'ended_product_ids_marker'=>self::ENDED_PRODUCT_IDS_MARKER, 'ended_products_export_marker'=>self::ENDED_PRODUCTS_EXPORT_MARKER, 'full_ended_results_available'=>($s['status'] ?? null)==='completed' && array_key_exists('ended_results_by_listing_id',$s), 'source'=>array_key_exists('ended_results_by_listing_id',$s)?'runner_state_ended_results_by_listing_id':'unavailable', 'limitation'=>array_key_exists('ended_results_by_listing_id',$s)?null:'Current completed run contains only counters/recent_results. Start a new dry-run after this fix to collect the full ended product ID list.', 'ended_listing_count'=>count($endedResults), 'ended_products_count'=>count($endedPartIds), 'ended_part_ids'=>$endedPartIds], $delay); if($inconsistent) $s = array_merge($s, ['state_inconsistent'=>true, 'reason'=>'completed_with_remaining_items']); return $s; }
 }

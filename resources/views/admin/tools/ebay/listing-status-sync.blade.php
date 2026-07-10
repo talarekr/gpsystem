@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>eBay listing status sync dry-run</title>
-    <style>body{font-family:system-ui,sans-serif;margin:24px}.ok{color:#166534}.error{color:#991b1b}.panel{border:1px solid #ddd;padding:16px;margin:16px 0}label{display:block;margin:8px 0}button{padding:8px 12px;margin:6px 6px 0 0}button:disabled{opacity:.55;cursor:not-allowed}.muted{color:#6b7280}.status-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px}.status-card{background:#f9fafb;border:1px solid #e5e7eb;padding:10px}.status-card strong{display:block;font-size:1.35rem}pre{background:#f3f4f6;padding:16px;overflow:auto}.banner{padding:10px 12px;background:#eff6ff;border:1px solid #bfdbfe;margin:10px 0}</style>
+    <style>body{font-family:system-ui,sans-serif;margin:24px}.ok{color:#166534}.error{color:#991b1b}.panel{border:1px solid #ddd;padding:16px;margin:16px 0}label{display:block;margin:8px 0}button{padding:8px 12px;margin:6px 6px 0 0}button:disabled{opacity:.55;cursor:not-allowed}.muted{color:#6b7280}.status-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px}.status-card{background:#f9fafb;border:1px solid #e5e7eb;padding:10px}.status-card strong{display:block;font-size:1.35rem}pre{background:#f3f4f6;padding:16px;overflow:auto}.banner{padding:10px 12px;background:#eff6ff;border:1px solid #bfdbfe;margin:10px 0}.ended-products{display:none}.ended-products textarea{width:100%;min-height:90px}</style>
 </head>
 <body>
 <div data-marker="{{ $pageMarker }}" data-browser-autorun-marker="ebay_listing_status_batch_runner_browser_autorun_v2" data-delay-countdown-fix-marker="ebay_listing_status_batch_runner_delay_countdown_fix_v4">
@@ -17,6 +17,18 @@
         <div id="statusGrid" class="status-grid"></div>
         <p><strong>Ostatni batch:</strong> <span id="lastBatch">—</span></p>
         <p><strong>Ostatni błąd:</strong> <span id="lastError">—</span></p>
+        <div id="endedProductsPanel" class="panel ended-products">
+            <h2>Produkty z zakończonymi aukcjami</h2>
+            <p>Zakończone listingi: <strong id="endedListingCount">0</strong></p>
+            <p>Unikalne produkty: <strong id="endedProductsCount">0</strong></p>
+            <textarea id="endedPartIds" readonly></textarea>
+            <p>
+                <button id="copyEndedPartIds" type="button">Kopiuj ID produktów</button>
+                <a id="endedProductsLink" href="{{ route('admin.tools.ebay.listing-status-sync.ended-products', ['json' => 1]) }}">ended-products JSON</a>
+                · <a href="{{ route('admin.tools.ebay.listing-status-sync.ended-products.csv') }}">CSV</a>
+            </p>
+            <p class="muted" id="endedProductsLimitation"></p>
+        </div>
         <h3>recent_results</h3>
         <pre id="recentResults">[]</pre>
         <pre id="rawStatus">{{ json_encode($status, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}</pre>
@@ -51,6 +63,7 @@
     const startUrl = @json(route('admin.tools.ebay.listing-status-sync.start'));
     const runNextBatchUrl = @json(route('admin.tools.ebay.listing-status-sync.run-next-batch'));
     const stopUrl = @json(route('admin.tools.ebay.listing-status-sync.stop'));
+    const endedProductsUrl = @json(route('admin.tools.ebay.listing-status-sync.ended-products', ['json' => 1]));
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || document.querySelector('input[name="_token"]')?.value || '';
     const tabId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const lockKey = 'ebay_listing_status_sync_browser_autorun_lock_v2';
@@ -116,6 +129,13 @@
         document.getElementById('lastError').textContent = status?.last_error || '—';
         document.getElementById('recentResults').textContent = JSON.stringify(status?.recent_results || [], null, 2);
         document.getElementById('rawStatus').textContent = JSON.stringify(status || {}, null, 2);
+        const endedPanel = document.getElementById('endedProductsPanel');
+        const fullAvailable = status?.full_ended_results_available === true || Array.isArray(status?.ended_part_ids);
+        endedPanel.style.display = status?.status === 'completed' ? 'block' : 'none';
+        document.getElementById('endedListingCount').textContent = status?.ended_listing_count ?? 0;
+        document.getElementById('endedProductsCount').textContent = status?.ended_products_count ?? 0;
+        document.getElementById('endedPartIds').value = (status?.ended_part_ids || []).join(', ');
+        document.getElementById('endedProductsLimitation').textContent = status?.limitation || (fullAvailable ? 'Pełna lista dostępna w stanie runnera.' : '');
         runNextButton.disabled = autoRunActive || requestInFlight;
     }
     function stopAutoRun(text, cls = 'muted') { autoRunActive = false; clearTimer(); releaseLock(); setMessage(text, cls); runNextButton.disabled = requestInFlight; }
@@ -177,6 +197,7 @@
         finally { requestInFlight = false; }
     });
     document.getElementById('runNextForm').addEventListener('submit', async (event) => { event.preventDefault(); if (autoRunActive || requestInFlight) return; requestInFlight = true; try { renderStatus(await apiPost(runNextBatchUrl, {confirm: 'run-next-ebay-listing-status-sync-batch'})); } catch (e) { setMessage(e.message || 'Błąd ręcznego batcha', 'error'); } finally { requestInFlight = false; runNextButton.disabled = false; } });
+    document.getElementById('copyEndedPartIds').addEventListener('click', async () => { const ids = document.getElementById('endedPartIds').value; try { await navigator.clipboard.writeText(ids); setMessage('Skopiowano ID produktów', 'ok'); } catch { document.getElementById('endedPartIds').select(); document.execCommand('copy'); setMessage('Skopiowano ID produktów', 'ok'); } });
     document.getElementById('stopForm').addEventListener('submit', async (event) => { event.preventDefault(); clearTimer(); autoRunActive = false; releaseLock(); requestInFlight = true; try { renderStatus(await apiPost(stopUrl, {confirm: 'stop-ebay-listing-status-sync'})); setMessage('Runner zatrzymany', 'ok'); renderStatus(await fetchStatus()); } catch (e) { stopAutoRun(e.message || 'Błąd — auto-run zatrzymany', 'error'); } finally { requestInFlight = false; runNextButton.disabled = false; } });
     window.addEventListener('beforeunload', releaseLock);
 

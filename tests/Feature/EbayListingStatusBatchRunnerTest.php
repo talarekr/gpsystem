@@ -282,6 +282,78 @@ class EbayListingStatusBatchRunnerTest extends TestCase
             ->assertDontSee('delayFromStatus(result) +');
     }
 
+    public function test_ended_products_are_collected_and_exported_read_only(): void
+    {
+        $this->actingAsAdminUser();
+        $this->account();
+        $endedA = $this->listing('121212121212');
+        $endedDup = $this->listing('131313131313', ['part_id' => $endedA->part_id]);
+        $active = $this->listing('141414141414');
+        $unknown429 = $this->listing('151515151515');
+        $notFound = $this->listing('161616161616');
+        $nullPart = $this->listing('171717171717', ['part_id' => null]);
+        $dbBefore = MarketplaceListing::query()->orderBy('id')->get()->toArray();
+
+        Http::fake(function ($request) {
+            $url = (string) $request->url();
+            return match (true) {
+                str_contains($url, '121212121212'), str_contains($url, '131313131313'), str_contains($url, '171717171717') => Http::response(['itemEndDate' => '2026-05-31T10:00:00.000Z'], 200),
+                str_contains($url, '141414141414') => Http::response(['estimatedAvailabilities' => [['estimatedAvailabilityStatus' => 'IN_STOCK']]], 200),
+                str_contains($url, '151515151515') => Http::response(['errors' => []], 429),
+                default => Http::response(['errors' => []], 404),
+            };
+        });
+
+        $this->postJson('/admin/tools/ebay/listing-status-sync/start', ['batch_size' => 6, 'delay_seconds' => 5, 'scope' => 'products_with_ebay_item_id', 'dry_run' => true, 'confirm' => 'start-ebay-listing-status-sync'])->assertOk();
+        $this->postJson('/admin/tools/ebay/listing-status-sync/run-next-batch', ['confirm' => 'run-next-ebay-listing-status-sync-batch'])
+            ->assertOk()
+            ->assertJsonPath('status', 'completed')
+            ->assertJsonPath('ended_listing_count', 2)
+            ->assertJsonPath('ended_products_count', 1)
+            ->assertJsonPath('ended_part_ids', [$endedA->part_id]);
+
+        $state = Cache::get(EbayListingStatusBatchRunnerService::CACHE_KEY);
+        $this->assertSame([$endedA->part_id], $state['ended_part_ids']);
+        $this->assertCount(2, $state['ended_results_by_listing_id']);
+        $this->assertSame([$endedA->id, $endedDup->id], $state['ended_marketplace_listing_ids']);
+        $this->assertLessThan($state['ended_marketplace_listing_ids'][1], $state['ended_marketplace_listing_ids'][0]);
+
+        Http::fake(function () { $this->fail('Read-only ended-products endpoint must not call eBay API.'); });
+        $cacheBefore = Cache::get(EbayListingStatusBatchRunnerService::CACHE_KEY);
+        $this->getJson('/admin/tools/ebay/listing-status-sync/ended-products?json=1')
+            ->assertOk()
+            ->assertJsonPath('read_only', true)
+            ->assertJsonPath('no_mutation', true)
+            ->assertJsonPath('no_ebay_request', true)
+            ->assertJsonPath('full_ended_results_available', true)
+            ->assertJsonPath('source', 'runner_state_ended_results_by_listing_id')
+            ->assertJsonPath('ended_listing_count', 2)
+            ->assertJsonPath('ended_products_count', 1)
+            ->assertJsonPath('ended_part_ids', [$endedA->part_id]);
+        $this->assertSame($cacheBefore, Cache::get(EbayListingStatusBatchRunnerService::CACHE_KEY));
+        $this->assertSame($dbBefore, MarketplaceListing::query()->orderBy('id')->get()->toArray());
+
+        $this->get('/admin/tools/ebay/listing-status-sync/ended-products.csv')
+            ->assertOk()
+            ->assertSee('part_id,marketplace_listing_id,ebay_item_id,normalized_status,http_status')
+            ->assertSee($endedA->part_id.','.$endedA->id.',121212121212,ended,200');
+    }
+
+    public function test_old_completed_session_without_full_ended_results_reports_unavailable(): void
+    {
+        $this->actingAsAdminUser();
+        Cache::put(EbayListingStatusBatchRunnerService::CACHE_KEY, [
+            'status' => 'completed', 'ended' => 1, 'recent_results' => [['part_id' => 999, 'normalized_status' => 'ended']],
+        ], now()->addHour());
+
+        $this->getJson('/admin/tools/ebay/listing-status-sync/ended-products?json=1')
+            ->assertOk()
+            ->assertJsonPath('full_ended_results_available', false)
+            ->assertJsonPath('source', 'unavailable')
+            ->assertJsonPath('ended_part_ids', [])
+            ->assertJsonPath('limitation', 'Current completed run contains only counters/recent_results. Start a new dry-run after this fix to collect the full ended product ID list.');
+    }
+
     private function listing(string $itemId, array $overrides = []): MarketplaceListing
     {
         $part = Part::query()->create(['name' => 'Part '.$itemId, 'sku' => 'SKU-'.$itemId, 'quantity' => 1, 'status' => 'ready']);
