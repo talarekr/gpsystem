@@ -20,7 +20,7 @@
         <h3>recent_results</h3>
         <pre id="recentResults">[]</pre>
         <pre id="rawStatus">{{ json_encode($status, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}</pre>
-        <p><a href="{{ route('admin.tools.ebay.listing-status-sync.diagnose', ['json' => 1]) }}">Diagnostyka read-only JSON</a></p>
+        <p><a href="{{ route('admin.tools.ebay.listing-status-sync.diagnose', ['json' => 1]) }}">Diagnostyka read-only JSON</a> | <a href="{{ route('admin.tools.ebay.listing-status-sync.retry-diagnose', ['json' => 1]) }}">Retry diagnose read-only JSON</a></p>
     </div>
     <div class="panel">
         <h2>Akcje runnera</h2>
@@ -38,6 +38,16 @@
             <input type="hidden" name="confirm" value="run-next-ebay-listing-status-sync-batch">
             <button id="runNextButton" type="submit">Uruchom następny batch</button>
         </form>
+        <form id="retryTransientForm" method="POST" action="{{ route('admin.tools.ebay.listing-status-sync.retry-transient') }}">
+            @csrf
+            <input type="hidden" name="confirm" value="retry-ebay-listing-status-transient-failures">
+            <input type="hidden" name="scope" value="previous_transient_failures">
+            <input type="hidden" name="dry_run" value="1">
+            <input type="hidden" name="max_attempts_per_item" value="3">
+            <input type="hidden" name="batch_size" value="2">
+            <input type="hidden" name="delay_seconds" value="30">
+            <button id="retryTransientButton" type="submit" onclick="return confirm('Ponowić wyłącznie błędy przejściowe eBay w dry-run?')">Ponów błędy przejściowe</button>
+        </form>
         <form id="stopForm" method="POST" action="{{ route('admin.tools.ebay.listing-status-sync.stop') }}">
             @csrf
             <input type="hidden" name="confirm" value="stop-ebay-listing-status-sync">
@@ -51,6 +61,7 @@
     const startUrl = @json(route('admin.tools.ebay.listing-status-sync.start'));
     const runNextBatchUrl = @json(route('admin.tools.ebay.listing-status-sync.run-next-batch'));
     const stopUrl = @json(route('admin.tools.ebay.listing-status-sync.stop'));
+    const retryTransientUrl = @json(route('admin.tools.ebay.listing-status-sync.retry-transient'));
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || document.querySelector('input[name="_token"]')?.value || '';
     const tabId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const lockKey = 'ebay_listing_status_sync_browser_autorun_lock_v2';
@@ -63,12 +74,14 @@
     let networkErrors = 0;
 
     const terminalStatuses = ['completed', 'stopped', 'failed'];
+    const waitingStatuses = ['waiting_rate_limit'];
     const message = document.getElementById('autoRunMessage');
     const runNextButton = document.getElementById('runNextButton');
 
     function setMessage(text, cls = 'muted') { message.textContent = text; message.className = `banner ${cls}`; }
     function delayFromStatus(status) { return Math.max(0, Number(status?.delay_seconds || 10)); }
     function retryFromStatus(status) {
+        if (status?.retry?.status === 'waiting_rate_limit') return Math.max(0, Number(status.retry.retry_after_seconds || 0));
         const fallback = delayFromStatus(status);
         const retry = status?.retry_after_seconds;
         if (retry === null || retry === undefined || retry === '') return fallback;
@@ -125,7 +138,7 @@
         nextRunAt = Date.now() + (seconds * 1000);
         const renderCountdown = () => {
             const remaining = Math.max(0, Math.ceil((nextRunAt - Date.now()) / 1000));
-            setMessage(`Oczekiwanie ${remaining} s na następny batch`, 'muted');
+            setMessage(status?.retry?.status === 'waiting_rate_limit' ? `eBay ograniczył liczbę zapytań. Następna próba za ${remaining} s.` : `Oczekiwanie ${remaining} s na następny batch`, 'muted');
         };
         renderCountdown();
         if (seconds > 0) countdownTimerId = window.setInterval(renderCountdown, 1000);
@@ -140,6 +153,7 @@
         try {
             let status = await fetchStatus();
             renderStatus(status);
+            if (status?.retry?.status === 'waiting_rate_limit') return scheduleNext(status, retryFromStatus(status));
             if (terminalStatuses.includes(status.status)) return stopAutoRun(status.status === 'completed' ? 'Synchronizacja zakończona' : (status.status === 'stopped' ? 'Runner zatrzymany' : 'Błąd — auto-run zatrzymany'), status.status === 'failed' ? 'error' : 'ok');
             if (status.status === 'running') {
                 setMessage('Batch w trakcie', 'muted');
@@ -177,12 +191,13 @@
         finally { requestInFlight = false; }
     });
     document.getElementById('runNextForm').addEventListener('submit', async (event) => { event.preventDefault(); if (autoRunActive || requestInFlight) return; requestInFlight = true; try { renderStatus(await apiPost(runNextBatchUrl, {confirm: 'run-next-ebay-listing-status-sync-batch'})); } catch (e) { setMessage(e.message || 'Błąd ręcznego batcha', 'error'); } finally { requestInFlight = false; runNextButton.disabled = false; } });
+    document.getElementById('retryTransientForm').addEventListener('submit', async (event) => { event.preventDefault(); if (requestInFlight) return; requestInFlight = true; try { const result = await apiPost(retryTransientUrl, {batch_size: 2, delay_seconds: 30, max_attempts_per_item: 3, scope: 'previous_transient_failures', dry_run: true, confirm: 'retry-ebay-listing-status-transient-failures'}); renderStatus({...(await fetchStatus()), retry: result}); setMessage('Retry błędów przejściowych uruchomiony', 'ok'); } catch (e) { setMessage(e.message || 'Błąd retry', 'error'); } finally { requestInFlight = false; } });
     document.getElementById('stopForm').addEventListener('submit', async (event) => { event.preventDefault(); clearTimer(); autoRunActive = false; releaseLock(); requestInFlight = true; try { renderStatus(await apiPost(stopUrl, {confirm: 'stop-ebay-listing-status-sync'})); setMessage('Runner zatrzymany', 'ok'); renderStatus(await fetchStatus()); } catch (e) { stopAutoRun(e.message || 'Błąd — auto-run zatrzymany', 'error'); } finally { requestInFlight = false; runNextButton.disabled = false; } });
     window.addEventListener('beforeunload', releaseLock);
 
     const initialStatus = @json($status);
     renderStatus(initialStatus);
-    if (initialStatus?.status === 'running') startAutoRun(initialStatus);
+    if (initialStatus?.status === 'running' || initialStatus?.retry?.status === 'running' || initialStatus?.retry?.status === 'waiting_rate_limit') startAutoRun(initialStatus);
 })();
 </script>
 </body>

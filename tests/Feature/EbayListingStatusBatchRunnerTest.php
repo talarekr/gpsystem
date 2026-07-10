@@ -282,6 +282,75 @@ class EbayListingStatusBatchRunnerTest extends TestCase
             ->assertDontSee('delayFromStatus(result) +');
     }
 
+
+    public function test_retry_diagnose_reports_full_transient_list_without_ebay_request_or_mutation(): void
+    {
+        $this->actingAsAdminUser();
+        Cache::put(EbayListingStatusBatchRunnerService::CACHE_KEY, [
+            'status' => 'completed', 'transient_failure_ids' => [10, 20],
+            'results_by_listing_id' => [10 => ['marketplace_listing_id'=>10,'normalized_status'=>'unknown','error_type'=>'rate_limited','http_status'=>429], 20 => ['marketplace_listing_id'=>20,'normalized_status'=>'unknown','error_type'=>'remote_error','http_status'=>503]],
+        ], now()->addHour());
+        Http::fake(fn () => throw new \RuntimeException('eBay API must not be called'));
+
+        $this->getJson('/admin/tools/ebay/listing-status-sync/retry-diagnose?json=1')
+            ->assertOk()->assertJsonPath('no_mutation', true)->assertJsonPath('no_ebay_request', true)
+            ->assertJsonPath('full_retry_id_list_available', true)->assertJsonPath('unique_transient_failure_ids', 2)
+            ->assertJsonPath('can_retry_without_full_rescan', true)->assertJsonPath('marker', 'ebay_listing_status_retry_diagnose_v1');
+    }
+
+    public function test_429_stays_pending_retry_and_does_not_mark_ended_or_mutate_listing(): void
+    {
+        $this->actingAsAdminUser(); $this->account(); $listing = $this->listing('121212121212', ['status'=>'published']);
+        Cache::put(EbayListingStatusBatchRunnerService::CACHE_KEY, ['status'=>'completed','active'=>4582,'ended'=>378,'not_found'=>34,'unknown'=>553,'failed'=>553,'transient_failure_ids'=>[$listing->id]], now()->addHour());
+        Http::fake(fn () => Http::response(['errors'=>[]], 429, ['Retry-After' => '60']));
+
+        $this->postJson('/admin/tools/ebay/listing-status-sync/retry-transient', ['batch_size'=>2,'delay_seconds'=>30,'max_attempts_per_item'=>3,'scope'=>'previous_transient_failures','dry_run'=>true,'confirm'=>'retry-ebay-listing-status-transient-failures'])->assertOk()->assertJsonPath('status','running')->assertJsonPath('retry_scope_total',1);
+        $response = $this->postJson('/admin/tools/ebay/listing-status-sync/run-next-batch', ['confirm'=>'run-next-ebay-listing-status-sync-batch'])
+            ->assertOk()->assertJsonPath('status','waiting_rate_limit')->assertJsonPath('pending',1)->assertJsonPath('resolved_ended',0)->assertJsonPath('unresolved_after_max_attempts',0);
+        $this->assertGreaterThanOrEqual(60, $response->json('retry_after_seconds'));
+        $fresh = $listing->fresh();
+        $this->assertSame('published', $fresh->status); $this->assertNull($fresh->last_api_status); $this->assertNull($fresh->not_seen_in_active_api_at);
+    }
+
+    public function test_retry_after_http_date_and_no_retry_before_next_retry_at(): void
+    {
+        $this->actingAsAdminUser(); $this->account(); $listing = $this->listing('131313131313');
+        Cache::put(EbayListingStatusBatchRunnerService::CACHE_KEY, ['status'=>'completed','transient_failure_ids'=>[$listing->id]], now()->addHour());
+        $date = now()->addSeconds(90)->toRfc7231String(); $calls = 0;
+        Http::fake(function () use (&$calls, $date) { $calls++; return Http::response([], 429, ['Retry-After'=>$date]); });
+        $this->postJson('/admin/tools/ebay/listing-status-sync/retry-transient', ['scope'=>'previous_transient_failures','dry_run'=>true,'confirm'=>'retry-ebay-listing-status-transient-failures'])->assertOk();
+        $first = $this->postJson('/admin/tools/ebay/listing-status-sync/run-next-batch', ['confirm'=>'run-next-ebay-listing-status-sync-batch'])->assertOk()->assertJsonPath('status','waiting_rate_limit');
+        $this->assertGreaterThanOrEqual(90, $first->json('retry_after_seconds'));
+        $this->postJson('/admin/tools/ebay/listing-status-sync/run-next-batch', ['confirm'=>'run-next-ebay-listing-status-sync-batch'])->assertOk()->assertJsonPath('reason','rate_limit_wait')->assertJsonPath('batch_executed', false);
+        $this->assertSame(1, $calls);
+    }
+
+    public function test_missing_retry_after_uses_exponential_backoff_and_max_attempts_completes_unresolved(): void
+    {
+        $this->actingAsAdminUser(); $this->account(); $listing = $this->listing('141414141414');
+        Cache::put(EbayListingStatusBatchRunnerService::CACHE_KEY, ['status'=>'completed','transient_failure_ids'=>[$listing->id]], now()->addHour());
+        Http::fake(fn () => Http::response([], 429));
+        $this->postJson('/admin/tools/ebay/listing-status-sync/retry-transient', ['max_attempts_per_item'=>1,'scope'=>'previous_transient_failures','dry_run'=>true,'confirm'=>'retry-ebay-listing-status-transient-failures'])->assertOk();
+        $response = $this->postJson('/admin/tools/ebay/listing-status-sync/run-next-batch', ['confirm'=>'run-next-ebay-listing-status-sync-batch'])
+            ->assertOk()->assertJsonPath('status','completed')->assertJsonPath('pending',0)->assertJsonPath('unresolved_after_max_attempts',1);
+        $this->assertGreaterThanOrEqual(60, $response->json('retry_after_seconds'));
+    }
+
+    public function test_retry_scope_only_transient_and_first_session_counters_are_not_overwritten(): void
+    {
+        $this->actingAsAdminUser(); $this->account(); $transient=$this->listing('151515151515'); $ended=$this->listing('161616161616');
+        Cache::put(EbayListingStatusBatchRunnerService::CACHE_KEY, ['status'=>'completed','active'=>4582,'ended'=>378,'not_found'=>34,'unknown'=>553,'failed'=>553,'unknown_items'=>553,'failed_requests'=>553,'unique_unresolved_items'=>553,'results_by_listing_id'=>[
+            $transient->id=>['marketplace_listing_id'=>$transient->id,'normalized_status'=>'unknown','error_type'=>'rate_limited','http_status'=>429],
+            $ended->id=>['marketplace_listing_id'=>$ended->id,'normalized_status'=>'ended','error_type'=>null,'http_status'=>200],
+        ]], now()->addHour());
+        Http::fake(fn () => Http::response(['estimatedAvailabilities'=>[['estimatedAvailabilityStatus'=>'IN_STOCK']]], 200));
+        $this->postJson('/admin/tools/ebay/listing-status-sync/retry-transient', ['scope'=>'previous_transient_failures','dry_run'=>true,'confirm'=>'retry-ebay-listing-status-transient-failures'])->assertOk()->assertJsonPath('retry_scope_total',1);
+        $this->postJson('/admin/tools/ebay/listing-status-sync/run-next-batch', ['confirm'=>'run-next-ebay-listing-status-sync-batch'])->assertOk()->assertJsonPath('status','completed')->assertJsonPath('resolved_active',1)->assertJsonPath('consolidated_report.active',4583);
+        $first = Cache::get(EbayListingStatusBatchRunnerService::CACHE_KEY);
+        $this->assertSame(4582, $first['active']); $this->assertSame(553, $first['unknown_items']); $this->assertSame(553, $first['failed_requests']); $this->assertSame(553, $first['unique_unresolved_items']);
+        Http::assertSentCount(1);
+    }
+
     private function listing(string $itemId, array $overrides = []): MarketplaceListing
     {
         $part = Part::query()->create(['name' => 'Part '.$itemId, 'sku' => 'SKU-'.$itemId, 'quantity' => 1, 'status' => 'ready']);

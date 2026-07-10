@@ -40,7 +40,7 @@ class EbayListingStatusBatchRunnerController extends Controller
             'exception_line' => null,
         ];
 
-        foreach (['index', 'status', 'start', 'run-next-batch', 'stop', 'diagnose'] as $suffix) {
+        foreach (['index', 'status', 'start', 'run-next-batch', 'stop', 'diagnose', 'retry-transient', 'retry-diagnose'] as $suffix) {
             $name = 'admin.tools.ebay.listing-status-sync.'.$suffix;
             $diagnostics['route_names_exist'][$name] = Route::has($name);
         }
@@ -82,6 +82,16 @@ class EbayListingStatusBatchRunnerController extends Controller
     public function stop(Request $request, EbayListingStatusBatchRunnerService $service): JsonResponse|RedirectResponse
     {
         return $this->respond($request, $service->stop($request->only(['confirm'])), 'Runner został zatrzymany.');
+    }
+
+    public function retryDiagnose(EbayListingStatusBatchRunnerService $service): JsonResponse
+    {
+        return response()->json($service->retryDiagnose());
+    }
+
+    public function retryTransient(Request $request, EbayListingStatusBatchRunnerService $service): JsonResponse|RedirectResponse
+    {
+        return $this->respond($request, $service->retryTransient($request->only(['batch_size', 'delay_seconds', 'max_attempts_per_item', 'scope', 'dry_run', 'confirm'])), 'Retry błędów przejściowych został uruchomiony.');
     }
 
     private function respond(Request $request, array $result, string $message): JsonResponse|RedirectResponse

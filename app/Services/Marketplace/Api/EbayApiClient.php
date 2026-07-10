@@ -371,6 +371,7 @@ class EbayApiClient extends AbstractMarketplaceApiClient
             'availability_status' => $availability ?: null,
             'title_present' => filled($payload['title'] ?? null),
             'safe_top_level_keys' => array_slice(array_keys($payload), 0, 20),
+            'retry_after' => $response->header('Retry-After'),
         ]);
     }
 
