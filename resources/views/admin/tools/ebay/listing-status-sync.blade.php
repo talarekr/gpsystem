@@ -7,7 +7,7 @@
     <style>body{font-family:system-ui,sans-serif;margin:24px}.ok{color:#166534}.error{color:#991b1b}.panel{border:1px solid #ddd;padding:16px;margin:16px 0}label{display:block;margin:8px 0}button{padding:8px 12px;margin:6px 6px 0 0}button:disabled{opacity:.55;cursor:not-allowed}.muted{color:#6b7280}.status-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px}.status-card{background:#f9fafb;border:1px solid #e5e7eb;padding:10px}.status-card strong{display:block;font-size:1.35rem}pre{background:#f3f4f6;padding:16px;overflow:auto}.banner{padding:10px 12px;background:#eff6ff;border:1px solid #bfdbfe;margin:10px 0}</style>
 </head>
 <body>
-<div data-marker="{{ $pageMarker }}" data-browser-autorun-marker="ebay_listing_status_batch_runner_browser_autorun_v2">
+<div data-marker="{{ $pageMarker }}" data-browser-autorun-marker="ebay_listing_status_batch_runner_browser_autorun_v2" data-delay-countdown-fix-marker="ebay_listing_status_batch_runner_delay_countdown_fix_v4">
     <h1>eBay listing status sync dry-run</h1>
     @if(session('runner_message'))<div class="ok">{{ session('runner_message') }}</div>@endif
     @if(session('runner_error'))<div class="error">{{ session('runner_error') }}</div>@endif
@@ -58,6 +58,8 @@
     let autoRunActive = false;
     let requestInFlight = false;
     let timerId = null;
+    let countdownTimerId = null;
+    let nextRunAt = null;
     let networkErrors = 0;
 
     const terminalStatuses = ['completed', 'stopped', 'failed'];
@@ -65,8 +67,21 @@
     const runNextButton = document.getElementById('runNextButton');
 
     function setMessage(text, cls = 'muted') { message.textContent = text; message.className = `banner ${cls}`; }
-    function delayFromStatus(status) { return Math.max(5, Number(status?.delay_seconds || 10)); }
-    function clearTimer() { if (timerId) window.clearTimeout(timerId); timerId = null; }
+    function delayFromStatus(status) { return Math.max(0, Number(status?.delay_seconds || 10)); }
+    function retryFromStatus(status) {
+        const fallback = delayFromStatus(status);
+        const retry = status?.retry_after_seconds;
+        if (retry === null || retry === undefined || retry === '') return fallback;
+        const seconds = Math.max(0, Number(retry));
+        return status?.clock_skew_detected ? seconds : Math.min(seconds, fallback);
+    }
+    function clearTimer() {
+        if (timerId) window.clearTimeout(timerId);
+        if (countdownTimerId) window.clearInterval(countdownTimerId);
+        timerId = null;
+        countdownTimerId = null;
+        nextRunAt = null;
+    }
     function lockValue() { try { return JSON.parse(localStorage.getItem(lockKey) || 'null'); } catch { return null; } }
     function ownsLock() { const lock = lockValue(); return lock?.tabId === tabId && Number(lock.expiresAt || 0) > Date.now(); }
     function acquireLock() { const lock = lockValue(); if (lock && lock.tabId !== tabId && Number(lock.expiresAt || 0) > Date.now()) return false; localStorage.setItem(lockKey, JSON.stringify({tabId, expiresAt: Date.now() + lockTtlMs})); return true; }
@@ -106,8 +121,14 @@
     function stopAutoRun(text, cls = 'muted') { autoRunActive = false; clearTimer(); releaseLock(); setMessage(text, cls); runNextButton.disabled = requestInFlight; }
     function scheduleNext(status, overrideSeconds = null) {
         clearTimer();
-        const seconds = Math.max(5, Number(overrideSeconds || delayFromStatus(status)));
-        setMessage(`Oczekiwanie ${seconds} s na następny batch`, 'muted');
+        const seconds = Math.max(0, Number(overrideSeconds ?? retryFromStatus(status)));
+        nextRunAt = Date.now() + (seconds * 1000);
+        const renderCountdown = () => {
+            const remaining = Math.max(0, Math.ceil((nextRunAt - Date.now()) / 1000));
+            setMessage(`Oczekiwanie ${remaining} s na następny batch`, 'muted');
+        };
+        renderCountdown();
+        if (seconds > 0) countdownTimerId = window.setInterval(renderCountdown, 1000);
         timerId = window.setTimeout(autoRunStep, seconds * 1000);
     }
     async function autoRunStep() {
@@ -124,7 +145,7 @@
                 setMessage('Batch w trakcie', 'muted');
                 const result = await apiPost(runNextBatchUrl, {confirm: 'run-next-ebay-listing-status-sync-batch'});
                 renderStatus(result);
-                if (result.reason === 'delay_not_elapsed' || result.should_wait || result.retry_after_seconds) return scheduleNext(result, result.retry_after_seconds || delayFromStatus(result));
+                if (result.reason === 'delay_not_elapsed' || result.should_wait || result.retry_after_seconds) return scheduleNext(result, retryFromStatus(result));
                 if (terminalStatuses.includes(result.status)) return stopAutoRun(result.status === 'completed' ? 'Synchronizacja zakończona' : (result.status === 'stopped' ? 'Runner zatrzymany' : 'Błąd — auto-run zatrzymany'), result.status === 'failed' ? 'error' : 'ok');
                 networkErrors = 0;
                 return scheduleNext(result);

@@ -5,6 +5,7 @@ namespace App\Services\Marketplace;
 use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceListing;
 use App\Services\Marketplace\Api\EbayApiClient;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
 
@@ -14,6 +15,7 @@ class EbayListingStatusBatchRunnerService
     public const DRY_RUN_MARKER = 'ebay_listing_status_batch_dry_run_v1';
     public const BROWSER_AUTORUN_MARKER = 'ebay_listing_status_batch_runner_browser_autorun_v2';
     public const STATE_INITIALIZATION_FIX_MARKER = 'ebay_listing_status_batch_runner_state_initialization_fix_v3';
+    public const DELAY_COUNTDOWN_FIX_MARKER = 'ebay_listing_status_batch_runner_delay_countdown_fix_v4';
     public const CACHE_KEY = 'admin_tools:ebay_listing_status_sync:v1';
 
     public function __construct(private readonly EbayListingStatusNormalizer $normalizer) {}
@@ -59,8 +61,8 @@ class EbayListingStatusBatchRunnerService
         $state = $this->state();
         if ($state['status'] !== 'running') return array_merge($this->publicStatus($state), ['ok' => false, 'reason' => 'not_running', 'batch_executed' => false, 'completed' => $state['status'] === 'completed' && empty($state['remaining_ids']) && (int) $state['remaining'] === 0]);
         if (empty($state['remaining_ids'])) return array_merge($this->complete($state), ['ok' => true, 'batch_executed' => false, 'completed' => true]);
-        $retryAfter = $this->retryAfterSeconds($state);
-        if ($retryAfter > 0) return array_merge($this->publicStatus($state), ['ok' => true, 'reason' => 'delay_not_elapsed', 'batch_executed' => false, 'should_wait' => true, 'retry_after_seconds' => $retryAfter, 'completed' => false]);
+        $delay = $this->delayDiagnostics($state);
+        if ($delay['retry_after_seconds'] > 0) return array_merge($this->publicStatus($state), ['ok' => true, 'reason' => 'delay_not_elapsed', 'batch_executed' => false, 'should_wait' => true, 'retry_after_seconds' => $delay['retry_after_seconds'], 'next_batch_allowed_at' => $delay['next_batch_allowed_at'], 'clock_skew_detected' => $delay['clock_skew_detected'], 'completed' => false]);
 
         $batchIds = array_slice($state['remaining_ids'], 0, (int) $state['batch_size']);
         foreach (MarketplaceListing::query()->with('part')->whereIn('id', $batchIds)->orderBy('id')->get() as $listing) {
@@ -74,7 +76,7 @@ class EbayListingStatusBatchRunnerService
         $state['last_batch_at'] = now()->toISOString();
         if (empty($state['remaining_ids']) && $state['processed'] === $state['total']) $state = $this->complete($state, false);
         Cache::put(self::CACHE_KEY, $state, now()->addHours(12));
-        return array_merge($this->publicStatus($state), ['ok' => true, 'batch_executed' => true, 'completed' => $state['status'] === 'completed']);
+        return array_merge($this->publicStatus($state), ['ok' => true, 'batch_executed' => true, 'completed' => $state['status'] === 'completed', 'should_wait' => $state['status'] === 'running', 'retry_after_seconds' => $state['status'] === 'running' ? (int) $state['delay_seconds'] : 0, 'next_batch_allowed_at' => $state['status'] === 'running' ? CarbonImmutable::parse($state['last_batch_at'])->addSeconds((int) $state['delay_seconds'])->toISOString() : null, 'clock_skew_detected' => false]);
     }
 
     public function status(): array { return array_merge($this->publicStatus($this->state()), ['ok' => true]); }
@@ -118,9 +120,31 @@ class EbayListingStatusBatchRunnerService
     private function blocksRelisting(MarketplaceListing $l): bool { return in_array(strtolower((string) $l->status), ['active','published','live'], true) && ! in_array(strtolower((string) $l->last_api_status), ['ended','failed','deleted','archived','not_found','inactive','unavailable','error'], true) && $l->not_seen_in_active_api_at === null; }
     private function errorType(array $api, array $n): ?string { $h=(int)($api['http_status']??0); return match(true){in_array($h,[401,403],true)=>'auth_error',$h===429=>'rate_limited',in_array($h,[500,502,503,504],true)=>'remote_error',($api['error_type']??null)==='transient_error'=>'transient_error',default=>$n['error_type']}; }
     private function recordResult(array $s, array $r): array { $k=$r['normalized_status']; if(isset($s[$k]))$s[$k]++; if($r['error_type'])$s['failed']++; $s['recent_results']=array_slice(array_merge([$r],$s['recent_results']),0,50); if($r['error_type'])$s['last_error']=$r['error_type']; return $s; }
-    private function retryAfterSeconds(array $s): int { if (empty($s['last_batch_at'])) return 0; $elapsed = now()->diffInSeconds(\Carbon\Carbon::parse($s['last_batch_at'])); return max(0, ((int) $s['delay_seconds']) - $elapsed); }
+    private function delayDiagnostics(array $s): array
+    {
+        $now = CarbonImmutable::now('UTC');
+        $delaySeconds = (int) ($s['delay_seconds'] ?? 0);
+        $lastBatchAt = ! empty($s['last_batch_at']) ? CarbonImmutable::parse((string) $s['last_batch_at'])->utc() : null;
+        $nextAllowedAt = $lastBatchAt?->addSeconds($delaySeconds);
+        $retryAfterSeconds = $nextAllowedAt ? max(0, (int) ceil($this->epochSeconds($nextAllowedAt) - $this->epochSeconds($now))) : 0;
+
+        return [
+            'server_now' => $now->toISOString(),
+            'last_batch_at' => $lastBatchAt?->toISOString(),
+            'delay_seconds' => $delaySeconds,
+            'next_batch_allowed_at' => $nextAllowedAt?->toISOString(),
+            'retry_after_seconds' => $retryAfterSeconds,
+            'clock_skew_detected' => $lastBatchAt !== null && $lastBatchAt->greaterThan($now),
+        ];
+    }
+
+    private function epochSeconds(CarbonImmutable $time): float
+    {
+        return $time->getTimestamp() + ((int) $time->format('u') / 1_000_000);
+    }
+
     private function complete(array $s, bool $put=true): array { if(!empty($s['remaining_ids']) || (int)$s['remaining'] > 0) return $this->publicStatus($s); $s['status']='completed'; $s['finished_at']=$s['finished_at']??now()->toISOString(); if($put)Cache::put(self::CACHE_KEY,$s,now()->addHours(12)); return $this->publicStatus($s); }
     private function state(): array { $state = Cache::get(self::CACHE_KEY); return is_array($state) ? array_merge($this->baseState('idle'), $state) : $this->baseState('idle'); }
     private function baseState(string $status): array { return ['status'=>$status,'marker'=>self::MARKER,'state_initialization_fix_marker'=>self::STATE_INITIALIZATION_FIX_MARKER,'dry_run'=>true,'batch_size'=>10,'delay_seconds'=>5,'total'=>0,'processed'=>0,'remaining'=>0,'active'=>0,'ended'=>0,'not_found'=>0,'invalid'=>0,'unknown'=>0,'failed'=>0,'started_at'=>null,'finished_at'=>null,'last_batch_at'=>null,'last_error'=>null,'recent_results'=>[],'remaining_ids'=>[],'processed_ids'=>[]]; }
-    private function publicStatus(array $s): array { $inconsistent = ($s['status'] ?? null) === 'completed' && (!empty($s['remaining_ids']) || (int)($s['remaining'] ?? 0) > 0); unset($s['remaining_ids'],$s['processed_ids']); $s = array_merge($s, ['dry_run_marker'=>self::DRY_RUN_MARKER, 'browser_autorun_marker'=>self::BROWSER_AUTORUN_MARKER]); if($inconsistent) $s = array_merge($s, ['state_inconsistent'=>true, 'reason'=>'completed_with_remaining_items']); return $s; }
+    private function publicStatus(array $s): array { $inconsistent = ($s['status'] ?? null) === 'completed' && (!empty($s['remaining_ids']) || (int)($s['remaining'] ?? 0) > 0); $delay=$this->delayDiagnostics($s); unset($s['remaining_ids'],$s['processed_ids']); $s = array_merge($s, ['dry_run_marker'=>self::DRY_RUN_MARKER, 'browser_autorun_marker'=>self::BROWSER_AUTORUN_MARKER, 'delay_countdown_fix_marker'=>self::DELAY_COUNTDOWN_FIX_MARKER], $delay); if($inconsistent) $s = array_merge($s, ['state_inconsistent'=>true, 'reason'=>'completed_with_remaining_items']); return $s; }
 }
