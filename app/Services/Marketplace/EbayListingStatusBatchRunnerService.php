@@ -156,6 +156,9 @@ class EbayListingStatusBatchRunnerService
     public function applyConfirmedEnded(array $input): array
     {
         if (($input['confirm'] ?? null) !== 'apply-confirmed-ebay-ended-listings') return ['ok' => false, 'reason' => 'missing_confirm_token'];
+        if (isset($input['scan_run_id'])) {
+            return ['ok' => false, 'reason' => 'persistent_scan_run_apply_not_enabled_yet', 'accepted_future_contract' => ['scan_run_id' => (int) $input['scan_run_id'], 'expected_count' => (int) ($input['expected_count'] ?? 0), 'dry_run' => filter_var($input['dry_run'] ?? true, FILTER_VALIDATE_BOOLEAN), 'confirm' => $input['confirm']]];
+        }
         if (($input['source'] ?? null) !== 'completed_dry_run') return ['ok' => false, 'reason' => 'invalid_source'];
         if ((int) ($input['expected_count'] ?? 0) !== self::EXPECTED_CONFIRMED_ENDED_COUNT) return ['ok' => false, 'reason' => 'expected_count_mismatch'];
         if (filter_var($input['dry_run'] ?? true, FILTER_VALIDATE_BOOLEAN)) return ['ok' => false, 'reason' => 'dry_run_required_false_for_apply'];
