@@ -97,7 +97,7 @@ class OvokoCarModelSyncRunnerService
             $run->update(['status' => OvokoCarModelSyncRun::STATUS_RUNNING, 'last_batch' => $batch]);
 
             $phase = 'select_brands';
-            $processedIds = $this->normalizeStringList($run->processed_brand_ids);
+            $processedIds = $this->normalizeBrandIdList($run->processed_brand_ids);
             $brands = $this->eligibleBrandsQuery((bool) $run->only_missing, $processedIds)->limit((int) $run->batch_size)->get();
             if ($brands->isEmpty()) {
                 $batch = ['brand_count' => 0, 'completed' => true, 'finished_at' => now()->toISOString(), 'brands' => []];
@@ -114,7 +114,7 @@ class OvokoCarModelSyncRunnerService
             $dictionaryService = app(OvokoCarDictionaryService::class);
 
             foreach ($brands as $brand) {
-                $brandId = (string) $brand->ovoko_id;
+                $brandId = $this->normalizeBrandId($brand->ovoko_id);
                 $brandName = (string) $brand->name;
                 try {
                     $phase = 'fetch_models';
@@ -138,7 +138,7 @@ class OvokoCarModelSyncRunnerService
             }
 
             $phase = 'update_run';
-            $processedIds = array_values(array_unique($processedIds));
+            $processedIds = $this->normalizeBrandIdList($processedIds);
             $remaining = $this->eligibleBrandsQuery((bool) $run->only_missing, $processedIds)->count();
             $batch['finished_at'] = now()->toISOString();
             $batch['remaining_brand_count'] = $remaining;
@@ -197,7 +197,7 @@ class OvokoCarModelSyncRunnerService
     {
         return OvokoCarDictionaryEntry::query()
             ->where('dictionary', 'brands')
-            ->when($excludeBrandIds !== [], fn ($q) => $q->whereNotIn('ovoko_id', $excludeBrandIds))
+            ->when($excludeBrandIds !== [], fn ($q) => $q->whereNotIn('ovoko_id', $this->normalizeBrandIdList($excludeBrandIds)))
             ->when($onlyMissing, fn ($q) => $q->whereNotExists(function ($sub): void {
                 $sub->selectRaw('1')->from('ovoko_car_dictionary_entries as models')
                     ->where('models.dictionary', 'models')
@@ -206,7 +206,20 @@ class OvokoCarModelSyncRunnerService
             ->orderBy('ovoko_id');
     }
 
-    private function normalizeStringList(mixed $value): array
+    private function normalizeBrandId(mixed $value): string
+    {
+        if ($value === null) {
+            return '';
+        }
+
+        if (is_scalar($value) || $value instanceof \Stringable) {
+            return trim((string) $value);
+        }
+
+        return '';
+    }
+
+    private function normalizeBrandIdList(mixed $value): array
     {
         if (is_string($value)) {
             $decoded = json_decode($value, true);
@@ -217,7 +230,7 @@ class OvokoCarModelSyncRunnerService
             return [];
         }
 
-        return array_values(array_unique(array_filter(array_map(static fn ($item): string => (string) $item, $value), static fn (string $item): bool => $item !== '')));
+        return array_values(array_unique(array_filter(array_map(fn ($item): string => $this->normalizeBrandId($item), $value), static fn (string $item): bool => $item !== '')));
     }
 
     private function normalizeListOfArrays(mixed $value): array
@@ -231,12 +244,42 @@ class OvokoCarModelSyncRunnerService
             return [];
         }
 
-        return array_values(array_filter($value, static fn ($item): bool => is_array($item)));
+        return array_values(array_map(fn (array $item): array => $this->normalizeBrandIdFields($item), array_filter($value, static fn ($item): bool => is_array($item))));
+    }
+
+    private function normalizeBrandIdFields(array $value): array
+    {
+        foreach (['brand_id', 'ovoko_id', 'ovoko_brand_id'] as $key) {
+            if (array_key_exists($key, $value)) {
+                $value[$key] = $this->normalizeBrandId($value[$key]);
+            }
+        }
+
+        foreach (['brand_ids', 'processed_brand_ids'] as $key) {
+            if (array_key_exists($key, $value)) {
+                $value[$key] = $this->normalizeBrandIdList($value[$key]);
+            }
+        }
+
+        return $value;
+    }
+
+    private function normalizeBatchBrands(mixed $value): array
+    {
+        $brands = $this->normalizeListOfArrays($value);
+
+        return array_values(array_map(function (array $brand): array {
+            if (array_key_exists('brand_id', $brand)) {
+                $brand['brand_id'] = $this->normalizeBrandId($brand['brand_id']);
+            }
+
+            return $brand;
+        }, $brands));
     }
 
     private function exceptionDiagnostic(\Throwable $e, string $phase, array $context = []): array
     {
-        $message = Str::limit($e->getMessage(), 500)->toString();
+        $message = (string) Str::limit($e->getMessage(), 500);
 
         return $context + [
             'phase' => $phase,
@@ -253,8 +296,8 @@ class OvokoCarModelSyncRunnerService
             $run->refresh();
             $errors = $this->normalizeListOfArrays($run->errors);
             $errors[] = $diagnostic + ['runner_error' => true];
-            $lastBatch = $this->normalizeListOfArrays(data_get($run->last_batch, 'brands'));
-            $batch['brands'] = $batch['brands'] ?: $lastBatch;
+            $lastBatch = $this->normalizeBatchBrands(data_get($run->last_batch, 'brands'));
+            $batch['brands'] = $this->normalizeBatchBrands($batch['brands'] ?: $lastBatch);
             $batch['finished_at'] = now()->toISOString();
             $batch['status'] = 'failed_defensively';
             $batch['error'] = $diagnostic;
