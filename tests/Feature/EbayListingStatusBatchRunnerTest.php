@@ -38,6 +38,7 @@ class EbayListingStatusBatchRunnerTest extends TestCase
             ->assertJsonPath('remaining', 3)
             ->assertJsonPath('completed', false)
             ->assertJsonPath('state_initialization_fix_marker', 'ebay_listing_status_batch_runner_state_initialization_fix_v3')
+            ->assertJsonPath('delay_countdown_fix_marker', 'ebay_listing_status_batch_runner_delay_countdown_fix_v4')
             ->assertJsonStructure(['started_at']);
 
         $state = Cache::get(EbayListingStatusBatchRunnerService::CACHE_KEY);
@@ -200,14 +201,48 @@ class EbayListingStatusBatchRunnerTest extends TestCase
 
         $this->postJson('/admin/tools/ebay/listing-status-sync/start', ['batch_size' => 1, 'delay_seconds' => 10, 'scope' => 'products_with_ebay_item_id', 'dry_run' => true, 'confirm' => 'start-ebay-listing-status-sync'])->assertOk()->assertJsonPath('status', 'running');
         $this->postJson('/admin/tools/ebay/listing-status-sync/run-next-batch', ['confirm' => 'run-next-ebay-listing-status-sync-batch'])->assertOk()->assertJsonPath('batch_executed', true)->assertJsonPath('remaining', 1);
-        $this->postJson('/admin/tools/ebay/listing-status-sync/run-next-batch', ['confirm' => 'run-next-ebay-listing-status-sync-batch'])
+        $afterBatch = $this->postJson('/admin/tools/ebay/listing-status-sync/run-next-batch', ['confirm' => 'run-next-ebay-listing-status-sync-batch'])
             ->assertOk()
             ->assertJsonPath('reason', 'delay_not_elapsed')
             ->assertJsonPath('batch_executed', false)
             ->assertJsonPath('should_wait', true)
-            ->assertJsonPath('retry_after_seconds', 10)
-            ->assertJsonPath('completed', false);
-        $this->assertSame(1, $calls);
+            ->assertJsonPath('completed', false)
+            ->assertJsonStructure(['server_now', 'last_batch_at', 'delay_seconds', 'next_batch_allowed_at', 'retry_after_seconds', 'clock_skew_detected']);
+        $this->assertGreaterThanOrEqual(9, $afterBatch->json('retry_after_seconds'));
+        $this->assertLessThanOrEqual(10, $afterBatch->json('retry_after_seconds'));
+
+        $this->travel(5)->seconds();
+        $afterFiveSeconds = $this->postJson('/admin/tools/ebay/listing-status-sync/run-next-batch', ['confirm' => 'run-next-ebay-listing-status-sync-batch'])
+            ->assertOk()
+            ->assertJsonPath('reason', 'delay_not_elapsed')
+            ->assertJsonPath('batch_executed', false);
+        $this->assertGreaterThanOrEqual(4, $afterFiveSeconds->json('retry_after_seconds'));
+        $this->assertLessThanOrEqual(5, $afterFiveSeconds->json('retry_after_seconds'));
+
+        $this->travel(5)->seconds();
+        $this->postJson('/admin/tools/ebay/listing-status-sync/run-next-batch', ['confirm' => 'run-next-ebay-listing-status-sync-batch'])
+            ->assertOk()
+            ->assertJsonPath('batch_executed', true)
+            ->assertJsonPath('retry_after_seconds', 0)
+            ->assertJsonPath('completed', true);
+        $this->assertSame(2, $calls);
+    }
+
+    public function test_retry_after_reports_clock_skew_instead_of_using_arbitrary_waits(): void
+    {
+        $this->actingAsAdminUser();
+        Cache::put(EbayListingStatusBatchRunnerService::CACHE_KEY, [
+            'status' => 'running', 'batch_size' => 5, 'delay_seconds' => 10, 'total' => 1, 'processed' => 0, 'remaining' => 1,
+            'remaining_ids' => [123], 'processed_ids' => [], 'last_batch_at' => now()->addSeconds(72)->toISOString(),
+        ], now()->addHour());
+
+        $response = $this->postJson('/admin/tools/ebay/listing-status-sync/run-next-batch', ['confirm' => 'run-next-ebay-listing-status-sync-batch'])
+            ->assertOk()
+            ->assertJsonPath('reason', 'delay_not_elapsed')
+            ->assertJsonPath('batch_executed', false)
+            ->assertJsonPath('clock_skew_detected', true);
+        $this->assertGreaterThanOrEqual(81, $response->json('retry_after_seconds'));
+        $this->assertLessThanOrEqual(82, $response->json('retry_after_seconds'));
     }
 
     public function test_stopped_runner_does_not_execute_more_batches(): void
@@ -231,13 +266,20 @@ class EbayListingStatusBatchRunnerTest extends TestCase
         $this->get('/admin/tools/ebay/listing-status-sync')
             ->assertOk()
             ->assertSee('ebay_listing_status_batch_runner_browser_autorun_v2')
+            ->assertSee('ebay_listing_status_batch_runner_delay_countdown_fix_v4')
             ->assertSee('requestInFlight')
             ->assertSee('terminalStatuses')
             ->assertSee("['completed', 'stopped', 'failed']", false)
             ->assertSee("initialStatus?.status === 'running'", false)
             ->assertSee('localStorage')
             ->assertSee('lockKey')
-            ->assertDontSee('setInterval');
+            ->assertSee('retryFromStatus')
+            ->assertSee('Math.min(seconds, fallback)')
+            ->assertSee('nextRunAt = Date.now() + (seconds * 1000)')
+            ->assertSee('if (timerId) window.clearTimeout(timerId)')
+            ->assertSee('if (countdownTimerId) window.clearInterval(countdownTimerId)')
+            ->assertDontSee('lock.expiresAt - Date.now()')
+            ->assertDontSee('delayFromStatus(result) +');
     }
 
     private function listing(string $itemId, array $overrides = []): MarketplaceListing
