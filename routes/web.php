@@ -356,11 +356,9 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/ebay/listing-status-diagnose', EbayListingStatusDiagnoseController::class)->name('admin.tools.ebay.listing-status-diagnose');
     Route::get('/admin/tools/ebay/listing-status-sync', [EbayListingStatusBatchRunnerController::class, 'index'])->name('admin.tools.ebay.listing-status-sync.index');
     Route::get('/admin/tools/ebay/listing-status-sync/diagnose', [EbayListingStatusBatchRunnerController::class, 'diagnose'])->name('admin.tools.ebay.listing-status-sync.diagnose');
-    Route::get('/admin/tools/ebay/listing-status-sync/retry-diagnose', [EbayListingStatusBatchRunnerController::class, 'retryDiagnose'])->name('admin.tools.ebay.listing-status-sync.retry-diagnose');
     Route::get('/admin/tools/ebay/listing-status-sync/status', [EbayListingStatusBatchRunnerController::class, 'status'])->name('admin.tools.ebay.listing-status-sync.status');
     Route::post('/admin/tools/ebay/listing-status-sync/start', [EbayListingStatusBatchRunnerController::class, 'start'])->name('admin.tools.ebay.listing-status-sync.start');
     Route::post('/admin/tools/ebay/listing-status-sync/run-next-batch', [EbayListingStatusBatchRunnerController::class, 'runNextBatch'])->name('admin.tools.ebay.listing-status-sync.run-next-batch');
-    Route::post('/admin/tools/ebay/listing-status-sync/retry-transient', [EbayListingStatusBatchRunnerController::class, 'retryTransient'])->name('admin.tools.ebay.listing-status-sync.retry-transient');
     Route::post('/admin/tools/ebay/listing-status-sync/stop', [EbayListingStatusBatchRunnerController::class, 'stop'])->name('admin.tools.ebay.listing-status-sync.stop');
     Route::get('/admin/tools/ebay/listing-audit-runner/status', [EbayListingAuditRunnerController::class, 'status'])->name('admin.tools.ebay.listing-audit-runner.status');
     Route::get('/admin/tools/ebay-listing-audit-runner', fn (Request $request) => redirect()->to('/admin/tools/ebay/listing-audit-runner'.($request->getQueryString() ? '?'.$request->getQueryString() : '')))->name('admin.tools.ebay-listing-audit-runner.redirect');
