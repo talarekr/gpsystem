@@ -152,7 +152,7 @@ class OvokoCarModelSyncRunnerService
         $brandsWithModels = OvokoCarDictionaryEntry::query()->where('dictionary', 'models')->distinct('ovoko_brand_id')->count('ovoko_brand_id');
         $brandsTotal = OvokoCarDictionaryEntry::query()->where('dictionary', 'brands')->count();
         return [
-            'ok' => true, 'marker' => self::MARKER, 'status' => $run->status, 'batch_size' => $run->batch_size,
+            'ok' => true, 'marker' => self::MARKER, 'run_id' => $run->id, 'status' => $run->status, 'batch_size' => $run->batch_size,
             'delay_seconds' => $run->delay_seconds, 'only_missing' => $run->only_missing,
             'total_brand_count' => $run->total_brand_count, 'processed_brand_count' => $run->processed_brand_count,
             'remaining_brand_count' => max(0, (int) $run->total_brand_count - (int) $run->processed_brand_count),
