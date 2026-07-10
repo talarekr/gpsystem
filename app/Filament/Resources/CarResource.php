@@ -136,12 +136,28 @@ class CarResource extends Resource
                             ->columnSpan(['default' => 1, 'md' => 6])
                             ->numeric()
                             ->minValue(0),
+                        Forms\Components\Select::make('legacy_payload.ovoko_fuel_id')
+                            ->label('Rodzaj paliwa')
+                            ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
+                            ->columnSpan(['default' => 1, 'md' => 6])
+                            ->searchable()
+                            ->preload()
+                            ->options(static fn (): array => self::ovokoDictionaryOptions('fuel'))
+                            ->live()
+                            ->afterStateUpdated(static fn (?string $state, Set $set): null => $set('fuel_type', self::ovokoDictionaryName('fuel', $state)))
+                            ->native(false)
+                            ->visible(static fn (string $operation): bool => $operation === 'create')
+                            ->dehydrated(static fn (string $operation): bool => $operation === 'create'),
+                        Forms\Components\Hidden::make('fuel_type')
+                            ->dehydrated(static fn (string $operation): bool => $operation === 'create'),
                         Forms\Components\Select::make('fuel_type')
                             ->label('Rodzaj paliwa')
                             ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
                             ->options(Car::fuelTypeOptions())
-                            ->native(false),
+                            ->native(false)
+                            ->visible(static fn (string $operation): bool => $operation !== 'create')
+                            ->dehydrated(static fn (string $operation): bool => $operation !== 'create'),
                         Forms\Components\TextInput::make('engine_power_kw')
                             ->label('Moc silnika kW')
                             ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
@@ -159,32 +175,68 @@ class CarResource extends Resource
                             ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
                             ->maxLength(255),
+                        Forms\Components\Select::make('legacy_payload.ovoko_wheel_drive_id')
+                            ->label('Napęd')
+                            ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
+                            ->columnSpan(['default' => 1, 'md' => 6])
+                            ->searchable()
+                            ->preload()
+                            ->options(static fn (): array => self::ovokoDictionaryOptions('wheel_drive'))
+                            ->live()
+                            ->afterStateUpdated(static fn (?string $state, Set $set): null => $set('drivetrain', self::ovokoDictionaryName('wheel_drive', $state)))
+                            ->native(false)
+                            ->visible(static fn (string $operation): bool => $operation === 'create')
+                            ->dehydrated(static fn (string $operation): bool => $operation === 'create'),
+                        Forms\Components\Hidden::make('drivetrain')
+                            ->dehydrated(static fn (string $operation): bool => $operation === 'create'),
                         Forms\Components\Select::make('drivetrain')
                             ->label('Napęd')
                             ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
-                            ->options(static fn (string $operation): array => $operation === 'create'
-                                ? static::createFormDrivetrainOptions()
-                                : Car::drivetrainOptions())
-                            ->native(false),
+                            ->options(Car::drivetrainOptions())
+                            ->native(false)
+                            ->visible(static fn (string $operation): bool => $operation !== 'create')
+                            ->dehydrated(static fn (string $operation): bool => $operation !== 'create'),
+                        Forms\Components\Select::make('legacy_payload.ovoko_gearbox_type_id')
+                            ->label('Typ skrzyni biegów')
+                            ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
+                            ->columnSpan(['default' => 1, 'md' => 6])
+                            ->searchable()
+                            ->preload()
+                            ->options(static fn (): array => self::ovokoDictionaryOptions('gearbox_type'))
+                            ->live()
+                            ->afterStateUpdated(static fn (?string $state, Set $set): null => $set('gearbox_type', self::ovokoDictionaryName('gearbox_type', $state)))
+                            ->native(false)
+                            ->visible(static fn (string $operation): bool => $operation === 'create')
+                            ->dehydrated(static fn (string $operation): bool => $operation === 'create'),
+                        Forms\Components\Hidden::make('gearbox_type')
+                            ->dehydrated(static fn (string $operation): bool => $operation === 'create'),
                         Forms\Components\Select::make('gearbox_type')
                             ->label('Typ skrzyni biegów')
                             ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
                             ->options(Car::gearboxTypeOptions())
-                            ->native(false),
+                            ->native(false)
+                            ->visible(static fn (string $operation): bool => $operation !== 'create')
+                            ->dehydrated(static fn (string $operation): bool => $operation !== 'create'),
                         Forms\Components\TextInput::make('gearbox_code')
                             ->label('Kod skrzyni biegów')
                             ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
                             ->maxLength(255),
-                        Forms\Components\Select::make('body_type')
+                        Forms\Components\Select::make('legacy_payload.ovoko_body_type_id')
                             ->label('Typ nadwozia')
                             ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
-                            ->options(static::createFormBodyTypeOptions())
+                            ->searchable()
+                            ->preload()
+                            ->options(static fn (): array => self::ovokoDictionaryOptions('body_type'))
+                            ->live()
+                            ->afterStateUpdated(static fn (?string $state, Set $set): null => $set('body_type', self::ovokoDictionaryName('body_type', $state)))
                             ->native(false)
                             ->visible(static fn (string $operation): bool => $operation === 'create')
+                            ->dehydrated(static fn (string $operation): bool => $operation === 'create'),
+                        Forms\Components\Hidden::make('body_type')
                             ->dehydrated(static fn (string $operation): bool => $operation === 'create'),
                         Forms\Components\TextInput::make('body_type')
                             ->label('Typ nadwozia')
@@ -246,6 +298,7 @@ class CarResource extends Resource
                             ->preload()
                             ->native(false)
                             ->options(static fn (): array => self::ovokoCarStatusOptions())
+                            ->required(static fn (string $operation): bool => $operation === 'create')
                             ->helperText('Wymagany do utworzenia samochodu w Ovoko.'),
                         Forms\Components\DatePicker::make('purchase_date')
                             ->label('Data zakupu')
@@ -334,6 +387,25 @@ class CarResource extends Resource
             }
         }
 
+        foreach ([
+            'ovoko_fuel_id' => ['dictionary' => 'fuel', 'column' => 'fuel_type'],
+            'ovoko_gearbox_type_id' => ['dictionary' => 'gearbox_type', 'column' => 'gearbox_type'],
+            'ovoko_body_type_id' => ['dictionary' => 'body_type', 'column' => 'body_type'],
+            'ovoko_wheel_drive_id' => ['dictionary' => 'wheel_drive', 'column' => 'drivetrain'],
+        ] as $payloadKey => $mapping) {
+            $dictionaryId = (string) ($payload[$payloadKey] ?? '');
+
+            if ($dictionaryId === '') {
+                continue;
+            }
+
+            $dictionaryName = self::ovokoDictionaryName($mapping['dictionary'], $dictionaryId);
+
+            if ($dictionaryName !== null) {
+                $data[$mapping['column']] = $dictionaryName;
+            }
+        }
+
         if (blank($payload['ovoko_status_id'] ?? null) && ($data['status'] ?? null) === 'kupiony') {
             $boughtStatus = OvokoCarDictionaryEntry::query()
                 ->where('dictionary', 'car_status')
@@ -358,44 +430,32 @@ class CarResource extends Resource
      */
     private static function ovokoCarStatusOptions(): array
     {
+        return self::ovokoDictionaryOptions('car_status');
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private static function ovokoDictionaryOptions(string $dictionary): array
+    {
         return OvokoCarDictionaryEntry::query()
-            ->where('dictionary', 'car_status')
+            ->where('dictionary', $dictionary)
             ->orderBy('ovoko_id')
             ->get(['ovoko_id', 'name'])
-            ->mapWithKeys(fn (OvokoCarDictionaryEntry $status): array => [(string) $status->ovoko_id => $status->name ?: (string) $status->ovoko_id])
+            ->mapWithKeys(fn (OvokoCarDictionaryEntry $entry): array => [(string) $entry->ovoko_id => $entry->name ?: (string) $entry->ovoko_id])
             ->all();
     }
 
-    /**
-     * @return array<string, string>
-     */
-    private static function createFormDrivetrainOptions(): array
+    private static function ovokoDictionaryName(string $dictionary, ?string $ovokoId): ?string
     {
-        return [
-            'Przód' => 'Przód',
-            'Tył' => 'Tył',
-            'AWD' => 'AWD',
-        ];
-    }
+        if (blank($ovokoId)) {
+            return null;
+        }
 
-    /**
-     * @return array<string, string>
-     */
-    private static function createFormBodyTypeOptions(): array
-    {
-        return [
-            'Sedan' => 'Sedan',
-            'Hatchback' => 'Hatchback',
-            'Kombi' => 'Kombi',
-            'Minivan' => 'Minivan',
-            'SUV' => 'SUV',
-            'Coupe' => 'Coupe',
-            'Dostawczy' => 'Dostawczy',
-            'Kabriolet' => 'Kabriolet',
-            'Roadster' => 'Roadster',
-            'Limuzyna' => 'Limuzyna',
-            'Pickup' => 'Pickup',
-        ];
+        return OvokoCarDictionaryEntry::query()
+            ->where('dictionary', $dictionary)
+            ->where('ovoko_id', (string) $ovokoId)
+            ->value('name');
     }
 
     /**
