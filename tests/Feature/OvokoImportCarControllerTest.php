@@ -40,6 +40,10 @@ class OvokoImportCarControllerTest extends TestCase
             ->assertJsonPath('request_payload_without_auth.car_years', 2007)
             ->assertJsonPath('request_payload_without_auth.status', '1')
             ->assertJsonPath('request_payload_without_auth.external_id', 'gps-car-'.$car->id)
+            ->assertJsonPath('request_payload_without_auth.car_fuel', '2')
+            ->assertJsonPath('request_payload_without_auth.car_engine_code', 'N47')
+            ->assertJsonPath('request_payload_without_auth.vin', 'WBA12345678901234')
+            ->assertJsonPath('request_payload_without_auth.mileage', 123456)
             ->assertJsonPath('marker', 'ovoko_import_car_admin_tool_v1');
 
         Http::assertSentCount(1);
@@ -52,12 +56,21 @@ class OvokoImportCarControllerTest extends TestCase
             && (int) $request['car_years'] === 2007
             && $request['status'] === '1'
             && $request['external_id'] === 'gps-car-'.$car->id
+            && $request['car_fuel'] === '2'
+            && $request['car_engine_code'] === 'N47'
+            && $request['vin'] === 'WBA12345678901234'
+            && (int) $request['mileage'] === 123456
+            && ! isset($request['gearbox'])
+            && ! isset($request['body_type'])
+            && ! isset($request['wheel_drive'])
             && ! isset($request['part_id']));
 
         $car->refresh();
         $this->assertSame('RRR-499', data_get($car->legacy_payload, 'ovoko_car_id'));
         $this->assertSame('2600', data_get($car->legacy_payload, 'import_car_request_payload.car_model'));
         $this->assertSame('1', data_get($car->legacy_payload, 'import_car_request_payload.status'));
+        $this->assertSame('2', data_get($car->legacy_payload, 'import_car_request_payload.car_fuel'));
+        $this->assertSame('N47', data_get($car->legacy_payload, 'import_car_request_payload.car_engine_code'));
         $this->assertSame('R200', data_get($car->legacy_payload, 'status_code'));
     }
 
@@ -101,11 +114,19 @@ class OvokoImportCarControllerTest extends TestCase
             'model' => 'Series 5',
             'production_year' => 2007,
             'status' => 'kupiony',
+            'fuel_type' => 'Diesel',
+            'engine_code' => 'N47',
+            'vin' => 'WBA12345678901234',
+            'mileage_km' => 123456,
             'legacy_payload' => array_merge([
                 'ovoko_brand_id' => '1',
                 'ovoko_model_group_label' => 'Series 5',
                 'ovoko_car_model_id' => '2600',
                 'ovoko_status_id' => '1',
+                'ovoko_fuel_id' => '2',
+                'ovoko_gearbox_type_id' => '1',
+                'ovoko_body_type_id' => '4',
+                'ovoko_wheel_drive_id' => '1',
             ], $legacyOverrides),
         ]);
     }
