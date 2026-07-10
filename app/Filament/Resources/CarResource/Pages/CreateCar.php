@@ -25,6 +25,17 @@ class CreateCar extends CreateRecord
         return parent::getCreateFormAction()->label('Zapisz samochód');
     }
 
+    /**
+     * @return array<\Filament\Actions\Action>
+     */
+    protected function getFormActions(): array
+    {
+        return [
+            $this->getCreateFormAction(),
+            $this->getCancelFormAction(),
+        ];
+    }
+
     protected function getCreatedNotificationTitle(): ?string
     {
         return 'Samochód został dodany';
