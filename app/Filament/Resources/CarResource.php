@@ -43,15 +43,17 @@ class CarResource extends Resource
     public static function form(Form $form): Form
     {
         return $form
+            ->columns(1)
+            ->extraAttributes(['class' => 'gps-car-form'])
             ->schema([
                 Section::make('Informacje o samochodzie')
                     ->icon('heroicon-o-truck')
-                    ->extraAttributes(['class' => 'gps-car-form-section'])
-                    ->columns(4)
+                    ->extraAttributes(['class' => 'gps-car-form-section gps-car-form-section--vehicle'])
+                    ->columns(['default' => 1, 'md' => 2, 'xl' => 3])
                     ->schema([
                         Forms\Components\Placeholder::make('ovoko_local_only_notice')
                             ->label('Ovoko')
-                            ->content('To auto zostanie zapisane lokalnie. Utworzenie samochodu w Ovoko nie jest jeszcze wykonywane.')
+                            ->content('Samochód zostanie zapisany lokalnie. Utworzenie w Ovoko wykonujemy osobnym krokiem.')
                             ->columnSpanFull(),
                         Forms\Components\Select::make('legacy_payload.ovoko_brand_id')
                             ->label('Marka')
@@ -71,8 +73,7 @@ class CarResource extends Resource
                                 $set('legacy_payload.ovoko_model_group_label', null);
                                 $set('legacy_payload.ovoko_car_model_id', null);
                             })
-                            ->live()
-                            ->helperText('Wybór z lokalnego cache Ovoko brands; zapisuje ovoko_brand_id.'),
+                            ->live(),
                         Forms\Components\Hidden::make('make'),
                         Forms\Components\Select::make('legacy_payload.ovoko_model_group_label')
                             ->label('Model samochodu')
@@ -85,8 +86,7 @@ class CarResource extends Resource
                                 $set('legacy_payload.ovoko_car_model_id', null);
                             })
                             ->live()
-                            ->disabled(static fn (Get $get): bool => blank($get('legacy_payload.ovoko_brand_id')))
-                            ->helperText('Lokalna grupa/filtrowanie z cache models, bez osobnego ID Ovoko.'),
+                            ->disabled(static fn (Get $get): bool => blank($get('legacy_payload.ovoko_brand_id'))),
                         Forms\Components\Hidden::make('model'),
                         Forms\Components\Select::make('legacy_payload.ovoko_car_model_id')
                             ->label('Modyfikacja modelu samochodu')
@@ -98,8 +98,7 @@ class CarResource extends Resource
                                 $set('model_variant', $modification ? app(OvokoCarDictionaryService::class)->modelGroupSampleModification($modification)['display_name'] : null);
                             })
                             ->live()
-                            ->disabled(static fn (Get $get): bool => blank($get('legacy_payload.ovoko_brand_id')) || blank($get('legacy_payload.ovoko_model_group_label')))
-                            ->helperText(static fn (Get $get): string => filled($get('legacy_payload.ovoko_car_model_id')) ? 'Ovoko model ID: '.$get('legacy_payload.ovoko_car_model_id') : 'Wybór zapisuje realne ovoko_car_model_id dla przyszłego importCar.'),
+                            ->disabled(static fn (Get $get): bool => blank($get('legacy_payload.ovoko_brand_id')) || blank($get('legacy_payload.ovoko_model_group_label'))),
                         Forms\Components\Hidden::make('model_variant'),
                         Forms\Components\TextInput::make('production_year')
                             ->label('Rok produkcji samochodu')
@@ -160,7 +159,7 @@ class CarResource extends Resource
                         Forms\Components\TextInput::make('interior')
                             ->label('Wnętrze')
                             ->maxLength(255),
-                        Grid::make(2)
+                        Grid::make(['default' => 1, 'md' => 2])
                             ->schema([
                                 Forms\Components\TextInput::make('purchase_price')
                                     ->label('Cena samochodu')
@@ -183,7 +182,7 @@ class CarResource extends Resource
                             ->preload()
                             ->native(false)
                             ->options(static fn (): array => self::ovokoCarStatusOptions())
-                            ->helperText('Wybór zapisuje techniczne legacy_payload.ovoko_status_id dla przyszłego importCar.'),
+                            ->helperText('Wymagany do utworzenia samochodu w Ovoko.'),
                         Forms\Components\DatePicker::make('purchase_date')
                             ->label('Data zakupu')
                             ->native(false),
@@ -198,8 +197,8 @@ class CarResource extends Resource
 
                 Section::make('Dane sprzedawcy i zakupu')
                     ->icon('heroicon-o-clipboard-document-list')
-                    ->extraAttributes(['class' => 'gps-car-form-section'])
-                    ->columns(3)
+                    ->extraAttributes(['class' => 'gps-car-form-section gps-car-form-section--seller'])
+                    ->columns(['default' => 1, 'md' => 2, 'xl' => 3])
                     ->schema([
                         Forms\Components\TextInput::make('seller_name')
                             ->label('Imię i nazwisko / nazwa firmy sprzedawcy')
