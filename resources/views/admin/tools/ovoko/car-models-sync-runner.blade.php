@@ -77,7 +77,7 @@
         </div>
     </div>
 
-    {{-- ovoko_car_models_sync_runner_browser_autorun_v4 --}}
+    {{-- ovoko_car_models_sync_runner_500_recovery_v6 --}}
     <div id="browserAutoRunCard" class="card autorun-off">
         <h2>Browser fallback auto-runner</h2>
         <label class="inline-check">
@@ -93,6 +93,7 @@
         </div>
     </div>
 
+    <div id="runnerJsError" class="card warn hidden"><h2>Błąd panelu</h2><p id="runnerJsErrorText"></p></div>
     <div class="card"><h2>Ostatni batch</h2><div id="lastBatch"></div></div>
     <div class="card"><h2>Lista błędów</h2><div id="errors"></div></div>
     <div class="card"><h2>Przydatne adresy</h2><p>Status JSON: <a class="mono" href="{{ route('admin.tools.ovoko.car-models-sync-runner.status', ['json' => 1]) }}">{{ route('admin.tools.ovoko.car-models-sync-runner.status', ['json' => 1]) }}</a></p></div>
@@ -111,6 +112,7 @@ let autoRunInFlight = false;
 let latestStatus = @json($status);
 let nextAutoRunAt = null;
 let lastAutoRunResult = '—';
+let consecutiveAutoRunErrors = 0;
 
 function esc(v){return String(v ?? '—').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c]));}
 function asInt(v){const n = Number(v || 0); return Number.isFinite(n) ? Math.trunc(n) : 0;}
@@ -118,6 +120,10 @@ function delayMs(data){return Math.max(5, asInt(data?.delay_seconds || 10)) * 10
 function canAutoRun(data){return runnableStatuses.includes(data?.status || 'idle') && asInt(data?.remaining_brand_count) > 0;}
 function autoRunChecked(){return document.getElementById('browserAutoRunEnabled')?.checked === true;}
 function formatTime(date){return date ? date.toLocaleTimeString() : '—';}
+function asArray(value){return Array.isArray(value) ? value : (value && typeof value === 'object' ? Object.values(value) : []);}
+function asObject(value){return value && typeof value === 'object' && !Array.isArray(value) ? value : {};}
+function showPanelError(message){const box=document.getElementById('runnerJsError'); const text=document.getElementById('runnerJsErrorText'); if(box&&text){text.textContent=message; box.classList.remove('hidden');}}
+function clearPanelError(){document.getElementById('runnerJsError')?.classList.add('hidden');}
 
 function updateAutoRunPanel(message = null){
     const card = document.getElementById('browserAutoRunCard');
@@ -174,18 +180,25 @@ async function runNextBatchAutomatically(){
             body
         });
         const result = await res.json().catch(() => ({}));
-        lastAutoRunResult = res.ok && result.ok ? `OK, remaining=${result.remaining_brand_count ?? '—'}` : `Błąd: ${result.reason || res.status}`;
+        lastAutoRunResult = res.ok && result.ok ? `OK, remaining=${result.remaining_brand_count ?? '—'}` : `Błąd: ${result.reason || result.error || res.status}`;
         if (!res.ok || !result.ok) {
+            consecutiveAutoRunErrors += 1;
             autoRunInFlight = false;
+            showPanelError(`Run next batch nie powiódł się (${consecutiveAutoRunErrors}/3): ${result.reason || result.error || res.status}`);
             await refresh(false);
-            return stopAutoRun('zatrzymany — błąd batcha');
+            if (consecutiveAutoRunErrors >= 3) return stopAutoRun('zatrzymany — 3 kolejne błędy batcha');
+            return scheduleAutoRun(latestStatus);
         }
+        consecutiveAutoRunErrors = 0;
+        clearPanelError();
         autoRunInFlight = false;
         await refresh(false);
     } catch (e) {
         lastAutoRunResult = `Błąd: ${e?.message || e}`;
+        consecutiveAutoRunErrors += 1;
+        showPanelError(`Request auto-run nie powiódł się (${consecutiveAutoRunErrors}/3): ${e?.message || e}`);
         autoRunInFlight = false;
-        stopAutoRun('zatrzymany — błąd requestu');
+        if (consecutiveAutoRunErrors >= 3) stopAutoRun('zatrzymany — 3 kolejne błędy requestu'); else scheduleAutoRun(latestStatus);
     }
 }
 
@@ -199,9 +212,10 @@ function render(data){
     document.getElementById('progressText').textContent = `${processed} / ${total} marek (${pct}%), remaining=${remaining}`;
     const keys = ['batch_size','delay_seconds','only_missing','total_brand_count','processed_brand_count','remaining_brand_count','brands_with_models','brands_without_models','synced_models_count','failed_brand_count','started_at','updated_at','completed_at'];
     document.getElementById('statusGrid').innerHTML = keys.map(k => `<div class="metric"><span>${k}</span><b>${esc(data[k])}</b></div>`).join('');
-    const brands = (((data.last_batch || {}).brands) || []);
+    const lastBatch = asObject(data.last_batch);
+    const brands = asArray(lastBatch.brands);
     document.getElementById('lastBatch').innerHTML = brands.length ? `<table><thead><tr><th>brand_id</th><th>brand_name</th><th>status</th><th>synced models</th><th>error</th></tr></thead><tbody>${brands.map(b => `<tr><td class="mono">${esc(b.brand_id)}</td><td>${esc(b.brand_name)}</td><td>${esc(b.status)}</td><td>${esc(b.models_count)}</td><td>${esc(b.error)}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">Brak ostatniego batcha.</p>';
-    const errors = data.errors || [];
+    const errors = asArray(data.errors);
     document.getElementById('errors').innerHTML = errors.length ? `<table><thead><tr><th>brand_id</th><th>brand_name</th><th>error</th></tr></thead><tbody>${errors.map(e => `<tr><td class="mono">${esc(e.brand_id)}</td><td>${esc(e.brand_name)}</td><td>${esc(e.error)}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">Brak błędów.</p>';
     document.getElementById('rawStatus').textContent = JSON.stringify(data, null, 2);
     document.getElementById('runNextForm').classList.toggle('hidden', !runnableStatuses.includes(status));
@@ -214,9 +228,10 @@ async function refresh(keepAutoSchedule = true){
     try{
         const res = await fetch(statusUrl, {headers:{Accept:'application/json'}, credentials:'same-origin'});
         const data = await res.json();
+        clearPanelError();
         if (!keepAutoSchedule) { clearTimeout(autoRunTimer); autoRunTimer = null; }
         render(data);
-    }catch(e){clearTimeout(refreshTimer); stopAutoRun('zatrzymany — błąd statusu');}
+    }catch(e){clearTimeout(refreshTimer); showPanelError(`Nie udało się odświeżyć statusu: ${e?.message || e}`); stopAutoRun('zatrzymany — błąd statusu');}
 }
 
 document.getElementById('browserAutoRunEnabled').addEventListener('change', () => {

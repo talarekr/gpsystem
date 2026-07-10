@@ -7,13 +7,29 @@ use App\Services\Marketplace\Ovoko\OvokoCarModelSyncRunnerService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\View\View;
 
 class OvokoCarModelsSyncRunnerController extends Controller
 {
     public function index(OvokoCarModelSyncRunnerService $service): View
     {
-        $status = $service->status();
+        try {
+            $status = $service->status();
+        } catch (\Throwable $e) {
+            Log::error('Ovoko car models sync runner status render failed defensively.', [
+                'marker' => OvokoCarModelSyncRunnerService::RECOVERY_MARKER,
+                'error' => $e->getMessage(),
+            ]);
+            $status = [
+                'ok' => false,
+                'marker' => OvokoCarModelSyncRunnerService::MARKER,
+                'status' => 'failed',
+                'run_id' => null,
+                'errors' => [['error' => $e->getMessage(), 'runner_error' => true]],
+                'last_batch' => [],
+            ];
+        }
 
         return view('admin.tools.ovoko.car-models-sync-runner', [
             'status' => $status,
@@ -36,7 +52,23 @@ class OvokoCarModelsSyncRunnerController extends Controller
 
     public function status(OvokoCarModelSyncRunnerService $service): JsonResponse
     {
-        return response()->json($service->status());
+        try {
+            return response()->json($service->status());
+        } catch (\Throwable $e) {
+            Log::error('Ovoko car models sync runner status JSON failed defensively.', [
+                'marker' => OvokoCarModelSyncRunnerService::RECOVERY_MARKER,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'ok' => false,
+                'marker' => OvokoCarModelSyncRunnerService::MARKER,
+                'status' => 'failed',
+                'reason' => 'status_failed_defensively',
+                'errors' => [['error' => $e->getMessage(), 'runner_error' => true]],
+                'last_batch' => [],
+            ], 200);
+        }
     }
 
     public function stop(Request $request, OvokoCarModelSyncRunnerService $service): JsonResponse|RedirectResponse
@@ -58,7 +90,16 @@ class OvokoCarModelsSyncRunnerController extends Controller
             $result = ['ok' => false, 'blocked' => true, 'reason' => 'missing_confirm_token'];
         } else {
             $runId = (int) $request->input('run_id');
-            $result = $service->runNextBatch($runId);
+            try {
+                $result = $service->runNextBatch($runId);
+            } catch (\Throwable $e) {
+                Log::error('Ovoko car models sync runner run-next-batch failed defensively.', [
+                    'marker' => OvokoCarModelSyncRunnerService::RECOVERY_MARKER,
+                    'run_id' => $runId,
+                    'error' => $e->getMessage(),
+                ]);
+                $result = ['ok' => false, 'marker' => OvokoCarModelSyncRunnerService::MARKER, 'reason' => 'batch_failed_defensively', 'error' => $e->getMessage()];
+            }
         }
 
         if ($request->expectsJson()) {
