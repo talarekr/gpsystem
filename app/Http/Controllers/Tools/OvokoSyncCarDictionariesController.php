@@ -15,6 +15,17 @@ class OvokoSyncCarDictionariesController extends Controller
             return response()->json(['ok' => false, 'blocked' => true, 'reason' => 'missing_confirm_token', 'expected_confirm' => OvokoCarDictionaryService::CONFIRM], 422);
         }
 
-        return response()->json(['ok' => true] + $service->sync((string) $request->input('scope', 'all'), $request->filled('brand_id') ? (string) $request->input('brand_id') : null));
+        $scope = (string) $request->input('scope', 'all');
+        if ($scope === 'models' && ! $request->filled('brand_id')) {
+            return response()->json([
+                'ok' => false,
+                'blocked' => true,
+                'reason' => 'models_full_sync_requires_runner',
+                'message' => 'Pełny sync modeli Ovoko uruchom przez /admin/tools/ovoko/car-models-sync-runner/start.',
+                'runner_endpoint' => '/admin/tools/ovoko/car-models-sync-runner/start',
+            ], 422);
+        }
+
+        return response()->json(['ok' => true] + $service->sync($scope, $request->filled('brand_id') ? (string) $request->input('brand_id') : null));
     }
 }

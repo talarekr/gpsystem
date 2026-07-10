@@ -61,6 +61,7 @@ use App\Http\Controllers\Tools\OvokoLocalCarReadinessController;
 use App\Http\Controllers\Tools\OvokoSetCarStatusMappingController;
 use App\Http\Controllers\Tools\OvokoImportCarController;
 use App\Http\Controllers\Tools\OvokoSyncCarDictionariesController;
+use App\Http\Controllers\Tools\OvokoCarModelsSyncRunnerController;
 use App\Http\Controllers\Tools\OvokoCrossChannelDiagnoseController;
 use App\Http\Controllers\Tools\OvokoOrderItemPartBackfillController;
 use App\Http\Controllers\Tools\MarketplaceListingUrlBackfillController;
@@ -359,6 +360,10 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/marketplace/mapping-gaps-export', MarketplaceMappingGapsExportController::class)->name('admin.tools.marketplace.mapping-gaps-export');
     Route::get('/admin/tools/ovoko/car-dictionaries-diagnose', OvokoCarDictionariesDiagnoseController::class)->name('admin.tools.ovoko.car-dictionaries-diagnose');
     Route::post('/admin/tools/ovoko/sync-car-dictionaries', OvokoSyncCarDictionariesController::class)->name('admin.tools.ovoko.sync-car-dictionaries');
+    Route::post('/admin/tools/ovoko/car-models-sync-runner/start', [OvokoCarModelsSyncRunnerController::class, 'start'])->name('admin.tools.ovoko.car-models-sync-runner.start');
+    Route::get('/admin/tools/ovoko/car-models-sync-runner/status', [OvokoCarModelsSyncRunnerController::class, 'status'])->name('admin.tools.ovoko.car-models-sync-runner.status');
+    Route::post('/admin/tools/ovoko/car-models-sync-runner/stop', [OvokoCarModelsSyncRunnerController::class, 'stop'])->name('admin.tools.ovoko.car-models-sync-runner.stop');
+    Route::post('/admin/tools/ovoko/car-models-sync-runner/run-next-batch', [OvokoCarModelsSyncRunnerController::class, 'runNextBatch'])->name('admin.tools.ovoko.car-models-sync-runner.run-next-batch');
     Route::options('/admin/tools/ovoko/sync-car-dictionaries', static fn () => response()->noContent()->withHeaders(['Allow' => 'POST, OPTIONS']))
         ->name('admin.tools.ovoko.sync-car-dictionaries.options');
     Route::get('/admin/tools/ovoko/local-car-ovoko-readiness', OvokoLocalCarReadinessController::class)->name('admin.tools.ovoko.local-car-ovoko-readiness');
