@@ -120,6 +120,103 @@ class OvokoLocalCarReadinessControllerTest extends TestCase
             ->assertJsonFragment(['ovoko_status_id']);
     }
 
+
+    public function test_set_car_status_mapping_updates_only_one_car_legacy_payload_status_mapping(): void
+    {
+        $this->actingAsAdminUser();
+
+        OvokoCarDictionaryEntry::query()->create([
+            'dictionary' => 'models',
+            'ovoko_id' => '1391',
+            'ovoko_brand_id' => '1',
+            'name' => 'Model 1391',
+            'synced_at' => now(),
+        ]);
+
+        OvokoCarDictionaryEntry::query()->create([
+            'dictionary' => 'car_status',
+            'ovoko_id' => '1',
+            'name' => 'Kupiony',
+            'synced_at' => now(),
+        ]);
+
+        $car = Car::query()->create([
+            'make' => 'Test',
+            'model' => 'Car',
+            'production_year' => 2007,
+            'status' => 'kupiony',
+            'legacy_payload' => [
+                'ovoko_brand_id' => '1',
+                'ovoko_car_model_id' => '1391',
+                'untouched_key' => 'untouched-value',
+            ],
+        ]);
+
+        $otherCar = Car::query()->create([
+            'make' => 'Other',
+            'model' => 'Car',
+            'status' => 'kupiony',
+            'legacy_payload' => ['untouched_key' => 'other-value'],
+        ]);
+
+        Http::fake(function (): void {
+            $this->fail('Set-status mapping must not call Ovoko importCar, importPart, or any external HTTP endpoint.');
+        });
+
+        $this->postJson('/admin/tools/ovoko/cars/set-status-mapping', [
+            'car_id' => $car->id,
+            'ovoko_status_id' => '1',
+            'confirm' => 'set-ovoko-car-status',
+        ])
+            ->assertOk()
+            ->assertJsonPath('marker', 'ovoko_car_status_mapping_readiness_v1')
+            ->assertJsonPath('local_car_id', $car->id)
+            ->assertJsonPath('ovoko_status_id', '1')
+            ->assertJsonPath('readiness.ovoko_status_id', '1')
+            ->assertJsonPath('readiness.ovoko_status_id_exists_in_cache', true)
+            ->assertJsonPath('readiness.missing_fields_for_future_import_car', [])
+            ->assertJsonPath('readiness.ready_for_future_import_car', true)
+            ->assertJsonPath('readiness.planned_import_car_payload.status', '1')
+            ->assertJsonPath('safety_flags.no_import_car', true)
+            ->assertJsonPath('safety_flags.no_import_part', true)
+            ->assertJsonPath('safety_flags.no_parts_mutation', true)
+            ->assertJsonPath('safety_flags.no_bulk_update', true);
+
+        $this->assertSame([
+            'ovoko_brand_id' => '1',
+            'ovoko_car_model_id' => '1391',
+            'untouched_key' => 'untouched-value',
+            'ovoko_status_id' => '1',
+        ], $car->fresh()->legacy_payload);
+        $this->assertSame(['untouched_key' => 'other-value'], $otherCar->fresh()->legacy_payload);
+    }
+
+    public function test_set_car_status_mapping_requires_confirm_and_cached_status(): void
+    {
+        $this->actingAsAdminUser();
+
+        $car = Car::query()->create([
+            'make' => 'Test',
+            'model' => 'Car',
+            'status' => 'kupiony',
+            'legacy_payload' => [],
+        ]);
+
+        $this->postJson('/admin/tools/ovoko/cars/set-status-mapping', [
+            'car_id' => $car->id,
+            'ovoko_status_id' => '1',
+            'confirm' => 'wrong-confirm',
+        ])->assertUnprocessable()->assertJsonValidationErrors(['confirm']);
+
+        $this->postJson('/admin/tools/ovoko/cars/set-status-mapping', [
+            'car_id' => $car->id,
+            'ovoko_status_id' => '1',
+            'confirm' => 'set-ovoko-car-status',
+        ])->assertUnprocessable()->assertJsonValidationErrors(['ovoko_status_id']);
+
+        $this->assertSame([], $car->fresh()->legacy_payload);
+    }
+
     private function actingAsAdminUser(): User
     {
         $this->seed(RoleSeeder::class);
