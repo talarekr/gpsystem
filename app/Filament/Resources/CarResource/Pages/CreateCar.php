@@ -20,6 +20,11 @@ class CreateCar extends CreateRecord
         return CarResource::normalizeOvokoLocalMappingData($data);
     }
 
+    protected function getCreateFormAction(): \Filament\Actions\Action
+    {
+        return parent::getCreateFormAction()->label('Zapisz samochód');
+    }
+
     protected function getCreatedNotificationTitle(): ?string
     {
         return 'Samochód został dodany';

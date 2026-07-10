@@ -2660,3 +2660,112 @@ body:has(.gps-admin-topbar) .fi-no {
         min-height: 9rem !important;
     }
 }
+
+/* car_create_form_admin_ui_align_v1 */
+.gps-car-form {
+    max-width: 1180px;
+    margin-inline: auto;
+}
+
+.gps-car-form .gps-car-form-section.fi-section {
+    overflow: hidden;
+    border-color: #e5e7eb !important;
+    border-radius: 1rem !important;
+    background: #fff;
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.055);
+}
+
+.gps-car-form .gps-car-form-section.fi-section + .gps-car-form-section.fi-section {
+    margin-top: 1rem;
+}
+
+.gps-car-form .gps-car-form-section.fi-section .fi-section-header {
+    min-height: 3.25rem;
+    border-bottom-color: #e5e7eb !important;
+    background: #fff;
+    padding-block: 0.85rem;
+}
+
+.gps-car-form .gps-car-form-section.fi-section .fi-section-header-heading {
+    color: #0f172a;
+    font-size: 0.98rem;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+}
+
+.gps-car-form .gps-car-form-section.fi-section .fi-section-content {
+    padding: 1rem;
+}
+
+.gps-car-form .gps-car-form-section.fi-section .fi-fo-component-ctn,
+.gps-car-form .gps-car-form-section.fi-section .grid {
+    gap: 0.9rem 1rem;
+}
+
+.gps-car-form .fi-fo-field-wrp {
+    gap: 0.35rem;
+}
+
+.gps-car-form .fi-fo-field-wrp-label span,
+.gps-car-form .fi-fo-field-wrp-label label,
+.gps-car-form .fi-fo-placeholder .fi-fo-field-wrp-label span {
+    color: #64748b;
+    font-size: 0.78rem;
+    font-weight: 750;
+    letter-spacing: 0.01em;
+}
+
+.gps-car-form .fi-input-wrp,
+.gps-car-form .fi-select-input,
+.gps-car-form .fi-textarea,
+.gps-car-form .choices__inner {
+    min-height: 2.5rem;
+    border-color: #d1d5db !important;
+    border-radius: 0.7rem !important;
+    background: #fff;
+}
+
+.gps-car-form .fi-input,
+.gps-car-form .fi-select-input,
+.gps-car-form .fi-textarea,
+.gps-car-form .choices__item,
+.gps-car-form .choices__item--selectable {
+    color: #0f172a;
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+.gps-car-form .fi-fo-field-wrp-helper-text,
+.gps-car-form .fi-fo-placeholder .fi-fo-placeholder-content {
+    color: #64748b;
+    font-size: 0.78rem;
+    line-height: 1.35;
+}
+
+.gps-car-form .fi-fo-placeholder:has([wire\:key*="ovoko_local_only_notice"]),
+.gps-car-form [wire\:key*="ovoko_local_only_notice"] {
+    border: 1px solid #dbeafe;
+    border-radius: 0.8rem;
+    background: #eff6ff;
+    padding: 0.75rem 0.85rem;
+}
+
+.gps-car-form .fi-toggle {
+    align-self: center;
+}
+
+.gps-car-form .fi-textarea {
+    min-height: 6rem;
+}
+
+@media (max-width: 1280px) {
+    .gps-car-form {
+        max-width: 100%;
+    }
+}
+
+@media (max-width: 768px) {
+    .gps-car-form .gps-car-form-section.fi-section .fi-section-content {
+        padding: 0.85rem;
+    }
+}
