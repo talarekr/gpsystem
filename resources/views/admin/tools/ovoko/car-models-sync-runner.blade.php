@@ -6,7 +6,7 @@
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>Ovoko car models sync runner</title>
     <style>
-        body{font-family:Inter,ui-sans-serif,system-ui,Arial,sans-serif;background:#f8fafc;color:#0f172a;margin:0;padding:24px}.wrap{max-width:1180px;margin:auto}.card{background:white;border:1px solid #e2e8f0;border-radius:14px;padding:18px;margin:0 0 16px;box-shadow:0 1px 2px #0000000d}.safe{border-color:#10b981;background:#ecfdf5}.warn{border-color:#f59e0b;background:#fffbeb}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:end}.stack{display:flex;flex-direction:column;gap:10px}.btn{border:0;border-radius:10px;padding:10px 14px;font-weight:700;cursor:pointer;text-decoration:none;display:inline-block}.primary{background:#2563eb;color:white}.secondary{background:#e2e8f0;color:#0f172a}.danger{background:#dc2626;color:white}.debug{background:#7c3aed;color:white}.muted{color:#64748b}.helper{color:#475569;font-size:13px;max-width:760px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}.metric{background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:12px}.metric span{display:block;font-size:12px;color:#64748b}.metric b{display:block;font-size:20px;margin-top:4px}.badge{display:inline-block;border-radius:999px;padding:4px 10px;background:#e2e8f0;font-weight:800}.running,.queued{background:#dbeafe}.completed{background:#dcfce7}.failed,.stopped{background:#fee2e2}.bar{height:22px;background:#e2e8f0;border-radius:999px;overflow:hidden}.bar span{display:block;height:100%;width:0;background:#22c55e;transition:width .25s}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}label{display:flex;flex-direction:column;gap:4px;font-size:13px;font-weight:700}.checkbox-label{align-items:flex-start;gap:6px}input[type=number]{border:1px solid #cbd5e1;border-radius:9px;padding:9px;min-width:120px}table{width:100%;border-collapse:collapse}td,th{border-bottom:1px solid #e2e8f0;text-align:left;padding:8px;font-size:13px;vertical-align:top}pre{white-space:pre-wrap;word-break:break-word;background:#0f172a;color:#e2e8f0;border-radius:12px;padding:12px;max-height:360px;overflow:auto}.hidden{display:none}
+        body{font-family:Inter,ui-sans-serif,system-ui,Arial,sans-serif;background:#f8fafc;color:#0f172a;margin:0;padding:24px}.wrap{max-width:1180px;margin:auto}.card{background:white;border:1px solid #e2e8f0;border-radius:14px;padding:18px;margin:0 0 16px;box-shadow:0 1px 2px #0000000d}.safe{border-color:#10b981;background:#ecfdf5}.warn{border-color:#f59e0b;background:#fffbeb}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:end}.stack{display:flex;flex-direction:column;gap:10px}.btn{border:0;border-radius:10px;padding:10px 14px;font-weight:700;cursor:pointer;text-decoration:none;display:inline-block}.primary{background:#2563eb;color:white}.secondary{background:#e2e8f0;color:#0f172a}.danger{background:#dc2626;color:white}.debug{background:#7c3aed;color:white}.muted{color:#64748b}.helper{color:#475569;font-size:13px;max-width:760px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}.metric{background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:12px}.metric span{display:block;font-size:12px;color:#64748b}.metric b{display:block;font-size:20px;margin-top:4px}.badge{display:inline-block;border-radius:999px;padding:4px 10px;background:#e2e8f0;font-weight:800}.running,.queued{background:#dbeafe}.completed{background:#dcfce7}.failed,.stopped{background:#fee2e2}.bar{height:22px;background:#e2e8f0;border-radius:999px;overflow:hidden}.bar span{display:block;height:100%;width:0;background:#22c55e;transition:width .25s}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}label{display:flex;flex-direction:column;gap:4px;font-size:13px;font-weight:700}.checkbox-label{align-items:flex-start;gap:6px}input[type=number]{border:1px solid #cbd5e1;border-radius:9px;padding:9px;min-width:120px}table{width:100%;border-collapse:collapse}td,th{border-bottom:1px solid #e2e8f0;text-align:left;padding:8px;font-size:13px;vertical-align:top}pre{white-space:pre-wrap;word-break:break-word;background:#0f172a;color:#e2e8f0;border-radius:12px;padding:12px;max-height:360px;overflow:auto}.hidden{display:none}.autorun-on{border-color:#2563eb;background:#eff6ff}.autorun-off{border-color:#cbd5e1;background:#f8fafc}.autorun-stopped{border-color:#f59e0b;background:#fffbeb}.inline-check{display:flex;flex-direction:row;align-items:center;gap:8px;font-size:14px}.status-line{font-weight:800}
     </style>
 </head>
 <body>
@@ -77,6 +77,22 @@
         </div>
     </div>
 
+    {{-- ovoko_car_models_sync_runner_browser_autorun_v4 --}}
+    <div id="browserAutoRunCard" class="card autorun-off">
+        <h2>Browser fallback auto-runner</h2>
+        <label class="inline-check">
+            <input id="browserAutoRunEnabled" type="checkbox" {{ in_array(($status['status'] ?? 'idle'), ['queued', 'running'], true) && (int) ($status['remaining_brand_count'] ?? 0) > 0 ? 'checked' : '' }}>
+            <span>Auto-run w przeglądarce</span>
+        </label>
+        <p class="helper">Jeśli queue worker nie działa, ta strona wywoła kolejny batch co delay_seconds sekund. Zostaw kartę otwartą.</p>
+        <p class="warn helper" style="padding:10px;border-radius:10px"><strong>Karta musi pozostać otwarta.</strong> Auto-run zatrzyma się po zakończeniu, błędzie, odznaczeniu opcji albo gdy nie ma już marek do przetworzenia.</p>
+        <div class="grid">
+            <div class="metric"><span>browser auto-run</span><b id="browserAutoRunState">—</b></div>
+            <div class="metric"><span>następny batch</span><b id="browserAutoRunNextAt">—</b></div>
+            <div class="metric"><span>ostatni wynik batcha</span><b id="browserAutoRunLastResult">—</b></div>
+        </div>
+    </div>
+
     <div class="card"><h2>Ostatni batch</h2><div id="lastBatch"></div></div>
     <div class="card"><h2>Lista błędów</h2><div id="errors"></div></div>
     <div class="card"><h2>Przydatne adresy</h2><p>Status JSON: <a class="mono" href="{{ route('admin.tools.ovoko.car-models-sync-runner.status', ['json' => 1]) }}">{{ route('admin.tools.ovoko.car-models-sync-runner.status', ['json' => 1]) }}</a></p></div>
@@ -84,12 +100,100 @@
 </div>
 <script>
 const statusUrl = @json(route('admin.tools.ovoko.car-models-sync-runner.status', ['json' => 1]));
-let timer = null;
+const runNextBatchUrl = @json(route('admin.tools.ovoko.car-models-sync-runner.run-next-batch'));
+const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+const runNextConfirmToken = 'run-next-batch-ovoko-car-models-sync-runner';
+const terminalStatuses = ['completed', 'stopped', 'failed'];
+const runnableStatuses = ['running', 'queued'];
+let refreshTimer = null;
+let autoRunTimer = null;
+let autoRunInFlight = false;
+let latestStatus = @json($status);
+let nextAutoRunAt = null;
+let lastAutoRunResult = '—';
+
 function esc(v){return String(v ?? '—').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c]));}
+function asInt(v){const n = Number(v || 0); return Number.isFinite(n) ? Math.trunc(n) : 0;}
+function delayMs(data){return Math.max(5, asInt(data?.delay_seconds || 10)) * 1000;}
+function canAutoRun(data){return runnableStatuses.includes(data?.status || 'idle') && asInt(data?.remaining_brand_count) > 0;}
+function autoRunChecked(){return document.getElementById('browserAutoRunEnabled')?.checked === true;}
+function formatTime(date){return date ? date.toLocaleTimeString() : '—';}
+
+function updateAutoRunPanel(message = null){
+    const card = document.getElementById('browserAutoRunCard');
+    const state = document.getElementById('browserAutoRunState');
+    const next = document.getElementById('browserAutoRunNextAt');
+    const last = document.getElementById('browserAutoRunLastResult');
+    const active = autoRunChecked() && canAutoRun(latestStatus) && !autoRunInFlight && !!autoRunTimer;
+    const waiting = autoRunChecked() && canAutoRun(latestStatus) && autoRunInFlight;
+    card.classList.toggle('autorun-on', active || waiting);
+    card.classList.toggle('autorun-off', !active && !waiting && !message);
+    card.classList.toggle('autorun-stopped', !!message && !active && !waiting);
+    state.textContent = message || (waiting ? 'aktywny — batch trwa' : (active ? 'aktywny' : 'nieaktywny'));
+    next.textContent = active ? formatTime(nextAutoRunAt) : '—';
+    last.textContent = lastAutoRunResult;
+}
+
+function stopAutoRun(message = 'zatrzymany'){
+    clearTimeout(autoRunTimer);
+    autoRunTimer = null;
+    nextAutoRunAt = null;
+    updateAutoRunPanel(message);
+}
+
+function scheduleAutoRun(data){
+    if (!autoRunChecked()) return stopAutoRun('wyłączony przez użytkownika');
+    if (!canAutoRun(data)) {
+        clearTimeout(autoRunTimer);
+        autoRunTimer = null;
+        nextAutoRunAt = null;
+        const status = data?.status || 'idle';
+        return updateAutoRunPanel(terminalStatuses.includes(status) || asInt(data?.remaining_brand_count) <= 0 ? 'zatrzymany — koniec pracy' : 'nieaktywny');
+    }
+    if (autoRunInFlight || autoRunTimer) return updateAutoRunPanel();
+    const ms = delayMs(data);
+    nextAutoRunAt = new Date(Date.now() + ms);
+    autoRunTimer = setTimeout(runNextBatchAutomatically, ms);
+    updateAutoRunPanel();
+}
+
+async function runNextBatchAutomatically(){
+    autoRunTimer = null;
+    if (autoRunInFlight || !autoRunChecked() || !canAutoRun(latestStatus)) return scheduleAutoRun(latestStatus);
+    autoRunInFlight = true;
+    nextAutoRunAt = null;
+    updateAutoRunPanel();
+    const body = new URLSearchParams();
+    body.set('confirm', runNextConfirmToken);
+    if (latestStatus.run_id) body.set('run_id', latestStatus.run_id);
+    try {
+        const res = await fetch(runNextBatchUrl, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {'Accept':'application/json', 'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8', 'X-CSRF-TOKEN': csrfToken, 'X-Requested-With':'XMLHttpRequest'},
+            body
+        });
+        const result = await res.json().catch(() => ({}));
+        lastAutoRunResult = res.ok && result.ok ? `OK, remaining=${result.remaining_brand_count ?? '—'}` : `Błąd: ${result.reason || res.status}`;
+        if (!res.ok || !result.ok) {
+            autoRunInFlight = false;
+            await refresh(false);
+            return stopAutoRun('zatrzymany — błąd batcha');
+        }
+        autoRunInFlight = false;
+        await refresh(false);
+    } catch (e) {
+        lastAutoRunResult = `Błąd: ${e?.message || e}`;
+        autoRunInFlight = false;
+        stopAutoRun('zatrzymany — błąd requestu');
+    }
+}
+
 function render(data){
+    latestStatus = data || {};
     const status = data.status || 'idle';
     const badge = document.getElementById('statusBadge'); badge.textContent = status; badge.className = `badge ${status}`;
-    const total = Number(data.total_brand_count || 0), processed = Number(data.processed_brand_count || 0), remaining = Number(data.remaining_brand_count || 0);
+    const total = asInt(data.total_brand_count), processed = asInt(data.processed_brand_count), remaining = asInt(data.remaining_brand_count);
     const pct = total > 0 ? Math.min(100, Math.round(processed * 100 / total)) : (status === 'completed' ? 100 : 0);
     document.getElementById('progressBar').style.width = pct + '%';
     document.getElementById('progressText').textContent = `${processed} / ${total} marek (${pct}%), remaining=${remaining}`;
@@ -100,13 +204,26 @@ function render(data){
     const errors = data.errors || [];
     document.getElementById('errors').innerHTML = errors.length ? `<table><thead><tr><th>brand_id</th><th>brand_name</th><th>error</th></tr></thead><tbody>${errors.map(e => `<tr><td class="mono">${esc(e.brand_id)}</td><td>${esc(e.brand_name)}</td><td>${esc(e.error)}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">Brak błędów.</p>';
     document.getElementById('rawStatus').textContent = JSON.stringify(data, null, 2);
-    document.getElementById('runNextForm').classList.toggle('hidden', !['running','queued'].includes(status));
+    document.getElementById('runNextForm').classList.toggle('hidden', !runnableStatuses.includes(status));
     if (data.run_id) document.getElementById('runIdInput').value = data.run_id;
-    clearTimeout(timer); if (['running','queued'].includes(status)) timer = setTimeout(refresh, 7000);
+    clearTimeout(refreshTimer); if (runnableStatuses.includes(status)) refreshTimer = setTimeout(() => refresh(true), 7000);
+    scheduleAutoRun(data);
 }
-async function refresh(){try{const res = await fetch(statusUrl, {headers:{Accept:'application/json'}}); render(await res.json());}catch(e){clearTimeout(timer);}}
-render(@json($status));
-refresh();
+
+async function refresh(keepAutoSchedule = true){
+    try{
+        const res = await fetch(statusUrl, {headers:{Accept:'application/json'}, credentials:'same-origin'});
+        const data = await res.json();
+        if (!keepAutoSchedule) { clearTimeout(autoRunTimer); autoRunTimer = null; }
+        render(data);
+    }catch(e){clearTimeout(refreshTimer); stopAutoRun('zatrzymany — błąd statusu');}
+}
+
+document.getElementById('browserAutoRunEnabled').addEventListener('change', () => {
+    if (autoRunChecked()) scheduleAutoRun(latestStatus); else stopAutoRun('wyłączony przez użytkownika');
+});
+render(latestStatus);
+refresh(true);
 </script>
 </body>
 </html>
