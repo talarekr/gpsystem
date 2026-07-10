@@ -83,6 +83,58 @@ class EbayListingStatusBatchRunnerTest extends TestCase
         $this->assertSame(2, $calls);
     }
 
+
+    public function test_run_next_batch_respects_delay_and_returns_retry_after_seconds(): void
+    {
+        $this->actingAsAdminUser();
+        $this->account();
+        $this->listing('777777777777');
+        $this->listing('888888888888');
+        $calls = 0;
+        Http::fake(function () use (&$calls) { $calls++; return Http::response(['estimatedAvailabilities' => [['estimatedAvailabilityStatus' => 'IN_STOCK']]], 200); });
+
+        $this->postJson('/admin/tools/ebay/listing-status-sync/start', ['batch_size' => 1, 'delay_seconds' => 10, 'scope' => 'products_with_ebay_item_id', 'dry_run' => true, 'confirm' => 'start-ebay-listing-status-sync'])->assertOk()->assertJsonPath('status', 'running');
+        $this->postJson('/admin/tools/ebay/listing-status-sync/run-next-batch', ['confirm' => 'run-next-ebay-listing-status-sync-batch'])->assertOk()->assertJsonPath('batch_executed', true)->assertJsonPath('remaining', 1);
+        $this->postJson('/admin/tools/ebay/listing-status-sync/run-next-batch', ['confirm' => 'run-next-ebay-listing-status-sync-batch'])
+            ->assertOk()
+            ->assertJsonPath('reason', 'delay_not_elapsed')
+            ->assertJsonPath('batch_executed', false)
+            ->assertJsonPath('should_wait', true)
+            ->assertJsonPath('retry_after_seconds', 10)
+            ->assertJsonPath('completed', false);
+        $this->assertSame(1, $calls);
+    }
+
+    public function test_stopped_runner_does_not_execute_more_batches(): void
+    {
+        $this->actingAsAdminUser();
+        $this->account();
+        $this->listing('999999999999');
+        $calls = 0;
+        Http::fake(function () use (&$calls) { $calls++; return Http::response(['estimatedAvailabilities' => [['estimatedAvailabilityStatus' => 'IN_STOCK']]], 200); });
+
+        $this->postJson('/admin/tools/ebay/listing-status-sync/start', ['batch_size' => 1, 'delay_seconds' => 10, 'scope' => 'products_with_ebay_item_id', 'dry_run' => true, 'confirm' => 'start-ebay-listing-status-sync'])->assertOk();
+        $this->postJson('/admin/tools/ebay/listing-status-sync/stop', ['confirm' => 'stop-ebay-listing-status-sync'])->assertOk()->assertJsonPath('status', 'stopped');
+        $this->postJson('/admin/tools/ebay/listing-status-sync/run-next-batch', ['confirm' => 'run-next-ebay-listing-status-sync-batch'])->assertStatus(422)->assertJsonPath('reason', 'not_running')->assertJsonPath('batch_executed', false);
+        $this->assertSame(0, $calls);
+    }
+
+    public function test_browser_autorun_static_contract_is_present(): void
+    {
+        $this->actingAsAdminUser();
+
+        $this->get('/admin/tools/ebay/listing-status-sync')
+            ->assertOk()
+            ->assertSee('ebay_listing_status_batch_runner_browser_autorun_v2')
+            ->assertSee('requestInFlight')
+            ->assertSee('terminalStatuses')
+            ->assertSee("['completed', 'stopped', 'failed']", false)
+            ->assertSee("initialStatus?.status === 'running'", false)
+            ->assertSee('localStorage')
+            ->assertSee('lockKey')
+            ->assertDontSee('setInterval');
+    }
+
     private function listing(string $itemId, array $overrides = []): MarketplaceListing
     {
         $part = Part::query()->create(['name' => 'Part '.$itemId, 'sku' => 'SKU-'.$itemId, 'quantity' => 1, 'status' => 'ready']);
