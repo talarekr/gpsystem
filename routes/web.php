@@ -73,6 +73,7 @@ use App\Http\Controllers\Tools\EbayListingAuditRunnerController;
 use App\Http\Controllers\Tools\EbayMarketplaceDiagnoseController;
 use App\Http\Controllers\Tools\MarketplaceCategoryTreeImportController;
 use App\Http\Controllers\Tools\EbayListingDryRunController;
+use App\Http\Controllers\Tools\EbayListingStatusDiagnoseController;
 use App\Http\Controllers\Tools\CheckOvokoMappingController;
 use App\Http\Controllers\Tools\DebugOvokoPartMatchController;
 use App\Http\Controllers\Tools\DebugPartCategorySuggestionController;
@@ -351,6 +352,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/ebay/prepare-debug/{partId}', [PartMarketplaceReadinessController::class, 'ebayPrepareDebug'])->name('admin.tools.ebay.prepare-debug');
     Route::match(['get', 'post'], '/admin/tools/ebay/marketplace-diagnose', EbayMarketplaceDiagnoseController::class)->name('admin.tools.ebay.marketplace-diagnose');
     Route::match(['get', 'post'], '/admin/tools/ebay/listing-audit-runner', EbayListingAuditRunnerController::class)->name('admin.tools.ebay.listing-audit-runner');
+    Route::get('/admin/tools/ebay/listing-status-diagnose', EbayListingStatusDiagnoseController::class)->name('admin.tools.ebay.listing-status-diagnose');
     Route::get('/admin/tools/ebay/listing-audit-runner/status', [EbayListingAuditRunnerController::class, 'status'])->name('admin.tools.ebay.listing-audit-runner.status');
     Route::get('/admin/tools/ebay-listing-audit-runner', fn (Request $request) => redirect()->to('/admin/tools/ebay/listing-audit-runner'.($request->getQueryString() ? '?'.$request->getQueryString() : '')))->name('admin.tools.ebay-listing-audit-runner.redirect');
     Route::post('/admin/tools/ebay-listing-audit-runner', EbayListingAuditRunnerController::class)->name('admin.tools.ebay-listing-audit-runner.alias');
