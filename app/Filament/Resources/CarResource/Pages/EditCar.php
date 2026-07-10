@@ -10,7 +10,6 @@ use Filament\Actions;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
 use Illuminate\Http\Request;
-use Illuminate\Support\Arr;
 
 class EditCar extends EditRecord
 {
@@ -18,7 +17,7 @@ class EditCar extends EditRecord
 
     protected static ?string $title = 'Edytuj samochód';
 
-    private const MARKER = 'car_form_actions_send_to_ovoko_v1';
+    private const MODAL_SIMPLIFIED_MARKER = 'car_form_send_to_ovoko_modal_simplified_v2';
 
     /**
      * @param  array<string, mixed>  $data
@@ -60,11 +59,12 @@ class EditCar extends EditRecord
             ->label('Wyślij samochód do Ovoko')
             ->color('warning')
             ->icon('heroicon-o-cloud-arrow-up')
+            ->extraAttributes(['data-marker' => self::MODAL_SIMPLIFIED_MARKER])
             ->visible(fn (): bool => blank(data_get($this->record->legacy_payload, 'ovoko_car_id')))
             ->requiresConfirmation()
             ->modalHeading('Wyślij samochód do Ovoko')
             ->modalSubmitActionLabel('Wyślij samochód do Ovoko')
-            ->modalDescription(fn (OvokoCarDictionaryService $dictionaryService): string => $this->ovokoImportModalDescription($dictionaryService))
+            ->modalCancelActionLabel('Anuluj')
             ->action(function (OvokoCarDictionaryService $dictionaryService, MarketplaceApiManager $apiManager): void {
                 $readiness = $dictionaryService->readiness($this->record->refresh());
 
@@ -115,38 +115,6 @@ class EditCar extends EditRecord
                     ->danger()
                     ->send();
             });
-    }
-
-    private function ovokoImportModalDescription(OvokoCarDictionaryService $dictionaryService): string
-    {
-        $readiness = $dictionaryService->readiness($this->record);
-        $payload = Arr::only((array) ($readiness['planned_import_car_payload'] ?? []), [
-            'car_model',
-            'car_years',
-            'status',
-            'external_id',
-            'car_fuel',
-        ]);
-
-        $lines = [
-            'Wysyłasz zapisany samochód do Ovoko. Operacji nie uruchamiaj, jeśli formularz nie został zapisany.',
-            'Confirm token: '.OvokoImportCarController::CONFIRM,
-            'Marker: '.self::MARKER,
-        ];
-
-        foreach ($payload as $key => $value) {
-            if (filled($value)) {
-                $lines[] = $key.': '.$value;
-            }
-        }
-
-        $missing = (array) ($readiness['missing_fields_for_future_import_car'] ?? []);
-
-        if ($missing !== []) {
-            $lines[] = 'Brakujące pola: '.implode(', ', $missing);
-        }
-
-        return implode("\n", $lines);
     }
 
     /**
