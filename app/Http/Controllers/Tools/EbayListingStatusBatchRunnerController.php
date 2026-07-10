@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Tools;
 
 use App\Http\Controllers\Controller;
 use App\Services\Marketplace\EbayListingStatusBatchRunnerService;
-use App\Services\Marketplace\EbayListingStatusPersistentScanService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -41,7 +40,7 @@ class EbayListingStatusBatchRunnerController extends Controller
             'exception_line' => null,
         ];
 
-        foreach (['index', 'status', 'start', 'run-next-batch', 'stop', 'diagnose', 'retry-transient', 'retry-diagnose', 'ended-results-diagnose', 'apply-confirmed-ended-preview', 'apply-confirmed-ended', 'start-persistent-scan', 'persistent-scan.status', 'persistent-scan.run-next-batch', 'persistent-scan.stop', 'persistent-scan.diagnose', 'persistent-scan.ended-results'] as $suffix) {
+        foreach (['index', 'status', 'start', 'run-next-batch', 'stop', 'diagnose', 'retry-transient', 'retry-diagnose', 'ended-results-diagnose', 'apply-confirmed-ended-preview', 'apply-confirmed-ended'] as $suffix) {
             $name = 'admin.tools.ebay.listing-status-sync.'.$suffix;
             $diagnostics['route_names_exist'][$name] = Route::has($name);
         }
@@ -102,38 +101,7 @@ class EbayListingStatusBatchRunnerController extends Controller
 
     public function applyConfirmedEnded(Request $request, EbayListingStatusBatchRunnerService $service): JsonResponse|RedirectResponse
     {
-        return $this->respond($request, $service->applyConfirmedEnded($request->only(['source', 'scan_run_id', 'expected_count', 'dry_run', 'confirm'])), 'Potwierdzone zakończone aukcje eBay zostały oznaczone lokalnie.');
-    }
-
-
-    public function startPersistentScan(Request $request, EbayListingStatusPersistentScanService $service): JsonResponse|RedirectResponse
-    {
-        return $this->respond($request, $service->start($request->only(['batch_size', 'delay_seconds', 'scope', 'dry_run', 'stop_on_rate_limit', 'max_attempts_per_item', 'persist_full_report', 'confirm'])), 'Persistent eBay dry-run scan został uruchomiony.');
-    }
-
-    public function persistentScanStatus(EbayListingStatusPersistentScanService $service): JsonResponse
-    {
-        return response()->json($service->status());
-    }
-
-    public function persistentScanRunNextBatch(Request $request, EbayListingStatusPersistentScanService $service): JsonResponse|RedirectResponse
-    {
-        return $this->respond($request, $service->runNextBatch($request->only(['confirm'])), 'Persistent scan batch został wykonany.');
-    }
-
-    public function persistentScanStop(Request $request, EbayListingStatusPersistentScanService $service): JsonResponse|RedirectResponse
-    {
-        return $this->respond($request, $service->stop($request->only(['confirm'])), 'Persistent scan został zatrzymany.');
-    }
-
-    public function persistentScanDiagnose(EbayListingStatusPersistentScanService $service): JsonResponse
-    {
-        return response()->json($service->diagnose());
-    }
-
-    public function persistentScanEndedResults(Request $request, EbayListingStatusPersistentScanService $service): JsonResponse
-    {
-        return response()->json($service->endedResults($request->integer('scan_run_id') ?: null));
+        return $this->respond($request, $service->applyConfirmedEnded($request->only(['source', 'expected_count', 'dry_run', 'confirm'])), 'Potwierdzone zakończone aukcje eBay zostały oznaczone lokalnie.');
     }
 
     public function retryTransient(Request $request, EbayListingStatusBatchRunnerService $service): JsonResponse|RedirectResponse
