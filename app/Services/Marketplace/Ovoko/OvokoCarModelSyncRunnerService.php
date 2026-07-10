@@ -28,8 +28,9 @@ class OvokoCarModelSyncRunnerService
             return ['ok' => false, 'marker' => self::MARKER, 'blocked' => true, 'reason' => 'missing_confirm_token', 'expected_confirm' => self::START_CONFIRM];
         }
 
-        if (OvokoCarModelSyncRun::query()->whereIn('status', [OvokoCarModelSyncRun::STATUS_RUNNING, OvokoCarModelSyncRun::STATUS_QUEUED])->exists()) {
-            return ['ok' => false, 'marker' => self::MARKER, 'blocked' => true, 'reason' => 'active_runner_exists'] + $this->status();
+        $activeRun = $this->activeRun();
+        if ($activeRun) {
+            return ['ok' => false, 'marker' => self::MARKER, 'blocked' => true, 'reason' => 'active_runner_exists'] + $this->status($activeRun);
         }
 
         $total = $this->eligibleBrandsQuery($onlyMissing)->count();
@@ -64,7 +65,7 @@ class OvokoCarModelSyncRunnerService
             return ['ok' => false, 'marker' => self::MARKER, 'blocked' => true, 'reason' => 'missing_confirm_token', 'expected_confirm' => self::STOP_CONFIRM];
         }
 
-        $run = $this->latestRun();
+        $run = $this->activeRun() ?? $this->latestRun();
         if ($run && in_array($run->status, [OvokoCarModelSyncRun::STATUS_RUNNING, OvokoCarModelSyncRun::STATUS_QUEUED], true)) {
             $run->update(['status' => OvokoCarModelSyncRun::STATUS_STOPPED, 'completed_at' => now()]);
         }
@@ -74,8 +75,11 @@ class OvokoCarModelSyncRunnerService
 
     public function runNextBatch(int $runId): array
     {
-        $run = OvokoCarModelSyncRun::query()->find($runId);
+        $run = $runId > 0 ? OvokoCarModelSyncRun::query()->find($runId) : null;
         if (! $run || ! in_array($run->status, [OvokoCarModelSyncRun::STATUS_QUEUED, OvokoCarModelSyncRun::STATUS_RUNNING], true)) {
+            $run = $this->activeRun();
+        }
+        if (! $run) {
             return ['ok' => false, 'marker' => self::MARKER, 'reason' => 'runner_not_active'];
         }
 
@@ -171,7 +175,7 @@ class OvokoCarModelSyncRunnerService
 
     public function status(?OvokoCarModelSyncRun $run = null): array
     {
-        $run ??= $this->latestRun();
+        $run ??= $this->activeRun() ?? $this->latestRun();
         if (! $run) {
             return $this->emptyStatus();
         }
@@ -268,6 +272,14 @@ class OvokoCarModelSyncRunnerService
                 'persist_exception_message' => $persistException->getMessage(),
             ]);
         }
+    }
+
+    private function activeRun(): ?OvokoCarModelSyncRun
+    {
+        return OvokoCarModelSyncRun::query()
+            ->whereIn('status', [OvokoCarModelSyncRun::STATUS_QUEUED, OvokoCarModelSyncRun::STATUS_RUNNING])
+            ->latest('id')
+            ->first();
     }
 
     private function latestRun(): ?OvokoCarModelSyncRun
