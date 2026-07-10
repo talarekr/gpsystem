@@ -14,20 +14,21 @@ use Illuminate\Support\Str;
 class OvokoCarDictionaryService
 {
     public const MARKER = 'ovoko_car_dictionaries_cache_diagnostics_v1';
+    public const CAR_STATUS_DIAGNOSTICS_MARKER = 'ovoko_car_status_dictionary_diagnostics_v1';
     public const CONFIRM = 'sync-ovoko-car-dictionaries';
     public const DICTIONARIES = ['brands', 'models', 'fuel', 'gearbox_type', 'body_type', 'wheel', 'wheel_drive', 'car_status', 'car_class'];
     public const ENUMS = ['fuel', 'gearbox_type', 'body_type', 'wheel', 'wheel_drive', 'car_status', 'car_class'];
 
-    public function diagnostics(?string $brandSearch = null, ?string $brandId = null, int $modelsLimit = 5, bool $includeRaw = false, bool $includeModelGroups = false, ?string $modelGroupSearch = null, int $modelGroupsLimit = 5): array
+    public function diagnostics(?string $brandSearch = null, ?string $brandId = null, int $modelsLimit = 5, bool $includeRaw = false, bool $includeModelGroups = false, ?string $modelGroupSearch = null, int $modelGroupsLimit = 5, ?string $dictionary = null): array
     {
         $account = $this->account();
         $credentials = $account?->api_credentials ?? [];
         $counts = [];
         $lastSynced = [];
-        foreach (self::DICTIONARIES as $dictionary) {
-            $query = OvokoCarDictionaryEntry::query()->where('dictionary', $dictionary);
-            $counts[$dictionary] = (clone $query)->count();
-            $lastSynced[$dictionary] = (clone $query)->max('synced_at');
+        foreach (self::DICTIONARIES as $dictionaryName) {
+            $query = OvokoCarDictionaryEntry::query()->where('dictionary', $dictionaryName);
+            $counts[$dictionaryName] = (clone $query)->count();
+            $lastSynced[$dictionaryName] = (clone $query)->max('synced_at');
         }
 
         $sampleBrand = $this->sampleBrand($brandId);
@@ -63,11 +64,15 @@ class OvokoCarDictionaryService
             'brand_search' => $this->brandSearchDiagnostics($brandSearch),
             'model_modification_diagnostics' => $this->modelModificationDiagnostics(),
             'import_car_model_requirements' => $this->importCarModelRequirements(),
-            'safety_flags' => ['read_only_diagnose' => true, 'no_import_car' => true, 'no_import_part' => true, 'no_parts_mutation' => true, 'no_local_cars_mutation' => true],
+            'safety_flags' => ['read_only_diagnose' => true, 'local_cache_only' => true, 'no_ovoko_request' => true, 'no_import_car' => true, 'no_import_part' => true, 'no_cars_mutation' => true, 'no_parts_mutation' => true, 'no_local_cars_mutation' => true],
         ];
 
         if ($includeModelGroups) {
             $diagnostics['model_groups'] = $this->modelGroupsDiagnostics($sampleBrand, $modelGroupsLimit, $modelGroupSearch);
+        }
+
+        if ($includeRaw && trim((string) $dictionary) === 'car_status') {
+            $diagnostics['dictionary_diagnostics'] = $this->dictionaryDiagnostics('car_status');
         }
 
         return $diagnostics;
@@ -150,6 +155,62 @@ class OvokoCarDictionaryService
             'ready_for_future_import_car' => $missing === [],
             'planned_import_car_payload' => $ovokoCarIdSet ? ['already_imported' => true] : $payload,
             'safety_flags' => ['read_only' => true, 'no_import_car' => true, 'no_import_part' => true, 'no_mutation' => true],
+        ];
+    }
+
+
+    private function dictionaryDiagnostics(string $dictionary): array
+    {
+        $entries = OvokoCarDictionaryEntry::query()
+            ->where('dictionary', $dictionary)
+            ->orderBy('ovoko_id')
+            ->get(['ovoko_id', 'name', 'raw_payload', 'synced_at']);
+
+        $fieldsSeen = [];
+        $nameCandidateCounts = [];
+        $nameCandidateFields = ['name', 'title', 'label', 'value_name', 'status', 'status_name', 'car_status', 'car_status_name', 'description'];
+
+        $diagnosticEntries = $entries->map(function (OvokoCarDictionaryEntry $entry) use (&$fieldsSeen, &$nameCandidateCounts, $nameCandidateFields): array {
+            $rawPayload = $entry->raw_payload ?? [];
+
+            if (is_array($rawPayload)) {
+                foreach (array_keys($rawPayload) as $field) {
+                    $fieldsSeen[(string) $field] = true;
+                }
+
+                foreach ($nameCandidateFields as $field) {
+                    if (filled(data_get($rawPayload, $field))) {
+                        $nameCandidateCounts[$field] = ($nameCandidateCounts[$field] ?? 0) + 1;
+                    }
+                }
+            }
+
+            return [
+                'ovoko_id' => (string) $entry->ovoko_id,
+                'name' => $entry->name,
+                'raw_payload' => $rawPayload,
+                'synced_at' => optional($entry->synced_at)->toISOString(),
+            ];
+        })->values()->all();
+
+        $likelyNameField = null;
+        if ($nameCandidateCounts !== []) {
+            arsort($nameCandidateCounts);
+            $likelyNameField = array_key_first($nameCandidateCounts);
+        }
+
+        $fieldsSeen = array_keys($fieldsSeen);
+        sort($fieldsSeen, SORT_NATURAL | SORT_FLAG_CASE);
+
+        return [
+            'marker' => self::CAR_STATUS_DIAGNOSTICS_MARKER,
+            'dictionary' => $dictionary,
+            'count' => $entries->count(),
+            'entries' => $diagnosticEntries,
+            'name_extraction_candidates' => [
+                'fields_seen' => $fieldsSeen,
+                'likely_name_field' => $likelyNameField,
+            ],
         ];
     }
 
