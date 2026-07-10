@@ -122,6 +122,19 @@ function autoRunChecked(){return document.getElementById('browserAutoRunEnabled'
 function formatTime(date){return date ? date.toLocaleTimeString() : '—';}
 function asArray(value){return Array.isArray(value) ? value : (value && typeof value === 'object' ? Object.values(value) : []);}
 function asObject(value){return value && typeof value === 'object' && !Array.isArray(value) ? value : {};}
+function diagnosticMessage(value){
+    const obj = asObject(value);
+    const error = asObject(obj.error);
+    return obj.exception_message || error.exception_message || obj.error || error.error || obj.reason || '';
+}
+function diagnosticMeta(value){
+    const obj = asObject(value);
+    const error = asObject(obj.error);
+    const phase = obj.phase || error.phase || '';
+    const klass = obj.exception_class || error.exception_class || '';
+    const failedAt = obj.failed_at || error.failed_at || '';
+    return [phase ? `phase=${phase}` : '', klass, failedAt].filter(Boolean).join(' | ');
+}
 function showPanelError(message){const box=document.getElementById('runnerJsError'); const text=document.getElementById('runnerJsErrorText'); if(box&&text){text.textContent=message; box.classList.remove('hidden');}}
 function clearPanelError(){document.getElementById('runnerJsError')?.classList.add('hidden');}
 
@@ -180,11 +193,11 @@ async function runNextBatchAutomatically(){
             body
         });
         const result = await res.json().catch(() => ({}));
-        lastAutoRunResult = res.ok && result.ok ? `OK, remaining=${result.remaining_brand_count ?? '—'}` : `Błąd: ${result.reason || result.error || res.status}`;
+        lastAutoRunResult = res.ok && result.ok ? `OK, remaining=${result.remaining_brand_count ?? '—'}` : `Błąd: ${diagnosticMessage(result) || result.reason || res.status}`;
         if (!res.ok || !result.ok) {
             consecutiveAutoRunErrors += 1;
             autoRunInFlight = false;
-            showPanelError(`Run next batch nie powiódł się (${consecutiveAutoRunErrors}/3): ${result.reason || result.error || res.status}`);
+            showPanelError(`Run next batch nie powiódł się (${consecutiveAutoRunErrors}/3): ${diagnosticMessage(result) || result.reason || res.status}`);
             await refresh(false);
             if (consecutiveAutoRunErrors >= 3) return stopAutoRun('zatrzymany — 3 kolejne błędy batcha');
             return scheduleAutoRun(latestStatus);
@@ -214,9 +227,9 @@ function render(data){
     document.getElementById('statusGrid').innerHTML = keys.map(k => `<div class="metric"><span>${k}</span><b>${esc(data[k])}</b></div>`).join('');
     const lastBatch = asObject(data.last_batch);
     const brands = asArray(lastBatch.brands);
-    document.getElementById('lastBatch').innerHTML = brands.length ? `<table><thead><tr><th>brand_id</th><th>brand_name</th><th>status</th><th>synced models</th><th>error</th></tr></thead><tbody>${brands.map(b => `<tr><td class="mono">${esc(b.brand_id)}</td><td>${esc(b.brand_name)}</td><td>${esc(b.status)}</td><td>${esc(b.models_count)}</td><td>${esc(b.error)}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">Brak ostatniego batcha.</p>';
+    document.getElementById('lastBatch').innerHTML = brands.length ? `<table><thead><tr><th>brand_id</th><th>brand_name</th><th>status</th><th>synced models</th><th>error</th><th>diagnostics</th></tr></thead><tbody>${brands.map(b => `<tr><td class="mono">${esc(b.brand_id)}</td><td>${esc(b.brand_name)}</td><td>${esc(b.status)}</td><td>${esc(b.models_count)}</td><td>${esc(diagnosticMessage(b))}</td><td class="mono">${esc(diagnosticMeta(b))}</td></tr>`).join('')}</tbody></table>` : (lastBatch.error ? `<p class="warn helper"><strong>${esc(diagnosticMessage(lastBatch.error))}</strong><br><span class="mono">${esc(diagnosticMeta(lastBatch.error))}</span></p>` : '<p class="muted">Brak ostatniego batcha.</p>');
     const errors = asArray(data.errors);
-    document.getElementById('errors').innerHTML = errors.length ? `<table><thead><tr><th>brand_id</th><th>brand_name</th><th>error</th></tr></thead><tbody>${errors.map(e => `<tr><td class="mono">${esc(e.brand_id)}</td><td>${esc(e.brand_name)}</td><td>${esc(e.error)}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">Brak błędów.</p>';
+    document.getElementById('errors').innerHTML = errors.length ? `<table><thead><tr><th>brand_id</th><th>brand_name</th><th>error</th><th>diagnostics</th></tr></thead><tbody>${errors.map(e => `<tr><td class="mono">${esc(e.brand_id)}</td><td>${esc(e.brand_name)}</td><td>${esc(diagnosticMessage(e))}</td><td class="mono">${esc(diagnosticMeta(e))}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">Brak błędów.</p>';
     document.getElementById('rawStatus').textContent = JSON.stringify(data, null, 2);
     document.getElementById('runNextForm').classList.toggle('hidden', !runnableStatuses.includes(status));
     if (data.run_id) document.getElementById('runIdInput').value = data.run_id;

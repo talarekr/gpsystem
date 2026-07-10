@@ -7,7 +7,6 @@ use App\Models\OvokoCarDictionaryEntry;
 use App\Models\OvokoCarModelSyncRun;
 use App\Services\Marketplace\Api\MarketplaceApiManager;
 use App\Services\Marketplace\Api\OvokoApiClient;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -80,58 +79,72 @@ class OvokoCarModelSyncRunnerService
             return ['ok' => false, 'marker' => self::MARKER, 'reason' => 'runner_not_active'];
         }
 
+        $phase = 'start';
+        $batch = ['started_at' => now()->toISOString(), 'brands' => []];
+
         try {
-            return DB::transaction(function () use ($run): array {
+            $phase = 'refresh_run';
             $run->refresh();
             if (! in_array($run->status, [OvokoCarModelSyncRun::STATUS_QUEUED, OvokoCarModelSyncRun::STATUS_RUNNING], true)) {
                 return ['ok' => true, 'marker' => self::MARKER, 'stopped' => true];
             }
-            $run->update(['status' => OvokoCarModelSyncRun::STATUS_RUNNING]);
 
-            $processedIds = array_map('strval', $run->processed_brand_ids ?? []);
+            $phase = 'update_run';
+            $run->update(['status' => OvokoCarModelSyncRun::STATUS_RUNNING, 'last_batch' => $batch]);
+
+            $phase = 'select_brands';
+            $processedIds = $this->normalizeStringList($run->processed_brand_ids);
             $brands = $this->eligibleBrandsQuery((bool) $run->only_missing, $processedIds)->limit((int) $run->batch_size)->get();
             if ($brands->isEmpty()) {
-                $run->update(['status' => OvokoCarModelSyncRun::STATUS_COMPLETED, 'completed_at' => now(), 'last_batch' => ['brand_count' => 0, 'completed' => true, 'finished_at' => now()->toISOString()]]);
+                $batch = ['brand_count' => 0, 'completed' => true, 'finished_at' => now()->toISOString(), 'brands' => []];
+                $run->update(['status' => OvokoCarModelSyncRun::STATUS_COMPLETED, 'completed_at' => now(), 'last_batch' => $batch]);
                 return ['ok' => true, 'marker' => self::MARKER, 'completed' => true];
             }
 
-            $batch = ['started_at' => now()->toISOString(), 'brands' => []];
+            $batch['brand_count'] = $brands->count();
             $synced = 0;
-            $failed = $run->failed_brands ?? [];
-            $errors = $run->errors ?? [];
+            $failed = $this->normalizeListOfArrays($run->failed_brands);
+            $errors = $this->normalizeListOfArrays($run->errors);
+            /** @var OvokoApiClient $client */
+            $client = app(MarketplaceApiManager::class)->client('ovoko');
+            $dictionaryService = app(OvokoCarDictionaryService::class);
 
             foreach ($brands as $brand) {
                 $brandId = (string) $brand->ovoko_id;
+                $brandName = (string) $brand->name;
                 try {
-                    /** @var OvokoApiClient $client */
-                    $client = app(MarketplaceApiManager::class)->client('ovoko');
-                    $dictionaryService = app(OvokoCarDictionaryService::class);
+                    $phase = 'fetch_models';
                     $result = $client->fetchCarDictionary('models', $brandId);
                     if (! ($result['api_ok'] ?? false)) {
                         throw new \RuntimeException((string) ($result['error'] ?? 'Ovoko car models request failed.'));
                     }
-                    $count = $dictionaryService->storeRows('models', $result['rows'] ?? [], $brandId);
+
+                    $phase = 'upsert_models';
+                    $count = $dictionaryService->storeRows('models', is_array($result['rows'] ?? null) ? $result['rows'] : [], $brandId);
                     $synced += $count;
-                    $batch['brands'][] = ['brand_id' => $brandId, 'brand_name' => $brand->name, 'status' => 'synced', 'models_count' => $count];
+                    $batch['brands'][] = ['brand_id' => $brandId, 'brand_name' => $brandName, 'status' => 'synced', 'models_count' => $count];
                 } catch (\Throwable $e) {
-                    $error = Str::limit($e->getMessage(), 500)->toString();
-                    $failed[] = ['brand_id' => $brandId, 'brand_name' => $brand->name, 'error' => $error];
-                    $errors[] = ['brand_id' => $brandId, 'brand_name' => $brand->name, 'error' => $error];
-                    $batch['brands'][] = ['brand_id' => $brandId, 'brand_name' => $brand->name, 'status' => 'failed', 'error' => $error];
+                    $diagnostic = $this->exceptionDiagnostic($e, $phase, ['brand_id' => $brandId, 'brand_name' => $brandName]);
+                    $failed[] = $diagnostic;
+                    $errors[] = $diagnostic;
+                    $batch['brands'][] = ['brand_id' => $brandId, 'brand_name' => $brandName, 'status' => 'failed'] + $diagnostic;
+                    Log::warning('Ovoko car models sync runner brand failed.', ['marker' => self::RECOVERY_MARKER, 'run_id' => $run->id] + $diagnostic);
                 }
                 $processedIds[] = $brandId;
             }
 
+            $phase = 'update_run';
+            $processedIds = array_values(array_unique($processedIds));
             $remaining = $this->eligibleBrandsQuery((bool) $run->only_missing, $processedIds)->count();
             $batch['finished_at'] = now()->toISOString();
             $batch['remaining_brand_count'] = $remaining;
             $run->update([
                 'status' => $remaining > 0 ? OvokoCarModelSyncRun::STATUS_QUEUED : OvokoCarModelSyncRun::STATUS_COMPLETED,
-                'processed_brand_count' => count(array_unique($processedIds)),
+                'processed_brand_count' => count($processedIds),
                 'synced_models_count' => ((int) $run->synced_models_count) + $synced,
                 'failed_brand_count' => count($failed),
-                'last_offset' => count(array_unique($processedIds)),
-                'processed_brand_ids' => array_values(array_unique($processedIds)),
+                'last_offset' => count($processedIds),
+                'processed_brand_ids' => $processedIds,
                 'failed_brands' => $failed,
                 'errors' => array_slice($errors, -100),
                 'last_batch' => $batch,
@@ -142,32 +155,17 @@ class OvokoCarModelSyncRunnerService
                 SyncOvokoCarModelsBatchJob::dispatch((int) $run->id)->delay(now()->addSeconds((int) $run->delay_seconds));
             }
 
-            return ['ok' => true, 'marker' => self::MARKER, 'remaining_brand_count' => $remaining];
-            });
+            return ['ok' => true, 'marker' => self::MARKER, 'remaining_brand_count' => $remaining, 'last_batch' => $batch];
         } catch (\Throwable $e) {
-            $message = Str::limit($e->getMessage(), 500)->toString();
+            $diagnostic = $this->exceptionDiagnostic($e, $phase);
             Log::error('Ovoko car models sync runner batch failed defensively.', [
                 'marker' => self::RECOVERY_MARKER,
                 'run_id' => $run->id,
-                'error' => $message,
-            ]);
+            ] + $diagnostic);
 
-            $run->refresh();
-            $errors = $run->errors ?? [];
-            $errors[] = ['error' => $message, 'runner_error' => true, 'created_at' => now()->toISOString()];
-            $run->update([
-                'status' => in_array($run->status, [OvokoCarModelSyncRun::STATUS_QUEUED, OvokoCarModelSyncRun::STATUS_RUNNING], true) ? OvokoCarModelSyncRun::STATUS_QUEUED : $run->status,
-                'errors' => array_slice($errors, -100),
-                'last_batch' => [
-                    'started_at' => data_get($run->last_batch, 'started_at'),
-                    'finished_at' => now()->toISOString(),
-                    'status' => 'failed_defensively',
-                    'error' => $message,
-                    'brands' => data_get($run->last_batch, 'brands', []),
-                ],
-            ]);
+            $this->persistDefensiveFailure($run, $diagnostic, $batch);
 
-            return ['ok' => false, 'marker' => self::MARKER, 'reason' => 'batch_failed_defensively', 'error' => $message];
+            return ['ok' => false, 'marker' => self::MARKER, 'reason' => 'batch_failed_defensively'] + $diagnostic;
         }
     }
 
@@ -202,6 +200,74 @@ class OvokoCarModelSyncRunnerService
                     ->whereColumn('models.ovoko_brand_id', 'ovoko_car_dictionary_entries.ovoko_id');
             }))
             ->orderBy('ovoko_id');
+    }
+
+    private function normalizeStringList(mixed $value): array
+    {
+        if (is_string($value)) {
+            $decoded = json_decode($value, true);
+            $value = json_last_error() === JSON_ERROR_NONE ? $decoded : [$value];
+        }
+
+        if (! is_array($value)) {
+            return [];
+        }
+
+        return array_values(array_unique(array_filter(array_map(static fn ($item): string => (string) $item, $value), static fn (string $item): bool => $item !== '')));
+    }
+
+    private function normalizeListOfArrays(mixed $value): array
+    {
+        if (is_string($value)) {
+            $decoded = json_decode($value, true);
+            $value = json_last_error() === JSON_ERROR_NONE ? $decoded : [];
+        }
+
+        if (! is_array($value)) {
+            return [];
+        }
+
+        return array_values(array_filter($value, static fn ($item): bool => is_array($item)));
+    }
+
+    private function exceptionDiagnostic(\Throwable $e, string $phase, array $context = []): array
+    {
+        $message = Str::limit($e->getMessage(), 500)->toString();
+
+        return $context + [
+            'phase' => $phase,
+            'exception_class' => $e::class,
+            'exception_message' => $message,
+            'error' => $message,
+            'failed_at' => now()->toISOString(),
+        ];
+    }
+
+    private function persistDefensiveFailure(OvokoCarModelSyncRun $run, array $diagnostic, array $batch): void
+    {
+        try {
+            $run->refresh();
+            $errors = $this->normalizeListOfArrays($run->errors);
+            $errors[] = $diagnostic + ['runner_error' => true];
+            $lastBatch = $this->normalizeListOfArrays(data_get($run->last_batch, 'brands'));
+            $batch['brands'] = $batch['brands'] ?: $lastBatch;
+            $batch['finished_at'] = now()->toISOString();
+            $batch['status'] = 'failed_defensively';
+            $batch['error'] = $diagnostic;
+            $run->update([
+                'status' => in_array($run->status, [OvokoCarModelSyncRun::STATUS_QUEUED, OvokoCarModelSyncRun::STATUS_RUNNING], true) ? OvokoCarModelSyncRun::STATUS_QUEUED : $run->status,
+                'errors' => array_slice($errors, -100),
+                'last_batch' => $batch,
+            ]);
+        } catch (\Throwable $persistException) {
+            Log::critical('Ovoko car models sync runner could not persist defensive failure.', [
+                'marker' => self::RECOVERY_MARKER,
+                'run_id' => $run->id,
+                'original' => $diagnostic,
+                'persist_exception_class' => $persistException::class,
+                'persist_exception_message' => $persistException->getMessage(),
+            ]);
+        }
     }
 
     private function latestRun(): ?OvokoCarModelSyncRun
