@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Services\Marketplace\EbayListingStatusBatchRunnerService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Response;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Route;
@@ -82,6 +83,19 @@ class EbayListingStatusBatchRunnerController extends Controller
     public function stop(Request $request, EbayListingStatusBatchRunnerService $service): JsonResponse|RedirectResponse
     {
         return $this->respond($request, $service->stop($request->only(['confirm'])), 'Runner został zatrzymany.');
+    }
+
+    public function endedProducts(EbayListingStatusBatchRunnerService $service): JsonResponse
+    {
+        return response()->json($service->endedProducts());
+    }
+
+    public function endedProductsCsv(EbayListingStatusBatchRunnerService $service): Response
+    {
+        return response($service->endedProductsCsv(), 200, [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => 'attachment; filename=ebay-ended-products.csv',
+        ]);
     }
 
     private function respond(Request $request, array $result, string $message): JsonResponse|RedirectResponse
