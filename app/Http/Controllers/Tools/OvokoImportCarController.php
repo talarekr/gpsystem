@@ -72,7 +72,20 @@ class OvokoImportCarController extends Controller
             ], 422);
         }
 
-        $payload = Arr::only((array) ($readiness['planned_import_car_payload'] ?? []), ['car_model', 'car_years', 'external_id']);
+        $payload = Arr::only((array) ($readiness['planned_import_car_payload'] ?? []), ['car_model', 'car_years', 'status', 'external_id']);
+
+        if (blank($payload['status'] ?? null)) {
+            return response()->json([
+                'ok' => false,
+                'blocked' => true,
+                'reason' => 'ovoko_status_id_missing_for_import_car',
+                'local_car_id' => $car->id,
+                'missing_fields_for_future_import_car' => ['ovoko_status_id'],
+                'request_payload_without_auth' => $payload,
+                'readiness' => $readiness,
+                'marker' => self::MARKER,
+            ], 422);
+        }
 
         try {
             /** @var OvokoApiClient $client */
@@ -87,6 +100,7 @@ class OvokoImportCarController extends Controller
                 'reason' => 'ovoko_import_car_request_failed',
                 'message' => $this->safeError($e),
                 'external_id' => $payload['external_id'] ?? null,
+                'request_payload_without_auth' => $payload,
                 'marker' => self::MARKER,
             ], 502);
         }
@@ -106,6 +120,7 @@ class OvokoImportCarController extends Controller
                 'message' => $result['message'] ?? null,
                 'external_id' => $payload['external_id'] ?? null,
                 'response' => $this->sanitizeResponse($result),
+                'request_payload_without_auth' => $payload,
                 'marker' => self::MARKER,
             ], 502);
         }
@@ -130,6 +145,7 @@ class OvokoImportCarController extends Controller
             'status_code' => $result['api_status_code'] ?? null,
             'external_id' => $payload['external_id'] ?? null,
             'idempotent_existing_car' => $this->looksIdempotentExistingCar($result),
+            'request_payload_without_auth' => $payload,
             'marker' => self::MARKER,
         ]);
     }
