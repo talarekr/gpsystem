@@ -2818,14 +2818,25 @@ body:has(.gps-admin-topbar) .fi-no {
     --gps-admin-compact-field-placeholder: #a8b0bb;
 }
 
-.gps-admin-floating-label-section .fi-fo-field-wrp {
+/* car_create_form_floating_labels_match_part_info_v1 */
+.gps-admin-floating-label-section .fi-fo-field-wrp:not(.fi-fo-toggle) {
     position: relative;
     min-width: 0;
-    gap: 0.25rem;
+    gap: 0 !important;
     padding-top: 0.36rem;
 }
 
-.gps-admin-floating-label-section .fi-fo-field-wrp-label {
+.gps-admin-floating-label-section .fi-fo-field-wrp:not(.fi-fo-toggle) > .grid,
+.gps-admin-floating-label-section .fi-fo-field-wrp:not(.fi-fo-toggle) > .grid > .grid {
+    gap: 0 !important;
+    row-gap: 0 !important;
+}
+
+.gps-admin-floating-label-section .fi-fo-field-wrp:not(.fi-fo-toggle) > .grid > :has(> .fi-fo-field-wrp-label) {
+    display: contents;
+}
+
+.gps-admin-floating-label-section .fi-fo-field-wrp:not(.fi-fo-toggle) :where(.fi-fo-field-wrp-label) {
     position: absolute;
     top: 0.48rem;
     left: 0.75rem;
@@ -2837,6 +2848,11 @@ body:has(.gps-admin-topbar) .fi-no {
     background: #ffffff;
     line-height: 1;
     pointer-events: none;
+}
+
+.gps-admin-floating-label-section .fi-fo-field-wrp:not(.fi-fo-toggle) :where(.fi-fo-field-wrp-label) + *,
+.gps-admin-floating-label-section .fi-fo-field-wrp:not(.fi-fo-toggle) :where(.fi-fo-field-wrp-label) ~ * {
+    margin-top: 0 !important;
 }
 
 .gps-admin-floating-label-section .fi-fo-field-wrp-label span {
