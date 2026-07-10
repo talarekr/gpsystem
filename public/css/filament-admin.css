@@ -3126,5 +3126,5 @@ body:has(.gps-admin-topbar) .fi-no {
 
 /* car_create_form_label_top_final_override_v14 */
 .gps-car-form .fi-fo-field-wrp.gps-car-floating-field .fi-fo-field-wrp-label {
-    top: 1.375rem !important;
+    top: 1rem !important;
 }
