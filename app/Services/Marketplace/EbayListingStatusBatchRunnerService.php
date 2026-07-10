@@ -12,6 +12,7 @@ class EbayListingStatusBatchRunnerService
 {
     public const MARKER = 'ebay_listing_status_batch_runner_v1';
     public const DRY_RUN_MARKER = 'ebay_listing_status_batch_dry_run_v1';
+    public const BROWSER_AUTORUN_MARKER = 'ebay_listing_status_batch_runner_browser_autorun_v2';
     private const KEY = 'admin_tools:ebay_listing_status_sync:v1';
 
     public function __construct(private readonly EbayListingStatusNormalizer $normalizer) {}
@@ -47,9 +48,10 @@ class EbayListingStatusBatchRunnerService
     {
         if (($input['confirm'] ?? null) !== 'run-next-ebay-listing-status-sync-batch') return ['ok' => false, 'reason' => 'missing_confirm_token'];
         $state = $this->state();
-        if ($state['status'] !== 'running') return $this->publicStatus($state) + ['ok' => false, 'reason' => 'not_running'];
-        if (empty($state['remaining_ids'])) return $this->complete($state) + ['ok' => true];
-        if ($state['last_batch_at'] && now()->diffInSeconds(\Carbon\Carbon::parse($state['last_batch_at']), false) > -((int) $state['delay_seconds'])) return $this->publicStatus($state) + ['ok' => false, 'reason' => 'delay_not_elapsed'];
+        if ($state['status'] !== 'running') return $this->publicStatus($state) + ['ok' => false, 'reason' => 'not_running', 'batch_executed' => false, 'completed' => $state['status'] === 'completed'];
+        if (empty($state['remaining_ids'])) return $this->complete($state) + ['ok' => true, 'batch_executed' => false, 'completed' => true];
+        $retryAfter = $this->retryAfterSeconds($state);
+        if ($retryAfter > 0) return $this->publicStatus($state) + ['ok' => true, 'reason' => 'delay_not_elapsed', 'batch_executed' => false, 'should_wait' => true, 'retry_after_seconds' => $retryAfter, 'completed' => false];
 
         $batchIds = array_slice($state['remaining_ids'], 0, (int) $state['batch_size']);
         foreach (MarketplaceListing::query()->with('part')->whereIn('id', $batchIds)->orderBy('id')->get() as $listing) {
@@ -63,7 +65,7 @@ class EbayListingStatusBatchRunnerService
         $state['last_batch_at'] = now()->toISOString();
         if ($state['remaining'] === 0) $state = $this->complete($state, false);
         Cache::put(self::KEY, $state, now()->addHours(12));
-        return $this->publicStatus($state) + ['ok' => true];
+        return $this->publicStatus($state) + ['ok' => true, 'batch_executed' => true, 'completed' => $state['status'] === 'completed'];
     }
 
     public function status(): array { return $this->publicStatus($this->state()) + ['ok' => true]; }
@@ -107,8 +109,9 @@ class EbayListingStatusBatchRunnerService
     private function blocksRelisting(MarketplaceListing $l): bool { return in_array(strtolower((string) $l->status), ['active','published','live'], true) && ! in_array(strtolower((string) $l->last_api_status), ['ended','failed','deleted','archived','not_found','inactive','unavailable','error'], true) && $l->not_seen_in_active_api_at === null; }
     private function errorType(array $api, array $n): ?string { $h=(int)($api['http_status']??0); return match(true){in_array($h,[401,403],true)=>'auth_error',$h===429=>'rate_limited',in_array($h,[500,502,503,504],true)=>'remote_error',($api['error_type']??null)==='transient_error'=>'transient_error',default=>$n['error_type']}; }
     private function recordResult(array $s, array $r): array { $k=$r['normalized_status']; if(isset($s[$k]))$s[$k]++; if($r['error_type'])$s['failed']++; $s['recent_results']=array_slice(array_merge([$r],$s['recent_results']),0,50); if($r['error_type'])$s['last_error']=$r['error_type']; return $s; }
+    private function retryAfterSeconds(array $s): int { if (empty($s['last_batch_at'])) return 0; $elapsed = now()->diffInSeconds(\Carbon\Carbon::parse($s['last_batch_at'])); return max(0, ((int) $s['delay_seconds']) - $elapsed); }
     private function complete(array $s, bool $put=true): array { $s['status']='completed'; $s['finished_at']=$s['finished_at']??now()->toISOString(); if($put)Cache::put(self::KEY,$s,now()->addHours(12)); return $this->publicStatus($s); }
     private function state(): array { $state = Cache::get(self::KEY); return is_array($state) ? ($state + $this->baseState('idle')) : $this->baseState('idle'); }
     private function baseState(string $status): array { return ['status'=>$status,'marker'=>self::MARKER,'dry_run'=>true,'batch_size'=>10,'delay_seconds'=>5,'total'=>0,'processed'=>0,'remaining'=>0,'active'=>0,'ended'=>0,'not_found'=>0,'invalid'=>0,'unknown'=>0,'failed'=>0,'started_at'=>null,'finished_at'=>null,'last_batch_at'=>null,'last_error'=>null,'recent_results'=>[],'remaining_ids'=>[],'processed_ids'=>[]]; }
-    private function publicStatus(array $s): array { unset($s['remaining_ids'],$s['processed_ids']); return $s + ['dry_run_marker'=>self::DRY_RUN_MARKER]; }
+    private function publicStatus(array $s): array { unset($s['remaining_ids'],$s['processed_ids']); return $s + ['dry_run_marker'=>self::DRY_RUN_MARKER, 'browser_autorun_marker'=>self::BROWSER_AUTORUN_MARKER]; }
 }
