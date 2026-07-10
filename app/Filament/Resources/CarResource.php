@@ -163,7 +163,9 @@ class CarResource extends Resource
                             ->label('Napęd')
                             ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
-                            ->options(Car::drivetrainOptions())
+                            ->options(static fn (string $operation): array => $operation === 'create'
+                                ? static::createFormDrivetrainOptions()
+                                : Car::drivetrainOptions())
                             ->native(false),
                         Forms\Components\Select::make('gearbox_type')
                             ->label('Typ skrzyni biegów')
@@ -176,21 +178,41 @@ class CarResource extends Resource
                             ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
                             ->maxLength(255),
+                        Forms\Components\Select::make('body_type')
+                            ->label('Typ nadwozia')
+                            ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
+                            ->columnSpan(['default' => 1, 'md' => 6])
+                            ->options(static::createFormBodyTypeOptions())
+                            ->native(false)
+                            ->visible(static fn (string $operation): bool => $operation === 'create')
+                            ->dehydrated(static fn (string $operation): bool => $operation === 'create'),
                         Forms\Components\TextInput::make('body_type')
                             ->label('Typ nadwozia')
                             ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
-                            ->maxLength(255),
+                            ->maxLength(255)
+                            ->visible(static fn (string $operation): bool => $operation !== 'create')
+                            ->dehydrated(static fn (string $operation): bool => $operation !== 'create'),
                         Forms\Components\TextInput::make('color_code')
                             ->label('Kod koloru')
                             ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
                             ->maxLength(255),
+                        Forms\Components\Select::make('color')
+                            ->label('Kolor')
+                            ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
+                            ->columnSpan(['default' => 1, 'md' => 6])
+                            ->options(static::createFormColorOptions())
+                            ->native(false)
+                            ->visible(static fn (string $operation): bool => $operation === 'create')
+                            ->dehydrated(static fn (string $operation): bool => $operation === 'create'),
                         Forms\Components\TextInput::make('color')
                             ->label('Kolor')
                             ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
                             ->columnSpan(['default' => 1, 'md' => 6])
-                            ->maxLength(255),
+                            ->maxLength(255)
+                            ->visible(static fn (string $operation): bool => $operation !== 'create')
+                            ->dehydrated(static fn (string $operation): bool => $operation !== 'create'),
                         Forms\Components\TextInput::make('interior')
                             ->label('Wnętrze')
                             ->extraFieldWrapperAttributes(['class' => 'gps-car-floating-field'])
@@ -347,6 +369,54 @@ class CarResource extends Resource
     /**
      * @return array<string, string>
      */
+    private static function createFormDrivetrainOptions(): array
+    {
+        return [
+            'Przód' => 'Przód',
+            'Tył' => 'Tył',
+            'AWD' => 'AWD',
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private static function createFormBodyTypeOptions(): array
+    {
+        return [
+            'Sedan' => 'Sedan',
+            'Hatchback' => 'Hatchback',
+            'Kombi' => 'Kombi',
+            'Minivan' => 'Minivan',
+            'SUV' => 'SUV',
+            'Coupe' => 'Coupe',
+            'Dostawczy' => 'Dostawczy',
+            'Kabriolet' => 'Kabriolet',
+            'Roadster' => 'Roadster',
+            'Limuzyna' => 'Limuzyna',
+            'Pickup' => 'Pickup',
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private static function createFormColorOptions(): array
+    {
+        return [
+            'Czerwony' => 'Czerwony',
+            'Pomarańczowy' => 'Pomarańczowy',
+            'Żółty' => 'Żółty',
+            'Zielony' => 'Zielony',
+            'Niebieski' => 'Niebieski',
+            'Biały' => 'Biały',
+            'Fioletowy' => 'Fioletowy',
+            'Brązowy' => 'Brązowy',
+            'Szary' => 'Szary',
+            'Czarny' => 'Czarny',
+        ];
+    }
+
     private static function ovokoModelGroupOptions(?string $brandId): array
     {
         if (blank($brandId)) {
