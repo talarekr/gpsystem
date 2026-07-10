@@ -360,6 +360,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/marketplace/mapping-gaps-export', MarketplaceMappingGapsExportController::class)->name('admin.tools.marketplace.mapping-gaps-export');
     Route::get('/admin/tools/ovoko/car-dictionaries-diagnose', OvokoCarDictionariesDiagnoseController::class)->name('admin.tools.ovoko.car-dictionaries-diagnose');
     Route::post('/admin/tools/ovoko/sync-car-dictionaries', OvokoSyncCarDictionariesController::class)->name('admin.tools.ovoko.sync-car-dictionaries');
+    Route::get('/admin/tools/ovoko/car-models-sync-runner', [OvokoCarModelsSyncRunnerController::class, 'index'])->name('admin.tools.ovoko.car-models-sync-runner.index');
     Route::post('/admin/tools/ovoko/car-models-sync-runner/start', [OvokoCarModelsSyncRunnerController::class, 'start'])->name('admin.tools.ovoko.car-models-sync-runner.start');
     Route::get('/admin/tools/ovoko/car-models-sync-runner/status', [OvokoCarModelsSyncRunnerController::class, 'status'])->name('admin.tools.ovoko.car-models-sync-runner.status');
     Route::post('/admin/tools/ovoko/car-models-sync-runner/stop', [OvokoCarModelsSyncRunnerController::class, 'stop'])->name('admin.tools.ovoko.car-models-sync-runner.stop');
