@@ -110,6 +110,7 @@ use App\Http\Controllers\Tools\OvokoOrderShipmentSendPackageDataController;
 use App\Http\Controllers\Tools\MarketplaceMappingGapsExportController;
 use App\Http\Controllers\Tools\MarketplaceOrdersResetController;
 use App\Http\Controllers\Tools\MarketplaceOrdersSyncController;
+use App\Http\Controllers\Tools\MarketplaceSupportSyncDiagnoseController;
 use App\Http\Controllers\Tools\MarketplaceOrdersPurgeToolController;
 use App\Http\Controllers\Tools\MarketplaceFulfillmentSyncToolController;
 use App\Http\Controllers\Tools\MarketplaceOrderFulfillmentSyncController;
@@ -427,6 +428,8 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/marketplace/ebay-listing-audit-runner/status', fn (Request $request) => redirect()->to('/admin/tools/ebay/listing-audit-runner/status'.($request->getQueryString() ? '?'.$request->getQueryString() : '')))->name('admin.tools.marketplace.ebay-listing-audit-runner.status.redirect');
     Route::match(['get', 'post'], '/admin/tools/marketplace/orders-reset', MarketplaceOrdersResetController::class)->name('admin.tools.marketplace.orders-reset');
     Route::match(['get', 'post'], '/admin/tools/marketplace/orders-sync', MarketplaceOrdersSyncController::class)->name('admin.tools.marketplace.orders-sync');
+    Route::get('/admin/tools/support-sync/preview', [MarketplaceSupportSyncDiagnoseController::class, 'preview'])->name('admin.tools.support-sync.preview');
+    Route::get('/admin/tools/support-sync/{marketplace}/diagnose', [MarketplaceSupportSyncDiagnoseController::class, 'diagnose'])->whereIn('marketplace', ['allegro', 'ebay', 'ovoko'])->name('admin.tools.support-sync.diagnose');
     Route::match(['get', 'post'], '/admin/tools/marketplace/orders-purge', MarketplaceOrdersPurgeToolController::class)->name('admin.tools.marketplace.orders-purge');
     Route::match(['get', 'post'], '/admin/tools/marketplace/fulfillment-status-sync', MarketplaceFulfillmentSyncToolController::class)->name('admin.tools.marketplace.fulfillment-status-sync');
     Route::match(['get', 'post'], '/admin/tools/marketplace/orders/{order}/fulfillment-sync', MarketplaceOrderFulfillmentSyncController::class)->name('admin.tools.marketplace.orders.fulfillment-sync');
