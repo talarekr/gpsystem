@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\PartResource\Pages;
 
 use App\Filament\Resources\PartResource;
+use App\Support\Parts\AdditionalPartCodes;
 use App\Models\PartCategory;
 use App\Services\PartCategorySuggestionService;
 use Filament\Notifications\Notification;
@@ -20,6 +21,7 @@ class CreatePart extends CreateRecord
         unset($data['part_photo_paths']);
 
         $data['quantity'] = 1;
+        $data['additional_part_codes'] = AdditionalPartCodes::normalize($data['additional_part_codes'] ?? null, $data['part_number'] ?? null);
         $data['condition_notes'] = PartResource::defaultConditionValue($data['condition_notes'] ?? null);
         $data = PartResource::applyAdminSteeringFormStateToData($data);
 

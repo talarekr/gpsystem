@@ -21,7 +21,7 @@ class Part extends Model
     private static array $columnExistsCache = [];
 
     protected $fillable = [
-        'source_system','external_id','sku','name','slug','legacy_url','legacy_slug','part_number','oem_number','manufacturer_code','short_description','description','condition_notes','internal_note','code_photo_path',
+        'source_system','external_id','sku','name','slug','legacy_url','legacy_slug','part_number','additional_part_codes','oem_number','manufacturer_code','short_description','description','condition_notes','internal_note','code_photo_path',
         'category_id','suggested_category_id','category_confidence','category_suggestion_reason','category_needs_review',
         'car_id','vehicle_snapshot','legacy_payload','storage_location_id','weight_kg','length_cm','width_cm','height_cm','price','currency','allegro_price','ovoko_price','ebay_price','allegro_shipping_rate_name','quantity','status','sale_source','sold_at',
         'is_visible_storefront','needs_listing','needs_review','review_reason','review_detected_at','review_source','review_metadata','created_by',
@@ -32,6 +32,7 @@ class Part extends Model
         return [
             'vehicle_snapshot' => 'array',
             'legacy_payload' => 'array',
+            'additional_part_codes' => 'array',
             'category_confidence' => 'decimal:2',
             'category_needs_review' => 'boolean',
             'price' => 'decimal:2',

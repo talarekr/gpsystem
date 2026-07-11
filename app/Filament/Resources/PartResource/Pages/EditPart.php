@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\PartResource\Pages;
 
 use App\Filament\Resources\PartResource;
+use App\Support\Parts\AdditionalPartCodes;
 use App\Models\MarketplaceCategory;
 use App\Models\PartCategory;
 use App\Models\PartImage;
@@ -50,6 +51,7 @@ class EditPart extends EditRecord
         $this->marketplaceCategorySelections = (array) ($data['marketplace_category_selections'] ?? []);
         unset($data['part_photo_paths'], $data['marketplace_category_selections']);
 
+        $data['additional_part_codes'] = AdditionalPartCodes::normalize($data['additional_part_codes'] ?? null, $data['part_number'] ?? null);
         $data['condition_notes'] = PartResource::defaultConditionValue($data['condition_notes'] ?? null);
         $data = PartResource::applyPartPositionFormStateToData($data, $this->record);
         $data = PartResource::applyAdminSteeringFormStateToData($data, $this->record);

@@ -13,6 +13,7 @@ use App\Services\Marketplace\PreparePartMarketplaceListingService;
 use App\Services\Parts\PartImageUploadService;
 use App\Models\StorageLocation;
 use App\Services\PartCategorySuggestionService;
+use App\Support\Parts\AdditionalPartCodes;
 use Filament\Forms;
 use Filament\Forms\Components\Grid;
 use Filament\Forms\Components\Section;
@@ -134,6 +135,19 @@ class PartResource extends Resource
                             ->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))
                             ->columnSpanFull(),
                         Forms\Components\TextInput::make('part_number')->label('Główny kod części')->maxLength(255)->live(debounce: 500)->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, ?Part $record): null => self::refreshCategorySuggestion($get, $set, $record))->columnSpanFull(),
+                        Forms\Components\Repeater::make('additional_part_codes')
+                            ->label('Dodatkowe kody części')
+                            ->addActionLabel('+ Dodaj kod części')
+                            ->maxItems(AdditionalPartCodes::MAX_CODES)
+                            ->defaultItems(0)
+                            ->simple(
+                                Forms\Components\TextInput::make('code')
+                                    ->label('Kod części')
+                                    ->maxLength(AdditionalPartCodes::MAX_LENGTH)
+                            )
+                            ->mutateDehydratedStateUsing(fn (?array $state, Forms\Get $get): ?array => AdditionalPartCodes::normalize($state, $get('part_number')))
+                            ->helperText('part_edit_additional_part_codes_dynamic_v1 — opcjonalnie maksymalnie 2 dodatkowe kody części.')
+                            ->columnSpanFull(),
                         Forms\Components\Hidden::make('sku'),
                         Forms\Components\Select::make('category_id')->label('Kategoria')->placeholder('Kategoria')->relationship('category', 'name')->required()->validationMessages(['required' => 'Kategoria jest wymagana.'])->searchable()->preload()->native(false)->live()->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set): null => self::refreshMarketplaceMappings($get, $set))->suffixAction(self::categoryTreeAction())->columnSpanFull(),
                         Forms\Components\Select::make('condition_notes')->label('Jakość')->placeholder('Jakość')->options(['Używany' => 'Używany', 'Nowy' => 'Nowy', 'Uszkodzony' => 'Uszkodzony', 'Regenerowany' => 'Regenerowany'])->default(self::DEFAULT_CONDITION_VALUE)->native(false)->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])->columnSpan(['default' => 1, 'md' => 6]),

@@ -7,6 +7,7 @@ use App\Mail\WorkshopPartCreatedMail;
 use App\Models\Part;
 use App\Models\StorageLocation;
 use App\Services\Parts\PartImageUploadService;
+use App\Support\Parts\AdditionalPartCodes;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -85,6 +86,8 @@ class WorkshopQuickPartController extends Controller
             'storage_location' => ['required', 'string', 'max:255'],
             'storage_location_id' => ['nullable', 'integer', 'exists:storage_locations,id'],
             'part_number' => ['required', 'string', 'max:255'],
+            'additional_part_codes' => ['nullable', 'array', 'max:2'],
+            'additional_part_codes.*' => ['nullable', 'string', 'max:255'],
             'internal_note' => ['nullable', 'string', 'max:5000'],
             'condition_notes' => ['nullable', 'string', 'max:255'],
             'steering_side' => ['nullable', 'string', 'max:255'],
@@ -96,6 +99,7 @@ class WorkshopQuickPartController extends Controller
             'photos.*.max' => 'Zdjęcie może mieć maksymalnie 12 MB.',
             'storage_location.required' => 'Podaj magazyn lub miejsce składowania.',
             'part_number.required' => 'Podaj główny kod części.',
+            'additional_part_codes.max' => 'Można dodać maksymalnie 2 dodatkowe kody części.',
         ]);
 
         $part = DB::transaction(function () use ($request, $validated, $partImageUploadService): Part {
@@ -111,9 +115,12 @@ class WorkshopQuickPartController extends Controller
                 isset($validated['storage_location_id']) ? (int) $validated['storage_location_id'] : null,
             );
 
+            $additionalPartCodes = AdditionalPartCodes::normalize($validated['additional_part_codes'] ?? null, $validated['part_number']);
+
             $part = new Part([
                 'name' => trim($validated['part_number']),
                 'part_number' => trim($validated['part_number']),
+                'additional_part_codes' => $additionalPartCodes,
                 'storage_location_id' => $location->id,
                 'description' => filled($validated['internal_note'] ?? null) ? trim($validated['internal_note']) : null,
                 'condition_notes' => filled($conditionNotes) ? trim($conditionNotes) : null,
