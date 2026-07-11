@@ -146,7 +146,7 @@ class PartResource extends Resource
                                     ->maxLength(AdditionalPartCodes::MAX_LENGTH)
                             )
                             ->mutateDehydratedStateUsing(fn (?array $state, Forms\Get $get): ?array => AdditionalPartCodes::normalize($state, $get('part_number')))
-                            ->helperText('part_edit_additional_part_codes_dynamic_v1 — opcjonalnie maksymalnie 2 dodatkowe kody części.')
+                            // Diagnostic marker: part_edit_additional_part_codes_dynamic_v1. Do not render helper text under this repeater.
                             ->columnSpanFull(),
                         Forms\Components\Hidden::make('sku'),
                         Forms\Components\Select::make('category_id')->label('Kategoria')->placeholder('Kategoria')->relationship('category', 'name')->required()->validationMessages(['required' => 'Kategoria jest wymagana.'])->searchable()->preload()->native(false)->live()->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set): null => self::refreshMarketplaceMappings($get, $set))->suffixAction(self::categoryTreeAction())->columnSpanFull(),
