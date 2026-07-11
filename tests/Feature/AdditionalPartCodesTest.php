@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Filament\Resources\PartResource;
+use App\Filament\Resources\PartResource\Pages\CreatePart;
 use App\Filament\Resources\PartResource\Pages\EditPart;
 use App\Models\Part;
 use App\Models\StorageLocation;
@@ -56,6 +58,103 @@ class AdditionalPartCodesTest extends TestCase
         $this->assertSame(['9321076'], $part->additional_part_codes);
     }
 
+    public function test_admin_edit_hides_additional_part_codes_section_for_null_empty_and_blank_values(): void
+    {
+        $admin = $this->actingAdmin();
+
+        foreach ([null, [], ['']] as $codes) {
+            $part = Part::query()->create(['name' => 'Old', 'part_number' => 'MAIN', 'additional_part_codes' => $codes]);
+
+            $this->assertFalse(PartResource::shouldShowAdditionalPartCodesRepeater($part));
+
+            Livewire::actingAs($admin)
+                ->test(EditPart::class, ['record' => $part->getKey()])
+                ->assertDontSee('Dodatkowe kody części')
+                ->assertDontSee('+ Dodaj kod części')
+                ->assertSee('Główny kod części');
+        }
+    }
+
+    public function test_admin_edit_shows_only_saved_additional_part_code_fields(): void
+    {
+        $admin = $this->actingAdmin();
+
+        $one = Part::query()->create(['name' => 'One', 'part_number' => 'MAIN', 'additional_part_codes' => ['AAA111']]);
+        Livewire::actingAs($admin)
+            ->test(EditPart::class, ['record' => $one->getKey()])
+            ->assertSee('Dodatkowe kody części')
+            ->assertSee('+ Dodaj kod części')
+            ->assertSee('AAA111')
+            ->assertSet('data.additional_part_codes', ['AAA111']);
+
+        $two = Part::query()->create(['name' => 'Two', 'part_number' => 'MAIN', 'additional_part_codes' => ['AAA111', 'BBB222']]);
+        Livewire::actingAs($admin)
+            ->test(EditPart::class, ['record' => $two->getKey()])
+            ->assertSee('Dodatkowe kody części')
+            ->assertSee('AAA111')
+            ->assertSee('BBB222')
+            ->assertDontSee('+ Dodaj kod części')
+            ->assertSet('data.additional_part_codes', ['AAA111', 'BBB222']);
+    }
+
+    public function test_admin_edit_without_additional_codes_does_not_show_add_button_and_create_hides_section(): void
+    {
+        $admin = $this->actingAdmin();
+        $part = Part::query()->create(['name' => 'Old', 'part_number' => 'MAIN', 'additional_part_codes' => null]);
+
+        Livewire::actingAs($admin)
+            ->test(EditPart::class, ['record' => $part->getKey()])
+            ->assertDontSee('+ Dodaj kod części')
+            ->assertDontSee('Dodatkowe kody części');
+
+        Livewire::actingAs($admin)
+            ->test(CreatePart::class)
+            ->assertDontSee('+ Dodaj kod części')
+            ->assertDontSee('Dodatkowe kody części');
+    }
+
+    public function test_admin_edit_with_one_code_can_add_second_but_not_third(): void
+    {
+        $admin = $this->actingAdmin();
+        $part = Part::query()->create(['name' => 'Part', 'part_number' => 'MAIN', 'additional_part_codes' => ['AAA111']]);
+
+        Livewire::actingAs($admin)
+            ->test(EditPart::class, ['record' => $part->getKey()])
+            ->set('data.additional_part_codes', ['AAA111', 'BBB222'])
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertSame(['AAA111', 'BBB222'], $part->fresh()->additional_part_codes);
+
+        Livewire::actingAs($admin)
+            ->test(EditPart::class, ['record' => $part->getKey()])
+            ->set('data.additional_part_codes', ['AAA111', 'BBB222', 'CCC333'])
+            ->call('save')
+            ->assertHasErrors(['additional_part_codes']);
+
+        $this->assertSame(['AAA111', 'BBB222'], $part->fresh()->additional_part_codes);
+    }
+
+    public function test_admin_edit_removing_existing_code_persists_and_next_load_uses_old_layout(): void
+    {
+        $admin = $this->actingAdmin();
+        $part = Part::query()->create(['name' => 'Part', 'part_number' => 'MAIN', 'additional_part_codes' => ['AAA111']]);
+
+        Livewire::actingAs($admin)
+            ->test(EditPart::class, ['record' => $part->getKey()])
+            ->set('data.additional_part_codes', [])
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertNull($part->fresh()->additional_part_codes);
+
+        Livewire::actingAs($admin)
+            ->test(EditPart::class, ['record' => $part->getKey()])
+            ->assertDontSee('Dodatkowe kody części')
+            ->assertDontSee('+ Dodaj kod części')
+            ->assertSee('Główny kod części');
+    }
+
     public function test_admin_edit_hydrates_adds_removes_and_preserves_legacy_payload(): void
     {
         $admin = User::factory()->create();
@@ -91,6 +190,15 @@ class AdditionalPartCodesTest extends TestCase
 
         Livewire::test(EditPart::class, ['record' => $part->getKey()])
             ->assertSet('data.additional_part_codes', null);
+    }
+
+    private function actingAdmin(): User
+    {
+        $admin = User::factory()->create();
+        $admin->assignRole('admin');
+        $this->actingAs($admin);
+
+        return $admin;
     }
 
     private function storeWorkshopPart(array $overrides = []): Part

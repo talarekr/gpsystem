@@ -49,6 +49,37 @@ class PartResource extends Resource
     protected static ?string $modelLabel = 'część';
     protected static ?string $pluralModelLabel = 'części';
 
+    public static function shouldShowAdditionalPartCodesRepeater(?Part $record): bool
+    {
+        if (! $record instanceof Part || ! $record->exists) {
+            return false;
+        }
+
+        return self::normalizedOriginalAdditionalPartCodes($record) !== [];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public static function normalizedOriginalAdditionalPartCodes(?Part $record): array
+    {
+        if (! $record instanceof Part) {
+            return [];
+        }
+
+        $codes = $record->getRawOriginal('additional_part_codes') ?? $record->additional_part_codes;
+
+        if (is_string($codes)) {
+            $decoded = json_decode($codes, true);
+            $codes = is_array($decoded) ? $decoded : [];
+        }
+
+        return array_slice(array_values(array_filter(array_map(
+            fn (mixed $code): string => trim((string) $code),
+            (array) $codes
+        ), fn (string $code): bool => $code !== '')), 0, AdditionalPartCodes::MAX_CODES);
+    }
+
     public static function form(Form $form): Form
     {
         return $form
@@ -146,7 +177,8 @@ class PartResource extends Resource
                                     ->maxLength(AdditionalPartCodes::MAX_LENGTH)
                             )
                             ->mutateDehydratedStateUsing(fn (?array $state, Forms\Get $get): ?array => AdditionalPartCodes::normalize($state, $get('part_number')))
-                            // Diagnostic marker: part_edit_additional_part_codes_dynamic_v1. Do not render helper text under this repeater.
+                            ->visible(fn (?Part $record): bool => self::shouldShowAdditionalPartCodesRepeater($record))
+                            // Diagnostic marker: part_edit_additional_part_codes_conditional_visibility_v2. Do not render helper text under this repeater.
                             ->columnSpanFull(),
                         Forms\Components\Hidden::make('sku'),
                         Forms\Components\Select::make('category_id')->label('Kategoria')->placeholder('Kategoria')->relationship('category', 'name')->required()->validationMessages(['required' => 'Kategoria jest wymagana.'])->searchable()->preload()->native(false)->live()->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set): null => self::refreshMarketplaceMappings($get, $set))->suffixAction(self::categoryTreeAction())->columnSpanFull(),
