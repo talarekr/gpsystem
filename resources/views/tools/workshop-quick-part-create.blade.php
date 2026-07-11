@@ -34,6 +34,11 @@
         .autocomplete-results button { width:100%; min-height:46px; justify-content:flex-start; border-radius:12px; background:#f9fafb; color:var(--text); }
         .scan-status { margin:10px 0 0; padding:10px 12px; border-radius:14px; background:#ecfdf3; color:#027a48; font-weight:800; }
         .scan-status.error { background:#fef3f2; color:var(--danger); }
+        .additional-part-codes { display:grid; gap:12px; margin-top:14px; }
+        .additional-part-code { display:grid; gap:10px; padding:12px; border:1px solid #eaecf0; border-radius:16px; background:#f9fafb; }
+        .additional-part-code-actions { display:grid; grid-template-columns:1fr auto; gap:10px; }
+        .add-part-code-btn { width:100%; min-height:48px; background:#f9fafb; color:#1849a9; border:2px dashed #b2ccff; }
+        .remove-part-code-btn { min-width:52px; min-height:52px; padding:0; background:#fff; color:var(--danger); border:2px solid #fecdca; }
         .ocr-modal { position:fixed; inset:0; z-index:20; background:#000; color:#fff; display:grid; grid-template-rows:auto 1fr auto; }
         .ocr-modal video { width:100%; height:100%; object-fit:cover; }
         .ocr-header, .ocr-footer { position:relative; z-index:3; padding:16px; background:rgba(0,0,0,.62); text-align:center; }
@@ -107,7 +112,9 @@
                     <h2>3. Główny kod części</h2>
                     <label for="part_number">Główny kod części</label>
                     <input id="part_number" name="part_number" type="text" value="{{ old('part_number') }}" placeholder="np. 8K0953568D" required>
-                    <button type="button" id="scanPartNumberBtn" class="secondary">Skanuj kod z etykiety</button>
+                    <button type="button" id="scanPartNumberBtn" class="secondary" data-scan-target="part_number">Skanuj kod z etykiety</button>
+                    <div id="additionalPartCodes" class="additional-part-codes" data-marker="workshop_additional_part_codes_dynamic_v1"></div>
+                    <button type="button" id="addPartCodeBtn" class="add-part-code-btn">+ Dodaj kod części</button>
                     <p id="scanStatus" class="scan-status hidden" aria-live="polite"></p>
                 </section>
                 <section class="section">
@@ -168,6 +175,9 @@
     const objectUrls = [];
     const partNumberInput = document.getElementById('part_number');
     const scanPartNumberBtn = document.getElementById('scanPartNumberBtn');
+    const additionalPartCodes = document.getElementById('additionalPartCodes');
+    const addPartCodeBtn = document.getElementById('addPartCodeBtn');
+    let activeScanInput = partNumberInput;
     const scanStatus = document.getElementById('scanStatus');
     const ocrModal = document.getElementById('ocrModal');
     const ocrVideo = document.getElementById('ocrVideo');
@@ -315,7 +325,10 @@
         context.putImageData(image, 0, 0);
         return canvas;
     };
-    scanPartNumberBtn?.addEventListener('click', async () => {
+    const openScannerForInput = async input => {
+        // workshop_additional_part_code_scanner_v1
+        activeScanInput = input || partNumberInput;
+
         if (!navigator.mediaDevices?.getUserMedia) { setScanStatus('Kamera nie jest dostępna w tej przeglądarce. Wpisz kod ręcznie.', true); return; }
         try {
             ocrStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 }, focusMode: { ideal: 'continuous' } }, audio: false });
@@ -326,7 +339,32 @@
         } catch (error) {
             setScanStatus('Nie udało się uruchomić kamery. Wpisz kod ręcznie.', true);
         }
-    });
+    };
+    scanPartNumberBtn?.addEventListener('click', () => openScannerForInput(partNumberInput));
+
+    const oldAdditionalPartCodes = @json(array_values(array_filter((array) old('additional_part_codes', []), fn ($value) => filled($value))));
+    const renderAdditionalPartCodes = values => {
+        if (!additionalPartCodes || !addPartCodeBtn) return;
+        additionalPartCodes.innerHTML = '';
+        values.slice(0, 2).forEach((value, index) => {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'additional-part-code';
+            const label = document.createElement('label');
+            label.htmlFor = `additional_part_codes_${index}`;
+            label.textContent = 'Kod części';
+            const input = document.createElement('input');
+            input.type = 'text'; input.name = 'additional_part_codes[]'; input.id = `additional_part_codes_${index}`; input.value = value || ''; input.maxLength = 255;
+            const actions = document.createElement('div'); actions.className = 'additional-part-code-actions';
+            const scan = document.createElement('button'); scan.type = 'button'; scan.className = 'secondary'; scan.textContent = 'Skanuj kod z etykiety'; scan.addEventListener('click', () => openScannerForInput(input));
+            const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'remove-part-code-btn'; remove.setAttribute('aria-label', 'Usuń kod części'); remove.textContent = '×';
+            remove.addEventListener('click', () => { const current = Array.from(additionalPartCodes.querySelectorAll('input')).map(i => i.value); current.splice(index, 1); renderAdditionalPartCodes(current); });
+            actions.append(scan, remove); wrapper.append(label, input, actions); additionalPartCodes.append(wrapper);
+        });
+        addPartCodeBtn.classList.toggle('hidden', values.length >= 2);
+    };
+    addPartCodeBtn?.addEventListener('click', () => renderAdditionalPartCodes([...Array.from(additionalPartCodes.querySelectorAll('input')).map(input => input.value), '']));
+    renderAdditionalPartCodes(oldAdditionalPartCodes);
+
     ocrSmallModeBtn?.addEventListener('click', () => applyScanMode('small'));
     ocrLargeModeBtn?.addEventListener('click', () => applyScanMode('large'));
     ocrPreview?.addEventListener('click', requestCameraFocus);
@@ -345,8 +383,8 @@
             }
             const code = choosePartCode(texts);
             if (!code) { setScanStatus('Nie udało się pewnie rozpoznać kodu. Spróbuj ponownie albo wpisz ręcznie.', true); return; }
-            partNumberInput.value = code;
-            partNumberInput.dispatchEvent(new Event('input', { bubbles: true }));
+            activeScanInput.value = code;
+            activeScanInput.dispatchEvent(new Event('input', { bubbles: true }));
             setScanStatus(`Rozpoznano kod: ${code}`);
             closeOcr();
         } catch (error) {
