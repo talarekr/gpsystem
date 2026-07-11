@@ -77,4 +77,70 @@ class MarketplaceSupportReadOnlyDiagnosticsTest extends TestCase
             ->assertJsonPath('complaints_supported', false)
             ->assertJsonPath('no_mutation', true);
     }
+
+
+    public function test_allegro_probe_uses_get_limits_to_five_and_redacts_sensitive_data(): void
+    {
+        Http::preventStrayRequests();
+        MarketplaceAccount::query()->create(['marketplace'=>'allegro','name'=>'Allegro','code'=>'allegro','status'=>'active','api_enabled'=>true,'api_base_url'=>'https://api.allegro.pl','api_credentials'=>['access_token'=>'secret','scope'=>'allegro:api:orders:read']]);
+        Order::query()->create(['order_number'=>'A1','marketplace_order_id'=>'ORDER-1','marketplace'=>'allegro','status'=>'new','currency'=>'PLN']);
+        Http::fake([
+            'api.allegro.pl/order/customer-returns?limit=5' => Http::response(['customerReturns'=>array_map(fn($i)=>['id'=>'R'.$i,'status'=>'CREATED','order'=>['id'=>'ORDER-'.$i],'buyerEmail'=>'x@example.com'], range(1, 7))], 200),
+            'api.allegro.pl/sale/issues?limit=5' => Http::response(['issues'=>[['id'=>'D1','status'=>'OPEN','order'=>['id'=>'ORDER-1']]]], 200),
+        ]);
+
+        $this->getJson('/admin/tools/support-sync/allegro/diagnose?json=1&probe=1')->assertOk()
+            ->assertJsonPath('probe_executed', true)
+            ->assertJsonPath('sample_count', 5)
+            ->assertJsonPath('sample.0.local_order_id', 1);
+        Http::assertSentCount(2);
+        Http::assertSent(fn($request) => $request->method() === 'GET' && str_contains($request->url(), 'limit=5'));
+        $this->assertSame(0, ShopEvent::query()->count());
+    }
+
+    public function test_ebay_fulfillment_is_not_message_probe_and_capability_distinguishes_scope_from_access(): void
+    {
+        Http::preventStrayRequests();
+        MarketplaceAccount::query()->create(['marketplace'=>'ebay','name'=>'eBay','code'=>'ebay_de','status'=>'active','api_enabled'=>true,'api_base_url'=>'https://api.ebay.com','api_credentials'=>['access_token'=>'secret','scope'=>'https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly']]);
+        Http::fake([
+            'api.ebay.com/post-order/v2/return/search?limit=5' => Http::response([], 403),
+            'api.ebay.com/post-order/v2/inquiry/search?limit=5' => Http::response([], 429),
+            'api.ebay.com/post-order/v2/cancellation/search?limit=5' => Http::response(['cancellations'=>[]], 200),
+            'api.ebay.com/post-order/v2/casemanagement/search?limit=5' => Http::response([], 401),
+        ]);
+        $json = $this->getJson('/admin/tools/support-sync/ebay/diagnose?json=1&probe=1')->assertOk()->json();
+        $messages = collect($json['capability_checks'])->firstWhere('feature', 'messages');
+        $returns = collect($json['capability_checks'])->firstWhere('feature', 'returns');
+        $inquiries = collect($json['capability_checks'])->firstWhere('feature', 'inquiries');
+        $cancellations = collect($json['capability_checks'])->firstWhere('feature', 'cancellations');
+        $disputes = collect($json['capability_checks'])->firstWhere('feature', 'disputes');
+        $this->assertStringNotContainsString('/sell/fulfillment/v1/order', $messages['endpoint']);
+        $this->assertFalse($messages['probe_executed']);
+        $this->assertTrue($messages['api_exists']);
+        $this->assertFalse($messages['app_has_scope']);
+        $this->assertSame('auth_or_scope_error', $returns['error_type']);
+        $this->assertSame('rate_limited', $inquiries['error_type']);
+        $this->assertTrue($cancellations['app_access_confirmed']);
+        $this->assertSame('auth_or_scope_error', $disputes['error_type']);
+    }
+
+    public function test_missing_scope_does_not_execute_ebay_request(): void
+    {
+        Http::preventStrayRequests();
+        MarketplaceAccount::query()->create(['marketplace'=>'ebay','name'=>'eBay','code'=>'ebay_de','status'=>'active','api_enabled'=>true,'api_base_url'=>'https://api.ebay.com','api_credentials'=>['access_token'=>'secret','scope'=>'']]);
+        $this->getJson('/admin/tools/support-sync/ebay/diagnose?json=1&probe=1')->assertOk();
+        Http::assertNothingSent();
+    }
+
+    public function test_ovoko_config_diagnose_does_not_probe_undocumented_support_api(): void
+    {
+        Http::preventStrayRequests();
+        MarketplaceAccount::query()->create(['marketplace'=>'ovoko','name'=>'Ovoko','code'=>'ovoko','status'=>'active','api_enabled'=>true,'api_base_url'=>'https://api.rrr.lt','api_credentials'=>['username'=>'u','password'=>'p','user_token'=>'t']]);
+        $this->getJson('/admin/tools/support-sync/ovoko/diagnose?json=1&probe=1')->assertOk()
+            ->assertJsonPath('ovoko_config.order_sync_credentials_detected', true)
+            ->assertJsonPath('ovoko_config.support_api_credentials_detected', false)
+            ->assertJsonPath('ovoko_config.can_probe_support_api', false);
+        Http::assertNothingSent();
+    }
+
 }
