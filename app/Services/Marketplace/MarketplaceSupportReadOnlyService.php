@@ -4,7 +4,6 @@ namespace App\Services\Marketplace;
 
 use App\Models\MarketplaceAccount;
 use App\Models\Order;
-use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -16,39 +15,24 @@ class MarketplaceSupportReadOnlyService
         'marketplace_support_api_capabilities_v1',
         'marketplace_support_read_only_diagnostics_v1',
         'marketplace_support_normalization_v1',
+        'marketplace_support_allegro_live_readonly_probe_v2',
+        'marketplace_support_ebay_capability_probe_v2',
+        'marketplace_support_ovoko_config_diagnose_v2',
+        'marketplace_support_order_link_preview_v2',
+    ];
+
+    private const EBAY_FEATURES = [
+        'messages' => ['api_family' => 'Commerce Message API', 'endpoint' => '/commerce/message/v1/conversation?limit=5', 'required_scopes' => ['https://api.ebay.com/oauth/api_scope/commerce.message.readonly'], 'requires_application_approval' => true, 'deprecated' => false],
+        'returns' => ['api_family' => 'Post-Order Return API', 'endpoint' => '/post-order/v2/return/search?limit=5', 'required_scopes' => ['https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly'], 'requires_application_approval' => true, 'deprecated' => false],
+        'inquiries' => ['api_family' => 'Post-Order Inquiry API', 'endpoint' => '/post-order/v2/inquiry/search?limit=5', 'required_scopes' => ['https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly'], 'requires_application_approval' => true, 'deprecated' => false],
+        'cancellations' => ['api_family' => 'Post-Order Cancellation API', 'endpoint' => '/post-order/v2/cancellation/search?limit=5', 'required_scopes' => ['https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly'], 'requires_application_approval' => true, 'deprecated' => false],
+        'disputes' => ['api_family' => 'Post-Order Case/Dispute API', 'endpoint' => '/post-order/v2/casemanagement/search?limit=5', 'required_scopes' => ['https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly'], 'requires_application_approval' => true, 'deprecated' => false],
     ];
 
     public const CAPABILITIES = [
-        'allegro' => [
-            'api_supported' => true,
-            'messages_supported' => false,
-            'returns_supported' => true,
-            'complaints_supported' => true,
-            'webhooks_supported' => true,
-            'required_scopes' => ['allegro:api:orders:read'],
-            'diagnostic_endpoint' => '/order/customer-returns?limit=1',
-            'notes' => 'Public order/customer-returns and dispute areas are read-capable; no documented generic Message Center import endpoint was wired in this stage.',
-        ],
-        'ebay' => [
-            'api_supported' => true,
-            'messages_supported' => true,
-            'returns_supported' => true,
-            'complaints_supported' => true,
-            'webhooks_supported' => true,
-            'required_scopes' => ['https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly'],
-            'diagnostic_endpoint' => '/sell/fulfillment/v1/order?limit=1',
-            'notes' => 'Current GPSwiss order integration uses Sell Fulfillment; Post-Order and legacy messaging APIs may need additional approval/scopes before live probing.',
-        ],
-        'ovoko' => [
-            'api_supported' => true,
-            'messages_supported' => false,
-            'returns_supported' => false,
-            'complaints_supported' => false,
-            'webhooks_supported' => false,
-            'required_scopes' => ['username', 'password', 'user_token'],
-            'diagnostic_endpoint' => null,
-            'notes' => 'No official public support-message/return/complaint endpoints found in the currently used Ovoko API pattern; do not invent endpoints.',
-        ],
+        'allegro' => ['api_supported' => true, 'messages_supported' => false, 'returns_supported' => true, 'complaints_supported' => true, 'webhooks_supported' => true, 'required_scopes' => ['allegro:api:orders:read'], 'diagnostic_endpoint' => '/order/customer-returns?limit=5', 'notes' => 'Returns use documented GET /order/customer-returns. Complaints/disputes are probed only through the documented disputes endpoint when the token can access it; Message Center remains unconfirmed.'],
+        'ebay' => ['api_supported' => true, 'messages_supported' => false, 'returns_supported' => false, 'complaints_supported' => false, 'webhooks_supported' => true, 'required_scopes' => ['https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly'], 'diagnostic_endpoint' => null, 'notes' => 'Sell Fulfillment Orders is not treated as proof for messages, returns, inquiries, cancellations, or disputes.'],
+        'ovoko' => ['api_supported' => true, 'messages_supported' => false, 'returns_supported' => false, 'complaints_supported' => false, 'webhooks_supported' => false, 'required_scopes' => ['username', 'password', 'user_token'], 'diagnostic_endpoint' => null, 'notes' => 'No official public support-message/return/complaint endpoints found in the currently used Ovoko API pattern; do not invent endpoints.'],
     ];
 
     public function diagnose(string $marketplace, bool $probe = false): array
@@ -58,119 +42,81 @@ class MarketplaceSupportReadOnlyService
         $account = $this->account($marketplace);
         $credentials = $this->credentials($account);
         $scopes = $this->scopes($credentials);
-        $missing = $this->missingScopes($capability['required_scopes'], $scopes, $marketplace);
+        $missing = $this->missingScopes($capability['required_scopes'], $scopes, $marketplace, $credentials);
+        $authReady = $this->authenticationReady($marketplace, $account, $credentials);
 
-        $result = [
-            'ok' => true,
-            'read_only' => true,
-            'marketplace' => $marketplace,
-            'api_supported' => $capability['api_supported'],
-            'authentication_ready' => $this->authenticationReady($marketplace, $account, $credentials),
-            'required_scopes' => $capability['required_scopes'],
-            'missing_scopes' => $missing,
-            'messages_supported' => $capability['messages_supported'],
-            'returns_supported' => $capability['returns_supported'],
-            'complaints_supported' => $capability['complaints_supported'],
-            'webhooks_supported' => $capability['webhooks_supported'],
-            'sample_count' => 0,
-            'sample' => [],
-            'no_mutation' => true,
-            'max_sample' => 5,
-            'probe_executed' => false,
-            'diagnostic_endpoint' => $capability['diagnostic_endpoint'],
-            'notes' => $capability['notes'],
-            'audit_markers' => self::AUDIT_MARKERS,
-        ];
+        $result = ['ok' => true, 'read_only' => true, 'marketplace' => $marketplace, 'api_supported' => $capability['api_supported'], 'authentication_ready' => $authReady, 'required_scopes' => $capability['required_scopes'], 'missing_scopes' => $missing, 'messages_supported' => $capability['messages_supported'], 'returns_supported' => $capability['returns_supported'], 'complaints_supported' => $capability['complaints_supported'], 'webhooks_supported' => $capability['webhooks_supported'], 'sample_count' => 0, 'sample' => [], 'order_link_preview' => [], 'decision_table' => [], 'no_mutation' => true, 'max_sample' => 5, 'probe_executed' => false, 'diagnostic_endpoint' => $capability['diagnostic_endpoint'], 'notes' => $capability['notes'], 'audit_markers' => self::AUDIT_MARKERS];
 
-        if ($probe && $result['authentication_ready'] && in_array($marketplace, ['allegro', 'ebay'], true)) {
-            $result = $this->probe($marketplace, $account, $credentials, $result);
-        }
-
+        if ($marketplace === 'ovoko') $result['ovoko_config'] = $this->ovokoConfigDiagnose($account, $credentials);
+        if ($marketplace === 'ebay') $result['capability_checks'] = $this->ebayCapabilities($account, $credentials, $scopes, $probe && $authReady);
+        if ($probe && $authReady && $marketplace === 'allegro' && $missing === []) $result = $this->probeAllegro($account, $credentials, $result);
+        $result['decision_table'] = $this->decisionTable($marketplace, $result);
         return $result;
     }
 
     public function preview(string $marketplace): array
     {
         $marketplace = $this->normalizeMarketplace($marketplace);
-        $diagnose = $this->diagnose($marketplace, false);
         $sample = $this->localReadOnlySamples($marketplace);
-
-        return [
-            'ok' => true,
-            'read_only' => true,
-            'marketplace' => $marketplace,
-            'source' => 'local_safe_preview_no_marketplace_mutation',
-            'api_diagnosis' => Arr::only($diagnose, ['api_supported', 'authentication_ready', 'messages_supported', 'returns_supported', 'complaints_supported', 'missing_scopes']),
-            'sample_count' => count($sample),
-            'sample' => $sample,
-            'no_mutation' => true,
-        ];
+        return ['ok' => true, 'read_only' => true, 'marketplace' => $marketplace, 'source' => 'local_safe_preview_no_marketplace_mutation', 'sample_count' => count($sample), 'sample' => $sample, 'no_mutation' => true, 'audit_markers' => self::AUDIT_MARKERS];
     }
 
-    private function probe(string $marketplace, ?MarketplaceAccount $account, array $credentials, array $result): array
+    private function probeAllegro(?MarketplaceAccount $account, array $credentials, array $result): array
     {
-        $base = rtrim((string) $account?->api_base_url, '/');
-        if ($base === '') return $result;
-        $endpoint = self::CAPABILITIES[$marketplace]['diagnostic_endpoint'];
-        try {
-            $request = Http::withToken((string) ($credentials['access_token'] ?? ''))->timeout(10)->acceptJson();
-            if ($marketplace === 'allegro') $request = $request->accept('application/vnd.allegro.public.v1+json');
-            if ($marketplace === 'ebay') $request = $request->withHeaders(['X-EBAY-C-MARKETPLACE-ID' => (string) (($account?->api_settings ?? [])['marketplace_id'] ?? 'EBAY_DE')]);
-            $response = $request->get($base.$endpoint);
-            $json = is_array($response->json()) ? $response->json() : [];
-            $rows = array_slice(array_values(array_filter($json['customerReturns'] ?? $json['orders'] ?? $json['data'] ?? [], 'is_array')), 0, 5);
-            $result['probe_executed'] = true;
-            $result['http_status'] = $response->status();
-            $result['sample'] = array_map(fn (array $row): array => $this->redact($row), $rows);
-            $result['sample_count'] = count($result['sample']);
-        } catch (\Throwable $e) {
-            $result['ok'] = false;
-            $result['probe_error'] = $e::class;
+        $base = rtrim((string) $account?->api_base_url, '/'); if ($base === '') return $result;
+        $endpoints = ['returns' => '/order/customer-returns?limit=5', 'disputes' => '/sale/issues?limit=5'];
+        foreach ($endpoints as $type => $endpoint) {
+            $response = Http::withToken((string) $credentials['access_token'])->timeout(10)->accept('application/vnd.allegro.public.v1+json')->get($base.$endpoint);
+            $result['probe_executed'] = true; $result['http_status'][$type] = $response->status();
+            $rows = $response->successful() ? $this->extractRows((array) $response->json(), ['customerReturns', 'issues']) : [];
+            $samples = array_map(fn (array $row) => $this->supportSample('allegro', $type === 'returns' ? 'return' : 'dispute', $row), array_slice($rows, 0, 5));
+            $result['sample'] = array_slice(array_merge($result['sample'], $samples), 0, 5);
+            $result['errors'][$type] = $response->successful() ? null : $this->errorType($response->status());
         }
+        $result['sample_count'] = count($result['sample']);
+        $result['order_link_preview'] = array_map(fn ($s) => $this->orderLinkPreview('allegro', $s), $result['sample']);
         return $result;
     }
 
-    private function localReadOnlySamples(string $marketplace): array
+    private function ebayCapabilities(?MarketplaceAccount $account, array $credentials, array $scopes, bool $probe): array
     {
-        if (! Schema::hasTable('orders')) return [];
-        return Order::query()->where(function ($query) use ($marketplace): void {
-            $query->where('marketplace', 'like', '%'.$marketplace.'%')->orWhere('order_number', 'like', '%'.$marketplace.'%');
-        })->latest()->limit(5)->get()->map(function (Order $order) use ($marketplace): array {
-            $external = (string) ($order->marketplace_order_id ?? $order->order_number ?? '');
-            return [
-                'raw_reference' => ['order_number' => $order->order_number, 'marketplace' => $order->marketplace],
-                'normalized_type' => 'message',
-                'normalized_status' => 'unknown',
-                'requires_action' => false,
-                'unread' => false,
-                'external_order_id' => $external,
-                'local_order_id' => $order->id,
-                'exists' => false,
-                'would' => 'create_if_supported_by_future_import',
-                'no_mutation' => true,
-            ];
-        })->values()->all();
+        $base = rtrim((string) $account?->api_base_url, '/') ?: 'https://api.ebay.com';
+        $out = [];
+        foreach (self::EBAY_FEATURES as $feature => $meta) {
+            $missing = array_values(array_diff($meta['required_scopes'], $scopes));
+            $row = ['feature' => $feature] + $meta + ['missing_scopes' => $missing, 'probe_supported' => $missing === [], 'probe_executed' => false, 'http_status' => null, 'sample_count' => 0, 'error_type' => null, 'api_exists' => true, 'app_has_scope' => $missing === [], 'app_access_confirmed' => false];
+            if ($probe && $missing === []) {
+                $response = Http::withToken((string) ($credentials['access_token'] ?? ''))->timeout(10)->acceptJson()->withHeaders(['X-EBAY-C-MARKETPLACE-ID' => (string) (($account?->api_settings ?? [])['marketplace_id'] ?? 'EBAY_DE')])->get($base.$meta['endpoint']);
+                $row['probe_executed'] = true; $row['http_status'] = $response->status(); $row['error_type'] = $response->successful() ? null : $this->errorType($response->status());
+                $row['app_access_confirmed'] = $response->successful(); $row['sample_count'] = $response->successful() ? min(5, count($this->extractRows((array) $response->json(), ['conversations', 'returns', 'inquiries', 'cancellations', 'cases', 'disputes']))) : 0;
+            }
+            $out[] = $row;
+        }
+        return $out;
     }
 
-    private function account(string $marketplace): ?MarketplaceAccount
+    private function supportSample(string $marketplace, string $type, array $row): array
     {
-        if (! Schema::hasTable('marketplace_accounts')) return null;
-        return MarketplaceAccount::query()->where(function ($query) use ($marketplace): void {
-            $query->where('marketplace', $marketplace)->orWhere('code', 'like', $marketplace.'%');
-        })->where('api_enabled', true)->first();
+        $orderId = (string) data_get($row, 'order.id', data_get($row, 'checkoutForm.id', data_get($row, 'orderId', '')));
+        return ['external_id' => (string) ($row['id'] ?? $row['returnId'] ?? $row['caseId'] ?? ''), 'type' => $type, 'raw_status' => (string) ($row['status'] ?? $row['state'] ?? 'unknown'), 'normalized_status' => $this->normalizeStatus((string) ($row['status'] ?? $row['state'] ?? 'unknown')), 'requires_action' => $this->requiresAction($row), 'external_order_id' => $orderId, 'local_order_id' => $this->localOrderId($marketplace, $orderId), 'created_at' => $row['createdAt'] ?? $row['created_at'] ?? null, 'updated_at' => $row['updatedAt'] ?? $row['lastModifiedAt'] ?? null, 'deadline_at' => $row['deadlineAt'] ?? null, 'safe_keys' => array_values(array_slice(array_filter(array_keys($row), fn ($k) => ! preg_match('/email|phone|address|name|token|secret|password/i', (string) $k)), 0, 20))];
     }
 
-    private function normalizeMarketplace(string $marketplace): string
-    {
-        $value = Str::lower(trim($marketplace));
-        if (Str::contains($value, 'ebay')) return 'ebay';
-        if (! array_key_exists($value, self::CAPABILITIES)) abort(404, 'Unsupported marketplace.');
-        return $value;
-    }
+    private function orderLinkPreview(string $marketplace, array $sample): array
+    { return ['external_order_id' => $sample['external_order_id'] ?? null, 'local_order_id' => $sample['local_order_id'] ?? null, 'marketplace' => $marketplace, 'type' => $sample['type'] ?? null, 'normalized_status' => $sample['normalized_status'] ?? null, 'requires_action' => (bool) ($sample['requires_action'] ?? false), 'would_go_to' => ['messages' => ($sample['type'] ?? '') === 'message', 'returns_complaints' => in_array($sample['type'] ?? '', ['return','complaint','dispute'], true), 'requires_action' => (bool) ($sample['requires_action'] ?? false)], 'no_mutation' => true]; }
+    private function extractRows(array $json, array $keys): array { foreach ($keys as $key) if (isset($json[$key]) && is_array($json[$key])) return array_values(array_filter($json[$key], 'is_array')); return []; }
+    private function errorType(int $status): ?string { return in_array($status, [401,403], true) ? 'auth_or_scope_error' : ($status === 429 ? 'rate_limited' : ($status >= 400 ? 'api_error' : null)); }
+    private function normalizeStatus(string $status): string { return match (Str::lower($status)) { 'created','new','open','opened' => 'open', 'closed','completed','resolved' => 'closed', 'cancelled','canceled','rejected' => 'closed', default => 'unknown' }; }
+    private function requiresAction(array $row): bool { $status = Str::lower((string) ($row['status'] ?? $row['state'] ?? '')); return (bool) ($row['requiresAction'] ?? Str::contains($status, ['created','open','waiting'])); }
 
+    private function localReadOnlySamples(string $marketplace): array { if (! Schema::hasTable('orders')) return []; return Order::query()->where(fn ($q) => $q->where('marketplace', 'like', '%'.$marketplace.'%')->orWhere('order_number', 'like', '%'.$marketplace.'%'))->latest()->limit(5)->get()->map(fn (Order $order) => $this->orderLinkPreview($marketplace, ['type' => 'message', 'normalized_status' => 'unknown', 'requires_action' => false, 'external_order_id' => (string) ($order->marketplace_order_id ?? $order->order_number ?? ''), 'local_order_id' => $order->id]) + ['raw_reference' => ['order_number' => $order->order_number, 'marketplace' => $order->marketplace], 'unread' => false])->values()->all(); }
+    private function ovokoConfigDiagnose(?MarketplaceAccount $account, array $credentials): array { $order = $this->hasAll($credentials, ['username','password','user_token']) || $this->hasAll((array) ($account?->config ?? []), ['username','password','user_token']); return ['order_sync_credentials_detected' => $order, 'support_api_credentials_detected' => false, 'same_configuration_source' => false, 'support_endpoints_documented' => false, 'can_probe_support_api' => false, 'reason' => 'Order sync credentials may exist for the documented order API pattern, but no official support API endpoint is configured or documented; values are intentionally redacted.']; }
+    private function hasAll(array $array, array $keys): bool { foreach ($keys as $key) if (blank($array[$key] ?? null)) return false; return true; }
+    private function decisionTable(string $marketplace, array $result): array { if ($marketplace === 'ovoko') return ['messages' => 'unavailable', 'returns' => 'unavailable', 'complaints' => 'unavailable']; if ($marketplace === 'allegro') return ['returns' => ($result['errors']['returns'] ?? null) ? 'blocked' : (($result['probe_executed'] ?? false) ? 'confirmed working' : 'not probed'), 'complaints/disputes' => ($result['errors']['disputes'] ?? null) ? 'blocked' : (($result['probe_executed'] ?? false) ? 'confirmed working' : 'not probed'), 'messages' => 'unsupported/unconfirmed']; return collect($result['capability_checks'] ?? [])->mapWithKeys(fn ($r) => [$r['feature'] => $r['missing_scopes'] ? 'missing scope' : (($r['app_access_confirmed'] ?? false) ? 'confirmed working' : (($r['probe_executed'] ?? false) ? 'restricted' : 'not probed'))])->all(); }
+    private function account(string $marketplace): ?MarketplaceAccount { if (! Schema::hasTable('marketplace_accounts')) return null; return MarketplaceAccount::query()->where(fn ($q) => $q->where('marketplace', $marketplace)->orWhere('code', 'like', $marketplace.'%'))->where('api_enabled', true)->first(); }
+    private function normalizeMarketplace(string $marketplace): string { $value = Str::lower(trim($marketplace)); if (Str::contains($value, 'ebay')) return 'ebay'; if (! array_key_exists($value, self::CAPABILITIES)) abort(404, 'Unsupported marketplace.'); return $value; }
     private function credentials(?MarketplaceAccount $account): array { return is_array($account?->api_credentials) ? $account->api_credentials : []; }
     private function scopes(array $credentials): array { $scope = $credentials['scope'] ?? $credentials['scopes'] ?? []; return is_array($scope) ? $scope : preg_split('/\s+/', (string) $scope, -1, PREG_SPLIT_NO_EMPTY); }
-    private function missingScopes(array $required, array $actual, string $marketplace): array { return $marketplace === 'ovoko' ? array_values(array_filter($required, fn ($key) => blank($actual[$key] ?? null))) : array_values(array_diff($required, $actual)); }
-    private function authenticationReady(string $marketplace, ?MarketplaceAccount $account, array $credentials): bool { return $account !== null && $account->api_enabled && filled($account->api_base_url) && ($marketplace === 'ovoko' ? filled($credentials['user_token'] ?? null) : filled($credentials['access_token'] ?? null)); }
-    private function redact(array $row): array { array_walk_recursive($row, function (&$value, $key): void { if (preg_match('/token|email|phone|address|password|secret/i', (string) $key)) $value = '[redacted]'; }); return $row; }
+    private function missingScopes(array $required, array $actual, string $marketplace, array $credentials = []): array { return $marketplace === 'ovoko' ? array_values(array_filter($required, fn ($key) => blank($credentials[$key] ?? null))) : array_values(array_diff($required, $actual)); }
+    private function authenticationReady(string $marketplace, ?MarketplaceAccount $account, array $credentials): bool { return $account !== null && $account->api_enabled && filled($account->api_base_url) && ($marketplace === 'ovoko' ? $this->hasAll($credentials, ['username','password','user_token']) : filled($credentials['access_token'] ?? null)); }
+    private function localOrderId(string $marketplace, string $externalOrderId): ?int { if ($externalOrderId === '' || ! Schema::hasTable('orders')) return null; return Order::query()->where('marketplace_order_id', $externalOrderId)->where('marketplace', 'like', '%'.$marketplace.'%')->value('id'); }
 }
