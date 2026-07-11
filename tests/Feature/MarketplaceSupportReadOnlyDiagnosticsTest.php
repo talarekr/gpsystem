@@ -57,11 +57,8 @@ class MarketplaceSupportReadOnlyDiagnosticsTest extends TestCase
             ->assertOk()
             ->assertJsonPath('read_only', true)
             ->assertJsonPath('marketplace', 'allegro')
-            ->assertJsonPath('sample.0.normalized_status', 'unknown')
-            ->assertJsonPath('sample.0.requires_action', false)
-            ->assertJsonPath('sample.0.unread', false)
-            ->assertJsonPath('sample.0.external_order_id', 'EXT-123')
-            ->assertJsonPath('sample.0.no_mutation', true);
+            ->assertJsonPath('sample_count', 0)
+            ->assertJsonPath('sample', []);
     }
 
     public function test_ovoko_diagnose_reports_undocumented_support_capabilities(): void
@@ -82,7 +79,7 @@ class MarketplaceSupportReadOnlyDiagnosticsTest extends TestCase
     public function test_allegro_probe_uses_get_limits_to_five_and_redacts_sensitive_data(): void
     {
         Http::preventStrayRequests();
-        MarketplaceAccount::query()->create(['marketplace'=>'allegro','name'=>'Allegro','code'=>'allegro','status'=>'active','api_enabled'=>true,'api_base_url'=>'https://api.allegro.pl','api_credentials'=>['access_token'=>'secret','scope'=>'allegro:api:orders:read']]);
+        MarketplaceAccount::query()->create(['marketplace'=>'allegro','name'=>'Allegro','code'=>'allegro','status'=>'active','api_enabled'=>true,'api_base_url'=>'https://api.allegro.pl','api_credentials'=>['access_token'=>'secret','scope'=>'allegro:api:orders:read allegro:api:sale:offers:read']]);
         Order::query()->create(['order_number'=>'A1','marketplace_order_id'=>'ORDER-1','marketplace'=>'allegro','status'=>'new','currency'=>'PLN']);
         Http::fake([
             'api.allegro.pl/order/customer-returns?limit=5' => Http::response(['customerReturns'=>array_map(fn($i)=>['id'=>'R'.$i,'status'=>'CREATED','order'=>['id'=>'ORDER-'.$i],'buyerEmail'=>'x@example.com'], range(1, 7))], 200),
@@ -141,6 +138,66 @@ class MarketplaceSupportReadOnlyDiagnosticsTest extends TestCase
             ->assertJsonPath('ovoko_config.support_api_credentials_detected', false)
             ->assertJsonPath('ovoko_config.can_probe_support_api', false);
         Http::assertNothingSent();
+    }
+
+
+    public function test_allegro_probe_uses_separate_accept_headers_and_maps_406(): void
+    {
+        Http::preventStrayRequests();
+        MarketplaceAccount::query()->create(['marketplace'=>'allegro','name'=>'Allegro','code'=>'allegro','status'=>'active','api_enabled'=>true,'api_base_url'=>'https://api.allegro.pl','api_credentials'=>['access_token'=>'secret','scope'=>'allegro:api:orders:read allegro:api:sale:offers:read']]);
+        Http::fake([
+            'api.allegro.pl/order/customer-returns?limit=5' => Http::response(['customerReturns'=>[['id'=>'R1','status'=>'CREATED']]], 200, ['Content-Type' => 'application/vnd.allegro.public.v1+json']),
+            'api.allegro.pl/sale/issues?limit=5' => Http::response(['errors'=>[['code'=>'NotAcceptableException','message'=>'Not acceptable representation requested']]], 406, ['Content-Type' => 'application/json', 'trace-id' => 'trace-redacted']),
+        ]);
+
+        $this->getJson('/admin/tools/support-sync/allegro/diagnose?json=1&probe=1')->assertOk()
+            ->assertJsonPath('probe_results.returns.accept_header', 'application/vnd.allegro.public.v1+json')
+            ->assertJsonPath('probe_results.issues.accept_header', 'application/vnd.allegro.beta.v1+json')
+            ->assertJsonPath('probe_results.issues.error_type', 'not_acceptable_media_type')
+            ->assertJsonPath('probe_results.returns.sample_count', 1)
+            ->assertJsonPath('probe_results.issues.sample_count', 0);
+
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/order/customer-returns') && $request->header('Accept')[0] === 'application/vnd.allegro.public.v1+json' && $request->header('Accept-Language')[0] === 'pl-PL');
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/sale/issues') && $request->header('Accept')[0] === 'application/vnd.allegro.beta.v1+json' && $request->method() === 'GET');
+    }
+
+    public function test_ebay_auth_diagnose_redacts_tokens_and_reports_missing_message_scope(): void
+    {
+        Http::preventStrayRequests();
+        MarketplaceAccount::query()->create(['marketplace'=>'ebay','name'=>'eBay','code'=>'ebay_de','status'=>'active','api_enabled'=>true,'api_base_url'=>'https://api.ebay.com','api_credentials'=>['access_token'=>'secret-access','refresh_token'=>'secret-refresh','scope'=>'https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly']]);
+        $json = $this->getJson('/admin/tools/support-sync/ebay/auth-diagnose?json=1')->assertOk()
+            ->assertJsonPath('read_only', true)
+            ->assertJsonPath('no_mutation', true)
+            ->assertJsonPath('requires_reauthorization', true)
+            ->json();
+        $encoded = json_encode($json);
+        $this->assertStringNotContainsString('secret-access', $encoded);
+        $this->assertStringNotContainsString('secret-refresh', $encoded);
+        $this->assertContains('https://api.ebay.com/oauth/api_scope/commerce.message.readonly', $json['missing_scopes_by_feature']['messages']);
+    }
+
+    public function test_ebay_post_order_401_keeps_safe_error_details_and_not_confirmed_working(): void
+    {
+        Http::preventStrayRequests();
+        MarketplaceAccount::query()->create(['marketplace'=>'ebay','name'=>'eBay','code'=>'ebay_de','status'=>'active','api_enabled'=>true,'api_base_url'=>'https://api.ebay.com','api_credentials'=>['access_token'=>'secret','scope'=>'https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly']]);
+        Http::fake(['api.ebay.com/post-order/v2/*' => Http::response(['errors'=>[['errorId'=>1100,'domain'=>'ACCESS','category'=>'REQUEST','message'=>'Access denied']]], 401)]);
+        $json = $this->getJson('/admin/tools/support-sync/ebay/diagnose?json=1&probe=1')->assertOk()->json();
+        $returns = collect($json['capability_checks'])->firstWhere('feature', 'returns');
+        $this->assertSame(401, $returns['http_status']);
+        $this->assertSame(1100, $returns['ebay_error_id']);
+        $this->assertSame('ACCESS', $returns['ebay_error_domain']);
+        $this->assertFalse($returns['app_access_confirmed']);
+        $this->assertNotSame('confirmed working', $json['decision_table']['returns']);
+    }
+
+    public function test_no_marketplace_mutating_methods_are_used_by_probes(): void
+    {
+        Http::preventStrayRequests();
+        MarketplaceAccount::query()->create(['marketplace'=>'allegro','name'=>'Allegro','code'=>'allegro','status'=>'active','api_enabled'=>true,'api_base_url'=>'https://api.allegro.pl','api_credentials'=>['access_token'=>'secret','scope'=>'allegro:api:orders:read allegro:api:sale:offers:read']]);
+        Http::fake(['api.allegro.pl/*' => Http::response([], 401)]);
+        $this->getJson('/admin/tools/support-sync/allegro/diagnose?json=1&probe=1')->assertOk();
+        Http::assertSent(fn ($request) => ! in_array($request->method(), ['POST','PUT','PATCH','DELETE'], true));
+        $this->assertSame(0, ShopEvent::query()->count());
     }
 
 }

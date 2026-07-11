@@ -429,6 +429,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::match(['get', 'post'], '/admin/tools/marketplace/orders-reset', MarketplaceOrdersResetController::class)->name('admin.tools.marketplace.orders-reset');
     Route::match(['get', 'post'], '/admin/tools/marketplace/orders-sync', MarketplaceOrdersSyncController::class)->name('admin.tools.marketplace.orders-sync');
     Route::get('/admin/tools/support-sync/preview', [MarketplaceSupportSyncDiagnoseController::class, 'preview'])->name('admin.tools.support-sync.preview');
+    Route::get('/admin/tools/support-sync/ebay/auth-diagnose', [MarketplaceSupportSyncDiagnoseController::class, 'ebayAuthDiagnose'])->name('admin.tools.support-sync.ebay.auth-diagnose');
     Route::get('/admin/tools/support-sync/{marketplace}/diagnose', [MarketplaceSupportSyncDiagnoseController::class, 'diagnose'])->whereIn('marketplace', ['allegro', 'ebay', 'ovoko'])->name('admin.tools.support-sync.diagnose');
     Route::match(['get', 'post'], '/admin/tools/marketplace/orders-purge', MarketplaceOrdersPurgeToolController::class)->name('admin.tools.marketplace.orders-purge');
     Route::match(['get', 'post'], '/admin/tools/marketplace/fulfillment-status-sync', MarketplaceFulfillmentSyncToolController::class)->name('admin.tools.marketplace.fulfillment-status-sync');

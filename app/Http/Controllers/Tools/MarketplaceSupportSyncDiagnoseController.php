@@ -16,6 +16,11 @@ class MarketplaceSupportSyncDiagnoseController extends Controller
         return response()->json($this->service->diagnose($marketplace, $request->boolean('probe')));
     }
 
+    public function ebayAuthDiagnose(Request $request): JsonResponse
+    {
+        return response()->json($this->service->ebayAuthDiagnose());
+    }
+
     public function preview(Request $request): JsonResponse
     {
         return response()->json($this->service->preview((string) $request->query('marketplace', 'allegro')));
