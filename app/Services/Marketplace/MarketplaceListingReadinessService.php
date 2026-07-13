@@ -92,7 +92,10 @@ class MarketplaceListingReadinessService
             if ($categoryMapping && filled($categoryMapping->external_category_id)) {
                 $definitions = $this->allegroCategoryParametersService->definitions((string) $categoryMapping->external_category_id);
                 $allegroParameters = $this->allegroOfferParametersBuilder->build($part, $categoryMapping, $definitions);
-                foreach (($allegroParameters['missing_required_parameters'] ?? []) as $param) { $missing[] = 'allegro_parameter:'.($param['name'] ?? $param['id']); }
+                foreach (($allegroParameters['missing_required_parameters'] ?? []) as $param) {
+                    $missing[] = 'allegro_parameter:'.($param['name'] ?? $param['id']);
+                    if (filled($param['reason'] ?? null)) $blockers[] = (string) $param['reason'];
+                }
                 if (($allegroParameters['missing_required_parameters'] ?? []) !== []) $blockers[] = 'allegro_required_category_parameters_missing';
                 if (! ($definitions['ok'] ?? false)) $blockers[] = $definitions['blocker'] ?? 'allegro_category_parameters_unavailable';
             } else {

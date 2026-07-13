@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Car;
 use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceCategoryMapping;
 use App\Models\Part;
@@ -478,6 +479,49 @@ class AllegroCategoryParametersTest extends TestCase
             ['id' => 'drive', 'valuesIds' => ['4x4']],
         ], $result['offer_parameters']);
         $this->assertSame([], $result['missing_required_parameters']);
+    }
+
+    public function test_allegro_complete_engine_type_maps_from_assigned_car_fuel_type(): void
+    {
+        $car = Car::query()->create(['make' => 'Audi', 'model' => 'A4', 'fuel_type' => 'Benzyna']);
+        $part = Part::query()->create(['name' => 'Silnik kompletny Audi', 'category_id' => 77, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'car_id' => $car->id, 'is_visible_storefront' => true]);
+
+        $result = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, null, ['ok' => true, 'source' => 'cache', 'parameters' => [
+            ['id' => 'engine-type', 'name' => 'Typ silnika', 'type' => 'dictionary', 'required' => true, 'dictionary' => [['id' => 'petrol-id', 'value' => 'Benzyna']], 'options' => ['describesProduct' => false]],
+        ]]);
+
+        $this->assertSame([['id' => 'engine-type', 'valuesIds' => ['petrol-id']]], $result['offer_parameters']);
+        $this->assertSame([], $result['missing_required_parameters']);
+        $diagnostics = $result['parameter_source_diagnostics'][0];
+        $this->assertSame($part->id, $diagnostics['part_id']);
+        $this->assertSame($car->id, $diagnostics['car_id']);
+        $this->assertSame('Benzyna', $diagnostics['raw_local_value']);
+        $this->assertSame('Typ silnika', $diagnostics['matched_parameter_name']);
+        $this->assertSame('engine-type', $diagnostics['matched_parameter_id']);
+        $this->assertSame('Benzyna', $diagnostics['matched_value_label']);
+        $this->assertSame('petrol-id', $diagnostics['matched_value_id']);
+    }
+
+    public function test_allegro_complete_engine_type_missing_car_or_fuel_type_returns_clear_blocker(): void
+    {
+        $partWithoutCar = Part::query()->create(['name' => 'Silnik bez auta', 'category_id' => 77, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'is_visible_storefront' => true]);
+
+        $missingCar = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($partWithoutCar, null, ['ok' => true, 'source' => 'cache', 'parameters' => [
+            ['id' => 'engine-type', 'name' => 'Typ silnika', 'type' => 'dictionary', 'required' => true, 'dictionary' => [['id' => 'petrol-id', 'value' => 'Benzyna']], 'options' => ['describesProduct' => false]],
+        ]]);
+
+        $this->assertSame([], $missingCar['offer_parameters']);
+        $this->assertSame('Brak samochodu przypisanego do części — nie można ustalić parametru Typ silnika.', $missingCar['missing_required_parameters'][0]['reason']);
+
+        $carWithoutFuel = Car::query()->create(['make' => 'Audi', 'model' => 'A4']);
+        $partWithoutFuel = Part::query()->create(['name' => 'Silnik bez paliwa', 'category_id' => 77, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'car_id' => $carWithoutFuel->id, 'is_visible_storefront' => true]);
+
+        $missingFuel = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($partWithoutFuel, null, ['ok' => true, 'source' => 'cache', 'parameters' => [
+            ['id' => 'engine-type', 'name' => 'Typ silnika', 'type' => 'dictionary', 'required' => true, 'dictionary' => [['id' => 'petrol-id', 'value' => 'Benzyna']], 'options' => ['describesProduct' => false]],
+        ]]);
+
+        $this->assertSame([], $missingFuel['offer_parameters']);
+        $this->assertSame('Brak rodzaju paliwa w samochodzie — nie można ustalić parametru Typ silnika.', $missingFuel['missing_required_parameters'][0]['reason']);
     }
 
     private function carTypeDictionary(): array
