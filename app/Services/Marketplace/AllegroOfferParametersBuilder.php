@@ -54,6 +54,7 @@ class AllegroOfferParametersBuilder
         if ($m) return $this->resolveValue($m['value'], $m['source'], $def);
         if ($name === 'stronazabudowy') return $this->resolvePartPosition($part, $def);
         if ($name === 'typsamochodu') return $this->resolveCarType($part, $def);
+        if ($name === 'typsilnika') return $this->resolveEngineTypeFromCarFuel($part, $def);
         if ($vehicleField = $this->vehicleFieldForParameter($name)) return $this->resolveVehicleParameter($part, $def, $vehicleField);
         if ($this->isCatalogPartNumberParameter($def, $name) || (string) ($def['id'] ?? '') === '227345') {
             return $this->resolveValue($this->catalogPartNumber($part), 'part.part_number', $def);
@@ -148,6 +149,69 @@ class AllegroOfferParametersBuilder
         return ['value' => null, 'source' => 'not_resolved'];
     }
 
+
+
+    private function resolveEngineTypeFromCarFuel(Part $part, array $def): array
+    {
+        $part->loadMissing('car');
+        $car = $part->car;
+        $base = [
+            'source' => 'part.car.fuel_type',
+            'source_field' => 'car.fuel_type',
+            'part_id' => $part->id,
+            'car_id' => $part->car_id,
+            'matched_parameter_name' => (string) ($def['name'] ?? ''),
+            'matched_parameter_id' => (string) ($def['id'] ?? ''),
+        ];
+
+        if (! $car) {
+            return $base + ['value' => null, 'source_value' => null, 'reason' => 'Brak samochodu przypisanego do części — nie można ustalić parametru Typ silnika.'];
+        }
+
+        $fuelType = $car->fuel_type;
+        if (blank($fuelType)) {
+            return $base + ['value' => null, 'source_value' => $fuelType, 'reason' => 'Brak rodzaju paliwa w samochodzie — nie można ustalić parametru Typ silnika.'];
+        }
+
+        $candidates = $this->engineTypeCandidatesFromFuelType((string) $fuelType);
+        $normalized = $this->norm($fuelType);
+        if (($def['type'] ?? '') !== 'dictionary') {
+            $value = $candidates[0] ?? (string) $fuelType;
+            return $base + ['value' => $value, 'source_value' => $fuelType, 'normalized_value' => $normalized, 'matched_value_label' => $value];
+        }
+
+        foreach (($def['dictionary'] ?? []) as $allowed) {
+            foreach ($candidates as $candidate) {
+                if ((string) ($allowed['id'] ?? '') === $candidate || $this->matchesDictionaryLabel($allowed['value'] ?? '', $candidate)) {
+                    return $base + ['type' => 'dictionary', 'value' => [(string) $allowed['id']], 'label' => $allowed['value'] ?? null, 'source_value' => $fuelType, 'normalized_value' => $normalized, 'mapped_value_id' => (string) $allowed['id'], 'mapped_label' => $allowed['value'] ?? null, 'matched_value_label' => $allowed['value'] ?? null, 'matched_value_id' => (string) $allowed['id']];
+                }
+            }
+        }
+
+        return $base + ['value' => null, 'source_value' => $fuelType, 'normalized_value' => $normalized, 'reason' => "Nie udało się dopasować rodzaju paliwa {$fuelType} do wartości Allegro parametru Typ silnika.", 'allowed_values_sample' => array_slice(array_map(fn ($allowed): array => ['id' => (string) ($allowed['id'] ?? ''), 'value' => (string) ($allowed['value'] ?? '')], $def['dictionary'] ?? []), 0, 20), 'allowed_values' => $this->allowedValuesDiagnostics($def)];
+    }
+
+    private function engineTypeCandidatesFromFuelType(string $fuelType): array
+    {
+        $normalized = $this->norm($fuelType);
+        $map = [
+            'benzyna' => ['benzyna'],
+            'petrol' => ['benzyna'],
+            'gasoline' => ['benzyna'],
+            'diesel' => ['diesel'],
+            'olejnapedowy' => ['diesel'],
+            'hybryda' => ['hybryda'],
+            'hybrid' => ['hybryda'],
+            'elektryczny' => ['elektryczny'],
+            'electric' => ['elektryczny'],
+            'lpg' => ['benzyna + LPG', 'benzyna lpg', 'lpg', 'gaz'],
+            'gaz' => ['benzyna + LPG', 'benzyna lpg', 'lpg', 'gaz'],
+            'benzynalpg' => ['benzyna + LPG', 'benzyna lpg', 'lpg', 'gaz'],
+            'benzynagaz' => ['benzyna + LPG', 'benzyna lpg', 'lpg', 'gaz'],
+        ];
+
+        return $map[$normalized] ?? [];
+    }
 
     private function vehicleFieldForParameter(string $normalizedName): ?string
     {
@@ -365,6 +429,12 @@ class AllegroOfferParametersBuilder
             'reason' => $reason,
             'mapped_value_id' => $resolved['mapped_value_id'] ?? ($valuesIds[0] ?? null),
             'mapped_label' => $resolved['mapped_label'] ?? ($resolved['label'] ?? null),
+            'part_id' => $resolved['part_id'] ?? null,
+            'car_id' => $resolved['car_id'] ?? null,
+            'matched_parameter_name' => $resolved['matched_parameter_name'] ?? null,
+            'matched_parameter_id' => $resolved['matched_parameter_id'] ?? null,
+            'matched_value_label' => $resolved['matched_value_label'] ?? ($resolved['mapped_label'] ?? ($resolved['label'] ?? null)),
+            'matched_value_id' => $resolved['matched_value_id'] ?? ($resolved['mapped_value_id'] ?? ($valuesIds[0] ?? null)),
             'allowed_values_sample' => $resolved['allowed_values_sample'] ?? null,
             'type' => (string) ($def['type'] ?? ''),
             'describesProduct' => (bool) ($def['options']['describesProduct'] ?? false),
@@ -378,6 +448,7 @@ class AllegroOfferParametersBuilder
         if ($row['resolved_value'] === null) unset($row['resolved_value']);
         if ($row['mapped_value_id'] === null) unset($row['mapped_value_id']);
         if ($row['mapped_label'] === null) unset($row['mapped_label']);
+        foreach (['part_id', 'car_id', 'matched_parameter_name', 'matched_parameter_id', 'matched_value_label', 'matched_value_id'] as $key) { if ($row[$key] === null) unset($row[$key]); }
         if ($row['allowed_values_sample'] === null) unset($row['allowed_values_sample']);
         if ($row['allowed_values'] === null) unset($row['allowed_values']);
 
