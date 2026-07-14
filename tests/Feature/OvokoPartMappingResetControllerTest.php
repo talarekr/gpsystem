@@ -111,7 +111,7 @@ class OvokoPartMappingResetControllerTest extends TestCase
 
         $this->getJson('/admin/tools/ovoko/part-mapping-reset-candidates?json=1&include_readiness=1&only_gps_gmail=1&source_system=woo')
             ->assertOk()
-            ->assertJsonPath('marker', 'ovoko_part_mapping_reset_candidates_audit_v1')
+            ->assertJsonPath('marker', 'ovoko_part_mapping_reset_candidates_not_ready_filter_v2')
             ->assertJsonPath('summary.safety_flags.read_only', true)
             ->assertJsonPath('summary.safety_flags.no_mutation', true)
             ->assertJsonPath('summary.safety_flags.no_ovoko_request', true)
@@ -129,6 +129,38 @@ class OvokoPartMappingResetControllerTest extends TestCase
 
         $this->assertSame('11582', $ovoko->fresh()->external_offer_id);
         $this->assertSame('A-11582', MarketplaceListing::query()->where('marketplace', 'allegro')->value('external_offer_id'));
+    }
+
+
+    public function test_reset_candidates_not_ready_filters_summary_and_recommendation_are_read_only(): void
+    {
+        $this->actingAsAdminUser();
+
+        $ready = Part::query()->create(['name' => 'Ready', 'sku' => 'GPS-GMAIL-READY', 'quantity' => 1, 'status' => 'ready', 'price' => 100, 'ovoko_price' => 120, 'weight_kg' => 1, 'length_cm' => 10, 'width_cm' => 10, 'height_cm' => 10, 'car_id' => 1, 'review_metadata' => ['marketplace_category_overrides' => ['ovoko' => ['external_category_id' => 'CAT']]]]);
+        $notReadyImported = Part::query()->create(['name' => 'Imported missing price', 'sku' => 'GPS-GMAIL-IMPORT', 'quantity' => 1, 'status' => 'ready', 'price' => null, 'ovoko_price' => null]);
+        $published = Part::query()->create(['name' => 'Published missing price', 'sku' => 'GPS-GMAIL-PUB', 'quantity' => 1, 'status' => 'ready', 'price' => null, 'ovoko_price' => null]);
+        $nonGps = Part::query()->create(['name' => 'Not GPS', 'sku' => 'LOCAL-1', 'quantity' => 1, 'status' => 'ready', 'price' => null, 'ovoko_price' => null]);
+
+        MarketplaceListing::query()->create(['part_id' => $ready->id, 'marketplace' => 'ovoko', 'external_offer_id' => 'R-1', 'sku' => 'GPS-GMAIL-READY', 'url' => 'https://ovoko.example.test/R-1', 'status' => 'imported']);
+        MarketplaceListing::query()->create(['part_id' => $notReadyImported->id, 'marketplace' => 'ovoko', 'external_offer_id' => 'I-1', 'sku' => 'GPS-GMAIL-IMPORT', 'url' => 'https://ovoko.example.test/I-1', 'status' => 'imported']);
+        MarketplaceListing::query()->create(['part_id' => $published->id, 'marketplace' => 'ovoko', 'external_offer_id' => 'P-1', 'sku' => 'GPS-GMAIL-PUB', 'url' => 'https://ovoko.example.test/P-1', 'status' => 'published']);
+        MarketplaceListing::query()->create(['part_id' => $nonGps->id, 'marketplace' => 'ovoko', 'external_offer_id' => 'N-1', 'sku' => 'LOCAL-1', 'url' => 'https://ovoko.example.test/N-1', 'status' => 'imported']);
+
+        $this->getJson('/admin/tools/ovoko/part-mapping-reset-candidates?json=1&include_readiness=1&only_not_ready=1&exclude_published=1&only_imported=1&limit=10')
+            ->assertOk()
+            ->assertJsonPath('marker', 'ovoko_part_mapping_reset_candidates_not_ready_filter_v2')
+            ->assertJsonPath('summary.total_candidates', 2)
+            ->assertJsonPath('summary.ready_candidates_count', 0)
+            ->assertJsonPath('summary.not_ready_candidates_count', 2)
+            ->assertJsonPath('summary.published_candidates_count', 0)
+            ->assertJsonPath('summary.imported_not_ready_candidates_count', 2)
+            ->assertJsonPath('candidates.0.status', 'imported')
+            ->assertJsonPath('candidates.0.reset_recommended_now', false)
+            ->assertJsonPath('candidates.1.status', 'imported')
+            ->assertJsonPath('candidates.1.reset_recommended_now', true);
+
+        $this->assertSame('I-1', MarketplaceListing::query()->where('part_id', $notReadyImported->id)->value('external_offer_id'));
+        $this->assertSame('P-1', MarketplaceListing::query()->where('part_id', $published->id)->value('external_offer_id'));
     }
 
     public function test_reset_preview_shows_fields_to_clear_and_does_not_include_allegro_ebay_reset_fields(): void
