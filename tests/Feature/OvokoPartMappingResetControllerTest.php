@@ -101,6 +101,61 @@ class OvokoPartMappingResetControllerTest extends TestCase
         $this->assertNull($listing->fresh()->external_offer_id);
     }
 
+    public function test_reset_candidates_endpoint_is_read_only_and_shows_gps_gmail_candidates(): void
+    {
+        $this->actingAsAdminUser();
+
+        $part = Part::query()->create(['name' => 'Candidate', 'sku' => 'GPS-GMAIL-7730', 'quantity' => 1, 'status' => 'published', 'price' => null, 'ovoko_price' => null, 'source_system' => 'woo']);
+        $ovoko = MarketplaceListing::query()->create(['part_id' => $part->id, 'marketplace' => 'ovoko', 'external_offer_id' => '11582', 'external_listing_id' => '11582', 'external_inventory_id' => 'INV-11582', 'sku' => 'GPS-GMAIL-7730', 'url' => 'https://ovoko.example.test/11582', 'status' => 'mapped', 'sync_status' => 'mapped', 'match_status' => 'confirmed', 'raw_payload' => ['ovoko_part_id' => '11582']]);
+        MarketplaceListing::query()->create(['part_id' => $part->id, 'marketplace' => 'allegro', 'external_offer_id' => 'A-11582', 'external_listing_id' => 'A-11582', 'url' => 'https://allegro.example.test/A-11582', 'status' => 'ACTIVE']);
+
+        $this->getJson('/admin/tools/ovoko/part-mapping-reset-candidates?json=1&include_readiness=1&only_gps_gmail=1&source_system=woo')
+            ->assertOk()
+            ->assertJsonPath('marker', 'ovoko_part_mapping_reset_candidates_audit_v1')
+            ->assertJsonPath('summary.safety_flags.read_only', true)
+            ->assertJsonPath('summary.safety_flags.no_mutation', true)
+            ->assertJsonPath('summary.safety_flags.no_ovoko_request', true)
+            ->assertJsonPath('summary.safety_flags.no_publish', true)
+            ->assertJsonPath('summary.total_candidates', 1)
+            ->assertJsonPath('summary.candidates_with_gps_gmail_sku', 1)
+            ->assertJsonPath('summary.candidates_missing_price', 1)
+            ->assertJsonPath('candidates.0.part_id', $part->id)
+            ->assertJsonPath('candidates.0.identity_looks_like_gps_gmail', true)
+            ->assertJsonPath('candidates.0.has_active_ovoko_identity', true)
+            ->assertJsonPath('candidates.0.has_active_ovoko_url', true)
+            ->assertJsonPath('candidates.0.should_create_after_reset', true)
+            ->assertJsonPath('candidates.0.raw_payload_ovoko_part_id', '11582')
+            ->assertJsonPath('candidates.0.suggested_action', 'reset_mapping_for_recreate');
+
+        $this->assertSame('11582', $ovoko->fresh()->external_offer_id);
+        $this->assertSame('A-11582', MarketplaceListing::query()->where('marketplace', 'allegro')->value('external_offer_id'));
+    }
+
+    public function test_reset_preview_shows_fields_to_clear_and_does_not_include_allegro_ebay_reset_fields(): void
+    {
+        $this->actingAsAdminUser();
+
+        $part = Part::query()->create(['name' => 'Preview part', 'sku' => 'GPS-GMAIL-7729', 'quantity' => 1, 'status' => 'published', 'price' => 100]);
+        $ovoko = MarketplaceListing::query()->create(['part_id' => $part->id, 'marketplace' => 'ovoko', 'external_offer_id' => '11773', 'external_listing_id' => '11773', 'external_inventory_id' => 'INV-11773', 'sku' => 'GPS-GMAIL-7729', 'url' => 'https://ovoko.example.test/11773', 'status' => 'mapped', 'sync_status' => 'mapped', 'match_status' => 'confirmed', 'raw_payload' => ['metadata' => ['previous_external_offer_id' => '11582', 'previous_url' => 'https://ovoko.example.test/11582']]]);
+        MarketplaceListing::query()->create(['part_id' => $part->id, 'marketplace' => 'allegro', 'external_offer_id' => 'A-1', 'external_listing_id' => 'A-1', 'url' => 'https://allegro.test/A-1', 'status' => 'ACTIVE']);
+        MarketplaceListing::query()->create(['part_id' => $part->id, 'marketplace' => 'ebay', 'external_offer_id' => 'E-1', 'external_listing_id' => 'E-1', 'url' => 'https://ebay.test/E-1', 'status' => 'active']);
+
+        $response = $this->getJson('/admin/tools/ovoko/part-mapping-reset-preview?part_ids='.$part->id.'&json=1')
+            ->assertOk()
+            ->assertJsonPath('marker', 'ovoko_part_mapping_reset_candidates_audit_v1')
+            ->assertJsonPath('items.0.current_active_ovoko_identity.external_offer_id', '11773')
+            ->assertJsonPath('items.0.archived_identity.previous_external_offer_id', '11582')
+            ->assertJsonPath('items.0.what_would_be_cleared_by_reset.marketplace_listings#'.$ovoko->id.'.external_offer_id', '11773')
+            ->assertJsonPath('items.0.post_reset_expected_identity.external_id', 'gps-part-'.$part->id)
+            ->assertJsonPath('items.0.post_reset_expected_identity.id_bridge', (string) $part->id)
+            ->assertJsonPath('items.0.safety_flags.no_mutation', true);
+
+        $content = $response->getContent();
+        $this->assertStringNotContainsString('allegro', $content);
+        $this->assertStringNotContainsString('ebay', $content);
+        $this->assertSame('11773', $ovoko->fresh()->external_offer_id);
+    }
+
 
     public function test_publish_path_diagnose_separates_technical_identity_from_visible_part_codes(): void
     {
