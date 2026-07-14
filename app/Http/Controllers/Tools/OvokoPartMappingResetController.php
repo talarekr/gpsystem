@@ -11,6 +11,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
+use Symfony\Component\HttpFoundation\Response;
 
 class OvokoPartMappingResetController extends Controller
 {
@@ -125,6 +126,118 @@ class OvokoPartMappingResetController extends Controller
             'visible_code_repair_preview' => $this->visibleCodeRepairPreview($part, $visibleFields, (array) $payload),
             'recommendation' => $this->publishPathRecommendation($responseOvokoId, $payloadSku),
             'safety_flags' => ['read_only' => true, 'no_mutation' => true, 'no_ovoko_request' => true, 'no_publish' => true, 'single_part_only' => true],
+        ]);
+    }
+
+    public function candidates(Request $request): JsonResponse|Response
+    {
+        $limit = max(1, min(1000, (int) $request->integer('limit', 100)));
+        $includeReadiness = $request->boolean('include_readiness');
+        $statuses = collect(explode(',', (string) $request->query('status', 'imported,mapped,confirmed,published,ready')))
+            ->map(fn (string $status): string => trim($status))
+            ->filter()
+            ->values()
+            ->all();
+
+        $query = Part::query()
+            ->with(['marketplaceListings' => fn ($q) => $q->where('marketplace', 'ovoko')->orderByDesc('id'), 'images'])
+            ->whereHas('marketplaceListings', function ($q) use ($statuses, $request): void {
+                $q->where('marketplace', 'ovoko')
+                    ->where(function ($inner): void {
+                        $inner->whereNotNull('external_offer_id')
+                            ->orWhereNotNull('external_listing_id')
+                            ->orWhereNotNull('external_inventory_id')
+                            ->orWhereNotNull('url')
+                            ->orWhereNotNull('sku')
+                            ->orWhereNotNull('raw_payload');
+                    });
+
+                if ($statuses !== []) {
+                    $q->where(function ($statusQuery) use ($statuses): void {
+                        $statusQuery->whereIn('status', $statuses)
+                            ->orWhereIn('sync_status', $statuses)
+                            ->orWhereIn('match_status', $statuses);
+                    });
+                }
+
+                if ($request->boolean('only_with_ovoko_url')) {
+                    $q->whereNotNull('url')->where('url', '!=', '');
+                }
+            });
+
+        if ($request->filled('source_system')) {
+            $query->where('source_system', (string) $request->query('source_system'));
+        }
+
+        $rows = $query->orderByDesc('id')->limit($limit * 3)->get()
+            ->map(fn (Part $part): array => $this->candidateRow($part, $includeReadiness))
+            ->filter(function (array $row) use ($request): bool {
+                if ($request->boolean('only_gps_gmail') && ! $row['identity_looks_like_gps_gmail']) return false;
+                if ($request->boolean('only_missing_price') && ! in_array('brak ceny', $row['readiness_blockers'], true)) return false;
+                if ($request->boolean('only_with_ovoko_url') && ! $row['has_active_ovoko_url']) return false;
+
+                return true;
+            })
+            ->take($limit)
+            ->values()
+            ->all();
+
+        $summary = [
+            'total_candidates' => count($rows),
+            'candidates_with_gps_gmail_sku' => collect($rows)->where('identity_looks_like_gps_gmail', true)->count(),
+            'candidates_with_ovoko_url' => collect($rows)->where('has_active_ovoko_url', true)->count(),
+            'candidates_missing_price' => collect($rows)->filter(fn (array $row): bool => in_array('brak ceny', $row['readiness_blockers'], true))->count(),
+            'candidates_missing_category' => collect($rows)->filter(fn (array $row): bool => in_array('brak kategorii Ovoko', $row['readiness_blockers'], true))->count(),
+            'candidates_ready_after_reset' => collect($rows)->where('should_create_after_reset', true)->filter(fn (array $row): bool => ($row['readiness_blockers'] ?? []) === [])->count(),
+            'safety_flags' => $this->readOnlySafetyFlags(),
+        ];
+
+        $payload = [
+            'marker' => 'ovoko_part_mapping_reset_candidates_audit_v1',
+            'filters' => $request->only(['limit', 'only_gps_gmail', 'only_missing_price', 'only_with_ovoko_url', 'status', 'source_system', 'include_readiness', 'export']),
+            'summary' => $summary,
+            'candidates' => $rows,
+            'safety_flags' => $this->readOnlySafetyFlags(),
+        ];
+
+        if ($request->query('export') === 'csv') {
+            return $this->csvResponse('ovoko-part-mapping-reset-candidates.csv', $rows);
+        }
+
+        return response()->json($payload);
+    }
+
+    public function preview(Request $request): JsonResponse
+    {
+        $partIds = collect(explode(',', (string) $request->query('part_ids')))
+            ->map(fn (string $id): int => (int) trim($id))
+            ->filter(fn (int $id): bool => $id > 0)
+            ->unique()
+            ->values();
+        abort_if($partIds->isEmpty(), 422, 'Invalid part_ids.');
+
+        $parts = Part::query()->with(['marketplaceListings' => fn ($q) => $q->orderBy('marketplace')->orderByDesc('id')])->whereIn('id', $partIds)->get()->keyBy('id');
+
+        return response()->json([
+            'marker' => 'ovoko_part_mapping_reset_candidates_audit_v1',
+            'items' => $partIds->map(function (int $partId) use ($parts): array {
+                $part = $parts->get($partId);
+                if (! $part) return ['part_id' => $partId, 'found' => false, 'safety_flags' => $this->readOnlySafetyFlags()];
+
+                $ovoko = $part->marketplaceListings->where('marketplace', 'ovoko')->first();
+
+                return [
+                    'part_id' => $part->id,
+                    'found' => true,
+                    'current_active_ovoko_identity' => $this->activeOvokoIdentityFields($ovoko),
+                    'archived_identity' => $this->archivedOvokoIdentityFields($ovoko),
+                    'what_would_be_cleared_by_reset' => $this->fieldsClearedByReset($ovoko),
+                    'what_would_be_preserved' => ['parts.*', 'part_images.*', 'parts.price', 'parts.ovoko_price', 'parts.description', 'parts.quantity', 'non_ovoko_marketplace_listings.*', 'marketplace_sync_logs.*'],
+                    'post_reset_expected_identity' => ['external_id' => 'gps-part-'.$part->id, 'id_bridge' => (string) $part->id],
+                    'safety_flags' => $this->readOnlySafetyFlags(),
+                ];
+            })->values()->all(),
+            'safety_flags' => $this->readOnlySafetyFlags(),
         ]);
     }
 
@@ -280,6 +393,128 @@ class OvokoPartMappingResetController extends Controller
     private function listingSnapshot(MarketplaceListing $l): array
     {
         return $l->only(['id','marketplace','part_id','external_offer_id','external_listing_id','external_inventory_id','sku','price','quantity','currency','status','url','sync_status','match_status','last_api_status','not_seen_in_active_api_at','last_error']) + ['raw_payload_ovoko_candidates' => $this->ovokoCandidates($l->raw_payload)];
+    }
+
+    private function candidateRow(Part $part, bool $includeReadiness): array
+    {
+        /** @var MarketplaceListing|null $listing */
+        $listing = $part->marketplaceListings->first();
+        $blockers = $this->readinessBlockers($part);
+        $hasActiveMapping = $listing ? $this->hasActiveOvokoIdentity($listing) : false;
+        $hasUrl = filled($listing?->url);
+
+        return [
+            'part_id' => $part->id,
+            'sku' => $part->sku,
+            'part_code' => $part->part_number,
+            'source_system' => $part->source_system,
+            'source_external_id' => $part->external_id,
+            'legacy_url' => $part->legacy_url,
+            'local_price' => $part->price,
+            'ovoko_price' => $part->ovoko_price ?? $listing?->price,
+            'marketplace_listing_id' => $listing?->id,
+            'ovoko_external_offer_id' => $listing?->external_offer_id,
+            'ovoko_external_listing_id' => $listing?->external_listing_id,
+            'ovoko_external_inventory_id' => $listing?->external_inventory_id,
+            'ovoko_sku' => $listing?->sku,
+            'ovoko_url' => $listing?->url,
+            'status' => $listing?->status ?? $part->status,
+            'sync_status' => $listing?->sync_status,
+            'match_status' => $listing?->match_status,
+            'raw_payload_ovoko_part_id' => data_get($listing?->raw_payload, 'ovoko_part_id') ?: data_get($listing?->raw_payload, 'metadata.ovoko_part_id'),
+            'identity_looks_like_gps_gmail' => $this->identityLooksLikeGpsGmail($part, $listing),
+            'has_active_ovoko_identity' => $hasActiveMapping,
+            'has_active_ovoko_url' => $hasUrl,
+            'should_create_after_reset' => $hasActiveMapping,
+            'readiness_blockers' => $includeReadiness ? $blockers : [],
+            'suggested_action' => $this->suggestedAction($listing),
+        ];
+    }
+
+    /** @return array<int, string> */
+    private function readinessBlockers(Part $part): array
+    {
+        $blockers = [];
+        if (! is_numeric($part->ovoko_price ?? $part->price) || (float) ($part->ovoko_price ?? $part->price) <= 0) $blockers[] = 'brak ceny';
+        if (! $this->hasOvokoCategory($part)) $blockers[] = 'brak kategorii Ovoko';
+        if (! is_numeric($part->weight_kg) || ! is_numeric($part->length_cm) || ! is_numeric($part->width_cm) || ! is_numeric($part->height_cm)) $blockers[] = 'brak wymiarów/wagi';
+        if ($part->images->isEmpty()) $blockers[] = 'brak zdjęć';
+        if (blank($part->car_id) && blank($part->vehicle_snapshot)) $blockers[] = 'brak auta';
+
+        return $blockers;
+    }
+
+    private function hasOvokoCategory(Part $part): bool
+    {
+        if (filled(data_get($part->review_metadata, 'marketplace_category_overrides.ovoko.external_category_id'))) return true;
+        if (blank($part->category_id)) return false;
+
+        return DB::table('marketplace_category_mappings')
+            ->where('local_category_id', $part->category_id)
+            ->where('channel', 'ovoko')
+            ->whereNotNull('external_category_id')
+            ->exists();
+    }
+
+    private function hasActiveOvokoIdentity(MarketplaceListing $listing): bool
+    {
+        return (filled($listing->external_offer_id) || filled($listing->external_listing_id) || filled($listing->external_inventory_id) || filled($listing->url) || filled($listing->sku))
+            && ! in_array((string) $listing->status, ['unlinked', 'archived', 'deleted', 'ended', 'UNLINKED', 'ARCHIVED', 'DELETED', 'ENDED'], true);
+    }
+
+    private function identityLooksLikeGpsGmail(Part $part, ?MarketplaceListing $listing): bool
+    {
+        foreach ([$part->sku, $part->part_number, $listing?->sku, $listing?->external_offer_id, $listing?->external_inventory_id] as $value) {
+            if (preg_match('/^GPS-GMAIL-/i', (string) $value) === 1) return true;
+        }
+
+        return false;
+    }
+
+    private function suggestedAction(?MarketplaceListing $listing): string
+    {
+        if (! $listing) return 'skip_no_active_ovoko_mapping';
+        if (in_array((string) $listing->status, ['unlinked', 'UNLINKED'], true)) return 'skip_already_unlinked';
+        if ($this->hasActiveOvokoIdentity($listing)) return 'reset_mapping_for_recreate';
+
+        return 'inspect_manually';
+    }
+
+    private function fieldsClearedByReset(?MarketplaceListing $listing): array
+    {
+        if (! $listing) return [];
+
+        return array_filter([
+            'marketplace_listings#'.$listing->id.'.sku' => $listing->sku,
+            'marketplace_listings#'.$listing->id.'.external_offer_id' => $listing->external_offer_id,
+            'marketplace_listings#'.$listing->id.'.external_listing_id' => $listing->external_listing_id,
+            'marketplace_listings#'.$listing->id.'.external_inventory_id' => $listing->external_inventory_id,
+            'marketplace_listings#'.$listing->id.'.url' => $listing->url,
+            'marketplace_listings#'.$listing->id.'.status' => $listing->status,
+            'marketplace_listings#'.$listing->id.'.sync_status' => $listing->sync_status,
+            'marketplace_listings#'.$listing->id.'.match_status' => $listing->match_status,
+            'marketplace_listings#'.$listing->id.'.raw_payload.mapping_keys' => $this->ovokoCandidates($listing->raw_payload),
+        ], fn ($value) => filled($value) || (is_array($value) && $value !== []));
+    }
+
+    private function readOnlySafetyFlags(): array
+    {
+        return ['read_only' => true, 'no_mutation' => true, 'no_ovoko_request' => true, 'no_publish' => true];
+    }
+
+    private function csvResponse(string $filename, array $rows): Response
+    {
+        $headers = array_keys($rows[0] ?? ['part_id' => null]);
+        $handle = fopen('php://temp', 'r+');
+        fputcsv($handle, $headers);
+        foreach ($rows as $row) {
+            fputcsv($handle, array_map(fn ($value) => is_array($value) ? json_encode($value) : $value, Arr::only($row, $headers)));
+        }
+        rewind($handle);
+        $csv = stream_get_contents($handle) ?: '';
+        fclose($handle);
+
+        return response($csv, 200, ['Content-Type' => 'text/csv; charset=UTF-8', 'Content-Disposition' => 'attachment; filename="'.$filename.'"']);
     }
 
     private function activeOvokoIdentityFields(?MarketplaceListing $listing): array
