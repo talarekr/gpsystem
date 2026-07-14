@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\UserRole;
 use App\Models\MarketplaceListing;
+use App\Models\MarketplaceSyncLog;
 use App\Models\Part;
 use App\Models\User;
 use App\Services\Marketplace\PublishPartToMarketplacesService;
@@ -74,6 +75,30 @@ class OvokoPartMappingResetControllerTest extends TestCase
         $this->assertSame(['price' => '100.00', 'ovoko_price' => '120.00', 'quantity' => 3, 'description' => 'Keep me'], $part->fresh()->only(['price', 'ovoko_price', 'quantity', 'description']));
         $this->assertSame($allegro->only(['external_offer_id', 'external_listing_id', 'url', 'status']), $allegro->fresh()->only(['external_offer_id', 'external_listing_id', 'url', 'status']));
         $this->assertSame($ebay->only(['external_offer_id', 'external_listing_id', 'url', 'status']), $ebay->fresh()->only(['external_offer_id', 'external_listing_id', 'url', 'status']));
+    }
+
+    public function test_publish_path_diagnose_reports_import_part_identity_and_latest_response_without_mutation(): void
+    {
+        $this->actingAsAdminUser();
+        $this->mockPublisher();
+
+        $part = Part::query()->create(['name' => 'Test part', 'sku' => 'GPS-GMAIL-7730', 'part_number' => 'HGF7730', 'quantity' => 1, 'status' => 'ready', 'price' => 100, 'ovoko_price' => 120]);
+        $listing = MarketplaceListing::query()->create(['part_id' => $part->id, 'marketplace' => 'ovoko', 'external_offer_id' => null, 'external_listing_id' => null, 'status' => 'unlinked', 'sync_status' => 'stale', 'match_status' => 'unmatched', 'raw_payload' => ['metadata' => ['previous_external_offer_id' => '11582']]]);
+        MarketplaceSyncLog::query()->create(['marketplace' => 'ovoko', 'marketplace_listing_id' => $listing->id, 'part_id' => $part->id, 'action' => 'crm/importPart', 'status' => 'success', 'http_status' => 200, 'external_id' => '11582', 'message' => 'Marketplace publish API call completed.', 'payload' => ['request' => ['external_id' => 'GPS-GMAIL-7730'], 'response' => ['ovoko_part_id' => '11582']], 'created_at' => now()]);
+
+        $this->getJson('/admin/tools/ovoko/part-publish-path-diagnose?part_id='.$part->id.'&json=1')
+            ->assertOk()
+            ->assertJsonPath('marker', 'ovoko_part_recreate_rematched_existing_11582_audit_v1')
+            ->assertJsonPath('publish_path.would_choose', 'create')
+            ->assertJsonPath('publish_path.endpoint', 'POST /crm/importPart')
+            ->assertJsonPath('payload_identity.external_id', 'GPS-GMAIL-7730')
+            ->assertJsonPath('payload_identity.contains_old_ovoko_id', false)
+            ->assertJsonPath('local_rematch_controls.uses_previous_external_offer_id_as_candidate', false)
+            ->assertJsonPath('local_rematch_controls.lookup_or_rematch_by_sku_before_publish', false)
+            ->assertJsonPath('latest_import_part_log.api_response_ovoko_id', '11582')
+            ->assertJsonPath('safety_flags.no_ovoko_request', true);
+
+        $this->assertNull($listing->fresh()->external_offer_id);
     }
 
     private function mockPublisher(): void

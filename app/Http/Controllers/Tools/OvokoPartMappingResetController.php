@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Tools;
 
 use App\Http\Controllers\Controller;
 use App\Models\MarketplaceListing;
+use App\Models\MarketplaceSyncLog;
 use App\Models\Part;
 use App\Services\Marketplace\PublishPartToMarketplacesService;
 use Illuminate\Http\JsonResponse;
@@ -23,6 +24,77 @@ class OvokoPartMappingResetController extends Controller
         abort_if($partId <= 0, 422, 'Invalid part_id.');
 
         return response()->json($this->snapshot($partId, $publisher, true));
+    }
+
+    public function publishPathDiagnose(Request $request, PublishPartToMarketplacesService $publisher): JsonResponse
+    {
+        $partId = (int) $request->query('part_id');
+        abort_if($partId <= 0, 422, 'Invalid part_id.');
+
+        $snapshot = $this->snapshot($partId, $publisher, true);
+        if (! ($snapshot['found'] ?? false)) {
+            return response()->json($snapshot);
+        }
+
+        $part = Part::query()->with(['marketplaceListings' => fn ($q) => $q->where('marketplace', 'ovoko')->orderByDesc('id')])->findOrFail($partId);
+        $preview = $snapshot['publish_decision']['readiness_preview'] ?? [];
+        $payload = data_get($preview, 'payload_preview_safe', data_get($preview, 'readiness.prepared_payload_preview_safe', []));
+        $payloadSku = $payload['sku'] ?? $part->sku ?? ('gps-part-'.$part->id);
+        $latestImportPartLog = MarketplaceSyncLog::query()
+            ->where('marketplace', 'ovoko')
+            ->where('part_id', $partId)
+            ->where('action', 'crm/importPart')
+            ->latest('created_at')
+            ->latest('id')
+            ->first();
+
+        $responseOvokoId = $latestImportPartLog?->external_id
+            ?: data_get($latestImportPartLog?->payload, 'response.ovoko_part_id')
+            ?: data_get($latestImportPartLog?->payload, 'response.response_summary.ovoko_part_id')
+            ?: data_get($latestImportPartLog?->payload, 'response.part_id');
+
+        return response()->json([
+            'found' => true,
+            'marker' => 'ovoko_part_recreate_rematched_existing_11582_audit_v1',
+            'part_id' => $part->id,
+            'read_only' => true,
+            'publish_path' => [
+                'would_choose' => $snapshot['publish_decision']['would_choose'] ?? null,
+                'duplicate_guard' => $snapshot['publish_decision'],
+                'endpoint' => 'POST /crm/importPart',
+                'endpoint_source' => 'OvokoPublishAdapter::performLivePublish always calls OvokoApiClient::importPart after readiness and duplicate guard pass.',
+            ],
+            'payload_identity' => [
+                'external_id' => $payloadSku,
+                'visible_code' => $payloadSku,
+                'sku' => $part->sku,
+                'part_code' => $part->part_number,
+                'manufacturer_code' => $part->manufacturer_code,
+                'oem_number' => $part->oem_number,
+                'contains_old_ovoko_id' => $this->payloadContainsAny((array) $payload, $this->previousOvokoIds($part)),
+                'previous_external_offer_id_is_archival' => true,
+            ],
+            'local_rematch_controls' => [
+                'uses_previous_external_offer_id_as_candidate' => false,
+                'previous_external_offer_id_note' => 'Reset stores previous_* under raw_payload.metadata for audit; publish payload uses sku as external_id and does not read metadata.previous_external_offer_id.',
+                'lookup_or_rematch_by_sku_before_publish' => false,
+                'local_mapping_restored_from' => $responseOvokoId ? 'latest_crm_importPart_response_or_log_external_id' : 'not_observed_in_logs',
+            ],
+            'latest_import_part_log' => $latestImportPartLog ? [
+                'id' => $latestImportPartLog->id,
+                'created_at' => optional($latestImportPartLog->created_at)->toISOString(),
+                'status' => $latestImportPartLog->status,
+                'http_status' => $latestImportPartLog->http_status,
+                'external_id' => $latestImportPartLog->external_id,
+                'message' => $latestImportPartLog->message,
+                'api_response_ovoko_id' => $responseOvokoId,
+                'request_external_id' => data_get($latestImportPartLog->payload, 'request.external_id') ?: data_get($latestImportPartLog->payload, 'request.request.external_id') ?: data_get($latestImportPartLog->payload, 'request.sku'),
+                'payload_candidates' => $this->ovokoCandidates($latestImportPartLog->payload),
+            ] : null,
+            'current_mapping' => $snapshot['ovoko_mapping_fields'],
+            'recommendation' => $this->publishPathRecommendation($responseOvokoId, $payloadSku),
+            'safety_flags' => ['read_only' => true, 'no_mutation' => true, 'no_ovoko_request' => true, 'no_publish' => true, 'single_part_only' => true],
+        ]);
     }
 
     public function reset(Request $request, PublishPartToMarketplacesService $publisher): JsonResponse
@@ -118,6 +190,43 @@ class OvokoPartMappingResetController extends Controller
                 'readiness_preview' => $preview,
             ],
             'safety_flags' => ['read_only' => $readOnly, 'no_mutation' => true, 'no_ovoko_request' => true],
+        ];
+    }
+
+    /** @return array<int, string> */
+    private function previousOvokoIds(Part $part): array
+    {
+        return $part->marketplaceListings
+            ->where('marketplace', 'ovoko')
+            ->flatMap(fn (MarketplaceListing $listing): array => array_filter([
+                (string) data_get($listing->raw_payload, 'metadata.previous_external_offer_id'),
+                (string) data_get($listing->raw_payload, 'metadata.previous_external_listing_id'),
+            ], fn (string $id): bool => $id !== ''))
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private function payloadContainsAny(array $payload, array $needles): bool
+    {
+        $encoded = json_encode($payload);
+        if (! is_string($encoded)) return false;
+
+        foreach ($needles as $needle) {
+            if ($needle !== '' && str_contains($encoded, (string) $needle)) return true;
+        }
+
+        return false;
+    }
+
+    private function publishPathRecommendation(mixed $responseOvokoId, mixed $externalId): array
+    {
+        return [
+            'most_likely_cause' => filled($responseOvokoId) ? 'Ovoko /crm/importPart returned the existing Ovoko ID for the submitted external_id/SKU, so the local listing was recreated from the API response rather than from previous_* metadata.' : 'No importPart response with an Ovoko ID was found in local logs; inspect latest logs and Ovoko API response.',
+            'recommended_fix' => 'When an Ovoko mapping has been explicitly reset for recreate, keep the operator-facing SKU unchanged but send a fresh importPart external_id/id_bridge value such as gps-part-{part_id}-recreate-{timestamp} to avoid Ovoko-side deduplication on the old SKU/external_id.',
+            'current_external_id_would_be' => $externalId,
+            'do_not_use_previous_metadata_as_candidate' => true,
+            'do_not_bulk_reset' => true,
         ];
     }
 
