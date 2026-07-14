@@ -16,7 +16,7 @@ class OvokoPartMappingResetController extends Controller
 {
     private const CONFIRM = 'reset-ovoko-part-mapping-for-recreate';
     private const MODE = 'detach_ovoko_mapping_for_recreate';
-    private const MARKER = 'ovoko_recreate_identity_not_visible_part_code_v3';
+    private const MARKER = 'ovoko_filter_technical_codes_from_visible_codes_v4';
 
     public function diagnose(Request $request, PublishPartToMarketplacesService $publisher): JsonResponse
     {
@@ -86,9 +86,9 @@ class OvokoPartMappingResetController extends Controller
                 'id_bridge' => $effectiveIdentity['id_bridge'] ?? $payloadSku,
                 'visible_code' => $effectiveIdentity['visible_code'] ?? $visibleFields['visible_code'],
                 'sku' => $effectiveIdentity['sku'] ?? null,
-                'part_code' => $part->part_number,
-                'manufacturer_code' => $part->manufacturer_code,
-                'oem_number' => $part->oem_number,
+                'part_code' => $visibleFields['part_code'],
+                'manufacturer_code' => $visibleFields['manufacturer_code'],
+                'oem_number' => $visibleFields['oem_number'],
                 'contains_old_ovoko_id' => $this->payloadContainsAny($effectiveIdentity + (array) $payload, $this->previousOvokoIds($part)),
                 'uses_gps_gmail_as_ovoko_identity' => $this->identityUsesGpsGmail($effectiveIdentity),
                 'payload_will_use_local_gps_gmail_as_ovoko_identity' => $this->identityUsesGpsGmail($effectiveIdentity),
@@ -118,6 +118,7 @@ class OvokoPartMappingResetController extends Controller
                 'payload_candidates' => $this->ovokoCandidates($latestImportPartLog->payload),
             ] : null,
             'current_mapping' => $snapshot['ovoko_mapping_fields'],
+            'visible_code_repair_preview' => $this->visibleCodeRepairPreview($part, $visibleFields, (array) $payload),
             'recommendation' => $this->publishPathRecommendation($responseOvokoId, $payloadSku),
             'safety_flags' => ['read_only' => true, 'no_mutation' => true, 'no_ovoko_request' => true, 'no_publish' => true, 'single_part_only' => true],
         ]);
@@ -336,7 +337,7 @@ class OvokoPartMappingResetController extends Controller
         return [
             'main_part_code' => $main,
             'visible_code' => $main,
-            'part_code' => $part->part_number,
+            'part_code' => $this->visibleCode($part->part_number),
             'manufacturer_code' => $this->visibleCode($part->manufacturer_code),
             'oem_number' => $this->visibleCode($part->oem_number),
             'additional_codes' => $codes,
@@ -351,11 +352,44 @@ class OvokoPartMappingResetController extends Controller
         return $code;
     }
 
+
+    private function visibleCodeRepairPreview(Part $part, array $visibleFields, array $payload): array
+    {
+        $rawVisible = [
+            'part_number' => $part->part_number,
+            'oem_number' => $part->oem_number,
+            'manufacturer_code' => $part->manufacturer_code,
+            'payload_visible_code' => $payload['visible_code'] ?? null,
+            'payload_part_code' => $payload['part_code'] ?? null,
+            'payload_optional_codes' => $payload['optional_codes'] ?? [],
+        ];
+        $rawEncoded = json_encode($rawVisible) ?: '';
+        $suggestedTitle = $this->sanitizedVisibleText((string) ($payload['title'] ?? $payload['name'] ?? $part->name ?? ''));
+
+        return [
+            'recommended_repair_for_visible_codes' => $this->containsTechnicalCode($rawEncoded) || $this->containsTechnicalCode((string) ($payload['title'] ?? $payload['name'] ?? $part->name ?? '')),
+            'suggested_visible_codes' => array_values(array_unique(array_filter($visibleFields['additional_codes'] ?? []))),
+            'suggested_title' => $suggestedTitle === '' ? null : $suggestedTitle,
+            'safety_flags' => ['read_only' => true, 'no_mutation' => true, 'no_ovoko_request' => true, 'no_publish' => true],
+        ];
+    }
+
+    private function sanitizedVisibleText(string $value): string
+    {
+        $value = preg_replace('/\bGPS[-_ ]*GMAIL[-_ ]*\d+\b/i', '', $value) ?? $value;
+        $value = preg_replace('/\bGPSGMAIL\d+\b/i', '', $value) ?? $value;
+        $value = preg_replace('/\bgps[-_ ]*part[-_ ]*\d+\b/i', '', $value) ?? $value;
+        $value = preg_replace('/\bGPSPART\d+\b/i', '', $value) ?? $value;
+        $value = preg_replace('/\s+/u', ' ', $value) ?? $value;
+
+        return trim($value);
+    }
+
     private function visibleLeakFlags(Part $part, array $identity, array $visibleFields, array $payload): array
     {
-        $visiblePayload = $visibleFields + Arr::only($payload, ['visible_code','part_code','manufacturer_code','oem_number','optional_codes','other_code','notes','title','name']);
+        $visiblePayload = $visibleFields + Arr::only($payload, ['visible_code','part_code','manufacturer_code','oem_number','optional_codes','additional_codes','other_code']);
         $visibleEncoded = json_encode($visiblePayload) ?: '';
-        $title = (string) ($payload['title'] ?? $payload['name'] ?? $part->name ?? '');
+        $title = $this->sanitizedVisibleText((string) ($payload['title'] ?? $payload['name'] ?? $part->name ?? ''));
 
         return [
             'technical_identity_leaks_to_visible_codes' => collect([$identity['external_id'] ?? null, $identity['id_bridge'] ?? null])->filter()->contains(fn ($value): bool => $this->payloadContainsAny($visiblePayload, [(string) $value]) || $this->payloadContainsAny($visiblePayload, [$this->compactCode((string) $value)])),

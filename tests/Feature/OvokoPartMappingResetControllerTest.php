@@ -29,7 +29,7 @@ class OvokoPartMappingResetControllerTest extends TestCase
 
         $this->getJson('/admin/tools/ovoko/part-mapping-diagnose?part_id='.$part->id.'&json=1')
             ->assertOk()
-            ->assertJsonPath('marker', 'ovoko_recreate_identity_not_visible_part_code_v3')
+            ->assertJsonPath('marker', 'ovoko_filter_technical_codes_from_visible_codes_v4')
             ->assertJsonPath('part_id', $part->id)
             ->assertJsonPath('sku', 'GPS-GMAIL-61054')
             ->assertJsonPath('has_local_ovoko_id', true)
@@ -57,7 +57,7 @@ class OvokoPartMappingResetControllerTest extends TestCase
         $this->postJson('/admin/tools/ovoko/part-mapping-reset', ['part_id' => $part->id, 'mode' => 'detach_ovoko_mapping_for_recreate', 'confirm' => 'reset-ovoko-part-mapping-for-recreate'])
             ->assertOk()
             ->assertJsonPath('ok', true)
-            ->assertJsonPath('marker', 'ovoko_recreate_identity_not_visible_part_code_v3')
+            ->assertJsonPath('marker', 'ovoko_filter_technical_codes_from_visible_codes_v4')
             ->assertJsonPath('after.publish_decision.would_choose', 'create')
             ->assertJsonPath('safety_flags.no_allegro_change', true)
             ->assertJsonPath('safety_flags.no_ebay_change', true)
@@ -88,7 +88,7 @@ class OvokoPartMappingResetControllerTest extends TestCase
 
         $this->getJson('/admin/tools/ovoko/part-publish-path-diagnose?part_id='.$part->id.'&json=1')
             ->assertOk()
-            ->assertJsonPath('marker', 'ovoko_recreate_identity_not_visible_part_code_v3')
+            ->assertJsonPath('marker', 'ovoko_filter_technical_codes_from_visible_codes_v4')
             ->assertJsonPath('publish_path.would_choose', 'create')
             ->assertJsonPath('publish_path.endpoint', 'POST /crm/importPart')
             ->assertJsonPath('payload_identity.external_id', 'GPS-GMAIL-7730')
@@ -123,6 +123,33 @@ class OvokoPartMappingResetControllerTest extends TestCase
             ->assertJsonPath('payload_contains_previous_ovoko_id', false);
 
         $this->assertNull($listing->fresh()->external_offer_id);
+    }
+
+
+    public function test_publish_path_diagnose_filters_gmail_only_visible_codes_but_keeps_recreate_identity(): void
+    {
+        $this->actingAsAdminUser();
+        $this->mockPublisher();
+
+        $part = Part::query()->create(['id' => 7731, 'name' => 'Test part GPSPART7731 GPS-GMAIL-61052', 'sku' => 'GPS-GMAIL-61052', 'part_number' => 'GPS-GMAIL-61052', 'oem_number' => 'GPSGMAIL61052', 'manufacturer_code' => 'gps-part-7731', 'quantity' => 1, 'status' => 'ready', 'price' => 100, 'ovoko_price' => 120]);
+        MarketplaceListing::query()->create(['part_id' => $part->id, 'marketplace' => 'ovoko', 'external_offer_id' => null, 'external_listing_id' => null, 'external_inventory_id' => null, 'sku' => null, 'status' => 'unlinked', 'sync_status' => 'stale', 'match_status' => 'unmatched', 'raw_payload' => ['metadata' => ['ovoko_part_mapping_reset_for_recreate' => true]]]);
+
+        $this->getJson('/admin/tools/ovoko/part-publish-path-diagnose?part_id=7731&json=1')
+            ->assertOk()
+            ->assertJsonPath('technical_identity_fields.external_id', 'gps-part-7731')
+            ->assertJsonPath('technical_identity_fields.id_bridge', 'gps-part-7731')
+            ->assertJsonPath('visible_part_code_fields.main_part_code', null)
+            ->assertJsonPath('visible_part_code_fields.visible_code', null)
+            ->assertJsonPath('visible_part_code_fields.part_code', null)
+            ->assertJsonPath('visible_part_code_fields.manufacturer_code', null)
+            ->assertJsonPath('visible_part_code_fields.oem_number', null)
+            ->assertJsonPath('visible_part_code_fields.additional_codes', [])
+            ->assertJsonPath('payload_contains_gps_gmail_as_visible_code', false)
+            ->assertJsonPath('payload_contains_gps_part_as_visible_code', false)
+            ->assertJsonPath('technical_identity_leaks_to_visible_codes', false)
+            ->assertJsonPath('technical_identity_leaks_to_title', false)
+            ->assertJsonPath('payload_contains_previous_ovoko_id', false)
+            ->assertJsonPath('visible_code_repair_preview.suggested_title', 'Test part');
     }
 
     private function mockPublisher(): void
