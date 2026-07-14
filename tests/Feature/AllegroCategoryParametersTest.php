@@ -6,6 +6,7 @@ use App\Models\Car;
 use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceCategoryMapping;
 use App\Models\Part;
+use App\Models\PartCategory;
 use App\Services\Marketplace\AllegroCategoryParametersService;
 use App\Services\Marketplace\MarketplaceListingReadinessService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -573,6 +574,82 @@ class AllegroCategoryParametersTest extends TestCase
         $this->assertSame('Strona zabudowy', $result['missing_required_parameters'][0]['name']);
         $this->assertSame('Brak lub nieobsługiwana Pozycja części dla parametru Allegro: Strona zabudowy', $result['missing_required_parameters'][0]['reason']);
         $this->assertSame('review_metadata.part_position', $result['missing_required_parameters'][0]['source_field']);
+    }
+
+
+    public function test_required_installation_side_uses_local_shop_category_defaults(): void
+    {
+        $cases = [
+            'Zestaw tarcz i zacisków hamulcowych' => ['label' => 'przód i tył', 'id' => 'front-back'],
+            'Zacisk hamulcowy przedni' => ['label' => 'przód', 'id' => 'front'],
+            'Tylny zacisk hamulcowy' => ['label' => 'tył', 'id' => 'back'],
+            'Tarcza hamulca przedniego' => ['label' => 'przód', 'id' => 'front'],
+        ];
+
+        foreach ($cases as $categoryName => $expected) {
+            $category = PartCategory::query()->create(['name' => $categoryName]);
+            $part = Part::query()->create(['name' => 'Audi hamulce', 'category_id' => $category->id, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'is_visible_storefront' => true]);
+
+            $result = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, null, ['ok' => true, 'source' => 'cache', 'parameters' => [$this->installationSideDefinition()]]);
+
+            $this->assertSame([['id' => 'side', 'valuesIds' => [$expected['id']]]], $result['offer_parameters']);
+            $this->assertSame([], $result['missing_required_parameters']);
+            $diagnostic = $result['parameter_source_diagnostics'][0];
+            $this->assertSame('local_shop_category_default_installation_side', $diagnostic['source']);
+            $this->assertSame('local_shop_category_default_installation_side', $diagnostic['mapping_source']);
+            $this->assertSame($categoryName, $diagnostic['mapping_rule']['local_category_name']);
+            $this->assertSame($expected['label'], $diagnostic['selected_value_label']);
+            $this->assertSame($expected['id'], $diagnostic['selected_value_id']);
+            $this->assertTrue($diagnostic['auto_injected']);
+        }
+    }
+
+    public function test_required_installation_side_non_dictionary_sends_values_from_local_shop_category_default(): void
+    {
+        $category = PartCategory::query()->create(['name' => 'Zacisk hamulcowy przedni']);
+        $part = Part::query()->create(['name' => 'Zacisk Audi', 'category_id' => $category->id, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'is_visible_storefront' => true]);
+
+        $result = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, null, ['ok' => true, 'source' => 'cache', 'parameters' => [[
+            'id' => 'side', 'name' => 'Strona zabudowy', 'type' => 'string', 'required' => true, 'options' => ['describesProduct' => false],
+        ]]]);
+
+        $this->assertSame([['id' => 'side', 'values' => ['przód']]], $result['offer_parameters']);
+        $this->assertSame('local_shop_category_default_installation_side', $result['parameter_source_diagnostics'][0]['mapping_source']);
+    }
+
+    public function test_required_installation_side_dictionary_without_matching_value_blocks_instead_of_guessing(): void
+    {
+        $category = PartCategory::query()->create(['name' => 'Zestaw tarcz i zacisków hamulcowych']);
+        $part = Part::query()->create(['name' => 'Audi hamulce swap', 'category_id' => $category->id, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'is_visible_storefront' => true]);
+
+        $result = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, null, ['ok' => true, 'source' => 'cache', 'parameters' => [[
+            'id' => 'side', 'name' => 'Strona zabudowy', 'type' => 'dictionary', 'required' => true,
+            'dictionary' => [['id' => 'front', 'value' => 'przód'], ['id' => 'back', 'value' => 'tył']],
+            'options' => ['describesProduct' => false],
+        ]]]);
+
+        $this->assertSame([], $result['offer_parameters']);
+        $missing = $result['missing_required_parameters'][0];
+        $this->assertSame('Nie udało się dopasować wartości parametru Strona zabudowy dla lokalnej kategorii: Zestaw tarcz i zacisków hamulcowych.', $missing['reason']);
+        $this->assertSame(['front' => 'przód', 'back' => 'tył'], $missing['allowed_values']);
+        $this->assertSame('local_shop_category_default_installation_side', $missing['mapping_source']);
+    }
+
+
+    private function installationSideDefinition(): array
+    {
+        return [
+            'id' => 'side',
+            'name' => 'Strona zabudowy',
+            'type' => 'dictionary',
+            'required' => true,
+            'dictionary' => [
+                ['id' => 'front', 'value' => 'oś przednia'],
+                ['id' => 'back', 'value' => 'oś tylna'],
+                ['id' => 'front-back', 'value' => 'oś przednia i tylna'],
+            ],
+            'options' => ['describesProduct' => false],
+        ];
     }
 
     private function parametersPayload(bool $requireSide = false): array
