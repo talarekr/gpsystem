@@ -16,7 +16,7 @@ class OvokoPartMappingResetController extends Controller
 {
     private const CONFIRM = 'reset-ovoko-part-mapping-for-recreate';
     private const MODE = 'detach_ovoko_mapping_for_recreate';
-    private const MARKER = 'ovoko_part_mapping_reset_for_recreate_v1';
+    private const MARKER = 'ovoko_part_mapping_reset_clear_ovoko_identity_v2';
 
     public function diagnose(Request $request, PublishPartToMarketplacesService $publisher): JsonResponse
     {
@@ -39,7 +39,9 @@ class OvokoPartMappingResetController extends Controller
         $part = Part::query()->with(['marketplaceListings' => fn ($q) => $q->where('marketplace', 'ovoko')->orderByDesc('id')])->findOrFail($partId);
         $preview = $snapshot['publish_decision']['readiness_preview'] ?? [];
         $payload = data_get($preview, 'payload_preview_safe', data_get($preview, 'readiness.prepared_payload_preview_safe', []));
-        $payloadSku = $payload['sku'] ?? $part->sku ?? ('gps-part-'.$part->id);
+        $activeIdentity = $this->activeOvokoIdentityFields($part->marketplaceListings->first());
+        $effectiveIdentity = $this->effectiveOvokoIdentityFieldsForPublish($part);
+        $payloadSku = $effectiveIdentity['external_id'] ?? $payload['sku'] ?? $part->sku ?? ('gps-part-'.$part->id);
         $latestImportPartLog = MarketplaceSyncLog::query()
             ->where('marketplace', 'ovoko')
             ->where('part_id', $partId)
@@ -55,23 +57,34 @@ class OvokoPartMappingResetController extends Controller
 
         return response()->json([
             'found' => true,
-            'marker' => 'ovoko_part_recreate_rematched_existing_11582_audit_v1',
+            'marker' => self::MARKER,
             'part_id' => $part->id,
             'read_only' => true,
             'publish_path' => [
                 'would_choose' => $snapshot['publish_decision']['would_choose'] ?? null,
+                'intended_operation' => $snapshot['publish_decision']['would_choose'] ?? null,
                 'duplicate_guard' => $snapshot['publish_decision'],
                 'endpoint' => 'POST /crm/importPart',
+                'planned_endpoint' => '/crm/importPart',
                 'endpoint_source' => 'OvokoPublishAdapter::performLivePublish always calls OvokoApiClient::importPart after readiness and duplicate guard pass.',
             ],
+            'local_part_identity' => [
+                'sku' => $part->sku,
+                'part_code' => $part->part_number,
+            ],
+            'active_ovoko_identity_fields' => $activeIdentity,
+            'effective_ovoko_identity_fields_for_next_publish' => $effectiveIdentity,
             'payload_identity' => [
                 'external_id' => $payloadSku,
-                'visible_code' => $payloadSku,
-                'sku' => $part->sku,
+                'visible_code' => $effectiveIdentity['visible_code'] ?? $payloadSku,
+                'sku' => $effectiveIdentity['sku'] ?? null,
                 'part_code' => $part->part_number,
                 'manufacturer_code' => $part->manufacturer_code,
                 'oem_number' => $part->oem_number,
-                'contains_old_ovoko_id' => $this->payloadContainsAny((array) $payload, $this->previousOvokoIds($part)),
+                'contains_old_ovoko_id' => $this->payloadContainsAny($effectiveIdentity + (array) $payload, $this->previousOvokoIds($part)),
+                'uses_gps_gmail_as_ovoko_identity' => $this->identityUsesGpsGmail($effectiveIdentity),
+                'payload_will_use_local_gps_gmail_as_ovoko_identity' => $this->identityUsesGpsGmail($effectiveIdentity),
+                'payload_contains_previous_ovoko_id' => $this->payloadContainsAny($effectiveIdentity + (array) $payload, $this->previousOvokoIds($part)),
                 'previous_external_offer_id_is_archival' => true,
             ],
             'local_rematch_controls' => [
@@ -118,13 +131,16 @@ class OvokoPartMappingResetController extends Controller
                     Arr::set($raw, 'metadata.ovoko_part_mapping_reset_for_recreate', true);
                     Arr::set($raw, 'metadata.reset_marker', self::MARKER);
                     Arr::set($raw, 'metadata.reset_at', now()->toISOString());
+                    Arr::set($raw, 'metadata.previous_sku', $listing->sku);
                     Arr::set($raw, 'metadata.previous_external_offer_id', $listing->external_offer_id);
                     Arr::set($raw, 'metadata.previous_external_listing_id', $listing->external_listing_id);
                     Arr::set($raw, 'metadata.previous_external_inventory_id', $listing->external_inventory_id);
                     Arr::set($raw, 'metadata.previous_url', $listing->url);
-                    Arr::forget($raw, ['external_id', 'ovoko_part_id', 'marketplace_external_id', 'listing_id', 'metadata.ovoko_part_id']);
+                    Arr::set($raw, 'metadata.previous_ovoko_part_id', data_get($raw, 'ovoko_part_id') ?: data_get($raw, 'metadata.ovoko_part_id') ?: $listing->external_offer_id ?: $listing->external_listing_id);
+                    Arr::forget($raw, ['external_id', 'sku', 'external_inventory_id', 'external_offer_id', 'external_listing_id', 'external_listing_id', 'ovoko_part_id', 'marketplace_external_id', 'listing_id', 'id_bridge', 'part_id', 'metadata.ovoko_part_id']);
 
                     $listing->fill([
+                        'sku' => null,
                         'external_offer_id' => null,
                         'external_listing_id' => null,
                         'external_inventory_id' => null,
@@ -136,6 +152,7 @@ class OvokoPartMappingResetController extends Controller
                         'last_error' => null,
                     ])->save();
 
+                    $cleared[] = 'marketplace_listings#'.$listing->id.'.sku';
                     $cleared[] = 'marketplace_listings#'.$listing->id.'.external_offer_id';
                     $cleared[] = 'marketplace_listings#'.$listing->id.'.external_listing_id';
                     $cleared[] = 'marketplace_listings#'.$listing->id.'.external_inventory_id';
@@ -183,6 +200,8 @@ class OvokoPartMappingResetController extends Controller
             'ovoko_publication_status' => $ovokoListings->pluck('status')->filter()->values()->all(),
             'marketplace_listings' => $part->marketplaceListings->map(fn (MarketplaceListing $l): array => $this->listingSnapshot($l))->values()->all(),
             'ovoko_mapping_fields' => $ovokoListings->map(fn (MarketplaceListing $l): array => $this->listingSnapshot($l))->values()->all(),
+            'ovoko_identity_fields_active' => $this->activeOvokoIdentityFields($ovokoListings->last()),
+            'ovoko_identity_fields_archived' => $this->archivedOvokoIdentityFields($ovokoListings->last()),
             'publish_decision' => [
                 'would_choose' => $blocking->isNotEmpty() ? 'update_or_skip_existing' : 'create',
                 'reason' => $blocking->isNotEmpty() ? 'BaseMarketplacePublishAdapter activeListing duplicate guard sees an Ovoko listing with external_offer_id/external_listing_id and non-terminal status.' : 'No active Ovoko marketplace listing with external_offer_id/external_listing_id blocks crm/importPart creation.',
@@ -243,6 +262,64 @@ class OvokoPartMappingResetController extends Controller
     private function listingSnapshot(MarketplaceListing $l): array
     {
         return $l->only(['id','marketplace','part_id','external_offer_id','external_listing_id','external_inventory_id','sku','price','quantity','currency','status','url','sync_status','match_status','last_api_status','not_seen_in_active_api_at','last_error']) + ['raw_payload_ovoko_candidates' => $this->ovokoCandidates($l->raw_payload)];
+    }
+
+    private function activeOvokoIdentityFields(?MarketplaceListing $listing): array
+    {
+        return [
+            'sku' => $listing?->sku,
+            'external_inventory_id' => $listing?->external_inventory_id,
+            'external_offer_id' => $listing?->external_offer_id,
+            'external_listing_id' => $listing?->external_listing_id,
+            'url' => $listing?->url,
+        ];
+    }
+
+    private function archivedOvokoIdentityFields(?MarketplaceListing $listing): array
+    {
+        return [
+            'previous_sku' => data_get($listing?->raw_payload, 'metadata.previous_sku'),
+            'previous_external_inventory_id' => data_get($listing?->raw_payload, 'metadata.previous_external_inventory_id'),
+            'previous_external_offer_id' => data_get($listing?->raw_payload, 'metadata.previous_external_offer_id'),
+            'previous_external_listing_id' => data_get($listing?->raw_payload, 'metadata.previous_external_listing_id'),
+            'previous_url' => data_get($listing?->raw_payload, 'metadata.previous_url'),
+            'previous_ovoko_part_id' => data_get($listing?->raw_payload, 'metadata.previous_ovoko_part_id'),
+        ];
+    }
+
+    private function effectiveOvokoIdentityFieldsForPublish(Part $part): array
+    {
+        $listing = $part->marketplaceListings->where('marketplace', 'ovoko')->first();
+        $resetForRecreate = $listing
+            && (bool) data_get($listing->raw_payload, 'metadata.ovoko_part_mapping_reset_for_recreate', false)
+            && blank($listing->sku)
+            && blank($listing->external_inventory_id)
+            && blank($listing->external_offer_id)
+            && blank($listing->external_listing_id)
+            && in_array((string) $listing->status, ['unlinked', 'stale', 'UNLINKED', 'STALE'], true)
+            && in_array((string) $listing->sync_status, ['stale', 'STALE'], true)
+            && in_array((string) $listing->match_status, ['unmatched', 'UNMATCHED'], true);
+
+        $externalId = $resetForRecreate ? 'gps-part-'.$part->id : ($part->sku ?? 'gps-part-'.$part->id);
+
+        return [
+            'sku' => $externalId,
+            'external_id' => $externalId,
+            'id_bridge' => $externalId,
+            'visible_code' => $externalId,
+            'source' => $resetForRecreate ? 'neutral_part_id_after_ovoko_mapping_reset' : 'part_sku_fallback',
+        ];
+    }
+
+    private function identityUsesGpsGmail(array $identity): bool
+    {
+        foreach (['sku', 'external_id', 'id_bridge', 'visible_code', 'external_inventory_id'] as $key) {
+            if (preg_match('/^GPS-GMAIL-/i', (string) ($identity[$key] ?? '')) === 1) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function ovokoCandidates(mixed $payload): array

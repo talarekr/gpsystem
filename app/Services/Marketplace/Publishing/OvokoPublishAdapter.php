@@ -67,7 +67,7 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
             return ['ok' => false, 'status' => 'api_error', 'action' => 'crm/importPart', 'http_status' => $result['http_status'] ?? null, 'error' => (string) ($result['message'] ?? 'Ovoko/RRR importPart failed.'), 'request_summary' => $this->requestSummary($payload) + ['ovoko_form_keys' => array_keys($form['fields']), 'ovoko_photo' => $photoDiagnostics] + $formDiagnostics, 'response_summary' => $summary];
         }
 
-        return ['ok' => true, 'status' => 'published', 'listing_status' => 'published', 'action' => 'crm/importPart', 'http_status' => $result['http_status'] ?? null, 'external_offer_id' => $externalId, 'external_listing_id' => $externalId, 'url' => $shopUrl, 'request_summary' => $this->requestSummary($payload) + ['ovoko_form_keys' => array_keys($form['fields']), 'ovoko_photo' => $photoDiagnostics] + $formDiagnostics, 'response_summary' => $summary, 'log_context' => ['ovoko_part_id' => $externalId, 'ovoko_shop_url_present' => filled($shopUrl),
+        return ['ok' => true, 'status' => 'published', 'listing_status' => 'published', 'action' => 'crm/importPart', 'http_status' => $result['http_status'] ?? null, 'external_offer_id' => $externalId, 'external_listing_id' => $externalId, 'external_inventory_id' => $form['fields']['external_id'] ?? null, 'resolved_sku' => $form['fields']['external_id'] ?? null, 'url' => $shopUrl, 'request_summary' => $this->requestSummary($payload) + ['ovoko_form_keys' => array_keys($form['fields']), 'ovoko_photo' => $photoDiagnostics] + $formDiagnostics, 'response_summary' => $summary, 'log_context' => ['ovoko_part_id' => $externalId, 'ovoko_shop_url_present' => filled($shopUrl),
             'ovoko_shop_url_source' => filled($externalId) ? 'generated_from_ovoko_part_id' : null, 'ovoko_shop_url' => $shopUrl, 'ovoko_listing_url' => $shopUrl, 'ovoko_listing_url_source' => filled($externalId) ? 'generated_from_ovoko_part_id' : null]];
     }
 
@@ -112,6 +112,7 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
         $partCodes = $partCodeDiagnostics['ovoko_optional_codes'];
         $car = $this->ovokoCarDiagnostics($part, $vehicle, $settings);
         $condition = $this->ovokoConditionDiagnostics($part);
+        $identity = $this->ovokoPublishIdentity($part, $payload);
 
         $fields = array_filter([
             'category_id' => $payload['category_id'] ?? null,
@@ -120,8 +121,8 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
             'status' => $payload['status'] ?? $settings['default_part_status'] ?? $settings['ovoko_default_part_status'] ?? null,
             'price' => $readiness['marketplace_price'] ?? $payload['price_pln'] ?? null,
             'original_currency' => $readiness['currency'] ?? $payload['currency'] ?? 'PLN',
-            'external_id' => $this->normalizeOvokoText($payload['sku'] ?? $part->sku ?? ('gps-part-'.$part->id), collapseWhitespace: false),
-            'visible_code' => $this->normalizeOvokoText($payload['sku'] ?? $part->sku ?? null, collapseWhitespace: false),
+            'external_id' => $identity['external_id'],
+            'visible_code' => $identity['visible_code'],
             'manufacturer_code' => $this->normalizeOvokoText($partCodeDiagnostics['ovoko_manufacturer_code'] ?? null, collapseWhitespace: false),
             'other_code' => $this->normalizeOvokoText($part->oem_number ?? $part->manufacturer_code ?? null, collapseWhitespace: false),
             'optional_codes' => array_values(array_filter(array_map(fn (string $code): ?string => $this->normalizeOvokoText($code, collapseWhitespace: false), $partCodes), fn (?string $code): bool => ! blank($code))),
@@ -136,12 +137,44 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
         if (blank($fields['quality'] ?? null)) $missing[] = 'Ovoko: nie udało się zmapować quality z wartości '.($part->condition_notes ?? '');
         if (blank($fields['status'] ?? null)) $missing[] = 'Uzupełnij domyślny status części Ovoko w ustawieniach konta.';
         if (blank($fields['photo'] ?? null)) $missing[] = 'Ovoko: zdjęcie części musi być publicznym URL-em HTTP/HTTPS. Szczegóły są w Logach.';
-        $diagnostics = array_merge($condition, ['ovoko_status' => $fields['status'] ?? null, 'raw_condition_payload_fields' => ['quality' => $fields['quality'] ?? null, 'status' => $fields['status'] ?? null]], $car, $partCodeDiagnostics);
+        $diagnostics = array_merge($condition, ['ovoko_status' => $fields['status'] ?? null, 'ovoko_publish_identity' => $identity, 'raw_condition_payload_fields' => ['quality' => $fields['quality'] ?? null, 'status' => $fields['status'] ?? null]], $car, $partCodeDiagnostics);
         if (blank($fields['car_id'] ?? null)) $diagnostics['blocked_reason'] = 'missing_ovoko_car_id';
         if (($partCodeDiagnostics['ovoko_codes_look_like_title'] ?? false) === true) $diagnostics['warning'] = 'ovoko_code_looks_like_full_title';
         if ($missing !== []) return ['ok' => false, 'fields' => $fields, 'missing' => $missing, 'error' => implode('; ', $missing), 'diagnostics' => $diagnostics];
 
         return ['ok' => true, 'fields' => $fields, 'diagnostics' => $diagnostics];
+    }
+
+    private function ovokoPublishIdentity(Part $part, array $payload): array
+    {
+        $part->loadMissing('marketplaceListings');
+        $listing = $part->marketplaceListings
+            ->where('marketplace', 'ovoko')
+            ->sortByDesc('id')
+            ->first();
+        $resetForRecreate = $listing
+            && (bool) data_get($listing->raw_payload, 'metadata.ovoko_part_mapping_reset_for_recreate', false)
+            && blank($listing->sku)
+            && blank($listing->external_inventory_id)
+            && blank($listing->external_offer_id)
+            && blank($listing->external_listing_id)
+            && in_array((string) $listing->status, ['unlinked', 'stale', 'UNLINKED', 'STALE'], true)
+            && in_array((string) $listing->sync_status, ['stale', 'STALE'], true)
+            && in_array((string) $listing->match_status, ['unmatched', 'UNMATCHED'], true);
+
+        $externalId = $resetForRecreate
+            ? 'gps-part-'.$part->id
+            : ($payload['sku'] ?? $part->sku ?? ('gps-part-'.$part->id));
+
+        $externalId = $this->normalizeOvokoText($externalId, collapseWhitespace: false);
+
+        return [
+            'external_id' => $externalId,
+            'visible_code' => $externalId,
+            'id_bridge' => $externalId,
+            'source' => $resetForRecreate ? 'neutral_part_id_after_ovoko_mapping_reset' : 'payload_sku_or_part_sku',
+            'local_part_sku_preserved' => $part->sku,
+        ];
     }
 
     /** @return array<int, string> */
