@@ -173,8 +173,11 @@ class OvokoPartMappingResetController extends Controller
             ->map(fn (Part $part): array => $this->candidateRow($part, $includeReadiness))
             ->filter(function (array $row) use ($request): bool {
                 if ($request->boolean('only_gps_gmail') && ! $row['identity_looks_like_gps_gmail']) return false;
-                if ($request->boolean('only_missing_price') && ! in_array('brak ceny', $row['readiness_blockers'], true)) return false;
+                if ($request->boolean('only_missing_price') && ! in_array('brak ceny', $row['readiness_blockers_for_audit'], true)) return false;
                 if ($request->boolean('only_with_ovoko_url') && ! $row['has_active_ovoko_url']) return false;
+                if (($request->boolean('only_not_ready') || $request->boolean('exclude_ready')) && $row['readiness_blockers_for_audit'] === []) return false;
+                if ($request->boolean('exclude_published') && strcasecmp((string) $row['status'], 'published') === 0) return false;
+                if ($request->boolean('only_imported') && strcasecmp((string) $row['status'], 'imported') !== 0) return false;
 
                 return true;
             })
@@ -182,26 +185,34 @@ class OvokoPartMappingResetController extends Controller
             ->values()
             ->all();
 
+        $rowCollection = collect($rows);
+
         $summary = [
             'total_candidates' => count($rows),
-            'candidates_with_gps_gmail_sku' => collect($rows)->where('identity_looks_like_gps_gmail', true)->count(),
-            'candidates_with_ovoko_url' => collect($rows)->where('has_active_ovoko_url', true)->count(),
-            'candidates_missing_price' => collect($rows)->filter(fn (array $row): bool => in_array('brak ceny', $row['readiness_blockers'], true))->count(),
-            'candidates_missing_category' => collect($rows)->filter(fn (array $row): bool => in_array('brak kategorii Ovoko', $row['readiness_blockers'], true))->count(),
-            'candidates_ready_after_reset' => collect($rows)->where('should_create_after_reset', true)->filter(fn (array $row): bool => ($row['readiness_blockers'] ?? []) === [])->count(),
+            'candidates_with_gps_gmail_sku' => $rowCollection->where('identity_looks_like_gps_gmail', true)->count(),
+            'candidates_with_ovoko_url' => $rowCollection->where('has_active_ovoko_url', true)->count(),
+            'candidates_missing_price' => $rowCollection->filter(fn (array $row): bool => in_array('brak ceny', $row['readiness_blockers_for_audit'], true))->count(),
+            'candidates_missing_category' => $rowCollection->filter(fn (array $row): bool => in_array('brak kategorii Ovoko', $row['readiness_blockers_for_audit'], true))->count(),
+            'candidates_ready_after_reset' => $rowCollection->where('should_create_after_reset', true)->filter(fn (array $row): bool => ($row['readiness_blockers_for_audit'] ?? []) === [])->count(),
+            'ready_candidates_count' => $rowCollection->filter(fn (array $row): bool => ($row['readiness_blockers_for_audit'] ?? []) === [])->count(),
+            'not_ready_candidates_count' => $rowCollection->filter(fn (array $row): bool => ($row['readiness_blockers_for_audit'] ?? []) !== [])->count(),
+            'published_candidates_count' => $rowCollection->filter(fn (array $row): bool => strcasecmp((string) $row['status'], 'published') === 0)->count(),
+            'imported_not_ready_candidates_count' => $rowCollection->filter(fn (array $row): bool => strcasecmp((string) $row['status'], 'imported') === 0)->filter(fn (array $row): bool => ($row['readiness_blockers_for_audit'] ?? []) !== [])->count(),
             'safety_flags' => $this->readOnlySafetyFlags(),
         ];
 
+        $responseRows = $rowCollection->map(fn (array $row): array => Arr::except($row, ['readiness_blockers_for_audit']))->values()->all();
+
         $payload = [
-            'marker' => 'ovoko_part_mapping_reset_candidates_audit_v1',
-            'filters' => $request->only(['limit', 'only_gps_gmail', 'only_missing_price', 'only_with_ovoko_url', 'status', 'source_system', 'include_readiness', 'export']),
+            'marker' => 'ovoko_part_mapping_reset_candidates_not_ready_filter_v2',
+            'filters' => $request->only(['limit', 'only_gps_gmail', 'only_missing_price', 'only_with_ovoko_url', 'only_not_ready', 'exclude_ready', 'exclude_published', 'only_imported', 'status', 'source_system', 'include_readiness', 'export']),
             'summary' => $summary,
-            'candidates' => $rows,
+            'candidates' => $responseRows,
             'safety_flags' => $this->readOnlySafetyFlags(),
         ];
 
         if ($request->query('export') === 'csv') {
-            return $this->csvResponse('ovoko-part-mapping-reset-candidates.csv', $rows);
+            return $this->csvResponse('ovoko-part-mapping-reset-candidates.csv', $responseRows);
         }
 
         return response()->json($payload);
@@ -403,6 +414,13 @@ class OvokoPartMappingResetController extends Controller
         $hasActiveMapping = $listing ? $this->hasActiveOvokoIdentity($listing) : false;
         $hasUrl = filled($listing?->url);
 
+        $status = $listing?->status ?? $part->status;
+        $identityLooksLikeGpsGmail = $this->identityLooksLikeGpsGmail($part, $listing);
+        $resetRecommendedNow = $hasActiveMapping
+            && $identityLooksLikeGpsGmail
+            && strcasecmp((string) $status, 'published') !== 0
+            && $blockers !== [];
+
         return [
             'part_id' => $part->id,
             'sku' => $part->sku,
@@ -418,15 +436,17 @@ class OvokoPartMappingResetController extends Controller
             'ovoko_external_inventory_id' => $listing?->external_inventory_id,
             'ovoko_sku' => $listing?->sku,
             'ovoko_url' => $listing?->url,
-            'status' => $listing?->status ?? $part->status,
+            'status' => $status,
             'sync_status' => $listing?->sync_status,
             'match_status' => $listing?->match_status,
             'raw_payload_ovoko_part_id' => data_get($listing?->raw_payload, 'ovoko_part_id') ?: data_get($listing?->raw_payload, 'metadata.ovoko_part_id'),
-            'identity_looks_like_gps_gmail' => $this->identityLooksLikeGpsGmail($part, $listing),
+            'identity_looks_like_gps_gmail' => $identityLooksLikeGpsGmail,
             'has_active_ovoko_identity' => $hasActiveMapping,
             'has_active_ovoko_url' => $hasUrl,
             'should_create_after_reset' => $hasActiveMapping,
             'readiness_blockers' => $includeReadiness ? $blockers : [],
+            'readiness_blockers_for_audit' => $blockers,
+            'reset_recommended_now' => $resetRecommendedNow,
             'suggested_action' => $this->suggestedAction($listing),
         ];
     }
@@ -508,7 +528,7 @@ class OvokoPartMappingResetController extends Controller
         $handle = fopen('php://temp', 'r+');
         fputcsv($handle, $headers);
         foreach ($rows as $row) {
-            fputcsv($handle, array_map(fn ($value) => is_array($value) ? json_encode($value) : $value, Arr::only($row, $headers)));
+            fputcsv($handle, array_map(fn ($value) => is_array($value) ? json_encode($value) : (is_bool($value) ? ($value ? 'true' : 'false') : $value), Arr::only($row, $headers)));
         }
         rewind($handle);
         $csv = stream_get_contents($handle) ?: '';
