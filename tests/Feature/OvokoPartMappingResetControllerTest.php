@@ -111,7 +111,7 @@ class OvokoPartMappingResetControllerTest extends TestCase
 
         $this->getJson('/admin/tools/ovoko/part-mapping-reset-candidates?json=1&include_readiness=1&only_gps_gmail=1&source_system=woo')
             ->assertOk()
-            ->assertJsonPath('marker', 'ovoko_part_mapping_reset_candidates_not_ready_filter_v2')
+            ->assertJsonPath('marker', 'ovoko_reset_candidates_missing_price_to_publish_only_v4')
             ->assertJsonPath('summary.safety_flags.read_only', true)
             ->assertJsonPath('summary.safety_flags.no_mutation', true)
             ->assertJsonPath('summary.safety_flags.no_ovoko_request', true)
@@ -125,7 +125,8 @@ class OvokoPartMappingResetControllerTest extends TestCase
             ->assertJsonPath('candidates.0.has_active_ovoko_url', true)
             ->assertJsonPath('candidates.0.should_create_after_reset', true)
             ->assertJsonPath('candidates.0.raw_payload_ovoko_part_id', '11582')
-            ->assertJsonPath('candidates.0.suggested_action', 'reset_mapping_for_recreate');
+            ->assertJsonPath('candidates.0.reset_recommended_now_strict', false)
+            ->assertJsonPath('candidates.0.suggested_action', 'inspect_manually');
 
         $this->assertSame('11582', $ovoko->fresh()->external_offer_id);
         $this->assertSame('A-11582', MarketplaceListing::query()->where('marketplace', 'allegro')->value('external_offer_id'));
@@ -148,7 +149,7 @@ class OvokoPartMappingResetControllerTest extends TestCase
 
         $this->getJson('/admin/tools/ovoko/part-mapping-reset-candidates?json=1&include_readiness=1&only_not_ready=1&exclude_published=1&only_imported=1&limit=10')
             ->assertOk()
-            ->assertJsonPath('marker', 'ovoko_part_mapping_reset_candidates_not_ready_filter_v2')
+            ->assertJsonPath('marker', 'ovoko_reset_candidates_missing_price_to_publish_only_v4')
             ->assertJsonPath('summary.total_candidates', 2)
             ->assertJsonPath('summary.ready_candidates_count', 0)
             ->assertJsonPath('summary.not_ready_candidates_count', 2)
@@ -161,6 +162,62 @@ class OvokoPartMappingResetControllerTest extends TestCase
 
         $this->assertSame('I-1', MarketplaceListing::query()->where('part_id', $notReadyImported->id)->value('external_offer_id'));
         $this->assertSame('P-1', MarketplaceListing::query()->where('part_id', $published->id)->value('external_offer_id'));
+    }
+
+
+    public function test_strict_reset_candidates_skip_priced_live_parts_and_filter_to_publish_queue(): void
+    {
+        $this->actingAsAdminUser();
+
+        $priced = Part::query()->forceCreate([
+            'id' => 7795,
+            'name' => 'Priced live part',
+            'sku' => 'GPS-GMAIL-7795',
+            'quantity' => 1,
+            'status' => 'ready',
+            'price' => 100,
+            'ovoko_price' => 120,
+            'is_visible_storefront' => true,
+            'needs_listing' => false,
+        ]);
+        $candidate = Part::query()->create([
+            'name' => 'Missing price queue part',
+            'sku' => 'GPS-GMAIL-QUEUE',
+            'quantity' => 1,
+            'status' => 'draft',
+            'price' => null,
+            'ovoko_price' => null,
+            'is_visible_storefront' => false,
+            'needs_listing' => true,
+            'source_system' => 'woo',
+        ]);
+
+        MarketplaceListing::query()->create(['part_id' => $priced->id, 'marketplace' => 'ovoko', 'external_offer_id' => '7795', 'external_listing_id' => '7795', 'sku' => 'GPS-GMAIL-7795', 'url' => 'https://ovoko.example.test/7795', 'price' => 120, 'status' => 'published', 'sync_status' => 'published']);
+        MarketplaceListing::query()->create(['part_id' => $candidate->id, 'marketplace' => 'ovoko', 'external_offer_id' => 'Q-1', 'external_listing_id' => 'Q-1', 'sku' => 'GPS-GMAIL-QUEUE', 'url' => 'https://ovoko.example.test/Q-1', 'status' => 'imported', 'sync_status' => 'mapped']);
+
+        $this->getJson('/admin/tools/ovoko/part-mapping-reset-candidates?json=1&only_gps_gmail=1&only_with_ovoko_url=1&limit=10')
+            ->assertOk()
+            ->assertJsonPath('marker', 'ovoko_reset_candidates_missing_price_to_publish_only_v4')
+            ->assertJsonPath('summary.with_price_skipped_count', 1)
+            ->assertJsonPath('summary.strict_reset_candidates_count', 1)
+            ->assertJsonPath('candidates.0.part_id', $candidate->id)
+            ->assertJsonPath('candidates.0.reset_recommended_now_strict', true)
+            ->assertJsonPath('candidates.1.part_id', 7795)
+            ->assertJsonPath('candidates.1.has_price', true)
+            ->assertJsonPath('candidates.1.has_ovoko_price', true)
+            ->assertJsonPath('candidates.1.reset_recommended_now_strict', false)
+            ->assertJsonPath('candidates.1.suggested_action', 'inspect_manually')
+            ->assertJsonPath('candidates.1.reset_risk_level', 'high')
+            ->assertJsonPath('candidates.1.reset_risk_reason', 'product has price and may already be live/listed');
+
+        $this->getJson('/admin/tools/ovoko/part-mapping-reset-candidates?json=1&only_gps_gmail=1&only_with_ovoko_url=1&only_missing_price=1&only_to_publish_queue=1&limit=10')
+            ->assertOk()
+            ->assertJsonPath('summary.total_candidates', 1)
+            ->assertJsonPath('summary.strict_reset_candidates_count', 1)
+            ->assertJsonPath('summary.to_publish_candidates_count', 1)
+            ->assertJsonPath('candidates.0.part_id', $candidate->id);
+
+        $this->assertSame('7795', MarketplaceListing::query()->where('part_id', 7795)->value('external_offer_id'));
     }
 
     public function test_reset_preview_shows_fields_to_clear_and_does_not_include_allegro_ebay_reset_fields(): void
