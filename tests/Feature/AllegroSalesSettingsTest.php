@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Filament\Resources\PartResource;
 use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceCategoryMapping;
+use App\Models\MarketplaceCategory;
 use App\Models\Part;
 use App\Models\PartImage;
 use App\Services\Marketplace\AllegroSalesSettingsResolver;
@@ -467,6 +468,67 @@ class AllegroSalesSettingsTest extends TestCase
             && str_contains((string) data_get($request->data(), 'description.sections.0.items.0.content'), 'Witam oferta dotyczy'));
     }
 
+
+
+    public function test_allegro_live_publish_blocks_product_set_category_mismatch_before_api(): void
+    {
+        Http::fake(array_merge($this->fakeAllegro(), [
+            'https://api.allegro.pl/sale/product-offers' => Http::response(['id' => 'offer-should-not-be-created'], 201),
+        ]));
+        MarketplaceCategory::query()->create(['channel' => 'allegro_main', 'external_category_id' => '254548', 'name' => 'Klapa bagażnika', 'full_path' => 'Klapa bagażnika', 'active' => true]);
+        MarketplaceCategory::query()->create(['channel' => 'allegro_main', 'external_category_id' => '254580', 'name' => 'Drzwi', 'full_path' => 'Drzwi', 'active' => true]);
+        $part = $this->part('KURIER DPD');
+        MarketplaceCategoryMapping::query()->where('local_category_id', 77)->update(['external_category_id' => '254548', 'external_category_name' => 'Klapa bagażnika']);
+        $account = MarketplaceAccount::query()->where('code', 'allegro_main')->firstOrFail();
+        $account->api_settings = ['productSet' => [['product' => ['id' => 'catalog-door-product', 'name' => 'Drzwi BMW X5', 'category' => ['id' => '254580']]]]];
+        $account->save();
+        $payload = [
+            'title' => 'BMW X5 F15 A90 KLAPA BAGAŻNIKA POKRYWA STAN IDEALNY',
+            'category_id' => '254548',
+            'category_mapping_source' => 'marketplace_category_mappings',
+            'category_mapping_name' => 'Klapa bagażnika',
+            'price_pln' => 100,
+            'quantity' => 1,
+            'image_urls' => ['https://gpswiss.pl/storage/parts/photos/imported/7890/kuyJdjAM4xzYvW7Hoy0YQ7WlCKE8nRfkSUskHyT0.jpg'],
+            'allegro_parameters' => ['payload_parameters' => [], 'product_parameters' => []],
+        ];
+        $adapter = new class(app(MarketplaceListingReadinessService::class), app(MarketplacePublishGate::class), app(ApiIntegrationLogger::class), app(AllegroSalesSettingsResolver::class)) extends AllegroPublishAdapter {
+            public function callPerformLivePublish(Part $part, array $readiness, array $payload, MarketplaceAccount $account): array { return $this->performLivePublish($part, $readiness, $payload, $account); }
+        };
+
+        $result = $adapter->callPerformLivePublish($part, ['marketplace_price' => 100], $payload, $account);
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('blocked_allegro_catalog_product_category_mismatch', $result['status']);
+        $this->assertSame('254548', data_get($result, 'request_summary.category_consistency.offer_category_id'));
+        $this->assertSame('254580', data_get($result, 'request_summary.category_consistency.product_set_category_id'));
+        $this->assertSame('existing_catalog_product', data_get($result, 'request_summary.category_consistency.product_set_source'));
+        $this->assertTrue(data_get($result, 'request_summary.category_consistency.payload_would_be_rejected_because_category_mismatch'));
+        Http::assertNotSent(fn ($request) => $request->url() === 'https://api.allegro.pl/sale/product-offers');
+    }
+
+    public function test_allegro_publish_path_diagnose_reports_category_sources_and_mismatch(): void
+    {
+        Http::fake(array_merge($this->fakeAllegro(), ['https://api.allegro.pl/sale/categories/254548/parameters' => Http::response(['parameters' => []], 200)]));
+        MarketplaceCategory::query()->create(['channel' => 'allegro_main', 'external_category_id' => '254548', 'name' => 'Klapa bagażnika', 'full_path' => 'Klapa bagażnika', 'active' => true]);
+        MarketplaceCategory::query()->create(['channel' => 'allegro_main', 'external_category_id' => '254580', 'name' => 'Drzwi', 'full_path' => 'Drzwi', 'active' => true]);
+        $part = $this->part('KURIER DPD');
+        MarketplaceCategoryMapping::query()->where('local_category_id', 77)->update(['external_category_id' => '254548', 'external_category_name' => 'Klapa bagażnika']);
+        $account = MarketplaceAccount::query()->where('code', 'allegro_main')->firstOrFail();
+        $account->api_settings = ['productSet' => [['product' => ['id' => 'catalog-door-product', 'name' => 'Drzwi BMW X5', 'category' => ['id' => '254580']]]]];
+        $account->save();
+
+        $response = $this->getJson('/admin/tools/allegro/part-publish-path-diagnose?part_id='.$part->id.'&json=1');
+
+        $response->assertOk();
+        $this->assertSame('254548', $response->json('offer_category_id'));
+        $this->assertSame('Klapa bagażnika', $response->json('offer_category_name'));
+        $this->assertSame('254580', $response->json('product_set_category_id'));
+        $this->assertSame('Drzwi', $response->json('product_set_category_name'));
+        $this->assertFalse($response->json('categories_match'));
+        $this->assertSame('reject_catalog_product_category_mismatch', $response->json('recommended_action'));
+        $this->assertTrue($response->json('product_set_uses_existing_allegro_catalog_product'));
+    }
 
     public function test_allegro_live_publish_blocks_when_tax_rate_is_not_supported_by_category(): void
     {

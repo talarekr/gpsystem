@@ -11,6 +11,7 @@ use App\Services\Marketplace\AllegroDescriptionBuilder;
 use App\Services\Marketplace\AllegroGpSwissDescriptionTemplate;
 use App\Services\Marketplace\MarketplaceListingReadinessService;
 use App\Services\Marketplace\MarketplacePublishGate;
+use App\Services\Marketplace\AllegroCategoryConsistencyGuard;
 
 class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
 {
@@ -45,6 +46,8 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
         $taxSettings = $this->validatedTaxSettings($client, (string) ($payload['category_id'] ?? ''));
         if (($taxSettings['blockers'] ?? []) !== []) return ['ok' => false, 'status' => 'blocked_tax_settings', 'errors' => $taxSettings['blockers'], 'warnings' => $taxSettings['warnings'] ?? [], 'request_summary' => $this->requestSummary($payload, null, $part) + $productNameDiagnostics + $signature + ['allegro_sales_settings' => $this->salesSettingsSummary($salesSettings), 'allegro_tax_settings' => $taxSettings], 'write' => false];
         $body = array_filter(['name' => (string) ($payload['title'] ?? $part->name), 'category' => ['id' => (string) ($payload['category_id'] ?? '')], 'productSet' => $productSet, 'parameters' => $offerParameters, 'images' => $offerImages, 'description' => $description, 'sellingMode' => $settings['sellingMode'] ?? ['format' => 'BUY_NOW', 'price' => ['amount' => (string) ($payload['price_pln'] ?? $readiness['marketplace_price']), 'currency' => 'PLN']], 'stock' => ['available' => (int) ($payload['quantity'] ?? $part->quantity ?? 1), 'unit' => 'UNIT'], 'publication' => ['status' => 'ACTIVE'], 'delivery' => $delivery, 'payments' => $this->paymentsPayload($settings['payments'] ?? null, $payload['payments'] ?? null), 'taxSettings' => $taxSettings['payload'] ?? null, 'afterSalesServices' => $afterSales, 'location' => $settings['location'] ?? null, 'external' => filled($signature['allegro_signature_value']) ? ['id' => $signature['allegro_signature_value']] : null], fn ($v) => $v !== null && $v !== []);
+        $categoryConsistency = app(AllegroCategoryConsistencyGuard::class)->diagnose($part, $payload, $body);
+        if (app(AllegroCategoryConsistencyGuard::class)->hasBlockingMismatch($categoryConsistency)) return ['ok' => false, 'status' => 'blocked_allegro_catalog_product_category_mismatch', 'action' => 'createProductOffer', 'error' => AllegroCategoryConsistencyGuard::MISMATCH_MARKER, 'ui_error' => $categoryConsistency['blocker_message'] ?? AllegroCategoryConsistencyGuard::MISMATCH_MARKER, 'request_summary' => $this->requestSummary($payload, $body, $part) + $productNameDiagnostics + $signature + ['allegro_sales_settings' => $this->salesSettingsSummary($salesSettings), 'allegro_tax_settings' => $taxSettings, 'category_consistency' => $categoryConsistency], 'response_summary' => ['blocked_before_allegro_api' => true], 'write' => false];
         $descriptionGuard = $this->assertGpSwissDescriptionTemplate($body, $builtDescription['diagnostics']);
         if (! $descriptionGuard['ok']) return ['ok' => false, 'status' => 'blocked', 'action' => 'createProductOffer', 'error' => 'allegro_description_template_not_applied', 'ui_error' => 'allegro_description_template_not_applied', 'request_summary' => $this->requestSummary($payload, $body, $part) + $productNameDiagnostics + $signature + ['allegro_sales_settings' => $this->salesSettingsSummary($salesSettings), 'description_guard' => $descriptionGuard], 'write' => false];
         $result = $client->createProductOffer($body);
@@ -432,6 +435,7 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
             'productSet_0_product_main_image_present' => filled(data_get($body ?? $payload, 'productSet.0.product.images.0')),
             'description_sections_count' => count((array) data_get($body ?? $payload, 'description.sections', [])),
             'description_has_non_empty_content' => $this->hasNonEmptyDescriptionSection((array) data_get($body ?? $payload, 'description', [])),
+            'category_consistency' => app(AllegroCategoryConsistencyGuard::class)->diagnose($part, $payload, $body),
         ] + ($part ? $this->descriptionDiagnostics($part, $body) : []);
     }
 

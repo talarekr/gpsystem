@@ -54,6 +54,7 @@ use App\Http\Controllers\Tools\MarketplaceApiFoundationController;
 use App\Http\Controllers\Tools\MarketplaceListingDryRunController;
 use App\Http\Controllers\Tools\AllegroCompatibilityDryRunController;
 use App\Http\Controllers\Tools\AllegroMarketplaceDiagnoseController;
+use App\Http\Controllers\Tools\AllegroPartPublishPathDiagnoseController;
 use App\Http\Controllers\Tools\MarketplaceListingImageRefreshController;
 use App\Http\Controllers\Tools\OvokoCarMappingController;
 use App\Http\Controllers\Tools\OvokoCarDictionariesDiagnoseController;
@@ -393,6 +394,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::match(['get', 'post'], '/admin/tools/ovoko/unlink-stale-listing', OvokoUnlinkStaleListingController::class)->name('admin.tools.ovoko.unlink-stale-listing');
     Route::get('/admin/tools/ovoko/part-mapping-diagnose', [OvokoPartMappingResetController::class, 'diagnose'])->name('admin.tools.ovoko.part-mapping-diagnose');
     Route::get('/admin/tools/ovoko/part-publish-path-diagnose', [OvokoPartMappingResetController::class, 'publishPathDiagnose'])->name('admin.tools.ovoko.part-publish-path-diagnose');
+    Route::get('/admin/tools/allegro/part-publish-path-diagnose', AllegroPartPublishPathDiagnoseController::class)->name('admin.tools.allegro.part-publish-path-diagnose');
     Route::get('/admin/tools/ovoko/part-mapping-reset-candidates', [OvokoPartMappingResetController::class, 'candidates'])->name('admin.tools.ovoko.part-mapping-reset-candidates');
     Route::get('/admin/tools/ovoko/part-mapping-reset-preview', [OvokoPartMappingResetController::class, 'preview'])->name('admin.tools.ovoko.part-mapping-reset-preview');
     Route::post('/admin/tools/ovoko/part-mapping-reset', [OvokoPartMappingResetController::class, 'reset'])->name('admin.tools.ovoko.part-mapping-reset');
