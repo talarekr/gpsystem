@@ -173,8 +173,9 @@ class OvokoPartMappingResetController extends Controller
             ->map(fn (Part $part): array => $this->candidateRow($part, $includeReadiness))
             ->filter(function (array $row) use ($request): bool {
                 if ($request->boolean('only_gps_gmail') && ! $row['identity_looks_like_gps_gmail']) return false;
-                if ($request->boolean('only_missing_price') && ! in_array('brak ceny', $row['readiness_blockers_for_audit'], true)) return false;
+                if ($request->boolean('only_missing_price') && ! ((bool) $row['missing_price_for_strict_reset'])) return false;
                 if ($request->boolean('only_with_ovoko_url') && ! $row['has_active_ovoko_url']) return false;
+                if ($request->boolean('only_to_publish_queue') && $row['is_to_publish'] !== true) return false;
                 if (($request->boolean('only_not_ready') || $request->boolean('exclude_ready')) && $row['readiness_blockers_for_audit'] === []) return false;
                 if ($request->boolean('exclude_published') && strcasecmp((string) $row['status'], 'published') === 0) return false;
                 if ($request->boolean('only_imported') && strcasecmp((string) $row['status'], 'imported') !== 0) return false;
@@ -192,6 +193,12 @@ class OvokoPartMappingResetController extends Controller
             'candidates_with_gps_gmail_sku' => $rowCollection->where('identity_looks_like_gps_gmail', true)->count(),
             'candidates_with_ovoko_url' => $rowCollection->where('has_active_ovoko_url', true)->count(),
             'candidates_missing_price' => $rowCollection->filter(fn (array $row): bool => in_array('brak ceny', $row['readiness_blockers_for_audit'], true))->count(),
+            'strict_reset_candidates_count' => $rowCollection->where('reset_recommended_now_strict', true)->count(),
+            'missing_price_candidates_count' => $rowCollection->where('missing_price_for_strict_reset', true)->count(),
+            'with_price_skipped_count' => $rowCollection->filter(fn (array $row): bool => (bool) $row['has_price'] || (bool) $row['has_ovoko_price'])->count(),
+            'to_publish_candidates_count' => $rowCollection->where('is_to_publish', true)->count(),
+            'parts_menu_active_skipped_count' => $rowCollection->where('is_in_parts_menu', true)->count(),
+            'unknown_publish_state_count' => $rowCollection->filter(fn (array $row): bool => ($row['is_to_publish'] ?? null) === 'unknown' || ($row['is_in_parts_menu'] ?? null) === 'unknown')->count(),
             'candidates_missing_category' => $rowCollection->filter(fn (array $row): bool => in_array('brak kategorii Ovoko', $row['readiness_blockers_for_audit'], true))->count(),
             'candidates_ready_after_reset' => $rowCollection->where('should_create_after_reset', true)->filter(fn (array $row): bool => ($row['readiness_blockers_for_audit'] ?? []) === [])->count(),
             'ready_candidates_count' => $rowCollection->filter(fn (array $row): bool => ($row['readiness_blockers_for_audit'] ?? []) === [])->count(),
@@ -204,8 +211,8 @@ class OvokoPartMappingResetController extends Controller
         $responseRows = $rowCollection->map(fn (array $row): array => Arr::except($row, ['readiness_blockers_for_audit']))->values()->all();
 
         $payload = [
-            'marker' => 'ovoko_part_mapping_reset_candidates_not_ready_filter_v2',
-            'filters' => $request->only(['limit', 'only_gps_gmail', 'only_missing_price', 'only_with_ovoko_url', 'only_not_ready', 'exclude_ready', 'exclude_published', 'only_imported', 'status', 'source_system', 'include_readiness', 'export']),
+            'marker' => 'ovoko_reset_candidates_missing_price_to_publish_only_v4',
+            'filters' => $request->only(['limit', 'only_gps_gmail', 'only_missing_price', 'only_to_publish_queue', 'only_with_ovoko_url', 'only_not_ready', 'exclude_ready', 'exclude_published', 'only_imported', 'status', 'source_system', 'include_readiness', 'export']),
             'summary' => $summary,
             'candidates' => $responseRows,
             'safety_flags' => $this->readOnlySafetyFlags(),
@@ -416,10 +423,25 @@ class OvokoPartMappingResetController extends Controller
 
         $status = $listing?->status ?? $part->status;
         $identityLooksLikeGpsGmail = $this->identityLooksLikeGpsGmail($part, $listing);
+        $hasPrice = $this->positivePrice($part->price);
+        $hasOvokoPrice = $this->positivePrice($part->ovoko_price) || $this->positivePrice($listing?->price);
+        $missingPriceForStrictReset = ! $hasPrice && ! $hasOvokoPrice;
+        $menuState = $this->partsMenuState($part);
+        $publishState = $this->publishQueueState($part, $menuState['is_in_parts_menu']);
+        $hasActiveLiveSignal = $this->hasActiveLiveSignal($part, $listing, $menuState['is_in_parts_menu']);
         $resetRecommendedNow = $hasActiveMapping
             && $identityLooksLikeGpsGmail
             && strcasecmp((string) $status, 'published') !== 0
             && $blockers !== [];
+        $resetRecommendedNowStrict = $hasActiveMapping
+            && $identityLooksLikeGpsGmail
+            && strcasecmp((string) $status, 'published') !== 0
+            && $missingPriceForStrictReset
+            && $publishState['is_to_publish'] === true
+            && $menuState['is_in_parts_menu'] === false
+            && ! $hasActiveLiveSignal;
+        $risk = $this->resetRisk($hasPrice, $hasOvokoPrice, $hasActiveLiveSignal, $menuState['is_in_parts_menu'], $publishState['is_to_publish']);
+        $suggestedAction = $resetRecommendedNowStrict ? 'reset_mapping_for_recreate' : $this->strictSuggestedAction($listing, $risk, $publishState['is_to_publish']);
 
         return [
             'part_id' => $part->id,
@@ -430,6 +452,13 @@ class OvokoPartMappingResetController extends Controller
             'legacy_url' => $part->legacy_url,
             'local_price' => $part->price,
             'ovoko_price' => $part->ovoko_price ?? $listing?->price,
+            'has_price' => $hasPrice,
+            'has_ovoko_price' => $hasOvokoPrice,
+            'missing_price_for_strict_reset' => $missingPriceForStrictReset,
+            'is_in_parts_menu' => $menuState['is_in_parts_menu'],
+            'is_to_publish' => $publishState['is_to_publish'],
+            'parts_menu_status_source' => $menuState['source'],
+            'publish_queue_status_source' => $publishState['source'],
             'marketplace_listing_id' => $listing?->id,
             'ovoko_external_offer_id' => $listing?->external_offer_id,
             'ovoko_external_listing_id' => $listing?->external_listing_id,
@@ -447,7 +476,10 @@ class OvokoPartMappingResetController extends Controller
             'readiness_blockers' => $includeReadiness ? $blockers : [],
             'readiness_blockers_for_audit' => $blockers,
             'reset_recommended_now' => $resetRecommendedNow,
-            'suggested_action' => $this->suggestedAction($listing),
+            'reset_recommended_now_strict' => $resetRecommendedNowStrict,
+            'reset_risk_level' => $risk['level'],
+            'reset_risk_reason' => $risk['reason'],
+            'suggested_action' => $suggestedAction,
         ];
     }
 
@@ -489,6 +521,85 @@ class OvokoPartMappingResetController extends Controller
         }
 
         return false;
+    }
+
+    private function positivePrice(mixed $price): bool
+    {
+        return is_numeric($price) && (float) $price > 0;
+    }
+
+    /** @return array{is_in_parts_menu: bool|string, source: string} */
+    private function partsMenuState(Part $part): array
+    {
+        if ((bool) $part->is_visible_storefront) {
+            return ['is_in_parts_menu' => true, 'source' => 'parts.is_visible_storefront'];
+        }
+
+        if (in_array((string) $part->status, ['ready', 'published'], true)) {
+            return ['is_in_parts_menu' => true, 'source' => 'parts.status ready/published'];
+        }
+
+        if (in_array((string) $part->status, ['draft', 'needs_review', 'sold', 'archived', 'imported'], true)) {
+            return ['is_in_parts_menu' => false, 'source' => 'parts.status not active storefront status'];
+        }
+
+        return ['is_in_parts_menu' => 'unknown', 'source' => 'unknown parts.status/is_visible_storefront combination'];
+    }
+
+    /** @param bool|string $isInPartsMenu @return array{is_to_publish: bool|string, source: string} */
+    private function publishQueueState(Part $part, bool|string $isInPartsMenu): array
+    {
+        if ($isInPartsMenu === true) {
+            return ['is_to_publish' => false, 'source' => 'parts menu active; not publish queue'];
+        }
+
+        if ((bool) $part->needs_listing) {
+            return ['is_to_publish' => true, 'source' => 'parts.needs_listing'];
+        }
+
+        if ($part->needs_listing === false || $part->needs_listing === 0 || $part->needs_listing === '0') {
+            return ['is_to_publish' => false, 'source' => 'parts.needs_listing=false'];
+        }
+
+        return ['is_to_publish' => 'unknown', 'source' => 'unknown parts.needs_listing'];
+    }
+
+    private function hasActiveLiveSignal(Part $part, ?MarketplaceListing $listing, bool|string $isInPartsMenu): bool
+    {
+        if ($isInPartsMenu === true) return true;
+        if (in_array((string) $part->status, ['ready', 'published'], true)) return true;
+        if (! $listing) return false;
+
+        return in_array((string) $listing->status, ['published', 'active', 'live', 'publication_pending', 'PUBLISHED', 'ACTIVE'], true)
+            || in_array((string) $listing->sync_status, ['published', 'active', 'live', 'PUBLISHED', 'ACTIVE'], true)
+            || in_array((string) $listing->last_api_status, ['published', 'active', 'live', 'PUBLISHED', 'ACTIVE'], true);
+    }
+
+    /** @return array{level: string, reason: string} */
+    private function resetRisk(bool $hasPrice, bool $hasOvokoPrice, bool $hasActiveLiveSignal, bool|string $isInPartsMenu, bool|string $isToPublish): array
+    {
+        if ($hasPrice || $hasOvokoPrice) {
+            return ['level' => 'high', 'reason' => 'product has price and may already be live/listed'];
+        }
+
+        if ($hasActiveLiveSignal || $isInPartsMenu === true) {
+            return ['level' => 'high', 'reason' => 'product has local active/live signal or is visible in normal parts menu'];
+        }
+
+        if ($isToPublish === 'unknown' || $isInPartsMenu === 'unknown') {
+            return ['level' => 'medium', 'reason' => 'publish/menu state cannot be determined unambiguously'];
+        }
+
+        return ['level' => 'low', 'reason' => 'missing local and Ovoko price, not active in parts menu, and marked for listing'];
+    }
+
+    private function strictSuggestedAction(?MarketplaceListing $listing, array $risk, bool|string $isToPublish): string
+    {
+        if (! $listing) return 'skip_no_active_ovoko_mapping';
+        if ($isToPublish === 'unknown') return 'inspect_manually';
+        if (($risk['level'] ?? null) !== 'low') return 'inspect_manually';
+
+        return $this->suggestedAction($listing);
     }
 
     private function suggestedAction(?MarketplaceListing $listing): string
