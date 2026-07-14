@@ -106,6 +106,38 @@ class OvokoPublishAdapterTest extends TestCase
         });
     }
 
+
+    public function test_ovoko_recreate_identity_is_not_sent_as_visible_part_code(): void
+    {
+        $part = $this->readyPart([
+            'id' => 7731,
+            'sku' => 'GPS-GMAIL-61055',
+            'name' => 'Citroen DS3 Amortyzator osi przedniej ze sprężyną 9672656080',
+            'part_number' => '9672656080',
+            'oem_number' => 'GPSPART7731',
+            'manufacturer_code' => 'GPS-GMAIL-61055',
+        ]);
+        MarketplaceListing::query()->create(['part_id' => $part->id, 'marketplace' => 'ovoko', 'external_offer_id' => null, 'external_listing_id' => null, 'external_inventory_id' => null, 'sku' => null, 'status' => 'unlinked', 'sync_status' => 'stale', 'match_status' => 'unmatched', 'raw_payload' => ['metadata' => ['ovoko_part_mapping_reset_for_recreate' => true, 'previous_sku' => 'GPS-GMAIL-61055', 'previous_external_offer_id' => '11583']]]);
+        $this->enableFlags();
+        Http::fake(['https://ovoko.example.test/crm/importPart' => Http::response(['part_id' => 11774, 'msg' => 'OK', 'status_code' => 'R200'], 200)]);
+
+        app(PublishPartToMarketplacesService::class)->confirm($part, ['ovoko'], dryRun: false, confirm: true);
+
+        Http::assertSent(function ($request): bool {
+            $body = urldecode($request->body());
+
+            return str_contains($body, 'external_id=gps-part-7731')
+                && str_contains($body, 'id_bridge=gps-part-7731')
+                && str_contains($body, 'visible_code=9672656080')
+                && str_contains($body, 'manufacturer_code=9672656080')
+                && str_contains($body, 'optional_codes=9672656080')
+                && ! str_contains($body, 'visible_code=gps-part-7731')
+                && ! str_contains($body, 'visible_code=GPSPART7731')
+                && ! str_contains($body, 'optional_codes=GPSPART7731')
+                && ! str_contains($body, 'manufacturer_code=GPS-GMAIL-61055');
+        });
+    }
+
     public function test_ovoko_condition_is_always_published_as_used_even_when_local_note_says_new(): void
     {
         $part = $this->readyPart(['condition_notes' => 'nowy']);

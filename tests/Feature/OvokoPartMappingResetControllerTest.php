@@ -29,7 +29,7 @@ class OvokoPartMappingResetControllerTest extends TestCase
 
         $this->getJson('/admin/tools/ovoko/part-mapping-diagnose?part_id='.$part->id.'&json=1')
             ->assertOk()
-            ->assertJsonPath('marker', 'ovoko_part_mapping_reset_for_recreate_v1')
+            ->assertJsonPath('marker', 'ovoko_recreate_identity_not_visible_part_code_v3')
             ->assertJsonPath('part_id', $part->id)
             ->assertJsonPath('sku', 'GPS-GMAIL-61054')
             ->assertJsonPath('has_local_ovoko_id', true)
@@ -57,7 +57,7 @@ class OvokoPartMappingResetControllerTest extends TestCase
         $this->postJson('/admin/tools/ovoko/part-mapping-reset', ['part_id' => $part->id, 'mode' => 'detach_ovoko_mapping_for_recreate', 'confirm' => 'reset-ovoko-part-mapping-for-recreate'])
             ->assertOk()
             ->assertJsonPath('ok', true)
-            ->assertJsonPath('marker', 'ovoko_part_mapping_reset_for_recreate_v1')
+            ->assertJsonPath('marker', 'ovoko_recreate_identity_not_visible_part_code_v3')
             ->assertJsonPath('after.publish_decision.would_choose', 'create')
             ->assertJsonPath('safety_flags.no_allegro_change', true)
             ->assertJsonPath('safety_flags.no_ebay_change', true)
@@ -88,7 +88,7 @@ class OvokoPartMappingResetControllerTest extends TestCase
 
         $this->getJson('/admin/tools/ovoko/part-publish-path-diagnose?part_id='.$part->id.'&json=1')
             ->assertOk()
-            ->assertJsonPath('marker', 'ovoko_part_recreate_rematched_existing_11582_audit_v1')
+            ->assertJsonPath('marker', 'ovoko_recreate_identity_not_visible_part_code_v3')
             ->assertJsonPath('publish_path.would_choose', 'create')
             ->assertJsonPath('publish_path.endpoint', 'POST /crm/importPart')
             ->assertJsonPath('payload_identity.external_id', 'GPS-GMAIL-7730')
@@ -97,6 +97,30 @@ class OvokoPartMappingResetControllerTest extends TestCase
             ->assertJsonPath('local_rematch_controls.lookup_or_rematch_by_sku_before_publish', false)
             ->assertJsonPath('latest_import_part_log.api_response_ovoko_id', '11582')
             ->assertJsonPath('safety_flags.no_ovoko_request', true);
+
+        $this->assertNull($listing->fresh()->external_offer_id);
+    }
+
+
+    public function test_publish_path_diagnose_separates_technical_identity_from_visible_part_codes(): void
+    {
+        $this->actingAsAdminUser();
+        $this->mockPublisher();
+
+        $part = Part::query()->create(['id' => 7730, 'name' => 'Citroen DS3 Amortyzator osi przedniej ze sprężyną 9672656180', 'sku' => 'GPS-GMAIL-61054', 'part_number' => '9672656180', 'oem_number' => 'GPSPART7730', 'manufacturer_code' => 'GPS-GMAIL-61054', 'quantity' => 1, 'status' => 'ready', 'price' => 100, 'ovoko_price' => 120]);
+        $listing = MarketplaceListing::query()->create(['part_id' => $part->id, 'marketplace' => 'ovoko', 'external_offer_id' => null, 'external_listing_id' => null, 'external_inventory_id' => null, 'sku' => null, 'status' => 'unlinked', 'sync_status' => 'stale', 'match_status' => 'unmatched', 'raw_payload' => ['metadata' => ['ovoko_part_mapping_reset_for_recreate' => true, 'previous_external_offer_id' => '11582', 'previous_sku' => 'GPS-GMAIL-61054']]]);
+
+        $this->getJson('/admin/tools/ovoko/part-publish-path-diagnose?part_id=7730&json=1')
+            ->assertOk()
+            ->assertJsonPath('technical_identity_fields.external_id', 'gps-part-7730')
+            ->assertJsonPath('technical_identity_fields.id_bridge', 'gps-part-7730')
+            ->assertJsonPath('visible_part_code_fields.main_part_code', '9672656180')
+            ->assertJsonPath('visible_part_code_fields.visible_code', '9672656180')
+            ->assertJsonPath('technical_identity_leaks_to_visible_codes', false)
+            ->assertJsonPath('technical_identity_leaks_to_title', false)
+            ->assertJsonPath('payload_contains_gps_part_as_visible_code', false)
+            ->assertJsonPath('payload_contains_gps_gmail_as_visible_code', false)
+            ->assertJsonPath('payload_contains_previous_ovoko_id', false);
 
         $this->assertNull($listing->fresh()->external_offer_id);
     }

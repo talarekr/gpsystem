@@ -122,10 +122,11 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
             'price' => $readiness['marketplace_price'] ?? $payload['price_pln'] ?? null,
             'original_currency' => $readiness['currency'] ?? $payload['currency'] ?? 'PLN',
             'external_id' => $identity['external_id'],
+            'id_bridge' => $identity['id_bridge'],
             'visible_code' => $identity['visible_code'],
             'manufacturer_code' => $this->normalizeOvokoText($partCodeDiagnostics['ovoko_manufacturer_code'] ?? null, collapseWhitespace: false),
-            'other_code' => $this->normalizeOvokoText($part->oem_number ?? $part->manufacturer_code ?? null, collapseWhitespace: false),
-            'optional_codes' => array_values(array_filter(array_map(fn (string $code): ?string => $this->normalizeOvokoText($code, collapseWhitespace: false), $partCodes), fn (?string $code): bool => ! blank($code))),
+            'other_code' => $this->visibleOvokoCode($part->oem_number ?? $part->manufacturer_code ?? null, $part),
+            'optional_codes' => array_values(array_filter(array_map(fn (string $code): ?string => $this->visibleOvokoCode($code, $part), $partCodes), fn (?string $code): bool => ! blank($code))),
             'notes' => $this->normalizeOvokoText(($part->description ?? null) ?: ($part->short_description ?? null) ?: ($part->condition_notes ?? null)),
             'photo' => $ovokoPhotoUrls[0] ?? null,
             'photos[]' => $ovokoPhotoUrls,
@@ -170,7 +171,7 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
 
         return [
             'external_id' => $externalId,
-            'visible_code' => $externalId,
+            'visible_code' => $this->primaryVisibleOvokoCode($part),
             'id_bridge' => $externalId,
             'source' => $resetForRecreate ? 'neutral_part_id_after_ovoko_mapping_reset' : 'payload_sku_or_part_sku',
             'local_part_sku_preserved' => $part->sku,
@@ -229,6 +230,7 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
                 $sourceLookedLikeTitle = true;
                 $code = $this->extractCodeFromTitleLikeValue($code) ?? '';
             }
+            $code = $this->visibleOvokoCode($code, $part) ?? '';
             if ($code !== '' && ! in_array($code, $codes, true)) {
                 $codes[] = $code;
                 $source[] = $field;
@@ -240,11 +242,44 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
             'part_part_number' => $part->part_number,
             'part_oem_number' => $part->oem_number,
             'part_manufacturer_code' => $part->manufacturer_code,
-            'ovoko_manufacturer_code' => $codes[0] ?? null,
+            'ovoko_manufacturer_code' => $this->primaryVisibleOvokoCode($part),
             'ovoko_optional_codes' => $codes,
             'ovoko_codes_source' => implode(',', array_unique($source)) ?: 'none',
             'ovoko_codes_look_like_title' => $sourceLookedLikeTitle || collect($codes)->contains(fn (string $code): bool => $this->looksLikeTitleCode($code, (string) ($part->name ?? ''))),
         ];
+    }
+
+    private function primaryVisibleOvokoCode(Part $part): ?string
+    {
+        foreach ([$part->part_number ?? null, $part->oem_number ?? null, $part->manufacturer_code ?? null, $part->visible_code ?? null, $part->sku ?? null] as $value) {
+            $code = $this->visibleOvokoCode($value, $part);
+            if ($code !== null) return $code;
+        }
+
+        return null;
+    }
+
+    private function visibleOvokoCode(mixed $value, Part $part): ?string
+    {
+        $code = trim((string) $value);
+        if ($code === '') return null;
+        if ($this->looksLikeTitleCode($code, (string) ($part->name ?? ''))) {
+            $code = $this->extractCodeFromTitleLikeValue($code) ?? '';
+        }
+        $code = $this->normalizeOvokoText($code, collapseWhitespace: false);
+        if ($code === null || $this->isTechnicalOvokoIdentityCode($code)) return null;
+
+        return $code;
+    }
+
+    private function isTechnicalOvokoIdentityCode(string $value): bool
+    {
+        $compact = strtoupper(preg_replace('/[^A-Z0-9]+/i', '', $value) ?? $value);
+
+        return preg_match('/^GPSPART\d+$/', $compact) === 1
+            || preg_match('/^GPSGMAIL\d+$/', $compact) === 1
+            || preg_match('/^GPS-GMAIL-/i', $value) === 1
+            || preg_match('/^gps-part-\d+$/i', $value) === 1;
     }
 
     private function photoDiagnostics(array $fields): array
