@@ -12,16 +12,17 @@ class AdditionalPartCodes
     /**
      * additional_part_codes_persistence_v1
      *
-     * @param  array<int, mixed>|null  $codes
+     * @param  mixed  $codes
      * @return array<int, string>|null
      */
-    public static function normalize(?array $codes, mixed $mainPartCode = null, bool $throwOnDuplicates = true): ?array
+    public static function normalize(mixed $codes, mixed $mainPartCode = null, bool $throwOnDuplicates = true): ?array
     {
         $main = trim((string) ($mainPartCode ?? ''));
+        $items = self::normalizeInputItems($codes);
         $normalized = [];
         $seen = [];
 
-        foreach (array_slice($codes ?? [], 0, self::MAX_CODES + 1) as $code) {
+        foreach (array_slice($items, 0, self::MAX_CODES + 1) as $code) {
             $value = trim((string) $code);
 
             if ($value === '') {
@@ -49,10 +50,43 @@ class AdditionalPartCodes
             $normalized[] = $value;
         }
 
-        if (count($normalized) > self::MAX_CODES || count($codes ?? []) > self::MAX_CODES) {
+        if (count($normalized) > self::MAX_CODES || count($items) > self::MAX_CODES) {
             throw ValidationException::withMessages(['additional_part_codes' => 'Można dodać maksymalnie 2 dodatkowe kody części.']);
         }
 
         return $normalized === [] ? null : $normalized;
+    }
+
+    /**
+     * Filament simple repeaters may dehydrate either as ['ABC'] or as
+     * [['code' => 'ABC']] depending on hydration path/version. Convert both
+     * shapes to a flat string list before validation to avoid Array to string
+     * conversion errors during part edit saves.
+     *
+     * @return array<int, mixed>
+     */
+    private static function normalizeInputItems(mixed $codes): array
+    {
+        if ($codes === null || $codes === '') {
+            return [];
+        }
+
+        if (! is_array($codes)) {
+            return [$codes];
+        }
+
+        $items = [];
+
+        foreach ($codes as $code) {
+            if (is_array($code)) {
+                $items[] = array_key_exists('code', $code) ? $code['code'] : (reset($code) ?: null);
+
+                continue;
+            }
+
+            $items[] = $code;
+        }
+
+        return $items;
     }
 }

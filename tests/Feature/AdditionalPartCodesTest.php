@@ -192,6 +192,43 @@ class AdditionalPartCodesTest extends TestCase
             ->assertSet('data.additional_part_codes', null);
     }
 
+    public function test_admin_edit_accepts_filament_simple_repeater_array_item_shape_without_marketplace_publish(): void
+    {
+        $admin = $this->actingAdmin();
+        $part = Part::query()->create(['name' => 'Part', 'part_number' => 'MAIN', 'additional_part_codes' => ['AAA111']]);
+
+        Livewire::actingAs($admin)
+            ->test(EditPart::class, ['record' => $part->getKey()])
+            ->set('data.additional_part_codes', [['code' => ' AAA111 '], ['code' => ' BBB222 ']])
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $part->refresh();
+
+        $this->assertSame(['AAA111', 'BBB222'], $part->additional_part_codes);
+        $this->assertDatabaseMissing('marketplace_listings', ['part_id' => $part->getKey()]);
+        $this->assertDatabaseMissing('marketplace_sync_logs', ['part_id' => $part->getKey()]);
+    }
+
+    public function test_admin_edit_saves_part_with_only_main_code_without_marketplace_publish(): void
+    {
+        $admin = $this->actingAdmin();
+        $part = Part::query()->create(['name' => 'Part', 'part_number' => 'MAIN', 'additional_part_codes' => null]);
+
+        Livewire::actingAs($admin)
+            ->test(EditPart::class, ['record' => $part->getKey()])
+            ->set('data.name', 'Part updated')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $part->refresh();
+
+        $this->assertSame('Part updated', $part->name);
+        $this->assertNull($part->additional_part_codes);
+        $this->assertDatabaseMissing('marketplace_listings', ['part_id' => $part->getKey()]);
+        $this->assertDatabaseMissing('marketplace_sync_logs', ['part_id' => $part->getKey()]);
+    }
+
     private function actingAdmin(): User
     {
         $admin = User::factory()->create();
