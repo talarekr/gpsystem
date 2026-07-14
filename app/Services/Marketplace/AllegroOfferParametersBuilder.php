@@ -332,16 +332,16 @@ class AllegroOfferParametersBuilder
         $normalizedName = $this->norm($categoryName);
 
         $rules = [
-            'zestawtarczizaciskowhamulcowych' => 'przód i tył',
-            'zaciskhamulcowyprzedni' => 'przód',
-            'tylnyzaciskhamulcowy' => 'tył',
-            'tarczahamulcaprzedniego' => 'przód',
+            'zestawtarczizaciskowhamulcowych' => 'front_and_rear',
+            'zaciskhamulcowyprzedni' => 'front',
+            'tylnyzaciskhamulcowy' => 'rear',
+            'tarczahamulcaprzedniego' => 'front',
         ];
 
         if (! isset($rules[$normalizedName])) return null;
 
         return [
-            'value' => $rules[$normalizedName],
+            'intent' => $rules[$normalizedName],
             'local_category_id' => $part->category_id,
             'local_category_name' => $categoryName,
             'mapping_source' => 'local_shop_category_default_installation_side',
@@ -354,12 +354,16 @@ class AllegroOfferParametersBuilder
 
     private function resolveInstallationSideDefault(Part $part, array $def, array $default): array
     {
-        $target = (string) $default['value'];
+        $intent = (string) $default['intent'];
+        $target = $this->installationSideIntentFallbackLabel($intent);
         $base = [
             'source' => 'local_shop_category_default_installation_side',
             'source_field' => 'part.category.name',
             'source_value' => $default['local_category_name'] ?? null,
-            'normalized_value' => $this->norm($target),
+            'normalized_value' => $intent,
+            'local_category_installation_side_intent' => $intent,
+            'parameter_values_source' => 'allegro_category_parameters_api_or_cache',
+            'available_values_official' => $this->allowedValuesDiagnostics($def),
             'mapping_source' => $default['mapping_source'],
             'mapping_rule' => $default['mapping_rule'],
             'selected_value_label' => $target,
@@ -373,15 +377,25 @@ class AllegroOfferParametersBuilder
 
         foreach (($def['dictionary'] ?? []) as $allowed) {
             foreach ($this->installationSideCandidates($target) as $candidate) {
-                if ((string) ($allowed['id'] ?? '') === $candidate || $this->installationSideLabelMatches($allowed['value'] ?? '', $candidate)) {
-                    return $base + ['type' => 'dictionary', 'value' => [(string) $allowed['id']], 'label' => $allowed['value'] ?? null, 'mapped_value_id' => (string) $allowed['id'], 'mapped_label' => $allowed['value'] ?? null, 'selected_value_label' => $allowed['value'] ?? $target, 'selected_value_id' => (string) $allowed['id']];
+                if ((string) ($allowed['id'] ?? '') === $candidate || $this->installationSideLabelMatchesIntent($allowed['value'] ?? '', $intent)) {
+                    return $base + ['type' => 'dictionary', 'value' => [(string) $allowed['id']], 'label' => $allowed['value'] ?? null, 'mapped_value_id' => (string) $allowed['id'], 'mapped_label' => $allowed['value'] ?? null, 'matched_official_value_id' => (string) $allowed['id'], 'matched_official_value_label' => $allowed['value'] ?? null, 'selected_value_label' => $allowed['value'] ?? $target, 'selected_value_id' => (string) $allowed['id'], 'matcher_reason' => 'official_label_matches_'.$intent.'_intent'];
                 }
             }
         }
 
-        $message = 'Nie udało się dopasować wartości parametru Strona zabudowy dla lokalnej kategorii: '.($default['local_category_name'] ?? $part->category_id).'.';
+        $message = 'Nie znaleziono oficjalnej wartości Allegro dla parametru Strona zabudowy i intencji '.$intent.'.';
 
-        return $base + ['value' => null, 'reason' => $message, 'allowed_values_sample' => array_slice(array_map(fn ($allowed): array => ['id' => (string) ($allowed['id'] ?? ''), 'value' => (string) ($allowed['value'] ?? '')], $def['dictionary'] ?? []), 0, 20), 'allowed_values' => $this->allowedValuesDiagnostics($def)];
+        return $base + ['value' => null, 'reason' => $message, 'allowed_values_sample' => array_slice(array_map(fn ($allowed): array => ['id' => (string) ($allowed['id'] ?? ''), 'value' => (string) ($allowed['value'] ?? '')], $def['dictionary'] ?? []), 0, 20), 'allowed_values' => $this->allowedValuesDiagnostics($def), 'matcher_reason' => 'no_official_label_matches_'.$intent.'_intent'];
+    }
+
+    private function installationSideIntentFallbackLabel(string $intent): string
+    {
+        return match ($intent) {
+            'front' => 'przód',
+            'rear' => 'tył',
+            'front_and_rear' => 'przód + tył',
+            default => $intent,
+        };
     }
 
     private function installationSideCandidates(string $value): array
@@ -395,14 +409,18 @@ class AllegroOfferParametersBuilder
         return array_values(array_unique(array_filter(array_merge([$value], $aliases[$this->norm($value)] ?? []))));
     }
 
-    private function installationSideLabelMatches(mixed $allowed, mixed $value): bool
+    private function installationSideLabelMatchesIntent(mixed $allowed, string $intent): bool
     {
-        $allowedNorm = $this->norm($allowed);
-        foreach ($this->installationSideCandidates((string) $value) as $candidate) {
-            if ($allowedNorm === $this->norm($candidate)) return true;
-        }
+        $label = $this->norm($allowed);
+        $hasFront = str_contains($label, 'przod') || str_contains($label, 'przedni') || str_contains($label, 'przednia');
+        $hasRear = str_contains($label, 'tyl') || str_contains($label, 'tylny') || str_contains($label, 'tylna');
 
-        return false;
+        return match ($intent) {
+            'front' => $hasFront && ! $hasRear,
+            'rear' => $hasRear && ! $hasFront,
+            'front_and_rear' => $hasFront && $hasRear,
+            default => false,
+        };
     }
 
     private function partPosition(Part $part): array
@@ -535,6 +553,12 @@ class AllegroOfferParametersBuilder
             'allowed_values' => $resolved['allowed_values'] ?? (($this->norm($def['name'] ?? '') === 'typsamochodu') ? $this->allowedValuesDiagnostics($def) : null),
             'selected_value_label' => $resolved['selected_value_label'] ?? ($resolved['label'] ?? null),
             'selected_value_id' => $resolved['selected_value_id'] ?? ($resolved['mapped_value_id'] ?? ($valuesIds[0] ?? null)),
+            'local_category_installation_side_intent' => $resolved['local_category_installation_side_intent'] ?? null,
+            'parameter_values_source' => $resolved['parameter_values_source'] ?? null,
+            'available_values_official' => $resolved['available_values_official'] ?? null,
+            'matched_official_value_id' => $resolved['matched_official_value_id'] ?? null,
+            'matched_official_value_label' => $resolved['matched_official_value_label'] ?? null,
+            'matcher_reason' => $resolved['matcher_reason'] ?? null,
             'mapping_source' => $resolved['mapping_source'] ?? null,
             'mapping_rule' => $resolved['mapping_rule'] ?? null,
             'local_category_id' => $resolved['local_category_id'] ?? null,
@@ -548,7 +572,7 @@ class AllegroOfferParametersBuilder
         if ($row['resolved_value'] === null) unset($row['resolved_value']);
         if ($row['mapped_value_id'] === null) unset($row['mapped_value_id']);
         if ($row['mapped_label'] === null) unset($row['mapped_label']);
-        foreach (['part_id', 'car_id', 'matched_parameter_name', 'matched_parameter_id', 'matched_value_label', 'matched_value_id', 'selected_value_label', 'selected_value_id', 'mapping_source', 'mapping_rule', 'local_category_id', 'local_category_name'] as $key) { if ($row[$key] === null) unset($row[$key]); }
+        foreach (['part_id', 'car_id', 'matched_parameter_name', 'matched_parameter_id', 'matched_value_label', 'matched_value_id', 'selected_value_label', 'selected_value_id', 'local_category_installation_side_intent', 'parameter_values_source', 'available_values_official', 'matched_official_value_id', 'matched_official_value_label', 'matcher_reason', 'mapping_source', 'mapping_rule', 'local_category_id', 'local_category_name'] as $key) { if ($row[$key] === null) unset($row[$key]); }
         if ($row['auto_injected'] === false) unset($row['auto_injected']);
         if ($row['allowed_values_sample'] === null) unset($row['allowed_values_sample']);
         if ($row['allowed_values'] === null) unset($row['allowed_values']);

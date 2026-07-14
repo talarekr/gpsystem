@@ -580,10 +580,10 @@ class AllegroCategoryParametersTest extends TestCase
     public function test_required_installation_side_uses_local_shop_category_defaults(): void
     {
         $cases = [
-            'Zestaw tarcz i zacisków hamulcowych' => ['label' => 'przód i tył', 'id' => 'front-back'],
-            'Zacisk hamulcowy przedni' => ['label' => 'przód', 'id' => 'front'],
-            'Tylny zacisk hamulcowy' => ['label' => 'tył', 'id' => 'back'],
-            'Tarcza hamulca przedniego' => ['label' => 'przód', 'id' => 'front'],
+            'Zestaw tarcz i zacisków hamulcowych' => ['label' => 'oś przednia i tylna', 'id' => 'front-back', 'intent' => 'front_and_rear'],
+            'Zacisk hamulcowy przedni' => ['label' => 'oś przednia', 'id' => 'front', 'intent' => 'front'],
+            'Tylny zacisk hamulcowy' => ['label' => 'oś tylna', 'id' => 'back', 'intent' => 'rear'],
+            'Tarcza hamulca przedniego' => ['label' => 'oś przednia', 'id' => 'front', 'intent' => 'front'],
         ];
 
         foreach ($cases as $categoryName => $expected) {
@@ -600,8 +600,39 @@ class AllegroCategoryParametersTest extends TestCase
             $this->assertSame($categoryName, $diagnostic['mapping_rule']['local_category_name']);
             $this->assertSame($expected['label'], $diagnostic['selected_value_label']);
             $this->assertSame($expected['id'], $diagnostic['selected_value_id']);
+            $this->assertSame($expected['intent'], $diagnostic['local_category_installation_side_intent']);
+            $this->assertSame('allegro_category_parameters_api_or_cache', $diagnostic['parameter_values_source']);
             $this->assertTrue($diagnostic['auto_injected']);
         }
+    }
+
+    public function test_required_installation_side_uses_official_allegro_front_and_rear_value_from_category_dictionary(): void
+    {
+        $category = PartCategory::query()->create(['name' => 'Zestaw tarcz i zacisków hamulcowych']);
+        $part = Part::query()->create(['name' => 'Audi hamulce swap', 'category_id' => $category->id, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'is_visible_storefront' => true]);
+
+        $result = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, null, ['ok' => true, 'source' => 'cache', 'parameters' => [[
+            'id' => '227349', 'name' => 'Strona zabudowy', 'type' => 'dictionary', 'required' => true,
+            'dictionary' => [
+                ['id' => '227349_320405', 'value' => 'przód'],
+                ['id' => '227349_320413', 'value' => 'przód + tył'],
+                ['id' => '227349_320409', 'value' => 'tył'],
+            ],
+            'options' => ['describesProduct' => false],
+        ]]]);
+
+        $this->assertSame([['id' => '227349', 'valuesIds' => ['227349_320413']]], $result['offer_parameters']);
+        $this->assertSame([], $result['missing_required_parameters']);
+        $diagnostic = $result['parameter_source_diagnostics'][0];
+        $this->assertSame('front_and_rear', $diagnostic['local_category_installation_side_intent']);
+        $this->assertSame('allegro_category_parameters_api_or_cache', $diagnostic['parameter_values_source']);
+        $this->assertSame(['227349_320405' => 'przód', '227349_320413' => 'przód + tył', '227349_320409' => 'tył'], $diagnostic['available_values_official']);
+        $this->assertSame('227349_320413', $diagnostic['matched_official_value_id']);
+        $this->assertSame('przód + tył', $diagnostic['matched_official_value_label']);
+        $this->assertSame('227349_320413', $diagnostic['selected_value_id']);
+        $this->assertSame('przód + tył', $diagnostic['selected_value_label']);
+        $this->assertSame(['227349_320413'], $diagnostic['valuesIds']);
+        $this->assertSame('official_label_matches_front_and_rear_intent', $diagnostic['matcher_reason']);
     }
 
     public function test_required_installation_side_non_dictionary_sends_values_from_local_shop_category_default(): void
@@ -630,7 +661,7 @@ class AllegroCategoryParametersTest extends TestCase
 
         $this->assertSame([], $result['offer_parameters']);
         $missing = $result['missing_required_parameters'][0];
-        $this->assertSame('Nie udało się dopasować wartości parametru Strona zabudowy dla lokalnej kategorii: Zestaw tarcz i zacisków hamulcowych.', $missing['reason']);
+        $this->assertSame('Nie znaleziono oficjalnej wartości Allegro dla parametru Strona zabudowy i intencji front_and_rear.', $missing['reason']);
         $this->assertSame(['front' => 'przód', 'back' => 'tył'], $missing['allowed_values']);
         $this->assertSame('local_shop_category_default_installation_side', $missing['mapping_source']);
     }

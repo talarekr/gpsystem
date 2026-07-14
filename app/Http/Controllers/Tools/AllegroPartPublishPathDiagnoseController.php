@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Schema;
 
 class AllegroPartPublishPathDiagnoseController extends Controller
 {
-    private const MARKER = 'allegro_installation_side_from_local_category_mapping_v2';
+    private const MARKER = 'allegro_installation_side_official_category_values_v4';
 
     public function __invoke(Request $request, MarketplaceListingReadinessService $readiness): JsonResponse
     {
@@ -45,13 +45,21 @@ class AllegroPartPublishPathDiagnoseController extends Controller
             'allegro_category_id' => $mapping?->external_category_id,
             'allegro_category_name' => $mapping?->external_category_name,
             'required_parameter_detected' => ($row && ($row['required'] ?? false)) ? 'Strona zabudowy' : null,
+            'local_category_installation_side_intent' => $row['local_category_installation_side_intent'] ?? null,
             'parameter_id' => $row['id'] ?? null,
+            'parameter_name' => $row['name'] ?? null,
             'parameter_type' => (($row['type'] ?? null) === 'dictionary') ? 'dictionary' : ($row ? 'non-dictionary' : null),
+            'parameter_values_source' => $row['parameter_values_source'] ?? null,
             'available_values' => $row['allowed_values'] ?? $row['allowed_values_sample'] ?? [],
+            'available_values_official' => $row['available_values_official'] ?? $row['allowed_values'] ?? $row['allowed_values_sample'] ?? [],
+            'matched_official_value_id' => $row['matched_official_value_id'] ?? null,
+            'matched_official_value_label' => $row['matched_official_value_label'] ?? null,
             'selected_value_label' => $row['selected_value_label'] ?? $row['mapped_label'] ?? $row['resolved_value'] ?? null,
             'selected_value_id' => $row['selected_value_id'] ?? $row['mapped_value_id'] ?? null,
             'mapping_source' => $row['mapping_source'] ?? null,
             'mapping_rule' => $row['mapping_rule'] ?? null,
+            'valuesIds' => $row['valuesIds'] ?? [],
+            'matcher_reason' => $row['matcher_reason'] ?? null,
             'auto_injected' => (bool) ($row['auto_injected'] ?? false),
             'blockers' => array_values(array_unique($blockers)),
             'installation_side_parameter_diagnostic' => $row,
