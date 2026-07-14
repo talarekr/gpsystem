@@ -107,6 +107,7 @@ use App\Http\Controllers\Tools\OvokoImportProductDataController;
 use App\Http\Controllers\Tools\OvokoOrderShipmentDiagnoseController;
 use App\Http\Controllers\Tools\OvokoOrderShipmentPackageDraftController;
 use App\Http\Controllers\Tools\OvokoOrderShipmentSendPackageDataController;
+use App\Http\Controllers\Tools\OvokoOrderShipmentFetchLabelController;
 use App\Http\Controllers\Tools\MarketplaceMappingGapsExportController;
 use App\Http\Controllers\Tools\MarketplaceOrdersResetController;
 use App\Http\Controllers\Tools\MarketplaceOrdersSyncController;
@@ -400,6 +401,8 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/ovoko/order-shipment-diagnose', OvokoOrderShipmentDiagnoseController::class)->name('admin.tools.ovoko.order-shipment-diagnose');
     Route::post('/admin/tools/ovoko/order-shipment-package-draft', OvokoOrderShipmentPackageDraftController::class)->name('admin.tools.ovoko.order-shipment-package-draft');
     Route::post('/admin/tools/ovoko/order-shipment-send-package-data', OvokoOrderShipmentSendPackageDataController::class)->name('admin.tools.ovoko.order-shipment-send-package-data');
+    Route::post('/admin/tools/ovoko/order-shipment-fetch-label', OvokoOrderShipmentFetchLabelController::class)->name('admin.tools.ovoko.order-shipment-fetch-label');
+    Route::get('/admin/tools/ovoko/order-shipment-label-diagnose', OvokoOrderShipmentDiagnoseController::class)->name('admin.tools.ovoko.order-shipment-label-diagnose');
     Route::get('/admin/tools/ovoko-stock-sync-dry-run', [OvokoStockSyncController::class, 'dryRun'])->name('admin.tools.ovoko-stock-sync-dry-run');
     Route::match(['get', 'post'], '/admin/tools/ovoko-stock-sync-apply', [OvokoStockSyncController::class, 'apply'])->name('admin.tools.ovoko-stock-sync-apply');
     Route::get('/admin/tools/ovoko-stock-sync-runner', [OvokoStockSyncRunnerController::class, 'index'])->name('admin.tools.ovoko-stock-sync-runner.index');

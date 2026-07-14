@@ -50,6 +50,7 @@ class OvokoOrderShipmentDiagnoseController extends Controller
 
         return response()->json([
             'code_marker' => self::CODE_MARKER,
+            'label_flow_marker' => 'ovoko_shipping_label_prepared_button_flow_v1',
             'read_only' => true,
             'order' => [
                 'local_order_id' => $order?->id ?? $localOrderId,
@@ -76,6 +77,15 @@ class OvokoOrderShipmentDiagnoseController extends Controller
                 'weight_kg' => true,
             ],
             'current_local_shipment_data' => $this->localShipmentData($shipment),
+            'label_diagnose' => [
+                'is_ovoko_order' => $order?->marketplace === 'ovoko',
+                'local_package_draft' => $this->localShipmentData($shipment),
+                'package_data_sent' => $shipment ? $this->packageDataSent($shipment) : false,
+                'current_local_shipment_status' => $shipment?->shipment_status,
+                'label_exists_locally' => (bool) ($this->localShipmentData($shipment)['label_exists'] ?? false),
+                'label_endpoint' => 'https://api.rrr.lt/get/print_shipping_label/'.($order?->marketplace_order_id ?: '{marketplace_order_id}'),
+                'safety_flags' => ['no_mutation' => true, 'import_post_data_not_sent' => true, 'label_not_fetched' => true],
+            ],
             'rrr_order_id_source' => [
                 'api_field' => 'order_id',
                 'uses_local_column' => 'orders.marketplace_order_id',
@@ -91,6 +101,7 @@ class OvokoOrderShipmentDiagnoseController extends Controller
             ],
             'warnings' => [
                 'Diagnostics are read-only. The separate POST endpoint sends package data only after CSRF and exact confirmation.',
+                'Label fetching is never automatic; it requires POST confirm=fetch-ovoko-shipping-label.',
             ],
         ]);
     }
@@ -128,6 +139,13 @@ class OvokoOrderShipmentDiagnoseController extends Controller
         if ($localOrderId) return Order::query()->where('marketplace', 'ovoko')->find($localOrderId);
         if ($marketplaceOrderId) return Order::query()->where('marketplace', 'ovoko')->where('marketplace_order_id', $marketplaceOrderId)->first();
         return null;
+    }
+
+    private function packageDataSent(Shipment $shipment): bool
+    {
+        return $shipment->shipment_status === 'ovoko_package_data_sent'
+            || $shipment->shipment_status === 'ovoko_shipping_label_downloaded'
+            || (bool) data_get(is_array($shipment->request_payload) ? $shipment->request_payload : [], 'ovoko_import_post_data.sent');
     }
 
     private function latestOvokoShipment(Order $order): ?Shipment

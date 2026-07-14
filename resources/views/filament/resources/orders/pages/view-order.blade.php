@@ -138,7 +138,11 @@
     $ovokoDraftHeight = $ovokoDraftValue('height_cm', ['height']);
     $ovokoDraftWeight = $ovokoDraftValue('weight_kg', ['weight']);
     $ovokoDraftExists = $isOvokoOrder && $ovokoShipmentDraft && filled($ovokoDraftType) && filled($ovokoDraftLength) && filled($ovokoDraftWidth) && filled($ovokoDraftHeight) && filled($ovokoDraftWeight);
-    $ovokoPackageDataSent = $ovokoShipmentDraft?->shipment_status === 'ovoko_package_data_sent' || (bool) data_get(is_array($ovokoShipmentDraft?->request_payload) ? $ovokoShipmentDraft->request_payload : [], 'ovoko_import_post_data.sent');
+    $ovokoPackageDataSent = $ovokoShipmentDraft?->shipment_status === 'ovoko_package_data_sent' || $ovokoShipmentDraft?->shipment_status === 'ovoko_shipping_label_downloaded' || (bool) data_get(is_array($ovokoShipmentDraft?->request_payload) ? $ovokoShipmentDraft->request_payload : [], 'ovoko_import_post_data.sent');
+    $ovokoLabelPath = is_scalar($ovokoShipmentDraft?->label_path) ? trim((string) $ovokoShipmentDraft->label_path) : '';
+    $ovokoLabelExists = $ovokoLabelPath !== '' && ! str_contains($ovokoLabelPath, "\0") && preg_match('/^[a-z]+:\/\//i', $ovokoLabelPath) !== 1 && Storage::disk('local')->exists($ovokoLabelPath);
+    $ovokoLabelDownloaded = $ovokoShipmentDraft?->shipment_status === 'ovoko_shipping_label_downloaded' && $ovokoLabelExists;
+    $ovokoCanFetchLabel = $isOvokoOrder && $ovokoDraftExists && $ovokoPackageDataSent;
     $formatOvokoDimension = fn ($value): string => fmod((float) $value, 1.0) === 0.0 ? number_format((float) $value, 0, '.', '') : number_format((float) $value, 2, '.', '');
     $formatOvokoWeight = fn ($value): string => number_format((float) $value, 3, '.', '');
     // code_marker = ovoko_import_post_data_send_v1
@@ -550,7 +554,7 @@
                                 <div>Typ: {{ $ovokoDraftTypeLabel }}</div>
                                 <div>Wymiary: {{ $formatOvokoDimension($ovokoDraftLength) }} × {{ $formatOvokoDimension($ovokoDraftWidth) }} × {{ $formatOvokoDimension($ovokoDraftHeight) }} cm</div>
                                 <div>Waga: {{ $formatOvokoWeight($ovokoDraftWeight) }} kg</div>
-                                <div>Status: {{ $ovokoPackageDataSent ? 'Dane paczki wysłane do Ovoko.' : 'dane paczki zapisane lokalnie' }}</div>
+                                <div>Status: {{ $ovokoLabelDownloaded ? 'Etykieta pobrana / Przesyłka przygotowana.' : ($ovokoPackageDataSent ? 'Dane paczki wysłane do Ovoko.' : 'dane paczki zapisane lokalnie') }}</div>
                                 @if (! $ovokoPackageDataSent)
                                     <form method="POST" action="{{ route('admin.tools.ovoko.order-shipment-send-package-data') }}" onsubmit="return confirm('Wysłać dane paczki do Ovoko? To zaktualizuje post data dla tego zamówienia w Ovoko.');">
                                         @csrf
@@ -559,6 +563,18 @@
                                         <input type="hidden" name="confirm" value="send-ovoko-package-data">
                                         <button type="submit" class="fi-btn fi-color-primary fi-btn-color-primary fi-size-sm mt-2 inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-primary-500">Wyślij dane paczki do Ovoko</button>
                                     </form>
+                                @endif
+                                @if ($ovokoCanFetchLabel)
+                                    <form method="POST" action="{{ route('admin.tools.ovoko.order-shipment-fetch-label') }}" onsubmit="return confirm('Pobrać etykietę przewozową z Ovoko dla tego zamówienia?');">
+                                        @csrf
+                                        <input type="hidden" name="order_id" value="{{ $order->id }}">
+                                        <input type="hidden" name="marketplace_order_id" value="{{ $order->marketplace_order_id }}">
+                                        <input type="hidden" name="confirm" value="fetch-ovoko-shipping-label">
+                                        <button type="submit" class="fi-btn fi-color-primary fi-btn-color-primary fi-size-sm mt-2 inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-primary-500">Przesyłka przygotowana</button>
+                                    </form>
+                                @endif
+                                @if ($ovokoLabelExists)
+                                    <a class="fi-btn fi-color-primary fi-btn-color-primary fi-size-sm mt-2 inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm outline-none transition duration-75 hover:bg-primary-500" href="{{ route('tools.download-shipment-label', $ovokoShipmentDraft) }}">Pobierz etykietę</a>
                                 @endif
                             </div>
                         @endif
