@@ -16,7 +16,7 @@ class OvokoPartMappingResetController extends Controller
 {
     private const CONFIRM = 'reset-ovoko-part-mapping-for-recreate';
     private const MODE = 'detach_ovoko_mapping_for_recreate';
-    private const MARKER = 'ovoko_part_mapping_reset_clear_ovoko_identity_v2';
+    private const MARKER = 'ovoko_recreate_identity_not_visible_part_code_v3';
 
     public function diagnose(Request $request, PublishPartToMarketplacesService $publisher): JsonResponse
     {
@@ -42,6 +42,8 @@ class OvokoPartMappingResetController extends Controller
         $activeIdentity = $this->activeOvokoIdentityFields($part->marketplaceListings->first());
         $effectiveIdentity = $this->effectiveOvokoIdentityFieldsForPublish($part);
         $payloadSku = $effectiveIdentity['external_id'] ?? $payload['sku'] ?? $part->sku ?? ('gps-part-'.$part->id);
+        $visibleFields = $this->visiblePartCodeFields($part);
+        $leakFlags = $this->visibleLeakFlags($part, $effectiveIdentity, $visibleFields, (array) $payload);
         $latestImportPartLog = MarketplaceSyncLog::query()
             ->where('marketplace', 'ovoko')
             ->where('part_id', $partId)
@@ -74,9 +76,15 @@ class OvokoPartMappingResetController extends Controller
             ],
             'active_ovoko_identity_fields' => $activeIdentity,
             'effective_ovoko_identity_fields_for_next_publish' => $effectiveIdentity,
+            'technical_identity_fields' => [
+                'external_id' => $effectiveIdentity['external_id'] ?? $payloadSku,
+                'id_bridge' => $effectiveIdentity['id_bridge'] ?? $payloadSku,
+            ],
+            'visible_part_code_fields' => $visibleFields,
             'payload_identity' => [
                 'external_id' => $payloadSku,
-                'visible_code' => $effectiveIdentity['visible_code'] ?? $payloadSku,
+                'id_bridge' => $effectiveIdentity['id_bridge'] ?? $payloadSku,
+                'visible_code' => $effectiveIdentity['visible_code'] ?? $visibleFields['visible_code'],
                 'sku' => $effectiveIdentity['sku'] ?? null,
                 'part_code' => $part->part_number,
                 'manufacturer_code' => $part->manufacturer_code,
@@ -87,6 +95,11 @@ class OvokoPartMappingResetController extends Controller
                 'payload_contains_previous_ovoko_id' => $this->payloadContainsAny($effectiveIdentity + (array) $payload, $this->previousOvokoIds($part)),
                 'previous_external_offer_id_is_archival' => true,
             ],
+            'technical_identity_leaks_to_visible_codes' => $leakFlags['technical_identity_leaks_to_visible_codes'],
+            'technical_identity_leaks_to_title' => $leakFlags['technical_identity_leaks_to_title'],
+            'payload_contains_gps_part_as_visible_code' => $leakFlags['payload_contains_gps_part_as_visible_code'],
+            'payload_contains_gps_gmail_as_visible_code' => $leakFlags['payload_contains_gps_gmail_as_visible_code'],
+            'payload_contains_previous_ovoko_id' => $leakFlags['payload_contains_previous_ovoko_id'],
             'local_rematch_controls' => [
                 'uses_previous_external_offer_id_as_candidate' => false,
                 'previous_external_offer_id_note' => 'Reset stores previous_* under raw_payload.metadata for audit; publish payload uses sku as external_id and does not read metadata.previous_external_offer_id.',
@@ -242,7 +255,7 @@ class OvokoPartMappingResetController extends Controller
     {
         return [
             'most_likely_cause' => filled($responseOvokoId) ? 'Ovoko /crm/importPart returned the existing Ovoko ID for the submitted external_id/SKU, so the local listing was recreated from the API response rather than from previous_* metadata.' : 'No importPart response with an Ovoko ID was found in local logs; inspect latest logs and Ovoko API response.',
-            'recommended_fix' => 'When an Ovoko mapping has been explicitly reset for recreate, keep the operator-facing SKU unchanged but send a fresh importPart external_id/id_bridge value such as gps-part-{part_id}-recreate-{timestamp} to avoid Ovoko-side deduplication on the old SKU/external_id.',
+            'recommended_fix' => 'When an Ovoko mapping has been explicitly reset for recreate, send gps-part-{part_id} only in technical importPart identity fields (external_id/id_bridge). Keep visible_code and part-code fields on real part codes only.',
             'current_external_id_would_be' => $externalId,
             'do_not_use_previous_metadata_as_candidate' => true,
             'do_not_bulk_reset' => true,
@@ -303,12 +316,70 @@ class OvokoPartMappingResetController extends Controller
         $externalId = $resetForRecreate ? 'gps-part-'.$part->id : ($part->sku ?? 'gps-part-'.$part->id);
 
         return [
-            'sku' => $externalId,
+            'sku' => null,
             'external_id' => $externalId,
             'id_bridge' => $externalId,
-            'visible_code' => $externalId,
+            'visible_code' => $this->visiblePartCodeFields($part)['visible_code'],
             'source' => $resetForRecreate ? 'neutral_part_id_after_ovoko_mapping_reset' : 'part_sku_fallback',
         ];
+    }
+
+    private function visiblePartCodeFields(Part $part): array
+    {
+        $codes = [];
+        foreach ([$part->part_number ?? null, $part->oem_number ?? null, $part->manufacturer_code ?? null] as $value) {
+            $code = $this->visibleCode($value);
+            if ($code !== null && ! in_array($code, $codes, true)) $codes[] = $code;
+        }
+        $main = $codes[0] ?? null;
+
+        return [
+            'main_part_code' => $main,
+            'visible_code' => $main,
+            'part_code' => $part->part_number,
+            'manufacturer_code' => $this->visibleCode($part->manufacturer_code),
+            'oem_number' => $this->visibleCode($part->oem_number),
+            'additional_codes' => $codes,
+        ];
+    }
+
+    private function visibleCode(mixed $value): ?string
+    {
+        $code = trim((string) $value);
+        if ($code === '') return null;
+        if ($this->isTechnicalVisibleCode($code)) return null;
+        return $code;
+    }
+
+    private function visibleLeakFlags(Part $part, array $identity, array $visibleFields, array $payload): array
+    {
+        $visiblePayload = $visibleFields + Arr::only($payload, ['visible_code','part_code','manufacturer_code','oem_number','optional_codes','other_code','notes','title','name']);
+        $visibleEncoded = json_encode($visiblePayload) ?: '';
+        $title = (string) ($payload['title'] ?? $payload['name'] ?? $part->name ?? '');
+
+        return [
+            'technical_identity_leaks_to_visible_codes' => collect([$identity['external_id'] ?? null, $identity['id_bridge'] ?? null])->filter()->contains(fn ($value): bool => $this->payloadContainsAny($visiblePayload, [(string) $value]) || $this->payloadContainsAny($visiblePayload, [$this->compactCode((string) $value)])),
+            'technical_identity_leaks_to_title' => $this->containsTechnicalCode($title),
+            'payload_contains_gps_part_as_visible_code' => preg_match('/gps[-_ ]*part[-_ ]*\d+/i', $visibleEncoded) === 1 || preg_match('/GPSPART\d+/i', $visibleEncoded) === 1,
+            'payload_contains_gps_gmail_as_visible_code' => preg_match('/GPS[-_ ]*GMAIL[-_ ]*\d+/i', $visibleEncoded) === 1 || preg_match('/GPSGMAIL\d+/i', $visibleEncoded) === 1,
+            'payload_contains_previous_ovoko_id' => $this->payloadContainsAny($visiblePayload, $this->previousOvokoIds($part)),
+        ];
+    }
+
+    private function containsTechnicalCode(string $value): bool
+    {
+        return $this->isTechnicalVisibleCode($value) || preg_match('/gps[-_ ]*part[-_ ]*\d+|GPSPART\d+|GPS[-_ ]*GMAIL[-_ ]*\d+|GPSGMAIL\d+/i', $value) === 1;
+    }
+
+    private function isTechnicalVisibleCode(string $value): bool
+    {
+        $compact = $this->compactCode($value);
+        return preg_match('/^GPSPART\d+$/', $compact) === 1 || preg_match('/^GPSGMAIL\d+$/', $compact) === 1 || preg_match('/^GPS-GMAIL-/i', $value) === 1 || preg_match('/^gps-part-\d+$/i', $value) === 1;
+    }
+
+    private function compactCode(string $value): string
+    {
+        return strtoupper(preg_replace('/[^A-Z0-9]+/i', '', $value) ?? $value);
     }
 
     private function identityUsesGpsGmail(array $identity): bool
