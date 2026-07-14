@@ -105,6 +105,7 @@ use App\Http\Controllers\Tools\OvokoPartMappingResetController;
 use App\Http\Controllers\Tools\OvokoLinkedProductsCheckController;
 use App\Http\Controllers\Tools\OvokoSoldMappingCheckController;
 use App\Http\Controllers\Tools\OvokoImportProductDataController;
+use App\Http\Controllers\Tools\OvokoPartStatusSyncDiagnoseController;
 use App\Http\Controllers\Tools\OvokoOrderShipmentDiagnoseController;
 use App\Http\Controllers\Tools\OvokoOrderShipmentPackageDraftController;
 use App\Http\Controllers\Tools\OvokoOrderShipmentSendPackageDataController;
@@ -398,6 +399,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::post('/admin/tools/ovoko/part-mapping-reset', [OvokoPartMappingResetController::class, 'reset'])->name('admin.tools.ovoko.part-mapping-reset');
     Route::get('/admin/tools/ovoko/linked-products-check', OvokoLinkedProductsCheckController::class)->name('admin.tools.ovoko.linked-products-check');
     Route::get('/admin/tools/ovoko/sold-mapping-check', OvokoSoldMappingCheckController::class)->name('admin.tools.ovoko.sold-mapping-check');
+    Route::get('/admin/tools/ovoko/part-status-sync-diagnose', OvokoPartStatusSyncDiagnoseController::class)->name('admin.tools.ovoko.part-status-sync-diagnose');
     Route::get('/admin/tools/orders/ovoko-cross-channel-diagnose', OvokoCrossChannelDiagnoseController::class)->name('admin.tools.orders.ovoko-cross-channel-diagnose');
     Route::match(['get', 'post'], '/admin/tools/orders/ovoko-order-item-part-backfill', [OvokoOrderItemPartBackfillController::class, 'admin'])->name('admin.tools.orders.ovoko-order-item-part-backfill');
     Route::get('/admin/tools/ovoko/sold-mapping-check-ping', function () {
