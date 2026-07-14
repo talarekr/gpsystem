@@ -127,10 +127,13 @@ class OvokoPublishAdapterTest extends TestCase
             $body = urldecode($request->body());
 
             return str_contains($body, 'external_id=gps-part-7731')
-                && str_contains($body, 'id_bridge=gps-part-7731')
+                && str_contains($body, 'id_bridge=7731')
                 && str_contains($body, 'visible_code=9672656080')
                 && str_contains($body, 'manufacturer_code=9672656080')
                 && str_contains($body, 'optional_codes=9672656080')
+                && ! str_contains($body, 'id_bridge=gps-part-7731')
+                && ! str_contains($body, 'id_bridge=GPS-GMAIL-61055')
+                && ! str_contains($body, 'id_bridge=11583')
                 && ! str_contains($body, 'visible_code=gps-part-7731')
                 && ! str_contains($body, 'visible_code=GPSPART7731')
                 && ! str_contains($body, 'optional_codes=GPSPART7731')

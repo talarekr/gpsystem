@@ -172,7 +172,9 @@ class OvokoPublishAdapter extends BaseMarketplacePublishAdapter
         return [
             'external_id' => $externalId,
             'visible_code' => $this->primaryVisibleOvokoCode($part),
-            'id_bridge' => $externalId,
+            'id_bridge' => (string) $part->id,
+            'id_bridge_is_numeric' => ctype_digit((string) $part->id),
+            'id_bridge_source' => $resetForRecreate ? 'local_part_id_numeric_after_ovoko_mapping_reset' : 'local_part_id_numeric',
             'source' => $resetForRecreate ? 'neutral_part_id_after_ovoko_mapping_reset' : 'payload_sku_or_part_sku',
             'local_part_sku_preserved' => $part->sku,
         ];

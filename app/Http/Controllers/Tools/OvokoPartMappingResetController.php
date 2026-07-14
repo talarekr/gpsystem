@@ -16,7 +16,7 @@ class OvokoPartMappingResetController extends Controller
 {
     private const CONFIRM = 'reset-ovoko-part-mapping-for-recreate';
     private const MODE = 'detach_ovoko_mapping_for_recreate';
-    private const MARKER = 'ovoko_filter_technical_codes_from_visible_codes_v4';
+    private const MARKER = 'ovoko_recreate_numeric_id_bridge_v5';
 
     public function diagnose(Request $request, PublishPartToMarketplacesService $publisher): JsonResponse
     {
@@ -78,12 +78,16 @@ class OvokoPartMappingResetController extends Controller
             'effective_ovoko_identity_fields_for_next_publish' => $effectiveIdentity,
             'technical_identity_fields' => [
                 'external_id' => $effectiveIdentity['external_id'] ?? $payloadSku,
-                'id_bridge' => $effectiveIdentity['id_bridge'] ?? $payloadSku,
+                'id_bridge' => $effectiveIdentity['id_bridge'] ?? (string) $part->id,
+                'id_bridge_is_numeric' => ctype_digit((string) ($effectiveIdentity['id_bridge'] ?? $part->id)),
+                'id_bridge_source' => $effectiveIdentity['id_bridge_source'] ?? 'local_part_id_numeric',
             ],
             'visible_part_code_fields' => $visibleFields,
             'payload_identity' => [
                 'external_id' => $payloadSku,
-                'id_bridge' => $effectiveIdentity['id_bridge'] ?? $payloadSku,
+                'id_bridge' => $effectiveIdentity['id_bridge'] ?? (string) $part->id,
+                'id_bridge_is_numeric' => ctype_digit((string) ($effectiveIdentity['id_bridge'] ?? $part->id)),
+                'id_bridge_source' => $effectiveIdentity['id_bridge_source'] ?? 'local_part_id_numeric',
                 'visible_code' => $effectiveIdentity['visible_code'] ?? $visibleFields['visible_code'],
                 'sku' => $effectiveIdentity['sku'] ?? null,
                 'part_code' => $visibleFields['part_code'],
@@ -256,7 +260,7 @@ class OvokoPartMappingResetController extends Controller
     {
         return [
             'most_likely_cause' => filled($responseOvokoId) ? 'Ovoko /crm/importPart returned the existing Ovoko ID for the submitted external_id/SKU, so the local listing was recreated from the API response rather than from previous_* metadata.' : 'No importPart response with an Ovoko ID was found in local logs; inspect latest logs and Ovoko API response.',
-            'recommended_fix' => 'When an Ovoko mapping has been explicitly reset for recreate, send gps-part-{part_id} only in technical importPart identity fields (external_id/id_bridge). Keep visible_code and part-code fields on real part codes only.',
+            'recommended_fix' => 'When an Ovoko mapping has been explicitly reset for recreate, send gps-part-{part_id} only as external_id and send numeric local part_id as id_bridge. Keep visible_code and part-code fields on real part codes only.',
             'current_external_id_would_be' => $externalId,
             'do_not_use_previous_metadata_as_candidate' => true,
             'do_not_bulk_reset' => true,
@@ -319,7 +323,9 @@ class OvokoPartMappingResetController extends Controller
         return [
             'sku' => null,
             'external_id' => $externalId,
-            'id_bridge' => $externalId,
+            'id_bridge' => (string) $part->id,
+            'id_bridge_is_numeric' => ctype_digit((string) $part->id),
+            'id_bridge_source' => $resetForRecreate ? 'local_part_id_numeric_after_ovoko_mapping_reset' : 'local_part_id_numeric',
             'visible_code' => $this->visiblePartCodeFields($part)['visible_code'],
             'source' => $resetForRecreate ? 'neutral_part_id_after_ovoko_mapping_reset' : 'part_sku_fallback',
         ];
