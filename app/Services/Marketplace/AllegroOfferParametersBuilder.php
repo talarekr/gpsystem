@@ -52,7 +52,7 @@ class AllegroOfferParametersBuilder
         }
         $m = $this->configuredMapping($part, $mapping, $def);
         if ($m) return $this->resolveValue($m['value'], $m['source'], $def);
-        if ($name === 'stronazabudowy') return $this->resolvePartPosition($part, $def);
+        if ($name === 'stronazabudowy') return $this->resolveInstallationSide($part, $def);
         if ($name === 'typsamochodu') return $this->resolveCarType($part, $def);
         if ($name === 'typsilnika') return $this->resolveEngineTypeFromCarFuel($part, $def);
         if ($vehicleField = $this->vehicleFieldForParameter($name)) return $this->resolveVehicleParameter($part, $def, $vehicleField);
@@ -312,6 +312,99 @@ class AllegroOfferParametersBuilder
         return data_get($part, $field) ?? data_get($part->vehicle_snapshot, Str::after($field, 'vehicle_snapshot.'));
     }
 
+
+    private function resolveInstallationSide(Part $part, array $def): array
+    {
+        if ((bool) ($def['required'] ?? false)) {
+            $localDefault = $this->localCategoryInstallationSideDefault($part);
+            if ($localDefault !== null) {
+                return $this->resolveInstallationSideDefault($part, $def, $localDefault);
+            }
+        }
+
+        return $this->resolvePartPosition($part, $def);
+    }
+
+    private function localCategoryInstallationSideDefault(Part $part): ?array
+    {
+        $part->loadMissing('category');
+        $categoryName = (string) ($part->category?->name ?? '');
+        $normalizedName = $this->norm($categoryName);
+
+        $rules = [
+            'zestawtarczizaciskowhamulcowych' => 'przód i tył',
+            'zaciskhamulcowyprzedni' => 'przód',
+            'tylnyzaciskhamulcowy' => 'tył',
+            'tarczahamulcaprzedniego' => 'przód',
+        ];
+
+        if (! isset($rules[$normalizedName])) return null;
+
+        return [
+            'value' => $rules[$normalizedName],
+            'local_category_id' => $part->category_id,
+            'local_category_name' => $categoryName,
+            'mapping_source' => 'local_shop_category_default_installation_side',
+            'mapping_rule' => [
+                'local_category_id' => $part->category_id,
+                'local_category_name' => $categoryName,
+            ],
+        ];
+    }
+
+    private function resolveInstallationSideDefault(Part $part, array $def, array $default): array
+    {
+        $target = (string) $default['value'];
+        $base = [
+            'source' => 'local_shop_category_default_installation_side',
+            'source_field' => 'part.category.name',
+            'source_value' => $default['local_category_name'] ?? null,
+            'normalized_value' => $this->norm($target),
+            'mapping_source' => $default['mapping_source'],
+            'mapping_rule' => $default['mapping_rule'],
+            'selected_value_label' => $target,
+            'local_category_id' => $default['local_category_id'] ?? $part->category_id,
+            'local_category_name' => $default['local_category_name'] ?? null,
+        ];
+
+        if (($def['type'] ?? '') !== 'dictionary') {
+            return $base + ['value' => $target, 'label' => $target];
+        }
+
+        foreach (($def['dictionary'] ?? []) as $allowed) {
+            foreach ($this->installationSideCandidates($target) as $candidate) {
+                if ((string) ($allowed['id'] ?? '') === $candidate || $this->installationSideLabelMatches($allowed['value'] ?? '', $candidate)) {
+                    return $base + ['type' => 'dictionary', 'value' => [(string) $allowed['id']], 'label' => $allowed['value'] ?? null, 'mapped_value_id' => (string) $allowed['id'], 'mapped_label' => $allowed['value'] ?? null, 'selected_value_label' => $allowed['value'] ?? $target, 'selected_value_id' => (string) $allowed['id']];
+                }
+            }
+        }
+
+        $message = 'Nie udało się dopasować wartości parametru Strona zabudowy dla lokalnej kategorii: '.($default['local_category_name'] ?? $part->category_id).'.';
+
+        return $base + ['value' => null, 'reason' => $message, 'allowed_values_sample' => array_slice(array_map(fn ($allowed): array => ['id' => (string) ($allowed['id'] ?? ''), 'value' => (string) ($allowed['value'] ?? '')], $def['dictionary'] ?? []), 0, 20), 'allowed_values' => $this->allowedValuesDiagnostics($def)];
+    }
+
+    private function installationSideCandidates(string $value): array
+    {
+        $aliases = [
+            'przod' => ['przód', 'przod', 'przednia', 'przedni', 'oś przednia', 'os przednia'],
+            'tyl' => ['tył', 'tyl', 'tylna', 'tylny', 'oś tylna', 'os tylna'],
+            'przodityl' => ['przód i tył', 'przod i tyl', 'przednia i tylna', 'przedni i tylny', 'oś przednia i tylna', 'os przednia i tylna'],
+        ];
+
+        return array_values(array_unique(array_filter(array_merge([$value], $aliases[$this->norm($value)] ?? []))));
+    }
+
+    private function installationSideLabelMatches(mixed $allowed, mixed $value): bool
+    {
+        $allowedNorm = $this->norm($allowed);
+        foreach ($this->installationSideCandidates((string) $value) as $candidate) {
+            if ($allowedNorm === $this->norm($candidate)) return true;
+        }
+
+        return false;
+    }
+
     private function partPosition(Part $part): array
     {
         foreach (['review_metadata.part_position', 'part_position', 'position', 'placement', 'side', 'legacy_payload.part_position', 'legacy_payload.position'] as $field) {
@@ -440,6 +533,13 @@ class AllegroOfferParametersBuilder
             'describesProduct' => (bool) ($def['options']['describesProduct'] ?? false),
             'parameter_location' => ((bool) ($def['options']['describesProduct'] ?? false)) ? 'productSet[0].product.parameters' : 'parameters',
             'allowed_values' => $resolved['allowed_values'] ?? (($this->norm($def['name'] ?? '') === 'typsamochodu') ? $this->allowedValuesDiagnostics($def) : null),
+            'selected_value_label' => $resolved['selected_value_label'] ?? ($resolved['label'] ?? null),
+            'selected_value_id' => $resolved['selected_value_id'] ?? ($resolved['mapped_value_id'] ?? ($valuesIds[0] ?? null)),
+            'mapping_source' => $resolved['mapping_source'] ?? null,
+            'mapping_rule' => $resolved['mapping_rule'] ?? null,
+            'local_category_id' => $resolved['local_category_id'] ?? null,
+            'local_category_name' => $resolved['local_category_name'] ?? null,
+            'auto_injected' => ($resolved['mapping_source'] ?? null) === 'local_shop_category_default_installation_side',
         ];
 
         if ($row['blocker'] === null) unset($row['blocker']);
@@ -448,7 +548,8 @@ class AllegroOfferParametersBuilder
         if ($row['resolved_value'] === null) unset($row['resolved_value']);
         if ($row['mapped_value_id'] === null) unset($row['mapped_value_id']);
         if ($row['mapped_label'] === null) unset($row['mapped_label']);
-        foreach (['part_id', 'car_id', 'matched_parameter_name', 'matched_parameter_id', 'matched_value_label', 'matched_value_id'] as $key) { if ($row[$key] === null) unset($row[$key]); }
+        foreach (['part_id', 'car_id', 'matched_parameter_name', 'matched_parameter_id', 'matched_value_label', 'matched_value_id', 'selected_value_label', 'selected_value_id', 'mapping_source', 'mapping_rule', 'local_category_id', 'local_category_name'] as $key) { if ($row[$key] === null) unset($row[$key]); }
+        if ($row['auto_injected'] === false) unset($row['auto_injected']);
         if ($row['allowed_values_sample'] === null) unset($row['allowed_values_sample']);
         if ($row['allowed_values'] === null) unset($row['allowed_values']);
 
