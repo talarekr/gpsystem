@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Storage;
 
 class OvokoPartMappingResetRunnerService
 {
-    public const MARKER = 'ovoko_part_mapping_reset_runner_start_phase_isolation_v7';
+    public const MARKER = 'ovoko_part_mapping_reset_runner_candidate_query_500_fix_v8';
     private const STATE_PATH = 'admin-tools/ovoko-part-mapping-reset-runner.json';
     private const START_CONFIRM = 'start-ovoko-part-mapping-reset-runner';
     private const BATCH_CONFIRM = 'run-ovoko-part-mapping-reset-runner-batch';
@@ -51,20 +51,87 @@ class OvokoPartMappingResetRunnerService
 
     public function candidateQuerySmoke(): array
     {
-        $query = Part::query()
-            ->whereHas('marketplaceListings', fn ($q) => $q->where('marketplace', 'ovoko')->whereNotNull('url')->where('url', '!=', ''))
-            ->orderByDesc('id');
+        return $this->debugCandidateQuerySafe('all');
+    }
 
-        $ids = $this->candidateIds();
+    public function debugCandidateQuerySafe(string $operation = 'all'): array
+    {
+        $sql = null;
+        $bindings = [];
+
+        try {
+            $query = $this->fallbackCandidateQuery();
+            $sql = $query->toSql();
+            $bindings = $query->getBindings();
+
+            $payload = [
+                'ok' => true,
+                'phase' => 'candidate_query',
+                'candidate_query_executed' => in_array($operation, ['count', 'first', 'all'], true),
+                'mutation_executed' => false,
+                'query_sql' => $sql,
+                'query_bindings' => $bindings,
+                'sql' => $sql,
+                'bindings' => $bindings,
+                'query_strategy' => 'schema_checked_fallback',
+            ];
+
+            if ($operation === 'build') {
+                return $payload + ['count_executed' => false, 'first_executed' => false];
+            }
+
+            if ($operation === 'count' || $operation === 'all') {
+                $payload['count'] = (clone $query)->count();
+                $payload['count_executed'] = true;
+            }
+
+            if ($operation === 'first' || $operation === 'all') {
+                $row = (clone $query)->first();
+                $payload['first_executed'] = true;
+                $payload['first_candidate'] = $row ? (array) $row : null;
+                $payload['first_id'] = $row->id ?? null;
+            }
+
+            if ($operation === 'all') {
+                $payload['first_ids'] = (clone $query)->limit(20)->pluck('parts.id')->map(fn ($id) => (int) $id)->all();
+            }
+
+            return $payload;
+        } catch (\Throwable $e) {
+            return [
+                'ok' => false,
+                'phase' => 'candidate_query',
+                'candidate_query_executed' => false,
+                'mutation_executed' => false,
+                'error_class' => $e::class,
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'sql' => $sql,
+                'bindings' => $bindings,
+                'query_sql' => $sql,
+                'query_bindings' => $bindings,
+            ];
+        }
+    }
+
+    public function schemaDebug(): array
+    {
+        $partsColumns = ['id', 'sku', 'part_number', 'price', 'ovoko_price', 'ovoko_price_pln', 'needs_listing', 'is_visible_storefront', 'status'];
+        $listingColumns = ['id', 'part_id', 'marketplace', 'status', 'sync_status', 'match_status', 'external_offer_id', 'external_listing_id', 'external_inventory_id', 'url', 'sku', 'price'];
+        $partsExists = Schema::hasTable('parts');
+        $listingsExists = Schema::hasTable('marketplace_listings');
 
         return [
             'ok' => true,
-            'candidate_query_executed' => true,
-            'mutation_executed' => false,
-            'count' => count($ids),
-            'first_ids' => array_slice($ids, 0, 20),
-            'query_sql' => $query->toSql(),
-            'query_bindings' => $query->getBindings(),
+            'marker' => self::MARKER,
+            'phase' => 'schema_debug',
+            'tables' => [
+                'parts' => ['exists' => $partsExists, 'columns' => $this->columnExistence('parts', $partsColumns, $partsExists)],
+                'marketplace_listings' => ['exists' => $listingsExists, 'columns' => $this->columnExistence('marketplace_listings', $listingColumns, $listingsExists)],
+            ],
+            'db' => ['driver' => DB::connection()->getDriverName(), 'version' => $this->dbVersionSafe()],
+            'safety_flags' => ['read_only' => true, 'no_mutation' => true, 'no_ovoko_request' => true],
         ];
     }
 
@@ -308,18 +375,87 @@ class OvokoPartMappingResetRunnerService
 
     public function candidateIds(): array
     {
-        if (! Schema::hasTable('parts') || ! Schema::hasTable('marketplace_listings')) return [];
+        try {
+            if (! Schema::hasTable('parts') || ! Schema::hasTable('marketplace_listings')) return [];
 
-        return Part::query()
-            ->with(['marketplaceListings' => fn ($q) => $q->where('marketplace', 'ovoko')->orderByDesc('id')])
-            ->whereHas('marketplaceListings', fn ($q) => $q->where('marketplace', 'ovoko')->whereNotNull('url')->where('url', '!=', ''))
-            ->orderByDesc('id')
-            ->get()
-            ->filter(fn (Part $p) => $this->strictCheck($p, $p->marketplaceListings->first())['ok'])
-            ->pluck('id')
-            ->map(fn ($id) => (int) $id)
-            ->values()
-            ->all();
+            return $this->fallbackCandidateQuery()
+                ->limit(1000)
+                ->pluck('parts.id')
+                ->map(fn ($id) => (int) $id)
+                ->values()
+                ->all();
+        } catch (\Throwable $e) {
+            Log::error('Ovoko part mapping reset runner candidate fallback query failed', ['marker' => self::MARKER, 'exception' => $e]);
+            return [];
+        }
+    }
+
+    private function fallbackCandidateQuery(): \Illuminate\Database\Query\Builder
+    {
+        if (! Schema::hasTable('parts') || ! Schema::hasTable('marketplace_listings')) {
+            throw new \RuntimeException('Required table missing: parts or marketplace_listings');
+        }
+
+        $this->assertColumns('parts', ['id', 'sku']);
+        $this->assertColumns('marketplace_listings', ['id', 'part_id', 'marketplace', 'sku', 'external_offer_id', 'external_listing_id', 'url']);
+
+        $query = DB::table('marketplace_listings')
+            ->join('parts', 'parts.id', '=', 'marketplace_listings.part_id')
+            ->select(['parts.id', 'parts.sku as part_sku', 'marketplace_listings.id as marketplace_listing_id', 'marketplace_listings.sku as listing_sku', 'marketplace_listings.url'])
+            ->where('marketplace_listings.marketplace', 'ovoko')
+            ->where(function ($q): void {
+                $q->whereNotNull('marketplace_listings.external_offer_id')
+                    ->orWhereNotNull('marketplace_listings.external_listing_id')
+                    ->orWhereNotNull('marketplace_listings.url');
+            })
+            ->where(function ($q): void {
+                $q->where('marketplace_listings.sku', 'like', 'GPS-GMAIL-%')
+                    ->orWhere('parts.sku', 'like', 'GPS-GMAIL-%');
+            })
+            ->orderByDesc('parts.id');
+
+        if (Schema::hasColumn('parts', 'price')) {
+            $query->where(function ($q): void {
+                $q->whereNull('parts.price')->orWhere('parts.price', '<=', 0);
+            });
+        }
+
+        if (Schema::hasColumn('parts', 'ovoko_price_pln')) {
+            $query->where(function ($q): void {
+                $q->whereNull('parts.ovoko_price_pln')->orWhere('parts.ovoko_price_pln', '<=', 0);
+            });
+        } elseif (Schema::hasColumn('parts', 'ovoko_price')) {
+            $query->where(function ($q): void {
+                $q->whereNull('parts.ovoko_price')->orWhere('parts.ovoko_price', '<=', 0);
+            });
+        }
+
+        if (Schema::hasColumn('marketplace_listings', 'status')) $query->where('marketplace_listings.status', 'imported');
+        if (Schema::hasColumn('parts', 'needs_listing')) $query->where('parts.needs_listing', true);
+        if (Schema::hasColumn('parts', 'is_visible_storefront')) $query->where('parts.is_visible_storefront', false);
+        if (Schema::hasColumn('parts', 'status')) $query->whereNotIn('parts.status', ['published', 'sold', 'archived']);
+
+        return $query;
+    }
+
+    private function columnExistence(string $table, array $columns, bool $tableExists): array
+    {
+        $result = [];
+        foreach ($columns as $column) $result[$column] = $tableExists && Schema::hasColumn($table, $column);
+        return $result;
+    }
+
+    private function assertColumns(string $table, array $columns): void
+    {
+        $missing = array_values(array_filter($columns, fn (string $column): bool => ! Schema::hasColumn($table, $column)));
+        if ($missing !== []) {
+            throw new \RuntimeException('Missing required candidate query columns on '.$table.': '.implode(', ', $missing));
+        }
+    }
+
+    private function dbVersionSafe(): ?string
+    {
+        try { return (string) DB::selectOne('select version() as version')->version; } catch (\Throwable) { return null; }
     }
 
     private function strictCheck(Part $part, ?MarketplaceListing $listing): array

@@ -83,6 +83,64 @@ class OvokoPartMappingResetRunnerController extends Controller
 
     public function startQuerySmoke(): JsonResponse
     {
+        try {
+            $payload = $this->candidateSmokePayload('all', 'start_query_smoke');
+        } catch (\Throwable $e) {
+            $payload = $this->exceptionPayload($e, 'start_query_smoke_outermost');
+        }
+
+        return response()->json($payload, 200);
+    }
+
+    public function queryBuildSmoke(): JsonResponse
+    {
+        try {
+            $payload = $this->candidateSmokePayload('build', 'query_build_smoke');
+        } catch (\Throwable $e) {
+            $payload = $this->exceptionPayload($e, 'query_build_smoke_outermost');
+        }
+
+        return response()->json($payload, 200);
+    }
+
+    public function queryCountSmoke(): JsonResponse
+    {
+        try {
+            $payload = $this->candidateSmokePayload('count', 'query_count_smoke');
+        } catch (\Throwable $e) {
+            $payload = $this->exceptionPayload($e, 'query_count_smoke_outermost');
+        }
+
+        return response()->json($payload, 200);
+    }
+
+    public function queryFirstSmoke(): JsonResponse
+    {
+        try {
+            $payload = $this->candidateSmokePayload('first', 'query_first_smoke');
+        } catch (\Throwable $e) {
+            $payload = $this->exceptionPayload($e, 'query_first_smoke_outermost');
+        }
+
+        return response()->json($payload, 200);
+    }
+
+    public function schemaDebug(): JsonResponse
+    {
+        try {
+            $service = app(OvokoPartMappingResetRunnerService::class);
+            $payload = $service->schemaDebug();
+        } catch (\Throwable $e) {
+            $payload = $this->exceptionPayload($e, 'schema_debug_outermost') + [
+                'safety_flags' => ['read_only' => true, 'no_mutation' => true, 'no_ovoko_request' => true],
+            ];
+        }
+
+        return response()->json($payload, 200);
+    }
+
+    private function candidateSmokePayload(string $operation, string $phase): array
+    {
         $payload = [
             'ok' => false,
             'marker' => OvokoPartMappingResetRunnerService::MARKER,
@@ -91,18 +149,14 @@ class OvokoPartMappingResetRunnerController extends Controller
             'candidate_query_executed' => false,
             'mutation_executed' => false,
             'state_saved' => false,
+            'endpoint_phase' => $phase,
         ];
 
-        try {
-            $service = app(OvokoPartMappingResetRunnerService::class);
-            $payload['service_resolved'] = true;
-            $payload['service_class'] = $service::class;
-            $payload += $service->candidateQuerySmoke();
-        } catch (\Throwable $e) {
-            $payload += $this->exceptionPayload($e, 'start_query_smoke');
-        }
+        $service = app(OvokoPartMappingResetRunnerService::class);
+        $payload['service_resolved'] = true;
+        $payload['service_class'] = $service::class;
 
-        return response()->json($payload, ($payload['ok'] ?? false) ? 200 : 422);
+        return $payload + $service->debugCandidateQuerySafe($operation);
     }
 
     public function startSaveStateSmoke(): JsonResponse
@@ -210,6 +264,10 @@ class OvokoPartMappingResetRunnerController extends Controller
             'admin.tools.ovoko.part-mapping-reset-runner.start-service-smoke',
             'admin.tools.ovoko.part-mapping-reset-runner.start-validate-smoke',
             'admin.tools.ovoko.part-mapping-reset-runner.start-query-smoke',
+            'admin.tools.ovoko.part-mapping-reset-runner.query-build-smoke',
+            'admin.tools.ovoko.part-mapping-reset-runner.query-count-smoke',
+            'admin.tools.ovoko.part-mapping-reset-runner.query-first-smoke',
+            'admin.tools.ovoko.part-mapping-reset-runner.schema-debug',
             'admin.tools.ovoko.part-mapping-reset-runner.start-save-state-smoke',
             'admin.tools.ovoko.part-mapping-reset-runner.start-simple',
             'admin.tools.ovoko.part-mapping-reset-runner.run-next-batch',
@@ -285,6 +343,8 @@ class OvokoPartMappingResetRunnerController extends Controller
             'phase' => $phase,
             'error_class' => $e::class,
             'message' => $e->getMessage(),
+            'file' => $e->getFile(),
+            'line' => $e->getLine(),
         ];
     }
 
@@ -296,6 +356,8 @@ class OvokoPartMappingResetRunnerController extends Controller
             'phase' => $phase,
             'error_class' => $e::class,
             'message' => $e->getMessage(),
+            'file' => $e->getFile(),
+            'line' => $e->getLine(),
         ];
     }
 }
