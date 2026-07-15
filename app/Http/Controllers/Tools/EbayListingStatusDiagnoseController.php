@@ -8,6 +8,7 @@ use App\Models\MarketplaceListing;
 use App\Models\Part;
 use App\Services\Marketplace\Api\EbayApiClient;
 use App\Services\Marketplace\EbayListingStatusNormalizer;
+use App\Services\Marketplace\EbayEndedListingLocalCleanupRunnerService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -15,7 +16,7 @@ class EbayListingStatusDiagnoseController extends Controller
 {
     public const MARKER = 'ebay_listing_status_single_diagnose_v1';
 
-    public function __invoke(Request $request, EbayListingStatusNormalizer $normalizer): JsonResponse
+    public function __invoke(Request $request, EbayListingStatusNormalizer $normalizer, EbayEndedListingLocalCleanupRunnerService $cleanupRunner): JsonResponse
     {
         $partId = (int) $request->query('part_id');
         $part = Part::query()->with('marketplaceListings')->find($partId);
@@ -36,6 +37,8 @@ class EbayListingStatusDiagnoseController extends Controller
         }
 
         $normalized = $normalizer->normalize($api);
+
+        $cleanupDiagnostic = $cleanupRunner->diagnosePart($partId);
 
         return response()->json([
             'ok' => true,
@@ -70,6 +73,16 @@ class EbayListingStatusDiagnoseController extends Controller
                 'is_really_active' => $normalized['is_really_active'],
                 'should_show_checkmark' => $normalized['should_show_checkmark'],
                 'should_allow_relisting' => $normalized['should_allow_relisting'],
+            ],
+            'cleanup_diagnostic' => $cleanupDiagnostic,
+            'would_cleanup' => (bool) ($cleanupDiagnostic['would_cleanup'] ?? false),
+            'cleanup_reason' => $cleanupDiagnostic['cleanup_reason'] ?? null,
+            'proposed_cleanup_fields' => $cleanupDiagnostic['proposed_cleanup_fields'] ?? null,
+            'safety_flags' => [
+                'read_only' => true,
+                'fresh_recheck_required_before_live_cleanup' => true,
+                'api_errors_are_skipped' => true,
+                'active_remote_listings_are_skipped' => true,
             ],
             'no_mutation' => true,
         ]);
