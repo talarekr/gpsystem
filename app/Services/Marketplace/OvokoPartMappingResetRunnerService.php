@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Storage;
 
 class OvokoPartMappingResetRunnerService
 {
-    public const MARKER = 'ovoko_part_mapping_reset_runner_start_500_fix_v2';
+    public const MARKER = 'ovoko_part_mapping_reset_runner_routes_debug_fix_v4';
     private const STATE_PATH = 'admin-tools/ovoko-part-mapping-reset-runner.json';
     private const START_CONFIRM = 'start-ovoko-part-mapping-reset-runner';
     private const BATCH_CONFIRM = 'run-ovoko-part-mapping-reset-runner-batch';
@@ -20,7 +20,11 @@ class OvokoPartMappingResetRunnerService
 
     public function status(): array
     {
-        return $this->withComputed($this->readState());
+        try {
+            return $this->withComputed($this->readState());
+        } catch (\Throwable $e) {
+            return $this->exceptionResult($e, 'read_status') + $this->emptyState();
+        }
     }
 
     public function start(array $input): array
@@ -58,8 +62,19 @@ class OvokoPartMappingResetRunnerService
 
     public function debug(): array
     {
+        $state = null;
+        $stateError = null;
         $candidateError = null;
         $preview = null;
+        $canQuery = false;
+
+        try {
+            $state = $this->status();
+        } catch (\Throwable $e) {
+            $stateError = ['error_class' => $e::class, 'message' => $e->getMessage()];
+            $state = $this->emptyState();
+            $state['ok'] = false;
+        }
 
         try {
             $ids = $this->candidateIds();
@@ -68,19 +83,23 @@ class OvokoPartMappingResetRunnerService
             if ($previewId) {
                 $part = Part::query()->with(['marketplaceListings' => fn ($q) => $q->where('marketplace', 'ovoko')->orderByDesc('id')])->find($previewId);
                 $listing = $part?->marketplaceListings->first();
-                $preview = $part ? $this->resultPayload($part, $listing) : null;
+                $preview = ($part && $listing) ? $this->resultPayload($part, $listing) : null;
             }
         } catch (\Throwable $e) {
             $canQuery = false;
-            $candidateError = ['class' => $e::class, 'message' => $e->getMessage()];
+            $candidateError = ['error_class' => $e::class, 'message' => $e->getMessage()];
         }
 
         return [
+            'ok' => $stateError === null && $candidateError === null,
             'marker' => self::MARKER,
+            'route_reached' => true,
             'routes_registered' => true,
-            'service_class_loaded' => self::class,
+            'service_class_loaded' => true,
+            'service_class' => self::class,
             'state_cache_key' => 'local:'.self::STATE_PATH,
-            'current_state' => $this->status(),
+            'current_state' => $state,
+            'state_error' => $stateError,
             'can_query_candidates' => $canQuery,
             'candidate_query_error' => $candidateError,
             'first_candidate_preview' => $preview,
