@@ -6,11 +6,13 @@ use App\Models\MarketplaceListing;
 use App\Models\Part;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 
 class OvokoPartMappingResetRunnerService
 {
-    public const MARKER = 'ovoko_part_mapping_reset_runner_v1';
+    public const MARKER = 'ovoko_part_mapping_reset_runner_start_500_fix_v2';
     private const STATE_PATH = 'admin-tools/ovoko-part-mapping-reset-runner.json';
     private const START_CONFIRM = 'start-ovoko-part-mapping-reset-runner';
     private const BATCH_CONFIRM = 'run-ovoko-part-mapping-reset-runner-batch';
@@ -23,25 +25,67 @@ class OvokoPartMappingResetRunnerService
 
     public function start(array $input): array
     {
-        if (($input['confirm'] ?? null) !== self::START_CONFIRM) return ['ok' => false, 'reason' => 'missing_confirm_token'];
-        $mode = in_array(($input['mode'] ?? 'dry_run'), ['dry_run', 'live'], true) ? $input['mode'] : 'dry_run';
-        $batchSize = max(1, min(25, (int) ($input['batch_size'] ?? 10)));
-        $delay = max(1, (int) ($input['delay_seconds'] ?? 2));
-        $ids = $this->candidateIds();
-        $state = $this->emptyState() + [];
-        $state = array_merge($state, [
-            'mode' => $mode,
-            'status' => 'running',
-            'started_at' => now()->toISOString(),
-            'finished_at' => null,
-            'batch_size' => $batchSize,
-            'delay_seconds' => $delay,
-            'total_candidates_at_start' => count($ids),
-            'candidate_ids' => $ids,
-            'marker_position' => 0,
-        ]);
-        $this->writeState($state);
+        if (($input['confirm'] ?? null) !== self::START_CONFIRM) return ['ok' => false, 'reason' => 'missing_confirm_token', 'phase' => 'start'];
+
+        try {
+            $mode = in_array(($input['mode'] ?? 'dry_run'), ['dry_run', 'live'], true) ? $input['mode'] : 'dry_run';
+            $batchSize = max(1, min(25, (int) ($input['batch_size'] ?? 10)));
+            $delay = max(1, (int) ($input['delay_seconds'] ?? 2));
+            $ids = $this->candidateIds();
+        } catch (\Throwable $e) {
+            return $this->exceptionResult($e, 'query_candidates');
+        }
+
+        try {
+            $state = array_merge($this->emptyState(), [
+                'mode' => $mode,
+                'status' => 'running',
+                'started_at' => now()->toISOString(),
+                'finished_at' => null,
+                'batch_size' => $batchSize,
+                'delay_seconds' => $delay,
+                'total_candidates_at_start' => count($ids),
+                'candidate_ids' => array_values(array_map('intval', $ids)),
+                'marker_position' => 0,
+            ]);
+            $this->writeState($state);
+        } catch (\Throwable $e) {
+            return $this->exceptionResult($e, 'save_state');
+        }
+
         return ['ok' => true] + $this->withComputed($state);
+    }
+
+    public function debug(): array
+    {
+        $candidateError = null;
+        $preview = null;
+
+        try {
+            $ids = $this->candidateIds();
+            $canQuery = true;
+            $previewId = $ids[0] ?? null;
+            if ($previewId) {
+                $part = Part::query()->with(['marketplaceListings' => fn ($q) => $q->where('marketplace', 'ovoko')->orderByDesc('id')])->find($previewId);
+                $listing = $part?->marketplaceListings->first();
+                $preview = $part ? $this->resultPayload($part, $listing) : null;
+            }
+        } catch (\Throwable $e) {
+            $canQuery = false;
+            $candidateError = ['class' => $e::class, 'message' => $e->getMessage()];
+        }
+
+        return [
+            'marker' => self::MARKER,
+            'routes_registered' => true,
+            'service_class_loaded' => self::class,
+            'state_cache_key' => 'local:'.self::STATE_PATH,
+            'current_state' => $this->status(),
+            'can_query_candidates' => $canQuery,
+            'candidate_query_error' => $candidateError,
+            'first_candidate_preview' => $preview,
+            'safety_flags' => ['read_only' => true, 'no_mutation' => true, 'no_ovoko_request' => true],
+        ];
     }
 
     public function stop(array $input): array
@@ -117,7 +161,18 @@ class OvokoPartMappingResetRunnerService
 
     public function candidateIds(): array
     {
-        return Part::query()->with(['marketplaceListings' => fn ($q) => $q->where('marketplace', 'ovoko')->orderByDesc('id')])->whereHas('marketplaceListings', fn ($q) => $q->where('marketplace', 'ovoko')->whereNotNull('url')->where('url', '!=', ''))->orderByDesc('id')->get()->filter(fn (Part $p) => $this->strictCheck($p, $p->marketplaceListings->first())['ok'])->pluck('id')->values()->all();
+        if (! Schema::hasTable('parts') || ! Schema::hasTable('marketplace_listings')) return [];
+
+        return Part::query()
+            ->with(['marketplaceListings' => fn ($q) => $q->where('marketplace', 'ovoko')->orderByDesc('id')])
+            ->whereHas('marketplaceListings', fn ($q) => $q->where('marketplace', 'ovoko')->whereNotNull('url')->where('url', '!=', ''))
+            ->orderByDesc('id')
+            ->get()
+            ->filter(fn (Part $p) => $this->strictCheck($p, $p->marketplaceListings->first())['ok'])
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->values()
+            ->all();
     }
 
     private function strictCheck(Part $part, ?MarketplaceListing $listing): array
@@ -143,8 +198,10 @@ class OvokoPartMappingResetRunnerService
     {
         return ['ok' => true, 'marker' => self::MARKER, 'mode' => 'dry_run', 'status' => 'idle', 'started_at' => null, 'finished_at' => null, 'batch_size' => 10, 'delay_seconds' => 2, 'total_candidates_at_start' => 0, 'candidate_ids' => [], 'processed_ids' => [], 'reset_ids' => [], 'dry_run_ids' => [], 'skipped_ids' => [], 'failed_ids' => [], 'last_batch_results' => [], 'marker_position' => 0];
     }
-    private function readState(): array { return Storage::disk('local')->exists(self::STATE_PATH) ? array_merge($this->emptyState(), json_decode(Storage::disk('local')->get(self::STATE_PATH), true) ?: []) : $this->emptyState(); }
-    private function writeState(array $state): void { Storage::disk('local')->put(self::STATE_PATH, json_encode($state, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)); }
+    private function readState(): array { $decoded = Storage::disk('local')->exists(self::STATE_PATH) ? json_decode(Storage::disk('local')->get(self::STATE_PATH), true) : []; return array_merge($this->emptyState(), is_array($decoded) ? $decoded : []); }
+    private function writeState(array $state): void { $json = json_encode($this->jsonSafe($state), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR); Storage::disk('local')->put(self::STATE_PATH, $json); }
+    private function jsonSafe(array $state): array { return json_decode(json_encode($state, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR), true, 512, JSON_THROW_ON_ERROR); }
+    private function exceptionResult(\Throwable $e, string $phase): array { Log::error('Ovoko part mapping reset runner failed', ['marker' => self::MARKER, 'phase' => $phase, 'exception' => $e]); return ['ok' => false, 'phase' => $phase, 'error_class' => $e::class, 'message' => $e->getMessage()]; }
     private function withComputed(array $state): array { $processed = count(array_unique($state['processed_ids'] ?? [])); $total = (int) ($state['total_candidates_at_start'] ?? count($state['candidate_ids'] ?? [])); return $state + ['total_candidates' => $total, 'processed' => $processed, 'reset_count' => count($state['reset_ids'] ?? []), 'dry_run_count' => count($state['dry_run_ids'] ?? []), 'skipped_count' => count($state['skipped_ids'] ?? []), 'failed_count' => count($state['failed_ids'] ?? []), 'remaining' => max(0, $total - $processed)]; }
     private function hasActiveMapping(MarketplaceListing $l): bool { return (filled($l->external_offer_id) || filled($l->external_listing_id) || filled($l->external_inventory_id) || filled($l->url) || filled($l->sku)) && ! in_array((string) $l->status, ['unlinked', 'archived', 'deleted', 'ended', 'UNLINKED', 'ARCHIVED', 'DELETED', 'ENDED'], true); }
     private function identityLooksLikeGpsGmail(Part $p, ?MarketplaceListing $l): bool { foreach ([$p->sku, $p->part_number, $l?->sku, $l?->external_offer_id, $l?->external_inventory_id] as $v) if (preg_match('/^GPS-GMAIL-/i', (string) $v) === 1) return true; return false; }
