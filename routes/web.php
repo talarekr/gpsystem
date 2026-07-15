@@ -363,6 +363,8 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/ebay/listing-status-diagnose', EbayListingStatusDiagnoseController::class)->name('admin.tools.ebay.listing-status-diagnose');
     Route::get('/admin/tools/ebay/listing-status-audit-runner', [EbayEndedListingLocalCleanupRunnerController::class, 'index'])->name('admin.tools.ebay.listing-status-audit-runner.index');
     Route::get('/admin/tools/ebay/listing-status-audit-runner/status', [EbayEndedListingLocalCleanupRunnerController::class, 'status'])->name('admin.tools.ebay.listing-status-audit-runner.status');
+    Route::get('/admin/tools/ebay/listing-status-audit-runner/results', [EbayEndedListingLocalCleanupRunnerController::class, 'results'])->name('admin.tools.ebay.listing-status-audit-runner.results');
+    Route::get('/admin/tools/ebay/listing-status-audit-runner/results.csv', [EbayEndedListingLocalCleanupRunnerController::class, 'resultsCsv'])->name('admin.tools.ebay.listing-status-audit-runner.results.csv');
     Route::post('/admin/tools/ebay/listing-status-audit-runner/start', [EbayEndedListingLocalCleanupRunnerController::class, 'start'])->name('admin.tools.ebay.listing-status-audit-runner.start');
     Route::post('/admin/tools/ebay/listing-status-audit-runner/run-next-batch', [EbayEndedListingLocalCleanupRunnerController::class, 'runNextBatch'])->name('admin.tools.ebay.listing-status-audit-runner.run-next-batch');
     Route::post('/admin/tools/ebay/listing-status-audit-runner/stop', [EbayEndedListingLocalCleanupRunnerController::class, 'stop'])->name('admin.tools.ebay.listing-status-audit-runner.stop');
