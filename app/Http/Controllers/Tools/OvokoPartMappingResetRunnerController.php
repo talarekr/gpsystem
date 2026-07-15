@@ -44,7 +44,7 @@ class OvokoPartMappingResetRunnerController extends Controller
         try {
             $result = $service->start($request->only(['mode', 'batch_size', 'delay_seconds', 'confirm']));
         } catch (\Throwable $e) {
-            $result = ['ok' => false, 'phase' => 'start', 'error_class' => $e::class, 'message' => $e->getMessage()];
+            $result = $this->exceptionPayload($e, 'unknown');
         }
 
         if ($this->shouldReturnJson($request)) return response()->json($result, ($result['ok'] ?? false) ? 200 : 422);
@@ -159,6 +159,7 @@ class OvokoPartMappingResetRunnerController extends Controller
     {
         return [
             'ok' => false,
+            'marker' => OvokoPartMappingResetRunnerService::MARKER,
             'phase' => $phase,
             'error_class' => $e::class,
             'message' => $e->getMessage(),
