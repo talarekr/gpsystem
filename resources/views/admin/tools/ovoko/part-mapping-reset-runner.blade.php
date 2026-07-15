@@ -4,6 +4,7 @@
 <h1>Ovoko part mapping reset runner</h1>
 @if(session('runner_message'))<div class="card">{{ session('runner_message') }}</div>@endif
 @if(session('runner_error'))<div class="card">{{ session('runner_error') }}</div>@endif
+@if(!empty($statusError))<div class="card"><strong>Runner status warning:</strong> {{ data_get($statusError, 'error_class') }} — {{ data_get($statusError, 'message') }} (phase: {{ data_get($statusError, 'phase') }})</div>@endif
 <div class="card"><h2>Warunki strict</h2><p>Runner odłącza wyłącznie lokalne mapowania/linki Ovoko dla GPS-GMAIL, z aktywnym linkiem/identity Ovoko, bez ceny lokalnej i Ovoko, w kolejce do wystawienia, poza menu Części, status=imported, risk=low. Nie wykonuje requestów do Ovoko i nie rusza Allegro/eBay, zdjęć, opisów, cen, ilości, samochodów ani przesyłek.</p></div>
 <div class="card"><h2>Status</h2><div class="grid">@foreach(['status','mode','total_candidates','processed','reset_count','dry_run_count','skipped_count','failed_count','remaining','batch_size','delay_seconds','started_at','finished_at'] as $key)<div><strong>{{ $key }}</strong><br><span id="s-{{ $key }}">{{ data_get($status,$key,'—') }}</span></div>@endforeach</div></div>
 <div class="card"><h2>Sterowanie</h2>
