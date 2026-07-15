@@ -73,6 +73,32 @@ class OvokoPartMappingResetRunnerTest extends TestCase
         $this->postJson('/admin/tools/ovoko/part-mapping-reset-runner/run-next-batch', ['confirm' => 'run-ovoko-part-mapping-reset-runner-batch'])->assertOk()->assertJsonPath('processed', 2)->assertJsonPath('remaining', 0)->assertJsonPath('status', 'completed');
     }
 
+    public function test_live_start_with_zero_candidates_completes_without_500(): void
+    {
+        $this->postJson('/admin/tools/ovoko/part-mapping-reset-runner/start?json=1', ['mode' => 'live', 'batch_size' => 10, 'delay_seconds' => 2, 'confirm' => 'start-ovoko-part-mapping-reset-runner'])
+            ->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('marker', 'ovoko_part_mapping_reset_runner_live_start_500_fix_v5')
+            ->assertJsonPath('status', 'completed')
+            ->assertJsonPath('total_candidates_at_start', 0)
+            ->assertJsonPath('message', 'No candidates');
+    }
+
+    public function test_live_start_validation_error_returns_json_not_500(): void
+    {
+        $this->postJson('/admin/tools/ovoko/part-mapping-reset-runner/start?json=1', ['mode' => 'live', 'batch_size' => 10, 'delay_seconds' => 2, 'confirm' => 'wrong-token'])
+            ->assertStatus(422)
+            ->assertJsonPath('ok', false)
+            ->assertJsonPath('marker', 'ovoko_part_mapping_reset_runner_live_start_500_fix_v5')
+            ->assertJsonPath('phase', 'validation')
+            ->assertJsonPath('error_class', 'ValidationException');
+
+        $this->getJson('/admin/tools/ovoko/part-mapping-reset-runner/status')
+            ->assertOk()
+            ->assertJsonPath('last_start_phase', 'validation')
+            ->assertJsonPath('last_start_mode', 'live');
+    }
+
     private function part(string $sku, array $overrides = []): Part
     {
         return Part::query()->create(array_merge(['name' => $sku, 'sku' => $sku, 'quantity' => 1, 'status' => 'imported', 'price' => null, 'ovoko_price' => null, 'is_visible_storefront' => false, 'needs_listing' => true], $overrides));
