@@ -196,6 +196,21 @@ class OvokoPartMappingResetRunnerController extends Controller
         return redirect()->route('admin.tools.ovoko.part-mapping-reset-runner.index')->with(($result['ok'] ?? false) ? 'runner_message' : 'runner_error', ($result['ok'] ?? false) ? 'Runner simple został uruchomiony.' : ('Start simple zablokowany: '.($result['message'] ?? $result['reason'] ?? 'unknown')));
     }
 
+
+    public function startFromIds(Request $request): JsonResponse|RedirectResponse
+    {
+        try {
+            $service = app(OvokoPartMappingResetRunnerService::class);
+            $result = $service->startFromIds($request->only(['mode', 'part_ids', 'batch_size', 'delay_seconds', 'confirm']));
+        } catch (\Throwable $e) {
+            $result = $this->exceptionPayload($e, 'start_from_ids');
+        }
+
+        if ($this->shouldReturnJson($request)) return response()->json($result, ($result['ok'] ?? false) ? 200 : 422);
+
+        return redirect()->route('admin.tools.ovoko.part-mapping-reset-runner.index')->with(($result['ok'] ?? false) ? 'runner_message' : 'runner_error', ($result['ok'] ?? false) ? 'Runner from IDs został uruchomiony.' : ('Start from IDs zablokowany: '.($result['message'] ?? $result['reason'] ?? 'unknown')));
+    }
+
     public function startSmoke(Request $request): JsonResponse
     {
         return response()->json([

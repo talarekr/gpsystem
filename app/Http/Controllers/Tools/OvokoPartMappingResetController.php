@@ -225,6 +225,30 @@ class OvokoPartMappingResetController extends Controller
         return response()->json($payload);
     }
 
+
+    public function candidateIds(Request $request): JsonResponse
+    {
+        $request->query->set('export', null);
+        $request->query->set('json', '1');
+        $response = $this->candidates($request);
+        $payload = json_decode($response->getContent() ?: '{}', true);
+        $ids = collect($payload['candidates'] ?? [])
+            ->pluck('part_id')
+            ->map(fn ($id): int => (int) $id)
+            ->filter(fn (int $id): bool => $id > 0)
+            ->values()
+            ->all();
+
+        return response()->json([
+            'ids' => $ids,
+            'count' => count($ids),
+            'marker' => 'ovoko_part_mapping_reset_runner_from_ids_v9',
+            'source_marker' => $payload['marker'] ?? null,
+            'filters' => $payload['filters'] ?? [],
+            'safety_flags' => $this->readOnlySafetyFlags(),
+        ]);
+    }
+
     public function preview(Request $request): JsonResponse
     {
         $partIds = collect(explode(',', (string) $request->query('part_ids')))
