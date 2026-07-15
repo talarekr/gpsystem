@@ -50,9 +50,9 @@ class AllegroOfferParametersBuilder
             $manufacturer = $this->partManufacturer($part);
             return $this->resolvePartManufacturer($manufacturer['value'], $manufacturer['source'], $def, $manufacturer['source_field'] ?? $manufacturer['source']);
         }
-        if ($name === 'stronazabudowy') return $this->resolveInstallationSide($part, $mapping, $def);
         $m = $this->configuredMapping($part, $mapping, $def);
         if ($m) return $this->resolveValue($m['value'], $m['source'], $def);
+        if ($name === 'stronazabudowy') return $this->resolveInstallationSide($part, $def);
         if ($name === 'typsamochodu') return $this->resolveCarType($part, $def);
         if ($name === 'typsilnika') return $this->resolveEngineTypeFromCarFuel($part, $def);
         if ($vehicleField = $this->vehicleFieldForParameter($name)) return $this->resolveVehicleParameter($part, $def, $vehicleField);
@@ -313,23 +313,16 @@ class AllegroOfferParametersBuilder
     }
 
 
-    private function resolveInstallationSide(Part $part, ?MarketplaceCategoryMapping $mapping, array $def): array
+    private function resolveInstallationSide(Part $part, array $def): array
     {
-        $fromPosition = $this->resolvePartPosition($part, $def);
-        if (($fromPosition['value'] ?? null) !== null || filled($fromPosition['source_value'] ?? null)) return $fromPosition;
-
-        $configured = $this->configuredMapping($part, $mapping, $def);
-        if ($configured) {
-            $resolved = $this->resolveValue($configured['value'], $configured['source'], $def);
-            return $resolved + ['mapping_source' => 'configured_parameter_mapping'];
-        }
-
         if ((bool) ($def['required'] ?? false)) {
             $localDefault = $this->localCategoryInstallationSideDefault($part);
-            if ($localDefault !== null) return $this->resolveInstallationSideDefault($part, $def, $localDefault);
+            if ($localDefault !== null) {
+                return $this->resolveInstallationSideDefault($part, $def, $localDefault);
+            }
         }
 
-        return $fromPosition;
+        return $this->resolvePartPosition($part, $def);
     }
 
     private function localCategoryInstallationSideDefault(Part $part): ?array
@@ -419,21 +412,13 @@ class AllegroOfferParametersBuilder
     private function installationSideLabelMatchesIntent(mixed $allowed, string $intent): bool
     {
         $label = $this->norm($allowed);
-        $hasFront = str_contains($label, 'przod') || str_contains($label, 'przedni') || str_contains($label, 'przednia') || str_contains($label, 'front');
-        $hasRear = str_contains($label, 'tyl') || str_contains($label, 'tylny') || str_contains($label, 'tylna') || str_contains($label, 'rear');
-        $hasLeft = str_contains($label, 'lew') || str_contains($label, 'left');
-        $hasRight = str_contains($label, 'praw') || str_contains($label, 'right');
+        $hasFront = str_contains($label, 'przod') || str_contains($label, 'przedni') || str_contains($label, 'przednia');
+        $hasRear = str_contains($label, 'tyl') || str_contains($label, 'tylny') || str_contains($label, 'tylna');
 
         return match ($intent) {
-            'front' => $hasFront && ! $hasRear && ! $hasLeft && ! $hasRight,
-            'rear' => $hasRear && ! $hasFront && ! $hasLeft && ! $hasRight,
-            'front_and_rear' => $hasFront && $hasRear && ! $hasLeft && ! $hasRight,
-            'left' => $hasLeft && ! $hasRight && ! $hasFront && ! $hasRear,
-            'right' => $hasRight && ! $hasLeft && ! $hasFront && ! $hasRear,
-            'left_front' => $hasLeft && $hasFront && ! $hasRight && ! $hasRear,
-            'right_front' => $hasRight && $hasFront && ! $hasLeft && ! $hasRear,
-            'left_rear' => $hasLeft && $hasRear && ! $hasRight && ! $hasFront,
-            'right_rear' => $hasRight && $hasRear && ! $hasLeft && ! $hasFront,
+            'front' => $hasFront && ! $hasRear,
+            'rear' => $hasRear && ! $hasFront,
+            'front_and_rear' => $hasFront && $hasRear,
             default => false,
         };
     }
@@ -452,75 +437,25 @@ class AllegroOfferParametersBuilder
         $position = $this->partPosition($part);
         $sourceValue = $position['value'] ?? null;
         $sourceField = $position['source_field'] ?? 'review_metadata.part_position';
-        $intent = filled($sourceValue) ? $this->installationSideIntentFromLocalValue((string) $sourceValue) : null;
-        $base = [
-            'source' => 'part_position',
-            'source_field' => $sourceField,
-            'source_value' => $sourceValue,
-            'local_installation_position_raw' => $sourceValue,
-            'normalized_installation_position_intent' => $intent,
-            'local_category_installation_side_intent' => $intent,
-            'parameter_values_source' => 'allegro_category_parameters_api_or_cache',
-            'available_values_official' => $this->allowedValuesDiagnostics($def),
-            'mapping_source' => 'part_position',
-        ];
 
-        if (blank($sourceValue) || $intent === null) {
-            return $base + ['value' => null, 'reason' => 'Allegro wymaga parametru Strona zabudowy, ale nie udało się dopasować wartości z pola Pozycja części.'];
+        if (blank($sourceValue)) {
+            return ['value' => null, 'source' => 'part_position', 'source_field' => $sourceField, 'source_value' => $sourceValue, 'reason' => 'Brak lub nieobsługiwana Pozycja części dla parametru Allegro: Strona zabudowy'];
         }
 
-        $target = $this->installationSideIntentFallbackLabel($intent);
         if (($def['type'] ?? '') !== 'dictionary') {
-            return $base + ['value' => $target, 'label' => $target, 'normalized_value' => $intent, 'matcher_reason' => 'non_dictionary_parameter_uses_semantic_intent_label'];
+            return ['value' => (string) $sourceValue, 'source' => 'part_position', 'source_field' => $sourceField, 'source_value' => $sourceValue, 'normalized_value' => $this->norm($sourceValue)];
         }
 
-        $match = $this->matchInstallationSideOfficialValue($def, $intent);
-        if ($match !== null) {
-            return $base + [
-                'type' => 'dictionary',
-                'value' => [$match['id']],
-                'label' => $match['label'],
-                'normalized_value' => $intent,
-                'mapped_value_id' => $match['id'],
-                'mapped_label' => $match['label'],
-                'matched_official_value_id' => $match['id'],
-                'matched_official_value_label' => $match['label'],
-                'selected_value_id' => $match['id'],
-                'selected_value_label' => $match['label'],
-                'matcher_reason' => $match['reason'],
-            ];
-        }
-
-        return $base + ['value' => null, 'normalized_value' => $intent, 'reason' => 'Allegro wymaga parametru Strona zabudowy, ale nie udało się dopasować wartości z pola Pozycja części.', 'allowed_values_sample' => array_slice(array_map(fn ($allowed): array => ['id' => (string) ($allowed['id'] ?? ''), 'value' => (string) ($allowed['value'] ?? '')], $def['dictionary'] ?? []), 0, 20), 'allowed_values' => $this->allowedValuesDiagnostics($def), 'matcher_reason' => 'no_unambiguous_official_value_for_'.$intent];
-    }
-
-    private function installationSideIntentFromLocalValue(string $value): ?string
-    {
-        $n = $this->norm($value);
-        $map = [
-            'komplet' => 'front_and_rear', 'przodityl' => 'front_and_rear', 'przodtyl' => 'front_and_rear', 'przedniaitylna' => 'front_and_rear',
-            'przod' => 'front', 'przednia' => 'front', 'przedni' => 'front', 'osprzednia' => 'front', 'front' => 'front',
-            'tyl' => 'rear', 'tylna' => 'rear', 'tylny' => 'rear', 'ostylna' => 'rear', 'rear' => 'rear',
-            'lewa' => 'left', 'lewastrona' => 'left', 'left' => 'left',
-            'prawa' => 'right', 'prawastrona' => 'right', 'right' => 'right',
-            'lewyprzod' => 'left_front', 'przodlewa' => 'left_front', 'przodstronalewa' => 'left_front', 'zprzodupolewej' => 'left_front',
-            'prawyprzod' => 'right_front', 'przodprawa' => 'right_front', 'przodstronaprawa' => 'right_front', 'zprzodupoprawej' => 'right_front',
-            'lewytyl' => 'left_rear', 'tyllewa' => 'left_rear', 'tylstronalewa' => 'left_rear', 'ztylupolewej' => 'left_rear',
-            'prawytyl' => 'right_rear', 'tylprawa' => 'right_rear', 'tylstronaprawa' => 'right_rear', 'ztylupoprawej' => 'right_rear',
-        ];
-        return $map[$n] ?? null;
-    }
-
-    private function matchInstallationSideOfficialValue(array $def, string $intent): ?array
-    {
-        $matches = [];
+        $candidates = $this->partPositionCandidates((string) $sourceValue);
         foreach (($def['dictionary'] ?? []) as $allowed) {
-            $label = (string) ($allowed['value'] ?? '');
-            if ($this->installationSideLabelMatchesIntent($label, $intent)) {
-                $matches[] = ['id' => (string) ($allowed['id'] ?? ''), 'label' => $label, 'reason' => 'official_label_matches_'.$intent.'_intent'];
+            foreach ($candidates as $candidate) {
+                if ((string) ($allowed['id'] ?? '') === $candidate || $this->matchesDictionaryLabel($allowed['value'] ?? '', $candidate)) {
+                    return ['type' => 'dictionary', 'value' => [(string) $allowed['id']], 'label' => $allowed['value'] ?? null, 'source' => 'part_position', 'source_field' => $sourceField, 'source_value' => $sourceValue, 'normalized_value' => $candidate, 'mapped_value_id' => (string) $allowed['id'], 'mapped_label' => $allowed['value'] ?? null];
+                }
             }
         }
-        return count($matches) === 1 ? $matches[0] : null;
+
+        return ['value' => null, 'source' => 'part_position', 'source_field' => $sourceField, 'source_value' => $sourceValue, 'normalized_value' => $this->norm($sourceValue), 'reason' => 'Brak lub nieobsługiwana Pozycja części dla parametru Allegro: Strona zabudowy', 'allowed_values_sample' => array_slice(array_map(fn ($allowed): array => ['id' => (string) ($allowed['id'] ?? ''), 'value' => (string) ($allowed['value'] ?? '')], $def['dictionary'] ?? []), 0, 20), 'allowed_values' => $this->allowedValuesDiagnostics($def)];
     }
 
     private function partPositionCandidates(string $value): array
@@ -619,8 +554,6 @@ class AllegroOfferParametersBuilder
             'selected_value_label' => $resolved['selected_value_label'] ?? ($resolved['label'] ?? null),
             'selected_value_id' => $resolved['selected_value_id'] ?? ($resolved['mapped_value_id'] ?? ($valuesIds[0] ?? null)),
             'local_category_installation_side_intent' => $resolved['local_category_installation_side_intent'] ?? null,
-            'local_installation_position_raw' => $resolved['local_installation_position_raw'] ?? null,
-            'normalized_installation_position_intent' => $resolved['normalized_installation_position_intent'] ?? null,
             'parameter_values_source' => $resolved['parameter_values_source'] ?? null,
             'available_values_official' => $resolved['available_values_official'] ?? null,
             'matched_official_value_id' => $resolved['matched_official_value_id'] ?? null,
@@ -639,7 +572,7 @@ class AllegroOfferParametersBuilder
         if ($row['resolved_value'] === null) unset($row['resolved_value']);
         if ($row['mapped_value_id'] === null) unset($row['mapped_value_id']);
         if ($row['mapped_label'] === null) unset($row['mapped_label']);
-        foreach (['part_id', 'car_id', 'matched_parameter_name', 'matched_parameter_id', 'matched_value_label', 'matched_value_id', 'selected_value_label', 'selected_value_id', 'local_category_installation_side_intent', 'local_installation_position_raw', 'normalized_installation_position_intent', 'parameter_values_source', 'available_values_official', 'matched_official_value_id', 'matched_official_value_label', 'matcher_reason', 'mapping_source', 'mapping_rule', 'local_category_id', 'local_category_name'] as $key) { if ($row[$key] === null) unset($row[$key]); }
+        foreach (['part_id', 'car_id', 'matched_parameter_name', 'matched_parameter_id', 'matched_value_label', 'matched_value_id', 'selected_value_label', 'selected_value_id', 'local_category_installation_side_intent', 'parameter_values_source', 'available_values_official', 'matched_official_value_id', 'matched_official_value_label', 'matcher_reason', 'mapping_source', 'mapping_rule', 'local_category_id', 'local_category_name'] as $key) { if ($row[$key] === null) unset($row[$key]); }
         if ($row['auto_injected'] === false) unset($row['auto_injected']);
         if ($row['allowed_values_sample'] === null) unset($row['allowed_values_sample']);
         if ($row['allowed_values'] === null) unset($row['allowed_values']);
