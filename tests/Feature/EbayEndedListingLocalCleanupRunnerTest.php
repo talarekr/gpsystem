@@ -82,6 +82,53 @@ class EbayEndedListingLocalCleanupRunnerTest extends TestCase
         $this->assertSame('active', $other->fresh()->status);
     }
 
+    public function test_dry_run_exports_cleanup_recommended_results_as_json_and_csv(): void
+    {
+        $listing = $this->listing('ebay_de', 'active', 'mapped', 'confirmed', '555555555555');
+        Http::fake(['https://api.ebay.test/buy/browse/v1/item/v1|555555555555|0' => Http::response(['itemEndDate' => now()->subDay()->toISOString()], 200)]);
+
+        $this->postJson('/admin/tools/ebay/listing-status-audit-runner/start', ['mode' => 'dry_run', 'batch_size' => 10, 'delay_seconds' => 0, 'confirm' => 'start-ebay-listing-status-audit-runner'])->assertOk();
+        $this->postJson('/admin/tools/ebay/listing-status-audit-runner/run-next-batch')->assertOk()->assertJsonPath('cleanup_recommended_count', 1);
+
+        $this->getJson('/admin/tools/ebay/listing-status-audit-runner/results?json=1&status=cleanup_recommended')
+            ->assertOk()
+            ->assertJsonPath('read_only', true)
+            ->assertJsonPath('results.0.part_id', $listing->part_id)
+            ->assertJsonPath('results.0.local_url', 'https://www.ebay.de/itm/555555555555')
+            ->assertJsonPath('results.0.would_cleanup', true)
+            ->assertJsonPath('results.0.cleaned', false);
+
+        $csv = $this->get('/admin/tools/ebay/listing-status-audit-runner/results.csv?status=cleanup_recommended')->assertOk()->streamedContent();
+        $this->assertStringContainsString('part_id', $csv);
+        $this->assertStringContainsString((string) $listing->part_id, $csv);
+        $this->assertStringContainsString('https://www.ebay.de/itm/555555555555', $csv);
+        $this->assertSame('https://www.ebay.de/itm/555555555555', $listing->fresh()->url);
+    }
+
+    public function test_live_exports_cleaned_results(): void
+    {
+        $listing = $this->listing('ebay_de', 'active', 'mapped', 'confirmed', '666666666666');
+        Http::fake(['https://api.ebay.test/buy/browse/v1/item/v1|666666666666|0' => Http::response(['estimatedAvailabilities' => [['estimatedAvailabilityStatus' => 'UNAVAILABLE']]], 200)]);
+
+        $this->postJson('/admin/tools/ebay/listing-status-audit-runner/start', ['mode' => 'live', 'batch_size' => 10, 'delay_seconds' => 0, 'confirm' => 'start-ebay-listing-status-audit-runner'])->assertOk();
+        $this->postJson('/admin/tools/ebay/listing-status-audit-runner/run-next-batch')->assertOk()->assertJsonPath('cleaned_count', 1);
+
+        $this->getJson('/admin/tools/ebay/listing-status-audit-runner/results?json=1&status=cleaned')
+            ->assertOk()
+            ->assertJsonPath('results.0.part_id', $listing->part_id)
+            ->assertJsonPath('results.0.cleaned', true);
+    }
+
+    public function test_results_export_empty_state_is_read_only_without_500(): void
+    {
+        Http::fake();
+
+        $this->getJson('/admin/tools/ebay/listing-status-audit-runner/results?json=1&status=cleanup_recommended')
+            ->assertOk()
+            ->assertJsonPath('read_only', true)
+            ->assertJsonCount(0, 'results');
+    }
+
     private function listing(string $marketplace, string $status, string $sync, string $match, string $itemId, array $raw = []): MarketplaceListing
     {
         $part = Part::query()->create(['name' => 'Part '.$itemId, 'sku' => 'SKU'.$itemId, 'status' => 'ready']);
