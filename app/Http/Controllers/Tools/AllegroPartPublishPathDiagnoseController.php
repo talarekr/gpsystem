@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Schema;
 
 class AllegroPartPublishPathDiagnoseController extends Controller
 {
-    private const MARKER = 'allegro_installation_side_official_category_values_v4';
+    private const MARKER = 'allegro_installation_side_from_part_position_official_api_v5';
 
     public function __invoke(Request $request, MarketplaceListingReadinessService $readiness): JsonResponse
     {
@@ -45,6 +45,8 @@ class AllegroPartPublishPathDiagnoseController extends Controller
             'allegro_category_id' => $mapping?->external_category_id,
             'allegro_category_name' => $mapping?->external_category_name,
             'required_parameter_detected' => ($row && ($row['required'] ?? false)) ? 'Strona zabudowy' : null,
+            'local_installation_position_raw' => $row['local_installation_position_raw'] ?? $row['raw_local_value'] ?? null,
+            'normalized_installation_position_intent' => $row['normalized_installation_position_intent'] ?? $row['local_category_installation_side_intent'] ?? null,
             'local_category_installation_side_intent' => $row['local_category_installation_side_intent'] ?? null,
             'parameter_id' => $row['id'] ?? null,
             'parameter_name' => $row['name'] ?? null,
@@ -59,6 +61,7 @@ class AllegroPartPublishPathDiagnoseController extends Controller
             'mapping_source' => $row['mapping_source'] ?? null,
             'mapping_rule' => $row['mapping_rule'] ?? null,
             'valuesIds' => $row['valuesIds'] ?? [],
+            'generated_parameter_payload' => $row ? array_filter(['id' => $row['id'] ?? null, 'valuesIds' => $row['valuesIds'] ?? null, 'values' => $row['values'] ?? null], fn ($value) => $value !== null && $value !== []) : null,
             'matcher_reason' => $row['matcher_reason'] ?? null,
             'auto_injected' => (bool) ($row['auto_injected'] ?? false),
             'blockers' => array_values(array_unique($blockers)),

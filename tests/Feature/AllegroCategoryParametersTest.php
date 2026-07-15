@@ -572,8 +572,43 @@ class AllegroCategoryParametersTest extends TestCase
 
         $this->assertSame([], $result['offer_parameters']);
         $this->assertSame('Strona zabudowy', $result['missing_required_parameters'][0]['name']);
-        $this->assertSame('Brak lub nieobsługiwana Pozycja części dla parametru Allegro: Strona zabudowy', $result['missing_required_parameters'][0]['reason']);
+        $this->assertSame('Allegro wymaga parametru Strona zabudowy, ale nie udało się dopasować wartości z pola Pozycja części.', $result['missing_required_parameters'][0]['reason']);
         $this->assertSame('review_metadata.part_position', $result['missing_required_parameters'][0]['source_field']);
+    }
+
+    public function test_required_installation_side_maps_part_position_complete_to_official_front_and_rear_value(): void
+    {
+        $part = Part::query()->create(['name' => 'Zderzak komplet', 'category_id' => 77, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'review_metadata' => ['part_position' => 'Komplet'], 'is_visible_storefront' => true]);
+
+        $result = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, null, ['ok' => true, 'source' => 'cache', 'parameters' => [[
+            'id' => '227349', 'name' => 'Strona zabudowy', 'type' => 'dictionary', 'required' => true,
+            'dictionary' => [
+                ['id' => 'front', 'value' => 'Przód'],
+                ['id' => 'front-rear', 'value' => 'Przód + tył'],
+                ['id' => 'rear', 'value' => 'Tył'],
+            ],
+            'options' => ['describesProduct' => false],
+        ]]]);
+
+        $this->assertSame([['id' => '227349', 'valuesIds' => ['front-rear']]], $result['offer_parameters']);
+        $diagnostic = $result['parameter_source_diagnostics'][0];
+        $this->assertSame('Komplet', $diagnostic['local_installation_position_raw']);
+        $this->assertSame('front_and_rear', $diagnostic['normalized_installation_position_intent']);
+        $this->assertSame('Przód + tył', $diagnostic['matched_official_value_label']);
+        $this->assertSame('front-rear', $diagnostic['matched_official_value_id']);
+        $this->assertSame('part_position', $diagnostic['mapping_source']);
+    }
+
+    public function test_explicit_part_position_has_priority_over_local_category_fallback(): void
+    {
+        $category = PartCategory::query()->create(['name' => 'Zacisk hamulcowy przedni']);
+        $part = Part::query()->create(['name' => 'Zacisk Audi tył', 'category_id' => $category->id, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'review_metadata' => ['part_position' => 'Tył'], 'is_visible_storefront' => true]);
+
+        $result = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, null, ['ok' => true, 'source' => 'cache', 'parameters' => [$this->installationSideDefinition()]]);
+
+        $this->assertSame([['id' => 'side', 'valuesIds' => ['back']]], $result['offer_parameters']);
+        $this->assertSame('part_position', $result['parameter_source_diagnostics'][0]['mapping_source']);
+        $this->assertSame('rear', $result['parameter_source_diagnostics'][0]['normalized_installation_position_intent']);
     }
 
 
