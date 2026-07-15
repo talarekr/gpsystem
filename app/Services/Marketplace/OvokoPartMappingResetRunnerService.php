@@ -12,9 +12,10 @@ use Illuminate\Support\Facades\Storage;
 
 class OvokoPartMappingResetRunnerService
 {
-    public const MARKER = 'ovoko_part_mapping_reset_runner_candidate_query_500_fix_v8';
+    public const MARKER = 'ovoko_part_mapping_reset_runner_from_ids_v9';
     private const STATE_PATH = 'admin-tools/ovoko-part-mapping-reset-runner.json';
     private const START_CONFIRM = 'start-ovoko-part-mapping-reset-runner';
+    private const START_FROM_IDS_CONFIRM = 'start-ovoko-part-mapping-reset-runner-from-ids';
     private const BATCH_CONFIRM = 'run-ovoko-part-mapping-reset-runner-batch';
     private const STOP_CONFIRM = 'stop-ovoko-part-mapping-reset-runner';
 
@@ -56,63 +57,16 @@ class OvokoPartMappingResetRunnerService
 
     public function debugCandidateQuerySafe(string $operation = 'all'): array
     {
-        $sql = null;
-        $bindings = [];
-
-        try {
-            $query = $this->fallbackCandidateQuery();
-            $sql = $query->toSql();
-            $bindings = $query->getBindings();
-
-            $payload = [
-                'ok' => true,
-                'phase' => 'candidate_query',
-                'candidate_query_executed' => in_array($operation, ['count', 'first', 'all'], true),
-                'mutation_executed' => false,
-                'query_sql' => $sql,
-                'query_bindings' => $bindings,
-                'sql' => $sql,
-                'bindings' => $bindings,
-                'query_strategy' => 'schema_checked_fallback',
-            ];
-
-            if ($operation === 'build') {
-                return $payload + ['count_executed' => false, 'first_executed' => false];
-            }
-
-            if ($operation === 'count' || $operation === 'all') {
-                $payload['count'] = (clone $query)->count();
-                $payload['count_executed'] = true;
-            }
-
-            if ($operation === 'first' || $operation === 'all') {
-                $row = (clone $query)->first();
-                $payload['first_executed'] = true;
-                $payload['first_candidate'] = $row ? (array) $row : null;
-                $payload['first_id'] = $row->id ?? null;
-            }
-
-            if ($operation === 'all') {
-                $payload['first_ids'] = (clone $query)->limit(20)->pluck('parts.id')->map(fn ($id) => (int) $id)->all();
-            }
-
-            return $payload;
-        } catch (\Throwable $e) {
-            return [
-                'ok' => false,
-                'phase' => 'candidate_query',
-                'candidate_query_executed' => false,
-                'mutation_executed' => false,
-                'error_class' => $e::class,
-                'message' => $e->getMessage(),
-                'file' => $e->getFile(),
-                'line' => $e->getLine(),
-                'sql' => $sql,
-                'bindings' => $bindings,
-                'query_sql' => $sql,
-                'query_bindings' => $bindings,
-            ];
-        }
+        return [
+            'ok' => false,
+            'marker' => self::MARKER,
+            'phase' => 'candidate_query_disabled',
+            'candidate_query_executed' => false,
+            'mutation_executed' => false,
+            'query_strategy' => 'disabled_use_start_from_ids',
+            'operation' => $operation,
+            'message' => 'candidate query disabled; use start-from-ids',
+        ];
     }
 
     public function schemaDebug(): array
@@ -176,6 +130,51 @@ class OvokoPartMappingResetRunnerService
         $this->writeState($state);
 
         return ['ok' => true, 'marker' => self::MARKER, 'simple_start' => true] + $this->withComputed($state);
+    }
+
+
+    public function startFromIds(array $input): array
+    {
+        $mode = $input['mode'] ?? 'dry_run';
+        if (! in_array($mode, ['dry_run', 'live'], true)) {
+            return ['ok' => false, 'marker' => self::MARKER, 'phase' => 'validation', 'message' => 'mode must be dry_run or live'];
+        }
+        if (($input['confirm'] ?? null) !== self::START_FROM_IDS_CONFIRM) {
+            return ['ok' => false, 'marker' => self::MARKER, 'phase' => 'validation', 'message' => 'Invalid confirm token'];
+        }
+
+        $ids = collect($input['part_ids'] ?? [])
+            ->map(fn ($id): int => (int) $id)
+            ->filter(fn (int $id): bool => $id > 0)
+            ->unique()
+            ->values()
+            ->take(1000)
+            ->all();
+
+        if ($ids === []) {
+            return ['ok' => false, 'marker' => self::MARKER, 'phase' => 'validation', 'message' => 'part_ids must contain at least one positive id'];
+        }
+
+        $total = count($ids);
+        $state = array_merge($this->emptyState(), [
+            'mode' => $mode,
+            'status' => 'running',
+            'started_at' => now()->toISOString(),
+            'finished_at' => null,
+            'message' => 'Started from explicit part_ids; strict per-item recheck happens in run-next-batch.',
+            'batch_size' => max(1, min(25, (int) ($input['batch_size'] ?? 10))),
+            'delay_seconds' => max(1, (int) ($input['delay_seconds'] ?? 2)),
+            'total_candidates_at_start' => $total,
+            'candidate_ids' => $ids,
+            'candidate_source' => 'explicit_part_ids',
+            'route_reached_start' => true,
+            'route_reached_markers' => [self::MARKER => now()->toISOString()],
+            'last_start_phase' => 'start_from_ids_saved_state',
+            'last_start_mode' => $mode,
+        ]);
+        $this->writeState($state);
+
+        return ['ok' => true, 'marker' => self::MARKER, 'start_from_ids' => true, 'mutation_executed' => false] + $this->withComputed($state);
     }
 
     public function status(): array
@@ -420,11 +419,7 @@ class OvokoPartMappingResetRunnerService
             });
         }
 
-        if (Schema::hasColumn('parts', 'ovoko_price_pln')) {
-            $query->where(function ($q): void {
-                $q->whereNull('parts.ovoko_price_pln')->orWhere('parts.ovoko_price_pln', '<=', 0);
-            });
-        } elseif (Schema::hasColumn('parts', 'ovoko_price')) {
+        if (Schema::hasColumn('parts', 'ovoko_price')) {
             $query->where(function ($q): void {
                 $q->whereNull('parts.ovoko_price')->orWhere('parts.ovoko_price', '<=', 0);
             });

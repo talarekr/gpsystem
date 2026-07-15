@@ -411,9 +411,11 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::post('/admin/tools/ovoko/part-mapping-reset-runner/start-save-state-smoke', [OvokoPartMappingResetRunnerController::class, 'startSaveStateSmoke'])->name('admin.tools.ovoko.part-mapping-reset-runner.start-save-state-smoke');
     Route::post('/admin/tools/ovoko/part-mapping-reset-runner/start-simple', [OvokoPartMappingResetRunnerController::class, 'startSimple'])->name('admin.tools.ovoko.part-mapping-reset-runner.start-simple');
     Route::post('/admin/tools/ovoko/part-mapping-reset-runner/start', [OvokoPartMappingResetRunnerController::class, 'start'])->name('admin.tools.ovoko.part-mapping-reset-runner.start');
+    Route::post('/admin/tools/ovoko/part-mapping-reset-runner/start-from-ids', [OvokoPartMappingResetRunnerController::class, 'startFromIds'])->name('admin.tools.ovoko.part-mapping-reset-runner.start-from-ids');
     Route::post('/admin/tools/ovoko/part-mapping-reset-runner/run-next-batch', [OvokoPartMappingResetRunnerController::class, 'runNextBatch'])->name('admin.tools.ovoko.part-mapping-reset-runner.run-next-batch');
     Route::post('/admin/tools/ovoko/part-mapping-reset-runner/stop', [OvokoPartMappingResetRunnerController::class, 'stop'])->name('admin.tools.ovoko.part-mapping-reset-runner.stop');
     Route::get('/admin/tools/ovoko/part-mapping-reset-candidates', [OvokoPartMappingResetController::class, 'candidates'])->name('admin.tools.ovoko.part-mapping-reset-candidates');
+    Route::get('/admin/tools/ovoko/part-mapping-reset-candidate-ids', [OvokoPartMappingResetController::class, 'candidateIds'])->name('admin.tools.ovoko.part-mapping-reset-candidate-ids');
     Route::get('/admin/tools/ovoko/part-mapping-reset-preview', [OvokoPartMappingResetController::class, 'preview'])->name('admin.tools.ovoko.part-mapping-reset-preview');
     Route::post('/admin/tools/ovoko/part-mapping-reset', [OvokoPartMappingResetController::class, 'reset'])->name('admin.tools.ovoko.part-mapping-reset');
     Route::get('/admin/tools/ovoko/linked-products-check', OvokoLinkedProductsCheckController::class)->name('admin.tools.ovoko.linked-products-check');
