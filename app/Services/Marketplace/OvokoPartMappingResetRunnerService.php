@@ -12,11 +12,104 @@ use Illuminate\Support\Facades\Storage;
 
 class OvokoPartMappingResetRunnerService
 {
-    public const MARKER = 'ovoko_part_mapping_reset_runner_live_hard_500_fix_v6';
+    public const MARKER = 'ovoko_part_mapping_reset_runner_start_phase_isolation_v7';
     private const STATE_PATH = 'admin-tools/ovoko-part-mapping-reset-runner.json';
     private const START_CONFIRM = 'start-ovoko-part-mapping-reset-runner';
     private const BATCH_CONFIRM = 'run-ovoko-part-mapping-reset-runner-batch';
     private const STOP_CONFIRM = 'stop-ovoko-part-mapping-reset-runner';
+
+    public function validateStartInput(array $input): array
+    {
+        $mode = $input['mode'] ?? 'dry_run';
+        if (! in_array($mode, ['dry_run', 'live'], true)) {
+            return ['ok' => false, 'phase' => 'validation', 'error_class' => 'ValidationException', 'message' => 'mode must be dry_run or live', 'mode' => $mode];
+        }
+        if (($input['confirm'] ?? null) !== self::START_CONFIRM) {
+            return ['ok' => false, 'phase' => 'validation', 'error_class' => 'ValidationException', 'message' => 'Invalid confirm token', 'mode' => $mode];
+        }
+
+        return [
+            'ok' => true,
+            'phase' => 'validation',
+            'mode' => $mode,
+            'batch_size' => max(1, min(25, (int) ($input['batch_size'] ?? 10))),
+            'delay_seconds' => max(1, (int) ($input['delay_seconds'] ?? 2)),
+            'confirm_present' => true,
+        ];
+    }
+
+    public function markStartPhase(string $phase, ?string $mode = null, ?array $extra = null): void
+    {
+        $state = $this->readState();
+        $state['route_reached_start'] = true;
+        $state['last_start_phase'] = $phase;
+        $state['last_start_mode'] = $mode;
+        $state['route_reached_markers'] = array_merge($state['route_reached_markers'] ?? [], [self::MARKER => now()->toISOString()]);
+        if ($extra !== null) $state['last_start_phase_extra'] = $this->jsonSafe($extra);
+        $this->writeState($state);
+    }
+
+    public function candidateQuerySmoke(): array
+    {
+        $query = Part::query()
+            ->whereHas('marketplaceListings', fn ($q) => $q->where('marketplace', 'ovoko')->whereNotNull('url')->where('url', '!=', ''))
+            ->orderByDesc('id');
+
+        $ids = $this->candidateIds();
+
+        return [
+            'ok' => true,
+            'candidate_query_executed' => true,
+            'mutation_executed' => false,
+            'count' => count($ids),
+            'first_ids' => array_slice($ids, 0, 20),
+            'query_sql' => $query->toSql(),
+            'query_bindings' => $query->getBindings(),
+        ];
+    }
+
+    public function saveStateSmoke(): array
+    {
+        $state = array_merge($this->emptyState(), [
+            'mode' => 'live',
+            'status' => 'idle',
+            'total_candidates_at_start' => 0,
+            'candidate_ids' => [],
+            'route_reached_start' => true,
+            'last_start_phase' => 'save_state_smoke',
+            'last_start_mode' => 'live',
+        ]);
+        $this->writeState($state);
+
+        return ['ok' => true, 'mutation_executed' => false, 'saved_state' => $this->readState()];
+    }
+
+    public function startSimple(array $input): array
+    {
+        $validation = $this->validateStartInput($input);
+        if (! ($validation['ok'] ?? false)) return ['marker' => self::MARKER] + $validation;
+
+        $ids = $this->candidateIds();
+        $total = count($ids);
+        $state = array_merge($this->emptyState(), [
+            'mode' => $validation['mode'],
+            'status' => $total === 0 ? 'completed' : 'running',
+            'started_at' => now()->toISOString(),
+            'finished_at' => $total === 0 ? now()->toISOString() : null,
+            'message' => $total === 0 ? 'No candidates' : null,
+            'batch_size' => $validation['batch_size'],
+            'delay_seconds' => $validation['delay_seconds'],
+            'total_candidates_at_start' => $total,
+            'candidate_ids' => array_values(array_map('intval', $ids)),
+            'route_reached_start' => true,
+            'route_reached_markers' => [self::MARKER => now()->toISOString()],
+            'last_start_phase' => 'response',
+            'last_start_mode' => $validation['mode'],
+        ]);
+        $this->writeState($state);
+
+        return ['ok' => true, 'marker' => self::MARKER, 'simple_start' => true] + $this->withComputed($state);
+    }
 
     public function status(): array
     {
@@ -29,30 +122,33 @@ class OvokoPartMappingResetRunnerService
 
     public function start(array $input): array
     {
-        $mode = $input['mode'] ?? 'dry_run';
+        $mode = (string) ($input['mode'] ?? 'dry_run');
+        $phase = 'start';
 
         try {
-            if (! in_array($mode, ['dry_run', 'live'], true)) {
-                return $this->validationError('mode must be dry_run or live', $mode);
+            $phase = 'request_received';
+            $this->markStartPhase('request_received', $mode);
+
+            $phase = 'validation';
+            $this->markStartPhase('validation', $mode);
+            $validation = $this->validateStartInput($input);
+            if (! ($validation['ok'] ?? false)) {
+                $this->rememberStartError('validation', $mode, (string) ($validation['error_class'] ?? 'ValidationException'), (string) ($validation['message'] ?? 'validation failed'));
+                return ['marker' => self::MARKER] + $validation;
             }
+            $mode = (string) $validation['mode'];
+            $batchSize = (int) $validation['batch_size'];
+            $delay = (int) $validation['delay_seconds'];
 
-            if (($input['confirm'] ?? null) !== self::START_CONFIRM) {
-                return $this->validationError('Invalid confirm token', $mode);
-            }
+            $phase = 'service_resolved';
+            $this->markStartPhase('service_resolved', $mode, ['service_class' => self::class, 'has_start_method' => method_exists($this, 'start')]);
 
-            $batchSize = max(1, min(25, (int) ($input['batch_size'] ?? 10)));
-            $delay = max(1, (int) ($input['delay_seconds'] ?? 2));
-        } catch (\Throwable $e) {
-            return $this->exceptionResult($e, 'validation', (string) $mode);
-        }
-
-        try {
+            $phase = 'query_candidates';
+            $this->markStartPhase('query_candidates', $mode);
             $ids = $this->candidateIds();
-        } catch (\Throwable $e) {
-            return $this->exceptionResult($e, 'query_candidates', (string) $mode);
-        }
 
-        try {
+            $phase = 'build_state';
+            $this->markStartPhase('build_state', $mode, ['candidate_count' => count($ids)]);
             $total = count($ids);
             $state = array_merge($this->emptyState(), [
                 'mode' => $mode,
@@ -73,16 +169,23 @@ class OvokoPartMappingResetRunnerService
                 'last_start_exception_line' => null,
                 'route_reached_start' => true,
                 'route_reached_markers' => [self::MARKER => now()->toISOString()],
-                'last_start_phase' => null,
+                'last_start_phase' => 'build_state',
                 'last_start_mode' => $mode,
                 'last_exception_at' => null,
             ]);
-            $this->writeState($state);
-        } catch (\Throwable $e) {
-            return $this->exceptionResult($e, 'save_state', (string) $mode);
-        }
 
-        return ['ok' => true] + $this->withComputed($state);
+            $phase = 'save_state';
+            $this->markStartPhase('save_state', $mode, ['candidate_count' => $total]);
+            $state['last_start_phase'] = 'save_state';
+            $this->writeState($state);
+
+            $phase = 'response';
+            $this->markStartPhase('response', $mode, ['candidate_count' => $total]);
+            $state['last_start_phase'] = 'response';
+            return ['ok' => true] + $this->withComputed($state);
+        } catch (\Throwable $e) {
+            return $this->exceptionResult($e, $phase, $mode);
+        }
     }
 
     public function debug(): array
