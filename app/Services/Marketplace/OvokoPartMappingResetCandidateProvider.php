@@ -13,10 +13,11 @@ class OvokoPartMappingResetCandidateProvider
     /** @return array<int, int> */
     public function ids(int $limit = 1000, array $excludePartIds = []): array
     {
-        return $this->query($excludePartIds)
-            ->limit(max(1, min(1000, $limit)))
-            ->pluck('parts.id')
+        return collect($this->rows($limit, $excludePartIds))
+            ->pluck('part_id')
             ->map(fn ($id): int => (int) $id)
+            ->filter(fn (int $id): bool => $id > 0)
+            ->unique()
             ->values()
             ->all();
     }
@@ -27,27 +28,8 @@ class OvokoPartMappingResetCandidateProvider
         return $this->query($excludePartIds)
             ->limit(max(1, min(1000, $limit)))
             ->get()
-            ->map(fn ($row): array => [
-                'part_id' => (int) $row->part_id,
-                'marketplace_listing_id' => (int) $row->marketplace_listing_id,
-                'sku' => $row->part_sku,
-                'part_code' => $row->part_code,
-                'listing_sku' => $row->listing_sku,
-                'status' => $row->listing_status,
-                'price' => $row->price,
-                'ovoko_price' => $row->ovoko_price,
-                'needs_listing' => (bool) $row->needs_listing,
-                'is_visible_storefront' => (bool) $row->is_visible_storefront,
-                'external_offer_id' => $row->external_offer_id,
-                'external_listing_id' => $row->external_listing_id,
-                'external_inventory_id' => $row->external_inventory_id,
-                'url' => $row->url,
-                'reset_recommended_now_strict' => true,
-                'missing_price_for_strict_reset' => true,
-                'identity_looks_like_gps_gmail' => true,
-                'is_to_publish' => true,
-                'is_in_parts_menu' => false,
-            ])
+            ->map(fn ($row): array => $this->candidateRowToArray($row))
+            ->filter(fn (array $row): bool => ($row['reason'] ?? null) !== 'candidate_row_missing_id_alias')
             ->values()
             ->all();
     }
@@ -73,11 +55,7 @@ class OvokoPartMappingResetCandidateProvider
 
         return DB::table('marketplace_listings')
             ->join('parts', 'parts.id', '=', 'marketplace_listings.part_id')
-            ->select([
-                'parts.id as part_id', 'parts.sku as part_sku', 'parts.part_number as part_code', 'parts.price', 'parts.ovoko_price', 'parts.needs_listing', 'parts.is_visible_storefront',
-                'marketplace_listings.id as marketplace_listing_id', 'marketplace_listings.sku as listing_sku', 'marketplace_listings.status as listing_status',
-                'marketplace_listings.external_offer_id', 'marketplace_listings.external_listing_id', 'marketplace_listings.external_inventory_id', 'marketplace_listings.url',
-            ])
+            ->select($this->selectedColumns())
             ->where('marketplace_listings.marketplace', '=', 'ovoko')
             ->where('marketplace_listings.status', '=', 'imported')
             ->where(function ($q): void {
@@ -97,6 +75,58 @@ class OvokoPartMappingResetCandidateProvider
             ->whereNotIn('parts.status', ['published'])
             ->when($excludePartIds !== [], fn ($q) => $q->whereNotIn('parts.id', array_values(array_unique(array_map('intval', $excludePartIds)))))
             ->orderBy('parts.id');
+    }
+
+    /** @return array<int, string> */
+    public function selectedColumns(): array
+    {
+        return [
+            'parts.id as part_id', 'parts.sku as part_sku', 'parts.part_number as part_code', 'parts.price', 'parts.ovoko_price', 'parts.needs_listing', 'parts.is_visible_storefront',
+            'marketplace_listings.id as marketplace_listing_id', 'marketplace_listings.sku as listing_sku', 'marketplace_listings.status as listing_status',
+            'marketplace_listings.external_offer_id', 'marketplace_listings.external_listing_id', 'marketplace_listings.external_inventory_id', 'marketplace_listings.url',
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    public function candidateRowToArray(object $row): array
+    {
+        if (! property_exists($row, 'part_id') || ! property_exists($row, 'marketplace_listing_id') || ! $row->part_id || ! $row->marketplace_listing_id) {
+            return [
+                'part_id' => property_exists($row, 'part_id') ? $row->part_id : null,
+                'marketplace_listing_id' => property_exists($row, 'marketplace_listing_id') ? $row->marketplace_listing_id : null,
+                'action' => 'skipped',
+                'reason' => 'candidate_row_missing_id_alias',
+                'raw_keys' => array_keys(get_object_vars($row)),
+            ];
+        }
+
+        $hasPrice = $this->positivePrice($row->price ?? null);
+        $hasOvokoPrice = $this->positivePrice($row->ovoko_price ?? null);
+
+        return [
+            'part_id' => (int) $row->part_id,
+            'marketplace_listing_id' => (int) $row->marketplace_listing_id,
+            'sku' => $row->part_sku ?? null,
+            'part_code' => $row->part_code ?? null,
+            'listing_sku' => $row->listing_sku ?? null,
+            'status' => $row->listing_status ?? null,
+            'price' => $row->price ?? null,
+            'ovoko_price' => $row->ovoko_price ?? null,
+            'has_price' => $hasPrice,
+            'has_ovoko_price' => $hasOvokoPrice,
+            'needs_listing' => (bool) ($row->needs_listing ?? false),
+            'is_visible_storefront' => (bool) ($row->is_visible_storefront ?? false),
+            'external_offer_id' => $row->external_offer_id ?? null,
+            'external_listing_id' => $row->external_listing_id ?? null,
+            'external_inventory_id' => $row->external_inventory_id ?? null,
+            'url' => $row->url ?? null,
+            'reset_recommended_now_strict' => true,
+            'missing_price_for_strict_reset' => true,
+            'identity_looks_like_gps_gmail' => true,
+            'is_to_publish' => true,
+            'is_in_parts_menu' => false,
+            'reset_risk_level' => 'low',
+        ];
     }
 
     private function assertSchema(): void

@@ -78,7 +78,7 @@ class OvokoPartMappingResetRunnerTest extends TestCase
         $this->postJson('/admin/tools/ovoko/part-mapping-reset-runner/start?json=1', ['mode' => 'live', 'batch_size' => 10, 'delay_seconds' => 2, 'confirm' => 'start-ovoko-part-mapping-reset-runner'])
             ->assertOk()
             ->assertJsonPath('ok', true)
-            ->assertJsonPath('marker', 'ovoko_part_mapping_reset_runner_from_ids_v9')
+            ->assertJsonPath('marker', 'ovoko_part_mapping_reset_runner_candidate_id_alias_fix_v11')
             ->assertJsonPath('status', 'completed')
             ->assertJsonPath('total_candidates_at_start', 0)
             ->assertJsonPath('message', 'No candidates');
@@ -89,7 +89,7 @@ class OvokoPartMappingResetRunnerTest extends TestCase
         $this->postJson('/admin/tools/ovoko/part-mapping-reset-runner/start?json=1', ['mode' => 'live', 'batch_size' => 10, 'delay_seconds' => 2, 'confirm' => 'wrong-token'])
             ->assertStatus(422)
             ->assertJsonPath('ok', false)
-            ->assertJsonPath('marker', 'ovoko_part_mapping_reset_runner_from_ids_v9')
+            ->assertJsonPath('marker', 'ovoko_part_mapping_reset_runner_candidate_id_alias_fix_v11')
             ->assertJsonPath('phase', 'validation')
             ->assertJsonPath('error_class', 'ValidationException');
 
@@ -137,6 +137,43 @@ class OvokoPartMappingResetRunnerTest extends TestCase
             ->assertOk()
             ->assertJsonPath('ok', false)
             ->assertJsonPath('message', 'candidate query disabled; use start-from-ids');
+    }
+
+    public function test_candidate_provider_uses_explicit_part_and_listing_id_aliases(): void
+    {
+        $candidate = $this->part('GPS-GMAIL-ALIASES');
+        $listing = $this->ovoko($candidate, 'OV-ALIASES');
+
+        $provider = app(\App\Services\Marketplace\OvokoPartMappingResetCandidateProvider::class);
+        $raw = $provider->query()->first();
+        $row = $provider->rows(10)[0] ?? null;
+
+        $this->assertTrue(property_exists($raw, 'part_id'));
+        $this->assertTrue(property_exists($raw, 'marketplace_listing_id'));
+        $this->assertFalse(property_exists($raw, 'id'));
+        $this->assertSame($candidate->id, $row['part_id']);
+        $this->assertSame($listing->id, $row['marketplace_listing_id']);
+        $this->assertSame([$candidate->id], $provider->ids());
+    }
+
+    public function test_fresh_recheck_finds_active_ovoko_listing_by_part_id(): void
+    {
+        $candidate = $this->part('GPS-GMAIL-ACTIVE-RECHECK');
+        $this->ovoko($candidate, 'OV-OLD', ['status' => 'unlinked']);
+        $listing = $this->ovoko($candidate, 'OV-ACTIVE');
+
+        $this->postJson('/admin/tools/ovoko/part-mapping-reset-runner/start-from-ids?json=1', [
+            'mode' => 'dry_run',
+            'part_ids' => [$candidate->id],
+            'batch_size' => 10,
+            'delay_seconds' => 2,
+            'confirm' => 'start-ovoko-part-mapping-reset-runner-from-ids',
+        ])->assertOk()->assertJsonPath('candidate_ids.0', $candidate->id);
+
+        $this->postJson('/admin/tools/ovoko/part-mapping-reset-runner/run-next-batch', ['confirm' => 'run-ovoko-part-mapping-reset-runner-batch'])
+            ->assertOk()
+            ->assertJsonPath('last_batch_results.0.marketplace_listing_id', $listing->id)
+            ->assertJsonPath('dry_run_count', 1);
     }
 
     private function part(string $sku, array $overrides = []): Part

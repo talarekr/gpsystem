@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Storage;
 
 class OvokoPartMappingResetRunnerService
 {
-    public const MARKER = 'ovoko_part_mapping_reset_runner_rebuild_like_working_runner_v10';
+    public const MARKER = 'ovoko_part_mapping_reset_runner_candidate_id_alias_fix_v11';
     private const STATE_PATH = 'admin-tools/ovoko-part-mapping-reset-runner.json';
     private const START_CONFIRM = 'start-ovoko-part-mapping-reset-runner';
     private const START_FROM_IDS_CONFIRM = 'start-ovoko-part-mapping-reset-runner-from-ids';
@@ -349,9 +349,9 @@ class OvokoPartMappingResetRunnerService
 
     private function processOne(int $partId, string $mode): array
     {
-        $part = Part::query()->with(['marketplaceListings' => fn ($q) => $q->where('marketplace', 'ovoko')->orderByDesc('id')])->find($partId);
+        $part = Part::query()->find($partId);
         if (! $part) return ['part_id' => $partId, 'action' => 'skipped', 'reason' => 'part_not_found'];
-        $listing = $part->marketplaceListings->first();
+        $listing = $this->activeOvokoListingForPart($partId);
         $strict = app(OvokoPartMappingResetCandidateProvider::class)->strictCheck($part, $listing);
         if (! $strict['ok']) return ['part_id' => $partId, 'marketplace_listing_id' => $listing?->id, 'action' => 'skipped', 'reason' => $strict['reason']];
         $payload = $this->resultPayload($part, $listing);
@@ -381,12 +381,52 @@ class OvokoPartMappingResetRunnerService
         try {
             return app(OvokoPartMappingResetCandidateProvider::class)->ids();
         } catch (\Throwable $e) {
-            Log::error('Ovoko part mapping reset runner candidate provider failed', ['marker' => self::MARKER, 'exception' => $e]);
+            $diagnostics = $this->candidateQueryDiagnostics();
+            Log::error('Ovoko part mapping reset runner candidate provider failed', ['marker' => self::MARKER, 'diagnostics' => $diagnostics, 'exception' => $e]);
             $state = $this->readState();
-            $state['errors'] = array_slice(array_merge($state['errors'] ?? [], [$this->exceptionSummary($e, 'candidate_ids')]), -50);
+            $state['errors'] = array_slice(array_merge($state['errors'] ?? [], [$this->exceptionSummary($e, 'candidate_ids') + ['diagnostics' => $diagnostics]]), -50);
             $state['last_exception_at'] = now()->toISOString();
+            $state['candidate_query_diagnostics'] = $diagnostics;
             $this->writeState($state);
             return [];
+        }
+    }
+
+    private function activeOvokoListingForPart(int $partId): ?MarketplaceListing
+    {
+        return MarketplaceListing::query()
+            ->where('part_id', $partId)
+            ->where('marketplace', 'ovoko')
+            ->whereNotIn('status', ['unlinked', 'archived', 'deleted', 'ended', 'UNLINKED', 'ARCHIVED', 'DELETED', 'ENDED'])
+            ->where(function ($q): void {
+                $q->whereNotNull('external_offer_id')
+                    ->orWhereNotNull('external_listing_id')
+                    ->orWhereNotNull('external_inventory_id')
+                    ->orWhereNotNull('url')
+                    ->orWhereNotNull('sku');
+            })
+            ->orderByDesc('id')
+            ->first();
+    }
+
+    private function candidateQueryDiagnostics(): array
+    {
+        try {
+            $provider = app(OvokoPartMappingResetCandidateProvider::class);
+            $first = $provider->query()->limit(1)->first();
+
+            return [
+                'selected_columns_aliases' => $provider->selectedColumns(),
+                'first_raw_row_keys' => $first ? array_keys(get_object_vars($first)) : [],
+                'expected_aliases' => ['part_id', 'marketplace_listing_id'],
+            ];
+        } catch (\Throwable $diagnosticError) {
+            return [
+                'selected_columns_aliases' => ['parts.id as part_id', 'marketplace_listings.id as marketplace_listing_id'],
+                'first_raw_row_keys' => null,
+                'expected_aliases' => ['part_id', 'marketplace_listing_id'],
+                'diagnostic_error' => $diagnosticError->getMessage(),
+            ];
         }
     }
 
@@ -436,7 +476,7 @@ class OvokoPartMappingResetRunnerService
     private function readState(): array { $decoded = Storage::disk('local')->exists(self::STATE_PATH) ? json_decode(Storage::disk('local')->get(self::STATE_PATH), true) : []; return array_merge($this->emptyState(), is_array($decoded) ? $decoded : []); }
     private function writeState(array $state): void { $json = json_encode($this->jsonSafe($state), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR); Storage::disk('local')->put(self::STATE_PATH, $json); }
     private function jsonSafe(array $state): array { return json_decode(json_encode($state, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR), true, 512, JSON_THROW_ON_ERROR); }
-    private function exceptionResult(\Throwable $e, string $phase, ?string $mode = null): array { Log::error('Ovoko part mapping reset runner failed', ['marker' => self::MARKER, 'phase' => $phase, 'mode' => $mode, 'exception' => $e]); $this->rememberStartException($phase, $mode, $e); return ['ok' => false, 'marker' => self::MARKER, 'phase' => $phase, 'error_class' => $e::class, 'message' => $e->getMessage(), 'file' => $e->getFile(), 'line' => $e->getLine()]; }
+    private function exceptionResult(\Throwable $e, string $phase, ?string $mode = null): array { $diagnostics = $phase === 'query_candidates' ? $this->candidateQueryDiagnostics() : null; Log::error('Ovoko part mapping reset runner failed', ['marker' => self::MARKER, 'phase' => $phase, 'mode' => $mode, 'candidate_query_diagnostics' => $diagnostics, 'exception' => $e]); $this->rememberStartException($phase, $mode, $e); return array_filter(['ok' => false, 'marker' => self::MARKER, 'phase' => $phase, 'error_class' => $e::class, 'message' => $e->getMessage(), 'file' => $e->getFile(), 'line' => $e->getLine(), 'candidate_query_diagnostics' => $diagnostics], fn ($value) => $value !== null); }
     private function validationError(string $message, ?string $mode): array { $this->rememberStartError('validation', $mode, 'ValidationException', $message); return ['ok' => false, 'marker' => self::MARKER, 'phase' => 'validation', 'error_class' => 'ValidationException', 'message' => $message]; }
     private function rememberStartException(string $phase, ?string $mode, \Throwable $e): void { try { $state = $this->readState(); $state['last_http_500_error'] = $e->getMessage(); $state['last_start_error'] = $e->getMessage(); $state['last_start_phase'] = $phase; $state['last_start_mode'] = $mode; $state['last_exception_at'] = now()->toISOString(); $state['last_start_error_class'] = $e::class; $state['last_start_exception_class'] = $e::class; $state['last_start_exception_message'] = $e->getMessage(); $state['last_start_exception_file'] = $e->getFile(); $state['last_start_exception_line'] = $e->getLine(); $this->writeState($state); } catch (\Throwable) { /* keep original failure payload */ } }
     private function rememberStartError(string $phase, ?string $mode, string $class, string $message): void { try { $state = $this->readState(); $state['last_start_error'] = $message; $state['last_start_phase'] = $phase; $state['last_start_mode'] = $mode; $state['last_exception_at'] = now()->toISOString(); $state['last_start_error_class'] = $class; $state['last_start_exception_class'] = $class; $state['last_start_exception_message'] = $message; $this->writeState($state); } catch (\Throwable) { /* keep original failure payload */ } }
