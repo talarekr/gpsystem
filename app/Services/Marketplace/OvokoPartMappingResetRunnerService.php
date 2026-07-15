@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Storage;
 
 class OvokoPartMappingResetRunnerService
 {
-    public const MARKER = 'ovoko_part_mapping_reset_runner_from_ids_v9';
+    public const MARKER = 'ovoko_part_mapping_reset_runner_rebuild_like_working_runner_v10';
     private const STATE_PATH = 'admin-tools/ovoko-part-mapping-reset-runner.json';
     private const START_CONFIRM = 'start-ovoko-part-mapping-reset-runner';
     private const START_FROM_IDS_CONFIRM = 'start-ovoko-part-mapping-reset-runner-from-ids';
@@ -124,6 +124,7 @@ class OvokoPartMappingResetRunnerService
             'candidate_ids' => array_values(array_map('intval', $ids)),
             'route_reached_start' => true,
             'route_reached_markers' => [self::MARKER => now()->toISOString()],
+            'errors' => [],
             'last_start_phase' => 'response',
             'last_start_mode' => $validation['mode'],
         ]);
@@ -211,7 +212,7 @@ class OvokoPartMappingResetRunnerService
 
             $phase = 'query_candidates';
             $this->markStartPhase('query_candidates', $mode);
-            $ids = $this->candidateIds();
+            $ids = app(OvokoPartMappingResetCandidateProvider::class)->ids();
 
             $phase = 'build_state';
             $this->markStartPhase('build_state', $mode, ['candidate_count' => count($ids)]);
@@ -235,6 +236,7 @@ class OvokoPartMappingResetRunnerService
                 'last_start_exception_line' => null,
                 'route_reached_start' => true,
                 'route_reached_markers' => [self::MARKER => now()->toISOString()],
+                'errors' => [],
                 'last_start_phase' => 'build_state',
                 'last_start_mode' => $mode,
                 'last_exception_at' => null,
@@ -271,7 +273,7 @@ class OvokoPartMappingResetRunnerService
         }
 
         try {
-            $ids = $this->candidateIds();
+            $ids = app(OvokoPartMappingResetCandidateProvider::class)->ids();
             $canQuery = true;
             $previewId = $ids[0] ?? null;
             if ($previewId) {
@@ -324,14 +326,16 @@ class OvokoPartMappingResetRunnerService
             try {
                 $result = $this->processOne((int) $id, (string) ($state['mode'] ?? 'dry_run'));
             } catch (\Throwable $e) {
-                $result = ['part_id' => (int) $id, 'action' => 'failed', 'error' => $e->getMessage()];
+                $result = ['part_id' => (int) $id, 'action' => 'failed', 'error' => $e->getMessage(), 'error_class' => $e::class];
             }
             $results[] = $result;
             $state['processed_ids'][] = (int) $id;
             if (($result['action'] ?? null) === 'reset') $state['reset_ids'][] = (int) $id;
             elseif (($result['action'] ?? null) === 'dry_run') $state['dry_run_ids'][] = (int) $id;
-            elseif (($result['action'] ?? null) === 'failed') $state['failed_ids'][] = ['part_id' => (int) $id, 'error' => $result['error'] ?? 'unknown'];
-            else $state['skipped_ids'][] = ['part_id' => (int) $id, 'reason' => $result['reason'] ?? 'skipped'];
+            elseif (($result['action'] ?? null) === 'failed') {
+                $state['failed_ids'][] = ['part_id' => (int) $id, 'error' => $result['error'] ?? 'unknown'];
+                $state['errors'][] = ['part_id' => (int) $id, 'message' => $result['error'] ?? 'unknown'];
+            } else $state['skipped_ids'][] = ['part_id' => (int) $id, 'reason' => $result['reason'] ?? 'skipped'];
         }
         $state['last_batch_results'] = $results;
         $state['marker_position'] = count(array_unique($state['processed_ids'] ?? []));
@@ -348,7 +352,7 @@ class OvokoPartMappingResetRunnerService
         $part = Part::query()->with(['marketplaceListings' => fn ($q) => $q->where('marketplace', 'ovoko')->orderByDesc('id')])->find($partId);
         if (! $part) return ['part_id' => $partId, 'action' => 'skipped', 'reason' => 'part_not_found'];
         $listing = $part->marketplaceListings->first();
-        $strict = $this->strictCheck($part, $listing);
+        $strict = app(OvokoPartMappingResetCandidateProvider::class)->strictCheck($part, $listing);
         if (! $strict['ok']) return ['part_id' => $partId, 'marketplace_listing_id' => $listing?->id, 'action' => 'skipped', 'reason' => $strict['reason']];
         $payload = $this->resultPayload($part, $listing);
         if ($mode === 'dry_run') return $payload + ['action' => 'dry_run', 'no_mutation' => true];
@@ -375,62 +379,15 @@ class OvokoPartMappingResetRunnerService
     public function candidateIds(): array
     {
         try {
-            if (! Schema::hasTable('parts') || ! Schema::hasTable('marketplace_listings')) return [];
-
-            return $this->fallbackCandidateQuery()
-                ->limit(1000)
-                ->pluck('parts.id')
-                ->map(fn ($id) => (int) $id)
-                ->values()
-                ->all();
+            return app(OvokoPartMappingResetCandidateProvider::class)->ids();
         } catch (\Throwable $e) {
-            Log::error('Ovoko part mapping reset runner candidate fallback query failed', ['marker' => self::MARKER, 'exception' => $e]);
+            Log::error('Ovoko part mapping reset runner candidate provider failed', ['marker' => self::MARKER, 'exception' => $e]);
+            $state = $this->readState();
+            $state['errors'] = array_slice(array_merge($state['errors'] ?? [], [$this->exceptionSummary($e, 'candidate_ids')]), -50);
+            $state['last_exception_at'] = now()->toISOString();
+            $this->writeState($state);
             return [];
         }
-    }
-
-    private function fallbackCandidateQuery(): \Illuminate\Database\Query\Builder
-    {
-        if (! Schema::hasTable('parts') || ! Schema::hasTable('marketplace_listings')) {
-            throw new \RuntimeException('Required table missing: parts or marketplace_listings');
-        }
-
-        $this->assertColumns('parts', ['id', 'sku']);
-        $this->assertColumns('marketplace_listings', ['id', 'part_id', 'marketplace', 'sku', 'external_offer_id', 'external_listing_id', 'url']);
-
-        $query = DB::table('marketplace_listings')
-            ->join('parts', 'parts.id', '=', 'marketplace_listings.part_id')
-            ->select(['parts.id', 'parts.sku as part_sku', 'marketplace_listings.id as marketplace_listing_id', 'marketplace_listings.sku as listing_sku', 'marketplace_listings.url'])
-            ->where('marketplace_listings.marketplace', 'ovoko')
-            ->where(function ($q): void {
-                $q->whereNotNull('marketplace_listings.external_offer_id')
-                    ->orWhereNotNull('marketplace_listings.external_listing_id')
-                    ->orWhereNotNull('marketplace_listings.url');
-            })
-            ->where(function ($q): void {
-                $q->where('marketplace_listings.sku', 'like', 'GPS-GMAIL-%')
-                    ->orWhere('parts.sku', 'like', 'GPS-GMAIL-%');
-            })
-            ->orderByDesc('parts.id');
-
-        if (Schema::hasColumn('parts', 'price')) {
-            $query->where(function ($q): void {
-                $q->whereNull('parts.price')->orWhere('parts.price', '<=', 0);
-            });
-        }
-
-        if (Schema::hasColumn('parts', 'ovoko_price')) {
-            $query->where(function ($q): void {
-                $q->whereNull('parts.ovoko_price')->orWhere('parts.ovoko_price', '<=', 0);
-            });
-        }
-
-        if (Schema::hasColumn('marketplace_listings', 'status')) $query->where('marketplace_listings.status', 'imported');
-        if (Schema::hasColumn('parts', 'needs_listing')) $query->where('parts.needs_listing', true);
-        if (Schema::hasColumn('parts', 'is_visible_storefront')) $query->where('parts.is_visible_storefront', false);
-        if (Schema::hasColumn('parts', 'status')) $query->whereNotIn('parts.status', ['published', 'sold', 'archived']);
-
-        return $query;
     }
 
     private function columnExistence(string $table, array $columns, bool $tableExists): array
@@ -474,7 +431,7 @@ class OvokoPartMappingResetRunnerService
 
     private function emptyState(): array
     {
-        return ['ok' => true, 'marker' => self::MARKER, 'mode' => 'dry_run', 'status' => 'idle', 'started_at' => null, 'finished_at' => null, 'message' => null, 'batch_size' => 10, 'delay_seconds' => 2, 'total_candidates_at_start' => 0, 'candidate_ids' => [], 'processed_ids' => [], 'reset_ids' => [], 'dry_run_ids' => [], 'skipped_ids' => [], 'failed_ids' => [], 'last_batch_results' => [], 'marker_position' => 0, 'last_start_error' => null, 'last_http_500_error' => null, 'last_start_exception_class' => null, 'last_start_exception_message' => null, 'last_start_exception_file' => null, 'last_start_exception_line' => null, 'route_reached_start' => false, 'route_reached_markers' => [], 'last_start_phase' => null, 'last_start_mode' => null, 'last_exception_at' => null];
+        return ['ok' => true, 'marker' => self::MARKER, 'mode' => 'dry_run', 'status' => 'idle', 'started_at' => null, 'finished_at' => null, 'message' => null, 'batch_size' => 10, 'delay_seconds' => 2, 'total_candidates_at_start' => 0, 'candidate_ids' => [], 'processed_ids' => [], 'reset_ids' => [], 'dry_run_ids' => [], 'skipped_ids' => [], 'failed_ids' => [], 'last_batch_results' => [], 'errors' => [], 'marker_position' => 0, 'last_start_error' => null, 'last_http_500_error' => null, 'last_start_exception_class' => null, 'last_start_exception_message' => null, 'last_start_exception_file' => null, 'last_start_exception_line' => null, 'route_reached_start' => false, 'route_reached_markers' => [], 'last_start_phase' => null, 'last_start_mode' => null, 'last_exception_at' => null];
     }
     private function readState(): array { $decoded = Storage::disk('local')->exists(self::STATE_PATH) ? json_decode(Storage::disk('local')->get(self::STATE_PATH), true) : []; return array_merge($this->emptyState(), is_array($decoded) ? $decoded : []); }
     private function writeState(array $state): void { $json = json_encode($this->jsonSafe($state), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR); Storage::disk('local')->put(self::STATE_PATH, $json); }
@@ -483,6 +440,7 @@ class OvokoPartMappingResetRunnerService
     private function validationError(string $message, ?string $mode): array { $this->rememberStartError('validation', $mode, 'ValidationException', $message); return ['ok' => false, 'marker' => self::MARKER, 'phase' => 'validation', 'error_class' => 'ValidationException', 'message' => $message]; }
     private function rememberStartException(string $phase, ?string $mode, \Throwable $e): void { try { $state = $this->readState(); $state['last_http_500_error'] = $e->getMessage(); $state['last_start_error'] = $e->getMessage(); $state['last_start_phase'] = $phase; $state['last_start_mode'] = $mode; $state['last_exception_at'] = now()->toISOString(); $state['last_start_error_class'] = $e::class; $state['last_start_exception_class'] = $e::class; $state['last_start_exception_message'] = $e->getMessage(); $state['last_start_exception_file'] = $e->getFile(); $state['last_start_exception_line'] = $e->getLine(); $this->writeState($state); } catch (\Throwable) { /* keep original failure payload */ } }
     private function rememberStartError(string $phase, ?string $mode, string $class, string $message): void { try { $state = $this->readState(); $state['last_start_error'] = $message; $state['last_start_phase'] = $phase; $state['last_start_mode'] = $mode; $state['last_exception_at'] = now()->toISOString(); $state['last_start_error_class'] = $class; $state['last_start_exception_class'] = $class; $state['last_start_exception_message'] = $message; $this->writeState($state); } catch (\Throwable) { /* keep original failure payload */ } }
+    private function exceptionSummary(\Throwable $e, string $phase): array { return ['phase' => $phase, 'error_class' => $e::class, 'message' => $e->getMessage(), 'file' => $e->getFile(), 'line' => $e->getLine(), 'at' => now()->toISOString()]; }
     private function withComputed(array $state): array { $processed = count(array_unique($state['processed_ids'] ?? [])); $total = (int) ($state['total_candidates_at_start'] ?? count($state['candidate_ids'] ?? [])); return $state + ['total_candidates' => $total, 'processed' => $processed, 'reset_count' => count($state['reset_ids'] ?? []), 'dry_run_count' => count($state['dry_run_ids'] ?? []), 'skipped_count' => count($state['skipped_ids'] ?? []), 'failed_count' => count($state['failed_ids'] ?? []), 'remaining' => max(0, $total - $processed)]; }
     private function hasActiveMapping(MarketplaceListing $l): bool { return (filled($l->external_offer_id) || filled($l->external_listing_id) || filled($l->external_inventory_id) || filled($l->url) || filled($l->sku)) && ! in_array((string) $l->status, ['unlinked', 'archived', 'deleted', 'ended', 'UNLINKED', 'ARCHIVED', 'DELETED', 'ENDED'], true); }
     private function identityLooksLikeGpsGmail(Part $p, ?MarketplaceListing $l): bool { foreach ([$p->sku, $p->part_number, $l?->sku, $l?->external_offer_id, $l?->external_inventory_id] as $v) if (preg_match('/^GPS-GMAIL-/i', (string) $v) === 1) return true; return false; }
