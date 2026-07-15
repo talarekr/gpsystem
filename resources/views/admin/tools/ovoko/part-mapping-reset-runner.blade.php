@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="pl"><head><meta charset="utf-8"><title>Ovoko part mapping reset runner</title><style>body{font-family:system-ui;margin:24px}.card{border:1px solid #ddd;border-radius:8px;padding:16px;margin:12px 0}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.mono{font-family:monospace}button{padding:8px 12px;margin:4px}</style></head>
+<body>
+<h1>Ovoko part mapping reset runner</h1>
+@if(session('runner_message'))<div class="card">{{ session('runner_message') }}</div>@endif
+@if(session('runner_error'))<div class="card">{{ session('runner_error') }}</div>@endif
+<div class="card"><h2>Warunki strict</h2><p>Runner odłącza wyłącznie lokalne mapowania/linki Ovoko dla GPS-GMAIL, z aktywnym linkiem/identity Ovoko, bez ceny lokalnej i Ovoko, w kolejce do wystawienia, poza menu Części, status=imported, risk=low. Nie wykonuje requestów do Ovoko i nie rusza Allegro/eBay, zdjęć, opisów, cen, ilości, samochodów ani przesyłek.</p></div>
+<div class="card"><h2>Status</h2><div class="grid">@foreach(['status','mode','total_candidates','processed','reset_count','dry_run_count','skipped_count','failed_count','remaining','batch_size','delay_seconds','started_at','finished_at'] as $key)<div><strong>{{ $key }}</strong><br><span id="s-{{ $key }}">{{ data_get($status,$key,'—') }}</span></div>@endforeach</div></div>
+<div class="card"><h2>Sterowanie</h2>
+<form method="POST" action="{{ route('admin.tools.ovoko.part-mapping-reset-runner.start') }}">@csrf<input type="hidden" name="mode" value="dry_run"><input type="hidden" name="confirm" value="start-ovoko-part-mapping-reset-runner">Batch <input name="batch_size" value="10" size="3"> Delay <input name="delay_seconds" value="2" size="3"><button>Start dry-run</button></form>
+<form method="POST" action="{{ route('admin.tools.ovoko.part-mapping-reset-runner.start') }}" onsubmit="return confirm('Uruchomić LIVE reset lokalnych mapowań Ovoko?');">@csrf<input type="hidden" name="mode" value="live"><input type="hidden" name="confirm" value="start-ovoko-part-mapping-reset-runner">Batch <input name="batch_size" value="10" size="3"> Delay <input name="delay_seconds" value="2" size="3"><button>Start live</button></form>
+<form id="runNextForm" method="POST" action="{{ route('admin.tools.ovoko.part-mapping-reset-runner.run-next-batch') }}">@csrf<input type="hidden" name="confirm" value="run-ovoko-part-mapping-reset-runner-batch"><button>Run next batch</button></form>
+<form method="POST" action="{{ route('admin.tools.ovoko.part-mapping-reset-runner.stop') }}">@csrf<input type="hidden" name="confirm" value="stop-ovoko-part-mapping-reset-runner"><button>Stop</button></form>
+<button onclick="location.reload()">Refresh status</button></div>
+<div class="card"><h2>Ostatni batch</h2><pre id="lastBatch" class="mono">{{ json_encode(data_get($status,'last_batch_results',[]), JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE) }}</pre></div>
+<script>
+const statusUrl=@json(route('admin.tools.ovoko.part-mapping-reset-runner.status',['json'=>1]));const runNextUrl=@json(route('admin.tools.ovoko.part-mapping-reset-runner.run-next-batch'));const token='{{ csrf_token() }}';
+async function tick(){const s=await (await fetch(statusUrl)).json();for(const k of ['status','mode','total_candidates','processed','reset_count','dry_run_count','skipped_count','failed_count','remaining','batch_size','delay_seconds','started_at','finished_at']){const e=document.getElementById('s-'+k);if(e)e.textContent=s[k]??'—'}document.getElementById('lastBatch').textContent=JSON.stringify(s.last_batch_results||[],null,2);if(s.status==='running'){setTimeout(async()=>{await fetch(runNextUrl,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-TOKEN':token,'Accept':'application/json'},body:JSON.stringify({confirm:'run-ovoko-part-mapping-reset-runner-batch'})});tick();},Math.max(1,Number(s.delay_seconds||2))*1000)}}tick();
+</script></body></html>
