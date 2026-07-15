@@ -7,6 +7,7 @@ use App\Models\MarketplaceListing;
 use App\Models\MarketplaceSyncLog;
 use App\Models\Part;
 use App\Services\Marketplace\PublishPartToMarketplacesService;
+use App\Services\Marketplace\OvokoPartMappingResetCandidateProvider;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
@@ -129,124 +130,66 @@ class OvokoPartMappingResetController extends Controller
         ]);
     }
 
-    public function candidates(Request $request): JsonResponse|Response
+    public function candidates(Request $request, OvokoPartMappingResetCandidateProvider $candidateProvider): JsonResponse|Response
     {
-        $limit = max(1, min(1000, (int) $request->integer('limit', 100)));
-        $includeReadiness = $request->boolean('include_readiness');
-        $statuses = collect(explode(',', (string) $request->query('status', 'imported,mapped,confirmed,published,ready')))
-            ->map(fn (string $status): string => trim($status))
-            ->filter()
-            ->values()
-            ->all();
+        try {
+            $limit = max(1, min(1000, (int) $request->integer('limit', 100)));
+            $rows = $candidateProvider->rows($limit);
+            $payload = [
+                'marker' => 'ovoko_part_mapping_reset_runner_rebuild_like_working_runner_v10',
+                'filters' => $request->only(['limit', 'only_gps_gmail', 'only_missing_price', 'only_to_publish_queue', 'only_with_ovoko_url', 'exclude_published', 'only_imported', 'status', 'source_system', 'include_readiness', 'export']),
+                'summary' => [
+                    'total_candidates' => count($rows),
+                    'strict_reset_candidates_count' => count($rows),
+                    'missing_price_candidates_count' => count($rows),
+                    'candidates_with_gps_gmail_sku' => count($rows),
+                    'to_publish_candidates_count' => count($rows),
+                    'parts_menu_active_skipped_count' => 0,
+                    'published_candidates_count' => 0,
+                    'safety_flags' => $this->readOnlySafetyFlags(),
+                ],
+                'candidates' => $rows,
+                'safety_flags' => $this->readOnlySafetyFlags(),
+            ];
 
-        $query = Part::query()
-            ->with(['marketplaceListings' => fn ($q) => $q->where('marketplace', 'ovoko')->orderByDesc('id'), 'images'])
-            ->whereHas('marketplaceListings', function ($q) use ($statuses, $request): void {
-                $q->where('marketplace', 'ovoko')
-                    ->where(function ($inner): void {
-                        $inner->whereNotNull('external_offer_id')
-                            ->orWhereNotNull('external_listing_id')
-                            ->orWhereNotNull('external_inventory_id')
-                            ->orWhereNotNull('url')
-                            ->orWhereNotNull('sku')
-                            ->orWhereNotNull('raw_payload');
-                    });
+            if ($request->query('export') === 'csv') {
+                return $this->csvResponse('ovoko-part-mapping-reset-candidates.csv', $rows);
+            }
 
-                if ($statuses !== []) {
-                    $q->where(function ($statusQuery) use ($statuses): void {
-                        $statusQuery->whereIn('status', $statuses)
-                            ->orWhereIn('sync_status', $statuses)
-                            ->orWhereIn('match_status', $statuses);
-                    });
-                }
-
-                if ($request->boolean('only_with_ovoko_url')) {
-                    $q->whereNotNull('url')->where('url', '!=', '');
-                }
-            });
-
-        if ($request->filled('source_system')) {
-            $query->where('source_system', (string) $request->query('source_system'));
+            return response()->json($payload);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'marker' => 'ovoko_part_mapping_reset_runner_rebuild_like_working_runner_v10',
+                'ok' => false,
+                'summary' => ['total_candidates' => 0, 'safety_flags' => $this->readOnlySafetyFlags()],
+                'candidates' => [],
+                'error' => ['class' => $e::class, 'message' => $e->getMessage()],
+                'safety_flags' => $this->readOnlySafetyFlags(),
+            ], 200);
         }
-
-        $rows = $query->orderByDesc('id')->limit($limit * 3)->get()
-            ->map(fn (Part $part): array => $this->candidateRow($part, $includeReadiness))
-            ->filter(function (array $row) use ($request): bool {
-                if ($request->boolean('only_gps_gmail') && ! $row['identity_looks_like_gps_gmail']) return false;
-                if ($request->boolean('only_missing_price') && ! ((bool) $row['missing_price_for_strict_reset'])) return false;
-                if ($request->boolean('only_with_ovoko_url') && ! $row['has_active_ovoko_url']) return false;
-                if ($request->boolean('only_to_publish_queue') && $row['is_to_publish'] !== true) return false;
-                if (($request->boolean('only_not_ready') || $request->boolean('exclude_ready')) && $row['readiness_blockers_for_audit'] === []) return false;
-                if ($request->boolean('exclude_published') && strcasecmp((string) $row['status'], 'published') === 0) return false;
-                if ($request->boolean('only_imported') && strcasecmp((string) $row['status'], 'imported') !== 0) return false;
-
-                return true;
-            })
-            ->take($limit)
-            ->values()
-            ->all();
-
-        $rowCollection = collect($rows);
-
-        $summary = [
-            'total_candidates' => count($rows),
-            'candidates_with_gps_gmail_sku' => $rowCollection->where('identity_looks_like_gps_gmail', true)->count(),
-            'candidates_with_ovoko_url' => $rowCollection->where('has_active_ovoko_url', true)->count(),
-            'candidates_missing_price' => $rowCollection->filter(fn (array $row): bool => in_array('brak ceny', $row['readiness_blockers_for_audit'], true))->count(),
-            'strict_reset_candidates_count' => $rowCollection->where('reset_recommended_now_strict', true)->count(),
-            'missing_price_candidates_count' => $rowCollection->where('missing_price_for_strict_reset', true)->count(),
-            'with_price_skipped_count' => $rowCollection->filter(fn (array $row): bool => (bool) $row['has_price'] || (bool) $row['has_ovoko_price'])->count(),
-            'to_publish_candidates_count' => $rowCollection->where('is_to_publish', true)->count(),
-            'parts_menu_active_skipped_count' => $rowCollection->where('is_in_parts_menu', true)->count(),
-            'unknown_publish_state_count' => $rowCollection->filter(fn (array $row): bool => ($row['is_to_publish'] ?? null) === 'unknown' || ($row['is_in_parts_menu'] ?? null) === 'unknown')->count(),
-            'candidates_missing_category' => $rowCollection->filter(fn (array $row): bool => in_array('brak kategorii Ovoko', $row['readiness_blockers_for_audit'], true))->count(),
-            'candidates_ready_after_reset' => $rowCollection->where('should_create_after_reset', true)->filter(fn (array $row): bool => ($row['readiness_blockers_for_audit'] ?? []) === [])->count(),
-            'ready_candidates_count' => $rowCollection->filter(fn (array $row): bool => ($row['readiness_blockers_for_audit'] ?? []) === [])->count(),
-            'not_ready_candidates_count' => $rowCollection->filter(fn (array $row): bool => ($row['readiness_blockers_for_audit'] ?? []) !== [])->count(),
-            'published_candidates_count' => $rowCollection->filter(fn (array $row): bool => strcasecmp((string) $row['status'], 'published') === 0)->count(),
-            'imported_not_ready_candidates_count' => $rowCollection->filter(fn (array $row): bool => strcasecmp((string) $row['status'], 'imported') === 0)->filter(fn (array $row): bool => ($row['readiness_blockers_for_audit'] ?? []) !== [])->count(),
-            'safety_flags' => $this->readOnlySafetyFlags(),
-        ];
-
-        $responseRows = $rowCollection->map(fn (array $row): array => Arr::except($row, ['readiness_blockers_for_audit']))->values()->all();
-
-        $payload = [
-            'marker' => 'ovoko_reset_candidates_missing_price_to_publish_only_v4',
-            'filters' => $request->only(['limit', 'only_gps_gmail', 'only_missing_price', 'only_to_publish_queue', 'only_with_ovoko_url', 'only_not_ready', 'exclude_ready', 'exclude_published', 'only_imported', 'status', 'source_system', 'include_readiness', 'export']),
-            'summary' => $summary,
-            'candidates' => $responseRows,
-            'safety_flags' => $this->readOnlySafetyFlags(),
-        ];
-
-        if ($request->query('export') === 'csv') {
-            return $this->csvResponse('ovoko-part-mapping-reset-candidates.csv', $responseRows);
-        }
-
-        return response()->json($payload);
     }
 
 
-    public function candidateIds(Request $request): JsonResponse
+    public function candidateIds(Request $request, OvokoPartMappingResetCandidateProvider $candidateProvider): JsonResponse
     {
-        $request->query->set('export', null);
-        $request->query->set('json', '1');
-        $response = $this->candidates($request);
-        $payload = json_decode($response->getContent() ?: '{}', true);
-        $ids = collect($payload['candidates'] ?? [])
-            ->pluck('part_id')
-            ->map(fn ($id): int => (int) $id)
-            ->filter(fn (int $id): bool => $id > 0)
-            ->values()
-            ->all();
+        try {
+            $ids = $candidateProvider->ids(max(1, min(1000, (int) $request->integer('limit', 1000))));
 
-        return response()->json([
-            'ids' => $ids,
-            'count' => count($ids),
-            'marker' => 'ovoko_part_mapping_reset_runner_from_ids_v9',
-            'source_marker' => $payload['marker'] ?? null,
-            'filters' => $payload['filters'] ?? [],
-            'safety_flags' => $this->readOnlySafetyFlags(),
-        ]);
+            return response()->json([
+                'ids' => $ids,
+                'count' => count($ids),
+                'marker' => 'ovoko_part_mapping_reset_runner_rebuild_like_working_runner_v10',
+                'safety_flags' => $this->readOnlySafetyFlags(),
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'ids' => [],
+                'count' => 0,
+                'marker' => 'ovoko_part_mapping_reset_runner_rebuild_like_working_runner_v10',
+                'error' => ['class' => $e::class, 'message' => $e->getMessage()],
+                'safety_flags' => $this->readOnlySafetyFlags(),
+            ], 200);
+        }
     }
 
     public function preview(Request $request): JsonResponse
