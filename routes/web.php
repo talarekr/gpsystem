@@ -400,6 +400,8 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/ovoko/part-mapping-reset-runner', [OvokoPartMappingResetRunnerController::class, 'index'])->name('admin.tools.ovoko.part-mapping-reset-runner.index');
     Route::get('/admin/tools/ovoko/part-mapping-reset-runner/status', [OvokoPartMappingResetRunnerController::class, 'status'])->name('admin.tools.ovoko.part-mapping-reset-runner.status');
     Route::get('/admin/tools/ovoko/part-mapping-reset-runner/debug', [OvokoPartMappingResetRunnerController::class, 'debug'])->name('admin.tools.ovoko.part-mapping-reset-runner.debug');
+    Route::post('/admin/tools/ovoko/part-mapping-reset-runner/start-smoke', [OvokoPartMappingResetRunnerController::class, 'startSmoke'])->name('admin.tools.ovoko.part-mapping-reset-runner.start-smoke');
+    Route::post('/admin/tools/ovoko/part-mapping-reset-runner/start-service-smoke', [OvokoPartMappingResetRunnerController::class, 'startServiceSmoke'])->name('admin.tools.ovoko.part-mapping-reset-runner.start-service-smoke');
     Route::post('/admin/tools/ovoko/part-mapping-reset-runner/start', [OvokoPartMappingResetRunnerController::class, 'start'])->name('admin.tools.ovoko.part-mapping-reset-runner.start');
     Route::post('/admin/tools/ovoko/part-mapping-reset-runner/run-next-batch', [OvokoPartMappingResetRunnerController::class, 'runNextBatch'])->name('admin.tools.ovoko.part-mapping-reset-runner.run-next-batch');
     Route::post('/admin/tools/ovoko/part-mapping-reset-runner/stop', [OvokoPartMappingResetRunnerController::class, 'stop'])->name('admin.tools.ovoko.part-mapping-reset-runner.stop');

@@ -30,35 +30,82 @@ class OvokoPartMappingResetRunnerController extends Controller
         ]);
     }
 
-    public function status(OvokoPartMappingResetRunnerService $service): JsonResponse
+    public function status(): JsonResponse
     {
         try {
+            $service = app(OvokoPartMappingResetRunnerService::class);
             return response()->json($service->status());
         } catch (\Throwable $e) {
             return response()->json($this->fallbackStatus($e, 'status'), 200);
         }
     }
 
-    public function start(Request $request, OvokoPartMappingResetRunnerService $service): JsonResponse|RedirectResponse
+    public function start(Request $request): JsonResponse|RedirectResponse
     {
         try {
+            $service = app(OvokoPartMappingResetRunnerService::class);
             $result = $service->start($request->only(['mode', 'batch_size', 'delay_seconds', 'confirm']));
         } catch (\Throwable $e) {
-            $result = $this->exceptionPayload($e, 'unknown');
+            $result = $this->exceptionPayload($e, 'start_outermost');
         }
 
         if ($this->shouldReturnJson($request)) return response()->json($result, ($result['ok'] ?? false) ? 200 : 422);
 
-        $message = ($result['ok'] ?? false)
-            ? 'Runner został uruchomiony.'
-            : 'Start zablokowany: '.($result['message'] ?? $result['reason'] ?? 'unknown').' (phase: '.($result['phase'] ?? 'start').')';
+        try {
+            $message = ($result['ok'] ?? false)
+                ? 'Runner został uruchomiony.'
+                : 'Start zablokowany: '.($result['message'] ?? $result['reason'] ?? 'unknown').' (phase: '.($result['phase'] ?? 'start').')';
 
-        return redirect()->route('admin.tools.ovoko.part-mapping-reset-runner.index')->with(($result['ok'] ?? false) ? 'runner_message' : 'runner_error', $message);
+            return redirect()->route('admin.tools.ovoko.part-mapping-reset-runner.index')->with(($result['ok'] ?? false) ? 'runner_message' : 'runner_error', $message);
+        } catch (\Throwable $e) {
+            return response()->json($this->exceptionPayload($e, 'start_response'), 500);
+        }
     }
 
-    public function debug(OvokoPartMappingResetRunnerService $service): JsonResponse
+    public function startSmoke(Request $request): JsonResponse
+    {
+        return response()->json([
+            'ok' => true,
+            'route_reached' => true,
+            'method' => $request->method(),
+            'payload' => [
+                'mode' => $request->input('mode'),
+                'batch_size' => $request->input('batch_size'),
+                'delay_seconds' => $request->input('delay_seconds'),
+                'confirm_present' => $request->filled('confirm'),
+            ],
+            'marker' => OvokoPartMappingResetRunnerService::MARKER,
+        ]);
+    }
+
+    public function startServiceSmoke(Request $request): JsonResponse
+    {
+        $payload = [
+            'ok' => false,
+            'marker' => OvokoPartMappingResetRunnerService::MARKER,
+            'route_reached' => true,
+            'controller_reached' => true,
+            'candidate_query_executed' => false,
+            'mutation_executed' => false,
+        ];
+
+        try {
+            $service = app(OvokoPartMappingResetRunnerService::class);
+            $payload['service_resolved'] = true;
+            $payload['service_class'] = $service::class;
+            $payload['current_state'] = $service->status();
+            $payload['ok'] = true;
+        } catch (\Throwable $e) {
+            $payload += $this->exceptionPayload($e, 'service_smoke');
+        }
+
+        return response()->json($payload, ($payload['ok'] ?? false) ? 200 : 422);
+    }
+
+    public function debug(): JsonResponse
     {
         try {
+            $service = app(OvokoPartMappingResetRunnerService::class);
             $debug = $service->debug();
         } catch (\Throwable $e) {
             $debug = [
@@ -79,6 +126,8 @@ class OvokoPartMappingResetRunnerController extends Controller
             'admin.tools.ovoko.part-mapping-reset-runner.index',
             'admin.tools.ovoko.part-mapping-reset-runner.status',
             'admin.tools.ovoko.part-mapping-reset-runner.start',
+            'admin.tools.ovoko.part-mapping-reset-runner.start-smoke',
+            'admin.tools.ovoko.part-mapping-reset-runner.start-service-smoke',
             'admin.tools.ovoko.part-mapping-reset-runner.run-next-batch',
             'admin.tools.ovoko.part-mapping-reset-runner.stop',
             'admin.tools.ovoko.part-mapping-reset-runner.debug',

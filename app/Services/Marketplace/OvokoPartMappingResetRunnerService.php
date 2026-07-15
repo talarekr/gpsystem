@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Storage;
 
 class OvokoPartMappingResetRunnerService
 {
-    public const MARKER = 'ovoko_part_mapping_reset_runner_live_start_500_fix_v5';
+    public const MARKER = 'ovoko_part_mapping_reset_runner_live_hard_500_fix_v6';
     private const STATE_PATH = 'admin-tools/ovoko-part-mapping-reset-runner.json';
     private const START_CONFIRM = 'start-ovoko-part-mapping-reset-runner';
     private const BATCH_CONFIRM = 'run-ovoko-part-mapping-reset-runner-batch';
@@ -37,7 +37,7 @@ class OvokoPartMappingResetRunnerService
             }
 
             if (($input['confirm'] ?? null) !== self::START_CONFIRM) {
-                return $this->validationError('missing_confirm_token', $mode);
+                return $this->validationError('Invalid confirm token', $mode);
             }
 
             $batchSize = max(1, min(25, (int) ($input['batch_size'] ?? 10)));
@@ -66,6 +66,13 @@ class OvokoPartMappingResetRunnerService
                 'candidate_ids' => array_values(array_map('intval', $ids)),
                 'marker_position' => 0,
                 'last_start_error' => null,
+                'last_http_500_error' => null,
+                'last_start_exception_class' => null,
+                'last_start_exception_message' => null,
+                'last_start_exception_file' => null,
+                'last_start_exception_line' => null,
+                'route_reached_start' => true,
+                'route_reached_markers' => [self::MARKER => now()->toISOString()],
                 'last_start_phase' => null,
                 'last_start_mode' => $mode,
                 'last_exception_at' => null,
@@ -233,14 +240,15 @@ class OvokoPartMappingResetRunnerService
 
     private function emptyState(): array
     {
-        return ['ok' => true, 'marker' => self::MARKER, 'mode' => 'dry_run', 'status' => 'idle', 'started_at' => null, 'finished_at' => null, 'message' => null, 'batch_size' => 10, 'delay_seconds' => 2, 'total_candidates_at_start' => 0, 'candidate_ids' => [], 'processed_ids' => [], 'reset_ids' => [], 'dry_run_ids' => [], 'skipped_ids' => [], 'failed_ids' => [], 'last_batch_results' => [], 'marker_position' => 0, 'last_start_error' => null, 'last_start_phase' => null, 'last_start_mode' => null, 'last_exception_at' => null];
+        return ['ok' => true, 'marker' => self::MARKER, 'mode' => 'dry_run', 'status' => 'idle', 'started_at' => null, 'finished_at' => null, 'message' => null, 'batch_size' => 10, 'delay_seconds' => 2, 'total_candidates_at_start' => 0, 'candidate_ids' => [], 'processed_ids' => [], 'reset_ids' => [], 'dry_run_ids' => [], 'skipped_ids' => [], 'failed_ids' => [], 'last_batch_results' => [], 'marker_position' => 0, 'last_start_error' => null, 'last_http_500_error' => null, 'last_start_exception_class' => null, 'last_start_exception_message' => null, 'last_start_exception_file' => null, 'last_start_exception_line' => null, 'route_reached_start' => false, 'route_reached_markers' => [], 'last_start_phase' => null, 'last_start_mode' => null, 'last_exception_at' => null];
     }
     private function readState(): array { $decoded = Storage::disk('local')->exists(self::STATE_PATH) ? json_decode(Storage::disk('local')->get(self::STATE_PATH), true) : []; return array_merge($this->emptyState(), is_array($decoded) ? $decoded : []); }
     private function writeState(array $state): void { $json = json_encode($this->jsonSafe($state), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR); Storage::disk('local')->put(self::STATE_PATH, $json); }
     private function jsonSafe(array $state): array { return json_decode(json_encode($state, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR), true, 512, JSON_THROW_ON_ERROR); }
-    private function exceptionResult(\Throwable $e, string $phase, ?string $mode = null): array { Log::error('Ovoko part mapping reset runner failed', ['marker' => self::MARKER, 'phase' => $phase, 'mode' => $mode, 'exception' => $e]); $this->rememberStartError($phase, $mode, $e::class, $e->getMessage()); return ['ok' => false, 'marker' => self::MARKER, 'phase' => $phase, 'error_class' => $e::class, 'message' => $e->getMessage()]; }
+    private function exceptionResult(\Throwable $e, string $phase, ?string $mode = null): array { Log::error('Ovoko part mapping reset runner failed', ['marker' => self::MARKER, 'phase' => $phase, 'mode' => $mode, 'exception' => $e]); $this->rememberStartException($phase, $mode, $e); return ['ok' => false, 'marker' => self::MARKER, 'phase' => $phase, 'error_class' => $e::class, 'message' => $e->getMessage(), 'file' => $e->getFile(), 'line' => $e->getLine()]; }
     private function validationError(string $message, ?string $mode): array { $this->rememberStartError('validation', $mode, 'ValidationException', $message); return ['ok' => false, 'marker' => self::MARKER, 'phase' => 'validation', 'error_class' => 'ValidationException', 'message' => $message]; }
-    private function rememberStartError(string $phase, ?string $mode, string $class, string $message): void { try { $state = $this->readState(); $state['last_start_error'] = $message; $state['last_start_phase'] = $phase; $state['last_start_mode'] = $mode; $state['last_exception_at'] = now()->toISOString(); $state['last_start_error_class'] = $class; $this->writeState($state); } catch (\Throwable) { /* keep original failure payload */ } }
+    private function rememberStartException(string $phase, ?string $mode, \Throwable $e): void { try { $state = $this->readState(); $state['last_http_500_error'] = $e->getMessage(); $state['last_start_error'] = $e->getMessage(); $state['last_start_phase'] = $phase; $state['last_start_mode'] = $mode; $state['last_exception_at'] = now()->toISOString(); $state['last_start_error_class'] = $e::class; $state['last_start_exception_class'] = $e::class; $state['last_start_exception_message'] = $e->getMessage(); $state['last_start_exception_file'] = $e->getFile(); $state['last_start_exception_line'] = $e->getLine(); $this->writeState($state); } catch (\Throwable) { /* keep original failure payload */ } }
+    private function rememberStartError(string $phase, ?string $mode, string $class, string $message): void { try { $state = $this->readState(); $state['last_start_error'] = $message; $state['last_start_phase'] = $phase; $state['last_start_mode'] = $mode; $state['last_exception_at'] = now()->toISOString(); $state['last_start_error_class'] = $class; $state['last_start_exception_class'] = $class; $state['last_start_exception_message'] = $message; $this->writeState($state); } catch (\Throwable) { /* keep original failure payload */ } }
     private function withComputed(array $state): array { $processed = count(array_unique($state['processed_ids'] ?? [])); $total = (int) ($state['total_candidates_at_start'] ?? count($state['candidate_ids'] ?? [])); return $state + ['total_candidates' => $total, 'processed' => $processed, 'reset_count' => count($state['reset_ids'] ?? []), 'dry_run_count' => count($state['dry_run_ids'] ?? []), 'skipped_count' => count($state['skipped_ids'] ?? []), 'failed_count' => count($state['failed_ids'] ?? []), 'remaining' => max(0, $total - $processed)]; }
     private function hasActiveMapping(MarketplaceListing $l): bool { return (filled($l->external_offer_id) || filled($l->external_listing_id) || filled($l->external_inventory_id) || filled($l->url) || filled($l->sku)) && ! in_array((string) $l->status, ['unlinked', 'archived', 'deleted', 'ended', 'UNLINKED', 'ARCHIVED', 'DELETED', 'ENDED'], true); }
     private function identityLooksLikeGpsGmail(Part $p, ?MarketplaceListing $l): bool { foreach ([$p->sku, $p->part_number, $l?->sku, $l?->external_offer_id, $l?->external_inventory_id] as $v) if (preg_match('/^GPS-GMAIL-/i', (string) $v) === 1) return true; return false; }
