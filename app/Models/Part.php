@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Services\PartCategorySuggestionService;
+use App\Services\PartSlugService;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -64,6 +65,9 @@ class Part extends Model
             $part->needs_listing ??= false;
             $part->needs_review ??= false;
             $part->fillVehicleSnapshot();
+            if (blank($part->slug) && filled($part->name)) {
+                $part->slug = app(PartSlugService::class)->uniqueSlugForName($part->name);
+            }
             if (! $part->skipCategorySuggestion) {
                 app(PartCategorySuggestionService::class)->suggest($part);
             }
