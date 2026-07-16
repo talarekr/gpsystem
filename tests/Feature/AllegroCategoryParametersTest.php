@@ -525,6 +525,102 @@ class AllegroCategoryParametersTest extends TestCase
         $this->assertSame('Brak rodzaju paliwa w samochodzie — nie można ustalić parametru Typ silnika.', $missingFuel['missing_required_parameters'][0]['reason']);
     }
 
+
+    public function test_allegro_complete_engine_type_keeps_diesel_mapping_regression(): void
+    {
+        $result = $this->buildEngineTypeForFuel('Diesel', [['id' => 'diesel-id-from-api', 'value' => 'Diesel']]);
+
+        $this->assertSame([['id' => 'engine-type', 'valuesIds' => ['diesel-id-from-api']]], $result['offer_parameters']);
+        $this->assertSame([], $result['missing_required_parameters']);
+    }
+
+    /**
+     * @dataProvider petrolEngineTypeFuelProvider
+     */
+    public function test_allegro_complete_engine_type_maps_petrol_intent_to_official_benzynowy_value(string $fuelType): void
+    {
+        $result = $this->buildEngineTypeForFuel($fuelType, [['id' => 'petrol-id-from-api', 'value' => 'Benzynowy']]);
+
+        $this->assertSame([['id' => 'engine-type', 'valuesIds' => ['petrol-id-from-api']]], $result['offer_parameters']);
+        $this->assertSame([], $result['missing_required_parameters']);
+        $this->assertSame('Benzynowy', $result['offer_parameter_diagnostics'][0]['matched_value_label']);
+        $this->assertSame('petrol-id-from-api', $result['offer_parameter_diagnostics'][0]['matched_value_id']);
+    }
+
+    public static function petrolEngineTypeFuelProvider(): array
+    {
+        return [
+            'benzyna' => ['benzyna'],
+            'benzynowy' => ['Benzynowy'],
+            'petrol' => ['petrol'],
+            'gasoline' => ['gasoline'],
+        ];
+    }
+
+    public function test_allegro_complete_engine_type_uses_current_value_id_from_api_dictionary(): void
+    {
+        $result = $this->buildEngineTypeForFuel('benzyna', [['id' => 'different-current-api-id', 'value' => 'Benzynowy']]);
+
+        $this->assertSame([['id' => 'engine-type', 'valuesIds' => ['different-current-api-id']]], $result['offer_parameters']);
+        $this->assertSame([], $result['missing_required_parameters']);
+    }
+
+    public function test_allegro_complete_engine_type_blocks_petrol_when_dictionary_has_no_counterpart(): void
+    {
+        $result = $this->buildEngineTypeForFuel('benzyna', [
+            ['id' => 'diesel-id', 'value' => 'Diesel'],
+            ['id' => 'electric-id', 'value' => 'Elektryczny'],
+            ['id' => 'hybrid-id', 'value' => 'Hybrydowy'],
+        ]);
+
+        $this->assertSame([], $result['offer_parameters']);
+        $this->assertSame('Typ silnika', $result['missing_required_parameters'][0]['name']);
+        $this->assertSame('required_parameter_not_mapped', $result['missing_required_parameters'][0]['blocker']);
+    }
+
+    public function test_allegro_complete_engine_type_does_not_guess_unknown_fuel(): void
+    {
+        $result = $this->buildEngineTypeForFuel('wodór', [['id' => 'petrol-id', 'value' => 'Benzynowy']]);
+
+        $this->assertSame([], $result['offer_parameters']);
+        $this->assertSame('required_parameter_not_mapped', $result['missing_required_parameters'][0]['blocker']);
+    }
+
+    public function test_allegro_complete_engine_type_respects_describes_product_location(): void
+    {
+        $productResult = $this->buildEngineTypeForFuel('benzyna', [['id' => 'petrol-id', 'value' => 'Benzynowy']], true);
+        $offerResult = $this->buildEngineTypeForFuel('benzyna', [['id' => 'petrol-id', 'value' => 'Benzynowy']], false);
+
+        $this->assertSame([['id' => 'engine-type', 'valuesIds' => ['petrol-id']]], $productResult['product_parameters']);
+        $this->assertSame([], $productResult['offer_parameters']);
+        $this->assertSame([['id' => 'engine-type', 'valuesIds' => ['petrol-id']]], $offerResult['offer_parameters']);
+        $this->assertSame([], $offerResult['product_parameters']);
+    }
+
+    public function test_allegro_complete_engine_type_optional_missing_value_is_unmapped_not_missing_required(): void
+    {
+        $result = $this->buildEngineTypeForFuel('benzyna', [['id' => 'diesel-id', 'value' => 'Diesel']], false, false);
+
+        $this->assertSame([], $result['offer_parameters']);
+        $this->assertSame([], $result['missing_required_parameters']);
+        $this->assertSame('Typ silnika', $result['unmapped_parameters'][0]['name']);
+    }
+
+    private function buildEngineTypeForFuel(string $fuelType, array $dictionary, bool $describesProduct = false, bool $required = true): array
+    {
+        $car = Car::query()->create(['make' => 'Mercedes-Benz', 'model' => 'E', 'fuel_type' => $fuelType]);
+        $part = Part::query()->create(['name' => 'Silnik kompletny Mercedes', 'category_id' => 77, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'car_id' => $car->id, 'is_visible_storefront' => true]);
+
+        return app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, null, ['ok' => true, 'source' => 'cache', 'parameters' => [[
+            'id' => 'engine-type',
+            'name' => 'Typ silnika',
+            'type' => 'dictionary',
+            'required' => $required,
+            'dictionary' => $dictionary,
+            'options' => ['describesProduct' => $describesProduct],
+        ]]]);
+    }
+
     private function carTypeDictionary(): array
     {
         return [

@@ -195,9 +195,10 @@ class AllegroOfferParametersBuilder
     {
         $normalized = $this->norm($fuelType);
         $map = [
-            'benzyna' => ['benzyna'],
-            'petrol' => ['benzyna'],
-            'gasoline' => ['benzyna'],
+            'benzyna' => ['benzyna', 'benzynowy'],
+            'benzynowy' => ['benzyna', 'benzynowy'],
+            'petrol' => ['benzyna', 'benzynowy'],
+            'gasoline' => ['benzyna', 'benzynowy'],
             'diesel' => ['diesel'],
             'olejnapedowy' => ['diesel'],
             'hybryda' => ['hybryda'],
