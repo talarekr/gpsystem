@@ -91,7 +91,8 @@ class AllegroSalesSettingsTest extends TestCase
         $this->assertStringContainsString("Forms\\Components\\Select::make(self::ALLEGRO_MANUAL_PARAMETERS_FIELD.'.'.$parameterId)", $resource);
         $this->assertStringContainsString("Forms\\Components\\Select::make('selected_value_ids')", $resource);
         $this->assertStringContainsString('->hiddenLabel()', $resource);
-        $this->assertStringContainsString('->contained(false)', $resource);
+        $this->assertStringNotContainsString('->contained(false)', $resource);
+        $this->assertStringContainsString("->extraAttributes(['class' => 'gps-allegro-parameters-repeater'])", $resource);
         $this->assertStringContainsString('->itemLabel(null)', $resource);
         $this->assertStringContainsString('->addable(false)', $resource);
         $this->assertStringContainsString('->deletable(false)', $resource);

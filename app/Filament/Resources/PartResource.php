@@ -166,8 +166,8 @@ class PartResource extends Resource
             ->reorderable(false)
             ->reorderableWithButtons(false)
             ->reorderableWithDragAndDrop(false)
-            ->contained(false)
             ->itemLabel(null)
+            ->extraAttributes(['class' => 'gps-allegro-parameters-repeater'])
             ->dehydrated(true)
             ->default(fn (?Part $record): array => self::dynamicAllegroParameterItems($record))
             ->schema([
