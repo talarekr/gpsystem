@@ -145,6 +145,8 @@ class MarketplaceListingReadinessService
             'missing_fields' => $missing,
             'warnings' => $warnings,
             'blockers' => $blockers,
+            'missing_required_allegro_parameters' => $allegroParameters['missing_required_allegro_parameters'] ?? [],
+            'dynamic_allegro_parameters' => $this->dynamicAllegroParametersDiagnostics($categoryMapping, $allegroParameters),
             'prepared_payload_preview_safe' => $this->safePayloadPreview($part, $channel, $price, $categoryMapping, $ebayPrice, $allegroParameters, $allegroSalesSettings),
             'price_source' => $this->priceSource($channel),
             'local_price' => is_numeric($part->price ?? null) ? (float) $part->price : null,
@@ -490,6 +492,36 @@ class MarketplaceListingReadinessService
         return $mapping;
     }
     private function hasActiveListing(Part $part, ?string $marketplace, string $channel): bool { if (! $marketplace || ! Schema::hasTable('marketplace_listings')) return false; return MarketplaceListing::query()->where('part_id', $part->id)->where('marketplace', $marketplace)->where(function ($q) { $q->whereNotNull('external_listing_id')->orWhereNotNull('external_offer_id'); })->where(function ($q) { $q->whereNull('external_listing_id')->orWhere('external_listing_id', 'not like', 'GPSW-%'); })->where(function ($q) { $q->whereNull('external_offer_id')->orWhere('external_offer_id', 'not like', 'GPSW-%'); })->whereIn('status', ['published','active','ACTIVE','live'])->whereNotIn('last_api_status', ['ended','inactive','deleted','archived','not_found','unavailable','failed','error'])->whereNull('not_seen_in_active_api_at')->get()->contains(fn (MarketplaceListing $listing): bool => ! app(OvokoStaleListingService::class)->ignoredForPublish($listing)); }
+    private function dynamicAllegroParametersDiagnostics(?MarketplaceCategoryMapping $categoryMapping, ?array $allegroParameters): array
+    {
+        $fields = [];
+        foreach (($allegroParameters['missing_required_allegro_parameters'] ?? []) as $param) {
+            $officialValues = array_values((array) ($param['dictionary'] ?? []));
+            $fields[] = [
+                'parameter_id' => (string) ($param['id'] ?? ''),
+                'parameter_name' => (string) ($param['name'] ?? ''),
+                'type' => (string) ($param['type'] ?? ''),
+                'multiple_choices' => (bool) ($param['multiple_choices'] ?? false),
+                'required' => (bool) ($param['required'] ?? false),
+                'describes_product' => (bool) ($param['describes_product'] ?? false),
+                'official_values' => $officialValues,
+                'saved_value_ids' => [],
+                'valid_saved_value_ids' => [],
+                'invalid_saved_value_ids' => [],
+                'ui_supported' => (bool) ($param['ui_supported'] ?? false),
+                'payload_preview' => null,
+            ];
+        }
+
+        return [
+            'triggered_by_prepare' => true,
+            'category_id' => (string) ($categoryMapping?->external_category_id ?? ''),
+            'fields' => $fields,
+            'blockers' => array_values(array_filter(array_map(fn (array $param): ?string => $param['blocker'] ?? null, (array) ($allegroParameters['missing_required_allegro_parameters'] ?? [])))),
+            'warnings' => [],
+        ];
+    }
+
     /** @return array<string, mixed> */
     private function safePayloadPreview(Part $part, string $channel, ?float $price, ?MarketplaceCategoryMapping $categoryMapping = null, ?array $ebayPrice = null, ?array $allegroParameters = null, ?array $allegroSalesSettings = null): array
     {

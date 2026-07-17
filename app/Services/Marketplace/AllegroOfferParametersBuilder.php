@@ -12,7 +12,7 @@ class AllegroOfferParametersBuilder
 {
     private array $loggedCarTypeMappings = [];
 
-    public function __construct(private readonly AllegroFunctionsBranchResolver $functionsBranchResolver, private readonly AllegroFunctionsParameterService $functionsParameterService, private readonly AllegroFunctionsSelectionService $functionsSelectionService) {}
+    public function __construct(private readonly AllegroFunctionsBranchResolver $functionsBranchResolver, private readonly AllegroFunctionsParameterService $functionsParameterService, private readonly AllegroFunctionsSelectionService $functionsSelectionService, private readonly AllegroManualParameterSelectionService $manualSelectionService) {}
 
     public function build(Part $part, ?MarketplaceCategoryMapping $mapping, array $definitionsResult): array
     {
@@ -23,7 +23,7 @@ class AllegroOfferParametersBuilder
         foreach ($definitions as $def) {
             $hasInvoiceParameter = $hasInvoiceParameter || $this->norm($def['name'] ?? '') === 'faktura';
             $required = (bool) ($def['required'] ?? false);
-            $resolved = $this->resolveFunctionsParameter($part, $mapping, $def) ?? $this->resolve($part, $mapping, $def);
+            $resolved = $this->resolveManualDictionarySelection($part, $mapping, $def) ?? $this->resolveFunctionsParameter($part, $mapping, $def) ?? $this->resolve($part, $mapping, $def);
             if ($resolved['value'] === null) {
                 $row = $this->diagnosticRow($def, $resolved);
                 if ($required) $missing[] = $row; else $unmapped[] = $row;
@@ -41,6 +41,26 @@ class AllegroOfferParametersBuilder
         return $this->result($offer, $product, $missing, $optional, $unmapped, $diag, $definitionsResult, $payments, $paymentDiagnostics);
     }
 
+    private function resolveManualDictionarySelection(Part $part, ?MarketplaceCategoryMapping $mapping, array $def): ?array
+    {
+        if (($def['type'] ?? '') !== 'dictionary') return null;
+
+        $categoryId = (string) ($mapping?->external_category_id ?? $def['category_id'] ?? '');
+        $parameterId = (string) ($def['id'] ?? '');
+        if ($categoryId === '' || $parameterId === '') return null;
+
+        $selected = $this->manualSelectionService->selectedValueIds($part, $categoryId, $parameterId);
+        if ($selected === []) return null;
+
+        $allowed = array_keys($this->manualSelectionService->allowedLabels($def));
+        $valid = array_values(array_intersect($selected, $allowed));
+
+        if ($valid === []) {
+            return ['value' => null, 'source' => 'allegro_parameter_selections.value_id', 'source_value' => $selected, 'reason' => 'manual_selection_values_not_in_current_dictionary', 'invalid_saved_value_ids' => $selected];
+        }
+
+        return ['type' => 'dictionary', 'value' => $valid, 'source' => 'allegro_parameter_selections.value_id', 'label' => $valid, 'manual_override_used' => true, 'valid_saved_value_ids' => $valid, 'invalid_saved_value_ids' => array_values(array_diff($selected, $valid))];
+    }
 
     private function resolveFunctionsParameter(Part $part, ?MarketplaceCategoryMapping $mapping, array $def): ?array
     {
@@ -577,7 +597,8 @@ class AllegroOfferParametersBuilder
             'type' => (string) ($def['type'] ?? ''),
             'describesProduct' => (bool) ($def['options']['describesProduct'] ?? false),
             'parameter_location' => ((bool) ($def['options']['describesProduct'] ?? false)) ? 'productSet[0].product.parameters' : 'parameters',
-            'allowed_values' => $resolved['allowed_values'] ?? (($this->norm($def['name'] ?? '') === 'typsamochodu') ? $this->allowedValuesDiagnostics($def) : null),
+            'allowed_values' => $resolved['allowed_values'] ?? (($def['type'] ?? '') === 'dictionary' ? $this->allowedValuesDiagnostics($def) : null),
+            'multiple_choices' => (bool) ($def['restrictions']['multipleChoices'] ?? $def['multipleChoices'] ?? false),
             'selected_value_label' => $resolved['selected_value_label'] ?? ($resolved['label'] ?? null),
             'selected_value_id' => $resolved['selected_value_id'] ?? ($resolved['mapped_value_id'] ?? ($valuesIds[0] ?? null)),
             'local_category_installation_side_intent' => $resolved['local_category_installation_side_intent'] ?? null,
@@ -591,6 +612,9 @@ class AllegroOfferParametersBuilder
             'local_category_id' => $resolved['local_category_id'] ?? null,
             'local_category_name' => $resolved['local_category_name'] ?? null,
             'auto_injected' => ($resolved['mapping_source'] ?? null) === 'local_shop_category_default_installation_side',
+            'manual_override_used' => (bool) ($resolved['manual_override_used'] ?? false),
+            'valid_saved_value_ids' => $resolved['valid_saved_value_ids'] ?? null,
+            'invalid_saved_value_ids' => $resolved['invalid_saved_value_ids'] ?? null,
         ];
 
         if ($row['blocker'] === null) unset($row['blocker']);
@@ -601,6 +625,9 @@ class AllegroOfferParametersBuilder
         if ($row['mapped_label'] === null) unset($row['mapped_label']);
         foreach (['part_id', 'car_id', 'matched_parameter_name', 'matched_parameter_id', 'matched_value_label', 'matched_value_id', 'selected_value_label', 'selected_value_id', 'local_category_installation_side_intent', 'parameter_values_source', 'available_values_official', 'matched_official_value_id', 'matched_official_value_label', 'matcher_reason', 'mapping_source', 'mapping_rule', 'local_category_id', 'local_category_name'] as $key) { if ($row[$key] === null) unset($row[$key]); }
         if ($row['auto_injected'] === false) unset($row['auto_injected']);
+        if ($row['manual_override_used'] === false) unset($row['manual_override_used']);
+        if ($row['valid_saved_value_ids'] === null) unset($row['valid_saved_value_ids']);
+        if ($row['invalid_saved_value_ids'] === null) unset($row['invalid_saved_value_ids']);
         if ($row['allowed_values_sample'] === null) unset($row['allowed_values_sample']);
         if ($row['allowed_values'] === null) unset($row['allowed_values']);
 
@@ -728,7 +755,36 @@ class AllegroOfferParametersBuilder
     {
         $payloadParameters = $this->mergeParameters($offer);
 
-        return ['allegro_parameters'=>array_merge($product, $offer),'offer_parameters'=>$offer,'payload_parameters'=>$payloadParameters,'product_parameters'=>$product,'payments'=>$payments,'missing_required_parameters'=>$missing,'optional_parameters_present'=>$optional,'unmapped_parameters'=>$unmapped,'parameter_source_diagnostics'=>array_merge($diag, $paymentDiagnostics),'product_parameter_diagnostics'=>array_values(array_filter($diag, fn ($row) => ($row['parameter_location'] ?? null) === 'productSet[0].product.parameters')),'offer_parameter_diagnostics'=>array_values(array_filter($diag, fn ($row) => ($row['parameter_location'] ?? null) === 'parameters')),'payment_diagnostics'=>$paymentDiagnostics,'parameter_definitions_source'=>$defs['source'] ?? 'none','will_make_marketplace_request'=>false];
+        return ['allegro_parameters'=>array_merge($product, $offer),'missing_required_allegro_parameters'=>$this->missingRequiredAllegroParameters($missing),'offer_parameters'=>$offer,'payload_parameters'=>$payloadParameters,'product_parameters'=>$product,'payments'=>$payments,'missing_required_parameters'=>$missing,'optional_parameters_present'=>$optional,'unmapped_parameters'=>$unmapped,'parameter_source_diagnostics'=>array_merge($diag, $paymentDiagnostics),'product_parameter_diagnostics'=>array_values(array_filter($diag, fn ($row) => ($row['parameter_location'] ?? null) === 'productSet[0].product.parameters')),'offer_parameter_diagnostics'=>array_values(array_filter($diag, fn ($row) => ($row['parameter_location'] ?? null) === 'parameters')),'payment_diagnostics'=>$paymentDiagnostics,'parameter_definitions_source'=>$defs['source'] ?? 'none','will_make_marketplace_request'=>false];
+    }
+
+    private function missingRequiredAllegroParameters(array $missing): array
+    {
+        return array_values(array_map(function (array $row): array {
+            $dictionary = [];
+            foreach (($row['allowed_values'] ?? []) as $id => $label) {
+                $dictionary[] = ['id' => (string) $id, 'label' => (string) $label];
+            }
+            $isDictionary = ($row['type'] ?? '') === 'dictionary';
+            $multiple = (bool) ($row['multiple_choices'] ?? true);
+            $uiSupported = $isDictionary && $dictionary !== [];
+
+            return [
+                'id' => (string) ($row['id'] ?? ''),
+                'name' => (string) ($row['name'] ?? ''),
+                'type' => (string) ($row['type'] ?? ''),
+                'required' => (bool) ($row['required'] ?? false),
+                'required_for_product' => (bool) ($row['required'] ?? false),
+                'describes_product' => (bool) ($row['describesProduct'] ?? false),
+                'multiple_choices' => $multiple,
+                'dictionary' => $dictionary,
+                'reason' => $row['reason'] ?? null,
+                'source' => 'official_allegro_category_parameters',
+                'ui_supported' => $uiSupported,
+                'ui_component' => $uiSupported ? ($multiple ? 'multi_select' : 'select') : null,
+                'blocker' => $uiSupported ? null : ($isDictionary ? 'allegro_parameter_dictionary_empty' : 'allegro_parameter_type_not_supported'),
+            ];
+        }, $missing));
     }
 
     private function mergeParameters(array ...$groups): array
