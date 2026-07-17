@@ -449,6 +449,8 @@ class MarketplaceListingReadinessService
 
     private function allegroCategoryMapping(Part $part): ?MarketplaceCategoryMapping
     {
+        if ($override = $this->categoryOverride($part, 'allegro', 'allegro_main')) return $override;
+
         $resolved = app(AllegroCategoryResolver::class)->resolve($part);
         if (($resolved['mapping'] ?? null) instanceof MarketplaceCategoryMapping) return $resolved['mapping'];
         if (filled($resolved['id'] ?? null)) {

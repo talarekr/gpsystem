@@ -611,6 +611,55 @@ class AllegroSalesSettingsTest extends TestCase
         $this->assertStringNotContainsString('Uzupełnij wymagane parametry Allegro poniżej i zapisz produkt. Brakuje: ', $controller);
     }
 
+
+    public function test_allegro_publish_preflight_uses_same_override_category_manual_selection_as_prepare(): void
+    {
+        config(['marketplace.publish_enabled' => true]);
+        Http::fake($this->fakeAllegroFunctions(['129929_256' => 'kierunkowskazy']));
+        $part = $this->partInAllegroFunctionsBranch('99999');
+        $part->forceFill([
+            'description' => 'Opis przełącznika kierunkowskazów',
+            'allegro_shipping_rate_name' => 'KURIER DPD',
+            'review_metadata' => ['marketplace_category_overrides' => ['allegro' => ['external_category_id' => '18892', 'channel' => 'allegro_main']]],
+        ])->save();
+        PartImage::query()->create(['part_id' => $part->id, 'path' => 'parts/photos/imported/7890/kuyJdjAM4xzYvW7Hoy0YQ7WlCKE8nRfkSUskHyT0.jpg', 'is_primary' => true, 'sort_order' => 1]);
+
+        app(\App\Services\Marketplace\AllegroManualParameterSelectionService::class)->sync(
+            $part,
+            '18892',
+            $this->functionsDefinition(['129929_256' => 'kierunkowskazy']),
+            ['129929_256'],
+        );
+
+        $prepare = app(\App\Services\Marketplace\PartMarketplaceReadinessService::class)->check($part->fresh())['allegro'];
+        $preflight = app(MarketplaceListingReadinessService::class)->checkPartReadiness($part->fresh(), 'allegro_main');
+
+        $this->assertTrue($prepare['ready']);
+        $this->assertTrue($preflight['can_publish_later']);
+        $this->assertSame('18892', data_get($preflight, 'prepared_payload_preview_safe.category_id'));
+        $this->assertSame([['id' => '229205', 'valuesIds' => ['129929_256']]], data_get($preflight, 'prepared_payload_preview_safe.productSet.0.product.parameters'));
+        $this->assertNotContains('allegro_required_category_parameters_missing', $preflight['blockers']);
+    }
+
+    public function test_allegro_selection_under_different_category_or_invalid_value_still_blocks_publish_preflight(): void
+    {
+        Http::fake($this->fakeAllegroFunctions(['129929_256' => 'kierunkowskazy']));
+        $part = $this->partInAllegroFunctionsBranch('18892');
+        $part->forceFill(['description' => 'Opis przełącznika kierunkowskazów', 'allegro_shipping_rate_name' => 'KURIER DPD'])->save();
+        PartImage::query()->create(['part_id' => $part->id, 'path' => 'parts/photos/imported/7890/kuyJdjAM4xzYvW7Hoy0YQ7WlCKE8nRfkSUskHyT0.jpg', 'is_primary' => true, 'sort_order' => 1]);
+
+        $part->allegroParameterSelections()->create(['allegro_category_id' => '99999', 'parameter_id' => '229205', 'parameter_name' => 'Funkcje', 'value_id' => '129929_256', 'value_label' => 'kierunkowskazy']);
+        $categoryMismatch = app(MarketplaceListingReadinessService::class)->checkPartReadiness($part->fresh(), 'allegro_main');
+        $this->assertFalse($categoryMismatch['can_publish_later']);
+        $this->assertContains('allegro_required_category_parameters_missing', $categoryMismatch['blockers']);
+
+        $part->allegroParameterSelections()->delete();
+        $part->allegroParameterSelections()->create(['allegro_category_id' => '18892', 'parameter_id' => '229205', 'parameter_name' => 'Funkcje', 'value_id' => 'invalid', 'value_label' => 'invalid']);
+        $invalidValue = app(MarketplaceListingReadinessService::class)->checkPartReadiness($part->fresh(), 'allegro_main');
+        $this->assertFalse($invalidValue['can_publish_later']);
+        $this->assertContains('manual_selection_values_not_in_current_dictionary', $invalidValue['blockers']);
+    }
+
     public function test_allegro_dynamic_dictionary_select_rejects_custom_ui_values_and_keeps_official_selection_label(): void
     {
         $field = $this->dynamicFunctionsField($this->fixture7985FunctionsDictionary());
