@@ -679,6 +679,79 @@ class AllegroSalesSettingsTest extends TestCase
     }
 
 
+
+    public function test_allegro_dynamic_parameter_section_uses_explicit_form_state_after_prepare(): void
+    {
+        $resource = file_get_contents(app_path('Filament/Resources/PartResource.php'));
+        $view = file_get_contents(resource_path('views/filament/resources/parts/marketplace-readiness-cards.blade.php'));
+
+        $this->assertStringContainsString("public const ALLEGRO_DYNAMIC_PARAMETER_FIELDS = 'allegro_dynamic_parameter_fields';", $resource);
+        $this->assertStringContainsString("count((array) ($get(self::ALLEGRO_DYNAMIC_PARAMETER_FIELDS) ?: [])) > 0", $resource);
+        $this->assertStringContainsString('data.dynamic_allegro_parameters.fields', $view);
+        $this->assertStringContainsString('hydrateAllegroDynamicParametersFromPrepare', $view);
+    }
+
+    public function test_allegro_dynamic_parameter_fields_are_hydrated_without_page_reload(): void
+    {
+        $part = $this->partInAllegroFunctionsBranch('18892');
+        $admin = User::factory()->create();
+        $admin->assignRole('admin');
+
+        Livewire::actingAs($admin)
+            ->test(EditPart::class, ['record' => $part->getKey()])
+            ->assertSet('data.'.PartResource::ALLEGRO_DYNAMIC_PARAMETER_FIELDS, [])
+            ->call('hydrateAllegroDynamicParametersFromPrepare', [$this->dynamicFunctionsField(['129929_8' => 'nawiew, klimatyzacja'])])
+            ->assertSet('data.'.PartResource::ALLEGRO_DYNAMIC_PARAMETER_FIELDS.'.0.id', '129929')
+            ->assertSet('data.'.PartResource::ALLEGRO_DYNAMIC_PARAMETER_FIELDS.'.0.name', 'Funkcje')
+            ->assertSet('data.'.PartResource::ALLEGRO_MANUAL_PARAMETERS_FIELD.'.129929', []);
+    }
+
+    public function test_allegro_dynamic_parameter_renderer_supports_multiple_dictionary_fields(): void
+    {
+        $fields = PartResource::dynamicAllegroParameterFields(null, [
+            $this->dynamicFunctionsField(['129929_8' => 'nawiew, klimatyzacja']),
+            $this->dynamicFunctionsField(['p2v1' => 'Opcja'], 'p2', 'Drugi parametr'),
+        ]);
+
+        $this->assertCount(2, $fields);
+        $this->assertSame('allegro_dynamic_parameter_values.129929', $fields[0]->getName());
+        $this->assertSame('allegro_dynamic_parameter_values.p2', $fields[1]->getName());
+    }
+
+    public function test_saved_value_ids_hydrate_dynamic_parameter_values(): void
+    {
+        $part = $this->partInAllegroFunctionsBranch('18892');
+        $admin = User::factory()->create();
+        $admin->assignRole('admin');
+
+        Livewire::actingAs($admin)
+            ->test(EditPart::class, ['record' => $part->getKey()])
+            ->call('hydrateAllegroDynamicParametersFromPrepare', [$this->dynamicFunctionsField(['129929_8' => 'nawiew, klimatyzacja'], saved: ['129929_8'])])
+            ->assertSet('data.'.PartResource::ALLEGRO_MANUAL_PARAMETERS_FIELD.'.129929', ['129929_8']);
+    }
+
+    public function test_dynamic_parameter_normalizer_rejects_custom_text_fields(): void
+    {
+        $this->assertNull(PartResource::normalizeDynamicAllegroParameterField($this->dynamicFunctionsField([])));
+        $this->assertNull(PartResource::normalizeDynamicAllegroParameterField(array_replace($this->dynamicFunctionsField(['129929_8' => 'nawiew']), ['type' => 'string'])));
+    }
+
+
+    private function dynamicFunctionsField(array $values, string $id = '129929', string $name = 'Funkcje', array $saved = []): array
+    {
+        return [
+            'parameter_id' => $id,
+            'parameter_name' => $name,
+            'type' => 'dictionary',
+            'multiple_choices' => true,
+            'required' => true,
+            'describes_product' => true,
+            'ui_supported' => true,
+            'official_values' => array_map(fn (string $label, string $valueId): array => ['id' => $valueId, 'label' => $label], $values, array_keys($values)),
+            'saved_value_ids' => $saved,
+        ];
+    }
+
     private function fixture7985FunctionsDictionary(): array
     {
         return [

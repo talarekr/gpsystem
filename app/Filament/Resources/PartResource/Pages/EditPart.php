@@ -50,6 +50,7 @@ class EditPart extends EditRecord
         $data['part_photo_paths'] = [];
         $data['marketplace_category_selections'] = [];
         $data[PartResource::ALLEGRO_FUNCTIONS_FIELD] = PartResource::savedAllegroFunctionsValueIds($this->record);
+        $data[PartResource::ALLEGRO_DYNAMIC_PARAMETER_FIELDS] = PartResource::dynamicAllegroParameterDefinitions($this->record);
         $data[PartResource::ALLEGRO_MANUAL_PARAMETERS_FIELD] = PartResource::savedAllegroManualParameterValues($this->record);
 
         return $data;
@@ -61,7 +62,7 @@ class EditPart extends EditRecord
         $this->marketplaceCategorySelections = (array) ($data['marketplace_category_selections'] ?? []);
         $this->allegroFunctionsValueIds = (array) ($data[PartResource::ALLEGRO_FUNCTIONS_FIELD] ?? []);
         $this->allegroManualParameterValues = (array) ($data[PartResource::ALLEGRO_MANUAL_PARAMETERS_FIELD] ?? []);
-        unset($data['part_photo_paths'], $data['marketplace_category_selections'], $data[PartResource::ALLEGRO_FUNCTIONS_FIELD], $data[PartResource::ALLEGRO_MANUAL_PARAMETERS_FIELD]);
+        unset($data['part_photo_paths'], $data['marketplace_category_selections'], $data[PartResource::ALLEGRO_FUNCTIONS_FIELD], $data[PartResource::ALLEGRO_MANUAL_PARAMETERS_FIELD], $data[PartResource::ALLEGRO_DYNAMIC_PARAMETER_FIELDS]);
 
         $data['additional_part_codes'] = AdditionalPartCodes::normalize($data['additional_part_codes'] ?? null, $data['part_number'] ?? null);
         $data['condition_notes'] = PartResource::defaultConditionValue($data['condition_notes'] ?? null);
@@ -349,6 +350,27 @@ class EditPart extends EditRecord
         return true;
     }
 
+
+
+    public function hydrateAllegroDynamicParametersFromPrepare(array $fields): void
+    {
+        $definitions = array_values(array_filter(array_map(
+            fn (array $field): ?array => PartResource::normalizeDynamicAllegroParameterField($field),
+            $fields,
+        )));
+
+        $this->data[PartResource::ALLEGRO_DYNAMIC_PARAMETER_FIELDS] = $definitions;
+
+        foreach ($definitions as $definition) {
+            $parameterId = (string) $definition['id'];
+            $savedValueIds = array_values((array) ($definition['saved_value_ids'] ?? []));
+            $this->data[PartResource::ALLEGRO_MANUAL_PARAMETERS_FIELD][$parameterId] = ($definition['multiple_choices'] ?? false)
+                ? $savedValueIds
+                : ($savedValueIds[0] ?? null);
+        }
+
+        $this->dispatch('$refresh');
+    }
 
     private function syncAllegroFunctionsSelections(): void
     {
