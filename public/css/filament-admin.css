@@ -1154,6 +1154,39 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     background: var(--gps-part-field-bg) !important;
 }
 
+
+/* Keep the Allegro parameters section visually flat: Filament's Repeater
+   renders nested containers that otherwise inherit the compact part-form card chrome. */
+.gps-part-form .gps-part-form-section--allegro-parameters .gps-allegro-parameters-repeater.fi-fo-repeater,
+.gps-part-form .gps-part-form-section--allegro-parameters .gps-allegro-parameters-repeater :where(
+    .fi-fo-repeater,
+    .fi-fo-repeater > div,
+    .fi-fo-repeater-item,
+    .fi-in-repeatable-item,
+    .fi-fo-repeater-item-header,
+    .fi-in-repeatable-item-header,
+    .fi-fo-repeater-item-content,
+    .fi-in-repeatable-item-content,
+    .fi-fo-component-ctn,
+    .grid,
+    .fi-fo-field-wrp,
+    .fi-fo-field-wrp > div
+) {
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+.gps-part-form .gps-part-form-section--allegro-parameters .gps-allegro-parameters-repeater :where(.fi-fo-select .choices) {
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
 .gps-part-form {
     --gps-part-inline-label-color: #354d69;
     --gps-part-inline-label-font: inherit;
