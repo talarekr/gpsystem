@@ -56,6 +56,28 @@ class AllegroSalesSettingsTest extends TestCase
         $this->assertStringNotContainsString("->label('Kurier Allegro')", $resource);
     }
 
+    public function test_allegro_functions_section_is_between_courier_and_marketplace_channels(): void
+    {
+        $resource = file_get_contents(app_path('Filament/Resources/PartResource.php'));
+
+        $carPosition = strpos($resource, "Section::make('Informacje o samochodzie')");
+        $pricesPosition = strpos($resource, "Section::make('Ceny')");
+        $courierPosition = strpos($resource, "Section::make('Kurier Allegro')");
+        $functionsPosition = strpos($resource, "Section::make('Funkcje Allegro')");
+        $channelsPosition = strpos($resource, "Section::make('Kanały sprzedaży')");
+
+        $this->assertNotFalse($carPosition);
+        $this->assertNotFalse($pricesPosition);
+        $this->assertNotFalse($courierPosition);
+        $this->assertNotFalse($functionsPosition);
+        $this->assertNotFalse($channelsPosition);
+        $this->assertTrue($carPosition < $pricesPosition);
+        $this->assertTrue($pricesPosition < $courierPosition);
+        $this->assertTrue($courierPosition < $functionsPosition);
+        $this->assertTrue($functionsPosition < $channelsPosition);
+        $this->assertStringContainsString("Forms\\Components\\Select::make(self::ALLEGRO_FUNCTIONS_FIELD)", substr($resource, $functionsPosition, $channelsPosition - $functionsPosition));
+    }
+
     public function test_manual_return_policy_mapping_keeps_readiness_unblocked_when_api_does_not_return_it(): void
     {
         Http::fake($this->fakeAllegro(returnPolicies: []));
