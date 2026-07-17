@@ -396,11 +396,16 @@ class EditPart extends EditRecord
         if ($categoryId === '') return;
 
         foreach (PartResource::dynamicAllegroParameterDefinitions($this->record) as $definition) {
+            $rawValue = $this->allegroManualParameterValues[(string) $definition['id']] ?? [];
+            $valueIds = ($definition['multiple_choices'] ?? false)
+                ? $rawValue
+                : ($rawValue === null || $rawValue === '' ? [] : [$rawValue]);
+
             app(AllegroManualParameterSelectionService::class)->sync(
                 $this->record,
                 $categoryId,
                 ['id' => $definition['id'], 'name' => $definition['name'], 'dictionary' => array_map(fn (array $row): array => ['id' => $row['id'] ?? '', 'value' => $row['label'] ?? ''], (array) ($definition['dictionary'] ?? []))],
-                $this->allegroManualParameterValues[(string) $definition['id']] ?? [],
+                $valueIds,
                 PartResource::ALLEGRO_MANUAL_PARAMETERS_FIELD.'.'.$definition['id'],
             );
         }

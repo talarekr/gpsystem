@@ -744,6 +744,33 @@ class AllegroSalesSettingsTest extends TestCase
         $this->assertSame('allegro_dynamic_parameter_values.p2', $fields[1]->getName());
     }
 
+    public function test_allegro_dynamic_dictionary_parameter_maps_official_values_to_select_options(): void
+    {
+        $field = $this->dynamicFunctionsField($this->fixture7985FunctionsDictionary());
+        $definition = PartResource::normalizeDynamicAllegroParameterField($field);
+        $options = PartResource::dynamicAllegroParameterOptions($definition);
+        $components = PartResource::dynamicAllegroParameterFields(null, [$field]);
+
+        $this->assertNotNull($definition);
+        $this->assertCount(18, $definition['dictionary']);
+        $this->assertSame('nawiew, klimatyzacja', $options['129929_8']);
+        $this->assertCount(18, $options);
+        $this->assertInstanceOf(\Filament\Forms\Components\Select::class, $components[0]);
+        $this->assertSame('allegro_dynamic_parameter_values.129929', $components[0]->getName());
+    }
+
+    public function test_allegro_dynamic_parameter_renderer_uses_stable_component_keys(): void
+    {
+        $resource = file_get_contents(app_path('Filament/Resources/PartResource.php'));
+
+        $this->assertStringContainsString("->key('allegro-parameter-'.$parameterId)", $resource);
+        $this->assertStringContainsString('Forms\\Components\\Select::make(self::ALLEGRO_MANUAL_PARAMETERS_FIELD.\'.\'.$parameterId)', $resource);
+        $this->assertStringNotContainsString('TagsInput::make(self::ALLEGRO_MANUAL_PARAMETERS_FIELD', $resource);
+        $this->assertStringNotContainsString('TextInput::make(self::ALLEGRO_MANUAL_PARAMETERS_FIELD', $resource);
+        $this->assertStringNotContainsString('->creatable()', $resource);
+        $this->assertStringNotContainsString('->createOptionUsing(', $resource);
+    }
+
     public function test_saved_value_ids_apply_dynamic_parameter_values(): void
     {
         $part = $this->partInAllegroFunctionsBranch('18892');
@@ -798,7 +825,7 @@ class AllegroSalesSettingsTest extends TestCase
             '129929_270' => 'czujnik deszczu',
             '129929_271' => 'czujnik zmierzchu',
             '129929_272' => 'manetki zmiany biegów',
-            '129929_273' => 'inne',
+            '129929_8' => 'nawiew, klimatyzacja',
         ];
     }
 
