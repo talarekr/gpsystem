@@ -12,7 +12,15 @@ use Throwable;
 
 class AllegroCategoryParametersService
 {
-    public function definitions(string $categoryId, bool $refresh = false): array
+    public function definitionsReadOnly(string $categoryId, bool $refresh = false): array
+    {
+        $result = $this->definitions($categoryId, $refresh, allowCredentialRefresh: false, allowCacheWrite: false);
+        $result['writes'] = ['database' => false, 'allegro' => false, 'credentials_refresh_allowed' => false];
+
+        return $result;
+    }
+
+    public function definitions(string $categoryId, bool $refresh = false, bool $allowCredentialRefresh = true, bool $allowCacheWrite = true): array
     {
         if ($categoryId === '') return ['ok' => false, 'source' => 'none', 'blocker' => 'allegro_category_mapping_missing', 'parameters' => []];
         if (Schema::hasTable('allegro_category_parameters_cache') && ! $refresh) {
@@ -29,7 +37,7 @@ class AllegroCategoryParametersService
         if ($token === '') return ['ok' => false, 'source' => 'none', 'blocker' => 'allegro_credentials_missing', 'parameters' => []];
         $endpoint = $base.'/sale/categories/'.$categoryId.'/parameters';
         $response = AllegroUserAgent::request()->withToken($token)->accept('application/vnd.allegro.public.v1+json')->timeout(20)->get($endpoint);
-        if ($response->status() === 401 && filled(data_get($account, 'api_credentials.refresh_token'))) {
+        if ($allowCredentialRefresh && $response->status() === 401 && filled(data_get($account, 'api_credentials.refresh_token'))) {
             $refresh = (new AllegroApiClient('allegro_main', $account))->refreshAccessToken();
             if (($refresh['ok'] ?? false) === true) {
                 $account->refresh();
@@ -45,7 +53,7 @@ class AllegroCategoryParametersService
             return ['ok' => false, 'source' => 'api', 'blocker' => 'Brak parametrów Allegro dla category id '.$categoryId, 'http_status' => $response->status(), 'parameters' => []];
         }
         $payload = $response->json();
-        if (Schema::hasTable('allegro_category_parameters_cache')) {
+        if ($allowCacheWrite && Schema::hasTable('allegro_category_parameters_cache')) {
             try {
                 DB::table('allegro_category_parameters_cache')->updateOrInsert([$this->cacheKeyColumn() => $categoryId], ['raw_response' => json_encode($payload), 'fetched_at' => now(), 'created_at' => now(), 'updated_at' => now()]);
             } catch (Throwable $exception) {

@@ -12,6 +12,8 @@ class AllegroOfferParametersBuilder
 {
     private array $loggedCarTypeMappings = [];
 
+    public function __construct(private readonly AllegroFunctionsBranchResolver $functionsBranchResolver, private readonly AllegroFunctionsParameterService $functionsParameterService, private readonly AllegroFunctionsSelectionService $functionsSelectionService) {}
+
     public function build(Part $part, ?MarketplaceCategoryMapping $mapping, array $definitionsResult): array
     {
         $this->loggedCarTypeMappings = [];
@@ -21,7 +23,7 @@ class AllegroOfferParametersBuilder
         foreach ($definitions as $def) {
             $hasInvoiceParameter = $hasInvoiceParameter || $this->norm($def['name'] ?? '') === 'faktura';
             $required = (bool) ($def['required'] ?? false);
-            $resolved = $this->resolve($part, $mapping, $def);
+            $resolved = $this->resolveFunctionsParameter($part, $mapping, $def) ?? $this->resolve($part, $mapping, $def);
             if ($resolved['value'] === null) {
                 $row = $this->diagnosticRow($def, $resolved);
                 if ($required) $missing[] = $row; else $unmapped[] = $row;
@@ -37,6 +39,30 @@ class AllegroOfferParametersBuilder
         $paymentDiagnostics = $hasInvoiceParameter ? [] : [$this->invoicePaymentDiagnosticRow()];
         $payments = $hasInvoiceParameter ? [] : ['invoice' => 'VAT'];
         return $this->result($offer, $product, $missing, $optional, $unmapped, $diag, $definitionsResult, $payments, $paymentDiagnostics);
+    }
+
+
+    private function resolveFunctionsParameter(Part $part, ?MarketplaceCategoryMapping $mapping, array $def): ?array
+    {
+        if (! $this->functionsBranchResolver->matches($part->category)) {
+            return null;
+        }
+
+        if (! $this->functionsParameterService->isFunctionsDefinition($def)) {
+            return null;
+        }
+
+        $normalized = $this->functionsParameterService->normalizeDefinition($def);
+        $categoryId = (string) ($mapping?->external_category_id ?? $def['category_id'] ?? '');
+        $selected = $categoryId !== '' ? $this->functionsSelectionService->selectedValueIds($part, $categoryId, (string) $normalized['id']) : [];
+        $allowed = array_keys($this->functionsParameterService->allowedLabels($normalized));
+        $valid = array_values(array_intersect($selected, $allowed));
+
+        if ($valid === []) {
+            return ['value' => null, 'source' => 'allegro_parameter_selections', 'source_value' => $selected, 'reason' => 'Wybierz co najmniej jedną funkcję Allegro.'];
+        }
+
+        return ['type' => 'dictionary', 'value' => $valid, 'source' => 'allegro_parameter_selections.value_id', 'label' => $valid];
     }
 
     private function resolve(Part $part, ?MarketplaceCategoryMapping $mapping, array $def): array

@@ -7,6 +7,9 @@ use App\Support\Parts\AdditionalPartCodes;
 use App\Models\MarketplaceCategory;
 use App\Models\PartCategory;
 use App\Models\PartImage;
+use App\Services\Marketplace\AllegroCategoryResolver;
+use App\Services\Marketplace\AllegroFunctionsParameterService;
+use App\Services\Marketplace\AllegroFunctionsSelectionService;
 use App\Services\Marketplace\PreparePartMarketplaceListingService;
 use App\Services\Marketplace\PublishPartToMarketplacesService;
 use Filament\Actions;
@@ -22,6 +25,8 @@ class EditPart extends EditRecord
     protected array $partPhotoPaths = [];
 
     protected array $marketplaceCategorySelections = [];
+
+    protected array $allegroFunctionsValueIds = [];
 
     public bool $marketplacePublishInProgress = false;
 
@@ -41,6 +46,7 @@ class EditPart extends EditRecord
         // Existing images are rendered by the edit gallery; keep FileUpload empty so it only adds new photos.
         $data['part_photo_paths'] = [];
         $data['marketplace_category_selections'] = [];
+        $data[PartResource::ALLEGRO_FUNCTIONS_FIELD] = PartResource::savedAllegroFunctionsValueIds($this->record);
 
         return $data;
     }
@@ -49,7 +55,8 @@ class EditPart extends EditRecord
     {
         $this->partPhotoPaths = array_values(array_filter((array) ($data['part_photo_paths'] ?? []), fn (mixed $path): bool => filled($path)));
         $this->marketplaceCategorySelections = (array) ($data['marketplace_category_selections'] ?? []);
-        unset($data['part_photo_paths'], $data['marketplace_category_selections']);
+        $this->allegroFunctionsValueIds = (array) ($data[PartResource::ALLEGRO_FUNCTIONS_FIELD] ?? []);
+        unset($data['part_photo_paths'], $data['marketplace_category_selections'], $data[PartResource::ALLEGRO_FUNCTIONS_FIELD]);
 
         $data['additional_part_codes'] = AdditionalPartCodes::normalize($data['additional_part_codes'] ?? null, $data['part_number'] ?? null);
         $data['condition_notes'] = PartResource::defaultConditionValue($data['condition_notes'] ?? null);
@@ -62,6 +69,7 @@ class EditPart extends EditRecord
     protected function afterSave(): void
     {
         $this->persistMarketplaceCategorySelections();
+        $this->syncAllegroFunctionsSelections();
 
         if ($this->partPhotoPaths !== []) {
             $this->record->load('images');
@@ -334,6 +342,16 @@ class EditPart extends EditRecord
             ->send();
 
         return true;
+    }
+
+
+    private function syncAllegroFunctionsSelections(): void
+    {
+        $resolved = app(AllegroCategoryResolver::class)->resolve($this->record, data_get($this->marketplaceCategorySelections, 'allegro.external_category_id'));
+        if (blank($resolved['id'] ?? null)) return;
+        $definition = app(AllegroFunctionsParameterService::class)->definition((string) $resolved['id']);
+        if (($definition['found'] ?? false) !== true) return;
+        app(AllegroFunctionsSelectionService::class)->sync($this->record, (string) $resolved['id'], $definition['definition'], $this->allegroFunctionsValueIds);
     }
 
     private function marketplacePublishMessage(string $message): string

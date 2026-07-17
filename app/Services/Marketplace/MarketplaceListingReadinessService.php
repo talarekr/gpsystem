@@ -447,7 +447,15 @@ class MarketplaceListingReadinessService
 
     private function allegroCategoryMapping(Part $part): ?MarketplaceCategoryMapping
     {
-        return $this->categoryOverride($part, 'allegro', 'allegro_main') ?: $this->mappedCategory($part, ['allegro_main', 'allegro'], 'allegro_main');
+        $resolved = app(AllegroCategoryResolver::class)->resolve($part);
+        if (($resolved['mapping'] ?? null) instanceof MarketplaceCategoryMapping) return $resolved['mapping'];
+        if (filled($resolved['id'] ?? null)) {
+            $mapping = new MarketplaceCategoryMapping();
+            $mapping->forceFill(['local_category_id' => $part->category_id, 'channel' => 'allegro_main', 'external_category_id' => (string) $resolved['id'], 'source' => $resolved['source']]);
+            return $mapping;
+        }
+
+        return null;
     }
 
     private function ovokoCategoryMapping(Part $part): ?MarketplaceCategoryMapping

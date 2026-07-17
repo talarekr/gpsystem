@@ -724,6 +724,7 @@ class Part extends Model
 
     public function images(): HasMany { return $this->hasMany(PartImage::class)->orderBy('sort_order'); }
     public function category(): BelongsTo { return $this->belongsTo(PartCategory::class, 'category_id'); }
+    public function allegroParameterSelections(): HasMany { return $this->hasMany(AllegroParameterSelection::class); }
     public function suggestedCategory(): BelongsTo { return $this->belongsTo(PartCategory::class, 'suggested_category_id'); }
     public function car(): BelongsTo { return $this->belongsTo(Car::class); }
     public function storageLocation(): BelongsTo { return $this->belongsTo(StorageLocation::class); }
