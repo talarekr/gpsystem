@@ -947,6 +947,19 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     z-index: 80;
 }
 
+.gps-part-form .gps-part-form-section--allegro-parameters .gps-allegro-parameters-repeater :where(.fi-fo-repeater-item, .fi-in-repeatable-item) {
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+.gps-part-form .gps-part-form-section--allegro-parameters .gps-allegro-parameters-repeater :where(.fi-fo-repeater-item-content, .fi-in-repeatable-item-content) {
+    padding: 0 !important;
+}
+
 .gps-part-form .gps-part-form-section--allegro-parameters :where(.choices__list--dropdown, .choices__list[aria-expanded]) {
     height: auto !important;
     max-height: min(20rem, calc(100vh - 12rem)) !important;
