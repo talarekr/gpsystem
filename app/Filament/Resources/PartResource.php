@@ -9,8 +9,6 @@ use App\Models\Part;
 use App\Models\PartCategory;
 use App\Models\PartImage;
 use App\Services\Marketplace\AllegroCategoryResolver;
-use App\Services\Marketplace\AllegroFunctionsBranchResolver;
-use App\Services\Marketplace\AllegroFunctionsParameterService;
 use App\Services\Marketplace\AllegroManualParameterSelectionService;
 use App\Services\Marketplace\AllegroSalesSettingsResolver;
 use App\Services\Marketplace\PreparePartMarketplaceListingService;
@@ -40,7 +38,6 @@ class PartResource extends Resource
     public const EXPECTED_LEFT_STEERING_VALUE = 'po lewej';
     public const EXPECTED_RIGHT_STEERING_VALUE = 'po prawej';
     public const PART_TITLE_MAX_LENGTH = 75;
-    public const ALLEGRO_FUNCTIONS_FIELD = 'allegro_functions_value_ids';
     public const ALLEGRO_MANUAL_PARAMETERS_FIELD = 'allegro_dynamic_parameter_values';
     public const ALLEGRO_DYNAMIC_PARAMETER_FIELDS = 'allegro_dynamic_parameter_fields';
     public const ADMIN_STEERING_OPTIONS = [
@@ -56,50 +53,6 @@ class PartResource extends Resource
     protected static ?string $modelLabel = 'część';
     protected static ?string $pluralModelLabel = 'części';
 
-
-    public static function shouldShowAllegroFunctionsField(?Part $record, mixed $categoryId = null): bool
-    {
-        $category = $record?->category;
-        if (! $category && filled($categoryId)) {
-            $category = PartCategory::query()->find($categoryId);
-        }
-
-        return app(AllegroFunctionsBranchResolver::class)->matches($category);
-    }
-
-    public static function allegroFunctionsOptions(?Part $record, mixed $categoryId = null, mixed $formAllegroCategoryId = null): array
-    {
-        $part = $record ?? new Part(['category_id' => filled($categoryId) ? (int) $categoryId : null]);
-        if (! $part->exists && filled($categoryId)) {
-            $part->setRelation('category', PartCategory::query()->find($categoryId));
-        }
-
-        $resolved = app(AllegroCategoryResolver::class)->resolve($part, $formAllegroCategoryId);
-        if (blank($resolved['id'] ?? null)) return [];
-        $definition = app(AllegroFunctionsParameterService::class)->definition((string) $resolved['id']);
-        if (! ($definition['found'] ?? false)) return [];
-
-        return app(AllegroFunctionsParameterService::class)->allowedLabels($definition['definition']);
-    }
-
-    public static function allegroFunctionsHelperText(?Part $record, mixed $categoryId = null, mixed $formAllegroCategoryId = null): string
-    {
-        if (! self::shouldShowAllegroFunctionsField($record, $categoryId)) return '';
-        $part = $record ?? new Part(['category_id' => filled($categoryId) ? (int) $categoryId : null]);
-        $resolved = app(AllegroCategoryResolver::class)->resolve($part, $formAllegroCategoryId);
-        if (blank($resolved['id'] ?? null)) return 'Brak mapowania kategorii Allegro dla tej kategorii lokalnej.';
-        $definition = app(AllegroFunctionsParameterService::class)->definition((string) $resolved['id']);
-        if (! ($definition['ok'] ?? false)) return 'Nie udało się pobrać parametrów Allegro dla kategorii.';
-        if (! ($definition['found'] ?? false)) return 'Parametr „Funkcje” nie występuje w tej kategorii Allegro.';
-        if (app(AllegroFunctionsParameterService::class)->allowedLabels($definition['definition']) === []) return 'Słownik parametru „Funkcje” jest pusty.';
-        return '';
-    }
-
-    public static function savedAllegroFunctionsValueIds(?Part $record): array
-    {
-        if (! $record || ! $record->exists) return [];
-        return $record->allegroParameterSelections()->pluck('value_id')->map(fn ($id): string => (string) $id)->unique()->values()->all();
-    }
 
     public static function dynamicAllegroParameterDefinitions(?Part $record): array
     {

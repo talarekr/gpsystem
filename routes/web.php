@@ -133,7 +133,6 @@ use App\Http\Controllers\Tools\CheckPartNumberPerformanceController;
 use App\Http\Controllers\Tools\CheckPartsToListController;
 use App\Http\Controllers\Tools\CheckAllegroChannelsController;
 use App\Http\Controllers\Tools\CheckAllegroOAuthReadinessController;
-use App\Http\Controllers\Tools\AllegroFunctionsParameterDiagnoseController;
 use App\Http\Controllers\Tools\ExportAllegroOfferIdCoverageController;
 use App\Http\Controllers\Tools\CheckAllegroOfferIdCoverageController;
 use App\Http\Controllers\Tools\CheckAllegroLocalIdSourcesController;
@@ -2864,6 +2863,3 @@ Route::get('/tools/create-order-shipment', [ShipmentToolsController::class, 'cre
 Route::get('/tools/download-shipment-label/{shipment}', [ShipmentToolsController::class, 'download'])->name('tools.download-shipment-label');
 Route::delete('/tools/delete-test-shipment/{shipment}', [ShipmentToolsController::class, 'deleteTest'])->name('tools.delete-test-shipment');
 
-Route::middleware(['auth','admin.panel'])->group(function () {
-    Route::get('/tools/allegro-functions-parameter-diagnose', AllegroFunctionsParameterDiagnoseController::class)->middleware('throttle:tools')->name('tools.allegro-functions-parameter-diagnose');
-});

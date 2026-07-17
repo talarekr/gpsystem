@@ -8,8 +8,6 @@ use App\Models\MarketplaceCategory;
 use App\Models\PartCategory;
 use App\Models\PartImage;
 use App\Services\Marketplace\AllegroCategoryResolver;
-use App\Services\Marketplace\AllegroFunctionsParameterService;
-use App\Services\Marketplace\AllegroFunctionsSelectionService;
 use App\Services\Marketplace\AllegroManualParameterSelectionService;
 use App\Services\Marketplace\PreparePartMarketplaceListingService;
 use App\Services\Marketplace\PublishPartToMarketplacesService;
@@ -26,8 +24,6 @@ class EditPart extends EditRecord
     protected array $partPhotoPaths = [];
 
     protected array $marketplaceCategorySelections = [];
-
-    protected array $allegroFunctionsValueIds = [];
 
     protected array $allegroManualParameterValues = [];
 
@@ -49,7 +45,6 @@ class EditPart extends EditRecord
         // Existing images are rendered by the edit gallery; keep FileUpload empty so it only adds new photos.
         $data['part_photo_paths'] = [];
         $data['marketplace_category_selections'] = [];
-        $data[PartResource::ALLEGRO_FUNCTIONS_FIELD] = PartResource::savedAllegroFunctionsValueIds($this->record);
         $data[PartResource::ALLEGRO_DYNAMIC_PARAMETER_FIELDS] = PartResource::dynamicAllegroParameterDefinitions($this->record);
         $data[PartResource::ALLEGRO_MANUAL_PARAMETERS_FIELD] = PartResource::savedAllegroManualParameterValues($this->record);
 
@@ -60,9 +55,8 @@ class EditPart extends EditRecord
     {
         $this->partPhotoPaths = array_values(array_filter((array) ($data['part_photo_paths'] ?? []), fn (mixed $path): bool => filled($path)));
         $this->marketplaceCategorySelections = (array) ($data['marketplace_category_selections'] ?? []);
-        $this->allegroFunctionsValueIds = (array) ($data[PartResource::ALLEGRO_FUNCTIONS_FIELD] ?? []);
         $this->allegroManualParameterValues = (array) ($data[PartResource::ALLEGRO_MANUAL_PARAMETERS_FIELD] ?? []);
-        unset($data['part_photo_paths'], $data['marketplace_category_selections'], $data[PartResource::ALLEGRO_FUNCTIONS_FIELD], $data[PartResource::ALLEGRO_MANUAL_PARAMETERS_FIELD], $data[PartResource::ALLEGRO_DYNAMIC_PARAMETER_FIELDS]);
+        unset($data['part_photo_paths'], $data['marketplace_category_selections'], $data[PartResource::ALLEGRO_MANUAL_PARAMETERS_FIELD], $data[PartResource::ALLEGRO_DYNAMIC_PARAMETER_FIELDS]);
 
         $data['additional_part_codes'] = AdditionalPartCodes::normalize($data['additional_part_codes'] ?? null, $data['part_number'] ?? null);
         $data['condition_notes'] = PartResource::defaultConditionValue($data['condition_notes'] ?? null);
@@ -378,16 +372,6 @@ class EditPart extends EditRecord
                 : ($savedValueIds[0] ?? null);
         }
     }
-
-    private function syncAllegroFunctionsSelections(): void
-    {
-        $resolved = app(AllegroCategoryResolver::class)->resolve($this->record, data_get($this->marketplaceCategorySelections, 'allegro.external_category_id'));
-        if (blank($resolved['id'] ?? null)) return;
-        $definition = app(AllegroFunctionsParameterService::class)->definition((string) $resolved['id']);
-        if (($definition['found'] ?? false) !== true) return;
-        app(AllegroFunctionsSelectionService::class)->sync($this->record, (string) $resolved['id'], $definition['definition'], $this->allegroFunctionsValueIds);
-    }
-
 
     private function syncAllegroManualParameterSelections(): void
     {
