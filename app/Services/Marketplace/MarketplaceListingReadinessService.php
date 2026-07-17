@@ -20,7 +20,7 @@ class MarketplaceListingReadinessService
     /** @return array<string, mixed> */
     public function checkPartReadiness(Part $part, string $channel): array
     {
-        $channel = $channel === 'ebay' ? 'ebay_de' : $channel;
+        $channel = $channel === 'ebay' ? 'ebay_de' : AllegroChannel::normalize($channel);
 
         if (! in_array($channel, self::CHANNELS, true)) {
             return $this->unsupportedChannelResult($part, $channel);
@@ -42,7 +42,7 @@ class MarketplaceListingReadinessService
         $hasActiveListing = $marketplace ? $this->hasActiveListing($part, $marketplace, $channel) : false;
         $categoryMapping = match (true) {
             str_starts_with($channel, 'ebay_') => $this->ebayCategoryMapping($part, $channel),
-            $channel === 'allegro_main' => $this->allegroCategoryMapping($part),
+            AllegroChannel::isAllegro($channel) => $this->allegroCategoryMapping($part),
             $channel === 'ovoko' => $this->ovokoCategoryMapping($part),
             default => null,
         };
@@ -77,7 +77,7 @@ class MarketplaceListingReadinessService
         if ($channel === 'storefront') {
             $required = ['title', 'storefront_price', 'quantity', 'images', 'description'];
             if (! $descriptionReady) $warnings[] = 'Storefront description is missing or placeholder-only.';
-        } elseif ($channel === 'allegro_main') {
+        } elseif (AllegroChannel::isAllegro($channel)) {
             $required = ['title', 'allegro_price_pln', 'quantity', 'images', 'allegro_category_mapping', 'description'];
             $this->checkAccount($account, $blockers, $warnings, 'Allegro OAuth/account is not configured or not enabled.');
             if (! $categoryMapping || blank($categoryMapping->external_category_id)) { $missing[] = 'allegro_category_mapping'; $blockers[] = 'Brakuje Allegro category id.'; }
@@ -503,12 +503,15 @@ class MarketplaceListingReadinessService
                 'type' => (string) ($param['type'] ?? ''),
                 'multiple_choices' => (bool) ($param['multiple_choices'] ?? false),
                 'required' => (bool) ($param['required'] ?? false),
+                'required_for_product' => (bool) ($param['required_for_product'] ?? false),
                 'describes_product' => (bool) ($param['describes_product'] ?? false),
                 'official_values' => $officialValues,
                 'saved_value_ids' => [],
                 'valid_saved_value_ids' => [],
                 'invalid_saved_value_ids' => [],
                 'ui_supported' => (bool) ($param['ui_supported'] ?? false),
+                'ui_component' => $param['ui_component'] ?? null,
+                'blocker' => $param['blocker'] ?? null,
                 'payload_preview' => null,
             ];
         }
