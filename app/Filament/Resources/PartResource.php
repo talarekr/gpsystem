@@ -11,6 +11,7 @@ use App\Models\PartImage;
 use App\Services\Marketplace\AllegroCategoryResolver;
 use App\Services\Marketplace\AllegroFunctionsBranchResolver;
 use App\Services\Marketplace\AllegroFunctionsParameterService;
+use App\Services\Marketplace\AllegroManualParameterSelectionService;
 use App\Services\Marketplace\AllegroSalesSettingsResolver;
 use App\Services\Marketplace\PreparePartMarketplaceListingService;
 use App\Services\Parts\PartImageUploadService;
@@ -40,6 +41,7 @@ class PartResource extends Resource
     public const EXPECTED_RIGHT_STEERING_VALUE = 'po prawej';
     public const PART_TITLE_MAX_LENGTH = 75;
     public const ALLEGRO_FUNCTIONS_FIELD = 'allegro_functions_value_ids';
+    public const ALLEGRO_MANUAL_PARAMETERS_FIELD = 'allegro_manual_parameters';
     public const ADMIN_STEERING_OPTIONS = [
         self::EXPECTED_LEFT_STEERING_VALUE => self::EXPECTED_LEFT_STEERING_VALUE,
         self::EXPECTED_RIGHT_STEERING_VALUE => self::EXPECTED_RIGHT_STEERING_VALUE,
@@ -96,6 +98,68 @@ class PartResource extends Resource
     {
         if (! $record || ! $record->exists) return [];
         return $record->allegroParameterSelections()->pluck('value_id')->map(fn ($id): string => (string) $id)->unique()->values()->all();
+    }
+
+    public static function dynamicAllegroParameterDefinitions(?Part $record): array
+    {
+        if (! $record || ! $record->exists) return [];
+        $params = (array) data_get((array) ($record->review_metadata ?: []), 'marketplace_prepare_results.allegro.missing_required_allegro_parameters', []);
+        $supported = [];
+        foreach ($params as $param) {
+            if (! is_array($param) || ($param['ui_supported'] ?? false) !== true) continue;
+            if (($param['type'] ?? null) !== 'dictionary' || ($param['dictionary'] ?? []) === []) continue;
+            $supported[(string) $param['id']] = $param;
+        }
+
+        $categoryId = self::currentAllegroCategoryId($record);
+        if ($categoryId !== '') {
+            foreach ($record->allegroParameterSelections()->where('allegro_category_id', $categoryId)->get()->groupBy('parameter_id') as $parameterId => $rows) {
+                if (isset($supported[(string) $parameterId])) continue;
+                $first = $rows->first();
+                $supported[(string) $parameterId] = [
+                    'id' => (string) $parameterId,
+                    'name' => (string) ($first->parameter_name ?? $parameterId),
+                    'type' => 'dictionary',
+                    'multiple_choices' => true,
+                    'dictionary' => $rows->map(fn ($row): array => ['id' => (string) $row->value_id, 'label' => (string) ($row->value_label ?? $row->value_id)])->values()->all(),
+                    'ui_supported' => true,
+                ];
+            }
+        }
+
+        return array_values($supported);
+    }
+
+    public static function savedAllegroManualParameterValues(?Part $record): array
+    {
+        if (! $record || ! $record->exists) return [];
+        $categoryId = self::currentAllegroCategoryId($record);
+        if ($categoryId === '') return [];
+        return app(AllegroManualParameterSelectionService::class)->savedSelectionsForCategory($record, $categoryId);
+    }
+
+    private static function currentAllegroCategoryId(?Part $record): string
+    {
+        if (! $record || ! $record->exists) return '';
+        $resolved = app(AllegroCategoryResolver::class)->resolve($record);
+        return (string) ($resolved['id'] ?? '');
+    }
+
+    public static function dynamicAllegroParameterFields(?Part $record): array
+    {
+        return array_map(function (array $param) {
+            $field = Forms\Components\Select::make(self::ALLEGRO_MANUAL_PARAMETERS_FIELD.'.'.((string) $param['id']))
+                ->label((string) ($param['name'] ?? $param['id']))
+                ->placeholder('Wybierz z listy')
+                ->searchable()
+                ->preload()
+                ->native(false)
+                ->options(collect((array) ($param['dictionary'] ?? []))->mapWithKeys(fn ($row): array => [(string) ($row['id'] ?? '') => (string) ($row['label'] ?? $row['value'] ?? $row['id'] ?? '')])->filter()->all())
+                ->dehydrated(true)
+                ->columnSpanFull();
+
+            return ($param['multiple_choices'] ?? false) ? $field->multiple() : $field;
+        }, self::dynamicAllegroParameterDefinitions($record));
     }
 
     public static function shouldShowAdditionalPartCodesRepeater(?Part $record): bool
@@ -328,26 +392,12 @@ class PartResource extends Resource
                             ->columnSpanFull(),
                     ]),
 
-                Section::make('Funkcje Allegro')
+                Section::make('Parametry Allegro')
                     ->collapsible()
                     ->columns(1)
-                    ->visible(fn (?Part $record, Forms\Get $get): bool => self::shouldShowAllegroFunctionsField($record, $get('category_id')))
-                    ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--allegro-functions'])
-                    ->schema([
-                        Forms\Components\Select::make(self::ALLEGRO_FUNCTIONS_FIELD)
-                            ->hiddenLabel()
-                            ->placeholder('Wybierz z listy')
-                            ->multiple()
-                            ->searchable()
-                            ->preload()
-                            ->native(false)
-                            ->dehydrated(true)
-                            ->options(fn (?Part $record, Forms\Get $get): array => self::allegroFunctionsOptions($record, $get('category_id'), data_get($get('marketplace_category_selections'), 'allegro.external_category_id')))
-                            ->default(fn (?Part $record): array => self::savedAllegroFunctionsValueIds($record))
-                            ->disabled(fn (?Part $record, Forms\Get $get): bool => self::allegroFunctionsOptions($record, $get('category_id'), data_get($get('marketplace_category_selections'), 'allegro.external_category_id')) === [])
-                            ->helperText(fn (?Part $record, Forms\Get $get): string => self::allegroFunctionsHelperText($record, $get('category_id'), data_get($get('marketplace_category_selections'), 'allegro.external_category_id')))
-                            ->columnSpanFull(),
-                    ]),
+                    ->visible(fn (?Part $record): bool => self::dynamicAllegroParameterDefinitions($record) !== [])
+                    ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--allegro-parameters'])
+                    ->schema(fn (?Part $record): array => self::dynamicAllegroParameterFields($record)),
 
                 Section::make('Kanały sprzedaży')
                     ->collapsible()

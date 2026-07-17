@@ -224,7 +224,15 @@ class PartMarketplaceReadinessController extends Controller
             $card = $this->cardReadinessService->check($part)[$key] ?? [];
             $presentation = (array) ($card['presentation'] ?? []);
             $ready = (bool) ($presentation['ready'] ?? $card['ready'] ?? false);
-            $message = $ready ? 'Gotowe' : $this->humanReadablePrepareMessage((array) ($presentation['missing'] ?? $card['missing'] ?? []));
+            $missingParams = (array) ($card['missing_required_allegro_parameters'] ?? []);
+            if ($key === 'allegro') {
+                $metadata = is_array($part->review_metadata) ? $part->review_metadata : [];
+                data_set($metadata, 'marketplace_prepare_results.allegro.dynamic_allegro_parameters', $card['dynamic_allegro_parameters'] ?? null);
+                data_set($metadata, 'marketplace_prepare_results.allegro.missing_required_allegro_parameters', $missingParams);
+                data_set($metadata, 'marketplace_prepare_results.allegro.status', $ready ? 'ready' : 'blocked');
+                $part->forceFill(['review_metadata' => $metadata])->save();
+            }
+            $message = $ready ? 'Gotowe' : ($missingParams !== [] ? 'Uzupełnij wymagane parametry Allegro poniżej i zapisz produkt. Brakuje: '.implode(', ', array_values(array_filter(array_map(fn ($param) => is_array($param) ? ($param['name'] ?? null) : null, $missingParams)))) : $this->humanReadablePrepareMessage((array) ($presentation['missing'] ?? $card['missing'] ?? []))); 
 
             return response()->json([
                 'ok' => $ready,
@@ -236,6 +244,9 @@ class PartMarketplaceReadinessController extends Controller
                 'will_make_marketplace_request' => false,
                 'publish' => false,
                 'marketplace_listings' => false,
+                'missing_required_allegro_parameters' => $missingParams,
+                'dynamic_allegro_parameters' => $card['dynamic_allegro_parameters'] ?? null,
+                'prepared_payload_preview_safe' => $card['prepared_payload_preview_safe'] ?? null,
                 'ebay_channels' => $key === 'ebay' ? ($ebayResults ?? []) : null,
             ]);
         } catch (\Throwable $e) {
