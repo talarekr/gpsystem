@@ -1006,6 +1006,80 @@ class AllegroSalesSettingsTest extends TestCase
             && ! str_contains(json_encode($request->data()), '254580'));
     }
 
+
+    public function test_allegro_publish_removes_saved_catalog_product_id_when_saved_category_differs_from_requested_category(): void
+    {
+        Http::fake(array_merge($this->fakeAllegro(), [
+            'https://api.allegro.pl/sale/product-offers' => Http::response(['id' => 'offer-123'], 201),
+        ]));
+        $part = $this->part('KURIER DPD');
+        MarketplaceAccount::query()->where('code', 'allegro_main')->firstOrFail()->forceFill(['api_settings' => [
+            'productSet' => [[
+                'product' => [
+                    'id' => '8f74dfdf-248d-4306-a2f7-2728cdda4f0d',
+                    'category' => ['id' => '254580'],
+                ],
+            ]],
+        ]])->save();
+        $payload = [
+            'title' => 'BMW X5 F15 A90 KLAPA BAGAŻNIKA POKRYWA',
+            'category_id' => '254548',
+            'category_mapping_source' => 'manual_override',
+            'price_pln' => 100,
+            'quantity' => 1,
+            'image_urls' => ['https://gpswiss.pl/storage/parts/photos/imported/7890/kuyJdjAM4xzYvW7Hoy0YQ7WlCKE8nRfkSUskHyT0.jpg'],
+            'allegro_parameters' => ['payload_parameters' => [], 'product_parameters' => []],
+        ];
+
+        $adapter = new class(app(MarketplaceListingReadinessService::class), app(MarketplacePublishGate::class), app(ApiIntegrationLogger::class), app(AllegroSalesSettingsResolver::class)) extends AllegroPublishAdapter {
+            public function callPerformLivePublish(Part $part, array $readiness, array $payload, MarketplaceAccount $account): array { return $this->performLivePublish($part, $readiness, $payload, $account); }
+        };
+
+        $result = $adapter->callPerformLivePublish($part, ['marketplace_price' => 100], $payload, MarketplaceAccount::query()->where('code', 'allegro_main')->firstOrFail());
+
+        $this->assertTrue($result['ok']);
+        Http::assertSent(fn ($request) => $request->url() === 'https://api.allegro.pl/sale/product-offers'
+            && data_get($request->data(), 'productSet.0.product.category.id') === '254548'
+            && data_get($request->data(), 'productSet.0.product.id') === null
+            && ! str_contains(json_encode($request->data()), '8f74dfdf-248d-4306-a2f7-2728cdda4f0d'));
+    }
+
+    public function test_allegro_publish_keeps_saved_catalog_product_id_when_saved_category_matches_requested_category(): void
+    {
+        Http::fake(array_merge($this->fakeAllegro(), [
+            'https://api.allegro.pl/sale/product-offers' => Http::response(['id' => 'offer-123'], 201),
+        ]));
+        $part = $this->part('KURIER DPD');
+        MarketplaceAccount::query()->where('code', 'allegro_main')->firstOrFail()->forceFill(['api_settings' => [
+            'productSet' => [[
+                'product' => [
+                    'id' => 'matching-product-id',
+                    'category' => ['id' => '254548'],
+                ],
+            ]],
+        ]])->save();
+        $payload = [
+            'title' => 'BMW X5 F15 A90 KLAPA BAGAŻNIKA POKRYWA',
+            'category_id' => '254548',
+            'category_mapping_source' => 'manual_override',
+            'price_pln' => 100,
+            'quantity' => 1,
+            'image_urls' => ['https://gpswiss.pl/storage/parts/photos/imported/7890/kuyJdjAM4xzYvW7Hoy0YQ7WlCKE8nRfkSUskHyT0.jpg'],
+            'allegro_parameters' => ['payload_parameters' => [], 'product_parameters' => []],
+        ];
+
+        $adapter = new class(app(MarketplaceListingReadinessService::class), app(MarketplacePublishGate::class), app(ApiIntegrationLogger::class), app(AllegroSalesSettingsResolver::class)) extends AllegroPublishAdapter {
+            public function callPerformLivePublish(Part $part, array $readiness, array $payload, MarketplaceAccount $account): array { return $this->performLivePublish($part, $readiness, $payload, $account); }
+        };
+
+        $result = $adapter->callPerformLivePublish($part, ['marketplace_price' => 100], $payload, MarketplaceAccount::query()->where('code', 'allegro_main')->firstOrFail());
+
+        $this->assertTrue($result['ok']);
+        Http::assertSent(fn ($request) => $request->url() === 'https://api.allegro.pl/sale/product-offers'
+            && data_get($request->data(), 'productSet.0.product.category.id') === '254548'
+            && data_get($request->data(), 'productSet.0.product.id') === 'matching-product-id');
+    }
+
     public function test_allegro_category_guard_blocks_artificial_mismatch_before_api_request(): void
     {
         Http::fake(['https://api.allegro.pl/sale/product-offers' => Http::response(['id' => 'should-not-send'], 201)]);
