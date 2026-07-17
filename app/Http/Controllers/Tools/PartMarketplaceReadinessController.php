@@ -232,7 +232,7 @@ class PartMarketplaceReadinessController extends Controller
                 data_set($metadata, 'marketplace_prepare_results.allegro.status', $ready ? 'ready' : 'blocked');
                 $part->forceFill(['review_metadata' => $metadata])->save();
             }
-            $message = $ready ? 'Gotowe' : ($missingParams !== [] ? 'Uzupełnij wymagane parametry Allegro poniżej i zapisz produkt. Brakuje: '.implode(', ', array_values(array_filter(array_map(fn ($param) => is_array($param) ? ($param['name'] ?? null) : null, $missingParams)))) : $this->humanReadablePrepareMessage((array) ($presentation['missing'] ?? $card['missing'] ?? []))); 
+            $message = $ready ? 'Gotowe' : ($missingParams !== [] ? 'Uzupełnij wymagane parametry Allegro powyżej i zapisz produkt. Brakuje: '.implode(', ', array_values(array_filter(array_map(fn ($param) => is_array($param) ? ($param['name'] ?? null) : null, $missingParams)))) : $this->humanReadablePrepareMessage((array) ($presentation['missing'] ?? $card['missing'] ?? [])));
 
             return response()->json([
                 'ok' => $ready,
