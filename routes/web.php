@@ -54,6 +54,7 @@ use App\Http\Controllers\Tools\MarketplaceApiFoundationController;
 use App\Http\Controllers\Tools\MarketplaceListingDryRunController;
 use App\Http\Controllers\Tools\AllegroCompatibilityDryRunController;
 use App\Http\Controllers\Tools\AllegroMarketplaceDiagnoseController;
+use App\Http\Controllers\Tools\AllegroListingStatusSyncController;
 use App\Http\Controllers\Tools\AllegroPartPublishPathDiagnoseController;
 use App\Http\Controllers\Tools\MarketplaceListingImageRefreshController;
 use App\Http\Controllers\Tools\OvokoCarMappingController;
@@ -675,6 +676,9 @@ Route::get('/tools/check-part-marketplace-preparation-payload', [PartMarketplace
 Route::get('/tools/check-allegro-listing-status-read-only', AllegroListingReadOnlyStatusController::class)
     ->middleware([Authenticate::class, 'admin.panel', 'throttle:tools'])
     ->name('tools.check-allegro-listing-status-read-only');
+Route::post('/tools/sync-allegro-listing-status', AllegroListingStatusSyncController::class)
+    ->middleware([Authenticate::class, 'admin.panel', 'throttle:tools'])
+    ->name('tools.sync-allegro-listing-status');
 Route::get('/tools/allegro-listing-preview', [MarketplaceListingDryRunController::class, 'allegroPreview'])->name('tools.allegro-listing-preview');
 Route::get('/tools/ebay-listing-preview', [PartMarketplaceReadinessController::class, 'ebayPreview'])->name('tools.ebay-listing-preview');
 Route::get('/tools/ebay-listing-preview-html', [PartMarketplaceReadinessController::class, 'ebayPreviewHtml'])->name('tools.ebay-listing-preview-html');
