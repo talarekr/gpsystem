@@ -11,6 +11,7 @@ use App\Services\Marketplace\AllegroDescriptionBuilder;
 use App\Services\Marketplace\AllegroGpSwissDescriptionTemplate;
 use App\Services\Marketplace\MarketplaceListingReadinessService;
 use App\Services\Marketplace\MarketplacePublishGate;
+use Illuminate\Support\Facades\Log;
 
 class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
 {
@@ -41,6 +42,9 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
         $productNameDiagnostics = $this->productNameDiagnostics($part, $payload);
         if (($productNameDiagnostics['product_name_length'] ?? 0) < 12) return ['ok' => false, 'status' => 'blocked_product_name_too_short', 'errors' => ['allegro_product_name_too_short'], 'request_summary' => $productNameDiagnostics, 'write' => false];
         $productSet = $this->productSetPayload($settings, $payload, $productNameDiagnostics['product_name'], $offerImages[0] ?? null);
+        $categoryGuard = $this->assertConsistentProductSetCategory($part, $payload, $productSet);
+        if (! $categoryGuard['ok']) return ['ok' => false, 'status' => 'blocked_category_mismatch', 'action' => 'createProductOffer', 'error' => 'allegro_category_mismatch', 'ui_error' => 'Kategoria oferty i produktu Allegro są niespójne.', 'request_summary' => $this->requestSummary($payload, null, $part) + ['allegro_category_consistency_guard' => $categoryGuard], 'write' => false];
+        $productSet = $categoryGuard['productSet'];
         $offerParameters = $this->offerParametersPayload($payload, $productSet);
         $taxSettings = $this->validatedTaxSettings($client, (string) ($payload['category_id'] ?? ''));
         if (($taxSettings['blockers'] ?? []) !== []) return ['ok' => false, 'status' => 'blocked_tax_settings', 'errors' => $taxSettings['blockers'], 'warnings' => $taxSettings['warnings'] ?? [], 'request_summary' => $this->requestSummary($payload, null, $part) + $productNameDiagnostics + $signature + ['allegro_sales_settings' => $this->salesSettingsSummary($salesSettings), 'allegro_tax_settings' => $taxSettings], 'write' => false];
@@ -199,11 +203,49 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
         if (! is_array($productSet[0]['product'] ?? null)) $productSet[0]['product'] = [];
         if (filled($offerName)) $productSet[0]['product']['name'] = trim($offerName);
         if (filled($mainImageUrl)) $productSet[0]['product']['images'] = [trim($mainImageUrl)];
+        if (filled($payload['category_id'] ?? null)) {
+            $productSet[0]['product']['category'] = ['id' => (string) $payload['category_id']];
+        }
         $responsibleProducer = $this->responsibleProducer($settings, $payload);
         $safetyInformation = $this->safetyInformation($settings, $payload);
         if ($responsibleProducer !== null) $productSet[0]['responsibleProducer'] = $responsibleProducer;
         if ($safetyInformation !== null) $productSet[0]['safetyInformation'] = $safetyInformation;
         return $productSet === [] ? null : $productSet;
+    }
+
+
+    /** @param array<int, array<string, mixed>>|null $productSet @return array<string, mixed> */
+    protected function assertConsistentProductSetCategory(Part $part, array $payload, ?array $productSet): array
+    {
+        $offerCategoryId = trim((string) ($payload['category_id'] ?? ''));
+        $productCategoryId = trim((string) data_get($productSet, '0.product.category.id', ''));
+        $offerSource = (string) ($payload['category_mapping_source'] ?? 'prepared_payload.category_id');
+        $productSource = filled(data_get($payload, 'productSet.0.product.category.id')) ? 'prepared_payload.productSet.0.product.category.id' : 'canonical_payload.category_id';
+
+        if ($offerCategoryId !== '' && $productCategoryId === '') {
+            data_set($productSet, '0.product.category.id', $offerCategoryId);
+            $productCategoryId = $offerCategoryId;
+            $productSource = 'canonical_payload.category_id';
+        }
+
+        $ok = $offerCategoryId === '' || $productCategoryId === '' || $offerCategoryId === $productCategoryId;
+
+        $diagnostics = [
+            'ok' => $ok,
+            'part_id' => (int) $part->getKey(),
+            'offer_category_id' => $offerCategoryId !== '' ? $offerCategoryId : null,
+            'offer_category_source' => $offerSource,
+            'product_category_id' => $productCategoryId !== '' ? $productCategoryId : null,
+            'product_category_source' => $productSource,
+            'request_blocked' => ! $ok,
+            'message' => $ok ? null : 'Kategoria oferty i produktu Allegro są niespójne.',
+        ];
+
+        if (! $ok) {
+            Log::warning('allegro_category_mismatch_blocked', $diagnostics);
+        }
+
+        return $diagnostics + ['productSet' => $productSet];
     }
 
     private function responsibleProducer(array $settings, array $payload): ?array

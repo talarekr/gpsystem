@@ -971,4 +971,56 @@ class AllegroSalesSettingsTest extends TestCase
             'https://api.allegro.pl/after-sales-service-conditions/warranties' => Http::response(['warranties' => [['id' => 'war-1', 'name' => 'GWARANTGOLD', 'status' => 'ACTIVE']]], 200),
         ];
     }
+    public function test_allegro_publish_overwrites_stale_product_set_category_with_canonical_offer_category(): void
+    {
+        Http::fake(array_merge($this->fakeAllegro(), [
+            'https://api.allegro.pl/sale/product-offers' => Http::response(['id' => 'offer-123'], 201),
+        ]));
+        $part = $this->part('KURIER DPD');
+        $payload = [
+            'title' => 'Klapa bagażnika Audi',
+            'category_id' => '254548',
+            'category_mapping_source' => 'part_override',
+            'price_pln' => 100,
+            'quantity' => 1,
+            'image_urls' => ['https://gpswiss.pl/storage/parts/photos/imported/7890/kuyJdjAM4xzYvW7Hoy0YQ7WlCKE8nRfkSUskHyT0.jpg'],
+            'productSet' => [[
+                'product' => [
+                    'category' => ['id' => '254580'],
+                    'parameters' => [],
+                ],
+            ]],
+            'allegro_parameters' => ['payload_parameters' => [], 'product_parameters' => []],
+        ];
+
+        $adapter = new class(app(MarketplaceListingReadinessService::class), app(MarketplacePublishGate::class), app(ApiIntegrationLogger::class), app(AllegroSalesSettingsResolver::class)) extends AllegroPublishAdapter {
+            public function callPerformLivePublish(Part $part, array $readiness, array $payload, MarketplaceAccount $account): array { return $this->performLivePublish($part, $readiness, $payload, $account); }
+        };
+
+        $result = $adapter->callPerformLivePublish($part, ['marketplace_price' => 100], $payload, MarketplaceAccount::query()->where('code', 'allegro_main')->firstOrFail());
+
+        $this->assertTrue($result['ok']);
+        Http::assertSent(fn ($request) => $request->url() === 'https://api.allegro.pl/sale/product-offers'
+            && data_get($request->data(), 'category.id') === '254548'
+            && data_get($request->data(), 'productSet.0.product.category.id') === '254548'
+            && ! str_contains(json_encode($request->data()), '254580'));
+    }
+
+    public function test_allegro_category_guard_blocks_artificial_mismatch_before_api_request(): void
+    {
+        Http::fake(['https://api.allegro.pl/sale/product-offers' => Http::response(['id' => 'should-not-send'], 201)]);
+        $part = $this->part('KURIER DPD');
+        $adapter = new class(app(MarketplaceListingReadinessService::class), app(MarketplacePublishGate::class), app(ApiIntegrationLogger::class), app(AllegroSalesSettingsResolver::class)) extends AllegroPublishAdapter {
+            public function callGuard(Part $part, array $payload, array $productSet): array { return $this->assertConsistentProductSetCategory($part, $payload, $productSet); }
+        };
+
+        $result = $adapter->callGuard($part, ['category_id' => '254548', 'category_mapping_source' => 'part_override'], [['product' => ['category' => ['id' => '254580']]]]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('254548', $result['offer_category_id']);
+        $this->assertSame('254580', $result['product_category_id']);
+        $this->assertSame('Kategoria oferty i produktu Allegro są niespójne.', $result['message']);
+        Http::assertNothingSent();
+    }
+
 }
