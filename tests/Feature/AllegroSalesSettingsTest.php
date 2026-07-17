@@ -688,10 +688,17 @@ class AllegroSalesSettingsTest extends TestCase
         $this->assertStringContainsString("public const ALLEGRO_DYNAMIC_PARAMETER_FIELDS = 'allegro_dynamic_parameter_fields';", $resource);
         $this->assertStringContainsString("count((array) ($get(self::ALLEGRO_DYNAMIC_PARAMETER_FIELDS) ?: [])) > 0", $resource);
         $this->assertStringContainsString('data.dynamic_allegro_parameters.fields', $view);
-        $this->assertStringContainsString('hydrateAllegroDynamicParametersFromPrepare', $view);
+        $this->assertStringContainsString('applyAllegroDynamicParametersFromPrepare', $view);
+        $this->assertStringNotContainsString('hydrateAllegroDynamicParametersFromPrepare', $view);
+        $this->assertStringContainsString("x-text=\"preparing ? 'Przygotowuję...' : 'Przygotuj'\"", $view);
+
+        $reservedPrefixes = ['hydrate', 'dehydrate', 'mount', 'boot', 'updating', 'updated', 'rendering', 'rendered'];
+        foreach ($reservedPrefixes as $prefix) {
+            $this->assertFalse(str_starts_with('applyAllegroDynamicParametersFromPrepare', $prefix));
+        }
     }
 
-    public function test_allegro_dynamic_parameter_fields_are_hydrated_without_page_reload(): void
+    public function test_allegro_dynamic_parameter_fields_are_applied_without_page_reload(): void
     {
         $part = $this->partInAllegroFunctionsBranch('18892');
         $admin = User::factory()->create();
@@ -700,10 +707,29 @@ class AllegroSalesSettingsTest extends TestCase
         Livewire::actingAs($admin)
             ->test(EditPart::class, ['record' => $part->getKey()])
             ->assertSet('data.'.PartResource::ALLEGRO_DYNAMIC_PARAMETER_FIELDS, [])
-            ->call('hydrateAllegroDynamicParametersFromPrepare', [$this->dynamicFunctionsField(['129929_8' => 'nawiew, klimatyzacja'])])
+            ->call('applyAllegroDynamicParametersFromPrepare', [$this->dynamicFunctionsField(['129929_8' => 'nawiew, klimatyzacja'])])
             ->assertSet('data.'.PartResource::ALLEGRO_DYNAMIC_PARAMETER_FIELDS.'.0.id', '129929')
             ->assertSet('data.'.PartResource::ALLEGRO_DYNAMIC_PARAMETER_FIELDS.'.0.name', 'Funkcje')
-            ->assertSet('data.'.PartResource::ALLEGRO_MANUAL_PARAMETERS_FIELD.'.129929', []);
+            ->assertSet('data.'.PartResource::ALLEGRO_MANUAL_PARAMETERS_FIELD.'.129929', [])
+            ->assertSee('Parametry Allegro')
+            ->assertSee('Funkcje');
+    }
+
+
+    public function test_apply_dynamic_parameters_accepts_null_and_empty_input(): void
+    {
+        $part = $this->partInAllegroFunctionsBranch('18892');
+        $admin = User::factory()->create();
+        $admin->assignRole('admin');
+
+        Livewire::actingAs($admin)
+            ->test(EditPart::class, ['record' => $part->getKey()])
+            ->call('applyAllegroDynamicParametersFromPrepare')
+            ->assertSet('data.'.PartResource::ALLEGRO_DYNAMIC_PARAMETER_FIELDS, [])
+            ->assertDontSee('Parametry Allegro')
+            ->call('applyAllegroDynamicParametersFromPrepare', [])
+            ->assertSet('data.'.PartResource::ALLEGRO_DYNAMIC_PARAMETER_FIELDS, [])
+            ->assertDontSee('Parametry Allegro');
     }
 
     public function test_allegro_dynamic_parameter_renderer_supports_multiple_dictionary_fields(): void
@@ -718,7 +744,7 @@ class AllegroSalesSettingsTest extends TestCase
         $this->assertSame('allegro_dynamic_parameter_values.p2', $fields[1]->getName());
     }
 
-    public function test_saved_value_ids_hydrate_dynamic_parameter_values(): void
+    public function test_saved_value_ids_apply_dynamic_parameter_values(): void
     {
         $part = $this->partInAllegroFunctionsBranch('18892');
         $admin = User::factory()->create();
@@ -726,7 +752,7 @@ class AllegroSalesSettingsTest extends TestCase
 
         Livewire::actingAs($admin)
             ->test(EditPart::class, ['record' => $part->getKey()])
-            ->call('hydrateAllegroDynamicParametersFromPrepare', [$this->dynamicFunctionsField(['129929_8' => 'nawiew, klimatyzacja'], saved: ['129929_8'])])
+            ->call('applyAllegroDynamicParametersFromPrepare', [$this->dynamicFunctionsField(['129929_8' => 'nawiew, klimatyzacja'], saved: ['129929_8'])])
             ->assertSet('data.'.PartResource::ALLEGRO_MANUAL_PARAMETERS_FIELD.'.129929', ['129929_8']);
     }
 
