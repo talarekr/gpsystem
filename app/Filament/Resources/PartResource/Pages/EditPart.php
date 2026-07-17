@@ -352,12 +352,21 @@ class EditPart extends EditRecord
 
 
 
-    public function hydrateAllegroDynamicParametersFromPrepare(array $fields): void
+    public function applyAllegroDynamicParametersFromPrepare(?array $fields = null): void
     {
-        $definitions = array_values(array_filter(array_map(
-            fn (array $field): ?array => PartResource::normalizeDynamicAllegroParameterField($field),
-            $fields,
-        )));
+        $definitions = [];
+
+        foreach (($fields ?? []) as $field) {
+            if (! is_array($field)) {
+                continue;
+            }
+
+            $definition = PartResource::normalizeDynamicAllegroParameterField($field);
+
+            if ($definition !== null) {
+                $definitions[] = $definition;
+            }
+        }
 
         $this->data[PartResource::ALLEGRO_DYNAMIC_PARAMETER_FIELDS] = $definitions;
 
@@ -368,8 +377,6 @@ class EditPart extends EditRecord
                 ? $savedValueIds
                 : ($savedValueIds[0] ?? null);
         }
-
-        $this->dispatch('$refresh');
     }
 
     private function syncAllegroFunctionsSelections(): void
