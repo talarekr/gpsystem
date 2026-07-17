@@ -6,6 +6,9 @@ use App\Filament\Resources\PartResource;
 use App\Support\Parts\AdditionalPartCodes;
 use App\Models\PartCategory;
 use App\Services\PartCategorySuggestionService;
+use App\Services\Marketplace\AllegroCategoryResolver;
+use App\Services\Marketplace\AllegroFunctionsParameterService;
+use App\Services\Marketplace\AllegroFunctionsSelectionService;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\CreateRecord;
 
@@ -15,10 +18,13 @@ class CreatePart extends CreateRecord
 
     protected array $partPhotoPaths = [];
 
+    protected array $allegroFunctionsValueIds = [];
+
     protected function mutateFormDataBeforeCreate(array $data): array
     {
         $this->partPhotoPaths = $data['part_photo_paths'] ?? [];
-        unset($data['part_photo_paths']);
+        $this->allegroFunctionsValueIds = (array) ($data[PartResource::ALLEGRO_FUNCTIONS_FIELD] ?? []);
+        unset($data['part_photo_paths'], $data[PartResource::ALLEGRO_FUNCTIONS_FIELD]);
 
         $data['quantity'] = 1;
         $data['additional_part_codes'] = AdditionalPartCodes::normalize($data['additional_part_codes'] ?? null, $data['part_number'] ?? null);
@@ -31,6 +37,17 @@ class CreatePart extends CreateRecord
     protected function afterCreate(): void
     {
         PartResource::syncPartImages($this->record, $this->partPhotoPaths);
+        $this->syncAllegroFunctionsSelections();
+    }
+
+
+    private function syncAllegroFunctionsSelections(): void
+    {
+        $resolved = app(AllegroCategoryResolver::class)->resolve($this->record);
+        if (blank($resolved['id'] ?? null) || $this->allegroFunctionsValueIds === []) return;
+        $definition = app(AllegroFunctionsParameterService::class)->definition((string) $resolved['id']);
+        if (($definition['found'] ?? false) !== true) return;
+        app(AllegroFunctionsSelectionService::class)->sync($this->record, (string) $resolved['id'], $definition['definition'], $this->allegroFunctionsValueIds);
     }
 
     protected function getCreateFormAction(): \Filament\Actions\Action

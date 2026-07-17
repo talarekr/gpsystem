@@ -8,6 +8,9 @@ use App\Models\Car;
 use App\Models\Part;
 use App\Models\PartCategory;
 use App\Models\PartImage;
+use App\Services\Marketplace\AllegroCategoryResolver;
+use App\Services\Marketplace\AllegroFunctionsBranchResolver;
+use App\Services\Marketplace\AllegroFunctionsParameterService;
 use App\Services\Marketplace\AllegroSalesSettingsResolver;
 use App\Services\Marketplace\PreparePartMarketplaceListingService;
 use App\Services\Parts\PartImageUploadService;
@@ -36,6 +39,7 @@ class PartResource extends Resource
     public const EXPECTED_LEFT_STEERING_VALUE = 'po lewej';
     public const EXPECTED_RIGHT_STEERING_VALUE = 'po prawej';
     public const PART_TITLE_MAX_LENGTH = 75;
+    public const ALLEGRO_FUNCTIONS_FIELD = 'allegro_functions_value_ids';
     public const ADMIN_STEERING_OPTIONS = [
         self::EXPECTED_LEFT_STEERING_VALUE => self::EXPECTED_LEFT_STEERING_VALUE,
         self::EXPECTED_RIGHT_STEERING_VALUE => self::EXPECTED_RIGHT_STEERING_VALUE,
@@ -48,6 +52,51 @@ class PartResource extends Resource
     protected static ?int $navigationSort = 20;
     protected static ?string $modelLabel = 'część';
     protected static ?string $pluralModelLabel = 'części';
+
+
+    public static function shouldShowAllegroFunctionsField(?Part $record, mixed $categoryId = null): bool
+    {
+        $category = $record?->category;
+        if (! $category && filled($categoryId)) {
+            $category = PartCategory::query()->find($categoryId);
+        }
+
+        return app(AllegroFunctionsBranchResolver::class)->matches($category);
+    }
+
+    public static function allegroFunctionsOptions(?Part $record, mixed $categoryId = null, mixed $formAllegroCategoryId = null): array
+    {
+        $part = $record ?? new Part(['category_id' => filled($categoryId) ? (int) $categoryId : null]);
+        if (! $part->exists && filled($categoryId)) {
+            $part->setRelation('category', PartCategory::query()->find($categoryId));
+        }
+
+        $resolved = app(AllegroCategoryResolver::class)->resolve($part, $formAllegroCategoryId);
+        if (blank($resolved['id'] ?? null)) return [];
+        $definition = app(AllegroFunctionsParameterService::class)->definition((string) $resolved['id']);
+        if (! ($definition['found'] ?? false)) return [];
+
+        return app(AllegroFunctionsParameterService::class)->allowedLabels($definition['definition']);
+    }
+
+    public static function allegroFunctionsHelperText(?Part $record, mixed $categoryId = null, mixed $formAllegroCategoryId = null): string
+    {
+        if (! self::shouldShowAllegroFunctionsField($record, $categoryId)) return '';
+        $part = $record ?? new Part(['category_id' => filled($categoryId) ? (int) $categoryId : null]);
+        $resolved = app(AllegroCategoryResolver::class)->resolve($part, $formAllegroCategoryId);
+        if (blank($resolved['id'] ?? null)) return 'Brak mapowania kategorii Allegro dla tej kategorii lokalnej.';
+        $definition = app(AllegroFunctionsParameterService::class)->definition((string) $resolved['id']);
+        if (! ($definition['ok'] ?? false)) return 'Nie udało się pobrać parametrów Allegro dla kategorii.';
+        if (! ($definition['found'] ?? false)) return 'Parametr „Funkcje” nie występuje w tej kategorii Allegro.';
+        if (app(AllegroFunctionsParameterService::class)->allowedLabels($definition['definition']) === []) return 'Słownik parametru „Funkcje” jest pusty.';
+        return 'Wybierz oficjalne wartości słownikowe Allegro. Do payloadu trafią valuesIds, nie etykiety.';
+    }
+
+    public static function savedAllegroFunctionsValueIds(?Part $record): array
+    {
+        if (! $record || ! $record->exists) return [];
+        return $record->allegroParameterSelections()->pluck('value_id')->map(fn ($id): string => (string) $id)->unique()->values()->all();
+    }
 
     public static function shouldShowAdditionalPartCodesRepeater(?Part $record): bool
     {
@@ -198,6 +247,20 @@ class PartResource extends Resource
                         Forms\Components\Hidden::make('category_suggestions')->dehydrated(false)->default([]),
                         Forms\Components\Hidden::make('marketplace_category_mappings_state')->dehydrated(false)->default([]),
                         Forms\Components\Hidden::make('marketplace_category_selections')->default([]),
+
+                        Forms\Components\Select::make(self::ALLEGRO_FUNCTIONS_FIELD)
+                            ->label('Funkcje Allegro')
+                            ->multiple()
+                            ->searchable()
+                            ->preload()
+                            ->native(false)
+                            ->dehydrated(false)
+                            ->options(fn (?Part $record, Forms\Get $get): array => self::allegroFunctionsOptions($record, $get('category_id'), data_get($get('marketplace_category_selections'), 'allegro.external_category_id')))
+                            ->default(fn (?Part $record): array => self::savedAllegroFunctionsValueIds($record))
+                            ->visible(fn (?Part $record, Forms\Get $get): bool => self::shouldShowAllegroFunctionsField($record, $get('category_id')))
+                            ->disabled(fn (?Part $record, Forms\Get $get): bool => self::allegroFunctionsOptions($record, $get('category_id'), data_get($get('marketplace_category_selections'), 'allegro.external_category_id')) === [])
+                            ->helperText(fn (?Part $record, Forms\Get $get): string => self::allegroFunctionsHelperText($record, $get('category_id'), data_get($get('marketplace_category_selections'), 'allegro.external_category_id')))
+                            ->columnSpanFull(),
                     ]),
 
                 Section::make('Informacje o samochodzie')
