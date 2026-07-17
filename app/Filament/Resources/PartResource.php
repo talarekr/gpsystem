@@ -331,6 +331,7 @@ class PartResource extends Resource
                 Section::make('Funkcje Allegro')
                     ->collapsible()
                     ->columns(1)
+                    ->visible(fn (?Part $record, Forms\Get $get): bool => self::shouldShowAllegroFunctionsField($record, $get('category_id')))
                     ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--allegro-functions'])
                     ->schema([
                         Forms\Components\Select::make(self::ALLEGRO_FUNCTIONS_FIELD)
@@ -339,10 +340,9 @@ class PartResource extends Resource
                             ->searchable()
                             ->preload()
                             ->native(false)
-                            ->dehydrated(false)
+                            ->dehydrated(true)
                             ->options(fn (?Part $record, Forms\Get $get): array => self::allegroFunctionsOptions($record, $get('category_id'), data_get($get('marketplace_category_selections'), 'allegro.external_category_id')))
                             ->default(fn (?Part $record): array => self::savedAllegroFunctionsValueIds($record))
-                            ->visible(fn (?Part $record, Forms\Get $get): bool => self::shouldShowAllegroFunctionsField($record, $get('category_id')))
                             ->disabled(fn (?Part $record, Forms\Get $get): bool => self::allegroFunctionsOptions($record, $get('category_id'), data_get($get('marketplace_category_selections'), 'allegro.external_category_id')) === [])
                             ->helperText(fn (?Part $record, Forms\Get $get): string => self::allegroFunctionsHelperText($record, $get('category_id'), data_get($get('marketplace_category_selections'), 'allegro.external_category_id')))
                             ->columnSpanFull(),
