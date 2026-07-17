@@ -123,6 +123,11 @@ class PartResource extends Resource
         return app(AllegroManualParameterSelectionService::class)->savedSelectionsForCategory($record, $categoryId);
     }
 
+    public static function currentAllegroCategoryIdForDiagnostics(?Part $record): string
+    {
+        return self::currentAllegroCategoryId($record);
+    }
+
     private static function currentAllegroCategoryId(?Part $record): string
     {
         if (! $record || ! $record->exists) return '';

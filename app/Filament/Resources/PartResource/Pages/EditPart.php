@@ -31,6 +31,8 @@ class EditPart extends EditRecord
 
     protected array $allegroDynamicParameterRepeaterStateForSync = [];
 
+    protected array $pendingAllegroDynamicParameters = [];
+
     public bool $marketplacePublishInProgress = false;
 
     protected function mutateFormDataBeforeFill(array $data): array
@@ -52,6 +54,7 @@ class EditPart extends EditRecord
         $data[PartResource::ALLEGRO_DYNAMIC_PARAMETER_FIELDS] = PartResource::dynamicAllegroParameterDefinitions($this->record);
         $data[PartResource::ALLEGRO_DYNAMIC_PARAMETERS_REPEATER] = PartResource::dynamicAllegroParameterItems($this->record, $data[PartResource::ALLEGRO_DYNAMIC_PARAMETER_FIELDS]);
         $data[PartResource::ALLEGRO_MANUAL_PARAMETERS_FIELD] = PartResource::savedAllegroManualParameterValues($this->record);
+        $this->logAllegroDynamicHydrationState($data[PartResource::ALLEGRO_DYNAMIC_PARAMETERS_REPEATER]);
 
         return $data;
     }
@@ -60,12 +63,8 @@ class EditPart extends EditRecord
     {
         $this->partPhotoPaths = array_values(array_filter((array) ($data['part_photo_paths'] ?? []), fn (mixed $path): bool => filled($path)));
         $this->marketplaceCategorySelections = (array) ($data['marketplace_category_selections'] ?? []);
-        $this->allegroDynamicParameterRepeaterStateForSync = (array) ($data[PartResource::ALLEGRO_DYNAMIC_PARAMETERS_REPEATER] ?? []);
-        $this->allegroDynamicParameterDefinitionsForSync = $this->dynamicAllegroParameterDefinitionsFromRepeater($this->allegroDynamicParameterRepeaterStateForSync);
-        $this->allegroManualParameterValues = PartResource::mapDynamicAllegroParameterItemsToManualValues($this->allegroDynamicParameterRepeaterStateForSync);
-        if ($this->allegroManualParameterValues === []) {
-            $this->allegroManualParameterValues = (array) ($data[PartResource::ALLEGRO_MANUAL_PARAMETERS_FIELD] ?? []);
-        }
+
+        $this->captureAllegroDynamicParameterSaveState($data);
         unset($data['part_photo_paths'], $data['marketplace_category_selections'], $data[PartResource::ALLEGRO_MANUAL_PARAMETERS_FIELD], $data[PartResource::ALLEGRO_DYNAMIC_PARAMETER_FIELDS], $data[PartResource::ALLEGRO_DYNAMIC_PARAMETERS_REPEATER]);
 
         $data['additional_part_codes'] = AdditionalPartCodes::normalize($data['additional_part_codes'] ?? null, $data['part_number'] ?? null);
@@ -384,33 +383,114 @@ class EditPart extends EditRecord
         }
     }
 
+    private function captureAllegroDynamicParameterSaveState(array $data): void
+    {
+        $dataState = (array) ($data[PartResource::ALLEGRO_DYNAMIC_PARAMETERS_REPEATER] ?? []);
+        $livewireState = (array) data_get($this->data, PartResource::ALLEGRO_DYNAMIC_PARAMETERS_REPEATER, []);
+        $formState = [];
+
+        try {
+            $formState = (array) data_get($this->form->getState(), PartResource::ALLEGRO_DYNAMIC_PARAMETERS_REPEATER, []);
+        } catch (\Throwable $exception) {
+            Log::warning('Allegro dynamic parameter form state could not be read before save.', [
+                'part_id' => (int) $this->record->getKey(),
+                'error' => $exception->getMessage(),
+            ]);
+        }
+
+        $source = $this->bestAllegroDynamicParameterStateSource($dataState, $livewireState, $formState);
+        $state = $source['state'];
+
+        $this->allegroDynamicParameterRepeaterStateForSync = $state;
+        $this->allegroDynamicParameterDefinitionsForSync = $this->dynamicAllegroParameterDefinitionsFromRepeater($state);
+        $this->allegroManualParameterValues = PartResource::mapDynamicAllegroParameterItemsToManualValues($state);
+        $this->pendingAllegroDynamicParameters = $state;
+
+        $this->logAllegroDynamicSaveStateCaptured($dataState, $livewireState, $formState, $source['name']);
+    }
+
+    private function bestAllegroDynamicParameterStateSource(array $dataState, array $livewireState, array $formState): array
+    {
+        foreach ([
+            'form_get_state' => $formState,
+            'data_argument' => $dataState,
+            'livewire_data' => $livewireState,
+        ] as $name => $state) {
+            if ($this->containsSelectedValueIds($state)) {
+                return ['name' => $name, 'state' => $state];
+            }
+        }
+
+        foreach ([
+            'form_get_state' => $formState,
+            'data_argument' => $dataState,
+            'livewire_data' => $livewireState,
+        ] as $name => $state) {
+            if ($state !== []) {
+                return ['name' => $name, 'state' => $state];
+            }
+        }
+
+        return ['name' => 'none', 'state' => []];
+    }
+
+    private function containsSelectedValueIds(array $state): bool
+    {
+        foreach ($state as $item) {
+            if (is_array($item) && array_key_exists('selected_value_ids', $item)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private function syncAllegroManualParameterSelections(): void
     {
         $resolved = app(AllegroCategoryResolver::class)->resolve($this->record, data_get($this->marketplaceCategorySelections, 'allegro.external_category_id'));
         $categoryId = (string) ($resolved['id'] ?? '');
-        if ($categoryId === '') return;
+        if ($categoryId === '' || $this->pendingAllegroDynamicParameters === []) return;
 
-        $definitions = PartResource::dynamicAllegroParameterDefinitions($this->record);
-        $repeaterDefinitions = $this->allegroDynamicParameterDefinitionsForSync;
+        $this->logAllegroDynamicSyncEvent('allegro_dynamic_sync_started', $categoryId, $this->pendingAllegroDynamicParameters);
 
-        $this->logAllegroDynamicParameterSyncDiagnostic('allegro_dynamic_parameters_before_sync', $categoryId);
+        foreach ($this->pendingAllegroDynamicParameters as $item) {
+            if (! is_array($item)) continue;
 
-        foreach (($repeaterDefinitions !== [] ? $repeaterDefinitions : $definitions) as $definition) {
-            $rawValue = $this->allegroManualParameterValues[(string) $definition['id']] ?? [];
-            $valueIds = ($definition['multiple_choices'] ?? false)
+            $parameterId = (string) ($item['parameter_id'] ?? '');
+            if ($parameterId === '' || ! array_key_exists('selected_value_ids', $item)) {
+                continue;
+            }
+
+            $definition = [
+                'id' => $parameterId,
+                'name' => (string) ($item['parameter_name'] ?? $parameterId),
+                'dictionary' => array_map(fn (array $row): array => ['id' => $row['id'] ?? '', 'value' => $row['label'] ?? $row['value'] ?? ''], (array) ($item['official_values'] ?? [])),
+            ];
+            $rawValue = $item['selected_value_ids'];
+            $valueIds = filter_var($item['multiple_choices'] ?? false, FILTER_VALIDATE_BOOLEAN)
                 ? (array) $rawValue
                 : ($rawValue === null || $rawValue === '' ? [] : [$rawValue]);
 
             app(AllegroManualParameterSelectionService::class)->sync(
                 $this->record,
                 $categoryId,
-                ['id' => $definition['id'], 'name' => $definition['name'], 'dictionary' => array_map(fn (array $row): array => ['id' => $row['id'] ?? '', 'value' => $row['label'] ?? ''], (array) ($definition['dictionary'] ?? []))],
+                $definition,
                 $valueIds,
-                PartResource::ALLEGRO_MANUAL_PARAMETERS_FIELD.'.'.$definition['id'],
+                PartResource::ALLEGRO_DYNAMIC_PARAMETERS_REPEATER.'.'.$parameterId.'.selected_value_ids',
             );
         }
 
-        $this->logAllegroDynamicParameterSyncDiagnostic('allegro_dynamic_parameters_after_sync', $categoryId);
+        $persistedRows = $this->record->allegroParameterSelections()
+            ->where('allegro_category_id', $categoryId)
+            ->orderBy('parameter_id')
+            ->orderBy('value_id')
+            ->get(['part_id', 'allegro_category_id', 'parameter_id', 'parameter_name', 'value_id', 'value_label'])
+            ->map(fn ($row): array => $row->toArray())
+            ->values()
+            ->all();
+
+        $this->logAllegroDynamicSyncEvent('allegro_dynamic_sync_completed', $categoryId, $this->pendingAllegroDynamicParameters, ['persisted_rows' => $persistedRows]);
+        $this->pendingAllegroDynamicParameters = [];
     }
 
     private function dynamicAllegroParameterDefinitionsFromRepeater(array $items): array
@@ -428,35 +508,65 @@ class EditPart extends EditRecord
             ->all();
     }
 
-    private function logAllegroDynamicParameterSyncDiagnostic(string $event, string $categoryId): void
+    private function logAllegroDynamicSaveStateCaptured(array $dataState, array $livewireState, array $formState, string $selectedSource): void
     {
-        if ((int) $this->record->getKey() !== 8146) {
-            return;
-        }
+        Log::info('allegro_dynamic_save_state_captured', [
+            'part_id' => (int) $this->record->getKey(),
+            'record_id' => (int) $this->record->getKey(),
+            'selected_source' => $selectedSource,
+            'sources' => [
+                'data_argument' => $this->summarizeAllegroDynamicState($dataState),
+                'livewire_data' => $this->summarizeAllegroDynamicState($livewireState),
+                'form_get_state' => $this->summarizeAllegroDynamicState($formState),
+            ],
+            'repeater_state' => $this->summarizeAllegroDynamicState($this->pendingAllegroDynamicParameters),
+            'mapped_dynamic_values' => $this->allegroManualParameterValues,
+        ]);
+    }
 
-        $context = [
-            'event' => $event,
+    private function logAllegroDynamicSyncEvent(string $event, string $categoryId, array $state, array $extra = []): void
+    {
+        Log::info($event, array_merge([
             'part_id' => (int) $this->record->getKey(),
             'category_id' => $categoryId,
-        ];
+            'parameters' => $this->summarizeAllegroDynamicState($state),
+        ], $extra));
+    }
 
-        if ($event === 'allegro_dynamic_parameters_before_sync') {
-            $context['repeater_state'] = $this->allegroDynamicParameterRepeaterStateForSync;
-            $context['mapped_dynamic_values'] = $this->allegroManualParameterValues;
-        } else {
-            $context['persisted_rows'] = $this->record->allegroParameterSelections()
+    private function summarizeAllegroDynamicState(array $state): array
+    {
+        return collect($state)
+            ->filter(fn (mixed $item): bool => is_array($item))
+            ->map(fn (array $item): array => [
+                'parameter_id' => (string) ($item['parameter_id'] ?? ''),
+                'parameter_name' => (string) ($item['parameter_name'] ?? ''),
+                'selected_value_ids_present' => array_key_exists('selected_value_ids', $item),
+                'selected_value_ids' => array_values((array) ($item['selected_value_ids'] ?? [])),
+                'official_values_count' => count((array) ($item['official_values'] ?? [])),
+            ])
+            ->values()
+            ->all();
+    }
+
+
+    private function logAllegroDynamicHydrationState(array $repeaterState): void
+    {
+        $categoryId = PartResource::currentAllegroCategoryIdForDiagnostics($this->record);
+
+        Log::info('allegro_dynamic_repeater_hydrated', [
+            'part_id' => (int) $this->record->getKey(),
+            'category_id' => $categoryId,
+            'saved_rows' => $categoryId === '' ? [] : $this->record->allegroParameterSelections()
                 ->where('allegro_category_id', $categoryId)
                 ->orderBy('parameter_id')
                 ->orderBy('value_id')
                 ->get(['part_id', 'allegro_category_id', 'parameter_id', 'parameter_name', 'value_id', 'value_label'])
                 ->map(fn ($row): array => $row->toArray())
                 ->values()
-                ->all();
-        }
-
-        Log::info('Allegro dynamic parameter sync diagnostic.', $context);
+                ->all(),
+            'repeater_after_fill' => $this->summarizeAllegroDynamicState($repeaterState),
+        ]);
     }
-
     private function marketplacePublishMessage(string $message): string
     {
         return match ($message) {
