@@ -247,20 +247,6 @@ class PartResource extends Resource
                         Forms\Components\Hidden::make('category_suggestions')->dehydrated(false)->default([]),
                         Forms\Components\Hidden::make('marketplace_category_mappings_state')->dehydrated(false)->default([]),
                         Forms\Components\Hidden::make('marketplace_category_selections')->default([]),
-
-                        Forms\Components\Select::make(self::ALLEGRO_FUNCTIONS_FIELD)
-                            ->label('Funkcje Allegro')
-                            ->multiple()
-                            ->searchable()
-                            ->preload()
-                            ->native(false)
-                            ->dehydrated(false)
-                            ->options(fn (?Part $record, Forms\Get $get): array => self::allegroFunctionsOptions($record, $get('category_id'), data_get($get('marketplace_category_selections'), 'allegro.external_category_id')))
-                            ->default(fn (?Part $record): array => self::savedAllegroFunctionsValueIds($record))
-                            ->visible(fn (?Part $record, Forms\Get $get): bool => self::shouldShowAllegroFunctionsField($record, $get('category_id')))
-                            ->disabled(fn (?Part $record, Forms\Get $get): bool => self::allegroFunctionsOptions($record, $get('category_id'), data_get($get('marketplace_category_selections'), 'allegro.external_category_id')) === [])
-                            ->helperText(fn (?Part $record, Forms\Get $get): string => self::allegroFunctionsHelperText($record, $get('category_id'), data_get($get('marketplace_category_selections'), 'allegro.external_category_id')))
-                            ->columnSpanFull(),
                     ]),
 
                 Section::make('Informacje o samochodzie')
@@ -339,6 +325,26 @@ class PartResource extends Resource
                             ->placeholder('Wybierz cennik dostawy Allegro')
                             ->options(AllegroSalesSettingsResolver::SHIPPING_RATE_OPTIONS)
                             ->native(true)
+                            ->columnSpanFull(),
+                    ]),
+
+                Section::make('Funkcje Allegro')
+                    ->collapsible()
+                    ->columns(1)
+                    ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--allegro-functions'])
+                    ->schema([
+                        Forms\Components\Select::make(self::ALLEGRO_FUNCTIONS_FIELD)
+                            ->label('Funkcje Allegro')
+                            ->multiple()
+                            ->searchable()
+                            ->preload()
+                            ->native(false)
+                            ->dehydrated(false)
+                            ->options(fn (?Part $record, Forms\Get $get): array => self::allegroFunctionsOptions($record, $get('category_id'), data_get($get('marketplace_category_selections'), 'allegro.external_category_id')))
+                            ->default(fn (?Part $record): array => self::savedAllegroFunctionsValueIds($record))
+                            ->visible(fn (?Part $record, Forms\Get $get): bool => self::shouldShowAllegroFunctionsField($record, $get('category_id')))
+                            ->disabled(fn (?Part $record, Forms\Get $get): bool => self::allegroFunctionsOptions($record, $get('category_id'), data_get($get('marketplace_category_selections'), 'allegro.external_category_id')) === [])
+                            ->helperText(fn (?Part $record, Forms\Get $get): string => self::allegroFunctionsHelperText($record, $get('category_id'), data_get($get('marketplace_category_selections'), 'allegro.external_category_id')))
                             ->columnSpanFull(),
                     ]),
 
