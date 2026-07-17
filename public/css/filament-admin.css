@@ -929,6 +929,58 @@ body:has(.gps-admin-topbar) .fi-main-ctn { min-height: calc(100dvh - var(--gps-a
     margin-top: 0.75rem;
 }
 
+/* Dynamic Allegro parameter selects need their Choices dropdowns to escape the
+   compact section/repeater chrome; keep only the dropdown's inner list scrollable. */
+.gps-part-form .gps-part-form-section--allegro-parameters.fi-section,
+.gps-part-form .gps-part-form-section--allegro-parameters .fi-section-content,
+.gps-part-form .gps-part-form-section--allegro-parameters :where(.fi-fo-component-ctn, .grid, .fi-fo-repeater, .fi-fo-repeater-item, .fi-in-repeatable-item, .fi-fo-field-wrp, .fi-fo-field-wrp > div, .fi-fo-select) {
+    overflow: visible !important;
+}
+
+.gps-part-form .gps-part-form-section--allegro-parameters :where(.fi-fo-select .choices) {
+    overflow: visible !important;
+    position: relative;
+    z-index: 20;
+}
+
+.gps-part-form .gps-part-form-section--allegro-parameters :where(.fi-fo-select .choices.is-open) {
+    z-index: 80;
+}
+
+.gps-part-form .gps-part-form-section--allegro-parameters :where(.choices__list--dropdown, .choices__list[aria-expanded]) {
+    height: auto !important;
+    max-height: min(20rem, calc(100vh - 12rem)) !important;
+    overflow: hidden !important;
+    z-index: 90 !important;
+}
+
+.gps-part-form .gps-part-form-section--allegro-parameters :where(.choices__list--dropdown .choices__list, .choices__list[aria-expanded] .choices__list) {
+    max-height: min(20rem, calc(100vh - 12rem)) !important;
+    overflow-y: auto !important;
+}
+
+@supports (height: 100dvh) {
+    .gps-part-form .gps-part-form-section--allegro-parameters :where(.choices__list--dropdown, .choices__list[aria-expanded], .choices__list--dropdown .choices__list, .choices__list[aria-expanded] .choices__list) {
+        max-height: min(20rem, calc(100dvh - 12rem)) !important;
+    }
+}
+
+.gps-part-form .gps-part-form-section--allegro-parameters :where(
+    .fi-fo-field-wrp-label span,
+    .fi-fo-select .choices__inner,
+    .fi-fo-select .choices__placeholder,
+    .fi-fo-select .choices__input,
+    .fi-fo-select .choices__list--single,
+    .fi-fo-select .choices__item,
+    .fi-fo-select .choices__item--selectable,
+    .fi-fo-select .choices__item--choice
+) {
+    font-family: inherit !important;
+    font-size: 0.875rem !important;
+    font-weight: 400 !important;
+    line-height: 1.5 !important;
+}
+
 .gps-part-form .gps-part-form-section .fi-section-header {
     min-height: 2.75rem;
     padding: 0.65rem 0.85rem !important;
