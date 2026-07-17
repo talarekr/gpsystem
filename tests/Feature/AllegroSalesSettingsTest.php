@@ -6,6 +6,7 @@ use App\Filament\Resources\PartResource;
 use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceCategoryMapping;
 use App\Models\Part;
+use App\Models\PartCategory;
 use App\Models\PartImage;
 use App\Services\Marketplace\AllegroSalesSettingsResolver;
 use App\Services\Marketplace\ApiIntegrationLogger;
@@ -75,7 +76,43 @@ class AllegroSalesSettingsTest extends TestCase
         $this->assertTrue($pricesPosition < $courierPosition);
         $this->assertTrue($courierPosition < $functionsPosition);
         $this->assertTrue($functionsPosition < $channelsPosition);
-        $this->assertStringContainsString("Forms\\Components\\Select::make(self::ALLEGRO_FUNCTIONS_FIELD)", substr($resource, $functionsPosition, $channelsPosition - $functionsPosition));
+
+        $functionsSection = substr($resource, $functionsPosition, $channelsPosition - $functionsPosition);
+        $this->assertStringContainsString("->schema([", $functionsSection);
+        $this->assertStringContainsString("Forms\\Components\\Select::make(self::ALLEGRO_FUNCTIONS_FIELD)", $functionsSection);
+        $this->assertStringContainsString("->dehydrated(true)", $functionsSection);
+        $this->assertStringContainsString("->disabled(fn (?Part $record, Forms\\Get $get): bool => self::allegroFunctionsOptions", $functionsSection);
+        $this->assertStringContainsString("->helperText(fn (?Part $record, Forms\\Get $get): string => self::allegroFunctionsHelperText", $functionsSection);
+        $this->assertStringNotContainsString("->hidden(", $functionsSection);
+        $this->assertStringNotContainsString("Select::make(self::ALLEGRO_FUNCTIONS_FIELD)\n                            ->label('Funkcje Allegro')\n                            ->multiple()\n                            ->searchable()\n                            ->preload()\n                            ->native(false)\n                            ->dehydrated(true)\n                            ->options(fn (?Part $record, Forms\\Get $get): array => self::allegroFunctionsOptions($record, $get('category_id'), data_get($get('marketplace_category_selections'), 'allegro.external_category_id')))\n                            ->default(fn (?Part $record): array => self::savedAllegroFunctionsValueIds($record))\n                            ->visible(", $functionsSection);
+    }
+
+    public function test_allegro_functions_branch_callbacks_keep_field_renderable(): void
+    {
+        Http::fake($this->fakeAllegroFunctions(['front' => 'Przednie', 'rear' => 'Tylne']));
+        $part = $this->partInAllegroFunctionsBranch('18892');
+
+        $this->assertTrue(PartResource::shouldShowAllegroFunctionsField($part, $part->category_id));
+        $this->assertSame(['front' => 'Przednie', 'rear' => 'Tylne'], PartResource::allegroFunctionsOptions($part, $part->category_id, null));
+        $this->assertSame('Wybierz oficjalne wartości słownikowe Allegro. Do payloadu trafią valuesIds, nie etykiety.', PartResource::allegroFunctionsHelperText($part, $part->category_id, null));
+    }
+
+    public function test_allegro_functions_section_is_hidden_outside_branch(): void
+    {
+        $category = PartCategory::query()->create(['name' => 'Alternatory']);
+        $part = Part::query()->create(['name' => 'Alternator', 'category_id' => $category->id, 'price' => 100, 'quantity' => 1]);
+
+        $this->assertFalse(PartResource::shouldShowAllegroFunctionsField($part, $part->category_id));
+    }
+
+    public function test_allegro_functions_empty_dictionary_keeps_visible_field_disabled_with_helper(): void
+    {
+        Http::fake($this->fakeAllegroFunctions([]));
+        $part = $this->partInAllegroFunctionsBranch('18892');
+
+        $this->assertTrue(PartResource::shouldShowAllegroFunctionsField($part, $part->category_id));
+        $this->assertSame([], PartResource::allegroFunctionsOptions($part, $part->category_id, null));
+        $this->assertSame('Słownik parametru „Funkcje” jest pusty.', PartResource::allegroFunctionsHelperText($part, $part->category_id, null));
     }
 
     public function test_manual_return_policy_mapping_keeps_readiness_unblocked_when_api_does_not_return_it(): void
@@ -517,6 +554,33 @@ class AllegroSalesSettingsTest extends TestCase
         $this->assertContains('allegro_tax_settings_rates_not_supported', $result['errors']);
         $this->assertContains('allegro_tax_rate_not_supported:CZ:21.00', $result['warnings']);
         Http::assertNotSent(fn ($request) => $request->url() === 'https://api.allegro.pl/sale/product-offers');
+    }
+
+    private function partInAllegroFunctionsBranch(string $allegroCategoryId): Part
+    {
+        MarketplaceAccount::query()->create(['code' => 'allegro_main', 'marketplace' => 'allegro', 'name' => 'Allegro', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://api.allegro.pl', 'api_credentials' => ['access_token' => 'token']]);
+
+        $root = PartCategory::query()->create(['name' => 'Wyposażenie elektryczne']);
+        $parent = PartCategory::query()->create(['name' => 'Przełączniki i przyciski', 'parent_id' => $root->id]);
+        $leaf = PartCategory::query()->create(['name' => 'Przełącznik świateł', 'parent_id' => $parent->id]);
+        MarketplaceCategoryMapping::query()->create(['local_category_id' => $leaf->id, 'channel' => 'allegro_main', 'external_category_id' => $allegroCategoryId]);
+
+        return Part::query()->create(['name' => 'Przełącznik świateł', 'category_id' => $leaf->id, 'price' => 100, 'quantity' => 1]);
+    }
+
+    private function fakeAllegroFunctions(array $dictionary): array
+    {
+        return [
+            'https://api.allegro.pl/sale/categories/18892/parameters' => Http::response(['parameters' => [[
+                'id' => '229205',
+                'name' => 'Funkcje',
+                'type' => 'dictionary',
+                'required' => true,
+                'options' => ['describesProduct' => true],
+                'restrictions' => ['multipleChoices' => true],
+                'dictionary' => array_map(fn (string $label, string $id): array => ['id' => $id, 'value' => $label], $dictionary, array_keys($dictionary)),
+            ]]], 200),
+        ];
     }
 
     private function part(?string $shippingRateName): Part
