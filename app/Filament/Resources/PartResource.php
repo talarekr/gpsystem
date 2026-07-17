@@ -89,7 +89,7 @@ class PartResource extends Resource
         if (! ($definition['ok'] ?? false)) return 'Nie udało się pobrać parametrów Allegro dla kategorii.';
         if (! ($definition['found'] ?? false)) return 'Parametr „Funkcje” nie występuje w tej kategorii Allegro.';
         if (app(AllegroFunctionsParameterService::class)->allowedLabels($definition['definition']) === []) return 'Słownik parametru „Funkcje” jest pusty.';
-        return 'Wybierz oficjalne wartości słownikowe Allegro. Do payloadu trafią valuesIds, nie etykiety.';
+        return '';
     }
 
     public static function savedAllegroFunctionsValueIds(?Part $record): array
@@ -335,7 +335,8 @@ class PartResource extends Resource
                     ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--allegro-functions'])
                     ->schema([
                         Forms\Components\Select::make(self::ALLEGRO_FUNCTIONS_FIELD)
-                            ->label('Funkcje Allegro')
+                            ->hiddenLabel()
+                            ->placeholder('Wybierz z listy')
                             ->multiple()
                             ->searchable()
                             ->preload()
@@ -345,6 +346,7 @@ class PartResource extends Resource
                             ->default(fn (?Part $record): array => self::savedAllegroFunctionsValueIds($record))
                             ->disabled(fn (?Part $record, Forms\Get $get): bool => self::allegroFunctionsOptions($record, $get('category_id'), data_get($get('marketplace_category_selections'), 'allegro.external_category_id')) === [])
                             ->helperText(fn (?Part $record, Forms\Get $get): string => self::allegroFunctionsHelperText($record, $get('category_id'), data_get($get('marketplace_category_selections'), 'allegro.external_category_id')))
+                            ->extraAttributes(['class' => 'gps-allegro-functions-select'])
                             ->columnSpanFull(),
                     ]),
 
