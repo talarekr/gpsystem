@@ -326,10 +326,11 @@ class MarketplaceListingReadinessService
         ];
     }
 
-    private function allegroProductSetPreview(array $allegroParameters, ?MarketplaceAccount $account, string $productName, ?string $mainImageUrl = null): array
+    private function allegroProductSetPreview(array $allegroParameters, ?MarketplaceAccount $account, string $productName, ?string $categoryId = null, ?string $mainImageUrl = null): array
     {
         $settings = is_array($account?->api_settings) ? $account->api_settings : [];
         $product = ['name' => trim($productName), 'parameters' => $allegroParameters['product_parameters'] ?? []];
+        if (filled($categoryId)) $product['category'] = ['id' => (string) $categoryId];
         if (filled($mainImageUrl)) $product['images'] = [trim($mainImageUrl)];
         $productSet = ['product' => $product];
         $responsibleProducer = $this->allegroResponsibleProducer($settings);
@@ -595,7 +596,7 @@ class MarketplaceListingReadinessService
             $preview = array_merge($preview, $signatureDiagnostics);
             $preview['external'] = filled($signatureDiagnostics['allegro_signature_value']) ? ['id' => $signatureDiagnostics['allegro_signature_value']] : null;
             $preview['diagnostics']['allegro_signature'] = $signatureDiagnostics;
-            $preview['productSet'] = [$this->allegroProductSetPreview($allegroParameters, $this->accountFor($channel), $productNameDiagnostics['product_name'], $preview['image_urls'][0] ?? null)];
+            $preview['productSet'] = [$this->allegroProductSetPreview($allegroParameters, $this->accountFor($channel), $productNameDiagnostics['product_name'], (string) ($preview['category_id'] ?? ''), $preview['image_urls'][0] ?? null)];
             $preview['gpsr_diagnostics'] = $this->allegroGpsrDiagnostics($this->accountFor($channel));
             $preview['afterSalesServices'] = array_filter([
                 'returnPolicy' => ['id' => $allegroSalesSettings['returnPolicy']['id'] ?? null],
