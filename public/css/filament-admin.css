@@ -3172,8 +3172,7 @@ body:has(.gps-admin-topbar) .fi-no {
 .gps-part-form .gps-part-form-section--allegro-functions .fi-fo-field-wrp,
 .gps-part-form .gps-part-form-section--allegro-functions .fi-fo-field-wrp > div,
 .gps-part-form .gps-part-form-section--allegro-functions .gps-allegro-functions-select,
-.gps-part-form .gps-part-form-section--allegro-functions .fi-fo-select,
-.gps-part-form .gps-part-form-section--allegro-functions .choices {
+.gps-part-form .gps-part-form-section--allegro-functions .fi-fo-select {
     overflow: visible;
 }
 
@@ -3181,15 +3180,13 @@ body:has(.gps-admin-topbar) .fi-no {
     z-index: 70;
 }
 
-.gps-part-form .gps-part-form-section--allegro-functions .choices__list--dropdown,
-.gps-part-form .gps-part-form-section--allegro-functions .choices__list[aria-expanded] {
+.gps-part-form .gps-part-form-section--allegro-functions .choices__list--dropdown {
     z-index: 70;
     max-height: min(22rem, calc(100vh - 12rem));
-    overflow: visible;
+    overflow: hidden;
 }
 
-.gps-part-form .gps-part-form-section--allegro-functions .choices__list--dropdown .choices__list,
-.gps-part-form .gps-part-form-section--allegro-functions .choices__list[aria-expanded] .choices__list {
+.gps-part-form .gps-part-form-section--allegro-functions .choices__list--dropdown .choices__list {
     max-height: min(22rem, calc(100vh - 12rem));
     overflow-y: auto;
     overscroll-behavior: contain;
