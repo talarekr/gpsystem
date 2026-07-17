@@ -80,9 +80,13 @@ class AllegroSalesSettingsTest extends TestCase
         $functionsSection = substr($resource, $functionsPosition, $channelsPosition - $functionsPosition);
         $this->assertStringContainsString("->schema([", $functionsSection);
         $this->assertStringContainsString("Forms\\Components\\Select::make(self::ALLEGRO_FUNCTIONS_FIELD)", $functionsSection);
+        $this->assertStringContainsString("->hiddenLabel()", $functionsSection);
+        $this->assertStringContainsString("->placeholder('Wybierz z listy')", $functionsSection);
         $this->assertStringContainsString("->dehydrated(true)", $functionsSection);
         $this->assertStringContainsString("->disabled(fn (?Part $record, Forms\\Get $get): bool => self::allegroFunctionsOptions", $functionsSection);
         $this->assertStringContainsString("->helperText(fn (?Part $record, Forms\\Get $get): string => self::allegroFunctionsHelperText", $functionsSection);
+        $this->assertStringContainsString("->extraAttributes(['class' => 'gps-allegro-functions-select'])", $functionsSection);
+        $this->assertStringNotContainsString("->label('Funkcje Allegro')", $functionsSection);
         $this->assertStringNotContainsString("->hidden(", $functionsSection);
         $this->assertStringNotContainsString("Select::make(self::ALLEGRO_FUNCTIONS_FIELD)\n                            ->label('Funkcje Allegro')\n                            ->multiple()\n                            ->searchable()\n                            ->preload()\n                            ->native(false)\n                            ->dehydrated(true)\n                            ->options(fn (?Part $record, Forms\\Get $get): array => self::allegroFunctionsOptions($record, $get('category_id'), data_get($get('marketplace_category_selections'), 'allegro.external_category_id')))\n                            ->default(fn (?Part $record): array => self::savedAllegroFunctionsValueIds($record))\n                            ->visible(", $functionsSection);
     }
@@ -94,7 +98,25 @@ class AllegroSalesSettingsTest extends TestCase
 
         $this->assertTrue(PartResource::shouldShowAllegroFunctionsField($part, $part->category_id));
         $this->assertSame(['front' => 'Przednie', 'rear' => 'Tylne'], PartResource::allegroFunctionsOptions($part, $part->category_id, null));
-        $this->assertSame('Wybierz oficjalne wartości słownikowe Allegro. Do payloadu trafią valuesIds, nie etykiety.', PartResource::allegroFunctionsHelperText($part, $part->category_id, null));
+        $this->assertSame('', PartResource::allegroFunctionsHelperText($part, $part->category_id, null));
+    }
+
+    public function test_allegro_functions_dropdown_css_is_scoped_and_scrollable(): void
+    {
+        $css = file_get_contents(public_path('css/filament-admin.css'));
+        $scopedCssStart = strpos($css, '.gps-part-form .gps-part-form-section--allegro-functions.fi-section');
+
+        $this->assertNotFalse($scopedCssStart);
+        $scopedCss = substr($css, $scopedCssStart);
+
+        $this->assertStringContainsString(".gps-part-form .gps-part-form-section--allegro-functions.fi-section {
+    overflow: visible;", $scopedCss);
+        $this->assertStringNotContainsString(".gps-part-form .gps-part-form-section--allegro-functions.fi-section {
+    overflow: hidden;", $scopedCss);
+        $this->assertStringContainsString('.gps-part-form .gps-part-form-section--allegro-functions .choices__list--dropdown', $scopedCss);
+        $this->assertStringContainsString('max-height: min(22rem, calc(100vh - 12rem));', $scopedCss);
+        $this->assertStringContainsString('overflow-y: auto;', $scopedCss);
+        $this->assertStringContainsString('z-index: 70;', $scopedCss);
     }
 
     public function test_allegro_functions_section_is_hidden_outside_branch(): void

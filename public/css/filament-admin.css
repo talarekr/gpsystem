@@ -3159,3 +3159,38 @@ body:has(.gps-admin-topbar) .fi-no {
     padding-bottom: 0.25rem !important;
     line-height: 1.25rem !important;
 }
+
+/* Allow the Allegro Functions Choices dropdown to escape the compact Filament section shell.
+   The generic .gps-part-form-section rule uses overflow:hidden for rounded cards, which clipped
+   this in-section dropdown to the first row. Keep the change scoped to this one section/select. */
+.gps-part-form .gps-part-form-section--allegro-functions.fi-section {
+    overflow: visible;
+}
+
+.gps-part-form .gps-part-form-section--allegro-functions .fi-section-content,
+.gps-part-form .gps-part-form-section--allegro-functions .fi-section-content > div,
+.gps-part-form .gps-part-form-section--allegro-functions .fi-fo-field-wrp,
+.gps-part-form .gps-part-form-section--allegro-functions .fi-fo-field-wrp > div,
+.gps-part-form .gps-part-form-section--allegro-functions .gps-allegro-functions-select,
+.gps-part-form .gps-part-form-section--allegro-functions .fi-fo-select,
+.gps-part-form .gps-part-form-section--allegro-functions .choices {
+    overflow: visible;
+}
+
+.gps-part-form .gps-part-form-section--allegro-functions .choices.is-open {
+    z-index: 70;
+}
+
+.gps-part-form .gps-part-form-section--allegro-functions .choices__list--dropdown,
+.gps-part-form .gps-part-form-section--allegro-functions .choices__list[aria-expanded] {
+    z-index: 70;
+    max-height: min(22rem, calc(100vh - 12rem));
+    overflow: visible;
+}
+
+.gps-part-form .gps-part-form-section--allegro-functions .choices__list--dropdown .choices__list,
+.gps-part-form .gps-part-form-section--allegro-functions .choices__list[aria-expanded] .choices__list {
+    max-height: min(22rem, calc(100vh - 12rem));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
