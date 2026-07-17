@@ -89,6 +89,14 @@ class AllegroSalesSettingsTest extends TestCase
         $this->assertStringNotContainsString('ALLEGRO_FUNCTIONS_FIELD', $resource);
         $this->assertStringNotContainsString('allegro_functions_value_ids', $resource);
         $this->assertStringContainsString("Forms\\Components\\Select::make(self::ALLEGRO_MANUAL_PARAMETERS_FIELD.'.'.$parameterId)", $resource);
+        $this->assertStringContainsString("Forms\\Components\\Select::make('selected_value_ids')", $resource);
+        $this->assertStringContainsString('->hiddenLabel()', $resource);
+        $this->assertStringContainsString('->contained(false)', $resource);
+        $this->assertStringContainsString('->itemLabel(null)', $resource);
+        $this->assertStringContainsString('->addable(false)', $resource);
+        $this->assertStringContainsString('->deletable(false)', $resource);
+        $this->assertStringContainsString('->reorderable(false)', $resource);
+        $this->assertStringNotContainsString("->label(fn (Forms\\Get $get): string => (string) ($get('parameter_name')", $resource);
     }
 
     public function test_legacy_functions_selection_row_is_read_by_generic_builder_and_unblocks_readiness(): void
@@ -652,8 +660,7 @@ class AllegroSalesSettingsTest extends TestCase
             ->assertSet('data.'.PartResource::ALLEGRO_DYNAMIC_PARAMETER_FIELDS.'.0.id', '129929')
             ->assertSet('data.'.PartResource::ALLEGRO_DYNAMIC_PARAMETER_FIELDS.'.0.name', 'Funkcje')
             ->assertSet('data.'.PartResource::ALLEGRO_MANUAL_PARAMETERS_FIELD.'.129929', [])
-            ->assertSee('Parametry Allegro')
-            ->assertSee('Funkcje');
+            ->assertSee('Parametry Allegro');
     }
 
 
