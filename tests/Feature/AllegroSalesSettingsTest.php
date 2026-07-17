@@ -593,6 +593,52 @@ class AllegroSalesSettingsTest extends TestCase
         }
     }
 
+
+    public function test_allegro_readiness_guidance_points_to_parameters_above_channels(): void
+    {
+        $controller = file_get_contents(app_path('Http/Controllers/Tools/PartMarketplaceReadinessController.php'));
+
+        $this->assertStringContainsString('Uzupełnij wymagane parametry Allegro powyżej i zapisz produkt. Brakuje: ', $controller);
+        $this->assertStringNotContainsString('Uzupełnij wymagane parametry Allegro poniżej i zapisz produkt. Brakuje: ', $controller);
+    }
+
+    public function test_allegro_dynamic_dictionary_select_rejects_custom_ui_values_and_keeps_official_selection_label(): void
+    {
+        $field = $this->dynamicFunctionsField($this->fixture7985FunctionsDictionary());
+        $definition = PartResource::normalizeDynamicAllegroParameterField($field);
+        $options = PartResource::dynamicAllegroParameterOptions($definition);
+        $components = PartResource::dynamicAllegroParameterFields(null, [$field]);
+        $resource = file_get_contents(app_path('Filament/Resources/PartResource.php'));
+
+        $this->assertCount(18, $options);
+        $this->assertSame('nawiew, klimatyzacja', $options['129929_8']);
+        $this->assertSame(['129929_8'], array_keys(array_filter($options, fn (string $label): bool => $label === 'nawiew, klimatyzacja')));
+        $this->assertSame('allegro_dynamic_parameter_values.129929', $components[0]->getName());
+        $this->assertStringContainsString("->searchable()", $resource);
+        $this->assertStringContainsString("->preload()", $resource);
+        $this->assertStringContainsString("->native(false)", $resource);
+        $this->assertStringContainsString("'data-gps-allegro-dictionary-select' => \$parameterId", $resource);
+        $this->assertStringContainsString("'data-gps-allegro-dictionary-option-count' => (string) count(self::dynamicAllegroParameterOptions($param))", $resource);
+        $this->assertStringNotContainsString('->creatable()', $resource);
+        $this->assertStringNotContainsString('->createOptionUsing(', $resource);
+        $this->assertArrayNotHasKey('tesk', $options);
+    }
+
+    public function test_allegro_dictionary_choices_hook_clears_unselected_search_text_without_custom_items(): void
+    {
+        $script = file_get_contents(public_path('js/filament-admin-dashboard.js'));
+
+        $this->assertStringContainsString('[data-gps-allegro-dictionary-select] .choices', $script);
+        $this->assertStringContainsString("choices.addEventListener('pointerdown'", $script);
+        $this->assertStringContainsString("input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))", $script);
+        $this->assertStringContainsString("choices.addEventListener('hideDropdown'", $script);
+        $this->assertStringContainsString("choices.addEventListener('blur'", $script);
+        $this->assertStringContainsString("input.value = ''", $script);
+        $this->assertStringContainsString("input.dispatchEvent(new Event('input', { bubbles: true }))", $script);
+        $this->assertStringContainsString("window.Livewire.hook('morph.updated'", $script);
+        $this->assertStringNotContainsString('new Choices(', $script);
+    }
+
     public function test_allegro_dynamic_parameter_fields_are_applied_without_page_reload(): void
     {
         $part = $this->partInAllegroFunctionsBranch('18892');

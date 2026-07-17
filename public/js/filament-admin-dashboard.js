@@ -202,3 +202,78 @@
         initLocalSaleModal();
     }
 })();
+
+(function () {
+    const selector = '[data-gps-allegro-dictionary-select] .choices';
+
+    function clearChoicesSearch(choices) {
+        const input = choices.querySelector('.choices__input--cloned, input.choices__input');
+        if (!input || input.value === '') return;
+
+        input.value = '';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    function focusExistingChoicesSearch(choices) {
+        const input = choices.querySelector('.choices__input--cloned, input.choices__input');
+        if (!input) return;
+
+        input.focus();
+        input.click();
+
+        if (!choices.classList.contains('is-open')) {
+            input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+        }
+    }
+
+    function initAllegroDictionarySelects(root) {
+        (root || document).querySelectorAll(selector).forEach(function (choices) {
+            if (choices.dataset.gpsAllegroDictionaryBound === '1') return;
+            choices.dataset.gpsAllegroDictionaryBound = '1';
+
+            choices.addEventListener('pointerdown', function () {
+                window.setTimeout(function () {
+                    focusExistingChoicesSearch(choices);
+                }, 0);
+            });
+
+            choices.addEventListener('hideDropdown', function () {
+                clearChoicesSearch(choices);
+            });
+
+            choices.addEventListener('blur', function () {
+                clearChoicesSearch(choices);
+            }, true);
+        });
+    }
+
+    function boot() {
+        initAllegroDictionarySelects(document);
+
+        document.addEventListener('livewire:navigated', function () {
+            initAllegroDictionarySelects(document);
+        });
+
+        if (window.Livewire && typeof window.Livewire.hook === 'function') {
+            window.Livewire.hook('morph.updated', function (payload) {
+                initAllegroDictionarySelects(payload.el || document);
+            });
+        }
+
+        new MutationObserver(function (mutations) {
+            mutations.forEach(function (mutation) {
+                mutation.addedNodes.forEach(function (node) {
+                    if (node.nodeType === Node.ELEMENT_NODE) {
+                        initAllegroDictionarySelects(node);
+                    }
+                });
+            });
+        }).observe(document.documentElement, { childList: true, subtree: true });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', boot);
+    } else {
+        boot();
+    }
+})();

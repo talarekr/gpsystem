@@ -144,6 +144,10 @@ class PartResource extends Resource
                 ->native(false)
                 ->options(self::dynamicAllegroParameterOptions($param))
                 ->dehydrated(true)
+                ->extraAttributes([
+                    'data-gps-allegro-dictionary-select' => $parameterId,
+                    'data-gps-allegro-dictionary-option-count' => (string) count(self::dynamicAllegroParameterOptions($param)),
+                ])
                 ->columnSpanFull();
 
             return ($param['multiple_choices'] ?? false) ? $field->multiple() : $field;
