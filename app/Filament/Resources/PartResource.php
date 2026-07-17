@@ -164,6 +164,10 @@ class PartResource extends Resource
             ->addable(false)
             ->deletable(false)
             ->reorderable(false)
+            ->reorderableWithButtons(false)
+            ->reorderableWithDragAndDrop(false)
+            ->contained(false)
+            ->itemLabel(null)
             ->dehydrated(true)
             ->default(fn (?Part $record): array => self::dynamicAllegroParameterItems($record))
             ->schema([
@@ -173,8 +177,8 @@ class PartResource extends Resource
                 Forms\Components\Hidden::make('official_values'),
                 Forms\Components\Select::make('selected_value_ids')
                     ->key('allegro-parameter-selected-value-ids')
-                    ->label(fn (Forms\Get $get): string => (string) ($get('parameter_name') ?: $get('parameter_id') ?: 'Parametr Allegro'))
-                    ->placeholder('Wybierz z listy')
+                    ->hiddenLabel()
+                    ->placeholder(fn (Forms\Get $get): string => self::dynamicAllegroParameterPlaceholder($get))
                     ->searchable()
                     ->preload()
                     ->native(false)
@@ -190,6 +194,17 @@ class PartResource extends Resource
             ->columnSpanFull();
     }
 
+
+    private static function dynamicAllegroParameterPlaceholder(Forms\Get $get): string
+    {
+        $parameterName = trim((string) $get('parameter_name'));
+
+        if ($parameterName === '' || $parameterName === 'Funkcje') {
+            return 'Wybierz z listy';
+        }
+
+        return 'Wybierz: '.$parameterName;
+    }
 
     public static function mapDynamicAllegroParameterItemsToManualValues(array $items): array
     {
