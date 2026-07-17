@@ -11,8 +11,6 @@ class AllegroListingReadOnlyStatusController extends Controller
 {
     public function __invoke(Request $request, AllegroListingDiagnosisService $diagnostics): JsonResponse
     {
-        if ($request->query('token') !== 'gps_images_import_2026') abort(403);
-
         $partId = $request->integer('part_id');
         abort_unless($partId > 0, 422, 'part_id is required.');
 
