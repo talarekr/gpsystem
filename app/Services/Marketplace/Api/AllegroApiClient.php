@@ -407,7 +407,20 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
             ->accept('application/vnd.allegro.public.v1+json')
             ->timeout(20)
             ->get($this->absoluteUrl('/sale/product-offers/'.rawurlencode($offerId)));
-        return ['ok' => $response->successful(), 'http_status' => $response->status(), 'json' => is_array($response->json()) ? $response->json() : [], 'request_id' => $response->header('trace-id') ?: $response->header('x-request-id')];
+        $json = $response->json();
+        $validJson = is_array($json);
+        return ['ok' => $response->successful() && $validJson, 'http_status' => $response->status(), 'json' => $validJson ? $json : [], 'error' => $validJson ? null : 'invalid_json', 'request_id' => $response->header('trace-id') ?: $response->header('x-request-id')];
+    }
+
+    public function productCatalogReadOnly(string $productId): array
+    {
+        $response = AllegroUserAgent::request()->withToken((string) $this->credentials()['access_token'])
+            ->accept('application/vnd.allegro.public.v1+json')
+            ->timeout(20)
+            ->get($this->absoluteUrl('/sale/products/'.rawurlencode($productId)));
+        $json = $response->json();
+        $validJson = is_array($json);
+        return ['ok' => $response->successful() && $validJson, 'http_status' => $response->status(), 'json' => $validJson ? $json : [], 'error' => $validJson ? null : 'invalid_json', 'request_id' => $response->header('trace-id') ?: $response->header('x-request-id')];
     }
 
     private function accessToken(): string
