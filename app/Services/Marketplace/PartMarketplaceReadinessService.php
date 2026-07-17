@@ -65,6 +65,10 @@ class PartMarketplaceReadinessService
                 'ok' => $ok,
                 'warnings' => array_values(array_unique(array_filter($warnings))),
                 'will_make_marketplace_request' => false,
+                'missing_required_allegro_parameters' => $readiness['missing_required_allegro_parameters'] ?? [],
+                'dynamic_allegro_parameters' => $readiness['dynamic_allegro_parameters'] ?? null,
+                'prepared_payload_preview_safe' => $readiness['prepared_payload_preview_safe'] ?? null,
+                'blockers' => $readiness['blockers'] ?? [],
                 'source' => 'local_validation_only',
                 'presentation' => $this->presentation($status, $missing, $mapping, $label, $requiresEbayTranslations),
             ];
@@ -76,6 +80,10 @@ class PartMarketplaceReadinessService
                 'ok' => [],
                 'warnings' => ['Nie udało się przygotować podglądu gotowości: '.$e::class, 'Podgląd gotowości — bez wystawiania oferty i bez zapisu do marketplace.'],
                 'will_make_marketplace_request' => false,
+                'missing_required_allegro_parameters' => [],
+                'dynamic_allegro_parameters' => null,
+                'prepared_payload_preview_safe' => null,
+                'blockers' => [$e::class],
                 'source' => 'local_validation_only',
                 'presentation' => $this->presentation('api_error', ['Nie udało się przygotować podglądu gotowości.'], null, $label, $requiresEbayTranslations),
             ];

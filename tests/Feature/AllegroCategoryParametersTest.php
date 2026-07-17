@@ -787,4 +787,86 @@ class AllegroCategoryParametersTest extends TestCase
             ['id' => 'side', 'name' => 'Strona zabudowy', 'type' => 'dictionary', 'required' => $requireSide, 'dictionary' => [['id' => 'front-back', 'value' => 'przód + tył']], 'options' => ['describesProduct' => false]],
         ]];
     }
+    public function test_structured_missing_dictionary_flows_from_builder_to_readiness_and_allegro_alias(): void
+    {
+        Http::fake(['https://api.allegro.pl/sale/categories/18892/parameters' => Http::response(['parameters' => [$this->functionsDefinition()]], 200)]);
+        MarketplaceAccount::query()->create(['code' => 'allegro_main', 'marketplace' => 'allegro', 'name' => 'Allegro', 'status' => 'active', 'api_base_url' => 'https://api.allegro.pl', 'api_credentials' => ['access_token' => 'token']]);
+        $part = Part::query()->create(['name' => 'Lusterko funkcje test', 'category_id' => 8078, 'price' => 100, 'quantity' => 1, 'description' => 'Opis testowy części', 'is_visible_storefront' => true]);
+        MarketplaceCategoryMapping::query()->create(['local_category_id' => 8078, 'channel' => 'allegro_main', 'external_category_id' => '18892']);
+
+        $builder = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, MarketplaceCategoryMapping::query()->first(), ['ok' => true, 'source' => 'fixture', 'parameters' => [$this->functionsDefinition()]]);
+        $this->assertSame('Funkcje', $builder['missing_required_parameters'][0]['name']);
+        $this->assertSame('129929_8', $builder['missing_required_allegro_parameters'][0]['dictionary'][0]['id']);
+        $this->assertSame('multi_select', $builder['missing_required_allegro_parameters'][0]['ui_component']);
+
+        $result = app(MarketplaceListingReadinessService::class)->checkPartReadiness($part, 'allegro');
+
+        $this->assertSame('allegro_main', $result['channel']);
+        $this->assertContains('allegro_parameter:Funkcje', $result['missing_fields']);
+        $this->assertSame('Funkcje', $result['missing_required_allegro_parameters'][0]['name']);
+        $this->assertSame('129929', $result['dynamic_allegro_parameters']['fields'][0]['parameter_id']);
+        $this->assertGreaterThan(0, count($result['dynamic_allegro_parameters']['fields'][0]['official_values']));
+        $this->assertSame('multi_select', $result['dynamic_allegro_parameters']['fields'][0]['ui_component']);
+    }
+
+    public function test_prepare_card_returns_dynamic_allegro_parameters_for_structured_missing_dictionary(): void
+    {
+        Http::fake(['https://api.allegro.pl/sale/categories/18892/parameters' => Http::response(['parameters' => [$this->functionsDefinition()]], 200)]);
+        MarketplaceAccount::query()->create(['code' => 'allegro_main', 'marketplace' => 'allegro', 'name' => 'Allegro', 'status' => 'active', 'api_base_url' => 'https://api.allegro.pl', 'api_credentials' => ['access_token' => 'token']]);
+        $part = Part::query()->create(['name' => 'Lusterko funkcje test', 'category_id' => 8078, 'price' => 100, 'quantity' => 1, 'description' => 'Opis testowy części', 'is_visible_storefront' => true]);
+        MarketplaceCategoryMapping::query()->create(['local_category_id' => 8078, 'channel' => 'allegro_main', 'external_category_id' => '18892']);
+
+        $response = $this->getJson(route('tools.prepare-part-marketplace-card', ['token' => 'gps_images_import_2026', 'part_id' => $part->id, 'channel' => 'allegro']));
+
+        $response->assertOk()->assertJsonPath('ready', false)->assertJsonPath('missing_required_allegro_parameters.0.name', 'Funkcje')->assertJsonPath('dynamic_allegro_parameters.fields.0.parameter_name', 'Funkcje')->assertJsonPath('dynamic_allegro_parameters.fields.0.ui_component', 'multi_select');
+        $this->assertGreaterThan(0, count($response->json('dynamic_allegro_parameters.fields.0.official_values')));
+    }
+
+    public function test_two_missing_dictionary_parameters_remain_stable_and_distinct(): void
+    {
+        $part = Part::query()->create(['name' => 'Część', 'category_id' => 8078, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'is_visible_storefront' => true]);
+        $result = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, null, ['ok' => true, 'source' => 'fixture', 'parameters' => [$this->functionsDefinition(), $this->carTypeDefinition()]]);
+
+        $this->assertSame(['Funkcje', 'Typ samochodu'], array_column($result['missing_required_parameters'], 'name'));
+        $this->assertSame(['Funkcje', 'Typ samochodu'], array_column($result['missing_required_allegro_parameters'], 'name'));
+        $this->assertSame('129929', $result['missing_required_allegro_parameters'][0]['id']);
+        $this->assertSame('223489', $result['missing_required_allegro_parameters'][1]['id']);
+    }
+
+    public function test_optional_dictionary_does_not_create_dynamic_missing_and_unsupported_required_has_no_select(): void
+    {
+        $part = Part::query()->create(['name' => 'Część', 'category_id' => 8078, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'is_visible_storefront' => true]);
+        $optional = $this->functionsDefinition();
+        $optional['required'] = false;
+        $unsupported = ['id' => 'text_required', 'name' => 'Komentarz', 'type' => 'string', 'required' => true, 'options' => ['requiredForProduct' => true, 'describesProduct' => true]];
+
+        $result = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, null, ['ok' => true, 'source' => 'fixture', 'parameters' => [$optional, $unsupported]]);
+
+        $this->assertSame(['Komentarz'], array_column($result['missing_required_allegro_parameters'], 'name'));
+        $this->assertFalse($result['missing_required_allegro_parameters'][0]['ui_supported']);
+        $this->assertSame('allegro_parameter_type_not_supported', $result['missing_required_allegro_parameters'][0]['blocker']);
+    }
+
+    public function test_saved_manual_selection_removes_dictionary_missing_and_preserves_values_ids_payload(): void
+    {
+        $part = Part::query()->create(['name' => 'Część', 'category_id' => 8078, 'price' => 100, 'quantity' => 1, 'description' => 'Opis', 'is_visible_storefront' => true]);
+        $mapping = new MarketplaceCategoryMapping(['external_category_id' => '18892']);
+        DB::table('allegro_parameter_selections')->insert(['part_id' => $part->id, 'allegro_category_id' => '18892', 'parameter_id' => '129929', 'value_id' => '129929_8', 'created_at' => now(), 'updated_at' => now()]);
+
+        $result = app(\App\Services\Marketplace\AllegroOfferParametersBuilder::class)->build($part, $mapping, ['ok' => true, 'source' => 'fixture', 'parameters' => [$this->functionsDefinition()]]);
+
+        $this->assertSame([], $result['missing_required_allegro_parameters']);
+        $this->assertSame([['id' => '129929', 'valuesIds' => ['129929_8']]], $result['product_parameters']);
+    }
+
+    private function functionsDefinition(): array
+    {
+        return ['id' => '129929', 'name' => 'Funkcje', 'type' => 'dictionary', 'required' => true, 'dictionary' => [['id' => '129929_8', 'value' => 'nawiew, klimatyzacja'], ['id' => '129929_65536', 'value' => 'czujnik deszczu']], 'restrictions' => ['multipleChoices' => true], 'options' => ['requiredForProduct' => true, 'describesProduct' => true]];
+    }
+
+    private function carTypeDefinition(): array
+    {
+        return ['id' => '223489', 'name' => 'Typ samochodu', 'type' => 'dictionary', 'required' => true, 'dictionary' => [['id' => '223489_1', 'value' => 'Samochody osobowe']], 'restrictions' => ['multipleChoices' => true], 'options' => ['requiredForProduct' => true, 'describesProduct' => true]];
+    }
+
 }
