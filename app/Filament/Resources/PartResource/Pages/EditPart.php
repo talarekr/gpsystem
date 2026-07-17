@@ -46,6 +46,7 @@ class EditPart extends EditRecord
         $data['part_photo_paths'] = [];
         $data['marketplace_category_selections'] = [];
         $data[PartResource::ALLEGRO_DYNAMIC_PARAMETER_FIELDS] = PartResource::dynamicAllegroParameterDefinitions($this->record);
+        $data[PartResource::ALLEGRO_DYNAMIC_PARAMETERS_REPEATER] = PartResource::dynamicAllegroParameterItems($this->record, $data[PartResource::ALLEGRO_DYNAMIC_PARAMETER_FIELDS]);
         $data[PartResource::ALLEGRO_MANUAL_PARAMETERS_FIELD] = PartResource::savedAllegroManualParameterValues($this->record);
 
         return $data;
@@ -55,8 +56,11 @@ class EditPart extends EditRecord
     {
         $this->partPhotoPaths = array_values(array_filter((array) ($data['part_photo_paths'] ?? []), fn (mixed $path): bool => filled($path)));
         $this->marketplaceCategorySelections = (array) ($data['marketplace_category_selections'] ?? []);
-        $this->allegroManualParameterValues = (array) ($data[PartResource::ALLEGRO_MANUAL_PARAMETERS_FIELD] ?? []);
-        unset($data['part_photo_paths'], $data['marketplace_category_selections'], $data[PartResource::ALLEGRO_MANUAL_PARAMETERS_FIELD], $data[PartResource::ALLEGRO_DYNAMIC_PARAMETER_FIELDS]);
+        $this->allegroManualParameterValues = PartResource::mapDynamicAllegroParameterItemsToManualValues((array) ($data[PartResource::ALLEGRO_DYNAMIC_PARAMETERS_REPEATER] ?? []));
+        if ($this->allegroManualParameterValues === []) {
+            $this->allegroManualParameterValues = (array) ($data[PartResource::ALLEGRO_MANUAL_PARAMETERS_FIELD] ?? []);
+        }
+        unset($data['part_photo_paths'], $data['marketplace_category_selections'], $data[PartResource::ALLEGRO_MANUAL_PARAMETERS_FIELD], $data[PartResource::ALLEGRO_DYNAMIC_PARAMETER_FIELDS], $data[PartResource::ALLEGRO_DYNAMIC_PARAMETERS_REPEATER]);
 
         $data['additional_part_codes'] = AdditionalPartCodes::normalize($data['additional_part_codes'] ?? null, $data['part_number'] ?? null);
         $data['condition_notes'] = PartResource::defaultConditionValue($data['condition_notes'] ?? null);
@@ -363,6 +367,7 @@ class EditPart extends EditRecord
         }
 
         $this->data[PartResource::ALLEGRO_DYNAMIC_PARAMETER_FIELDS] = $definitions;
+        $this->data[PartResource::ALLEGRO_DYNAMIC_PARAMETERS_REPEATER] = PartResource::dynamicAllegroParameterItems($this->record, $definitions);
 
         foreach ($definitions as $definition) {
             $parameterId = (string) $definition['id'];
@@ -379,10 +384,22 @@ class EditPart extends EditRecord
         $categoryId = (string) ($resolved['id'] ?? '');
         if ($categoryId === '') return;
 
-        foreach (PartResource::dynamicAllegroParameterDefinitions($this->record) as $definition) {
+        $definitions = PartResource::dynamicAllegroParameterDefinitions($this->record);
+        $repeaterDefinitions = collect((array) ($this->data[PartResource::ALLEGRO_DYNAMIC_PARAMETERS_REPEATER] ?? []))
+            ->map(fn (array $item): array => [
+                'id' => (string) ($item['parameter_id'] ?? ''),
+                'name' => (string) ($item['parameter_name'] ?? $item['parameter_id'] ?? ''),
+                'multiple_choices' => (bool) ($item['multiple_choices'] ?? false),
+                'dictionary' => (array) ($item['official_values'] ?? []),
+            ])
+            ->filter(fn (array $item): bool => $item['id'] !== '' && $item['dictionary'] !== [])
+            ->values()
+            ->all();
+
+        foreach (($repeaterDefinitions !== [] ? $repeaterDefinitions : $definitions) as $definition) {
             $rawValue = $this->allegroManualParameterValues[(string) $definition['id']] ?? [];
             $valueIds = ($definition['multiple_choices'] ?? false)
-                ? $rawValue
+                ? (array) $rawValue
                 : ($rawValue === null || $rawValue === '' ? [] : [$rawValue]);
 
             app(AllegroManualParameterSelectionService::class)->sync(
