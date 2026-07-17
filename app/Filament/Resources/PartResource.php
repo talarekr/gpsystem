@@ -41,7 +41,8 @@ class PartResource extends Resource
     public const EXPECTED_RIGHT_STEERING_VALUE = 'po prawej';
     public const PART_TITLE_MAX_LENGTH = 75;
     public const ALLEGRO_FUNCTIONS_FIELD = 'allegro_functions_value_ids';
-    public const ALLEGRO_MANUAL_PARAMETERS_FIELD = 'allegro_manual_parameters';
+    public const ALLEGRO_MANUAL_PARAMETERS_FIELD = 'allegro_dynamic_parameter_values';
+    public const ALLEGRO_DYNAMIC_PARAMETER_FIELDS = 'allegro_dynamic_parameter_fields';
     public const ADMIN_STEERING_OPTIONS = [
         self::EXPECTED_LEFT_STEERING_VALUE => self::EXPECTED_LEFT_STEERING_VALUE,
         self::EXPECTED_RIGHT_STEERING_VALUE => self::EXPECTED_RIGHT_STEERING_VALUE,
@@ -103,12 +104,15 @@ class PartResource extends Resource
     public static function dynamicAllegroParameterDefinitions(?Part $record): array
     {
         if (! $record || ! $record->exists) return [];
-        $params = (array) data_get((array) ($record->review_metadata ?: []), 'marketplace_prepare_results.allegro.missing_required_allegro_parameters', []);
+        $params = (array) data_get((array) ($record->review_metadata ?: []), 'marketplace_prepare_results.allegro.dynamic_allegro_parameters.fields', []);
+        if ($params === []) {
+            $params = (array) data_get((array) ($record->review_metadata ?: []), 'marketplace_prepare_results.allegro.missing_required_allegro_parameters', []);
+        }
         $supported = [];
         foreach ($params as $param) {
-            if (! is_array($param) || ($param['ui_supported'] ?? false) !== true) continue;
-            if (($param['type'] ?? null) !== 'dictionary' || ($param['dictionary'] ?? []) === []) continue;
-            $supported[(string) $param['id']] = $param;
+            $definition = self::normalizeDynamicAllegroParameterField($param);
+            if ($definition === null) continue;
+            $supported[(string) $definition['id']] = $definition;
         }
 
         $categoryId = self::currentAllegroCategoryId($record);
@@ -130,6 +134,33 @@ class PartResource extends Resource
         return array_values($supported);
     }
 
+    public static function normalizeDynamicAllegroParameterField(array $param): ?array
+    {
+        if (($param['ui_supported'] ?? false) !== true) return null;
+        if (($param['type'] ?? null) !== 'dictionary') return null;
+
+        $dictionary = (array) ($param['dictionary'] ?? $param['official_values'] ?? []);
+        if ($dictionary === []) return null;
+
+        $id = (string) ($param['id'] ?? $param['parameter_id'] ?? '');
+        if ($id === '') return null;
+
+        return [
+            'id' => $id,
+            'name' => (string) ($param['name'] ?? $param['parameter_name'] ?? $id),
+            'type' => 'dictionary',
+            'multiple_choices' => (bool) ($param['multiple_choices'] ?? false),
+            'required' => (bool) ($param['required'] ?? false),
+            'describes_product' => (bool) ($param['describes_product'] ?? false),
+            'dictionary' => array_values(array_filter(array_map(fn (array $row): array => [
+                'id' => (string) ($row['id'] ?? ''),
+                'label' => (string) ($row['label'] ?? $row['value'] ?? $row['id'] ?? ''),
+            ], $dictionary), fn (array $row): bool => $row['id'] !== '')),
+            'saved_value_ids' => array_values((array) ($param['saved_value_ids'] ?? [])),
+            'ui_supported' => true,
+        ];
+    }
+
     public static function savedAllegroManualParameterValues(?Part $record): array
     {
         if (! $record || ! $record->exists) return [];
@@ -145,8 +176,10 @@ class PartResource extends Resource
         return (string) ($resolved['id'] ?? '');
     }
 
-    public static function dynamicAllegroParameterFields(?Part $record): array
+    public static function dynamicAllegroParameterFields(?Part $record, ?array $fields = null): array
     {
+        $definitions = $fields === null ? self::dynamicAllegroParameterDefinitions($record) : array_values(array_filter(array_map(fn (array $field): ?array => self::normalizeDynamicAllegroParameterField($field), $fields)));
+
         return array_map(function (array $param) {
             $field = Forms\Components\Select::make(self::ALLEGRO_MANUAL_PARAMETERS_FIELD.'.'.((string) $param['id']))
                 ->label((string) ($param['name'] ?? $param['id']))
@@ -159,7 +192,7 @@ class PartResource extends Resource
                 ->columnSpanFull();
 
             return ($param['multiple_choices'] ?? false) ? $field->multiple() : $field;
-        }, self::dynamicAllegroParameterDefinitions($record));
+        }, $definitions);
     }
 
     public static function shouldShowAdditionalPartCodesRepeater(?Part $record): bool
@@ -392,12 +425,16 @@ class PartResource extends Resource
                             ->columnSpanFull(),
                     ]),
 
+                Forms\Components\Hidden::make(self::ALLEGRO_DYNAMIC_PARAMETER_FIELDS)
+                    ->dehydrated(false)
+                    ->default(fn (?Part $record): array => self::dynamicAllegroParameterDefinitions($record)),
+
                 Section::make('Parametry Allegro')
                     ->collapsible()
                     ->columns(1)
-                    ->visible(fn (?Part $record): bool => self::dynamicAllegroParameterDefinitions($record) !== [])
+                    ->visible(fn (Forms\Get $get): bool => count((array) ($get(self::ALLEGRO_DYNAMIC_PARAMETER_FIELDS) ?: [])) > 0)
                     ->extraAttributes(['class' => 'gps-part-form-section gps-part-form-section--allegro-parameters'])
-                    ->schema(fn (?Part $record): array => self::dynamicAllegroParameterFields($record)),
+                    ->schema(fn (?Part $record, Forms\Get $get): array => self::dynamicAllegroParameterFields($record, (array) ($get(self::ALLEGRO_DYNAMIC_PARAMETER_FIELDS) ?: []))),
 
                 Section::make('Kanały sprzedaży')
                     ->collapsible()
