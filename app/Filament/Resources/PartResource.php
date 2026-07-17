@@ -346,7 +346,6 @@ class PartResource extends Resource
                             ->default(fn (?Part $record): array => self::savedAllegroFunctionsValueIds($record))
                             ->disabled(fn (?Part $record, Forms\Get $get): bool => self::allegroFunctionsOptions($record, $get('category_id'), data_get($get('marketplace_category_selections'), 'allegro.external_category_id')) === [])
                             ->helperText(fn (?Part $record, Forms\Get $get): string => self::allegroFunctionsHelperText($record, $get('category_id'), data_get($get('marketplace_category_selections'), 'allegro.external_category_id')))
-                            ->extraAttributes(['class' => 'gps-allegro-functions-select'])
                             ->columnSpanFull(),
                     ]),
 
