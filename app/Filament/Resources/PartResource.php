@@ -216,8 +216,13 @@ class PartResource extends Resource
             $parameterId = (string) ($item['parameter_id'] ?? '');
             if ($parameterId === '') continue;
 
-            $selected = $item['selected_value_ids'] ?? [];
-            $values[$parameterId] = ($item['multiple_choices'] ?? false)
+            if (! array_key_exists('selected_value_ids', $item)) {
+                continue;
+            }
+
+            $selected = $item['selected_value_ids'];
+            $multipleChoices = filter_var($item['multiple_choices'] ?? false, FILTER_VALIDATE_BOOLEAN);
+            $values[$parameterId] = $multipleChoices
                 ? array_values(array_filter((array) $selected, fn (mixed $value): bool => filled($value)))
                 : ($selected === '' ? null : $selected);
         }

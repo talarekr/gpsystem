@@ -769,6 +769,31 @@ class AllegroSalesSettingsTest extends TestCase
         $this->assertStringNotContainsString('->createOptionUsing(', $resource);
     }
 
+    public function test_dynamic_parameter_repeater_state_maps_selected_value_ids_by_parameter_id(): void
+    {
+        $state = [[
+            'parameter_id' => '129929',
+            'parameter_name' => 'Funkcje',
+            'multiple_choices' => true,
+            'official_values' => [['id' => '129929_256', 'label' => 'światła']],
+            'selected_value_ids' => ['129929_256'],
+        ]];
+
+        $this->assertSame(['129929' => ['129929_256']], PartResource::mapDynamicAllegroParameterItemsToManualValues($state));
+    }
+
+    public function test_dynamic_parameter_repeater_mapper_skips_missing_select_state_without_clearing_fallback_values(): void
+    {
+        $state = [[
+            'parameter_id' => '129929',
+            'parameter_name' => 'Funkcje',
+            'multiple_choices' => true,
+            'official_values' => [['id' => '129929_256', 'label' => 'światła']],
+        ]];
+
+        $this->assertSame([], PartResource::mapDynamicAllegroParameterItemsToManualValues($state));
+    }
+
     public function test_saved_value_ids_apply_dynamic_parameter_values(): void
     {
         $part = $this->partInAllegroFunctionsBranch('18892');
