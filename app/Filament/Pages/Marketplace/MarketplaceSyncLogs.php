@@ -23,6 +23,43 @@ class MarketplaceSyncLogs extends Page implements HasTable
     protected static ?int $navigationSort = 3;
     protected static string $view = 'filament.pages.marketplace.sync-logs';
 
+
+    public static function applyRelatedSearch(Builder $query, string $search): Builder
+    {
+        $relatedId = static::relatedSearchId($search);
+
+        if ($relatedId === null) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        return $query->where(function (Builder $query) use ($relatedId): void {
+            $query
+                ->where('part_id', $relatedId)
+                ->orWhere('marketplace_listing_id', $relatedId)
+                ->orWhere('order_id', $relatedId)
+                ->orWhere('shipment_id', $relatedId);
+        });
+    }
+
+    public static function relatedSearchId(string $search): ?int
+    {
+        $search = trim($search);
+
+        if ($search === '') {
+            return null;
+        }
+
+        if (preg_match('/^(?:#\s*)?(\d+)$/', $search, $matches) === 1) {
+            return (int) $matches[1];
+        }
+
+        if (preg_match('/^(?:part|cz[eę]ść|czesc|listing|zam(?:\.|ówienie|owienie)?|order|przes(?:\.|yłka|ylka)?|shipment)\s*#?\s*(\d+)$/iu', $search, $matches) === 1) {
+            return (int) $matches[1];
+        }
+
+        return null;
+    }
+
     public function table(Table $table): Table
     {
         return $table
@@ -42,7 +79,9 @@ class MarketplaceSyncLogs extends Page implements HasTable
                     $record->shipment_id ? 'Przes. #'.$record->shipment_id : null,
                     $record->marketplace_listing_id ? 'Listing #'.$record->marketplace_listing_id : null,
                     $record->part_id ? 'Część #'.$record->part_id : null,
-                ])->filter()->implode(' / ') ?: '—')->wrap(),
+                ])->filter()->implode(' / ') ?: '—')
+                    ->searchable(query: fn (Builder $query, string $search): Builder => static::applyRelatedSearch($query, $search))
+                    ->wrap(),
                 Tables\Columns\TextColumn::make('http_status')->label('Kod/status')->placeholder('—')->sortable(),
                 Tables\Columns\TextColumn::make('message')->label('Komunikat')->searchable()->limit(80)->wrap(),
                 Tables\Columns\TextColumn::make('duration_ms')->label('Czas ms')->sortable()->placeholder('—'),
