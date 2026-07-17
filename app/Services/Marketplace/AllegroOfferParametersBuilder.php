@@ -5,6 +5,7 @@ namespace App\Services\Marketplace;
 use App\Models\MarketplaceCategoryMapping;
 use App\Models\Part;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
@@ -56,10 +57,30 @@ class AllegroOfferParametersBuilder
         $valid = array_values(array_intersect($selected, $allowed));
 
         if ($valid === []) {
+            $this->logManualResolution($part, $categoryId, $parameterId, $selected, false, false);
+
             return ['value' => null, 'source' => 'allegro_parameter_selections.value_id', 'source_value' => $selected, 'reason' => 'manual_selection_values_not_in_current_dictionary', 'invalid_saved_value_ids' => $selected];
         }
 
+        $this->logManualResolution($part, $categoryId, $parameterId, $valid, false, true);
+
         return ['type' => 'dictionary', 'value' => $valid, 'source' => 'allegro_parameter_selections.value_id', 'label' => $valid, 'manual_override_used' => true, 'valid_saved_value_ids' => $valid, 'invalid_saved_value_ids' => array_values(array_diff($selected, $valid))];
+    }
+
+
+    private function logManualResolution(Part $part, string $categoryId, string $parameterId, array $valueIds, bool $missing, bool $ready): void
+    {
+        Log::info('allegro_dynamic_publish_resolution', [
+            'part_id' => (int) $part->getKey(),
+            'category_id' => $categoryId,
+            'required_parameter_id' => $parameterId,
+            'parameter_id' => $parameterId,
+            'saved_value_ids' => array_values($valueIds),
+            'count' => count($valueIds),
+            'manual_resolution_source' => 'manual_selection',
+            'missing' => $missing,
+            'ready' => $ready,
+        ]);
     }
 
     private function resolve(Part $part, ?MarketplaceCategoryMapping $mapping, array $def): array

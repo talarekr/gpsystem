@@ -806,6 +806,62 @@ class AllegroSalesSettingsTest extends TestCase
             ->assertSet('data.'.PartResource::ALLEGRO_MANUAL_PARAMETERS_FIELD.'.129929', ['129929_8']);
     }
 
+
+    public function test_edit_part_persists_rehydrates_and_publishes_two_dynamic_allegro_parameters(): void
+    {
+        config(['marketplace.publish_enabled' => true]);
+        Http::fake([
+            'https://api.allegro.pl/sale/categories/18892/parameters' => Http::response(['parameters' => [
+                $this->functionsDefinition(['129929_8' => 'nawiew, klimatyzacja']),
+                [
+                    'id' => '223489',
+                    'name' => 'Typ samochodu',
+                    'type' => 'dictionary',
+                    'required' => true,
+                    'options' => ['describesProduct' => true],
+                    'restrictions' => ['multipleChoices' => true],
+                    'dictionary' => [['id' => '223489_1', 'value' => 'Samochody osobowe']],
+                ],
+            ]], 200),
+        ]);
+
+        $part = $this->partInAllegroFunctionsBranch('18892');
+        $part->forceFill(['description' => 'Opis przełącznika świateł', 'allegro_shipping_rate_name' => 'KURIER DPD'])->save();
+        PartImage::query()->create(['part_id' => $part->id, 'path' => 'parts/photos/imported/7890/kuyJdjAM4xzYvW7Hoy0YQ7WlCKE8nRfkSUskHyT0.jpg', 'is_primary' => true, 'sort_order' => 1]);
+        $admin = User::factory()->create();
+        $admin->assignRole('admin');
+
+        $fields = [
+            $this->dynamicFunctionsField(['129929_8' => 'nawiew, klimatyzacja'], '229205', 'Funkcje'),
+            $this->dynamicFunctionsField(['223489_1' => 'Samochody osobowe'], '223489', 'Typ samochodu'),
+        ];
+
+        Livewire::actingAs($admin)
+            ->test(EditPart::class, ['record' => $part->getKey()])
+            ->call('applyAllegroDynamicParametersFromPrepare', $fields)
+            ->set('data.'.PartResource::ALLEGRO_DYNAMIC_PARAMETERS_REPEATER.'.0.selected_value_ids', ['129929_8'])
+            ->set('data.'.PartResource::ALLEGRO_DYNAMIC_PARAMETERS_REPEATER.'.1.selected_value_ids', ['223489_1'])
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertDatabaseHas('allegro_parameter_selections', ['part_id' => $part->id, 'allegro_category_id' => '18892', 'parameter_id' => '229205', 'value_id' => '129929_8', 'value_label' => 'nawiew, klimatyzacja']);
+        $this->assertDatabaseHas('allegro_parameter_selections', ['part_id' => $part->id, 'allegro_category_id' => '18892', 'parameter_id' => '223489', 'value_id' => '223489_1', 'value_label' => 'Samochody osobowe']);
+
+        Livewire::actingAs($admin)
+            ->test(EditPart::class, ['record' => $part->getKey()])
+            ->assertSet('data.'.PartResource::ALLEGRO_DYNAMIC_PARAMETERS_REPEATER.'.0.selected_value_ids', ['129929_8'])
+            ->assertSet('data.'.PartResource::ALLEGRO_DYNAMIC_PARAMETERS_REPEATER.'.1.selected_value_ids', ['223489_1']);
+
+        $preflight = app(MarketplaceListingReadinessService::class)->checkPartReadiness($part->fresh(), 'allegro_main');
+
+        $this->assertTrue($preflight['can_publish_later']);
+        $this->assertNotContains('allegro_required_category_parameters_missing', $preflight['blockers']);
+        $this->assertSame([
+            ['id' => '229205', 'valuesIds' => ['129929_8']],
+            ['id' => '223489', 'valuesIds' => ['223489_1']],
+        ], data_get($preflight, 'prepared_payload_preview_safe.productSet.0.product.parameters'));
+    }
+
     public function test_dynamic_parameter_normalizer_rejects_custom_text_fields(): void
     {
         $this->assertNull(PartResource::normalizeDynamicAllegroParameterField($this->dynamicFunctionsField([])));
