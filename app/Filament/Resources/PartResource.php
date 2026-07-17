@@ -181,18 +181,30 @@ class PartResource extends Resource
         $definitions = $fields === null ? self::dynamicAllegroParameterDefinitions($record) : array_values(array_filter(array_map(fn (array $field): ?array => self::normalizeDynamicAllegroParameterField($field), $fields)));
 
         return array_map(function (array $param) {
-            $field = Forms\Components\Select::make(self::ALLEGRO_MANUAL_PARAMETERS_FIELD.'.'.((string) $param['id']))
+            $parameterId = (string) $param['id'];
+            $field = Forms\Components\Select::make(self::ALLEGRO_MANUAL_PARAMETERS_FIELD.'.'.$parameterId)
+                ->key('allegro-parameter-'.$parameterId)
                 ->label((string) ($param['name'] ?? $param['id']))
                 ->placeholder('Wybierz z listy')
                 ->searchable()
                 ->preload()
                 ->native(false)
-                ->options(collect((array) ($param['dictionary'] ?? []))->mapWithKeys(fn ($row): array => [(string) ($row['id'] ?? '') => (string) ($row['label'] ?? $row['value'] ?? $row['id'] ?? '')])->filter()->all())
+                ->options(self::dynamicAllegroParameterOptions($param))
                 ->dehydrated(true)
                 ->columnSpanFull();
 
             return ($param['multiple_choices'] ?? false) ? $field->multiple() : $field;
         }, $definitions);
+    }
+
+    public static function dynamicAllegroParameterOptions(array $field): array
+    {
+        return collect((array) ($field['official_values'] ?? $field['dictionary'] ?? []))
+            ->mapWithKeys(fn ($item): array => [
+                (string) ($item['id'] ?? '') => (string) ($item['label'] ?? $item['value'] ?? $item['id'] ?? ''),
+            ])
+            ->filter(fn (string $label, string $id): bool => $id !== '' && $label !== '')
+            ->all();
     }
 
     public static function shouldShowAdditionalPartCodesRepeater(?Part $record): bool
