@@ -3,26 +3,39 @@
 namespace Tests\Feature;
 
 use App\Filament\Resources\PartResource;
+use App\Filament\Resources\PartResource\Pages\EditPart;
 use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceCategoryMapping;
 use App\Models\Part;
 use App\Models\PartCategory;
 use App\Models\PartImage;
-use App\Services\Marketplace\AllegroSalesSettingsResolver;
+use App\Models\User;
 use App\Services\Marketplace\AllegroFunctionsSelectionService;
 use App\Services\Marketplace\AllegroOfferParametersBuilder;
+use App\Services\Marketplace\AllegroSalesSettingsResolver;
 use App\Services\Marketplace\ApiIntegrationLogger;
+use App\Services\Marketplace\MarketplaceListingReadinessService;
 use App\Services\Marketplace\MarketplacePublishGate;
 use App\Services\Marketplace\Publishing\AllegroPublishAdapter;
-use App\Services\Marketplace\MarketplaceListingReadinessService;
+use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Validation\ValidationException;
+use Livewire\Livewire;
+use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
 
 class AllegroSalesSettingsTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+        $this->seed(RoleSeeder::class);
+    }
 
     public function test_missing_selected_allegro_courier_blocks_readiness(): void
     {
@@ -93,7 +106,7 @@ class AllegroSalesSettingsTest extends TestCase
         $this->assertStringContainsString("->dehydrated(true)", $functionsSection);
         $this->assertStringContainsString("->disabled(fn (?Part $record, Forms\\Get $get): bool => self::allegroFunctionsOptions", $functionsSection);
         $this->assertStringContainsString("->helperText(fn (?Part $record, Forms\\Get $get): string => self::allegroFunctionsHelperText", $functionsSection);
-        $this->assertStringContainsString("->extraAttributes(['class' => 'gps-allegro-functions-select'])", $functionsSection);
+        $this->assertStringNotContainsString("->extraAttributes(['class' => 'gps-allegro-functions-select'])", $functionsSection);
         $this->assertStringNotContainsString("->label('Funkcje Allegro')", $functionsSection);
         $this->assertStringNotContainsString("->hidden(", $functionsSection);
         $this->assertStringNotContainsString("->creatable(", $functionsSection);
@@ -118,34 +131,59 @@ class AllegroSalesSettingsTest extends TestCase
     public function test_allegro_functions_options_fixture_7985_has_dictionary_values(): void
     {
         Http::fake($this->fakeAllegroFunctions($this->fixture7985FunctionsDictionary()));
-        $part = $this->partInAllegroFunctionsBranch('18892');
+        $part = $this->partInAllegroFunctionsBranch('18892', 7985, 187);
 
         $options = PartResource::allegroFunctionsOptions($part, $part->category_id, null);
+        $diagnostics = [
+            'part_id' => $part->id,
+            'record_category_id' => $part->category_id,
+            'form_category_id' => null,
+            'resolved_category_id' => $part->category_id,
+            'allegro_category_id' => '18892',
+            'parameter_found' => $options !== [],
+            'options_count' => count($options),
+            'options_sample' => array_intersect_key($options, ['129929_256' => true]),
+        ];
 
-        $this->assertCount(18, $options);
-        $this->assertSame('światła', $options['129929_256']);
+        $this->assertSame([
+            'part_id' => 7985,
+            'record_category_id' => 187,
+            'form_category_id' => null,
+            'resolved_category_id' => 187,
+            'allegro_category_id' => '18892',
+            'parameter_found' => true,
+            'options_count' => 18,
+            'options_sample' => ['129929_256' => 'światła'],
+        ], $diagnostics);
     }
 
-    public function test_allegro_functions_dropdown_css_is_scoped_and_scrollable(): void
+    public function test_allegro_functions_edit_form_hydrates_multiple_select_with_official_options(): void
+    {
+        Http::fake($this->fakeAllegroFunctions($this->fixture7985FunctionsDictionary()));
+        $part = $this->partInAllegroFunctionsBranch('18892', 7985, 187);
+        $admin = User::factory()->create();
+        $admin->assignRole('admin');
+
+        Livewire::actingAs($admin)
+            ->test(EditPart::class, ['record' => $part->getKey()])
+            ->assertSet('data.category_id', 187)
+            ->assertSet('data.'.PartResource::ALLEGRO_FUNCTIONS_FIELD, [])
+            ->set('data.'.PartResource::ALLEGRO_FUNCTIONS_FIELD, ['129929_256'])
+            ->assertSet('data.'.PartResource::ALLEGRO_FUNCTIONS_FIELD, ['129929_256']);
+
+        $this->assertSame('światła', PartResource::allegroFunctionsOptions($part->fresh(), 187, null)['129929_256']);
+    }
+
+    public function test_allegro_functions_dropdown_uses_standard_filament_select_without_custom_choices_css(): void
     {
         $css = file_get_contents(public_path('css/filament-admin.css'));
-        $scopedCssStart = strpos($css, '.gps-part-form .gps-part-form-section--allegro-functions.fi-section');
+        $resource = file_get_contents(app_path('Filament/Resources/PartResource.php'));
 
-        $this->assertNotFalse($scopedCssStart);
-        $scopedCss = substr($css, $scopedCssStart);
-
-        $this->assertStringContainsString(".gps-part-form .gps-part-form-section--allegro-functions.fi-section {
-    overflow: visible;", $scopedCss);
-        $this->assertStringNotContainsString(".gps-part-form .gps-part-form-section--allegro-functions.fi-section {
-    overflow: hidden;", $scopedCss);
-        $this->assertStringContainsString('.gps-part-form .gps-part-form-section--allegro-functions .choices__list--dropdown', $scopedCss);
-        $this->assertStringContainsString('max-height: min(22rem, calc(100vh - 12rem));', $scopedCss);
-        $this->assertStringContainsString('overflow-y: auto;', $scopedCss);
-        $this->assertStringContainsString('z-index: 70;', $scopedCss);
-        $this->assertStringNotContainsString('.gps-part-form .gps-part-form-section--allegro-functions .choices {
-    overflow: visible;', $scopedCss);
-        $this->assertStringNotContainsString('.gps-part-form .gps-part-form-section--allegro-functions .choices__list[aria-expanded]', $scopedCss);
-        $this->assertStringContainsString('.gps-part-form .gps-part-form-section--part-info :where(.fi-fo-select .choices)', $css);
+        $this->assertStringNotContainsString('gps-allegro-functions-select', $resource);
+        $this->assertStringNotContainsString('gps-allegro-functions-select', $css);
+        $this->assertStringNotContainsString('gps-part-form-section--allegro-functions .choices', $css);
+        $this->assertStringNotContainsString('gps-part-form-section--allegro-functions .choices__inner', $css);
+        $this->assertStringNotContainsString('gps-part-form-section--allegro-functions .choices__list--dropdown', $css);
     }
 
     public function test_allegro_functions_rejects_custom_text_and_persists_only_official_values(): void
@@ -677,16 +715,16 @@ class AllegroSalesSettingsTest extends TestCase
             'dictionary' => array_map(fn (string $label, string $id): array => ['id' => $id, 'value' => $label], $dictionary, array_keys($dictionary)),
         ];
     }
-    private function partInAllegroFunctionsBranch(string $allegroCategoryId): Part
+    private function partInAllegroFunctionsBranch(string $allegroCategoryId, ?int $partId = null, ?int $categoryId = null): Part
     {
         MarketplaceAccount::query()->create(['code' => 'allegro_main', 'marketplace' => 'allegro', 'name' => 'Allegro', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://api.allegro.pl', 'api_credentials' => ['access_token' => 'token']]);
 
         $root = PartCategory::query()->create(['name' => 'Wyposażenie elektryczne']);
         $parent = PartCategory::query()->create(['name' => 'Przełączniki i przyciski', 'parent_id' => $root->id]);
-        $leaf = PartCategory::query()->create(['name' => 'Przełącznik świateł', 'parent_id' => $parent->id]);
+        $leaf = PartCategory::query()->create(array_filter(['id' => $categoryId, 'name' => 'Przełącznik świateł', 'parent_id' => $parent->id], fn ($value) => $value !== null));
         MarketplaceCategoryMapping::query()->create(['local_category_id' => $leaf->id, 'channel' => 'allegro_main', 'external_category_id' => $allegroCategoryId]);
 
-        return Part::query()->create(['name' => 'Przełącznik świateł', 'category_id' => $leaf->id, 'price' => 100, 'quantity' => 1]);
+        return Part::query()->create(array_filter(['id' => $partId, 'name' => 'Przełącznik świateł', 'category_id' => $leaf->id, 'price' => 100, 'quantity' => 1], fn ($value) => $value !== null));
     }
 
     private function fakeAllegroFunctions(array $dictionary): array
