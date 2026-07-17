@@ -201,22 +201,10 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
         $productSet = is_array($payload['productSet'] ?? null) ? $payload['productSet'] : (is_array($settings['productSet'] ?? null) ? $settings['productSet'] : []);
         if ($productSet === []) $productSet = [['product' => ['parameters' => $payload['allegro_product_parameters'] ?? $payload['allegro_parameters']['product_parameters'] ?? []]]];
         if (! is_array($productSet[0]['product'] ?? null)) $productSet[0]['product'] = [];
-        $requestedCategoryId = trim((string) ($payload['category_id'] ?? ''));
-        $savedProductId = trim((string) data_get($productSet, '0.product.id', ''));
-        $savedProductCategoryId = trim((string) data_get($productSet, '0.product.category.id', ''));
-        if ($requestedCategoryId !== '' && $savedProductId !== '' && $savedProductCategoryId !== '' && $savedProductCategoryId !== $requestedCategoryId) {
-            unset($productSet[0]['product']['id']);
-            Log::warning('allegro_mismatched_catalog_product_linkage_removed', [
-                'requested_category_id' => $requestedCategoryId,
-                'saved_product_id' => $savedProductId,
-                'saved_product_category_id' => $savedProductCategoryId,
-                'message' => 'Zapisany produkt katalogowy Allegro należy do innej kategorii.',
-            ]);
-        }
         if (filled($offerName)) $productSet[0]['product']['name'] = trim($offerName);
         if (filled($mainImageUrl)) $productSet[0]['product']['images'] = [trim($mainImageUrl)];
-        if ($requestedCategoryId !== '') {
-            $productSet[0]['product']['category'] = ['id' => $requestedCategoryId];
+        if (filled($payload['category_id'] ?? null)) {
+            $productSet[0]['product']['category'] = ['id' => (string) $payload['category_id']];
         }
         $responsibleProducer = $this->responsibleProducer($settings, $payload);
         $safetyInformation = $this->safetyInformation($settings, $payload);
