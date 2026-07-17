@@ -72,17 +72,26 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
     {
         $mediaType = 'application/vnd.allegro.public.v1+json';
         $path = '/order/checkout-forms/'.rawurlencode($checkoutFormId).'/fulfillment';
-        $endpoint = rtrim((string) $this->account?->api_base_url, '/').$path;
+        $baseEndpoint = rtrim((string) $this->account?->api_base_url, '/');
+        $query = ($revision !== null && $revision !== '') ? ['checkoutForm.revision' => $revision] : [];
+        $endpoint = $baseEndpoint.$path.($query === [] ? '' : '?'.http_build_query($query));
         $payload = ['status' => $status];
-        if ($revision !== null && $revision !== '') {
-            $payload['checkoutForm'] = ['revision' => $revision];
-        }
-        $requestSummary = ['method' => 'PUT', 'endpoint' => 'PUT /order/checkout-forms/{checkoutFormId}/fulfillment', 'url' => $endpoint, 'checkout_form_id' => $checkoutFormId, 'headers' => ['Accept' => $mediaType, 'Content-Type' => $mediaType, 'Authorization' => 'Bearer ***', 'User-Agent' => AllegroUserAgent::value()], 'payload' => $payload];
+        $requestSummary = ['method' => 'PUT', 'endpoint' => 'PUT /order/checkout-forms/{checkoutFormId}/fulfillment', 'url' => $endpoint, 'checkout_form_id' => $checkoutFormId, 'query' => $query, 'headers' => ['Accept' => $mediaType, 'Content-Type' => $mediaType, 'Authorization' => 'Bearer ***', 'User-Agent' => AllegroUserAgent::value()], 'payload' => $payload];
         try {
             $response = AllegroUserAgent::request()->withToken((string) $this->credentials()['access_token'])->withHeaders(['Accept' => $mediaType, 'Content-Type' => $mediaType])->timeout(20)->put($endpoint, $payload);
             $json = $response->json(); $body = is_array($json) ? $json : [];
-            $message = $response->status() === 409 ? 'Allegro fulfillment conflict: checkoutForm.revision may be stale; retry after refreshing order data.' : ($response->successful() ? 'Allegro order fulfillment status updated.' : 'Allegro order fulfillment status update failed.');
-            return ['ok' => $response->successful(), 'http_status' => $response->status(), 'action' => 'order_status_sync', 'message' => $message, 'request_summary' => $requestSummary, 'response_summary' => ['http_status' => $response->status(), 'successful' => $response->successful(), 'body' => $body, 'top_level_keys' => array_slice(array_keys($body), 0, 20), 'errors' => $body['errors'] ?? null, 'message' => $body['message'] ?? $body['error_description'] ?? $body['error'] ?? null, 'request_id' => $response->header('trace-id') ?: $response->header('x-request-id'), 'revision_conflict' => $response->status() === 409]];
+            if (! $response->successful()) {
+                $message = $response->status() === 409 ? 'Allegro fulfillment conflict: checkoutForm.revision may be stale; retry after refreshing order data.' : 'Allegro order fulfillment status update failed.';
+                return ['ok' => false, 'http_status' => $response->status(), 'action' => 'order_status_sync', 'message' => $message, 'request_summary' => $requestSummary, 'response_summary' => ['http_status' => $response->status(), 'successful' => false, 'body' => $body, 'top_level_keys' => array_slice(array_keys($body), 0, 20), 'errors' => $body['errors'] ?? null, 'message' => $body['message'] ?? $body['error_description'] ?? $body['error'] ?? null, 'request_id' => $response->header('trace-id') ?: $response->header('x-request-id'), 'revision_conflict' => $response->status() === 409]];
+            }
+
+            $getEndpoint = $baseEndpoint.'/order/checkout-forms/'.rawurlencode($checkoutFormId);
+            $confirmation = AllegroUserAgent::request()->withToken((string) $this->credentials()['access_token'])->accept($mediaType)->timeout(20)->get($getEndpoint);
+            $confirmationJson = $confirmation->json(); $confirmationBody = is_array($confirmationJson) ? $confirmationJson : [];
+            $confirmedStatus = data_get($confirmationBody, 'fulfillment.status');
+            $confirmed = $confirmation->successful() && $confirmedStatus === $status;
+
+            return ['ok' => $confirmed, 'http_status' => $response->status(), 'action' => 'order_status_sync', 'message' => $confirmed ? 'Allegro order fulfillment status updated.' : 'Allegro order fulfillment status confirmation failed.', 'request_summary' => $requestSummary + ['confirmation' => ['method' => 'GET', 'endpoint' => 'GET /order/checkout-forms/{checkoutFormId}', 'url' => $getEndpoint]], 'response_summary' => ['http_status' => $response->status(), 'successful' => true, 'body' => $body, 'confirmation_http_status' => $confirmation->status(), 'confirmation_successful' => $confirmation->successful(), 'confirmed_fulfillment_status' => $confirmedStatus, 'expected_fulfillment_status' => $status, 'confirmation_body' => $confirmationBody, 'request_id' => $response->header('trace-id') ?: $response->header('x-request-id')]];
         } catch (\Throwable $exception) {
             return ['ok' => false, 'http_status' => null, 'action' => 'order_status_sync', 'message' => 'Allegro order fulfillment status update failed.', 'request_summary' => $requestSummary, 'response_summary' => ['error_class' => $exception::class, 'error_message_safe' => $exception->getMessage()]];
         }

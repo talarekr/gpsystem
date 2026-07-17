@@ -54,6 +54,7 @@ use App\Http\Controllers\Tools\MarketplaceApiFoundationController;
 use App\Http\Controllers\Tools\MarketplaceListingDryRunController;
 use App\Http\Controllers\Tools\AllegroCompatibilityDryRunController;
 use App\Http\Controllers\Tools\AllegroMarketplaceDiagnoseController;
+use App\Http\Controllers\Tools\AllegroOrderFulfillmentAuditController;
 use App\Http\Controllers\Tools\AllegroPartPublishPathDiagnoseController;
 use App\Http\Controllers\Tools\MarketplaceListingImageRefreshController;
 use App\Http\Controllers\Tools\OvokoCarMappingController;
@@ -305,6 +306,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::match(['get', 'post'], '/admin/tools/parts-to-list/storage-location-backfill-apply', [PartsToListStorageLocationBackfillController::class, 'apply'])->name('admin.tools.parts-to-list.storage-location-backfill-apply');
     Route::get('/admin/tools/parts-to-list/storage-location-backfill-results', [PartsToListStorageLocationBackfillController::class, 'results'])->name('admin.tools.parts-to-list.storage-location-backfill-results');
     Route::get('/admin/tools/payu-diagnostics', PayuDiagnosticsController::class)->name('admin.tools.payu-diagnostics');
+    Route::get('/admin/tools/allegro/orders/{localOrderId}/fulfillment-audit', AllegroOrderFulfillmentAuditController::class)->name('admin.tools.allegro.orders.fulfillment-audit');
     Route::get('/admin/tools/dhl/config-diagnose', DhlConfigDiagnoseController::class)->name('admin.tools.dhl.config-diagnose');
     Route::post('/admin/tools/dhl/recover-created-shipment', DhlRecoverCreatedShipmentController::class)->name('admin.tools.dhl.recover-created-shipment');
     Route::get('/admin/tools/deploy-diagnose', DeployDiagnoseController::class)->name('admin.tools.deploy-diagnose');

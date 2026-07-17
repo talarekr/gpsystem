@@ -14,9 +14,12 @@ class OrderStatusMarketplaceSyncService
     public const CODE_VERSION = '137-ebay-ovoko-status-audit';
     public const SYNC_WRITER = self::class.'::log';
 
-    public function sync(Order $order, ?string $previousStatus = null, ?int $retryOfLogId = null): MarketplaceSyncLog
+    public function sync(Order $order, ?string $previousStatus = null, ?int $retryOfLogId = null, ?string $desiredStatus = null): MarketplaceSyncLog
     {
         $order = $order->refresh();
+        if ($desiredStatus !== null) {
+            $order->status = $desiredStatus;
+        }
         $marketplace = $this->normalizeMarketplace((string) $order->marketplace);
         $plan = $this->plan($order, $previousStatus, $retryOfLogId);
 
@@ -68,6 +71,8 @@ class OrderStatusMarketplaceSyncService
                 'ready_for_pickup' => 'READY_FOR_PICKUP',
                 'shipped' => 'SENT',
                 'picked_up' => 'PICKED_UP',
+                'cancelled' => 'CANCELLED',
+                'on_hold' => 'SUSPENDED',
             ];
             $target = $map[$status] ?? null;
             return $this->finalizePlan(array_merge($base, [
@@ -124,6 +129,10 @@ class OrderStatusMarketplaceSyncService
         $account = $this->accountFor($order, $marketplace);
 
         if ($marketplace === 'allegro') {
+            if (data_get($order->raw_payload, 'fulfillment.provider.id') === 'ALLEGRO') {
+                return ['ok' => false, 'message' => 'Status tego zamówienia jest zarządzany przez One Fulfillment by Allegro.', 'request_summary' => ['method' => null, 'endpoint' => null, 'one_fulfillment_blocked' => true], 'response_summary' => ['one_fulfillment_blocked' => true]];
+            }
+
             return (new AllegroApiClient('allegro_main', $account))->updateOrderFulfillmentStatus((string) $order->marketplace_order_id, (string) $plan['target_marketplace_status'], data_get($order->raw_payload, 'checkoutForm.revision') ?? data_get($order->raw_payload, 'revision'));
         }
 

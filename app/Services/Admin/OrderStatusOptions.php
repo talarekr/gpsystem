@@ -19,6 +19,8 @@ class OrderStatusOptions
             'ready_for_pickup' => 'DO ODBIORU',
             'shipped' => 'WYSŁANE',
             'picked_up' => 'ODEBRANE',
+            'cancelled' => 'ANULOWANE',
+            'on_hold' => 'WSTRZYMANE',
         ],
         'ebay' => [
             'new' => 'NOWE',
@@ -65,6 +67,7 @@ class OrderStatusOptions
         'COMPLETE' => 'shipped',
         'CANCELLED' => 'cancelled',
         'CANCELED' => 'cancelled',
+        'SUSPENDED' => 'on_hold',
         'ON_HOLD' => 'on_hold',
         'HOLD' => 'on_hold',
     ];

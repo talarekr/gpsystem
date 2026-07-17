@@ -22,6 +22,16 @@ class LocalOrderStatusUpdater
         }
 
         $previousStatus = (string) $order->status;
+        $syncLog = null;
+
+        if ($previousStatus !== $status && strtolower((string) $order->marketplace) === 'allegro') {
+            $syncLog = app(OrderStatusMarketplaceSyncService::class)->sync($order, $previousStatus, null, $status);
+
+            if ($syncLog->status === 'error') {
+                return ['order' => $order->refresh(), 'sync_log' => $syncLog];
+            }
+        }
+
         $updates = ['status' => $status];
 
         if ($order->status !== $status && Schema::hasColumn($order->getTable(), 'status_changed_at')) {
@@ -29,14 +39,13 @@ class LocalOrderStatusUpdater
         }
 
         $order->forceFill($updates)->save();
-
         $order = $order->refresh();
 
-        if ($previousStatus !== $status) {
+        if ($previousStatus !== $status && $syncLog === null) {
             $syncLog = app(OrderStatusMarketplaceSyncService::class)->sync($order, $previousStatus);
         }
 
-        return ['order' => $order, 'sync_log' => $syncLog ?? null];
+        return ['order' => $order, 'sync_log' => $syncLog];
     }
 
     public function update(Order $order, string $status): Order

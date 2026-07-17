@@ -380,6 +380,64 @@ class MarketplaceOrderStatusSyncTest extends TestCase
     }
 
 
+
+    public function test_allegro_cancelled_and_suspended_are_panel_options_and_sent(): void
+    {
+        $options = \App\Services\Admin\OrderStatusOptions::optionsForSource('allegro');
+        $this->assertSame('ANULOWANE', $options['cancelled']);
+        $this->assertSame('WSTRZYMANE', $options['on_hold']);
+        $this->assertNotContains('ZWRÓCONE', $options);
+
+        Http::fake([
+            'https://allegro.test/order/checkout-forms/cf-cancelled/fulfillment*' => Http::response([], 204),
+            'https://allegro.test/order/checkout-forms/cf-cancelled' => Http::response(['fulfillment' => ['status' => 'CANCELLED']], 200),
+            'https://allegro.test/order/checkout-forms/cf-on_hold/fulfillment*' => Http::response([], 204),
+            'https://allegro.test/order/checkout-forms/cf-on_hold' => Http::response(['fulfillment' => ['status' => 'SUSPENDED']], 200),
+        ]);
+        MarketplaceAccount::query()->create(['marketplace' => 'allegro', 'code' => 'allegro_main', 'name' => 'Allegro', 'api_enabled' => true, 'api_base_url' => 'https://allegro.test', 'api_mode' => 'live', 'api_credentials' => ['access_token' => 'token']]);
+
+        foreach (['cancelled' => 'CANCELLED', 'on_hold' => 'SUSPENDED'] as $localStatus => $allegroStatus) {
+            $order = Order::query()->create(['order_number' => 'A-'.$localStatus, 'marketplace' => 'allegro', 'marketplace_order_id' => 'cf-'.$localStatus, 'status' => 'new']);
+            app(LocalOrderStatusUpdater::class)->update($order, $localStatus);
+            $this->assertSame($localStatus, $order->refresh()->status);
+            Http::assertSent(fn ($request) => $request->method() === 'PUT' && $request['status'] === $allegroStatus);
+        }
+    }
+
+    public function test_allegro_failed_put_or_confirmation_does_not_change_local_status_and_one_fulfillment_blocks_put(): void
+    {
+        MarketplaceAccount::query()->create(['marketplace' => 'allegro', 'code' => 'allegro_main', 'name' => 'Allegro', 'api_enabled' => true, 'api_base_url' => 'https://allegro.test', 'api_mode' => 'live', 'api_credentials' => ['access_token' => 'token']]);
+
+        Http::fake(['https://allegro.test/*' => Http::response(['message' => 'fail'], 500)]);
+        $putFails = Order::query()->create(['order_number' => 'PUT-FAIL', 'marketplace' => 'allegro', 'marketplace_order_id' => 'put-fail', 'status' => 'new']);
+        app(LocalOrderStatusUpdater::class)->update($putFails, 'cancelled');
+        $this->assertSame('new', $putFails->refresh()->status);
+
+        Http::fake([
+            'https://allegro.test/order/checkout-forms/get-mismatch/fulfillment*' => Http::response([], 204),
+            'https://allegro.test/order/checkout-forms/get-mismatch' => Http::response(['fulfillment' => ['status' => 'PROCESSING']], 200),
+        ]);
+        $mismatch = Order::query()->create(['order_number' => 'GET-MISMATCH', 'marketplace' => 'allegro', 'marketplace_order_id' => 'get-mismatch', 'status' => 'new']);
+        app(LocalOrderStatusUpdater::class)->update($mismatch, 'cancelled');
+        $this->assertSame('new', $mismatch->refresh()->status);
+
+        Http::fake();
+        $oneFulfillment = Order::query()->create(['order_number' => 'OF', 'marketplace' => 'allegro', 'marketplace_order_id' => 'of-1', 'status' => 'new', 'raw_payload' => ['fulfillment' => ['provider' => ['id' => 'ALLEGRO']]]]);
+        app(LocalOrderStatusUpdater::class)->update($oneFulfillment, 'cancelled');
+        $this->assertSame('new', $oneFulfillment->refresh()->status);
+        Http::assertNothingSent();
+    }
+
+    public function test_allegro_import_maps_cancelled_and_suspended_read_only(): void
+    {
+        $service = app(\App\Services\Marketplace\MarketplaceOrdersImportService::class);
+        $method = new \ReflectionMethod($service, 'localStatus');
+        $method->setAccessible(true);
+
+        $this->assertSame('cancelled', $method->invoke($service, 'CANCELLED'));
+        $this->assertSame('on_hold', $method->invoke($service, 'SUSPENDED'));
+    }
+
     private function actingAsAdminUser(): User
     {
         $this->seed(RoleSeeder::class);

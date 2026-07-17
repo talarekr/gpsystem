@@ -8,7 +8,7 @@ use PHPUnit\Framework\TestCase;
 
 class OrderStatusOptionsTest extends TestCase
 {
-    public function test_it_returns_allegro_statuses_without_cancelled_or_on_hold(): void
+    public function test_it_returns_allegro_statuses_with_cancelled_and_on_hold(): void
     {
         $this->assertSame([
             'new' => 'NOWE',
@@ -17,6 +17,8 @@ class OrderStatusOptionsTest extends TestCase
             'ready_for_pickup' => 'DO ODBIORU',
             'shipped' => 'WYSŁANE',
             'picked_up' => 'ODEBRANE',
+            'cancelled' => 'ANULOWANE',
+            'on_hold' => 'WSTRZYMANE',
         ], OrderStatusOptions::optionsForSource('allegro'));
     }
 
