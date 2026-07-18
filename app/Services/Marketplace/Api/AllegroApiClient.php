@@ -88,6 +88,60 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
         }
     }
 
+
+    public function getProductOffer(string $offerId, string $action = 'allegro_get_product_offer'): array
+    {
+        $mediaType = 'application/vnd.allegro.public.v1+json';
+        $path = '/sale/product-offers/'.rawurlencode($offerId);
+        $endpoint = rtrim((string) $this->account?->api_base_url, '/').$path;
+        $requestSummary = ['method' => 'GET', 'endpoint' => 'GET /sale/product-offers/{offerId}', 'url' => $endpoint, 'offer_id' => $offerId, 'headers' => ['Accept' => $mediaType, 'Authorization' => 'Bearer ***', 'User-Agent' => AllegroUserAgent::value()]];
+
+        try {
+            $response = AllegroUserAgent::request()->withToken((string) $this->credentials()['access_token'])->accept($mediaType)->timeout(20)->get($endpoint);
+            $json = $response->json();
+            $body = is_array($json) ? $json : [];
+
+            return ['ok' => $response->successful(), 'http_status' => $response->status(), 'action' => $action, 'message' => $response->successful() ? 'Allegro product offer fetched.' : 'Allegro product offer fetch failed.', 'request_summary' => $requestSummary, 'response_summary' => $this->allegroOfferStateSummary($body, $response->header('trace-id') ?: $response->header('x-request-id')), 'body' => $body];
+        } catch (\Throwable $exception) {
+            return ['ok' => false, 'http_status' => null, 'action' => $action, 'message' => 'Allegro product offer fetch failed.', 'request_summary' => $requestSummary, 'response_summary' => ['error_class' => $exception::class, 'error_message_safe' => $exception->getMessage()], 'body' => []];
+        }
+    }
+
+    public function updateProductOfferStock(string $offerId, int $available): array
+    {
+        $mediaType = 'application/vnd.allegro.public.v1+json';
+        $path = '/sale/product-offers/'.rawurlencode($offerId);
+        $endpoint = rtrim((string) $this->account?->api_base_url, '/').$path;
+        $payload = ['stock' => ['available' => $available]];
+        $requestSummary = ['method' => 'PATCH', 'endpoint' => 'PATCH /sale/product-offers/{offerId}', 'url' => $endpoint, 'offer_id' => $offerId, 'headers' => ['Accept' => $mediaType, 'Content-Type' => $mediaType, 'Authorization' => 'Bearer ***', 'User-Agent' => AllegroUserAgent::value()], 'payload' => $payload];
+
+        try {
+            $response = AllegroUserAgent::request()->withToken((string) $this->credentials()['access_token'])->withHeaders(['Accept' => $mediaType, 'Content-Type' => $mediaType])->timeout(20)->patch($endpoint, $payload);
+            $json = $response->json();
+            $body = is_array($json) ? $json : [];
+
+            return ['ok' => $response->successful(), 'http_status' => $response->status(), 'action' => 'allegro_restore_stock_update', 'message' => $response->successful() ? 'Allegro product offer stock updated.' : 'Allegro product offer stock update failed.', 'request_summary' => $requestSummary, 'response_summary' => $this->allegroOfferStateSummary($body, $response->header('trace-id') ?: $response->header('x-request-id'))];
+        } catch (\Throwable $exception) {
+            return ['ok' => false, 'http_status' => null, 'action' => 'allegro_restore_stock_update', 'message' => 'Allegro product offer stock update failed.', 'request_summary' => $requestSummary, 'response_summary' => ['error_class' => $exception::class, 'error_message_safe' => $exception->getMessage()]];
+        }
+    }
+
+    private function allegroOfferStateSummary(array $body, ?string $requestId): array
+    {
+        return array_filter([
+            'top_level_keys' => array_slice(array_keys($body), 0, 20),
+            'publication_status' => $body['publication']['status'] ?? null,
+            'ended_by' => $body['publication']['endedBy'] ?? null,
+            'republish' => $body['publication']['republish'] ?? null,
+            'stock_available' => $body['stock']['available'] ?? null,
+            'selling_mode_format' => $body['sellingMode']['format'] ?? null,
+            'archived' => $body['archived'] ?? null,
+            'errors' => $body['errors'] ?? null,
+            'message' => $body['message'] ?? $body['error_description'] ?? $body['error'] ?? null,
+            'request_id' => $requestId,
+        ], fn ($value) => $value !== null && $value !== []);
+    }
+
     public function endOffer(string $offerId): array
     {
         return $this->patchOfferPublicationStatus($offerId, 'ENDED', 'allegro_end_offer', 'Allegro offer ended.', 'Allegro end offer failed.');

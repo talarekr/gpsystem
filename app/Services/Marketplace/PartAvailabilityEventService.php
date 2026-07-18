@@ -77,7 +77,13 @@ class PartAvailabilityEventService
 
         $results = [];
         foreach (self::TARGETS as $target) {
-            if ($this->matchesSourceTarget($source, $target)) {
+            if ($this->matchesSourceTarget($source, $target) && ! ($eventType === self::EVENT_RESTORED && $target === 'allegro')) {
+                if ($eventType === self::EVENT_SOLD && $source === 'allegro' && $target === 'allegro') {
+                    $result = $this->reconcileAllegroSourceSale($part, $eventKey, $event, $source);
+                    $results[$target] = ['status' => ($result['ok'] ?? false) ? 'success' : 'error', 'reason' => 'source_sync', 'message' => $result['message'] ?? null];
+                    continue;
+                }
+
                 $this->logEvent($target, null, $part->id, $eventType, $source, 'skip_source_channel', 'skipped', 'source_channel', $eventKey, $event, null);
                 $results[$target] = ['status' => 'skipped', 'reason' => 'source_channel'];
                 continue;
@@ -90,7 +96,7 @@ class PartAvailabilityEventService
                 continue;
             }
 
-            if ($this->targetAlreadyApplied($listing, $eventType)) {
+            if (! ($eventType === self::EVENT_RESTORED && $target === 'allegro') && $this->targetAlreadyApplied($listing, $eventType)) {
                 $this->logEvent($target, $listing, $part->id, $eventType, $source, 'availability_update', 'skipped', 'already_target_state', $eventKey, $event, null);
                 $results[$target] = ['status' => 'skipped', 'reason' => 'already_target_state'];
                 continue;
@@ -106,14 +112,17 @@ class PartAvailabilityEventService
             $result = $this->sendTargetUpdate($listing, $target, $eventType, (string) $externalId);
             $status = ($result['ok'] ?? false) ? 'success' : 'error';
             $this->logEvent($target, $listing, $part->id, $eventType, $source, $result['action'] ?? 'availability_update', $status, null, $eventKey, $event, $result);
-            $listing->forceFill([
-                'quantity' => $eventType === self::EVENT_SOLD ? 0 : 1,
-                'status' => $eventType === self::EVENT_SOLD ? 'ended' : 'active',
+            $listingUpdate = [
                 'sync_status' => $status === 'success' ? 'synced' : $listing->sync_status,
                 'last_api_status' => $status,
                 'last_error' => $status === 'success' ? null : ($result['message'] ?? 'Availability API failed'),
                 'last_synced_at' => now(),
-            ])->save();
+            ];
+            if ($status === 'success') {
+                $listingUpdate['quantity'] = $eventType === self::EVENT_SOLD ? 0 : 1;
+                $listingUpdate['status'] = $eventType === self::EVENT_SOLD ? 'ended' : 'active';
+            }
+            $listing->forceFill($listingUpdate)->save();
             $results[$target] = ['status' => $status, 'message' => $result['message'] ?? null];
         }
 
@@ -144,10 +153,96 @@ class PartAvailabilityEventService
         $account = $listing->account ?: MarketplaceAccount::query()->where('marketplace', $listing->marketplace)->first();
         $qty = $eventType === self::EVENT_SOLD ? 0 : 1;
         return match ($target) {
-            'allegro' => $eventType === self::EVENT_SOLD ? (new AllegroApiClient('allegro_main', $account))->endOffer($externalId) : (new AllegroApiClient('allegro_main', $account))->activateOffer($externalId),
+            'allegro' => $eventType === self::EVENT_SOLD ? (new AllegroApiClient('allegro_main', $account))->endOffer($externalId) : $this->sendAllegroRestoreUpdate($listing, $externalId),
             'ovoko' => $eventType === self::EVENT_SOLD ? (new OvokoApiClient('ovoko', $account))->deactivatePart($externalId) : (new OvokoApiClient('ovoko', $account))->restorePart($externalId),
             'ebay' => (new EbayApiClient($listing->marketplace, $account))->setInventoryQuantity((string) ($listing->sku ?: $externalId), $qty, $listing->external_offer_id),
             default => ['ok' => false, 'action' => 'availability_update', 'message' => 'Unsupported marketplace.', 'response_summary' => ['reason' => 'unsupported_or_missing_mapping']],
+        };
+    }
+
+
+    /** @param array<string, mixed> $event */
+    private function reconcileAllegroSourceSale(Part $part, string $eventKey, array $event, string $source): array
+    {
+        $offerId = (string) ($event['offer_id'] ?? $event['source_marketplace_item_id'] ?? '');
+        $listing = MarketplaceListing::query()->where('part_id', $part->id)->where('marketplace', 'allegro')->when($offerId !== '', fn ($q) => $q->where('external_offer_id', $offerId))->first();
+        if (! $listing || blank($offerId)) {
+            $this->logEvent('allegro', $listing, $part->id, self::EVENT_SOLD, $source, 'allegro_source_sale_reconcile', 'error', null, $eventKey, $event, ['ok' => false, 'message' => 'Missing local Allegro listing or offer id.', 'response_summary' => ['offer_id' => $offerId ?: null]]);
+            return ['ok' => false, 'message' => 'Missing local Allegro listing or offer id.'];
+        }
+
+        $result = $this->allegroClient($listing)->getProductOffer($offerId, 'allegro_source_sale_reconcile');
+        $this->applyAllegroRemoteState($listing, $result, false);
+        $this->logEvent('allegro', $listing, $part->id, self::EVENT_SOLD, $source, 'allegro_source_sale_reconcile', ($result['ok'] ?? false) ? 'success' : 'error', null, $eventKey, $event, $result);
+
+        return $result;
+    }
+
+    private function sendAllegroRestoreUpdate(MarketplaceListing $listing, string $externalId): array
+    {
+        $client = $this->allegroClient($listing);
+        $steps = [];
+        $preflight = $client->getProductOffer($externalId, 'allegro_restore_preflight');
+        $steps[] = $preflight;
+        if (! ($preflight['ok'] ?? false)) return $preflight + ['action' => 'allegro_restore_preflight', 'steps' => $steps];
+
+        $body = $preflight['body'] ?? [];
+        if (($body['archived'] ?? false) || ! in_array((string) ($body['sellingMode']['format'] ?? ''), ['', 'BUY_NOW', 'ADVERTISEMENT'], true)) {
+            return ['ok' => false, 'action' => 'allegro_restore_preflight', 'message' => 'Allegro offer is archived or uses unsupported selling mode.', 'steps' => $steps, 'response_summary' => $preflight['response_summary'] ?? []];
+        }
+
+        if ((int) ($body['stock']['available'] ?? 0) < 1) {
+            $stock = $client->updateProductOfferStock($externalId, 1);
+            $steps[] = $stock;
+            if (! ($stock['ok'] ?? false)) return $stock + ['steps' => $steps];
+        }
+
+        if ((string) ($body['publication']['status'] ?? '') !== 'ACTIVE') {
+            $activate = $client->activateOffer($externalId);
+            $activate['action'] = 'allegro_restore_activate';
+            $steps[] = $activate;
+            if (! ($activate['ok'] ?? false)) return $activate + ['steps' => $steps];
+        }
+
+        $confirm = $client->getProductOffer($externalId, 'allegro_restore_confirm');
+        $steps[] = $confirm;
+        $ok = ($confirm['ok'] ?? false) && (string) (($confirm['body']['publication']['status'] ?? '')) === 'ACTIVE' && (int) ($confirm['body']['stock']['available'] ?? 0) >= 1;
+
+        return $confirm + ['ok' => $ok, 'action' => 'allegro_restore_confirm', 'message' => $ok ? 'Allegro restore confirmed.' : 'Allegro restore was not confirmed by final GET.', 'steps' => $steps];
+    }
+
+    private function allegroClient(MarketplaceListing $listing): AllegroApiClient
+    {
+        $account = $listing->account ?: MarketplaceAccount::query()->where('marketplace', $listing->marketplace)->first();
+        return new AllegroApiClient('allegro_main', $account);
+    }
+
+    private function applyAllegroRemoteState(MarketplaceListing $listing, array $result, bool $forceActiveOnSuccess): void
+    {
+        $body = is_array($result['body'] ?? null) ? $result['body'] : [];
+        $ok = (bool) ($result['ok'] ?? false);
+        $remoteStatus = (string) ($body['publication']['status'] ?? '');
+        $quantity = array_key_exists('available', $body['stock'] ?? []) ? (int) $body['stock']['available'] : $listing->quantity;
+        $update = [
+            'sync_status' => $ok ? 'synced' : $listing->sync_status,
+            'last_api_status' => $ok ? 'success' : 'error',
+            'last_error' => $ok ? null : ($result['message'] ?? 'Allegro read reconciliation failed'),
+            'last_synced_at' => now(),
+        ];
+        if ($ok) {
+            $update['quantity'] = $forceActiveOnSuccess ? 1 : $quantity;
+            $update['status'] = $forceActiveOnSuccess ? 'active' : $this->mapAllegroStatus($remoteStatus, $quantity);
+            $update['raw_payload'] = $body !== [] ? array_replace($listing->raw_payload ?: [], ['allegro_remote_state' => Arr::only($body, ['publication', 'stock', 'sellingMode', 'archived'])]) : $listing->raw_payload;
+        }
+        $listing->forceFill($update)->save();
+    }
+
+    private function mapAllegroStatus(string $remoteStatus, ?int $quantity): string
+    {
+        return match ($remoteStatus) {
+            'ACTIVE' => (int) $quantity <= 0 ? 'active' : 'active',
+            'ENDED' => 'ended',
+            default => strtolower($remoteStatus) ?: 'unknown',
         };
     }
 
