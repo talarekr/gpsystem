@@ -4,6 +4,8 @@ namespace App\Services\Storefront;
 
 use App\Models\Part;
 use App\Models\PartCategory;
+use App\Repositories\Legacy\LegacyPartCategoryReadRepository;
+use App\Support\Tenancy\StorefrontHostContext;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
@@ -12,8 +14,14 @@ use Illuminate\Support\Str;
 
 class CategoryTreeService
 {
-    public const CACHE_KEY = 'storefront.category_tree.v2';
+    public const LEGACY_CACHE_KEY = 'storefront:legacy:category-tree';
+    public const CACHE_KEY = self::LEGACY_CACHE_KEY;
     public const CACHE_TTL_SECONDS = 600;
+
+    public function __construct(
+        private readonly LegacyPartCategoryReadRepository $legacyCategories,
+        private readonly StorefrontHostContext $hostContext,
+    ) {}
 
     /** @return EloquentCollection<int, PartCategory> */
     public function roots(): EloquentCollection
@@ -30,15 +38,8 @@ class CategoryTreeService
     /** @return array{roots:EloquentCollection<int, PartCategory>, all:Collection<int, PartCategory>} */
     public function tree(): array
     {
-        return Cache::remember(self::CACHE_KEY, self::CACHE_TTL_SECONDS, function (): array {
-            $categories = PartCategory::query()
-                ->where(function ($query): void {
-                    $query->where('source_system', 'woo')->orWhereNull('source_system');
-                })
-                ->visibleForPublic()
-                ->orderByRaw("case when source_system = 'woo' then 0 else 1 end")
-                ->ordered()
-                ->get();
+        return Cache::remember($this->cacheKey(), self::CACHE_TTL_SECONDS, function (): array {
+            $categories = $this->categoriesForCurrentSource();
 
             $productCounts = Part::query()
                 ->storefrontVisible()
@@ -89,6 +90,37 @@ class CategoryTreeService
 
             return ['roots' => new EloquentCollection($visibleRoots->all()), 'all' => $publicCategories];
         });
+    }
+
+    public function cacheKey(): string
+    {
+        $tenantUuid = $this->hostContext->tenantUuid();
+
+        return $tenantUuid
+            ? 'storefront:tenant:'.$tenantUuid.':category-tree'
+            : self::LEGACY_CACHE_KEY;
+    }
+
+    public function categorySource(): string
+    {
+        return $this->hostContext->hasTenantContext() ? 'tenant_model' : 'legacy_explicit_connection';
+    }
+
+    /** @return EloquentCollection<int, PartCategory> */
+    private function categoriesForCurrentSource(): EloquentCollection
+    {
+        if (! $this->hostContext->hasTenantContext()) {
+            return $this->legacyCategories->publicCategories();
+        }
+
+        return PartCategory::query()
+            ->where(function ($query): void {
+                $query->where('source_system', 'woo')->orWhereNull('source_system');
+            })
+            ->visibleForPublic()
+            ->orderByRaw("case when source_system = 'woo' then 0 else 1 end")
+            ->ordered()
+            ->get();
     }
 
     public function url(PartCategory $category): string

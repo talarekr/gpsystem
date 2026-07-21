@@ -35,6 +35,7 @@ use App\Http\Controllers\Payments\PayuNotifyController;
 use App\Http\Controllers\Storefront\PrivacyPolicyController;
 use App\Http\Controllers\Storefront\SearchController;
 use App\Http\Controllers\Storefront\TermsController;
+use App\Http\Controllers\Admin\Tools\StorefrontCategorySourceDiagnoseController;
 use App\Http\Controllers\Tools\CheckOrdersFlowController;
 use App\Http\Controllers\Tools\PayuDiagnosticsController;
 use App\Http\Controllers\Tools\DebugOrderItemThumbnailController;
@@ -197,6 +198,9 @@ use Illuminate\Support\Facades\Route;
 
 Route::get('/', [HomeController::class, 'index'])->name('storefront.home');
 Route::get('/api-info', fn () => response()->view('storefront.api-info'))->name('storefront.api-info');
+Route::get('/admin/tools/tenancy/storefront-category-source-diagnose', StorefrontCategorySourceDiagnoseController::class)
+    ->name('admin.tools.tenancy.storefront-category-source-diagnose');
+
 Route::get('/admin/brand/logo.png', function () {
     $candidates = [
         storage_path('app/imports/logo.png'),
