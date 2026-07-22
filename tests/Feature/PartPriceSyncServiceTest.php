@@ -81,6 +81,45 @@ class PartPriceSyncServiceTest extends TestCase
         $this->assertSame('34.65',(string)$listing->fresh()->price);
     }
 
+
+    public function test_ovoko_real_nested_list_payload_confirms_original_pln_price(): void
+    {
+        config(['marketplace.price_sync.on_part_save_enabled'=>true,'marketplace.external_api_writes_enabled'=>true,'marketplace.ovoko_publishing_enabled'=>true]);
+        Http::fake(['*/crm/updatePart'=>Http::response(['status_code'=>'R200','msg'=>'OK'],200),'*/get/part/11825'=>Http::response(['list'=>[[['id'=>'11825','price'=>'32.94','currency'=>'EUR','original_price'=>'140','original_currency'=>'PLN']]],'msg'=>'OK','status_code'=>'R200'],200)]);
+        $part=$this->part(['id'=>8212]); $listing=$this->listing($part,'ovoko',['id'=>23107,'external_offer_id'=>'11825','price'=>'136.00']);
+        $res=app(PartPriceSyncService::class)->sync($part->fresh(['marketplaceListings.account']), ['ovoko'=>['marketplace_price'=>'136.00']], ['ovoko'=>['marketplace_price'=>'140.00','marketplace_currency'=>'PLN','source_currency'=>'PLN','source_field'=>'parts.ovoko_price']]);
+        $this->assertSame('success',$res['channels']['ovoko']['status']);
+        $this->assertTrue($res['channels']['ovoko']['final_success']);
+        $this->assertSame('140.00',$res['channels']['ovoko']['remote_confirmed_price']);
+        $this->assertSame('140.00',$res['channels']['ovoko']['confirmed_remote_price']);
+        $this->assertSame('140.00',(string)$listing->fresh()->price);
+    }
+
+    public function test_allegro_406_keeps_full_sanitized_error_and_uses_public_media_type_headers(): void
+    {
+        config(['marketplace.price_sync.on_part_save_enabled'=>true,'marketplace.external_api_writes_enabled'=>true,'marketplace.allegro_publishing_enabled'=>true]);
+        Http::fake(['*/sale/product-offers/18778703976'=>Http::response(['errors'=>[['code'=>'NotAcceptableException','message'=>'Not acceptable','details'=>'media type','path'=>'sellingMode.price','userMessage'=>'Niepoprawne nagłówki']]],406,['trace-id'=>'trace-406'])]);
+        $part=$this->part(); $listing=$this->listing($part,'allegro',['external_offer_id'=>'18778703976']);
+        $res=app(PartPriceSyncService::class)->sync($part->fresh(['marketplaceListings.account']), ['allegro'=>['marketplace_price'=>'120.00']], ['allegro'=>['marketplace_price'=>'125.00','marketplace_currency'=>'PLN']]);
+        $this->assertSame('error',$res['channels']['allegro']['status']);
+        $this->assertSame(406,$res['channels']['allegro']['http_status']);
+        $this->assertSame('trace-406',data_get($res,'channels.allegro.response_summary.request_id'));
+        $this->assertSame('NotAcceptableException',data_get($res,'channels.allegro.response_summary.errors.0.code'));
+        Http::assertSent(fn($r)=>$r->method()==='PATCH' && $r->url()==='https://example.test/sale/product-offers/18778703976' && $r->hasHeader('Accept','application/vnd.allegro.public.v1+json') && $r->hasHeader('Content-Type','application/vnd.allegro.public.v1+json') && $r->hasHeader('Authorization','Bearer at') && $r->data()===['sellingMode'=>['price'=>['amount'=>'125.00','currency'=>'PLN']]]);
+    }
+
+    public function test_ebay_read_retry_confirms_after_delayed_propagation_without_second_write(): void
+    {
+        config(['marketplace.price_sync.on_part_save_enabled'=>true,'marketplace.external_api_writes_enabled'=>true,'marketplace.ebay_publishing_enabled'=>true,'marketplace.price_sync.ebay_read_retry_attempts'=>3,'marketplace.price_sync.ebay_read_retry_delay_ms'=>0]);
+        Http::fake(['*/sell/inventory/v1/offer/OFFERDE'=>Http::sequence()->push(['offerId'=>'OFFERDE','sku'=>'SKUDE','status'=>'PUBLISHED','availableQuantity'=>1,'pricingSummary'=>['price'=>['value'=>'34.55','currency'=>'EUR']]],200)->push(['offerId'=>'OFFERDE','sku'=>'SKUDE','status'=>'PUBLISHED','availableQuantity'=>1,'pricingSummary'=>['price'=>['value'=>'34.55','currency'=>'EUR']]],200)->push(['offerId'=>'OFFERDE','sku'=>'SKUDE','status'=>'PUBLISHED','availableQuantity'=>1,'pricingSummary'=>['price'=>['value'=>'36.09','currency'=>'EUR']]],200),'*/sell/inventory/v1/bulk_update_price_quantity'=>Http::response(['responses'=>[['sku'=>'SKUDE','inputRefId'=>'SKUDE','statusCode'=>200,'warnings'=>[],'errors'=>[]]]],200,['x-ebay-c-request-id'=>'rid-ebay'])]);
+        $part=$this->part(); $listing=$this->listing($part,'ebay_de',['external_offer_id'=>'OFFERDE','external_inventory_id'=>'INV','sku'=>'SKUDE','currency'=>'EUR','price'=>34.55]);
+        $res=app(PartPriceSyncService::class)->sync($part->fresh(['marketplaceListings.account']), ['ebay_de'=>['marketplace_price'=>'34.55','marketplace_currency'=>'EUR']], ['ebay_de'=>['marketplace_price'=>'36.09','marketplace_currency'=>'EUR']]);
+        $this->assertSame('success',$res['channels']['ebay_de']['status']);
+        $this->assertCount(2,data_get($res,'channels.ebay_de.read_after_write.attempts'));
+        $this->assertSame(1, count(Http::recorded(fn($r)=>$r->url()==='https://example.test/sell/inventory/v1/bulk_update_price_quantity')));
+        $this->assertSame('36.09',(string)$listing->fresh()->price);
+    }
+
     public function test_ebay_ignores_non_de_and_legacy_and_sanitizes_errors(): void
     {
         config(['marketplace.price_sync.on_part_save_enabled'=>true,'marketplace.external_api_writes_enabled'=>true,'marketplace.ebay_publishing_enabled'=>true]);
