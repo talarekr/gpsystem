@@ -404,9 +404,12 @@ class PartResource extends Resource
                         Forms\Components\Hidden::make('car_id')->live(),
                         Forms\Components\Actions::make([
                             self::chooseCarAction(),
-                            self::createCarAction(),
                         ])
                             ->extraAttributes(['class' => 'gps-vehicle-actions'])
+                            ->columnSpanFull(),
+                        Forms\Components\Placeholder::make('recent_cars')
+                            ->hiddenLabel()
+                            ->content(fn (Forms\Get $get): HtmlString => new HtmlString(self::recentCarsHtml($get('car_id'))))
                             ->columnSpanFull(),
                         Forms\Components\Placeholder::make('vehicle_context')
                             ->hiddenLabel()
@@ -722,9 +725,7 @@ class PartResource extends Resource
                     ->columnSpanFull(),
             ])
             ->action(function (array $data, Forms\Set $set): void {
-                if (! empty($data['selected_car_id'])) {
-                    $set('car_id', (int) $data['selected_car_id']);
-                }
+                self::selectCar($set, $data['selected_car_id'] ?? null);
             });
     }
 
@@ -744,6 +745,105 @@ class PartResource extends Resource
                 $car = Car::query()->create($data);
                 $set('car_id', $car->id);
             });
+    }
+
+    public static function selectCar(Forms\Set $set, mixed $carId): bool
+    {
+        if (blank($carId)) {
+            return false;
+        }
+
+        $car = self::carPickerBaseQuery()->find($carId);
+
+        if (! $car) {
+            return false;
+        }
+
+        $set('car_id', $car->getKey());
+
+        return true;
+    }
+
+    public static function selectCarInFormData(array &$data, mixed $carId): bool
+    {
+        if (blank($carId)) {
+            return false;
+        }
+
+        $car = self::carPickerBaseQuery()->find($carId);
+
+        if (! $car) {
+            return false;
+        }
+
+        $data['car_id'] = $car->getKey();
+
+        return true;
+    }
+
+    public static function recentCarsHtml(mixed $selectedCarId): string
+    {
+        $cars = self::carPickerBaseQuery()
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->limit(4)
+            ->get();
+
+        if ($cars->isEmpty()) {
+            return '<div class="gps-recent-vehicles gps-recent-vehicles--empty">Brak ostatnio dodanych samochodów.</div>';
+        }
+
+        $tiles = $cars->map(fn (Car $car): string => self::recentCarTileHtml($car, (int) $selectedCarId === $car->getKey()))->implode('');
+
+        return '<div class="gps-recent-vehicles">'.$tiles.'</div>';
+    }
+
+    private static function recentCarTileHtml(Car $car, bool $selected): string
+    {
+        $title = e(self::carLabel($car));
+        $identity = e($car->registration_number ?: $car->vin ?: '');
+        $details = array_slice(self::carDetails($car), 0, 6);
+        $classes = 'gps-recent-vehicle'.($selected ? ' gps-recent-vehicle--selected' : '');
+
+        return '<button type="button" class="'.$classes.'" wire:click="setPartCarFromPicker('.$car->getKey().')">'
+            .'<span class="gps-recent-vehicle__title">'.$title.'</span>'
+            .($identity !== '' ? '<span class="gps-recent-vehicle__identity">'.$identity.'</span>' : '')
+            .($details !== [] ? '<span class="gps-recent-vehicle__details">'.e(implode(' · ', $details)).'</span>' : '')
+            .'</button>';
+    }
+
+    private static function carPickerBaseQuery(): Builder
+    {
+        return Car::query()->select(self::carPickerColumns());
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private static function carPickerColumns(): array
+    {
+        return [
+            'id',
+            'external_id',
+            'vin',
+            'make',
+            'model',
+            'model_variant',
+            'production_year',
+            'first_registration_year',
+            'registration_number',
+            'fuel_type',
+            'engine_power_kw',
+            'engine_capacity_cm3',
+            'engine_code',
+            'drivetrain',
+            'gearbox_type',
+            'gearbox_code',
+            'body_type',
+            'color',
+            'steering_side',
+            'created_at',
+        ];
     }
 
     /**
@@ -783,28 +883,7 @@ class PartResource extends Resource
         $prefix = $like.'%';
         $partial = '%'.$like.'%';
 
-        return Car::query()
-            ->select([
-                'id',
-                'external_id',
-                'vin',
-                'make',
-                'model',
-                'model_variant',
-                'production_year',
-                'first_registration_year',
-                'registration_number',
-                'fuel_type',
-                'engine_power_kw',
-                'engine_capacity_cm3',
-                'engine_code',
-                'drivetrain',
-                'gearbox_type',
-                'gearbox_code',
-                'body_type',
-                'color',
-                'steering_side',
-            ])
+        return self::carPickerBaseQuery()
             ->where(fn (Builder $query): Builder => self::applyCarPickerSearch($query, $search))
             ->orderByRaw(
                 self::carPickerPrioritySql(),
@@ -847,27 +926,7 @@ class PartResource extends Resource
             return null;
         }
 
-        $car = Car::query()
-            ->select([
-                'id',
-                'vin',
-                'make',
-                'model',
-                'model_variant',
-                'production_year',
-                'first_registration_year',
-                'registration_number',
-                'fuel_type',
-                'engine_power_kw',
-                'engine_capacity_cm3',
-                'engine_code',
-                'drivetrain',
-                'gearbox_type',
-                'body_type',
-                'color',
-                'steering_side',
-            ])
-            ->find($value);
+        $car = self::carPickerBaseQuery()->find($value);
 
         return $car ? self::carPickerOptionHtml($car) : null;
     }
@@ -1242,6 +1301,7 @@ class PartResource extends Resource
             $car->production_year ? 'rok '.$car->production_year : null,
             $car->body_type,
             $car->fuel_type,
+            $car->engine_code ? 'kod '.$car->engine_code : null,
             $car->engine_power_kw ? $car->engine_power_kw.' kW' : null,
             $car->engine_capacity_cm3 ? $car->engine_capacity_cm3.' cm³' : null,
             $car->color,
