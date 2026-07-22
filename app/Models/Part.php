@@ -189,7 +189,7 @@ class Part extends Model
     {
         return $this->cleanStorefrontValue($this->description)
             ?: $this->cleanStorefrontValue($this->short_description)
-            ?: 'Opis produktu zostanie uzupełniony.';
+            ?: __('storefront.description_pending');
     }
 
     /**
@@ -199,9 +199,9 @@ class Part extends Model
     {
         $details = [];
 
-        $this->addStorefrontDetail($details, 'Numer części', $this->part_number);
+        $this->addStorefrontDetail($details, __('storefront.part_number'), $this->part_number);
         $this->addStorefrontDetail($details, 'OEM', $this->oem_number);
-        $this->addStorefrontDetail($details, 'Kod producenta', $this->manufacturer_code);
+        $this->addStorefrontDetail($details, __('storefront.manufacturer_code'), $this->manufacturer_code);
 
         if ($this->isMeaningfulStorefrontValue($this->sku)
             && ! in_array($this->normalizeStorefrontValue($this->sku), array_filter([
@@ -212,28 +212,28 @@ class Part extends Model
             $this->addStorefrontDetail($details, 'SKU', $this->sku);
         }
 
-        $this->addStorefrontDetail($details, 'Stan', $this->condition_notes ?: 'Używany / sprawdzony');
+        $this->addStorefrontDetail($details, __('storefront.condition'), $this->condition_notes ?: __('storefront.used_checked'));
 
         $vehicle = $this->storefrontVehicleData();
 
         foreach ([
-            'make' => 'Producent / marka',
-            'model' => 'Model',
-            'model_variant' => 'Modyfikacja / wersja',
-            'production_year' => 'Rok produkcji samochodu',
-            'production_period' => 'Okres produkcji',
-            'engine_capacity_cm3' => 'Pojemność silnika',
-            'engine_code' => 'Kod silnika',
-            'visible_code' => 'Kod widoczny',
-            'engine_power_kw' => 'Moc silnika',
-            'fuel_type' => 'Typ paliwa',
-            'gearbox_type' => 'Typ skrzyni biegów',
-            'drivetrain' => 'Koła napędowe / napęd',
-            'steering_side' => 'Pozycja kierownicy / strona',
-            'body_type' => 'Typ sylwetki / nadwozie',
-            'color' => 'Kolor',
-            'color_code' => 'Kod koloru',
-            'mileage_km' => 'Przebieg',
+            'make' => __('storefront.vehicle_make'),
+            'model' => __('storefront.vehicle_model'),
+            'model_variant' => __('storefront.vehicle_variant'),
+            'production_year' => __('storefront.production_year'),
+            'production_period' => __('storefront.production_period'),
+            'engine_capacity_cm3' => __('storefront.engine_capacity'),
+            'engine_code' => __('storefront.engine_code'),
+            'visible_code' => __('storefront.visible_code'),
+            'engine_power_kw' => __('storefront.engine_power'),
+            'fuel_type' => __('storefront.fuel_type'),
+            'gearbox_type' => __('storefront.gearbox_type'),
+            'drivetrain' => __('storefront.drivetrain'),
+            'steering_side' => __('storefront.steering_side'),
+            'body_type' => __('storefront.body_type'),
+            'color' => __('storefront.color'),
+            'color_code' => __('storefront.color_code'),
+            'mileage_km' => __('storefront.mileage'),
         ] as $key => $label) {
             $this->addStorefrontDetail($details, $label, $this->formatStorefrontDetailValue($key, $vehicle[$key] ?? null));
         }

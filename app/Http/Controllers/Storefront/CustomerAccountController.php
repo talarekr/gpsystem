@@ -32,7 +32,7 @@ class CustomerAccountController extends Controller
         ]);
         $data['name'] = trim($data['first_name'].' '.$data['last_name']);
         Auth::user()->update($data);
-        return back()->with('success', 'Dane zostały zapisane.');
+        return back()->with('success', __('storefront.data_saved'));
     }
 
     public function storeReturn(Request $request): RedirectResponse
@@ -40,10 +40,10 @@ class CustomerAccountController extends Controller
         $data = $request->validate(['order_id'=>['required','integer'], 'reason'=>['required','string','max:255'], 'message'=>['nullable','string','max:2000']]);
         $order = $this->ordersFor(Auth::user()->email)->firstWhere('id', (int) $data['order_id']);
         if (! $order || ! $this->isCompleted($order)) {
-            return back()->withErrors(['order_id' => 'Zwrot można zgłosić tylko dla zrealizowanego zamówienia.']);
+            return back()->withErrors(['order_id' => __('storefront.return_only_completed')]);
         }
         CustomerReturn::create(['user_id'=>Auth::id(), 'order_id'=>$order->id, 'reason'=>$data['reason'], 'message'=>$data['message'] ?? null]);
-        return back()->with('success', 'Zgłoszenie zwrotu zostało zapisane.');
+        return back()->with('success', __('storefront.return_saved'));
     }
 
     private function ordersFor(string $email): Collection

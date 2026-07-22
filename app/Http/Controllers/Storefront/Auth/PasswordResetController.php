@@ -22,7 +22,7 @@ class PasswordResetController extends Controller
         $request->validate(['email' => ['required','email']]);
         try { Password::sendResetLink($request->only('email')); }
         catch (Throwable) { /* hide mail transport problems */ }
-        return back()->with('success', 'Jeśli konto istnieje, wyślemy link do resetu hasła. Jeśli poczta nie jest skonfigurowana, spróbuj ponownie później lub skontaktuj się ze sklepem.');
+        return back()->with('success', __('storefront.password_link_sent'));
     }
 
     public function resetForm(string $token, Request $request): View
@@ -37,6 +37,6 @@ class PasswordResetController extends Controller
             $user->forceFill(['password' => Hash::make($password), 'remember_token' => Str::random(60)])->save();
             event(new PasswordReset($user));
         });
-        return $status === Password::PASSWORD_RESET ? redirect()->route('storefront.login')->with('success','Hasło zostało zmienione.') : back()->withErrors(['email'=>'Nie udało się zresetować hasła.'])->onlyInput('email');
+        return $status === Password::PASSWORD_RESET ? redirect()->route('storefront.login')->with('success',__('storefront.password_changed')) : back()->withErrors(['email'=>__('storefront.password_reset_failed')])->onlyInput('email');
     }
 }

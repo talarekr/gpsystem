@@ -23,12 +23,12 @@ class CustomerAuthController extends Controller
         $credentials = $request->validate(['email' => ['required','email'], 'password' => ['required','string']]);
 
         if (! Auth::attempt($credentials, $request->boolean('remember'))) {
-            return back()->withErrors(['email' => 'Podane dane logowania są nieprawidłowe.'])->onlyInput('email');
+            return back()->withErrors(['email' => __('storefront.invalid_login')])->onlyInput('email');
         }
 
         $request->session()->regenerate();
 
-        return redirect()->intended(route('storefront.account'))->with('success', 'Zalogowano pomyślnie.');
+        return redirect()->intended(route('storefront.account'))->with('success', __('storefront.login_success'));
     }
 
     public function registerForm(): View|RedirectResponse
@@ -63,7 +63,7 @@ class CustomerAuthController extends Controller
         Auth::login($user);
         $request->session()->regenerate();
 
-        return redirect()->route('storefront.account')->with('success', 'Konto zostało utworzone.');
+        return redirect()->route('storefront.account')->with('success', __('storefront.account_created'));
     }
 
     public function logout(Request $request): RedirectResponse
@@ -72,6 +72,6 @@ class CustomerAuthController extends Controller
         $request->session()->invalidate();
         $request->session()->regenerateToken();
 
-        return redirect()->route('storefront.login')->with('success', 'Wylogowano.');
+        return redirect()->route('storefront.login')->with('success', __('storefront.logout_success'));
     }
 }

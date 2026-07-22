@@ -49,6 +49,6 @@
             'categoryTreeService' => $categoryTreeService,
         ])
     @else
-        <p class="sf-empty">Kategorie zostaną uzupełnione.</p>
+        <p class="sf-empty">{{ __('storefront.categories_pending') }}</p>
     @endif
 </aside>

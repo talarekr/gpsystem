@@ -27,7 +27,7 @@ class PayuReturnController extends Controller
         return view('storefront.checkout.payu-return', [
             'order' => $order,
             'remoteStatus' => $remoteStatus,
-            'breadcrumbs' => [['label' => 'Strona główna', 'url' => route('storefront.home')], ['label' => 'Powrót z PayU']],
+            'breadcrumbs' => [['label' => __('storefront.home'), 'url' => route('storefront.home')], ['label' => 'Powrót z PayU']],
             'metaTitle' => 'Potwierdzenie płatności PayU - GPSwiss',
             'metaDescription' => 'Oczekiwanie na potwierdzenie płatności PayU.',
         ]);

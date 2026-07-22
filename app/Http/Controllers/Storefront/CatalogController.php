@@ -48,7 +48,7 @@ class CatalogController extends Controller
             'models' => $filterOptions['models'],
             'metaTitle' => 'Katalog części GPSwiss - używane części samochodowe',
             'metaDescription' => 'Katalog oryginalnych używanych części samochodowych GPSwiss.',
-            'breadcrumbs' => [['label' => 'Strona główna', 'url' => route('storefront.home')], ['label' => 'Katalog części']],
+            'breadcrumbs' => [['label' => __('storefront.home'), 'url' => route('storefront.home')], ['label' => __('storefront.catalog')]],
         ];
     }
 }

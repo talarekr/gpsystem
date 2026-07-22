@@ -10,11 +10,11 @@ class TermsController extends Controller
     public function __invoke(): View
     {
         return view('storefront.terms', [
-            'metaTitle' => 'Regulamin sklepu internetowego - GPSwiss',
-            'metaDescription' => 'Regulamin sklepu internetowego GPSwiss.',
+            'metaTitle' => __('storefront.terms_title'),
+            'metaDescription' => __('storefront.terms_desc'),
             'breadcrumbs' => [
-                ['label' => 'Strona główna', 'url' => route('storefront.home')],
-                ['label' => 'Regulamin'],
+                ['label' => __('storefront.home'), 'url' => route('storefront.home')],
+                ['label' => __('storefront.terms')],
             ],
         ]);
     }

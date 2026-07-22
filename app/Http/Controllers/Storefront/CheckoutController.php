@@ -22,7 +22,7 @@ class CheckoutController extends Controller
     public function show(): View|RedirectResponse
     {
         if ($this->cart->isEmpty()) {
-            return redirect()->route('storefront.cart.index')->with('warning', 'Koszyk jest pusty. Dodaj produkt przed złożeniem zamówienia.');
+            return redirect()->route('storefront.cart.index')->with('warning', __('storefront.cart_empty_before_checkout'));
         }
 
         return view('storefront.checkout.show', $this->viewData());
@@ -33,11 +33,11 @@ class CheckoutController extends Controller
         $items = $this->cart->items();
 
         if ($items->isEmpty()) {
-            throw ValidationException::withMessages(['cart' => 'Koszyk nie może być pusty.']);
+            throw ValidationException::withMessages(['cart' => __('storefront.cart_cannot_be_empty')]);
         }
 
         if ($items->contains(fn (array $item): bool => ! (bool) ($item['is_available'] ?? false))) {
-            throw ValidationException::withMessages(['cart' => 'Koszyk zawiera produkt niedostępny. Usuń go przed złożeniem zamówienia.']);
+            throw ValidationException::withMessages(['cart' => __('storefront.cart_contains_unavailable')]);
         }
 
         $validated = $request->validate([
@@ -184,16 +184,16 @@ class CheckoutController extends Controller
 
         $this->cart->clear();
 
-        return redirect()->route('storefront.checkout.thank-you', $order)->with('success', 'Dziękujemy. Zamówienie zostało przyjęte.');
+        return redirect()->route('storefront.checkout.thank-you', $order)->with('success', __('storefront.order_accepted'));
     }
 
     public function thankYou(Order $order): View
     {
         return view('storefront.checkout.thank-you', [
             'order' => $order->load('items'),
-            'breadcrumbs' => [['label' => 'Strona główna', 'url' => route('storefront.home')], ['label' => 'Dziękujemy']],
-            'metaTitle' => 'Dziękujemy za zamówienie - GPSwiss',
-            'metaDescription' => 'Potwierdzenie zamówienia GPSwiss.',
+            'breadcrumbs' => [['label' => __('storefront.home'), 'url' => route('storefront.home')], ['label' => __('storefront.thank_you')]],
+            'metaTitle' => __('storefront.order_thanks_title'),
+            'metaDescription' => __('storefront.order_confirmation_desc'),
         ]);
     }
 
@@ -202,9 +202,9 @@ class CheckoutController extends Controller
         return [
             'items' => $this->cart->items(),
             'subtotal' => $this->cart->subtotal(),
-            'breadcrumbs' => [['label' => 'Strona główna', 'url' => route('storefront.home')], ['label' => 'Koszyk', 'url' => route('storefront.cart.index')], ['label' => 'Zamówienie']],
-            'metaTitle' => 'Zamówienie - GPSwiss',
-            'metaDescription' => 'Checkout sklepu GPSwiss.',
+            'breadcrumbs' => [['label' => __('storefront.home'), 'url' => route('storefront.home')], ['label' => __('storefront.cart'), 'url' => route('storefront.cart.index')], ['label' => __('storefront.checkout')]],
+            'metaTitle' => __('storefront.checkout_title'),
+            'metaDescription' => __('storefront.checkout_desc'),
         ];
     }
 

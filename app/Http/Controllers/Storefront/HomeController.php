@@ -18,26 +18,33 @@ class HomeController extends Controller
 
     public function index(CategoryTreeService $categoryTree): View
     {
-        $sections = collect(self::SECTIONS)->map(function (string $path) use ($categoryTree) {
+        $sectionLabelKeys = [
+            'Silniki kompletne' => 'engines',
+            'Skrzynia biegów' => 'gearbox',
+            'Filtry DPF' => 'dpf',
+            'Zwrotnice' => 'knuckles',
+        ];
+
+        $sections = collect(self::SECTIONS)->mapWithKeys(function (string $path, string $label) use ($categoryTree, $sectionLabelKeys) {
             $category = $categoryTree->findByPublicPath($path);
 
             if (! $category) {
-                return collect();
+                return [__('storefront.'.($sectionLabelKeys[$label] ?? 'catalog')) => collect()];
             }
 
-            return Part::query()
+            return [__('storefront.'.($sectionLabelKeys[$label] ?? 'catalog')) => Part::query()
                 ->with(['images', 'category'])
                 ->storefrontVisible()
                 ->where('category_id', $category->id)
                 ->latest('updated_at')
                 ->limit(8)
-                ->get();
+                ->get()];
         });
 
         return view('storefront.home', [
             'sections' => $sections,
-            'metaTitle' => 'GPSwiss - używane części samochodowe',
-            'metaDescription' => 'Największy wybór oryginalnych używanych części samochodowych GPSwiss.',
+            'metaTitle' => __('storefront.homepage_title'),
+            'metaDescription' => __('storefront.homepage_desc'),
         ]);
     }
 }

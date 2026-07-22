@@ -29,6 +29,7 @@ use App\Http\Controllers\Storefront\Auth\GoogleAuthController;
 use App\Http\Controllers\Storefront\Auth\PasswordResetController;
 use App\Http\Controllers\Storefront\CustomerAccountController;
 use App\Http\Controllers\Storefront\HomeController;
+use App\Http\Controllers\Storefront\LocaleController;
 use App\Http\Controllers\Storefront\PartController;
 use App\Http\Controllers\Storefront\PayuReturnController;
 use App\Http\Controllers\Payments\PayuNotifyController;
@@ -256,6 +257,7 @@ Route::get('/sklep', fn (Request $request) => redirect()->route('storefront.cata
 Route::get('/czesci', [CatalogController::class, 'index'])->name('storefront.catalog');
 Route::get('/szukaj', [SearchController::class, 'index'])->name('storefront.search');
 Route::get('/koszyk', [CartController::class, 'index'])->name('storefront.cart.index');
+Route::post('/jezyk', LocaleController::class)->name('storefront.locale');
 
 Route::get('/login', fn () => redirect()->route('storefront.login'))->name('login');
 Route::get('/logowanie', [CustomerAuthController::class, 'loginForm'])->name('storefront.login');

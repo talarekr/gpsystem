@@ -31,7 +31,7 @@ class PartController extends Controller
             'part' => $part,
             'related' => $related,
             'metaTitle' => $part->name.' - GPSwiss',
-            'metaDescription' => str($part->short_description ?: $part->description ?: 'Używana część samochodowa GPSwiss.')->stripTags()->limit(155)->toString(),
+            'metaDescription' => str($part->short_description ?: $part->description ?: __('storefront.default_desc'))->stripTags()->limit(155)->toString(),
             'breadcrumbs' => $this->breadcrumbs($part, $categoryTree),
         ]);
     }
@@ -40,7 +40,7 @@ class PartController extends Controller
     private function breadcrumbs(Part $part, CategoryTreeService $categoryTree): array
     {
         $breadcrumbs = [
-            ['label' => 'Strona główna', 'url' => route('storefront.home')],
+            ['label' => __('storefront.home'), 'url' => route('storefront.home')],
         ];
 
         if ($part->category instanceof PartCategory) {

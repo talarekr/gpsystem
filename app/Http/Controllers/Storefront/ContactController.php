@@ -15,11 +15,11 @@ class ContactController extends Controller
     public function show(): View
     {
         return view('storefront.contact', [
-            'metaTitle' => 'Kontakt - GPSwiss',
-            'metaDescription' => 'Dane kontaktowe firmy GREGOR swiss GRZEGORZ PACIOREK oraz formularz kontaktowy GPSwiss.',
+            'metaTitle' => __('storefront.contact_title'),
+            'metaDescription' => __('storefront.contact_desc'),
             'breadcrumbs' => [
-                ['label' => 'Strona główna', 'url' => route('storefront.home')],
-                ['label' => 'Kontakt'],
+                ['label' => __('storefront.home'), 'url' => route('storefront.home')],
+                ['label' => __('storefront.contact')],
             ],
         ]);
     }
@@ -36,7 +36,7 @@ class ContactController extends Controller
             Mail::raw($this->messageBody($data), function ($message) use ($data): void {
                 $message->to('biuro@gpswiss.pl')
                     ->replyTo($data['email'], $data['name'] ?: null)
-                    ->subject('Wiadomość z formularza kontaktowego GPSwiss');
+                    ->subject(__('storefront.contact_mail_subject'));
             });
         } catch (Throwable $exception) {
             Log::warning('Storefront contact form mail failed.', [
@@ -46,10 +46,10 @@ class ContactController extends Controller
 
             return back()
                 ->withInput()
-                ->with('error', 'Nie udało się wysłać wiadomości. Spróbuj ponownie lub napisz bezpośrednio na biuro@gpswiss.pl.');
+                ->with('error', __('storefront.send_failed'));
         }
 
-        return back()->with('success', 'Dziękujemy. Wiadomość została wysłana.');
+        return back()->with('success', __('storefront.message_sent'));
     }
 
     /**
@@ -58,12 +58,12 @@ class ContactController extends Controller
     private function messageBody(array $data): string
     {
         return implode("\n", [
-            'Nowa wiadomość z formularza kontaktowego GPSwiss',
+            __('storefront.contact_mail_intro'),
             '',
-            'Imię i nazwisko: '.($data['name'] ?: '—'),
+            __('storefront.contact_name').': '.($data['name'] ?: '—'),
             'Email: '.$data['email'],
             '',
-            'Wiadomość:',
+            __('storefront.contact_message').':',
             $data['message'] ?: '—',
         ]);
     }

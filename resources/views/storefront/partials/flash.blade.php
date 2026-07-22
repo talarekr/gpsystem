@@ -6,7 +6,7 @@
             @endif
         @endforeach
         @if($errors->any())
-            <div class="sf-flash sf-flash--error" role="alert">Sprawdź poprawność danych formularza.</div>
+            <div class="sf-flash sf-flash--error" role="alert">{{ __('storefront.validate_form') }}</div>
         @endif
     </div>
 @endif
