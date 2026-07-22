@@ -154,6 +154,58 @@ class PartPriceSyncServiceTest extends TestCase
         $this->assertSame('34.55',(string)$listing->fresh()->price);
     }
 
+
+    public function test_ovoko_changed_price_always_returns_explicit_result_and_log(): void
+    {
+        config(['marketplace.price_sync.on_part_save_enabled'=>true,'marketplace.external_api_writes_enabled'=>true,'marketplace.ovoko_publishing_enabled'=>true,'marketplace.price_sync.channels'=>['ovoko']]);
+        Http::fake(['*/crm/updatePart'=>Http::response(['status_code'=>'R200'],200),'*/get/part/11825'=>Http::response(['data'=>['original_price'=>'125.00','original_currency'=>'PLN']],200)]);
+        $part=$this->part(['id'=>8212,'ovoko_price'=>125]); $this->listing($part,'ovoko',['external_offer_id'=>'11825','price'=>120]);
+        $res=app(PartPriceSyncService::class)->sync($part->fresh(['marketplaceListings.account']), ['ovoko'=>['marketplace_price'=>'120.00','marketplace_currency'=>'PLN']], ['ovoko'=>['marketplace_price'=>'125.00','marketplace_currency'=>'PLN','source_currency'=>'PLN','source_field'=>'parts.ovoko_price']]);
+        $this->assertArrayHasKey('ovoko',$res['channels']);
+        $this->assertSame('success',$res['channels']['ovoko']['status']);
+        $this->assertSame('120.00',$res['channels']['ovoko']['old_price']);
+        $this->assertSame('125.00',$res['channels']['ovoko']['new_price']);
+        $this->assertNotNull($res['channels']['ovoko']['log_id']);
+        $this->assertSame(1, MarketplaceSyncLog::query()->where('marketplace','ovoko')->where('action','part_price_sync')->count());
+    }
+
+    public function test_changed_ovoko_preflight_skip_is_returned_to_ui_with_log(): void
+    {
+        config(['marketplace.price_sync.on_part_save_enabled'=>true,'marketplace.external_api_writes_enabled'=>false,'marketplace.ovoko_publishing_enabled'=>true,'marketplace.price_sync.channels'=>['ovoko']]);
+        Http::fake();
+        $part=$this->part(['id'=>8212,'ovoko_price'=>125]); $this->listing($part,'ovoko',['external_offer_id'=>'11825','price'=>120]);
+        $res=app(PartPriceSyncService::class)->sync($part->fresh(['marketplaceListings.account']), ['ovoko'=>['marketplace_price'=>'120.00','marketplace_currency'=>'PLN']], ['ovoko'=>['marketplace_price'=>'125.00','marketplace_currency'=>'PLN']]);
+        $this->assertSame('skipped',$res['channels']['ovoko']['status']);
+        $this->assertSame('external_api_writes_disabled',$res['channels']['ovoko']['blocker']);
+        $this->assertNotNull($res['channels']['ovoko']['log_id']);
+        Http::assertNothingSent();
+    }
+
+    public function test_ebay_accepted_unverified_is_warning_status_not_error_and_single_write(): void
+    {
+        config(['marketplace.price_sync.on_part_save_enabled'=>true,'marketplace.external_api_writes_enabled'=>true,'marketplace.ebay_publishing_enabled'=>true,'marketplace.price_sync.ebay_read_retry_attempts'=>3,'marketplace.price_sync.ebay_read_retry_delay_ms'=>0]);
+        Http::fake(['*/sell/inventory/v1/offer/OFFERDE'=>Http::sequence()->push(['offerId'=>'OFFERDE','sku'=>'SKUDE','status'=>'PUBLISHED','availableQuantity'=>1,'pricingSummary'=>['price'=>['value'=>'34.55','currency'=>'EUR']]],200)->push(['offerId'=>'OFFERDE','sku'=>'SKUDE','status'=>'PUBLISHED','availableQuantity'=>1,'pricingSummary'=>['price'=>['value'=>'34.55','currency'=>'EUR']]],200)->push(['offerId'=>'OFFERDE','sku'=>'SKUDE','status'=>'PUBLISHED','availableQuantity'=>1,'pricingSummary'=>['price'=>['value'=>'34.55','currency'=>'EUR']]],200)->push(['offerId'=>'OFFERDE','sku'=>'SKUDE','status'=>'PUBLISHED','availableQuantity'=>1,'pricingSummary'=>['price'=>['value'=>'34.55','currency'=>'EUR']]],200),'*/sell/inventory/v1/bulk_update_price_quantity'=>Http::response(['responses'=>[['sku'=>'SKUDE','statusCode'=>200]],'errors'=>[],'warnings'=>[]],200)]);
+        $part=$this->part(['ebay_price'=>180.45]); $listing=$this->listing($part,'ebay_de',['external_offer_id'=>'OFFERDE','external_inventory_id'=>'INV','sku'=>'SKUDE','currency'=>'EUR','price'=>34.55]);
+        $res=app(PartPriceSyncService::class)->sync($part->fresh(['marketplaceListings.account']), ['ebay_de'=>['marketplace_price'=>'34.55','marketplace_currency'=>'EUR']], ['ebay_de'=>['marketplace_price'=>'36.09','marketplace_currency'=>'EUR']]);
+        $this->assertSame('write_accepted_unverified',$res['channels']['ebay_de']['status']);
+        $this->assertSame('ebay_price_update_pending_confirmation',$res['channels']['ebay_de']['blocker']);
+        $this->assertFalse($res['channels']['ebay_de']['final_success']);
+        $this->assertSame(1, count(Http::recorded(fn($r)=>$r->url()==='https://example.test/sell/inventory/v1/bulk_update_price_quantity')));
+        $this->assertSame('34.55',(string)$listing->fresh()->price);
+    }
+
+    public function test_ebay_later_read_only_confirmation_does_not_write_again(): void
+    {
+        config(['marketplace.ebay_publishing_enabled'=>true]);
+        Http::fake(['*/sell/inventory/v1/offer/OFFERDE'=>Http::response(['offerId'=>'OFFERDE','sku'=>'SKUDE','status'=>'PUBLISHED','availableQuantity'=>1,'pricingSummary'=>['price'=>['value'=>'36.09','currency'=>'EUR']]],200),'*/sell/inventory/v1/offer?sku=SKUDE&marketplace_id=EBAY_DE'=>Http::response(['offers'=>[['offerId'=>'OFFERDE']]],200),'*/sell/inventory/v1/inventory_item/SKUDE'=>Http::response(['sku'=>'SKUDE'],200)]);
+        $part=$this->part(['ebay_price'=>180.45]); $listing=$this->listing($part,'ebay_de',['external_offer_id'=>'OFFERDE','external_inventory_id'=>'INV','sku'=>'SKUDE','currency'=>'EUR','price'=>34.55]);
+        $res=app(EbayDePriceSyncAdapter::class)->confirmAcceptedWithoutWrite($listing->fresh('account'), ['marketplace_price'=>'36.09','marketplace_currency'=>'EUR']);
+        $this->assertSame('success',$res['status']);
+        $this->assertFalse($res['write_performed']);
+        $this->assertSame('36.09',(string)$listing->fresh()->price);
+        $this->assertSame(0, count(Http::recorded(fn($r)=>$r->method()==='POST')));
+    }
+
     private function part(array $attrs = []): Part { return Part::query()->create($attrs + ['name'=>'P','sku'=>'SKU1','price'=>100,'allegro_price'=>100,'ovoko_price'=>100,'ebay_price'=>125,'quantity'=>1,'status'=>'ready']); }
     private function listing(Part $part, string $marketplace, array $attrs = []): MarketplaceListing { $account=MarketplaceAccount::query()->create(['marketplace'=>$marketplace,'name'=>'A','status'=>'active','api_enabled'=>true,'api_base_url'=>'https://example.test','api_credentials'=>['token'=>'secret','username'=>'u','password'=>'p','user_token'=>'ut','access_token'=>'at','access_token_expires_at'=>now()->addHour()->toISOString()]]); return MarketplaceListing::query()->create($attrs + ['marketplace'=>$marketplace,'marketplace_account_id'=>$account->id,'part_id'=>$part->id,'external_offer_id'=>'EXT','sku'=>'SKU1','price'=>100,'currency'=>'PLN','status'=>'active']); }
 }
