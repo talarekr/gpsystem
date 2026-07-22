@@ -52,6 +52,7 @@ use App\Http\Controllers\Tools\WorkshopImageDiagnosticsController;
 use App\Http\Controllers\Tools\CheckOvokoApiSettingsController;
 use App\Http\Controllers\Tools\MarketplaceApiSettingsDiagnosticsController;
 use App\Http\Controllers\Tools\MarketplaceApiFoundationController;
+use App\Http\Controllers\Tools\MarketplacePriceSyncDiagnosticsController;
 use App\Http\Controllers\Tools\MarketplaceListingDryRunController;
 use App\Http\Controllers\Tools\AllegroCompatibilityDryRunController;
 use App\Http\Controllers\Tools\AllegroMarketplaceDiagnoseController;
@@ -2457,6 +2458,7 @@ Route::get('/tools/check-compiled-header', function (Request $request) {
 })->name('tools.check-compiled-header');
 Route::get('/tools/dry-run-import-marketplace-category-trees', [MarketplaceCategoryTreeImportController::class, 'dryRunImport'])->name('tools.dry-run-import-marketplace-category-trees');
 Route::get('/tools/debug-marketplace-category-tree-fetch', [MarketplaceCategoryTreeImportController::class, 'debugFetch'])->name('tools.debug-marketplace-category-tree-fetch');
+Route::get('/tools/marketplace-price-sync-diagnostics', MarketplacePriceSyncDiagnosticsController::class)->name('tools.marketplace-price-sync-diagnostics');
 Route::get('/tools/import-marketplace-category-trees', [MarketplaceCategoryTreeImportController::class, 'import'])->name('tools.import-marketplace-category-trees');
 Route::get('/tools/marketplace-category-tree-import-autorun', [MarketplaceCategoryTreeImportController::class, 'autorun'])->name('tools.marketplace-category-tree-import-autorun');
 Route::get('/tools/start-marketplace-category-tree-import-autorun', [MarketplaceCategoryTreeImportController::class, 'startAutorun'])->name('tools.start-marketplace-category-tree-import-autorun');

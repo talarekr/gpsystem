@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Services\PartCategorySuggestionService;
 use App\Services\PartSlugService;
+use App\Services\Marketplace\PriceSync\PartMarketplacePriceSyncService;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -70,6 +71,12 @@ class Part extends Model
             }
             if (! $part->skipCategorySuggestion) {
                 app(PartCategorySuggestionService::class)->suggest($part);
+            }
+        });
+
+        static::saved(function (Part $part): void {
+            if (! $part->wasRecentlyCreated) {
+                app(PartMarketplacePriceSyncService::class)->handlePartSaved($part);
             }
         });
 
