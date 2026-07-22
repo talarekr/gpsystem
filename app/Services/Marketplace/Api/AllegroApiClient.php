@@ -376,11 +376,6 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
         return $this->compatibilityListSuggestions($productId);
     }
 
-    public function compatibilitySuggestionsByOfferId(string $offerId): array
-    {
-        return $this->compatibilityListSuggestions(null, $offerId);
-    }
-
     public function compatibilityListSuggestions(?string $productId = null, ?string $offerId = null, ?string $language = null): array
     {
         $query = array_filter(['product.id' => $productId, 'offer.id' => $offerId, 'language' => $language], fn ($value) => filled($value));
@@ -420,31 +415,6 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
             'operation_location' => $response->header('Location'),
             'json' => is_array($json) ? $json : [],
             'request_id' => $response->header('trace-id') ?: $response->header('x-request-id'),
-        ];
-    }
-
-
-    public function updateCompatibilityListOnly(string $offerId, array $compatibilityList): array
-    {
-        $payload = ['compatibilityList' => $compatibilityList];
-        if (array_keys($payload) !== ['compatibilityList']) {
-            return ['ok' => false, 'http_status' => null, 'offer_id' => $offerId, 'blocker' => 'compatibility_patch_not_minimal', 'request_summary' => ['endpoint' => 'PATCH /sale/product-offers/{offerId}', 'payload_keys' => array_keys($payload)]];
-        }
-
-        $response = AllegroUserAgent::request()->withToken((string) $this->credentials()['access_token'])
-            ->accept('application/vnd.allegro.public.v1+json')
-            ->contentType('application/vnd.allegro.public.v1+json')
-            ->timeout(30)
-            ->patch($this->absoluteUrl('/sale/product-offers/'.rawurlencode($offerId)), $payload);
-        $json = $response->json();
-
-        return [
-            'ok' => $response->successful(),
-            'http_status' => $response->status(),
-            'offer_id' => $offerId,
-            'json' => is_array($json) ? $json : [],
-            'request_id' => $response->header('trace-id') ?: $response->header('x-request-id'),
-            'request_summary' => ['endpoint' => 'PATCH /sale/product-offers/{offerId}', 'payload_keys' => ['compatibilityList'], 'payload' => $payload],
         ];
     }
 
