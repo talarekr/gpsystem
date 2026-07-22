@@ -702,7 +702,8 @@ class PartResource extends Resource
         return Action::make('chooseCar')
             ->label(fn (): string => 'Moje samochody ('.Car::query()->count().')')
             ->icon('heroicon-o-truck')
-            ->color('gray')
+            ->color('primary')
+            ->extraAttributes(['class' => 'gps-choose-car-action'])
             ->modalHeading('Moje samochody')
             ->modalSubmitActionLabel('Wybierz samochód')
             ->modalCancelActionLabel('Zamknij')
@@ -783,6 +784,10 @@ class PartResource extends Resource
 
     public static function recentCarsHtml(mixed $selectedCarId): string
     {
+        if (filled($selectedCarId)) {
+            return '';
+        }
+
         $cars = self::carPickerBaseQuery()
             ->orderByDesc('created_at')
             ->orderByDesc('id')
@@ -800,16 +805,39 @@ class PartResource extends Resource
 
     private static function recentCarTileHtml(Car $car, bool $selected): string
     {
-        $title = e(self::carLabel($car));
-        $identity = e($car->registration_number ?: $car->vin ?: '');
-        $details = array_slice(self::carDetails($car), 0, 6);
+        $title = e(trim(implode(' ', array_filter([$car->make, $car->model]))));
+        $title = $title !== '' ? $title : e(self::carLabel($car));
+        $year = filled($car->production_year ?? null) ? e((string) $car->production_year) : null;
+        $details = self::recentCarTileDetails($car);
         $classes = 'gps-recent-vehicle'.($selected ? ' gps-recent-vehicle--selected' : '');
 
         return '<button type="button" class="'.$classes.'" wire:click="setPartCarFromPicker('.$car->getKey().')">'
-            .'<span class="gps-recent-vehicle__title">'.$title.'</span>'
-            .($identity !== '' ? '<span class="gps-recent-vehicle__identity">'.$identity.'</span>' : '')
+            .'<span class="gps-recent-vehicle__topline"><span class="gps-recent-vehicle__icon">🚗</span><span class="gps-recent-vehicle__title">'.$title.'</span></span>'
+            .($year !== null ? '<span class="gps-recent-vehicle__year">Rok '.$year.'</span>' : '')
             .($details !== [] ? '<span class="gps-recent-vehicle__details">'.e(implode(' · ', $details)).'</span>' : '')
             .'</button>';
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private static function recentCarTileDetails(Car $car): array
+    {
+        return collect([
+            $car->body_type,
+            $car->fuel_type,
+            $car->color,
+            $car->steering_side,
+            $car->gearbox_type,
+            filled($car->engine_code) ? 'Kod '.$car->engine_code : null,
+            filled($car->engine_power_kw) ? $car->engine_power_kw.' kW' : null,
+            filled($car->engine_capacity_cm3) ? $car->engine_capacity_cm3.' cm³' : null,
+        ])
+            ->filter(fn (mixed $value): bool => filled($value))
+            ->map(fn (mixed $value): string => (string) $value)
+            ->take(7)
+            ->values()
+            ->all();
     }
 
     private static function carPickerBaseQuery(): Builder
