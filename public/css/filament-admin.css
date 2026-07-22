@@ -2284,12 +2284,6 @@ button.gps-category-picker__arrow:hover {
     display: none;
 }
 
-.gps-vehicle-actions .gps-choose-car-action.fi-btn::before {
-    content: "🚗";
-    margin-right: 0.45rem;
-    font-size: 1rem;
-    line-height: 1;
-}
 
 .gps-selected-vehicle {
     display: block;
