@@ -56,6 +56,7 @@ use App\Http\Controllers\Tools\MarketplaceApiSettingsDiagnosticsController;
 use App\Http\Controllers\Tools\MarketplaceApiFoundationController;
 use App\Http\Controllers\Tools\MarketplaceListingDryRunController;
 use App\Http\Controllers\Tools\AllegroCompatibilityDryRunController;
+use App\Http\Controllers\Tools\AllegroCompatibilityApplyController;
 use App\Http\Controllers\Tools\AllegroMarketplaceDiagnoseController;
 use App\Http\Controllers\Tools\AllegroGpsrAuditRunnerController;
 use App\Http\Controllers\Tools\AllegroListingStatusSyncController;
@@ -380,6 +381,8 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/marketplace/parts/{part}/allegro-compatibility-preview', [PartMarketplaceReadinessController::class, 'allegroCompatibilityPreview'])->name('admin.tools.marketplace.parts.allegro-compatibility-preview')->middleware(['admin.panel', 'throttle:tools']);
     Route::get('/admin/tools/marketplace/parts/{part}/allegro-compatibility-post-publish-audit', [PartMarketplaceReadinessController::class, 'allegroCompatibilityPostPublishAudit'])->name('admin.tools.marketplace.parts.allegro-compatibility-post-publish-audit')->middleware(['admin.panel', 'throttle:tools']);
     Route::get('/admin/tools/marketplace/parts/{part}/allegro-compatibility-post-publish-preview', [PartMarketplaceReadinessController::class, 'allegroCompatibilityPostPublishPreview'])->name('admin.tools.marketplace.parts.allegro-compatibility-post-publish-preview')->middleware(['admin.panel', 'throttle:tools']);
+    Route::get('/admin/tools/marketplace/parts/{part}/allegro-compatibility-apply', [AllegroCompatibilityApplyController::class, 'dryRun'])->name('admin.tools.marketplace.parts.allegro-compatibility-apply.dry-run')->middleware(['admin.panel', 'throttle:tools']);
+    Route::post('/admin/tools/marketplace/parts/{part}/allegro-compatibility-apply', [AllegroCompatibilityApplyController::class, 'apply'])->name('admin.tools.marketplace.parts.allegro-compatibility-apply.apply')->middleware(['admin.panel', 'throttle:tools']);
 
     Route::match(['get', 'post'], '/admin/tools/ebay/marketplace-diagnose', EbayMarketplaceDiagnoseController::class)->name('admin.tools.ebay.marketplace-diagnose');
     Route::match(['get', 'post'], '/admin/tools/ebay/listing-audit-runner', EbayListingAuditRunnerController::class)->name('admin.tools.ebay.listing-audit-runner');
