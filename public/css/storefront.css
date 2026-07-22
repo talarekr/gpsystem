@@ -988,6 +988,17 @@
     max-width: 100%;
 }
 
+@media (min-width: 768px) {
+    .gp-product-page {
+        width: 100%;
+        max-width: 1320px;
+        margin-inline: auto;
+        padding-left: 12px;
+        padding-right: 12px;
+        overflow-x: visible;
+    }
+}
+
 .gp-product-page .sf-info-card h1,
 .gp-product-page .sf-info-card p,
 .gp-product-page .sf-purchase,
