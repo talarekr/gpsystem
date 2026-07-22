@@ -173,6 +173,19 @@ class PartMarketplaceReadinessServiceTest extends TestCase
         $this->assertStringNotContainsString("->collapsed()", substr($resource, strpos($resource, "Section::make('Kanały sprzedaży')"), 400));
     }
 
+    public function test_part_resource_vehicle_picker_hides_recent_cars_after_selection_and_uses_primary_button_color(): void
+    {
+        $resource = file_get_contents(app_path('Filament/Resources/PartResource.php'));
+        $css = file_get_contents(public_path('css/filament-admin.css'));
+
+        $this->assertStringContainsString("Forms\\Components\\Placeholder::make('recent_cars')", $resource);
+        $this->assertStringContainsString("->visible(fn (Forms\\Get $get): bool => blank($get('car_id')))", $resource);
+        $this->assertStringContainsString('.gps-vehicle-actions .gps-choose-car-action.fi-btn {', $css);
+        $this->assertStringContainsString('background: rgb(var(--primary-600)) !important;', $css);
+        $this->assertStringContainsString('background: rgb(var(--primary-500)) !important;', $css);
+        $this->assertStringNotContainsString('background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%) !important;', $css);
+    }
+
     public function test_ebay_prepared_translations_hide_static_translation_missing_items(): void
     {
         $category = PartCategory::query()->create(['name' => 'Alternatory']);

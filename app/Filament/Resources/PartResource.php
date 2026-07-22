@@ -409,6 +409,7 @@ class PartResource extends Resource
                             ->columnSpanFull(),
                         Forms\Components\Placeholder::make('recent_cars')
                             ->hiddenLabel()
+                            ->visible(fn (Forms\Get $get): bool => blank($get('car_id')))
                             ->content(fn (Forms\Get $get): HtmlString => new HtmlString(self::recentCarsHtml($get('car_id'))))
                             ->columnSpanFull(),
                         Forms\Components\Placeholder::make('vehicle_context')
