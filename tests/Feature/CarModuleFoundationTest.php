@@ -7,6 +7,8 @@ use App\Filament\Resources\CarResource;
 use App\Filament\Resources\PartResource;
 use App\Models\Car;
 use App\Models\OvokoCarDictionaryEntry;
+use App\Models\Part;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -205,6 +207,97 @@ class CarModuleFoundationTest extends TestCase
             UserRole::OwnerAdmin->value,
             UserRole::Manager->value,
         ], CarResource::rolesWithFullAccess());
+    }
+
+
+    public function test_recent_car_tiles_use_four_newest_cars_that_have_parts(): void
+    {
+        foreach ([506 => 16, 505 => 0, 504 => 0, 501 => 0, 500 => 0, 499 => 0, 498 => 10, 497 => 33, 496 => 5] as $id => $partsCount) {
+            $this->createCarWithParts($id, $partsCount);
+        }
+
+        $this->assertSame([506, 498, 497, 496], PartResource::recentCarPickerCars()->pluck('id')->all());
+
+        $this->createCarWithParts(507, 0);
+
+        $this->assertSame([506, 498, 497, 496], PartResource::recentCarPickerCars()->pluck('id')->all());
+
+        Part::query()->create(['name' => 'Part 507', 'car_id' => 507]);
+
+        $this->assertSame([507, 506, 498, 497], PartResource::recentCarPickerCars()->pluck('id')->all());
+    }
+
+    public function test_recent_car_tiles_handle_zero_two_exactly_four_and_more_than_four_cars_with_parts(): void
+    {
+        $this->createCarWithParts(10, 0);
+        $this->assertSame([], PartResource::recentCarPickerCars()->pluck('id')->all());
+
+        $this->createCarWithParts(11, 1);
+        $this->createCarWithParts(12, 1);
+        $this->assertSame([12, 11], PartResource::recentCarPickerCars()->pluck('id')->all());
+
+        $this->createCarWithParts(13, 1);
+        $this->createCarWithParts(14, 1);
+        $this->assertSame([14, 13, 12, 11], PartResource::recentCarPickerCars()->pluck('id')->all());
+
+        $this->createCarWithParts(15, 1);
+        $this->assertSame([15, 14, 13, 12], PartResource::recentCarPickerCars()->pluck('id')->all());
+    }
+
+    public function test_recent_car_tiles_query_is_limited_and_does_not_use_n_plus_one_counts(): void
+    {
+        foreach ([1, 2, 3, 4, 5] as $id) {
+            $this->createCarWithParts($id, 2);
+        }
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+
+        $cars = PartResource::recentCarPickerCars();
+        $html = PartResource::recentCarsHtml(null);
+
+        $queries = DB::getQueryLog();
+        DB::disableQueryLog();
+
+        $this->assertCount(4, $cars);
+        $this->assertStringContainsString('setPartCarFromPicker(5)', $html);
+        $this->assertStringNotContainsString('setPartCarFromPicker(1)', $html);
+        $this->assertLessThanOrEqual(2, count($queries));
+        $this->assertStringContainsString('limit 4', strtolower($queries[0]['query']));
+    }
+
+    public function test_recent_car_tiles_are_hidden_after_car_selection_but_modal_picker_still_lists_all_cars_and_car_id_is_saved(): void
+    {
+        $carWithoutParts = $this->createCarWithParts(20, 0);
+        $carWithParts = $this->createCarWithParts(21, 1);
+
+        $this->assertSame('', PartResource::recentCarsHtml($carWithParts->id));
+
+        $options = PartResource::carPickerOptions('Modal');
+        $this->assertArrayHasKey($carWithoutParts->id, $options);
+        $this->assertArrayHasKey($carWithParts->id, $options);
+
+        $data = [];
+        $this->assertTrue(PartResource::selectCarInFormData($data, $carWithParts->id));
+        $this->assertSame($carWithParts->id, $data['car_id']);
+    }
+
+    private function createCarWithParts(int $id, int $partsCount): Car
+    {
+        $car = Car::query()->create([
+            'id' => $id,
+            'make' => 'Modal',
+            'model' => 'Car '.$id,
+        ]);
+
+        for ($index = 1; $index <= $partsCount; $index++) {
+            Part::query()->create([
+                'name' => 'Part '.$id.'-'.$index,
+                'car_id' => $car->id,
+            ]);
+        }
+
+        return $car;
     }
 
     public function test_risky_features_remain_disabled_for_car_foundation(): void

@@ -788,11 +788,7 @@ class PartResource extends Resource
             return '';
         }
 
-        $cars = self::carPickerBaseQuery()
-            ->orderByDesc('created_at')
-            ->orderByDesc('id')
-            ->limit(4)
-            ->get();
+        $cars = self::recentCarPickerCars();
 
         if ($cars->isEmpty()) {
             return '<div class="gps-recent-vehicles gps-recent-vehicles--empty">Brak ostatnio dodanych samochodów.</div>';
@@ -801,6 +797,17 @@ class PartResource extends Resource
         $tiles = $cars->map(fn (Car $car): string => self::recentCarTileHtml($car, (int) $selectedCarId === $car->getKey()))->implode('');
 
         return '<div class="gps-recent-vehicles">'.$tiles.'</div>';
+    }
+
+
+    public static function recentCarPickerCars(): \Illuminate\Support\Collection
+    {
+        return self::carPickerBaseQuery()
+            ->withCount('parts')
+            ->has('parts')
+            ->orderByDesc('id')
+            ->limit(4)
+            ->get();
     }
 
     private static function recentCarTileHtml(Car $car, bool $selected): string
