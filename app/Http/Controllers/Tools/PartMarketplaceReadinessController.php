@@ -240,6 +240,9 @@ class PartMarketplaceReadinessController extends Controller
             }
             $message = $ready ? 'Gotowe' : ($missingParams !== [] ? 'Uzupełnij wymagane parametry Allegro powyżej i zapisz produkt. Brakuje: '.implode(', ', array_values(array_filter(array_map(fn ($param) => is_array($param) ? ($param['name'] ?? null) : null, $missingParams)))) : $this->humanReadablePrepareMessage((array) ($presentation['missing'] ?? $card['missing'] ?? [])));
 
+            $externalRequests = (bool) data_get($compatibilityResult ?? [], 'compatibility.external_requests', false);
+            $externalRequestMethods = (array) data_get($compatibilityResult ?? [], 'compatibility.external_request_methods', []);
+
             return response()->json([
                 'ok' => $ready,
                 'ready' => $ready,
@@ -247,7 +250,11 @@ class PartMarketplaceReadinessController extends Controller
                 'message' => $message,
                 'part_id' => $part->id,
                 'channel' => $key,
-                'will_make_marketplace_request' => false,
+                'will_make_marketplace_request' => $externalRequests,
+                'external_requests' => $externalRequests,
+                'external_request_methods' => array_values($externalRequestMethods),
+                'marketplace_write' => false,
+                'no_marketplace_mutation' => true,
                 'publish' => false,
                 'marketplace_listings' => false,
                 'missing_required_allegro_parameters' => $missingParams,
