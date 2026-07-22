@@ -556,3 +556,259 @@
 .sf-checkout-flow{display:grid;gap:0}.sf-checkout-section{padding:0 0 22px;margin:0 0 22px;border-bottom:1px solid var(--line)}.sf-checkout-section:last-child{padding-bottom:0;margin-bottom:0;border-bottom:0}.sf-checkout-section h2{margin-bottom:12px}.sf-checkout-section__label{margin:0 0 10px;color:#243044;font-weight:400}.sf-checkout-grid--spaced{margin-top:18px}.sf-checkout-options{display:grid;gap:10px;margin:0}.sf-checkout-options label{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:center;color:#243044;font-weight:400;line-height:1.4}.sf-checkout-options input{width:17px;height:17px;margin:0;accent-color:var(--navy)}.sf-checkout-options span{font-weight:400}.sf-checkout-options--segmented{display:inline-grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#fff}.sf-checkout-options--segmented label{display:block;position:relative}.sf-checkout-options--segmented input{position:absolute;opacity:0;inset:0;width:100%;height:100%;cursor:pointer}.sf-checkout-options--segmented span{display:block;padding:10px 16px;text-align:center;transition:background-color .16s ease,color .16s ease}.sf-checkout-options--segmented input:checked+span{background:#122a660d;color:var(--navy)}.sf-shipping-fields{margin-top:18px}@media(max-width:767px){.sf-checkout-options--segmented{display:grid;grid-template-columns:1fr;width:100%}.sf-checkout-section{padding-bottom:18px;margin-bottom:18px}}
 
 .sf-checkout-page [hidden]{display:none!important}
+
+/* Mobile storefront header compaction for gpswiss.pl */
+.sf-phones {
+    position: relative;
+    margin-left: auto;
+    font-weight: 700;
+}
+
+.sf-phones__toggle {
+    display: none;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    cursor: pointer;
+}
+
+.sf-phones__panel {
+    display: inline-flex;
+    gap: 12px;
+}
+
+@media (max-width: 767px) {
+    .sf-storefront-header {
+        overflow-x: clip;
+    }
+
+    .sf-container {
+        padding-left: 8px;
+        padding-right: 8px;
+    }
+
+    .sf-top__inner {
+        justify-content: space-between;
+        gap: 10px;
+        min-height: 32px;
+        overflow: visible;
+        font-size: 12px;
+    }
+
+    .sf-top__links {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        min-width: 0;
+    }
+
+    .sf-language {
+        flex: 0 0 auto;
+        margin-left: auto;
+    }
+
+    .sf-language-select {
+        max-width: 112px;
+        min-height: 30px;
+        padding: 4px 26px 4px 10px;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        background-color: #fff;
+        color: var(--navy);
+        font: inherit;
+        font-weight: 700;
+    }
+
+    .sf-main-row {
+        grid-template-columns: minmax(88px, auto) minmax(0, 1fr) auto;
+        gap: 8px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+    }
+
+    .sf-logo {
+        align-self: center;
+        min-width: 0;
+    }
+
+    .sf-logo img {
+        max-height: 38px;
+    }
+
+    .sf-main-row .sf-search {
+        grid-column: 1 / -1;
+        grid-row: 2;
+        min-width: 0;
+        width: 100%;
+        border-radius: 11px;
+    }
+
+    .sf-search input {
+        min-width: 0;
+        padding: 12px 10px;
+        font-size: 13px;
+    }
+
+    .sf-search button {
+        flex: 0 0 auto;
+        min-width: 78px;
+        padding: 0 14px;
+        font-size: 13px;
+    }
+
+    .sf-profile {
+        justify-self: end;
+    }
+
+    .sf-profile summary {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+        min-height: 38px;
+        padding: 8px 10px;
+        border-radius: 9px;
+        color: var(--navy);
+        font-size: 13px;
+        font-weight: 800;
+        white-space: nowrap;
+    }
+
+    .sf-profile div {
+        right: -48px;
+    }
+
+    .sf-cart {
+        justify-self: end;
+        width: 38px;
+        height: 38px;
+        font-size: 18px;
+    }
+
+    .sf-cart b {
+        top: -2px;
+        right: -2px;
+    }
+
+    .sf-nav__inner {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        gap: 10px;
+        min-height: 40px;
+        overflow: visible;
+    }
+
+    .sf-category-menu > summary,
+    .sf-phones__toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+        min-height: 36px;
+        padding: 7px 9px;
+        border-radius: 9px;
+        color: #fff;
+        font-size: 14px;
+        font-weight: 800;
+        line-height: 1;
+        white-space: nowrap;
+    }
+
+    .sf-nav__links {
+        display: none;
+    }
+
+    .sf-phones {
+        justify-self: end;
+        margin-left: 0;
+    }
+
+    .sf-phones__panel {
+        position: absolute;
+        top: calc(100% + 4px);
+        right: 0;
+        z-index: 1001;
+        display: grid;
+        gap: 8px;
+        min-width: 172px;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: #fff;
+        color: var(--navy);
+        box-shadow: 0 14px 30px #122a6630;
+        white-space: nowrap;
+    }
+
+    .sf-phones__toggle {
+        display: inline-flex;
+    }
+
+    .sf-phones:not(.is-open) .sf-phones__panel {
+        display: none;
+    }
+
+    .sf-category-menu .sf-category-menu__panel {
+        left: 8px;
+        width: calc(100vw - 16px);
+        max-height: calc(100vh - 150px);
+    }
+
+    .sf-hero__grid {
+        padding-top: 28px;
+        padding-bottom: 32px;
+    }
+
+    .sf-hero h1 {
+        margin-top: 4px;
+    }
+}
+
+@media (max-width: 430px) {
+    .sf-profile summary span:last-child {
+        display: none;
+    }
+
+    .sf-profile summary {
+        width: 38px;
+        padding-left: 0;
+        padding-right: 0;
+    }
+
+    .sf-search button {
+        min-width: 68px;
+        padding-left: 10px;
+        padding-right: 10px;
+    }
+}
+
+@media (max-width: 360px) {
+    .sf-top__links {
+        gap: 12px;
+    }
+
+    .sf-language-select {
+        max-width: 98px;
+        padding-left: 8px;
+    }
+
+    .sf-main-row {
+        grid-template-columns: minmax(78px, auto) minmax(0, 1fr) auto;
+        gap: 6px;
+    }
+
+    .sf-logo img {
+        max-height: 34px;
+    }
+
+    .sf-search input {
+        padding-left: 9px;
+        padding-right: 8px;
+        font-size: 12px;
+    }
+
+    .sf-category-menu > summary span,
+    .sf-phones__toggle span:last-child {
+        font-size: 13px;
+    }
+}
