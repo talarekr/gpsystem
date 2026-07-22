@@ -1358,10 +1358,7 @@ class PartResource extends Resource
         }
 
         if ($record?->vehicle_snapshot) {
-            $snapshot = $record->vehicle_snapshot;
-            $name = trim(implode(' ', array_filter([$snapshot['make'] ?? null, $snapshot['model'] ?? null])));
-
-            return '<div class="gps-selected-vehicle"><span>Wybrano: '.e($name ?: 'samochód z zapisanej migawki').'</span></div>';
+            return '<div class="gps-selected-vehicle"><span>Wybrano:</span></div>';
         }
 
         return '<span class="gps-selected-vehicle gps-selected-vehicle--empty">Nie wybrano samochodu.</span>';
