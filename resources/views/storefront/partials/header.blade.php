@@ -31,7 +31,7 @@
     </a>
     <?php echo $__env->make('storefront.partials.search-bar', \Illuminate\Support\Arr::except(get_defined_vars(), ['__data', '__path']))->render(); ?>
     <details class="sf-profile">
-        <summary><span aria-hidden="true">👤</span> Moje konto</summary>
+        <summary aria-label="Moje konto"><span aria-hidden="true">👤</span> <span class="sf-profile__label">Moje konto</span></summary>
         <div>
             <?php $storefrontCustomer = auth()->user(); ?>
             <?php if ($storefrontCustomer): ?>
