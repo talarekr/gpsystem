@@ -112,7 +112,57 @@ class EditPart extends EditRecord
 
         $this->record->refresh();
         $newPrices = app(PartPriceResolver::class)->snapshot($this->record);
-        app(PartPriceSyncService::class)->syncAfterPartSave($this->record, $oldPrices, $newPrices);
+        $result = app(PartPriceSyncService::class)->syncAfterPartSave($this->record, $oldPrices, $newPrices);
+        $this->sendMarketplacePriceSyncNotifications($result);
+    }
+
+
+    protected function sendMarketplacePriceSyncNotifications(array $result): void
+    {
+        $sent = [];
+        foreach (($result['channels'] ?? []) as $channel => $channelResult) {
+            if (! ($channelResult['changed'] ?? false)) {
+                continue;
+            }
+
+            $status = (string) ($channelResult['status'] ?? 'error');
+            if ($status === 'disabled') {
+                continue;
+            }
+
+            $key = $channel.'|'.$status.'|'.($channelResult['blocker'] ?? '').'|'.($channelResult['new_price'] ?? '');
+            if (isset($sent[$key])) {
+                continue;
+            }
+            $sent[$key] = true;
+
+            $notification = Notification::make()->title((string) ($channelResult['message'] ?? $this->marketplacePriceSyncFallbackMessage($channel, $status)));
+
+            match ($status) {
+                'success' => $notification->success(),
+                'write_accepted_unverified', 'skipped' => $notification->warning(),
+                default => $notification->danger(),
+            };
+
+            $notification->send();
+        }
+    }
+
+    private function marketplacePriceSyncFallbackMessage(string $channel, string $status): string
+    {
+        $label = match ($channel) {
+            'allegro' => 'Allegro',
+            'ovoko' => 'Ovoko',
+            'ebay_de' => 'eBay DE',
+            default => $channel,
+        };
+
+        return match ($status) {
+            'success' => "Cena {$label} została zaktualizowana i potwierdzona.",
+            'write_accepted_unverified' => "{$label} przyjęło zmianę ceny, ale aktualizacja oczekuje na potwierdzenie.",
+            'skipped' => "Pominięto synchronizację ceny na {$label}.",
+            default => "Nie udało się zaktualizować ceny na {$label}. Sprawdź log synchronizacji.",
+        };
     }
 
     public function movePartImage(int $imageId, string $direction): void
