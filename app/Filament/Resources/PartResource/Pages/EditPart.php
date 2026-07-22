@@ -11,6 +11,8 @@ use App\Services\Marketplace\AllegroCategoryResolver;
 use App\Services\Marketplace\AllegroManualParameterSelectionService;
 use App\Services\Marketplace\PreparePartMarketplaceListingService;
 use App\Services\Marketplace\PublishPartToMarketplacesService;
+use App\Services\Marketplace\PriceSync\PartPriceResolver;
+use App\Services\Marketplace\PriceSync\PartPriceSyncService;
 use Filament\Actions;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
@@ -32,6 +34,8 @@ class EditPart extends EditRecord
     protected array $allegroDynamicParameterRepeaterStateForSync = [];
 
     protected array $pendingAllegroDynamicParameters = [];
+
+    protected array $priceSyncBeforeSave = [];
 
     public bool $marketplacePublishInProgress = false;
 
@@ -61,6 +65,7 @@ class EditPart extends EditRecord
 
     protected function mutateFormDataBeforeSave(array $data): array
     {
+        $this->priceSyncBeforeSave = app(PartPriceResolver::class)->snapshot($this->record->fresh() ?: $this->record);
         $this->partPhotoPaths = array_values(array_filter((array) ($data['part_photo_paths'] ?? []), fn (mixed $path): bool => filled($path)));
         $this->marketplaceCategorySelections = (array) ($data['marketplace_category_selections'] ?? []);
 
@@ -77,6 +82,8 @@ class EditPart extends EditRecord
 
     protected function afterSave(): void
     {
+        $this->runMarketplacePriceSyncAfterSave();
+
         $this->persistMarketplaceCategorySelections();
         $this->syncAllegroManualParameterSelections();
 
@@ -92,6 +99,20 @@ class EditPart extends EditRecord
             $this->record->load('images');
             $this->data['part_photo_paths'] = [];
         }
+    }
+
+    protected function runMarketplacePriceSyncAfterSave(): void
+    {
+        $oldPrices = $this->priceSyncBeforeSave;
+        $this->priceSyncBeforeSave = [];
+
+        if ($oldPrices === []) {
+            return;
+        }
+
+        $this->record->refresh();
+        $newPrices = app(PartPriceResolver::class)->snapshot($this->record);
+        app(PartPriceSyncService::class)->syncAfterPartSave($this->record, $oldPrices, $newPrices);
     }
 
     public function movePartImage(int $imageId, string $direction): void

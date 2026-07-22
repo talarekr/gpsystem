@@ -127,6 +127,7 @@ use App\Http\Controllers\Tools\MarketplaceOrdersTimezoneFixController;
 use App\Http\Controllers\Tools\ManualLinkMappingDiagnosticsController;
 use App\Http\Controllers\Tools\ManualLinkMappingReplaceController;
 use App\Http\Controllers\Tools\PartMarketplaceReadinessController;
+use App\Http\Controllers\Tools\PartPriceSyncAuditController;
 use App\Http\Controllers\Tools\PartsToListStorageLocationBackfillController;
 use App\Http\Controllers\Tools\MarketplacePublishPartController;
 use App\Http\Controllers\Tools\ImportOvokoOrdersDryRunController;
@@ -305,6 +306,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/allegro/oauth/callback', [AllegroOAuthController::class, 'callback'])->name('admin.allegro.oauth.callback');
     Route::get('/admin/ebay/oauth/redirect', [EbayOAuthController::class, 'redirect'])->name('admin.ebay.oauth.redirect');
     Route::get('/admin/ebay/oauth/callback', [EbayOAuthController::class, 'callback'])->name('admin.ebay.oauth.callback');
+    Route::get('/admin/tools/marketplace/parts/{part}/price-sync-audit', PartPriceSyncAuditController::class)->name('admin.tools.marketplace.parts.price-sync-audit');
     Route::get('/admin/tools/parts-to-list/storage-location-backfill-dry-run', [PartsToListStorageLocationBackfillController::class, 'dryRun'])->name('admin.tools.parts-to-list.storage-location-backfill-dry-run');
     Route::match(['get', 'post'], '/admin/tools/parts-to-list/storage-location-backfill-apply', [PartsToListStorageLocationBackfillController::class, 'apply'])->name('admin.tools.parts-to-list.storage-location-backfill-apply');
     Route::get('/admin/tools/parts-to-list/storage-location-backfill-results', [PartsToListStorageLocationBackfillController::class, 'results'])->name('admin.tools.parts-to-list.storage-location-backfill-results');

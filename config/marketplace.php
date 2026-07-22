@@ -12,4 +12,8 @@ return [
     'allegro_max_images' => (int) env('MARKETPLACE_ALLEGRO_MAX_IMAGES', 16),
     'ebay_max_images' => (int) env('MARKETPLACE_EBAY_MAX_IMAGES', 24),
     'ovoko_max_images' => (int) env('MARKETPLACE_OVOKO_MAX_IMAGES', 10),
+    'price_sync' => [
+        'on_part_save_enabled' => (bool) env('MARKETPLACE_PRICE_SYNC_ON_PART_SAVE_ENABLED', false),
+        'channels' => array_values(array_filter(array_map('trim', explode(',', (string) env('MARKETPLACE_PRICE_SYNC_CHANNELS', 'allegro,ovoko,ebay_de'))))),
+    ],
 ];

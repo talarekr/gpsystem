@@ -1,0 +1,65 @@
+<?php
+
+namespace App\Services\Marketplace\PriceSync;
+
+use App\Models\MarketplaceListing;
+use App\Models\MarketplaceSyncLog;
+use App\Models\Part;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Str;
+
+class PartPriceSyncService
+{
+    public function __construct(private readonly PriceNormalizer $normalizer, private readonly AllegroPriceSyncAdapter $allegro, private readonly OvokoPriceSyncAdapter $ovoko, private readonly EbayDePriceSyncAdapter $ebay) {}
+
+    public function syncAfterPartSave(Part $part, array $old, array $new): array
+    {
+        try { return $this->sync($part->fresh(['marketplaceListings.account']) ?: $part, $old, $new); }
+        catch (\Throwable $e) { return ['ok'=>false,'error'=>'price_sync_orchestrator_exception','message'=>$e->getMessage()]; }
+    }
+
+    public function sync(Part $part, array $old, array $new): array
+    {
+        $enabled = (bool) config('marketplace.price_sync.on_part_save_enabled', false);
+        $channels = ['allegro','ovoko','ebay_de']; $out = [];
+        foreach ($channels as $channel) {
+            $ctx = $this->context($part, $channel, $old[$channel] ?? [], $new[$channel] ?? []);
+            if (! $enabled) { $out[$channel] = $ctx + ['status'=>'disabled','blockers'=>['price_sync_disabled']]; continue; }
+            $pre = $this->preflight($ctx);
+            if ($pre['blockers'] !== []) { $out[$channel] = $ctx + ['status'=>'skipped','blockers'=>$pre['blockers']]; continue; }
+            $lock = Cache::lock($ctx['lock_key'], 60);
+            if (! $lock->get()) { $out[$channel] = $ctx + ['status'=>'skipped','blockers'=>['operation_in_progress']]; continue; }
+            try {
+                if ($this->confirmedAlready($ctx)) { $out[$channel] = $ctx + ['status'=>'skipped','blockers'=>['idempotent_price_already_confirmed']]; continue; }
+                $res = $this->adapter($channel)->sync($ctx['listing'], $ctx['new']);
+                $out[$channel] = $ctx + $res;
+                $this->writeLog($ctx, $res);
+                if (($res['status'] ?? null) === 'success') $ctx['listing']->forceFill(['price'=>$ctx['new']['marketplace_price'],'currency'=>$ctx['new']['marketplace_currency'],'last_synced_at'=>now()])->save();
+            } finally { optional($lock)->release(); }
+        }
+        return ['ok'=>true,'channels'=>$out];
+    }
+
+    public function context(Part $part, string $channel, array $oldPrice, array $newPrice): array
+    {
+        $listing = $this->activeListing($part, $channel);
+        $external = $listing ? $this->externalId($listing, $channel) : null;
+        $changed = ($oldPrice['marketplace_price'] ?? null) !== ($newPrice['marketplace_price'] ?? null);
+        return ['part'=>$part,'channel'=>$channel,'old'=>$oldPrice,'new'=>$newPrice,'changed'=>$changed,'enabled'=>(bool)config('marketplace.price_sync.on_part_save_enabled',false),'channel_allowed'=>in_array($channel, (array) config('marketplace.price_sync.channels', []), true),'listing'=>$listing,'listing_id'=>$listing?->id,'marketplace_account_id'=>$listing?->marketplace_account_id,'external_id'=>$external,'sku'=>$listing?->sku,'listing_type'=>$channel==='ebay_de' ? $this->ebay->classify($listing ?: new MarketplaceListing())['type'] : null,'lock_key'=>'marketplace-price-sync:'.($part->id ?: 'new').':'.$channel.':'.($listing?->marketplace_account_id ?: 'none').':'.($external ?: $listing?->sku ?: 'none').':'.($newPrice['marketplace_price'] ?? 'null').':'.($newPrice['marketplace_currency'] ?? 'null')];
+    }
+
+    public function preflight(array $c): array
+    {
+        $b=[]; $p=$c['part']; $n=$c['new']; $l=$c['listing'];
+        foreach ([!$c['channel_allowed']=>'channel_not_allowed',!config('marketplace.external_api_writes_enabled',false)=>'external_api_writes_disabled',!$this->channelWriteEnabled($c['channel'])=>'channel_write_disabled',!$c['changed']=>'price_not_changed',in_array($p->status,['sold','archived'],true)=>'part_sold_or_archived',(int)$p->quantity<=0=>'quantity_not_positive',!$this->normalizer->positive($n['marketplace_price']??null)=>'price_not_positive',!$l=>'missing_active_listing',!$c['external_id']=>'missing_external_id',!$l?->account || !$l->account->api_enabled || $l->account->status !== 'active'=>'marketplace_account_inactive',blank($l?->account?->api_credentials)=>'missing_credentials'] as $bad=>$code) if($bad) $b[]=$code;
+        if ($c['channel']==='ebay_de') { if (($l?->marketplace)!=='ebay_de') $b[]='ebay_de_marketplace_required'; if (($c['listing_type']??null)==='legacy') $b[]='ebay_legacy_price_sync_not_supported'; if (($n['marketplace_currency']??null)!=='EUR') $b[]='ebay_de_currency_must_be_eur'; $b[]='ebay_price_only_write_not_guaranteed'; }
+        return ['blockers'=>array_values(array_unique($b))];
+    }
+
+    private function channelWriteEnabled(string $channel): bool { return match ($channel) { 'allegro' => (bool) config('marketplace.allegro_publishing_enabled', false), 'ovoko' => (bool) config('marketplace.ovoko_publishing_enabled', false), 'ebay_de' => (bool) config('marketplace.ebay_publishing_enabled', false), default => false }; }
+    private function activeListing(Part $part,string $channel): ?MarketplaceListing { return $part->marketplaceListings->filter(fn($l)=>$l->marketplace===$channel || ($channel==='allegro'&&$l->marketplace==='allegro_main'))->filter(fn($l)=>in_array(strtolower((string)$l->status),['active','published','live','in_stock','for_sale'],true) && !in_array(strtolower((string)$l->sync_status),['stale','ignored','sold','unlinked','error','failed'],true))->sortByDesc('id')->first(); }
+    private function externalId(MarketplaceListing $l,string $c): ?string { return $c==='ebay_de' ? ($l->external_offer_id ?: null) : ($l->external_offer_id ?: $l->external_listing_id ?: null); }
+    private function adapter(string $c): MarketplacePriceSyncAdapter { return ['allegro'=>$this->allegro,'ovoko'=>$this->ovoko,'ebay_de'=>$this->ebay][$c]; }
+    private function confirmedAlready(array $c): bool { return MarketplaceSyncLog::query()->where('action','part_price_sync')->where('status','success')->where('part_id',$c['part']->id)->where('marketplace',$c['channel'])->where('marketplace_listing_id',$c['listing_id'])->where('external_id',$c['external_id'])->where('payload->new_price',$c['new']['marketplace_price']??null)->where('payload->marketplace_currency',$c['new']['marketplace_currency']??null)->exists(); }
+    private function writeLog(array $c,array $r): void { MarketplaceSyncLog::query()->create(['marketplace'=>$c['channel'],'marketplace_listing_id'=>$c['listing_id'],'part_id'=>$c['part']->id,'action'=>'part_price_sync','status'=>$r['status'] ?? 'error','http_status'=>$r['http_status'] ?? null,'request_id'=>(string)Str::uuid(),'external_id'=>$c['external_id'],'message'=>$r['blocker'] ?? 'Marketplace price sync result.','payload'=>['old_price'=>$c['old']['marketplace_price']??null,'new_price'=>$c['new']['marketplace_price']??null,'source_currency'=>$c['new']['source_currency']??null,'marketplace_currency'=>$c['new']['marketplace_currency']??null,'source_field'=>$c['new']['source_field']??null,'conversion_rate'=>data_get($c,'new.conversion.rate'),'marketplace_account_id'=>$c['marketplace_account_id'],'listing_id'=>$c['listing_id'],'external_id'=>$c['external_id'],'sku'=>$c['sku'],'endpoint'=>$r['endpoint']??null,'request_summary'=>$r['request_summary']??null,'response_summary'=>$r['response_summary']??null,'read_after_write'=>$r['read_after_write']??null,'remote_confirmed_price'=>$r['remote_confirmed_price']??null,'final_success'=>$r['final_success']??false,'blocker'=>$r['blocker']??null],'created_at'=>now()]); }
+}
