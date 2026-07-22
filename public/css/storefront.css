@@ -812,3 +812,353 @@
         font-size: 13px;
     }
 }
+
+/* 2026-07 mobile storefront header/menu fix: keep a single mobile category panel and stable account/cart/phone slots. */
+.sf-phones--direct {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 7px;
+    color: inherit;
+    white-space: nowrap;
+}
+
+.sf-phones--direct:hover {
+    text-decoration: none;
+}
+
+@media (max-width: 767px) {
+    html,
+    body,
+    .sf-storefront-header {
+        max-width: 100%;
+        overflow-x: clip;
+    }
+
+    .sf-main-row {
+        grid-template-columns: minmax(86px, auto) minmax(0, 1fr) auto auto;
+        column-gap: 8px;
+        align-items: center;
+    }
+
+    .sf-profile {
+        grid-column: 3;
+        min-width: 0;
+    }
+
+    .sf-profile summary {
+        max-width: 128px;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .sf-cart {
+        grid-column: 4;
+        flex: 0 0 38px;
+        overflow: visible;
+    }
+
+    .sf-cart b {
+        top: -5px;
+        right: -5px;
+        z-index: 2;
+    }
+
+    .sf-nav__inner {
+        grid-template-columns: auto minmax(0, 1fr);
+        width: 100%;
+    }
+
+    .sf-nav__links,
+    .sf-category-menu .sf-category-menu__desktop,
+    .sf-category-menu .sf-category-menu__roots,
+    .sf-category-menu .sf-category-menu__branches,
+    .sf-category-menu .sf-category-menu__branch,
+    .sf-category-menu .sf-category-menu__branch-grid,
+    .sf-phones__toggle,
+    .sf-phones__panel {
+        display: none !important;
+        visibility: hidden !important;
+        pointer-events: none !important;
+    }
+
+    .sf-phones--direct {
+        justify-self: end;
+        min-width: 0;
+        margin-left: 0;
+        font-size: 14px;
+        font-weight: 800;
+        line-height: 1;
+    }
+
+    .sf-phones__number {
+        display: inline-block;
+        white-space: nowrap;
+    }
+
+    .sf-category-menu {
+        position: static !important;
+        min-width: 0;
+    }
+
+    .sf-category-menu.is-open[open] > .sf-category-menu__panel {
+        position: absolute !important;
+        top: 100%;
+        left: 8px !important;
+        right: 8px !important;
+        display: block !important;
+        width: auto !important;
+        max-width: calc(100vw - 16px) !important;
+        height: auto !important;
+        max-height: calc(100vh - 150px) !important;
+        overflow-x: hidden !important;
+        overflow-y: auto !important;
+        padding: 14px !important;
+        border-radius: 0 0 16px 16px;
+        transform: none !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+        pointer-events: auto !important;
+    }
+
+    .sf-category-menu .sf-category-menu__mobile {
+        display: block !important;
+        width: 100%;
+        min-width: 0;
+        visibility: visible !important;
+        pointer-events: auto !important;
+    }
+
+    .sf-category-menu .sf-category-menu__mobile,
+    .sf-category-menu .sf-category-menu__mobile * {
+        max-width: 100%;
+        overflow-wrap: anywhere;
+    }
+
+    .sf-category-menu__mobile-root summary,
+    .sf-category-menu__mobile li a,
+    .sf-category-menu__mobile-all,
+    .sf-category-menu__catalog-link {
+        pointer-events: auto !important;
+    }
+}
+
+@media (max-width: 430px) {
+    .sf-main-row {
+        grid-template-columns: minmax(78px, auto) minmax(0, 1fr) 38px 38px;
+        column-gap: 6px;
+    }
+
+    .sf-profile summary {
+        width: 38px;
+        max-width: 38px;
+    }
+}
+
+@media (max-width: 360px) {
+    .sf-phones--direct {
+        gap: 5px;
+        font-size: 13px;
+    }
+
+    .sf-phones__number {
+        letter-spacing: -.02em;
+    }
+}
+
+@media (max-width: 340px) {
+    .sf-phones__number {
+        font-size: 12px;
+    }
+}
+
+/* 2026-07 product detail mobile viewport fix: scoped to the single product page only. */
+.gp-product-page,
+.gp-product-page .sf-product-detail,
+.gp-product-page .sf-gallery,
+.gp-product-page .sf-gallery__layout,
+.gp-product-page .sf-gallery__main,
+.gp-product-page .sf-gallery__main-button,
+.gp-product-page .sf-info-card,
+.gp-product-page .sf-purchase,
+.gp-product-page .sf-tabs,
+.gp-product-page .sf-details-section {
+    min-width: 0;
+    max-width: 100%;
+}
+
+.gp-product-page .sf-info-card h1,
+.gp-product-page .sf-info-card p,
+.gp-product-page .sf-purchase,
+.gp-product-page .sf-details-section,
+.gp-product-page .sf-details-row,
+.gp-product-page .sf-breadcrumbs {
+    overflow-wrap: anywhere;
+    word-break: normal;
+}
+
+@media (max-width: 767px) {
+    .gp-product-page {
+        width: 100%;
+        padding-left: 10px;
+        padding-right: 10px;
+        overflow-x: clip;
+    }
+
+    .gp-product-page .sf-breadcrumbs {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 5px 8px;
+        margin-bottom: 16px;
+        font-size: 12px;
+        line-height: 1.45;
+    }
+
+    .gp-product-page .sf-breadcrumbs a,
+    .gp-product-page .sf-breadcrumbs span {
+        margin-right: 0;
+        max-width: 100%;
+    }
+
+    .gp-product-page .sf-product-detail {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) !important;
+        gap: 16px;
+        width: 100%;
+        max-width: 100%;
+        overflow-x: clip;
+    }
+
+    .gp-product-page .sf-gallery {
+        width: 100%;
+        overflow: hidden;
+    }
+
+    .gp-product-page .sf-gallery__layout {
+        display: grid !important;
+        grid-template-columns: minmax(0, 1fr) !important;
+        gap: 10px;
+        width: 100%;
+        height: auto !important;
+        min-height: 0 !important;
+        max-height: none !important;
+        overflow: hidden;
+    }
+
+    .gp-product-page .sf-gallery__main {
+        width: 100%;
+        max-width: 100%;
+        height: auto !important;
+        min-height: 0 !important;
+        aspect-ratio: 4 / 3;
+        overflow: hidden;
+        border-radius: 12px;
+    }
+
+    .gp-product-page .sf-gallery__main-button {
+        width: 100%;
+        height: 100%;
+        min-width: 0;
+        overflow: hidden;
+    }
+
+    .gp-product-page .sf-gallery__main img,
+    .gp-product-page .sf-gallery__main-button img {
+        display: block;
+        width: 100% !important;
+        max-width: 100% !important;
+        height: 100% !important;
+        max-height: 100% !important;
+        object-fit: contain !important;
+        object-position: center center;
+        padding: 6px;
+    }
+
+    .gp-product-page .sf-gallery__nav {
+        width: 38px;
+        height: 46px;
+        border-radius: 12px;
+        font-size: 30px;
+    }
+
+    .gp-product-page .sf-gallery__nav--prev {
+        left: 6px;
+    }
+
+    .gp-product-page .sf-gallery__nav--next {
+        right: 6px;
+    }
+
+    .gp-product-page .sf-thumbs-shell {
+        order: 2;
+        width: 100% !important;
+        max-width: 100%;
+        overflow: hidden !important;
+    }
+
+    .gp-product-page .sf-gallery__layout .sf-thumbs {
+        display: flex;
+        flex-direction: row;
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        gap: 8px;
+        margin: 10px 0 0 !important;
+        padding: 2px 2px 8px !important;
+        overflow-x: auto !important;
+        overflow-y: hidden !important;
+        overscroll-behavior-x: contain;
+        scrollbar-width: thin;
+    }
+
+    .gp-product-page .sf-gallery__layout .sf-thumbs__item {
+        flex: 0 0 74px;
+        width: 74px;
+        height: 58px;
+    }
+
+    .gp-product-page .sf-info-card,
+    .gp-product-page .sf-purchase,
+    .gp-product-page .sf-tabs section {
+        width: 100%;
+        max-width: 100%;
+        padding: 16px 14px;
+        overflow: hidden;
+    }
+
+    .gp-product-page .sf-info-card h1 {
+        font-size: clamp(24px, 7vw, 34px);
+        line-height: 1.22;
+    }
+
+    .gp-product-page .sf-trust {
+        grid-template-columns: 1fr;
+    }
+
+    .gp-product-page .sf-details-table,
+    .gp-product-page .sf-details-row {
+        max-width: 100%;
+        min-width: 0;
+    }
+}
+
+@media (max-width: 360px) {
+    .gp-product-page {
+        padding-left: 8px;
+        padding-right: 8px;
+    }
+
+    .gp-product-page .sf-gallery__layout .sf-thumbs__item {
+        flex-basis: 68px;
+        width: 68px;
+        height: 54px;
+    }
+
+    .gp-product-page .sf-gallery__nav {
+        width: 34px;
+        height: 42px;
+        font-size: 28px;
+    }
+}

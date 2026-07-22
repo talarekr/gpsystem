@@ -64,8 +64,10 @@
             }
 
             var firstThumb = thumbs[0];
-            var step = firstThumb ? firstThumb.getBoundingClientRect().height + 10 : 82;
-            thumbsTrack.scrollBy({ top: offset * step, left: 0, behavior: 'smooth' });
+            var isHorizontal = window.matchMedia && window.matchMedia('(max-width: 767px)').matches;
+            var rect = firstThumb ? firstThumb.getBoundingClientRect() : null;
+            var step = rect ? (isHorizontal ? rect.width : rect.height) + 10 : 82;
+            thumbsTrack.scrollBy({ top: isHorizontal ? 0 : offset * step, left: isHorizontal ? offset * step : 0, behavior: 'smooth' });
         }
 
         function openLightbox() {
