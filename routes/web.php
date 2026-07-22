@@ -376,6 +376,9 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::post('/admin/tools/allegro/gpsr-audit-runner/auto-run', [AllegroGpsrAuditRunnerController::class, 'autoRun'])->name('admin.tools.allegro.gpsr-audit-runner.auto-run')->middleware(['admin.panel', 'throttle:tools']);
     Route::post('/admin/tools/allegro/gpsr-audit-runner/stop', [AllegroGpsrAuditRunnerController::class, 'stop'])->name('admin.tools.allegro.gpsr-audit-runner.stop')->middleware(['admin.panel', 'throttle:tools']);
     Route::get('/admin/tools/ebay/prepare-debug/{partId}', [PartMarketplaceReadinessController::class, 'ebayPrepareDebug'])->name('admin.tools.ebay.prepare-debug');
+    Route::get('/admin/tools/marketplace/parts/{part}/allegro-compatibility-audit', [PartMarketplaceReadinessController::class, 'allegroCompatibilityAudit'])->name('admin.tools.marketplace.parts.allegro-compatibility-audit')->middleware(['admin.panel', 'throttle:tools']);
+    Route::get('/admin/tools/marketplace/parts/{part}/allegro-compatibility-preview', [PartMarketplaceReadinessController::class, 'allegroCompatibilityPreview'])->name('admin.tools.marketplace.parts.allegro-compatibility-preview')->middleware(['admin.panel', 'throttle:tools']);
+
     Route::match(['get', 'post'], '/admin/tools/ebay/marketplace-diagnose', EbayMarketplaceDiagnoseController::class)->name('admin.tools.ebay.marketplace-diagnose');
     Route::match(['get', 'post'], '/admin/tools/ebay/listing-audit-runner', EbayListingAuditRunnerController::class)->name('admin.tools.ebay.listing-audit-runner');
     Route::get('/admin/tools/ebay/listing-status-diagnose', EbayListingStatusDiagnoseController::class)->name('admin.tools.ebay.listing-status-diagnose');
