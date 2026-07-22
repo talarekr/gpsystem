@@ -3257,3 +3257,21 @@ body:has(.gps-admin-topbar) .fi-no {
     padding-bottom: 0.25rem !important;
     line-height: 1.25rem !important;
 }
+
+/* Delay Livewire/Filament SPA navigation progress only in the admin panel. */
+body:has(.gps-admin-topbar) #nprogress .bar,
+body:has(.gps-admin-topbar) #nprogress .peg,
+body:has(.gps-admin-topbar) #nprogress .spinner {
+    animation: gps-admin-spa-progress-reveal 1ms linear 250ms both;
+}
+
+@keyframes gps-admin-spa-progress-reveal {
+    from,
+    99% {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
