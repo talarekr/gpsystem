@@ -7,10 +7,10 @@
 
 <details class="sf-menu sf-category-menu" data-category-menu>
     <summary aria-expanded="false">☰ Menu</summary>
-    <div class="sf-category-menu__panel" role="region" aria-label="Menu kategorii części">
+    <div class="sf-category-menu__panel" role="region" aria-label="{{ __('storefront.category_menu') }}">
         <div class="sf-category-menu__desktop">
-            <aside class="sf-category-menu__roots" aria-label="Kategorie główne">
-                <a class="sf-category-menu__catalog-link" href="{{ route('storefront.catalog') }}">Wszystkie części</a>
+            <aside class="sf-category-menu__roots" aria-label="{{ __('storefront.featured_categories') }}">
+                <a class="sf-category-menu__catalog-link" href="{{ route('storefront.catalog') }}">{{ __('storefront.all_parts') }}</a>
                 <div class="sf-category-menu__root-list" role="list">
                     @foreach($roots as $root)
                         <button
@@ -57,11 +57,11 @@
                                                     <li><a href="{{ $categoryTreeService->url($grandchild) }}">{{ $grandchild->public_name }}</a></li>
                                                 @endforeach
                                                 @if($child->children->count() > $visibleGrandchildren)
-                                                    <li><a class="sf-category-menu__more" href="{{ $categoryTreeService->url($child) }}">Pokaż więcej</a></li>
+                                                    <li><a class="sf-category-menu__more" href="{{ $categoryTreeService->url($child) }}">{{ __('storefront.show_more') }}</a></li>
                                                 @endif
                                             </ul>
                                         @else
-                                            <p>Brak podkategorii.</p>
+                                            <p>{{ __('storefront.no_subcategories') }}</p>
                                         @endif
                                     </section>
                                 @endforeach
@@ -69,7 +69,7 @@
                         @else
                             <div class="sf-category-menu__empty">
                                 <p>Ta kategoria nie ma podkategorii w menu.</p>
-                                <a href="{{ $categoryTreeService->url($root) }}">Przejdź do kategorii</a>
+                                <a href="{{ $categoryTreeService->url($root) }}">{{ __('storefront.go_to_category') }}</a>
                             </div>
                         @endif
                     </section>
@@ -78,7 +78,7 @@
         </div>
 
         <div class="sf-category-menu__mobile">
-            <a class="sf-category-menu__catalog-link" href="{{ route('storefront.catalog') }}">Wszystkie części</a>
+            <a class="sf-category-menu__catalog-link" href="{{ route('storefront.catalog') }}">{{ __('storefront.all_parts') }}</a>
             @foreach($roots as $root)
                 <details class="sf-category-menu__mobile-root">
                     <summary>{{ $root->public_name }}</summary>
@@ -94,7 +94,7 @@
                                                 <li><a href="{{ $categoryTreeService->url($grandchild) }}">{{ $grandchild->public_name }}</a></li>
                                             @endforeach
                                             @if($child->children->count() > $visibleGrandchildren)
-                                                <li><a class="sf-category-menu__more" href="{{ $categoryTreeService->url($child) }}">Pokaż więcej</a></li>
+                                                <li><a class="sf-category-menu__more" href="{{ $categoryTreeService->url($child) }}">{{ __('storefront.show_more') }}</a></li>
                                             @endif
                                         </ul>
                                     @endif

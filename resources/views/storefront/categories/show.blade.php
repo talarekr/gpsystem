@@ -7,7 +7,7 @@
                 <div class="sf-category-hero__content">
                     <h1 id="category-title">{{ $category->public_name }}</h1>
                     <p>
-                        W sklepie motoryzacyjnym GP Swiss znajdziesz szeroki wybór oryginalnych, używanych części samochodowych do wielu popularnych marek, takich jak BMW, Mini, Mercedes, Audi czy Volkswagen. Każdy oferowany przez nas produkt jest dokładnie sprawdzany pod kątem jakości i sprawności, dzięki czemu masz pewność, że wybierasz sprawdzony i solidny produkt.
+                        {{ __('storefront.category_intro') }}
                     </p>
                 </div>
             </div>
@@ -25,12 +25,12 @@
                 @include('storefront.partials.category-sidebar', ['categoryRoots' => $categoryRoots, 'activeCategory' => $category])
             </div>
             <section>
-                <div class="sf-toolbar"><span>{{ $parts->total() }} wyników</span></div>
+                <div class="sf-toolbar"><span>{{ __('storefront.results', ['count' => $parts->total()]) }}</span></div>
                 <div class="sf-grid sf-grid--3">
                     @forelse($parts as $part)
                         @include('storefront.partials.product-card', ['part' => $part])
                     @empty
-                        <p class="sf-empty">Brak produktów w tej kategorii.</p>
+                        <p class="sf-empty">{{ __('storefront.no_products_category') }}</p>
                     @endforelse
                 </div>
                 {{ $parts->links() }}

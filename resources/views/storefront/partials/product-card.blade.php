@@ -20,7 +20,7 @@
         }
     }
 
-    $name = trim((string) ($part?->name ?? 'Część samochodowa')) ?: 'Część samochodowa';
+    $name = trim((string) ($part?->name ?? __('storefront.default_part_name'))) ?: __('storefront.default_part_name');
     $number = $part?->part_number ?: $part?->sku ?: '—';
     $currency = $part?->currency ?: 'PLN';
     $price = $part?->price;
@@ -31,10 +31,10 @@
         @if($src)
             <img src="{{ $src }}" alt="{{ $image?->alt_text ?: $name }}" loading="lazy">
         @else
-            <span>GPSwiss<br>brak zdjęcia</span>
+            <span>GPSwiss<br>{{ __('storefront.no_image') }}</span>
         @endif
     </a>
-    <button class="sf-heart" type="button" aria-label="Dodaj do ulubionych">♡</button>
-    <div class="sf-product-card__body"><div class="sf-part-number">Numer części <strong>{{ $number }}</strong></div><a class="sf-product-title" href="{{ $productUrl }}">{{ $name }}</a><div class="sf-price">@if($price !== null){{ number_format((float) $price, 2, ',', ' ') }} {{ $currency }}@else Cena na zapytanie @endif</div><div class="sf-delivery">Darmowa dostawa: najbliższy dzień roboczy</div><div class="sf-cutoff">Jeśli zapłacisz do 13:30</div></div>
+    <button class="sf-heart" type="button" aria-label="{{ __('storefront.add_favorite') }}">♡</button>
+    <div class="sf-product-card__body"><div class="sf-part-number">{{ __('storefront.part_number') }} <strong>{{ $number }}</strong></div><a class="sf-product-title" href="{{ $productUrl }}">{{ $name }}</a><div class="sf-price">@if($price !== null){{ number_format((float) $price, 2, ',', ' ') }} {{ $currency }}@else {{ __('storefront.price_on_request') }} @endif</div><div class="sf-delivery">{{ __('storefront.free_delivery') }}</div><div class="sf-cutoff">{{ __('storefront.payment_cutoff') }}</div></div>
 </article>
 @endif

@@ -22,8 +22,8 @@ class CartController extends Controller
             'subtotal' => $this->cart->subtotal(),
             'isEmpty' => $this->cart->isEmpty(),
             'breadcrumbs' => [
-                ['label' => 'Strona główna', 'url' => route('storefront.home')],
-                ['label' => 'Koszyk'],
+                ['label' => __('storefront.home'), 'url' => route('storefront.home')],
+                ['label' => __('storefront.cart')],
             ],
             'metaTitle' => 'Koszyk - GPSwiss',
             'metaDescription' => 'Koszyk produktów GPSwiss.',
@@ -57,13 +57,13 @@ class CartController extends Controller
     {
         $this->cart->remove((int) $part->id);
 
-        return redirect()->route('storefront.cart.index')->with('success', 'Usunięto produkt z koszyka.');
+        return redirect()->route('storefront.cart.index')->with('success', __('storefront.cart_removed'));
     }
 
     public function clear(): RedirectResponse
     {
         $this->cart->clear();
 
-        return redirect()->route('storefront.cart.index')->with('success', 'Koszyk wyczyszczony.');
+        return redirect()->route('storefront.cart.index')->with('success', __('storefront.cart_cleared'));
     }
 }

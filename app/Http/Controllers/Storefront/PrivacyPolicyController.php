@@ -10,11 +10,11 @@ class PrivacyPolicyController extends Controller
     public function __invoke(): View
     {
         return view('storefront.privacy-policy', [
-            'metaTitle' => 'Polityka prywatności - GPSwiss',
-            'metaDescription' => 'Polityka prywatności sklepu internetowego GPSwiss.',
+            'metaTitle' => __('storefront.privacy_title'),
+            'metaDescription' => __('storefront.privacy_desc'),
             'breadcrumbs' => [
-                ['label' => 'Strona główna', 'url' => route('storefront.home')],
-                ['label' => 'Polityka prywatności'],
+                ['label' => __('storefront.home'), 'url' => route('storefront.home')],
+                ['label' => __('storefront.privacy_policy')],
             ],
         ]);
     }

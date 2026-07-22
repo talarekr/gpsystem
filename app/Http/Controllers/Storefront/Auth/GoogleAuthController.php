@@ -14,7 +14,7 @@ class GoogleAuthController extends Controller
     public function redirect(): RedirectResponse
     {
         if (! class_exists(\Laravel\Socialite\Facades\Socialite::class)) {
-            return back()->with('warning', 'Logowanie Google jest przygotowane w UI i konfiguracji. Do pełnej integracji trzeba dodać laravel/socialite oraz zmienne GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET i GOOGLE_REDIRECT_URI.');
+            return back()->with('warning', __('storefront.google_not_ready'));
         }
 
         return \Laravel\Socialite\Facades\Socialite::driver('google')->redirect();
@@ -23,7 +23,7 @@ class GoogleAuthController extends Controller
     public function callback(): RedirectResponse
     {
         if (! class_exists(\Laravel\Socialite\Facades\Socialite::class)) {
-            return redirect()->route('storefront.login')->with('warning', 'Callback Google zostanie aktywowany po dodaniu zależności Socialite i kluczy OAuth.');
+            return redirect()->route('storefront.login')->with('warning', __('storefront.google_callback_not_ready'));
         }
 
         $googleUser = \Laravel\Socialite\Facades\Socialite::driver('google')->user();
@@ -48,6 +48,6 @@ class GoogleAuthController extends Controller
 
         Auth::login($user, true);
 
-        return redirect()->intended(route('storefront.account'))->with('success', 'Zalogowano przez Google.');
+        return redirect()->intended(route('storefront.account'))->with('success', __('storefront.google_login_success'));
     }
 }

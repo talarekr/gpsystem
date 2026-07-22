@@ -1,7 +1,7 @@
 <div data-diagnostic="catalog-simple">
     @forelse($parts as $part)
-        <article>{{ $part->name ?? 'Część samochodowa' }}</article>
+        <article>{{ $part->name ?? __('storefront.default_part_name') }}</article>
     @empty
-        <p>Brak produktów.</p>
+        <p>{{ __('storefront.no_products') }}</p>
     @endforelse
 </div>
