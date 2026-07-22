@@ -14,6 +14,7 @@ use App\Http\Controllers\Admin\JarekGearboxes\JarekAllegroOAuthController;
 use App\Http\Controllers\Admin\JarekGearboxes\JarekGearboxToolController;
 use App\Http\Controllers\Admin\MarketplaceOAuthTokenHealthController;
 use App\Http\Controllers\Admin\PartSearchController;
+use App\Http\Controllers\Admin\Part8212PriceSyncRemoteCheckController;
 use App\Http\Controllers\Admin\PartLocalAvailabilityController;
 use App\Http\Controllers\Admin\ImportMigration\WooCategoryTreeController;
 use App\Http\Controllers\Admin\ImportMigration\WooProductImportRunController;
@@ -307,6 +308,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/ebay/oauth/redirect', [EbayOAuthController::class, 'redirect'])->name('admin.ebay.oauth.redirect');
     Route::get('/admin/ebay/oauth/callback', [EbayOAuthController::class, 'callback'])->name('admin.ebay.oauth.callback');
     Route::get('/admin/tools/marketplace/parts/{part}/price-sync-audit', PartPriceSyncAuditController::class)->name('admin.tools.marketplace.parts.price-sync-audit');
+    Route::get('/admin/tools/marketplace/parts/{part}/price-sync-remote-check', Part8212PriceSyncRemoteCheckController::class)->name('admin.tools.marketplace.parts.price-sync-remote-check');
     Route::get('/admin/tools/parts-to-list/storage-location-backfill-dry-run', [PartsToListStorageLocationBackfillController::class, 'dryRun'])->name('admin.tools.parts-to-list.storage-location-backfill-dry-run');
     Route::match(['get', 'post'], '/admin/tools/parts-to-list/storage-location-backfill-apply', [PartsToListStorageLocationBackfillController::class, 'apply'])->name('admin.tools.parts-to-list.storage-location-backfill-apply');
     Route::get('/admin/tools/parts-to-list/storage-location-backfill-results', [PartsToListStorageLocationBackfillController::class, 'results'])->name('admin.tools.parts-to-list.storage-location-backfill-results');
