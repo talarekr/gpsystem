@@ -72,11 +72,18 @@ class PartPriceSyncService
     public function preflight(array $c): array
     {
         $b=[]; $p=$c['part']; $n=$c['new']; $l=$c['listing'];
+        if (! $this->snapshotMatchesModel($c)) $b[]='price_snapshot_mismatch';
         foreach ([!$c['channel_allowed']=>'channel_not_allowed',!config('marketplace.external_api_writes_enabled',false)=>'external_api_writes_disabled',!$this->channelWriteEnabled($c['channel'])=>'channel_write_disabled',!$c['changed']=>'price_not_changed',in_array($p->status,['sold','archived'],true)=>'part_sold_or_archived',(int)$p->quantity<=0=>'quantity_not_positive',!$this->normalizer->positive($n['marketplace_price']??null)=>'price_not_positive',!$l=>'missing_active_listing',!$c['external_id']=>'missing_external_id',!$l?->account || !$l->account->api_enabled || $l->account->status !== 'active'=>'marketplace_account_inactive',blank($l?->account?->api_credentials)=>'missing_credentials'] as $bad=>$code) if($bad) $b[]=$code;
         if ($c['channel']==='ebay_de') { if (($l?->marketplace)!=='ebay_de') $b[]='ebay_de_marketplace_required'; if (($c['listing_type']??null)==='legacy') $b[]='ebay_legacy_price_sync_not_supported'; if (($n['marketplace_currency']??null)!=='EUR') $b[]='ebay_de_currency_must_be_eur'; }
         return ['blockers'=>array_values(array_unique($b))];
     }
 
+    private function snapshotMatchesModel(array $c): bool
+    {
+        $current = app(PartPriceResolver::class)->resolve($c['part']->fresh() ?: $c['part'], $c['channel']);
+        return ($current['marketplace_price'] ?? null) === ($c['new']['marketplace_price'] ?? null)
+            && ($current['marketplace_currency'] ?? null) === ($c['new']['marketplace_currency'] ?? null);
+    }
     private function channelWriteEnabled(string $channel): bool { return match ($channel) { 'allegro' => (bool) config('marketplace.allegro_publishing_enabled', false), 'ovoko' => (bool) config('marketplace.ovoko_publishing_enabled', false), 'ebay_de' => (bool) config('marketplace.ebay_publishing_enabled', false), default => false }; }
     private function activeListing(Part $part,string $channel): ?MarketplaceListing { return $part->marketplaceListings->filter(fn($l)=>$l->marketplace===$channel || ($channel==='allegro'&&$l->marketplace==='allegro_main'))->filter(fn($l)=>in_array(strtolower((string)$l->status),['active','published','live','in_stock','for_sale'],true) && !in_array(strtolower((string)$l->sync_status),['stale','ignored','sold','unlinked','error','failed'],true))->sortByDesc('id')->first(); }
     private function externalId(MarketplaceListing $l,string $c): ?string { return $c==='ebay_de' ? ($l->external_offer_id ?: null) : ($l->external_offer_id ?: $l->external_listing_id ?: null); }

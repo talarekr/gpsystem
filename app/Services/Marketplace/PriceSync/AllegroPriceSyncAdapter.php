@@ -2,6 +2,7 @@
 namespace App\Services\Marketplace\PriceSync;
 use App\Models\MarketplaceListing;
 use App\Support\Marketplace\AllegroUserAgent;
+use App\Services\Marketplace\OAuthTokenManager;
 
 class AllegroPriceSyncAdapter implements MarketplacePriceSyncAdapter
 {
@@ -11,7 +12,9 @@ class AllegroPriceSyncAdapter implements MarketplacePriceSyncAdapter
     {
         $offerId = (string) $listing->external_offer_id;
         $base = rtrim((string) ($listing->account?->api_base_url ?: 'https://api.allegro.pl'), '/');
-        $token = (string) (((array) $listing->account?->api_credentials)['access_token'] ?? '');
+        $tokenResult = $listing->account ? app(OAuthTokenManager::class)->ensureValidToken($listing->account) : ['ok'=>false];
+        if (($tokenResult['ok'] ?? false) !== true) return ['status'=>'error','http_status'=>$tokenResult['http_status'] ?? null,'endpoint'=>'PATCH /sale/product-offers/{offerId}','final_success'=>false,'blocker'=>'allegro_oauth_token_unavailable','response_summary'=>['token_refresh_status'=>'failed','message'=>$tokenResult['message'] ?? null]];
+        $token = (string) $tokenResult['access_token'];
         $payload = ['sellingMode' => ['price' => ['amount' => $price['marketplace_price'], 'currency' => 'PLN']]];
         $url = $base.'/sale/product-offers/'.$offerId;
         $request = ['method'=>'PATCH','url'=>$url,'endpoint'=>'PATCH /sale/product-offers/{offerId}','headers'=>['Accept'=>self::MEDIA_TYPE,'Content-Type'=>self::MEDIA_TYPE,'Authorization'=>'Bearer ***','User-Agent'=>AllegroUserAgent::value()],'payload'=>$payload];
@@ -22,7 +25,7 @@ class AllegroPriceSyncAdapter implements MarketplacePriceSyncAdapter
         $amount = app(PriceNormalizer::class)->normalize(data_get($get->json(), 'sellingMode.price.amount'));
         $currency = data_get($get->json(), 'sellingMode.price.currency');
         $ok = $get->successful() && $amount === $price['marketplace_price'] && $currency === 'PLN';
-        return ['status' => $ok ? 'success' : 'error', 'http_status' => $get->status(), 'endpoint' => 'PATCH /sale/product-offers/{offerId}', 'read_after_write_endpoint' => 'GET /sale/product-offers/{offerId}', 'request_summary' => $request, 'response_summary' => ['patch_status' => $patch->status(), 'get_status' => $get->status(), 'request_id'=>$patch->header('trace-id') ?: $patch->header('x-request-id')], 'read_after_write' => ['amount' => $amount, 'currency' => $currency], 'remote_confirmed_price' => $ok ? $amount : null, 'final_success' => $ok, 'blocker' => $ok ? null : 'allegro_read_after_write_price_mismatch'];
+        return ['status' => $ok ? 'success' : 'error', 'http_status' => $get->status(), 'endpoint' => 'PATCH /sale/product-offers/{offerId}', 'read_after_write_endpoint' => 'GET /sale/product-offers/{offerId}', 'request_summary' => $request, 'response_summary' => ['patch_status' => $patch->status(), 'get_status' => $get->status(), 'request_id'=>$patch->header('trace-id') ?: $patch->header('x-request-id') ?: $patch->header('x-correlation-id')], 'read_after_write' => ['amount' => $amount, 'currency' => $currency], 'remote_confirmed_price' => $ok ? $amount : null, 'final_success' => $ok, 'blocker' => $ok ? null : 'allegro_read_after_write_price_mismatch'];
     }
 
     private function errorSummary(array $body, int $status, ?string $requestId): array
