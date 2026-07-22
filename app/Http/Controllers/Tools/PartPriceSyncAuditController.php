@@ -23,8 +23,30 @@ class PartPriceSyncAuditController
             $pre = $sync->preflight($ctx);
             $channels[$channel] = [
                 'stored_source_value'=>$prices[$channel]['source_value'] ?? null,'source_field'=>$prices[$channel]['source_field'] ?? null,'normalized_price'=>$prices[$channel]['marketplace_price'] ?? null,'marketplace_price'=>$prices[$channel]['marketplace_price'] ?? null,'source_currency'=>$prices[$channel]['source_currency'] ?? null,'marketplace_currency'=>$prices[$channel]['marketplace_currency'] ?? null,'conversion_result'=>$prices[$channel]['conversion'] ?? null,'current_listing_found'=>(bool)$ctx['listing'],'marketplace_account_id'=>$ctx['marketplace_account_id'],'listing_id'=>$ctx['listing_id'],'external_ids'=>['external_id'=>$ctx['external_id']],'sku'=>$ctx['sku'],'listing_type'=>$ctx['listing_type'],'last_confirmed_listing_price'=>$ctx['listing']?->price,'changed'=>$ctx['changed'],'preflight_blockers'=>$pre['blockers'],'can_sync_price'=>$pre['blockers']===[],'enabled'=>$ctx['enabled'],'channel_allowed'=>$ctx['channel_allowed'],
-            ] + ($channel==='ebay_de' ? ['conversion_rate'=>data_get($prices,'ebay_de.conversion.rate'),'conversion_source'=>data_get($prices,'ebay_de.conversion.source'),'conversion_date'=>data_get($prices,'ebay_de.conversion.effective_date'),'price_only_write_supported'=>false,'quantity_mutation_risk'=>true,'read_after_write_endpoint'=>'GET /sell/inventory/v1/offer/{offerId}'] : []);
+            ] + ($channel==='ebay_de' ? $this->ebayDeDiagnostics($ctx, $prices) : []);
         }
         return response()->json(['ok'=>true,'read_only'=>true,'no_mutation'=>true,'external_requests'=>false,'part_id'=>$part->id,'prices'=>$prices,'channels'=>$channels]);
     }
+
+    /** @param array<string,mixed> $ctx @param array<string,array<string,mixed>> $prices */
+    private function ebayDeDiagnostics(array $ctx, array $prices): array
+    {
+        $inventoryApi = ($ctx['listing_type'] ?? null) === 'inventory_api';
+
+        return [
+            'conversion_rate' => data_get($prices, 'ebay_de.conversion.rate'),
+            'conversion_source' => data_get($prices, 'ebay_de.conversion.source'),
+            'conversion_date' => data_get($prices, 'ebay_de.conversion.effective_date'),
+            'price_only_write_supported' => $inventoryApi,
+            'remote_quantity_pre_read_required' => $inventoryApi,
+            'quantity_source' => $inventoryApi ? 'remote_pre_read' : null,
+            'quantity_mutation_risk' => ! $inventoryApi,
+            'quantity_mutation_guarded' => $inventoryApi,
+            'publication_mutation_guarded' => $inventoryApi,
+            'post_write_quantity_verification' => $inventoryApi,
+            'post_write_publication_verification' => $inventoryApi,
+            'read_after_write_endpoint' => 'GET /sell/inventory/v1/offer/{offerId}',
+        ];
+    }
 }
+
