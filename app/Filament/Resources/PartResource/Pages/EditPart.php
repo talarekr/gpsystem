@@ -717,6 +717,7 @@ class EditPart extends EditRecord
         $published = $result['published_channels'] ?? $result['ready_channels'] ?? [];
         $skipped = $result['skipped_channels'] ?? [];
         $messages = collect($result['channels'] ?? [])->flatMap(fn (array $channel): array => $channel['errors'] ?? $channel['readiness']['blockers'] ?? [])->map(fn (mixed $message): string => $this->marketplacePublishMessage((string) $message))->filter()->values()->all();
+        $compatibilityMessages = collect($result['channels'] ?? [])->pluck('message')->filter()->values()->all();
         $channelLabel = $singleChannel ? match ($singleChannel) {
             'allegro_main', 'allegro' => 'Allegro',
             'ebay_de', 'ebay' => 'eBay',
@@ -753,6 +754,7 @@ class EditPart extends EditRecord
 
         Notification::make()
             ->title($singleChannel ? 'Część zapisana i wystawiona w kanale '.$channelLabel.'.' : 'Część zapisana i wystawiona w gotowych kanałach.')
+            ->body($compatibilityMessages === [] ? null : implode(' | ', $compatibilityMessages))
             ->success()
             ->send();
 
