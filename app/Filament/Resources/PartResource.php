@@ -377,7 +377,7 @@ class PartResource extends Resource
                             // Diagnostic marker: part_edit_additional_part_codes_conditional_visibility_v2. Do not render helper text under this repeater.
                             ->columnSpanFull(),
                         Forms\Components\Hidden::make('sku'),
-                        Forms\Components\Select::make('category_id')->label('Kategoria')->placeholder('Kategoria')->relationship('category', 'name')->required()->validationMessages(['required' => 'Kategoria jest wymagana.'])->searchable()->preload()->native(false)->live()->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set): null => self::refreshMarketplaceMappings($get, $set))->suffixAction(self::categoryTreeAction())->columnSpanFull(),
+                        Forms\Components\Select::make('category_id')->label('Kategoria')->placeholder('Wpisz min. 2 znaki')->required()->validationMessages(['required' => 'Kategoria jest wymagana.'])->searchable()->searchDebounce(250)->optionsLimit(30)->getSearchResultsUsing(fn (string $search): array => self::categorySearchResults($search))->getOptionLabelUsing(fn ($value): ?string => self::categoryOptionLabel($value))->native(false)->live()->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set): null => self::refreshMarketplaceMappings($get, $set))->suffixAction(self::categoryTreeAction())->columnSpanFull(),
                         Forms\Components\Select::make('condition_notes')->label('Jakość')->placeholder('Jakość')->options(['Używany' => 'Używany', 'Nowy' => 'Nowy', 'Uszkodzony' => 'Uszkodzony', 'Regenerowany' => 'Regenerowany'])->default(self::DEFAULT_CONDITION_VALUE)->native(false)->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])->columnSpan(['default' => 1, 'md' => 6]),
                         Forms\Components\Select::make('part_position')->label('Pozycja części (strona zabudowy)')->placeholder('Wybierz')->options(['Wszystkie' => 'Wszystkie', 'Lewa strona' => 'Lewa strona', 'Środek' => 'Środek', 'Prawa strona' => 'Prawa strona', 'Komplet' => 'Komplet', 'Tył strona lewa' => 'Tył strona lewa', 'Tył strona prawa' => 'Tył strona prawa', 'Przód strona lewa' => 'Przód strona lewa', 'Przód strona prawa' => 'Przód strona prawa', 'Przód' => 'Przód', 'Tył' => 'Tył'])->default(null)->native(false)->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])->columnSpan(['default' => 1, 'md' => 6]),
                         Forms\Components\Select::make(self::ADMIN_STEERING_FORM_STATE)->label('Kierownica po stronie')->placeholder('Kierownica po stronie')->options(self::ADMIN_STEERING_OPTIONS)->default(self::EXPECTED_LEFT_STEERING_VALUE)->native(false)->dehydrated(false)->extraFieldWrapperAttributes(['class' => 'gps-part-select-with-chevron'])->columnSpan(['default' => 1, 'md' => 6]),
@@ -711,10 +711,10 @@ class PartResource extends Resource
                     ->label('Wyszukaj samochód')
                     ->placeholder('Wyszukaj samochód')
                     ->searchable()
-                    ->preload()
+                    ->searchDebounce(250)
+                    ->optionsLimit(30)
                     ->native(false)
                     ->allowHtml()
-                    ->options(fn (): array => self::carPickerOptions())
                     ->getSearchResultsUsing(fn (string $search): array => self::carPickerOptions($search))
                     ->getOptionLabelUsing(fn ($value): ?string => self::carPickerOptionLabel($value))
                     ->extraAttributes(['class' => 'gps-vehicle-picker-select'])
@@ -775,8 +775,65 @@ class PartResource extends Resource
     {
         $search = trim((string) $search);
 
+        if (mb_strlen($search) < 2) {
+            return [];
+        }
+
+        $like = self::escapedLike($search);
+        $prefix = $like.'%';
+        $partial = '%'.$like.'%';
+
         return Car::query()
-            ->searchPhrase($search)
+            ->select([
+                'id',
+                'external_id',
+                'vin',
+                'make',
+                'model',
+                'model_variant',
+                'production_year',
+                'first_registration_year',
+                'registration_number',
+                'fuel_type',
+                'engine_power_kw',
+                'engine_capacity_cm3',
+                'engine_code',
+                'drivetrain',
+                'gearbox_type',
+                'gearbox_code',
+                'body_type',
+                'color',
+                'steering_side',
+            ])
+            ->where(fn (Builder $query): Builder => self::applyCarPickerSearch($query, $search))
+            ->orderByRaw(
+                self::carPickerPrioritySql(),
+                [
+                    $search,
+                    $search,
+                    $search,
+                    $search,
+                    $prefix,
+                    $prefix,
+                    $prefix,
+                    $prefix,
+                    $prefix,
+                    $partial,
+                    $partial,
+                    $partial,
+                    $partial,
+                    $partial,
+                    $partial,
+                    $partial,
+                    $partial,
+                    $partial,
+                    $partial,
+                    $partial,
+                    $partial,
+                    $partial,
+                    $partial,
+                ],
+            )
             ->orderByDesc('id')
             ->limit(30)
             ->get()
@@ -790,9 +847,164 @@ class PartResource extends Resource
             return null;
         }
 
-        $car = Car::query()->find($value);
+        $car = Car::query()
+            ->select([
+                'id',
+                'vin',
+                'make',
+                'model',
+                'model_variant',
+                'production_year',
+                'first_registration_year',
+                'registration_number',
+                'fuel_type',
+                'engine_power_kw',
+                'engine_capacity_cm3',
+                'engine_code',
+                'drivetrain',
+                'gearbox_type',
+                'body_type',
+                'color',
+                'steering_side',
+            ])
+            ->find($value);
 
         return $car ? self::carPickerOptionHtml($car) : null;
+    }
+
+    public static function categorySearchResults(string $search): array
+    {
+        $search = trim($search);
+
+        if (mb_strlen($search) < 2) {
+            return [];
+        }
+
+        $like = self::escapedLike($search);
+        $prefix = $like.'%';
+        $partial = '%'.$like.'%';
+
+        return PartCategory::query()
+            ->select(['id', 'parent_id', 'name', 'category_path', 'full_slug_path'])
+            ->where(function (Builder $query) use ($prefix, $partial): void {
+                $query
+                    ->where('name', 'like', $partial)
+                    ->orWhere('category_path', 'like', $partial)
+                    ->orWhere('full_slug_path', 'like', $partial)
+                    ->orWhere('slug', 'like', $prefix);
+            })
+            ->orderByRaw(
+                'CASE
+                    WHEN name = ? THEN 0
+                    WHEN name LIKE ? ESCAPE \'\\\\\' THEN 1
+                    WHEN category_path LIKE ? ESCAPE \'\\\\\' THEN 2
+                    WHEN full_slug_path LIKE ? ESCAPE \'\\\\\' THEN 3
+                    WHEN name LIKE ? ESCAPE \'\\\\\' THEN 4
+                    ELSE 5
+                END',
+                [$search, $prefix, $prefix, $prefix, $partial],
+            )
+            ->orderBy('name')
+            ->limit(30)
+            ->get()
+            ->mapWithKeys(fn (PartCategory $category): array => [$category->id => self::categorySearchLabel($category)])
+            ->all();
+    }
+
+    public static function categoryOptionLabel($value): ?string
+    {
+        if (blank($value)) {
+            return null;
+        }
+
+        $category = PartCategory::query()
+            ->select(['id', 'parent_id', 'name', 'category_path', 'full_slug_path'])
+            ->find($value);
+
+        return $category ? self::categorySearchLabel($category) : null;
+    }
+
+    private static function categorySearchLabel(PartCategory $category): string
+    {
+        $path = trim((string) ($category->category_path ?: $category->full_slug_path));
+
+        return trim($category->name.($path !== '' ? ' ('.$path.')' : ''));
+    }
+
+    private static function applyCarPickerSearch(Builder $query, string $search): Builder
+    {
+        $tokens = collect(preg_split('/\s+/', trim($search)) ?: [])->filter()->values();
+
+        foreach ($tokens as $token) {
+            $partial = '%'.self::escapedLike((string) $token).'%';
+
+            $query->where(function (Builder $query) use ($partial): void {
+                foreach (self::carPickerSearchFields() as $field) {
+                    $query->orWhere($field, 'like', $partial);
+                }
+            });
+        }
+
+        return $query;
+    }
+
+    private static function carPickerPrioritySql(): string
+    {
+        return 'CASE
+            WHEN vin = ? THEN 0
+            WHEN registration_number = ? THEN 0
+            WHEN external_id = ? THEN 0
+            WHEN model_variant = ? THEN 0
+            WHEN make LIKE ? ESCAPE \'\\\\\' THEN 1
+            WHEN model LIKE ? ESCAPE \'\\\\\' THEN 1
+            WHEN engine_code LIKE ? ESCAPE \'\\\\\' THEN 2
+            WHEN vin LIKE ? ESCAPE \'\\\\\' THEN 2
+            WHEN registration_number LIKE ? ESCAPE \'\\\\\' THEN 2
+            WHEN make LIKE ? ESCAPE \'\\\\\' THEN 3
+            WHEN model LIKE ? ESCAPE \'\\\\\' THEN 3
+            WHEN production_year LIKE ? ESCAPE \'\\\\\' THEN 4
+            WHEN first_registration_year LIKE ? ESCAPE \'\\\\\' THEN 4
+            WHEN engine_code LIKE ? ESCAPE \'\\\\\' THEN 4
+            WHEN engine_capacity_cm3 LIKE ? ESCAPE \'\\\\\' THEN 4
+            WHEN engine_power_kw LIKE ? ESCAPE \'\\\\\' THEN 4
+            WHEN model_variant LIKE ? ESCAPE \'\\\\\' THEN 4
+            WHEN vin LIKE ? ESCAPE \'\\\\\' THEN 4
+            WHEN registration_number LIKE ? ESCAPE \'\\\\\' THEN 4
+            WHEN fuel_type LIKE ? ESCAPE \'\\\\\' THEN 5
+            WHEN body_type LIKE ? ESCAPE \'\\\\\' THEN 5
+            WHEN drivetrain LIKE ? ESCAPE \'\\\\\' THEN 5
+            WHEN gearbox_type LIKE ? ESCAPE \'\\\\\' THEN 5
+            ELSE 6
+        END';
+    }
+
+    private static function carPickerSearchFields(): array
+    {
+        return [
+            'make',
+            'model',
+            'model_variant',
+            'engine_code',
+            'vin',
+            'registration_number',
+            'external_id',
+            'production_year',
+            'first_registration_year',
+            'fuel_type',
+            'body_type',
+            'color',
+            'drivetrain',
+            'steering_side',
+            'gearbox_type',
+            'gearbox_code',
+            'engine_power_kw',
+            'engine_capacity_cm3',
+        ];
+    }
+
+    private static function escapedLike(string $value): string
+    {
+        return str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], trim($value));
     }
 
     public static function carPickerOptionHtml(Car $car): string
