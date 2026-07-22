@@ -64,12 +64,8 @@
             <a href="<?= e($url) ?>"><?= e($label) ?></a>
         <?php endforeach; ?>
     </div>
-    <div class="sf-phones" data-phone-menu>
-        <button class="sf-phones__toggle" type="button" aria-expanded="false" aria-controls="sf-phone-panel"><span aria-hidden="true">📞</span> <span>Zadzwoń</span></button>
-        <div id="sf-phone-panel" class="sf-phones__panel">
-            <a href="tel:+48504266984">+48 504 266 984</a>
-            <a href="tel:+48579152665">+48 579 152 665</a>
-        </div>
-    </div>
+    <a class="sf-phones sf-phones--direct" href="tel:+48504266984" aria-label="Zadzwoń pod numer +48 504 266 984">
+        <span aria-hidden="true">📞</span> <span class="sf-phones__number">+48 504 266 984</span>
+    </a>
 </div></nav>
 </div>
