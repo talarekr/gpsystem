@@ -324,11 +324,6 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
     }
 
 
-    public function supportedCompatibilityCategories(): array
-    {
-        return $this->compatibilitySupportedCategories();
-    }
-
     public function compatibilitySupportedCategories(): array
     {
         $response = $this->getWithAuthRetry($this->absoluteUrl('/sale/compatibility-list/supported-categories'));
@@ -369,11 +364,6 @@ class AllegroApiClient extends AbstractMarketplaceApiClient
         $response = $this->getWithAuthRetry($this->absoluteUrl('/sale/products/'.rawurlencode($productId)));
         $json = $response->json();
         return ['ok' => $response->successful(), 'http_status' => $response->status(), 'json' => is_array($json) ? $json : [], 'request_id' => $response->header('trace-id') ?: $response->header('x-request-id'), 'error' => $response->successful() ? null : 'Allegro product details lookup failed.'];
-    }
-
-    public function compatibilitySuggestionsByProductId(string $productId): array
-    {
-        return $this->compatibilityListSuggestions($productId);
     }
 
     public function compatibilityListSuggestions(?string $productId = null, ?string $offerId = null, ?string $language = null): array

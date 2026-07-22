@@ -11,7 +11,6 @@ use App\Services\Marketplace\AllegroDescriptionBuilder;
 use App\Services\Marketplace\AllegroGpSwissDescriptionTemplate;
 use App\Services\Marketplace\MarketplaceListingReadinessService;
 use App\Services\Marketplace\MarketplacePublishGate;
-use App\Services\Marketplace\AllegroCompatibilitySuggestionsService;
 use Illuminate\Support\Facades\Log;
 
 class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
@@ -50,8 +49,6 @@ class AllegroPublishAdapter extends BaseMarketplacePublishAdapter
         $taxSettings = $this->validatedTaxSettings($client, (string) ($payload['category_id'] ?? ''));
         if (($taxSettings['blockers'] ?? []) !== []) return ['ok' => false, 'status' => 'blocked_tax_settings', 'errors' => $taxSettings['blockers'], 'warnings' => $taxSettings['warnings'] ?? [], 'request_summary' => $this->requestSummary($payload, null, $part) + $productNameDiagnostics + $signature + ['allegro_sales_settings' => $this->salesSettingsSummary($salesSettings), 'allegro_tax_settings' => $taxSettings], 'write' => false];
         $body = array_filter(['name' => (string) ($payload['title'] ?? $part->name), 'category' => ['id' => (string) ($payload['category_id'] ?? '')], 'productSet' => $productSet, 'parameters' => $offerParameters, 'images' => $offerImages, 'description' => $description, 'sellingMode' => $settings['sellingMode'] ?? ['format' => 'BUY_NOW', 'price' => ['amount' => (string) ($payload['price_pln'] ?? $readiness['marketplace_price']), 'currency' => 'PLN']], 'stock' => ['available' => (int) ($payload['quantity'] ?? $part->quantity ?? 1), 'unit' => 'UNIT'], 'publication' => ['status' => 'ACTIVE'], 'delivery' => $delivery, 'payments' => $this->paymentsPayload($settings['payments'] ?? null, $payload['payments'] ?? null), 'taxSettings' => $taxSettings['payload'] ?? null, 'afterSalesServices' => $afterSales, 'location' => $settings['location'] ?? null, 'external' => filled($signature['allegro_signature_value']) ? ['id' => $signature['allegro_signature_value']] : null], fn ($v) => $v !== null && $v !== []);
-        $compatibilityList = app(AllegroCompatibilitySuggestionsService::class)->publishableCompatibilityList($part, $payload);
-        if ($compatibilityList !== null) $body['compatibilityList'] = $compatibilityList;
         $descriptionGuard = $this->assertGpSwissDescriptionTemplate($body, $builtDescription['diagnostics']);
         if (! $descriptionGuard['ok']) return ['ok' => false, 'status' => 'blocked', 'action' => 'createProductOffer', 'error' => 'allegro_description_template_not_applied', 'ui_error' => 'allegro_description_template_not_applied', 'request_summary' => $this->requestSummary($payload, $body, $part) + $productNameDiagnostics + $signature + ['allegro_sales_settings' => $this->salesSettingsSummary($salesSettings), 'description_guard' => $descriptionGuard], 'write' => false];
         $result = $client->createProductOffer($body);
