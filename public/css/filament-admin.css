@@ -2254,9 +2254,8 @@ button.gps-category-picker__arrow:hover {
 }
 
 .gps-vehicle-actions .fi-fo-actions {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.75rem;
+    display: flex;
+    width: 100%;
 }
 
 .gps-vehicle-actions .fi-btn {
@@ -2287,6 +2286,72 @@ button.gps-category-picker__arrow:hover {
 
 .gps-selected-vehicle--empty {
     color: #94a3b8;
+}
+
+.gps-recent-vehicles {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.65rem;
+    margin-top: -0.25rem;
+}
+
+.gps-recent-vehicles--empty {
+    display: block;
+    color: #94a3b8;
+    font-size: 0.82rem;
+}
+
+.gps-recent-vehicle {
+    display: flex;
+    min-height: 5.25rem;
+    flex-direction: column;
+    gap: 0.18rem;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    border-radius: 0.75rem;
+    background: rgba(255, 255, 255, 0.72);
+    padding: 0.65rem 0.7rem;
+    color: #475569;
+    font-size: 0.76rem;
+    font-weight: 400;
+    line-height: 1.25;
+    text-align: left;
+    transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
+}
+
+.gps-recent-vehicle:hover {
+    border-color: rgba(100, 116, 139, 0.36);
+    background: rgba(248, 250, 252, 0.92);
+    box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
+}
+
+.gps-recent-vehicle--selected {
+    border-color: rgba(37, 99, 235, 0.38);
+    background: rgba(239, 246, 255, 0.56);
+}
+
+.gps-recent-vehicle__title,
+.gps-recent-vehicle__identity,
+.gps-recent-vehicle__details {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.gps-recent-vehicle__title {
+    color: #334155;
+    white-space: nowrap;
+}
+
+.gps-recent-vehicle__identity {
+    color: #64748b;
+    white-space: nowrap;
+}
+
+.gps-recent-vehicle__details {
+    color: #64748b;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
 }
 
 .fi-modal-window.gps-vehicle-picker-modal,
@@ -2330,6 +2395,18 @@ button.gps-category-picker__arrow:hover {
     .gps-vehicle-picker-modal.fi-modal-window {
         width: 100vw !important;
         max-width: 100vw !important;
+    }
+}
+
+@media (max-width: 900px) {
+    .gps-recent-vehicles {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 420px) {
+    .gps-recent-vehicles {
+        grid-template-columns: 1fr;
     }
 }
 

@@ -66,4 +66,9 @@ class CreatePart extends CreateRecord
     {
         return $this->setPartCategoryFromPicker($categoryId);
     }
+
+    public function setPartCarFromPicker(mixed $carId = null): bool
+    {
+        return PartResource::selectCarInFormData($this->data, $carId);
+    }
 }

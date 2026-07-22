@@ -780,4 +780,9 @@ class EditPart extends EditRecord
                 $this->publishMarketplaceChannels($publishService, 'all');
             });
     }
+
+    public function setPartCarFromPicker(mixed $carId = null): bool
+    {
+        return PartResource::selectCarInFormData($this->data, $carId);
+    }
 }
