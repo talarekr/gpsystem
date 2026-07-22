@@ -7,7 +7,6 @@ use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceListing;
 use App\Models\Part;
 use App\Services\Marketplace\AllegroListingStatusRefreshService;
-use App\Services\Marketplace\AllegroPostPublishCompatibilityService;
 use App\Services\Marketplace\ApiIntegrationLogger;
 use App\Services\Marketplace\MarketplaceListingReadinessService;
 use App\Services\Marketplace\MarketplacePublishGate;
@@ -80,7 +79,6 @@ abstract class BaseMarketplacePublishAdapter implements MarketplacePublishAdapte
         $resolvedSku = $result['resolved_sku'] ?? $result['external_inventory_id'] ?? ($payload['sku'] ?? $part->sku);
         $requestSummary = $result['request_summary'] ?? $this->requestSummary($payload);
 
-        $compatibility = null;
         $listing = filled($result['marketplace_listing_id'] ?? null) ? MarketplaceListing::query()->find($result['marketplace_listing_id']) : null;
         if (! $listing) {
             $listing = MarketplaceListing::query()->create(['marketplace' => $this->marketplace(), 'marketplace_account_id' => $account?->id, 'part_id' => $part->id, 'external_offer_id' => $result['external_offer_id'] ?? $result['offer_id'] ?? null, 'external_listing_id' => $result['external_listing_id'] ?? $result['listing_id'] ?? null, 'external_inventory_id' => $result['external_inventory_id'] ?? $resolvedSku, 'sku' => $resolvedSku, 'title' => $payload['title'] ?? $part->name, 'price' => $readiness['marketplace_price'] ?? $part->price, 'quantity' => $part->quantity, 'currency' => $readiness['currency'] ?? 'PLN', 'status' => $result['listing_status'] ?? 'published', 'sync_status' => 'published', 'match_status' => 'matched', 'match_confidence' => 100, 'url' => $result['url'] ?? null, 'raw_payload' => ['request_summary' => $requestSummary, 'response_summary' => $result['response_summary'] ?? []], 'last_synced_at' => now()]);
@@ -90,8 +88,6 @@ abstract class BaseMarketplacePublishAdapter implements MarketplacePublishAdapte
             $this->logger->success('ovoko', filled($listing->url) ? 'ovoko_listing_url_resolved' : 'missing_shop_url', filled($listing->url) ? 'Ovoko listing URL stored after publish.' : 'Ovoko crm/importPart returned no public listing URL; use read-only URL diagnostic/backfill.', ['marketplace_listing_id' => $listing->id, 'part_id' => $part->id, 'external_id' => $listing->external_offer_id ?: $listing->external_listing_id, 'ovoko_part_id' => $listing->external_offer_id ?: $listing->external_listing_id, 'ovoko_listing_url' => $listing->url, 'ovoko_listing_url_source' => filled($listing->url) ? ($result['response_summary']['ovoko_listing_url_source'] ?? $result['response_summary']['ovoko_shop_url_source'] ?? 'unknown') : null, 'response' => $result['response_summary'] ?? [], 'stored_listing_url' => $listing->url]);
         }
         if ($this->marketplace() === 'allegro' && filled($listing->external_offer_id ?: $listing->external_listing_id)) {
-            $compatibility = app(AllegroPostPublishCompatibilityService::class)->applyAfterPublish($part, $listing, $account);
-            $result['user_message'] = $compatibility['message'] ?? ($result['user_message'] ?? null);
             $immediateRefresh = $this->attemptImmediateAllegroPostPublishRefresh($listing, $part);
             $shouldScheduleRetry = ! (bool) data_get($immediateRefresh, 'api.is_active_with_stock', false);
 
@@ -115,7 +111,7 @@ abstract class BaseMarketplacePublishAdapter implements MarketplacePublishAdapte
                 });
             }
         }
-        return new MarketplacePublishResult($this->channel(), ['channel' => $this->channel(), 'marketplace' => $this->marketplace(), 'success' => true, 'status' => $listing->status, 'external_offer_id' => $listing->external_offer_id, 'external_listing_id' => $listing->external_listing_id, 'write' => true, 'listing_id' => $listing->id, 'message' => $result['user_message'] ?? null, 'compatibility' => $compatibility['compatibility'] ?? null]);
+        return new MarketplacePublishResult($this->channel(), ['channel' => $this->channel(), 'marketplace' => $this->marketplace(), 'success' => true, 'status' => $listing->status, 'external_offer_id' => $listing->external_offer_id, 'external_listing_id' => $listing->external_listing_id, 'write' => true, 'listing_id' => $listing->id, 'message' => $result['user_message'] ?? null]);
     }
 
     private function attemptImmediateAllegroPostPublishRefresh(MarketplaceListing $listing, Part $part): array
