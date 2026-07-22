@@ -6,6 +6,7 @@ return [
     'ui' => [
         'primary_color' => '#0B1F3A',
         'staff_locale' => 'pl',
+        'filament_spa_enabled' => (bool) env('FILAMENT_SPA_ENABLED', true),
     ],
 
     'roles' => [

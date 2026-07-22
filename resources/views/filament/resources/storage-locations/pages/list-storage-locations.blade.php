@@ -25,7 +25,7 @@
                 <div class="gps-cell gps-location-text">{{ $location->parts_count }}</div>
                 <div class="gps-cell gps-location-text"><span class="gps-status {{ $location->is_active ? 'gps-ok' : 'gps-no' }}">{{ $location->is_active ? 'Aktywne' : 'Nieaktywne' }}</span></div>
                 <div class="gps-cell gps-location-text">{{ $location->updated_at?->format('Y-m-d H:i') ?? '—' }}</div>
-                <div class="gps-cell gps-actions"><a class="gps-action" href="{{ StorageLocationResource::getUrl('view', ['record' => $location]) }}">Podgląd</a><a class="gps-action" href="{{ StorageLocationResource::getUrl('edit', ['record' => $location]) }}">Edytuj</a></div>
+                <div class="gps-cell gps-actions"><a class="gps-action" href="{{ StorageLocationResource::getUrl('view', ['record' => $location]) }}" wire:navigate>Podgląd</a><a class="gps-action" href="{{ StorageLocationResource::getUrl('edit', ['record' => $location]) }}" wire:navigate>Edytuj</a></div>
             </div>
         @empty
             <div class="gps-empty">Brak miejsc składowania dla wybranych kryteriów.</div>

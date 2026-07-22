@@ -17,7 +17,7 @@
     @if (! $part)
         <span>—</span>
     @else
-        <a href="{{ $editUrl }}">{{ $part->name ?: 'Część #'.$part->id }}</a>
+        <a href="{{ $editUrl }}" wire:navigate>{{ $part->name ?: 'Część #'.$part->id }}</a>
         <small>Magazyn: {{ $storageName }}</small>
     @endif
 </div>

@@ -68,7 +68,7 @@
                     </div>
                     <div><span class="gps-email-badge {{ $template->is_active ? '' : 'gps-email-badge--off' }}">{{ $template->is_active ? 'Aktywny' : 'Nieaktywny' }}</span></div>
                     <div class="gps-email-muted">{{ $template->updated_at?->format('Y-m-d H:i') ?? '—' }}</div>
-                    <div><a class="gps-email-action" href="{{ EmailTemplateResource::getUrl('edit', ['record' => $template]) }}">Edytuj</a></div>
+                    <div><a class="gps-email-action" href="{{ EmailTemplateResource::getUrl('edit', ['record' => $template]) }}" wire:navigate>Edytuj</a></div>
                 </div>
             </div>
         @empty
