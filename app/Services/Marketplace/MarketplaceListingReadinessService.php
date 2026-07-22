@@ -329,7 +329,8 @@ class MarketplaceListingReadinessService
     private function allegroProductSetPreview(array $allegroParameters, ?MarketplaceAccount $account, string $productName, ?string $categoryId = null, ?string $mainImageUrl = null): array
     {
         $settings = is_array($account?->api_settings) ? $account->api_settings : [];
-        $product = ['name' => trim($productName), 'parameters' => $allegroParameters['product_parameters'] ?? []];
+        $existingProduct = is_array(data_get($settings, 'productSet.0.product')) ? data_get($settings, 'productSet.0.product') : [];
+        $product = array_merge($existingProduct, ['name' => trim($productName), 'parameters' => $allegroParameters['product_parameters'] ?? []]);
         if (filled($categoryId)) $product['category'] = ['id' => (string) $categoryId];
         if (filled($mainImageUrl)) $product['images'] = [trim($mainImageUrl)];
         $productSet = ['product' => $product];

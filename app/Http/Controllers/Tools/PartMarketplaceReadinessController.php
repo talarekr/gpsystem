@@ -11,6 +11,7 @@ use App\Models\Part;
 use App\Models\PartCategory;
 use App\Services\Marketplace\MarketplaceListingReadinessService;
 use App\Services\Marketplace\PartMarketplaceReadinessService;
+use App\Services\Marketplace\AllegroCompatibilitySuggestionsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -36,6 +37,7 @@ class PartMarketplaceReadinessController extends Controller
     public function __construct(
         private readonly MarketplaceListingReadinessService $readinessService,
         private readonly PartMarketplaceReadinessService $cardReadinessService,
+        private readonly AllegroCompatibilitySuggestionsService $compatibilitySuggestionsService,
     ) {}
 
     public function check(Request $request): JsonResponse
@@ -231,6 +233,10 @@ class PartMarketplaceReadinessController extends Controller
                 data_set($metadata, 'marketplace_prepare_results.allegro.missing_required_allegro_parameters', $missingParams);
                 data_set($metadata, 'marketplace_prepare_results.allegro.status', $ready ? 'ready' : 'blocked');
                 $part->forceFill(['review_metadata' => $metadata])->save();
+                if ($ready) {
+                    $compatibilityResult = $this->compatibilitySuggestionsService->fetchAndStoreForPreparedPayload($part->fresh(), (array) ($card['prepared_payload_preview_safe'] ?? []));
+                    $part = $this->freshPartForMarketplaceReadiness($part);
+                }
             }
             $message = $ready ? 'Gotowe' : ($missingParams !== [] ? 'Uzupełnij wymagane parametry Allegro powyżej i zapisz produkt. Brakuje: '.implode(', ', array_values(array_filter(array_map(fn ($param) => is_array($param) ? ($param['name'] ?? null) : null, $missingParams)))) : $this->humanReadablePrepareMessage((array) ($presentation['missing'] ?? $card['missing'] ?? [])));
 
@@ -247,6 +253,8 @@ class PartMarketplaceReadinessController extends Controller
                 'missing_required_allegro_parameters' => $missingParams,
                 'dynamic_allegro_parameters' => $card['dynamic_allegro_parameters'] ?? null,
                 'prepared_payload_preview_safe' => $card['prepared_payload_preview_safe'] ?? null,
+                'compatibility' => $compatibilityResult['compatibility'] ?? null,
+                'compatibility_message' => $compatibilityResult['message'] ?? null,
                 'ebay_channels' => $key === 'ebay' ? ($ebayResults ?? []) : null,
             ]);
         } catch (\Throwable $e) {
@@ -266,6 +274,21 @@ class PartMarketplaceReadinessController extends Controller
                 method_exists($part, 'marketplaceListings') ? (Schema::hasTable('marketplace_accounts') ? 'marketplaceListings.account' : 'marketplaceListings') : null,
             ])))
             ->findOrFail($part->getKey());
+    }
+
+
+    public function allegroCompatibilityAudit(Request $request, Part $part): JsonResponse
+    {
+        abort_unless($request->user()?->hasAnyRole([\App\Enums\UserRole::OwnerAdmin->value]), 403);
+        $prepared = (array) data_get((array) $this->readinessService->checkPartReadiness($this->freshPartForMarketplaceReadiness($part), 'allegro_main'), 'prepared_payload_preview_safe', []);
+        return response()->json($this->compatibilitySuggestionsService->audit($part->fresh(), $prepared));
+    }
+
+    public function allegroCompatibilityPreview(Request $request, Part $part): JsonResponse
+    {
+        abort_unless($request->user()?->hasAnyRole([\App\Enums\UserRole::OwnerAdmin->value]), 403);
+        $prepared = (array) data_get((array) $this->readinessService->checkPartReadiness($this->freshPartForMarketplaceReadiness($part), 'allegro_main'), 'prepared_payload_preview_safe', []);
+        return response()->json($this->compatibilitySuggestionsService->preview($part->fresh(), $prepared));
     }
 
     public function ebayPrepareDebug(Request $request, int $partId): JsonResponse
