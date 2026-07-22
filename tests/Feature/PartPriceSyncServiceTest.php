@@ -77,10 +77,36 @@ class PartPriceSyncServiceTest extends TestCase
         $part=$this->part(['ebay_price'=>173.25]); Cache::put('nbp_table_a_eur_rate', ['rate'=>5,'source'=>'NBP_TABLE_A'], 60); $listing=$this->listing($part,'ebay_de',['external_offer_id'=>'OFFERDE','external_inventory_id'=>'INV','sku'=>'SKUDE','currency'=>'EUR','price'=>30]);
         $res=app(PartPriceSyncService::class)->sync($part->fresh(['marketplaceListings.account']), ['ebay_de'=>['marketplace_price'=>'30.00','marketplace_currency'=>'EUR']], ['ebay_de'=>['marketplace_price'=>'34.65','marketplace_currency'=>'EUR','source_currency'=>'PLN','source_field'=>'parts.ebay_price']]);
         $this->assertSame('success',$res['channels']['ebay_de']['status']); $this->assertTrue($res['channels']['ebay_de']['quantity_unchanged']);
-        Http::assertSent(fn($r)=>$r->url()==='https://example.test/sell/inventory/v1/bulk_update_price_quantity' && data_get($r->data(),'requests.0.sku')==='SKUDE' && data_get($r->data(),'requests.0.shipToLocationAvailability.quantity')===4 && data_get($r->data(),'requests.0.pricingSummary.price.value')==='34.65' && !array_key_exists('status',$r->data()));
+        Http::assertSent(fn($r)=>$r->url()==='https://example.test/sell/inventory/v1/bulk_update_price_quantity' && data_get($r->data(),'requests.0.sku')==='SKUDE' && data_get($r->data(),'requests.0.offers.0.offerId')==='OFFERDE' && data_get($r->data(),'requests.0.offers.0.availableQuantity')===4 && data_get($r->data(),'requests.0.offers.0.price.value')==='34.65' && !array_key_exists('status',$r->data()));
         $this->assertSame('34.65',(string)$listing->fresh()->price);
     }
 
+    public function test_ebay_bulk_payload_uses_official_offer_shape_and_keeps_sanitized_response_fields(): void
+    {
+        config(['marketplace.price_sync.on_part_save_enabled'=>true,'marketplace.external_api_writes_enabled'=>true,'marketplace.ebay_publishing_enabled'=>true]);
+        Http::fake(['*/sell/inventory/v1/offer/OFFERDE'=>Http::sequence()->push(['offerId'=>'OFFERDE','sku'=>'SKUDE','marketplaceId'=>'EBAY_DE','status'=>'PUBLISHED','availableQuantity'=>1,'pricingSummary'=>['price'=>['value'=>'34.55','currency'=>'EUR']]],200)->push(['offerId'=>'OFFERDE','sku'=>'SKUDE','marketplaceId'=>'EBAY_DE','status'=>'PUBLISHED','availableQuantity'=>1,'pricingSummary'=>['price'=>['value'=>'35.80','currency'=>'EUR']]],200),'*/sell/inventory/v1/bulk_update_price_quantity'=>Http::response(['responses'=>[['sku'=>'SKUDE','offerId'=>'OFFERDE','marketplaceId'=>'EBAY_DE','inputRefId'=>'SKUDE','statusCode'=>200,'message'=>'ok','status'=>'UPDATED','result'=>'SUCCESS','warnings'=>[],'errors'=>[]]]],200)]);
+        $part=$this->part(['ebay_price'=>179]); $listing=$this->listing($part,'ebay_de',['external_offer_id'=>'OFFERDE','external_inventory_id'=>'INV','sku'=>'SKUDE','currency'=>'EUR','price'=>34.55]);
+        $res=app(PartPriceSyncService::class)->sync($part->fresh(['marketplaceListings.account']), ['ebay_de'=>['marketplace_price'=>'34.55','marketplace_currency'=>'EUR']], ['ebay_de'=>['marketplace_price'=>'35.80','marketplace_currency'=>'EUR']]);
+        $payload=['requests'=>[['sku'=>'SKUDE','offers'=>[['offerId'=>'OFFERDE','price'=>['value'=>'35.80','currency'=>'EUR'],'availableQuantity'=>1]]]]];
+        Http::assertSent(fn($r)=>$r->url()==='https://example.test/sell/inventory/v1/bulk_update_price_quantity' && $r->data()===$payload);
+        $this->assertSame('OFFERDE', data_get($res,'channels.ebay_de.response_summary.responses.0.offerId'));
+        $this->assertSame('EBAY_DE', data_get($res,'channels.ebay_de.response_summary.responses.0.marketplaceId'));
+        $this->assertSame('UPDATED', data_get($res,'channels.ebay_de.response_summary.responses.0.status'));
+        $this->assertTrue($res['channels']['ebay_de']['quantity_unchanged']);
+        $this->assertTrue($res['channels']['ebay_de']['publication_unchanged']);
+        $this->assertSame(1, count(Http::recorded(fn($r)=>$r->method()==='POST')));
+        $this->assertSame('35.80',(string)$listing->fresh()->price);
+    }
+
+    public function test_ebay_http_200_for_different_offer_id_stays_unverified(): void
+    {
+        config(['marketplace.price_sync.on_part_save_enabled'=>true,'marketplace.external_api_writes_enabled'=>true,'marketplace.ebay_publishing_enabled'=>true,'marketplace.price_sync.ebay_read_retry_attempts'=>1]);
+        Http::fake(['*/sell/inventory/v1/offer/OFFERDE'=>Http::sequence()->push(['offerId'=>'OFFERDE','sku'=>'SKUDE','status'=>'PUBLISHED','availableQuantity'=>1,'pricingSummary'=>['price'=>['value'=>'34.55','currency'=>'EUR']]],200)->push(['offerId'=>'OFFERDE','sku'=>'SKUDE','status'=>'PUBLISHED','availableQuantity'=>1,'pricingSummary'=>['price'=>['value'=>'34.55','currency'=>'EUR']]],200),'*/sell/inventory/v1/bulk_update_price_quantity'=>Http::response(['responses'=>[['sku'=>'SKUDE','offerId'=>'OTHER','statusCode'=>200]]],200)]);
+        $part=$this->part(['ebay_price'=>179]); $listing=$this->listing($part,'ebay_de',['external_offer_id'=>'OFFERDE','external_inventory_id'=>'INV','sku'=>'SKUDE','currency'=>'EUR','price'=>34.55]);
+        $res=app(PartPriceSyncService::class)->sync($part->fresh(['marketplaceListings.account']), ['ebay_de'=>['marketplace_price'=>'34.55','marketplace_currency'=>'EUR']], ['ebay_de'=>['marketplace_price'=>'35.80','marketplace_currency'=>'EUR']]);
+        $this->assertSame('write_accepted_unverified',$res['channels']['ebay_de']['status']);
+        $this->assertSame('34.55',(string)$listing->fresh()->price);
+    }
 
     public function test_ovoko_real_nested_list_payload_confirms_original_pln_price(): void
     {
