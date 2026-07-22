@@ -31,7 +31,7 @@
             <span></span><span></span><span></span>
         </button>
 
-        <a class="gps-admin-topbar__brand" href="{{ url('/admin') }}" aria-label="GP Swiss">
+        <a class="gps-admin-topbar__brand" href="{{ url('/admin') }}" aria-label="GP Swiss" wire:navigate>
             <span class="gps-admin-topbar__brand-mark">
                 <img src="{{ $adminLogoUrl }}" alt="" loading="eager">
             </span>
@@ -46,11 +46,11 @@
             <div class="gps-admin-search__dropdown" data-gps-part-search-results hidden></div>
         </div>
 
-        <a class="gps-admin-topbar__parts-link" href="{{ $partsIndexUrl }}">Wszystkie części</a>
+        <a class="gps-admin-topbar__parts-link" href="{{ $partsIndexUrl }}" wire:navigate>Wszystkie części</a>
     </div>
 
     <div class="gps-admin-topbar__right">
-        <a class="gps-admin-topbar__action" href="{{ $ordersUrl }}" title="Zamówienia">
+        <a class="gps-admin-topbar__action" href="{{ $ordersUrl }}" title="Zamówienia" wire:navigate>
             <span aria-hidden="true">📋</span><span>Zamówienia</span><strong>{{ $ordersCount }}</strong>
         </a>
     </div>

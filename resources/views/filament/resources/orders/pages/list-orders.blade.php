@@ -465,7 +465,7 @@
                         @endif
 
                         <div class="gps-order-actions">
-                            <a class="gps-order-action" href="{{ OrderResource::getUrl('view', ['record' => $order]) }}">Szczegóły</a>
+                            <a class="gps-order-action" href="{{ OrderResource::getUrl('view', ['record' => $order]) }}" wire:navigate>Szczegóły</a>
                         </div>
                     </div>
                 </div>

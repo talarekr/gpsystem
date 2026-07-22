@@ -68,8 +68,8 @@
                     <div class="gps-sold-part-col"><div class="gps-sold-part-value">{{ $row['part_id'] ?: '—' }}</div></div>
                     <div class="gps-sold-part-col">
                         <div class="gps-sold-part-actions">
-                            @if ($row['part_url'])<a class="gps-sold-part-action" href="{{ $row['part_url'] }}">Część</a>@endif
-                            @if ($row['order_url'])<a class="gps-sold-part-action" href="{{ $row['order_url'] }}">Zamówienie</a>@endif
+                            @if ($row['part_url'])<a class="gps-sold-part-action" href="{{ $row['part_url'] }}" wire:navigate>Część</a>@endif
+                            @if ($row['order_url'])<a class="gps-sold-part-action" href="{{ $row['order_url'] }}" wire:navigate>Zamówienie</a>@endif
                         </div>
                     </div>
                 </div>

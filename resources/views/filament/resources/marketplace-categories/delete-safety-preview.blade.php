@@ -34,7 +34,7 @@
                 #{{ $product['product_id'] }}
                 — {{ $product['title'] ?: '—' }}
                 — current category_id: {{ $product['current_category_id'] ?? '—' }}
-                — <a class="text-primary-600 underline" href="{{ $product['edit_url'] }}">/admin/parts/{{ $product['product_id'] }}/edit</a>
+                — <a class="text-primary-600 underline" href="{{ $product['edit_url'] }}" wire:navigate>/admin/parts/{{ $product['product_id'] }}/edit</a>
             </div>
         @empty
             <span>—</span>

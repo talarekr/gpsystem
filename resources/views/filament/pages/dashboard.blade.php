@@ -7,11 +7,11 @@
                 <span class="gps-quick-action__icon">↘</span>
                 <strong>Sprzedaż lokalna</strong>
             </button>
-            <a class="gps-quick-action" href="{{ $this->addPartUrl() }}">
+            <a class="gps-quick-action" href="{{ $this->addPartUrl() }}" wire:navigate>
                 <span class="gps-quick-action__icon">＋</span>
                 <strong>Dodaj część</strong>
             </a>
-            <a class="gps-quick-action" href="{{ $this->ordersUrl() }}">
+            <a class="gps-quick-action" href="{{ $this->ordersUrl() }}" wire:navigate>
                 <span class="gps-quick-action__icon">☷</span>
                 <strong>Zamówienia</strong>
             </a>

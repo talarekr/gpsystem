@@ -7,7 +7,7 @@
     @include('filament.pages.partials.shipment-styles')
 
     <div class="gps-actions" style="margin-bottom:14px">
-        <a href="{{ \App\Filament\Pages\Shipments::getUrl() }}" class="gps-action">Wróć do listy</a>
+        <a href="{{ \App\Filament\Pages\Shipments::getUrl() }}" class="gps-action" wire:navigate>Wróć do listy</a>
         @if($shipment->label_path)
             <a class="gps-action gps-primary" href="{{ route('tools.download-shipment-label', $shipment) }}">Pobierz etykietę PDF</a>
         @endif

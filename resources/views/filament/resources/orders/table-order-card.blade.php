@@ -425,7 +425,7 @@
                     <div class="gps-admin-order-card__muted">Brak danych dostawy</div>
                 @endif
                 <div class="gps-admin-order-card__actions">
-                    <a class="gps-admin-order-card__action" href="{{ $viewUrl }}">Szczegóły</a>
+                    <a class="gps-admin-order-card__action" href="{{ $viewUrl }}" wire:navigate>Szczegóły</a>
                 </div>
             </div>
         </div>

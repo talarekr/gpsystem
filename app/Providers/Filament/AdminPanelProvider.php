@@ -59,6 +59,7 @@ use Filament\PanelProvider;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Support\Facades\Blade;
+use Illuminate\Support\Str;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Session\Middleware\StartSession;
@@ -75,6 +76,9 @@ class AdminPanelProvider extends PanelProvider
             ->login()
             ->brandName('GPS Product Hub')
             ->breadcrumbs(false)
+            ->when(config('product-hub.ui.filament_spa_enabled'), fn (Panel $panel): Panel => $panel
+                ->spa()
+                ->spaUrlExceptions($this->spaUrlExceptions()))
             ->renderHook(
                 'panels::head.end',
                 fn (): string => Blade::render('@include(\'filament.admin-ui-refinements\')')
@@ -202,5 +206,44 @@ class AdminPanelProvider extends PanelProvider
             ->authMiddleware([
                 Authenticate::class,
             ]);
+    }
+
+    /**
+     * URLs that must keep classic browser navigation even when Filament SPA is enabled.
+     *
+     * Keep downloads, OAuth redirects/callbacks, JSON/tool runners and write-capable
+     * admin utility endpoints out of Livewire navigation so a GET prefetch cannot
+     * accidentally replace a non-Filament response in the panel shell.
+     *
+     * @return array<int, string>
+     */
+    private function spaUrlExceptions(): array
+    {
+        return collect([
+            url('/admin/login'),
+            url('/admin/logout'),
+            url('/logout'),
+            url('/admin/csrf-token'),
+            url('/admin/allegro/oauth/*'),
+            url('/admin/ebay/oauth/*'),
+            url('/admin/tools/*oauth*'),
+            url('/admin/tools/*callback*'),
+            url('/admin/tools/*download*'),
+            url('/admin/tools/*export*'),
+            url('/admin/tools/*.csv*'),
+            url('/admin/tools/*.json*'),
+            url('/admin/tools/*dry-run*'),
+            url('/admin/tools/*apply*'),
+            url('/admin/tools/*runner*'),
+            url('/admin/tools/*sync*'),
+            url('/admin/tools/*deploy*'),
+            url('/admin/tools/*label*'),
+            url('/tools/*'),
+            url('/storage/*'),
+        ])
+            ->flatMap(fn (string $url): array => [$url, Str::replaceFirst(config('app.url'), '', $url)])
+            ->unique()
+            ->values()
+            ->all();
     }
 }

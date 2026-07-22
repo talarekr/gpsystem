@@ -1,4 +1,10 @@
 (() => {
+  if (window.GpsAdminTopbar?.initialized) {
+    return;
+  }
+
+  window.GpsAdminTopbar = { initialized: true };
+
   const body = document.body;
   const toggle = document.querySelector('[data-gps-sidebar-toggle]');
   const storageKey = 'gps-admin-sidebar-collapsed';
@@ -84,6 +90,7 @@
   });
 
   mobileQuery.addEventListener?.('change', syncResponsiveSidebarState);
+  document.addEventListener('livewire:navigated', syncResponsiveSidebarState);
 
   const root = document.querySelector('[data-gps-part-search]');
   if (!root) return;
@@ -111,7 +118,7 @@
       const details = ['Magazyn: ' + location, item.part_number || '—'].filter(Boolean).join(' · ');
 
       return `
-        <a class="gps-admin-search__result" href="${item.url}">
+        <a class="gps-admin-search__result" href="${item.url}" wire:navigate>
           <span class="gps-admin-search__thumb">${item.thumbnail ? `<img src="${item.thumbnail}" alt="">` : '—'}</span>
           <span class="gps-admin-search__meta">
             <span class="gps-admin-search__title">${escapeHtml(item.name || 'Część #' + item.id)}</span>
