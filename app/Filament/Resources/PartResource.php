@@ -926,9 +926,7 @@ class PartResource extends Resource
 
     private static function categorySearchLabel(PartCategory $category): string
     {
-        $path = trim((string) ($category->category_path ?: $category->full_slug_path));
-
-        return trim($category->name.($path !== '' ? ' ('.$path.')' : ''));
+        return trim((string) $category->name);
     }
 
     private static function applyCarPickerSearch(Builder $query, string $search): Builder

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Filament\Resources\PartResource;
 use App\Filament\Resources\PartResource\Pages\EditPart;
 use App\Models\MarketplaceCategoryMapping;
 use App\Models\Part;
@@ -298,6 +299,39 @@ class PartCategoryPickerUiTest extends TestCase
         $this->assertStringNotContainsString("'categories' => self::categoryPickerCategories()", $resource);
         $this->assertStringContainsString('url.searchParams.set(this.lazyChannel ? \'parent_external_category_id\' : \'parent_id\', parentId);', $categoryPicker);
         $this->assertStringContainsString('if (this.lazyLoadOnInit)', $categoryPicker);
+    }
+
+
+    public function test_category_search_and_selected_option_labels_show_only_final_category_name_while_searching_paths(): void
+    {
+        $matchingByName = PartCategory::query()->create([
+            'name' => 'Lampy przednie',
+            'category_path' => 'Motoryzacja > Części samochodowe > Oświetlenie > Lampy przednie',
+            'full_slug_path' => 'motoryzacja/czesci-samochodowe/oswietlenie/lampy-przednie',
+        ]);
+        $matchingByPath = PartCategory::query()->create([
+            'name' => 'Reflektory',
+            'category_path' => 'Motoryzacja > Części samochodowe > Oświetlenie > Lampy tylne',
+            'full_slug_path' => 'motoryzacja/czesci-samochodowe/oswietlenie/lampy-tylne',
+        ]);
+        $matchingBySlugPath = PartCategory::query()->create([
+            'name' => 'Klosze',
+            'category_path' => 'Motoryzacja > Oświetlenie',
+            'full_slug_path' => 'motoryzacja/czesci/lampa-obrysowa',
+        ]);
+
+        foreach (['la', 'lam', 'lampa'] as $search) {
+            $results = PartResource::categorySearchResults($search);
+
+            $this->assertSame('Lampy przednie', $results[$matchingByName->id] ?? null);
+            $this->assertStringNotContainsString('Motoryzacja >', $results[$matchingByName->id] ?? '');
+        }
+
+        $lampaResults = PartResource::categorySearchResults('lampa');
+
+        $this->assertSame('Reflektory', $lampaResults[$matchingByPath->id] ?? null);
+        $this->assertSame('Klosze', $lampaResults[$matchingBySlugPath->id] ?? null);
+        $this->assertSame('Lampy przednie', PartResource::categoryOptionLabel($matchingByName->id));
     }
 
     public function test_part_category_children_endpoint_loads_only_roots_and_then_children_from_local_db(): void
