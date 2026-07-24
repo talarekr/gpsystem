@@ -520,12 +520,15 @@ class Part extends Model
     {
         return $query
             ->where('status', 'ready')
-            ->where('quantity', '>', 0);
+            ->where('quantity', '>', 0)
+            ->where('price', '>', 0);
     }
 
     public function isAvailableForLocalSale(): bool
     {
-        return $this->status === 'ready' && (int) $this->quantity > 0;
+        return $this->status === 'ready'
+            && (int) $this->quantity > 0
+            && (float) $this->price > 0;
     }
 
     public function scopeNotSold(Builder $query): Builder
@@ -538,10 +541,11 @@ class Part extends Model
     public function scopeStorefrontVisible(Builder $query): Builder
     {
         return $query
+            ->where('status', 'ready')
             ->where('needs_listing', false)
             ->where(fn (Builder $query) => $query->where('needs_review', false)->orWhereNull('needs_review'))
-            ->inStock()
-            ->notSold();
+            ->where('price', '>', 0)
+            ->inStock();
     }
 
     public function scopeSearchStorefront(Builder $query, ?string $value): Builder
