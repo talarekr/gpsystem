@@ -128,9 +128,9 @@ class CartService
         return Part::query()->with('images')->storefrontVisible()->whereKey($partId)->first();
     }
 
-    private function isAvailable(Part $part): bool
+    public function isAvailable(Part $part): bool
     {
-        return ! in_array($part->status, ['sold', 'archived'], true) && (int) $part->quantity > 0;
+        return $part->isAvailableForLocalSale();
     }
 
     private function snapshot(Part $part, int $quantity, string $addedAt): array

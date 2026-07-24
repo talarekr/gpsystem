@@ -16,6 +16,7 @@ class StorefrontVisibilityTest extends TestCase
             'name' => 'Widoczna stara część',
             'status' => 'ready',
             'quantity' => 1,
+            'price' => 100,
             'is_visible_storefront' => false,
             'needs_listing' => false,
         ]);
@@ -24,6 +25,7 @@ class StorefrontVisibilityTest extends TestCase
             'name' => 'Ukryta część do wystawienia',
             'status' => 'ready',
             'quantity' => 1,
+            'price' => 100,
             'is_visible_storefront' => true,
             'needs_listing' => true,
         ]);
@@ -32,6 +34,7 @@ class StorefrontVisibilityTest extends TestCase
             'name' => 'Archiwalna część',
             'status' => 'archived',
             'quantity' => 1,
+            'price' => 100,
             'is_visible_storefront' => true,
             'needs_listing' => false,
         ]);
@@ -40,6 +43,7 @@ class StorefrontVisibilityTest extends TestCase
             'name' => 'Sprzedana część',
             'status' => 'sold',
             'quantity' => 1,
+            'price' => 100,
             'is_visible_storefront' => true,
             'needs_listing' => false,
         ]);
@@ -48,6 +52,7 @@ class StorefrontVisibilityTest extends TestCase
             'name' => 'Część bez stocku',
             'status' => 'ready',
             'quantity' => 0,
+            'price' => 100,
             'is_visible_storefront' => true,
             'needs_listing' => false,
         ]);
@@ -67,6 +72,7 @@ class StorefrontVisibilityTest extends TestCase
             'name' => 'Widoczna stara część',
             'status' => 'ready',
             'quantity' => 1,
+            'price' => 100,
             'is_visible_storefront' => false,
             'needs_listing' => false,
         ]);
@@ -75,6 +81,7 @@ class StorefrontVisibilityTest extends TestCase
             'name' => 'Ukryta część do wystawienia',
             'status' => 'ready',
             'quantity' => 1,
+            'price' => 100,
             'is_visible_storefront' => true,
             'needs_listing' => true,
         ]);
@@ -103,4 +110,92 @@ class StorefrontVisibilityTest extends TestCase
                 'sample_hidden_by_quantity',
             ]);
     }
+
+    public function test_draft_part_with_stock_and_price_is_hidden_and_cannot_be_added_to_cart(): void
+    {
+        $part = Part::query()->create([
+            'name' => 'Roboczy produkt z ceną',
+            'slug' => 'roboczy-produkt-z-cena',
+            'status' => 'draft',
+            'quantity' => 1,
+            'price' => 99.99,
+            'needs_listing' => false,
+            'is_visible_storefront' => true,
+        ]);
+
+        $this->assertFalse(Part::query()->whereKey($part->id)->storefrontVisible()->exists());
+        $this->get(route('storefront.catalog'))->assertDontSee('Roboczy produkt z ceną');
+        $this->get(route('storefront.product', $part->slug))->assertNotFound();
+
+        $this->post(route('storefront.cart.add', $part))->assertSessionHas('error');
+        $this->assertFalse(app(\App\Services\Storefront\CartService::class)->isAvailable($part));
+    }
+
+    public function test_draft_part_without_valid_price_cannot_be_bought(): void
+    {
+        $part = Part::query()->create([
+            'name' => 'Roboczy produkt bez ceny',
+            'status' => 'draft',
+            'quantity' => 1,
+            'price' => 0,
+            'needs_listing' => false,
+            'is_visible_storefront' => true,
+        ]);
+
+        $this->post(route('storefront.cart.add', $part))->assertSessionHas('error');
+        $this->assertFalse(app(\App\Services\Storefront\CartService::class)->isAvailable($part));
+    }
+
+    public function test_ready_part_with_stock_and_positive_price_is_storefront_buyable(): void
+    {
+        $part = Part::query()->create([
+            'name' => 'Gotowy produkt',
+            'status' => 'ready',
+            'quantity' => 1,
+            'price' => 123.45,
+            'needs_listing' => false,
+            'is_visible_storefront' => false,
+        ]);
+
+        $this->assertTrue(Part::query()->whereKey($part->id)->storefrontVisible()->exists());
+        $this->assertTrue(app(\App\Services\Storefront\CartService::class)->isAvailable($part));
+        $this->post(route('storefront.cart.add', $part))->assertSessionHas('success');
+    }
+
+    public function test_ready_part_without_positive_price_cannot_be_bought_for_zero(): void
+    {
+        foreach ([0, null] as $price) {
+            $part = Part::query()->create([
+                'name' => 'Gotowy produkt bez ceny '.($price === null ? 'null' : 'zero'),
+                'status' => 'ready',
+                'quantity' => 1,
+                'price' => $price,
+                'needs_listing' => false,
+                'is_visible_storefront' => true,
+            ]);
+
+            $this->assertFalse(Part::query()->whereKey($part->id)->storefrontVisible()->exists());
+            $this->assertFalse(app(\App\Services\Storefront\CartService::class)->isAvailable($part));
+            $this->post(route('storefront.cart.add', $part))->assertSessionHas('error');
+        }
+    }
+
+    public function test_sold_and_archived_parts_are_not_buyable(): void
+    {
+        foreach (['sold', 'archived'] as $status) {
+            $part = Part::query()->create([
+                'name' => 'Produkt '.$status,
+                'status' => $status,
+                'quantity' => 1,
+                'price' => 50,
+                'needs_listing' => false,
+                'is_visible_storefront' => true,
+            ]);
+
+            $this->assertFalse(Part::query()->whereKey($part->id)->storefrontVisible()->exists());
+            $this->assertFalse(app(\App\Services\Storefront\CartService::class)->isAvailable($part));
+            $this->post(route('storefront.cart.add', $part))->assertSessionHas('error');
+        }
+    }
+
 }
