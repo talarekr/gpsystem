@@ -39,6 +39,7 @@ use App\Http\Controllers\Storefront\PrivacyPolicyController;
 use App\Http\Controllers\Storefront\SearchController;
 use App\Http\Controllers\Storefront\TermsController;
 use App\Http\Controllers\Tools\CheckOrdersFlowController;
+use App\Http\Controllers\Tools\CategoryMappingExportController;
 use App\Http\Controllers\Tools\PayuDiagnosticsController;
 use App\Http\Controllers\Tools\DebugOrderItemThumbnailController;
 use App\Http\Controllers\Tools\DhlConfigDiagnoseController;
@@ -402,6 +403,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::get('/admin/tools/marketplace/ovoko-url-backfill', OvokoListingUrlBackfillController::class)->name('admin.tools.marketplace.ovoko-url-backfill');
     Route::match(['get', 'post'], '/admin/tools/marketplace/listing-image-refresh', MarketplaceListingImageRefreshController::class)->name('admin.tools.marketplace.listing-image-refresh');
     Route::get('/admin/tools/marketplace/mapping-gaps-export', MarketplaceMappingGapsExportController::class)->name('admin.tools.marketplace.mapping-gaps-export');
+    Route::get('/admin/tools/category-mapping-export', CategoryMappingExportController::class)->name('admin.tools.category-mapping-export');
     Route::get('/admin/tools/ovoko/car-dictionaries-diagnose', OvokoCarDictionariesDiagnoseController::class)->name('admin.tools.ovoko.car-dictionaries-diagnose');
     Route::post('/admin/tools/ovoko/sync-car-dictionaries', OvokoSyncCarDictionariesController::class)->name('admin.tools.ovoko.sync-car-dictionaries');
     Route::get('/admin/tools/ovoko/car-models-sync-runner', [OvokoCarModelsSyncRunnerController::class, 'index'])->name('admin.tools.ovoko.car-models-sync-runner.index');
@@ -2870,4 +2872,3 @@ Route::get('/tools/debug-ovoko-shipment-preview', [ShipmentToolsController::clas
 Route::get('/tools/create-order-shipment', [ShipmentToolsController::class, 'create'])->name('tools.create-order-shipment');
 Route::get('/tools/download-shipment-label/{shipment}', [ShipmentToolsController::class, 'download'])->name('tools.download-shipment-label');
 Route::delete('/tools/delete-test-shipment/{shipment}', [ShipmentToolsController::class, 'deleteTest'])->name('tools.delete-test-shipment');
-
