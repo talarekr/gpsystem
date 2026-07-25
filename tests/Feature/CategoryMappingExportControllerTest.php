@@ -40,12 +40,36 @@ class CategoryMappingExportControllerTest extends TestCase
             ->assertJsonPath('missing_all_count', 1);
 
         $path = $response->json('file_relative_path');
+        $filename = basename($path);
         Storage::disk('public')->assertExists($path);
+        $this->assertSame(
+            route('admin.tools.category-mapping-export.download', ['file' => $filename]),
+            $response->json('admin_download_url')
+        );
         $csv = Storage::disk('public')->get($path);
         $this->assertStringContainsString('allegro_channel', $csv);
         $this->assertStringContainsString('Silniki Allegro', $csv);
         $this->assertStringContainsString("'=Niebezpieczna", $csv);
         $this->assertStringContainsString('missing_all', $csv);
+
+        $this->get('/admin/tools/category-mapping-export/download?file='.$filename)
+            ->assertOk()
+            ->assertDownload($filename)
+            ->assertHeader('content-type', 'text/csv; charset=UTF-8');
+    }
+
+    public function test_download_rejects_paths_and_unknown_exports(): void
+    {
+        $this->withoutMiddleware();
+        Storage::fake('public');
+
+        $this->getJson('/admin/tools/category-mapping-export/download?file=../../.env')
+            ->assertNotFound()
+            ->assertJsonPath('error', 'Invalid filename');
+
+        $this->getJson('/admin/tools/category-mapping-export/download?file=category_mapping_export_20260725_205406.csv')
+            ->assertNotFound()
+            ->assertJsonPath('error', 'File not found');
     }
 
     private function mapping(int $categoryId, string $channel, string $externalId, string $name): array

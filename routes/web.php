@@ -404,6 +404,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
     Route::match(['get', 'post'], '/admin/tools/marketplace/listing-image-refresh', MarketplaceListingImageRefreshController::class)->name('admin.tools.marketplace.listing-image-refresh');
     Route::get('/admin/tools/marketplace/mapping-gaps-export', MarketplaceMappingGapsExportController::class)->name('admin.tools.marketplace.mapping-gaps-export');
     Route::get('/admin/tools/category-mapping-export', CategoryMappingExportController::class)->name('admin.tools.category-mapping-export');
+    Route::get('/admin/tools/category-mapping-export/download', [CategoryMappingExportController::class, 'download'])->name('admin.tools.category-mapping-export.download');
     Route::get('/admin/tools/ovoko/car-dictionaries-diagnose', OvokoCarDictionariesDiagnoseController::class)->name('admin.tools.ovoko.car-dictionaries-diagnose');
     Route::post('/admin/tools/ovoko/sync-car-dictionaries', OvokoSyncCarDictionariesController::class)->name('admin.tools.ovoko.sync-car-dictionaries');
     Route::get('/admin/tools/ovoko/car-models-sync-runner', [OvokoCarModelsSyncRunnerController::class, 'index'])->name('admin.tools.ovoko.car-models-sync-runner.index');

@@ -4,9 +4,11 @@ namespace App\Http\Controllers\Tools;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class CategoryMappingExportController extends Controller
 {
@@ -106,8 +108,28 @@ class CategoryMappingExportController extends Controller
             ...$counts,
             'file_relative_path' => $relativePath,
             'public_file_path' => $disk->path($relativePath),
-            'download_url' => $disk->url($relativePath),
+            'admin_download_url' => route('admin.tools.category-mapping-export.download', [
+                'file' => basename($relativePath),
+            ]),
         ]);
+    }
+
+    public function download(Request $request): StreamedResponse|JsonResponse
+    {
+        $filename = (string) $request->query('file');
+
+        if (preg_match('/^category_mapping_export_[0-9]{8}_[0-9]{6}\.csv$/', $filename) !== 1) {
+            return response()->json(['ok' => false, 'error' => 'Invalid filename'], 404);
+        }
+
+        $path = 'exports/tools/'.$filename;
+        $disk = Storage::disk('public');
+
+        if (! $disk->exists($path)) {
+            return response()->json(['ok' => false, 'error' => 'File not found'], 404);
+        }
+
+        return $disk->download($path, $filename, ['Content-Type' => 'text/csv; charset=UTF-8']);
     }
 
     private function marketplaceCatalog($mappings): array
