@@ -524,6 +524,18 @@ class Part extends Model
             ->where('price', '>', 0);
     }
 
+    public function scopeForSale(Builder $query): Builder
+    {
+        return $query
+            ->whereIn('status', ['ready', 'published'])
+            ->inStock();
+    }
+
+    public function scopeSold(Builder $query): Builder
+    {
+        return $query->where('status', 'sold');
+    }
+
     public function isAvailableForLocalSale(): bool
     {
         return $this->status === 'ready'
