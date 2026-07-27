@@ -731,7 +731,7 @@ class PartModuleFoundationTest extends TestCase
 
     public function test_part_navigation_counts_use_real_parts_and_needs_listing_queue(): void
     {
-        Part::query()->create(['name' => 'Część bez wystawienia']);
+        Part::query()->create(['name' => 'Część bez wystawienia', 'status' => 'ready']);
         Part::query()->create(['name' => 'Część do wystawienia 1', 'needs_listing' => true]);
         Part::query()->create(['name' => 'Część do wystawienia 2', 'needs_listing' => true]);
 
@@ -741,7 +741,7 @@ class PartModuleFoundationTest extends TestCase
 
     public function test_parts_to_list_diagnostics_reports_admin_view_split(): void
     {
-        Part::query()->create(['name' => 'Część bez wystawienia']);
+        Part::query()->create(['name' => 'Część bez wystawienia', 'status' => 'ready']);
         Part::query()->create(['name' => 'Część do wystawienia 1', 'needs_listing' => true]);
         Part::query()->create(['name' => 'Część do wystawienia 2', 'needs_listing' => true]);
 
