@@ -87,7 +87,7 @@ class DhlShipmentService
                 'shipment_end_hour' => '15:00',
                 'drop_off_type' => config('services.dhl.drop_off_type', 'REGULAR_PICKUP') === 'REQUEST_COURIER' ? 'REGULAR_PICKUP' : config('services.dhl.drop_off_type', 'REGULAR_PICKUP'),
                 'order_courier' => false,
-                'label_type' => config('services.dhl.label_type', 'LBLP'),
+                'label_type' => config('services.dhl.label_type', 'BLP'),
             ],
             'special_services' => [
                 'insurance' => false,
@@ -429,7 +429,7 @@ class DhlShipmentService
             throw new RuntimeException('DHL remote shipment was created, but local label PDF was not saved.');
         }
 
-        return Shipment::query()->create([
+        $shipment = Shipment::query()->create([
             'order_id' => $form['order_id'] ?? null, 'carrier' => 'dhl',
             'service_code' => data_get($payload, 'shipment.shipmentInfo.serviceType', data_get($form, 'service.service_type', 'AH')),
             'shipment_status' => 'label_created', 'tracking_number' => $waybill, 'carrier_shipment_id' => $waybill,
@@ -439,6 +439,21 @@ class DhlShipmentService
             'response_payload' => $this->sanitize($this->createShipmentResponseForLog($response) + ['recovered_from_dhl_create_shipment_log' => $recovery, 'code_marker' => 'dhl_create_shipment_atomic_label_v1']),
             'test_mode' => (bool) config('services.dhl.test_mode', true),
         ]);
+
+        app(ApiIntegrationLogger::class)->success('dhl', 'dhl_label_format', 'DHL PDF label format saved.', [
+            'order_id' => $shipment->order_id,
+            'shipment_id' => $shipment->id,
+            'tracking_number' => $shipment->tracking_number,
+            'external_id' => $shipment->carrier_shipment_id,
+            'requested_label_type' => data_get($payload, 'shipment.shipmentInfo.labelType', 'BLP'),
+            'response_label_type' => $parsedResponse['label_type'] ?? null,
+            'mime_type' => $parsedResponse['label_format'] ?? 'application/pdf',
+            'file_size_bytes' => strlen($labelBinary),
+            'label_path' => $path,
+            'marketplace_write' => false,
+        ]);
+
+        return $shipment;
     }
 
     private function persistIncompleteRemoteCreatedShipment(array $form, array $payload, mixed $response, array $parsedResponse, string $reason): Shipment
@@ -513,6 +528,105 @@ class DhlShipmentService
         ];
     }
 
+    public function ensureBlpLabel(Shipment $shipment): Shipment
+    {
+        if (strtolower((string) $shipment->carrier) !== 'dhl') {
+            throw new RuntimeException('BLP label download is available only for DHL shipments.');
+        }
+
+        $currentType = strtoupper((string) (data_get($shipment->request_payload, 'shipment.shipmentInfo.labelType')
+            ?: data_get($shipment->response_payload, 'labelType')));
+        if ($currentType === 'BLP' && $this->safeLocalLabelExists($shipment->label_path)) {
+            return $shipment;
+        }
+
+        $tracking = trim((string) ($shipment->carrier_shipment_id ?: $shipment->tracking_number));
+        if ($tracking === '') {
+            throw new RuntimeException('DHL shipment has no shipmentNotificationNumber.');
+        }
+
+        $payload = [
+            'authData' => ['username' => config('services.dhl.login'), 'password' => config('services.dhl.password')],
+            'itemsToPrint' => ['item' => [['labelType' => 'BLP', 'shipmentId' => $tracking]]],
+        ];
+        $startedAt = microtime(true);
+
+        try {
+            $response = $this->callGetLabels($payload);
+            $parsed = $this->parseGetLabelsResponse($response);
+            $binary = base64_decode((string) ($parsed['label_content'] ?? ''), true);
+            if ($binary === false || ! str_starts_with($binary, '%PDF-')) {
+                throw new RuntimeException('DHL getLabels did not return a valid BLP PDF.');
+            }
+
+            $path = 'shipments/labels/dhl/'.$tracking.'.pdf';
+            if (! $this->writeDhlLabelFile($path, $binary)) {
+                throw new RuntimeException('DHL BLP PDF could not be saved locally.');
+            }
+
+            $requestPayload = (array) ($shipment->request_payload ?? []);
+            data_set($requestPayload, 'shipment.shipmentInfo.labelType', 'BLP');
+            $shipment->update([
+                'label_path' => $path,
+                'label_format' => $parsed['label_format'] ?: 'application/pdf',
+                'request_payload' => $requestPayload,
+                'response_payload' => array_merge((array) ($shipment->response_payload ?? []), [
+                    'labelType' => 'BLP',
+                    'labelFormat' => $parsed['label_format'] ?: 'application/pdf',
+                    'blp_label_downloaded_at' => now()->toISOString(),
+                ]),
+            ]);
+
+            app(ApiIntegrationLogger::class)->success('dhl', 'dhl_label_format', 'DHL BLP PDF label downloaded and saved.', [
+                'order_id' => $shipment->order_id, 'shipment_id' => $shipment->id,
+                'tracking_number' => $tracking, 'external_id' => $tracking,
+                'requested_label_type' => 'BLP', 'response_label_type' => $parsed['label_type'],
+                'mime_type' => $parsed['label_format'] ?: 'application/pdf', 'file_size_bytes' => strlen($binary),
+                'label_path' => $path, 'marketplace_write' => false,
+            ]);
+
+            return $shipment->refresh();
+        } catch (Throwable $exception) {
+            app(ApiIntegrationLogger::class)->error('dhl', 'dhl_label_format', $exception, [
+                'order_id' => $shipment->order_id, 'shipment_id' => $shipment->id,
+                'tracking_number' => $tracking, 'external_id' => $tracking,
+                'requested_label_type' => 'BLP', 'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+                'marketplace_write' => false,
+            ]);
+            throw $exception;
+        }
+    }
+
+    public function parseGetLabelsResponse(mixed $response): array
+    {
+        $array = $this->toArray($response);
+        $result = data_get($array, 'getLabelsResult.item', data_get($array, 'getLabelsResult', $array));
+        if (is_array($result) && array_is_list($result)) {
+            $result = $result[0] ?? [];
+        }
+
+        return [
+            'label_content' => data_get($result, 'labelData') ?: data_get($result, 'labelContent'),
+            'label_type' => data_get($result, 'labelType') ?: 'BLP',
+            'label_format' => data_get($result, 'labelMimeType') ?: data_get($result, 'labelFormat') ?: 'application/pdf',
+        ];
+    }
+
+    protected function callGetLabels(array $payload): array
+    {
+        $endpoint = (string) config('services.dhl.endpoint');
+        if ($endpoint === '') {
+            throw new RuntimeException('DHL API endpoint is not configured; existing label cannot be converted to BLP without DHL getLabels.');
+        }
+
+        try {
+            $client = new SoapClient($endpoint, ['trace' => false, 'exceptions' => true]);
+            return (array) $client->__soapCall('getLabels', [$payload]);
+        } catch (SoapFault $exception) {
+            throw new RuntimeException('Błąd DHL getLabels: '.$exception->getMessage(), previous: $exception);
+        }
+    }
+
     private function safeLocalLabelExists(mixed $path): bool
     {
         if (! is_scalar($path)) {
@@ -579,7 +693,7 @@ class DhlShipmentService
                         'shipmentStartHour' => data_get($form, 'service.shipment_start_hour', '12:00'),
                         'shipmentEndHour' => data_get($form, 'service.shipment_end_hour', '15:00'),
                     ],
-                    'labelType' => data_get($form, 'service.label_type', 'LBLP'),
+                    'labelType' => data_get($form, 'service.label_type', 'BLP'),
                 ],
                 'content' => data_get($form, 'parcel.content', 'Części samochodowe'),
                 'comment' => data_get($form, 'parcel.comment'),
@@ -824,7 +938,7 @@ class DhlShipmentService
         $endpoint = (string) config('services.dhl.endpoint');
         if ($endpoint === '') {
             $id = 'DHL-TEST-'.Str::upper(Str::random(10));
-            return ['shipmentNotificationNumber' => $id, 'labelType' => data_get($payload, 'shipment.shipmentInfo.labelType', 'LBLP'), 'labelFormat' => 'application/pdf', 'labelContent' => base64_encode("%PDF-1.4\n% GPS DHL test label {$id}\n")];
+            return ['shipmentNotificationNumber' => $id, 'labelType' => data_get($payload, 'shipment.shipmentInfo.labelType', 'BLP'), 'labelFormat' => 'application/pdf', 'labelContent' => base64_encode("%PDF-1.4\n% GPS DHL test label {$id}\n")];
         }
 
         try {

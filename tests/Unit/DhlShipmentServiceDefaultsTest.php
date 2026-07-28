@@ -37,6 +37,33 @@ class DhlShipmentServiceDefaultsTest extends TestCase
         $this->assertSame('579 152 665', $defaults['shipper']['phone']);
         $this->assertSame('gregor1142@gmail.com', $defaults['shipper']['email']);
     }
+    public function test_defaults_and_payload_request_blp_pdf(): void
+    {
+        config()->set('services.dhl.label_type', 'BLP');
+
+        $service = app(DhlShipmentService::class);
+        $defaults = $service->defaults();
+        $payload = $service->payload($defaults);
+
+        $this->assertSame('BLP', $defaults['service']['label_type']);
+        $this->assertSame('BLP', $payload['shipment']['shipmentInfo']['labelType']);
+    }
+
+    public function test_get_labels_parser_reads_blp_pdf_response(): void
+    {
+        $parsed = app(DhlShipmentService::class)->parseGetLabelsResponse([
+            'getLabelsResult' => ['item' => [[
+                'labelType' => 'BLP',
+                'labelMimeType' => 'application/pdf',
+                'labelData' => base64_encode('%PDF-1.4 BLP'),
+            ]]],
+        ]);
+
+        $this->assertSame('BLP', $parsed['label_type']);
+        $this->assertSame('application/pdf', $parsed['label_format']);
+        $this->assertSame(base64_encode('%PDF-1.4 BLP'), $parsed['label_content']);
+    }
+
     public function test_payload_sends_service_value_only_for_selected_insurance_and_cod(): void
     {
         $service = app(DhlShipmentService::class);
