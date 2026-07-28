@@ -1,11 +1,15 @@
 # GPS Product Hub — Staging Deployment Guide
 
+> **Current production domain:** use `https://gpswiss.pl` for deploy and diagnostic endpoints. The former technical hostname is retired and must not be used as a browser URL.
+
+> Server filesystem paths may still contain `domains/gpsystem.thecamels.pl`; those paths identify the existing hosting layout and do not make that hostname a valid public URL.
+
 ## Purpose
 
 This document describes how to deploy the GPS Product Hub staging application on the current DirectAdmin/shared-hosting environment:
 
-- Staging domain: `https://gpsystem.thecamels.pl`
-- Expected admin URL: `https://gpsystem.thecamels.pl/admin`
+- Staging domain: `https://gpswiss.pl`
+- Expected admin URL: `https://gpswiss.pl/admin`
 - Laravel app root: `/home/gpsystem/domains/gpsystem.thecamels.pl/app`
 - Public root: `/home/gpsystem/domains/gpsystem.thecamels.pl/public_html`
 - Browser deploy file: `/home/gpsystem/domains/gpsystem.thecamels.pl/public_html/deploy.php`
@@ -36,13 +40,13 @@ For normal code-only staging deployments:
 2. Open:
 
    ```text
-   https://gpsystem.thecamels.pl/deploy.php?token=MY_FIXED_STAGING_TOKEN
+   https://gpswiss.pl/deploy.php?token=MY_FIXED_STAGING_TOKEN
    ```
 
 3. Watch the browser-readable log.
 4. Verify:
-   - `https://gpsystem.thecamels.pl/`
-   - `https://gpsystem.thecamels.pl/admin`
+   - `https://gpswiss.pl/`
+   - `https://gpswiss.pl/admin`
 
 The helper downloads:
 
@@ -79,7 +83,7 @@ Required values include:
 
 - `APP_ENV=staging` or equivalent staging value
 - `APP_KEY`
-- `APP_URL=https://gpsystem.thecamels.pl`
+- `APP_URL=https://gpswiss.pl`
 - database connection settings
 - cache/session/queue settings suitable for shared hosting
 - mail settings if mail is enabled
@@ -247,7 +251,7 @@ The Filament admin panel is configured with:
 Expected staging admin URL:
 
 ```text
-https://gpsystem.thecamels.pl/admin
+https://gpswiss.pl/admin
 ```
 
 ### Required PHP extensions
@@ -291,8 +295,8 @@ The current staging deployment should be treated as an admin foundation only:
 
 After a successful browser deploy, verify:
 
-- homepage loads at `https://gpsystem.thecamels.pl/`;
-- `/admin` loads at `https://gpsystem.thecamels.pl/admin`;
+- homepage loads at `https://gpswiss.pl/`;
+- `/admin` loads at `https://gpswiss.pl/admin`;
 - an admin user can log in;
 - dashboard/navigation appear;
 - feature flags remain disabled unless intentionally enabled;
@@ -331,5 +335,5 @@ After a successful browser deploy, verify:
 If no deployment is active, run the deploy URL with manual unlock:
 
 ```text
-https://gpsystem.thecamels.pl/deploy.php?token=MY_FIXED_STAGING_TOKEN&unlock=1
+https://gpswiss.pl/deploy.php?token=MY_FIXED_STAGING_TOKEN&unlock=1
 ```

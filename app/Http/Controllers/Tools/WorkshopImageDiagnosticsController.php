@@ -196,7 +196,7 @@ class WorkshopImageDiagnosticsController extends Controller
             'asset_url' => $publicPath !== '' ? asset('storage/'.$publicPath) : null,
             'asset_url_host' => $publicPath !== '' ? parse_url(asset('storage/'.$publicPath), PHP_URL_HOST) : null,
             'gpswiss_storage_url' => $publicPath !== '' ? 'https://gpswiss.pl/storage/'.$publicPath : null,
-            'technical_storage_url' => $publicPath !== '' ? 'https://gpsystem.thecamels.pl/storage/'.$publicPath : null,
+            'technical_storage_url' => $publicPath !== '' ? 'https://gpswiss.pl/storage/'.$publicPath : null,
             'relative_storage_url' => $publicPath !== '' ? '/storage/'.$publicPath : null,
             'admin_image_url_accessor' => $image->absolutePublicUrl(),
             'admin_image_url_host' => parse_url((string) $image->absolutePublicUrl(), PHP_URL_HOST),

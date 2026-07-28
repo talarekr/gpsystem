@@ -32,8 +32,8 @@ class PreDomainSwitchCheckController extends Controller
             'warnings' => [],
             'blockers' => [],
             'recommended_next_steps' => [
-                'Deploy this branch to gpsystem.thecamels.pl before switching gpswiss.pl.',
-                'Confirm this endpoint returns HTTP 200 JSON after deployment.',
+                'Deploy this branch to the production host at gpswiss.pl.',
+                'Confirm this endpoint returns HTTP 200 JSON at https://gpswiss.pl after deployment.',
             ],
             'generated_at' => now()->toISOString(),
             'route_registered' => $routeDiagnostics['registered'],

@@ -18,8 +18,8 @@ declare(strict_types=1);
 
 const DEPLOY_TOKEN = 'CHANGE_ME_TO_LONG_RANDOM_TOKEN';
 const GITHUB_ZIP_URL = 'https://github.com/talarekr/gpsystem/archive/refs/heads/main.zip';
-const STAGING_URL = 'https://gpsystem.thecamels.pl';
-const EXPECTED_ADMIN_URL = 'https://gpsystem.thecamels.pl/admin';
+const STAGING_URL = 'https://gpswiss.pl';
+const EXPECTED_ADMIN_URL = 'https://gpswiss.pl/admin';
 
 $config = [
     'app_dir' => '/home/gpsystem/domains/gpsystem.thecamels.pl/app',

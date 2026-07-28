@@ -1,5 +1,9 @@
 # GPS Product Hub one-file browser deployment helper
 
+> **Current production domain:** use `https://gpswiss.pl` for deploy and diagnostic endpoints. The former technical hostname is retired and must not be used as a browser URL.
+
+> Server filesystem paths may still contain `domains/gpsystem.thecamels.pl`; those paths identify the existing hosting layout and do not make that hostname a valid public URL.
+
 This document describes the staging browser deployment helper for the GPS Product Hub Laravel application on the current DirectAdmin/shared-hosting environment.
 
 > **Staging only:** this is a pragmatic shared-hosting deployment helper. It is not the final production deployment architecture. Production should later move to VPS/SSH, GitHub Actions, Deployer, or another real CI/CD flow.
@@ -10,12 +14,12 @@ Current staging values used by `deploy.example.php`:
 
 | Item | Value |
 | --- | --- |
-| Staging domain | `https://gpsystem.thecamels.pl` |
+| Staging domain | `https://gpswiss.pl` |
 | Laravel app root | `/home/gpsystem/domains/gpsystem.thecamels.pl/app` |
 | Public root | `/home/gpsystem/domains/gpsystem.thecamels.pl/public_html` |
 | Browser deploy file | `/home/gpsystem/domains/gpsystem.thecamels.pl/public_html/deploy.php` |
 | GitHub ZIP | `https://github.com/talarekr/gpsystem/archive/refs/heads/main.zip` |
-| Admin URL | `https://gpsystem.thecamels.pl/admin` |
+| Admin URL | `https://gpswiss.pl/admin` |
 
 The helper is copied from repository file `deploy.example.php` to `public_html/deploy.php` on staging. The real deploy token is edited only on the staging server and must not be committed.
 
@@ -27,13 +31,13 @@ For normal code-only changes:
 2. Open the protected staging URL:
 
    ```text
-   https://gpsystem.thecamels.pl/deploy.php?token=MY_FIXED_STAGING_TOKEN
+   https://gpswiss.pl/deploy.php?token=MY_FIXED_STAGING_TOKEN
    ```
 
 3. Read the browser log until it ends with a successful completion message.
 4. Verify:
-   - `https://gpsystem.thecamels.pl/`
-   - `https://gpsystem.thecamels.pl/admin`
+   - `https://gpswiss.pl/`
+   - `https://gpswiss.pl/admin`
 
 No shell access is required for this flow.
 
@@ -219,7 +223,7 @@ The helper uses `public_html/deploy.lock` to prevent accidental overlapping brow
 - a manual unlock is available by adding `&unlock=1` to the deploy URL after confirming no deployment is active:
 
   ```text
-  https://gpsystem.thecamels.pl/deploy.php?token=MY_FIXED_STAGING_TOKEN&unlock=1
+  https://gpswiss.pl/deploy.php?token=MY_FIXED_STAGING_TOKEN&unlock=1
   ```
 
 ## Safety confirmations

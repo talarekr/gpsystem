@@ -1,15 +1,19 @@
 # GPS Product Hub — Staging Operator Checklist
 
+> **Current production domain:** use `https://gpswiss.pl` for deploy and diagnostic endpoints. The former technical hostname is retired and must not be used as a browser URL.
+
+> Server filesystem paths may still contain `domains/gpsystem.thecamels.pl`; those paths identify the existing hosting layout and do not make that hostname a valid public URL.
+
 Target staging URL:
 
 ```text
-https://gpsystem.thecamels.pl
+https://gpswiss.pl
 ```
 
 Target admin URL:
 
 ```text
-https://gpsystem.thecamels.pl/admin
+https://gpswiss.pl/admin
 ```
 
 This checklist is for deploying the current GPS Product Hub foundation only. It does not enable product, staging, sync, marketplace, or external API features.
@@ -111,7 +115,7 @@ Recommended staging values:
 APP_NAME="GPS Product Hub"
 APP_ENV=staging
 APP_DEBUG=false
-APP_URL=https://gpsystem.thecamels.pl
+APP_URL=https://gpswiss.pl
 
 LOG_CHANNEL=stack
 LOG_STACK=single
@@ -129,7 +133,7 @@ CACHE_STORE=database
 QUEUE_CONNECTION=database
 
 MAIL_MAILER=log
-MAIL_FROM_ADDRESS=no-reply@gpsystem.thecamels.pl
+MAIL_FROM_ADDRESS=no-reply@gpswiss.pl
 MAIL_FROM_NAME="GPS Product Hub"
 
 GPS_INTEGRATIONS_ENABLED=false
@@ -278,19 +282,19 @@ The repository root contains `.env`, source code, and configuration files that m
 Configure SSL/TLS for:
 
 ```text
-gpsystem.thecamels.pl
+gpswiss.pl
 ```
 
 The final public URL should be:
 
 ```text
-https://gpsystem.thecamels.pl
+https://gpswiss.pl
 ```
 
 The admin URL should be:
 
 ```text
-https://gpsystem.thecamels.pl/admin
+https://gpswiss.pl/admin
 ```
 
 ## 15. Queue worker note
@@ -353,8 +357,8 @@ php artisan route:list --path=admin
 
 Verify in browser:
 
-- `https://gpsystem.thecamels.pl` responds.
-- `https://gpsystem.thecamels.pl/admin` loads the Filament login page.
+- `https://gpswiss.pl` responds.
+- `https://gpswiss.pl/admin` loads the Filament login page.
 - First admin can log in.
 - Dashboard appears.
 - Placeholder navigation appears:

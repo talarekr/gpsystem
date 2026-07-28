@@ -93,8 +93,8 @@ class EbayDescriptionTemplateService
             'copied' => $copied,
             'asset_check_after' => $live ? $this->checkAssets() : $check,
             'gpswiss_public_html_sync_reminder' => [
-                'dry_run' => 'https://gpsystem.thecamels.pl/tools/sync-gpswiss-public-html?token='.self::TOKEN.'&dry_run=1',
-                'live' => 'https://gpsystem.thecamels.pl/tools/sync-gpswiss-public-html?token='.self::TOKEN.'&dry_run=0',
+                'dry_run' => 'https://gpswiss.pl/tools/sync-gpswiss-public-html?token='.self::TOKEN.'&dry_run=1',
+                'live' => 'https://gpswiss.pl/tools/sync-gpswiss-public-html?token='.self::TOKEN.'&dry_run=0',
             ],
             'blockers' => $blockers,
             'warnings' => $warnings,
