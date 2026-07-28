@@ -42,7 +42,7 @@ return [
         'default_service' => env('DHL_DEFAULT_SERVICE', env('DHL24_DEFAULT_SERVICE_TYPE', 'AH')),
         'default_international_service' => env('DHL_DEFAULT_INTERNATIONAL_SERVICE', env('DHL24_DEFAULT_INTERNATIONAL_SERVICE_TYPE', 'EK')),
         'test_mode' => env('DHL_TEST_MODE', env('DHL24_MODE', 'test') !== 'production'),
-        'label_type' => env('DHL_LABEL_TYPE', env('DHL24_LABEL_TYPE', 'LBLP')),
+        'label_type' => env('DHL_LABEL_TYPE', env('DHL24_LABEL_TYPE', 'BLP')),
         'drop_off_type' => env('DHL_DROP_OFF_TYPE', env('DHL24_DEFAULT_DROP_OFF_TYPE', 'REGULAR_PICKUP')),
     ],
 

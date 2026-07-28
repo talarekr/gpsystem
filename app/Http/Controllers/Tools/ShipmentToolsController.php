@@ -4,7 +4,9 @@ namespace App\Http\Controllers\Tools;
 
 use App\Models\Order;
 use App\Models\Shipment;
+use App\Services\Marketplace\ApiIntegrationLogger;
 use App\Services\Marketplace\Shipments\OvokoShipmentAdapter;
+use App\Services\Shipments\DhlShipmentService;
 use App\Services\Shipments\ShipmentLabelService;
 use App\Support\AllegroShipmentPreviewBuilder;
 use Illuminate\Http\Request;
@@ -103,15 +105,28 @@ class ShipmentToolsController
         return response()->json($result, 200, [], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     }
 
-    public function download(Shipment $shipment)
+    public function download(Shipment $shipment, DhlShipmentService $dhl)
     {
+        if (strtolower((string) $shipment->carrier) === 'dhl') {
+            $shipment = $dhl->ensureBlpLabel($shipment);
+        }
         $path = is_scalar($shipment->label_path) ? trim((string) $shipment->label_path) : '';
         abort_unless($path !== '' && ! str_contains($path, "\0") && preg_match('/^[a-z]+:\/\//i', $path) !== 1, 404, 'Label not found.');
 
         try {
             abort_unless(Storage::disk('local')->exists($path), 404, 'Label not found.');
 
-            return Storage::disk('local')->download($path, 'shipment-'.$shipment->id.'-'.(is_scalar($shipment->carrier) && $shipment->carrier ? $shipment->carrier : 'carrier').'.pdf');
+            if (strtolower((string) $shipment->carrier) === 'dhl') {
+                app(ApiIntegrationLogger::class)->success('dhl', 'dhl_label_download', 'DHL BLP PDF label sent for download.', [
+                    'order_id' => $shipment->order_id, 'shipment_id' => $shipment->id,
+                    'tracking_number' => $shipment->tracking_number, 'external_id' => $shipment->carrier_shipment_id,
+                    'label_type' => 'BLP', 'mime_type' => 'application/pdf',
+                    'file_size_bytes' => Storage::disk('local')->size($path), 'label_path' => $path,
+                    'marketplace_write' => false,
+                ]);
+            }
+
+            return Storage::disk('local')->download($path, 'shipment-'.$shipment->id.'-'.(is_scalar($shipment->carrier) && $shipment->carrier ? $shipment->carrier : 'carrier').'.pdf', ['Content-Type' => 'application/pdf']);
         } catch (\Symfony\Component\HttpKernel\Exception\HttpException $exception) {
             throw $exception;
         } catch (\Throwable) {
