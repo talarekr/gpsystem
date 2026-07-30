@@ -1,0 +1,2 @@
+<!doctype html><html lang="pl"><head><meta charset="utf-8"><title>eBay wyłączony</title></head>
+<body style="font-family:system-ui;max-width:760px;margin:50px auto;padding:24px"><h1>Akcja eBay zablokowana</h1><p>{{ $message }}</p><p><strong>Zablokowana akcja:</strong> {{ $blocked_action }}</p><p>Nie wykonano requestu ani zapisu na marketplace.</p><a href="{{ route('admin.tools.marketplace.ebay-connection-toggle') }}">Przejdź do przełącznika eBay</a></body></html>

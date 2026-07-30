@@ -8,6 +8,7 @@ use App\Http\Middleware\FrontendMaintenanceMode;
 use App\Http\Middleware\SetStorefrontLocale;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use App\Exceptions\EbayConnectionDisabledException;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -31,6 +32,11 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        $exceptions->render(function (EbayConnectionDisabledException $exception, Request $request) {
+            $payload = ['ok' => false, 'code' => 'ebay_connection_disabled', 'message' => $exception->getMessage(), 'blocked_action' => $exception->blockedAction, 'marketplace_write' => false];
+            if ($request->expectsJson()) return response()->json($payload, 423);
+            return response()->view('admin.tools.marketplace.ebay-disabled', $payload, 423);
+        });
         $exceptions->render(function (TokenMismatchException $exception, Request $request) {
             if (! $request->is('admin', 'admin/*')) {
                 return null;
