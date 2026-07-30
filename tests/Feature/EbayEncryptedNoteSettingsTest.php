@@ -19,6 +19,8 @@ class EbayEncryptedNoteSettingsTest extends TestCase
 {
     use RefreshDatabase;
 
+    private const REMOVED_HELPER_TEXT = 'Pole techniczne, szyfrowane w aplikacji. Nie jest używane do logowania do eBay.';
+
     private User $admin;
 
     protected function setUp(): void
@@ -51,9 +53,24 @@ class EbayEncryptedNoteSettingsTest extends TestCase
         $this->assertStringNotContainsString(trim($plainText), $rawSettings);
         $this->assertSame(trim($plainText), Crypt::decryptString($encrypted));
 
-        Livewire::actingAs($this->admin)
+        $form = Livewire::actingAs($this->admin)
             ->test(EbaySettings::class)
             ->assertSet('data.ebay_de.ebay_encrypted_note', trim($plainText));
+
+        $form->assertSee('Hasło')
+            ->assertSeeHtml('type="password"')
+            ->assertSeeHtml('autocomplete="new-password"')
+            ->assertDontSee(self::REMOVED_HELPER_TEXT);
+    }
+
+    public function test_note_field_is_a_password_without_helper_text(): void
+    {
+        Livewire::actingAs($this->admin)
+            ->test(EbaySettings::class)
+            ->assertSee('Hasło')
+            ->assertSeeHtml('type="password"')
+            ->assertSeeHtml('autocomplete="new-password"')
+            ->assertDontSee(self::REMOVED_HELPER_TEXT);
     }
 
     public function test_empty_note_removes_setting_and_invalid_ciphertext_is_treated_as_empty(): void

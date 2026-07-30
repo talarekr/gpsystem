@@ -53,11 +53,10 @@ class EbaySettings extends MarketplaceApiSettingsPage
         $inputs = parent::credentialInputs($code, $definition);
         $inputs[] = TextInput::make("{$code}.ebay_encrypted_note")
             ->label('Hasło')
-            ->type('text')
-            ->autocomplete('off')
+            ->password()
+            ->autocomplete('new-password')
             ->rules(['nullable', 'string', 'max:255'])
-            ->maxLength(255)
-            ->helperText('Pole techniczne, szyfrowane w aplikacji. Nie jest używane do logowania do eBay.');
+            ->maxLength(255);
 
         return $inputs;
     }
