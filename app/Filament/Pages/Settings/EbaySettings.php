@@ -6,12 +6,16 @@ use App\Models\MarketplaceAccount;
 use App\Services\Marketplace\Api\EbayApiClient;
 use Filament\Forms\Components\Actions;
 use Filament\Forms\Components\Actions\Action;
-use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Placeholder;
+use Filament\Forms\Components\TextInput;
+use Illuminate\Contracts\Encryption\DecryptException;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\HtmlString;
 
 class EbaySettings extends MarketplaceApiSettingsPage
 {
+    public const ENCRYPTED_NOTE_KEY = 'marketplace.ebay.encrypted_note';
+
     protected static bool $shouldRegisterNavigation = true;
     protected static ?string $navigationIcon = null;
     protected static ?string $navigationLabel = 'eBay';
@@ -42,6 +46,50 @@ class EbaySettings extends MarketplaceApiSettingsPage
             TextInput::make("{$code}.payment_policy_id")->label('Payment policy ID')->maxLength(255)->helperText('Lokalna konfiguracja read-only; nie wykonuje operacji write do eBay.'),
             TextInput::make("{$code}.return_policy_id")->label('Return policy ID')->maxLength(255)->helperText('Lokalna konfiguracja read-only; nie wykonuje operacji write do eBay.'),
         ];
+    }
+
+    protected function credentialInputs(string $code, array $definition): array
+    {
+        $inputs = parent::credentialInputs($code, $definition);
+        $inputs[] = TextInput::make("{$code}.ebay_encrypted_note")
+            ->label('Hasło')
+            ->type('text')
+            ->autocomplete('off')
+            ->rules(['nullable', 'string', 'max:255'])
+            ->maxLength(255)
+            ->helperText('Pole techniczne, szyfrowane w aplikacji. Nie jest używane do logowania do eBay.');
+
+        return $inputs;
+    }
+
+    protected function additionalAccountState(MarketplaceAccount $account, array $definition): array
+    {
+        $settings = is_array($account->api_settings) ? $account->api_settings : [];
+        $encrypted = $settings[self::ENCRYPTED_NOTE_KEY] ?? null;
+
+        if (! is_string($encrypted) || $encrypted === '') {
+            return ['ebay_encrypted_note' => ''];
+        }
+
+        try {
+            return ['ebay_encrypted_note' => Crypt::decryptString($encrypted)];
+        } catch (DecryptException) {
+            return ['ebay_encrypted_note' => ''];
+        }
+    }
+
+    protected function saveAdditionalAccountState(MarketplaceAccount $account, array $state, array $definition): void
+    {
+        $settings = is_array($account->api_settings) ? $account->api_settings : [];
+        $value = trim((string) ($state['ebay_encrypted_note'] ?? ''));
+
+        if ($value === '') {
+            unset($settings[self::ENCRYPTED_NOTE_KEY]);
+        } else {
+            $settings[self::ENCRYPTED_NOTE_KEY] = Crypt::encryptString($value);
+        }
+
+        $account->api_settings = $settings;
     }
 
     protected function additionalAccountSchema(string $code, array $definition): array

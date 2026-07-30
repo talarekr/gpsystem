@@ -50,6 +50,7 @@ abstract class MarketplaceApiSettingsPage extends Page implements HasForms
             foreach ($definition['credential_fields'] as $field => $label) {
                 $state[$code][$field] = '';
             }
+            $state[$code] = array_merge($state[$code], $this->additionalAccountState($account, $definition));
         }
         $this->form->fill($state);
     }
@@ -58,10 +59,7 @@ abstract class MarketplaceApiSettingsPage extends Page implements HasForms
     {
         $sections = [];
         foreach ($this->accountDefinitions() as $code => $definition) {
-            $credentialInputs = [];
-            foreach ($definition['credential_fields'] as $field => $label) {
-                $credentialInputs[] = TextInput::make("{$code}.{$field}")->label($label)->password()->revealable(false)->autocomplete('off')->maxLength(1024)->helperText('Zostaw puste, aby zachować obecną zaszyfrowaną wartość.');
-            }
+            $credentialInputs = $this->credentialInputs($code, $definition);
 
             $sections[] = Section::make($definition['label'].' — Ustawienia API')
                 ->description('Konfiguracja zapisywana bez uruchamiania synchronizacji, publikacji ani aktualizacji marketplace.')
@@ -110,7 +108,9 @@ abstract class MarketplaceApiSettingsPage extends Page implements HasForms
                     'payment_policy_id' => trim((string) ($state[$code]['payment_policy_id'] ?? '')),
                     'return_policy_id' => trim((string) ($state[$code]['return_policy_id'] ?? '')),
                 ]), fn ($value) => $value !== ''),
-            ])->save();
+            ]);
+            $this->saveAdditionalAccountState($account, $state[$code] ?? [], $definition);
+            $account->save();
         }
         $this->mount();
         Notification::make()->title('Zapisano ustawienia API. Nie wykonano połączenia ani synchronizacji.')->success()->send();
@@ -126,6 +126,25 @@ abstract class MarketplaceApiSettingsPage extends Page implements HasForms
     protected function additionalAccountSchema(string $code, array $definition): array
     {
         return [];
+    }
+
+    protected function additionalAccountState(MarketplaceAccount $account, array $definition): array
+    {
+        return [];
+    }
+
+    protected function saveAdditionalAccountState(MarketplaceAccount $account, array $state, array $definition): void
+    {
+    }
+
+    protected function credentialInputs(string $code, array $definition): array
+    {
+        $inputs = [];
+        foreach ($definition['credential_fields'] as $field => $label) {
+            $inputs[] = TextInput::make("{$code}.{$field}")->label($label)->password()->revealable(false)->autocomplete('off')->maxLength(1024)->helperText('Zostaw puste, aby zachować obecną zaszyfrowaną wartość.');
+        }
+
+        return $inputs;
     }
 
     protected function getAccount(string $code, array $definition): MarketplaceAccount
