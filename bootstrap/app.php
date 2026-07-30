@@ -5,6 +5,7 @@ use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Session\TokenMismatchException;
 use App\Http\Middleware\EnsureAdminPanelAccess;
 use App\Http\Middleware\FrontendMaintenanceMode;
+use App\Http\Middleware\BlockDisabledEbayActions;
 use App\Http\Middleware\SetStorefrontLocale;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
@@ -23,6 +24,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->web(append: [
             SetStorefrontLocale::class,
             FrontendMaintenanceMode::class,
+            BlockDisabledEbayActions::class,
         ]);
         $middleware->alias([
             'admin.panel' => EnsureAdminPanelAccess::class,

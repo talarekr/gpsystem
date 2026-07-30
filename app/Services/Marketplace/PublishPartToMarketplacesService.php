@@ -32,6 +32,12 @@ class PublishPartToMarketplacesService
     public function confirm(Part $part, array|string $channels, bool $dryRun, bool $confirm): array
     {
         $selected = $this->normalizeChannels($channels);
+        // This is the live path used by the parts panel.  Keep the local preview
+        // available, but fail an actual eBay apply before readiness, a database
+        // transaction, or an adapter can perform any work.
+        if (! $dryRun && $confirm && in_array('ebay', $selected, true)) {
+            app(EbayConnectionGate::class)->assertEbayEnabledForWrite('parts_panel_publish');
+        }
         $enabled = collect($selected)->every(fn (string $channel): bool => $this->publishGate->allows($channel));
         $base = $this->responseSkeleton($dryRun, $confirm);
         if ($dryRun || ! $confirm || ! $enabled) return $base + ['part_id' => $part->id, 'blocked' => true, 'blockers' => $dryRun || ! $confirm ? ['marketplace_publish_not_confirmed'] : $this->blockingFlags($selected), 'channels' => [], 'publish_gates' => $this->publishGates($selected), 'readiness_ok' => false];
