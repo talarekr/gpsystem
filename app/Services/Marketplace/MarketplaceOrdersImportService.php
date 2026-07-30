@@ -90,11 +90,6 @@ class MarketplaceOrdersImportService
     private function runMarketplace(string $marketplace, array $options, bool $dryRun): array
     {
         $result = $this->emptyMarketplaceSummary($marketplace, $options, $dryRun);
-        if ($marketplace === 'ebay' && ! app(EbayConnectionGate::class)->isEbayEnabled()) {
-            try { app(EbayConnectionGate::class)->assertEbayEnabledForSync('orders_sync'); } catch (\App\Exceptions\EbayConnectionDisabledException) {}
-            $result['warnings'][] = ['marketplace' => 'ebay', 'code' => 'ebay_connection_disabled', 'message' => EbayConnectionGate::BLOCKER];
-            return $result;
-        }
         if ($marketplace === 'ebay' && ($options['ebay_shared_order_feed_warning'] ?? false)) {
             $result['warnings'][] = ['marketplace' => 'ebay', 'code' => 'ebay_shared_order_feed', 'message' => 'eBay DE/FR share the same order feed; orders were imported once as ebay.'];
         }
