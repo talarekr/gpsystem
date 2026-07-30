@@ -35,6 +35,10 @@ class EbayPublishAdapter extends BaseMarketplacePublishAdapter
 
     public function publish(Part $part, MarketplacePublishCommand $command): MarketplacePublishResult
     {
+        if (! app(\App\Services\Marketplace\EbayConnectionGate::class)->isEbayEnabled()) {
+            try { app(\App\Services\Marketplace\EbayConnectionGate::class)->assertEbayEnabledForWrite('publish'); } catch (\App\Exceptions\EbayConnectionDisabledException) {}
+            return new MarketplacePublishResult('ebay', ['channel' => 'ebay', 'marketplace' => 'ebay', 'success' => false, 'blocked' => true, 'status' => 'blocked_connection_disabled', 'errors' => [\App\Services\Marketplace\EbayConnectionGate::BLOCKER], 'ui_error' => \App\Services\Marketplace\EbayConnectionGate::BLOCKER, 'write' => false]);
+        }
         return $this->withEbayChannels(fn (): MarketplacePublishResult => parent::publish($part, $command), true);
     }
 

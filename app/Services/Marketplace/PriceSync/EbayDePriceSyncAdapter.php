@@ -7,6 +7,10 @@ class EbayDePriceSyncAdapter implements MarketplacePriceSyncAdapter
 {
     public function sync(MarketplaceListing $listing, array $price): array
     {
+        if (! app(\App\Services\Marketplace\EbayConnectionGate::class)->isEbayEnabled()) {
+            try { app(\App\Services\Marketplace\EbayConnectionGate::class)->assertEbayEnabledForWrite('update_price'); } catch (\App\Exceptions\EbayConnectionDisabledException) {}
+            return ['status'=>'blocked_connection_disabled','blocker'=>\App\Services\Marketplace\EbayConnectionGate::BLOCKER,'final_success'=>false,'write_performed'=>false];
+        }
         $class = $this->classify($listing); if ($class['type'] === 'legacy') return ['status'=>'skipped','blocker'=>'ebay_legacy_price_sync_not_supported','final_success'=>false];
         $offerId=(string)$listing->external_offer_id; $sku=(string)$class['sku']; $base=rtrim((string)$listing->account?->api_base_url,'/'); $token=(string)(((array)$listing->account?->api_credentials)['access_token']??''); $headers=['X-EBAY-C-MARKETPLACE-ID'=>'EBAY_DE'];
         $before=Http::withToken($token)->withHeaders($headers)->acceptJson()->get($base.'/sell/inventory/v1/offer/'.rawurlencode($offerId)); $bj=is_array($before->json())?$before->json():[];

@@ -24,6 +24,7 @@ class EbayListingStatusBatchRunnerService
 
     public function start(array $input): array
     {
+        if (! app(EbayConnectionGate::class)->isEbayEnabled()) return $this->disabled('listing_status_sync_start');
         if (($input['confirm'] ?? null) !== 'start-ebay-listing-status-sync') return ['ok' => false, 'reason' => 'missing_confirm_token'];
         if (($input['scope'] ?? 'products_with_ebay_item_id') !== 'products_with_ebay_item_id') return ['ok' => false, 'reason' => 'invalid_scope'];
         if (! filter_var($input['dry_run'] ?? true, FILTER_VALIDATE_BOOLEAN)) return ['ok' => false, 'reason' => 'live_mode_disabled'];
@@ -59,6 +60,7 @@ class EbayListingStatusBatchRunnerService
 
     public function runNextBatch(array $input): array
     {
+        if (! app(EbayConnectionGate::class)->isEbayEnabled()) return $this->disabled('listing_status_sync_batch');
         if (($input['confirm'] ?? null) !== 'run-next-ebay-listing-status-sync-batch') return ['ok' => false, 'reason' => 'missing_confirm_token'];
         $state = $this->state();
         if ($state['status'] !== 'running') return array_merge($this->publicStatus($state), ['ok' => false, 'reason' => 'not_running', 'batch_executed' => false, 'completed' => $state['status'] === 'completed' && empty($state['remaining_ids']) && (int) $state['remaining'] === 0]);
@@ -82,6 +84,12 @@ class EbayListingStatusBatchRunnerService
     }
 
     public function status(): array { return array_merge($this->publicStatus($this->state()), ['ok' => true]); }
+
+    private function disabled(string $action): array
+    {
+        try { app(EbayConnectionGate::class)->assertEbayEnabledForSync($action); } catch (\App\Exceptions\EbayConnectionDisabledException) {}
+        return ['ok' => false, 'reason' => 'ebay_connection_disabled', 'message' => EbayConnectionGate::BLOCKER, 'marketplace_write' => false, 'batch_executed' => false];
+    }
 
     private function eligibleListingIds(): array
     {
