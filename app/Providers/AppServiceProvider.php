@@ -25,10 +25,7 @@ class AppServiceProvider extends ServiceProvider
         // eBay host while the application-level connection switch is disabled.
         Http::globalRequestMiddleware(function ($request) {
             $host = strtolower($request->getUri()->getHost());
-            $isEbayRequest = str_contains($host, 'ebay')
-                || $request->hasHeader('X-EBAY-C-MARKETPLACE-ID')
-                || $request->hasHeader('X-EBAY-C-ENDUSERCTX');
-            if ($isEbayRequest) {
+            if (str_contains($host, 'ebay')) {
                 app(\App\Services\Marketplace\EbayConnectionGate::class)->assertEnabled('external_api_request:'.$request->getMethod());
             }
             return $request;

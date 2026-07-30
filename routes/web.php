@@ -9,7 +9,6 @@ use App\Http\Controllers\Admin\AllegroDuplicateCheckController;
 use App\Http\Controllers\Admin\EbayDePreviewController;
 use App\Http\Controllers\Admin\EbayPriceSyncDiagnoseController;
 use App\Http\Controllers\Admin\EbayConnectionToggleController;
-use App\Http\Controllers\Admin\EbayConnectionCoverageController;
 use App\Http\Middleware\EnsureAdminPanelAccess;
 use App\Http\Controllers\Admin\MarketplaceCategoryMapperController;
 use App\Http\Controllers\Admin\Allegro\AllegroOAuthController;
@@ -309,7 +308,6 @@ Route::middleware([Authenticate::class])->group(function (): void {
         Route::get('/admin/tools/marketplace/ebay-connection-toggle', [EbayConnectionToggleController::class, 'show'])->name('admin.tools.marketplace.ebay-connection-toggle');
         Route::post('/admin/tools/marketplace/ebay-connection-toggle', [EbayConnectionToggleController::class, 'update'])->name('admin.tools.marketplace.ebay-connection-toggle.update');
         Route::get('/admin/tools/marketplace/ebay-connection-status', [EbayConnectionToggleController::class, 'status'])->name('admin.tools.marketplace.ebay-connection-status');
-        Route::get('/admin/tools/marketplace/ebay-connection-coverage-check', EbayConnectionCoverageController::class)->name('admin.tools.marketplace.ebay-connection-coverage-check');
     });
     Route::get('/warsztat', [WorkshopQuickPartController::class, 'createAuthenticated'])->name('workshop.quick-part-create');
     Route::get('/warsztat/storage-locations', [WorkshopQuickPartController::class, 'storageLocationAutocomplete'])->name('workshop.storage-locations.autocomplete');

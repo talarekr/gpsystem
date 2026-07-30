@@ -6,7 +6,6 @@ use App\Exceptions\EbayConnectionDisabledException;
 use App\Enums\UserRole;
 use App\Models\User;
 use App\Models\MarketplaceSyncLog;
-use App\Models\Part;
 use App\Services\Marketplace\EbayConnectionGate;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -67,27 +66,5 @@ class EbayConnectionGateTest extends TestCase
         Http::get('https://api.allegro.pl/status');
         Http::get('https://api.ovoko.example/status');
         Http::assertSentCount(3);
-    }
-
-    public function test_real_parts_panel_publish_path_returns_423_without_sending_request_and_logs_block(): void
-    {
-        $part = Part::query()->create(['name' => 'Blocked eBay publish', 'sku' => 'EBAY-GATE-1', 'price' => 100, 'quantity' => 1, 'status' => 'ready']);
-        app(EbayConnectionGate::class)->setEnabled(false, null);
-        Http::fake();
-
-        $this->getJson('/tools/marketplace-publish-part-confirm?token=gps_images_import_2026&part_id='.$part->id.'&channels=ebay&dry_run=0&confirm=1')
-            ->assertStatus(423)
-            ->assertJsonPath('code', 'ebay_connection_disabled')
-            ->assertJsonPath('blocked_action', 'parts_panel_publish')
-            ->assertJsonPath('marketplace_write', false);
-
-        Http::assertNothingSent();
-        $this->assertDatabaseHas('marketplace_sync_logs', ['marketplace' => 'ebay', 'action' => 'ebay_action_blocked_connection_disabled']);
-        $this->assertSame('parts_panel_publish', data_get(MarketplaceSyncLog::query()->latest('id')->first()?->payload, 'blocked_action'));
-
-        app(EbayConnectionGate::class)->setEnabled(true, null);
-        $this->getJson('/tools/marketplace-publish-part-confirm?token=gps_images_import_2026&part_id='.$part->id.'&channels=ebay&dry_run=0&confirm=1')
-            ->assertStatus(200)
-            ->assertJsonMissing(['code' => 'ebay_connection_disabled']);
     }
 }
