@@ -17,6 +17,7 @@ use App\Http\Controllers\Admin\MarketplaceOAuthTokenHealthController;
 use App\Http\Controllers\Admin\PartSearchController;
 use App\Http\Controllers\Admin\Part8212PriceSyncRemoteCheckController;
 use App\Http\Controllers\Admin\PartLocalAvailabilityController;
+use App\Http\Controllers\Admin\SalesAnalyticsCurrencyDiagnoseController;
 use App\Http\Controllers\Admin\ImportMigration\WooCategoryTreeController;
 use App\Http\Controllers\Admin\ImportMigration\WooProductImportRunController;
 use App\Http\Controllers\Admin\ImportMigration\WooStoragePublicController;
@@ -2490,6 +2491,9 @@ Route::get('/tools/post-domain-switch-check', PostDomainSwitchCheckController::c
 
 
 Route::middleware(Authenticate::class)->prefix('admin')->name('admin.')->group(function (): void {
+    Route::get('/tools/sales-analytics/currency-conversion-diagnose', SalesAnalyticsCurrencyDiagnoseController::class)
+        ->middleware('admin.panel')
+        ->name('tools.sales-analytics.currency-conversion-diagnose');
     Route::get('/search/parts', PartSearchController::class)->name('search.parts');
     Route::patch('/parts/{part}/local-availability', [PartLocalAvailabilityController::class, 'update'])->name('parts.local-availability.update');
     Route::get('/tools/marketplace/ebay-de-preview/{part}', EbayDePreviewController::class)->name('tools.marketplace.ebay-de-preview');
