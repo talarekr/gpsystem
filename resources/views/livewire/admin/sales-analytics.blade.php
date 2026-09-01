@@ -74,6 +74,9 @@
                     </article>
                 @endforeach
             </div>
+            @if (collect($salesAnalytics['channels'])->sum('unconverted_orders_count') > 0)
+                <p role="alert"><strong>Uwaga:</strong> {{ collect($salesAnalytics['channels'])->sum('unconverted_orders_count') }} zamówień pominięto w sumie PLN z powodu braku kursu NBP. <a href="{{ route('admin.tools.sales-analytics.currency-conversion-diagnose') }}">Diagnostyka walut</a></p>
+            @endif
         </aside>
     </div>
 </section>

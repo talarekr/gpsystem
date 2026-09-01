@@ -4,7 +4,6 @@ namespace App\Services\Admin;
 
 use App\Models\LocalSale;
 use App\Models\Order;
-use App\Services\Marketplace\NbpExchangeRateService;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\DB;
@@ -12,7 +11,7 @@ use Illuminate\Support\Facades\Schema;
 
 class SalesAnalyticsService
 {
-    public function __construct(private readonly NbpExchangeRateService $exchangeRateService) {}
+    public function __construct(private readonly CurrencyConversionService $currencyConversion) {}
 
     /**
      * @return array<string, string>
@@ -98,13 +97,6 @@ class SalesAnalyticsService
             return array_values($channels);
         }
 
-        $eurRateData = $this->exchangeRateService->eurPln();
-        $eurRate = is_numeric($eurRateData['rate'] ?? null) ? (float) $eurRateData['rate'] : null;
-        $channels['ebay']['exchange_rate'] = $eurRate;
-        if ($eurRate === null) {
-            $channels['ebay']['exchange_rate_unavailable'] = true;
-        }
-
         $excludedStatuses = ['cancelled', 'canceled', 'refunded', 'returned', 'rejected', 'failed'];
 
         $orders = Order::query()
@@ -118,7 +110,7 @@ class SalesAnalyticsService
                 $query->whereNull('marketplace_status')
                     ->orWhereNotIn(DB::raw('LOWER(marketplace_status)'), $excludedStatuses);
             })
-            ->get(['id', 'marketplace', 'currency', 'total', 'meta']);
+            ->get(['id', 'marketplace', 'currency', 'total', 'meta', 'ordered_at', 'created_at']);
 
         foreach ($orders as $order) {
             $channel = $this->normalizeChannel($this->orderSource($order));
@@ -131,18 +123,16 @@ class SalesAnalyticsService
             $currency = strtoupper((string) ($order->currency ?: 'PLN'));
             $channels[$channel]['orders_count']++;
 
+            $conversion = $this->currencyConversion->toPln($total, $currency, $order->ordered_at ?: $order->created_at);
+
             if ($channel === 'ebay' && $currency === 'EUR') {
                 $channels[$channel]['sales_eur'] += $total;
-                if ($eurRate !== null) {
-                    $channels[$channel]['sales_pln'] += $total * $eurRate;
-                }
-
-                continue;
             }
-
-            $channels[$channel]['sales_pln'] += $total;
-            if ($channel === 'ebay' && $currency === 'PLN' && $eurRate !== null) {
-                $channels[$channel]['sales_eur'] += $total / $eurRate;
+            if ($conversion['converted_amount_pln'] !== null) {
+                $channels[$channel]['sales_pln'] += $conversion['converted_amount_pln'];
+            } else {
+                $channels[$channel]['unconverted_orders_count'] = ($channels[$channel]['unconverted_orders_count'] ?? 0) + 1;
+                $channels[$channel]['conversion_warnings'][] = ['order_id' => $order->id, 'currency' => $currency, 'warning' => $conversion['warning']];
             }
         }
 
