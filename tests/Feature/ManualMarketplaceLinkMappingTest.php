@@ -19,13 +19,15 @@ class ManualMarketplaceLinkMappingTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_manual_mapping_column_is_inserted_without_changing_channels_partial(): void
+    public function test_manual_mapping_column_is_hidden_from_shared_parts_listing_without_removing_mapping_tools(): void
     {
         $cardList = file_get_contents(resource_path('views/filament/resources/parts/partials/parts-card-list.blade.php'));
         $channelsPartial = file_get_contents(resource_path('views/filament/resources/parts/table-channels.blade.php'));
         $manualPartial = file_get_contents(resource_path('views/filament/resources/parts/table-manual-marketplace-links.blade.php'));
 
-        $this->assertStringContainsString('<div>Kanały sprzedaży</div><div>Mapowanie</div><div>Status</div>', $cardList);
+        $this->assertStringContainsString('<div>Kanały sprzedaży</div><div>Status</div><div>Notatka</div><div>ID</div><div>Akcje</div>', $cardList);
+        $this->assertStringNotContainsString('<div>Mapowanie</div>', $cardList);
+        $this->assertStringNotContainsString("@include('filament.resources.parts.table-manual-marketplace-links'", $cardList);
         $this->assertStringNotContainsString('saveManualMarketplaceLink', $channelsPartial);
         $this->assertStringContainsString('Allegro', $manualPartial);
         $this->assertStringContainsString('Ovoko', $manualPartial);
