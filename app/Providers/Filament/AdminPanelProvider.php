@@ -80,6 +80,10 @@ class AdminPanelProvider extends PanelProvider
                 ->spa()
                 ->spaUrlExceptions($this->spaUrlExceptions()))
             ->renderHook(
+                'panels::head.start',
+                fn (): string => Blade::render('@include(\'filament.admin-auth-navigation-boundary\')'),
+            )
+            ->renderHook(
                 'panels::head.end',
                 fn (): string => Blade::render('@include(\'filament.admin-ui-refinements\')')
                     . Blade::render('@include(\'filament.admin-csrf-session-guard\')'),
