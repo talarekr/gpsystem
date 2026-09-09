@@ -34,25 +34,43 @@ class JarekGearboxEbayPriceApplyRunnerService
         return Cache::lock(self::KEY.':lock', 60)->block(1, function () use ($apply): array {
             $state = $this->state();
             if (! $state || $state['status'] !== 'running') return ['ok' => false, 'error' => 'runner_is_not_running'] + ($state ?? []);
-            $result = $apply->apply($state['snapshot_id'], $state['batch_size'], $state['current_offset'], [], $state['apply_run_id']);
-            $items = collect($result['results'] ?? []);
-            $count = $items->count();
-            $state['current_offset'] += $count;
-            $state['processed_count'] += $count;
-            $state['success_count'] += $items->whereIn('status', ['success', 'already_updated'])->count();
-            $state['failed_count'] += $items->where('status', 'failed')->count();
-            $state['skipped_count'] += $items->where('status', 'skipped')->count();
-            $state['remaining_count'] = max(0, $state['eligible_count'] - $state['current_offset']);
-            $success = $items->whereIn('status', ['success', 'already_updated'])->last();
-            $failure = $items->whereIn('status', ['failed', 'skipped'])->last();
-            if ($success) $state['last_success'] = $success;
-            if ($failure) $state['last_error'] = $failure;
-            $state['batch_history'][] = ['apply_batch_id' => $result['apply_batch_id'] ?? null, 'offset' => $state['current_offset'] - $count, 'count' => $count, 'success' => $items->whereIn('status', ['success', 'already_updated'])->count(), 'failed' => $items->where('status', 'failed')->count(), 'skipped' => $items->where('status', 'skipped')->count(), 'at' => now()->toIso8601String()];
-            $state['batch_history'] = array_slice($state['batch_history'], -100);
-            if ($result['stop_reason'] ?? null) { $state['status'] = 'stopped_on_error'; $state['last_error'] = ['error' => $result['stop_reason']]; }
-            elseif ($state['remaining_count'] === 0 || $count === 0) $state['status'] = 'completed';
-            return $this->save($state) + ['batch' => $result];
+            return $this->applyBatch($state, $apply);
         });
+    }
+
+    public function resumeBatch(string $snapshotId, JarekGearboxEbayPriceApplyService $apply): array
+    {
+        return Cache::lock(self::KEY.':lock', 60)->block(1, function () use ($snapshotId, $apply): array {
+            $state = $this->state();
+            if (! $state) return ['ok' => false, 'marketplace_write' => false, 'error' => 'no_apply_run'];
+            if (! hash_equals((string) $state['snapshot_id'], $snapshotId)) return ['ok' => false, 'marketplace_write' => false, 'error' => 'snapshot_id_does_not_match_runner'] + $state;
+            if (! in_array($state['status'], ['running', 'paused'], true)) return ['ok' => false, 'marketplace_write' => false, 'error' => 'runner_cannot_be_resumed'] + $state;
+            $state['status'] = 'running';
+
+            return $this->applyBatch($state, $apply);
+        });
+    }
+
+    private function applyBatch(array $state, JarekGearboxEbayPriceApplyService $apply): array
+    {
+        $result = $apply->apply($state['snapshot_id'], $state['batch_size'], $state['current_offset'], [], $state['apply_run_id']);
+        $items = collect($result['results'] ?? []);
+        $count = $items->count();
+        $state['current_offset'] += $count;
+        $state['processed_count'] += $count;
+        $state['success_count'] += $items->whereIn('status', ['success', 'already_updated'])->count();
+        $state['failed_count'] += $items->where('status', 'failed')->count();
+        $state['skipped_count'] += $items->where('status', 'skipped')->count();
+        $state['remaining_count'] = max(0, $state['eligible_count'] - $state['current_offset']);
+        $success = $items->whereIn('status', ['success', 'already_updated'])->last();
+        $failure = $items->whereIn('status', ['failed', 'skipped'])->last();
+        if ($success) $state['last_success'] = $success;
+        if ($failure) $state['last_error'] = $failure;
+        $state['batch_history'][] = ['apply_batch_id' => $result['apply_batch_id'] ?? null, 'offset' => $state['current_offset'] - $count, 'count' => $count, 'success' => $items->whereIn('status', ['success', 'already_updated'])->count(), 'failed' => $items->where('status', 'failed')->count(), 'skipped' => $items->where('status', 'skipped')->count(), 'at' => now()->toIso8601String()];
+        $state['batch_history'] = array_slice($state['batch_history'], -100);
+        if ($result['stop_reason'] ?? null) { $state['status'] = 'stopped_on_error'; $state['last_error'] = ['error' => $result['stop_reason']]; }
+        elseif ($state['remaining_count'] === 0 || $count === 0) $state['status'] = 'completed';
+        return $this->save($state) + ['batch' => $result];
     }
 
     public function status(?string $snapshotId = null): array
