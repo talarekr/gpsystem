@@ -12,6 +12,7 @@
 <main id="jarek-ebay-apply-runner"
       data-preview-url="{{ route('admin.tools.jarek-gearboxes.ebay-bulk-price-increase-preview') }}?percent=7"
       data-action-url="{{ route('admin.tools.jarek-gearboxes.ebay-bulk-price-increase-apply-runner.action') }}"
+      data-resume-url="{{ route('admin.tools.jarek-gearboxes.ebay-bulk-price-increase-apply-runner.resume') }}"
       data-status-url="{{ route('admin.tools.jarek-gearboxes.ebay-bulk-price-increase-apply-runner-status') }}">
     <h1>Jarek Gearboxes — eBay DE +7% batch apply runner</h1>
     <div class="danger"><div class="marketplace">⚠ MARKETPLACE WRITE</div><b>Wyłącznie price-only PUT istniejącej oferty.</b> Runner nie zmienia ceny lokalnej, stocku, quantity, treści, zdjęć, kategorii, polityk ani tytułów; nie publikuje i nie dotyka eBay FR. Wejście na stronę ani załadowanie preview niczego nie uruchamia.</div>
@@ -35,6 +36,11 @@
         <h2>Nie udało się załadować preview</h2>
         <pre id="preview-error-details"></pre>
     </section>
+    <section id="resume-error" class="error hidden" role="alert" aria-live="assertive">
+        <h2>Nie udało się wznowić runnera</h2>
+        <p id="resume-error-message"></p>
+        <pre id="resume-error-details"></pre>
+    </section>
     <h2>Pierwsze 20 planowanych rekordów</h2>
     <table>
         <thead><tr><th>ID</th><th>SKU</th><th>Offer ID</th><th>Listing ID</th><th>Old price</th><th>New price</th><th>Currency</th></tr></thead>
@@ -52,11 +58,22 @@
         <dt>last_error_type</dt><dd id="debug-last-error-type">none</dd>
         <dt>last_response_preview</dt><dd id="debug-last-response-preview">—</dd>
     </dl>
+    <h2>Resume debug</h2>
+    <dl class="debug-grid">
+        <dt>resume_click_count</dt><dd id="debug-resume-click-count">0</dd>
+        <dt>last_resume_endpoint</dt><dd id="debug-last-resume-endpoint">—</dd>
+        <dt>last_resume_http_status</dt><dd id="debug-last-resume-http-status">—</dd>
+        <dt>last_resume_response_is_json</dt><dd id="debug-last-resume-response-is-json">—</dd>
+        <dt>last_resume_error_type</dt><dd id="debug-last-resume-error-type">none</dd>
+        <dt>last_resume_response_preview</dt><dd id="debug-last-resume-response-preview">—</dd>
+        <dt>active_timer</dt><dd id="debug-active-timer">no</dd>
+        <dt>next_batch_scheduled_at</dt><dd id="debug-next-batch-scheduled-at">—</dd>
+    </dl>
 </main>
 <script>
 (() => {
     const runtimeKey = '__jarekEbayApplyRunnerUi';
-    const runtime = window[runtimeKey] ?? {previewClickCount: 0, timer: null, listenersBound: false};
+    const runtime = window[runtimeKey] ?? {previewClickCount: 0, resumeClickCount: 0, timer: null, listenersBound: false};
     window[runtimeKey] = runtime;
 
     const root = () => document.getElementById('jarek-ebay-apply-runner');
@@ -81,6 +98,8 @@
         if (!root()) return;
         setDebug('js_loaded', 'yes');
         setDebug('preview_click_count', runtime.previewClickCount);
+        setDebug('resume_click_count', runtime.resumeClickCount);
+        setDebug('active_timer', runtime.timer ? 'yes' : 'no');
     }
 
     function showPreviewError(details) {
@@ -167,8 +186,94 @@
         element('output').textContent = JSON.stringify(json, null, 2);
         return json;
     }
-    function cancel() { if (runtime.timer) { clearTimeout(runtime.timer); runtime.timer = null; } }
-    async function tick() { const json = await post('batch'); if (json.status === 'running') runtime.timer = setTimeout(tick, json.delay_ms); else cancel(); }
+    function cancel() {
+        if (runtime.timer) clearTimeout(runtime.timer);
+        runtime.timer = null;
+        setDebug('active_timer', 'no');
+        setDebug('next_batch_scheduled_at', '—');
+    }
+    function schedule(snapshotId, delayMs) {
+        cancel();
+        const delay = Number(delayMs) || 4000;
+        setDebug('active_timer', 'yes');
+        setDebug('next_batch_scheduled_at', new Date(Date.now() + delay).toISOString());
+        runtime.timer = setTimeout(() => resumeNextBatch(snapshotId, false), delay);
+    }
+
+    function showResumeError(details, csrf = false) {
+        cancel();
+        const panel = element('resume-error');
+        if (!panel) return;
+        panel.classList.remove('hidden');
+        element('resume-error-message').textContent = csrf
+            ? 'Sesja lub token CSRF wygasły. Odśwież stronę i kliknij Resume.'
+            : 'Resume nie wykonał batcha. Szczegóły diagnostyczne znajdują się poniżej.';
+        element('resume-error-details').textContent = JSON.stringify(details, null, 2);
+    }
+
+    function clearResumeError() { element('resume-error')?.classList.add('hidden'); }
+
+    async function resumeNextBatch(snapshotId, countClick = true) {
+        const page = root();
+        if (!page) return;
+        cancel();
+        if (countClick) runtime.resumeClickCount += 1;
+        setDebug('resume_click_count', runtime.resumeClickCount);
+        const statusEndpoint = `${page.dataset.statusUrl}?snapshot_id=${encodeURIComponent(snapshotId || '')}`;
+        setDebug('last_resume_endpoint', statusEndpoint);
+        setDebug('last_resume_http_status', 'pending');
+        setDebug('last_resume_response_is_json', 'pending');
+        setDebug('last_resume_error_type', 'none');
+        setDebug('last_resume_response_preview', 'pending');
+        clearResumeError();
+        try {
+            const statusResponse = await fetch(statusEndpoint, {method: 'GET', headers: {'Accept': 'application/json'}, credentials: 'same-origin'});
+            const statusBody = await statusResponse.text();
+            let statusJson = null;
+            try { statusJson = JSON.parse(statusBody); } catch (_) { /* handled below */ }
+            if (!statusResponse.ok || !statusJson || !statusJson.runner?.apply_run_id) {
+                throw {response: statusResponse, body: statusBody, json: statusJson, phase: 'status'};
+            }
+            const runner = statusJson.runner;
+            element('snapshot').value = runner.snapshot_id;
+            element('size').value = runner.batch_size;
+            element('delay').value = runner.delay_ms;
+            if (!['running', 'paused'].includes(runner.status)) {
+                throw {response: statusResponse, body: statusBody, json: statusJson, phase: 'runner_state'};
+            }
+
+            const endpoint = page.dataset.resumeUrl;
+            setDebug('last_resume_endpoint', endpoint);
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+            const response = await fetch(endpoint, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken}, body: JSON.stringify({snapshot_id: runner.snapshot_id, confirm: element('token').value})});
+            const body = await response.text();
+            let json = null;
+            try { json = JSON.parse(body); } catch (_) { /* handled below */ }
+            const isJson = json !== null && typeof json === 'object';
+            const type = errorType(response.status, isJson);
+            setDebug('last_resume_http_status', response.status);
+            setDebug('last_resume_response_is_json', isJson ? 'yes' : 'no');
+            setDebug('last_resume_error_type', type);
+            setDebug('last_resume_response_preview', responsePreview(body));
+            element('output').textContent = isJson ? JSON.stringify(json, null, 2) : body;
+            if (!response.ok || !isJson || json.ok === false) {
+                showResumeError({endpoint, phase: 'resume_batch', http_status: response.status, error_type: type, response_preview: responsePreview(body)}, response.status === 419);
+                return;
+            }
+            if (json.status === 'running') schedule(json.snapshot_id, json.delay_ms);
+            else cancel();
+        } catch (failure) {
+            const status = failure?.response?.status ?? 'no response';
+            const body = failure?.body ?? failure?.message ?? String(failure);
+            const isJson = failure?.json !== null && typeof failure?.json === 'object';
+            const type = errorType(Number(status) || 0, isJson, status === 'no response');
+            setDebug('last_resume_http_status', status);
+            setDebug('last_resume_response_is_json', isJson ? 'yes' : 'no');
+            setDebug('last_resume_error_type', type);
+            setDebug('last_resume_response_preview', responsePreview(body));
+            showResumeError({endpoint: page.dataset.statusUrl, phase: failure?.phase || 'status', http_status: status, error_type: type, response_preview: responsePreview(body)}, status === 419);
+        }
+    }
 
     async function handleClick(event) {
         const button = event.target.closest('button');
@@ -178,11 +283,11 @@
             cancel();
             if (!confirm('Rozpocząć MARKETPLACE WRITE od offsetu 0?')) return;
             const json = await post('start', {confirm: element('token').value, snapshot_id: element('snapshot').value, percent: 7, channel: 'ebay_de', batch_size: +element('size').value, delay_ms: +element('delay').value});
-            if (json.ok && json.status === 'running') runtime.timer = setTimeout(tick, json.delay_ms);
+            if (json.ok && json.status === 'running') schedule(json.snapshot_id, json.delay_ms);
             return;
         }
         if (button.id === 'pause' || button.id === 'stop') { cancel(); await post(button.id); return; }
-        if (button.id === 'resume') { cancel(); const json = await post('resume'); if (json.ok && json.status === 'running') runtime.timer = setTimeout(tick, json.delay_ms); return; }
+        if (button.id === 'resume') { await resumeNextBatch(element('snapshot').value); return; }
         if (button.id === 'status') {
             const response = await fetch(`${root().dataset.statusUrl}?snapshot_id=${encodeURIComponent(element('snapshot').value)}`, {method: 'GET', headers: {'Accept': 'application/json'}});
             element('output').textContent = JSON.stringify(await response.json(), null, 2);

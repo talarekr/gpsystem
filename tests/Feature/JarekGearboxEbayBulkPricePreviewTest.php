@@ -5,8 +5,11 @@ namespace Tests\Feature;
 use App\Models\JarekGearbox;
 use App\Models\MarketplaceAccount;
 use App\Models\Part;
+use App\Services\JarekGearboxes\JarekGearboxEbayPriceApplyService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Mockery;
 use Tests\TestCase;
 
 class JarekGearboxEbayBulkPricePreviewTest extends TestCase
@@ -30,7 +33,80 @@ class JarekGearboxEbayBulkPricePreviewTest extends TestCase
             ->assertSee('last_response_is_json')
             ->assertSee('last_error_type')
             ->assertSee('last_response_preview')
+            ->assertSee('data-resume-url="'.url('/admin/tools/jarek-gearboxes/ebay-bulk-price-increase-apply-runner-resume').'"', false)
+            ->assertSee('resume_click_count')
+            ->assertSee('last_resume_endpoint')
+            ->assertSee('last_resume_http_status')
+            ->assertSee('last_resume_response_is_json')
+            ->assertSee('last_resume_error_type')
+            ->assertSee('last_resume_response_preview')
+            ->assertSee('active_timer')
+            ->assertSee('next_batch_scheduled_at')
+            ->assertSee('Odśwież stronę i kliknij Resume.')
             ->assertSee('APPLY_JAREK_EBAY_PRICES_7_PERCENT_BATCH_RUNNER');
+    }
+
+    public function test_resume_uses_existing_run_and_current_offset_for_exactly_one_mocked_batch(): void
+    {
+        config()->set('marketplace.jarek_ebay_price_apply_enabled', true);
+        MarketplaceAccount::query()->create(['marketplace' => 'ebay', 'name' => 'eBay DE', 'code' => 'ebay_de', 'api_enabled' => true, 'api_settings' => ['write_connection_enabled' => true]]);
+        Cache::forever('jarek:ebay-de:price-apply-runner', $this->runnerState());
+        Http::fake();
+
+        $apply = Mockery::mock(JarekGearboxEbayPriceApplyService::class);
+        $apply->shouldReceive('apply')->once()->with('snapshot-existing', 5, 320, [], 'run-existing')->andReturn([
+            'ok' => true,
+            'apply_run_id' => 'run-existing',
+            'apply_batch_id' => 'batch-next',
+            'results' => [
+                ['status' => 'already_updated', 'marketplace_write' => false],
+                ['status' => 'success', 'marketplace_write' => false],
+            ],
+        ]);
+        $this->app->instance(JarekGearboxEbayPriceApplyService::class, $apply);
+
+        $this->withoutMiddleware()->postJson('/admin/tools/jarek-gearboxes/ebay-bulk-price-increase-apply-runner-resume', [
+            'snapshot_id' => 'snapshot-existing',
+            'confirm' => 'APPLY_JAREK_EBAY_PRICES_7_PERCENT_BATCH_RUNNER',
+        ])->assertOk()
+            ->assertJsonPath('apply_run_id', 'run-existing')
+            ->assertJsonPath('current_offset', 322)
+            ->assertJsonPath('processed_count', 322)
+            ->assertJsonPath('batch_history.0.offset', 320);
+
+        $state = Cache::get('jarek:ebay-de:price-apply-runner');
+        $this->assertSame('run-existing', $state['apply_run_id']);
+        $this->assertSame(322, $state['current_offset']);
+        Http::assertNothingSent();
+    }
+
+    public function test_resume_rejects_missing_confirmation_snapshot_and_mismatched_runner_without_apply(): void
+    {
+        Cache::forever('jarek:ebay-de:price-apply-runner', $this->runnerState());
+        $apply = Mockery::mock(JarekGearboxEbayPriceApplyService::class);
+        $apply->shouldNotReceive('apply');
+        $this->app->instance(JarekGearboxEbayPriceApplyService::class, $apply);
+        $url = '/admin/tools/jarek-gearboxes/ebay-bulk-price-increase-apply-runner-resume';
+
+        $this->withoutMiddleware()->postJson($url, [])->assertForbidden();
+        $this->withoutMiddleware()->postJson($url, ['confirm' => 'APPLY_JAREK_EBAY_PRICES_7_PERCENT_BATCH_RUNNER'])->assertStatus(422);
+
+        config()->set('marketplace.jarek_ebay_price_apply_enabled', true);
+        MarketplaceAccount::query()->create(['marketplace' => 'ebay', 'name' => 'eBay DE', 'code' => 'ebay_de', 'api_enabled' => true, 'api_settings' => ['write_connection_enabled' => true]]);
+        $this->withoutMiddleware()->postJson($url, ['snapshot_id' => 'different', 'confirm' => 'APPLY_JAREK_EBAY_PRICES_7_PERCENT_BATCH_RUNNER'])
+            ->assertStatus(409)
+            ->assertJsonPath('error', 'snapshot_id_does_not_match_runner')
+            ->assertJsonPath('current_offset', 320);
+
+        $this->assertSame($this->runnerState(), Cache::get('jarek:ebay-de:price-apply-runner'));
+    }
+
+    public function test_resume_route_requires_csrf(): void
+    {
+        $this->postJson('/admin/tools/jarek-gearboxes/ebay-bulk-price-increase-apply-runner-resume', [
+            'snapshot_id' => 'snapshot-existing',
+            'confirm' => 'APPLY_JAREK_EBAY_PRICES_7_PERCENT_BATCH_RUNNER',
+        ])->assertStatus(419);
     }
 
     public function test_preview_is_read_only_calculates_seven_percent_and_excludes_parts(): void
@@ -129,5 +205,28 @@ class JarekGearboxEbayBulkPricePreviewTest extends TestCase
             'currency' => 'PLN',
             'quantity' => 1,
         ], $attributes));
+    }
+
+    private function runnerState(): array
+    {
+        return [
+            'ok' => true,
+            'apply_run_id' => 'run-existing',
+            'snapshot_id' => 'snapshot-existing',
+            'status' => 'running',
+            'current_offset' => 320,
+            'processed_count' => 320,
+            'success_count' => 319,
+            'failed_count' => 1,
+            'skipped_count' => 0,
+            'remaining_count' => 1029,
+            'eligible_count' => 1349,
+            'batch_size' => 5,
+            'delay_ms' => 4000,
+            'last_success' => null,
+            'last_error' => null,
+            'batch_history' => [],
+            'started_at' => now()->toIso8601String(),
+        ];
     }
 }
