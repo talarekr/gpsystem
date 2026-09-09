@@ -69,7 +69,29 @@ class JarekGearboxEbayPriceFetchTest extends TestCase
             ->assertSee("document.addEventListener('click'", false)
             ->assertSee("reflectSelection('Start clicked')", false)
             ->assertSee('last_error_type')
+            ->assertSee('active_request_id')
+            ->assertSee('request_in_flight')
+            ->assertSee('abort_reason')
+            ->assertSee('aborted_at')
+            ->assertSee('elapsed_ms')
+            ->assertSee('timeout_ms')
+            ->assertSee('duplicate_start_blocked')
+            ->assertSee('batch_started')
+            ->assertSee('batch_finished')
+            ->assertSee('retry_count')
+            ->assertSee('REQUEST_TIMEOUT_MS = 180000', false)
+            ->assertSee("id('action').textContent = 'Runner already running'", false)
+            ->assertSee("abortActive('user_stop')", false)
+            ->assertSee("abortActive('pause')", false)
+            ->assertSee("error.abortedBy === 'timeout'", false)
+            ->assertSee("initialize (request preserved)", false)
+            ->assertSee('value="50"', false)
             ->assertSee('max="100"', false);
+
+        $html = $response->getContent();
+        $this->assertStringNotContainsString("runtime.aborter?.abort()", $html);
+        $this->assertStringNotContainsString("30000", $html);
+        $this->assertStringNotContainsString('>Run All<', $html);
     }
 
     public function test_fetch_and_cache_endpoints_accept_limit_one_hundred_but_cache_still_requires_confirm(): void
