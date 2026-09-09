@@ -7,6 +7,7 @@ use App\Models\MarketplaceAccount;
 use App\Models\Part;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use App\Models\MarketplaceSyncLog;
 use Tests\TestCase;
 
 class JarekGearboxEbayPriceFetchTest extends TestCase
@@ -50,6 +51,32 @@ class JarekGearboxEbayPriceFetchTest extends TestCase
         $this->assertSame('Untouched', $gearbox->title);
         $this->assertTrue(data_get($gearbox->ebay_payload_snapshot, 'preserved'));
         $this->assertSame('10.00', data_get($gearbox->ebay_payload_snapshot, '_jarek_price_fetch.pricingSummary.price.value'));
+        $this->assertDatabaseHas('marketplace_sync_logs', ['action' => 'jarek_gearboxes_ebay_price_fetch_cache']);
+    }
+
+    public function test_canary_apply_updates_only_offer_price_and_preserves_local_product(): void
+    {
+        config()->set('marketplace.external_api_writes_enabled', true);
+        config()->set('marketplace.jarek_ebay_price_apply_enabled', true);
+        $gearbox = $this->gearbox(['price' => 9999, 'quantity' => 8, 'title' => 'Untouched', 'ebay_offer_id' => 'offer-4', 'ebay_listing_id' => 'listing-4', 'ebay_inventory_sku' => 'JAREK-4', 'ebay_payload_snapshot' => ['marketplaceId' => 'EBAY_DE', '_jarek_price_fetch' => ['fetched_at' => now()->toIso8601String(), 'pricingSummary' => ['price' => ['value' => '100.00', 'currency' => 'EUR']]]]]);
+        $preview = $this->withoutMiddleware()->getJson('/admin/tools/jarek-gearboxes/ebay-bulk-price-increase-preview?percent=7')->json();
+        Http::fakeSequence()->push(['offerId' => 'offer-4', 'sku' => 'JAREK-4', 'marketplaceId' => 'EBAY_DE', 'availableQuantity' => 3, 'listingDescription' => 'Keep me', 'pricingSummary' => ['price' => ['value' => '100.00', 'currency' => 'EUR']]], 200)->push([], 204, ['x-ebay-c-request-id' => 'write-1']);
+
+        $this->withoutMiddleware()->postJson('/admin/tools/jarek-gearboxes/ebay-bulk-price-increase-apply', ['percent' => 7, 'channel' => 'ebay_de', 'confirm' => 'INCREASE_JAREK_EBAY_PRICES_7_PERCENT', 'snapshot_id' => $preview['snapshot_id'], 'limit' => 1])->assertOk()->assertJsonPath('results.0.price_accepted', true);
+
+        Http::assertSent(fn ($request): bool => $request->method() === 'PUT' && data_get($request->data(), 'pricingSummary.price.value') === '107.00' && $request['availableQuantity'] === 3 && $request['listingDescription'] === 'Keep me');
+        $gearbox->refresh();
+        $this->assertSame('9999.00', $gearbox->price);
+        $this->assertSame(8, $gearbox->quantity);
+        $this->assertSame('Untouched', $gearbox->title);
+        $this->assertDatabaseHas('marketplace_sync_logs', ['action' => 'jarek_gearboxes_ebay_bulk_price_increase_apply', 'request_id' => 'write-1']);
+    }
+
+    public function test_apply_runner_exposes_no_run_all_action(): void
+    {
+        $html = $this->withoutMiddleware()->get('/admin/tools/jarek-gearboxes/ebay-bulk-price-increase-runner')->getContent();
+        $this->assertStringContainsString('Start Canary', $html);
+        $this->assertStringNotContainsString('>Run All<', $html);
     }
 
     public function test_bulk_preview_prefers_fetch_cache_not_local_price_and_excludes_parts(): void
