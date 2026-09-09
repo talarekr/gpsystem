@@ -34,7 +34,8 @@ class JarekGearboxEbayPriceApplyService
         $fetchedAt = data_get($product->ebay_payload_snapshot, '_jarek_price_fetch.fetched_at');
         if (! $fetchedAt || now()->diffInHours($fetchedAt, true) > config('marketplace.jarek_ebay_price_cache_max_age_hours', 24)) return $this->blockedItem($row, 'ebay_price_cache_stale');
         $account = MarketplaceAccount::query()->where('code', 'ebay_de')->firstOrFail();
-        $headers = ['X-EBAY-C-MARKETPLACE-ID' => 'EBAY_DE'];
+        $headers = $this->inventoryApiHeaders('EBAY_DE');
+        $headersSummary = $this->headersSummary($headers);
         $url = rtrim((string) $account->api_base_url, '/').'/sell/inventory/v1/offer/'.rawurlencode($row['ebay_offer_id']);
         $client = Http::withToken((string) data_get($account, 'api_credentials.access_token'))->withHeaders($headers)->acceptJson()->timeout(30);
         $read = $client->get($url);
@@ -54,8 +55,37 @@ class JarekGearboxEbayPriceApplyService
         $snapshot['_jarek_price_apply'] = ['old_price' => $row['old_price'], 'new_price' => $row['new_price'], 'currency' => $row['currency'], 'applied_at' => now()->toIso8601String(), 'http_status' => $write->status(), 'request_id' => $requestId, 'apply_batch_id' => $batchId];
         $product->forceFill(['ebay_payload_snapshot' => $snapshot])->saveQuietly();
         $message = $ok ? 'Price-only existing eBay offer update.' : ($ebayError['message'] ?? 'eBay rejected the price-only offer update.');
-        MarketplaceSyncLog::query()->create(['marketplace' => 'ebay_de', 'action' => 'jarek_gearboxes_ebay_bulk_price_increase_apply', 'status' => $ok ? 'success' : 'error', 'http_status' => $write->status(), 'request_id' => $requestId, 'external_id' => $row['ebay_offer_id'], 'message' => $message, 'payload' => ['marketplace_write' => true, 'apply_batch_id' => $batchId, 'jarek_gearbox_id' => $product->id, 'request' => ['method' => 'PUT', 'resource' => '/sell/inventory/v1/offer/{offerId}', 'offer_id' => $row['ebay_offer_id'], 'fields' => array_keys($payload), 'changed_fields' => ['pricingSummary.price.value'], 'preserved_fields' => array_values(array_diff(array_keys($payload), ['pricingSummary'])), 'quantity_preserved' => true, 'secrets_included' => false], 'diff' => ['pricingSummary.price' => ['old' => $row['old_price'], 'new' => $row['new_price']], 'all_other_fields' => 'preserved'], 'response' => $this->safeResponse($write->json()), 'error_body_sanitized' => $errorBody, 'secrets_logged' => false], 'created_at' => now()]);
-        return $row + ['ok' => $ok, 'status' => $ok ? 'success' : 'failed', 'http_status' => $write->status(), 'request_id' => $requestId, 'price_accepted' => $ok, 'ebay_error' => $ebayError, 'error_body_sanitized' => $errorBody, 'listing_url' => filled($row['ebay_listing_id']) ? 'https://www.ebay.de/itm/'.$row['ebay_listing_id'] : null];
+        MarketplaceSyncLog::query()->create(['marketplace' => 'ebay_de', 'action' => 'jarek_gearboxes_ebay_bulk_price_increase_apply', 'status' => $ok ? 'success' : 'error', 'http_status' => $write->status(), 'request_id' => $requestId, 'external_id' => $row['ebay_offer_id'], 'message' => $message, 'payload' => ['marketplace_write' => true, 'apply_batch_id' => $batchId, 'jarek_gearbox_id' => $product->id, 'request' => ['method' => 'PUT', 'resource' => '/sell/inventory/v1/offer/{offerId}', 'offer_id' => $row['ebay_offer_id'], 'headers_summary' => $headersSummary, 'fields' => array_keys($payload), 'changed_fields' => ['pricingSummary.price.value'], 'preserved_fields' => array_values(array_diff(array_keys($payload), ['pricingSummary'])), 'quantity_preserved' => true, 'secrets_included' => false], 'diff' => ['pricingSummary.price' => ['old' => $row['old_price'], 'new' => $row['new_price']], 'all_other_fields' => 'preserved'], 'response' => $this->safeResponse($write->json()), 'error_body_sanitized' => $errorBody, 'secrets_logged' => false], 'created_at' => now()]);
+        return $row + ['ok' => $ok, 'status' => $ok ? 'success' : 'failed', 'http_status' => $write->status(), 'request_id' => $requestId, 'request_headers_summary' => $headersSummary, 'price_accepted' => $ok, 'ebay_error' => $ebayError, 'error_body_sanitized' => $errorBody, 'listing_url' => filled($row['ebay_listing_id']) ? 'https://www.ebay.de/itm/'.$row['ebay_listing_id'] : null];
+    }
+
+    /** @return array<string, string> */
+    private function inventoryApiHeaders(string $marketplaceId): array
+    {
+        $locale = match ($marketplaceId) {
+            'EBAY_DE' => 'de-DE',
+            default => throw new \InvalidArgumentException("Unsupported eBay marketplace: {$marketplaceId}"),
+        };
+
+        return [
+            'X-EBAY-C-MARKETPLACE-ID' => $marketplaceId,
+            'Content-Language' => $locale,
+            'Accept-Language' => $locale,
+            'Content-Type' => 'application/json',
+            'Accept' => 'application/json',
+        ];
+    }
+
+    /** @param array<string, string> $headers */
+    private function headersSummary(array $headers): array
+    {
+        return [
+            'marketplace_id' => $headers['X-EBAY-C-MARKETPLACE-ID'],
+            'content_language' => $headers['Content-Language'],
+            'accept_language' => $headers['Accept-Language'],
+            'content_type' => $headers['Content-Type'],
+            'accept' => $headers['Accept'],
+        ];
     }
 
     private function blocked(string $reason): array { return ['ok' => false, 'applied' => false, 'marketplace_write' => false, 'error' => $reason]; }
