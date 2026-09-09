@@ -13,6 +13,7 @@ use App\Http\Controllers\Admin\Allegro\AllegroOAuthController;
 use App\Http\Controllers\Admin\Ebay\EbayOAuthController;
 use App\Http\Controllers\Admin\JarekGearboxes\JarekAllegroOAuthController;
 use App\Http\Controllers\Admin\JarekGearboxes\JarekGearboxToolController;
+use App\Http\Controllers\Admin\JarekGearboxes\JarekGearboxEbayBulkPriceController;
 use App\Http\Controllers\Admin\MarketplaceOAuthTokenHealthController;
 use App\Http\Controllers\Admin\PartSearchController;
 use App\Http\Controllers\Admin\Part8212PriceSyncRemoteCheckController;
@@ -332,6 +333,8 @@ Route::middleware([Authenticate::class])->group(function (): void {
         'app_env' => app()->environment(),
     ]))->name('admin.tools.shipments.diagnose-minimal');
     Route::get('/admin/tools/jarek-gearboxes/ping', [JarekGearboxToolController::class, 'ping'])->name('admin.tools.jarek-gearboxes.ping');
+    Route::get('/admin/tools/jarek-gearboxes/ebay-bulk-price-increase-preview', [JarekGearboxEbayBulkPriceController::class, 'preview'])->middleware(['admin.panel', 'throttle:tools'])->name('admin.tools.jarek-gearboxes.ebay-bulk-price-increase-preview');
+    Route::post('/admin/tools/jarek-gearboxes/ebay-bulk-price-increase-apply', [JarekGearboxEbayBulkPriceController::class, 'apply'])->middleware(['admin.panel', 'throttle:tools'])->name('admin.tools.jarek-gearboxes.ebay-bulk-price-increase-apply');
     Route::get('/admin/tools/jarek-gearboxes/allegro-import-runner', [JarekGearboxToolController::class, 'runner'])->name('admin.tools.jarek-gearboxes.allegro-import-runner');
     Route::get('/admin/tools/jarek-gearboxes/runner', [JarekGearboxToolController::class, 'jarekRunner'])->name('admin.tools.jarek-gearboxes.runner');
     Route::get('/admin/tools/jarek-gearboxes/image-import-runner-batch', [JarekGearboxToolController::class, 'imageImportRunnerBatch'])->name('admin.tools.jarek-gearboxes.image-import-runner-batch');
