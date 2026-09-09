@@ -238,7 +238,9 @@
             element('snapshot').value = runner.snapshot_id;
             element('size').value = runner.batch_size;
             element('delay').value = runner.delay_ms;
-            if (!['running', 'paused'].includes(runner.status)) {
+            // The server performs the strict error allow-list check. The browser
+            // only needs to let a stopped OAuth run reach that guarded endpoint.
+            if (!['running', 'paused', 'stopped_on_error'].includes(runner.status)) {
                 throw {response: statusResponse, body: statusBody, json: statusJson, phase: 'runner_state'};
             }
 
