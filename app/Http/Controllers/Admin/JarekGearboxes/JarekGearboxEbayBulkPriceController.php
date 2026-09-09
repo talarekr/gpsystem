@@ -5,12 +5,23 @@ namespace App\Http\Controllers\Admin\JarekGearboxes;
 use App\Http\Controllers\Controller;
 use App\Models\MarketplaceAccount;
 use App\Services\JarekGearboxes\JarekGearboxEbayBulkPricePreviewService;
+use App\Services\JarekGearboxes\JarekGearboxEbayPriceFetchService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
 
 class JarekGearboxEbayBulkPriceController extends Controller
 {
+    public function fetchPreview(Request $request, JarekGearboxEbayPriceFetchService $service): JsonResponse
+    {
+        return response()->json($service->fetch($this->channel($request), $this->limit($request), max(0, (int) $request->query('offset', 0)), $request->boolean('only_active', true), $request->boolean('only_missing_local_price'), false));
+    }
+
+    public function fetchCacheApply(Request $request, JarekGearboxEbayPriceFetchService $service): JsonResponse
+    {
+        abort_unless($request->input('confirm') === 'FETCH_JAREK_EBAY_PRICES_READ_ONLY_CACHE', 403, 'Explicit cache confirmation is required.');
+        return response()->json($service->fetch($this->channel($request), $this->limit($request), max(0, (int) $request->input('offset', 0)), $request->boolean('only_active', true), $request->boolean('only_missing_local_price'), true));
+    }
     public function preview(Request $request, JarekGearboxEbayBulkPricePreviewService $service): JsonResponse
     {
         $percent = (float) $request->query('percent', 0);
@@ -34,4 +45,7 @@ class JarekGearboxEbayBulkPriceController extends Controller
 
         return response()->json($blocked + ['error' => 'Apply is intentionally not implemented or enabled; obtain separate approval after reviewing the snapshot.'], 501);
     }
+
+    private function channel(Request $request): string { $channel = (string) $request->input('channel', 'ebay_de'); abort_unless($channel === 'ebay_de', 422, 'Only channel=ebay_de is supported.'); return $channel; }
+    private function limit(Request $request): int { $limit = (int) $request->input('limit', 20); abort_unless($limit >= 1 && $limit <= 100, 422, 'limit must be between 1 and 100.'); return $limit; }
 }

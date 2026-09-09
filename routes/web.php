@@ -334,6 +334,8 @@ Route::middleware([Authenticate::class])->group(function (): void {
     ]))->name('admin.tools.shipments.diagnose-minimal');
     Route::get('/admin/tools/jarek-gearboxes/ping', [JarekGearboxToolController::class, 'ping'])->name('admin.tools.jarek-gearboxes.ping');
     Route::get('/admin/tools/jarek-gearboxes/ebay-bulk-price-increase-preview', [JarekGearboxEbayBulkPriceController::class, 'preview'])->middleware(['admin.panel', 'throttle:tools'])->name('admin.tools.jarek-gearboxes.ebay-bulk-price-increase-preview');
+    Route::get('/admin/tools/jarek-gearboxes/ebay-price-fetch-preview', [JarekGearboxEbayBulkPriceController::class, 'fetchPreview'])->middleware(['admin.panel', 'throttle:tools'])->name('admin.tools.jarek-gearboxes.ebay-price-fetch-preview');
+    Route::post('/admin/tools/jarek-gearboxes/ebay-price-fetch-cache-apply', [JarekGearboxEbayBulkPriceController::class, 'fetchCacheApply'])->middleware(['admin.panel', 'throttle:tools'])->name('admin.tools.jarek-gearboxes.ebay-price-fetch-cache-apply');
     Route::post('/admin/tools/jarek-gearboxes/ebay-bulk-price-increase-apply', [JarekGearboxEbayBulkPriceController::class, 'apply'])->middleware(['admin.panel', 'throttle:tools'])->name('admin.tools.jarek-gearboxes.ebay-bulk-price-increase-apply');
     Route::get('/admin/tools/jarek-gearboxes/allegro-import-runner', [JarekGearboxToolController::class, 'runner'])->name('admin.tools.jarek-gearboxes.allegro-import-runner');
     Route::get('/admin/tools/jarek-gearboxes/runner', [JarekGearboxToolController::class, 'jarekRunner'])->name('admin.tools.jarek-gearboxes.runner');

@@ -56,7 +56,6 @@ class JarekGearboxEbayBulkPricePreviewTest extends TestCase
             ->assertJsonPath('sample_products.0.new_price', 107)
             ->assertJsonPath('sample_products.0.revise_would_be_needed', true)
             ->assertJsonPath('sample_products.1.skipped_reasons.0', 'no_ebay_listing')
-            ->assertJsonFragment(['non_positive_source_price'])
             ->assertJsonFragment(['non_positive_price']);
 
         $this->assertSame($before, JarekGearbox::query()->get()->map->getAttributes()->all());
@@ -67,7 +66,7 @@ class JarekGearboxEbayBulkPricePreviewTest extends TestCase
         $zero->refresh();
     }
 
-    public function test_preview_separates_de_and_fr_and_skips_missing_local_ebay_price(): void
+    public function test_preview_separates_de_and_fr_and_marks_missing_ebay_price_for_fetch(): void
     {
         $this->gearbox([
             'ebay_offer_id' => 'fr-offer',
@@ -81,7 +80,7 @@ class JarekGearboxEbayBulkPricePreviewTest extends TestCase
             ->assertJsonPath('ebay_channel_summary.ebay_de', 0)
             ->assertJsonPath('ebay_channel_summary.ebay_fr', 1)
             ->assertJsonPath('products_eligible_for_price_increase', 0)
-            ->assertJsonPath('skipped_reasons.missing_local_ebay_price', 1);
+            ->assertJsonPath('skipped_reasons.needs_ebay_price_fetch', 1);
     }
 
     public function test_apply_requires_confirmation_snapshot_canary_and_enabled_ebay(): void

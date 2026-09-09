@@ -1,0 +1,69 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\JarekGearbox;
+use App\Models\MarketplaceAccount;
+use App\Models\Part;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
+use Tests\TestCase;
+
+class JarekGearboxEbayPriceFetchTest extends TestCase
+{
+    use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        MarketplaceAccount::query()->create(['marketplace' => 'ebay', 'name' => 'eBay DE', 'code' => 'ebay_de', 'api_enabled' => true, 'api_base_url' => 'https://api.ebay.test', 'api_credentials' => ['access_token' => 'secret']]);
+    }
+
+    public function test_fetch_preview_only_gets_offer_and_never_writes_locally(): void
+    {
+        $gearbox = $this->gearbox(['price' => 999, 'ebay_offer_id' => 'offer/1', 'ebay_inventory_sku' => 'JAREK-1']);
+        $before = $gearbox->getAttributes();
+        Http::fake(['https://api.ebay.test/sell/inventory/v1/offer/offer%2F1' => Http::response(['offerId' => 'offer/1', 'sku' => 'JAREK-1', 'marketplaceId' => 'EBAY_DE', 'status' => 'PUBLISHED', 'pricingSummary' => ['price' => ['value' => '100.00', 'currency' => 'EUR']]], 200, ['x-ebay-c-request-id' => 'request-1'])]);
+
+        $this->withoutMiddleware()->getJson('/admin/tools/jarek-gearboxes/ebay-price-fetch-preview?limit=20')
+            ->assertOk()->assertJsonPath('marketplace_write', false)->assertJsonPath('external_api_requests', true)->assertJsonPath('local_write', false)
+            ->assertJsonPath('prices_fetched_from_ebay_count', 1)->assertJsonPath('products.0.current_ebay_price', 100)
+            ->assertJsonPath('products.0.proposed_new_price', 107)->assertJsonPath('products.0.ebay_request_id', 'request-1');
+
+        Http::assertSentCount(1);
+        Http::assertSent(fn ($request): bool => $request->method() === 'GET' && str_ends_with($request->url(), '/sell/inventory/v1/offer/offer%2F1'));
+        $this->assertSame($before, $gearbox->fresh()->getAttributes());
+    }
+
+    public function test_cache_apply_requires_confirm_and_only_updates_snapshot(): void
+    {
+        $gearbox = $this->gearbox(['price' => 555, 'quantity' => 7, 'title' => 'Untouched', 'ebay_offer_id' => 'offer-2', 'ebay_inventory_sku' => 'JAREK-2', 'ebay_payload_snapshot' => ['preserved' => true]]);
+        Http::fake(['*' => Http::response(['status' => 'PUBLISHED', 'marketplaceId' => 'EBAY_DE', 'pricingSummary' => ['price' => ['value' => '10.00', 'currency' => 'EUR']]])]);
+        $url = '/admin/tools/jarek-gearboxes/ebay-price-fetch-cache-apply';
+        $this->withoutMiddleware()->postJson($url, ['channel' => 'ebay_de'])->assertForbidden();
+        $this->withoutMiddleware()->postJson($url, ['channel' => 'ebay_de', 'confirm' => 'FETCH_JAREK_EBAY_PRICES_READ_ONLY_CACHE', 'limit' => 1])
+            ->assertOk()->assertJsonPath('marketplace_write', false)->assertJsonPath('local_write', true);
+
+        $gearbox->refresh();
+        $this->assertSame('555.00', $gearbox->price);
+        $this->assertSame(7, $gearbox->quantity);
+        $this->assertSame('Untouched', $gearbox->title);
+        $this->assertTrue(data_get($gearbox->ebay_payload_snapshot, 'preserved'));
+        $this->assertSame('10.00', data_get($gearbox->ebay_payload_snapshot, '_jarek_price_fetch.pricingSummary.price.value'));
+    }
+
+    public function test_bulk_preview_prefers_fetch_cache_not_local_price_and_excludes_parts(): void
+    {
+        $this->gearbox(['price' => 9000, 'ebay_offer_id' => 'offer-3', 'ebay_inventory_sku' => 'JAREK-3', 'ebay_payload_snapshot' => ['pricingSummary' => ['price' => ['value' => 80, 'currency' => 'EUR']], '_jarek_price_fetch' => ['pricingSummary' => ['price' => ['value' => 100, 'currency' => 'EUR']], 'fetched_at' => '2026-09-09T10:00:00Z']]]);
+        Part::query()->create(['name' => 'Ordinary Part', 'price' => 100, 'ebay_price' => 100]);
+
+        $this->withoutMiddleware()->getJson('/admin/tools/jarek-gearboxes/ebay-bulk-price-increase-preview?percent=7')->assertOk()
+            ->assertJsonPath('total_jarek_products', 1)->assertJsonPath('sample_products.0.current_ebay_price', 100)
+            ->assertJsonPath('sample_products.0.new_price', 107)->assertJsonPath('sample_products.0.price_source', 'ebay_offer_fetch_cache');
+    }
+
+    private function gearbox(array $attributes): JarekGearbox
+    {
+        return JarekGearbox::query()->create(array_merge(['source_account' => 'jarek', 'allegro_account' => 'jarek', 'allegro_offer_id' => uniqid(), 'title' => 'Jarek product', 'currency' => 'PLN', 'quantity' => 1, 'ebay_status' => 'published'], $attributes));
+    }
+}
