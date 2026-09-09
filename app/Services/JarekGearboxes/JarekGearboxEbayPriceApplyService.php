@@ -48,14 +48,46 @@ class JarekGearboxEbayPriceApplyService
         $write = $client->asJson()->put($url, $payload);
         $requestId = $write->header('x-ebay-c-request-id') ?: $write->header('x-ebay-correlation-id') ?: (string) Str::uuid();
         $ok = $write->successful();
+        $errorBody = $ok ? null : $this->sanitizedResponseBody($write->json(), $write->body());
+        $ebayError = $ok ? null : $this->primaryEbayError($errorBody);
         $snapshot = (array) $product->ebay_payload_snapshot;
         $snapshot['_jarek_price_apply'] = ['old_price' => $row['old_price'], 'new_price' => $row['new_price'], 'currency' => $row['currency'], 'applied_at' => now()->toIso8601String(), 'http_status' => $write->status(), 'request_id' => $requestId, 'apply_batch_id' => $batchId];
         $product->forceFill(['ebay_payload_snapshot' => $snapshot])->saveQuietly();
-        MarketplaceSyncLog::query()->create(['marketplace' => 'ebay_de', 'action' => 'jarek_gearboxes_ebay_bulk_price_increase_apply', 'status' => $ok ? 'success' : 'error', 'http_status' => $write->status(), 'request_id' => $requestId, 'external_id' => $row['ebay_offer_id'], 'message' => 'Price-only existing eBay offer update.', 'payload' => ['marketplace_write' => true, 'apply_batch_id' => $batchId, 'jarek_gearbox_id' => $product->id, 'diff' => ['pricingSummary.price' => ['old' => $row['old_price'], 'new' => $row['new_price']], 'all_other_fields' => 'preserved'], 'request_fields' => array_keys($payload), 'response' => $this->safeResponse($write->json()), 'secrets_logged' => false], 'created_at' => now()]);
-        return $row + ['ok' => $ok, 'status' => $ok ? 'success' : 'failed', 'http_status' => $write->status(), 'request_id' => $requestId, 'price_accepted' => $ok, 'listing_url' => filled($row['ebay_listing_id']) ? 'https://www.ebay.de/itm/'.$row['ebay_listing_id'] : null];
+        $message = $ok ? 'Price-only existing eBay offer update.' : ($ebayError['message'] ?? 'eBay rejected the price-only offer update.');
+        MarketplaceSyncLog::query()->create(['marketplace' => 'ebay_de', 'action' => 'jarek_gearboxes_ebay_bulk_price_increase_apply', 'status' => $ok ? 'success' : 'error', 'http_status' => $write->status(), 'request_id' => $requestId, 'external_id' => $row['ebay_offer_id'], 'message' => $message, 'payload' => ['marketplace_write' => true, 'apply_batch_id' => $batchId, 'jarek_gearbox_id' => $product->id, 'request' => ['method' => 'PUT', 'resource' => '/sell/inventory/v1/offer/{offerId}', 'offer_id' => $row['ebay_offer_id'], 'fields' => array_keys($payload), 'changed_fields' => ['pricingSummary.price.value'], 'preserved_fields' => array_values(array_diff(array_keys($payload), ['pricingSummary'])), 'quantity_preserved' => true, 'secrets_included' => false], 'diff' => ['pricingSummary.price' => ['old' => $row['old_price'], 'new' => $row['new_price']], 'all_other_fields' => 'preserved'], 'response' => $this->safeResponse($write->json()), 'error_body_sanitized' => $errorBody, 'secrets_logged' => false], 'created_at' => now()]);
+        return $row + ['ok' => $ok, 'status' => $ok ? 'success' : 'failed', 'http_status' => $write->status(), 'request_id' => $requestId, 'price_accepted' => $ok, 'ebay_error' => $ebayError, 'error_body_sanitized' => $errorBody, 'listing_url' => filled($row['ebay_listing_id']) ? 'https://www.ebay.de/itm/'.$row['ebay_listing_id'] : null];
     }
 
     private function blocked(string $reason): array { return ['ok' => false, 'applied' => false, 'marketplace_write' => false, 'error' => $reason]; }
     private function blockedItem(array $row, string $reason): array { return $row + ['ok' => false, 'status' => 'blocked', 'marketplace_write' => false, 'error' => $reason]; }
     private function safeResponse(mixed $json): array { return is_array($json) ? array_intersect_key($json, array_flip(['offerId', 'listingId', 'status', 'errors', 'warnings'])) : []; }
+
+    private function sanitizedResponseBody(mixed $json, string $body): array
+    {
+        $response = is_array($json) ? $json : ['message' => mb_substr($body, 0, 4000)];
+
+        return $this->sanitize($response);
+    }
+
+    private function sanitize(array $value): array
+    {
+        foreach ($value as $key => $item) {
+            if (preg_match('/token|authorization|credential|secret|password|cookie/i', (string) $key)) {
+                $value[$key] = '[REDACTED]';
+            } elseif (is_array($item)) {
+                $value[$key] = $this->sanitize($item);
+            }
+        }
+
+        return $value;
+    }
+
+    private function primaryEbayError(?array $body): ?array
+    {
+        if ($body === null) return null;
+        $error = data_get($body, 'errors.0');
+        if (! is_array($error)) return ['message' => (string) ($body['message'] ?? 'eBay request failed')];
+
+        return array_intersect_key($error, array_flip(['message', 'errorId', 'domain', 'category', 'inputRefIds', 'parameters', 'longMessage']));
+    }
 }
