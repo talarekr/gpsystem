@@ -54,6 +54,58 @@ class JarekGearboxEbayPriceFetchTest extends TestCase
         $this->assertDatabaseHas('marketplace_sync_logs', ['action' => 'jarek_gearboxes_ebay_price_fetch_cache']);
     }
 
+    public function test_fetch_runner_exposes_spa_safe_diagnostics_and_backend_urls(): void
+    {
+        $response = $this->withoutMiddleware()->get('/admin/tools/jarek-gearboxes/ebay-price-fetch-runner');
+
+        $response->assertOk()
+            ->assertSee('id="fetch-runner-start"', false)
+            ->assertSee('Debug runnera')
+            ->assertSee('Test dry-run request')
+            ->assertSee(route('admin.tools.jarek-gearboxes.ebay-price-fetch-preview'), false)
+            ->assertSee(route('admin.tools.jarek-gearboxes.ebay-price-fetch-cache-apply'), false)
+            ->assertSee('DOMContentLoaded')
+            ->assertSee('livewire:navigated')
+            ->assertSee("document.addEventListener('click'", false)
+            ->assertSee("reflectSelection('Start clicked')", false)
+            ->assertSee('last_error_type')
+            ->assertSee('max="100"', false);
+    }
+
+    public function test_fetch_and_cache_endpoints_accept_limit_one_hundred_but_cache_still_requires_confirm(): void
+    {
+        Http::fake();
+
+        $this->withoutMiddleware()->getJson('/admin/tools/jarek-gearboxes/ebay-price-fetch-preview?channel=ebay_de&limit=100&offset=0')
+            ->assertOk()
+            ->assertJsonPath('local_write', false)
+            ->assertJsonPath('marketplace_write', false);
+
+        $cacheUrl = '/admin/tools/jarek-gearboxes/ebay-price-fetch-cache-apply';
+        $this->withoutMiddleware()->postJson($cacheUrl, ['channel' => 'ebay_de', 'limit' => 100])
+            ->assertForbidden();
+        $this->withoutMiddleware()->postJson($cacheUrl, [
+            'channel' => 'ebay_de',
+            'limit' => 100,
+            'confirm' => 'FETCH_JAREK_EBAY_PRICES_READ_ONLY_CACHE',
+            'marketplace_write' => false,
+        ])->assertOk()
+            ->assertJsonPath('local_write', true)
+            ->assertJsonPath('marketplace_write', false);
+    }
+
+    public function test_price_apply_endpoint_keeps_five_item_canary_limit(): void
+    {
+        $this->withoutMiddleware()->postJson('/admin/tools/jarek-gearboxes/ebay-bulk-price-increase-apply', [
+            'percent' => 7,
+            'confirm' => 'INCREASE_JAREK_EBAY_PRICES_7_PERCENT',
+            'snapshot_id' => 'not-used-because-limit-is-rejected-first',
+            'limit' => 6,
+        ])->assertStatus(422)
+            ->assertJsonPath('error', 'canary limit between 1 and 5 is required')
+            ->assertJsonPath('marketplace_write', false);
+    }
+
     public function test_canary_apply_updates_only_offer_price_and_preserves_local_product(): void
     {
         config()->set('marketplace.external_api_writes_enabled', true);
