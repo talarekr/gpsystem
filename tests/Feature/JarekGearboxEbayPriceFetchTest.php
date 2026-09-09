@@ -146,6 +146,33 @@ class JarekGearboxEbayPriceFetchTest extends TestCase
         $this->assertDatabaseHas('marketplace_sync_logs', ['action' => 'jarek_gearboxes_ebay_bulk_price_increase_apply', 'request_id' => 'write-1']);
     }
 
+    public function test_failed_canary_returns_and_logs_sanitized_ebay_error_details(): void
+    {
+        config()->set('marketplace.external_api_writes_enabled', true);
+        config()->set('marketplace.jarek_ebay_price_apply_enabled', true);
+        $this->gearbox(['ebay_offer_id' => 'offer-error', 'ebay_listing_id' => 'listing-error', 'ebay_inventory_sku' => 'JAREK-ERROR', 'ebay_payload_snapshot' => ['_jarek_price_fetch' => ['fetched_at' => now()->toIso8601String(), 'pricingSummary' => ['price' => ['value' => '100.00', 'currency' => 'EUR']]]]]);
+        $preview = $this->withoutMiddleware()->getJson('/admin/tools/jarek-gearboxes/ebay-bulk-price-increase-preview?percent=7')->json();
+        $error = ['errors' => [['errorId' => 25002, 'domain' => 'API_INVENTORY', 'category' => 'REQUEST', 'message' => 'Invalid price.', 'inputRefIds' => ['JAREK-ERROR'], 'parameters' => [['name' => 'price', 'value' => '107.00']]]], 'access_token' => 'must-not-leak'];
+        Http::fakeSequence()
+            ->push(['offerId' => 'offer-error', 'sku' => 'JAREK-ERROR', 'marketplaceId' => 'EBAY_DE', 'availableQuantity' => 3, 'listingDescription' => 'Keep me', 'pricingSummary' => ['price' => ['value' => '100.00', 'currency' => 'EUR']]], 200)
+            ->push($error, 400, ['x-ebay-c-request-id' => 'failed-write-1']);
+
+        $response = $this->withoutMiddleware()->postJson('/admin/tools/jarek-gearboxes/ebay-bulk-price-increase-apply', ['percent' => 7, 'channel' => 'ebay_de', 'confirm' => 'INCREASE_JAREK_EBAY_PRICES_7_PERCENT', 'snapshot_id' => $preview['snapshot_id'], 'limit' => 1]);
+
+        $response->assertOk()
+            ->assertJsonPath('results.0.price_accepted', false)
+            ->assertJsonPath('results.0.ebay_error.errorId', 25002)
+            ->assertJsonPath('results.0.ebay_error.message', 'Invalid price.')
+            ->assertJsonPath('results.0.error_body_sanitized.access_token', '[REDACTED]');
+        $log = MarketplaceSyncLog::query()->where('request_id', 'failed-write-1')->firstOrFail();
+        $this->assertSame('Invalid price.', $log->message);
+        $this->assertSame(25002, data_get($log->payload, 'error_body_sanitized.errors.0.errorId'));
+        $this->assertSame(['pricingSummary.price.value'], data_get($log->payload, 'request.changed_fields'));
+        $this->assertTrue(data_get($log->payload, 'request.quantity_preserved'));
+        $this->assertSame(2, count(Http::recorded()));
+        Http::assertNotSent(fn ($request): bool => str_contains($request->url(), 'publishOffer') || str_contains($request->url(), 'bulk_update_price_quantity'));
+    }
+
     public function test_apply_runner_exposes_no_run_all_action(): void
     {
         $html = $this->withoutMiddleware()->get('/admin/tools/jarek-gearboxes/ebay-bulk-price-increase-runner')->getContent();
