@@ -146,6 +146,41 @@ class JarekGearboxEbayPriceFetchTest extends TestCase
         $this->assertDatabaseHas('marketplace_sync_logs', ['action' => 'jarek_gearboxes_ebay_bulk_price_increase_apply', 'request_id' => 'write-1']);
     }
 
+    public function test_ebay_de_price_only_apply_uses_german_inventory_headers_and_exactly_get_then_put(): void
+    {
+        config()->set('marketplace.external_api_writes_enabled', true);
+        config()->set('marketplace.jarek_ebay_price_apply_enabled', true);
+        $this->gearbox(['ebay_offer_id' => 'offer-headers', 'ebay_listing_id' => 'listing-headers', 'ebay_inventory_sku' => 'JAREK-HEADERS', 'ebay_payload_snapshot' => ['marketplaceId' => 'EBAY_DE', '_jarek_price_fetch' => ['fetched_at' => now()->toIso8601String(), 'pricingSummary' => ['price' => ['value' => '100.00', 'currency' => 'EUR']]]]]);
+        $preview = $this->withoutMiddleware()->getJson('/admin/tools/jarek-gearboxes/ebay-bulk-price-increase-preview?percent=7')->json();
+        Http::fakeSequence()
+            ->push(['offerId' => 'offer-headers', 'sku' => 'JAREK-HEADERS', 'marketplaceId' => 'EBAY_DE', 'availableQuantity' => 2, 'listingDescription' => 'Preserved', 'pricingSummary' => ['price' => ['value' => '100.00', 'currency' => 'EUR']]], 200)
+            ->push([], 204);
+
+        $response = $this->withoutMiddleware()->postJson('/admin/tools/jarek-gearboxes/ebay-bulk-price-increase-apply', ['percent' => 7, 'channel' => 'ebay_de', 'confirm' => 'INCREASE_JAREK_EBAY_PRICES_7_PERCENT', 'snapshot_id' => $preview['snapshot_id'], 'limit' => 1]);
+
+        $response->assertOk()
+            ->assertJsonPath('results.0.request_headers_summary.marketplace_id', 'EBAY_DE')
+            ->assertJsonPath('results.0.request_headers_summary.content_language', 'de-DE')
+            ->assertJsonPath('results.0.request_headers_summary.accept_language', 'de-DE')
+            ->assertJsonPath('results.0.request_headers_summary.content_type', 'application/json')
+            ->assertJsonPath('results.0.request_headers_summary.accept', 'application/json');
+        $requests = Http::recorded();
+        $this->assertCount(2, $requests);
+        $this->assertSame(['GET', 'PUT'], $requests->map(fn (array $record): string => $record[0]->method())->all());
+        foreach ($requests as [$request]) {
+            $this->assertTrue($request->hasHeader('X-EBAY-C-MARKETPLACE-ID', 'EBAY_DE'));
+            $this->assertTrue($request->hasHeader('Content-Language', 'de-DE'));
+            $this->assertFalse($request->hasHeader('Content-Language', 'ebay_de'));
+            $this->assertFalse($request->hasHeader('Content-Language', 'EBAY_DE'));
+            $this->assertTrue($request->hasHeader('Accept-Language', 'de-DE'));
+            $this->assertTrue($request->hasHeader('Content-Type', 'application/json'));
+            $this->assertTrue($request->hasHeader('Accept', 'application/json'));
+        }
+        Http::assertNotSent(fn ($request): bool => str_contains($request->url(), 'publishOffer') || str_contains($request->url(), 'bulk_update_price_quantity'));
+        $log = MarketplaceSyncLog::query()->latest('id')->firstOrFail();
+        $this->assertSame('de-DE', data_get($log->payload, 'request.headers_summary.content_language'));
+    }
+
     public function test_failed_canary_returns_and_logs_sanitized_ebay_error_details(): void
     {
         config()->set('marketplace.external_api_writes_enabled', true);
