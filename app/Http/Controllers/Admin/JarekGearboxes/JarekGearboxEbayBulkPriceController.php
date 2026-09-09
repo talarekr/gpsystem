@@ -7,6 +7,7 @@ use App\Models\MarketplaceAccount;
 use App\Services\JarekGearboxes\JarekGearboxEbayBulkPricePreviewService;
 use App\Services\JarekGearboxes\JarekGearboxEbayPriceFetchService;
 use App\Services\JarekGearboxes\JarekGearboxEbayPriceApplyService;
+use App\Services\Marketplace\EbayConnectionGate;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
@@ -37,12 +38,12 @@ class JarekGearboxEbayBulkPriceController extends Controller
         return view('admin.jarek-gearboxes.ebay-price-fetch-runner');
     }
 
-    public function applyRunner()
+    public function applyRunner(EbayConnectionGate $gate)
     {
-        return view('admin.jarek-gearboxes.ebay-price-apply-runner');
+        return view('admin.jarek-gearboxes.ebay-price-apply-runner', ['ebayConnection' => $gate->status()]);
     }
 
-    public function apply(Request $request, JarekGearboxEbayPriceApplyService $service): JsonResponse
+    public function apply(Request $request, JarekGearboxEbayPriceApplyService $service, EbayConnectionGate $gate): JsonResponse
     {
         $blocked = ['ok' => false, 'applied' => false, 'marketplace_write' => false];
         if ((float) $request->input('percent') !== 7.0) return response()->json($blocked + ['error' => 'percent=7 is required'], 422);
@@ -52,8 +53,11 @@ class JarekGearboxEbayBulkPriceController extends Controller
         if ($limit < 1 || $limit > 5) return response()->json($blocked + ['error' => 'canary limit between 1 and 5 is required'], 422);
         $this->channel($request);
         $account = Schema::hasTable('marketplace_accounts') ? MarketplaceAccount::query()->where('code', 'ebay_de')->first() : null;
-        if (! $account?->api_enabled || ! config('marketplace.external_api_writes_enabled') || ! config('marketplace.jarek_ebay_price_apply_enabled')) {
-            return response()->json($blocked + ['error' => 'eBay write connection is disabled'], 409);
+        if (! $gate->writeEnabled($account)) {
+            return response()->json($blocked + ['error' => 'eBay write connection is disabled', 'connection_toggle_url' => route('admin.tools.marketplace.ebay-connection-toggle')], 409);
+        }
+        if (! config('marketplace.jarek_ebay_price_apply_enabled')) {
+            return response()->json($blocked + ['error' => 'Jarek eBay price apply feature is disabled'], 409);
         }
         $selected = array_values(array_unique(array_map('intval', (array) $request->input('selected_ids', []))));
         if (count($selected) > $limit) return response()->json($blocked + ['error' => 'selected_ids exceeds canary limit'], 422);
