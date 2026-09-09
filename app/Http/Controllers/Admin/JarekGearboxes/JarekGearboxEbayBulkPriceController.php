@@ -61,5 +61,5 @@ class JarekGearboxEbayBulkPriceController extends Controller
     }
 
     private function channel(Request $request): string { $channel = (string) $request->input('channel', 'ebay_de'); abort_unless($channel === 'ebay_de', 422, 'Only channel=ebay_de is supported.'); return $channel; }
-    private function limit(Request $request): int { $limit = (int) $request->input('limit', 20); abort_unless($limit >= 1 && $limit <= 100, 422, 'limit must be between 1 and 100.'); return $limit; }
+    private function limit(Request $request): int { $limit = (int) $request->input('limit', 50); abort_unless($limit >= 1 && $limit <= 100, 422, 'limit must be between 1 and 100.'); return $limit; }
 }
