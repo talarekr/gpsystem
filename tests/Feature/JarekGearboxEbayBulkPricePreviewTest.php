@@ -13,6 +13,26 @@ class JarekGearboxEbayBulkPricePreviewTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_apply_runner_exposes_read_only_preview_loader_and_navigation_safe_debug_ui(): void
+    {
+        $response = $this->withoutMiddleware()->get('/admin/tools/jarek-gearboxes/ebay-bulk-price-increase-apply-runner');
+
+        $response->assertOk()
+            ->assertSee('data-preview-url="'.url('/admin/tools/jarek-gearboxes/ebay-bulk-price-increase-preview').'?percent=7"', false)
+            ->assertSee("method: 'GET'", false)
+            ->assertSee("document.addEventListener('DOMContentLoaded', initialize)", false)
+            ->assertSee("document.addEventListener('livewire:navigated', initialize)", false)
+            ->assertSee("document.addEventListener('filament:navigated', initialize)", false)
+            ->assertSee('runtime.listenersBound', false)
+            ->assertSee('preview_click_count')
+            ->assertSee('last_preview_endpoint')
+            ->assertSee('last_http_status')
+            ->assertSee('last_response_is_json')
+            ->assertSee('last_error_type')
+            ->assertSee('last_response_preview')
+            ->assertSee('APPLY_JAREK_EBAY_PRICES_7_PERCENT_BATCH_RUNNER');
+    }
+
     public function test_preview_is_read_only_calculates_seven_percent_and_excludes_parts(): void
     {
         Http::fake();
