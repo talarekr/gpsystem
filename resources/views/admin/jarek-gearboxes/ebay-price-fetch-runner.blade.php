@@ -17,6 +17,7 @@
     <label>Tryb <select id="fetch-runner-mode"><option value="cache">Fetch + cache</option><option value="dry">Dry-run (bez zapisu)</option></select></label>
     <label>Channel <select id="fetch-runner-channel"><option value="ebay_de">ebay_de</option></select></label>
     <label>Batch <input id="fetch-runner-limit" type="number" min="1" max="100" value="50"></label>
+    <small>Rekomendowany <code>batch_size=50</code>; maksymalny fetch/cache: 100.</small>
     <label>Delay ms <input id="fetch-runner-delay" type="number" min="1500" max="10000" value="2000"></label>
     <label>Offset <input id="fetch-runner-offset" type="number" min="0" value="0"></label>
     <label>Confirm <input id="fetch-runner-confirm" value="FETCH_JAREK_EBAY_PRICES_READ_ONLY_CACHE" readonly size="46"></label>
@@ -35,7 +36,7 @@
     <section id="fetch-runner-debug" class="debug" aria-live="polite">
         <h2>Debug runnera</h2>
         <div class="debug-grid">
-            @foreach (['js_loaded' => 'JS loaded', 'initialized_at' => 'initialized_at', 'bound' => 'bound', 'start_click_count' => 'start_click_count', 'last_action' => 'last_action', 'mode' => 'mode', 'channel' => 'channel', 'limit' => 'limit', 'offset' => 'offset', 'endpoint' => 'endpoint', 'request_started_at' => 'request_started_at', 'request_finished_at' => 'request_finished_at', 'last_http_status' => 'last_http_status', 'last_response_is_json' => 'last_response_is_json', 'last_error_type' => 'last_error_type', 'last_error_message' => 'last_error_message', 'last_response_preview' => 'last_response_preview'] as $key => $label)
+            @foreach (['js_loaded' => 'JS loaded', 'initialized_at' => 'initialized_at', 'bound' => 'bound', 'active_request_id' => 'active_request_id', 'request_in_flight' => 'request_in_flight', 'abort_reason' => 'abort_reason', 'aborted_at' => 'aborted_at', 'elapsed_ms' => 'elapsed_ms', 'timeout_ms' => 'timeout_ms', 'start_click_count' => 'start_click_count', 'duplicate_start_blocked' => 'duplicate_start_blocked', 'last_event' => 'last_event', 'batch_started' => 'batch_started', 'batch_finished' => 'batch_finished', 'retry_count' => 'retry_count', 'last_action' => 'last_action', 'mode' => 'mode', 'channel' => 'channel', 'limit' => 'limit', 'offset' => 'offset', 'endpoint' => 'endpoint', 'request_started_at' => 'request_started_at', 'request_finished_at' => 'request_finished_at', 'last_http_status' => 'last_http_status', 'last_response_is_json' => 'last_response_is_json', 'last_error_type' => 'last_error_type', 'last_error_message' => 'last_error_message', 'last_response_preview' => 'last_response_preview'] as $key => $label)
                 <div><strong>{{ $label }}:</strong> <span id="fetch-debug-{{ $key }}" class="debug-value">{{ in_array($key, ['js_loaded', 'bound'], true) ? 'no' : '—' }}</span></div>
             @endforeach
         </div>
@@ -50,8 +51,11 @@
     const debugElement = name => document.getElementById(`fetch-debug-${name}`);
     const now = () => new Date().toISOString();
     const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+    const REQUEST_TIMEOUT_MS = 180000;
     const runtime = window.jarekEbayPriceFetchRunner ||= {
         bound: false, running: false, paused: false, stopped: false, aborter: null,
+        activeRequestId: null, requestStartedMs: null, abortReason: null, requestSequence: 0,
+        retryCount: 0,
         startClickCount: 0, processed: 0, fetched: 0, cached: 0, missing: 0,
         stale: 0, skipped: 0, errors: 0, total: 0, withOffer: 0
     };
@@ -88,6 +92,11 @@
         setDebug('initialized_at', now());
         setDebug('bound', runtime.bound ? 'yes' : 'no');
         setDebug('start_click_count', runtime.startClickCount);
+        setDebug('request_in_flight', runtime.activeRequestId ? 'yes' : 'no');
+        setDebug('active_request_id', runtime.activeRequestId);
+        setDebug('timeout_ms', REQUEST_TIMEOUT_MS);
+        setDebug('retry_count', runtime.retryCount);
+        setDebug('last_event', 'initialize (request preserved)');
         reflectSelection('Initialized');
         draw(Number(id('offset')?.value) || 0);
     }
@@ -108,9 +117,35 @@
         return status >= 400 ? 'http' : 'none';
     }
 
-    async function request(url, options = {}) {
-        runtime.aborter = new AbortController();
-        const timer = setTimeout(() => runtime.aborter.abort(), 30000);
+    function abortActive(reason) {
+        if (!runtime.aborter || !runtime.activeRequestId) return false;
+        runtime.abortReason = reason;
+        setDebug('abort_reason', reason);
+        setDebug('aborted_at', now());
+        runtime.aborter.abort(reason);
+        return true;
+    }
+
+    function isAbort(error) {
+        return error?.name === 'AbortError' || /signal is aborted|aborted without reason/i.test(String(error?.message || ''));
+    }
+
+    async function request(url, options = {}, batch = {}) {
+        if (runtime.activeRequestId) throw Object.assign(new Error('Runner already running'), {type: 'duplicate_start'});
+        const controller = new AbortController();
+        const requestId = `jarek-fetch-${Date.now()}-${++runtime.requestSequence}`;
+        const startedMs = Date.now();
+        runtime.aborter = controller;
+        runtime.activeRequestId = requestId;
+        runtime.requestStartedMs = startedMs;
+        runtime.abortReason = null;
+        const timer = setTimeout(() => abortActive('timeout'), REQUEST_TIMEOUT_MS);
+        setDebug('active_request_id', requestId);
+        setDebug('request_in_flight', 'yes');
+        setDebug('abort_reason', '—');
+        setDebug('aborted_at', '—');
+        setDebug('elapsed_ms', 0);
+        setDebug('timeout_ms', REQUEST_TIMEOUT_MS);
         setDebug('endpoint', url);
         setDebug('request_started_at', now());
         setDebug('request_finished_at', '—');
@@ -122,7 +157,7 @@
         try {
             const response = await fetch(url, {
                 ...options,
-                signal: runtime.aborter.signal,
+                signal: controller.signal,
                 headers: {'Accept': 'application/json', ...(options.headers || {})}
             });
             const body = await response.text();
@@ -143,18 +178,34 @@
             id('action').textContent = `Request finished: HTTP ${response.status}`;
             return json;
         } catch (error) {
+            const aborted = isAbort(error) || controller.signal.aborted;
+            const abortedBy = aborted ? (runtime.abortReason || (typeof controller.signal.reason === 'string' ? controller.signal.reason : 'unknown')) : null;
+            const elapsed = Date.now() - startedMs;
             if (!error.diagnosed) {
                 setDebug('request_finished_at', now());
                 setDebug('last_http_status', 'no response');
                 setDebug('last_response_is_json', 'no');
-                setDebug('last_error_type', 'network');
-                setDebug('last_error_message', error.name === 'AbortError' ? 'Request aborted or timed out' : error.message);
+                setDebug('last_error_type', aborted ? 'aborted' : 'network');
+                setDebug('last_error_message', aborted ? `Request aborted by ${abortedBy}` : error.message);
             }
+            setDebug('elapsed_ms', elapsed);
+            if (aborted) setDebug('abort_reason', abortedBy);
+            error.type = aborted ? 'aborted' : (error.type || 'network');
+            error.abortedBy = abortedBy;
+            error.elapsedMs = elapsed;
+            error.requestId = requestId;
             id('errors').classList.add('error');
-            id('errors').textContent = `${error.type || 'network'}: ${error.message}\nEndpoint: ${url}`;
+            id('errors').textContent = JSON.stringify({error_type:error.type, message:error.message, aborted_by:abortedBy, active_request_id:requestId, batch_offset:batch.offset ?? null, batch_limit:batch.limit ?? null, elapsed_ms:elapsed, request_timeout_ms:REQUEST_TIMEOUT_MS, recommendation:(abortedBy === 'timeout' || error.type === 'server') && Number(batch.limit) > 50 ? 'Retry with batch_size=50' : null, endpoint:url}, null, 2);
             throw error;
         } finally {
             clearTimeout(timer);
+            setDebug('elapsed_ms', Date.now() - startedMs);
+            if (runtime.activeRequestId === requestId) {
+                runtime.activeRequestId = null;
+                runtime.aborter = null;
+                runtime.requestStartedMs = null;
+                setDebug('request_in_flight', 'no');
+            }
         }
     }
 
@@ -166,8 +217,15 @@
     }
 
     async function run() {
-        if (runtime.running) return;
+        if (runtime.running || runtime.activeRequestId) {
+            setDebug('duplicate_start_blocked', 'yes');
+            setDebug('last_event', 'duplicate start blocked');
+            id('action').textContent = 'Runner already running';
+            return;
+        }
         runtime.running = true; runtime.paused = false; runtime.stopped = false;
+        runtime.retryCount = 0;
+        setDebug('duplicate_start_blocked', 'no');
         try {
             while (!runtime.stopped) {
                 if (runtime.paused) { await sleep(250); continue; }
@@ -180,7 +238,26 @@
                     headers:{'Content-Type':'application/json','X-CSRF-TOKEN':document.querySelector('meta[name="csrf-token"]')?.content || ''},
                     body:JSON.stringify({channel:current.channel,limit:current.limit,offset:current.offset,confirm:id('confirm').value,local_write:true,marketplace_write:false})
                 };
-                const json = await request(url, options);
+                setDebug('batch_started', now());
+                setDebug('batch_finished', '—');
+                setDebug('last_event', 'batch started');
+                let json;
+                try {
+                    json = await request(url, options, current);
+                } catch (error) {
+                    const retryable = error.abortedBy === 'timeout' || error.type === 'server';
+                    if (retryable && runtime.retryCount < 1 && current.limit > 50 && !runtime.stopped && !runtime.paused) {
+                        runtime.retryCount++;
+                        id('limit').value = 50;
+                        setDebug('retry_count', runtime.retryCount);
+                        setDebug('last_event', 'retry with batch_size=50');
+                        id('action').textContent = 'Timeout/server error: retrying once with batch_size=50';
+                        continue;
+                    }
+                    throw error;
+                }
+                setDebug('batch_finished', now());
+                setDebug('last_event', 'batch finished');
                 id('last').textContent = JSON.stringify(json, null, 2);
                 runtime.total = json.total_jarek_products || 0; runtime.withOffer = json.products_with_ebay_offer_id || 0;
                 runtime.processed += json.count || 0; runtime.fetched += json.prices_fetched_from_ebay_count || 0;
@@ -200,10 +277,11 @@
     }
 
     async function testDryRun() {
+        if (runtime.running || runtime.activeRequestId) { id('action').textContent = 'Runner already running'; return; }
         const root = document.getElementById(rootId);
         const url = `${root.dataset.previewUrl}?${new URLSearchParams({channel:'ebay_de',limit:'1',offset:'0'})}`;
         setDebug('last_action', 'Test dry-run request');
-        try { id('last').textContent = JSON.stringify(await request(url, {method:'GET'}), null, 2); } catch (_) {}
+        try { id('last').textContent = JSON.stringify(await request(url, {method:'GET'}, {offset:0, limit:1}), null, 2); } catch (_) {}
     }
 
     if (!runtime.bound) {
@@ -216,9 +294,9 @@
                 reflectSelection('Start clicked');
                 id('action').textContent = 'Start clicked';
                 run();
-            } else if (button.id === 'fetch-runner-pause') { runtime.paused = true; reflectSelection('Pause clicked'); id('action').textContent = 'Pause clicked'; }
+            } else if (button.id === 'fetch-runner-pause') { runtime.paused = true; abortActive('pause'); reflectSelection('Pause clicked'); id('action').textContent = 'Pause clicked'; }
             else if (button.id === 'fetch-runner-resume') { runtime.paused = false; reflectSelection('Resume clicked'); id('action').textContent = 'Resume clicked'; run(); }
-            else if (button.id === 'fetch-runner-stop') { runtime.stopped = true; runtime.aborter?.abort(); reflectSelection('Stop clicked'); id('action').textContent = 'Stop clicked'; }
+            else if (button.id === 'fetch-runner-stop') { runtime.stopped = true; abortActive('user_stop'); reflectSelection('Stop clicked'); id('action').textContent = 'Stop clicked'; }
             else if (button.id === 'fetch-runner-test') { testDryRun(); }
         });
         runtime.bound = true;

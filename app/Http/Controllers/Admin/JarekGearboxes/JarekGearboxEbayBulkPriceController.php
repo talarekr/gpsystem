@@ -10,18 +10,19 @@ use App\Services\JarekGearboxes\JarekGearboxEbayPriceApplyService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
+use Throwable;
 
 class JarekGearboxEbayBulkPriceController extends Controller
 {
     public function fetchPreview(Request $request, JarekGearboxEbayPriceFetchService $service): JsonResponse
     {
-        return response()->json($service->fetch($this->channel($request), $this->limit($request), max(0, (int) $request->query('offset', 0)), $request->boolean('only_active', true), $request->boolean('only_missing_local_price'), false));
+        return $this->fetchResponse($request, $service, false);
     }
 
     public function fetchCacheApply(Request $request, JarekGearboxEbayPriceFetchService $service): JsonResponse
     {
         abort_unless($request->input('confirm') === 'FETCH_JAREK_EBAY_PRICES_READ_ONLY_CACHE', 403, 'Explicit cache confirmation is required.');
-        return response()->json($service->fetch($this->channel($request), $this->limit($request), max(0, (int) $request->input('offset', 0)), $request->boolean('only_active', true), $request->boolean('only_missing_local_price'), true));
+        return $this->fetchResponse($request, $service, true);
     }
     public function preview(Request $request, JarekGearboxEbayBulkPricePreviewService $service): JsonResponse
     {
@@ -62,4 +63,44 @@ class JarekGearboxEbayBulkPriceController extends Controller
 
     private function channel(Request $request): string { $channel = (string) $request->input('channel', 'ebay_de'); abort_unless($channel === 'ebay_de', 422, 'Only channel=ebay_de is supported.'); return $channel; }
     private function limit(Request $request): int { $limit = (int) $request->input('limit', 50); abort_unless($limit >= 1 && $limit <= 100, 422, 'limit must be between 1 and 100.'); return $limit; }
+
+    private function fetchResponse(Request $request, JarekGearboxEbayPriceFetchService $service, bool $cache): JsonResponse
+    {
+        $channel = $this->channel($request);
+        $limit = $this->limit($request);
+        $offset = max(0, (int) $request->input('offset', 0));
+
+        // A full 100-offer read can legitimately exceed common 30/60-second PHP defaults.
+        // Keep this narrowly scoped to the read/cache endpoints; marketplace writes never use it.
+        if (function_exists('set_time_limit')) {
+            set_time_limit(190);
+        }
+
+        try {
+            $result = $service->fetch(
+                $channel,
+                $limit,
+                $offset,
+                $request->boolean('only_active', true),
+                $request->boolean('only_missing_local_price'),
+                $cache,
+            );
+
+            return response()->json($result);
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return response()->json([
+                'ok' => false,
+                'error_type' => 'server',
+                'error' => 'eBay price fetch batch failed.',
+                'retryable' => true,
+                'recommended_batch_size' => 50,
+                'limit' => $limit,
+                'offset' => $offset,
+                'local_write' => $cache,
+                'marketplace_write' => false,
+            ], 500);
+        }
+    }
 }
