@@ -7,6 +7,7 @@ use App\Models\MarketplaceAccount;
 use App\Services\JarekGearboxes\JarekGearboxEbayBulkPricePreviewService;
 use App\Services\JarekGearboxes\JarekGearboxEbayPriceFetchService;
 use App\Services\JarekGearboxes\JarekGearboxEbayPriceApplyService;
+use App\Services\JarekGearboxes\JarekGearboxEbayPriceApplyRunnerService;
 use App\Services\Marketplace\EbayConnectionGate;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -41,6 +42,37 @@ class JarekGearboxEbayBulkPriceController extends Controller
     public function applyRunner(EbayConnectionGate $gate)
     {
         return view('admin.jarek-gearboxes.ebay-price-apply-runner', ['ebayConnection' => $gate->status()]);
+    }
+
+    public function applyRunnerAction(Request $request, JarekGearboxEbayPriceApplyRunnerService $runner, JarekGearboxEbayPriceApplyService $apply, EbayConnectionGate $gate): JsonResponse
+    {
+        $action = (string) $request->input('action');
+        if ($action === 'start') {
+            $blocked = ['ok' => false, 'marketplace_write' => false];
+            if ($request->input('confirm') !== 'APPLY_JAREK_EBAY_PRICES_7_PERCENT_BATCH_RUNNER') return response()->json($blocked + ['error' => 'explicit confirmation is required'], 403);
+            if (blank($request->input('snapshot_id'))) return response()->json($blocked + ['error' => 'snapshot_id is required'], 422);
+            if ((float) $request->input('percent') !== 7.0) return response()->json($blocked + ['error' => 'percent=7 is required'], 422);
+            $this->channel($request);
+            $batchSize = (int) $request->input('batch_size', 5);
+            if ($batchSize < 1 || $batchSize > 10) return response()->json($blocked + ['error' => 'batch_size must be between 1 and 10'], 422);
+            $account = Schema::hasTable('marketplace_accounts') ? MarketplaceAccount::query()->where('code', 'ebay_de')->first() : null;
+            if (! $gate->writeEnabled($account)) return response()->json($blocked + ['error' => 'eBay write connection is disabled'], 409);
+            if (! config('marketplace.jarek_ebay_price_apply_enabled')) return response()->json($blocked + ['error' => 'Jarek eBay price apply feature is disabled'], 409);
+            return response()->json($runner->start((string) $request->input('snapshot_id'), $batchSize, (int) $request->input('delay_ms', 4000)));
+        }
+        if ($action === 'batch') {
+            $account = Schema::hasTable('marketplace_accounts') ? MarketplaceAccount::query()->where('code', 'ebay_de')->first() : null;
+            if (! $gate->writeEnabled($account)) return response()->json(['ok' => false, 'marketplace_write' => false, 'error' => 'eBay write connection is disabled'], 409);
+            if (! config('marketplace.jarek_ebay_price_apply_enabled')) return response()->json(['ok' => false, 'marketplace_write' => false, 'error' => 'Jarek eBay price apply feature is disabled'], 409);
+            return response()->json($runner->batch($apply));
+        }
+        if (in_array($action, ['pause', 'resume', 'stop'], true)) return response()->json($runner->control($action));
+        return response()->json(['ok' => false, 'error' => 'invalid_action'], 422);
+    }
+
+    public function applyRunnerStatus(Request $request, JarekGearboxEbayPriceApplyRunnerService $runner): JsonResponse
+    {
+        return response()->json($runner->status($request->query('snapshot_id')));
     }
 
     public function apply(Request $request, JarekGearboxEbayPriceApplyService $service, EbayConnectionGate $gate): JsonResponse
