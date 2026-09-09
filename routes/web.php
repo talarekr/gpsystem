@@ -15,6 +15,7 @@ use App\Http\Controllers\Admin\JarekGearboxes\JarekAllegroOAuthController;
 use App\Http\Controllers\Admin\JarekGearboxes\JarekGearboxToolController;
 use App\Http\Controllers\Admin\JarekGearboxes\JarekGearboxEbayBulkPriceController;
 use App\Http\Controllers\Admin\MarketplaceOAuthTokenHealthController;
+use App\Http\Controllers\Admin\Marketplace\EbayConnectionToggleController;
 use App\Http\Controllers\Admin\PartSearchController;
 use App\Http\Controllers\Admin\Part8212PriceSyncRemoteCheckController;
 use App\Http\Controllers\Admin\PartLocalAvailabilityController;
@@ -333,6 +334,8 @@ Route::middleware([Authenticate::class])->group(function (): void {
         'app_env' => app()->environment(),
     ]))->name('admin.tools.shipments.diagnose-minimal');
     Route::get('/admin/tools/jarek-gearboxes/ping', [JarekGearboxToolController::class, 'ping'])->name('admin.tools.jarek-gearboxes.ping');
+    Route::get('/admin/tools/marketplace/ebay-connection-toggle', [EbayConnectionToggleController::class, 'show'])->middleware(['admin.panel', 'throttle:tools'])->name('admin.tools.marketplace.ebay-connection-toggle');
+    Route::post('/admin/tools/marketplace/ebay-connection-toggle', [EbayConnectionToggleController::class, 'update'])->middleware(['admin.panel', 'throttle:tools'])->name('admin.tools.marketplace.ebay-connection-toggle.update');
     Route::get('/admin/tools/jarek-gearboxes/ebay-bulk-price-increase-preview', [JarekGearboxEbayBulkPriceController::class, 'preview'])->middleware(['admin.panel', 'throttle:tools'])->name('admin.tools.jarek-gearboxes.ebay-bulk-price-increase-preview');
     Route::get('/admin/tools/jarek-gearboxes/ebay-price-fetch-preview', [JarekGearboxEbayBulkPriceController::class, 'fetchPreview'])->middleware(['admin.panel', 'throttle:tools'])->name('admin.tools.jarek-gearboxes.ebay-price-fetch-preview');
     Route::post('/admin/tools/jarek-gearboxes/ebay-price-fetch-cache-apply', [JarekGearboxEbayBulkPriceController::class, 'fetchCacheApply'])->middleware(['admin.panel', 'throttle:tools'])->name('admin.tools.jarek-gearboxes.ebay-price-fetch-cache-apply');
