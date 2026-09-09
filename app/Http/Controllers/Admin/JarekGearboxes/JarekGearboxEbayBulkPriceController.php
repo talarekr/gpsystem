@@ -9,6 +9,7 @@ use App\Services\JarekGearboxes\JarekGearboxEbayPriceFetchService;
 use App\Services\JarekGearboxes\JarekGearboxEbayPriceApplyService;
 use App\Services\JarekGearboxes\JarekGearboxEbayPriceApplyRunnerService;
 use App\Services\Marketplace\EbayConnectionGate;
+use App\Services\Marketplace\EbayAccessTokenRefreshService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
@@ -75,7 +76,7 @@ class JarekGearboxEbayBulkPriceController extends Controller
         return response()->json($runner->status($request->query('snapshot_id')));
     }
 
-    public function applyRunnerResume(Request $request, JarekGearboxEbayPriceApplyRunnerService $runner, JarekGearboxEbayPriceApplyService $apply, EbayConnectionGate $gate): JsonResponse
+    public function applyRunnerResume(Request $request, JarekGearboxEbayPriceApplyRunnerService $runner, JarekGearboxEbayPriceApplyService $apply, EbayConnectionGate $gate, EbayAccessTokenRefreshService $tokens): JsonResponse
     {
         $blocked = ['ok' => false, 'marketplace_write' => false];
         if ($request->input('confirm') !== 'APPLY_JAREK_EBAY_PRICES_7_PERCENT_BATCH_RUNNER') return response()->json($blocked + ['error' => 'explicit confirmation is required'], 403);
@@ -84,7 +85,7 @@ class JarekGearboxEbayBulkPriceController extends Controller
         if (! $gate->writeEnabled($account)) return response()->json($blocked + ['error' => 'eBay write connection is disabled'], 409);
         if (! config('marketplace.jarek_ebay_price_apply_enabled')) return response()->json($blocked + ['error' => 'Jarek eBay price apply feature is disabled'], 409);
 
-        $result = $runner->resumeBatch((string) $request->input('snapshot_id'), $apply);
+        $result = $runner->resumeBatch((string) $request->input('snapshot_id'), $apply, $tokens);
 
         return response()->json($result, ($result['ok'] ?? false) ? 200 : 409);
     }

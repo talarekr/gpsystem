@@ -2,7 +2,9 @@
 
 namespace App\Services\JarekGearboxes;
 
+use App\Models\MarketplaceAccount;
 use App\Models\MarketplaceSyncLog;
+use App\Services\Marketplace\EbayAccessTokenRefreshService;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 
@@ -38,17 +40,45 @@ class JarekGearboxEbayPriceApplyRunnerService
         });
     }
 
-    public function resumeBatch(string $snapshotId, JarekGearboxEbayPriceApplyService $apply): array
+    public function resumeBatch(string $snapshotId, JarekGearboxEbayPriceApplyService $apply, EbayAccessTokenRefreshService $tokens): array
     {
-        return Cache::lock(self::KEY.':lock', 60)->block(1, function () use ($snapshotId, $apply): array {
+        return Cache::lock(self::KEY.':lock', 60)->block(1, function () use ($snapshotId, $apply, $tokens): array {
             $state = $this->state();
             if (! $state) return ['ok' => false, 'marketplace_write' => false, 'error' => 'no_apply_run'];
             if (! hash_equals((string) $state['snapshot_id'], $snapshotId)) return ['ok' => false, 'marketplace_write' => false, 'error' => 'snapshot_id_does_not_match_runner'] + $state;
-            if (! in_array($state['status'], ['running', 'paused'], true)) return ['ok' => false, 'marketplace_write' => false, 'error' => 'runner_cannot_be_resumed'] + $state;
+            $oauthRecovery = ($state['status'] ?? null) === 'stopped_on_error' && $this->isResumableOauthError($state);
+            if (! in_array($state['status'], ['running', 'paused'], true) && ! $oauthRecovery) return ['ok' => false, 'marketplace_write' => false, 'error' => 'runner_cannot_be_resumed'] + $state;
+
+            $diagnostics = ['refresh_attempted' => false, 'refreshed' => false, 'token_expires_at' => null, 'account_code' => 'ebay_de', 'marketplace_id' => 'EBAY_DE'];
+            if ($oauthRecovery) {
+                $account = MarketplaceAccount::query()->where('code', 'ebay_de')->first();
+                if (! $account) return ['ok' => false, 'marketplace_write' => false, 'error' => 'ebay_de_account_not_found', 'next_offset' => (int) $state['current_offset']] + $diagnostics + $state;
+                $diagnostics = $tokens->refreshForResume($account);
+                if (! ($diagnostics['ok'] ?? false)) return ['marketplace_write' => false, 'next_offset' => (int) $state['current_offset']] + $diagnostics + $state;
+            }
             $state['status'] = 'running';
 
-            return $this->applyBatch($state, $apply);
+            $result = $this->applyBatch($state, $apply);
+
+            return $result + array_diff_key($diagnostics, ['ok' => true]) + ['next_offset' => (int) $result['current_offset']];
         });
+    }
+
+    private function isResumableOauthError(array $state): bool
+    {
+        if ((int) data_get($state, 'last_error.http_status') === 401) return true;
+
+        $values = array_filter([
+            $state['stop_reason'] ?? null,
+            data_get($state, 'last_error.error'),
+            data_get($state, 'last_error.message'),
+        ], 'is_string');
+
+        foreach ($values as $value) {
+            if (preg_match('/invalid access token/i', $value) || preg_match('/\boauth\b.*\b401\b|\b401\b.*\boauth\b/i', $value)) return true;
+        }
+
+        return false;
     }
 
     private function applyBatch(array $state, JarekGearboxEbayPriceApplyService $apply): array
@@ -68,7 +98,7 @@ class JarekGearboxEbayPriceApplyRunnerService
         if ($failure) $state['last_error'] = $failure;
         $state['batch_history'][] = ['apply_batch_id' => $result['apply_batch_id'] ?? null, 'offset' => $state['current_offset'] - $count, 'count' => $count, 'success' => $items->whereIn('status', ['success', 'already_updated'])->count(), 'failed' => $items->where('status', 'failed')->count(), 'skipped' => $items->where('status', 'skipped')->count(), 'at' => now()->toIso8601String()];
         $state['batch_history'] = array_slice($state['batch_history'], -100);
-        if ($result['stop_reason'] ?? null) { $state['status'] = 'stopped_on_error'; $state['last_error'] = ['error' => $result['stop_reason']]; }
+        if ($result['stop_reason'] ?? null) { $state['status'] = 'stopped_on_error'; $state['stop_reason'] = $result['stop_reason']; $state['last_error'] = ['error' => $result['stop_reason']]; }
         elseif ($state['remaining_count'] === 0 || $count === 0) $state['status'] = 'completed';
         return $this->save($state) + ['batch' => $result];
     }
