@@ -4,6 +4,7 @@ namespace App\Services\JarekGearboxes;
 
 use App\Models\JarekGearbox;
 use App\Models\MarketplaceAccount;
+use App\Models\MarketplaceSyncLog;
 use Illuminate\Support\Facades\Http;
 
 class JarekGearboxEbayPriceFetchService
@@ -47,7 +48,9 @@ class JarekGearboxEbayPriceFetchService
         $all = JarekGearbox::query()->get();
         $withOffer = $all->filter(fn (JarekGearbox $product): bool => $this->value($product->ebay_offer_id) !== null);
         $active = $withOffer->filter(fn (JarekGearbox $product): bool => ! $this->inactive($this->value($product->ebay_status)));
-        return ['ok' => true, 'marketplace_write' => false, 'external_api_requests' => true, 'local_write' => $cache, 'channel' => $channel, 'limit' => $limit, 'offset' => $offset, 'count' => $rows->count(), 'total_jarek_products' => $all->count(), 'products_with_ebay_offer_id' => $withOffer->count(), 'products_without_ebay_offer_id' => $all->count() - $withOffer->count(), 'active_ebay_products' => $active->count(), 'inactive_or_stale' => $withOffer->count() - $active->count(), 'prices_fetched_from_ebay_count' => $rows->whereNotNull('current_ebay_price')->count(), 'prices_missing_count' => $rows->whereNull('current_ebay_price')->count(), 'stale_404_count' => $rows->where('http_status', 404)->count(), 'eligible_for_7_percent_increase' => $rows->where('eligible_for_apply', true)->count(), 'skipped_reasons' => $rows->pluck('skipped_reason')->filter()->countBy(), 'currency_summary' => $rows->pluck('current_ebay_currency')->filter()->countBy(), 'sample_products' => $rows->take(50)->all(), 'products' => $rows->all()];
+        $result = ['ok' => true, 'marketplace_write' => false, 'external_api_requests' => true, 'local_write' => $cache, 'channel' => $channel, 'limit' => $limit, 'offset' => $offset, 'count' => $rows->count(), 'total_jarek_products' => $all->count(), 'products_with_ebay_offer_id' => $withOffer->count(), 'products_without_ebay_offer_id' => $all->count() - $withOffer->count(), 'active_ebay_products' => $active->count(), 'inactive_or_stale' => $withOffer->count() - $active->count(), 'prices_fetched_from_ebay_count' => $rows->whereNotNull('current_ebay_price')->count(), 'prices_missing_count' => $rows->whereNull('current_ebay_price')->count(), 'stale_404_count' => $rows->where('http_status', 404)->count(), 'eligible_for_7_percent_increase' => $rows->where('eligible_for_apply', true)->count(), 'skipped_reasons' => $rows->pluck('skipped_reason')->filter()->countBy(), 'currency_summary' => $rows->pluck('current_ebay_currency')->filter()->countBy(), 'sample_products' => $rows->take(50)->all(), 'products' => $rows->all(), 'next_offset' => $offset + $rows->count()];
+        if ($cache) MarketplaceSyncLog::query()->create(['marketplace' => $channel, 'action' => 'jarek_gearboxes_ebay_price_fetch_cache', 'status' => 'success', 'message' => 'Read-only eBay offer prices cached locally; no marketplace write.', 'payload' => collect($result)->except('products')->merge(['secrets_logged' => false])->all(), 'created_at' => now()]);
+        return $result;
     }
 
     private function baseRow(JarekGearbox $p): array { return ['jarek_gearbox_id' => $p->id, 'title' => $p->title, 'ebay_offer_id' => $this->value($p->ebay_offer_id), 'ebay_listing_id' => $this->value($p->ebay_listing_id), 'ebay_inventory_sku' => $this->value($p->ebay_inventory_sku), 'ebay_status' => $p->ebay_status]; }

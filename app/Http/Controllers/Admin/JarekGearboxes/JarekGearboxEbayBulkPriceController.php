@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\MarketplaceAccount;
 use App\Services\JarekGearboxes\JarekGearboxEbayBulkPricePreviewService;
 use App\Services\JarekGearboxes\JarekGearboxEbayPriceFetchService;
+use App\Services\JarekGearboxes\JarekGearboxEbayPriceApplyService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
@@ -27,10 +28,20 @@ class JarekGearboxEbayBulkPriceController extends Controller
         $percent = (float) $request->query('percent', 0);
         abort_unless($percent === 7.0, 422, 'This audited operation requires percent=7.');
 
-        return response()->json($service->preview($percent));
+        return response()->json($service->preview($percent, $this->channel($request)));
     }
 
-    public function apply(Request $request): JsonResponse
+    public function fetchRunner()
+    {
+        return view('admin.jarek-gearboxes.ebay-price-fetch-runner');
+    }
+
+    public function applyRunner()
+    {
+        return view('admin.jarek-gearboxes.ebay-price-apply-runner');
+    }
+
+    public function apply(Request $request, JarekGearboxEbayPriceApplyService $service): JsonResponse
     {
         $blocked = ['ok' => false, 'applied' => false, 'marketplace_write' => false];
         if ((float) $request->input('percent') !== 7.0) return response()->json($blocked + ['error' => 'percent=7 is required'], 422);
@@ -38,12 +49,15 @@ class JarekGearboxEbayBulkPriceController extends Controller
         if (blank($request->input('snapshot_id'))) return response()->json($blocked + ['error' => 'an accepted preview snapshot_id is required'], 422);
         $limit = (int) $request->input('limit', 0);
         if ($limit < 1 || $limit > 5) return response()->json($blocked + ['error' => 'canary limit between 1 and 5 is required'], 422);
+        $this->channel($request);
         $account = Schema::hasTable('marketplace_accounts') ? MarketplaceAccount::query()->where('code', 'ebay_de')->first() : null;
-        if (! $account?->api_enabled || ! config('marketplace.external_api_writes_enabled') || ! config('marketplace.ebay_publishing_enabled')) {
+        if (! $account?->api_enabled || ! config('marketplace.external_api_writes_enabled') || ! config('marketplace.jarek_ebay_price_apply_enabled')) {
             return response()->json($blocked + ['error' => 'eBay write connection is disabled'], 409);
         }
-
-        return response()->json($blocked + ['error' => 'Apply is intentionally not implemented or enabled; obtain separate approval after reviewing the snapshot.'], 501);
+        $selected = array_values(array_unique(array_map('intval', (array) $request->input('selected_ids', []))));
+        if (count($selected) > $limit) return response()->json($blocked + ['error' => 'selected_ids exceeds canary limit'], 422);
+        $result = $service->apply((string) $request->input('snapshot_id'), $limit, max(0, (int) $request->input('offset', 0)), $selected);
+        return response()->json($result, ($result['ok'] ?? false) ? 200 : 409);
     }
 
     private function channel(Request $request): string { $channel = (string) $request->input('channel', 'ebay_de'); abort_unless($channel === 'ebay_de', 422, 'Only channel=ebay_de is supported.'); return $channel; }

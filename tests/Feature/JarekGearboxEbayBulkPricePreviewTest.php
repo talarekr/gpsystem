@@ -22,7 +22,7 @@ class JarekGearboxEbayBulkPricePreviewTest extends TestCase
             'ebay_listing_id' => 'item-1',
             'ebay_inventory_sku' => 'JAREK-1',
             'ebay_status' => 'published',
-            'ebay_payload_snapshot' => ['marketplaceId' => 'EBAY_DE', 'pricingSummary' => ['price' => ['value' => '100.00', 'currency' => 'EUR']]],
+            'ebay_payload_snapshot' => ['marketplaceId' => 'EBAY_DE', '_jarek_price_fetch' => ['fetched_at' => now()->toIso8601String(), 'pricingSummary' => ['price' => ['value' => '100.00', 'currency' => 'EUR']]]],
         ]);
         $withoutListing = $this->gearbox(['allegro_offer_id' => '2', 'price' => 200]);
         $zero = $this->gearbox([
@@ -31,7 +31,7 @@ class JarekGearboxEbayBulkPricePreviewTest extends TestCase
             'ebay_offer_id' => 'offer-3',
             'ebay_inventory_sku' => 'JAREK-3',
             'ebay_status' => 'published',
-            'ebay_payload_snapshot' => ['pricingSummary' => ['price' => ['value' => 0, 'currency' => 'EUR']]],
+            'ebay_payload_snapshot' => ['_jarek_price_fetch' => ['fetched_at' => now()->toIso8601String(), 'pricingSummary' => ['price' => ['value' => 0, 'currency' => 'EUR']]]],
         ]);
         Part::query()->create(['name' => 'Ordinary Part', 'price' => 100, 'ebay_price' => 100]);
         $before = JarekGearbox::query()->get()->map->getAttributes()->all();

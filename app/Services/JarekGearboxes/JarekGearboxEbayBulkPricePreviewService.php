@@ -12,14 +12,14 @@ class JarekGearboxEbayBulkPricePreviewService
     public const INACTIVE_STATUSES = ['ended', 'end', 'closed', 'inactive', 'stale', 'deleted', 'failed'];
 
     /** @return array<string, mixed> */
-    public function preview(float $percent): array
+    public function preview(float $percent, string $channel = 'ebay_de'): array
     {
         $products = Schema::hasTable('jarek_gearboxes')
             ? JarekGearbox::query()->orderBy('id')->get()
             : collect();
         $rows = $products->map(fn (JarekGearbox $product): array => $this->inspect($product, $percent));
         $listed = $rows->where('has_ebay_listing', true);
-        $eligible = $rows->where('eligible', true);
+        $eligible = $rows->where('eligible', true)->where('ebay_channel', $channel);
         $skipped = $rows->where('eligible', false);
         $currencies = $eligible->groupBy('currency')->map(fn (Collection $items, string $currency): array => [
             'currency' => $currency,
@@ -37,8 +37,9 @@ class JarekGearboxEbayBulkPricePreviewService
             'marketplace_write' => false,
             'external_api_requests' => false,
             'percent' => $percent,
+            'channel' => $channel,
             'snapshot_id' => hash('sha256', json_encode($rows->map(fn (array $row): array => [
-                $row['id'], $row['ebay_channel'], $row['ebay_offer_id'], $row['ebay_listing_id'], $row['sku'], $row['old_price'], $row['new_price'],
+                $row['id'], $row['ebay_channel'], $row['ebay_offer_id'], $row['ebay_listing_id'], $row['sku'], $row['old_price'], $row['new_price'], $row['currency'], $row['fetched_at'],
             ])->all(), JSON_THROW_ON_ERROR).'|'.$percent),
             'total_jarek_products' => $products->count(),
             'products_with_ebay_listing' => $listed->count(),
@@ -68,16 +69,17 @@ class JarekGearboxEbayBulkPricePreviewService
                 'jarek_model_observers_detected' => false,
                 'local_price_update_auto_revise_risk' => false,
                 'reason' => 'JarekGearbox has no price-sync observer; Parts price sync is a separate service and this preview performs no model updates.',
-                'price_only_revise_available' => false,
-                'price_only_revise_scope' => 'The existing bulk_update_price_quantity adapter also sends quantity; apply remains HTTP 501 until a verified price-only client path exists.',
+                'price_only_revise_available' => true,
+                'price_only_revise_scope' => 'PUT /sell/inventory/v1/offer/{offerId}; GET first, preserve the accepted offer document and change pricingSummary.price only.',
                 'main_ebay_status_channel' => 'ebay_de',
             ],
             'price_source' => [
                 'publication_source' => 'eBay Inventory API offer price only; jarek_gearboxes.price is never used',
-                'preview_old_ebay_price' => 'cached eBay offer fetch, falling back to an eBay payload snapshot',
+                'preview_old_ebay_price' => 'cached eBay offer fetch only',
                 'missing_snapshot_policy' => 'needs_ebay_price_fetch; never infer from a local product price',
             ],
             'sample_products' => $rows->take(50)->map(fn (array $row): array => collect($row)->except(['has_ebay_listing', 'eligible', 'old_price', 'difference'])->all())->values(),
+            'eligible_products' => $eligible->values()->all(),
         ];
     }
 
@@ -132,10 +134,8 @@ class JarekGearboxEbayBulkPricePreviewService
     /** @return array{0: ?float, 1: ?string, 2: ?string} */
     private function snapshotPrice(array $snapshot): array
     {
-        foreach (['_jarek_price_fetch.pricingSummary.price', 'pricingSummary.price', 'json.pricingSummary.price', 'offer.pricingSummary.price'] as $path) {
-            $price = data_get($snapshot, $path);
-            if (is_array($price) && is_numeric($price['value'] ?? null)) return [(float) $price['value'], $this->value($price['currency'] ?? null), str_starts_with($path, '_jarek_price_fetch') ? 'ebay_offer_fetch_cache' : 'ebay_payload_snapshot'];
-        }
+        $price = data_get($snapshot, '_jarek_price_fetch.pricingSummary.price');
+        if (is_array($price) && is_numeric($price['value'] ?? null)) return [(float) $price['value'], $this->value($price['currency'] ?? null), 'ebay_offer_fetch_cache'];
 
         return [null, null, null];
     }
