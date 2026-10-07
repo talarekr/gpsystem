@@ -15,6 +15,7 @@ class CategoryController extends Controller
 
     public function show(Request $request, CategoryTreeService $categoryTree, string $path): View
     {
+        $locale = $request->attributes->get('storefront_locale', 'pl');
         $category = $categoryTree->findByPublicPath($path) ?? abort(404);
         $categoryIds = $categoryTree->categoryAndDescendantIds($category);
         $ancestors = $categoryTree->ancestors($category);
@@ -29,8 +30,10 @@ class CategoryController extends Controller
             'parts' => $this->storefrontQuery($request)->whereIn('category_id', $categoryIds)->paginate(60)->withQueryString(),
             'producers' => $filterOptions['producers'],
             'models' => $filterOptions['models'],
-            'metaTitle' => $category->name.' - GPSwiss',
-            'metaDescription' => 'Szeroki wybór oryginalnych, używanych części samochodowych w kategorii '.$category->name.'.',
+            'metaTitle' => $category->storefrontNameForLocale($locale).' - GPSwiss',
+            'metaDescription' => $locale === 'fr'
+                ? str($category->storefrontDescriptionForLocale($locale) ?: $category->storefrontNameForLocale($locale))->stripTags()->limit(155)->toString()
+                : 'Szeroki wybór oryginalnych, używanych części samochodowych w kategorii '.$category->name.'.',
             'breadcrumbs' => [],
         ]);
     }

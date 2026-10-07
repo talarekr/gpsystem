@@ -20,6 +20,10 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        View::composer('storefront.*', function ($view): void {
+            $view->with('storefrontContentLocale', request()->attributes->get('storefront_locale', 'pl'));
+        });
+
         RateLimiter::for('tools', function (Request $request): Limit {
             return Limit::perMinute(60)->by($request->user()?->id ?: $request->ip());
         });

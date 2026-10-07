@@ -15,6 +15,8 @@ class CategoryTreeService
     public const CACHE_KEY = 'storefront.category_tree.v2';
     public const CACHE_TTL_SECONDS = 600;
 
+    private ?array $frenchTree = null;
+
     /** @return EloquentCollection<int, PartCategory> */
     public function roots(): EloquentCollection
     {
@@ -30,7 +32,13 @@ class CategoryTreeService
     /** @return array{roots:EloquentCollection<int, PartCategory>, all:Collection<int, PartCategory>} */
     public function tree(): array
     {
-        return Cache::remember(self::CACHE_KEY, self::CACHE_TTL_SECONDS, function (): array {
+        $isFrenchStorefront = request()->attributes->get('storefront_locale') === 'fr';
+        if ($isFrenchStorefront && $this->frenchTree !== null) {
+            return $this->frenchTree;
+        }
+
+        // Cache only the base tree. Translation relations are refreshed outside that cache.
+        $tree = Cache::remember(self::CACHE_KEY, self::CACHE_TTL_SECONDS, function (): array {
             $categories = PartCategory::query()
                 ->where(function ($query): void {
                     $query->where('source_system', 'woo')->orWhereNull('source_system');
@@ -89,6 +97,15 @@ class CategoryTreeService
 
             return ['roots' => new EloquentCollection($visibleRoots->all()), 'all' => $publicCategories];
         });
+
+        if ($isFrenchStorefront) {
+            if (Schema::hasTable('category_translations')) {
+                (new EloquentCollection($tree['all']->all()))->load('translations');
+            }
+            $this->frenchTree = $tree;
+        }
+
+        return $tree;
     }
 
     public function url(PartCategory $category): string
@@ -159,6 +176,13 @@ class CategoryTreeService
 
         return collect($definitions)->map(function (array $needles, string $label): array {
             $category = $this->findShortcutCategory($needles);
+
+            if (request()->attributes->get('storefront_locale') === 'fr') {
+                $translation = $category?->translationForLocale('fr');
+                if ($translation?->isReady() && filled($translation->name)) {
+                    $label = $category->storefrontPublicNameForLocale('fr');
+                }
+            }
 
             return ['label' => $label, 'url' => $category ? $this->url($category) : route('storefront.catalog', ['q' => $label])];
         })->values()->all();

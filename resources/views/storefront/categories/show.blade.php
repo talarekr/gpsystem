@@ -5,10 +5,13 @@
         <div class="sf-container">
             <div class="sf-category-hero__inner">
                 <div class="sf-category-hero__content">
-                    <h1 id="category-title">{{ $category->public_name }}</h1>
+                    <h1 id="category-title">{{ $category->storefrontPublicNameForLocale($storefrontContentLocale) }}</h1>
                     <p>
                         {{ __('storefront.category_intro') }}
                     </p>
+                    @if($storefrontContentLocale === 'fr' && filled($category->storefrontDescriptionForLocale($storefrontContentLocale)))
+                        <p>{{ strip_tags($category->storefrontDescriptionForLocale($storefrontContentLocale)) }}</p>
+                    @endif
                 </div>
             </div>
         </div>

@@ -13,6 +13,7 @@ trait BuildsStorefrontQueries
     {
         $query = Part::query()
             ->with(['images', 'category', 'car'])
+            ->withStorefrontTranslations($request->attributes->get('storefront_locale', 'pl'))
             ->storefrontVisible()
             ->searchStorefront($request->string('q')->toString())
             ->partNumberSearch($request->string('part_number')->toString())

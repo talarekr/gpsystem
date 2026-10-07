@@ -34,6 +34,7 @@ class HomeController extends Controller
 
             return [__('storefront.'.($sectionLabelKeys[$label] ?? 'catalog')) => Part::query()
                 ->with(['images', 'category'])
+                ->withStorefrontTranslations(request()->attributes->get('storefront_locale', 'pl'))
                 ->storefrontVisible()
                 ->where('category_id', $category->id)
                 ->latest('updated_at')
