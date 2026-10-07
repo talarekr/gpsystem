@@ -8,6 +8,7 @@ use App\Http\Controllers\Admin\MarketplaceRelistPartController;
 use App\Http\Controllers\Admin\AllegroDuplicateCheckController;
 use App\Http\Controllers\Admin\EbayDePreviewController;
 use App\Http\Controllers\Admin\EbayPriceSyncDiagnoseController;
+use App\Http\Controllers\Admin\FrenchCatalogTranslationController;
 use App\Http\Controllers\Admin\MarketplaceCategoryMapperController;
 use App\Http\Controllers\Admin\Allegro\AllegroOAuthController;
 use App\Http\Controllers\Admin\Ebay\EbayOAuthController;
@@ -42,6 +43,7 @@ use App\Http\Controllers\Storefront\PrivacyPolicyController;
 use App\Http\Controllers\Storefront\SearchController;
 use App\Http\Controllers\Storefront\TermsController;
 use App\Http\Controllers\Tools\CheckOrdersFlowController;
+use App\Http\Middleware\EnsureFrenchCatalogTranslationAdmin;
 use App\Http\Controllers\Tools\CategoryMappingExportController;
 use App\Http\Controllers\Tools\PayuDiagnosticsController;
 use App\Http\Controllers\Tools\DebugOrderItemThumbnailController;
@@ -305,6 +307,19 @@ Route::get('/produkt/{slug}', [PartController::class, 'show'])->name('storefront
 Route::get('/kategoria-produktu/{path}', [CategoryController::class, 'show'])->where('path', '.*')->name('storefront.category');
 
 Route::middleware([Authenticate::class])->group(function (): void {
+    Route::prefix('/admin/tools/storefront/fr-translations')
+        ->name('admin.tools.storefront.fr-translations.')
+        ->middleware(['admin.panel', EnsureFrenchCatalogTranslationAdmin::class, 'throttle:tools'])
+        ->group(function (): void {
+            Route::get('/', [FrenchCatalogTranslationController::class, 'index'])->name('index');
+            Route::get('/status', [FrenchCatalogTranslationController::class, 'status'])->name('status');
+            Route::post('/dry-run', [FrenchCatalogTranslationController::class, 'dryRun'])->name('dry-run');
+            Route::post('/start', [FrenchCatalogTranslationController::class, 'start'])->name('start');
+            Route::post('/pause', [FrenchCatalogTranslationController::class, 'pause'])->name('pause');
+            Route::post('/resume', [FrenchCatalogTranslationController::class, 'resume'])->name('resume');
+            Route::post('/stop', [FrenchCatalogTranslationController::class, 'stop'])->name('stop');
+        });
+
     Route::get('/warsztat', [WorkshopQuickPartController::class, 'createAuthenticated'])->name('workshop.quick-part-create');
     Route::get('/warsztat/storage-locations', [WorkshopQuickPartController::class, 'storageLocationAutocomplete'])->name('workshop.storage-locations.autocomplete');
     Route::post('/warsztat', [WorkshopQuickPartController::class, 'storeAuthenticated'])->name('workshop.quick-part-create.store');

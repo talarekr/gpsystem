@@ -2,6 +2,7 @@
 
 namespace App\Providers\Filament;
 
+use App\Enums\UserRole;
 use App\Filament\Pages\AllegroIntegration;
 use App\Filament\Pages\Analytics;
 use App\Filament\Pages\CreateOrderShipment;
@@ -143,6 +144,15 @@ class AdminPanelProvider extends PanelProvider
                     ->sort(10)
                     ->url(fn (): string => route('admin.marketplace-category-mapper.index'))
                     ->isActiveWhen(fn (): bool => request()->routeIs('admin.marketplace-category-mapper.*')),
+                NavigationItem::make('GPSwiss FR — tłumaczenia katalogu')
+                    ->group('Ustawienia')
+                    ->sort(95)
+                    ->url(fn (): string => route('admin.tools.storefront.fr-translations.index'))
+                    ->isActiveWhen(fn (): bool => request()->routeIs('admin.tools.storefront.fr-translations.*'))
+                    ->visible(fn (): bool => auth()->user()?->hasAnyRole([
+                        UserRole::OwnerAdmin->value,
+                        UserRole::Manager->value,
+                    ]) ?? false),
             ])
             ->pages([
                 Dashboard::class,
@@ -235,6 +245,8 @@ class AdminPanelProvider extends PanelProvider
             url('/admin/tools/*dry-run*'),
             url('/admin/tools/*apply*'),
             url('/admin/tools/*runner*'),
+            url('/admin/tools/storefront/fr-translations'),
+            url('/admin/tools/storefront/fr-translations/*'),
             url('/admin/tools/*sync*'),
             url('/admin/tools/*deploy*'),
             url('/admin/tools/*label*'),
