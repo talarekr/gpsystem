@@ -20,7 +20,7 @@
         }
     }
 
-    $name = trim((string) ($part?->name ?? __('storefront.default_part_name'))) ?: __('storefront.default_part_name');
+    $name = trim((string) ($part?->storefrontNameForLocale($storefrontContentLocale) ?? __('storefront.default_part_name'))) ?: __('storefront.default_part_name');
     $number = $part?->part_number ?: $part?->sku ?: '—';
     $currency = $part?->currency ?: 'PLN';
     $price = $part?->price;

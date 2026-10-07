@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasStorefrontTranslations;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -9,6 +10,33 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class PartCategory extends Model
 {
+    use HasStorefrontTranslations;
+
+    public function translations(): HasMany
+    {
+        return $this->hasMany(CategoryTranslation::class, 'category_id');
+    }
+
+    public function translationSourceFields(): array
+    {
+        return ['name', 'description'];
+    }
+
+    public function storefrontNameForLocale(string $locale): string
+    {
+        return $this->translatedStorefrontField('name', $locale) ?? (string) $this->name;
+    }
+
+    public function storefrontPublicNameForLocale(string $locale): string
+    {
+        return $this->translatedStorefrontField('name', $locale) ?? $this->publicDisplayName();
+    }
+
+    public function storefrontDescriptionForLocale(string $locale): string
+    {
+        return $this->translatedStorefrontField('description', $locale) ?? (string) $this->description;
+    }
+
     protected $fillable = [
         'parent_id', 'source_system', 'external_id', 'name', 'slug', 'sort_order', 'category_path',
         'full_slug_path', 'woo_product_count', 'description', 'thumbnail_url', 'legacy_payload',

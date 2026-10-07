@@ -3,15 +3,16 @@
 @php
     $mainImage = $part->primaryImage();
     $mainSrc = $mainImage?->productUrl();
-    $description = $part->storefrontDescription();
-    $details = $part->storefrontDetails();
+    $description = $part->storefrontDescriptionForLocale($storefrontContentLocale);
+    $details = $part->storefrontDetailsForLocale($storefrontContentLocale);
+    $productName = $part->storefrontNameForLocale($storefrontContentLocale);
     $galleryImages = $part->images
         ->sortBy([
             ['is_primary', 'desc'],
             ['sort_order', 'asc'],
             ['id', 'asc'],
         ])
-        ->map(function ($image) use ($part) {
+        ->map(function ($image) use ($part, $productName) {
             $productSrc = $image->productUrl();
             $thumbSrc = $image->listingUrl() ?: $image->publicUrl();
 
@@ -22,7 +23,7 @@
             return [
                 'product' => $productSrc,
                 'thumb' => $thumbSrc ?: $productSrc,
-                'alt' => $image->alt_text ?: $part->name,
+                'alt' => $image->alt_text ?: $productName,
             ];
         })
         ->filter()
@@ -53,7 +54,7 @@
                 <div class="sf-gallery__main">
                     @if($mainSrc)
                         <button class="sf-gallery__main-button" type="button" data-gallery-open aria-label="{{ __('storefront.zoom_product_photo') }}">
-                            <img src="{{ $mainSrc }}" alt="{{ $mainImage->alt_text ?: $part->name }}" data-gallery-main>
+                            <img src="{{ $mainSrc }}" alt="{{ $mainImage->alt_text ?: $productName }}" data-gallery-main>
                         </button>
                         @if($galleryImages->count() > 1)
                             <button class="sf-gallery__nav sf-gallery__nav--prev" type="button" data-gallery-main-prev aria-label="{{ __('storefront.previous_photo') }}">‹</button>
@@ -73,10 +74,10 @@
                             <button class="sf-lightbox__nav sf-lightbox__nav--prev" type="button" data-gallery-prev aria-label="{{ __('storefront.previous_photo') }}">‹</button>
                             <button class="sf-lightbox__nav sf-lightbox__nav--next" type="button" data-gallery-next aria-label="{{ __('storefront.next_photo') }}">›</button>
                         @endif
-                        <img class="sf-lightbox__image" src="{{ $mainSrc ?: $galleryImages->first()['product'] }}" alt="{{ $mainImage?->alt_text ?: $part->name }}" data-gallery-lightbox-image>
+                        <img class="sf-lightbox__image" src="{{ $mainSrc ?: $galleryImages->first()['product'] }}" alt="{{ $mainImage?->alt_text ?: $productName }}" data-gallery-lightbox-image>
                     </div>
                 </div>
             @endif
         </section>
-        <section class="sf-info-card"><h1>{{ $part->name }}</h1><p><strong>{{ __('storefront.part_number') }}:</strong> {{ $part->part_number ?: $part->sku ?: '—' }}</p><p><strong>{{ __('storefront.condition') }}:</strong> {{ __('storefront.used_checked') }}</p>@if($part->car_id)<a class="sf-link-box" href="{{ route('storefront.catalog', ['vehicle_model'=>trim(($part->car?->make ?? '').' '.($part->car?->model ?? ''))]) }}">{{ __('storefront.show_more_vehicle') }}</a>@endif<div class="sf-trust"><span>{{ __('storefront.delivery_time') }}</span><span>{{ __('storefront.payment_methods') }}</span><span>{{ __('storefront.return_14_days') }}</span></div></section><aside class="sf-purchase"><span>{{ __('storefront.product_price') }}</span><strong>{{ number_format((float)$part->price,2,',',' ') }} {{ $part->currency ?: 'PLN' }}</strong><p>{{ __('storefront.gross_price_note') }}</p>@if((int) $part->quantity > 0 && ! in_array($part->status, ['sold', 'archived'], true))<form method="post" action="{{ route('storefront.cart.add', $part) }}">@csrf<button class="sf-purchase__cart" type="submit">{{ __('storefront.add_to_cart') }}</button></form>@else<button disabled>{{ __('storefront.unavailable') }}</button><small>{{ __('storefront.out_of_stock') }}</small>@endif<a href="mailto:biuro@gpswiss.pl">{{ __('storefront.have_question') }}</a><small>{{ __('storefront.vin_oem_help') }}</small></aside></div><div class="sf-tabs"><section class="sf-details-section"><p class="sf-details-description">{!! nl2br(e($description)) !!}</p><h2>{{ __('storefront.details') }}</h2>@if($details)<div class="sf-details-table">@foreach($details as $detail)<div class="sf-details-row"><div class="sf-details-label">{{ $detail['label'] }}</div><div class="sf-details-value">{{ $detail['value'] }}</div></div>@endforeach</div>@else<p>{{ __('storefront.details_pending') }}</p>@endif</section></div>@if($related->isNotEmpty())<section class="sf-section"><div class="sf-section__head"><h2>{{ __('storefront.more_vehicle_parts') }}</h2></div><div class="sf-grid sf-grid--4">@foreach($related as $part) @include('storefront.partials.product-card', ['part'=>$part]) @endforeach</div></section>@endif</div>
+        <section class="sf-info-card"><h1>{{ $productName }}</h1><p><strong>{{ __('storefront.part_number') }}:</strong> {{ $part->part_number ?: $part->sku ?: '—' }}</p><p><strong>{{ __('storefront.condition') }}:</strong> {{ __('storefront.used_checked') }}</p>@if($part->car_id)<a class="sf-link-box" href="{{ route('storefront.catalog', ['vehicle_model'=>trim(($part->car?->make ?? '').' '.($part->car?->model ?? ''))]) }}">{{ __('storefront.show_more_vehicle') }}</a>@endif<div class="sf-trust"><span>{{ __('storefront.delivery_time') }}</span><span>{{ __('storefront.payment_methods') }}</span><span>{{ __('storefront.return_14_days') }}</span></div></section><aside class="sf-purchase"><span>{{ __('storefront.product_price') }}</span><strong>{{ number_format((float)$part->price,2,',',' ') }} {{ $part->currency ?: 'PLN' }}</strong><p>{{ __('storefront.gross_price_note') }}</p>@if((int) $part->quantity > 0 && ! in_array($part->status, ['sold', 'archived'], true))<form method="post" action="{{ route('storefront.cart.add', $part) }}">@csrf<button class="sf-purchase__cart" type="submit">{{ __('storefront.add_to_cart') }}</button></form>@else<button disabled>{{ __('storefront.unavailable') }}</button><small>{{ __('storefront.out_of_stock') }}</small>@endif<a href="mailto:biuro@gpswiss.pl">{{ __('storefront.have_question') }}</a><small>{{ __('storefront.vin_oem_help') }}</small></aside></div><div class="sf-tabs"><section class="sf-details-section"><p class="sf-details-description">{!! nl2br(e($description)) !!}</p><h2>{{ __('storefront.details') }}</h2>@if($details)<div class="sf-details-table">@foreach($details as $detail)<div class="sf-details-row"><div class="sf-details-label">{{ $detail['label'] }}</div><div class="sf-details-value">{{ $detail['value'] }}</div></div>@endforeach</div>@else<p>{{ __('storefront.details_pending') }}</p>@endif</section></div>@if($related->isNotEmpty())<section class="sf-section"><div class="sf-section__head"><h2>{{ __('storefront.more_vehicle_parts') }}</h2></div><div class="sf-grid sf-grid--4">@foreach($related as $part) @include('storefront.partials.product-card', ['part'=>$part]) @endforeach</div></section>@endif</div>
 @endsection

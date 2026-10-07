@@ -32,7 +32,7 @@
                     }
                 @endphp
                 <option value="{{ $rootUrl }}" @selected($activeRoot?->id === $rootCategory->id)>
-                    {{ $rootCategory->public_name ?? 'Kategoria' }}
+                    {{ $rootCategory->storefrontPublicNameForLocale($storefrontContentLocale) ?? 'Kategoria' }}
                 </option>
             @endforeach
         </select>

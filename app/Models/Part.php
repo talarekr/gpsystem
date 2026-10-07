@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasStorefrontTranslations;
 use App\Services\PartCategorySuggestionService;
 use App\Services\PartSlugService;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -15,6 +16,7 @@ use Illuminate\Support\Facades\Schema;
 class Part extends Model
 {
     use HasFactory;
+    use HasStorefrontTranslations;
 
     public bool $skipCategorySuggestion = false;
 
@@ -184,6 +186,53 @@ class Part extends Model
         ] : null;
     }
 
+
+    public function translations(): HasMany
+    {
+        return $this->hasMany(PartTranslation::class);
+    }
+
+    public function translationSourceFields(): array
+    {
+        return ['name', 'short_description', 'description', 'condition_notes'];
+    }
+
+    public function storefrontNameForLocale(string $locale): string
+    {
+        return $this->translatedStorefrontField('name', $locale) ?? (string) $this->name;
+    }
+
+    public function storefrontShortDescriptionForLocale(string $locale): string
+    {
+        return $this->translatedStorefrontField('short_description', $locale) ?? (string) $this->short_description;
+    }
+
+    public function storefrontDescriptionForLocale(string $locale): string
+    {
+        return $this->cleanStorefrontValue($this->translatedStorefrontField('description', $locale))
+            ?: $this->storefrontDescription();
+    }
+
+    public function storefrontConditionNotesForLocale(string $locale): string
+    {
+        return $this->translatedStorefrontField('condition_notes', $locale) ?? (string) $this->condition_notes;
+    }
+
+    public function storefrontDetailsForLocale(string $locale): array
+    {
+        $details = $this->storefrontDetails();
+        if ($locale !== 'fr') {
+            return $details;
+        }
+
+        foreach ($details as &$detail) {
+            if ($detail['label'] === __('storefront.condition')) {
+                $detail['value'] = $this->cleanStorefrontValue($this->storefrontConditionNotesForLocale($locale)) ?: __('storefront.used_checked');
+            }
+        }
+
+        return $details;
+    }
 
     public function storefrontDescription(): string
     {

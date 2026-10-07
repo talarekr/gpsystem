@@ -21,7 +21,7 @@
                             aria-selected="{{ $root->id === $activeRootId ? 'true' : 'false' }}"
                             role="listitem"
                         >
-                            <span>{{ $root->public_name }}</span>
+                            <span>{{ $root->storefrontPublicNameForLocale($storefrontContentLocale) }}</span>
                             <span aria-hidden="true">›</span>
                         </button>
                     @endforeach
@@ -39,7 +39,7 @@
                         <div class="sf-category-menu__branch-head">
                             <div>
                                 <span>Wybrana kategoria</span>
-                                <h3>{{ $root->public_name }}</h3>
+                                <h3>{{ $root->storefrontPublicNameForLocale($storefrontContentLocale) }}</h3>
                             </div>
                             <a href="{{ $categoryTreeService->url($root) }}">Zobacz wszystkie</a>
                         </div>
@@ -49,12 +49,12 @@
                                 @foreach($root->children as $child)
                                     <section class="sf-category-menu__section">
                                         <a class="sf-category-menu__section-title" href="{{ $categoryTreeService->url($child) }}">
-                                            {{ $child->public_name }}
+                                            {{ $child->storefrontPublicNameForLocale($storefrontContentLocale) }}
                                         </a>
                                         @if($child->children->isNotEmpty())
                                             <ul>
                                                 @foreach($child->children->take($visibleGrandchildren) as $grandchild)
-                                                    <li><a href="{{ $categoryTreeService->url($grandchild) }}">{{ $grandchild->public_name }}</a></li>
+                                                    <li><a href="{{ $categoryTreeService->url($grandchild) }}">{{ $grandchild->storefrontPublicNameForLocale($storefrontContentLocale) }}</a></li>
                                                 @endforeach
                                                 @if($child->children->count() > $visibleGrandchildren)
                                                     <li><a class="sf-category-menu__more" href="{{ $categoryTreeService->url($child) }}">{{ __('storefront.show_more') }}</a></li>
@@ -81,17 +81,17 @@
             <a class="sf-category-menu__catalog-link" href="{{ route('storefront.catalog') }}">{{ __('storefront.all_parts') }}</a>
             @foreach($roots as $root)
                 <details class="sf-category-menu__mobile-root">
-                    <summary>{{ $root->public_name }}</summary>
+                    <summary>{{ $root->storefrontPublicNameForLocale($storefrontContentLocale) }}</summary>
                     <a class="sf-category-menu__mobile-all" href="{{ $categoryTreeService->url($root) }}">Zobacz wszystkie w kategorii</a>
                     @if($root->children->isNotEmpty())
                         <ul>
                             @foreach($root->children as $child)
                                 <li>
-                                    <a href="{{ $categoryTreeService->url($child) }}">{{ $child->public_name }}</a>
+                                    <a href="{{ $categoryTreeService->url($child) }}">{{ $child->storefrontPublicNameForLocale($storefrontContentLocale) }}</a>
                                     @if($child->children->isNotEmpty())
                                         <ul>
                                             @foreach($child->children->take($visibleGrandchildren) as $grandchild)
-                                                <li><a href="{{ $categoryTreeService->url($grandchild) }}">{{ $grandchild->public_name }}</a></li>
+                                                <li><a href="{{ $categoryTreeService->url($grandchild) }}">{{ $grandchild->storefrontPublicNameForLocale($storefrontContentLocale) }}</a></li>
                                             @endforeach
                                             @if($child->children->count() > $visibleGrandchildren)
                                                 <li><a class="sf-category-menu__more" href="{{ $categoryTreeService->url($child) }}">{{ __('storefront.show_more') }}</a></li>
