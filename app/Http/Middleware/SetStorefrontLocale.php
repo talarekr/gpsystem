@@ -18,7 +18,8 @@ class SetStorefrontLocale
             return $next($request);
         }
 
-        $locale = $request->session()->get('locale', $request->cookie(self::COOKIE, 'pl'));
+        $locale = $request->attributes->get('storefront_locale')
+            ?? $request->session()->get('locale', $request->cookie(self::COOKIE, 'pl'));
         $locale = in_array($locale, self::SUPPORTED, true) ? $locale : 'pl';
 
         App::setLocale($locale);

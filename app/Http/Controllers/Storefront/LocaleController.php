@@ -12,7 +12,7 @@ class LocaleController extends Controller
 {
     public function __invoke(Request $request): RedirectResponse
     {
-        $locale = $request->input('locale', 'pl');
+        $locale = $request->attributes->get('storefront_locale') ?? $request->input('locale', 'pl');
         $locale = in_array($locale, SetStorefrontLocale::SUPPORTED, true) ? $locale : 'pl';
 
         App::setLocale($locale);
