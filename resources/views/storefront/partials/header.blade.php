@@ -8,7 +8,7 @@
         <form method="post" action="{{ route('storefront.locale') }}" class="sf-language" aria-label="{{ __('storefront.language_selector') }}">
             @csrf
             <select class="sf-language-select" name="locale" onchange="this.form.submit()">
-                @foreach(['pl','de','en','fr','uk'] as $locale)
+                @foreach(request()->attributes->get('storefront_locale') === 'fr' ? ['fr'] : ['pl','de','en','fr','uk'] as $locale)
                     <option value="{{ $locale }}" @selected(app()->getLocale() === $locale)>{{ __('storefront.language_names.'.$locale) }}</option>
                 @endforeach
             </select>
