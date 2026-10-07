@@ -98,7 +98,7 @@ class StorefrontFrenchHostTest extends TestCase
             ->assertSee('CONDITIONS GÉNÉRALES DE VENTE')
             ->assertSee('lang="fr"', false)
             ->assertSee('https://gpswiss.fr/polityka-prywatnosci')
-            ->assertSee('8262157853')
+            ->assertSee('105 670 004 00016')
             ->assertDontSee('REGULAMIN SKLEPU INTERNETOWEGO');
     }
 

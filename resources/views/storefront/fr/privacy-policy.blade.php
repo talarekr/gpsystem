@@ -4,43 +4,307 @@
 <div class="sf-container sf-page sf-static-page">
     @include('storefront.partials.breadcrumbs')
     <section class="sf-static-card">
-        <h1>POLITIQUE DE CONFIDENTIALITÉ</h1>
+        <h1>POLITIQUE DE CONFIDENTIALITÉ — GPSWISS.FR</h1>
 
         <h2>1. Responsable du traitement</h2>
-        <p>Cette politique concerne les utilisateurs de <a href="https://gpswiss.fr">https://gpswiss.fr</a>. Le responsable du traitement est :</p>
-        <p><strong>GREGOR swiss GRZEGORZ PACIOREK</strong><br>
+
+        <p>Le responsable du traitement des données personnelles collectées sur le site https://gpswiss.fr est :</p>
+
+        <p>GREGOR SWISS FR<br>
+            Société à responsabilité limitée au capital social de 1 000,00 €<br>
+            Siège social : 7 rue de Castellane, 75008 Paris, France<br>
+            RCS Paris : 105 670 004<br>
+            SIRET : 105 670 004 00016<br>
+            Numéro de TVA intracommunautaire : FR56 105 670 004<br>
+            E-mail : biuro@gpswiss.fr<br>
+            Téléphone : +48 504 266 984</p>
+
+        <p>Ci-après le « Responsable du traitement ».</p>
+
+        <p>Pour toute question relative aux données personnelles, vous pouvez nous contacter à l’adresse :</p>
+
+        <p>biuro@gpswiss.fr</p>
+
+        <h2>2. Données collectées</h2>
+
+        <p>Dans le cadre de l’utilisation du site, le Responsable du traitement peut collecter les données suivantes :</p>
+
+        <ul>
+
+            <li>nom et prénom,</li>
+
+            <li>nom de société,</li>
+
+            <li>adresse de livraison,</li>
+
+            <li>adresse de facturation,</li>
+
+            <li>adresse e-mail,</li>
+
+            <li>numéro de téléphone,</li>
+
+            <li>numéro de TVA ou autre identifiant professionnel si nécessaire,</li>
+
+            <li>informations relatives à la commande,</li>
+
+            <li>informations relatives au paiement,</li>
+
+            <li>informations relatives à la livraison,</li>
+
+            <li>informations relatives aux retours, réclamations et garanties,</li>
+
+            <li>échanges avec le service client,</li>
+
+            <li>adresse IP,</li>
+
+            <li>données techniques liées à l’utilisation du site,</li>
+
+            <li>préférences relatives aux cookies lorsque le site utilise des traceurs soumis au consentement.</li>
+
+        </ul>
+
+        <h2>3. Finalités du traitement</h2>
+
+        <p>Les données personnelles sont traitées pour les finalités suivantes :</p>
+
+        <ul>
+
+            <li>gestion du site et du panier,</li>
+
+            <li>création et gestion du compte client,</li>
+
+            <li>traitement des commandes,</li>
+
+            <li>paiement des commandes,</li>
+
+            <li>livraison des produits,</li>
+
+            <li>émission des factures et documents comptables,</li>
+
+            <li>gestion du service client,</li>
+
+            <li>gestion des retours, réclamations, garanties et litiges,</li>
+
+            <li>prévention de la fraude,</li>
+
+            <li>sécurité du site,</li>
+
+            <li>respect des obligations légales et fiscales,</li>
+
+            <li>défense des droits du Responsable du traitement,</li>
+
+            <li>mesure d’audience et amélioration du site lorsque cela est autorisé,</li>
+
+            <li>prospection commerciale uniquement lorsque la loi l’autorise ou lorsque le consentement est requis et obtenu.</li>
+
+        </ul>
+
+        <h2>4. Bases légales</h2>
+
+        <p>Les traitements reposent, selon les cas, sur :</p>
+
+        <ul>
+
+            <li>l’exécution d’un contrat ou de mesures précontractuelles,</li>
+
+            <li>le respect d’une obligation légale,</li>
+
+            <li>l’intérêt légitime du Responsable du traitement,</li>
+
+            <li>le consentement de l’utilisateur lorsque celui-ci est nécessaire.</li>
+
+        </ul>
+
+        <h2>5. Paiements</h2>
+
+        <p>Les paiements réalisés sur gpswiss.fr sont traités par Stripe.</p>
+
+        <p>Stripe traite certaines données nécessaires à l’exécution du paiement, conformément à ses propres conditions et politiques de confidentialité.</p>
+
+        <p>Le site ne conserve pas les données complètes de carte bancaire.</p>
+
+        <h2>6. Livraison</h2>
+
+        <p>Pour assurer la livraison en France, certaines données peuvent être transmises aux transporteurs ou prestataires logistiques.</p>
+
+        <p>Les données transmises peuvent comprendre :</p>
+
+        <ul>
+
+            <li>nom et prénom,</li>
+
+            <li>adresse de livraison,</li>
+
+            <li>numéro de téléphone,</li>
+
+            <li>adresse e-mail,</li>
+
+            <li>informations nécessaires à l’acheminement du colis.</li>
+
+        </ul>
+
+        <h2>7. Retours et réclamations</h2>
+
+        <p>Pour la gestion des retours, réclamations et garanties, les données du client peuvent être utilisées afin d’identifier la commande, traiter la demande, organiser le retour du produit et communiquer avec le client.</p>
+
+        <p>L’adresse de retour est :</p>
+
+        <p>GREGOR swiss GRZEGORZ PACIOREK<br>
             ul. Milanowska 137<br>
-            08-460 Sobolew, Pologne<br>
-            Identifiant fiscal polonais (NIP) : 8262157853<br>
-            REGON : 368948917<br>
-            Contact : <a href="mailto:biuro@gpswiss.pl">biuro@gpswiss.pl</a></p>
+            08-460 Sobolew<br>
+            Pologne</p>
 
-        <h2>2. Données traitées</h2>
-        <p>Nous pouvons traiter les coordonnées du client, ses adresses de facturation et de livraison, les informations de son entreprise, les données de commande et de paiement, sa correspondance, les informations relatives aux retours et réclamations, ainsi que l’adresse IP et les données techniques nécessaires au fonctionnement et à la sécurité du site.</p>
+        <h2>8. Destinataires des données</h2>
 
-        <h2>3. Finalités et bases juridiques</h2>
-        <p>Les données servent à préparer et exécuter les commandes, traiter les paiements et livraisons, gérer les comptes, répondre aux demandes et assurer le service après-vente. Ces traitements reposent sur les mesures précontractuelles et l’exécution du contrat.</p>
-        <p>Les obligations fiscales et comptables reposent sur les obligations légales. La sécurité du service, la gestion de la correspondance et la défense des droits reposent sur les intérêts légitimes du responsable. Lorsque le consentement est requis, le traitement repose sur ce consentement, qui peut être retiré.</p>
+        <p>Les données personnelles peuvent être communiquées, uniquement lorsque cela est nécessaire, aux catégories de destinataires suivantes :</p>
 
-        <h2>4. Destinataires</h2>
-        <p>Les données nécessaires peuvent être transmises aux transporteurs, prestataires de paiement, dont PayU lorsqu’il est utilisé, prestataires d’hébergement et d’informatique, services comptables et autorités habilitées. Les prestataires de paiement appliquent également leurs propres règles de confidentialité.</p>
+        <ul>
 
-        <h2>5. Conservation</h2>
-        <p>Les données sont conservées pendant la durée nécessaire à l’exécution du contrat et au traitement du service après-vente, puis pendant les durées imposées par les obligations légales ou nécessaires à la défense des droits. Les données traitées sur la base du consentement sont conservées jusqu’à son retrait, sauf autre fondement juridique applicable.</p>
+            <li>personnel autorisé du Responsable du traitement,</li>
 
-        <h2>6. Vos droits</h2>
-        <p>Dans les conditions prévues par le RGPD, vous disposez de droits d’accès, de rectification, d’effacement, de limitation, de portabilité et d’opposition. Vous pouvez retirer votre consentement sans remettre en cause la licéité du traitement antérieur.</p>
-        <p>Pour exercer vos droits, contactez <a href="mailto:biuro@gpswiss.pl">biuro@gpswiss.pl</a>. Vous pouvez déposer une réclamation auprès d’une autorité de contrôle compétente, notamment la CNIL en France ou l’autorité polonaise UODO.</p>
+            <li>prestataires techniques et hébergeur,</li>
 
-        <h2>7. Fourniture des données</h2>
-        <p>La fourniture des données est volontaire, mais les données nécessaires à une commande, une livraison, une facture ou une demande de service doivent être communiquées pour que celle-ci puisse être traitée.</p>
+            <li>prestataire de paiement Stripe,</li>
 
-        <h2>8. Cookies</h2>
-        <p>Le site utilise des cookies pour gérer la session, le panier et les préférences de langue. Vous pouvez gérer les cookies dans votre navigateur ; leur blocage peut affecter certaines fonctions du site. Les cookies nécessitant un consentement sont soumis aux règles applicables.</p>
+            <li>transporteurs et prestataires logistiques,</li>
 
-        <h2>9. Sécurité et mises à jour</h2>
-        <p>Le responsable applique des mesures techniques et organisationnelles destinées à protéger les données contre les accès non autorisés, la perte et l’altération. Cette politique peut être mise à jour pour refléter l’évolution du service ou des règles applicables.</p>
-        <p>La version actuelle est disponible sur la <a href="{{ route('storefront.privacy-policy') }}">page de confidentialité de gpswiss.fr</a>. Consultez également les <a href="{{ route('storefront.terms') }}">conditions générales de vente</a>.</p>
+            <li>prestataires comptables,</li>
+
+            <li>prestataires de service client,</li>
+
+            <li>prestataires d’e-mailing transactionnel,</li>
+
+            <li>conseils juridiques ou comptables,</li>
+
+            <li>autorités publiques lorsque la loi l’exige.</li>
+
+        </ul>
+
+        <h2>9. Transferts hors Union européenne</h2>
+
+        <p>Certains prestataires peuvent traiter des données en dehors de l’Union européenne.</p>
+
+        <p>Lorsque de tels transferts ont lieu, le Responsable du traitement veille à ce qu’ils soient encadrés par des garanties appropriées, conformément au RGPD, telles que des clauses contractuelles types ou tout autre mécanisme reconnu par la réglementation applicable.</p>
+
+        <p>Cette section devra être précisée selon les prestataires effectivement utilisés, notamment Stripe, l’hébergeur, les outils d’e-mailing, les outils de mesure d’audience et les outils de support.</p>
+
+        <h2>10. Durées de conservation</h2>
+
+        <p>Les données personnelles sont conservées pendant une durée proportionnée à la finalité du traitement.</p>
+
+        <p>À titre indicatif :</p>
+
+        <ul>
+
+            <li>données de commande : pendant la durée nécessaire à l’exécution de la commande, puis pendant la durée légale de conservation applicable aux obligations comptables, fiscales et de preuve ;</li>
+
+            <li>factures et documents comptables : pendant la durée légale applicable ;</li>
+
+            <li>données de compte client : jusqu’à la suppression du compte ou après une période d’inactivité à définir ;</li>
+
+            <li>données de réclamation et de garantie : pendant la durée nécessaire au traitement de la demande puis pendant la durée de prescription applicable ;</li>
+
+            <li>données de prospection : jusqu’au retrait du consentement ou à l’opposition de la personne concernée ;</li>
+
+            <li>cookies soumis au consentement : selon la durée indiquée dans le bandeau ou la politique cookies.</li>
+
+        </ul>
+
+        <h2>11. Droits des personnes</h2>
+
+        <p>Conformément au RGPD, chaque personne concernée dispose des droits suivants :</p>
+
+        <ul>
+
+            <li>droit d’accès,</li>
+
+            <li>droit de rectification,</li>
+
+            <li>droit d’effacement,</li>
+
+            <li>droit à la limitation du traitement,</li>
+
+            <li>droit d’opposition,</li>
+
+            <li>droit à la portabilité des données,</li>
+
+            <li>droit de retirer son consentement à tout moment lorsque le traitement repose sur le consentement,</li>
+
+            <li>droit de définir des directives relatives au sort de ses données après son décès, lorsque ce droit est applicable.</li>
+
+        </ul>
+
+        <p>Pour exercer ces droits, il est possible de contacter le Responsable du traitement à l’adresse :</p>
+
+        <p>biuro@gpswiss.fr</p>
+
+        <p>Une preuve d’identité pourra être demandée si cela est nécessaire pour vérifier l’identité de la personne.</p>
+
+        <h2>12. Réclamation auprès de la CNIL</h2>
+
+        <p>Si vous estimez que vos droits ne sont pas respectés, vous pouvez introduire une réclamation auprès de la CNIL, autorité française de contrôle en matière de protection des données personnelles.</p>
+
+        <h2>13. Sécurité des données</h2>
+
+        <p>Le Responsable du traitement met en œuvre des mesures techniques et organisationnelles appropriées afin de protéger les données personnelles contre la perte, l’accès non autorisé, l’altération, la divulgation ou la destruction.</p>
+
+        <p>L’accès aux données est limité aux personnes et prestataires ayant besoin d’y accéder pour les finalités indiquées dans la présente politique.</p>
+
+        <h2>14. Cookies et traceurs</h2>
+
+        <p>Le site peut utiliser des cookies et autres traceurs.</p>
+
+        <p>Certains cookies sont strictement nécessaires au fonctionnement du site, notamment pour :</p>
+
+        <ul>
+
+            <li>gérer le panier,</li>
+
+            <li>maintenir la session utilisateur,</li>
+
+            <li>assurer la sécurité du site,</li>
+
+            <li>mémoriser certains choix nécessaires au service.</li>
+
+        </ul>
+
+        <p>Ces cookies peuvent être déposés sans consentement lorsqu’ils sont strictement nécessaires.</p>
+
+        <p>D’autres cookies ou traceurs, notamment de mesure d’audience non exemptée, publicité, réseaux sociaux ou personnalisation avancée, peuvent nécessiter le consentement préalable de l’utilisateur.</p>
+
+        <p>L’utilisateur doit pouvoir accepter, refuser ou paramétrer les cookies soumis à consentement. Il doit également pouvoir retirer son consentement à tout moment.</p>
+
+        <h2>15. Gestion des cookies</h2>
+
+        <p>Lors de la première visite, un bandeau de gestion des cookies peut être affiché.</p>
+
+        <p>L’utilisateur peut :</p>
+
+        <ul>
+
+            <li>accepter les cookies soumis à consentement,</li>
+
+            <li>les refuser,</li>
+
+            <li>personnaliser ses choix,</li>
+
+            <li>modifier ses préférences ultérieurement.</li>
+
+        </ul>
+
+        <p>Un lien de gestion des cookies doit être accessible à tout moment, par exemple en pied de page.</p>
+
+        <h2>16. Données des mineurs</h2>
+
+        <p>Le site ne s’adresse pas spécifiquement aux mineurs.</p>
+
+        <p>Si des données relatives à un mineur sont collectées dans le cadre d’une commande, elles doivent être fournies par le titulaire de l’autorité parentale ou sous sa responsabilité.</p>
+
+        <h2>17. Modifications de la politique</h2>
+
+        <p>La présente Politique de confidentialité peut être modifiée afin de tenir compte des évolutions légales, techniques ou fonctionnelles du site.</p>
+
+        <p>La version applicable est celle publiée sur le site au moment de la consultation.</p>
     </section>
 </div>
 @endsection
