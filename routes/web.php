@@ -39,6 +39,9 @@ use App\Http\Controllers\Storefront\LocaleController;
 use App\Http\Controllers\Storefront\PartController;
 use App\Http\Controllers\Storefront\PayuReturnController;
 use App\Http\Controllers\Payments\PayuNotifyController;
+use App\Http\Controllers\Storefront\StripeFrReturnController;
+use App\Http\Controllers\Payments\StripeFrWebhookController;
+use App\Http\Middleware\FrontendMaintenanceMode;
 use App\Http\Controllers\Storefront\PrivacyPolicyController;
 use App\Http\Controllers\Storefront\SearchController;
 use App\Http\Controllers\Storefront\TermsController;
@@ -303,6 +306,11 @@ Route::post('/zamowienie', [CheckoutController::class, 'store'])->name('storefro
 Route::get('/zamowienie/dziekujemy/{order}', [CheckoutController::class, 'thankYou'])->name('storefront.checkout.thank-you');
 Route::get('/zamowienie/payu/powrot', PayuReturnController::class)->name('storefront.checkout.payu-return');
 Route::post('/payu/notify', PayuNotifyController::class)->name('payu.notify');
+Route::post('/stripe/fr/webhook', StripeFrWebhookController::class)
+    ->withoutMiddleware(FrontendMaintenanceMode::class)
+    ->name('stripe.fr.webhook');
+Route::get('/stripe/fr/success/{order}', [StripeFrReturnController::class, 'success'])->name('storefront.checkout.stripe-fr-success');
+Route::get('/stripe/fr/cancel/{order}', [StripeFrReturnController::class, 'cancel'])->name('storefront.checkout.stripe-fr-cancel');
 Route::get('/produkt/{slug}', [PartController::class, 'show'])->name('storefront.product');
 Route::get('/kategoria-produktu/{path}', [CategoryController::class, 'show'])->where('path', '.*')->name('storefront.category');
 

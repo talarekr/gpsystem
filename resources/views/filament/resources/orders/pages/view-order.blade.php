@@ -152,6 +152,10 @@
     $paymentStatus = trim((string) $paymentLabel);
     $paymentType = trim((string) (data_get($order->raw_payload, 'payment.type') ?: data_get($order->raw_payload, 'payment_type') ?: data_get($order->raw_payload, 'payment_method')));
     $paymentProvider = trim((string) (data_get($order->raw_payload, 'payment.provider') ?: data_get($order->raw_payload, 'payment_provider')));
+    if (data_get($order->meta, 'source') === 'storefront' && data_get($order->meta, 'payment_provider') === 'stripe') {
+        $paymentProvider = 'Stripe';
+        $paymentStatus = (string) $order->payment_status;
+    }
     $isPaid = Str::contains(Str::lower($paymentStatus), ['zapłac', 'paid', 'completed', 'finished', 'settled']);
     $statusChangedAt = $order->status_changed_at ? $order->status_changed_at->format('Y-m-d H:i') : null;
     $formatMoney = fn ($amount, ?string $moneyCurrency = null): string => $amount !== null

@@ -5,31 +5,43 @@ namespace App\Http\Controllers\Storefront;
 use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Services\Marketplace\PartAvailabilityEventService;
+use App\Services\Payments\PaymentProviderResolver;
 use App\Services\Payments\PayuService;
+use App\Services\Payments\StripeFrService;
 use App\Services\Storefront\CartService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
+use RuntimeException;
 
 class CheckoutController extends Controller
 {
-    public function __construct(private readonly CartService $cart, private readonly PartAvailabilityEventService $availabilityEvents, private readonly PayuService $payu)
-    {
-    }
+    public function __construct(
+        private readonly CartService $cart,
+        private readonly PartAvailabilityEventService $availabilityEvents,
+        private readonly PayuService $payu,
+        private readonly PaymentProviderResolver $providers,
+        private readonly StripeFrService $stripe,
+    ) {}
 
-    public function show(): View|RedirectResponse
+    public function show(Request $request): View|RedirectResponse
     {
         if ($this->cart->isEmpty()) {
             return redirect()->route('storefront.cart.index')->with('warning', __('storefront.cart_empty_before_checkout'));
         }
 
-        return view('storefront.checkout.show', $this->viewData());
+        return view('storefront.checkout.show', $this->viewData($request));
     }
 
     public function store(Request $request): RedirectResponse
     {
+        $provider = $this->providers->resolve($request);
+        if ($provider === 'stripe' && ! $this->stripe->isAvailable()) {
+            throw ValidationException::withMessages(['payment_method' => 'Le paiement est temporairement indisponible. Veuillez réessayer plus tard.']);
+        }
+
         $items = $this->cart->items();
 
         if ($items->isEmpty()) {
@@ -62,9 +74,17 @@ class CheckoutController extends Controller
             'shipping_country' => ['required_if:shipping_same_as_billing,0', 'nullable', 'string', 'max:2'],
             'shipping_method' => ['required', 'in:courier,courier_cod,pickup'],
             'notes' => ['nullable', 'string', 'max:5000'],
-            'payment_method' => ['required', 'in:payu,blik'],
+            'payment_method' => $provider === 'stripe' ? ['nullable', 'string'] : ['required', 'in:payu,blik'],
             'terms' => ['accepted'],
         ]);
+
+        if ($provider === 'stripe') {
+            $validated['payment_method'] = 'stripe';
+            $currencies = $items->map(fn (array $item): string => strtoupper((string) ($item['currency'] ?? 'PLN')))->unique();
+            if ($currencies->count() !== 1 || ! in_array($currencies->first(), ['EUR', 'PLN'], true) || (float) $items->sum('line_total') <= 0) {
+                throw ValidationException::withMessages(['payment_method' => 'Le paiement de ce panier est indisponible. Veuillez nous contacter.']);
+            }
+        }
 
         $billingName = trim($validated['billing_first_name'].' '.$validated['billing_last_name']);
         $billingAddress = trim($validated['billing_street'].' '.$validated['billing_building_number']);
@@ -81,7 +101,7 @@ class CheckoutController extends Controller
 
         $subtotal = round((float) $items->sum('line_total'), 2);
 
-        $order = DB::transaction(function () use ($validated, $items, $subtotal, $request, $billingName, $billingAddress, $shippingSameAsBilling, $shippingData): Order {
+        $order = DB::transaction(function () use ($validated, $items, $subtotal, $request, $billingName, $billingAddress, $shippingSameAsBilling, $shippingData, $provider): Order {
             $order = Order::query()->create([
                 'order_number' => $this->nextOrderNumber(),
                 'customer_id' => $request->user()?->id,
@@ -116,14 +136,14 @@ class CheckoutController extends Controller
                     'phone' => $validated['billing_phone'],
                     'email' => $validated['billing_email'],
                 ],
-                'meta' => [
+                'meta' => array_merge([
                     'source' => 'storefront',
                     'customer_type' => $validated['customer_type'],
                     'shipping_same_as_billing' => $shippingSameAsBilling,
                     'shipping' => $shippingData,
                     'shipping_method' => $validated['shipping_method'],
                     'payment_method' => $validated['payment_method'],
-                ],
+                ], $provider === 'stripe' ? ['payment_provider' => 'stripe', 'storefront_code' => 'gpswiss_fr'] : []),
             ]);
 
             foreach ($items as $item) {
@@ -153,6 +173,24 @@ class CheckoutController extends Controller
                     'source_order_item_id' => (string) $item->id,
                 ]);
             }
+        }
+
+        if ($provider === 'stripe') {
+            try {
+                $session = $this->stripe->createCheckoutSession($order);
+            } catch (RuntimeException) {
+                $order->refresh();
+                $this->cart->clear();
+                $token = data_get($order->meta, 'stripe.return_token');
+                $redirect = is_string($token) && strlen($token) === 64
+                    ? redirect()->to('https://gpswiss.fr/stripe/fr/cancel/'.$order->id.'?token='.rawurlencode($token))
+                    : redirect()->route('storefront.cart.index');
+
+                return $redirect->with('error', 'Votre commande '.$order->order_number.' a été enregistrée. Le paiement est temporairement indisponible. Veuillez nous contacter avant de passer une nouvelle commande.');
+            }
+            $this->cart->clear();
+
+            return redirect()->away($session['url']);
         }
 
         if (in_array($validated['payment_method'], ['payu', 'blik'], true)) {
@@ -189,6 +227,9 @@ class CheckoutController extends Controller
 
     public function thankYou(Order $order): View
     {
+        // Stripe receipts use the token-protected route and never expose customer data.
+        abort_if(data_get($order->meta, 'payment_provider') === 'stripe', 404);
+
         return view('storefront.checkout.thank-you', [
             'order' => $order->load('items'),
             'breadcrumbs' => [['label' => __('storefront.home'), 'url' => route('storefront.home')], ['label' => __('storefront.thank_you')]],
@@ -197,9 +238,11 @@ class CheckoutController extends Controller
         ]);
     }
 
-    private function viewData(): array
+    private function viewData(Request $request): array
     {
         return [
+            'paymentProvider' => $this->providers->resolve($request),
+            'paymentAvailable' => $this->providers->resolve($request) !== 'stripe' || $this->stripe->isAvailable(),
             'items' => $this->cart->items(),
             'subtotal' => $this->cart->subtotal(),
             'breadcrumbs' => [['label' => __('storefront.home'), 'url' => route('storefront.home')], ['label' => __('storefront.cart'), 'url' => route('storefront.cart.index')], ['label' => __('storefront.checkout')]],

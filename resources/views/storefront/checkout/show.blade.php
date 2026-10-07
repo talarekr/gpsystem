@@ -115,9 +115,16 @@
                 <div class="sf-checkout-section">
                     <h2>{{ __('storefront.payment_method') }}</h2>
                     <div class="sf-checkout-options">
+                        @if($paymentProvider === 'stripe')
+                        <label><input type="radio" name="payment_method" value="stripe" checked required><span>Paiement sécurisé par carte (Stripe)</span></label>
+                        @else
                         <label><input type="radio" name="payment_method" value="payu" @checked(old('payment_method', 'payu') === 'payu') required><span>{{ __('storefront.payu_checkout') }}</span></label>
                         <label><input type="radio" name="payment_method" value="blik" @checked(old('payment_method') === 'blik') required><span>{{ __('storefront.blik_payu') }}</span></label>
+                        @endif
                     </div>
+                    @if($paymentProvider === 'stripe' && ! $paymentAvailable)
+                    <p role="status">Le paiement est temporairement indisponible. Veuillez réessayer plus tard.</p>
+                    @endif
                     @error('payment_method')<small class="sf-checkout-error">{{ $message }}</small>@enderror
                 </div>
             </section>
@@ -144,7 +151,7 @@
             </div>
             <div class="sf-checkout-summary__row"><span>{{ __('storefront.delivery') }}</span><strong>0,00 {{ $items->first()['currency'] ?? 'PLN' }}</strong></div>
             <div class="sf-checkout-summary__row sf-checkout-summary__row--total"><span>{{ __('storefront.total') }}</span><strong>{{ number_format((float) $subtotal, 2, ',', ' ') }} {{ $items->first()['currency'] ?? 'PLN' }}</strong></div>
-            <button class="sf-btn" type="submit">{{ __('storefront.place_order') }}</button>
+            <button class="sf-btn" type="submit" @disabled($paymentProvider === 'stripe' && ! $paymentAvailable)>{{ __('storefront.place_order') }}</button>
         </aside>
     </form>
 </div>
