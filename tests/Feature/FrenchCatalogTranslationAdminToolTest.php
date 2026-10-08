@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Services\Marketplace\GoogleTranslateService;
 use App\Services\Storefront\FrenchCatalogTranslationAdminRunner;
 use App\Services\Storefront\FrenchCatalogTranslationPreviewService;
+use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Support\Facades\Cache;
@@ -135,6 +136,17 @@ class FrenchCatalogTranslationAdminToolTest extends TestCase
     public static function allowedRoles(): array
     {
         return [['owner_admin'], ['manager']];
+    }
+
+    public function test_translation_tool_is_not_registered_in_admin_navigation(): void
+    {
+        $items = Filament::getPanel('admin')->getNavigationItems();
+
+        $this->assertNotEmpty($items);
+        foreach ($items as $item) {
+            $this->assertNotSame('GPSwiss FR — tłumaczenia katalogu', $item->getLabel());
+            $this->assertNotSame(route('admin.tools.storefront.fr-translations.index'), $item->getUrl());
+        }
     }
 
     #[DataProvider('allowedRoles')]
