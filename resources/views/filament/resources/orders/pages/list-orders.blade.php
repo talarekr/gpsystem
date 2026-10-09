@@ -381,7 +381,7 @@
                 $buyerName = $customerDisplay['name'] ?: '—';
                 $phone = $customerDisplay['phone'];
                 $total = OrderResource::formatOrderTotal($order);
-                $orderedAt = $order->ordered_at ? $order->ordered_at->format('Y-m-d H:i') : '—';
+                $orderedAt = ($order->ordered_at ?? $order->created_at?->copy()->timezone('Europe/Warsaw'))?->format('Y-m-d H:i') ?? '—';
                 $firstItem = $order->items->first();
                 $itemsCount = $order->items->count();
                 $thumbnailDebug = \App\Support\OrderItemThumbnailDiagnostics::resolve($order, $firstItem);
