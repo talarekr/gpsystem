@@ -184,6 +184,26 @@ class ListOrders extends Page
         return null;
     }
 
+    private function salesDateExpression(): string
+    {
+        // Marketplace ordered_at is Warsaw wall time; Eloquent created_at is UTC.
+        // EU DST begins/ends at 01:00 UTC on the last Sunday of March/October.
+        // Use numeric offsets so MySQL does not require installed timezone tables.
+        if (Order::query()->getConnection()->getDriverName() === 'sqlite') {
+            $start = "datetime(strftime('%Y', created_at) || '-03-31', '-' || strftime('%w', strftime('%Y', created_at) || '-03-31') || ' days', '+1 hour')";
+            $end = "datetime(strftime('%Y', created_at) || '-10-31', '-' || strftime('%w', strftime('%Y', created_at) || '-10-31') || ' days', '+1 hour')";
+            $fallback = "datetime(created_at, CASE WHEN created_at >= {$start} AND created_at < {$end} THEN '+2 hours' ELSE '+1 hour' END)";
+        } elseif (Order::query()->getConnection()->getDriverName() === 'pgsql') {
+            $fallback = "(created_at AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/Warsaw'";
+        } else {
+            $start = "DATE_ADD(DATE_SUB(CONCAT(YEAR(created_at), '-03-31'), INTERVAL (DAYOFWEEK(CONCAT(YEAR(created_at), '-03-31')) - 1) DAY), INTERVAL 1 HOUR)";
+            $end = "DATE_ADD(DATE_SUB(CONCAT(YEAR(created_at), '-10-31'), INTERVAL (DAYOFWEEK(CONCAT(YEAR(created_at), '-10-31')) - 1) DAY), INTERVAL 1 HOUR)";
+            $fallback = "TIMESTAMPADD(HOUR, CASE WHEN created_at >= {$start} AND created_at < {$end} THEN 2 ELSE 1 END, created_at)";
+        }
+
+        return "COALESCE(ordered_at, {$fallback})";
+    }
+
     protected function getOrdersQuery(): Builder
     {
         $sortDirection = strtolower($this->sortDirection) === 'asc' ? 'asc' : 'desc';
@@ -207,7 +227,7 @@ class ListOrders extends Page
             ->when(filled($this->status), fn (Builder $query): Builder => $query->where('status', $this->status))
             ->when(filled($this->testImport), fn (Builder $query): Builder => $query->where('test_import', $this->testImport === '1'))
             ->when(filled($this->sourceBatch), fn (Builder $query): Builder => $query->where('source_batch', $this->sourceBatch))
-            ->orderBy('ordered_at', $sortDirection)
+            ->orderByRaw($this->salesDateExpression().' '.$sortDirection)
             ->orderByDesc('id');
     }
 }
