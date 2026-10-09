@@ -89,7 +89,7 @@ class AdminStorefrontPayuOrderTest extends TestCase
             $ids = $component->instance()->getOrdersProperty()->pluck('id')->all();
             $this->assertContains($current->id, $ids);
             $this->assertContains($legacy->id, $ids);
-            $component->assertSee('GPS-REGRESSION-698')->assertSee('Sklep')->assertSee('PayU');
+            $component->assertSee('GPS-REGRESSION-698')->assertSee('Źródło:')->assertSee('Sklep')->assertDontSee('Płatność: PayU');
         }
         $this->assertSame(2, \App\Filament\Resources\OrderResource::getAllOrdersNavigationCount());
         $this->assertSame(2, \App\Filament\Resources\OrderResource::getNewOrdersNavigationCount());
@@ -123,6 +123,7 @@ class AdminStorefrontPayuOrderTest extends TestCase
             $external->save();
             $component = Livewire::withQueryParams(['marketplace' => $marketplace])->test(ListOrders::class);
             $this->assertSame([$external->id], $component->instance()->getOrdersProperty()->pluck('id')->all());
+            $component->assertSee('Źródło:')->assertSee('aria-label="Źródło: '.$marketplace.'"', false);
         }
         $this->assertSame([$order->id], Order::query()->storefront()->pluck('id')->all());
     }
