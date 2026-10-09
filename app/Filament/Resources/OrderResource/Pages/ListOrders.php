@@ -203,7 +203,7 @@ class ListOrders extends Page
                         ->orWhere('email', 'like', "%{$search}%");
                 });
             })
-            ->when(filled($this->marketplace), fn (Builder $query): Builder => $query->where('marketplace', $this->marketplace))
+            ->when(filled($this->marketplace), fn (Builder $query): Builder => ($this->marketplace === 'sklep' ? $query->storefront() : $query->where('marketplace', $this->marketplace)))
             ->when(filled($this->status), fn (Builder $query): Builder => $query->where('status', $this->status))
             ->when(filled($this->testImport), fn (Builder $query): Builder => $query->where('test_import', $this->testImport === '1'))
             ->when(filled($this->sourceBatch), fn (Builder $query): Builder => $query->where('source_batch', $this->sourceBatch))

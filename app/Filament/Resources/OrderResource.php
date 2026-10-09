@@ -38,7 +38,7 @@ class OrderResource extends Resource
 
     public static function displayOrderNumber(Order $order): string
     {
-        $number = trim((string) ($order->marketplace_order_id ?: $order->order_number));
+        $number = trim((string) ($order->isPolishStorefront() ? $order->order_number : ($order->marketplace_order_id ?: $order->order_number)));
 
         if ($number === '') {
             return '—';

@@ -39,7 +39,13 @@ class PayuNotifyController extends Controller
                 'payload' => $payload,
             ]);
 
-            $updates = ['meta' => $meta, 'marketplace_status' => $status ?: $order->marketplace_status];
+            if ($order->isPolishStorefront()) {
+                data_set($meta, 'payu.status', $status);
+            }
+            $updates = ['meta' => $meta];
+            if (! $order->isPolishStorefront()) {
+                $updates['marketplace_status'] = $status ?: $order->marketplace_status;
+            }
             if ($status === 'COMPLETED') {
                 $updates['payment_status'] = 'paid';
                 $updates['status'] = $order->status === 'new' ? 'processing' : $order->status;
