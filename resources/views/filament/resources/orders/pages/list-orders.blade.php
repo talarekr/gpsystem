@@ -374,7 +374,7 @@
         @forelse ($orders as $order)
             @php
                 $displayNumber = OrderResource::displayOrderNumber($order);
-                $marketplace = $order->marketplace ?: 'Sklep';
+                $marketplace = $order->salesChannel();
                 $statusOptions = OrderStatusOptions::optionsForOrder($order);
                 $selectedStatus = OrderStatusOptions::selectedValueForOrder($order);
                 $customerDisplay = \App\Support\OrderCustomerDisplay::forOrder($order);
@@ -426,6 +426,7 @@
                         <div class="gps-order-value gps-order-number">{{ $displayNumber }}</div>
                         <div class="gps-order-muted">{{ $orderedAt }}</div>
                         <div class="gps-order-source-row">Źródło: @include('filament.resources.orders.partials.source-wordmark', ['marketplace' => $marketplace])</div>
+                        @if ($order->isPolishStorefront() && $order->paymentProvider() === 'payu')<div>Płatność: PayU</div>@endif
                     </div>
 
                     <div class="gps-order-col gps-order-col-amount">

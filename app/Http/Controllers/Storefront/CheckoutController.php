@@ -118,6 +118,12 @@ class CheckoutController extends Controller
                 ],
                 'meta' => [
                     'source' => 'storefront',
+                    ...($request->getHost() === 'gpswiss.pl' ? [
+                        'source_channel' => 'storefront',
+                        'storefront_code' => 'gpswiss_pl',
+                        'locale' => app()->getLocale(),
+                        'payment_provider' => 'payu',
+                    ] : []),
                     'customer_type' => $validated['customer_type'],
                     'shipping_same_as_billing' => $shippingSameAsBilling,
                     'shipping' => $shippingData,
@@ -171,9 +177,11 @@ class CheckoutController extends Controller
                 'created_at' => now()->toIso8601String(),
             ]);
             $order->update([
-                'marketplace' => 'payu',
-                'marketplace_order_id' => $response['orderId'] ?? null,
-                'marketplace_status' => data_get($response, 'status.statusCode'),
+                ...($request->getHost() === 'gpswiss.pl' ? [] : [
+                    'marketplace' => 'payu',
+                    'marketplace_order_id' => $response['orderId'] ?? null,
+                    'marketplace_status' => data_get($response, 'status.statusCode'),
+                ]),
                 'payment_status' => 'pending',
                 'meta' => $meta,
             ]);

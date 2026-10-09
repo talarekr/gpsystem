@@ -10,7 +10,7 @@
     $order->loadMissing(['items.part.images', 'items.part.storageLocation', 'items.marketplaceListing.part.images', 'items.marketplaceListing.part.storageLocation', 'shipments']);
 
     $externalOrderId = trim((string) ($order->marketplace_order_id ?: $order->order_number));
-    $marketplace = trim((string) $order->marketplace) ?: 'Sklep';
+    $marketplace = $order->salesChannel();
     $marketplaceKey = Str::lower($marketplace);
     $orderMarketplaceSourceKey = Str::lower(trim((string) ($order->marketplace ?? $order->source ?? '')));
     $isOvokoOrder = $orderMarketplaceSourceKey === 'ovoko';
@@ -151,7 +151,7 @@
     $deliveryPhone = trim((string) (data_get($order->raw_payload, 'delivery.address.phoneNumber') ?: data_get($order->raw_payload, 'delivery.address.phone') ?: $order->phone));
     $paymentStatus = trim((string) $paymentLabel);
     $paymentType = trim((string) (data_get($order->raw_payload, 'payment.type') ?: data_get($order->raw_payload, 'payment_type') ?: data_get($order->raw_payload, 'payment_method')));
-    $paymentProvider = trim((string) (data_get($order->raw_payload, 'payment.provider') ?: data_get($order->raw_payload, 'payment_provider')));
+    $paymentProvider = trim((string) (($order->isPolishStorefront() ? $order->paymentProvider() : null) ?: data_get($order->raw_payload, 'payment.provider') ?: data_get($order->raw_payload, 'payment_provider')));
     $isPaid = Str::contains(Str::lower($paymentStatus), ['zapłac', 'paid', 'completed', 'finished', 'settled']);
     $statusChangedAt = $order->status_changed_at ? $order->status_changed_at->format('Y-m-d H:i') : null;
     $formatMoney = fn ($amount, ?string $moneyCurrency = null): string => $amount !== null
@@ -634,7 +634,7 @@
             @if ($paymentType !== '')<div class="gps-order-detail-fact"><div class="gps-order-detail-label">Typ</div><div class="gps-order-detail-value">{{ Str::headline(str_replace(['_', '-'], ' ', $paymentType)) }}</div></div>@endif
             <div class="gps-order-detail-fact"><div class="gps-order-detail-label">Kwota</div><div class="gps-order-detail-value">{{ $total }}</div></div>
             <div class="gps-order-detail-fact"><div class="gps-order-detail-label">Waluta</div><div class="gps-order-detail-value">{{ $currency }}</div></div>
-            @if ($paymentProvider !== '')<div class="gps-order-detail-fact"><div class="gps-order-detail-label">Provider</div><div class="gps-order-detail-value">{{ Str::headline(str_replace(['_', '-'], ' ', $paymentProvider)) }}</div></div>@endif
+            @if ($paymentProvider !== '')<div class="gps-order-detail-fact"><div class="gps-order-detail-label">Provider</div><div class="gps-order-detail-value">{{ $paymentProvider === 'payu' ? 'PayU' : Str::headline(str_replace(['_', '-'], ' ', $paymentProvider)) }}</div></div>@endif
         </div></section>
 
         @if ($technicalItems !== [])
