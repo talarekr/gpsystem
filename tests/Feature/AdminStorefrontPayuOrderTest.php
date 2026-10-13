@@ -71,7 +71,7 @@ class AdminStorefrontPayuOrderTest extends TestCase
             'source' => 'storefront', 'storefront_code' => 'gpswiss_fr', 'locale' => 'fr', 'payment_provider' => 'stripe',
         ]]);
         $this->get(\App\Filament\Resources\OrderResource::getUrl('view', ['record' => $order]))
-            ->assertOk()->assertSee('gpswiss_fr · fr · EUR');
+            ->assertOk()->assertSee('gpswiss_fr · fr · EUR')->assertSee('Stripe');
         Livewire::test(ListOrders::class)->assertSee('GPSwiss.fr · FR · EUR');
     }
 

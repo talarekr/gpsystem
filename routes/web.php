@@ -272,6 +272,8 @@ foreach (['gpswiss.fr' => 'storefront.fr.', 'www.gpswiss.fr' => 'storefront.fr-w
         Route::get('/panier', [CartController::class, 'index'])->name('cart.index');
         Route::get('/commande', [CheckoutController::class, 'show'])->name('checkout.show');
         Route::post('/commande', [CheckoutController::class, 'store'])->name('checkout.store');
+        Route::get('/commande/stripe/retour/{order}', [\App\Http\Controllers\Payments\StripeFrController::class, 'returned'])->middleware('signed')->name('stripe.return');
+        Route::get('/commande/stripe/annulation/{order}', [\App\Http\Controllers\Payments\StripeFrController::class, 'returned'])->middleware('signed')->name('stripe.cancel');
         Route::post('/commande/apercu', [CheckoutController::class, 'frenchPreview'])->name('checkout.preview');
     });
 }
@@ -312,6 +314,7 @@ Route::get('/zamowienie', [CheckoutController::class, 'show'])->name('storefront
 Route::post('/zamowienie', [CheckoutController::class, 'store'])->name('storefront.checkout.store');
 Route::get('/zamowienie/dziekujemy/{order}', [CheckoutController::class, 'thankYou'])->middleware(['signed', 'cache.headers:private;no_store'])->name('storefront.checkout.thank-you');
 Route::get('/zamowienie/payu/powrot', PayuReturnController::class)->name('storefront.checkout.payu-return');
+Route::post('/payments/stripe/fr/webhook', [\App\Http\Controllers\Payments\StripeFrController::class, 'webhook'])->name('stripe.fr.webhook');
 Route::post('/payu/notify', PayuNotifyController::class)->name('payu.notify');
 Route::get('/produkt/{slug}', [PartController::class, 'show'])->name('storefront.product');
 Route::get('/kategoria-produktu/{path}', [CategoryController::class, 'show'])->where('path', '.*')->name('storefront.category');

@@ -2,13 +2,18 @@
 
 namespace App\Services\Storefront;
 
+use App\Services\Payments\StripeFrGateway;
 use App\Support\StorefrontContext;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 
 /** Read-only draft builder. Never persists orders, reserves stock or invokes payments. */
 class FrenchCheckoutService
 {
-    public function __construct(private CartService $cart, private FrenchDeliveryQuoteService $deliveryQuotes) {}
+    public function __construct(private CartService $cart, private FrenchDeliveryQuoteService $deliveryQuotes, private FrenchPriceResolver $prices, private StripeFrGateway $stripe) {}
 
     public function draft(Request $request): array
     {
@@ -16,9 +21,8 @@ class FrenchCheckoutService
         $address = array_replace($this->defaults(), $request->session()->get('storefront.fr.address', []));
         $items = $this->cart->items()->map(function (array $item): array {
             $part = $item['current_part'] ?? null;
-            $price = $part && config('storefront-fr-checkout.pricing_policy') === 'catalog_eur'
-                && strtoupper((string) $part->currency) === 'EUR' && is_numeric($part->price) && (float) $part->price > 0
-                ? (int) round((float) $part->price * 100) : null;
+            $resolvedPrice = $this->prices->resolve($part);
+            $price = $resolvedPrice['cents'];
             $quantity = max(1, (int) $item['quantity']);
 
             return [
@@ -31,7 +35,7 @@ class FrenchCheckoutService
                 'product_url' => route('storefront.product', $part?->slug ?: ($item['slug'] ?? $item['part_id'])),
                 'delivery_quote' => $this->deliveryQuotes->forPart($part),
                 'is_available' => (bool) ($item['is_available'] ?? false),
-                'meta' => ['storefront_code' => 'gpswiss_fr', 'locale' => 'fr', 'price_source' => $price === null ? null : 'parts.price(EUR)', 'slug' => $part?->slug ?? $item['slug'] ?? null],
+                'meta' => ['storefront_code' => 'gpswiss_fr', 'locale' => 'fr', 'price_source' => $resolvedPrice['source'], 'slug' => $part?->slug ?? $item['slug'] ?? null],
             ];
         })->all();
         $pricesReady = $items !== [] && collect($items)->every(fn ($item) => $item['unit_price_cents'] !== null && $item['is_available']);
@@ -42,9 +46,23 @@ class FrenchCheckoutService
         $billing = $this->addressSnapshot($address, 'billing');
         $delivery = (bool) $address['shipping_same_as_billing'] ? $billing : $this->addressSnapshot($address, 'shipping');
 
+        $addressesReady = Validator::make($address, $this->addressRules())->passes();
+        $single = count($items) === 1 && $items[0]['quantity'] === 1;
+        $fingerprint = hash('sha256', json_encode([$items, $address, $shipping], JSON_THROW_ON_ERROR));
+        $oldKey = $request->session()->get('storefront.fr.checkout_key');
+        $oldAttempt = $oldKey && Schema::hasTable('stripe_fr_attempts')
+            ? DB::table('stripe_fr_attempts')->where('checkout_key', $oldKey)->first() : null;
+        $closed = $oldAttempt && (in_array($oldAttempt->status, ['expired', 'paid'], true) || now()->greaterThanOrEqualTo($oldAttempt->expires_at));
+        if ($closed || $request->session()->get('storefront.fr.checkout_fingerprint') !== $fingerprint) {
+            $request->session()->put('storefront.fr.checkout_fingerprint', $fingerprint);
+            $request->session()->put('storefront.fr.checkout_key', (string) Str::uuid());
+        }
+
         return [
+            'checkout_key' => $request->session()->get('storefront.fr.checkout_key'),
+            'stripe_mode' => config('stripe-fr.mode'), 'addresses_ready' => $addressesReady, 'single_item' => $single, 'stripe_ready' => $this->stripe->ready(),
             'storefront_code' => 'gpswiss_fr', 'locale' => 'fr', 'currency' => 'EUR',
-            'payment_provider' => 'stripe', 'can_place_order' => false,
+            'payment_provider' => 'stripe', 'can_place_order' => $this->stripe->ready() && $pricesReady && $shipping !== null && $addressesReady && $single,
             'prices_ready' => $pricesReady, 'shipping_ready' => $shipping !== null,
             'subtotal_cents' => $subtotal, 'shipping_cents' => $shipping,
             'total_cents' => $subtotal !== null && $shipping !== null ? $subtotal + $shipping : null,
@@ -83,7 +101,21 @@ class FrenchCheckoutService
     {
         abort_unless(StorefrontContext::isFrench($request), 404);
 
-        return $request->validate([
+        return $request->validate($this->addressRules(), [
+            'required' => 'Le champ :attribute est obligatoire.',
+            'required_if' => 'Le champ :attribute est obligatoire pour cette sélection.',
+            'in' => 'La valeur du champ :attribute n’est pas autorisée.',
+            'regex' => 'Le format du champ :attribute est incorrect.',
+        ], [
+            'billing_country' => 'pays de facturation', 'shipping_country' => 'pays de livraison',
+            'billing_postal_code' => 'code postal de facturation', 'shipping_postal_code' => 'code postal de livraison',
+            'billing_company_name' => 'raison sociale', 'billing_siret' => 'SIRET',
+        ]);
+    }
+
+    public function addressRules(): array
+    {
+        return [
             'customer_type' => ['required', 'in:private,company'],
             'billing_first_name' => ['required', 'string', 'max:120'],
             'billing_last_name' => ['required', 'string', 'max:120'],
@@ -105,16 +137,7 @@ class FrenchCheckoutService
             'shipping_postal_code' => ['nullable', 'required_if:shipping_same_as_billing,0', 'regex:/^[0-9]{5}$/'],
             'shipping_city' => ['nullable', 'required_if:shipping_same_as_billing,0', 'string', 'max:255'],
             'shipping_country' => ['required', 'in:FR'],
-        ], [
-            'required' => 'Le champ :attribute est obligatoire.',
-            'required_if' => 'Le champ :attribute est obligatoire pour cette sélection.',
-            'in' => 'La valeur du champ :attribute n’est pas autorisée.',
-            'regex' => 'Le format du champ :attribute est incorrect.',
-        ], [
-            'billing_country' => 'pays de facturation', 'shipping_country' => 'pays de livraison',
-            'billing_postal_code' => 'code postal de facturation', 'shipping_postal_code' => 'code postal de livraison',
-            'billing_company_name' => 'raison sociale', 'billing_siret' => 'SIRET',
-        ]);
+        ];
     }
 
     private function defaults(): array

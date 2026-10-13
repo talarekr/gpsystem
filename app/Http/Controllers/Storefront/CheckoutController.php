@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Services\Marketplace\PartAvailabilityEventService;
 use App\Services\Payments\PayuService;
+use App\Services\Payments\StripeFrCheckout;
+use App\Services\Payments\StripeFrGateway;
 use App\Services\Storefront\CartService;
 use App\Services\Storefront\FrenchCheckoutService;
 use App\Support\StorefrontContext;
@@ -24,10 +26,12 @@ class CheckoutController extends Controller
     public function show(Request $request, FrenchCheckoutService $french): View|RedirectResponse|Response
     {
         if (StorefrontContext::isFrench($request)) {
+            $draft = $french->draft($request);
+
             return response()->view('storefront.checkout.unavailable', [
-                'draft' => $french->draft($request),
-                'metaTitle' => 'Paiements temporairement indisponibles — GPSwiss',
-                'metaDescription' => 'Les paiements de la boutique française sont temporairement indisponibles.',
+                'draft' => $draft,
+                'metaTitle' => $draft['stripe_ready'] ? 'Commande — GPSwiss France' : 'Paiements temporairement indisponibles — GPSwiss',
+                'metaDescription' => $draft['stripe_ready'] ? 'Commande sécurisée en EUR — GPSwiss France.' : 'Les paiements de la boutique française sont temporairement indisponibles.',
             ])->header('Cache-Control', 'private, no-store');
         }
         if ($this->cart->isEmpty()) {
@@ -46,9 +50,12 @@ class CheckoutController extends Controller
 
     public function store(Request $request): RedirectResponse
     {
-        // Must precede cart access, validation, writes and every provider call.
-        // No flag can enable FR until a dedicated payment flow is implemented.
+        // Isolated FR path: no PayU or marketplace availability service.
         if (StorefrontContext::isFrench($request)) {
+            if (app(StripeFrGateway::class)->ready()) {
+                return redirect()->away(app(StripeFrCheckout::class)->start($request));
+            }
+
             return redirect()->route(StorefrontContext::routeName($request, 'checkout.show'))->with('warning',
                 'Les paiements de la boutique française sont temporairement indisponibles. Aucune commande n’a été créée.');
         }

@@ -8,5 +8,6 @@
     <p>Sous-total : {{ $draft['subtotal_cents'] === null ? 'Indisponible' : number_format($draft['subtotal_cents'] / 100, 2, ',', ' ').' EUR' }}</p>
     <p>Livraison par transporteur en France : {{ $draft['shipping_cents'] === null ? 'Tarif non disponible — commande indisponible' : number_format($draft['shipping_cents'] / 100, 2, ',', ' ').' EUR' }}</p>
     <p>Total : {{ $draft['total_cents'] === null ? 'Indisponible' : number_format($draft['total_cents'] / 100, 2, ',', ' ').' EUR' }}</p>
-    <p><strong>Paiements temporairement indisponibles.</strong> Ce récapitulatif ne constitue pas une commande.</p>
+    @if(!$draft['stripe_ready'])<p><strong>Paiements temporairement indisponibles.</strong></p>@endif
+    <p>Ce récapitulatif ne constitue pas une commande.</p>
 </section>
