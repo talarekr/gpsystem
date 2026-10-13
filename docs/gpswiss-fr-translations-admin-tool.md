@@ -104,3 +104,40 @@ Surowe wyjątki i payloady Google nie trafiają do odpowiedzi. Zapis biznesowy
 obejmuje wyłącznie `part_translations` i `category_translations`; dodatkowo
 używany jest cache/kolejka. Checkout, PayU, Stripe, stock, zamówienia i kod
 marketplace/Allegro/eBay/Ovoko pozostają poza zakresem.
+
+## Recovery runu zatrzymanego na 0
+
+Dla runu `39c2e732-e177-4899-9221-8b79b7aa67d8` nie klikaj Start, nie wykonuj
+nowego dry-run i nie klikaj Stop: stopped jest stanem końcowym, którego Resume
+nie obsługuje. Jeśli trzeba wstrzymać koszty podczas naprawy infrastruktury,
+użyj Pauza. Samo uruchomienie workera może wykonać już oczekujący job.
+
+1. Wdróż poprawkę recovery zgodnie ze zwykłą procedurą. Zachowaj istniejący
+   cache; nie wykonuj `cache:clear` ani `optimize:clear`. HTTP i worker muszą
+   korzystać z tego samego trwałego cache i tej samej bazy kolejki.
+2. Administrator serwera sprawdza procesy/Supervisor/systemd i kolejkę jobs
+   dla nazwy `storefront-fr-translations` (uwzględnij DB_QUEUE_TABLE i
+   DB_QUEUE_CONNECTION). Brak procesu konsumującego tę kolejkę wyjaśnia
+   running bez postępu. Nie usuwaj jobów, nie uruchamiaj masowego queue:retry.
+3. Utrzymuj dedykowany proces pod Supervisor/systemd, w katalogu aplikacji:
+   `php artisan queue:work storefront-translations --queue=storefront-fr-translations --timeout=540 --tries=1`.
+   Nie ma wymagania scheduler ani Horizon; database queue wymaga queue:work.
+   Nazwa systemowego service zależy od konfiguracji serwera i nie jest
+   zdefiniowana w repozytorium. Nie używaj domyślnego retry_after=90 dla FR.
+4. Odśwież status, potwierdź wskazany run_id i kliknij **Wznów**. Jeśli użyto
+   Pauza, wznowienie zleci ten sam run. Dla running recovery jest dostępne
+   60 sekund po next_batch (zachowuje opóźnienia retry). Aktywna blokada
+   workera zwróci busy; nie usuwaj jej ręcznie. Po awarii wygasa po 600 s.
+5. Sprawdź ostatni dispatch, aktualny rekord i rosnący processed. Jeżeli po
+   wznowieniu nadal nie ma postępu, sprawdź log dedykowanego workera,
+   failed_jobs i zgodność cache/bazy między HTTP a workerem. Kolejne kliknięcia
+   w ciągu 60 s nie wysyłają kolejnego joba. Status nigdy nie uruchamia API.
+
+`next_batch` oznacza zaplanowany termin, nie dowód istnienia joba ani żywego
+workera. `waiting_for_worker` oznacza zleconą partię bez potwierdzenia jej
+rozpoczęcia; `recovery_available` oznacza możliwość próby redispatchu, z dodatkową
+kontrolą blokady przy kliknięciu. Ostatni dispatch nie dowodzi odbioru przez
+worker. Stare checkpointy bez tego pola są obsługiwane przez fallback next_batch.
+Recovery nie tworzy runu, nie resetuje cursor/liczników i nie wywołuje providera
+w HTTP. Ewentualne duplikaty jobów serializuje istniejąca blokada processing;
+serwis ponownie sprawdza stan tłumaczeń i chroni zapisane/reviewed rekordy.

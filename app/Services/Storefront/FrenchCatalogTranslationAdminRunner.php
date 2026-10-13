@@ -94,7 +94,7 @@ class FrenchCatalogTranslationAdminRunner
                     Cache::forever(FrenchCatalogTranslationPreviewService::KEY.$actorId, $report);
                     $this->save($run);
                     if (! $this->enqueueLocked($run, 0)) {
-                        return $this->error('queue_unavailable', 'Nie udało się wysłać zadania do kolejki. Wykonaj nowy dry-run.');
+                        return $this->error('queue_unavailable', 'Nie udało się wysłać zadania do kolejki. Wznów istniejące zadanie.');
                     }
 
                     return ['ok' => true] + $this->publicRun($run);
@@ -128,10 +128,15 @@ class FrenchCatalogTranslationAdminRunner
                     $run['status'] = 'stopped';
                     $run['next_batch'] = null;
                 } elseif ($action === 'resume' && in_array($run['status'], ['running', 'paused', 'stopped_on_error', 'failed'], true)) {
-                    if ($run['status'] === 'running' && $run['next_batch'] !== null
-                        && Carbon::parse($run['next_batch'])->greaterThan(now()->subSeconds(660))) {
+                    if ($run['status'] === 'running' && ! $this->recoveryDue($run)) {
                         return ['ok' => true] + $this->publicRun($run);
                     }
+                    // Probe the worker lease; never force-release a live worker's lock.
+                    $lease = Cache::lock(self::PROCESSING_LOCK, 600);
+                    if (! $lease->get()) {
+                        return $this->error('busy', 'Worker wykonuje partię. Spróbuj wznowić po jej zakończeniu.');
+                    }
+                    $lease->release();
                     $run['status'] = 'running';
                     $this->save($run);
                     $delay = $this->retryDelay($run['_pending']);
@@ -433,6 +438,7 @@ class FrenchCatalogTranslationAdminRunner
 
     private function enqueueLocked(array &$run, int $delay): bool
     {
+        $run['last_dispatch_at'] = now()->toIso8601String();
         $run['next_batch'] = now()->addSeconds($delay)->toIso8601String();
         $this->save($run);
         try {
@@ -506,7 +512,21 @@ class FrenchCatalogTranslationAdminRunner
 
     private function publicRun(array $run): array
     {
-        return array_intersect_key($run, $this->idle());
+        $public = array_replace($this->idle(), array_intersect_key($run, $this->idle()));
+        $public['recovery_available'] = in_array($run['status'], ['paused', 'stopped_on_error', 'failed'], true)
+            || ($run['status'] === 'running' && $this->recoveryDue($run));
+        $public['waiting_for_worker'] = $run['status'] === 'running' && ($run['next_batch'] ?? null) !== null;
+
+        return $public;
+    }
+
+    private function recoveryDue(array $run): bool
+    {
+        // A scheduled time is not proof that a job still exists. Allow redispatch
+        // after 60s, preserving delayed retries and throttling repeated clicks.
+        $anchor = $run['next_batch'] ?? $run['last_dispatch_at'] ?? $run['updated_at'];
+
+        return Carbon::parse($anchor)->lessThanOrEqualTo(now()->subSeconds(60));
     }
 
     private function idle(): array
@@ -515,6 +535,8 @@ class FrenchCatalogTranslationAdminRunner
             'total' => 0, 'processed' => 0, 'translated' => 0, 'skipped' => 0, 'failed' => 0,
             'remaining' => 0, 'chars_translated' => 0, 'current_type' => null, 'current_id' => null,
             'last_success' => null, 'last_error' => null, 'failed_examples' => [], 'next_batch' => null,
+            'last_dispatch_at' => null, 'waiting_for_worker' => false, 'recovery_available' => false,
+            'runner_hint' => 'queue:work storefront-translations --queue=storefront-fr-translations --timeout=540 --tries=1; Wznów odzyskuje ten sam run po 60 s bez rozpoczęcia partii. Aktywna blokada workera wstrzymuje recovery.',
             'active_timer' => false, 'batch_size' => self::BATCH_SIZE];
     }
 
