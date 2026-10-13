@@ -1218,3 +1218,8 @@
         flex: 0 0 40px;
     }
 }
+
+/* FR uses the existing PL cart/checkout grid; only long unavailable copy needs wrapping. */
+.sf-fr-checkout .sf-checkout-summary__row strong,.sf-fr-cart .sf-checkout-summary__row strong{white-space:normal;text-align:right;overflow-wrap:anywhere}
+.sf-fr-checkout .sf-checkout-form>form{min-width:0}
+.sf-fr-checkout button:disabled,.sf-fr-cart button:disabled{cursor:not-allowed}
