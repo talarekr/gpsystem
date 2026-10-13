@@ -43,6 +43,50 @@ class FrenchCatalogTranslationRunnerRecoveryTest extends TestCase
         $this->actor->assignRole(UserRole::OwnerAdmin->value);
     }
 
+    public function test_unstarted_run_can_be_redispatched_once_without_replacing_checkpoint(): void
+    {
+        $this->part('LOST-JOB');
+        $runId = $this->start();
+        $runner = app(FrenchCatalogTranslationAdminRunner::class);
+        $before = Cache::get(FrenchCatalogTranslationAdminRunner::KEY);
+        $this->travel(61)->seconds();
+        $this->assertTrue($runner->status()['waiting_for_worker']);
+        $this->assertTrue($runner->status()['recovery_available']);
+        $response = $this->actingAs($this->actor)->postJson(
+            '/admin/tools/storefront/fr-translations/resume', ['run_id' => $runId],
+        );
+        $response->assertOk()->assertJsonPath('run_id', $runId)->assertJsonPath('processed', 0);
+        $this->assertTrue($runner->control($runId, 'resume')['ok']);
+        $after = Cache::get(FrenchCatalogTranslationAdminRunner::KEY);
+        foreach (['run_id', 'started_at', '_cursor', '_processed', '_max_ids', '_pending', 'total'] as $key) {
+            $this->assertSame($before[$key], $after[$key]);
+        }
+        $this->assertFalse($runner->status()['recovery_available']);
+        $this->assertTrue(app(FrenchCatalogTranslationPreviewService::class)->saved($this->actor->id)['consumed']);
+        Queue::assertPushed(RunFrenchCatalogTranslationBatch::class, 2);
+        Queue::assertPushed(RunFrenchCatalogTranslationBatch::class, fn ($job) => $job->runId === $runId && $job->connection === 'storefront-translations'
+            && $job->queue === 'storefront-fr-translations');
+        Http::assertNothingSent();
+        $this->assertDatabaseCount('part_translations', 0);
+    }
+
+    public function test_recovery_does_not_dispatch_while_worker_holds_lease(): void
+    {
+        $this->part('ACTIVE-WORKER');
+        $runId = $this->start();
+        $this->travel(61)->seconds();
+        $lock = Cache::lock(FrenchCatalogTranslationAdminRunner::PROCESSING_LOCK, 600);
+        $this->assertTrue($lock->get());
+        try {
+            $result = app(FrenchCatalogTranslationAdminRunner::class)->control($runId, 'resume');
+            $this->assertSame('busy', $result['reason']);
+            Queue::assertPushed(RunFrenchCatalogTranslationBatch::class, 1);
+            Http::assertNothingSent();
+        } finally {
+            $lock->release();
+        }
+    }
+
     public static function controlsDuringProviderCall(): array
     {
         return ['pause' => ['pause', 'paused'], 'stop' => ['stop', 'stopped']];

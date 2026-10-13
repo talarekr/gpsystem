@@ -109,7 +109,7 @@
             @endforeach
         </div>
         <dl class="status-grid">
-            @foreach (['run_id' => 'run_id', 'started_at' => 'Rozpoczęto', 'updated_at' => 'Ostatnia aktualizacja zadania', 'current_type' => 'Aktualny typ', 'current_id' => 'Aktualny rekord', 'next_batch' => 'Następna partia', 'active_timer' => 'Timer w przeglądarce'] as $key => $label)
+            @foreach (['run_id' => 'run_id', 'started_at' => 'Rozpoczęto', 'updated_at' => 'Ostatnia aktualizacja zadania', 'current_type' => 'Aktualny typ', 'current_id' => 'Aktualny rekord', 'next_batch' => 'Następna partia', 'active_timer' => 'Timer w przeglądarce', 'last_dispatch_at' => 'Ostatni dispatch', 'waiting_for_worker' => 'Partia zlecona / oczekuje na worker', 'recovery_available' => 'Wznów może ponownie zlecić wykonanie (jeśli worker nieaktywny)', 'runner_hint' => 'Runner / recovery'] as $key => $label)
                 <div><dt>{{ $label }}</dt><dd id="run-{{ $key }}">—</dd></div>
             @endforeach
         </dl>
@@ -237,8 +237,8 @@
         text('run-status', status);
         element('run-status').className = 'badge ' + (status === 'completed' ? 'good' : (['failed', 'stopped_on_error'].includes(status) ? 'bad' : (status === 'running' ? 'pending' : '')));
         for (const key of numberKeys) text(`run-${key}`, count(run[key]));
-        for (const key of ['run_id', 'current_type', 'current_id', 'active_timer']) text(`run-${key}`, run[key] ?? (key === 'active_timer' ? false : null));
-        for (const key of ['started_at', 'updated_at', 'next_batch']) text(`run-${key}`, date(run[key]));
+        for (const key of ['run_id', 'current_type', 'current_id', 'active_timer', 'waiting_for_worker', 'recovery_available', 'runner_hint']) text(`run-${key}`, run[key] ?? (key === 'active_timer' ? false : null));
+        for (const key of ['started_at', 'updated_at', 'next_batch', 'last_dispatch_at']) text(`run-${key}`, date(run[key]));
         const total = count(run.total), processed = count(run.processed);
         const percent = total > 0 ? Math.min(100, Math.round(processed / total * 100)) : (status === 'completed' ? 100 : 0);
         element('run-progress').value = percent;
