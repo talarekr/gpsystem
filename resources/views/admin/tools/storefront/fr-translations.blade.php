@@ -99,7 +99,9 @@
             <button id="refresh" class="button" type="button">Odśwież status</button>
         </div>
         <p class="muted">Zadanie działa w tle. Zamknięcie lub odświeżenie strony nie przerywa pracy. Status jest pobierany co 3 sekundy; wejście na stronę nie uruchamia ani nie wznawia zadania.</p>
-        <p class="muted">Jeśli licznik przetworzonych rekordów nie rośnie, zgłoś administratorowi sprawdzenie procesu obsługującego tłumaczenia FR. Nie uruchamiaj ponownie całego katalogu.</p>
+        <p><strong>Wymagany jest stały worker <code>storefront-fr-translations</code></strong> na połączeniu <code>storefront-translations</code>, zarządzany przez hosting/deployera. Sam deploy plików i przycisk Wznów nie uruchamiają procesu serwerowego.</p>
+        <p>Nie masz dostępu do shella? Zgłoś hostingowi/deployerowi wdrożenie konfiguracji <code>deploy/supervisor/storefront-fr-translations.conf.example</code> według <code>docs/gpswiss-fr-worker-deployment.md</code>. Przekaż run_id i ostatni dispatch z tej strony. Po potwierdzeniu działania workera odśwież status i użyj Wznów dla istniejącego zadania. <strong>Nie klikaj ponownie Start.</strong> Do czasu przygotowania infrastruktury możesz użyć Pauza; Stop kończy zadanie.</p>
+        <p id="worker-state" role="status" class="muted">Status workera: brak potwierdzenia. Panel pokazuje dispatch, nie stan procesu serwerowego.</p>
         <label for="run-progress" class="sr-only">Postęp tłumaczenia</label>
         <progress id="run-progress" class="progress" max="100" value="0">0%</progress>
         <p id="progress-text">Brak uruchomionego zadania.</p>
@@ -235,6 +237,9 @@
         run = data || {status: 'idle'};
         const status = run.status || 'idle';
         text('run-status', status);
+        text('worker-state', run.waiting_for_worker
+            ? 'Ostatni dispatch czeka na rozpoczęcie partii przez worker storefront-fr-translations. Jeśli postęp stoi, zgłoś hostingowi/deployerowi sprawdzenie usługi. Wznów zleca job, ale nie uruchamia workera. Nie klikaj ponownie Start.'
+            : (status === 'running' ? 'Partia rozpoczęta lub brak oczekującego dispatchu. Panel nie potwierdza, czy proces workera nadal działa.' : 'Brak partii oczekującej na worker. Przed wznowieniem uzyskaj od hostingu/deployera potwierdzenie działania usługi FR.'));
         element('run-status').className = 'badge ' + (status === 'completed' ? 'good' : (['failed', 'stopped_on_error'].includes(status) ? 'bad' : (status === 'running' ? 'pending' : '')));
         for (const key of numberKeys) text(`run-${key}`, count(run[key]));
         for (const key of ['run_id', 'current_type', 'current_id', 'active_timer', 'waiting_for_worker', 'recovery_available', 'runner_hint']) text(`run-${key}`, run[key] ?? (key === 'active_timer' ? false : null));

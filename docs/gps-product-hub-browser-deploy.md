@@ -204,7 +204,7 @@ When `/app/vendor/autoload.php` and `/app/bootstrap/app.php` are available, the 
    $kernel->call('db:seed', ['--class' => 'RoleSeeder', '--force' => true]);
    ```
 
-7. Clear Laravel config/cache/view caches through the same Kernel object.
+7. Clear only compiled config/route/view caches through the same Kernel object. Preserve application cache, including active translation checkpoints and locks; do not call `cache:clear` or `optimize:clear`.
 
 This avoids `php artisan ...` shell execution and does not require `proc_open`.
 

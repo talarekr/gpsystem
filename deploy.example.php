@@ -612,12 +612,11 @@ function runLaravelMaintenance(string $appDir, bool $seedRoles): void
         callArtisan($kernel, 'db:seed', ['--class' => 'RoleSeeder', '--force' => true], false);
     }
 
-    logLine('Clearing Laravel caches after deploy: optimize:clear, route:clear, view:clear, config:clear, cache:clear.');
-    callArtisan($kernel, 'optimize:clear', [], false);
+    // Application cache holds translation run checkpoints and locks. Preserve it.
+    logLine('Clearing compiled route/view/config caches; preserving application cache and checkpoints.');
     callArtisan($kernel, 'route:clear', [], false);
     callArtisan($kernel, 'view:clear', [], false);
     callArtisan($kernel, 'config:clear', [], false);
-    callArtisan($kernel, 'cache:clear', [], false);
 
     if (function_exists('opcache_reset')) {
         if (@opcache_reset()) {
