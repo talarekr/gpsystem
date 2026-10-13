@@ -300,7 +300,7 @@ Route::post('/koszyk/usun/{part}', [CartController::class, 'remove'])->name('sto
 Route::post('/koszyk/wyczysc', [CartController::class, 'clear'])->name('storefront.cart.clear');
 Route::get('/zamowienie', [CheckoutController::class, 'show'])->name('storefront.checkout.show');
 Route::post('/zamowienie', [CheckoutController::class, 'store'])->name('storefront.checkout.store');
-Route::get('/zamowienie/dziekujemy/{order}', [CheckoutController::class, 'thankYou'])->name('storefront.checkout.thank-you');
+Route::get('/zamowienie/dziekujemy/{order}', [CheckoutController::class, 'thankYou'])->middleware(['signed', 'cache.headers:private;no_store'])->name('storefront.checkout.thank-you');
 Route::get('/zamowienie/payu/powrot', PayuReturnController::class)->name('storefront.checkout.payu-return');
 Route::post('/payu/notify', PayuNotifyController::class)->name('payu.notify');
 Route::get('/produkt/{slug}', [PartController::class, 'show'])->name('storefront.product');

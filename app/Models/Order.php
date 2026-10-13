@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -44,6 +45,20 @@ class Order extends Model
                 && parse_url((string) data_get($this->meta, 'payu.request.continueUrl'), PHP_URL_HOST) === 'gpswiss.pl');
     }
 
+    /** Stable storefront identity for admin and future FR payment flow. */
+    public function storefrontCode(): ?string
+    {
+        $code = data_get($this->meta, 'storefront_code');
+
+        return in_array($code, ['gpswiss_pl', 'gpswiss_fr'], true)
+            ? $code : ($this->isPolishStorefront() ? 'gpswiss_pl' : null);
+    }
+
+    public function isFrenchStorefront(): bool
+    {
+        return $this->storefrontCode() === 'gpswiss_fr';
+    }
+
     public function salesChannel(): string
     {
         return $this->isPolishStorefront() ? 'sklep' : ($this->marketplace ?: 'sklep');
@@ -55,7 +70,7 @@ class Order extends Model
             ?: data_get($this->meta, 'payu.provider');
     }
 
-    public function scopeStorefront(\Illuminate\Database\Eloquent\Builder $query): void
+    public function scopeStorefront(Builder $query): void
     {
         $query->where(function ($query): void {
             $query->whereNull('marketplace')->orWhereIn('marketplace', ['', 'sklep', 'storefront'])

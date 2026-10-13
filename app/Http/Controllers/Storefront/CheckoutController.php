@@ -7,20 +7,26 @@ use App\Models\Order;
 use App\Services\Marketplace\PartAvailabilityEventService;
 use App\Services\Payments\PayuService;
 use App\Services\Storefront\CartService;
+use App\Support\StorefrontContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
 class CheckoutController extends Controller
 {
-    public function __construct(private readonly CartService $cart, private readonly PartAvailabilityEventService $availabilityEvents, private readonly PayuService $payu)
-    {
-    }
+    public function __construct(private readonly CartService $cart, private readonly PartAvailabilityEventService $availabilityEvents, private readonly PayuService $payu) {}
 
-    public function show(): View|RedirectResponse
+    public function show(Request $request): View|RedirectResponse
     {
+        if (StorefrontContext::isFrench($request)) {
+            return view('storefront.checkout.unavailable', [
+                'metaTitle' => 'Paiements temporairement indisponibles — GPSwiss',
+                'metaDescription' => 'Les paiements de la boutique française sont temporairement indisponibles.',
+            ]);
+        }
         if ($this->cart->isEmpty()) {
             return redirect()->route('storefront.cart.index')->with('warning', __('storefront.cart_empty_before_checkout'));
         }
@@ -30,6 +36,12 @@ class CheckoutController extends Controller
 
     public function store(Request $request): RedirectResponse
     {
+        // Must precede cart access, validation, writes and every provider call.
+        // No flag can enable FR until a dedicated payment flow is implemented.
+        if (StorefrontContext::isFrench($request)) {
+            return redirect()->route('storefront.checkout.show')->with('warning',
+                'Les paiements de la boutique française sont temporairement indisponibles. Aucune commande n’a été créée.');
+        }
         $items = $this->cart->items();
 
         if ($items->isEmpty()) {
@@ -118,12 +130,7 @@ class CheckoutController extends Controller
                 ],
                 'meta' => [
                     'source' => 'storefront',
-                    ...($request->getHost() === 'gpswiss.pl' ? [
-                        'source_channel' => 'storefront',
-                        'storefront_code' => 'gpswiss_pl',
-                        'locale' => app()->getLocale(),
-                        'payment_provider' => 'payu',
-                    ] : []),
+                    ...StorefrontContext::orderMetadata($request),
                     'customer_type' => $validated['customer_type'],
                     'shipping_same_as_billing' => $shippingSameAsBilling,
                     'shipping' => $shippingData,
@@ -148,6 +155,11 @@ class CheckoutController extends Controller
 
             return $order;
         });
+
+        if ($request->hasSession()) {
+            // Keep PL provider return usable without exposing arbitrary numeric IDs.
+            $request->session()->put('storefront.order_access.'.$order->id, now()->addDays(7)->timestamp);
+        }
 
         $order->load('items');
         foreach ($order->items as $item) {
@@ -192,7 +204,7 @@ class CheckoutController extends Controller
 
         $this->cart->clear();
 
-        return redirect()->route('storefront.checkout.thank-you', $order)->with('success', __('storefront.order_accepted'));
+        return redirect()->to(URL::temporarySignedRoute('storefront.checkout.thank-you', now()->addDays(7), ['order' => $order->id]))->with('success', __('storefront.order_accepted'));
     }
 
     public function thankYou(Order $order): View
