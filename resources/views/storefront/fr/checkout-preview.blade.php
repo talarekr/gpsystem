@@ -1,6 +1,8 @@
 <div class="sf-container sf-page sf-cart-page">
     <h1>Préparer ma commande</h1>
-    <p><strong>Paiements temporairement indisponibles.</strong> Vous pouvez préparer vos coordonnées. Enregistrer cet aperçu ne crée aucune commande, ne réserve aucun produit et ne déclenche aucun paiement.</p>
+    @if($draft['stripe_ready'] && $draft['stripe_mode'] === 'test')<p><strong>Mode test Stripe — aucune expédition ni modification du stock.</strong></p>@endif
+    @if(!$draft['stripe_ready'])<p><strong>Paiements temporairement indisponibles.</strong></p>@endif
+    <p> Vous pouvez préparer vos coordonnées. Enregistrer cet aperçu ne crée aucune commande, ne réserve aucun produit et ne déclenche aucun paiement.</p>
     <form method="post" action="{{ route('storefront.fr.checkout.preview') }}" class="sf-checkout-card">
         @csrf
         <label class="sf-field">Type de client
@@ -27,6 +29,17 @@
         <button class="sf-btn" type="submit">Enregistrer mon aperçu</button>
     </form>
     @include('storefront.fr.order-summary')
-    <button class="sf-btn" type="button" disabled>Commander et payer — indisponible</button>
+    @error('payment')<p role="alert">{{ $message }}</p>@enderror
+    @if($draft['can_place_order'])
+        <form method="post" action="{{ route('storefront.fr.checkout.store') }}">
+            @csrf
+            <input type="hidden" name="checkout_key" value="{{ $draft['checkout_key'] }}">
+            <label><input type="checkbox" name="terms" value="1" required>J’accepte les <a href="{{ route('storefront.terms') }}">conditions générales de vente</a>.</label>
+            <button class="sf-btn" type="submit">Commander et payer avec Stripe</button>
+        </form>
+    @else
+        <p>Pour payer, enregistrez une adresse complète en France et choisissez une seule pièce en quantité un avec un prix EUR et une livraison disponibles.</p>
+        <button class="sf-btn" type="button" disabled>Commander et payer — indisponible</button>
+    @endif
     <a class="sf-btn sf-btn--outline" href="{{ route('storefront.fr.cart.index') }}">{{ __('storefront.back_to_cart') }}</a>
 </div>

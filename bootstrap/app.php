@@ -30,6 +30,7 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
         $middleware->validateCsrfTokens(except: [
             'payu/notify',
+            'payments/stripe/fr/webhook',
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

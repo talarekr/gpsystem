@@ -32,6 +32,7 @@ class FrontendMaintenanceMode
         'wp-content/uploads/ebay-template/*',
         'favicon.ico',
         'robots.txt',
+        'payments/stripe/fr/webhook',
         'livewire/*',
         'product-images-dry-run',
         'product-images-import',
