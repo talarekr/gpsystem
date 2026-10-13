@@ -100,6 +100,8 @@
         </div>
         <p>Domyślny tryb panelowy nie wymaga workera ani shella. Start lub Wznów uruchamia kolejne małe partie przez AJAX. <strong>Zostaw stronę otwartą.</strong> Po zamknięciu nie są wysyłane kolejne partie; rozpoczęty rekord może jeszcze zakończyć się na serwerze.</p>
         <p>Po powrocie odśwież status i kliknij <strong>Wznów</strong> dla istniejącego runu. Nie klikaj ponownie Start. Pauza wstrzymuje wykonanie, Stop kończy run.</p>
+        <p id="lease-state" role="status" class="muted">Odczyt lease…</p>
+        <pre id="lease-details">—</pre>
         <p id="recovery-state" role="status" class="muted">Odczyt trwałego checkpointu…</p>
         <p id="worker-state" role="status" class="muted">Tryb wykonania jest wskazany w statusie.</p>
         <label for="run-progress" class="sr-only">Postęp tłumaczenia</label>
@@ -241,6 +243,8 @@
         run = data || {status: 'idle'};
         const status = run.status || 'idle';
         text('run-status', status);
+        text('lease-state', run.lease_hint);
+        text('lease-details', safeObject(run.lease));
         const saved = count(catalog.inventory?.translated);
         text('recovery-state', activeRun()
             ? 'Znaleziono niedokończony run. Po reloadzie lub ponownym zalogowaniu kliknij Wznów; zachowasz run_id i postęp. Nie klikaj ponownie Start.'

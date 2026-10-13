@@ -118,3 +118,36 @@ odśwież status. Jeśli odnaleziono checkpoint — Wznów. Jeśli panel nadal w
 brak checkpointu w bazie/cache — nowy dry-run, oceń zakres missing i ręcznie
 potwierdź Start. Zapisane 144 tłumaczenia nie zostaną wyzerowane; aktualne gotowe
 rekordy będą pomijane. Nie można zagwarantować odzyskania utraconego starego ID.
+
+## Processing lease w trybie browser
+
+Processing lock jest atomową blokadą cache z TTL 600 sekund. To nie jest dowód
+istnienia queue workera. Każdy nowy tick zapisuje w trwałym checkpointcie DB
+metadane `_lease`: owner (hash identyfikatora, nie sekret zwolnienia blokady),
+started_at, expires_at, last_heartbeat oraz released_at. Heartbeat jest zapisywany
+przed kolejnym provider call; nie przedłuża deadline/TTL. Status odczytuje je bez
+mutacji i pokazuje active/expired/released/unknown wraz z runner_mode.
+
+Po twardym przerwaniu PHP finally może nie wykonać się, ale TTL nadal wygasa.
+Po 600 sekundach od nabycia processing lock Wznów może nabyć nową blokadę i
+zachować ten sam run/cursor. Nie usuwamy blokady na podstawie wieku heartbeat
+ani nie wywołujemy forceRelease. Aktywny request może nadal czekać na odpowiedź
+providera. Przed kolejnym call runner sprawdza czas ważności oraz rzeczywiste
+własnictwo lease; utrata lease przerywa dalsze wywołania jako interrupted_attempt.
+Wynik niepewnej próby nie jest automatycznie ponawiany.
+
+TTL pozostaje 600 s także dla browser: pojedynczy rekord może mieć wiele pól i
+segmentów. Skrócenie go bez twardego limitu całego rekordu groziłoby równoległym
+wykonaniem. Blokada per-record również ma TTL 600 s; jej nabycie może być chwilę
+późniejsze niż processing lock. Recovery może wtedy odroczyć tick o 30 s zamiast
+powtórzyć provider call. Metadata expires_at to termin processing lease, nie
+potwierdzenie stanu sieci ani wszystkich blokad rekordów.
+
+Dla obecnego runu: deploy, odśwież panel, odczytaj lease. Jeżeli jest active,
+poczekaj do expires_at; potem kliknij Wznów. Gdy jest expired, Wznów przejmuje
+wykonanie bez nowego Startu. Dla blokady sprzed tej poprawki metadane są unknown:
+jej istniejący TTL to też 600 s i nie skróci się przez deploy; odczekaj maksymalnie
+10 minut od ostatniego ticka i Wznów. Nie resetuj runu i nie czyść cache/locks.
+Zapisany sukces zostanie doliczony bez nowego API; niepewny queued rekord może
+zatrzymać run kontrolowanym błędem, po którym kolejne Wznów przejdzie dalej.
+Ta poprawka nie wymaga nowej migracji poza tabelą runów wdrożoną w PR #1473.

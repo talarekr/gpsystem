@@ -28,6 +28,8 @@ class FrenchCatalogTranslationAdminRunner
 
     public const PROCESSING_LOCK = 'storefront:fr:admin:processing';
 
+    public const PROCESSING_LEASE_SECONDS = 600;
+
     private const BATCH_SIZE = 100;
 
     private const SOFT_SECONDS = 45;
@@ -53,9 +55,9 @@ class FrenchCatalogTranslationAdminRunner
                 if ($existing && in_array($existing['status'], ['running', 'paused', 'stopped_on_error', 'failed'], true)) {
                     return $this->error('active_run', 'Istnieje aktywne zadanie. Wznów je lub zatrzymaj.');
                 }
-                $lease = Cache::lock(self::PROCESSING_LOCK, 600);
+                $lease = Cache::lock(self::PROCESSING_LOCK, self::PROCESSING_LEASE_SECONDS);
                 if (! $lease->get()) {
-                    return $this->error('busy', 'Poprzedni worker kończy bieżący rekord. Spróbuj ponownie po chwili.');
+                    return $this->error('busy', 'Trwa aktualna partia lub jej blokada jeszcze nie wygasła. Odśwież status i spróbuj ponownie.');
                 }
                 try {
                     $report = $this->preview->saved($actorId);
@@ -137,11 +139,17 @@ class FrenchCatalogTranslationAdminRunner
                         return ['ok' => true] + $this->publicRun($run);
                     }
                     // Probe the worker lease; never force-release a live worker's lock.
-                    $lease = Cache::lock(self::PROCESSING_LOCK, 600);
+                    $lease = Cache::lock(self::PROCESSING_LOCK, self::PROCESSING_LEASE_SECONDS);
                     if (! $lease->get()) {
-                        return $this->error('busy', 'Worker wykonuje partię. Spróbuj wznowić po jej zakończeniu.');
+                        return $this->error('busy', $this->mode($run) === 'browser'
+                            ? 'Trwa aktualna partia albo oczekiwanie na wygaśnięcie blokady poprzedniego ticka. Odśwież status; Wznów będzie możliwe po wygaśnięciu lease.'
+                            : 'Worker wykonuje partię. Spróbuj wznowić po jej zakończeniu.');
                     }
                     $lease->release();
+                    if (isset($run['_lease'])) {
+                        $run['_lease']['released_at'] = now()->toISOString();
+                        $run['_lease']['recovered_at'] = now()->toISOString();
+                    }
                     $run['status'] = 'running';
                     // Explicit Resume migrates old queued checkpoints without resetting progress.
                     $run['runner_mode'] = $this->configuredMode();
@@ -208,7 +216,7 @@ class FrenchCatalogTranslationAdminRunner
         if (! $state || ($this->mode($state) === 'browser') !== $browser) {
             return;
         }
-        $lease = Cache::lock(self::PROCESSING_LOCK, 600);
+        $lease = Cache::lock(self::PROCESSING_LOCK, self::PROCESSING_LEASE_SECONDS);
         if (! $lease->get()) {
             if (! $browser) {
                 $this->enqueue($runId, 30);
@@ -217,11 +225,18 @@ class FrenchCatalogTranslationAdminRunner
             return;
         }
         $delay = null;
+        $owner = hash('sha256', $lease->owner());
+        $expiresAt = now()->addSeconds(self::PROCESSING_LEASE_SECONDS);
         try {
-            $this->mutate(function () use ($runId): void {
+            $this->mutate(function () use ($runId, $owner, $expiresAt): void {
                 $run = $this->running($runId);
                 if ($run) {
                     $run['next_batch'] = null;
+                    $run['_lease'] = [
+                        'owner' => $owner, 'started_at' => now()->toISOString(),
+                        'expires_at' => $expiresAt->toISOString(), 'last_heartbeat' => now()->toISOString(),
+                        'released_at' => null,
+                    ];
                     $this->save($run);
                 }
             });
@@ -280,6 +295,22 @@ class FrenchCatalogTranslationAdminRunner
                 $record = $this->record($pending['type'], $pending['id']);
                 $translation = $record?->translationForLocale('fr');
                 $options = FrenchCatalogTranslationPreviewService::OPTIONS;
+                $options['heartbeat'] = function () use ($runId, $owner, $expiresAt, $lease): bool {
+                    if (now()->greaterThanOrEqualTo($expiresAt) || ! $lease->isOwnedByCurrentProcess()) {
+                        return false;
+                    }
+
+                    return $this->mutate(function () use ($runId, $owner): bool {
+                        $state = $this->runs->latest();
+                        if (! $state || $state['run_id'] !== $runId || ($state['_lease']['owner'] ?? null) !== $owner) {
+                            return false;
+                        }
+                        $state['_lease']['last_heartbeat'] = now()->toISOString();
+                        $this->save($state);
+
+                        return true;
+                    });
+                };
                 if ($pending['retry_attempt'] > 0) {
                     // Permission to retry belongs to this run's exact failed attempt only.
                     if (! $record || $translation?->status !== 'failed'
@@ -330,7 +361,17 @@ class FrenchCatalogTranslationAdminRunner
             }
             $delay = 0;
         } finally {
-            $lease->release();
+            try {
+                $this->mutate(function () use ($runId, $owner): void {
+                    $state = $this->runs->latest();
+                    if ($state && $state['run_id'] === $runId && ($state['_lease']['owner'] ?? null) === $owner) {
+                        $state['_lease']['released_at'] = now()->toISOString();
+                        $this->save($state);
+                    }
+                });
+            } finally {
+                $lease->release();
+            }
             if ($delay !== null) {
                 $this->enqueue($runId, $delay);
             }
@@ -573,6 +614,18 @@ class FrenchCatalogTranslationAdminRunner
         $public = array_replace($this->idle(), array_intersect_key($run, $this->idle()));
         $public['recovery_available'] = in_array($run['status'], ['paused', 'stopped_on_error', 'failed'], true)
             || ($run['status'] === 'running' && ($this->mode($run) === 'browser' || $this->recoveryDue($run)));
+        $lease = $run['_lease'] ?? null;
+        $expired = $lease && ! ($lease['released_at'] ?? null) && Carbon::parse($lease['expires_at'])->lessThanOrEqualTo(now());
+        $active = $lease && ! ($lease['released_at'] ?? null) && ! $expired;
+        $public['lease'] = $lease;
+        $public['lease_state'] = $active ? 'active' : ($expired ? 'expired' : ($lease ? 'released' : 'unknown'));
+        $public['lease_hint'] = $active
+            ? 'Trwa aktualna partia lub oczekiwanie na wygaśnięcie jej lease. Termin wygaśnięcia jest widoczny poniżej.'
+            : ($expired ? 'Poprzednia partia prawdopodobnie przerwana — możesz kliknąć Wznów.'
+                : 'Brak aktywnego zarejestrowanego lease. Dla blokady sprzed deployu TTL wynosi 600 s; nie usuwaj jej ręcznie.');
+        if ($active) {
+            $public['recovery_available'] = false;
+        }
         $public['run_storage_ready'] = $this->runs->ready();
         $public['checkpoint_source'] = ! $run['run_id'] ? 'none' : (isset($run['_revision']) ? 'database' : 'legacy_cache');
         $public['runner_mode'] = $this->mode($run);
@@ -603,7 +656,7 @@ class FrenchCatalogTranslationAdminRunner
             'total' => 0, 'processed' => 0, 'translated' => 0, 'skipped' => 0, 'failed' => 0,
             'remaining' => 0, 'chars_translated' => 0, 'current_type' => null, 'current_id' => null,
             'last_success' => null, 'last_error' => null, 'failed_examples' => [], 'next_batch' => null,
-            'run_storage_ready' => false, 'checkpoint_source' => 'none', 'runner_mode' => null, 'last_dispatch_at' => null, 'waiting_for_worker' => false, 'recovery_available' => false,
+            'lease' => null, 'lease_state' => 'unknown', 'lease_hint' => '', 'run_storage_ready' => false, 'checkpoint_source' => 'none', 'runner_mode' => null, 'last_dispatch_at' => null, 'waiting_for_worker' => false, 'recovery_available' => false,
             'runner_hint' => '',
             'active_timer' => false, 'batch_size' => self::BATCH_SIZE];
     }

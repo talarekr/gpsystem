@@ -138,6 +138,13 @@ class FrenchCatalogTranslationService
                         $errorMessage = 'French catalog translation is disabled.';
                         break 2;
                     }
+                    // Optional admin-runner fence: never start another provider call
+                    // after losing the processing lease. Other callers are unchanged.
+                    if (isset($options['heartbeat']) && ! $options['heartbeat']()) {
+                        $errorCode = 'interrupted_attempt';
+                        $errorMessage = 'Processing lease expired before the next provider request.';
+                        break 2;
+                    }
                     try {
                         $response = app(GoogleTranslateService::class)->translate($segment, 'fr', 'pl');
                     } catch (Throwable) {
