@@ -4,11 +4,14 @@ namespace App\Services\Payments;
 
 use App\Models\Order;
 use App\Models\Part;
+use App\Services\Storefront\FrenchOrderNotifications;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class StripeFrWebhook
 {
+    public function __construct(private FrenchOrderNotifications $notifications) {}
+
     public function handle(array $event): void
     {
         $type = $event['type'] ?? '';
@@ -21,7 +24,7 @@ class StripeFrWebhook
             || ($session['object'] ?? '') !== 'checkout.session') {
             $this->reject();
         }
-        DB::transaction(function () use ($event, $eventId, $session, $type): void {
+        $orderId = DB::transaction(function () use ($event, $eventId, $session, $type): int {
             $order = Order::query()->whereKey($session['metadata']['order_id'] ?? 0)->lockForUpdate()->first();
             if (! $order || ! $order->isFrenchStorefront() || $order->paymentProvider() !== 'stripe'
                 || $order->currency !== 'EUR' || data_get($order->meta, 'locale') !== 'fr'
@@ -50,7 +53,7 @@ class StripeFrWebhook
                     $this->reject();
                 }
 
-                return;
+                return $order->id;
             }
             if ($type === 'checkout.session.completed') {
                 if (($session['status'] ?? '') !== 'complete' || ($session['payment_status'] ?? '') !== 'paid'
@@ -90,6 +93,7 @@ class StripeFrWebhook
                 } elseif (data_get($order->meta, 'stripe.payment_intent') !== $session['payment_intent']) {
                     $this->reject();
                 }
+                $this->notifications->record($order, 'paid');
                 $status = 'paid';
             } else {
                 if (($session['status'] ?? '') !== 'expired') {
@@ -97,6 +101,7 @@ class StripeFrWebhook
                 }
                 if ($order->payment_status === 'pending' && $order->status === 'new') {
                     $order->update(['payment_status' => 'failed', 'status' => 'cancelled', 'status_changed_at' => now()]);
+                    $this->notifications->record($order, 'expired');
                 }
                 $status = $order->payment_status === 'paid' ? 'paid' : 'expired';
             }
@@ -105,7 +110,10 @@ class StripeFrWebhook
             ]);
             DB::table('stripe_fr_events')->insert(['event_id' => $eventId, 'event_type' => $type,
                 'order_id' => $order->id, 'processed_at' => now()]);
+
+            return $order->id;
         });
+        $this->notifications->deliver($orderId);
     }
 
     private function reject(): never

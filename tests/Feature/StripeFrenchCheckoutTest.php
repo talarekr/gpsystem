@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Mail\FrenchOrderMail;
 use App\Models\MarketplaceCategoryMapping;
 use App\Models\MarketplaceListing;
 use App\Models\Order;
@@ -14,6 +15,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
@@ -27,6 +29,7 @@ class StripeFrenchCheckoutTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        Mail::fake();
         $this->freezeTime();
         config(['frontend-maintenance.enabled' => false, 'stripe-fr.enabled' => true, 'stripe-fr.mode' => 'test',
             'stripe-fr.secret_key' => 'sk_test_fixture', 'stripe-fr.publishable_key' => 'pk_test_fixture',
@@ -67,6 +70,9 @@ class StripeFrenchCheckoutTest extends TestCase
         $this->assertSame('155.00', $order->total);
         $this->assertSame('FR', $order->country);
         $this->assertSame(1, $this->part->fresh()->quantity);
+        Mail::assertSent(FrenchOrderMail::class, fn ($mail) => $mail->kind === 'awaiting');
+        Mail::assertNotSent(FrenchOrderMail::class, fn ($mail) => $mail->kind === 'paid');
+        Mail::assertSentCount(1);
         $this->assertDatabaseCount('orders', 1);
         Http::assertSentCount(1);
         Http::assertSent(fn ($r) => $r->hasHeader('Idempotency-Key', 'gpswiss-fr-'.$key)
@@ -120,7 +126,10 @@ class StripeFrenchCheckoutTest extends TestCase
         $payload = json_decode(DB::table('stripe_fr_attempts')->sole()->request_payload, true);
         $this->get('https://gpswiss.fr/commande/stripe/retour/'.$order->id)->assertForbidden();
         $this->get($payload['success_url'])->assertOk();
+        $this->get($payload['cancel_url'])->assertOk();
+        Mail::assertSentCount(1);
         $this->assertSame('pending', $order->fresh()->payment_status);
+        Mail::assertNotSent(FrenchOrderMail::class, fn ($mail) => $mail->kind === 'paid');
         $event = $this->event($order);
         $this->webhook($event)->assertOk();
         $this->webhook($event)->assertOk();
@@ -129,6 +138,9 @@ class StripeFrenchCheckoutTest extends TestCase
         $this->assertSame('on_hold', $order->fresh()->status);
         $this->assertSame(1, $this->part->fresh()->quantity);
         $this->assertDatabaseCount('stripe_fr_events', 2);
+        Mail::assertSent(FrenchOrderMail::class, fn ($mail) => $mail->kind === 'paid');
+        $this->assertCount(1, Mail::sent(FrenchOrderMail::class, fn ($mail) => $mail->kind === 'paid'));
+        $this->assertDatabaseCount('storefront_fr_order_notifications', 2);
         Http::assertSentCount(1); // Return + webhook never call Stripe/PayU.
     }
 
@@ -176,6 +188,7 @@ class StripeFrenchCheckoutTest extends TestCase
         $this->call('POST', 'https://gpswiss.fr/payments/stripe/fr/webhook', [], [], [], ['HTTP_STRIPE_SIGNATURE' => 'invalid'], '{}')->assertStatus(400);
         $this->webhook($this->event($order), 'gpswiss.pl')->assertNotFound();
         $this->assertDatabaseCount('stripe_fr_events', 0);
+        Mail::assertNotSent(FrenchOrderMail::class, fn ($mail) => $mail->kind === 'paid');
         $this->assertSame('pending', $order->fresh()->payment_status);
         $this->assertSame(1, $this->part->fresh()->quantity);
     }
@@ -191,6 +204,9 @@ class StripeFrenchCheckoutTest extends TestCase
         $this->webhook($event)->assertOk();
         $this->assertSame('cancelled', $order->fresh()->status);
         $this->assertSame('expired', DB::table('stripe_fr_attempts')->sole()->status);
+        $this->webhook($event)->assertOk();
+        $this->assertCount(1, Mail::sent(FrenchOrderMail::class, fn ($mail) => $mail->kind === 'expired'));
+        Mail::assertNotSent(FrenchOrderMail::class, fn ($mail) => $mail->kind === 'paid');
         $this->assertSame(1, $this->part->fresh()->quantity);
     }
 
@@ -260,6 +276,7 @@ class StripeFrenchCheckoutTest extends TestCase
         $this->call('POST', 'https://gpswiss.fr/payments/stripe/fr/webhook', [], [], [],
             ['HTTP_STRIPE_SIGNATURE' => 't='.$time.',v1='.$sig], $body)->assertStatus(400);
         $this->assertDatabaseCount('stripe_fr_events', 0);
+        Mail::assertNotSent(FrenchOrderMail::class, fn ($mail) => $mail->kind === 'paid');
         $this->assertSame('pending', $order->fresh()->payment_status);
     }
 
@@ -335,6 +352,7 @@ class StripeFrenchCheckoutTest extends TestCase
         $this->assertSame('payu', Order::sole()->paymentProvider());
         $this->assertSame('gpswiss_pl', Order::sole()->storefrontCode());
         $this->assertDatabaseCount('stripe_fr_attempts', 0);
+        Mail::assertNothingSent();
         Http::assertNothingSent();
     }
 
