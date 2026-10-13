@@ -5,15 +5,14 @@ namespace App\Http\Controllers\Storefront;
 use App\Http\Controllers\Controller;
 use App\Models\Part;
 use App\Services\Storefront\CartService;
+use App\Support\StorefrontContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
 
 class CartController extends Controller
 {
-    public function __construct(private readonly CartService $cart)
-    {
-    }
+    public function __construct(private readonly CartService $cart) {}
 
     public function index(): View
     {
@@ -50,20 +49,20 @@ class CartController extends Controller
             $lastResult = $this->cart->update((int) $partId, (int) $quantity);
         }
 
-        return redirect()->route('storefront.cart.index')->with($lastResult['status'], $lastResult['message']);
+        return redirect()->route(StorefrontContext::routeName(request(), 'cart.index'))->with($lastResult['status'], $lastResult['message']);
     }
 
     public function remove(Part $part): RedirectResponse
     {
         $this->cart->remove((int) $part->id);
 
-        return redirect()->route('storefront.cart.index')->with('success', __('storefront.cart_removed'));
+        return redirect()->route(StorefrontContext::routeName(request(), 'cart.index'))->with('success', __('storefront.cart_removed'));
     }
 
     public function clear(): RedirectResponse
     {
         $this->cart->clear();
 
-        return redirect()->route('storefront.cart.index')->with('success', __('storefront.cart_cleared'));
+        return redirect()->route(StorefrontContext::routeName(request(), 'cart.index'))->with('success', __('storefront.cart_cleared'));
     }
 }

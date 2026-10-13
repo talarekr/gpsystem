@@ -53,7 +53,7 @@
             <aside class="sf-cart-summary">
                 <h2>{{ __('storefront.summary') }}</h2>
                 <div><span>{{ __('storefront.subtotal') }}</span><strong>{{ number_format((float) $subtotal, 2, ',', ' ') }} {{ $items->first()['currency'] ?? 'PLN' }}</strong></div>
-                <a class="sf-btn" href="{{ route('storefront.checkout.show') }}">{{ __('storefront.checkout_go') }}</a>
+                <a class="sf-btn" href="{{ route(\App\Support\StorefrontContext::routeName(request(), 'checkout.show')) }}">{{ __('storefront.checkout_go') }}</a>
                 <form method="post" action="{{ route('storefront.cart.clear') }}">
                     @csrf
                     <button class="sf-btn sf-btn--outline" type="submit">{{ __('storefront.clear_cart') }}</button>
