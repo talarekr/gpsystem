@@ -128,6 +128,95 @@ class FrenchCartCheckoutLayoutTest extends TestCase
             ->assertSee('name="payment_method" value="payu"', false)->assertSee('name="payment_method" value="blik"', false);
     }
 
+    public function test_second_product_and_repeated_add_are_blocked_without_replacing_the_first(): void
+    {
+        $original = session('storefront.cart.items');
+        $other = $this->part->replicate();
+        $other->sku = 'FR-SECOND';
+        $other->slug = strtolower($other->sku);
+        $other->save();
+        foreach ([$other, $this->part] as $part) {
+            $this->post('https://gpswiss.fr/koszyk/dodaj/'.$part->id)->assertRedirect()
+                ->assertSessionHas('warning');
+            $this->assertSame($original, session('storefront.cart.items'));
+        }
+        $this->assertDatabaseCount('orders', 0);
+        Http::assertNothingSent();
+    }
+
+    public function test_fr_quantity_above_one_is_rejected_by_http_and_service(): void
+    {
+        $original = session('storefront.cart.items');
+        $this->post('https://gpswiss.fr/koszyk/aktualizuj', ['quantities' => [$this->part->id => 2]])
+            ->assertSessionHasErrors('quantities.'.$this->part->id);
+        $cart = app(\App\Services\Storefront\CartService::class);
+        $this->assertSame('warning', $cart->update($this->part->id, 2)['status']);
+        $this->assertSame('warning', $cart->add($this->part, 2)['status']);
+        $this->assertSame($original, session('storefront.cart.items'));
+    }
+
+    public function test_legacy_multi_item_cart_has_safe_summary_and_can_be_recovered_by_removing(): void
+    {
+        $other = $this->part->replicate();
+        $other->sku = 'FR-LEGACY';
+        $other->slug = strtolower($other->sku);
+        $other->save();
+        $items = session('storefront.cart.items');
+        $items[$other->id] = array_merge(reset($items), ['part_id' => $other->id, 'sku' => $other->sku]);
+        $response = $this->withSession(['storefront.cart.items' => $items])->get('https://gpswiss.fr/panier')
+            ->assertOk()->assertViewHas('draft', fn ($draft) => ! $draft['single_item'])
+            ->assertSee('Le panier France accepte un seul article')
+            ->assertDontSee('<a class="sf-btn" href="https://gpswiss.fr/commande">', false)
+            ->assertDontSee('sf-checkout-summary__row--product');
+        $response->assertSee('remove-fr-item-'.$other->id)->assertSee('https://gpswiss.fr/koszyk/wyczysc');
+        $this->get('https://gpswiss.fr/commande')->assertOk()->assertDontSee('id="fr-stripe-payment"', false);
+        $this->post('https://gpswiss.fr/koszyk/usun/'.$other->id)->assertRedirect();
+        $this->get('https://gpswiss.fr/panier')->assertOk()
+            ->assertViewHas('draft', fn ($draft) => $draft['single_item'])->assertSee('sf-checkout-summary__row--product');
+        $this->assertDatabaseCount('orders', 0);
+    }
+
+    public function test_legacy_quantity_is_not_silently_clamped_into_valid_fr_checkout(): void
+    {
+        $items = session('storefront.cart.items');
+        $items[$this->part->id]['quantity'] = 2;
+        $this->withSession(['storefront.cart.items' => $items])->get('https://gpswiss.fr/panier')->assertOk()
+            ->assertViewHas('draft', fn ($draft) => ! $draft['single_item'])
+            ->assertDontSee('<a class="sf-btn" href="https://gpswiss.fr/commande">', false);
+        $this->post('https://gpswiss.fr/koszyk/aktualizuj', ['quantities' => [$this->part->id => 1]])->assertRedirect();
+        $this->get('https://gpswiss.fr/panier')->assertOk()->assertViewHas('draft', fn ($draft) => $draft['single_item']);
+    }
+
+    public function test_all_delivery_quotes_are_visible_on_listing_and_product_page(): void
+    {
+        foreach ([55 => '260547694013', 70 => '260547464013', 130 => '260547754013'] as $amount => $policy) {
+            MarketplaceCategoryMapping::query()->update(['shipping_group' => 'fr_'.$amount.'_eur', 'fulfillment_policy_id' => $policy]);
+            foreach (['/czesci', '/produkt/'.$this->part->slug] as $path) {
+                $this->get('https://gpswiss.fr'.$path)->assertOk()->assertSee('Frais de livraison : '.$amount.',00 EUR')
+                    ->assertDontSee('Frais de livraison calculés au panier')->assertDontSee('Livraison gratuite')
+                    ->assertDontSee('le prochain jour ouvré')->assertDontSee('13 h 30');
+            }
+        }
+        Http::assertNothingSent();
+    }
+
+    public function test_polish_cart_still_accepts_multiple_products_and_units(): void
+    {
+        $this->post('https://gpswiss.pl/koszyk/wyczysc');
+        $this->part->update(['quantity' => 3, 'currency' => 'PLN']);
+        $other = $this->part->replicate();
+        $other->sku = 'PL-SECOND';
+        $other->slug = strtolower($other->sku);
+        $other->save();
+        foreach ([$this->part, $this->part, $other] as $part) {
+            $this->post('https://gpswiss.pl/koszyk/dodaj/'.$part->id)->assertSessionHas('success');
+        }
+        $items = session('storefront.cart.items');
+        $this->assertCount(2, $items);
+        $this->assertSame(2, $items[$this->part->id]['quantity']);
+        $this->get('https://gpswiss.pl/koszyk')->assertOk()->assertSee('PLN');
+    }
+
     private function assertNoPolishPaymentChoices(string $html): void
     {
         preg_match('/<main>(.*?)<\/main>/s', $html, $match);

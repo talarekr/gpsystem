@@ -30,7 +30,8 @@ class CartService
             $quantity = max(1, (int) ($item['quantity'] ?? 1));
             $maxQuantity = $part ? max(0, (int) $part->quantity) : 0;
 
-            if ($maxQuantity > 0) {
+            // Preserve invalid legacy FR quantities so checkout rejects them rather than silently accepting one unit.
+            if ($maxQuantity > 0 && ! StorefrontContext::isFrench(request())) {
                 $quantity = min($quantity, $maxQuantity);
             }
 
@@ -58,6 +59,11 @@ class CartService
 
     public function add(Part $part, int $quantity = 1): array
     {
+        if (StorefrontContext::isFrench(request())
+            && ($quantity !== 1 || session(self::SESSION_KEY, []) !== [])) {
+            return ['status' => 'warning', 'message' => __('storefront.fr_single_item_only')];
+        }
+
         $freshPart = $this->visiblePart((int) $part->id);
 
         if (! $freshPart) {
@@ -86,6 +92,10 @@ class CartService
     {
         $items = session(self::SESSION_KEY, []);
         $key = (string) $partId;
+
+        if (StorefrontContext::isFrench(request()) && ($quantity !== 1 || count($items) > 1)) {
+            return ['status' => 'warning', 'message' => __('storefront.fr_single_item_only')];
+        }
 
         if (! isset($items[$key])) {
             return ['status' => 'warning', 'message' => StorefrontContext::isFrench(request()) ? 'Cet article ne se trouve pas dans le panier.' : 'Produkt nie znajduje się w koszyku.'];

@@ -6,6 +6,7 @@
     @if(!$draft['items'])
         <section class="sf-cart-empty"><h2>{{ __('storefront.empty_cart_title') }}</h2><p>{{ __('storefront.empty_cart_text') }}</p><a class="sf-btn" href="{{ route('storefront.catalog') }}">{{ __('storefront.go_to_shop') }}</a></section>
     @else
+        @unless($draft['single_item'])<p class="sf-flash sf-flash--warning" role="alert">{{ __('storefront.fr_single_item_only') }}</p>@endunless
         <div class="sf-cart-layout">
             <form method="post" action="{{ route('storefront.cart.update') }}" class="sf-cart-items" aria-label="{{ __('storefront.cart_items') }}">
                 @csrf
