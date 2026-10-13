@@ -5,17 +5,26 @@ namespace App\Http\Controllers\Storefront;
 use App\Http\Controllers\Controller;
 use App\Models\Part;
 use App\Services\Storefront\CartService;
+use App\Services\Storefront\FrenchCheckoutService;
 use App\Support\StorefrontContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\View\View;
 
 class CartController extends Controller
 {
     public function __construct(private readonly CartService $cart) {}
 
-    public function index(): View
+    public function index(Request $request, FrenchCheckoutService $french): View|Response
     {
+        if (StorefrontContext::isFrench($request)) {
+            return response()->view('storefront.fr.cart', [
+                'draft' => $french->draft($request),
+                'metaTitle' => 'Panier — GPSwiss', 'metaDescription' => 'Votre panier GPSwiss France.',
+            ])->header('Cache-Control', 'private, no-store');
+        }
+
         return view('storefront.cart.index', [
             'items' => $this->cart->items(),
             'subtotal' => $this->cart->subtotal(),

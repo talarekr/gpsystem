@@ -425,6 +425,7 @@
                     <div class="gps-order-col gps-order-col-number">
                         <div class="gps-order-value gps-order-number">{{ $displayNumber }}</div>
                         <div class="gps-order-muted">{{ $orderedAt }}</div>
+                        @if($order->isFrenchStorefront())<div class="gps-order-card__muted">GPSwiss.fr · FR · {{ $order->currency }}</div>@endif
                         <div class="gps-order-source-row">Źródło: @include('filament.resources.orders.partials.source-wordmark', ['marketplace' => $marketplace])</div>
                     </div>
 

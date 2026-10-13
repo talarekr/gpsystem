@@ -151,7 +151,7 @@
     $deliveryPhone = trim((string) (data_get($order->raw_payload, 'delivery.address.phoneNumber') ?: data_get($order->raw_payload, 'delivery.address.phone') ?: $order->phone));
     $paymentStatus = trim((string) $paymentLabel);
     $paymentType = trim((string) (data_get($order->raw_payload, 'payment.type') ?: data_get($order->raw_payload, 'payment_type') ?: data_get($order->raw_payload, 'payment_method')));
-    $paymentProvider = trim((string) (($order->isPolishStorefront() ? $order->paymentProvider() : null) ?: data_get($order->raw_payload, 'payment.provider') ?: data_get($order->raw_payload, 'payment_provider')));
+    $paymentProvider = trim((string) ((($order->isPolishStorefront() || $order->isFrenchStorefront()) ? $order->paymentProvider() : null) ?: data_get($order->raw_payload, 'payment.provider') ?: data_get($order->raw_payload, 'payment_provider')));
     $isPaid = Str::contains(Str::lower($paymentStatus), ['zapłac', 'paid', 'completed', 'finished', 'settled']);
     $statusChangedAt = $order->status_changed_at ? $order->status_changed_at->format('Y-m-d H:i') : null;
     $formatMoney = fn ($amount, ?string $moneyCurrency = null): string => $amount !== null
@@ -359,6 +359,7 @@
     <div class="gps-order-detail">
         <section class="gps-order-detail-card gps-order-detail-summary">
             <div class="gps-order-detail-grid">
+                @if($order->isFrenchStorefront())<div class="gps-order-detail-fact"><div class="gps-order-detail-label">Storefront</div><div class="gps-order-detail-value">gpswiss_fr · fr · {{ $order->currency }}</div></div>@endif
                 <div class="gps-order-detail-fact">
                     <div class="gps-order-detail-label">Status</div>
                     <select class="gps-order-status-select" aria-label="Status zamówienia" wire:change="updateOrderStatus($event.target.value)">

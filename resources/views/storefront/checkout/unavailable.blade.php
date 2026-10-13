@@ -1,6 +1,9 @@
 @extends('layouts.storefront')
 
 @section('content')
+@if(isset($draft))
+    @include('storefront.fr.checkout-preview')
+@else
 <div class="sf-container sf-page sf-cart-page">
     <section class="sf-cart-empty">
         <h1>Paiements temporairement indisponibles</h1>
@@ -9,4 +12,5 @@
         <a class="sf-btn" href="{{ route('storefront.catalog') }}">{{ __('storefront.back_to_shop') }}</a>
     </section>
 </div>
+@endif
 @endsection
