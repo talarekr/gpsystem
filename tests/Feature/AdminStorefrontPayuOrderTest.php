@@ -63,6 +63,18 @@ class AdminStorefrontPayuOrderTest extends TestCase
         $this->assertSame(1, $order->items()->count());
     }
 
+    public function test_admin_identifies_french_storefront_without_changing_polish_orders(): void
+    {
+        $this->actingAsAdminUser();
+        $order = $this->storefrontOrder();
+        $order->update(['currency' => 'EUR', 'meta' => [
+            'source' => 'storefront', 'storefront_code' => 'gpswiss_fr', 'locale' => 'fr', 'payment_provider' => 'stripe',
+        ]]);
+        $this->get(\App\Filament\Resources\OrderResource::getUrl('view', ['record' => $order]))
+            ->assertOk()->assertSee('gpswiss_fr · fr · EUR');
+        Livewire::test(ListOrders::class)->assertSee('GPSwiss.fr · FR · EUR');
+    }
+
     public function test_payu_notify_keeps_payment_state_out_of_marketplace_fields(): void
     {
         $order = $this->storefrontOrder();

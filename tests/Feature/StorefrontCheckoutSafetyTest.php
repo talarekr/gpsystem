@@ -45,7 +45,9 @@ class StorefrontCheckoutSafetyTest extends TestCase
 
     public function test_french_checkout_get_and_posts_cannot_call_provider_or_create_orders(): void
     {
-        $this->mock(CartService::class)->shouldNotReceive('items', 'isEmpty', 'clear');
+        $cart = $this->mock(CartService::class);
+        $cart->shouldNotReceive('isEmpty', 'clear');
+        $cart->shouldReceive('items')->once()->andReturn(collect());
         $this->mock(PayuService::class)->shouldNotReceive('createOrder', 'getOrder');
         $this->mock(PartAvailabilityEventService::class)->shouldNotReceive('sold');
         $this->get('https://gpswiss.fr/zamowienie')->assertOk()

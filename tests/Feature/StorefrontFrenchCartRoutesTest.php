@@ -42,7 +42,8 @@ class StorefrontFrenchCartRoutesTest extends TestCase
     public function test_french_checkout_alias_and_post_keep_payment_guard(): void
     {
         $cart = $this->mock(CartService::class);
-        $cart->shouldNotReceive('items', 'isEmpty', 'clear');
+        $cart->shouldNotReceive('isEmpty', 'clear');
+        $cart->shouldReceive('items')->once()->andReturn(collect());
         $cart->shouldReceive('count')->andReturn(0);
         $this->get('https://gpswiss.fr/commande')->assertOk()
             ->assertSee('Paiements temporairement indisponibles')->assertSee('https://gpswiss.fr/panier')

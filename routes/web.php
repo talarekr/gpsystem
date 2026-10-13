@@ -272,6 +272,7 @@ foreach (['gpswiss.fr' => 'storefront.fr.', 'www.gpswiss.fr' => 'storefront.fr-w
         Route::get('/panier', [CartController::class, 'index'])->name('cart.index');
         Route::get('/commande', [CheckoutController::class, 'show'])->name('checkout.show');
         Route::post('/commande', [CheckoutController::class, 'store'])->name('checkout.store');
+        Route::post('/commande/apercu', [CheckoutController::class, 'frenchPreview'])->name('checkout.preview');
     });
 }
 

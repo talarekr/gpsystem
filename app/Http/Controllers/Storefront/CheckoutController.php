@@ -7,9 +7,11 @@ use App\Models\Order;
 use App\Services\Marketplace\PartAvailabilityEventService;
 use App\Services\Payments\PayuService;
 use App\Services\Storefront\CartService;
+use App\Services\Storefront\FrenchCheckoutService;
 use App\Support\StorefrontContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Validation\ValidationException;
@@ -19,19 +21,27 @@ class CheckoutController extends Controller
 {
     public function __construct(private readonly CartService $cart, private readonly PartAvailabilityEventService $availabilityEvents, private readonly PayuService $payu) {}
 
-    public function show(Request $request): View|RedirectResponse
+    public function show(Request $request, FrenchCheckoutService $french): View|RedirectResponse|Response
     {
         if (StorefrontContext::isFrench($request)) {
-            return view('storefront.checkout.unavailable', [
+            return response()->view('storefront.checkout.unavailable', [
+                'draft' => $french->draft($request),
                 'metaTitle' => 'Paiements temporairement indisponibles — GPSwiss',
                 'metaDescription' => 'Les paiements de la boutique française sont temporairement indisponibles.',
-            ]);
+            ])->header('Cache-Control', 'private, no-store');
         }
         if ($this->cart->isEmpty()) {
             return redirect()->route('storefront.cart.index')->with('warning', __('storefront.cart_empty_before_checkout'));
         }
 
         return view('storefront.checkout.show', $this->viewData());
+    }
+
+    public function frenchPreview(Request $request, FrenchCheckoutService $french): RedirectResponse
+    {
+        $request->session()->put('storefront.fr.address', $french->validateAddress($request));
+
+        return redirect()->route('storefront.fr.checkout.show')->with('success', 'Vos coordonnées sont conservées dans cette session. Aucune commande n’a été créée.');
     }
 
     public function store(Request $request): RedirectResponse
