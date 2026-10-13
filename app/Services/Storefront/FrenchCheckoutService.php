@@ -35,7 +35,8 @@ class FrenchCheckoutService
                 'product_url' => route('storefront.product', $part?->slug ?: ($item['slug'] ?? $item['part_id'])),
                 'delivery_quote' => $this->deliveryQuotes->forPart($part),
                 'is_available' => (bool) ($item['is_available'] ?? false),
-                'meta' => ['storefront_code' => 'gpswiss_fr', 'locale' => 'fr', 'price_source' => $resolvedPrice['source'], 'slug' => $part?->slug ?? $item['slug'] ?? null],
+                'meta' => ['storefront_code' => 'gpswiss_fr', 'locale' => 'fr', 'price_source' => $resolvedPrice['source'], 'slug' => $part?->slug ?? $item['slug'] ?? null]
+                    + (isset($resolvedPrice['conversion']) ? ['price_conversion' => $resolvedPrice['conversion']] : []),
             ];
         })->all();
         $pricesReady = $items !== [] && collect($items)->every(fn ($item) => $item['unit_price_cents'] !== null && $item['is_available']);

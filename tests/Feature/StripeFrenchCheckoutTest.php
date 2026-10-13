@@ -80,6 +80,43 @@ class StripeFrenchCheckoutTest extends TestCase
             && $r['shipping_options'][0]['shipping_rate_data']['fixed_amount']['amount'] === 5500);
     }
 
+    public function test_nbp_fallback_uses_the_same_eur_price_on_card_and_stripe_and_records_rate_snapshot(): void
+    {
+        $this->part->update(['currency' => 'PLN', 'price' => 500]);
+        Http::fake(['api.nbp.pl/*' => Http::response(['rates' => [[
+            'mid' => 5, 'effectiveDate' => today()->toDateString(), 'no' => '100/A/NBP/2026',
+        ]]])]);
+        $this->get('https://gpswiss.fr/produkt/'.$this->part->slug)->assertOk()
+            ->assertSee('100,00 EUR')->assertDontSee('PLN')->assertDontSee('Prix indisponible</strong>', false)
+            ->assertSee('Frais de livraison calculés au panier')->assertDontSee('Livraison en France calculée au panier');
+        $this->submit($this->key())->assertRedirect('https://checkout.stripe.com/c/pay/fixture');
+        $order = Order::sole();
+        $item = $order->items()->sole();
+        $this->assertSame('100.00', $item->unit_price);
+        $this->assertSame('EUR', $order->currency);
+        $this->assertSame('155.00', $order->total);
+        $this->assertSame(5, $item->meta['price_conversion']['rate']);
+        $this->assertSame('500.00', $item->meta['price_conversion']['source_amount']);
+        $this->assertSame(today()->toDateString(), $item->meta['price_conversion']['effective_date']);
+        $this->assertSame('parts.price(PLN)->NBP_TABLE_A(EUR)', $item->meta['price_source']);
+        Http::assertSent(fn ($request) => str_contains($request->url(), 'api.stripe.com')
+            && $request['line_items'][0]['price_data']['currency'] === 'eur'
+            && $request['line_items'][0]['price_data']['unit_amount'] === 10000);
+        $this->assertSame('500.00', $this->part->fresh()->price);
+        $this->assertSame(1, $this->part->fresh()->quantity);
+        $this->assertCount(1, Http::recorded(fn ($request) => str_contains($request->url(), 'api.nbp.pl')));
+    }
+
+    public function test_unavailable_nbp_blocks_checkout_before_order_and_stripe(): void
+    {
+        $this->part->update(['currency' => 'PLN', 'price' => 500]);
+        Http::fake(['api.nbp.pl/*' => Http::response([], 503)]);
+        $this->submit($this->key())->assertRedirect()->assertSessionHasErrors('payment');
+        $this->assertDatabaseCount('orders', 0);
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), 'api.stripe.com'));
+        $this->assertSame(1, $this->part->fresh()->quantity);
+    }
+
     public function test_disabled_stripe_blocks_orders_before_api(): void
     {
         config(['stripe-fr.enabled' => false]);

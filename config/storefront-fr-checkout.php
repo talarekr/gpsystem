@@ -1,6 +1,6 @@
 <?php
 
 return [
-    // Existing EUR amounts are approved. FrenchPriceResolver never converts PLN.
-    'pricing_policy' => 'existing_eur',
+    // Approved priority: existing EUR, local eBay FR EUR, then PLN / NBP table-A EUR rate.
+    'pricing_policy' => 'existing_eur_nbp',
 ];
