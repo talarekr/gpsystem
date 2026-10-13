@@ -8,6 +8,7 @@ use App\Models\Part;
 use App\Models\User;
 use App\Services\Storefront\FrenchCatalogTranslationAdminRunner;
 use App\Services\Storefront\FrenchCatalogTranslationPreviewService;
+use App\Services\Storefront\FrenchCatalogTranslationRunStore;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
@@ -337,6 +338,6 @@ class FrenchCatalogTranslationRunnerRecoveryTest extends TestCase
         ];
         $state['current_type'] = 'parts';
         $state['current_id'] = $part->id;
-        Cache::forever(FrenchCatalogTranslationAdminRunner::KEY, $state);
+        app(FrenchCatalogTranslationRunStore::class)->save($state);
     }
 }

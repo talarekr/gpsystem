@@ -100,6 +100,7 @@
         </div>
         <p>Domyślny tryb panelowy nie wymaga workera ani shella. Start lub Wznów uruchamia kolejne małe partie przez AJAX. <strong>Zostaw stronę otwartą.</strong> Po zamknięciu nie są wysyłane kolejne partie; rozpoczęty rekord może jeszcze zakończyć się na serwerze.</p>
         <p>Po powrocie odśwież status i kliknij <strong>Wznów</strong> dla istniejącego runu. Nie klikaj ponownie Start. Pauza wstrzymuje wykonanie, Stop kończy run.</p>
+        <p id="recovery-state" role="status" class="muted">Odczyt trwałego checkpointu…</p>
         <p id="worker-state" role="status" class="muted">Tryb wykonania jest wskazany w statusie.</p>
         <label for="run-progress" class="sr-only">Postęp tłumaczenia</label>
         <progress id="run-progress" class="progress" max="100" value="0">0%</progress>
@@ -110,7 +111,7 @@
             @endforeach
         </div>
         <dl class="status-grid">
-            @foreach (['run_id' => 'run_id', 'runner_mode' => 'Tryb wykonania', 'started_at' => 'Rozpoczęto', 'updated_at' => 'Ostatnia aktualizacja zadania', 'current_type' => 'Aktualny typ', 'current_id' => 'Aktualny rekord', 'next_batch' => 'Następna partia', 'active_timer' => 'Timer w przeglądarce', 'last_dispatch_at' => 'Ostatni dispatch', 'waiting_for_worker' => 'Partia zlecona / oczekuje na worker', 'recovery_available' => 'Dostępne wznowienie istniejącego runu', 'runner_hint' => 'Runner / recovery'] as $key => $label)
+            @foreach (['run_id' => 'run_id', 'runner_mode' => 'Tryb wykonania', 'checkpoint_source' => 'Źródło checkpointu', 'started_at' => 'Rozpoczęto', 'updated_at' => 'Ostatnia aktualizacja zadania', 'current_type' => 'Aktualny typ', 'current_id' => 'Aktualny rekord', 'next_batch' => 'Następna partia', 'active_timer' => 'Timer w przeglądarce', 'last_dispatch_at' => 'Ostatni dispatch', 'waiting_for_worker' => 'Partia zlecona / oczekuje na worker', 'recovery_available' => 'Dostępne wznowienie istniejącego runu', 'runner_hint' => 'Runner / recovery'] as $key => $label)
                 <div><dt>{{ $label }}</dt><dd id="run-{{ $key }}">—</dd></div>
             @endforeach
         </dl>
@@ -181,13 +182,14 @@
         if (authorizationLost) blocked = 'Sesja lub uprawnienia wygasły. Odśwież stronę i zaloguj się ponownie.';
         else if (!statusFresh) blocked = 'Nie udało się pobrać statusu. Odśwież status przed startem.';
         else if (activeRun()) blocked = 'Zadanie już istnieje. Użyj jego przycisków Pauza, Wznów lub Stop.';
+        else if (run.run_storage_ready === false) blocked = 'Brakuje trwałej tabeli runów FR. Wdrożenie musi wykonać migrację; nie czyść cache.';
         else if (!overview.schema_ready) blocked = 'Brakuje tabel tłumaczeń. Administrator musi uruchomić migracje.';
         else if (!overview.enabled) blocked = 'Włącz GPSWISS_FR_TRANSLATIONS_ENABLED i odśwież stronę.';
         else if (!overview.provider_ready) blocked = 'Skonfiguruj Google Translate i odśwież stronę.';
         else if (!freshDryRun()) blocked = 'Wykonaj nowy dry-run. Raport jest ważny przez godzinę i do jednego startu.';
         else if (element('confirm-token').value !== confirmToken) blocked = 'Wpisz dokładny token potwierdzenia.';
         else blocked = 'Gotowe do ręcznego startu. Google API może naliczyć opłaty.';
-        const canStart = !authorizationLost && statusFresh && !activeRun() && overview.schema_ready && overview.enabled && overview.provider_ready && freshDryRun() && element('confirm-token').value === confirmToken;
+        const canStart = !authorizationLost && statusFresh && !activeRun() && run.run_storage_ready !== false && overview.schema_ready && overview.enabled && overview.provider_ready && freshDryRun() && element('confirm-token').value === confirmToken;
         element('start').disabled = busy || !canStart;
         element('dry-run').disabled = busy || authorizationLost || !overview.schema_ready || activeRun();
         element('refresh').disabled = busy || polling || authorizationLost;
@@ -239,12 +241,16 @@
         run = data || {status: 'idle'};
         const status = run.status || 'idle';
         text('run-status', status);
+        const saved = count(catalog.inventory?.translated);
+        text('recovery-state', activeRun()
+            ? 'Znaleziono niedokończony run. Po reloadzie lub ponownym zalogowaniu kliknij Wznów; zachowasz run_id i postęp. Nie klikaj ponownie Start.'
+            : `Według ostatniego odczytu katalogu zapisano ${saved} translated/reviewed. ${run.run_id ? 'Poprzedni run jest zakończony lub zatrzymany.' : 'Brak checkpointu w bazie/cache — starego runu nie można odtworzyć.'} Możesz wykonać nowy dry-run i Start. Aktualne translated/reviewed nie będą tłumaczone ponownie; failed i needs_update pozostaną pominięte.`);
         text('worker-state', !run.run_id ? 'Start uruchomi domyślny tryb panelowy; pozostaw stronę otwartą.' : run.runner_mode === 'browser'
             ? (browserEnabled ? 'Tryb panelowy aktywny — strona zleca pojedyncze rekordy. Worker nie jest wymagany.' : 'Tryb panelowy wstrzymany w tej karcie. Kliknij Wznów, aby kontynuować istniejący run.')
             : 'Run kolejki. Kliknij Wznów, aby przełączyć istniejący checkpoint na domyślny tryb panelowy; bez ponownego Startu.');
         element('run-status').className = 'badge ' + (status === 'completed' ? 'good' : (['failed', 'stopped_on_error'].includes(status) ? 'bad' : (status === 'running' ? 'pending' : '')));
         for (const key of numberKeys) text(`run-${key}`, count(run[key]));
-        for (const key of ['run_id', 'runner_mode', 'current_type', 'current_id', 'active_timer', 'waiting_for_worker', 'recovery_available', 'runner_hint']) text(`run-${key}`, key === 'active_timer' ? browserEnabled && run.status === 'running' : run[key]);
+        for (const key of ['run_id', 'runner_mode', 'checkpoint_source', 'current_type', 'current_id', 'active_timer', 'waiting_for_worker', 'recovery_available', 'runner_hint']) text(`run-${key}`, key === 'active_timer' ? browserEnabled && run.status === 'running' : run[key]);
         for (const key of ['started_at', 'updated_at', 'next_batch', 'last_dispatch_at']) text(`run-${key}`, date(run[key]));
         const total = count(run.total), processed = count(run.processed);
         const percent = total > 0 ? Math.min(100, Math.round(processed / total * 100)) : (status === 'completed' ? 100 : 0);

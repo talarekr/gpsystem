@@ -35,6 +35,7 @@ class FrenchCatalogTranslationAdminRunner
     public function __construct(
         private FrenchCatalogTranslationService $translations,
         private FrenchCatalogTranslationPreviewService $preview,
+        private FrenchCatalogTranslationRunStore $runs,
     ) {}
 
     public function start(int $actorId, string $dryRunId, string $confirm): array
@@ -48,8 +49,8 @@ class FrenchCatalogTranslationAdminRunner
 
         try {
             return $this->mutate(function () use ($actorId, $dryRunId): array {
-                $existing = Cache::get(self::KEY);
-                if ($existing && in_array($existing['status'], ['running', 'paused', 'stopped_on_error'], true)) {
+                $existing = $this->runs->latest();
+                if ($existing && in_array($existing['status'], ['running', 'paused', 'stopped_on_error', 'failed'], true)) {
                     return $this->error('active_run', 'Istnieje aktywne zadanie. Wznów je lub zatrzymaj.');
                 }
                 $lease = Cache::lock(self::PROCESSING_LOCK, 600);
@@ -111,14 +112,17 @@ class FrenchCatalogTranslationAdminRunner
     /** Reading progress never dispatches work and never touches the translation provider. */
     public function status(): array
     {
-        return $this->publicRun(Cache::get(self::KEY) ?? $this->idle());
+        return $this->publicRun($this->runs->latest() ?? $this->idle());
     }
 
     public function control(string $runId, string $action): array
     {
         try {
             return $this->mutate(function () use ($runId, $action): array {
-                $run = Cache::get(self::KEY);
+                if (! $this->runs->ready()) {
+                    return $this->error('run_storage_missing', 'Wdróż migrację trwałych runów FR; nie czyść cache/checkpointów.');
+                }
+                $run = $this->runs->latest();
                 if (! $run || ! hash_equals($run['run_id'], $runId)) {
                     return $this->error('control_conflict', 'To zadanie nie jest już aktualne. Odśwież status.');
                 }
@@ -164,7 +168,10 @@ class FrenchCatalogTranslationAdminRunner
     /** A POST tick is the only browser operation allowed to call the provider. */
     public function tick(string $runId): array
     {
-        $run = Cache::get(self::KEY);
+        if (! $this->runs->ready()) {
+            return $this->error('run_storage_missing', 'Wdróż migrację trwałych runów FR; nie czyść cache/checkpointów.');
+        }
+        $run = $this->runs->latest();
         if (! $run || ! hash_equals((string) $run['run_id'], $runId)) {
             return $this->error('run_mismatch', 'Odśwież status: ten run nie jest aktualny.');
         }
@@ -191,7 +198,7 @@ class FrenchCatalogTranslationAdminRunner
     private function mode(array $run): string
     {
         // Checkpoints created before browser mode belong to the queue until Resume.
-        return $run['runner_mode'] ?? 'queue';
+        return $run['runner_mode'] ?? (($run['run_id'] ?? null) ? 'queue' : $this->configuredMode());
     }
 
     /** At most 100 records or 45 seconds; retry backoff uses delayed jobs, never sleeps. */
@@ -304,7 +311,7 @@ class FrenchCatalogTranslationAdminRunner
                 $result = $this->translations->translate($pending['type'], $pending['id'], $options);
                 if ($result['reason'] === 'busy') {
                     $this->mutate(function () use ($runId): void {
-                        $run = Cache::get(self::KEY);
+                        $run = $this->runs->latest();
                         if ($run && $run['run_id'] === $runId && $run['_pending']) {
                             $run['_pending']['in_flight'] = false;
                             $this->save($run);
@@ -420,7 +427,7 @@ class FrenchCatalogTranslationAdminRunner
     private function finishRecord(string $runId, array $pending, array $result): ?int
     {
         return $this->mutate(function () use ($runId, $pending, $result): ?int {
-            $run = Cache::get(self::KEY);
+            $run = $this->runs->latest();
             if (! $run || $run['run_id'] !== $runId || ! $run['_pending']
                 || $run['_pending']['id'] !== $pending['id'] || $run['_pending']['type'] !== $pending['type']) {
                 return null;
@@ -520,6 +527,9 @@ class FrenchCatalogTranslationAdminRunner
         if (! $this->translations->enabled()) {
             return $this->error('translations_disabled', 'Tłumaczenia FR są wyłączone. Wymagane GPSWISS_FR_TRANSLATIONS_ENABLED=true.');
         }
+        if (! $this->runs->ready()) {
+            return $this->error('run_storage_missing', 'Brak trwałej tabeli runów FR. Wdróż migrację; nie czyść cache ani checkpointów.');
+        }
         if (! $this->preview->schemaReady()) {
             return $this->error('schema_missing', 'Brak tabel tłumaczeń. Uruchom migracje Etapu 2A.');
         }
@@ -541,7 +551,7 @@ class FrenchCatalogTranslationAdminRunner
 
     private function running(string $runId): ?array
     {
-        $run = Cache::get(self::KEY);
+        $run = $this->runs->latest();
 
         return $run && $run['run_id'] === $runId && $run['status'] === 'running' ? $run : null;
     }
@@ -555,7 +565,7 @@ class FrenchCatalogTranslationAdminRunner
     {
         $run['updated_at'] = now()->toISOString();
         $run['remaining'] = max(0, $run['total'] - $run['processed']);
-        Cache::forever(self::KEY, $run);
+        $this->runs->save($run);
     }
 
     private function publicRun(array $run): array
@@ -563,11 +573,16 @@ class FrenchCatalogTranslationAdminRunner
         $public = array_replace($this->idle(), array_intersect_key($run, $this->idle()));
         $public['recovery_available'] = in_array($run['status'], ['paused', 'stopped_on_error', 'failed'], true)
             || ($run['status'] === 'running' && ($this->mode($run) === 'browser' || $this->recoveryDue($run)));
+        $public['run_storage_ready'] = $this->runs->ready();
+        $public['checkpoint_source'] = ! $run['run_id'] ? 'none' : (isset($run['_revision']) ? 'database' : 'legacy_cache');
         $public['runner_mode'] = $this->mode($run);
         $public['batch_size'] = $this->mode($run) === 'browser' ? 1 : self::BATCH_SIZE;
         $public['runner_hint'] = $this->mode($run) === 'browser'
             ? 'Tryb panelowy: zostaw stronę otwartą. Po powrocie kliknij Wznów dla tego samego runu. Worker nie jest wymagany. Nie klikaj ponownie Start.'
             : 'Tryb kolejki: wymagany worker FR. Wznów przełączy istniejący run do trybu panelowego, jeśli wdrożono domyślny tryb browser.';
+        if (! $run['run_id']) {
+            $public['runner_hint'] = 'Nie znaleziono checkpointu runu w bazie ani cache. Zapisane tłumaczenia pozostają w katalogu. Wykonaj nowy dry-run i Start; aktualne translated/reviewed nie będą tłumaczone ponownie, failed i needs_update pozostaną pominięte.';
+        }
         $public['waiting_for_worker'] = $this->mode($run) === 'queue' && $run['status'] === 'running' && ($run['next_batch'] ?? null) !== null;
 
         return $public;
@@ -588,8 +603,8 @@ class FrenchCatalogTranslationAdminRunner
             'total' => 0, 'processed' => 0, 'translated' => 0, 'skipped' => 0, 'failed' => 0,
             'remaining' => 0, 'chars_translated' => 0, 'current_type' => null, 'current_id' => null,
             'last_success' => null, 'last_error' => null, 'failed_examples' => [], 'next_batch' => null,
-            'runner_mode' => null, 'last_dispatch_at' => null, 'waiting_for_worker' => false, 'recovery_available' => false,
-            'runner_hint' => 'Wymagany stały worker storefront-fr-translations (połączenie storefront-translations). Bez shella: zgłoś hostingowi/deployerowi konfigurację deploy/supervisor i docs/gpswiss-fr-worker-deployment.md. Wznów zleca ten sam run po 60 s; nie uruchamia workera. Nie klikaj ponownie Start.',
+            'run_storage_ready' => false, 'checkpoint_source' => 'none', 'runner_mode' => null, 'last_dispatch_at' => null, 'waiting_for_worker' => false, 'recovery_available' => false,
+            'runner_hint' => '',
             'active_timer' => false, 'batch_size' => self::BATCH_SIZE];
     }
 
@@ -600,7 +615,7 @@ class FrenchCatalogTranslationAdminRunner
 
     private function event(?string $code, ?string $type = null, ?int $id = null, ?string $sku = null): array
     {
-        $messages = ['translated' => 'Tłumaczenie zapisane.', 'worker_failed' => 'Worker przerwał zadanie. Możesz bezpiecznie wznowić.',
+        $messages = ['translated' => 'Tłumaczenie zapisane.', 'worker_failed' => 'Wykonanie partii przerwane. Checkpoint zachowany; odśwież status i kliknij Wznów.',
             'queue_unavailable' => 'Kolejka jest niedostępna. Sprawdź worker i połączenie.',
             'provider_not_ready' => 'Google Translate nie jest gotowy. Sprawdź konfigurację providera.',
             'schema_missing' => 'Brak tabel tłumaczeń. Uruchom migracje Etapu 2A.'];

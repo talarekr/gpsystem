@@ -84,3 +84,37 @@ opóźniony retry i zajęty processing lease nie wykonują provider call.
 Zakres zapisów biznesowych pozostaje ograniczony do part_translations oraz
 category_translations. Checkout, płatności, zamówienia, marketplace i stock
 pozostają poza tą zmianą.
+
+## Trwały recovery po błędzie, reloadzie i utracie cache
+
+Nowa migracja tworzy `storefront_fr_translation_runs`. Wdrożenie musi wykonać
+migrację standardową ścieżką deployu (helper browserowy wywołuje migrate).
+Nie wymaga to workera ani shella operatora. Nie czyść cache ani checkpointów.
+Bez migracji panel blokuje nowy Start/tick i pokazuje komunikat o tabeli runów.
+
+Każda mutacja zapisuje pełny checkpoint w DB przed zapisaniem wskaźnika cache
+oraz przed wywołaniem providera. Baza jest nadrzędnym źródłem po utworzeniu runu.
+Status, tick i Wznów odnajdują ostatni run po kolejności utworzenia w tabeli,
+nie po sesji operatora ani wyłącznie po cache. GET status nie importuje runu,
+nie zapisuje cache i nie uruchamia tłumaczenia. Reload wymaga jawnego Wznów.
+
+Zachowany stary checkpoint cache zostaje zaimportowany do tabeli przy najbliższej
+mutacji po migracji (np. Wznów), z zachowaniem ID, licznika, pending i cursora.
+Jeśli checkpoint sprzed tej poprawki już zniknął i nie ma go w DB, nie można
+odtworzyć jego ID/cursora z samych zapisanych tłumaczeń. Panel pokazuje wtedy
+liczbę translated/reviewed z ostatniego odczytu katalogu i pozwala na nowy
+**dry-run → token → Start**, wyłącznie po ręcznym potwierdzeniu operatora.
+Aktualne translated/reviewed są chronione, failed/needs_update pomijane.
+Nie ma automatycznego Startu ani odtwarzania runu przez odczyt statusu.
+
+Ostatni stopped/completed nie jest automatycznie wznawiany; nie odkopujemy
+starszego incomplete runu za nowszym stanem końcowym. Failed jest niedokończonym
+runem do Wznów/Stop i blokuje tworzenie kolejnego apply. Awaria DB zwraca błąd,
+nie udaje idle ani nie pozwala na cache-only Start. Istniejące mutation,
+processing i per-record locks pozostają wymagane i nie są ręcznie usuwane.
+
+Dla obecnej sytuacji (np. 144 zapisane, brak run_id): po deployu z migracją
+odśwież status. Jeśli odnaleziono checkpoint — Wznów. Jeśli panel nadal wskazuje
+brak checkpointu w bazie/cache — nowy dry-run, oceń zakres missing i ręcznie
+potwierdź Start. Zapisane 144 tłumaczenia nie zostaną wyzerowane; aktualne gotowe
+rekordy będą pomijane. Nie można zagwarantować odzyskania utraconego starego ID.

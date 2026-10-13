@@ -588,7 +588,7 @@ class FrenchCatalogTranslationAdminToolTest extends TestCase
         $this->assertNotEmpty($writes);
         foreach ($writes as $sql) {
             $this->assertMatchesRegularExpression(
-                '/^\s*(?:insert\s+into|update|delete\s+from)\s+["`]*(?:part_translations|category_translations|cache|cache_locks|jobs|failed_jobs)\b/i',
+                '/^\s*(?:insert\s+into|update|delete\s+from)\s+["`]*(?:part_translations|category_translations|storefront_fr_translation_runs|cache|cache_locks|jobs|failed_jobs)\b/i',
                 $sql,
             );
         }
