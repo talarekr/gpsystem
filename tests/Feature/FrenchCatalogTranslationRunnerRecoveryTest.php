@@ -30,6 +30,7 @@ class FrenchCatalogTranslationRunnerRecoveryTest extends TestCase
         $this->freezeTime();
         config([
             'storefront-translations.fr_enabled' => true,
+            'storefront-translations.admin_runner' => 'queue',
             'services.google_translate.enabled' => true,
             'services.google_translate.mode' => 'dry_run',
             'services.google_translate.key' => 'recovery-test-key',
