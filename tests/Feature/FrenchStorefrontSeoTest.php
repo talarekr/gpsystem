@@ -199,7 +199,7 @@ class FrenchStorefrontSeoTest extends TestCase
     public function test_french_cart_messages_and_delivery_copy_preserve_pl(): void
     {
         $this->get('https://gpswiss.fr/czesci')->assertOk()
-            ->assertSee('Frais de livraison calculés au panier')->assertDontSee('Livraison gratuite : le prochain jour ouvré');
+            ->assertSee('Frais de livraison : 55,00 EUR')->assertDontSee('Livraison gratuite : le prochain jour ouvré');
         $this->post('https://gpswiss.fr/koszyk/dodaj/'.$this->part->id)->assertRedirect()
             ->assertSessionHas('success', 'Article ajouté au panier.');
         $this->get('https://gpswiss.fr/panier')->assertOk()->assertSee('Article ajouté au panier.')->assertDontSee('Dodano produkt');

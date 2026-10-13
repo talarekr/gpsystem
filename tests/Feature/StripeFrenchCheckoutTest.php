@@ -88,7 +88,7 @@ class StripeFrenchCheckoutTest extends TestCase
         ]]])]);
         $this->get('https://gpswiss.fr/produkt/'.$this->part->slug)->assertOk()
             ->assertSee('100,00 EUR')->assertDontSee('PLN')->assertDontSee('Prix indisponible</strong>', false)
-            ->assertSee('Frais de livraison calculés au panier')->assertDontSee('Livraison en France calculée au panier');
+            ->assertSee('Frais de livraison : 55,00 EUR')->assertDontSee('Livraison en France calculée au panier');
         $this->submit($this->key())->assertRedirect('https://checkout.stripe.com/c/pay/fixture');
         $order = Order::sole();
         $item = $order->items()->sole();

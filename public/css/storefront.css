@@ -1223,3 +1223,8 @@
 .sf-fr-checkout .sf-checkout-summary__row strong,.sf-fr-cart .sf-checkout-summary__row strong{white-space:normal;text-align:right;overflow-wrap:anywhere}
 .sf-fr-checkout .sf-checkout-form>form{min-width:0}
 .sf-fr-checkout button:disabled,.sf-fr-cart button:disabled{cursor:not-allowed}
+
+/* Keep long FR product names separate from summary amounts. */
+.sf-fr-cart .sf-checkout-summary__items,.sf-fr-checkout .sf-checkout-summary__items{display:grid;min-width:0}
+.sf-fr-cart .sf-checkout-summary__row,.sf-fr-checkout .sf-checkout-summary__row{display:grid;grid-template-columns:minmax(0,1fr) minmax(90px,40%);align-items:start;gap:12px}
+.sf-fr-cart .sf-checkout-summary__product-title,.sf-fr-checkout .sf-checkout-summary__product-title{min-width:0;overflow-wrap:anywhere}

@@ -29,7 +29,7 @@ class FrenchProductPricePresentationTest extends TestCase
         foreach (['/', '/czesci', '/kategoria-produktu/'.$part->category->slug, '/produkt/'.$part->slug] as $path) {
             $this->get('https://gpswiss.fr'.$path)->assertOk()->assertSee('123,45 EUR')->assertDontSee('PLN')
                 ->assertDontSee('Livraison gratuite')->assertDontSee('Pour un paiement avant')
-                ->assertSee('Frais de livraison calculés au panier');
+                ->assertSee('Frais de livraison : 55,00 EUR');
         }
         $other = $this->part('PLN', 9999);
         $this->get('https://gpswiss.fr/produkt/'.$other->slug)->assertOk()->assertSee('123,45 EUR')
@@ -84,11 +84,11 @@ class FrenchProductPricePresentationTest extends TestCase
         $mapping->update(['is_blocked' => true]);
         foreach (['/czesci', '/produkt/'.$part->slug] as $path) {
             $this->get('https://gpswiss.fr'.$path)->assertOk()->assertSee('100,00 EUR')
-                ->assertSee('Livraison en France indisponible')->assertDontSee('Frais de livraison calculés au panier')
+                ->assertSee('Livraison indisponible')->assertDontSee('Frais de livraison calculés au panier')
                 ->assertDontSee('Livraison gratuite')->assertDontSee('13 h 30');
         }
         $mapping->delete();
-        $this->get('https://gpswiss.fr/produkt/'.$part->slug)->assertOk()->assertSee('Livraison en France indisponible')
+        $this->get('https://gpswiss.fr/produkt/'.$part->slug)->assertOk()->assertSee('Livraison indisponible')
             ->assertDontSee('class="sf-purchase__cart"', false);
         $this->post('https://gpswiss.fr/koszyk/dodaj/'.$part->id)->assertRedirect()->assertSessionHas('warning');
         $this->assertEmpty(session('storefront.cart.items', []));

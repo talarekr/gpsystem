@@ -54,8 +54,8 @@ class CartController extends Controller
     public function update(Request $request): RedirectResponse
     {
         $validated = $request->validate([
-            'quantities' => ['required', 'array'],
-            'quantities.*' => ['required', 'integer', 'min:1'],
+            'quantities' => StorefrontContext::isFrench($request) ? ['required', 'array', 'max:1'] : ['required', 'array'],
+            'quantities.*' => StorefrontContext::isFrench($request) ? ['required', 'integer', 'min:1', 'max:1'] : ['required', 'integer', 'min:1'],
         ]);
 
         $lastResult = ['status' => 'success', 'message' => StorefrontContext::isFrench($request) ? 'Panier mis à jour.' : 'Zaktualizowano koszyk.'];

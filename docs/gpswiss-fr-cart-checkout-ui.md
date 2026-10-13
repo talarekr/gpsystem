@@ -8,7 +8,7 @@ Desktop: nagłówek i przycisk powrotu, dwie kolumny. Koszyk po lewej ma karty z
 
 Checkout: po lewej białe, zaokrąglone sekcje Informations de facturation, Adresse de livraison, Méthode de livraison, Paiement i Acceptations. Radio wyboru klienta/alternatywnego adresu, pola w siatce, kraj France, opcjonalny SIRET/TVA wyłącznie w sekcji firmy, bez NIP. Po prawej Résumé z pozycją i wartościami EUR oraz Payer par carte. Zastosowane klasy sf-checkout-layout, sf-checkout-grid, sf-field, sf-checkout-card, sf-checkout-options, sf-checkout-terms i sf-checkout-summary. Wspólny CSS PL pozostaje; nowe reguły mają wyłącznie scope sf-fr-cart / sf-fr-checkout i zawijają długie komunikaty.
 
-Kwoty pochodzą z tego samego draftu FrenchCheckoutService: EUR produktu, lokalne eBay FR EUR lub zatwierdzone NBP z #1482, bez zmiany source prices. Dostawa z istniejącego resolvera 55/70/130 EUR jest wyświetlana konkretnie w koszyku i checkout, nie jako „calculés au panier”. Brak wyceny pokazuje Livraison indisponible pour cet article i blokuje przejście/płatność. Jedna pozycja, jedna sztuka; ilość w formularzu ma max=1, a serwer zachowuje dotychczasowe zabezpieczenia.
+Kwoty pochodzą z tego samego draftu FrenchCheckoutService: EUR produktu, lokalne eBay FR EUR lub zatwierdzone NBP z #1482, bez zmiany source prices. Dostawa z istniejącego resolvera 55/70/130 EUR jest wyświetlana konkretnie w koszyku i checkout, nie jako „calculés au panier”. Brak wyceny pokazuje Livraison indisponible pour cet article i blokuje przejście/płatność. Jedna pozycja, jedna sztuka; ilość w formularzu ma max=1, a CartService oraz walidacja HTTP wymuszają jedną sztukę. Dodanie drugiego produktu lub ponowne dodanie tego samego jest blokowane bez zastępowania wcześniejszego wyboru.
 
 ## Zachowane flow
 
@@ -29,3 +29,13 @@ Nie łączymy adresowego POST i płatności w nowe flow. Nie zmieniamy Stripe se
 - PL /koszyk i /zamowienie zachowują własne widoki, style, dane i provider.
 
 Bez nowych migracji/workerów ani ręcznych komend operatora. Nie czyścić checkpointów/cache i nie tworzyć runu tłumaczeń. Testy lokalne używają Http::preventStrayRequests i Mail::fake. Nie wykonywano produkcyjnych zapisów, API/Google, realnych maili ani deployu. Opis layoutu powyżej jest instrukcją wizualnego sprawdzenia; automatyczne testy sprawdzają klasy, markup, wartości i guards, nie zastępują przeglądu ekranu na docelowym urządzeniu.
+
+## Jedna pozycja i dostawa na kartach
+
+Dotychczas checkout blokował wiele pozycji, lecz dodawanie/aktualizacja koszyka nadal je dopuszczały. Wspólna reguła `.sf-cart-summary div` narzucała flex kontenerowi pozycji. FR ma teraz własny układ grid z zawijaniem nazwy i oddzielną kolumną kwoty; PL pozostaje bez zmian.
+
+Stara sesja z wieloma pozycjami lub ilością większą niż jeden pokazuje kontrolowany komunikat. Résumé nie prezentuje wtedy wielopozycyjnego rozliczenia, a przejście dalej jest wyłączone. Usuń zbędne pozycje albo użyj Vider le panier. Ilość większą niż jeden w pojedynczej pozycji można poprawić do 1 i zapisać. Nie normalizujemy jej przy odczycie do ilości magazynowej, aby nie obejść blokady checkoutu.
+
+Karty home/katalogu/kategorii/powiązanych produktów i produkt pokazują `Frais de livraison : 55,00 EUR` (odpowiednio 70/130). Źródło: `FrenchProductPresentation` → `FrenchDeliveryQuoteService` → istniejące lokalne mapowanie eBay FR. Brak mapowania pokazuje `Livraison indisponible pour cet article`; istniejące can_buy/guards nadal blokują dodanie i checkout. Nie zmieniono resolverów, stawek ani mapowań.
+
+Po deployu sprawdź drugi produkt (komunikat, pierwszy pozostaje), długą nazwę w Résumé na desktopie i telefonie oraz konkretne koszty na home/listingu/produkcie. W starej sesji usuń nadmiarowy produkt albo wyczyść tylko koszyk. Nie trzeba czyścić cache, uruchamiać workera ani ingerować w tłumaczenia.
