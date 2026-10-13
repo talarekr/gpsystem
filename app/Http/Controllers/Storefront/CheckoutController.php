@@ -45,7 +45,7 @@ class CheckoutController extends Controller
     {
         $request->session()->put('storefront.fr.address', $french->validateAddress($request));
 
-        return redirect()->route('storefront.fr.checkout.show')->with('success', 'Vos coordonnées sont conservées dans cette session. Aucune commande n’a été créée.');
+        return redirect()->route('storefront.fr.checkout.show')->with('success', 'Vos coordonnées ont été enregistrées. Vous pouvez continuer vers le paiement sécurisé.');
     }
 
     public function store(Request $request): RedirectResponse

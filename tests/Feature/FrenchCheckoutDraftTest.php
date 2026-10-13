@@ -60,7 +60,7 @@ class FrenchCheckoutDraftTest extends TestCase
         $part = $this->part('PLN');
         config(['storefront-fr-checkout.pricing_policy' => 'catalog_eur']);
         $this->cart($part);
-        $response = $this->get('https://gpswiss.fr/panier')->assertOk()->assertSee('Prix EUR indisponible');
+        $response = $this->get('https://gpswiss.fr/panier')->assertOk()->assertSee('Prix indisponible');
         $draft = $response->viewData('draft');
         $this->assertNull($draft['subtotal_cents']);
         $this->assertNull($draft['shipping_cents']);

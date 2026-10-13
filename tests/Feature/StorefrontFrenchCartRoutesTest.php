@@ -34,8 +34,9 @@ class StorefrontFrenchCartRoutesTest extends TestCase
         $cart->shouldReceive('isEmpty')->andReturnFalse();
         $cart->shouldReceive('count')->andReturn(1);
         $this->get('https://gpswiss.fr/panier')->assertOk()->assertSee('lang="fr"', false)
-            ->assertSee('https://gpswiss.fr/panier')->assertSee('https://gpswiss.fr/commande');
-        $this->get('https://gpswiss.fr/koszyk')->assertOk()->assertSee('https://gpswiss.fr/commande');
+            ->assertSee('https://gpswiss.fr/panier')->assertSee('Livraison indisponible pour cet article')
+            ->assertDontSee('<a class="sf-btn" href="https://gpswiss.fr/commande">', false);
+        $this->get('https://gpswiss.fr/koszyk')->assertOk()->assertSee('Livraison indisponible pour cet article');
         Http::assertNothingSent();
     }
 
