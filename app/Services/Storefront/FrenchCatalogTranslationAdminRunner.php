@@ -15,7 +15,7 @@ use Throwable;
 
 /**
  * A shared-cache checkpoint, a short mutation lock and an independent worker lease.
- * Provider calls run only in queued batches; UI controls merge into the checkpoint after each
+ * Provider calls run in bounded browser or queued batches; UI controls merge into the checkpoint after each
  * record. No transaction or mutation lock is held while contacting the provider.
  */
 class FrenchCatalogTranslationAdminRunner
@@ -83,6 +83,7 @@ class FrenchCatalogTranslationAdminRunner
                     $run = $this->idle();
                     $run['run_id'] = (string) Str::uuid();
                     $run['status'] = 'running';
+                    $run['runner_mode'] = $this->configuredMode();
                     $run['started_at'] = $run['updated_at'] = now()->toISOString();
                     $run['total'] = $run['remaining'] = (int) $report['total'];
                     $run['_max_ids'] = ['parts' => (int) $report['products']['max_id'], 'categories' => (int) $report['categories']['max_id']];
@@ -128,7 +129,7 @@ class FrenchCatalogTranslationAdminRunner
                     $run['status'] = 'stopped';
                     $run['next_batch'] = null;
                 } elseif ($action === 'resume' && in_array($run['status'], ['running', 'paused', 'stopped_on_error', 'failed'], true)) {
-                    if ($run['status'] === 'running' && ! $this->recoveryDue($run)) {
+                    if ($run['status'] === 'running' && $this->mode($run) === 'queue' && $this->configuredMode() === 'queue' && ! $this->recoveryDue($run)) {
                         return ['ok' => true] + $this->publicRun($run);
                     }
                     // Probe the worker lease; never force-release a live worker's lock.
@@ -138,6 +139,8 @@ class FrenchCatalogTranslationAdminRunner
                     }
                     $lease->release();
                     $run['status'] = 'running';
+                    // Explicit Resume migrates old queued checkpoints without resetting progress.
+                    $run['runner_mode'] = $this->configuredMode();
                     $this->save($run);
                     $delay = $this->retryDelay($run['_pending']);
                     // Resume also recovers a crashed worker using the same run/cursor.
@@ -158,12 +161,51 @@ class FrenchCatalogTranslationAdminRunner
         }
     }
 
-    /** At most 100 records or 45 seconds; retry backoff uses delayed jobs, never sleeps. */
-    public function runBatch(string $runId): void
+    /** A POST tick is the only browser operation allowed to call the provider. */
+    public function tick(string $runId): array
     {
+        $run = Cache::get(self::KEY);
+        if (! $run || ! hash_equals((string) $run['run_id'], $runId)) {
+            return $this->error('run_mismatch', 'Odśwież status: ten run nie jest aktualny.');
+        }
+        if ($this->mode($run) !== 'browser') {
+            return $this->error('control_conflict', 'Kliknij Wznów, aby odzyskać istniejący run w trybie panelowym.');
+        }
+        if ($run['status'] !== 'running' || ($run['next_batch'] && Carbon::parse($run['next_batch'])->isFuture())) {
+            return ['ok' => true] + $this->publicRun($run);
+        }
+        try {
+            $this->runBatch($runId, true);
+        } catch (Throwable) {
+            $this->failed($runId, true);
+        }
+
+        return ['ok' => true] + $this->status();
+    }
+
+    private function configuredMode(): string
+    {
+        return config('storefront-translations.admin_runner', 'browser') === 'queue' ? 'queue' : 'browser';
+    }
+
+    private function mode(array $run): string
+    {
+        // Checkpoints created before browser mode belong to the queue until Resume.
+        return $run['runner_mode'] ?? 'queue';
+    }
+
+    /** At most 100 records or 45 seconds; retry backoff uses delayed jobs, never sleeps. */
+    public function runBatch(string $runId, bool $browser = false): void
+    {
+        $state = $this->running($runId);
+        if (! $state || ($this->mode($state) === 'browser') !== $browser) {
+            return;
+        }
         $lease = Cache::lock(self::PROCESSING_LOCK, 600);
         if (! $lease->get()) {
-            $this->enqueue($runId, 30);
+            if (! $browser) {
+                $this->enqueue($runId, 30);
+            }
 
             return;
         }
@@ -177,9 +219,11 @@ class FrenchCatalogTranslationAdminRunner
                 }
             });
             $started = microtime(true);
-            for ($count = 0; $count < self::BATCH_SIZE && microtime(true) - $started < self::SOFT_SECONDS; $count++) {
+            // One record per HTTP request bounds provider exposure even with several fields.
+            $limit = $browser ? 1 : self::BATCH_SIZE;
+            for ($count = 0; $count < $limit && microtime(true) - $started < self::SOFT_SECONDS; $count++) {
                 $run = $this->running($runId);
-                if (! $run) {
+                if (! $run || ($this->mode($run) === 'browser') !== $browser) {
                     return;
                 }
                 if ($error = $this->guard()) {
@@ -286,10 +330,10 @@ class FrenchCatalogTranslationAdminRunner
         }
     }
 
-    public function failed(string $runId): void
+    public function failed(string $runId, bool $browser = false): void
     {
-        $this->mutate(function () use ($runId): void {
-            if ($run = $this->running($runId)) {
+        $this->mutate(function () use ($runId, $browser): void {
+            if (($run = $this->running($runId)) && ($this->mode($run) === 'browser') === $browser) {
                 $run['status'] = 'failed';
                 $run['next_batch'] = null;
                 $run['last_error'] = $this->event('worker_failed', $run['current_type'], $run['current_id']);
@@ -438,8 +482,12 @@ class FrenchCatalogTranslationAdminRunner
 
     private function enqueueLocked(array &$run, int $delay): bool
     {
-        $run['last_dispatch_at'] = now()->toIso8601String();
         $run['next_batch'] = now()->addSeconds($delay)->toIso8601String();
+        $this->save($run);
+        if ($this->mode($run) === 'browser') {
+            return true;
+        }
+        $run['last_dispatch_at'] = now()->toIso8601String();
         $this->save($run);
         try {
             Bus::dispatch((new RunFrenchCatalogTranslationBatch($run['run_id']))->delay($delay));
@@ -475,7 +523,7 @@ class FrenchCatalogTranslationAdminRunner
         if (! $this->preview->schemaReady()) {
             return $this->error('schema_missing', 'Brak tabel tłumaczeń. Uruchom migracje Etapu 2A.');
         }
-        if (! in_array(config('queue.connections.storefront-translations.driver'), ['database', 'redis', 'sqs', 'beanstalkd'], true)) {
+        if ($this->configuredMode() === 'queue' && ! in_array(config('queue.connections.storefront-translations.driver'), ['database', 'redis', 'sqs', 'beanstalkd'], true)) {
             return $this->error('queue_unavailable', 'Wymagana jest osobna asynchroniczna kolejka storefront-translations.');
         }
         if (! app(GoogleTranslateService::class)->readiness(false)['ok']) {
@@ -514,8 +562,13 @@ class FrenchCatalogTranslationAdminRunner
     {
         $public = array_replace($this->idle(), array_intersect_key($run, $this->idle()));
         $public['recovery_available'] = in_array($run['status'], ['paused', 'stopped_on_error', 'failed'], true)
-            || ($run['status'] === 'running' && $this->recoveryDue($run));
-        $public['waiting_for_worker'] = $run['status'] === 'running' && ($run['next_batch'] ?? null) !== null;
+            || ($run['status'] === 'running' && ($this->mode($run) === 'browser' || $this->recoveryDue($run)));
+        $public['runner_mode'] = $this->mode($run);
+        $public['batch_size'] = $this->mode($run) === 'browser' ? 1 : self::BATCH_SIZE;
+        $public['runner_hint'] = $this->mode($run) === 'browser'
+            ? 'Tryb panelowy: zostaw stronę otwartą. Po powrocie kliknij Wznów dla tego samego runu. Worker nie jest wymagany. Nie klikaj ponownie Start.'
+            : 'Tryb kolejki: wymagany worker FR. Wznów przełączy istniejący run do trybu panelowego, jeśli wdrożono domyślny tryb browser.';
+        $public['waiting_for_worker'] = $this->mode($run) === 'queue' && $run['status'] === 'running' && ($run['next_batch'] ?? null) !== null;
 
         return $public;
     }
@@ -535,7 +588,7 @@ class FrenchCatalogTranslationAdminRunner
             'total' => 0, 'processed' => 0, 'translated' => 0, 'skipped' => 0, 'failed' => 0,
             'remaining' => 0, 'chars_translated' => 0, 'current_type' => null, 'current_id' => null,
             'last_success' => null, 'last_error' => null, 'failed_examples' => [], 'next_batch' => null,
-            'last_dispatch_at' => null, 'waiting_for_worker' => false, 'recovery_available' => false,
+            'runner_mode' => null, 'last_dispatch_at' => null, 'waiting_for_worker' => false, 'recovery_available' => false,
             'runner_hint' => 'Wymagany stały worker storefront-fr-translations (połączenie storefront-translations). Bez shella: zgłoś hostingowi/deployerowi konfigurację deploy/supervisor i docs/gpswiss-fr-worker-deployment.md. Wznów zleca ten sam run po 60 s; nie uruchamia workera. Nie klikaj ponownie Start.',
             'active_timer' => false, 'batch_size' => self::BATCH_SIZE];
     }

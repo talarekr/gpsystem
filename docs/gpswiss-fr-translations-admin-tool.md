@@ -1,151 +1,86 @@
-# GPSwiss FR — tłumaczenia katalogu w panelu
+# GPSwiss FR — tłumaczenia z panelu bez workera
 
-Narzędzie: `/admin/tools/storefront/fr-translations`, również pod nazwą
-**GPSwiss FR — tłumaczenia katalogu** w grupie **Ustawienia** panelu.
-Dostęp mają wyłącznie role Owner/Admin i Manager. Wszystkie endpointy wymagają
-zalogowania i uprawnień; domeny francuskiego storefrontu, w tym `gpswiss.fr`
-i `www.gpswiss.fr`, są blokowane także dla zalogowanego administratora.
+## Przyczyna i rozwiązanie
 
-## Obsługa bez terminala
+Poprzedni runner dispatchował wyłącznie job `RunFrenchCatalogTranslationBatch`
+do `storefront-translations` / `storefront-fr-translations`. Bez procesu queue
+worker run pozostawał running na 0. Operator nie ma shella ani dostępu do
+zarządzania hostingiem, więc domyślnym wykonawcą jest teraz otwarta strona admina.
+Wdrożenie samego kodu wystarcza przy istniejącej konfiguracji providera,
+fladze FR, tabelach tłumaczeń i trwałym cache z atomic locks.
 
-1. Otwórz narzędzie w panelu na domenie administracyjnej. Sprawdź flagę FR,
-   gotowość konfiguracji Google oraz liczniki produktów i kategorii.
-2. Kliknij **Sprawdź / Dry-run**. Wynik pokazuje rekordy, pola, szacowane znaki,
-   powody pominięcia i przykłady. Wejście na stronę, status i dry-run nie
-   wywołują Google API. Dry-run nie zapisuje katalogu ani tłumaczeń; cache
-   przechowuje jedynie wynik podglądu, potrzebny do potwierdzenia startu.
-3. Oceń zakres i możliwy koszt. Flaga `GPSWISS_FR_TRANSLATIONS_ENABLED=true`
-   oraz gotowy istniejący provider Google są wymagane do apply. Konfigurację
-   zmienia administrator serwera, poza tym narzędziem; formularz nie przyjmuje
-   ani nie pokazuje kluczy.
-4. Wpisz dokładnie `TRANSLATE-ALL-GPSWISS-FR-CATALOG` i kliknij
-   **Przetłumacz cały katalog**. Start zapisuje `run_id` i zleca zadanie
-   osobnej kolejce FR. HTTP nie wykonuje tłumaczeń.
-5. Obserwuj automatycznie odświeżany status lub kliknij **Odśwież status**.
-   **Pauza**, **Resume** i **Stop** sterują wyłącznie tym przebiegiem.
-   Odświeżenie lub zamknięcie strony zachowuje stan; worker działa w tle.
-   Zlecone już tłumaczenie pojedynczego rekordu może zakończyć się po pauzie
-   lub stopie; przed następnym rekordem sprawdzany jest aktualny stan.
+## Instrukcja operatora
 
-Dry-run jest przypisany do użytkownika, ważny godzinę i jednorazowy. Kolejny
-przebieg wymaga nowego dry-run i ponownego wpisania tokena. Istniejący przebieg
-w stanie running/paused/stopped_on_error należy wznowić lub zatrzymać.
+1. Deploy kodu, zachowując cache/checkpointy. Nie wymagamy Supervisor, shella,
+   schedulera ani kontaktu z hostingiem. Nie ustawiaj trybu queue.
+2. Otwórz `/admin/tools/storefront/fr-translations` na gpswiss.pl.
+3. Dla NOWEGO runu wykonaj dry-run i potwierdź tokenem
+   `TRANSLATE-ALL-GPSWISS-FR-CATALOG`, następnie Start.
+4. Zostaw stronę otwartą. Panel co 3 sekundy odczytuje status i zleca POST
+   następnej partii, dopiero gdy poprzedni request się zakończył.
+5. Obserwuj processed, aktualny rekord, błędy i tryb wykonania. Pauza zatrzymuje
+   kolejne partie. Stop kończy run i nie pozwala go wznowić.
+6. Po zamknięciu karty, błędzie sieci lub wygaśnięciu sesji nie są wysyłane kolejne
+   requesty. Po powrocie zaloguj się, odśwież status i kliknij Wznów dla TEGO
+   SAMEGO runu. Samo wejście na stronę nie uruchamia płatnych wywołań.
 
-## Wybór katalogu i błędy
+## Obecny run 39c2e732-e177-4899-9221-8b79b7aa67d8
 
-Narzędzie wykorzystuje `FrenchCatalogTranslationService` z PR #1462:
-`type=all`, `only_missing=true`, `chunk=100`, bez `include_failed` ani
-`include_needs_update`. Obejmuje również produkty i kategorie niewidoczne.
-Odczytuje pola i hashe zgodnie z tym samym serwisem co komenda masowa.
+Po deployu odśwież status i kliknij **Wznów**. Nie wykonuj nowego dry-run ani
+Start. Wznów zachowuje run_id, started_at, cursor, pending, zakres i liczniki;
+przełącza także stary checkpoint queue na domyślny browser. Nie usuwa starych
+jobów z kolejki. Stare joby i ich callback failed ignorują run przełączony do
+browser. Jeśli stary worker jeszcze trzyma lease, Wznów zwróci busy; nie usuwaj
+blokady ręcznie. Po awarii lease wygasa po 600 sekundach.
+
+## Granice requestu i bezpieczeństwo
+
+HTTP batch obejmuje najwyżej **jeden rekord** (produkt lub kategorię). To celowo
+mniejszy zakres niż 10–25: rekord zawiera kilka pól i może wymagać kilku
+wywołań providera. Nie da się przerwać już wysłanego provider call po zamknięciu
+karty; bieżący rekord może zakończyć się na serwerze. Czas zależy od timeoutów
+istniejącego providera i hostingu, jeden rekord nie gwarantuje konkretnego
+limitu czasu HTTP. Po niepewnym przerwaniu nie restartuj całego apply.
+
+Runner używa wspólnej blokady processing (600s), krótkiej mutation lock oraz
+istniejących blokad rekordów. Dwa requesty nie tłumaczą jednocześnie. Nie zwalnia
+się cudzych blokad. Kolejny tick zachowuje cursor i ponownie sprawdza stan
+rekordu. Status GET, start i resume nie wywołują Google API. Tylko POST tick
+wykonuje wywołania w trybie browser. Endpoint wymaga istniejącego run_id,
+admin auth, Owner/Admin lub Manager, CSRF i limitu żądań jak pozostałe endpointy.
+Francuskie domeny storefrontu nie umożliwiają obsługi narzędzia.
 
 - Aktualne translated i wszystkie reviewed są chronione.
-- Istniejące failed i needs_update są pomijane. Narzędzie nie rozszerza
-  automatycznie zakresu o te rekordy; wymagają osobnego, jawnie ocenionego
-  przebiegu zgodnie z dokumentacją PR #1462.
-- Błąd 429/5xx z bieżącej próby może otrzymać maksymalnie trzy ponowienia
-  po 30/120/300 sekundach. Odroczenie korzysta z kolejki, bez oczekiwania HTTP.
-  Ponawiany jest tylko konkretny rekord bieżącego przebiegu.
-- Po ostatecznym błędzie runner przechodzi do stopped_on_error, pokazuje
-  kontrolowany kod i komunikat. Resume kontynuuje ten sam przebieg; Stop
-  kończy go jako stopped. Nie ma ponownego tłumaczenia reviewed ani jawnego
-  nadpisywania istniejących failed.
-- Po przerwaniu workera Resume odczytuje checkpoint. Zapisany sukces jest
-  doliczany bez API. Jeżeli rekord nadal jest queued po rozpoczętej próbie,
-  wynik i koszt poprzedniego requestu są niepewne: otrzymuje kontrolowany błąd
-  interrupted_attempt i runner się zatrzymuje. Kolejne Resume przechodzi do
-  następnego rekordu; nie ponawia automatycznie niepewnego requestu.
+- Istniejące failed i needs_update są pomijane; only_missing pozostaje włączone.
+- Wyłącznie retry konkretnej próby tego runu przy 429/5xx może powtórzyć failed:
+  backoff 30/120/300s. Browser czeka do retry_at; nie ma sleep ani dispatchu.
+- Pauza/Stop mogą nastąpić podczas requestu; wynik bieżącego rekordu nie nadpisuje
+  stanu kontrolnego. Następny tick w paused/stopped nie tłumaczy.
+- Checkpoint sukcesu zapisany w DB jest odzyskiwany bez nowego provider call.
+  Niepewny queued attempt otrzymuje interrupted_attempt i zatrzymuje run;
+  kolejne Wznów przechodzi dalej bez automatycznego ponawiania niepewnego call.
+- Nie czyść cache, nie zmieniaj CACHE_PREFIX ani store podczas runu. Cache musi
+  być trwały i wspólny dla HTTP/procesów, z atomic locks (database lub Redis).
 
-Snapshot dry-run zapisuje górną granicę ID dla obu typów. Nowe rekordy ponad
-nią wymagają kolejnego dry-run. Usunięte rekordy są pomijane. Źródło i status
-każdego rekordu są ponownie sprawdzane przez istniejący serwis podczas apply.
-Szacowane znaki i `chars_translated` są informacją operacyjną, nie rachunkiem
-Google; ponowienia mogą generować dodatkowy koszt.
+Run może mieć status running po zamknięciu strony: to stan checkpointu, nie dowód
+aktywnej karty. Timer pokazany przez UI dotyczy tej karty. Błąd ticku zatrzymuje
+lokalny timer i wymaga jawnego Wznów; panel nie ponawia sam niepewnego requestu.
 
-## Wymagania wdrożenia
+## Opcjonalna kolejka
 
-Nie ma nowej migracji, zmiany domyślnej kolejki ani automatycznego startu przy
-deployu. Wymagane są tabele Etapu 2A i istniejąca tabela jobs. Wszystkie procesy
-muszą używać tego samego trwałego cache z atomic locks, np. database albo Redis.
-Cache zawiera ostatni przebieg, podglądy i checkpointy; nie wolno go czyścić
-podczas aktywnego przebiegu. Nie stosować produkcyjnie cache array ani oddzielnych
-lokalnych cache na kilku serwerach.
-
-Administrator infrastruktury powinien utrzymywać osobnego workera:
-
-```bash
-php artisan queue:work storefront-translations --queue=storefront-fr-translations --timeout=540 --tries=1
-```
-
-Połączenie i kolejka pochodzą z PR #1462 (`retry_after=660`). Partia obejmuje
-maksymalnie 100 rekordów; po około 45 sekundach runner oddaje pracę następnemu
-zadaniu. Retry błędów Google jest kontrolowany przez stan runnera. Nie zmieniać
-workera marketplace. Po zmianie konfiguracji odświeżyć config cache i zrestartować
-workera FR standardową procedurą. Bez workera start pozostaje running, a
-`processed` nie rośnie; status pokazuje czas ostatniej aktualizacji.
+Domyślne `GPSWISS_FR_ADMIN_RUNNER=browser` nie wymaga zmiany .env. Tylko jawne
+ustawienie `GPSWISS_FR_ADMIN_RUNNER=queue` wybiera starą ścieżkę. Wtedy wymagany
+jest worker z `docs/gpswiss-fr-worker-deployment.md`, batch do 100 rekordów/45s,
+timeout=540, retry_after=660. Nie uruchamiaj go dla trybu browser.
 
 ## Endpointy
 
-| Metoda | URL | Zachowanie |
-| --- | --- | --- |
-| GET | `/admin/tools/storefront/fr-translations` | Ekran i lokalne odczyty |
-| GET | `/admin/tools/storefront/fr-translations/status` | Status read-only |
-| POST | `/admin/tools/storefront/fr-translations/dry-run` | Podgląd bez API i zapisów katalogu |
-| POST | `/admin/tools/storefront/fr-translations/start` | `dry_run_id` i `confirm`; tylko enqueue |
-| POST | `/admin/tools/storefront/fr-translations/pause` | `run_id`; pauza |
-| POST | `/admin/tools/storefront/fr-translations/resume` | `run_id`; wznowienie |
-| POST | `/admin/tools/storefront/fr-translations/stop` | `run_id`; stop |
+GET strony/status są read-only. POST dry-run zapisuje jedynie raport cache.
+POST start tworzy run i zużywa raport. POST resume/pause/stop przyjmują run_id.
+POST `/admin/tools/storefront/fr-translations/process-next-batch` przyjmuje
+run_id i zwraca status JSON po najwyżej jednym rekordzie; paused/stopped,
+opóźniony retry i zajęty processing lease nie wykonują provider call.
 
-POST wymagają CSRF. Mutacje sprawdzają aktualny run_id; stare karty nie mogą
-sterować nowszym przebiegiem. Krótkie blokady synchronizują zmiany stanu,
-a osobna blokada zapobiega równoległemu wykonywaniu partii.
-
-Błędy historyczne i bieżące pokazują ID, SKU oraz kontrolowane kody/komunikaty.
-Surowe wyjątki i payloady Google nie trafiają do odpowiedzi. Zapis biznesowy
-obejmuje wyłącznie `part_translations` i `category_translations`; dodatkowo
-używany jest cache/kolejka. Checkout, PayU, Stripe, stock, zamówienia i kod
-marketplace/Allegro/eBay/Ovoko pozostają poza zakresem.
-
-## Recovery runu zatrzymanego na 0
-
-Dla runu `39c2e732-e177-4899-9221-8b79b7aa67d8` nie klikaj Start, nie wykonuj
-nowego dry-run i nie klikaj Stop: stopped jest stanem końcowym, którego Resume
-nie obsługuje. Jeśli trzeba wstrzymać koszty podczas naprawy infrastruktury,
-użyj Pauza. Samo uruchomienie workera może wykonać już oczekujący job.
-
-1. Wdróż poprawkę recovery zgodnie ze zwykłą procedurą. Zachowaj istniejący
-   cache; nie wykonuj `cache:clear` ani `optimize:clear`. HTTP i worker muszą
-   korzystać z tego samego trwałego cache i tej samej bazy kolejki.
-2. Administrator serwera sprawdza procesy/Supervisor/systemd i kolejkę jobs
-   dla nazwy `storefront-fr-translations` (uwzględnij DB_QUEUE_TABLE i
-   DB_QUEUE_CONNECTION). Brak procesu konsumującego tę kolejkę wyjaśnia
-   running bez postępu. Nie usuwaj jobów, nie uruchamiaj masowego queue:retry.
-3. Utrzymuj dedykowany proces pod Supervisor/systemd, w katalogu aplikacji:
-   `php artisan queue:work storefront-translations --queue=storefront-fr-translations --timeout=540 --tries=1`.
-   Nie ma wymagania scheduler ani Horizon; database queue wymaga queue:work.
-   Nazwa systemowego service zależy od konfiguracji serwera i nie jest
-   zdefiniowana w repozytorium. Nie używaj domyślnego retry_after=90 dla FR.
-4. Odśwież status, potwierdź wskazany run_id i kliknij **Wznów**. Jeśli użyto
-   Pauza, wznowienie zleci ten sam run. Dla running recovery jest dostępne
-   60 sekund po next_batch (zachowuje opóźnienia retry). Aktywna blokada
-   workera zwróci busy; nie usuwaj jej ręcznie. Po awarii wygasa po 600 s.
-5. Sprawdź ostatni dispatch, aktualny rekord i rosnący processed. Jeżeli po
-   wznowieniu nadal nie ma postępu, sprawdź log dedykowanego workera,
-   failed_jobs i zgodność cache/bazy między HTTP a workerem. Kolejne kliknięcia
-   w ciągu 60 s nie wysyłają kolejnego joba. Status nigdy nie uruchamia API.
-
-`next_batch` oznacza zaplanowany termin, nie dowód istnienia joba ani żywego
-workera. `waiting_for_worker` oznacza zleconą partię bez potwierdzenia jej
-rozpoczęcia; `recovery_available` oznacza możliwość próby redispatchu, z dodatkową
-kontrolą blokady przy kliknięciu. Ostatni dispatch nie dowodzi odbioru przez
-worker. Stare checkpointy bez tego pola są obsługiwane przez fallback next_batch.
-Recovery nie tworzy runu, nie resetuje cursor/liczników i nie wywołuje providera
-w HTTP. Ewentualne duplikaty jobów serializuje istniejąca blokada processing;
-serwis ponownie sprawdza stan tłumaczeń i chroni zapisane/reviewed rekordy.
-
-## Operator bez dostępu do shella
-
-Operator nie uruchamia workera ręcznie. Hosting/deployer instaluje stały proces
-z `deploy/supervisor/storefront-fr-translations.conf.example` i integruje jego
-restart z rzeczywistym deployem według `docs/gpswiss-fr-worker-deployment.md`.
-Samo wdrożenie plików nie tworzy usługi. Do czasu potwierdzenia infrastruktury
-użyj Pauza; następnie Wznów dla istniejącego run_id. Nie klikaj ponownie Start.
+Zakres zapisów biznesowych pozostaje ograniczony do part_translations oraz
+category_translations. Checkout, płatności, zamówienia, marketplace i stock
+pozostają poza tą zmianą.

@@ -83,7 +83,7 @@
 
     <section class="card warning" aria-labelledby="start-title">
         <h2 id="start-title">2. Przetłumacz cały katalog</h2>
-        <p><strong>Tłumaczenie wywołuje Google API i może generować koszt.</strong> Zakres obejmuje produkty i kategorie, tylko brakujące tłumaczenia, po 100 rekordów w partii. Aktualne oraz reviewed są chronione. Rekordy failed i needs_update są pomijane.</p>
+        <p><strong>Tłumaczenie wywołuje Google API i może generować koszt.</strong> Zakres obejmuje produkty i kategorie, tylko brakujące tłumaczenia, po jednym rekordzie na request w trybie panelowym. Aktualne oraz reviewed są chronione. Rekordy failed i needs_update są pomijane.</p>
         <p>Start wymaga nowego dry-run z ostatniej godziny, włączonej flagi i gotowego providera. Jeden raport można wykorzystać do startu tylko raz.</p>
         <form id="start-form">
             <label for="confirm-token">Wpisz dokładnie <code>TRANSLATE-ALL-GPSWISS-FR-CATALOG</code></label>
@@ -98,10 +98,9 @@
             <h2 id="run-title">3. Postęp / ostatni wynik apply <span id="run-status" class="badge">idle</span></h2>
             <button id="refresh" class="button" type="button">Odśwież status</button>
         </div>
-        <p class="muted">Zadanie działa w tle. Zamknięcie lub odświeżenie strony nie przerywa pracy. Status jest pobierany co 3 sekundy; wejście na stronę nie uruchamia ani nie wznawia zadania.</p>
-        <p><strong>Wymagany jest stały worker <code>storefront-fr-translations</code></strong> na połączeniu <code>storefront-translations</code>, zarządzany przez hosting/deployera. Sam deploy plików i przycisk Wznów nie uruchamiają procesu serwerowego.</p>
-        <p>Nie masz dostępu do shella? Zgłoś hostingowi/deployerowi wdrożenie konfiguracji <code>deploy/supervisor/storefront-fr-translations.conf.example</code> według <code>docs/gpswiss-fr-worker-deployment.md</code>. Przekaż run_id i ostatni dispatch z tej strony. Po potwierdzeniu działania workera odśwież status i użyj Wznów dla istniejącego zadania. <strong>Nie klikaj ponownie Start.</strong> Do czasu przygotowania infrastruktury możesz użyć Pauza; Stop kończy zadanie.</p>
-        <p id="worker-state" role="status" class="muted">Status workera: brak potwierdzenia. Panel pokazuje dispatch, nie stan procesu serwerowego.</p>
+        <p>Domyślny tryb panelowy nie wymaga workera ani shella. Start lub Wznów uruchamia kolejne małe partie przez AJAX. <strong>Zostaw stronę otwartą.</strong> Po zamknięciu nie są wysyłane kolejne partie; rozpoczęty rekord może jeszcze zakończyć się na serwerze.</p>
+        <p>Po powrocie odśwież status i kliknij <strong>Wznów</strong> dla istniejącego runu. Nie klikaj ponownie Start. Pauza wstrzymuje wykonanie, Stop kończy run.</p>
+        <p id="worker-state" role="status" class="muted">Tryb wykonania jest wskazany w statusie.</p>
         <label for="run-progress" class="sr-only">Postęp tłumaczenia</label>
         <progress id="run-progress" class="progress" max="100" value="0">0%</progress>
         <p id="progress-text">Brak uruchomionego zadania.</p>
@@ -111,7 +110,7 @@
             @endforeach
         </div>
         <dl class="status-grid">
-            @foreach (['run_id' => 'run_id', 'started_at' => 'Rozpoczęto', 'updated_at' => 'Ostatnia aktualizacja zadania', 'current_type' => 'Aktualny typ', 'current_id' => 'Aktualny rekord', 'next_batch' => 'Następna partia', 'active_timer' => 'Timer w przeglądarce', 'last_dispatch_at' => 'Ostatni dispatch', 'waiting_for_worker' => 'Partia zlecona / oczekuje na worker', 'recovery_available' => 'Wznów może ponownie zlecić wykonanie (jeśli worker nieaktywny)', 'runner_hint' => 'Runner / recovery'] as $key => $label)
+            @foreach (['run_id' => 'run_id', 'runner_mode' => 'Tryb wykonania', 'started_at' => 'Rozpoczęto', 'updated_at' => 'Ostatnia aktualizacja zadania', 'current_type' => 'Aktualny typ', 'current_id' => 'Aktualny rekord', 'next_batch' => 'Następna partia', 'active_timer' => 'Timer w przeglądarce', 'last_dispatch_at' => 'Ostatni dispatch', 'waiting_for_worker' => 'Partia zlecona / oczekuje na worker', 'recovery_available' => 'Dostępne wznowienie istniejącego runu', 'runner_hint' => 'Runner / recovery'] as $key => $label)
                 <div><dt>{{ $label }}</dt><dd id="run-{{ $key }}">—</dd></div>
             @endforeach
         </dl>
@@ -138,6 +137,7 @@
         dryRun: @json(route('admin.tools.storefront.fr-translations.dry-run', [], false)),
         start: @json(route('admin.tools.storefront.fr-translations.start', [], false)),
         pause: @json(route('admin.tools.storefront.fr-translations.pause', [], false)),
+        tick: @json(route('admin.tools.storefront.fr-translations.tick', [], false)),
         resume: @json(route('admin.tools.storefront.fr-translations.resume', [], false)),
         stop: @json(route('admin.tools.storefront.fr-translations.stop', [], false)),
     };
@@ -150,6 +150,8 @@
     let catalog = overview.catalog || {};
     let busy = false;
     let polling = false;
+    let ticking = false;
+    let browserEnabled = false;
     let authorizationLost = false;
     let statusFresh = true;
     let failedExamples = [];
@@ -237,12 +239,12 @@
         run = data || {status: 'idle'};
         const status = run.status || 'idle';
         text('run-status', status);
-        text('worker-state', run.waiting_for_worker
-            ? 'Ostatni dispatch czeka na rozpoczęcie partii przez worker storefront-fr-translations. Jeśli postęp stoi, zgłoś hostingowi/deployerowi sprawdzenie usługi. Wznów zleca job, ale nie uruchamia workera. Nie klikaj ponownie Start.'
-            : (status === 'running' ? 'Partia rozpoczęta lub brak oczekującego dispatchu. Panel nie potwierdza, czy proces workera nadal działa.' : 'Brak partii oczekującej na worker. Przed wznowieniem uzyskaj od hostingu/deployera potwierdzenie działania usługi FR.'));
+        text('worker-state', !run.run_id ? 'Start uruchomi domyślny tryb panelowy; pozostaw stronę otwartą.' : run.runner_mode === 'browser'
+            ? (browserEnabled ? 'Tryb panelowy aktywny — strona zleca pojedyncze rekordy. Worker nie jest wymagany.' : 'Tryb panelowy wstrzymany w tej karcie. Kliknij Wznów, aby kontynuować istniejący run.')
+            : 'Run kolejki. Kliknij Wznów, aby przełączyć istniejący checkpoint na domyślny tryb panelowy; bez ponownego Startu.');
         element('run-status').className = 'badge ' + (status === 'completed' ? 'good' : (['failed', 'stopped_on_error'].includes(status) ? 'bad' : (status === 'running' ? 'pending' : '')));
         for (const key of numberKeys) text(`run-${key}`, count(run[key]));
-        for (const key of ['run_id', 'current_type', 'current_id', 'active_timer', 'waiting_for_worker', 'recovery_available', 'runner_hint']) text(`run-${key}`, run[key] ?? (key === 'active_timer' ? false : null));
+        for (const key of ['run_id', 'runner_mode', 'current_type', 'current_id', 'active_timer', 'waiting_for_worker', 'recovery_available', 'runner_hint']) text(`run-${key}`, key === 'active_timer' ? browserEnabled && run.status === 'running' : run[key]);
         for (const key of ['started_at', 'updated_at', 'next_batch', 'last_dispatch_at']) text(`run-${key}`, date(run[key]));
         const total = count(run.total), processed = count(run.processed);
         const percent = total > 0 ? Math.min(100, Math.round(processed / total * 100)) : (status === 'completed' ? 100 : 0);
@@ -283,7 +285,7 @@
     }
 
     async function refresh(manual = false) {
-        if (polling || busy || authorizationLost) return;
+        if (polling || ticking || busy || authorizationLost) return;
         const requestedVersion = actionVersion;
         polling = true; renderButtons();
         try {
@@ -302,6 +304,7 @@
 
     async function action(name, body) {
         if (busy || authorizationLost) return;
+        if (['pause', 'stop', 'resume', 'start'].includes(name)) browserEnabled = false;
         actionVersion++;
         busy = true; renderButtons();
         element('start-form').setAttribute('aria-busy', 'true');
@@ -317,8 +320,9 @@
             } else {
                 statusFresh = true;
                 if (name === 'start') { if (dryRun) dryRun.consumed = true; element('confirm-token').value = ''; }
+                if (['start', 'resume'].includes(name)) browserEnabled = data.runner_mode === 'browser' && data.status === 'running';
                 renderRun(data);
-                message({start: 'Zadanie uruchomione w tle.', pause: 'Zapisano polecenie pauzy.', resume: 'Wznowiono istniejące zadanie.', stop: 'Zapisano polecenie zatrzymania.'}[name]);
+                message({start: 'Zadanie uruchomione. Zostaw stronę otwartą.', pause: 'Zapisano polecenie pauzy.', resume: 'Wznowiono istniejące zadanie.', stop: 'Zapisano polecenie zatrzymania.'}[name]);
             }
         } catch (error) {
             if (name === 'start') element('confirm-token').value = '';
@@ -332,6 +336,23 @@
         }
     }
 
+    async function tick() {
+        if (!browserEnabled || ticking || polling || busy || authorizationLost || !statusFresh || run.runner_mode !== 'browser' || run.status !== 'running') return;
+        if (run.next_batch && Date.parse(run.next_batch) > Date.now()) return;
+        const requestedVersion = actionVersion;
+        ticking = true;
+        try {
+            const data = await request(urls.tick, {run_id: run.run_id});
+            if (requestedVersion !== actionVersion) return;
+            if (data.status !== 'running') browserEnabled = false;
+            renderRun(data);
+        } catch (error) {
+            browserEnabled = false;
+            statusFresh = false;
+            message(`${error.message} Odśwież status i kliknij Wznów dla istniejącego runu.`, true);
+        } finally { ticking = false; renderButtons(); }
+    }
+
     element('confirm-token').addEventListener('input', renderButtons);
     element('dry-run').addEventListener('click', () => action('dryRun', {}));
     element('refresh').addEventListener('click', () => refresh(true));
@@ -343,7 +364,7 @@
         if (!element(name).disabled && run.run_id) action(name, {run_id: run.run_id});
     });
     renderCatalog(catalog); renderRun(initialStatus);
-    window.setInterval(() => { renderButtons(); refresh(); }, 3000);
+    window.setInterval(async () => { renderButtons(); await refresh(); await tick(); }, 3000);
 })();
 </script>
 </body>

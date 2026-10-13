@@ -37,6 +37,7 @@ class FrenchCatalogTranslationAdminToolTest extends TestCase
         parent::setUp();
         config([
             'storefront-translations.fr_enabled' => true,
+            'storefront-translations.admin_runner' => 'queue',
             'services.google_translate.enabled' => true,
             'services.google_translate.mode' => 'dry_run',
             'services.google_translate.key' => 'admin-test-key-never-exposed',
@@ -157,7 +158,7 @@ class FrenchCatalogTranslationAdminToolTest extends TestCase
         $this->actingAs($user)->get(self::URL)->assertOk();
         $this->preview($user);
         $this->getJson(self::URL.'/status')->assertOk()->assertJsonPath('status', 'idle');
-        foreach (['index', 'status', 'dry-run', 'start', 'pause', 'resume', 'stop'] as $action) {
+        foreach (['index', 'status', 'dry-run', 'start', 'pause', 'resume', 'stop', 'tick'] as $action) {
             $route = app('router')->getRoutes()->getByName('admin.tools.storefront.fr-translations.'.$action);
             $this->assertNotNull($route);
             $this->assertContains('admin.panel', $route->gatherMiddleware());
@@ -178,7 +179,7 @@ class FrenchCatalogTranslationAdminToolTest extends TestCase
         foreach (['', '/status'] as $path) {
             $this->getJson(self::URL.$path)->assertForbidden();
         }
-        foreach (['dry-run', 'start', 'pause', 'resume', 'stop'] as $action) {
+        foreach (['dry-run', 'start', 'pause', 'resume', 'stop', 'process-next-batch'] as $action) {
             $this->postJson(self::URL.'/'.$action, [
                 'dry_run_id' => 'untrusted', 'confirm' => self::CONFIRM, 'run_id' => 'untrusted',
             ])->assertForbidden();
@@ -192,7 +193,7 @@ class FrenchCatalogTranslationAdminToolTest extends TestCase
         foreach (['', '/status'] as $path) {
             $this->getJson(self::URL.$path)->assertUnauthorized();
         }
-        foreach (['dry-run', 'start', 'pause', 'resume', 'stop'] as $action) {
+        foreach (['dry-run', 'start', 'pause', 'resume', 'stop', 'process-next-batch'] as $action) {
             $this->postJson(self::URL.'/'.$action)->assertUnauthorized();
         }
         Http::assertNothingSent();
@@ -211,7 +212,7 @@ class FrenchCatalogTranslationAdminToolTest extends TestCase
         foreach (['', '/status'] as $path) {
             $this->getJson('https://'.$host.self::URL.$path)->assertForbidden();
         }
-        foreach (['dry-run', 'start', 'pause', 'resume', 'stop'] as $action) {
+        foreach (['dry-run', 'start', 'pause', 'resume', 'stop', 'process-next-batch'] as $action) {
             $this->postJson('https://'.$host.self::URL.'/'.$action, [
                 'dry_run_id' => 'untrusted', 'confirm' => self::CONFIRM, 'run_id' => 'untrusted',
             ])->assertForbidden();

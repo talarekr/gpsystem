@@ -1,4 +1,8 @@
-# Stały worker GPSwiss FR — wdrożenie bez shella operatora
+# Opcjonalny worker GPSwiss FR — tylko tryb queue
+
+Domyślny runner panelowy browser nie wymaga tej infrastruktury. Ta instrukcja
+dotyczy wyłącznie jawnego GPSWISS_FR_ADMIN_RUNNER=queue. Dla operatora bez
+shella użyj docs/gpswiss-fr-translations-admin-tool.md i Wznów w panelu.
 
 ## Ustalenia z repo
 

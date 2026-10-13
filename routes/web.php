@@ -315,6 +315,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
             Route::get('/status', [FrenchCatalogTranslationController::class, 'status'])->name('status');
             Route::post('/dry-run', [FrenchCatalogTranslationController::class, 'dryRun'])->name('dry-run');
             Route::post('/start', [FrenchCatalogTranslationController::class, 'start'])->name('start');
+            Route::post('/process-next-batch', [FrenchCatalogTranslationController::class, 'tick'])->name('tick');
             Route::post('/pause', [FrenchCatalogTranslationController::class, 'pause'])->name('pause');
             Route::post('/resume', [FrenchCatalogTranslationController::class, 'resume'])->name('resume');
             Route::post('/stop', [FrenchCatalogTranslationController::class, 'stop'])->name('stop');

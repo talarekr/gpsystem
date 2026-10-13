@@ -52,6 +52,13 @@ class FrenchCatalogTranslationController extends Controller
         ));
     }
 
+    public function tick(Request $request, FrenchCatalogTranslationAdminRunner $runner): JsonResponse
+    {
+        $input = $request->validate(['run_id' => ['required', 'string', 'max:128']]);
+
+        return $this->respond($runner->tick($input['run_id']));
+    }
+
     public function pause(Request $request, FrenchCatalogTranslationAdminRunner $runner): JsonResponse
     {
         return $this->control($request, $runner, 'pause');
