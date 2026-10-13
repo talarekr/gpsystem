@@ -283,6 +283,68 @@ class FrenchCatalogTranslationBrowserRunnerTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_interrupted_browser_lease_expires_and_resume_recovers_persisted_result_once(): void
+    {
+        $this->part('BEFORE-LEASE');
+        $pendingPart = $this->part('DURING-LEASE');
+        $id = $this->start();
+        $this->tick($id)->assertJsonPath('processed', 1);
+        $lock = Cache::lock(Runner::PROCESSING_LOCK, Runner::PROCESSING_LEASE_SECONDS);
+        $this->assertTrue($lock->get());
+        $state = Cache::get(Runner::KEY);
+        $state['_lease'] = [
+            'owner' => hash('sha256', $lock->owner()), 'started_at' => now()->toISOString(),
+            'expires_at' => now()->addSeconds(Runner::PROCESSING_LEASE_SECONDS)->toISOString(),
+            'last_heartbeat' => now()->toISOString(), 'released_at' => null,
+        ];
+        $state['_pending'] = [
+            'type' => 'parts', 'id' => $pendingPart->id, 'sku' => $pendingPart->sku, 'retry_attempt' => 0,
+            'retry_at' => null, 'source_hash' => $pendingPart->translationSourceHash(), 'in_flight' => true,
+            'baseline_attempts' => 0, 'chars_translated' => 0, 'estimated_characters' => mb_strlen($pendingPart->name),
+        ];
+        app(FrenchCatalogTranslationRunStore::class)->save($state);
+        $pendingPart->translations()->create([
+            'locale' => 'fr', 'name' => 'Persisted', 'status' => 'translated', 'attempts' => 1,
+            'source_hash' => $pendingPart->translationSourceHash(),
+        ]);
+        $status = $this->getJson(self::URL.'/status')->assertJsonPath('lease_state', 'active')
+            ->assertJsonPath('recovery_available', false)->assertJsonPath('runner_mode', 'browser');
+        $this->assertNotNull($status->json('lease.last_heartbeat'));
+        $this->postJson(self::URL.'/resume', ['run_id' => $id])->assertStatus(409)
+            ->assertJsonPath('reason', 'busy')->assertDontSee('Worker');
+        $this->tick($id)->assertJsonPath('processed', 1);
+        $this->travel(Runner::PROCESSING_LEASE_SECONDS + 1)->seconds();
+        $this->getJson(self::URL.'/status')->assertJsonPath('lease_state', 'expired')
+            ->assertJsonPath('recovery_available', true)->assertSee('Poprzednia partia');
+        $this->postJson(self::URL.'/resume', ['run_id' => $id])->assertOk()->assertJsonPath('run_id', $id);
+        $this->tick($id)->assertJsonPath('processed', 2)->assertJsonPath('translated', 2);
+        $this->tick($id)->assertJsonPath('status', 'completed');
+        $this->assertSame(1, $pendingPart->translations()->first()->attempts);
+        Http::assertSentCount(1);
+        $this->assertDatabaseCount('storefront_fr_translation_runs', 1);
+    }
+
+    public function test_browser_fence_stops_further_provider_calls_after_lease_expiry(): void
+    {
+        $part = $this->part('LONG-REQUEST');
+        $part->update(['description' => 'Additional field']);
+        $id = $this->start();
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        Http::fake(['translation.googleapis.com/*' => function () {
+            $this->getJson(self::URL.'/status')->assertJsonPath('lease_state', 'active');
+            $this->travel(Runner::PROCESSING_LEASE_SECONDS + 1)->seconds();
+
+            return Http::response(['data' => ['translations' => [['translatedText' => 'Moteur']]]]);
+        }]);
+        $this->tick($id)->assertJsonPath('status', 'stopped_on_error')->assertJsonPath('processed', 1);
+        $this->assertSame('interrupted_attempt', $part->translations()->first()->error_code);
+        $this->assertSame('released', app(Runner::class)->status()['lease_state']);
+        $this->postJson(self::URL.'/resume', ['run_id' => $id])->assertOk();
+        $this->tick($id)->assertJsonPath('status', 'completed');
+        Http::assertSentCount(1);
+    }
+
     private function part(string $sku): Part
     {
         return Part::create([
