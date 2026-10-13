@@ -8,9 +8,11 @@ use App\Models\Part;
 use App\Models\User;
 use App\Services\Storefront\FrenchCatalogTranslationAdminRunner as Runner;
 use App\Services\Storefront\FrenchCatalogTranslationPreviewService;
+use App\Services\Storefront\FrenchCatalogTranslationRunStore;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Testing\TestResponse;
@@ -125,6 +127,7 @@ class FrenchCatalogTranslationBrowserRunnerTest extends TestCase
         $this->part('LEGACY');
         $id = $this->start();
         $before = Cache::get(Runner::KEY);
+        DB::table(FrenchCatalogTranslationRunStore::TABLE)->delete();
         unset($before['runner_mode']);
         Cache::forever(Runner::KEY, $before);
         $this->postJson(self::URL.'/resume', ['run_id' => $id])->assertOk()
@@ -162,6 +165,121 @@ class FrenchCatalogTranslationBrowserRunnerTest extends TestCase
         $this->postJson(self::URL.'/process-next-batch', ['run_id' => 'stale'])->assertStatus(409);
         $user = User::create(['name' => 'Viewer', 'email' => 'viewer@example.test', 'password' => 'password']);
         $this->actingAs($user)->postJson(self::URL.'/process-next-batch', ['run_id' => $id])->assertForbidden();
+        Http::assertNothingSent();
+    }
+
+    public function test_lost_cache_pointer_and_new_session_recover_same_incomplete_browser_run(): void
+    {
+        $this->part('DURABLE-FIRST');
+        $this->part('DURABLE-SECOND');
+        $this->part('DURABLE-THIRD');
+        $id = $this->start();
+        $this->tick($id)->assertJsonPath('processed', 1);
+        $this->tick($id)->assertJsonPath('processed', 2);
+        $before = Cache::get(Runner::KEY);
+        Cache::forget(Runner::KEY);
+        $this->flushSession();
+        auth()->forgetGuards();
+        $this->getJson(self::URL.'/status')->assertUnauthorized();
+        $this->actingAs($this->actor);
+        $this->getJson(self::URL.'/status')->assertOk()
+            ->assertJsonPath('run_id', $id)->assertJsonPath('processed', 2)
+            ->assertJsonPath('runner_mode', 'browser')->assertJsonPath('recovery_available', true)
+            ->assertJsonPath('checkpoint_source', 'database');
+        $this->assertNull(Cache::get(Runner::KEY)); // GET remains read-only.
+        $preview = app(FrenchCatalogTranslationPreviewService::class)->dryRun($this->actor->id);
+        $this->postJson(self::URL.'/start', [
+            'dry_run_id' => $preview['dry_run_id'], 'confirm' => Runner::CONFIRM,
+        ])->assertStatus(409)->assertJsonPath('reason', 'active_run');
+        $this->get(self::URL)->assertOk()->assertSee('Znaleziono niedokończony run');
+        $this->postJson(self::URL.'/resume', ['run_id' => $id])->assertOk()->assertJsonPath('run_id', $id);
+        $this->assertSame($before['_cursor'], Cache::get(Runner::KEY)['_cursor']);
+        $this->tick($id)->assertJsonPath('processed', 3)->assertJsonPath('translated', 3);
+        Http::assertSentCount(3);
+        $this->assertDatabaseCount('storefront_fr_translation_runs', 1);
+        Queue::assertNothingPushed();
+    }
+
+    public function test_database_checkpoint_wins_over_stale_cache_after_failure(): void
+    {
+        $this->part('STALE');
+        $id = $this->start();
+        $stale = Cache::get(Runner::KEY);
+        $this->tick($id)->assertJsonPath('processed', 1);
+        app(Runner::class)->failed($id, true);
+        Cache::forever(Runner::KEY, $stale);
+        $this->getJson(self::URL.'/status')->assertJsonPath('status', 'failed')
+            ->assertJsonPath('processed', 1)->assertJsonPath('recovery_available', true);
+        $this->postJson(self::URL.'/resume', ['run_id' => $id])->assertOk()->assertJsonPath('runner_mode', 'browser');
+        $this->tick($id)->assertJsonPath('status', 'completed')->assertJsonPath('processed', 1);
+        Http::assertSentCount(1);
+    }
+
+    public function test_terminal_run_is_not_resurrected_and_new_run_skips_saved_translations(): void
+    {
+        $first = $this->part('SAVED');
+        $second = $this->part('REVIEWED-LATER');
+        $this->part('STILL-MISSING');
+        $id = $this->start();
+        $this->tick($id)->assertJsonPath('processed', 1);
+        $second->translations()->create([
+            'locale' => 'fr', 'name' => 'Reviewed', 'status' => 'reviewed',
+            'attempts' => 1, 'source_hash' => $second->translationSourceHash(),
+        ]);
+        $this->postJson(self::URL.'/stop', ['run_id' => $id])->assertOk();
+        Cache::forget(Runner::KEY);
+        $this->getJson(self::URL.'/status')->assertJsonPath('status', 'stopped')->assertJsonPath('recovery_available', false);
+        $this->get(self::URL)->assertSee('Aktualne translated/reviewed nie będą tłumaczone ponownie');
+        $new = $this->start();
+        $this->assertNotSame($id, $new);
+        $this->tick($new)->assertJsonPath('skipped', 1);
+        $this->tick($new)->assertJsonPath('skipped', 2);
+        $this->tick($new)->assertJsonPath('translated', 1);
+        $this->tick($new)->assertJsonPath('status', 'completed');
+        Cache::forget(Runner::KEY);
+        $this->getJson(self::URL.'/status')->assertJsonPath('run_id', $new)->assertJsonPath('status', 'completed');
+        $this->assertSame(1, $first->translations()->first()->attempts);
+        $this->assertSame('reviewed', $second->translations()->first()->status);
+        Http::assertSentCount(2);
+    }
+
+    public function test_no_checkpoint_uses_browser_and_explains_safe_new_start(): void
+    {
+        $part = $this->part('PREVIOUSLY-SAVED');
+        $part->translations()->create([
+            'locale' => 'fr', 'name' => 'Moteur', 'status' => 'translated',
+            'attempts' => 1, 'source_hash' => $part->translationSourceHash(),
+        ]);
+        Cache::forget(Runner::KEY);
+        $this->getJson(self::URL.'/status')->assertJsonPath('run_id', null)
+            ->assertJsonPath('runner_mode', 'browser')->assertJsonPath('checkpoint_source', 'none');
+        $this->get(self::URL)->assertOk()->assertSee('Brak checkpointu w bazie/cache')
+            ->assertSee('Możesz wykonać nowy dry-run i Start');
+        $id = $this->start();
+        $this->tick($id)->assertJsonPath('translated', 0)->assertJsonPath('skipped', 1);
+        Http::assertNothingSent();
+    }
+
+    public function test_durable_pending_success_is_recovered_without_repeating_provider_call(): void
+    {
+        $part = $this->part('PERSISTED-BEFORE-CRASH');
+        $id = $this->start();
+        $state = Cache::get(Runner::KEY);
+        $state['_pending'] = [
+            'type' => 'parts', 'id' => $part->id, 'sku' => $part->sku, 'retry_attempt' => 0, 'retry_at' => null,
+            'source_hash' => $part->translationSourceHash(), 'in_flight' => true, 'baseline_attempts' => 0,
+            'chars_translated' => 0, 'estimated_characters' => mb_strlen($part->name),
+        ];
+        app(FrenchCatalogTranslationRunStore::class)->save($state);
+        $part->translations()->create([
+            'locale' => 'fr', 'name' => 'Moteur', 'status' => 'translated',
+            'attempts' => 1, 'source_hash' => $part->translationSourceHash(),
+        ]);
+        Cache::forget(Runner::KEY);
+        $this->postJson(self::URL.'/resume', ['run_id' => $id])->assertOk();
+        $this->tick($id)->assertJsonPath('processed', 1)->assertJsonPath('translated', 1);
+        $this->tick($id)->assertJsonPath('status', 'completed');
+        $this->assertSame(1, $part->translations()->first()->attempts);
         Http::assertNothingSent();
     }
 
