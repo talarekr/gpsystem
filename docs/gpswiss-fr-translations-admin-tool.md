@@ -141,3 +141,11 @@ worker. Stare checkpointy bez tego pola są obsługiwane przez fallback next_bat
 Recovery nie tworzy runu, nie resetuje cursor/liczników i nie wywołuje providera
 w HTTP. Ewentualne duplikaty jobów serializuje istniejąca blokada processing;
 serwis ponownie sprawdza stan tłumaczeń i chroni zapisane/reviewed rekordy.
+
+## Operator bez dostępu do shella
+
+Operator nie uruchamia workera ręcznie. Hosting/deployer instaluje stały proces
+z `deploy/supervisor/storefront-fr-translations.conf.example` i integruje jego
+restart z rzeczywistym deployem według `docs/gpswiss-fr-worker-deployment.md`.
+Samo wdrożenie plików nie tworzy usługi. Do czasu potwierdzenia infrastruktury
+użyj Pauza; następnie Wznów dla istniejącego run_id. Nie klikaj ponownie Start.

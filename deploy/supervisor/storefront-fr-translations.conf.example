@@ -1,0 +1,19 @@
+; Installed once by hosting/deployer, outside the public web directory.
+; Replace all __...__ placeholders. See docs/gpswiss-fr-worker-deployment.md.
+[program:gpswiss-storefront-fr-translations]
+directory=__APP_CURRENT_ABSOLUTE_PATH__
+command=__PHP_CLI_ABSOLUTE_PATH__ __APP_CURRENT_ABSOLUTE_PATH__/artisan queue:work storefront-translations --queue=storefront-fr-translations --timeout=540 --tries=1 --sleep=3 --no-interaction
+user=__APP_OS_USER__
+numprocs=1
+autostart=true
+autorestart=true
+startsecs=5
+startretries=3
+stopsignal=TERM
+stopwaitsecs=700
+stopasgroup=true
+killasgroup=true
+redirect_stderr=true
+stdout_logfile=__APP_SHARED_STORAGE_ABSOLUTE_PATH__/logs/storefront-fr-worker.log
+stdout_logfile_maxbytes=10MB
+stdout_logfile_backups=5

@@ -536,7 +536,7 @@ class FrenchCatalogTranslationAdminRunner
             'remaining' => 0, 'chars_translated' => 0, 'current_type' => null, 'current_id' => null,
             'last_success' => null, 'last_error' => null, 'failed_examples' => [], 'next_batch' => null,
             'last_dispatch_at' => null, 'waiting_for_worker' => false, 'recovery_available' => false,
-            'runner_hint' => 'queue:work storefront-translations --queue=storefront-fr-translations --timeout=540 --tries=1; Wznów odzyskuje ten sam run po 60 s bez rozpoczęcia partii. Aktywna blokada workera wstrzymuje recovery.',
+            'runner_hint' => 'Wymagany stały worker storefront-fr-translations (połączenie storefront-translations). Bez shella: zgłoś hostingowi/deployerowi konfigurację deploy/supervisor i docs/gpswiss-fr-worker-deployment.md. Wznów zleca ten sam run po 60 s; nie uruchamia workera. Nie klikaj ponownie Start.',
             'active_timer' => false, 'batch_size' => self::BATCH_SIZE];
     }
 
