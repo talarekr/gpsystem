@@ -6,6 +6,7 @@ use App\Models\Order;
 use App\Models\Part;
 use App\Services\Storefront\CartService;
 use App\Services\Storefront\FrenchCheckoutService;
+use App\Services\Storefront\FrenchOrderNotifications;
 use App\Support\StorefrontContext;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Http\Request;
@@ -18,7 +19,7 @@ use Throwable;
 
 class StripeFrCheckout
 {
-    public function __construct(private FrenchCheckoutService $drafts, private StripeFrGateway $stripe, private CartService $cart) {}
+    public function __construct(private FrenchCheckoutService $drafts, private StripeFrGateway $stripe, private CartService $cart, private FrenchOrderNotifications $notifications) {}
 
     public function start(Request $request): string
     {
@@ -97,6 +98,8 @@ class StripeFrCheckout
                     $this->unavailable();
                 }
                 if ($attempt->checkout_url) {
+                    $this->notifications->awaiting($order);
+
                     return $attempt->checkout_url;
                 }
                 try {
@@ -126,6 +129,7 @@ class StripeFrCheckout
                     // Preserve attempt + immutable payload/idempotency key after uncertain network errors.
                     $this->unavailable('Le paiement n’a pas pu être confirmé. Réessayez depuis cette page; aucune nouvelle tentative indépendante ne sera créée.');
                 }
+                $this->notifications->awaiting($order);
                 $this->cart->clear();
 
                 return $session['url'];

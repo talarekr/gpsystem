@@ -224,8 +224,12 @@ class CheckoutController extends Controller
         return redirect()->to(URL::temporarySignedRoute('storefront.checkout.thank-you', now()->addDays(7), ['order' => $order->id]))->with('success', __('storefront.order_accepted'));
     }
 
-    public function thankYou(Order $order): View
+    public function thankYou(Order $order): View|Response
     {
+        if (StorefrontContext::isFrench(request()) || $order->isFrenchStorefront()) {
+            return app(FrenchOrderController::class)->show(request(), $order);
+        }
+
         return view('storefront.checkout.thank-you', [
             'order' => $order->load('items'),
             'breadcrumbs' => [['label' => __('storefront.home'), 'url' => route('storefront.home')], ['label' => __('storefront.thank_you')]],

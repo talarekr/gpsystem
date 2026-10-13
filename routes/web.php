@@ -275,6 +275,7 @@ foreach (['gpswiss.fr' => 'storefront.fr.', 'www.gpswiss.fr' => 'storefront.fr-w
         Route::get('/commande/stripe/retour/{order}', [\App\Http\Controllers\Payments\StripeFrController::class, 'returned'])->middleware('signed')->name('stripe.return');
         Route::get('/commande/stripe/annulation/{order}', [\App\Http\Controllers\Payments\StripeFrController::class, 'returned'])->middleware('signed')->name('stripe.cancel');
         Route::post('/commande/apercu', [CheckoutController::class, 'frenchPreview'])->name('checkout.preview');
+        Route::get('/commande/suivi/{order}', [\App\Http\Controllers\Storefront\FrenchOrderController::class, 'show'])->middleware('signed')->name('order');
     });
 }
 
