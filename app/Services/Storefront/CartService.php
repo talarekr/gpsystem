@@ -3,6 +3,7 @@
 namespace App\Services\Storefront;
 
 use App\Models\Part;
+use App\Support\StorefrontContext;
 use Illuminate\Support\Collection;
 
 class CartService
@@ -60,7 +61,7 @@ class CartService
         $freshPart = $this->visiblePart((int) $part->id);
 
         if (! $freshPart) {
-            return ['status' => 'error', 'message' => 'Nie można dodać produktu do koszyka.'];
+            return ['status' => 'error', 'message' => StorefrontContext::isFrench(request()) ? 'Cet article ne peut pas être ajouté au panier.' : 'Nie można dodać produktu do koszyka.'];
         }
 
         $quantity = max(1, $quantity);
@@ -75,10 +76,10 @@ class CartService
         session([self::SESSION_KEY => $items]);
 
         if ($finalQuantity < $targetQuantity) {
-            return ['status' => 'warning', 'message' => 'Produkt jest już w koszyku w maksymalnej dostępnej ilości.'];
+            return ['status' => 'warning', 'message' => StorefrontContext::isFrench(request()) ? 'La quantité maximale disponible de cet article est déjà dans le panier.' : 'Produkt jest już w koszyku w maksymalnej dostępnej ilości.'];
         }
 
-        return ['status' => 'success', 'message' => 'Dodano produkt do koszyka.'];
+        return ['status' => 'success', 'message' => StorefrontContext::isFrench(request()) ? 'Article ajouté au panier.' : 'Dodano produkt do koszyka.'];
     }
 
     public function update(int $partId, int $quantity): array
@@ -87,7 +88,7 @@ class CartService
         $key = (string) $partId;
 
         if (! isset($items[$key])) {
-            return ['status' => 'warning', 'message' => 'Produkt nie znajduje się w koszyku.'];
+            return ['status' => 'warning', 'message' => StorefrontContext::isFrench(request()) ? 'Cet article ne se trouve pas dans le panier.' : 'Produkt nie znajduje się w koszyku.'];
         }
 
         $freshPart = $this->visiblePart($partId);
@@ -96,14 +97,14 @@ class CartService
             unset($items[$key]);
             session([self::SESSION_KEY => $items]);
 
-            return ['status' => 'warning', 'message' => 'Produkt nie jest już dostępny i został usunięty z koszyka.'];
+            return ['status' => 'warning', 'message' => StorefrontContext::isFrench(request()) ? 'Cet article n’est plus disponible et a été retiré du panier.' : 'Produkt nie jest już dostępny i został usunięty z koszyka.'];
         }
 
         $quantity = min(max(1, $quantity), max(1, (int) $freshPart->quantity));
         $items[$key] = $this->snapshot($freshPart, $quantity, $items[$key]['added_at'] ?? now()->toIso8601String());
         session([self::SESSION_KEY => $items]);
 
-        return ['status' => 'success', 'message' => 'Zaktualizowano koszyk.'];
+        return ['status' => 'success', 'message' => StorefrontContext::isFrench(request()) ? 'Panier mis à jour.' : 'Zaktualizowano koszyk.'];
     }
 
     public function remove(int $partId): void

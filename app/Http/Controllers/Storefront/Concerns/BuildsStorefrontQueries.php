@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Storefront\Concerns;
 
 use App\Models\Part;
+use App\Services\Storefront\FrenchCatalogSearch;
+use App\Support\StorefrontContext;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
@@ -15,7 +17,9 @@ trait BuildsStorefrontQueries
             ->with(['images', 'category', 'car'])
             ->withStorefrontTranslations($request->attributes->get('storefront_locale', 'pl'))
             ->storefrontVisible()
-            ->searchStorefront($request->string('q')->toString())
+            ->when(StorefrontContext::isFrench($request),
+                fn (Builder $query) => app(FrenchCatalogSearch::class)->apply($query, $request->string('q')->toString()),
+                fn (Builder $query) => $query->searchStorefront($request->string('q')->toString()))
             ->partNumberSearch($request->string('part_number')->toString())
             ->priceBetween(
                 $request->input('price_from', $request->input('price_min')),
@@ -49,9 +53,15 @@ trait BuildsStorefrontQueries
 
         $category = trim($request->string('category')->toString());
         if ($category !== '') {
-            $query->whereHas('category', function (Builder $categoryQuery) use ($category): void {
-                if (Schema::hasColumn('part_categories', 'is_visible')) $categoryQuery->where('is_visible', true);
-                $categoryQuery->where(fn (Builder $inner) => $inner->where('slug', $category)->orWhere('name', 'like', '%'.$category.'%'));
+            $query->whereHas('category', function (Builder $categoryQuery) use ($category, $request): void {
+                if (Schema::hasColumn('part_categories', 'is_visible')) {
+                    $categoryQuery->where('is_visible', true);
+                }
+                if (StorefrontContext::isFrench($request)) {
+                    app(FrenchCatalogSearch::class)->categoryFilter($categoryQuery, $category);
+                } else {
+                    $categoryQuery->where(fn (Builder $inner) => $inner->where('slug', $category)->orWhere('name', 'like', '%'.$category.'%'));
+                }
             });
         }
 

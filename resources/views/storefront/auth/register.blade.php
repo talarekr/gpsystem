@@ -5,6 +5,7 @@
 <p class="sf-account-type">{{ __('storefront.account_type') }}</p>
 <form method="post" action="{{ route('storefront.register.store') }}" class="sf-auth-form sf-auth-grid">@csrf
 @foreach(['tax_id'=>__('storefront.tax_id_optional'),'company_name'=>__('storefront.company_name_optional'),'first_name'=>__('storefront.first_name'),'last_name'=>__('storefront.last_name'),'phone'=>__('storefront.phone'),'email'=>__('storefront.email')] as $name=>$label)
+@continue($name === 'tax_id' && \App\Support\StorefrontContext::isFrench(request()))
 <label>{{ $label }}<input type="{{ $name==='email'?'email':'text' }}" name="{{ $name }}" value="{{ old($name) }}" {{ in_array($name,['first_name','last_name','phone','email'])?'required':'' }}>@error($name)<small>{{ $message }}</small>@enderror</label>
 @endforeach
 <label>{{ __('storefront.password') }}<input type="password" name="password" required>@error('password')<small>{{ $message }}</small>@enderror</label><label>{{ __('storefront.confirm_password') }}<input type="password" name="password_confirmation" required></label>

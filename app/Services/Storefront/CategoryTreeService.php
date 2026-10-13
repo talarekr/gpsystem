@@ -13,9 +13,12 @@ use Illuminate\Support\Str;
 class CategoryTreeService
 {
     public const CACHE_KEY = 'storefront.category_tree.v2';
+
     public const CACHE_TTL_SECONDS = 600;
 
     private ?array $frenchTree = null;
+
+    private ?bool $hasVisibilityColumn = null;
 
     /** @return EloquentCollection<int, PartCategory> */
     public function roots(): EloquentCollection
@@ -58,7 +61,7 @@ class CategoryTreeService
             $byParent = $categories->groupBy(fn (PartCategory $category): int => (int) ($category->parent_id ?? 0));
 
             $attachChildren = function (PartCategory $category) use (&$attachChildren, $byParent, $productCounts): PartCategory {
-                $children = $byParent->get((int) $category->id, new EloquentCollection())
+                $children = $byParent->get((int) $category->id, new EloquentCollection)
                     ->sortBy([['sort_order', 'asc'], ['name', 'asc']])
                     ->values();
 
@@ -78,7 +81,7 @@ class CategoryTreeService
                 return $category;
             };
 
-            $roots = $byParent->get(0, new EloquentCollection())
+            $roots = $byParent->get(0, new EloquentCollection)
                 ->sortBy([['sort_order', 'asc'], ['name', 'asc']])
                 ->values();
 
@@ -120,9 +123,16 @@ class CategoryTreeService
         $path = trim($path, '/');
         $lastSegment = collect(explode('/', $path))->filter()->last();
 
-        return $this->all()->first(function (PartCategory $category) use ($path, $lastSegment): bool {
-            if (Schema::hasColumn('part_categories', 'is_visible') && ! (bool) $category->is_visible) return false;
-            if ($category->isSystemUncategorized()) return false;
+        $hasVisibilityColumn = $this->hasVisibilityColumn ??= Schema::hasColumn('part_categories', 'is_visible');
+
+        return $this->all()->first(function (PartCategory $category) use ($path, $lastSegment, $hasVisibilityColumn): bool {
+            if ($hasVisibilityColumn && ! (bool) $category->is_visible) {
+                return false;
+            }
+            if ($category->isSystemUncategorized()) {
+                return false;
+            }
+
             return $category->full_slug_path === $path
                 || $category->category_path === $path
                 || $category->slug === $path

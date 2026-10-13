@@ -52,7 +52,7 @@ class CartController extends Controller
             'quantities.*' => ['required', 'integer', 'min:1'],
         ]);
 
-        $lastResult = ['status' => 'success', 'message' => 'Zaktualizowano koszyk.'];
+        $lastResult = ['status' => 'success', 'message' => StorefrontContext::isFrench($request) ? 'Panier mis à jour.' : 'Zaktualizowano koszyk.'];
 
         foreach ($validated['quantities'] as $partId => $quantity) {
             $lastResult = $this->cart->update((int) $partId, (int) $quantity);

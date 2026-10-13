@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Models\User;
+use App\Support\StorefrontContext;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -47,6 +48,10 @@ class FrontendMaintenanceMode
 
         if ($this->isAlwaysAllowed($request) || $this->isAdminUser($request)) {
             return $next($request);
+        }
+
+        if (StorefrontContext::isFrench($request)) {
+            return response()->view('storefront.fr.error', ['status' => 503], 503)->header('Retry-After', '300');
         }
 
         return response()->view('maintenance.frontend', [
