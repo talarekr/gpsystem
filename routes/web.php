@@ -266,6 +266,15 @@ Route::get('/wp-content/uploads/ebay-template/{filename}', $serveEbayTemplateAss
 Route::get('/sklep', fn (Request $request) => redirect()->route('storefront.catalog', $request->query(), 301))->name('storefront.shop.legacy');
 Route::get('/czesci', [CatalogController::class, 'index'])->name('storefront.catalog');
 Route::get('/szukaj', [SearchController::class, 'index'])->name('storefront.search');
+// French public aliases use distinct names so PL route generation is unchanged.
+foreach (['gpswiss.fr' => 'storefront.fr.', 'www.gpswiss.fr' => 'storefront.fr-www.'] as $host => $prefix) {
+    Route::domain($host)->name($prefix)->group(function (): void {
+        Route::get('/panier', [CartController::class, 'index'])->name('cart.index');
+        Route::get('/commande', [CheckoutController::class, 'show'])->name('checkout.show');
+        Route::post('/commande', [CheckoutController::class, 'store'])->name('checkout.store');
+    });
+}
+
 Route::get('/koszyk', [CartController::class, 'index'])->name('storefront.cart.index');
 Route::post('/jezyk', LocaleController::class)->name('storefront.locale');
 

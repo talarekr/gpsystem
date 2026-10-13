@@ -43,7 +43,7 @@
             @endif
         </div>
     </details>
-    <a class="sf-cart sf-cart--icon" href="{{ route('storefront.cart.index') }}" aria-label="{{ __('storefront.cart') }}"><span aria-hidden="true">🛒</span><b>{{ $storefrontCartCount ?? 0 }}</b></a>
+    <a class="sf-cart sf-cart--icon" href="{{ route(\App\Support\StorefrontContext::routeName(request(), 'cart.index')) }}" aria-label="{{ __('storefront.cart') }}"><span aria-hidden="true">🛒</span><b>{{ $storefrontCartCount ?? 0 }}</b></a>
 </div>
 @php
     $storefrontMainLinks = [

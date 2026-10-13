@@ -39,7 +39,7 @@ class CheckoutController extends Controller
         // Must precede cart access, validation, writes and every provider call.
         // No flag can enable FR until a dedicated payment flow is implemented.
         if (StorefrontContext::isFrench($request)) {
-            return redirect()->route('storefront.checkout.show')->with('warning',
+            return redirect()->route(StorefrontContext::routeName($request, 'checkout.show'))->with('warning',
                 'Les paiements de la boutique française sont temporairement indisponibles. Aucune commande n’a été créée.');
         }
         $items = $this->cart->items();

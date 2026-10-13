@@ -9,7 +9,7 @@
     @include('storefront.partials.breadcrumbs')
     <div class="sf-cart-head">
         <h1>{{ __('storefront.checkout') }}</h1>
-        <a class="sf-btn sf-btn--outline" href="{{ route('storefront.cart.index') }}">{{ __('storefront.back_to_cart') }}</a>
+        <a class="sf-btn sf-btn--outline" href="{{ route(\App\Support\StorefrontContext::routeName(request(), 'cart.index')) }}">{{ __('storefront.back_to_cart') }}</a>
     </div>
 
     <form method="post" action="{{ route('storefront.checkout.store') }}" class="sf-checkout-layout">

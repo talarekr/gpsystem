@@ -22,6 +22,12 @@ final class StorefrontContext
         return (self::profile($request)['storefront_code'] ?? null) === 'gpswiss_fr';
     }
 
+    /** Only cart/checkout entry links are localized in this stage. */
+    public static function routeName(Request $request, string $suffix): string
+    {
+        return (self::isFrench($request) ? 'storefront.fr.' : 'storefront.').$suffix;
+    }
+
     public static function orderMetadata(Request $request): array
     {
         $profile = self::profile($request);
