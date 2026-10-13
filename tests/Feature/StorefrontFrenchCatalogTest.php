@@ -43,7 +43,8 @@ class StorefrontFrenchCatalogTest extends TestCase
                 ->assertViewHas('part', fn (Part $rendered): bool => $rendered->id === $part->id)
                 ->assertSee('Obecny opis produktu')
                 ->assertSee('1 234,00 PLN')
-                ->assertSee('https://'.$host.'/regulamin');
+                ->assertSee('https://'.$host.'/regulamin')
+                ->assertSee('mailto:'.($host === 'gpswiss.fr' ? 'contact@gpswiss.fr' : 'biuro@gpswiss.pl'));
         }
 
         $this->assertSame($original, $part->fresh()->getRawOriginal());

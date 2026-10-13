@@ -58,6 +58,6 @@
     <div class="sf-nav__links" aria-label="{{ __('storefront.main_menu') }}">
         @foreach($storefrontMainLinks as $label => $url)<a href="{{ $url }}">{{ $label }}</a>@endforeach
     </div>
-    <a class="sf-phones sf-phones--direct" href="tel:+48504266984" aria-label="{{ __('storefront.call_number', ['number' => '+48 504 266 984']) }}"><span aria-hidden="true">📞</span> <span class="sf-phones__number">+48 504 266 984</span></a>
+    <a class="sf-phones sf-phones--direct" href="tel:{{ \App\Support\StorefrontContact::phoneUri(request()) }}" aria-label="{{ __('storefront.call_number', ['number' => \App\Support\StorefrontContact::phone(request())]) }}"><span aria-hidden="true">📞</span> <span class="sf-phones__number">{{ \App\Support\StorefrontContact::phone(request()) }}</span></a>
 </div></nav>
 </div>

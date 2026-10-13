@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Storefront;
 
 use App\Http\Controllers\Controller;
+use App\Support\StorefrontContact;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -32,9 +33,11 @@ class ContactController extends Controller
             'message' => ['nullable', 'string', 'max:5000'],
         ]);
 
+        $recipient = StorefrontContact::email($request);
+
         try {
-            Mail::raw($this->messageBody($data), function ($message) use ($data): void {
-                $message->to('biuro@gpswiss.pl')
+            Mail::raw($this->messageBody($data), function ($message) use ($data, $recipient): void {
+                $message->to($recipient)
                     ->replyTo($data['email'], $data['name'] ?: null)
                     ->subject(__('storefront.contact_mail_subject'));
             });
@@ -46,7 +49,7 @@ class ContactController extends Controller
 
             return back()
                 ->withInput()
-                ->with('error', __('storefront.send_failed'));
+                ->with('error', __('storefront.send_failed', ['email' => $recipient]));
         }
 
         return back()->with('success', __('storefront.message_sent'));

@@ -12,10 +12,14 @@
 
     <div class="sf-contact-grid">
         <section class="sf-static-card sf-company-card">
+            @if(\App\Support\StorefrontContext::isFrench(request()))
+                @include('storefront.fr.company-identity')
+            @else
             <h2>GREGOR swiss GRZEGORZ PACIOREK</h2>
             <p>Milanowska 137<br>08-460 Sobolew</p>
             <p><strong>{{ __('storefront.tax_id') }}:</strong> 8262157853<br><strong>REGON:</strong> 368948917</p>
             <p><strong>Tel:</strong> <a href="tel:+48504266984">504 266 984</a><br><strong>E-mail:</strong> <a href="mailto:biuro@gpswiss.pl">biuro@gpswiss.pl</a></p>
+            @endif
         </section>
 
         <section class="sf-static-card">
@@ -40,8 +44,12 @@
     </div>
 
     <section class="sf-static-card sf-map-card">
-        <h2>{{ __('storefront.map') }}</h2>
+        <h2>{{ \App\Support\StorefrontContext::isFrench(request()) ? 'Adresse' : __('storefront.map') }}</h2>
+        @if(\App\Support\StorefrontContext::isFrench(request()))
+            <p>@include('storefront.fr.company-address')</p>
+        @else
         <iframe title="Mapa Google - Milanowska 137, 08-460 Sobolew" src="https://www.google.com/maps?q=Milanowska%20137%2C%2008-460%20Sobolew&output=embed" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+        @endif
     </section>
 </div>
 @endsection

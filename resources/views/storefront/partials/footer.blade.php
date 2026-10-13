@@ -2,6 +2,9 @@
     <div class="sf-container sf-footer__grid">
         <section class="sf-footer__column" aria-labelledby="footer-company-heading">
             <h3 id="footer-company-heading">{{ __('storefront.company_details') }}</h3>
+            @if(\App\Support\StorefrontContext::isFrench(request()))
+                @include('storefront.fr.company-identity')
+            @else
             <p>
                 <strong>{{ __('storefront.company_name') }}:</strong> Gregor Swiss Grzegorz Paciorek<br>
                 ul. Milanowska 137<br>
@@ -9,6 +12,7 @@
                 <strong>{{ __('storefront.tax_id') }}:</strong> 8262157853<br>
                 <strong>REGON:</strong> 368948917
             </p>
+            @endif
         </section>
 
         <section class="sf-footer__column" aria-labelledby="footer-info-heading">
@@ -22,8 +26,8 @@
         <section class="sf-footer__column" aria-labelledby="footer-contact-heading">
             <h3 id="footer-contact-heading">{{ __('storefront.contact') }}</h3>
             <p>
-                tel. <a href="tel:+48504266984">504 266 984</a><br>
-                e-mail: <a href="mailto:biuro@gpswiss.pl">biuro@gpswiss.pl</a>
+                tel. <a href="tel:{{ \App\Support\StorefrontContact::phoneUri(request()) }}">{{ \App\Support\StorefrontContext::isFrench(request()) ? \App\Support\StorefrontContact::phone(request()) : '504 266 984' }}</a><br>
+                e-mail: <a href="mailto:{{ \App\Support\StorefrontContact::email(request()) }}">{{ \App\Support\StorefrontContact::email(request()) }}</a>
             </p>
         </section>
     </div>

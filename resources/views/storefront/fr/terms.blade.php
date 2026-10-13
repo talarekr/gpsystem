@@ -10,15 +10,7 @@
 
         <p>Le site internet accessible à l’adresse https://gpswiss.fr est exploité par :</p>
 
-        <p>GREGOR SWISS FR<br>
-            Société à responsabilité limitée au capital social de 1 000,00 €<br>
-            Siège social : 7 rue de Castellane, 75008 Paris, France<br>
-            Immatriculée au RCS de Paris sous le numéro 105 670 004<br>
-            SIRET : 105 670 004 00016<br>
-            Numéro de TVA intracommunautaire : FR56 105 670 004<br>
-            Code APE : 45.32Z — Commerce de détail d’équipements automobiles<br>
-            E-mail : biuro@gpswiss.fr<br>
-            Téléphone : +48 504 266 984</p>
+        @include('storefront.fr.company-identity')
 
         <p>Ci-après désignée le « Vendeur ».</p>
 
@@ -152,14 +144,11 @@
 
         <p>Pour exercer son droit de rétractation, le client peut envoyer une déclaration claire à l’adresse suivante :</p>
 
-        <p>biuro@gpswiss.fr</p>
+        <p>{{ config('storefront-contact.fr.email') }}</p>
 
         <p>ou par courrier à l’adresse de retour indiquée ci-dessous :</p>
 
-        <p>GREGOR swiss GRZEGORZ PACIOREK<br>
-            ul. Milanowska 137<br>
-            08-460 Sobolew<br>
-            Pologne</p>
+        <p>@include('storefront.fr.company-address')</p>
 
         <p>Le client peut utiliser le formulaire type de rétractation figurant à la fin des présentes CGV, mais ce formulaire n’est pas obligatoire.</p>
 
@@ -181,10 +170,7 @@
 
         <p>Les produits retournés doivent être envoyés à l’adresse suivante :</p>
 
-        <p>GREGOR swiss GRZEGORZ PACIOREK<br>
-            ul. Milanowska 137<br>
-            08-460 Sobolew<br>
-            Pologne</p>
+        <p>@include('storefront.fr.company-address')</p>
 
         <p>Le client est responsable de l’emballage du produit retourné. Il est recommandé d’utiliser un mode d’expédition avec suivi et assurance adaptée à la valeur du produit.</p>
 
@@ -248,9 +234,9 @@
 
         <p>Toute réclamation peut être adressée au Vendeur :</p>
 
-        <p>par e-mail : biuro@gpswiss.fr<br>
-            par téléphone : +48 504 266 984<br>
-            par courrier : GREGOR SWISS FR, 7 rue de Castellane, 75008 Paris, France</p>
+        <p>par e-mail : {{ config('storefront-contact.fr.email') }}<br>
+            par téléphone : {{ config('storefront-contact.fr.phone') }}<br>
+            par courrier : {{ config('storefront-contact.fr.name') }}, {{ config('storefront-contact.fr.street') }}, {{ config('storefront-contact.fr.city') }}, {{ config('storefront-contact.fr.country') }}</p>
 
         <p>Le client doit fournir les informations utiles au traitement de sa demande : numéro de commande, produit concerné, description du problème, photos si nécessaire.</p>
 
@@ -300,11 +286,8 @@
 
         <p>À l’attention de :</p>
 
-        <p>GREGOR SWISS FR<br>
-            7 rue de Castellane<br>
-            75008 Paris<br>
-            France<br>
-            E-mail : biuro@gpswiss.fr</p>
+        <p>@include('storefront.fr.company-address')<br>
+            E-mail : {{ config('storefront-contact.fr.email') }}</p>
 
         <p>Je vous notifie par la présente ma rétractation du contrat portant sur la vente du bien suivant :</p>
 
