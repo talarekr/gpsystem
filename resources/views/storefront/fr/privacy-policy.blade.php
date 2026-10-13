@@ -10,20 +10,13 @@
 
         <p>Le responsable du traitement des données personnelles collectées sur le site https://gpswiss.fr est :</p>
 
-        <p>GREGOR SWISS FR<br>
-            Société à responsabilité limitée au capital social de 1 000,00 €<br>
-            Siège social : 7 rue de Castellane, 75008 Paris, France<br>
-            RCS Paris : 105 670 004<br>
-            SIRET : 105 670 004 00016<br>
-            Numéro de TVA intracommunautaire : FR56 105 670 004<br>
-            E-mail : biuro@gpswiss.fr<br>
-            Téléphone : +48 504 266 984</p>
+        @include('storefront.fr.company-identity')
 
         <p>Ci-après le « Responsable du traitement ».</p>
 
         <p>Pour toute question relative aux données personnelles, vous pouvez nous contacter à l’adresse :</p>
 
-        <p>biuro@gpswiss.fr</p>
+        <p>{{ config('storefront-contact.fr.email') }}</p>
 
         <h2>2. Données collectées</h2>
 
@@ -149,10 +142,7 @@
 
         <p>L’adresse de retour est :</p>
 
-        <p>GREGOR swiss GRZEGORZ PACIOREK<br>
-            ul. Milanowska 137<br>
-            08-460 Sobolew<br>
-            Pologne</p>
+        <p>@include('storefront.fr.company-address')</p>
 
         <h2>8. Destinataires des données</h2>
 
@@ -187,6 +177,8 @@
         <p>Lorsque de tels transferts ont lieu, le Responsable du traitement veille à ce qu’ils soient encadrés par des garanties appropriées, conformément au RGPD, telles que des clauses contractuelles types ou tout autre mécanisme reconnu par la réglementation applicable.</p>
 
         <p>Cette section devra être précisée selon les prestataires effectivement utilisés, notamment Stripe, l’hébergeur, les outils d’e-mailing, les outils de mesure d’audience et les outils de support.</p>
+
+        <p>Hébergeur : identité et coordonnées à compléter après confirmation.</p>
 
         <h2>10. Durées de conservation</h2>
 
@@ -236,7 +228,7 @@
 
         <p>Pour exercer ces droits, il est possible de contacter le Responsable du traitement à l’adresse :</p>
 
-        <p>biuro@gpswiss.fr</p>
+        <p>{{ config('storefront-contact.fr.email') }}</p>
 
         <p>Une preuve d’identité pourra être demandée si cela est nécessaire pour vérifier l’identité de la personne.</p>
 
@@ -275,6 +267,8 @@
         <p>L’utilisateur doit pouvoir accepter, refuser ou paramétrer les cookies soumis à consentement. Il doit également pouvoir retirer son consentement à tout moment.</p>
 
         <h2>15. Gestion des cookies</h2>
+
+        <p>Liste définitive des cookies et fournisseurs, finalités et durées de conservation : à compléter après inventaire des services effectivement utilisés.</p>
 
         <p>Lors de la première visite, un bandeau de gestion des cookies peut être affiché.</p>
 
