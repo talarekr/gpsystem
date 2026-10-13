@@ -49,7 +49,7 @@ Statyczny robots.txt w produkcyjnym DocumentRoot lub reguły serwera/CDN mogą w
 | --- | --- |
 | Nazwy/opisy produktu/kategorii, condition_notes | Gotowe tłumaczenia są używane. Brakujące, failed i needs_update mogą pokazać polski fallback; runner i zapisane dane nie były zmieniane. Poczekać na zakończenie i sprawdzić reprezentatywne produkty. |
 | Dane techniczne samochodu/OEM/SKU, historyczne etykiety i alt_text zdjęć | Źródłowe dane mogą zawierać PL. Nie tłumaczymy ani nie przepisujemy danych katalogu w tym PR. |
-| Ceny publicznego katalogu/karty produktu | Publiczny FR używa tego samego FrenchPriceResolver co checkout: parts.price w EUR albo jednoznaczna lokalna cena eBay FR EUR po part_id. Brak ceny daje Prix indisponible, bez fallbacku PLN i bez automatycznego FX. Brak ceny lub potwierdzonej dostawy blokuje przycisk oraz POST dodania do koszyka FR. Sprawdzić aktualność źródłowych danych EUR; wyświetlanie nie aktualizuje cen ani ofert. |
+| Ceny publicznego katalogu/karty produktu | Publiczny FR używa tego samego FrenchPriceResolver co checkout: parts.price w EUR albo jednoznaczna lokalna cena eBay FR EUR po part_id. Brak ceny daje Prix indisponible, bez fallbacku PLN i z zatwierdzonym fallbackiem NBP (patrz gpswiss-fr-nbp-pricing.md). Brak ceny lub potwierdzonej dostawy blokuje przycisk oraz POST dodania do koszyka FR. Sprawdzić aktualność źródłowych danych EUR; wyświetlanie nie aktualizuje cen ani ofert. |
 | Reset hasła / Google login | Formularze mają etykiety FR, ale frameworkowy mail resetu, domena linku, nadawca i integracja Google wymagają osobnego potwierdzenia. Nie wykonywano Google ani wysyłki resetu. Konta współdzielą istniejący system users. Nie są automatycznie przypinane gościnne zamówienia po e-mailu. |
 | Account/order preview/Stripe return | Etykiety statusów FR i signed dostęp z Etapu 5. Brak maili ręcznej zmiany statusu i nowego flow zwrotów. |
 | Maile Order FR | Francuskie widoki, dane FR, idempotentny rejestr. Faktyczna dostarczalność zależy od SMTP; `MAIL_MAILER=log` nie dostarcza wiadomości. |
@@ -58,7 +58,7 @@ Statyczny robots.txt w produkcyjnym DocumentRoot lub reguły serwera/CDN mogą w
 
 ## Gotowość: co potwierdza kod, co nadal blokuje live
 
-Gotowe w kodzie i testach: host/locale FR, publiczne trasy, katalog/tłumaczenia/fallbacki, search FR, SEO/sitemap/robots, dane prawne FR, zabezpieczenie prywatnych stron, jedna sztuka/jedna pozycja, ceny EUR bez automatycznego FX, mapowanie dostawy FR 55/70/130, izolacja PayU PL, Stripe session i zweryfikowany/idempotentny webhook, snapshot Order FR, maile i signed link, historia realnych Order.
+Gotowe w kodzie i testach: host/locale FR, publiczne trasy, katalog/tłumaczenia/fallbacki, search FR, SEO/sitemap/robots, dane prawne FR, zabezpieczenie prywatnych stron, jedna sztuka/jedna pozycja, ceny EUR z zatwierdzonym fallbackiem NBP (patrz gpswiss-fr-nbp-pricing.md), mapowanie dostawy FR 55/70/130, izolacja PayU PL, Stripe session i zweryfikowany/idempotentny webhook, snapshot Order FR, maile i signed link, historia realnych Order.
 
 To jest audyt repo, nie potwierdzenie aktywnej konfiguracji/danych produkcji. Nadal warunki przed live:
 
@@ -108,6 +108,8 @@ Dodatkowe sprawdzenie StorefrontCategorySidebarTest ujawniło dwa wcześniejsze 
 
 ## Poprawka publicznych cen FR po Etapie 6
 
-Home/listingi/kategorie/powiązane karty oraz strona produktu używają FrenchProductPresentation z niezmienionymi FrenchPriceResolver i FrenchDeliveryQuoteService. EUR produktu ma pierwszeństwo; fallbackiem może być wyłącznie jednoznaczna aktywna lokalna oferta eBay FR w EUR, po part_id. Żadne kwoty PLN nie są przeliczane ani podpisywane jako EUR. Brak lub sprzeczność daje Prix indisponible. Brak/blokada mapowania dostawy daje Livraison en France indisponible pour cet article. Nie deklarujemy darmowej dostawy ani gotowości wysyłki przed 13:30. Słownik JS FR pomija historyczne komunikaty PL o dostawie/0 PLN; słownik PL pozostaje bez zmian.
+Home/listingi/kategorie/powiązane karty oraz strona produktu używają FrenchProductPresentation z niezmienionymi FrenchPriceResolver i FrenchDeliveryQuoteService. EUR produktu ma pierwszeństwo; fallbackiem może być wyłącznie jednoznaczna aktywna lokalna oferta eBay FR w EUR, po part_id. Po zatwierdzonej zmianie biznesowej PLN może być przeliczane przez wspólny moduł NBP; szczegóły i limity w gpswiss-fr-nbp-pricing.md. PLN nie jest wyświetlane ani podpisywane jako EUR bez przeliczenia. Brak lub sprzeczność daje Prix indisponible. Brak/blokada mapowania dostawy daje Livraison en France indisponible pour cet article. Nie deklarujemy darmowej dostawy ani gotowości wysyłki przed 13:30. Słownik JS FR pomija historyczne komunikaty PL o dostawie/0 PLN; słownik PL pozostaje bez zmian.
 
 Zmiana nie wymaga migracji ani workera. Po zwykłym deployu sprawdź produkt z EUR, produkt z lokalną ceną eBay FR EUR i produkt bez EUR; sprawdź też dostawę bez mapowania. Nie twórz nowego runu tłumaczeń ani nie czyść checkpointów. Publiczne filtry/sort po cenie nadal opierają się na kolumnie źródłowej Part, co wymaga oddzielnego etapu dla pełnej zgodności filtrowania/sortowania EUR; ten PR nie zmienia zapytań cenowych, cenników ani stawek.
+
+Aktualizacja po #1481: nowa zatwierdzona polityka existing_eur_nbp używa NBP jako ostatniego fallbacku dla PLN; neutralny komunikat to Frais de livraison calculés au panier. Szczegóły: [gpswiss-fr-nbp-pricing.md](gpswiss-fr-nbp-pricing.md).

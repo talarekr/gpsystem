@@ -233,7 +233,7 @@ return [
     'mileage' => 'Kilométrage',
     'description_pending' => 'La description du produit sera complétée.',
     'fr_price_unavailable' => 'Prix indisponible',
-    'fr_delivery_calculated' => 'Livraison en France calculée au panier',
+    'fr_delivery_calculated' => 'Frais de livraison calculés au panier',
     'fr_delivery_unavailable' => 'Livraison en France indisponible pour cet article',
     'fr_purchase_unavailable' => 'Achat indisponible : le prix EUR ou la livraison en France n’est pas confirmé.',
     'price_on_request' => 'Prix sur demande',

@@ -29,7 +29,7 @@ class FrenchProductPricePresentationTest extends TestCase
         foreach (['/', '/czesci', '/kategoria-produktu/'.$part->category->slug, '/produkt/'.$part->slug] as $path) {
             $this->get('https://gpswiss.fr'.$path)->assertOk()->assertSee('123,45 EUR')->assertDontSee('PLN')
                 ->assertDontSee('Livraison gratuite')->assertDontSee('Pour un paiement avant')
-                ->assertSee('Livraison en France calculée au panier');
+                ->assertSee('Frais de livraison calculés au panier');
         }
         $other = $this->part('PLN', 9999);
         $this->get('https://gpswiss.fr/produkt/'.$other->slug)->assertOk()->assertSee('123,45 EUR')
@@ -84,7 +84,7 @@ class FrenchProductPricePresentationTest extends TestCase
         $mapping->update(['is_blocked' => true]);
         foreach (['/czesci', '/produkt/'.$part->slug] as $path) {
             $this->get('https://gpswiss.fr'.$path)->assertOk()->assertSee('100,00 EUR')
-                ->assertSee('Livraison en France indisponible')->assertDontSee('Livraison en France calculée au panier')
+                ->assertSee('Livraison en France indisponible')->assertDontSee('Frais de livraison calculés au panier')
                 ->assertDontSee('Livraison gratuite')->assertDontSee('13 h 30');
         }
         $mapping->delete();
