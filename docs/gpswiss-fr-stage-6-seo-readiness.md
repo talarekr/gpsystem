@@ -49,7 +49,7 @@ Statyczny robots.txt w produkcyjnym DocumentRoot lub reguły serwera/CDN mogą w
 | --- | --- |
 | Nazwy/opisy produktu/kategorii, condition_notes | Gotowe tłumaczenia są używane. Brakujące, failed i needs_update mogą pokazać polski fallback; runner i zapisane dane nie były zmieniane. Poczekać na zakończenie i sprawdzić reprezentatywne produkty. |
 | Dane techniczne samochodu/OEM/SKU, historyczne etykiety i alt_text zdjęć | Źródłowe dane mogą zawierać PL. Nie tłumaczymy ani nie przepisujemy danych katalogu w tym PR. |
-| Ceny publicznego katalogu/karty produktu | Nadal cena/waluta źródłowa (często PLN). FR cart/checkout bierze zatwierdzone EUR ze źródła EUR/eBay FR. Nie ma cichego przeliczenia. Potwierdzić spójność prezentacji; ewentualny osobny PR prezentacji cen EUR bez zmian cennika. |
+| Ceny publicznego katalogu/karty produktu | Publiczny FR używa tego samego FrenchPriceResolver co checkout: parts.price w EUR albo jednoznaczna lokalna cena eBay FR EUR po part_id. Brak ceny daje Prix indisponible, bez fallbacku PLN i bez automatycznego FX. Brak ceny lub potwierdzonej dostawy blokuje przycisk oraz POST dodania do koszyka FR. Sprawdzić aktualność źródłowych danych EUR; wyświetlanie nie aktualizuje cen ani ofert. |
 | Reset hasła / Google login | Formularze mają etykiety FR, ale frameworkowy mail resetu, domena linku, nadawca i integracja Google wymagają osobnego potwierdzenia. Nie wykonywano Google ani wysyłki resetu. Konta współdzielą istniejący system users. Nie są automatycznie przypinane gościnne zamówienia po e-mailu. |
 | Account/order preview/Stripe return | Etykiety statusów FR i signed dostęp z Etapu 5. Brak maili ręcznej zmiany statusu i nowego flow zwrotów. |
 | Maile Order FR | Francuskie widoki, dane FR, idempotentny rejestr. Faktyczna dostarczalność zależy od SMTP; `MAIL_MAILER=log` nie dostarcza wiadomości. |
@@ -64,7 +64,7 @@ To jest audyt repo, nie potwierdzenie aktywnej konfiguracji/danych produkcji. Na
 
 1. Zakończone tłumaczenia oraz przegląd fallbacków/failed/needs_update. Nie uruchamiaj nowego runu w ramach wdrożenia SEO.
 2. Zatwierdzone/kompletne dokumenty prawne: mediator, hosting, faktyczne cookies/dostawcy i zachowanie consent. Zewnętrzne fonty Google/asset services już występują w layoutach; zweryfikować ich rolę przy inwentaryzacji, bez wywoływania API.
-3. Rzeczywista kompletność i aktualność cen EUR oraz mapowań dostawy dla sprzedawanych produktów. Braki blokują checkout; publiczne źródłowe ceny wymagają oceny UX/spójności.
+3. Rzeczywista kompletność i aktualność cen EUR oraz mapowań dostawy dla sprzedawanych produktów. Braki blokują dodanie do koszyka i checkout FR; karty i checkout korzystają z tego samego źródła EUR.
 4. Autoryzowany SMTP dla contact@gpswiss.fr, SPF/DKIM i kontrola dostarczalności/odbicia. Niepewne sending/uncertain z Etapu 5 nie są automatycznie ponawiane.
 5. Domena/SSL/www, poprawny rewrite wszystkich tras, faktyczne robots/sitemap bez statycznego nadpisania, brak maintenance i APP_DEBUG w produkcji. Cookies sesji muszą działać na gpswiss.fr (nie mogą być przypięte wyłącznie do gpswiss.pl), a kart/session ma przetrwać reload i powrót z Stripe. Sprawdzić HTTPS/Secure/SameSite przez istniejącą konfigurację; nie zmieniamy .env.
 6. Udany end-to-end Stripe TEST, poprawne dane sprzedawcy/VAT/konta Stripe, webhook właściwego trybu, monitoring błędów i obsługi stock conflict/refund. Tryb testowy nie realizuje sprzedaży/stocku; nie przełączać na live podczas tego testu.
@@ -105,3 +105,9 @@ Standardowy deploy samego kodu tego etapu, bez nowych migracji/workerów i bez r
 Testy wykonują wyłącznie lokalne operacje na SQLite, Http::preventStrayRequests i Mail::fake. Bez Google, realnych płatności/maili, produkcyjnych zapisów, deployu ani zmian marketplace/stocku/runnera. Liczby końcowego zestawu są zapisane w PR.
 
 Dodatkowe sprawdzenie StorefrontCategorySidebarTest ujawniło dwa wcześniejsze błędy: oczekiwanie selected w opcji kategorii głównej (linia 67) oraz brak pełnej nazwy kategorii w całym HTML (linia 198, podczas gdy występuje w metadanych). Te same dwa błędy odtworzono na czystym origin/main po #1479. Nie zmieniano testów ani zachowania sidebaru w celu ich ukrycia. Pozostają osobnym zadaniem bazowym.
+
+## Poprawka publicznych cen FR po Etapie 6
+
+Home/listingi/kategorie/powiązane karty oraz strona produktu używają FrenchProductPresentation z niezmienionymi FrenchPriceResolver i FrenchDeliveryQuoteService. EUR produktu ma pierwszeństwo; fallbackiem może być wyłącznie jednoznaczna aktywna lokalna oferta eBay FR w EUR, po part_id. Żadne kwoty PLN nie są przeliczane ani podpisywane jako EUR. Brak lub sprzeczność daje Prix indisponible. Brak/blokada mapowania dostawy daje Livraison en France indisponible pour cet article. Nie deklarujemy darmowej dostawy ani gotowości wysyłki przed 13:30. Słownik JS FR pomija historyczne komunikaty PL o dostawie/0 PLN; słownik PL pozostaje bez zmian.
+
+Zmiana nie wymaga migracji ani workera. Po zwykłym deployu sprawdź produkt z EUR, produkt z lokalną ceną eBay FR EUR i produkt bez EUR; sprawdź też dostawę bez mapowania. Nie twórz nowego runu tłumaczeń ani nie czyść checkpointów. Publiczne filtry/sort po cenie nadal opierają się na kolumnie źródłowej Part, co wymaga oddzielnego etapu dla pełnej zgodności filtrowania/sortowania EUR; ten PR nie zmienia zapytań cenowych, cenników ani stawek.

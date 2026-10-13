@@ -20,7 +20,16 @@
 @include('storefront.partials.footer')
 <script>
     window.GPSwiss = window.GPSwiss || {};
-    window.GPSwiss.i18n = @json(__('storefront'));
+    @php
+        $storefrontI18n = __('storefront');
+        if (\App\Support\StorefrontContext::isFrench(request())) {
+            // Legacy PL shipping copy is not used by the dedicated FR cart/checkout.
+            foreach (['courier_free', 'courier_cod_free', 'pickup_free', 'free_delivery', 'payment_cutoff'] as $key) {
+                unset($storefrontI18n[$key]);
+            }
+        }
+    @endphp
+    window.GPSwiss.i18n = @json($storefrontI18n);
 </script>
 <script src="{{ asset('js/storefront-category-menu.js') }}" defer></script>
 <script src="{{ asset('js/storefront-product-gallery.js') }}" defer></script>

@@ -42,7 +42,7 @@ class StorefrontFrenchCatalogTest extends TestCase
                 ->assertViewIs('storefront.parts.show')
                 ->assertViewHas('part', fn (Part $rendered): bool => $rendered->id === $part->id)
                 ->assertSee('Obecny opis produktu')
-                ->assertSee('1 234,00 PLN')
+                ->assertSee($host === 'gpswiss.fr' ? 'Prix indisponible' : '1 234,00 PLN')
                 ->assertSee('https://'.$host.'/regulamin')
                 ->assertSee('mailto:'.($host === 'gpswiss.fr' ? 'contact@gpswiss.fr' : 'biuro@gpswiss.pl'));
         }

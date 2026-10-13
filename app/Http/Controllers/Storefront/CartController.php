@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Part;
 use App\Services\Storefront\CartService;
 use App\Services\Storefront\FrenchCheckoutService;
+use App\Services\Storefront\FrenchProductPresentation;
 use App\Support\StorefrontContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -40,6 +41,11 @@ class CartController extends Controller
 
     public function add(Part $part): RedirectResponse
     {
+        if (StorefrontContext::isFrench(request())
+            && ! app(FrenchProductPresentation::class)->forPart($part)['can_buy']) {
+            return back()->with('warning', __('storefront.fr_purchase_unavailable'));
+        }
+
         $result = $this->cart->add($part, 1);
 
         return back()->with($result['status'], $result['message']);

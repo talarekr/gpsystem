@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\MarketplaceCategoryMapping;
 use App\Models\Order;
 use App\Models\Part;
 use App\Models\PartCategory;
@@ -32,6 +33,8 @@ class FrenchStorefrontSeoTest extends TestCase
         $this->category->translations()->create(['locale' => 'fr', 'status' => 'reviewed', 'name' => 'Moteurs', 'description' => 'Moteurs d’occasion']);
         $this->part = Part::create(['name' => 'Silnik Audi', 'slug' => 'silnik-audi', 'sku' => 'SEO-123',
             'category_id' => $this->category->id, 'status' => 'ready', 'quantity' => 1, 'price' => 100, 'currency' => 'EUR']);
+        MarketplaceCategoryMapping::create(['local_category_id' => $this->category->id, 'channel' => 'ebay_fr',
+            'shipping_group' => 'fr_55_eur', 'fulfillment_policy_id' => '260547694013']);
         $this->part->translations()->create(['locale' => 'fr', 'status' => 'translated', 'name' => 'Moteur Audi', 'short_description' => 'Moteur d’occasion Audi']);
     }
 
