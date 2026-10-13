@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ $metaTitle ?? __('storefront.default_title') }}</title>
     <meta name="description" content="{{ $metaDescription ?? __('storefront.default_desc') }}">
-    <link rel="canonical" href="{{ url()->current() }}">
+    @include('storefront.partials.seo')
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Storefront;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Storefront\Concerns\BuildsStorefrontQueries;
 use App\Services\Storefront\CategoryTreeService;
+use App\Support\StorefrontContext;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\Request;
 use Throwable;
@@ -46,8 +47,8 @@ class CatalogController extends Controller
             'categoryTreeService' => $safeCategoryTree,
             'producers' => $filterOptions['producers'],
             'models' => $filterOptions['models'],
-            'metaTitle' => 'Katalog części GPSwiss - używane części samochodowe',
-            'metaDescription' => 'Katalog oryginalnych używanych części samochodowych GPSwiss.',
+            'metaTitle' => StorefrontContext::isFrench($request) ? 'Catalogue de pièces automobiles d’occasion — GPSwiss.fr' : 'Katalog części GPSwiss - używane części samochodowe',
+            'metaDescription' => StorefrontContext::isFrench($request) ? 'Découvrez les pièces automobiles d’occasion GPSwiss.fr : moteurs, boîtes de vitesses et équipements automobiles.' : 'Katalog oryginalnych używanych części samochodowych GPSwiss.',
             'breadcrumbs' => [['label' => __('storefront.home'), 'url' => route('storefront.home')], ['label' => __('storefront.catalog')]],
         ];
     }

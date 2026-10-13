@@ -35,6 +35,6 @@
         @endif
     </a>
     <button class="sf-heart" type="button" aria-label="{{ __('storefront.add_favorite') }}">♡</button>
-    <div class="sf-product-card__body"><div class="sf-part-number">{{ __('storefront.part_number') }} <strong>{{ $number }}</strong></div><a class="sf-product-title" href="{{ $productUrl }}">{{ $name }}</a><div class="sf-price">@if($price !== null){{ number_format((float) $price, 2, ',', ' ') }} {{ $currency }}@else {{ __('storefront.price_on_request') }} @endif</div><div class="sf-delivery">{{ __('storefront.free_delivery') }}</div><div class="sf-cutoff">{{ __('storefront.payment_cutoff') }}</div></div>
+    <div class="sf-product-card__body"><div class="sf-part-number">{{ __('storefront.part_number') }} <strong>{{ $number }}</strong></div><a class="sf-product-title" href="{{ $productUrl }}">{{ $name }}</a><div class="sf-price">@if($price !== null){{ number_format((float) $price, 2, ',', ' ') }} {{ $currency }}@else {{ __('storefront.price_on_request') }} @endif</div><div class="sf-delivery">{{ \App\Support\StorefrontContext::isFrench(request()) ? 'Livraison en France calculée au panier' : __('storefront.free_delivery') }}</div>@unless(\App\Support\StorefrontContext::isFrench(request()))<div class="sf-cutoff">{{ __('storefront.payment_cutoff') }}</div>@endunless</div>
 </article>
 @endif

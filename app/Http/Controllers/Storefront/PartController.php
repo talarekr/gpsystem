@@ -36,7 +36,7 @@ class PartController extends Controller
             'related' => $related,
             'metaTitle' => $part->storefrontNameForLocale($locale).' - GPSwiss',
             'metaDescription' => str($locale === 'fr'
-                ? ($part->storefrontShortDescriptionForLocale($locale) ?: $part->storefrontDescriptionForLocale($locale))
+                ? ($part->storefrontShortDescriptionForLocale($locale) ?: $part->storefrontDescriptionForLocale($locale) ?: __('storefront.default_desc'))
                 : ($part->short_description ?: $part->description ?: __('storefront.default_desc')))->stripTags()->limit(155)->toString(),
             'breadcrumbs' => $this->breadcrumbs($part, $categoryTree, $locale),
         ]);

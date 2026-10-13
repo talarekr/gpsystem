@@ -269,6 +269,10 @@ Route::get('/szukaj', [SearchController::class, 'index'])->name('storefront.sear
 // French public aliases use distinct names so PL route generation is unchanged.
 foreach (['gpswiss.fr' => 'storefront.fr.', 'www.gpswiss.fr' => 'storefront.fr-www.'] as $host => $prefix) {
     Route::domain($host)->name($prefix)->group(function (): void {
+        Route::get('/sitemap.xml', [\App\Http\Controllers\Storefront\FrenchSitemapController::class, 'index'])->name('sitemap.index');
+        Route::get('/sitemaps/pages.xml', [\App\Http\Controllers\Storefront\FrenchSitemapController::class, 'pages'])->name('sitemap.pages');
+        Route::get('/sitemaps/products-{page}.xml', [\App\Http\Controllers\Storefront\FrenchSitemapController::class, 'products'])->whereNumber('page')->name('sitemap.products');
+        Route::get('/robots.txt', [\App\Http\Controllers\Storefront\FrenchSitemapController::class, 'robots'])->name('robots');
         Route::get('/panier', [CartController::class, 'index'])->name('cart.index');
         Route::get('/commande', [CheckoutController::class, 'show'])->name('checkout.show');
         Route::post('/commande', [CheckoutController::class, 'store'])->name('checkout.store');
