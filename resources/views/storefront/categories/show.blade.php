@@ -36,8 +36,9 @@
                         <p class="sf-empty">{{ __('storefront.no_products_category') }}</p>
                     @endforelse
                 </div>
-                {{ $parts->links() }}
+                {{ $parts->links(\App\Support\StorefrontContext::isFrench(request()) ? 'storefront.fr.pagination' : null) }}
             </section>
         </div>
     </div>
 @endsection
+

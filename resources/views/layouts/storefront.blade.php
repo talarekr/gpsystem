@@ -23,8 +23,8 @@
     @php
         $storefrontI18n = __('storefront');
         if (\App\Support\StorefrontContext::isFrench(request())) {
-            // Legacy PL shipping copy is not used by the dedicated FR cart/checkout.
-            foreach (['courier_free', 'courier_cod_free', 'pickup_free', 'free_delivery', 'payment_cutoff'] as $key) {
+            // FR does not use the legacy PL shipping copy or the removed product price note.
+            foreach (['courier_free', 'courier_cod_free', 'pickup_free', 'free_delivery', 'payment_cutoff', 'gross_price_note'] as $key) {
                 unset($storefrontI18n[$key]);
             }
         }
@@ -36,3 +36,4 @@
 <script src="{{ asset('js/storefront-product-carousel.js') }}" defer></script>
 </body>
 </html>
+

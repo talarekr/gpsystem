@@ -1,1 +1,2 @@
-@if(!empty($breadcrumbs))<nav class="sf-breadcrumbs" aria-label="Breadcrumbs">@foreach($breadcrumbs as $crumb) @if(!$loop->first)<span>/</span>@endif @if(!empty($crumb['url']))<a href="{{ $crumb['url'] }}">{{ $crumb['label'] }}</a>@else<span>{{ $crumb['label'] }}</span>@endif @endforeach</nav>@endif
+@if(!empty($breadcrumbs))<nav class="sf-breadcrumbs" aria-label="{{ \App\Support\StorefrontContext::isFrench(request()) ? __('storefront.breadcrumbs_label', [], 'fr') : 'Breadcrumbs' }}">@foreach($breadcrumbs as $crumb) @if(!$loop->first)<span>/</span>@endif @if(!empty($crumb['url']))<a href="{{ $crumb['url'] }}">{{ $crumb['label'] }}</a>@else<span>{{ $crumb['label'] }}</span>@endif @endforeach</nav>@endif
+

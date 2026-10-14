@@ -1,5 +1,8 @@
+@php
+    $catalogUiLocale = \App\Support\StorefrontContext::isFrench(request()) ? 'fr' : 'pl';
+@endphp
 <aside class="sf-filters">
-    <h3>Filtry</h3>
+    <h3>{{ __('storefront.filter_title', [], $catalogUiLocale) }}</h3>
     <form method="get" action="{{ $filterAction ?? route('storefront.catalog') }}">
         @if(request()->filled('q'))
             <input type="hidden" name="q" value="{{ request('q') }}">
@@ -8,18 +11,18 @@
             <input type="hidden" name="sort" value="{{ request('sort') }}">
         @endif
 
-        <label>Producent
+        <label>{{ __('storefront.filter_manufacturer', [], $catalogUiLocale) }}
             <select name="producer">
-                <option value="">Wszyscy</option>
+                <option value="">{{ __('storefront.filter_all_manufacturers', [], $catalogUiLocale) }}</option>
                 @foreach($producers ?? [] as $producer)
                     <option value="{{ $producer }}" @selected(request('producer') === $producer)>{{ $producer }}</option>
                 @endforeach
             </select>
         </label>
 
-        <label>Model
+        <label>{{ __('storefront.filter_model', [], $catalogUiLocale) }}
             <select name="model">
-                <option value="">Wszystkie</option>
+                <option value="">{{ __('storefront.filter_all_models', [], $catalogUiLocale) }}</option>
                 @foreach($models ?? [] as $model)
                     <option value="{{ $model }}" @selected(request('model') === $model)>{{ $model }}</option>
                 @endforeach
@@ -32,7 +35,8 @@
         </div>
 
         <label>{{ __('storefront.part_number') }}<input name="part_number" value="{{ request('part_number') }}" placeholder="8E0 953 521D"></label>
-        <button class="sf-btn" type="submit">Filtruj</button>
+        <button class="sf-btn" type="submit">{{ __('storefront.filter_apply', [], $catalogUiLocale) }}</button>
         <a class="sf-clear" href="{{ $filterAction ?? route('storefront.catalog') }}">{{ __('storefront.clear_filters') }}</a>
     </form>
 </aside>
+

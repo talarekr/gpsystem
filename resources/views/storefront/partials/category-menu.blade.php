@@ -1,4 +1,5 @@
 @php
+    $catalogUiLocale = \App\Support\StorefrontContext::isFrench(request()) ? 'fr' : 'pl';
     $categoryTreeService ??= app(\App\Services\Storefront\CategoryTreeService::class);
     $roots = ($storefrontCategoryRoots ?? $categoryTreeService->roots())->values();
     $activeRootId = optional($roots->first())->id;
@@ -38,10 +39,10 @@
                     >
                         <div class="sf-category-menu__branch-head">
                             <div>
-                                <span>Wybrana kategoria</span>
+                                <span>{{ __('storefront.selected_category', [], $catalogUiLocale) }}</span>
                                 <h3>{{ $root->storefrontPublicNameForLocale($storefrontContentLocale) }}</h3>
                             </div>
-                            <a href="{{ $categoryTreeService->url($root) }}">Zobacz wszystkie</a>
+                            <a href="{{ $categoryTreeService->url($root) }}">{{ __('storefront.view_all_category', [], $catalogUiLocale) }}</a>
                         </div>
 
                         @if($root->children->isNotEmpty())
@@ -68,7 +69,7 @@
                             </div>
                         @else
                             <div class="sf-category-menu__empty">
-                                <p>Ta kategoria nie ma podkategorii w menu.</p>
+                                <p>{{ __('storefront.menu_no_subcategories', [], $catalogUiLocale) }}</p>
                                 <a href="{{ $categoryTreeService->url($root) }}">{{ __('storefront.go_to_category') }}</a>
                             </div>
                         @endif
@@ -82,7 +83,7 @@
             @foreach($roots as $root)
                 <details class="sf-category-menu__mobile-root">
                     <summary>{{ $root->storefrontPublicNameForLocale($storefrontContentLocale) }}</summary>
-                    <a class="sf-category-menu__mobile-all" href="{{ $categoryTreeService->url($root) }}">Zobacz wszystkie w kategorii</a>
+                    <a class="sf-category-menu__mobile-all" href="{{ $categoryTreeService->url($root) }}">{{ __('storefront.view_all_in_category', [], $catalogUiLocale) }}</a>
                     @if($root->children->isNotEmpty())
                         <ul>
                             @foreach($root->children as $child)
@@ -107,3 +108,4 @@
         </div>
     </div>
 </details>
+
