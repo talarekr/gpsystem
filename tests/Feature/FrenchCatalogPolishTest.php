@@ -75,6 +75,8 @@ class FrenchCatalogPolishTest extends TestCase
         @$dom->loadHTML('<?xml encoding="utf-8" ?>'.$response->getContent());
         $links = (new \DOMXPath($dom))->query('//section[contains(@class,"sf-product-carousel")][.//h2[text()="Boîtes de vitesses"]]//div[contains(@class,"sf-section__head")]/a');
         $this->assertSame('https://gpswiss.fr/kategoria-produktu/'.FrenchMixedCatalog::CATEGORY_PATH, $links->item(0)->getAttribute('href'));
+        $mainLink = (new \DOMXPath($dom))->query('//nav[contains(@class,"sf-nav")]//a[text()="Boîtes de vitesses"]')->item(0);
+        $this->assertSame('/kategoria-produktu/'.FrenchMixedCatalog::CATEGORY_PATH, $mainLink->getAttribute('href'));
         $this->get('https://gpswiss.pl/')->assertOk()->assertSee('/kategoria-produktu/uklad-napedowy/skrzynie-biegow-i-inne-elementy/automatyczna-skrzynia-biegow')->assertDontSee('Boîte fournisseur fixture');
         Http::assertNothingSent();
     }

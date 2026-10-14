@@ -8,7 +8,7 @@ Baza: `talarekr/gpsystem`, `main` `8b0e7374ba9b72de0a69dc07cdfe62c232c13457`, po
 
 **Zdjęcia:** #1490 udostępnił wspólny szablon/CSS/galerię, ale adapter nadal zwracał oryginalny JPEG zarówno z `listingUrl()`, jak i `productUrl()`. Zwykłe `PartImage` korzystają z wariantów `parts/photos/presentation/listing` i `product`: wykrywają obiekt, ograniczają marginesy, kadrują i renderują canvas. Biały margines w oryginale Jarka pozostawał więc wewnątrz takiego samego wrappera `object-fit: contain`, przez co sam obiekt wyglądał na mały. To brakujący etap poprzedniej poprawki, a nie oddzielny CSS karty.
 
-**Home:** kontroler i link „Boîtes de vitesses” wskazywały kategorię automatycznej skrzyni. FR korzysta teraz z docelowej manualnej 6-biegowej kategorii; sekcja pobiera zwykłe produkty i ekspozycje Jarka do tego samego standardowego karuzelowego grida, maksymalnie 8 pozycji. Nie ma oddzielnej sekcji Jarka. PL zachowuje automatyczną skrzynię i dotychczasowy wybór.
+**Home:** kontroler, link sekcji i skrót nagłówka „Boîtes de vitesses” wskazywały kategorię automatycznej skrzyni. FR korzysta teraz z docelowej manualnej 6-biegowej kategorii; sekcja pobiera zwykłe produkty i ekspozycje Jarka do tego samego standardowego karuzelowego grida, maksymalnie 8 pozycji. Nie ma oddzielnej sekcji Jarka. PL zachowuje automatyczną skrzynię i dotychczasowy wybór.
 
 **Polskie kategorie:** aktualny main już odczytuje gotowe niepuste `category_translations.name`, status `translated/reviewed`, locale `fr`. Dotyczy to mega menu, sidebaru/podkategorii, breadcrumbs, hero, nagłówka i meta title/description. Drzewo FR jest budowane z bieżących danych, a relacje tłumaczeń ładowane poza trwałym cache PL. Testy potwierdzają użycie gotowego FR również po cache PL i zmianie tłumaczenia. Nie odtworzono ignorowania gotowych FR nazw w kodzie.
 
@@ -99,6 +99,7 @@ Dla świadomie zatwierdzonego ponowienia failed/needs_update użyć istniejącyc
 - `app/Services/Storefront/JarekCatalogImage.php`
 - `app/Services/Storefront/JarekCatalogProduct.php`
 - `app/Services/Storefront/FrenchMixedCatalog.php` — opcjonalny limit strony dla standardowej sekcji home
+- `resources/views/storefront/partials/header.blade.php` — również skrót nawigacyjny FR prowadzi do manualnej kategorii
 - `resources/views/storefront/partials/product-card.blade.php`
 - `resources/views/storefront/parts/show.blade.php`
 - `resources/views/storefront/fr/cart.blade.php`
@@ -113,7 +114,7 @@ Dla świadomie zatwierdzonego ponowienia failed/needs_update użyć istniejącyc
 
 ## Testy i zakres wykonania
 
-PHP 8.4.26 / Laravel 11.57.0, SQLite w pamięci, HTTP blokowane lub mockowane. **334 testy, 3935 asercji — PASS**, w tym **14 nowych testów / 124 asercje**. Nowe testy obejmują ukrycie SKU z zachowaniem wewnętrznego identyfikatora, link home/PL, limit wspólnej karuzeli, identyczne piksele i canvasy zwykłego procesora, ranking zdjęć, brak generowania w requestach publicznych/preview, lokalne warianty/galerię, kursor/idempotencję, unieważnienie manifestu, brak lokalnych/czytelnych plików, role owner/manager, potwierdzenie POST i odczyt brakujących/pustych/niepublicznych tłumaczeń bez mutacji. Istniejące testy obejmują menu/hero/meta/breadcrumbs/podkategorie, tłumaczenia po cache PL, Stripe/webhook bez stock write Jarka, PayU PL, ceny i SEO/sitemap/hreflang.
+PHP 8.4.26 / Laravel 11.57.0, SQLite w pamięci, HTTP blokowane lub mockowane. **334 testy, 3935 asercji — PASS**, w tym **14 nowych testów / 124 asercje**. Końcowa kontrola skrótu nagłówka jest dodatkowo objęta testem home. Nowe testy obejmują ukrycie SKU z zachowaniem wewnętrznego identyfikatora, link home/PL, limit wspólnej karuzeli, identyczne piksele i canvasy zwykłego procesora, ranking zdjęć, brak generowania w requestach publicznych/preview, lokalne warianty/galerię, kursor/idempotencję, unieważnienie manifestu, brak lokalnych/czytelnych plików, role owner/manager, potwierdzenie POST i odczyt brakujących/pustych/niepublicznych tłumaczeń bez mutacji. Istniejące testy obejmują menu/hero/meta/breadcrumbs/podkategorie, tłumaczenia po cache PL, Stripe/webhook bez stock write Jarka, PayU PL, ceny i SEO/sitemap/hreflang.
 
 Z zestawu regresji wyłączono 14 wcześniej potwierdzonych błędów bazowego main: 10 przypadków StorefrontCatalogSearchTest, 2 StorefrontProductBreadcrumbTest, 1 StorefrontCategorySidebarTest i test CSRF JarekGearboxEbayBulkPricePreviewTest. Nie deklarujemy całego nieprzefiltrowanego suite jako zielonego.
 
