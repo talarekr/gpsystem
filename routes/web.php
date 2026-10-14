@@ -337,6 +337,13 @@ Route::middleware([Authenticate::class])->group(function (): void {
             Route::post('/pause', [FrenchCatalogTranslationController::class, 'pause'])->name('pause');
             Route::post('/resume', [FrenchCatalogTranslationController::class, 'resume'])->name('resume');
             Route::post('/stop', [FrenchCatalogTranslationController::class, 'stop'])->name('stop');
+            Route::prefix('/jarek-gearboxes')->name('jarek.')->group(function (): void {
+                Route::get('/status', [FrenchCatalogTranslationController::class, 'status'])->defaults('translation_scope', 'jarek_gearboxes')->name('status');
+                foreach (['dry-run' => 'dryRun', 'start' => 'start', 'process-next-batch' => 'tick', 'pause' => 'pause', 'resume' => 'resume', 'stop' => 'stop'] as $path => $method) {
+                    Route::post('/'.$path, [FrenchCatalogTranslationController::class, $method])
+                        ->defaults('translation_scope', 'jarek_gearboxes')->name($method === 'dryRun' ? 'dry-run' : $method);
+                }
+            });
         });
 
     Route::get('/warsztat', [WorkshopQuickPartController::class, 'createAuthenticated'])->name('workshop.quick-part-create');
