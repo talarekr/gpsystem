@@ -21,11 +21,13 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Spatie\Permission\Models\Role;
+use Tests\Concerns\ResolvesFrenchCategoryUrls;
 use Tests\TestCase;
 
 class FrenchCatalogPolishTest extends TestCase
 {
     use RefreshDatabase;
+    use ResolvesFrenchCategoryUrls;
 
     private JarekFrProduct $product;
 
@@ -55,7 +57,7 @@ class FrenchCatalogPolishTest extends TestCase
 
     public function test_technical_supplier_sku_is_hidden_on_all_visible_fr_product_surfaces_but_kept_internally(): void
     {
-        foreach (['/czesci', '/kategoria-produktu/'.FrenchMixedCatalog::CATEGORY_PATH, '/boites-jarek/'.$this->product->id, '/'] as $path) {
+        foreach (['/czesci', parse_url($this->frenchCategoryUrl($this->leaf), PHP_URL_PATH), '/boites-jarek/'.$this->product->id, '/'] as $path) {
             $this->get('https://gpswiss.fr'.$path)->assertOk()->assertSee('Boîte fournisseur fixture')->assertDontSee('JAREK-17413813163');
         }
         $this->post('https://gpswiss.fr/boites-jarek/'.$this->product->id.'/panier')->assertRedirect();
@@ -69,15 +71,15 @@ class FrenchCatalogPolishTest extends TestCase
 
     public function test_fr_home_gearbox_section_uses_manual_category_and_normal_carousel_while_pl_keeps_automatic(): void
     {
-        $response = $this->get('https://gpswiss.fr/')->assertOk()->assertSee('/kategoria-produktu/'.FrenchMixedCatalog::CATEGORY_PATH)
+        $response = $this->get('https://gpswiss.fr/')->assertOk()->assertSee(parse_url($this->frenchCategoryUrl($this->leaf), PHP_URL_PATH))
             ->assertSee('sf-product-carousel', false)->assertSee('sf-product-card__image', false)->assertDontSee('Boîtes de vitesses — Jarek');
         $this->assertCount(1, $response->viewData('sections')['Boîtes de vitesses']);
         $dom = new \DOMDocument;
         @$dom->loadHTML('<?xml encoding="utf-8" ?>'.$response->getContent());
         $links = (new \DOMXPath($dom))->query('//section[contains(@class,"sf-product-carousel")][.//h2[text()="Boîtes de vitesses"]]//div[contains(@class,"sf-section__head")]/a');
-        $this->assertSame('https://gpswiss.fr/kategoria-produktu/'.FrenchMixedCatalog::CATEGORY_PATH, $links->item(0)->getAttribute('href'));
+        $this->assertSame($this->frenchCategoryUrl($this->leaf), $links->item(0)->getAttribute('href'));
         $mainLink = (new \DOMXPath($dom))->query('//nav[contains(@class,"sf-nav")]//a[text()="Boîtes de vitesses"]')->item(0);
-        $this->assertSame('/kategoria-produktu/'.FrenchMixedCatalog::CATEGORY_PATH, $mainLink->getAttribute('href'));
+        $this->assertSame($this->frenchCategoryUrl($this->leaf), $mainLink->getAttribute('href'));
         $this->get('https://gpswiss.pl/')->assertOk()->assertSee('/kategoria-produktu/uklad-napedowy/skrzynie-biegow-i-inne-elementy/automatyczna-skrzynia-biegow')->assertDontSee('Boîte fournisseur fixture');
         Http::assertNothingSent();
     }
@@ -291,7 +293,7 @@ class FrenchCatalogPolishTest extends TestCase
             $this->assertStringContainsString($name, $middle);
         }
         $this->leaf->translations()->where('locale', 'fr')->update(['description' => 'Description française de la catégorie']);
-        $this->get('https://gpswiss.fr/kategoria-produktu/'.FrenchMixedCatalog::CATEGORY_PATH)->assertOk()
+        $this->get($this->frenchCategoryUrl($this->leaf))->assertOk()
             ->assertSee('<h1 id="category-title">Boîte manuelle à 6 rapports</h1>', false)->assertSee('Description française de la catégorie')->assertSee('Boîte manuelle à 6 rapports - GPSwiss');
         Http::assertNothingSent();
     }

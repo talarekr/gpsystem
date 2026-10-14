@@ -8,11 +8,13 @@ use App\Services\Storefront\FrenchCatalogTranslationPreviewService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Tests\Concerns\ResolvesFrenchCategoryUrls;
 use Tests\TestCase;
 
 class FrenchCatalogUiLabelsTest extends TestCase
 {
     use RefreshDatabase;
+    use ResolvesFrenchCategoryUrls;
 
     protected function setUp(): void
     {
@@ -164,6 +166,6 @@ class FrenchCatalogUiLabelsTest extends TestCase
 
     private function categoryUrl(string $locale, PartCategory $category): string
     {
-        return 'https://gpswiss.'.$locale.'/kategoria-produktu/'.$category->full_slug_path;
+        return $locale === 'fr' ? $this->frenchCategoryUrl($category) : 'https://gpswiss.pl/kategoria-produktu/'.$category->full_slug_path;
     }
 }

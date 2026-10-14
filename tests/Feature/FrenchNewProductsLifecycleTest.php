@@ -20,11 +20,13 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Spatie\Permission\Models\Role;
+use Tests\Concerns\ResolvesFrenchCategoryUrls;
 use Tests\TestCase;
 
 class FrenchNewProductsLifecycleTest extends TestCase
 {
     use RefreshDatabase;
+    use ResolvesFrenchCategoryUrls;
 
     private const URL = 'https://gpswiss.pl/admin/tools/storefront/fr-translations/new-products';
 
@@ -331,7 +333,7 @@ class FrenchNewProductsLifecycleTest extends TestCase
         $category->translations()->create(['locale' => 'fr', 'status' => 'reviewed', 'name' => 'Nouvelle catégorie']);
         $this->get('https://gpswiss.pl/czesci')->assertOk()->assertDontSee('Nowa kategoria');
         $this->part(['category_id' => $category->id]);
-        $this->get('https://gpswiss.fr/kategoria-produktu/new-category')->assertOk()->assertSee('Nouvelle catégorie')->assertViewHas('parts', fn ($parts) => $parts->total() === 1);
+        $this->get($this->frenchCategoryUrl($category))->assertOk()->assertSee('Nouvelle catégorie')->assertViewHas('parts', fn ($parts) => $parts->total() === 1);
         $this->get('https://gpswiss.pl/kategoria-produktu/new-category')->assertOk()->assertSee('Nowa kategoria')->assertViewHas('parts', fn ($parts) => $parts->total() === 1);
         Http::assertNothingSent();
     }

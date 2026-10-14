@@ -13,11 +13,13 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Route;
+use Tests\Concerns\ResolvesFrenchCategoryUrls;
 use Tests\TestCase;
 
 class FrenchStorefrontSeoTest extends TestCase
 {
     use RefreshDatabase;
+    use ResolvesFrenchCategoryUrls;
 
     private Part $part;
 
@@ -40,15 +42,16 @@ class FrenchStorefrontSeoTest extends TestCase
 
     public function test_public_pages_have_fr_language_canonical_and_real_reciprocal_alternates(): void
     {
-        foreach (['/', '/czesci', '/produkt/'.$this->part->slug, '/kategoria-produktu/silniki', '/kontakt', '/regulamin', '/polityka-prywatnosci'] as $path) {
+        foreach (['/', '/czesci', '/produkt/'.$this->part->slug, parse_url($this->frenchCategoryUrl($this->category), PHP_URL_PATH), '/kontakt', '/regulamin', '/polityka-prywatnosci'] as $path) {
+            $plPath = str_starts_with($path, '/kategoria-produktu/') ? '/kategoria-produktu/silniki' : $path;
             $fr = $this->get('https://gpswiss.fr'.$path)->assertOk()->assertSee('lang="fr"', false);
             $fr->assertSee('<link rel="canonical" href="https://gpswiss.fr'.$path.'">', false)
                 ->assertSee('hreflang="fr" href="https://gpswiss.fr'.$path.'"', false)
-                ->assertSee('hreflang="pl" href="https://gpswiss.pl'.$path.'"', false)
-                ->assertSee('hreflang="x-default" href="https://gpswiss.pl'.$path.'"', false);
-            $this->get('https://gpswiss.pl'.$path)->assertOk()
+                ->assertSee('hreflang="pl" href="https://gpswiss.pl'.$plPath.'"', false)
+                ->assertSee('hreflang="x-default" href="https://gpswiss.pl'.$plPath.'"', false);
+            $this->get('https://gpswiss.pl'.$plPath)->assertOk()
                 ->assertSee('hreflang="fr" href="https://gpswiss.fr'.$path.'"', false)
-                ->assertSee('hreflang="pl" href="https://gpswiss.pl'.$path.'"', false);
+                ->assertSee('hreflang="pl" href="https://gpswiss.pl'.$plPath.'"', false);
         }
         $this->get('https://gpswiss.fr/czesci')->assertSee('Catalogue de pièces automobiles d’occasion — GPSwiss.fr');
         $this->get('https://gpswiss.pl/czesci')->assertSee('Katalog części GPSwiss - używane części samochodowe');
@@ -142,7 +145,7 @@ class FrenchStorefrontSeoTest extends TestCase
             $this->assertNotFalse(simplexml_load_string($body));
             $xml .= $body;
         }
-        foreach (['https://gpswiss.fr/', 'https://gpswiss.fr/czesci', 'https://gpswiss.fr/kategoria-produktu/silniki',
+        foreach (['https://gpswiss.fr/', 'https://gpswiss.fr/czesci', $this->frenchCategoryUrl($this->category),
             'https://gpswiss.fr/produkt/'.$this->part->slug] as $url) {
             $this->assertStringContainsString('<loc>'.$url.'</loc>', $xml);
         }

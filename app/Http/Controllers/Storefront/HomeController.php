@@ -56,8 +56,15 @@ class HomeController extends Controller
             return [__('storefront.'.($sectionLabelKeys[$label] ?? 'catalog')) => $parts];
         });
 
+        $sectionUrls = collect($paths)->mapWithKeys(function (string $path, string $label) use ($categoryTree, $sectionLabelKeys): array {
+            $category = StorefrontContext::isFrench(request()) ? $categoryTree->findByPublicPath($path) : null;
+
+            return [__('storefront.'.($sectionLabelKeys[$label] ?? 'catalog')) => $category ? $categoryTree->url($category) : route('storefront.category', ['path' => $path])];
+        })->all();
+
         return view('storefront.home', [
             'sections' => $sections,
+            'sectionUrls' => $sectionUrls,
             'metaTitle' => __('storefront.homepage_title'),
             'metaDescription' => __('storefront.homepage_desc'),
         ]);

@@ -9,11 +9,13 @@ use App\Models\PartCategory;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
+use Tests\Concerns\ResolvesFrenchCategoryUrls;
 use Tests\TestCase;
 
 class FrenchProductPricePresentationTest extends TestCase
 {
     use RefreshDatabase;
+    use ResolvesFrenchCategoryUrls;
 
     protected function setUp(): void
     {
@@ -26,7 +28,7 @@ class FrenchProductPricePresentationTest extends TestCase
     public function test_existing_eur_prices_are_shared_by_home_catalog_category_detail_and_related_cards(): void
     {
         $part = $this->part('EUR', 123.45);
-        foreach (['/', '/czesci', '/kategoria-produktu/'.$part->category->slug, '/produkt/'.$part->slug] as $path) {
+        foreach (['/', '/czesci', parse_url($this->frenchCategoryUrl($part->category), PHP_URL_PATH), '/produkt/'.$part->slug] as $path) {
             $this->get('https://gpswiss.fr'.$path)->assertOk()->assertSee('123,45 EUR')->assertDontSee('PLN')
                 ->assertDontSee('Livraison gratuite')->assertDontSee('Pour un paiement avant')
                 ->assertSee('Frais de livraison : 55,00 EUR');

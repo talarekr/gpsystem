@@ -16,11 +16,13 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 use Livewire\Livewire;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Tests\Concerns\ResolvesFrenchCategoryUrls;
 use Tests\TestCase;
 
 class StorefrontTranslationsTest extends TestCase
 {
     use RefreshDatabase;
+    use ResolvesFrenchCategoryUrls;
 
     protected function setUp(): void
     {
@@ -50,7 +52,7 @@ class StorefrontTranslationsTest extends TestCase
     }
 
     #[DataProvider('statuses')]
-    public function test_fr_reads_only_ready_translations_and_preserves_urls(?string $status, bool $ready): void
+    public function test_fr_reads_only_ready_translations_and_localizes_category_urls(?string $status, bool $ready): void
     {
         $part = $this->fixture($status);
         $name = $ready ? 'Moteur FR' : 'Silnik PL';
@@ -61,7 +63,7 @@ class StorefrontTranslationsTest extends TestCase
             ->assertSee($ready ? 'État FR' : 'Stan PL')
             ->assertViewHas('metaTitle', $name.' - GPSwiss')
             ->assertViewHas('metaDescription', $ready ? 'Résumé FR' : 'Krótki opis PL');
-        $this->get('https://gpswiss.fr/kategoria-produktu/silniki-pl')->assertOk()->assertSee($categoryName)
+        $this->get($this->frenchCategoryUrl($part->category))->assertOk()->assertSee($categoryName)
             ->assertViewHas('metaTitle', $categoryName.' - GPSwiss')
             ->assertSee($ready ? 'Catégorie FR' : 'Opis kategorii PL');
         $this->assertSame('Silnik PL', $part->fresh()->name);
