@@ -61,7 +61,9 @@ class CartController extends Controller
         $lastResult = ['status' => 'success', 'message' => StorefrontContext::isFrench($request) ? 'Panier mis à jour.' : 'Zaktualizowano koszyk.'];
 
         foreach ($validated['quantities'] as $partId => $quantity) {
-            $lastResult = $this->cart->update((int) $partId, (int) $quantity);
+            $lastResult = StorefrontContext::isFrench($request) && str_starts_with((string) $partId, 'jarek:')
+                ? $this->cart->updateJarek((int) substr($partId, 6), (int) $quantity)
+                : $this->cart->update((int) $partId, (int) $quantity);
         }
 
         return redirect()->route(StorefrontContext::routeName(request(), 'cart.index'))->with($lastResult['status'], $lastResult['message']);

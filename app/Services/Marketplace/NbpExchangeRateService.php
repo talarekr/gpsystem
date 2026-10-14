@@ -88,6 +88,30 @@ class NbpExchangeRateService
         return null;
     }
 
+    /** Publication/checkout may refresh missing or stale cache through the existing NBP path. */
+    public function currentEurPln(): array
+    {
+        $cached = $this->cachedEurPlnForPreview();
+        if ($cached['ok']) {
+            return $cached;
+        }
+        $rate = $this->rateFor('EUR', null, true);
+        try {
+            $date = $rate['effective_date'] ?? null;
+            $effective = is_string($date) && preg_match('/^\\d{4}-\\d{2}-\\d{2}$/', $date)
+                ? CarbonImmutable::createFromFormat('!Y-m-d', $date) : null;
+            if (($rate['ok'] ?? false) && ($rate['currency'] ?? null) === 'EUR' && ($rate['source'] ?? null) === 'NBP_TABLE_A'
+                && is_numeric($rate['rate'] ?? null) && is_finite((float) $rate['rate']) && $rate['rate'] > 0
+                && $effective && $effective->toDateString() === $date && ! $effective->isFuture()
+                && $effective->greaterThanOrEqualTo(today()->subDays(7))) {
+                return $rate;
+            }
+        } catch (\Throwable) {
+        }
+
+        return $this->unavailable('EUR', 'Current NBP EUR rate unavailable.');
+    }
+
     public function eurPln(): array
     {
         $cached = Cache::get(self::LEGACY_EUR_CACHE_KEY);
@@ -104,14 +128,14 @@ class NbpExchangeRateService
     }
 
     /** Return the most recent table-A rate not later than the requested date. */
-    public function rateFor(string $currency, CarbonInterface|string|null $date = null): array
+    public function rateFor(string $currency, CarbonInterface|string|null $date = null, bool $refresh = false): array
     {
         $currency = strtoupper(trim($currency));
         $requestedDate = $date ? CarbonImmutable::parse($date)->startOfDay() : null;
         $cacheKey = 'nbp_table_a_rate:'.$currency.':'.($requestedDate?->toDateString() ?? 'latest');
 
         $cached = Cache::get($cacheKey);
-        if (is_array($cached)) {
+        if (! $refresh && is_array($cached)) {
             return $cached + ['cached' => true];
         }
 

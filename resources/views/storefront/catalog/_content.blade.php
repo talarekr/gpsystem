@@ -1,18 +1,20 @@
 @php
     $parts = $parts ?? collect();
 
-    $catalogUrl = '/czesci';
+    $catalogUrl = ($jarekOnly ?? false) ? '/boites-jarek' : '/czesci';
 
     $resultCount = method_exists($parts, 'total')
         ? $parts->total()
         : (method_exists($parts, 'count') ? $parts->count() : 0);
+
+    if (($jarekProducts ?? null) && method_exists($jarekProducts, 'total')) $resultCount += $jarekProducts->total();
 
     $currentSort = $_GET['sort'] ?? '';
     $currentQ = $_GET['q'] ?? '';
     $currentPartNumber = $_GET['part_number'] ?? '';
 
     $sortableQuery = $_GET;
-    unset($sortableQuery['sort'], $sortableQuery['page'], $sortableQuery['token'], $sortableQuery['stage']);
+    unset($sortableQuery['sort'], $sortableQuery['page'], $sortableQuery['jarek_page'], $sortableQuery['token'], $sortableQuery['stage']);
 @endphp
 
 <div class="sf-container sf-page">
@@ -74,6 +76,8 @@
                 </form>
             </div>
 
+            @include('storefront.fr.jarek-listing')
+            @unless($jarekOnly ?? false)
             <div class="sf-grid sf-grid--3">
                 @forelse($parts as $part)
                     @include('storefront.partials.product-card', ['part' => $part])
@@ -85,6 +89,7 @@
             @if(method_exists($parts, 'links'))
                 {!! method_exists($parts, 'withQueryString') ? $parts->withQueryString()->links() : $parts->links() !!}
             @endif
+            @endunless
         </section>
     </div>
 </div>

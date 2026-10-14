@@ -17,9 +17,9 @@
                         </a>
                         <div class="sf-cart-item__main"><a class="sf-cart-item__title" href="{{ $item['product_url'] }}">{{ $item['product_name'] }}</a><span>{{ __('storefront.part_number_sku') }} : <strong>{{ $item['part_number'] ?: $item['sku'] ?: '—' }}</strong></span>@unless($item['is_available'])<em>{{ __('storefront.availability_recheck') }}</em>@endunless</div>
                         <div class="sf-cart-item__price">{{ $item['unit_price_cents'] === null ? __('storefront.fr_price_unavailable') : number_format($item['unit_price_cents'] / 100, 2, ',', ' ').' EUR' }}</div>
-                        <label class="sf-cart-item__qty">{{ __('storefront.quantity') }}<input type="number" name="quantities[{{ $item['part_id'] }}]" value="{{ $item['quantity'] }}" min="1" max="1" step="1" required></label>
+                        <label class="sf-cart-item__qty">{{ __('storefront.quantity') }}<input type="number" name="quantities[{{ $item['cart_key'] ?? $item['part_id'] }}]" value="{{ $item['quantity'] }}" min="1" max="1" step="1" required></label>
                         <div class="sf-cart-item__total">{{ $item['line_total_cents'] === null ? __('storefront.fr_price_unavailable') : number_format($item['line_total_cents'] / 100, 2, ',', ' ').' EUR' }}</div>
-                        <button class="sf-cart-item__remove" type="submit" form="remove-fr-item-{{ $item['part_id'] }}">{{ __('storefront.remove') }}</button>
+                        <button class="sf-cart-item__remove" type="submit" form="remove-fr-item-{{ $item['cart_key'] ?? $item['part_id'] }}">{{ __('storefront.remove') }}</button>
                     </article>
                 @endforeach
                 <button class="sf-btn" type="submit">{{ __('storefront.update_cart') }}</button>
@@ -35,7 +35,7 @@
             </aside>
         </div>
         @foreach($draft['items'] as $item)
-            <form id="remove-fr-item-{{ $item['part_id'] }}" method="post" action="{{ route('storefront.cart.remove', $item['part_id']) }}">@csrf</form>
+            <form id="remove-fr-item-{{ $item['cart_key'] ?? $item['part_id'] }}" method="post" action="{{ ($item['source_type'] ?? '') === 'jarek_gearbox' ? route('storefront.jarek.remove', $item['jarek_fr_product_id']) : route('storefront.cart.remove', $item['part_id']) }}">@csrf</form>
         @endforeach
     @endif
 </div>

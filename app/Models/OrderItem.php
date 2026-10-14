@@ -11,7 +11,7 @@ class OrderItem extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['order_id', 'marketplace', 'marketplace_order_id', 'marketplace_item_id', 'offer_id', 'part_id', 'product_name', 'part_number', 'sku', 'external_product_id', 'unit_price', 'quantity', 'line_total', 'currency', 'meta', 'raw_payload'];
+    protected $fillable = ['order_id', 'marketplace', 'marketplace_order_id', 'marketplace_item_id', 'offer_id', 'part_id', 'jarek_fr_product_id', 'product_name', 'part_number', 'sku', 'external_product_id', 'unit_price', 'quantity', 'line_total', 'currency', 'meta', 'raw_payload'];
 
     protected function casts(): array
     {

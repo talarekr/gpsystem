@@ -68,15 +68,30 @@ class StripeFrWebhook
                     if ((int) $item->quantity !== 1 || $item->currency !== 'EUR' || (int) $item->part_id !== (int) $attempt->part_id) {
                         $this->reject();
                     }
-                    $part = Part::query()->whereKey($item->part_id)->lockForUpdate()->first();
-                    $stockAvailable = $part && $part->isAvailableForLocalSale();
+                    $jarek = $attempt->jarek_fr_product_id !== null;
+                    if ($jarek && ($item->part_id !== null || $attempt->part_id !== null
+                        || (int) $item->jarek_fr_product_id !== (int) $attempt->jarek_fr_product_id
+                        || data_get($item->meta, 'source_type') !== 'jarek_gearbox'
+                        || ($session['metadata']['source_type'] ?? '') !== 'jarek_gearbox'
+                        || ($session['metadata']['jarek_fr_product_id'] ?? '') !== (string) $attempt->jarek_fr_product_id
+                        || ($session['metadata']['jarek_gearbox_id'] ?? '') !== (string) data_get($item->meta, 'source_id'))) {
+                        $this->reject();
+                    }
+                    if (! $jarek && ($item->jarek_fr_product_id !== null || data_get($item->meta, 'source_type') === 'jarek_gearbox')) {
+                        $this->reject();
+                    }
+                    $part = $jarek ? null : Part::query()->whereKey($item->part_id)->lockForUpdate()->first();
+                    $stockAvailable = $jarek || ($part && $part->isAvailableForLocalSale());
                     $live = config('stripe-fr.mode') === 'live';
                     $meta = $order->meta;
                     $meta['stripe']['payment_intent'] = $session['payment_intent'];
                     $meta['stripe']['session_id'] = $session['id'];
                     $meta['stripe']['paid_at'] = now()->toISOString();
-                    $meta['stripe']['stock_applied'] = $live && $stockAvailable;
-                    if ($live && $stockAvailable) {
+                    $meta['stripe']['stock_applied'] = ! $jarek && $live && $stockAvailable;
+                    if ($jarek) {
+                        $meta['stripe']['stock_behavior'] = 'supplier_virtual_no_decrement';
+                    }
+                    if (! $jarek && $live && $stockAvailable) {
                         // Local one-unit fulfillment only; never call marketplace sold()/sync here.
                         $values = ['quantity' => (int) $part->quantity - 1];
                         if ($values['quantity'] === 0) {
@@ -85,7 +100,7 @@ class StripeFrWebhook
                         }
                         // Bypass Part::saving: it recomputes eBay prices even on stock-only saves.
                         Part::query()->whereKey($part->id)->update($values + ['updated_at' => now()]);
-                    } else {
+                    } elseif (! $live || ! $stockAvailable) {
                         $meta['stripe']['review_reason'] = $live ? 'stock_conflict_after_payment' : 'test_payment_no_fulfillment';
                     }
                     $order->update(['payment_status' => 'paid', 'status' => $live && $stockAvailable ? 'processing' : 'on_hold',

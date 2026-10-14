@@ -2,6 +2,8 @@
 
 namespace App\Services\Payments;
 
+use App\Models\JarekFrProduct;
+use App\Models\JarekGearbox;
 use App\Models\Order;
 use App\Models\Part;
 use App\Services\Storefront\CartService;
@@ -38,16 +40,22 @@ class StripeFrCheckout
                     $draft = $this->drafts->draft($request);
                     $this->requireDraft($draft, $key);
                     $attempt = DB::transaction(function () use ($request, $draft, $key) {
-                        $part = Part::query()->whereKey($draft['items'][0]['part_id'])->lockForUpdate()->first();
-                        if (! $part || ! $part->isAvailableForLocalSale()) {
+                        $jarek = ($draft['items'][0]['meta']['source_type'] ?? null) === 'jarek_gearbox';
+                        $product = $jarek ? JarekFrProduct::query()->active()->whereKey($draft['items'][0]['jarek_fr_product_id'])->lockForUpdate()->first() : null;
+                        $part = $jarek ? null : Part::query()->whereKey($draft['items'][0]['part_id'])->lockForUpdate()->first();
+                        if ($jarek) {
+                            if (! $product || ! JarekGearbox::query()->whereKey($product->jarek_gearbox_id)->lockForUpdate()->first()) {
+                                $this->unavailable();
+                            }
+                        } elseif (! $part || ! $part->isAvailableForLocalSale()) {
                             $this->unavailable();
                         }
-                        // Re-read price, category quote and address, never use posted totals.
                         $fresh = $this->drafts->draft($request);
                         $this->requireDraft($fresh, $key);
-                        $held = DB::table('stripe_fr_attempts')->where('part_id', $part->id)
+                        $held = DB::table('stripe_fr_attempts')
+                            ->where($jarek ? 'jarek_fr_product_id' : 'part_id', $jarek ? $product->id : $part->id)
                             ->whereIn('status', ['creating', 'open'])->where('expires_at', '>', now())->count();
-                        if ($held >= (int) $part->quantity) {
+                        if ($held >= ($jarek ? 1 : (int) $part->quantity)) {
                             $this->unavailable();
                         }
                         $expires = now()->addMinutes(35);
@@ -61,6 +69,9 @@ class StripeFrCheckout
                         $order->items()->create($fresh['order_items'][0]);
                         $metadata = ['order_id' => (string) $order->id, 'checkout_key' => $key,
                             'storefront_code' => 'gpswiss_fr', 'payment_provider' => 'stripe'];
+                        if ($jarek) {
+                            $metadata += ['source_type' => 'jarek_gearbox', 'jarek_fr_product_id' => (string) $product->id, 'jarek_gearbox_id' => (string) $product->jarek_gearbox_id];
+                        }
                         $success = URL::temporarySignedRoute('storefront.fr.stripe.return', now()->addDays(7), ['order' => $order->id]);
                         $cancel = URL::temporarySignedRoute('storefront.fr.stripe.cancel', now()->addDays(7), ['order' => $order->id]);
                         $payload = [
@@ -77,7 +88,7 @@ class StripeFrCheckout
                                 'display_name' => 'Livraison par transporteur en France']]],
                         ];
                         DB::table('stripe_fr_attempts')->insert(['checkout_key' => $key, 'order_id' => $order->id,
-                            'part_id' => $part->id, 'status' => 'creating', 'expires_at' => $expires->copy()->addMinutes(5),
+                            'part_id' => $part?->id, 'jarek_fr_product_id' => $product?->id, 'status' => 'creating', 'expires_at' => $expires->copy()->addMinutes(5),
                             'request_payload' => json_encode($payload, JSON_THROW_ON_ERROR), 'created_at' => now(), 'updated_at' => now()]);
 
                         return DB::table('stripe_fr_attempts')->where('checkout_key', $key)->first();

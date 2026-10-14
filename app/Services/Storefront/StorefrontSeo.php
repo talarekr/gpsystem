@@ -12,11 +12,12 @@ class StorefrontSeo
     private const PUBLIC_ROUTES = [
         'storefront.home', 'storefront.catalog', 'storefront.category', 'storefront.product',
         'storefront.contact', 'storefront.terms', 'storefront.privacy-policy',
+        'storefront.jarek.index', 'storefront.jarek.show',
     ];
 
     public function filtered(Request $request): bool
     {
-        return $request->routeIs('storefront.catalog', 'storefront.category')
+        return $request->routeIs('storefront.catalog', 'storefront.category', 'storefront.jarek.index')
             && collect(['q', 'part_number', 'category', 'producer', 'model', 'vehicle_model',
                 'price_from', 'price_to', 'price_min', 'price_max', 'sort'])
                 ->contains(fn ($key) => $request->filled($key));
@@ -39,16 +40,17 @@ class StorefrontSeo
         } elseif ($category && $request->routeIs('storefront.category')) {
             $path = route('storefront.category', ['path' => $category->full_slug_path ?: $category->slug ?: $category->id], false);
         }
-        $page = filter_var($request->query('page'), FILTER_VALIDATE_INT);
-        if ($request->routeIs('storefront.catalog', 'storefront.category') && ! $this->filtered($request) && $page > 1) {
-            $path .= '?page='.$page;
+        $pageKey = $request->routeIs('storefront.jarek.index') ? 'jarek_page' : 'page';
+        $page = filter_var($request->query($pageKey), FILTER_VALIDATE_INT);
+        if ($request->routeIs('storefront.catalog', 'storefront.category', 'storefront.jarek.index') && ! $this->filtered($request) && $page > 1) {
+            $path .= '?'.$pageKey.'='.$page;
         }
         $canonical = $fr ? 'https://gpswiss.fr'.$path : url()->current();
         $alternates = [];
         // Both sites serve the same public catalog/paths. Never fabricate alternates for auth,
         // signed pages, filters or PL-only operational routes. Unknown hosts retain legacy SEO.
         $public = $request->routeIs(...self::PUBLIC_ROUTES) && ! $this->filtered($request);
-        if ($public && in_array($request->getHost(), ['gpswiss.fr', 'gpswiss.pl'], true)) {
+        if ($public && ! $request->routeIs('storefront.jarek.*') && in_array($request->getHost(), ['gpswiss.fr', 'gpswiss.pl'], true)) {
             $alternates = ['pl' => 'https://gpswiss.pl'.$path, 'fr' => 'https://gpswiss.fr'.$path,
                 'x-default' => 'https://gpswiss.pl'.$path];
             // Normalize the PL counterpart too so self-hreflang points at its canonical URL.
