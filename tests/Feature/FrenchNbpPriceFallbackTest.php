@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Models\MarketplaceListing;
 use App\Models\Part;
 use App\Services\Marketplace\NbpExchangeRateService;
 use App\Services\Storefront\FrenchPriceResolver;
@@ -29,27 +28,14 @@ class FrenchNbpPriceFallbackTest extends TestCase
         $part = Part::create(['name' => 'Moteur test', 'currency' => 'PLN', 'price' => 100,
             'quantity' => 1, 'status' => 'ready']);
         $price = app(FrenchPriceResolver::class)->resolve($part);
-        $this->assertSame((int) round(round(100 / 4.321, 2) * 100), $price['cents']);
+        $this->assertSame((int) round(round(100 * 1.25 / 4.321, 2) * 100), $price['cents']);
         $view = $this->get('https://gpswiss.fr/produkt/'.$part->slug)->assertOk()
-            ->assertSee('23,14 EUR')->assertDontSee('PLN')->assertDontSee('Prix indisponible</strong>', false);
+            ->assertSee('28,93 EUR')->assertDontSee('PLN')->assertDontSee('Prix indisponible</strong>', false);
         preg_match('/<aside class="sf-purchase">.*?<strong>(.*?)<\/strong>/s', $view->getContent(), $priceMarkup);
-        $this->assertSame('23,14 EUR', trim(strip_tags($priceMarkup[1])));
+        $this->assertSame('28,93 EUR', trim(strip_tags($priceMarkup[1])));
         $this->get('https://gpswiss.pl/produkt/'.$part->slug)->assertOk()->assertSee('100,00 PLN');
         $this->assertSame('100.00', $part->fresh()->price);
         Http::assertSentCount(1);
-    }
-
-    public function test_existing_eur_and_local_ebay_eur_take_priority_without_requesting_nbp(): void
-    {
-        $this->mock(NbpExchangeRateService::class)->shouldNotReceive('rateFor');
-        $part = Part::create(['name' => 'Moteur test', 'currency' => 'EUR', 'price' => 100,
-            'quantity' => 1, 'status' => 'ready']);
-        $this->assertSame(10000, app(FrenchPriceResolver::class)->resolve($part)['cents']);
-        $part->update(['currency' => 'PLN', 'price' => 500]);
-        MarketplaceListing::create(['part_id' => $part->id, 'marketplace' => 'ebay_de', 'match_status' => 'matched',
-            'external_offer_id' => 'priority', 'price' => 123, 'currency' => 'EUR', 'quantity' => 1, 'status' => 'active']);
-        $this->assertSame(12300, app(FrenchPriceResolver::class)->resolve($part)['cents']);
-        Http::assertNothingSent();
     }
 
     public function test_failed_nbp_is_looked_up_once_per_request_and_blocks_fallback(): void

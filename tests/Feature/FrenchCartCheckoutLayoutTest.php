@@ -5,7 +5,9 @@ namespace Tests\Feature;
 use App\Models\MarketplaceCategoryMapping;
 use App\Models\Part;
 use App\Models\PartCategory;
+use App\Services\Storefront\CartService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use Tests\TestCase;
@@ -22,9 +24,10 @@ class FrenchCartCheckoutLayoutTest extends TestCase
         Http::preventStrayRequests();
         Mail::fake();
         config(['frontend-maintenance.enabled' => false]);
+        Cache::put('nbp_table_a_rate:EUR:latest', ['ok' => true, 'currency' => 'EUR', 'source' => 'NBP_TABLE_A', 'rate' => 5, 'effective_date' => today()->toDateString()], 3600);
         $category = PartCategory::create(['name' => 'Moteurs', 'slug' => 'layout-category']);
         $this->part = Part::create(['name' => 'Moteur test', 'sku' => 'FR-LAYOUT', 'category_id' => $category->id,
-            'currency' => 'EUR', 'price' => 100, 'quantity' => 1, 'status' => 'ready']);
+            'currency' => 'PLN', 'price' => 400, 'quantity' => 1, 'status' => 'ready']);
         MarketplaceCategoryMapping::create(['local_category_id' => $category->id, 'channel' => 'ebay_fr',
             'shipping_group' => 'fr_55_eur', 'fulfillment_policy_id' => '260547694013']);
         $this->post('https://gpswiss.fr/koszyk/dodaj/'.$this->part->id)->assertRedirect();
@@ -97,6 +100,7 @@ class FrenchCartCheckoutLayoutTest extends TestCase
 
     public function test_missing_eur_and_unavailable_nbp_disable_continuation(): void
     {
+        Cache::forget('nbp_table_a_rate:EUR:latest');
         $this->part->update(['currency' => 'PLN']);
         Http::fake(['api.nbp.pl/*' => Http::response([], 503)]);
         $this->get('https://gpswiss.fr/panier')->assertOk()->assertSee('Prix indisponible')
@@ -123,7 +127,7 @@ class FrenchCartCheckoutLayoutTest extends TestCase
         $this->part->update(['currency' => 'PLN']);
         $this->post('https://gpswiss.pl/koszyk/dodaj/'.$this->part->id)->assertRedirect();
         $this->get('https://gpswiss.pl/koszyk')->assertOk()->assertViewIs('storefront.cart.index')
-            ->assertSee('sf-cart-layout')->assertSee('100,00 PLN');
+            ->assertSee('sf-cart-layout')->assertSee('400,00 PLN');
         $this->get('https://gpswiss.pl/zamowienie')->assertOk()->assertViewIs('storefront.checkout.show')
             ->assertSee('name="payment_method" value="payu"', false)->assertSee('name="payment_method" value="blik"', false);
     }
@@ -149,7 +153,7 @@ class FrenchCartCheckoutLayoutTest extends TestCase
         $original = session('storefront.cart.items');
         $this->post('https://gpswiss.fr/koszyk/aktualizuj', ['quantities' => [$this->part->id => 2]])
             ->assertSessionHasErrors('quantities.'.$this->part->id);
-        $cart = app(\App\Services\Storefront\CartService::class);
+        $cart = app(CartService::class);
         $this->assertSame('warning', $cart->update($this->part->id, 2)['status']);
         $this->assertSame('warning', $cart->add($this->part, 2)['status']);
         $this->assertSame($original, session('storefront.cart.items'));

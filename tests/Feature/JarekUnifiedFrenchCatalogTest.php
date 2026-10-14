@@ -48,7 +48,7 @@ class JarekUnifiedFrenchCatalogTest extends TestCase
         $this->get('https://gpswiss.pl/czesci')->assertOk()->assertDontSee('Supplier gearbox');
         $response = $this->get($this->categoryUrl())->assertOk()->assertSee('Supplier gearbox')
             ->assertSee('Transmission')->assertSee('Boîte manuelle à 6 rapports')->assertSee('sf-product-card', false)
-            ->assertSee('312,50 EUR')->assertSee('130,00 EUR')->assertDontSee('Boîtes de vitesses — Jarek')->assertDontSee('hreflang="pl"', false);
+            ->assertSee('375,00 EUR')->assertSee('130,00 EUR')->assertDontSee('Boîtes de vitesses — Jarek')->assertDontSee('hreflang="pl"', false);
         $this->assertSame(1, $response->viewData('parts')->total());
         $this->get('https://gpswiss.fr/czesci')->assertOk()->assertSee('Supplier gearbox')->assertDontSee('Układ napędowy');
         $this->get($this->frenchCategoryUrl($this->categories[0]))->assertOk()->assertSee('Supplier gearbox');
@@ -91,12 +91,12 @@ class JarekUnifiedFrenchCatalogTest extends TestCase
         foreach (['gp-product-page', 'sf-product-detail', 'sf-gallery__layout', 'data-gallery-thumb', 'data-gallery-lightbox', 'sf-info-card', 'sf-purchase', 'sf-purchase__cart', '/boites-jarek/'.$this->product->id.'/panier'] as $text) {
             $response->assertSee($text, false);
         }
-        foreach (['Transmission', 'Boîtes de vitesses et accessoires', 'Boîte manuelle à 6 rapports', '312,50 EUR', '130,00 EUR'] as $text) {
+        foreach (['Transmission', 'Boîtes de vitesses et accessoires', 'Boîte manuelle à 6 rapports', '375,00 EUR', '130,00 EUR'] as $text) {
             $response->assertSee($text);
         }
         $response->assertDontSee('PLN')->assertDontSee('Prix brut. Le prix le plus bas des 30 derniers jours est disponible lors de la commande.')->assertDontSee('hreflang="pl"', false);
         $this->post('https://gpswiss.fr/boites-jarek/'.$this->product->id.'/panier', ['quantity' => 1])->assertRedirect();
-        $this->get('https://gpswiss.fr/panier')->assertOk()->assertSee('312,50 EUR')->assertSee('130,00 EUR');
+        $this->get('https://gpswiss.fr/panier')->assertOk()->assertSee('375,00 EUR')->assertSee('130,00 EUR');
         $this->assertSame($before, $this->product->gearbox->fresh()->getAttributes());
         $this->assertDatabaseCount('parts', 0);
         $this->get('https://gpswiss.fr/sitemaps/jarek-1.xml')->assertOk()->assertSee('/boites-jarek/'.$this->product->id);
@@ -139,7 +139,7 @@ class JarekUnifiedFrenchCatalogTest extends TestCase
 
     public function test_price_sort_and_bounds_use_displayed_eur_for_both_sources(): void
     {
-        $this->ordinary()->update(['price' => 1000]);
+        $this->ordinary()->update(['price' => 3200]);
         $response = $this->get($this->categoryUrl().'?sort=price_asc')->assertOk();
         $this->assertSame(['jarek-'.$this->product->id, '1'], $response->viewData('parts')->getCollection()->map(fn ($p) => (string) $p->id)->all());
         $this->get($this->categoryUrl().'?price_min=300&price_max=400')->assertOk()->assertSee('Supplier gearbox')->assertDontSee('Ordinary gearbox');
@@ -147,15 +147,15 @@ class JarekUnifiedFrenchCatalogTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_mixed_paging_respects_existing_local_ebay_eur_priority_and_conflict_block(): void
+    public function test_mixed_paging_ignores_local_ebay_prices_and_conflicts(): void
     {
         $part = $this->ordinary();
         $part->update(['currency' => 'PLN', 'price' => 4000]);
         MarketplaceListing::create(['part_id' => $part->id, 'marketplace' => 'ebay_de', 'match_status' => 'matched', 'price' => 50, 'currency' => 'EUR', 'quantity' => 1, 'status' => 'active']);
-        $response = $this->get($this->categoryUrl().'?price_max=100')->assertOk()->assertSee('Ordinary gearbox')->assertSee('50,00 EUR')->assertDontSee('Supplier gearbox');
+        $response = $this->get($this->categoryUrl().'?price_min=1200')->assertOk()->assertSee('Ordinary gearbox')->assertSee('1 250,00 EUR')->assertDontSee('Supplier gearbox');
         $this->assertSame(1, $response->viewData('parts')->total());
         MarketplaceListing::create(['part_id' => $part->id, 'marketplace' => 'ebay_de', 'match_status' => 'matched', 'price' => 60, 'currency' => 'EUR', 'quantity' => 1, 'status' => 'active']);
-        $this->get($this->categoryUrl().'?price_max=100')->assertOk()->assertDontSee('Ordinary gearbox');
+        $this->get($this->categoryUrl().'?price_min=1200')->assertOk()->assertSee('Ordinary gearbox')->assertSee('1 250,00 EUR');
         Http::assertNothingSent();
     }
 
@@ -189,7 +189,7 @@ class JarekUnifiedFrenchCatalogTest extends TestCase
 
     private function ordinary(): Part
     {
-        return Part::create(['name' => 'Ordinary gearbox', 'sku' => 'NORMAL', 'slug' => 'ordinary', 'price' => 100, 'currency' => 'EUR', 'quantity' => 1, 'status' => 'ready', 'category_id' => $this->leaf->id]);
+        return Part::create(['name' => 'Ordinary gearbox', 'sku' => 'NORMAL', 'slug' => 'ordinary', 'price' => 320, 'currency' => 'PLN', 'quantity' => 1, 'status' => 'ready', 'category_id' => $this->leaf->id]);
     }
 
     private function categoryUrl(): string

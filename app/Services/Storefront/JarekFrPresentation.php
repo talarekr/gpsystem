@@ -58,16 +58,12 @@ class JarekFrPresentation
         if ($images === []) {
             $blockers[] = 'no_images';
         }
-        if (! ($rate['ok'] ?? false) || ! is_numeric($rate['rate'] ?? null) || ! is_finite((float) $rate['rate']) || $rate['rate'] <= 0) {
-            $blockers[] = 'no_nbp_rate';
+        $price = FrenchPlnPricing::convert($gearbox?->price, $gearbox?->currency, FrenchPlnPricing::JAREK_MULTIPLIER, $rate, self::DELIVERY_CENTS);
+        if ($price['reason'] !== null) {
+            $blockers[] = $price['reason'];
         }
-        $marked = $base !== null && $gearbox?->currency === 'PLN' ? round($base * 1.25, 2, PHP_ROUND_HALF_UP) : null;
-        $eur = $marked !== null && ! in_array('no_nbp_rate', $blockers, true) ? round($marked / (float) $rate['rate'], 2, PHP_ROUND_HALF_UP) : null;
-        $cents = $eur !== null ? (int) round($eur * 100) : null;
-        if ($cents !== null && ($cents < 1 || $cents + self::DELIVERY_CENTS > 99999999)) {
-            $blockers[] = 'price_out_of_range';
-            $cents = null;
-        }
+        $marked = $price['price_pln_after_margin'];
+        $cents = $price['cents'];
 
         return [
             'source_type' => 'jarek_gearbox', 'source_id' => $gearbox?->id, 'sku' => 'JAREK-'.($gearbox?->allegro_offer_id ?: $gearbox?->id),
@@ -75,10 +71,10 @@ class JarekFrPresentation
             'uses_fr_translation' => $frTitle && ($frDescription || $source['description'] === ''),
             'uses_fallback_translation' => ! $frTitle || (! $frDescription && $source['description'] !== ''),
             'images' => $images, 'cents' => $cents, 'currency' => 'EUR', 'quantity' => 1,
-            'base_price_pln' => $base, 'price_after_markup_pln' => $marked, 'nbp_rate' => $rate,
+            'applied_margin' => 50, 'applied_margin_steps' => [25, 20], 'base_price_pln' => $base, 'price_after_markup_pln' => $marked, 'nbp_rate' => $rate,
             'delivery' => ['available' => true, 'amount_cents' => self::DELIVERY_CENTS, 'currency' => 'EUR', 'source' => 'approved_jarek_fr_fixed_130'],
             'can_buy' => $blockers === [], 'blockers' => $blockers,
-            'price_source' => 'jarek_gearboxes.price(PLN)*1.25->NBP_TABLE_A(EUR)',
+            'price_source' => 'jarek_gearboxes.price(PLN)*1.50->NBP_TABLE_A(EUR)',
         ];
     }
 

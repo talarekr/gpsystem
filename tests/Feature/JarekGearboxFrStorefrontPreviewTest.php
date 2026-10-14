@@ -97,9 +97,9 @@ class JarekGearboxFrStorefrontPreviewTest extends TestCase
             ->assertJsonPath('summary.eligible_for_fr_count', 0)
             ->assertJsonPath('summary.blocked_count', 1)
             ->assertJsonPath('sample_products.0.base_price', 1000)
-            ->assertJsonPath('sample_products.0.price_after_markup_pln', 1250)
+            ->assertJsonPath('sample_products.0.price_after_markup_pln', 1500)
             ->assertJsonPath('sample_products.0.nbp_eur_rate', 4)
-            ->assertJsonPath('sample_products.0.price_eur', 312.5)
+            ->assertJsonPath('sample_products.0.price_eur', 375)
             ->assertJsonPath('sample_products.0.source_quantity', 0)
             ->assertJsonPath('sample_products.0.fr_quantity_decision', 1)
             ->assertJsonPath('sample_products.0.source_stock_decrement', false)
@@ -152,8 +152,8 @@ class JarekGearboxFrStorefrontPreviewTest extends TestCase
                 'pricingSummary' => ['price' => ['value' => '50', 'currency' => 'EUR']]]]]);
         $this->cacheRate();
         $this->getJson(self::URL)->assertOk()
-            ->assertJsonPath('sample_products.0.price_after_markup_pln', 1.31)
-            ->assertJsonPath('sample_products.0.price_eur', 0.33)
+            ->assertJsonPath('sample_products.0.price_after_markup_pln', 1.575)
+            ->assertJsonPath('sample_products.0.price_eur', 0.39)
             ->assertJsonPath('sample_products.0.has_description', false)
             ->assertJsonPath('sample_products.0.historical_ebay_de_price', null)
             ->assertJsonPath('sample_products.0.proposed_fr_delivery.reason', 'delivery_mapping_blocked')

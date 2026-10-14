@@ -47,7 +47,8 @@ class FrenchNewProductsLifecycleTest extends TestCase
 
     public function test_product_save_registers_pending_without_google_or_queue_and_both_hosts_share_visibility(): void
     {
-        $part = $this->part(['is_visible_storefront' => false]);
+        $part = $this->part(['is_visible_storefront' => false, 'currency' => 'PLN', 'price' => 400]);
+        Cache::put('nbp_table_a_rate:EUR:latest', ['ok' => true, 'currency' => 'EUR', 'source' => 'NBP_TABLE_A', 'rate' => 5, 'effective_date' => today()->toDateString()], 3600);
         $this->assertSame($part->translationSourceHash(), FrenchProductTranslationRequest::sole()->source_hash);
         $this->assertSame('pending', FrenchProductTranslationRequest::sole()->status);
         $this->assertDatabaseCount('part_translations', 0);
@@ -250,7 +251,7 @@ class FrenchNewProductsLifecycleTest extends TestCase
         $part = $this->part(['currency' => 'PLN', 'price' => 500]);
         Cache::put('nbp_table_a_rate:EUR:latest', ['ok' => true, 'source' => 'NBP_TABLE_A', 'currency' => 'EUR', 'rate' => 4, 'effective_date' => today()->subDays(8)->toDateString()], 3600);
         Http::fake(['api.nbp.pl/*' => Http::response(['rates' => [['mid' => 5, 'effectiveDate' => today()->toDateString(), 'no' => 'fixture']]])]);
-        $this->get('https://gpswiss.fr/produkt/'.$part->slug)->assertOk()->assertSee('100,00 EUR')->assertDontSee('PLN');
+        $this->get('https://gpswiss.fr/produkt/'.$part->slug)->assertOk()->assertSee('125,00 EUR')->assertDontSee('PLN');
         $this->get('https://gpswiss.pl/produkt/'.$part->slug)->assertOk()->assertSee('500,00 PLN');
         $this->assertSame('500.00', $part->fresh()->price);
         $this->assertSame(1, $part->fresh()->quantity);

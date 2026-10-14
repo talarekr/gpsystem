@@ -9,6 +9,7 @@ use App\Models\PartCategory;
 use App\Models\User;
 use App\Support\FrenchOrderPresentation;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
@@ -201,6 +202,8 @@ class FrenchStorefrontSeoTest extends TestCase
 
     public function test_french_cart_messages_and_delivery_copy_preserve_pl(): void
     {
+        $this->part->update(['currency' => 'PLN', 'price' => 400]);
+        Cache::put('nbp_table_a_rate:EUR:latest', ['ok' => true, 'currency' => 'EUR', 'source' => 'NBP_TABLE_A', 'rate' => 5, 'effective_date' => today()->toDateString()], 3600);
         $this->get('https://gpswiss.fr/czesci')->assertOk()
             ->assertSee('Frais de livraison : 55,00 EUR')->assertDontSee('Livraison gratuite : le prochain jour ouvré');
         $this->post('https://gpswiss.fr/koszyk/dodaj/'.$this->part->id)->assertRedirect()

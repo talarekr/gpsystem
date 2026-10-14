@@ -13,6 +13,7 @@ use App\Services\Payments\PayuService;
 use App\Services\Storefront\CartService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Factory;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
@@ -31,6 +32,7 @@ class StripeFrenchCheckoutTest extends TestCase
         parent::setUp();
         Mail::fake();
         $this->freezeTime();
+        Cache::put('nbp_table_a_rate:EUR:latest', ['ok' => true, 'currency' => 'EUR', 'source' => 'NBP_TABLE_A', 'rate' => 5, 'effective_date' => today()->toDateString()], 3600);
         config(['frontend-maintenance.enabled' => false, 'stripe-fr.enabled' => true, 'stripe-fr.mode' => 'test',
             'stripe-fr.secret_key' => 'sk_test_fixture', 'stripe-fr.publishable_key' => 'pk_test_fixture',
             'stripe-fr.webhook_secret' => 'whsec_fixture']);
@@ -39,7 +41,7 @@ class StripeFrenchCheckoutTest extends TestCase
         Http::preventStrayRequests();
         $category = PartCategory::create(['name' => 'Moteurs', 'slug' => 'stripe-category']);
         $this->part = Part::create(['name' => 'Silnik', 'sku' => 'STRIPE-FR', 'slug' => 'stripe-fr',
-            'price' => 100, 'currency' => 'EUR', 'quantity' => 1, 'status' => 'ready', 'category_id' => $category->id]);
+            'price' => 400, 'currency' => 'PLN', 'quantity' => 1, 'status' => 'ready', 'category_id' => $category->id]);
         $this->part->translations()->create(['locale' => 'fr', 'name' => 'Moteur', 'status' => 'reviewed']);
         MarketplaceCategoryMapping::create(['local_category_id' => $category->id, 'channel' => 'ebay_fr',
             'shipping_group' => 'fr_55_eur', 'fulfillment_policy_id' => '260547694013']);
@@ -82,7 +84,8 @@ class StripeFrenchCheckoutTest extends TestCase
 
     public function test_nbp_fallback_uses_the_same_eur_price_on_card_and_stripe_and_records_rate_snapshot(): void
     {
-        $this->part->update(['currency' => 'PLN', 'price' => 500]);
+        $this->part->update(['currency' => 'PLN', 'price' => 400]);
+        Cache::forget('nbp_table_a_rate:EUR:latest');
         Http::fake(['api.nbp.pl/*' => Http::response(['rates' => [[
             'mid' => 5, 'effectiveDate' => today()->toDateString(), 'no' => '100/A/NBP/2026',
         ]]])]);
@@ -96,20 +99,21 @@ class StripeFrenchCheckoutTest extends TestCase
         $this->assertSame('EUR', $order->currency);
         $this->assertSame('155.00', $order->total);
         $this->assertSame(5, $item->meta['price_conversion']['rate']);
-        $this->assertSame('500.00', $item->meta['price_conversion']['source_amount']);
+        $this->assertSame('400.00', $item->meta['price_conversion']['source_amount']);
         $this->assertSame(today()->toDateString(), $item->meta['price_conversion']['effective_date']);
-        $this->assertSame('parts.price(PLN)->NBP_TABLE_A(EUR)', $item->meta['price_source']);
+        $this->assertSame('parts.price(PLN)*1.25->NBP_TABLE_A(EUR)', $item->meta['price_source']);
         Http::assertSent(fn ($request) => str_contains($request->url(), 'api.stripe.com')
             && $request['line_items'][0]['price_data']['currency'] === 'eur'
             && $request['line_items'][0]['price_data']['unit_amount'] === 10000);
-        $this->assertSame('500.00', $this->part->fresh()->price);
+        $this->assertSame('400.00', $this->part->fresh()->price);
         $this->assertSame(1, $this->part->fresh()->quantity);
         $this->assertCount(1, Http::recorded(fn ($request) => str_contains($request->url(), 'api.nbp.pl')));
     }
 
     public function test_unavailable_nbp_blocks_checkout_before_order_and_stripe(): void
     {
-        $this->part->update(['currency' => 'PLN', 'price' => 500]);
+        $this->part->update(['currency' => 'PLN', 'price' => 400]);
+        Cache::forget('nbp_table_a_rate:EUR:latest');
         Http::fake(['api.nbp.pl/*' => Http::response([], 503)]);
         $this->submit($this->key())->assertRedirect()->assertSessionHasErrors('payment');
         $this->assertDatabaseCount('orders', 0);
@@ -128,9 +132,9 @@ class StripeFrenchCheckoutTest extends TestCase
 
     public function test_missing_eur_shipping_addresses_and_multiple_units_block_before_writes(): void
     {
-        $this->part->update(['currency' => 'PLN']);
-        $this->assertBlocked();
         $this->part->update(['currency' => 'EUR']);
+        $this->assertBlocked();
+        $this->part->update(['currency' => 'PLN']);
         MarketplaceCategoryMapping::query()->delete();
         $this->assertBlocked();
         MarketplaceCategoryMapping::create(['local_category_id' => $this->part->category_id, 'channel' => 'ebay_fr',
@@ -144,15 +148,15 @@ class StripeFrenchCheckoutTest extends TestCase
         $this->assertSame(1, $this->part->fresh()->quantity);
     }
 
-    public function test_existing_ebay_fr_eur_price_is_read_without_conversion_or_mapping_writes(): void
+    public function test_local_ebay_eur_price_is_diagnostic_only_without_listing_or_mapping_writes(): void
     {
-        $this->part->update(['currency' => 'PLN', 'price' => 500]);
+        $this->part->update(['currency' => 'PLN', 'price' => 400]);
         $listing = MarketplaceListing::create(['part_id' => $this->part->id, 'marketplace' => 'ebay_de', 'match_status' => 'matched',
-            'external_offer_id' => 'fr-price-fixture', 'price' => 100, 'currency' => 'EUR', 'quantity' => 1, 'status' => 'active']);
+            'external_offer_id' => 'fr-price-fixture', 'price' => 400, 'currency' => 'PLN', 'quantity' => 1, 'status' => 'active']);
         $before = $listing->fresh()->toArray();
         $this->submit($this->key())->assertRedirect('https://checkout.stripe.com/c/pay/fixture');
         $this->assertSame($before, $listing->fresh()->toArray());
-        $this->assertStringContainsString('marketplace_listings:', Order::sole()->items()->sole()->meta['price_source']);
+        $this->assertSame('parts.price(PLN)*1.25->NBP_TABLE_A(EUR)', Order::sole()->items()->sole()->meta['price_source']);
         Http::assertSentCount(1);
     }
 
@@ -317,7 +321,7 @@ class StripeFrenchCheckoutTest extends TestCase
         $this->assertSame('pending', $order->fresh()->payment_status);
     }
 
-    public function test_multiple_positions_and_ambiguous_fr_eur_prices_do_not_create_orders(): void
+    public function test_multiple_positions_block_but_ambiguous_marketplace_prices_do_not(): void
     {
         $cart = $this->mock(CartService::class);
         $item = ['part_id' => $this->part->id, 'current_part' => $this->part->fresh(), 'quantity' => 1,
@@ -332,8 +336,8 @@ class StripeFrenchCheckoutTest extends TestCase
             MarketplaceListing::create(['part_id' => $this->part->id, 'marketplace' => 'ebay_de', 'match_status' => 'matched',
                 'external_offer_id' => 'ambiguous-'.$i, 'price' => $price, 'currency' => 'EUR', 'quantity' => 1, 'status' => 'active']);
         }
-        $this->assertBlocked();
-        Http::assertNothingSent();
+        $this->submit($this->key())->assertRedirect('https://checkout.stripe.com/c/pay/fixture');
+        Http::assertSentCount(1);
     }
 
     public function test_changed_price_invalidates_old_checkout_key_before_order_or_stripe(): void
