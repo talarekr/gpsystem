@@ -48,7 +48,7 @@ class JarekUnifiedFrenchCatalogTest extends TestCase
         $this->get('https://gpswiss.pl/czesci')->assertOk()->assertDontSee('Supplier gearbox');
         $response = $this->get($this->categoryUrl())->assertOk()->assertSee('Supplier gearbox')
             ->assertSee('Transmission')->assertSee('Boîte manuelle à 6 rapports')->assertSee('sf-product-card', false)
-            ->assertSee('375,00 EUR')->assertSee('130,00 EUR')->assertDontSee('Boîtes de vitesses — Jarek')->assertDontSee('hreflang="pl"', false);
+            ->assertSee('312,50 EUR')->assertSee('130,00 EUR')->assertDontSee('Boîtes de vitesses — Jarek')->assertDontSee('hreflang="pl"', false);
         $this->assertSame(1, $response->viewData('parts')->total());
         $this->get('https://gpswiss.fr/czesci')->assertOk()->assertSee('Supplier gearbox')->assertDontSee('Układ napędowy');
         $this->get($this->frenchCategoryUrl($this->categories[0]))->assertOk()->assertSee('Supplier gearbox');
@@ -91,12 +91,12 @@ class JarekUnifiedFrenchCatalogTest extends TestCase
         foreach (['gp-product-page', 'sf-product-detail', 'sf-gallery__layout', 'data-gallery-thumb', 'data-gallery-lightbox', 'sf-info-card', 'sf-purchase', 'sf-purchase__cart', '/boites-jarek/'.$this->product->id.'/panier'] as $text) {
             $response->assertSee($text, false);
         }
-        foreach (['Transmission', 'Boîtes de vitesses et accessoires', 'Boîte manuelle à 6 rapports', '375,00 EUR', '130,00 EUR'] as $text) {
+        foreach (['Transmission', 'Boîtes de vitesses et accessoires', 'Boîte manuelle à 6 rapports', '312,50 EUR', '130,00 EUR'] as $text) {
             $response->assertSee($text);
         }
         $response->assertDontSee('PLN')->assertDontSee('Prix brut. Le prix le plus bas des 30 derniers jours est disponible lors de la commande.')->assertDontSee('hreflang="pl"', false);
         $this->post('https://gpswiss.fr/boites-jarek/'.$this->product->id.'/panier', ['quantity' => 1])->assertRedirect();
-        $this->get('https://gpswiss.fr/panier')->assertOk()->assertSee('375,00 EUR')->assertSee('130,00 EUR');
+        $this->get('https://gpswiss.fr/panier')->assertOk()->assertSee('312,50 EUR')->assertSee('130,00 EUR');
         $this->assertSame($before, $this->product->gearbox->fresh()->getAttributes());
         $this->assertDatabaseCount('parts', 0);
         $this->get('https://gpswiss.fr/sitemaps/jarek-1.xml')->assertOk()->assertSee('/boites-jarek/'.$this->product->id);

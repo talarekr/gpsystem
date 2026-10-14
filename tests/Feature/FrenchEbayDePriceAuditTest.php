@@ -154,10 +154,11 @@ class FrenchEbayDePriceAuditTest extends TestCase
         $this->assertSame(687.5, $rows[0]['final_fr_price_eur']);
         $this->assertSame(2200, $rows[0]['ebay_de_price']);
         $this->assertSame('jarek', $rows[1]['source_type']);
-        $this->assertSame(50, $rows[1]['applied_margin']);
-        $this->assertSame([25, 20], $rows[1]['applied_margin_steps']);
-        $this->assertSame(4500.0, $rows[1]['price_pln_after_margin']);
-        $this->assertSame(1125, $rows[1]['final_fr_price_eur']);
+        $this->assertSame(25, $rows[1]['applied_margin']);
+        $this->assertSame([25], $rows[1]['applied_margin_steps']);
+        $this->assertSame(3750.0, $rows[1]['price_pln_after_margin']);
+        $this->assertSame(937.5, $rows[1]['final_fr_price_eur']);
+        $this->assertNotEquals(1125, $rows[1]['final_fr_price_eur']);
         $this->assertSame($before, $source->fresh()->getRawOriginal());
         Http::assertNothingSent();
     }
@@ -181,7 +182,7 @@ class FrenchEbayDePriceAuditTest extends TestCase
     public function test_sql_and_runtime_share_rounding_currency_and_range_guards_for_both_margins(): void
     {
         $rate = ['ok' => true, 'currency' => 'EUR', 'source' => 'NBP_TABLE_A', 'rate' => 4, 'effective_date' => today()->toDateString()];
-        foreach ([1.25, 1.50] as $multiplier) {
+        foreach ([FrenchPlnPricing::PART_MULTIPLIER, FrenchPlnPricing::JAREK_MULTIPLIER] as $multiplier) {
             foreach ([0, 0.01, 1.05, 2200, 3000, 999999999] as $amount) {
                 foreach (['PLN', 'EUR'] as $currency) {
                     $expected = FrenchPlnPricing::convert($amount, $currency, $multiplier, $rate);
@@ -192,7 +193,7 @@ class FrenchEbayDePriceAuditTest extends TestCase
             }
         }
         foreach ([today()->subDays(8)->toDateString(), today()->addDay()->toDateString(), '2026-02-30'] as $date) {
-            $price = FrenchPlnPricing::convert(3000, 'PLN', 1.50, array_replace($rate, ['effective_date' => $date]));
+            $price = FrenchPlnPricing::convert(3000, 'PLN', FrenchPlnPricing::JAREK_MULTIPLIER, array_replace($rate, ['effective_date' => $date]));
             $this->assertNull($price['cents']);
             $this->assertSame('no_nbp_rate', $price['reason']);
         }

@@ -71,10 +71,10 @@ class JarekFrPresentation
             'uses_fr_translation' => $frTitle && ($frDescription || $source['description'] === ''),
             'uses_fallback_translation' => ! $frTitle || (! $frDescription && $source['description'] !== ''),
             'images' => $images, 'cents' => $cents, 'currency' => 'EUR', 'quantity' => 1,
-            'applied_margin' => 50, 'applied_margin_steps' => [25, 20], 'base_price_pln' => $base, 'price_after_markup_pln' => $marked, 'nbp_rate' => $rate,
+            'applied_margin' => 25, 'applied_margin_steps' => [25], 'base_price_pln' => $base, 'price_after_markup_pln' => $marked, 'nbp_rate' => $rate,
             'delivery' => ['available' => true, 'amount_cents' => self::DELIVERY_CENTS, 'currency' => 'EUR', 'source' => 'approved_jarek_fr_fixed_130'],
             'can_buy' => $blockers === [], 'blockers' => $blockers,
-            'price_source' => 'jarek_gearboxes.price(PLN)*1.50->NBP_TABLE_A(EUR)',
+            'price_source' => 'jarek_gearboxes.price(PLN)*1.25->NBP_TABLE_A(EUR)',
         ];
     }
 

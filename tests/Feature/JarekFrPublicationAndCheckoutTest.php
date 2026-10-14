@@ -64,7 +64,7 @@ class JarekFrPublicationAndCheckoutTest extends TestCase
         $this->get(self::TOOL)->assertOk();
         $report = $this->preview();
         $this->assertSame(1, $report['summary']['would_publish_count']);
-        $this->assertSame(375, $report['products'][0]['price_eur']);
+        $this->assertSame(312.5, $report['products'][0]['price_eur']);
         $this->assertDatabaseCount('jarek_fr_products', 0);
         $this->apply($report['report_id'], 'incorrect')->assertUnprocessable();
         $this->assertDatabaseCount('jarek_fr_products', 0);
@@ -111,7 +111,7 @@ class JarekFrPublicationAndCheckoutTest extends TestCase
         Http::preventStrayRequests();
         Http::fake(['api.nbp.pl/*' => Http::response(['rates' => [['mid' => 5, 'effectiveDate' => today()->toDateString(), 'no' => 'fixture']]])]);
         $report = $this->preview();
-        $this->assertSame(300, $report['products'][0]['price_eur']);
+        $this->assertSame(250, $report['products'][0]['price_eur']);
         $this->apply($report['report_id'])->assertOk();
     }
 
@@ -120,25 +120,25 @@ class JarekFrPublicationAndCheckoutTest extends TestCase
         $this->source->update(['price' => 3000]);
         $before = $this->source->fresh()->getAttributes();
         $product = $this->publish();
-        $this->get('https://gpswiss.fr/boites-jarek/'.$product->id)->assertOk()->assertSee('1 125,00 EUR')->assertSee('130,00 EUR')->assertDontSee('PLN');
-        $this->get('https://gpswiss.fr/czesci')->assertOk()->assertSee($this->source->title);
+        $this->get('https://gpswiss.fr/boites-jarek/'.$product->id)->assertOk()->assertSee('937,50 EUR')->assertSee('130,00 EUR')->assertDontSee('PLN');
+        $this->get('https://gpswiss.fr/czesci')->assertOk()->assertSee($this->source->title)->assertSee('937,50 EUR')->assertDontSee('1 125,00 EUR');
         $this->get('https://gpswiss.pl/czesci')->assertOk()->assertDontSee($this->source->title);
         $this->get('https://gpswiss.pl/boites-jarek/'.$product->id.'?lang=fr')->assertNotFound();
         $this->get('https://gpswiss.fr/sitemaps/jarek-1.xml')->assertOk()->assertSee('/boites-jarek/'.$product->id);
         $this->post('https://gpswiss.fr/boites-jarek/'.$product->id.'/panier', ['quantity' => 1])->assertRedirect();
         $this->withSession(['storefront.fr.address' => $this->address()]);
-        $this->get('https://gpswiss.fr/panier')->assertOk()->assertSee('1 125,00 EUR')->assertSee('130,00 EUR');
-        $key = $this->get('https://gpswiss.fr/commande')->assertOk()->viewData('draft')['checkout_key'];
+        $this->get('https://gpswiss.fr/panier')->assertOk()->assertSee('937,50 EUR')->assertSee('130,00 EUR');
+        $key = $this->get('https://gpswiss.fr/commande')->assertOk()->assertSee('937,50 EUR')->assertSee('130,00 EUR')->viewData('draft')['checkout_key'];
         $this->post('https://gpswiss.fr/commande', ['checkout_key' => $key, 'terms' => 1])->assertRedirect('https://checkout.stripe.com/c/pay/jarek');
         $this->post('https://gpswiss.fr/commande', ['checkout_key' => $key, 'terms' => 1])->assertRedirect('https://checkout.stripe.com/c/pay/jarek');
         $order = Order::sole();
-        $this->assertSame('1255.00', $order->total);
+        $this->assertSame('1067.50', $order->total);
         $item = $order->items()->sole();
         $this->assertNull($item->part_id);
         $this->assertSame($product->id, (int) $item->jarek_fr_product_id);
         $this->assertSame('jarek_gearbox', $item->meta['source_type']);
-        $this->assertSame('1125.00', $item->unit_price);
-        Http::assertSent(fn ($r) => $r['line_items'][0]['price_data']['unit_amount'] === 112500
+        $this->assertSame('937.50', $item->unit_price);
+        Http::assertSent(fn ($r) => $r['line_items'][0]['price_data']['unit_amount'] === 93750
             && $r['shipping_options'][0]['shipping_rate_data']['fixed_amount']['amount'] === 13000);
         $this->get('https://gpswiss.pl/admin/orders/'.$order->id)->assertOk()->assertSee('Źródło: Jarek gearbox / gpswiss_fr')->assertSee('gpswiss_fr · fr · EUR');
         $attempt = DB::table('stripe_fr_attempts')->sole();
@@ -146,7 +146,7 @@ class JarekFrPublicationAndCheckoutTest extends TestCase
         $event = ['id' => 'evt_jarek_fixture', 'type' => 'checkout.session.completed', 'livemode' => true,
             'data' => ['object' => ['object' => 'checkout.session', 'id' => $attempt->session_id, 'mode' => 'payment',
                 'livemode' => true, 'status' => 'complete', 'payment_status' => 'paid', 'payment_intent' => 'pi_jarek',
-                'currency' => 'eur', 'amount_total' => 125500, 'client_reference_id' => (string) $order->id, 'metadata' => $payload['metadata']]]];
+                'currency' => 'eur', 'amount_total' => 106750, 'client_reference_id' => (string) $order->id, 'metadata' => $payload['metadata']]]];
         $invalid = $event;
         $invalid['data']['object']['metadata']['jarek_fr_product_id'] = '999999';
         $this->webhook($invalid)->assertUnprocessable();
@@ -265,7 +265,7 @@ class JarekFrPublicationAndCheckoutTest extends TestCase
         $this->apply($id)->assertUnprocessable()->assertJsonValidationErrors('report_id');
         $this->assertDatabaseCount('jarek_fr_products', 0);
         $report = $this->preview();
-        $this->assertSame(300, $report['products'][0]['price_eur']);
+        $this->assertSame(250, $report['products'][0]['price_eur']);
         $this->apply($report['report_id'])->assertOk();
         Http::assertSentCount(1);
     }

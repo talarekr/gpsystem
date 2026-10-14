@@ -33,7 +33,7 @@ class FrenchPriceAudit
                 $price = FrenchPlnPricing::convert($gearbox?->price, $gearbox?->currency, FrenchPlnPricing::JAREK_MULTIPLIER, $this->cachedRate(), JarekFrPresentation::DELIVERY_CENTS);
                 yield ['source_type' => 'jarek', 'source_id' => $gearbox?->id, 'part_id' => null, 'sku' => null, 'part_number' => null, 'slug' => null,
                     'parts_price' => null, 'parts_currency' => null, 'source_jarek_price_pln' => $gearbox?->price,
-                    'source_currency' => $gearbox?->currency, 'applied_margin' => 50, 'applied_margin_steps' => [25, 20],
+                    'source_currency' => $gearbox?->currency, 'applied_margin' => 25, 'applied_margin_steps' => [25],
                     'price_pln_after_margin' => $price['price_pln_after_margin'], 'nbp_eur_rate' => $price['nbp_eur_rate'],
                     'final_fr_price_eur' => $price['cents'] === null ? null : $price['cents'] / 100, 'ebay_de_price' => null,
                     'price_difference_abs' => null, 'reason_code' => $price['reason'] ?? 'priced_from_source_pln', 'warnings' => []];
@@ -67,7 +67,7 @@ class FrenchPriceAudit
         return ['generated_at' => now()->toISOString(), 'summary' => $summary, 'top_50_differences' => $top,
             'jarek_examples' => $jarek, 'examples' => $examples, 'nbp_cache' => $this->cachedRate(),
             'scope' => 'storefront-visible Part and active Jarek FR products', 'marketplace_calls' => false, 'writes' => false,
-            'policy' => ['part' => 'parts.price PLN * 1.25 / NBP EUR', 'jarek' => 'jarek_gearboxes.price PLN * 1.50 / NBP EUR'],
+            'policy' => ['part' => 'parts.price PLN * 1.25 / NBP EUR', 'jarek' => 'jarek_gearboxes.price PLN * 1.25 / NBP EUR'],
             'limitations' => ['eBay.de is diagnostic only, never the pricing authority.', 'Warnings are heuristics, not proof of incorrect marketplace data.',
                 'No NBP refresh; missing/invalid cache makes report prices unavailable. Runtime may use the existing NBP fetch.', 'Delivery is separate and unchanged.']];
     }

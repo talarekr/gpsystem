@@ -34,12 +34,12 @@
 <h2>Próbka: offset {{ $preview['offset'] ?? 0 }}, limit {{ $preview['limit'] ?? 0 }}</h2>
 <p>Qty FR = 1 niezależnie od ilości źródłowej. Dane zdjęć sprawdzane lokalnie, bez HTTP. Historyczna cena eBay nie jest potwierdzeniem bieżącej ceny.</p>
 <div class="table"><table>
-<thead><tr><th>Produkt</th><th>Cena +50% (+25%, następnie +20%)</th><th>Dostawa FR</th><th>Status</th><th>Pełne dane preview</th></tr></thead>
+<thead><tr><th>Produkt</th><th>Cena +25%</th><th>Dostawa FR</th><th>Status</th><th>Pełne dane preview</th></tr></thead>
 <tbody>
 @forelse ($preview['sample_products'] as $row)
 <tr>
     <td>{{ $row['sku'] }}<br>{{ $row['title'] }}<br>Jarek ID: {{ $row['jarek_gearbox_id'] }}</td>
-    <td>{{ $row['base_price'] ?? '—' }} {{ $row['base_currency'] }}<br>+50% (+25%, następnie +20%): {{ $row['price_after_markup_pln'] ?? '—' }} PLN<br>{{ $row['price_eur'] ?? '—' }} EUR</td>
+    <td>{{ $row['base_price'] ?? '—' }} {{ $row['base_currency'] }}<br>+25%: {{ $row['price_after_markup_pln'] ?? '—' }} PLN<br>{{ $row['price_eur'] ?? '—' }} EUR</td>
     <td>{{ $row['proposed_fr_delivery']['amount_eur'] ?? '—' }} EUR<br>{{ $row['proposed_fr_delivery']['source'] ?? $row['proposed_fr_delivery']['reason'] ?? '—' }}</td>
     <td>{{ $row['status'] }}<br>data_ready: {{ $row['data_ready'] ? 'tak' : 'nie' }}<br>{{ implode(', ', $row['blockers']) }}</td>
     <td><details><summary>Dane i decyzje</summary><pre>{{ json_encode($row, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) }}</pre></details></td>

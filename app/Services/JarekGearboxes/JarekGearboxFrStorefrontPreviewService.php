@@ -159,7 +159,7 @@ class JarekGearboxFrStorefrontPreviewService
             'has_images' => $images !== [], 'images_count' => count($images),
             'image_verification' => 'local_paths_or_stored_urls_only; no HTTP checks',
             'base_price' => $price, 'source_price_raw' => $product->price, 'base_currency' => $currency, 'base_price_source' => 'jarek_gearboxes.price (imported Allegro offer price)',
-            'markup_percent' => 50, 'applied_margin_steps' => [25, 20], 'price_after_markup_pln' => $marked,
+            'markup_percent' => 25, 'applied_margin_steps' => [25], 'price_after_markup_pln' => $marked,
             'nbp_eur_rate' => ($rate['ok'] ?? false) ? $rate['rate'] : null,
             'nbp_effective_date' => $rate['effective_date'] ?? null, 'nbp_table_no' => $rate['table_no'] ?? null,
             'price_eur' => $eur, 'historical_ebay_de_price' => $this->historicalPrice($product, $existingListings),
