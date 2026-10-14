@@ -31,7 +31,7 @@ class FrenchMixedCatalog
         return $category && ($categoryIds === null || in_array((int) $category->id, $categoryIds, true));
     }
 
-    public function paginate(Builder $parts, Request $request, ?array $categoryIds = null): LengthAwarePaginator
+    public function paginate(Builder $parts, Request $request, ?array $categoryIds = null, int $perPage = 60): LengthAwarePaginator
     {
         abort_unless(StorefrontContext::isFrench($request), 404);
         $needsPrice = in_array($request->input('sort'), ['price_asc', 'price_desc'], true)
@@ -78,7 +78,7 @@ class FrenchMixedCatalog
             'name' => $rows->orderBy('sort_name'),
             default => $rows->orderByDesc('sort_updated'),
         };
-        $page = $rows->orderBy('source_type')->orderByDesc('product_id')->paginate(60)->withQueryString();
+        $page = $rows->orderBy('source_type')->orderByDesc('product_id')->paginate(max(1, min(60, $perPage)))->withQueryString();
         $ids = $page->getCollection();
         $ordinary = Part::query()->with(['images', 'category', 'car'])->withStorefrontTranslations('fr')
             ->whereIn('id', $ids->where('source_type', 'part')->pluck('product_id'))->get()->keyBy('id');

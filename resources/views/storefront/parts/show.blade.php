@@ -83,7 +83,7 @@
                 </div>
             @endif
         </section>
-        <section class="sf-info-card"><h1>{{ $productName }}</h1><p><strong>{{ __('storefront.part_number') }}:</strong> {{ $part->part_number ?: $part->sku ?: '—' }}</p><p><strong>{{ __('storefront.condition') }}:</strong> {{ __('storefront.used_checked') }}</p>@if($part->car_id)<a class="sf-link-box" href="{{ route('storefront.catalog', ['vehicle_model'=>trim(($part->car?->make ?? '').' '.($part->car?->model ?? ''))]) }}">{{ __('storefront.show_more_vehicle') }}</a>@endif<div class="sf-trust"><span>{{ __('storefront.delivery_time') }}</span><span>{{ __('storefront.payment_methods') }}</span><span>{{ __('storefront.return_14_days') }}</span></div></section><aside class="sf-purchase"><span>{{ __('storefront.product_price') }}</span><strong>
+        <section class="sf-info-card"><h1>{{ $productName }}</h1>@unless($isFrenchProduct && $isJarekProduct)<p><strong>{{ __('storefront.part_number') }}:</strong> {{ $part->part_number ?: $part->sku ?: '—' }}</p>@endunless<p><strong>{{ __('storefront.condition') }}:</strong> {{ __('storefront.used_checked') }}</p>@if($part->car_id)<a class="sf-link-box" href="{{ route('storefront.catalog', ['vehicle_model'=>trim(($part->car?->make ?? '').' '.($part->car?->model ?? ''))]) }}">{{ __('storefront.show_more_vehicle') }}</a>@endif<div class="sf-trust"><span>{{ __('storefront.delivery_time') }}</span><span>{{ __('storefront.payment_methods') }}</span><span>{{ __('storefront.return_14_days') }}</span></div></section><aside class="sf-purchase"><span>{{ __('storefront.product_price') }}</span><strong>
 @if($isFrenchProduct)
     @if($frProduct['cents'] !== null)
         {{ number_format($frProduct['cents'] / 100, 2, ',', ' ') }} EUR

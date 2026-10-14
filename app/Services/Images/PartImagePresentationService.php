@@ -8,7 +8,7 @@ use Throwable;
 
 class PartImagePresentationService
 {
-    private const PRESENTATION_VERSION = '2026-06-auto-crop-v2';
+    public const PRESENTATION_VERSION = '2026-06-auto-crop-v2';
     private const LISTING_CANVAS = ['width' => 522, 'height' => 336];
     private const PRODUCT_CANVAS = ['width' => 900, 'height' => 675];
     private const LISTING_TARGET_FILL = 1.0;

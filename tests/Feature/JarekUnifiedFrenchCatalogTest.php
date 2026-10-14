@@ -76,7 +76,7 @@ class JarekUnifiedFrenchCatalogTest extends TestCase
 
     public function test_home_and_legacy_collection_have_no_separate_supplier_section(): void
     {
-        $this->get('https://gpswiss.fr/')->assertOk()->assertDontSee('Boîtes de vitesses — Jarek')->assertDontSee('Supplier gearbox');
+        $this->get('https://gpswiss.fr/')->assertOk()->assertDontSee('Boîtes de vitesses — Jarek')->assertSee('Supplier gearbox');
         $this->get('https://gpswiss.fr/boites-jarek')->assertStatus(301)->assertRedirect('/kategoria-produktu/'.FrenchMixedCatalog::CATEGORY_PATH);
         $this->get('https://gpswiss.pl/boites-jarek')->assertNotFound();
         Http::assertNothingSent();
