@@ -26,6 +26,39 @@ class JarekImagePresentation
             'product' => $manifest ? Storage::disk('public')->url($manifest['product_path']) : $url, 'ready' => $manifest !== null, 'listing_score' => is_numeric($manifest['listing_score'] ?? null) ? (float) $manifest['listing_score'] : null];
     }
 
+    public function inspect(string $url): array
+    {
+        $source = $this->source($url);
+        if (! $source) {
+            return ['status' => 'skipped', 'code' => 'missing_local_source', 'fingerprint' => null];
+        }
+        if ($this->manifest($source)) {
+            return ['status' => 'ready', 'code' => 'already_ready', 'fingerprint' => $source['fingerprint']];
+        }
+        $dimensions = @getimagesize($source['absolute']);
+        if (! $dimensions || $dimensions[0] * $dimensions[1] > 16000000) {
+            return ['status' => 'failed', 'code' => 'unreadable_or_too_large', 'fingerprint' => $source['fingerprint']];
+        }
+        if (! extension_loaded('gd')) {
+            return ['status' => 'failed', 'code' => 'gd_unavailable', 'fingerprint' => $source['fingerprint']];
+        }
+
+        return ['status' => 'missing', 'code' => null, 'fingerprint' => $source['fingerprint']];
+    }
+
+    public function prepareUrl(string $url, ?string $expectedFingerprint = null): array
+    {
+        $source = $this->source($url);
+        if (! $source) {
+            return ['status' => 'error', 'code' => 'missing_local_source'];
+        }
+        if ($expectedFingerprint !== null && $source['fingerprint'] !== $expectedFingerprint) {
+            return ['status' => 'error', 'code' => 'source_changed'];
+        }
+
+        return $this->prepare($source, true);
+    }
+
     /** At most two images and ten exposures per browser request; cursor is resumable. */
     public function batch(int $afterId = 0, int $afterImage = 0, bool $apply = false): array
     {

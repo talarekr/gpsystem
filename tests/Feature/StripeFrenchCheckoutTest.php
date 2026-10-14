@@ -147,7 +147,7 @@ class StripeFrenchCheckoutTest extends TestCase
     public function test_existing_ebay_fr_eur_price_is_read_without_conversion_or_mapping_writes(): void
     {
         $this->part->update(['currency' => 'PLN', 'price' => 500]);
-        $listing = MarketplaceListing::create(['part_id' => $this->part->id, 'marketplace' => 'ebay_fr',
+        $listing = MarketplaceListing::create(['part_id' => $this->part->id, 'marketplace' => 'ebay_de', 'match_status' => 'matched',
             'external_offer_id' => 'fr-price-fixture', 'price' => 100, 'currency' => 'EUR', 'quantity' => 1, 'status' => 'active']);
         $before = $listing->fresh()->toArray();
         $this->submit($this->key())->assertRedirect('https://checkout.stripe.com/c/pay/fixture');
@@ -329,7 +329,7 @@ class StripeFrenchCheckoutTest extends TestCase
         $this->mockCart();
         $this->part->update(['currency' => 'PLN']);
         foreach ([100, 110] as $i => $price) {
-            MarketplaceListing::create(['part_id' => $this->part->id, 'marketplace' => 'ebay_fr',
+            MarketplaceListing::create(['part_id' => $this->part->id, 'marketplace' => 'ebay_de', 'match_status' => 'matched',
                 'external_offer_id' => 'ambiguous-'.$i, 'price' => $price, 'currency' => 'EUR', 'quantity' => 1, 'status' => 'active']);
         }
         $this->assertBlocked();

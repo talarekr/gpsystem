@@ -19,7 +19,22 @@ class CategoryTreeService
 
     private ?array $frenchTree = null;
 
+    private ?string $explicitLocale = null;
+
     private ?bool $hasVisibilityColumn = null;
+
+    /** Read-only diagnostics can inspect the FR structure while the admin host is PL. */
+    public function forLocale(string $locale): self
+    {
+        if (! in_array($locale, ['fr', 'pl'], true)) {
+            throw new \InvalidArgumentException('Unsupported catalog tree locale.');
+        }
+        $tree = clone $this;
+        $tree->explicitLocale = $locale;
+        $tree->frenchTree = null;
+
+        return $tree;
+    }
 
     /** @return EloquentCollection<int, PartCategory> */
     public function roots(): EloquentCollection
@@ -36,7 +51,7 @@ class CategoryTreeService
     /** @return array{roots:EloquentCollection<int, PartCategory>, all:Collection<int, PartCategory>} */
     public function tree(): array
     {
-        $isFrenchStorefront = request()->attributes->get('storefront_locale') === 'fr';
+        $isFrenchStorefront = ($this->explicitLocale ?? request()->attributes->get('storefront_locale')) === 'fr';
         if ($isFrenchStorefront && $this->frenchTree !== null) {
             return $this->frenchTree;
         }

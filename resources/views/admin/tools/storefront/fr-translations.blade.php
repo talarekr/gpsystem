@@ -12,7 +12,7 @@
 <body>
 <main>
     <a href="{{ url('/admin') }}">← Wróć do panelu admina</a>
-    <p><a href="{{ route('admin.tools.storefront.fr-translations.category-diagnostics') }}">Diagnostyka kategorii FR — bieżące nazwy, statusy i fallback</a>@if(auth()->user()?->hasRole(\App\Enums\UserRole::OwnerAdmin->value)) · <a href="{{ route('admin.tools.storefront.fr-translations.jarek-local-images') }}">Jarek FR — przygotowanie lokalnych wariantów zdjęć</a>@endif</p>
+    <p><a href="{{ route('admin.tools.storefront.fr-translations.category-diagnostics') }}">Diagnostyka kategorii FR — bieżące nazwy, statusy i fallback</a> · <a href="{{ route('admin.tools.storefront.fr-translations.price-audit') }}">Raport cen GPSwiss.fr vs eBay.de</a>@if(auth()->user()?->hasRole(\App\Enums\UserRole::OwnerAdmin->value)) · <a href="{{ route('admin.tools.storefront.fr-translations.jarek-local-images') }}">Jarek FR — przygotowanie lokalnych wariantów zdjęć</a>@endif</p>
     <div class="row between">
         <h1>GPSwiss FR — tłumaczenia katalogu</h1>
         <span class="badge">Uruchamianie ręczne</span>

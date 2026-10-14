@@ -4,22 +4,29 @@ namespace App\Http\Controllers\Admin\JarekGearboxes;
 
 use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
-use App\Services\Images\JarekImagePresentation;
+use App\Services\Images\JarekImageRunner;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Schema;
 
 class JarekFrImagesController extends Controller
 {
-    public function __invoke(Request $request, JarekImagePresentation $images)
+    public function __invoke(Request $request, JarekImageRunner $runner)
     {
         abort_unless($request->user()?->hasRole(UserRole::OwnerAdmin->value), 403);
-        abort_unless(Schema::hasTable('jarek_fr_products'), 422, 'Brak tabeli ekspozycji Jarka.');
+        $actor = (int) $request->user()->id;
         if ($request->isMethod('post')) {
-            $input = $request->validate(['action' => ['required', 'in:preview,prepare'],
-                'after_id' => ['nullable', 'integer', 'min:0'], 'after_image' => ['nullable', 'integer', 'min:0', 'max:60'],
-                'confirm' => ['required_if:action,prepare', 'in:PREPARE-JAREK-FR-LOCAL-IMAGES']]);
+            $input = $request->validate(['action' => ['required', 'in:preview,start,tick,pause,resume,stop'],
+                'run_id' => ['required_unless:action,preview', 'uuid'], 'confirm' => ['required_if:action,start', 'in:'.JarekImageRunner::CONFIRM]]);
+            $run = match ($input['action']) {
+                'preview' => $runner->preview($actor),
+                'start' => $runner->start($input['run_id'], $actor, $input['confirm']),
+                'tick' => $runner->tick($input['run_id'], $actor),
+                default => $runner->control($input['run_id'], $actor, $input['action']),
+            };
 
-            return response()->json($images->batch((int) ($input['after_id'] ?? 0), (int) ($input['after_image'] ?? 0), $input['action'] === 'prepare'))
+            return response()->json(['schema_ready' => $runner->ready(), 'run' => $run])->header('Cache-Control', 'private, no-store');
+        }
+        if ($request->expectsJson()) {
+            return response()->json(['schema_ready' => $runner->ready(), 'run' => $runner->latest($actor)])
                 ->header('Cache-Control', 'private, no-store');
         }
 

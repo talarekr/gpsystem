@@ -1,6 +1,6 @@
 <?php
 
 return [
-    // Approved priority: existing EUR, local eBay FR EUR, then PLN / NBP table-A EUR rate.
+    // Approved priority: unambiguous active local eBay DE EUR, Part EUR, then PLN / NBP. Delivery stays FR.
     'pricing_policy' => 'existing_eur_nbp',
 ];

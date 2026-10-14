@@ -46,7 +46,7 @@ class FrenchNbpPriceFallbackTest extends TestCase
             'quantity' => 1, 'status' => 'ready']);
         $this->assertSame(10000, app(FrenchPriceResolver::class)->resolve($part)['cents']);
         $part->update(['currency' => 'PLN', 'price' => 500]);
-        MarketplaceListing::create(['part_id' => $part->id, 'marketplace' => 'ebay_fr',
+        MarketplaceListing::create(['part_id' => $part->id, 'marketplace' => 'ebay_de', 'match_status' => 'matched',
             'external_offer_id' => 'priority', 'price' => 123, 'currency' => 'EUR', 'quantity' => 1, 'status' => 'active']);
         $this->assertSame(12300, app(FrenchPriceResolver::class)->resolve($part)['cents']);
         Http::assertNothingSent();
