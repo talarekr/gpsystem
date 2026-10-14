@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Services\Storefront\FrenchCatalogTranslationAdminRunner;
 use App\Services\Storefront\FrenchCatalogTranslationPreviewService;
+use App\Services\Storefront\FrenchNewProductsTranslationRunner;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -16,6 +17,7 @@ class FrenchCatalogTranslationController extends Controller
         return view('admin.tools.storefront.fr-translations', [
             'overview' => $preview->overview((int) $request->user()->getAuthIdentifier()),
             'status' => $runner->status(),
+            'newProductsOverview' => app(FrenchNewProductsTranslationRunner::class)->overview(),
             'jarekOverview' => $preview->forScope('jarek_gearboxes')->overview((int) $request->user()->getAuthIdentifier()),
             'jarekStatus' => $runner->forScope('jarek_gearboxes')->status(),
         ]);

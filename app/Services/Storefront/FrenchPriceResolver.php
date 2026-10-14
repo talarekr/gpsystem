@@ -58,7 +58,7 @@ class FrenchPriceResolver
             $request = request();
             $key = 'storefront.fr.nbp.eur_rate';
             if (! $request->attributes->has($key)) {
-                $request->attributes->set($key, $this->rates->rateFor('EUR'));
+                $request->attributes->set($key, $this->rates->currentEurPln());
             }
             $rate = $request->attributes->get($key);
             $value = is_numeric($rate['rate'] ?? null) ? (float) $rate['rate'] : 0;

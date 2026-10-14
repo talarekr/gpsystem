@@ -95,6 +95,9 @@ class FrenchCatalogTranslationService
                 if (! $record) {
                     return ['result' => $this->result('skipped', 'record_missing')];
                 }
+                if (isset($options['expected_source_hash']) && ! hash_equals($options['expected_source_hash'], $record->translationSourceHash())) {
+                    return ['result' => $this->result('skipped', 'source_changed')];
+                }
                 $translation = $record->translations()->where('locale', 'fr')->lockForUpdate()->first();
                 $record->setRelation('translations', collect($translation ? [$translation] : []));
                 if ($reason = $this->skipReason($record, $options)) {

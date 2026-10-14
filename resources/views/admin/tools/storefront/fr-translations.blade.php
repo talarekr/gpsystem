@@ -25,6 +25,7 @@
         <h2 id="catalog-section-title">Produkty i kategorie GPSwiss.fr</h2>
         @include('admin.tools.storefront._fr-translation-section', ['prefix' => '', 'kinds' => $catalogKinds, 'confirmToken' => 'TRANSLATE-ALL-GPSWISS-FR-CATALOG', 'startLabel' => 'Przetłumacz cały katalog', 'scopeDescription' => 'Zakres obejmuje produkty i kategorie'])
     </section>
+    @include('admin.tools.storefront._fr-new-products')
     <section id="jarek-translations" aria-labelledby="jarek-section-title">
         <h2 id="jarek-section-title">Skrzynie Jarka — tłumaczenia FR</h2>
         <p>Ta sekcja tłumaczy wyłącznie treści Jarka. Nie publikuje produktów, nie tworzy Part, nie zmienia cen ani stocku i nie robi marketplace writes. Blokery publikacji FR nie blokują tłumaczenia tekstów.</p>
@@ -45,3 +46,4 @@
 </script>
 </body>
 </html>
+
