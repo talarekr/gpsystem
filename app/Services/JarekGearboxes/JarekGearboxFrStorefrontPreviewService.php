@@ -9,6 +9,7 @@ use App\Models\Part;
 use App\Models\PartCategory;
 use App\Services\Marketplace\NbpExchangeRateService;
 use App\Services\Storefront\FrenchDeliveryQuoteService;
+use App\Services\Storefront\FrenchPlnPricing;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Schema;
 
@@ -95,8 +96,10 @@ class JarekGearboxFrStorefrontPreviewService
         $hasDescription = $this->hasDescription($product);
         $currency = strtoupper(trim((string) $product->currency));
         $price = is_numeric($product->price) && is_finite((float) $product->price) && (float) $product->price > 0 ? (float) $product->price : null;
-        $marked = $price !== null && $currency === 'PLN' ? round($price * 1.25, 2, PHP_ROUND_HALF_UP) : null;
-        $eur = $marked !== null && ($rate['ok'] ?? false) ? round($marked / $rate['rate'], 2, PHP_ROUND_HALF_UP) : null;
+        $pricing = FrenchPlnPricing::convert($price, $currency,
+            FrenchPlnPricing::JAREK_MULTIPLIER, $rate ?? []);
+        $marked = $pricing['price_pln_after_margin'];
+        $eur = $pricing['cents'] === null ? null : $pricing['cents'] / 100;
         $dataBlockers = [];
         if (trim((string) $product->title) === '') {
             $dataBlockers[] = 'missing_title';
@@ -156,7 +159,7 @@ class JarekGearboxFrStorefrontPreviewService
             'has_images' => $images !== [], 'images_count' => count($images),
             'image_verification' => 'local_paths_or_stored_urls_only; no HTTP checks',
             'base_price' => $price, 'source_price_raw' => $product->price, 'base_currency' => $currency, 'base_price_source' => 'jarek_gearboxes.price (imported Allegro offer price)',
-            'markup_percent' => 25, 'price_after_markup_pln' => $marked,
+            'markup_percent' => 50, 'applied_margin_steps' => [25, 20], 'price_after_markup_pln' => $marked,
             'nbp_eur_rate' => ($rate['ok'] ?? false) ? $rate['rate'] : null,
             'nbp_effective_date' => $rate['effective_date'] ?? null, 'nbp_table_no' => $rate['table_no'] ?? null,
             'price_eur' => $eur, 'historical_ebay_de_price' => $this->historicalPrice($product, $existingListings),

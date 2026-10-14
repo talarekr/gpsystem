@@ -49,13 +49,13 @@ class FrenchMixedCatalog
         foreach (['producer', 'model', 'vehicle_model'] as $filter) {
             $include = $include && ! $request->filled($filter);
         }
-        $needsNbp = $needsPrice && ((config('storefront-fr-checkout.pricing_policy') === 'existing_eur_nbp' && app(EbayDeLocalPrice::class)->needsNbp($parts))
+        $needsNbp = $needsPrice && ((clone $parts)->where('parts.currency', 'PLN')->exists()
             || ($include && app(JarekFrCatalog::class)->query($request)->exists()));
         $rate = $needsNbp ? app(FrenchPriceResolver::class)->rateForCurrentRequest() : [];
         if ($needsNbp && $include) {
             request()->attributes->set('storefront.fr.jarek.eur_rate', $rate);
         }
-        $eurRate = ($rate['ok'] ?? false) ? (float) ($rate['rate'] ?? 0) : 0;
+        $eurRate = FrenchPlnPricing::validRate($rate) ? (float) $rate['rate'] : 0;
         $partRows = (clone $parts)->reorder()->setEagerLoads([]);
         $partPrice = $needsPrice ? $this->partPriceExpression($partRows, $eurRate) : 'NULL';
         $partName = $this->translatedName('part_translations', 'part_id', 'parts.id', 'name', 'parts.name');
@@ -64,9 +64,7 @@ class FrenchMixedCatalog
         if ($include) {
             $jarek = app(JarekFrCatalog::class)->query($request)->setEagerLoads([])
                 ->join('jarek_gearboxes', 'jarek_gearboxes.id', '=', 'jarek_fr_products.jarek_gearbox_id');
-            $jarekPrice = $eurRate > 0 && is_finite($eurRate)
-                ? 'ROUND(ROUND(ROUND(jarek_gearboxes.price * 1.25, 2) / '.sprintf('%.12F', $eurRate).', 2) * 100, 0)'
-                : 'NULL';
+            $jarekPrice = FrenchPlnPricing::sql('jarek_gearboxes.price', 'jarek_gearboxes.currency', FrenchPlnPricing::JAREK_MULTIPLIER, $eurRate, JarekFrPresentation::DELIVERY_CENTS);
             $jarekName = $this->translatedName('jarek_gearbox_translations', 'jarek_gearbox_id', 'jarek_gearboxes.id', 'title', 'jarek_gearboxes.title');
             $union->unionAll($jarek->selectRaw("jarek_fr_products.id as product_id, 'jarek' as source_type, {$jarekPrice} as sort_price, {$jarekName} as sort_name, jarek_fr_products.updated_at as sort_updated")->toBase());
         }
@@ -90,7 +88,6 @@ class FrenchMixedCatalog
         $ids = $page->getCollection();
         $ordinary = Part::query()->with(['images', 'category', 'car'])->withStorefrontTranslations('fr')
             ->whereIn('id', $ids->where('source_type', 'part')->pluck('product_id'))->get()->keyBy('id');
-        app(EbayDeLocalPrice::class)->preload($ordinary);
         $supplier = $include ? JarekFrProduct::query()->active()->with('gearbox.translations')
             ->whereIn('id', $ids->where('source_type', 'jarek')->pluck('product_id'))->get()->keyBy('id') : collect();
         $page->setCollection($ids->map(fn ($row) => $row->source_type === 'part'
@@ -102,7 +99,7 @@ class FrenchMixedCatalog
 
     private function partPriceExpression(Builder $query, float $rate): string
     {
-        return app(EbayDeLocalPrice::class)->sqlExpression($query, $rate, config('storefront-fr-checkout.pricing_policy', 'existing_eur_nbp'));
+        return FrenchPlnPricing::sql('parts.price', 'parts.currency', FrenchPlnPricing::PART_MULTIPLIER, $rate);
     }
 
     private function translatedName(string $table, string $foreignKey, string $id, string $field, string $fallback): string

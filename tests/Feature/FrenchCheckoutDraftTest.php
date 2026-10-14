@@ -11,6 +11,7 @@ use App\Services\Payments\PayuService;
 use App\Services\Storefront\CartService;
 use App\Services\Storefront\FrenchDeliveryQuoteService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -23,6 +24,7 @@ class FrenchCheckoutDraftTest extends TestCase
         parent::setUp();
         config(['frontend-maintenance.enabled' => false]);
         Http::preventStrayRequests();
+        Cache::put('nbp_table_a_rate:EUR:latest', ['ok' => true, 'currency' => 'EUR', 'source' => 'NBP_TABLE_A', 'rate' => 5, 'effective_date' => today()->toDateString()], 3600);
         $this->mock(PayuService::class)->shouldNotReceive('createOrder', 'getOrder');
         $this->mock(PartAvailabilityEventService::class)->shouldNotReceive('sold');
     }
@@ -32,7 +34,6 @@ class FrenchCheckoutDraftTest extends TestCase
         $part = $this->part();
         $part->translations()->create(['locale' => 'fr', 'name' => 'Moteur relu', 'status' => 'reviewed']);
         $this->mapping($part, 'fr_55_eur', '260547694013');
-        config(['storefront-fr-checkout.pricing_policy' => 'catalog_eur']);
         $this->cart($part);
         $response = $this->get('https://gpswiss.fr/commande')->assertOk()
             ->assertSee('Moteur relu')->assertSee('55,00 EUR')->assertDontSee('billing_nip')
@@ -55,10 +56,9 @@ class FrenchCheckoutDraftTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_pln_is_not_relabelled_or_converted_and_missing_delivery_is_unavailable(): void
+    public function test_non_pln_is_not_relabelled_or_converted_and_missing_delivery_is_unavailable(): void
     {
-        $part = $this->part('PLN');
-        config(['storefront-fr-checkout.pricing_policy' => 'catalog_eur']);
+        $part = $this->part('EUR');
         $this->cart($part);
         $response = $this->get('https://gpswiss.fr/panier')->assertOk()->assertSee('Prix indisponible');
         $draft = $response->viewData('draft');
@@ -136,11 +136,11 @@ class FrenchCheckoutDraftTest extends TestCase
         Http::assertNothingSent();
     }
 
-    private function part(string $currency = 'EUR'): Part
+    private function part(string $currency = 'PLN'): Part
     {
         $category = PartCategory::create(['name' => 'Silniki', 'slug' => 'silniki-test']);
 
-        return Part::create(['name' => 'Silnik', 'sku' => 'FR-DRAFT', 'slug' => 'fr-draft', 'price' => 100,
+        return Part::create(['name' => 'Silnik', 'sku' => 'FR-DRAFT', 'slug' => 'fr-draft', 'price' => 400,
             'currency' => $currency, 'category_id' => $category->id, 'quantity' => 2, 'status' => 'ready']);
     }
 

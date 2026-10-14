@@ -7,6 +7,7 @@ use App\Models\MarketplaceListing;
 use App\Models\Part;
 use App\Models\PartCategory;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use Tests\Concerns\ResolvesFrenchCategoryUrls;
@@ -23,26 +24,27 @@ class FrenchProductPricePresentationTest extends TestCase
         Http::preventStrayRequests();
         Mail::fake();
         config(['frontend-maintenance.enabled' => false]);
+        Cache::put('nbp_table_a_rate:EUR:latest', ['ok' => true, 'currency' => 'EUR', 'source' => 'NBP_TABLE_A', 'rate' => 5, 'effective_date' => today()->toDateString()], 3600);
     }
 
-    public function test_existing_eur_prices_are_shared_by_home_catalog_category_detail_and_related_cards(): void
+    public function test_marked_up_pln_prices_are_shared_by_home_catalog_category_detail_and_related_cards(): void
     {
-        $part = $this->part('EUR', 123.45);
+        $part = $this->part('PLN', 493.80);
         foreach (['/', '/czesci', parse_url($this->frenchCategoryUrl($part->category), PHP_URL_PATH), '/produkt/'.$part->slug] as $path) {
             $this->get('https://gpswiss.fr'.$path)->assertOk()->assertSee('123,45 EUR')->assertDontSee('PLN')
                 ->assertDontSee('Livraison gratuite')->assertDontSee('Pour un paiement avant')
                 ->assertSee('Frais de livraison : 55,00 EUR');
         }
-        $other = $this->part('PLN', 9999);
+        $other = $this->part('USD', 9999);
         $this->get('https://gpswiss.fr/produkt/'.$other->slug)->assertOk()->assertSee('123,45 EUR')
             ->assertSee('Prix indisponible')->assertDontSee('9 999,00')->assertDontSee('PLN')
             ->assertSee('<link rel="canonical" href="https://gpswiss.fr/produkt/'.$other->slug.'">', false);
         $this->post('https://gpswiss.fr/koszyk/dodaj/'.$part->id)->assertRedirect()->assertSessionHas('success');
-        $this->assertSame('123.45', $part->fresh()->price);
+        $this->assertSame('493.80', $part->fresh()->price);
         Http::assertNothingSent();
     }
 
-    public function test_local_ebay_de_eur_price_is_displayed_without_converting_or_writing_source(): void
+    public function test_local_ebay_de_is_ignored_without_writing_source(): void
     {
         $part = $this->part('PLN', 20000);
         $listing = MarketplaceListing::create(['part_id' => $part->id, 'marketplace' => 'ebay_de', 'match_status' => 'matched',
@@ -50,7 +52,7 @@ class FrenchProductPricePresentationTest extends TestCase
         $original = $listing->fresh()->getRawOriginal();
         $partOriginal = $part->fresh()->getRawOriginal();
         foreach (['/czesci', '/produkt/'.$part->slug] as $path) {
-            $this->get('https://gpswiss.fr'.$path)->assertOk()->assertSee('321,99 EUR')
+            $this->get('https://gpswiss.fr'.$path)->assertOk()->assertSee('5 000,00 EUR')->assertDontSee('321,99 EUR')
                 ->assertDontSee('20 000,00')->assertDontSee('PLN');
             $this->withSession(['locale' => 'fr'])->get('https://gpswiss.pl'.$path)->assertOk()->assertSee('20 000,00 PLN');
         }
@@ -59,8 +61,10 @@ class FrenchProductPricePresentationTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_missing_or_ambiguous_eur_never_falls_back_to_pln_and_cannot_be_added(): void
+    public function test_missing_nbp_never_displays_pln_or_marketplace_prices_and_blocks_purchase(): void
     {
+        Cache::forget('nbp_table_a_rate:EUR:latest');
+        Http::fake(['api.nbp.pl/*' => Http::response([], 503)]);
         $part = $this->part('PLN', 27000);
         foreach ([false, true] as $ambiguous) {
             if ($ambiguous) {
@@ -76,12 +80,12 @@ class FrenchProductPricePresentationTest extends TestCase
         }
         $this->assertDatabaseCount('orders', 0);
         $this->assertSame(2, $part->fresh()->quantity);
-        Http::assertNothingSent();
+        Http::assertNotSent(fn ($request) => ! str_contains($request->url(), 'api.nbp.pl'));
     }
 
     public function test_missing_or_blocked_delivery_does_not_promise_shipping_or_enable_purchase(): void
     {
-        $part = $this->part('EUR', 100);
+        $part = $this->part('PLN', 400);
         $mapping = MarketplaceCategoryMapping::where('local_category_id', $part->category_id)->first();
         $mapping->update(['is_blocked' => true]);
         foreach (['/czesci', '/produkt/'.$part->slug] as $path) {

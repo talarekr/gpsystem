@@ -1,6 +1,6 @@
 <?php
 
 return [
-    // Approved priority: unambiguous active local eBay DE EUR, Part EUR, then PLN / NBP. Delivery stays FR.
-    'pricing_policy' => 'existing_eur_nbp',
+    // FR source PLN: Part +25%, Jarek +50% effective; NBP EUR, delivery unchanged.
+    'pricing_policy' => 'pln_margin_nbp',
 ];
