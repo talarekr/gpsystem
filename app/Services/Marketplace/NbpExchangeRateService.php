@@ -4,12 +4,89 @@ namespace App\Services\Marketplace;
 
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
+use Illuminate\Cache\ArrayStore;
+use Illuminate\Cache\DatabaseStore;
+use Illuminate\Cache\FileStore;
+use Illuminate\Cache\RedisStore;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 
 class NbpExchangeRateService
 {
     private const LEGACY_EUR_CACHE_KEY = 'nbp_table_a_eur_rate';
+
+    /** Existing cache only: no provider requests, cache refresh, or writes. */
+    public function cachedEurPlnForPreview(): array
+    {
+        foreach (['nbp_table_a_rate:EUR:latest', self::LEGACY_EUR_CACHE_KEY] as $key) {
+            $cached = $this->previewCacheValue($key);
+            if (! is_array($cached) || ! ($cached['ok'] ?? false)
+                || ($cached['currency'] ?? null) !== 'EUR' || ($cached['source'] ?? null) !== 'NBP_TABLE_A'
+                || ! is_numeric($cached['rate'] ?? null) || ! is_finite((float) $cached['rate']) || (float) $cached['rate'] <= 0) {
+                continue;
+            }
+            $date = $cached['effective_date'] ?? null;
+            if (! is_string($date) || ! preg_match('/^\\d{4}-\\d{2}-\\d{2}$/', $date)) {
+                continue;
+            }
+            try {
+                $effective = CarbonImmutable::createFromFormat('!Y-m-d', $date);
+                if (! $effective || $effective->toDateString() !== $date || $effective->isFuture()
+                    || $effective->lessThan(today()->subDays(7))) {
+                    continue;
+                }
+            } catch (\Throwable) {
+                continue;
+            }
+
+            return array_replace($cached, ['rate' => (float) $cached['rate'], 'cached' => true, 'cache_key' => $key]);
+        }
+
+        return $this->unavailable('EUR', 'No valid existing NBP EUR cache (maximum age: seven days). Preview never refreshes it.');
+    }
+
+    /** Laravel database/file cache get() deletes expired entries; inspect without cleanup. */
+    private function previewCacheValue(string $key): mixed
+    {
+        try {
+            $name = Cache::getDefaultDriver();
+            $store = Cache::store($name)->getStore();
+            if ($store instanceof DatabaseStore) {
+                $table = config("cache.stores.{$name}.table", 'cache');
+                $row = $store->getConnection()->table($table)->where('key', $store->getPrefix().$key)->first();
+                if (! $row || (int) $row->expiration <= now()->timestamp) {
+                    return null;
+                }
+                $value = $row->value;
+                if (! str_contains($value, ':') && ! str_contains($value, ';')) {
+                    $value = base64_decode($value, true);
+                }
+
+                return is_string($value) ? @unserialize($value, ['allowed_classes' => false]) : null;
+            }
+            if ($store instanceof FileStore) {
+                $path = $store->path($key);
+                if (! is_file($path)) {
+                    return null;
+                }
+                $contents = $store->getFilesystem()->get($path);
+                $expires = substr($contents, 0, 10);
+                if (! ctype_digit($expires) || (int) $expires <= now()->timestamp) {
+                    return null;
+                }
+
+                return @unserialize(substr($contents, 10), ['allowed_classes' => false]);
+            }
+            // Redis GET does not perform application writes; array is process-local test storage.
+            if ($store instanceof RedisStore || $store instanceof ArrayStore) {
+                return $store->get($key);
+            }
+        } catch (\Throwable) {
+            // Unsupported/unavailable cache is a blocker, never a reason to refresh or log a write.
+        }
+
+        return null;
+    }
 
     public function eurPln(): array
     {
