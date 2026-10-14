@@ -21,10 +21,10 @@ trait BuildsStorefrontQueries
                 fn (Builder $query) => app(FrenchCatalogSearch::class)->apply($query, $request->string('q')->toString()),
                 fn (Builder $query) => $query->searchStorefront($request->string('q')->toString()))
             ->partNumberSearch($request->string('part_number')->toString())
-            ->priceBetween(
+            ->when(! StorefrontContext::isFrench($request), fn (Builder $query) => $query->priceBetween(
                 $request->input('price_from', $request->input('price_min')),
                 $request->input('price_to', $request->input('price_max')),
-            );
+            ));
 
         $producer = trim($request->string('producer')->toString());
         if ($producer !== '') {

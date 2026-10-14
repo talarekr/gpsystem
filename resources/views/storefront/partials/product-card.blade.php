@@ -1,12 +1,13 @@
 @php
     $part ??= null;
+    $isJarekProduct = $part instanceof \App\Services\Storefront\JarekCatalogProduct;
     $productUrl = '#';
     $image = null;
     $src = null;
 
     if ($part) {
         try {
-            $productUrl = route('storefront.product', $part->slug ?: $part->id);
+            $productUrl = $isJarekProduct ? $part->presentation['url'] : route('storefront.product', $part->slug ?: $part->id);
         } catch (Throwable $exception) {
             $productUrl = url('/czesci');
         }
@@ -25,7 +26,7 @@
     $currency = $part?->currency ?: 'PLN';
     $price = $part?->price;
     $isFrenchProduct = \App\Support\StorefrontContext::isFrench(request());
-    $frProduct = $isFrenchProduct ? app(\App\Services\Storefront\FrenchProductPresentation::class)->forPart($part) : null;
+    $frProduct = $isFrenchProduct ? ($isJarekProduct ? $part->presentation : app(\App\Services\Storefront\FrenchProductPresentation::class)->forPart($part)) : null;
     if ($isFrenchProduct) {
         $currency = 'EUR';
         $price = $frProduct['cents'] === null ? null : $frProduct['cents'] / 100;

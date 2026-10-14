@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Http\Controllers\Storefront\Concerns\BuildsStorefrontQueries;
 use App\Models\Part;
 use App\Services\Storefront\CategoryTreeService;
+use App\Services\Storefront\FrenchMixedCatalog;
+use App\Support\StorefrontContext;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\Request;
 
@@ -22,12 +24,17 @@ class CategoryController extends Controller
         $categoryPartsQuery = Part::query()->storefrontVisible()->whereIn('category_id', $categoryIds);
         $filterOptions = $this->storefrontFilterOptions($categoryPartsQuery);
 
+        $query = $this->storefrontQuery($request)->whereIn('category_id', $categoryIds);
+        $parts = StorefrontContext::isFrench($request)
+            ? app(FrenchMixedCatalog::class)->paginate($query, $request, $categoryIds)
+            : $query->paginate(60)->withQueryString();
+
         return view('storefront.categories.show', [
             'category' => $category,
             'categoryAncestors' => $ancestors,
             'categoryRoots' => $categoryTree->roots(),
             'categoryTreeService' => $categoryTree,
-            'parts' => $this->storefrontQuery($request)->whereIn('category_id', $categoryIds)->paginate(60)->withQueryString(),
+            'parts' => $parts,
             'producers' => $filterOptions['producers'],
             'models' => $filterOptions['models'],
             'metaTitle' => $category->storefrontNameForLocale($locale).' - GPSwiss',

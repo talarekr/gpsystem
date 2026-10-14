@@ -50,7 +50,9 @@ class StorefrontSeo
         // Both sites serve the same public catalog/paths. Never fabricate alternates for auth,
         // signed pages, filters or PL-only operational routes. Unknown hosts retain legacy SEO.
         $public = $request->routeIs(...self::PUBLIC_ROUTES) && ! $this->filtered($request);
-        if ($public && ! $request->routeIs('storefront.jarek.*') && in_array($request->getHost(), ['gpswiss.fr', 'gpswiss.pl'], true)) {
+        $frOnlyCategory = $fr && $request->routeIs('storefront.category') && $category
+            && $category->getAttribute('has_products_in_pl_branch') === false;
+        if ($public && ! $frOnlyCategory && ! $request->routeIs('storefront.jarek.*') && in_array($request->getHost(), ['gpswiss.fr', 'gpswiss.pl'], true)) {
             $alternates = ['pl' => 'https://gpswiss.pl'.$path, 'fr' => 'https://gpswiss.fr'.$path,
                 'x-default' => 'https://gpswiss.pl'.$path];
             // Normalize the PL counterpart too so self-hreflang points at its canonical URL.
