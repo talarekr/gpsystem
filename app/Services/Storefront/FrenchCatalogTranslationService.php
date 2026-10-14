@@ -2,6 +2,7 @@
 
 namespace App\Services\Storefront;
 
+use App\Models\JarekGearbox;
 use App\Models\Part;
 use App\Models\PartCategory;
 use App\Models\StorefrontTranslation;
@@ -22,7 +23,7 @@ class FrenchCatalogTranslationService
     }
 
     /** Null means eligible. Reviewed records are always protected. */
-    public function skipReason(Part|PartCategory $record, array $options = []): ?string
+    public function skipReason(Part|PartCategory|JarekGearbox $record, array $options = []): ?string
     {
         $translation = $record->translationForLocale('fr');
         if ($translation?->status === 'reviewed') {
@@ -47,7 +48,7 @@ class FrenchCatalogTranslationService
         return null;
     }
 
-    public function sourceFields(Part|PartCategory $record): array
+    public function sourceFields(Part|PartCategory|JarekGearbox $record): array
     {
         return array_filter($record->translationSource(), fn (string $text): bool => trim($text) !== '');
     }
@@ -79,6 +80,7 @@ class FrenchCatalogTranslationService
         $model = match ($type) {
             'parts' => Part::class,
             'categories' => PartCategory::class,
+            'jarek_gearboxes' => JarekGearbox::class,
             default => throw new \InvalidArgumentException('Invalid catalog type.'),
         };
         // Use the shared production cache store; never hold a database transaction across HTTP.
@@ -126,8 +128,16 @@ class FrenchCatalogTranslationService
             $retryable = false;
             foreach ($claim['source'] as $field => $text) {
                 $output = '';
+                $protected = $claim['record'] instanceof JarekGearbox
+                    ? app(JarekTranslationTechnicalTokens::class)->mask($text, (array) $claim['record']->parameters) : ['text' => $text, 'tokens' => []];
+                if ($claim['record'] instanceof JarekGearbox && trim(str_replace(array_keys($protected['tokens']), '', $protected['text']), " \t\n\r.-_/(),:;") === '') {
+                    // Code/numeric-only fields need no provider call at all.
+                    $translated[$field] = $text;
+
+                    continue;
+                }
                 // Google v2 has request size limits. Preserve boundary whitespace across segments.
-                foreach ($this->segments($text) as $segment) {
+                foreach ($this->segments($protected['text']) as $segment) {
                     if (trim($segment) === '') {
                         $output .= $segment;
 
@@ -162,7 +172,16 @@ class FrenchCatalogTranslationService
                     preg_match('/\s*$/u', $segment, $trailing);
                     $output .= $leading[0].trim($response['translated_text']).$trailing[0];
                 }
-                if ($field === 'name' && mb_strlen($output) > 255) {
+                if ($claim['record'] instanceof JarekGearbox) {
+                    $restored = app(JarekTranslationTechnicalTokens::class)->restore($output, $protected['tokens']);
+                    if ($restored === null) {
+                        $errorCode = 'technical_code_changed';
+                        $errorMessage = 'Technical identifier markers changed during translation; review required.';
+                        break;
+                    }
+                    $output = $restored;
+                }
+                if (in_array($field, ['name', 'title'], true) && mb_strlen($output) > 255) {
                     $errorCode = 'translated_name_too_long';
                     $errorMessage = 'Translated name exceeds the translation column limit.';
                     break;
@@ -221,11 +240,11 @@ class FrenchCatalogTranslationService
         return ['status' => $status, 'reason' => $reason, 'chars_translated' => $characters, 'retryable' => $retryable];
     }
 
-    private function loggedResult(Part|PartCategory $record, ?StorefrontTranslation $translation, array $result): array
+    private function loggedResult(Part|PartCategory|JarekGearbox $record, ?StorefrontTranslation $translation, array $result): array
     {
         Log::info('storefront.fr_catalog_translation', [
-            $record instanceof Part ? 'part_id' : 'category_id' => $record->id,
-            'sku' => $record instanceof Part ? $record->sku : null,
+            $record instanceof Part ? 'part_id' : ($record instanceof JarekGearbox ? 'jarek_gearbox_id' : 'category_id') => $record->id,
+            'sku' => $record instanceof Part ? $record->sku : ($record instanceof JarekGearbox ? 'JAREK-'.$record->allegro_offer_id : null),
             'locale' => 'fr', 'provider' => 'google_translate', 'source_hash' => $record->translationSourceHash(),
             'status' => $translation?->status, 'chars_count' => $result['chars_translated'],
             'skipped_reason' => $result['status'] === 'skipped' ? $result['reason'] : null,

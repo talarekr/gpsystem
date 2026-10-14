@@ -2,6 +2,7 @@
 
 namespace App\Services\Storefront;
 
+use App\Models\JarekGearbox;
 use App\Models\Part;
 use App\Models\PartCategory;
 use App\Services\Marketplace\GoogleTranslateService;
@@ -15,8 +16,35 @@ class FrenchCatalogTranslationPreviewService
 
     public const OPTIONS = ['only_missing' => true, 'include_needs_update' => false, 'include_failed' => false];
 
+    private string $scope = 'catalog';
+
+    public function forScope(string $scope): self
+    {
+        if (! in_array($scope, ['catalog', 'jarek_gearboxes'], true)) {
+            throw new \InvalidArgumentException('Invalid translation scope.');
+        }
+        $preview = clone $this;
+        $preview->scope = $scope;
+
+        return $preview;
+    }
+
+    public function cacheKey(int $actorId): string
+    {
+        return self::KEY.($this->scope === 'catalog' ? '' : $this->scope.':').$actorId;
+    }
+
+    public function mutationLock(): string
+    {
+        return FrenchCatalogTranslationAdminRunner::MUTATION_LOCK.($this->scope === 'catalog' ? '' : ':'.$this->scope);
+    }
+
     public function schemaReady(): bool
     {
+        if ($this->scope === 'jarek_gearboxes') {
+            return Schema::hasTable('jarek_gearboxes') && Schema::hasTable('jarek_gearbox_translations');
+        }
+
         return Schema::hasTable('part_translations') && Schema::hasTable('category_translations');
     }
 
@@ -41,7 +69,7 @@ class FrenchCatalogTranslationPreviewService
 
     public function saved(int $actorId): ?array
     {
-        return Cache::get(self::KEY.$actorId);
+        return Cache::get($this->cacheKey($actorId));
     }
 
     /** Only preview metadata is cached; no catalog writes, provider resolution or API calls. */
@@ -54,8 +82,8 @@ class FrenchCatalogTranslationPreviewService
             'consumed' => false,
         ];
         // Do not let a concurrent Start overwrite a newer preview while consuming it.
-        Cache::lock(FrenchCatalogTranslationAdminRunner::MUTATION_LOCK, 10)->block(3, function () use ($actorId, $report): void {
-            Cache::forever(self::KEY.$actorId, $report);
+        Cache::lock($this->mutationLock(), 10)->block(3, function () use ($actorId, $report): void {
+            Cache::forever($this->cacheKey($actorId), $report);
         });
 
         return $report;
@@ -65,18 +93,21 @@ class FrenchCatalogTranslationPreviewService
     private function summary(): array
     {
         $service = app(FrenchCatalogTranslationService::class);
-        $report = ['total' => 0, 'estimated_characters' => 0,
+        $report = ['scope' => $this->scope, 'total' => 0, 'estimated_characters' => 0,
             'inventory' => ['translated' => 0, 'missing' => 0, 'needs_update' => 0, 'failed' => 0, 'skipped' => 0, 'queued' => 0],
             'failed_examples' => [],
         ];
-        foreach (['products' => Part::class, 'categories' => PartCategory::class] as $kind => $model) {
+        $models = $this->scope === 'jarek_gearboxes' ? ['jarek_gearboxes' => JarekGearbox::class] : ['products' => Part::class, 'categories' => PartCategory::class];
+        foreach ($models as $kind => $model) {
             $counts = ['total' => 0, 'eligible' => 0, 'fields' => 0, 'estimated_characters' => 0,
                 'skipped' => 0, 'skipped_reasons' => [], 'examples' => [], 'max_id' => (int) $model::query()->max('id')];
-            $columns = array_merge(['id'], (new $model)->translationSourceFields(), $kind === 'products' ? ['sku'] : []);
+            $columns = array_merge(['id'], (new $model)->translationSourceFields(), $kind === 'products' ? ['sku'] : ($kind === 'jarek_gearboxes' ? ['plain_description', 'allegro_offer_id'] : []));
             $query = $model::query()->select($columns)->where('id', '<=', $counts['max_id']);
             $schemaReady = $this->schemaReady();
             if ($schemaReady) {
-                $foreignKey = $kind === 'products' ? 'part_id' : 'category_id';
+                $foreignKey = match ($kind) {
+                    'products' => 'part_id', 'jarek_gearboxes' => 'jarek_gearbox_id', default => 'category_id'
+                };
                 $query->with(['translations' => fn ($q) => $q->select(['id', $foreignKey, 'locale', 'status', 'source_hash', 'error_code'])->where('locale', 'fr')]);
             }
             $query->chunkById(100, function ($records) use ($service, $schemaReady, &$counts, &$report): void {
@@ -87,7 +118,9 @@ class FrenchCatalogTranslationPreviewService
                     $counts['total']++;
                     $translation = $record->translationForLocale('fr');
                     $status = $translation?->status ?? 'missing';
-                    if ($status === 'reviewed') {
+                    if ($record instanceof JarekGearbox && $translation?->isReady() && ! $translation->matchesSourceHash($record->translationSourceHash())) {
+                        $status = 'needs_update';
+                    } elseif ($status === 'reviewed') {
                         $status = 'translated';
                     } elseif ($status === 'translated' && ! $translation->matchesSourceHash($record->translationSourceHash())) {
                         $status = 'needs_update';
@@ -98,9 +131,9 @@ class FrenchCatalogTranslationPreviewService
                     $fields = $service->sourceFields($record);
                     $reason = $service->skipReason($record, self::OPTIONS) ?? ($fields === [] ? 'empty_source' : null);
                     $characters = array_sum(array_map(fn ($text) => mb_strlen(trim($text)), $fields));
-                    $identity = [$record instanceof Part ? 'part_id' : 'category_id' => (int) $record->id];
-                    if ($record instanceof Part) {
-                        $identity['sku'] = $record->sku;
+                    $identity = [$record instanceof Part ? 'part_id' : ($record instanceof JarekGearbox ? 'jarek_gearbox_id' : 'category_id') => (int) $record->id];
+                    if ($record instanceof Part || $record instanceof JarekGearbox) {
+                        $identity['sku'] = $record instanceof Part ? $record->sku : 'JAREK-'.$record->allegro_offer_id;
                     }
                     if ($status === 'failed' && count($report['failed_examples']) < 20) {
                         $report['failed_examples'][] = $identity + self::safeError($translation?->error_code);
@@ -124,6 +157,10 @@ class FrenchCatalogTranslationPreviewService
             $report['inventory']['skipped'] += $counts['skipped'];
         }
 
+        if ($this->scope === 'jarek_gearboxes') {
+            $report['total_jarek_gearboxes'] = $report['total'];
+        }
+
         return $report;
     }
 
@@ -134,6 +171,7 @@ class FrenchCatalogTranslationPreviewService
             return ['error_code' => $code, 'error_message' => 'Google Translate zwrócił HTTP '.$matches[1].'.'];
         }
         $messages = [
+            'technical_code_changed' => 'Google zmienił lub usunął znacznik kodu technicznego. Tłumaczenie wymaga kontroli.',
             'source_changed' => 'Źródło zmieniło się podczas tłumaczenia.',
             'translations_disabled' => 'Tłumaczenia FR są wyłączone.',
             'translated_name_too_long' => 'Przetłumaczona nazwa przekracza limit długości.',

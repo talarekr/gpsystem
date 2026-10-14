@@ -3,6 +3,7 @@
 namespace App\Services\Storefront;
 
 use App\Jobs\RunFrenchCatalogTranslationBatch;
+use App\Models\JarekGearbox;
 use App\Models\Part;
 use App\Models\PartCategory;
 use App\Services\Marketplace\GoogleTranslateService;
@@ -20,6 +21,8 @@ use Throwable;
  */
 class FrenchCatalogTranslationAdminRunner
 {
+    public const JAREK_CONFIRM = 'TRANSLATE-JAREK-GEARBOXES-FR';
+
     public const KEY = 'storefront:fr:admin:run';
 
     public const CONFIRM = 'TRANSLATE-ALL-GPSWISS-FR-CATALOG';
@@ -34,6 +37,31 @@ class FrenchCatalogTranslationAdminRunner
 
     private const SOFT_SECONDS = 45;
 
+    private string $scope = 'catalog';
+
+    public function forScope(string $scope): self
+    {
+        if (! in_array($scope, ['catalog', 'jarek_gearboxes'], true)) {
+            throw new \InvalidArgumentException('Invalid translation scope.');
+        }
+        $runner = clone $this;
+        $runner->scope = $scope;
+        $runner->preview = $this->preview->forScope($scope);
+        $runner->runs = $this->runs->forScope($scope);
+
+        return $runner;
+    }
+
+    private function models(): array
+    {
+        return $this->scope === 'jarek_gearboxes' ? ['jarek_gearboxes' => JarekGearbox::class] : ['parts' => Part::class, 'categories' => PartCategory::class];
+    }
+
+    private function processingKey(): string
+    {
+        return self::PROCESSING_LOCK.($this->scope === 'catalog' ? '' : ':'.$this->scope);
+    }
+
     public function __construct(
         private FrenchCatalogTranslationService $translations,
         private FrenchCatalogTranslationPreviewService $preview,
@@ -42,7 +70,7 @@ class FrenchCatalogTranslationAdminRunner
 
     public function start(int $actorId, string $dryRunId, string $confirm): array
     {
-        if ($confirm !== self::CONFIRM) {
+        if ($confirm !== ($this->scope === 'jarek_gearboxes' ? self::JAREK_CONFIRM : self::CONFIRM)) {
             return $this->error('invalid_confirmation', 'Wpisz dokładny token potwierdzenia.');
         }
         if ($error = $this->guard()) {
@@ -55,7 +83,7 @@ class FrenchCatalogTranslationAdminRunner
                 if ($existing && in_array($existing['status'], ['running', 'paused', 'stopped_on_error', 'failed'], true)) {
                     return $this->error('active_run', 'Istnieje aktywne zadanie. Wznów je lub zatrzymaj.');
                 }
-                $lease = Cache::lock(self::PROCESSING_LOCK, self::PROCESSING_LEASE_SECONDS);
+                $lease = Cache::lock($this->processingKey(), self::PROCESSING_LEASE_SECONDS);
                 if (! $lease->get()) {
                     return $this->error('busy', 'Trwa aktualna partia lub jej blokada jeszcze nie wygasła. Odśwież status i spróbuj ponownie.');
                 }
@@ -89,13 +117,16 @@ class FrenchCatalogTranslationAdminRunner
                     $run['runner_mode'] = $this->configuredMode();
                     $run['started_at'] = $run['updated_at'] = now()->toISOString();
                     $run['total'] = $run['remaining'] = (int) $report['total'];
-                    $run['_max_ids'] = ['parts' => (int) $report['products']['max_id'], 'categories' => (int) $report['categories']['max_id']];
-                    $run['_totals'] = ['parts' => (int) $report['products']['total'], 'categories' => (int) $report['categories']['total']];
-                    $run['_cursor'] = ['parts' => 0, 'categories' => 0];
-                    $run['_processed'] = ['parts' => 0, 'categories' => 0];
+                    foreach ($this->models() as $type => $model) {
+                        $kind = $type === 'parts' ? 'products' : $type;
+                        $run['_max_ids'][$type] = (int) $report[$kind]['max_id'];
+                        $run['_totals'][$type] = (int) $report[$kind]['total'];
+                        $run['_cursor'][$type] = 0;
+                        $run['_processed'][$type] = 0;
+                    }
                     $run['_pending'] = null;
                     $report['consumed'] = true;
-                    Cache::forever(FrenchCatalogTranslationPreviewService::KEY.$actorId, $report);
+                    Cache::forever($this->preview->cacheKey($actorId), $report);
                     $this->save($run);
                     if (! $this->enqueueLocked($run, 0)) {
                         return $this->error('queue_unavailable', 'Nie udało się wysłać zadania do kolejki. Wznów istniejące zadanie.');
@@ -139,7 +170,7 @@ class FrenchCatalogTranslationAdminRunner
                         return ['ok' => true] + $this->publicRun($run);
                     }
                     // Probe the worker lease; never force-release a live worker's lock.
-                    $lease = Cache::lock(self::PROCESSING_LOCK, self::PROCESSING_LEASE_SECONDS);
+                    $lease = Cache::lock($this->processingKey(), self::PROCESSING_LEASE_SECONDS);
                     if (! $lease->get()) {
                         return $this->error('busy', $this->mode($run) === 'browser'
                             ? 'Trwa aktualna partia albo oczekiwanie na wygaśnięcie blokady poprzedniego ticka. Odśwież status; Wznów będzie możliwe po wygaśnięciu lease.'
@@ -200,6 +231,10 @@ class FrenchCatalogTranslationAdminRunner
 
     private function configuredMode(): string
     {
+        if ($this->scope === 'jarek_gearboxes') {
+            return 'browser';
+        }
+
         return config('storefront-translations.admin_runner', 'browser') === 'queue' ? 'queue' : 'browser';
     }
 
@@ -216,7 +251,7 @@ class FrenchCatalogTranslationAdminRunner
         if (! $state || ($this->mode($state) === 'browser') !== $browser) {
             return;
         }
-        $lease = Cache::lock(self::PROCESSING_LOCK, self::PROCESSING_LEASE_SECONDS);
+        $lease = Cache::lock($this->processingKey(), self::PROCESSING_LEASE_SECONDS);
         if (! $lease->get()) {
             if (! $browser) {
                 $this->enqueue($runId, 30);
@@ -268,8 +303,8 @@ class FrenchCatalogTranslationAdminRunner
                         return;
                     }
                     $pending = [
-                        'type' => $record instanceof Part ? 'parts' : 'categories',
-                        'sku' => $record instanceof Part ? $record->sku : null,
+                        'type' => $record instanceof Part ? 'parts' : ($record instanceof JarekGearbox ? 'jarek_gearboxes' : 'categories'),
+                        'sku' => $record instanceof Part ? $record->sku : ($record instanceof JarekGearbox ? 'JAREK-'.$record->allegro_offer_id : null),
                         'id' => (int) $record->id, 'retry_attempt' => 0, 'retry_at' => null,
                         'source_hash' => $record->translationSourceHash(), 'in_flight' => false,
                         'chars_translated' => 0, 'estimated_characters' => array_sum(array_map(fn ($text) => mb_strlen(trim($text)), $this->translations->sourceFields($record))),
@@ -390,9 +425,9 @@ class FrenchCatalogTranslationAdminRunner
         });
     }
 
-    private function nextRecord(string $runId, array $run): Part|PartCategory|null
+    private function nextRecord(string $runId, array $run): Part|PartCategory|JarekGearbox|null
     {
-        foreach (['parts' => Part::class, 'categories' => PartCategory::class] as $type => $model) {
+        foreach ($this->models() as $type => $model) {
             $record = $model::query()->with(['translations' => fn ($q) => $q->where('locale', 'fr')])
                 ->where('id', '>', $run['_cursor'][$type])->where('id', '<=', $run['_max_ids'][$type])->orderBy('id')->first();
             if ($record) {
@@ -512,9 +547,9 @@ class FrenchCatalogTranslationAdminRunner
         });
     }
 
-    private function record(string $type, int $id): Part|PartCategory|null
+    private function record(string $type, int $id): Part|PartCategory|JarekGearbox|null
     {
-        $model = $type === 'parts' ? Part::class : PartCategory::class;
+        $model = $this->models()[$type] ?? throw new \InvalidArgumentException('Invalid scoped record type.');
 
         return $model::query()->with(['translations' => fn ($q) => $q->where('locale', 'fr')])->find($id);
     }
@@ -599,7 +634,7 @@ class FrenchCatalogTranslationAdminRunner
 
     private function mutate(callable $callback): mixed
     {
-        return Cache::lock(self::MUTATION_LOCK, 10)->block(3, $callback);
+        return Cache::lock($this->preview->mutationLock(), 10)->block(3, $callback);
     }
 
     private function save(array &$run): void
@@ -652,7 +687,7 @@ class FrenchCatalogTranslationAdminRunner
 
     private function idle(): array
     {
-        return ['run_id' => null, 'status' => 'idle', 'started_at' => null, 'updated_at' => null,
+        return ['scope' => $this->scope, 'run_id' => null, 'status' => 'idle', 'started_at' => null, 'updated_at' => null,
             'total' => 0, 'processed' => 0, 'translated' => 0, 'skipped' => 0, 'failed' => 0,
             'remaining' => 0, 'chars_translated' => 0, 'current_type' => null, 'current_id' => null,
             'last_success' => null, 'last_error' => null, 'failed_examples' => [], 'next_batch' => null,
@@ -684,6 +719,9 @@ class FrenchCatalogTranslationAdminRunner
             'error_code' => $code, 'error_message' => $message, 'at' => now()->toIso8601String()];
         if ($type === 'parts') {
             $event['part_id'] = $id;
+            $event['sku'] = $sku;
+        } elseif ($type === 'jarek_gearboxes') {
+            $event['jarek_gearbox_id'] = $id;
             $event['sku'] = $sku;
         } elseif ($type === 'categories') {
             $event['category_id'] = $id;

@@ -16,19 +16,21 @@ class FrenchCatalogTranslationController extends Controller
         return view('admin.tools.storefront.fr-translations', [
             'overview' => $preview->overview((int) $request->user()->getAuthIdentifier()),
             'status' => $runner->status(),
+            'jarekOverview' => $preview->forScope('jarek_gearboxes')->overview((int) $request->user()->getAuthIdentifier()),
+            'jarekStatus' => $runner->forScope('jarek_gearboxes')->status(),
         ]);
     }
 
-    public function status(FrenchCatalogTranslationAdminRunner $runner): JsonResponse
+    public function status(Request $request, FrenchCatalogTranslationAdminRunner $runner): JsonResponse
     {
-        return response()->json($runner->status());
+        return response()->json($runner->forScope($this->scope($request))->status());
     }
 
     public function dryRun(Request $request, FrenchCatalogTranslationPreviewService $preview): JsonResponse
     {
         return response()->json([
             'ok' => true,
-            'dry_run' => $preview->dryRun((int) $request->user()->getAuthIdentifier()),
+            'dry_run' => $preview->forScope($this->scope($request))->dryRun((int) $request->user()->getAuthIdentifier()),
         ]);
     }
 
@@ -45,7 +47,7 @@ class FrenchCatalogTranslationController extends Controller
             'options' => ['prohibited'],
         ]);
 
-        return $this->respond($runner->start(
+        return $this->respond($runner->forScope($this->scope($request))->start(
             (int) $request->user()->getAuthIdentifier(),
             $input['dry_run_id'],
             $input['confirm'],
@@ -56,7 +58,7 @@ class FrenchCatalogTranslationController extends Controller
     {
         $input = $request->validate(['run_id' => ['required', 'string', 'max:128']]);
 
-        return $this->respond($runner->tick($input['run_id']));
+        return $this->respond($runner->forScope($this->scope($request))->tick($input['run_id']));
     }
 
     public function pause(Request $request, FrenchCatalogTranslationAdminRunner $runner): JsonResponse
@@ -78,7 +80,13 @@ class FrenchCatalogTranslationController extends Controller
     {
         $input = $request->validate(['run_id' => ['required', 'string', 'max:128']]);
 
-        return $this->respond($runner->control($input['run_id'], $action));
+        return $this->respond($runner->forScope($this->scope($request))->control($input['run_id'], $action));
+    }
+
+    /** Scope is fixed by the route, never selected from user-supplied options. */
+    private function scope(Request $request): string
+    {
+        return $request->route('translation_scope') === 'jarek_gearboxes' ? 'jarek_gearboxes' : 'catalog';
     }
 
     private function respond(array $result): JsonResponse

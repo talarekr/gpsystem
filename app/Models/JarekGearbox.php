@@ -2,11 +2,44 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasStorefrontTranslations;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Storage;
 
 class JarekGearbox extends Model
 {
+    use HasStorefrontTranslations;
+
+    public function translations(): HasMany
+    {
+        return $this->hasMany(JarekGearboxTranslation::class, 'jarek_gearbox_id');
+    }
+
+    public function translationSourceFields(): array
+    {
+        return ['title', 'description'];
+    }
+
+    /** Translate public text, never Allegro JSON keys, images, parameters, or identifiers. */
+    public function translationSource(): array
+    {
+        $description = trim((string) $this->plain_description);
+        if ($description === '') {
+            $raw = (string) $this->description;
+            $decoded = json_decode($raw, true);
+            $description = is_array($decoded)
+                ? collect($decoded['sections'] ?? [])->flatMap(fn ($section) => $section['items'] ?? [])
+                    ->where('type', 'TEXT')->pluck('content')->filter(fn ($value) => is_string($value))->implode("\n")
+                : $raw;
+        }
+
+        $description = preg_replace('/<(?:br\s*\/?|\/(?:p|div|li|h[1-6]))\s*>/i', "\n", $description) ?? $description;
+
+        return ['title' => (string) $this->title,
+            'description' => trim(html_entity_decode(strip_tags($description), ENT_QUOTES | ENT_HTML5, 'UTF-8'))];
+    }
+
     public const LOCALIZED_IMAGES_DIRECTORY = 'jarek-gearboxes';
     public const LOCALIZED_IMAGES_SOURCE = 'storage/app/public/jarek-gearboxes';
     private const LOCALIZED_IMAGE_MAX_INDEX = 60;
