@@ -5,7 +5,7 @@ namespace App\Services\Storefront;
 /** Hide identifiers/numbers from the provider, and reject missing/duplicated/altered markers. */
 class JarekTranslationTechnicalTokens
 {
-    public const VERSION = 2;
+    public const VERSION = 3;
 
     public function mask(string $text, array $parameters = []): array
     {
@@ -21,7 +21,7 @@ class JarekTranslationTechnicalTokens
             }
         }
         $brands = ['VW', 'Volkswagen', 'Audi', 'BMW', 'Mini', 'Mercedes', 'Mercedes-Benz', 'Peugeot', 'Citroën', 'Citroen', 'Renault', 'Opel', 'Ford', 'Seat', 'Skoda', 'Škoda', 'Volvo', 'Toyota', 'Nissan', 'Fiat', 'Honda', 'Mazda', 'Hyundai', 'Kia', 'Dacia', 'Suzuki', 'Mitsubishi', 'Jeep', 'Porsche', 'Jaguar', 'Chevrolet', 'Iveco'];
-        $technicalValues = array_merge($technicalValues, $brands);
+        $technicalValues = array_merge($technicalValues, $brands, ['Kangoo']);
         // Preserve the vehicle model following a recognized brand, never descriptive Polish words.
         $brandPattern = implode('|', array_map(fn ($value) => preg_quote($value, '/'), $brands));
         preg_match_all('/\b(?:'.$brandPattern.')\s+([\p{L}\p{N}]+(?:[-.][\p{L}\p{N}]+)*)/iu', $text, $models);
@@ -51,6 +51,31 @@ class JarekTranslationTechnicalTokens
         return ['text' => $masked ?? $text, 'tokens' => $tokens];
     }
 
+    /** Google v2 HTML honors notranslate spans; technical values themselves stay local. */
+    public function html(string $segment, array $tokens): string
+    {
+        $html = htmlspecialchars($segment, ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML5, 'UTF-8');
+        foreach ($tokens as $marker => $value) {
+            $html = str_replace($marker, '<span class="notranslate" translate="no">'.$marker.'</span>', $html);
+        }
+
+        return '<div>'.$html.'</div>';
+    }
+
+    public function htmlText(string $html): string
+    {
+        $document = new \DOMDocument;
+        $previous = libxml_use_internal_errors(true);
+        try {
+            $document->loadHTML('<?xml encoding="UTF-8">'.$html, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING);
+
+            return $document->getElementsByTagName('body')->item(0)?->textContent ?? '';
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($previous);
+        }
+    }
+
     public function restore(string $output, array $tokens): ?string
     {
         foreach ($tokens as $marker => $value) {
@@ -65,7 +90,7 @@ class JarekTranslationTechnicalTokens
             $restored = preg_replace_callback('/(?<![A-Za-z0-9])'.preg_quote($marker, '/').'(?![A-Za-z0-9])/i', fn () => $value, $restored);
         }
 
-        return preg_match('/ZXQ[A-Z0-9]{8,24}/i', str_ireplace(array_keys($tokens), '', $output)) ? null : $restored;
+        return preg_match('/ZXQ?[A-Z0-9]{8,24}/i', str_ireplace(array_keys($tokens), '', $output)) ? null : $restored;
     }
 
     /** Only markers and technical code values; never a raw description/provider response/credentials. */
@@ -95,7 +120,7 @@ class JarekTranslationTechnicalTokens
     public static function storedDiagnostic(?string $message): ?array
     {
         $diagnostic = json_decode((string) $message, true)['diagnostic'] ?? null;
-        if (! is_array($diagnostic) || ($diagnostic['version'] ?? null) !== self::VERSION || ! in_array($diagnostic['field'] ?? null, ['title', 'description'], true)) {
+        if (! is_array($diagnostic) || ! in_array($diagnostic['version'] ?? null, [2, self::VERSION], true) || ! in_array($diagnostic['field'] ?? null, ['title', 'description'], true)) {
             return null;
         }
         $issues = [];
@@ -111,7 +136,7 @@ class JarekTranslationTechnicalTokens
             $issues[] = ['expected_marker' => $issue['expected_marker'], 'source_code' => $source, 'occurrences' => $issue['occurrences']];
         }
 
-        return ['version' => self::VERSION, 'field' => $diagnostic['field'], 'issues' => $issues,
+        return ['version' => $diagnostic['version'], 'field' => $diagnostic['field'], 'issues' => $issues,
             'response_markers' => array_slice(array_values(array_filter((array) ($diagnostic['response_markers'] ?? []), fn ($v) => is_string($v) && preg_match('/^ZXQ[A-Z0-9]{1,24}$/i', $v))), 0, 2),
             'response_codes' => array_slice(array_values(array_filter((array) ($diagnostic['response_codes'] ?? []), fn ($v) => is_string($v) && preg_match('/^[A-Z][A-Z0-9]{1,15}$/', $v) && preg_match('/[0-9]/', $v))), 0, 2)];
     }

@@ -333,6 +333,7 @@ Route::middleware([Authenticate::class])->group(function (): void {
             Route::get('/', [FrenchCatalogTranslationController::class, 'index'])->name('index');
             Route::get('/status', [FrenchCatalogTranslationController::class, 'status'])->name('status');
             Route::get('/category-diagnostics', \App\Http\Controllers\Admin\FrenchCategoryDiagnosticsController::class)->name('category-diagnostics');
+            Route::match(['get', 'post'], '/jarek-failed', \App\Http\Controllers\Admin\JarekFailedTranslationController::class)->withoutMiddleware('throttle:tools')->middleware('throttle:fr-jarek-failed-translations')->name('jarek-failed');
             Route::get('/price-audit', \App\Http\Controllers\Admin\FrenchPriceAuditController::class)->name('price-audit');
             Route::match(['get', 'post'], '/jarek-local-images', \App\Http\Controllers\Admin\JarekGearboxes\JarekFrImagesController::class)->withoutMiddleware('throttle:tools')->middleware('throttle:fr-jarek-images')->name('jarek-local-images');
             Route::prefix('/new-products')->name('new-products.')->withoutMiddleware('throttle:tools')->middleware('throttle:fr-new-products-translations')->group(function (): void {

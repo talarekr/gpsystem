@@ -41,25 +41,79 @@ class FrenchCatalogTranslationAdminRunner
 
     public function forScope(string $scope): self
     {
-        if (! in_array($scope, ['catalog', 'jarek_gearboxes'], true)) {
+        if (! in_array($scope, ['catalog', 'jarek_gearboxes', 'jarek_failed'], true)) {
             throw new \InvalidArgumentException('Invalid translation scope.');
         }
         $runner = clone $this;
         $runner->scope = $scope;
-        $runner->preview = $this->preview->forScope($scope);
+        $runner->preview = $this->preview->forScope($scope === 'jarek_failed' ? 'jarek_gearboxes' : $scope);
         $runner->runs = $this->runs->forScope($scope);
 
         return $runner;
     }
 
+    private function isJarek(): bool
+    {
+        return in_array($this->scope, ['jarek_gearboxes', 'jarek_failed'], true);
+    }
+
+    /** A small recovery checkpoint; the original full run is never read or updated here. */
+    public function startFailed(int $actor, string $previewId, string $confirm): array
+    {
+        if ($this->scope !== 'jarek_failed' || $confirm !== JarekFailedTranslationPreview::CONFIRM) {
+            return $this->error('invalid_confirmation', 'Wpisz token ponowienia tylko błędnych tłumaczeń Jarka.');
+        }
+        if ($error = $this->guard()) {
+            return $error;
+        }
+
+        return $this->mutate(function () use ($actor, $previewId): array {
+            $existing = $this->runs->latest();
+            if ($existing && in_array($existing['status'], ['running', 'paused', 'stopped_on_error', 'failed'], true)) {
+                return $this->error('active_run', 'Wznów istniejące recovery, zamiast uruchamiać ponownie.');
+            }
+            if (($existing['_preview_id_hash'] ?? null) === hash('sha256', $previewId)) {
+                return $this->error('preview_consumed', 'Ten podgląd został użyty. Sprawdź ponownie pozostałe błędy.');
+            }
+            $lease = Cache::lock($this->processingKey(), self::PROCESSING_LEASE_SECONDS);
+            if (! $lease->get()) {
+                return $this->error('busy', 'Trwa partia Jarka; poczekaj na zakończenie.');
+            }
+            try {
+                $report = app(JarekFailedTranslationPreview::class)->approved($actor, $previewId);
+                if (! $report || ! $report['manifest']) {
+                    return $this->error('preview_required', 'Sprawdź ponownie listę błędnych tłumaczeń; zakres zmienił się lub jest pusty.');
+                }
+                $run = $this->idle();
+                $run['run_id'] = (string) Str::uuid();
+                $run['status'] = 'running';
+                $run['runner_mode'] = 'browser';
+                $run['started_at'] = $run['updated_at'] = now()->toISOString();
+                $run['total'] = $run['failed'] = count($report['manifest']);
+                $run['_cursor'] = $run['_max_ids'] = $run['_totals'] = $run['_processed'] = ['jarek_gearboxes' => 0];
+                $run['_pending'] = null;
+                $run['_preview_id_hash'] = hash('sha256', $previewId);
+                $run['actor_id'] = $actor;
+                $run['_technical_retry_version'] = JarekTranslationTechnicalTokens::VERSION;
+                $run['_technical_retry_queue'] = $report['manifest'];
+                $run['technical_retry_total'] = $run['technical_retry_remaining'] = count($report['manifest']);
+                $this->save($run);
+
+                return ['ok' => true] + $this->publicRun($run);
+            } finally {
+                $lease->release();
+            }
+        });
+    }
+
     private function models(): array
     {
-        return $this->scope === 'jarek_gearboxes' ? ['jarek_gearboxes' => JarekGearbox::class] : ['parts' => Part::class, 'categories' => PartCategory::class];
+        return $this->isJarek() ? ['jarek_gearboxes' => JarekGearbox::class] : ['parts' => Part::class, 'categories' => PartCategory::class];
     }
 
     private function processingKey(): string
     {
-        return self::PROCESSING_LOCK.($this->scope === 'catalog' ? '' : ':'.$this->scope);
+        return self::PROCESSING_LOCK.($this->isJarek() ? ':jarek_gearboxes' : '');
     }
 
     public function __construct(
@@ -70,7 +124,7 @@ class FrenchCatalogTranslationAdminRunner
 
     public function start(int $actorId, string $dryRunId, string $confirm): array
     {
-        if ($confirm !== ($this->scope === 'jarek_gearboxes' ? self::JAREK_CONFIRM : self::CONFIRM)) {
+        if ($confirm !== ($this->isJarek() ? self::JAREK_CONFIRM : self::CONFIRM)) {
             return $this->error('invalid_confirmation', 'Wpisz dokładny token potwierdzenia.');
         }
         if ($error = $this->guard()) {
@@ -170,9 +224,11 @@ class FrenchCatalogTranslationAdminRunner
                     if ($run['status'] === 'running' && $this->mode($run) === 'queue' && $this->configuredMode() === 'queue' && ! $this->recoveryDue($run)) {
                         return ['ok' => true] + $this->publicRun($run);
                     }
-                    if ($this->scope === 'jarek_gearboxes' && $this->mode($run) === 'browser' && $run['status'] === 'running') {
+                    if ($this->isJarek() && $this->mode($run) === 'browser' && $run['status'] === 'running') {
                         // Resume enables the local timer even while a worker owns the lease; tick remains fenced.
-                        app(JarekTechnicalTranslationRecovery::class)->prepare($run);
+                        if ($this->scope !== 'jarek_failed') {
+                            app(JarekTechnicalTranslationRecovery::class)->prepare($run);
+                        }
                         $this->save($run);
 
                         return ['ok' => true] + $this->publicRun($run);
@@ -189,8 +245,10 @@ class FrenchCatalogTranslationAdminRunner
                         $run['_lease']['released_at'] = now()->toISOString();
                         $run['_lease']['recovered_at'] = now()->toISOString();
                     }
-                    if ($this->scope === 'jarek_gearboxes') {
-                        app(JarekTechnicalTranslationRecovery::class)->prepare($run);
+                    if ($this->isJarek()) {
+                        if ($this->scope !== 'jarek_failed') {
+                            app(JarekTechnicalTranslationRecovery::class)->prepare($run);
+                        }
                     }
                     $run['status'] = 'running';
                     // Explicit Resume migrates old queued checkpoints without resetting progress.
@@ -242,7 +300,7 @@ class FrenchCatalogTranslationAdminRunner
 
     private function configuredMode(): string
     {
-        if ($this->scope === 'jarek_gearboxes') {
+        if ($this->isJarek()) {
             return 'browser';
         }
 
@@ -309,7 +367,7 @@ class FrenchCatalogTranslationAdminRunner
                     continue;
                 }
                 if (! $run['_pending']) {
-                    $repair = $this->scope === 'jarek_gearboxes' ? app(JarekTechnicalTranslationRecovery::class)->next($run) : null;
+                    $repair = $this->isJarek() ? app(JarekTechnicalTranslationRecovery::class)->next($run) : null;
                     $record = $repair ? $this->record('jarek_gearboxes', $repair['id']) : $this->nextRecord($runId, $run);
                     if (! $record && ! $repair) {
                         return;
@@ -359,7 +417,8 @@ class FrenchCatalogTranslationAdminRunner
                     });
                 };
                 if (($pending['technical_repair'] ?? null) && $pending['retry_attempt'] === 0) {
-                    if (! $record || $translation?->status !== 'failed' || $translation->error_code !== 'technical_code_changed'
+                    $repairCode = array_key_exists('error_code', $pending['technical_repair']) ? $pending['technical_repair']['error_code'] : 'technical_code_changed';
+                    if (! $record || $translation?->status !== 'failed' || $translation->error_code !== $repairCode
                         || $translation->attempts !== $pending['technical_repair']['expected_attempts']
                         || ! $translation->matchesSourceHash($pending['source_hash']) || ! hash_equals($pending['source_hash'], $record->translationSourceHash())) {
                         $this->finishRecord($runId, $pending, $this->result('skipped', 'translation_changed'));
@@ -368,6 +427,8 @@ class FrenchCatalogTranslationAdminRunner
                     }
                     $options['include_failed'] = true;
                     $options['expected_source_hash'] = $pending['source_hash'];
+                    $options['expected_failed_attempts'] = $pending['technical_repair']['expected_attempts'];
+                    $options['expected_failed_code'] = $repairCode;
                 }
                 if ($pending['retry_attempt'] > 0) {
                     // Permission to retry belongs to this run's exact failed attempt only.
@@ -381,6 +442,8 @@ class FrenchCatalogTranslationAdminRunner
                         continue;
                     }
                     $options['include_failed'] = true;
+                    $options['expected_failed_attempts'] = $pending['expected_attempts'];
+                    $options['expected_failed_code'] = $pending['retry_reason'];
                 }
                 $pending['baseline_attempts'] = (int) ($translation?->attempts ?? 0);
                 $pending['in_flight'] = true;
@@ -450,6 +513,16 @@ class FrenchCatalogTranslationAdminRunner
 
     private function nextRecord(string $runId, array $run): Part|PartCategory|JarekGearbox|null
     {
+        if ($this->scope === 'jarek_failed') {
+            $this->mutate(function () use ($runId): void {
+                if ($state = $this->running($runId)) {
+                    $state['status'] = 'completed';
+                    $this->save($state);
+                }
+            });
+
+            return null;
+        }
         foreach ($this->models() as $type => $model) {
             $record = $model::query()->with(['translations' => fn ($q) => $q->where('locale', 'fr')])
                 ->where('id', '>', $run['_cursor'][$type])->where('id', '<=', $run['_max_ids'][$type])->orderBy('id')->first();
@@ -566,7 +639,7 @@ class FrenchCatalogTranslationAdminRunner
                 $run['last_error'] = $event;
                 $run['failed_examples'] = array_slice([...$run['failed_examples'], $event], -20);
                 // Exhausted/provider/uncertain errors halt costs; Resume starts at the next ID.
-                $recordError = $this->scope === 'jarek_gearboxes' && in_array($result['reason'], ['technical_code_changed', 'translated_name_too_long', 'source_changed'], true);
+                $recordError = $this->isJarek() && in_array($result['reason'], ['technical_code_changed', 'google_translate_failed', 'translated_name_too_long', 'source_changed'], true);
                 if ($run['status'] === 'running' && ! $recordError) {
                     $run['status'] = 'stopped_on_error';
                     $run['next_batch'] = null;
@@ -671,6 +744,9 @@ class FrenchCatalogTranslationAdminRunner
     private function save(array &$run): void
     {
         $run['updated_at'] = now()->toISOString();
+        if ($this->scope === 'jarek_failed') {
+            $run['processed'] = $run['technical_retry_processed'];
+        }
         $run['remaining'] = max(0, $run['total'] - $run['processed']);
         $this->runs->save($run);
     }
@@ -692,10 +768,13 @@ class FrenchCatalogTranslationAdminRunner
         if ($active) {
             $public['recovery_available'] = false;
         }
-        if ($this->scope === 'jarek_gearboxes') {
+        if ($this->isJarek()) {
             $unfinished = ($run['remaining'] ?? 0) > 0 || ($run['technical_retry_remaining'] ?? 0) > 0;
-            $repair = $run['status'] === 'completed' && $run['failed'] > 0 && ($run['_technical_retry_version'] ?? null) !== JarekTranslationTechnicalTokens::VERSION;
+            $repair = $this->scope === 'jarek_gearboxes' && $run['status'] === 'completed' && $run['failed'] > 0 && ($run['_technical_retry_version'] ?? null) !== JarekTranslationTechnicalTokens::VERSION;
             $public['recovery_available'] = ($unfinished && in_array($run['status'], ['running', 'paused', 'stopped_on_error', 'failed'], true)) || $repair;
+        }
+        if ($this->scope === 'jarek_failed') {
+            $public['revision'] = $run['_revision'] ?? 0;
         }
         $public['resume_available'] = $public['recovery_available'];
         $public['run_storage_ready'] = $this->runs->ready();

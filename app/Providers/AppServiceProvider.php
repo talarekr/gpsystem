@@ -27,6 +27,7 @@ class AppServiceProvider extends ServiceProvider
             $view->with('storefrontContentLocale', request()->attributes->get('storefront_locale', 'pl'));
         });
 
+        RateLimiter::for('fr-jarek-failed-translations', fn (Request $request): Limit => Limit::perMinute(40)->by($request->user()?->id ?: $request->ip()));
         RateLimiter::for('fr-jarek-images', fn (Request $request): Limit => Limit::perMinute(40)->by($request->user()?->id ?: $request->ip()));
         RateLimiter::for('fr-new-products-translations', fn (Request $request): Limit => Limit::perMinute(15)->by($request->user()?->id ?: $request->ip()));
 

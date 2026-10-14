@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Services\Storefront\FrenchCatalogTranslationAdminRunner;
 use App\Services\Storefront\FrenchCatalogTranslationPreviewService;
 use App\Services\Storefront\FrenchNewProductsTranslationRunner;
+use App\Services\Storefront\JarekFailedTranslationPreview;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -20,6 +21,8 @@ class FrenchCatalogTranslationController extends Controller
             'newProductsOverview' => app(FrenchNewProductsTranslationRunner::class)->overview(),
             'jarekOverview' => $preview->forScope('jarek_gearboxes')->overview((int) $request->user()->getAuthIdentifier()),
             'jarekStatus' => $runner->forScope('jarek_gearboxes')->status(),
+            'jarekFailedReport' => app(JarekFailedTranslationPreview::class)->publicReport(),
+            'jarekFailedStatus' => $runner->forScope('jarek_failed')->status(),
         ]);
     }
 
