@@ -22,6 +22,10 @@ return Application::configure(basePath: dirname(__DIR__))
         __DIR__.'/../app/Console/Commands',
     ])
     ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->prependToPriorityList(
+            \Illuminate\View\Middleware\ShareErrorsFromSession::class,
+            \App\Http\Middleware\ReadOnlyPreviewSession::class,
+        );
         $middleware->web(append: [
             ResolveStorefrontHost::class,
             SetStorefrontLocale::class,

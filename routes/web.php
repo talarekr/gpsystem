@@ -2927,3 +2927,9 @@ Route::get('/tools/debug-ovoko-shipment-preview', [ShipmentToolsController::clas
 Route::get('/tools/create-order-shipment', [ShipmentToolsController::class, 'create'])->name('tools.create-order-shipment');
 Route::get('/tools/download-shipment-label/{shipment}', [ShipmentToolsController::class, 'download'])->name('tools.download-shipment-label');
 Route::delete('/tools/delete-test-shipment/{shipment}', [ShipmentToolsController::class, 'deleteTest'])->name('tools.delete-test-shipment');
+
+// Preview only. No apply route and no rate-limiter cache writes.
+Route::get('/admin/tools/jarek-gearboxes/fr-storefront-preview', \App\Http\Controllers\Admin\JarekGearboxes\JarekGearboxFrStorefrontPreviewController::class)
+    ->withoutMiddleware(\Illuminate\Session\Middleware\StartSession::class)
+    ->middleware([\App\Http\Middleware\ReadOnlyPreviewSession::class, Authenticate::class, 'admin.panel'])
+    ->name('admin.tools.jarek-gearboxes.fr-storefront-preview');
