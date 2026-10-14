@@ -332,6 +332,12 @@ Route::middleware([Authenticate::class])->group(function (): void {
         ->group(function (): void {
             Route::get('/', [FrenchCatalogTranslationController::class, 'index'])->name('index');
             Route::get('/status', [FrenchCatalogTranslationController::class, 'status'])->name('status');
+            Route::prefix('/new-products')->name('new-products.')->withoutMiddleware('throttle:tools')->middleware('throttle:fr-new-products-translations')->group(function (): void {
+                Route::get('/status', [\App\Http\Controllers\Admin\FrenchNewProductsTranslationController::class, 'status'])->name('status');
+                foreach (['dry-run' => 'dryRun', 'start' => 'start', 'process-next-batch' => 'tick', 'control' => 'control', 'register' => 'register'] as $path => $method) {
+                    Route::post('/'.$path, [\App\Http\Controllers\Admin\FrenchNewProductsTranslationController::class, $method])->name($method);
+                }
+            });
             Route::post('/dry-run', [FrenchCatalogTranslationController::class, 'dryRun'])->name('dry-run');
             Route::post('/start', [FrenchCatalogTranslationController::class, 'start'])->name('start');
             Route::post('/process-next-batch', [FrenchCatalogTranslationController::class, 'tick'])->name('tick');
@@ -2948,3 +2954,4 @@ Route::post('/boites-jarek/{product}/panier', [\App\Http\Controllers\Storefront\
 Route::post('/boites-jarek/{product}/panier/retirer', [\App\Http\Controllers\Storefront\JarekFrProductController::class, 'remove'])->whereNumber('product')->name('storefront.jarek.remove');
 Route::match(['get', 'post'], '/admin/tools/jarek-gearboxes/fr-publication', \App\Http\Controllers\Admin\JarekGearboxes\JarekFrPublicationController::class)
     ->middleware([Authenticate::class, 'admin.panel'])->name('admin.tools.jarek-gearboxes.fr-publication');
+

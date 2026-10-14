@@ -79,7 +79,7 @@ class FrenchNbpPriceFallbackTest extends TestCase
             ['rate' => 5, 'date' => '2026-02-30'],
         ] as $case) {
             request()->attributes->remove('storefront.fr.nbp.eur_rate');
-            $this->mock(NbpExchangeRateService::class)->shouldReceive('rateFor')->once()->with('EUR')
+            $this->mock(NbpExchangeRateService::class)->shouldReceive('currentEurPln')->once()
                 ->andReturn(['ok' => true, 'currency' => 'EUR', 'source' => 'NBP_TABLE_A',
                     'rate' => $case['rate'], 'effective_date' => $case['date']]);
             $this->assertNull(app(FrenchPriceResolver::class)->resolve($part)['cents']);

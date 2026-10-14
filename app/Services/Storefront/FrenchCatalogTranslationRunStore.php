@@ -15,7 +15,7 @@ class FrenchCatalogTranslationRunStore
 
     public function forScope(string $scope): self
     {
-        if (! in_array($scope, ['catalog', 'jarek_gearboxes'], true)) {
+        if (! in_array($scope, ['catalog', 'jarek_gearboxes', 'new_products'], true)) {
             throw new \InvalidArgumentException('Invalid translation scope.');
         }
         $store = clone $this;

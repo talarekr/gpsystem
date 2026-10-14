@@ -2,14 +2,16 @@
 
 namespace App\Providers;
 
+use App\Models\Part;
+use App\Observers\PartFrenchTranslationObserver;
 use App\Services\Storefront\CartService;
 use App\Services\Storefront\CategoryTreeService;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\View;
-use Throwable;
 use Illuminate\Support\ServiceProvider;
+use Throwable;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -20,9 +22,12 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        Part::observe(PartFrenchTranslationObserver::class);
         View::composer('storefront.*', function ($view): void {
             $view->with('storefrontContentLocale', request()->attributes->get('storefront_locale', 'pl'));
         });
+
+        RateLimiter::for('fr-new-products-translations', fn (Request $request): Limit => Limit::perMinute(15)->by($request->user()?->id ?: $request->ip()));
 
         RateLimiter::for('tools', function (Request $request): Limit {
             return Limit::perMinute(60)->by($request->user()?->id ?: $request->ip());
