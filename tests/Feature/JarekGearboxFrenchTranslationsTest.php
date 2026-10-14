@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Services\Storefront\FrenchCatalogTranslationAdminRunner as Runner;
 use App\Services\Storefront\FrenchCatalogTranslationPreviewService as Preview;
 use App\Services\Storefront\FrenchCatalogTranslationRunStore as RunStore;
+use App\Services\Storefront\JarekTranslationTechnicalTokens;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Support\Facades\Cache;
@@ -160,13 +161,12 @@ class JarekGearboxFrenchTranslationsTest extends TestCase
         Http::fake(['translation.googleapis.com/*' => Http::response(['data' => ['translations' => [['translatedText' => 'Boîte DQ251']]]])]);
         $record = $this->gearbox(['title' => 'Skrzynia DQ250']);
         $id = $this->start();
-        $this->tick($id)->assertOk()->assertJsonPath('failed', 1)->assertJsonPath('status', 'stopped_on_error')
+        $this->tick($id)->assertOk()->assertJsonPath('failed', 1)->assertJsonPath('status', 'running')
             ->assertJsonPath('last_error.code', 'technical_code_changed');
         $translation = $record->translations()->first();
         $this->assertSame('failed', $translation->status);
         $this->assertNull($translation->title);
         $this->assertSame('technical_code_changed', $translation->error_code);
-        $this->postJson(self::URL.'/resume', ['run_id' => $id])->assertOk();
         $this->tick($id)->assertJsonPath('status', 'completed');
         Http::assertSentCount(1);
     }
@@ -305,6 +305,103 @@ class JarekGearboxFrenchTranslationsTest extends TestCase
         $this->actingAs($viewer)->postJson(self::URL.'/dry-run')->assertForbidden();
         $this->actingAs($this->actor)->getJson('https://gpswiss.fr'.self::URL.'/status')->assertForbidden();
         Http::assertNothingSent();
+    }
+
+    public function test_tokenization_preserves_all_reported_gearbox_vehicle_and_numeric_identifiers(): void
+    {
+        $tokens = app(JarekTranslationTechnicalTokens::class);
+        foreach ([
+            ['Skrzynia biegów RGA Regenerowana VW Caddy 1.2TSI', ['RGA', 'VW', 'Caddy', '1.2TSI']],
+            ['Skrzynia biegów QQG Regenerowana VW Caddy 1.2TSI', ['QQG', 'VW', 'Caddy', '1.2TSI']],
+            ['Skrzynia biegów QMF Regenerowana VW Golf VI Seat Leon III 1.6TDI', ['QMF', 'VW', 'Golf', 'VI', 'Seat', 'Leon', 'III', '1.6TDI']],
+            ['Tylny Most VW Crafter A9063502500 51/10 Bliźniak', ['VW', 'Crafter', 'A9063502500', '51/10']],
+            ['Skrzynia biegów 20XT02 Peugeot 308 T9 1.2THP', ['20XT02', 'Peugeot', '308', 'T9', '1.2THP']],
+        ] as [$source, $preserve]) {
+            $masked = $tokens->mask($source);
+            foreach ($preserve as $value) {
+                $this->assertContains($value, $masked['tokens']);
+            }
+            $this->assertStringContainsString(str_contains($source, 'Skrzynia') ? 'Skrzynia biegów' : 'Tylny Most', $masked['text']);
+            $this->assertStringNotContainsString('__JAREK_', $masked['text']);
+            $output = str_replace(['Skrzynia biegów', 'Regenerowana', 'Tylny Most', 'Bliźniak'], ['Boîte de vitesses', 'Reconditionnée', 'Pont arrière', 'Roues jumelées'], $masked['text']);
+            $output = preg_replace_callback('/ZXQ[A-Z0-9]+/', fn ($m) => strtolower($m[0]), $output);
+            $restored = $tokens->restore($output, $masked['tokens']);
+            $this->assertNotNull($restored);
+            foreach ($preserve as $value) {
+                $this->assertStringContainsString($value, $restored);
+            }
+            $this->assertStringNotContainsString('Regenerowana', $restored);
+            $marker = array_key_first($masked['tokens']);
+            $this->assertNull($tokens->restore(str_replace($marker, '', $masked['text']), $masked['tokens']));
+            $this->assertNull($tokens->restore($masked['text'].' '.$marker, $masked['tokens']));
+        }
+        Http::assertNothingSent();
+    }
+
+    public function test_failed_record_continues_and_bounded_marker_diagnostic_survives_reload_without_raw_response(): void
+    {
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        Http::fake(['translation.googleapis.com/*' => fn ($r) => Http::response(['data' => ['translations' => [['translatedText' => str_contains($r['q'], 'bad fixture') ? 'Boîte DQ251 private@example.test Bearer sensitive' : 'FR '.$r['q']]]]])]);
+        $first = $this->gearbox(['title' => 'bad fixture DQ250']);
+        $this->gearbox(['allegro_offer_id' => 'good', 'title' => 'Skrzynia QQG']);
+        $id = $this->start();
+        $this->tick($id)->assertJsonPath('status', 'running')->assertJsonPath('failed', 1)->assertJsonPath('resume_available', true)
+            ->assertJsonPath('last_error.diagnostic.issues.0.source_code', 'DQ250')->assertDontSee('private@example.test')->assertDontSee('sensitive');
+        $stored = JarekTranslationTechnicalTokens::storedDiagnostic($first->translations()->first()->error_message);
+        $this->assertSame('DQ250', $stored['issues'][0]['source_code']);
+        $this->assertContains('DQ251', $stored['response_codes']);
+        $this->tick($id)->assertJsonPath('translated', 1)->assertJsonPath('processed', 2);
+        $this->tick($id)->assertJsonPath('status', 'completed');
+        $this->get(self::BASE)->assertOk()->assertSee('source_code')->assertDontSee('private@example.test');
+        $this->assertSame('failed', $first->translations()->first()->status);
+    }
+
+    public function test_resume_retries_prior_technical_failures_once_in_same_run_without_resetting_main_cursor_or_processed(): void
+    {
+        $failed = $this->gearbox();
+        $next = $this->gearbox(['allegro_offer_id' => 'next']);
+        $id = $this->start();
+        $state = $this->checkpoint();
+        $failed->translations()->create(['locale' => 'fr', 'status' => 'failed', 'error_code' => 'technical_code_changed', 'source_hash' => $failed->translationSourceHash(), 'attempts' => 1]);
+        $state['status'] = 'stopped_on_error';
+        $state['processed'] = 1;
+        $state['failed'] = 1;
+        $state['remaining'] = 1;
+        $state['_cursor'][self::SCOPE] = $failed->id;
+        $state['_processed'][self::SCOPE] = 1;
+        app(RunStore::class)->forScope(self::SCOPE)->save($state);
+        $this->postJson(self::URL.'/resume', ['run_id' => $id])->assertOk()->assertJsonPath('run_id', $id)->assertJsonPath('technical_retry_total', 1)->assertJsonPath('processed', 1);
+        $this->tick($id)->assertJsonPath('processed', 1)->assertJsonPath('remaining', 1)->assertJsonPath('translated', 1)->assertJsonPath('failed', 0)->assertJsonPath('technical_retry_translated', 1);
+        $this->assertSame($failed->id, $this->checkpoint()['_cursor'][self::SCOPE]);
+        $this->postJson(self::URL.'/resume', ['run_id' => $id])->assertOk()->assertJsonPath('technical_retry_processed', 1);
+        $this->tick($id)->assertJsonPath('processed', 2)->assertJsonPath('translated', 2);
+        $this->tick($id)->assertJsonPath('status', 'completed');
+        $this->assertDatabaseCount(RunStore::TABLE, 1);
+        $this->assertSame(2, $failed->translations()->first()->attempts);
+        $this->assertSame(1, $next->translations()->first()->attempts);
+        Http::assertSentCount(4);
+    }
+
+    public function test_running_browser_run_resume_keeps_live_worker_fenced_but_enables_local_timer(): void
+    {
+        $this->gearbox();
+        $id = $this->start();
+        $state = $this->checkpoint();
+        $state['_lease'] = ['owner' => 'existing-owner', 'started_at' => now()->toISOString(), 'expires_at' => now()->addMinutes(10)->toISOString(), 'released_at' => null];
+        app(RunStore::class)->forScope(self::SCOPE)->save($state);
+        $lock = Cache::lock(Runner::PROCESSING_LOCK.':'.self::SCOPE, 600);
+        $this->assertTrue($lock->get());
+        try {
+            $this->getJson(self::URL.'/status')->assertJsonPath('lease_state', 'active')->assertJsonPath('resume_available', true);
+            $this->postJson(self::URL.'/resume', ['run_id' => $id])->assertOk()->assertJsonPath('runner_mode', 'browser')->assertJsonPath('status', 'running');
+            $this->tick($id)->assertJsonPath('processed', 0);
+            $this->assertTrue($lock->isOwnedByCurrentProcess());
+        } finally {
+            $lock->release();
+        }
+        $this->tick($id)->assertJsonPath('processed', 1);
+        $this->assertDatabaseCount(RunStore::TABLE, 1);
     }
 
     private function gearbox(array $values = []): JarekGearbox
