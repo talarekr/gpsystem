@@ -90,11 +90,14 @@ class GoogleTranslateService
     /**
      * @return array<string, mixed>
      */
-    public function translate(string $text, string $target, ?string $source = null): array
+    public function translate(string $text, string $target, ?string $source = null, string $format = 'text'): array
     {
         $target = strtolower($target);
         $source = strtolower($source ?: self::DEFAULT_SOURCE);
         $text = trim($text);
+        if (! in_array($format, ['text', 'html'], true)) {
+            throw new \InvalidArgumentException('Unsupported translation format.');
+        }
         $blockers = [];
         $warnings = [];
 
@@ -115,7 +118,7 @@ class GoogleTranslateService
 
         if ($blockers === []) {
             try {
-                $response = $this->sendApiKeyTranslateRequest($text, $target, $source);
+                $response = $this->sendApiKeyTranslateRequest($text, $target, $source, $format);
 
                 if (! $response['ok']) {
                     $blockers[] = $response['error'];
@@ -204,7 +207,7 @@ class GoogleTranslateService
     /**
      * @return array{ok: bool, translated_text: ?string, detected_source_language: ?string, error: string, http_status: ?int, google_error_status: ?string, google_error_message: ?string, google_error_reason: ?string}
      */
-    private function sendApiKeyTranslateRequest(string $text, string $target, string $source): array
+    private function sendApiKeyTranslateRequest(string $text, string $target, string $source, string $format = 'text'): array
     {
         $apiKey = (string) config('services.google_translate.key', '');
 
@@ -228,7 +231,7 @@ class GoogleTranslateService
                     'q' => $text,
                     'source' => $source,
                     'target' => $target,
-                    'format' => 'text',
+                    'format' => $format,
                 ]);
         } catch (Throwable $e) {
             return [
@@ -275,7 +278,7 @@ class GoogleTranslateService
 
         return [
             'ok' => true,
-            'translated_text' => html_entity_decode((string) $translation['translatedText'], ENT_QUOTES | ENT_HTML5, 'UTF-8'),
+            'translated_text' => $format === 'html' ? (string) $translation['translatedText'] : html_entity_decode((string) $translation['translatedText'], ENT_QUOTES | ENT_HTML5, 'UTF-8'),
             'detected_source_language' => $translation['detectedSourceLanguage'] ?? null,
             'error' => '',
             'http_status' => $response->status(),

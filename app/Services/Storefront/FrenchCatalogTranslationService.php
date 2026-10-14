@@ -99,6 +99,11 @@ class FrenchCatalogTranslationService
                     return ['result' => $this->result('skipped', 'source_changed')];
                 }
                 $translation = $record->translations()->where('locale', 'fr')->lockForUpdate()->first();
+                if ($record instanceof JarekGearbox && isset($options['expected_failed_attempts']) && (! $translation || $translation->status !== 'failed'
+                    || $translation->attempts !== $options['expected_failed_attempts']
+                    || $translation->error_code !== $options['expected_failed_code'])) {
+                    return ['result' => $this->result('skipped', 'translation_changed')];
+                }
                 $record->setRelation('translations', collect($translation ? [$translation] : []));
                 if ($reason = $this->skipReason($record, $options)) {
                     if ($reason === 'needs_update_requires_include_needs_update' && $translation->status !== 'needs_update') {
@@ -141,7 +146,7 @@ class FrenchCatalogTranslationService
                     continue;
                 }
                 // Google v2 has request size limits. Preserve boundary whitespace across segments.
-                foreach ($this->segments($protected['text']) as $segment) {
+                foreach ($this->segments($protected['text'], array_keys($protected['tokens'])) as $segment) {
                     if (trim($segment) === '') {
                         $output .= $segment;
 
@@ -160,12 +165,22 @@ class FrenchCatalogTranslationService
                         break 2;
                     }
                     try {
-                        $response = app(GoogleTranslateService::class)->translate($segment, 'fr', 'pl');
+                        if ($claim['record'] instanceof JarekGearbox) {
+                            $response = app(GoogleTranslateService::class)->translate(app(JarekTranslationTechnicalTokens::class)->html($segment, $protected['tokens']), 'fr', 'pl', 'html');
+                            if ($response['ok'] ?? false) {
+                                $response['translated_text'] = app(JarekTranslationTechnicalTokens::class)->htmlText((string) ($response['translated_text'] ?? ''));
+                            }
+                        } else {
+                            $response = app(GoogleTranslateService::class)->translate($segment, 'fr', 'pl');
+                        }
                     } catch (Throwable) {
                         $response = ['ok' => false];
                     }
                     if (! ($response['ok'] ?? false) || trim((string) ($response['translated_text'] ?? '')) === '') {
                         $http = (int) ($response['api_test_http_status'] ?? 0);
+                        if ($claim['record'] instanceof JarekGearbox && $http >= 200 && $http < 300) {
+                            $http = 0; // A successful HTTP response without text is a translation failure.
+                        }
                         $errorCode = $http ? 'google_http_'.$http : 'google_translate_failed';
                         $errorMessage = $http ? 'Google Translate returned HTTP '.$http.'.' : 'Google Translate did not return a translation; check provider configuration/connectivity.';
                         $retryable = $http === 429 || ($http >= 500 && $http <= 599);
@@ -223,13 +238,19 @@ class FrenchCatalogTranslationService
         }
     }
 
-    private function segments(string $text): array
+    private function segments(string $text, array $markers = []): array
     {
         $segments = [];
         while (mb_strlen($text) > 4500) {
             $prefix = mb_substr($text, 0, 4500);
             $boundary = mb_strrpos($prefix, ' ');
             $length = $boundary !== false && $boundary > 2250 ? $boundary + 1 : 4500;
+            foreach ($markers as $marker) {
+                $offset = mb_strpos($text, $marker);
+                if ($offset !== false && $offset < $length && $offset + mb_strlen($marker) > $length) {
+                    $length = $offset; // Never split a protected token, even in a long unbroken field.
+                }
+            }
             $segments[] = mb_substr($text, 0, $length);
             $text = mb_substr($text, $length);
         }

@@ -14,10 +14,10 @@ class JarekTechnicalTranslationRecovery
             return;
         }
         $queue = JarekGearbox::query()->with('translations')->where('id', '<=', $run['_cursor']['jarek_gearboxes'])
-            ->whereHas('translations', fn ($q) => $q->where('locale', 'fr')->where('status', 'failed')->where('error_code', 'technical_code_changed')->where('updated_at', '>=', Carbon::parse($run['started_at'])))
+            ->whereHas('translations', fn ($q) => $q->where('locale', 'fr')->where('status', 'failed')->whereIn('error_code', ['technical_code_changed', 'google_translate_failed'])->where('updated_at', '>=', Carbon::parse($run['started_at'])))
             ->orderBy('id')->get()->filter(fn ($record) => $record->translationForLocale('fr')->matchesSourceHash($record->translationSourceHash()))
             ->take(max(0, (int) $run['failed']))->map(fn ($record) => ['id' => $record->id, 'source_hash' => $record->translationSourceHash(),
-                'expected_attempts' => $record->translationForLocale('fr')->attempts])->values()->all();
+                'error_code' => $record->translationForLocale('fr')->error_code, 'expected_attempts' => $record->translationForLocale('fr')->attempts])->values()->all();
         $run['_technical_retry_version'] = JarekTranslationTechnicalTokens::VERSION;
         $run['_technical_retry_queue'] = $queue;
         $run['technical_retry_total'] = count($queue);
