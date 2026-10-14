@@ -99,7 +99,7 @@ class FrenchCatalogTranslationService
                     return ['result' => $this->result('skipped', 'source_changed')];
                 }
                 $translation = $record->translations()->where('locale', 'fr')->lockForUpdate()->first();
-                if (isset($options['expected_failed_attempts']) && (! $translation || $translation->status !== 'failed'
+                if ($record instanceof JarekGearbox && isset($options['expected_failed_attempts']) && (! $translation || $translation->status !== 'failed'
                     || $translation->attempts !== $options['expected_failed_attempts']
                     || $translation->error_code !== $options['expected_failed_code'])) {
                     return ['result' => $this->result('skipped', 'translation_changed')];
