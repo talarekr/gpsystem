@@ -2,13 +2,12 @@
     $parts = $parts ?? collect();
     $paginationView = \App\Support\StorefrontContext::isFrench(request()) ? 'storefront.fr.pagination' : null;
 
-    $catalogUrl = ($jarekOnly ?? false) ? '/boites-jarek' : '/czesci';
+    $catalogUrl = '/czesci';
 
     $resultCount = method_exists($parts, 'total')
         ? $parts->total()
         : (method_exists($parts, 'count') ? $parts->count() : 0);
 
-    if (($jarekProducts ?? null) && method_exists($jarekProducts, 'total')) $resultCount += $jarekProducts->total();
 
     $currentSort = $_GET['sort'] ?? '';
     $currentQ = $_GET['q'] ?? '';
@@ -77,8 +76,6 @@
                 </form>
             </div>
 
-            @include('storefront.fr.jarek-listing')
-            @unless($jarekOnly ?? false)
             <div class="sf-grid sf-grid--3">
                 @forelse($parts as $part)
                     @include('storefront.partials.product-card', ['part' => $part])
@@ -90,7 +87,6 @@
             @if(method_exists($parts, 'links'))
                 {!! method_exists($parts, 'withQueryString') ? $parts->withQueryString()->links($paginationView) : $parts->links($paginationView) !!}
             @endif
-            @endunless
         </section>
     </div>
 </div>

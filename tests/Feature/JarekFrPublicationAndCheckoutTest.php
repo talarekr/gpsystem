@@ -7,9 +7,11 @@ use App\Models\JarekFrProduct;
 use App\Models\JarekGearbox;
 use App\Models\Order;
 use App\Models\Part;
+use App\Models\PartCategory;
 use App\Models\User;
 use App\Services\Marketplace\PartAvailabilityEventService;
 use App\Services\Payments\PayuService;
+use App\Services\Storefront\FrenchMixedCatalog;
 use App\Services\Storefront\JarekFrPublication;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Factory;
@@ -52,6 +54,7 @@ class JarekFrPublicationAndCheckoutTest extends TestCase
         $this->actor = User::create(['name' => 'Operator', 'email' => 'publication@example.test', 'password' => 'password']);
         $this->actor->assignRole(UserRole::OwnerAdmin->value);
         $this->actingAs($this->actor);
+        PartCategory::create(['name' => 'Manualna 6-biegowa skrzynia biegów', 'slug' => 'manualna-6-biegowa-skrzynia-biegow', 'full_slug_path' => FrenchMixedCatalog::CATEGORY_PATH, 'source_system' => 'woo', 'is_visible' => true]);
         $this->source = $this->gearbox();
     }
 
@@ -177,7 +180,7 @@ class JarekFrPublicationAndCheckoutTest extends TestCase
         $this->assertCount(1, session('storefront.cart.items'));
         $this->get('https://gpswiss.pl/koszyk')->assertOk()->assertDontSee($this->source->title);
         $this->post('https://gpswiss.pl/boites-jarek/'.$product->id.'/panier', ['quantity' => 1])->assertNotFound();
-        $this->get('https://gpswiss.fr/boites-jarek')->assertOk()->assertDontSee('noindex, noarchive')->assertDontSee('hreflang="pl"', false);
+        $this->get('https://gpswiss.fr/boites-jarek')->assertStatus(301)->assertRedirect('/kategoria-produktu/'.FrenchMixedCatalog::CATEGORY_PATH);
         $this->get('https://gpswiss.fr/boites-jarek/'.$product->id)->assertOk()->assertDontSee('noindex, noarchive')->assertDontSee('hreflang="pl"', false);
     }
 

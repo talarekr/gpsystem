@@ -2,6 +2,7 @@
 
 namespace App\Services\Storefront;
 
+use App\Models\JarekFrProduct;
 use App\Models\Part;
 use App\Models\PartCategory;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
@@ -41,7 +42,7 @@ class CategoryTreeService
         }
 
         // Cache only the base tree. Translation relations are refreshed outside that cache.
-        $tree = Cache::remember(self::CACHE_KEY, self::CACHE_TTL_SECONDS, function (): array {
+        $buildTree = function () use ($isFrenchStorefront): array {
             $categories = PartCategory::query()
                 ->where(function ($query): void {
                     $query->where('source_system', 'woo')->orWhereNull('source_system');
@@ -58,9 +59,20 @@ class CategoryTreeService
                 ->groupBy('category_id')
                 ->pluck('aggregate', 'category_id');
 
+            $plProductCounts = $productCounts->all();
+
+            // Supplier exposure belongs only to this existing FR category. Keep the PL cache independent.
+            if ($isFrenchStorefront && Schema::hasTable('jarek_fr_products')) {
+                $target = $categories->firstWhere('full_slug_path', FrenchMixedCatalog::CATEGORY_PATH);
+                if ($target) {
+                    $productCounts[$target->id] = (int) ($productCounts[$target->id] ?? 0)
+                        + JarekFrProduct::query()->active()->count();
+                }
+            }
+
             $byParent = $categories->groupBy(fn (PartCategory $category): int => (int) ($category->parent_id ?? 0));
 
-            $attachChildren = function (PartCategory $category) use (&$attachChildren, $byParent, $productCounts): PartCategory {
+            $attachChildren = function (PartCategory $category) use (&$attachChildren, $byParent, $productCounts, $plProductCounts): PartCategory {
                 $children = $byParent->get((int) $category->id, new EloquentCollection)
                     ->sortBy([['sort_order', 'asc'], ['name', 'asc']])
                     ->values();
@@ -77,6 +89,8 @@ class CategoryTreeService
                     (int) ($productCounts[$category->id] ?? 0),
                 ));
                 $category->setAttribute('has_products_in_branch', $this->branchHasProducts($category));
+                $category->setAttribute('has_products_in_pl_branch', max((int) ($category->woo_product_count ?? 0), (int) ($plProductCounts[$category->id] ?? 0)) > 0
+                    || $children->contains(fn (PartCategory $child): bool => (bool) $child->has_products_in_pl_branch));
 
                 return $category;
             };
@@ -99,7 +113,9 @@ class CategoryTreeService
             $visibleRoots->each(fn (PartCategory $root) => $collectPublic($root));
 
             return ['roots' => new EloquentCollection($visibleRoots->all()), 'all' => $publicCategories];
-        });
+        };
+        // Build the FR structure from current exposure; a warmed PL tree may omit a Jarek-only branch.
+        $tree = $isFrenchStorefront ? $buildTree() : Cache::remember(self::CACHE_KEY, self::CACHE_TTL_SECONDS, $buildTree);
 
         if ($isFrenchStorefront) {
             if (Schema::hasTable('category_translations')) {

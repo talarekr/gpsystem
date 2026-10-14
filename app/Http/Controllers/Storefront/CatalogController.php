@@ -5,7 +5,7 @@ namespace App\Http\Controllers\Storefront;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Storefront\Concerns\BuildsStorefrontQueries;
 use App\Services\Storefront\CategoryTreeService;
-use App\Services\Storefront\JarekFrCatalog;
+use App\Services\Storefront\FrenchMixedCatalog;
 use App\Support\StorefrontContext;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\Request;
@@ -25,7 +25,10 @@ class CatalogController extends Controller
      */
     public function viewData(Request $request, ?CategoryTreeService $categoryTree = null): array
     {
-        $parts = $this->storefrontQuery($request)->paginate(60)->withQueryString();
+        $query = $this->storefrontQuery($request);
+        $parts = StorefrontContext::isFrench($request)
+            ? app(FrenchMixedCatalog::class)->paginate($query, $request)
+            : $query->paginate(60)->withQueryString();
         $filterOptions = [
             'producers' => collect(),
             'models' => collect(),
@@ -44,8 +47,6 @@ class CatalogController extends Controller
 
         return [
             'parts' => $parts,
-            'jarekProducts' => StorefrontContext::isFrench($request) && ! $request->filled('category')
-                ? app(JarekFrCatalog::class)->listing($request) : null,
             'categoryRoots' => $categoryRoots,
             'categoryTreeService' => $safeCategoryTree,
             'producers' => $filterOptions['producers'],
