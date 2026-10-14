@@ -28,7 +28,11 @@ class JarekFrProductController extends Controller
             unset($query['jarek_page']);
         }
 
-        return redirect('/kategoria-produktu/'.FrenchMixedCatalog::CATEGORY_PATH.($query ? '?'.http_build_query($query) : ''), 301);
+        $tree = app(CategoryTreeService::class);
+        $category = $tree->findByPublicPath(FrenchMixedCatalog::CATEGORY_PATH);
+        $target = $category ? $tree->localizedUrl($category, 'fr') : '/kategoria-produktu/'.FrenchMixedCatalog::CATEGORY_PATH;
+
+        return redirect($target.($query ? '?'.http_build_query($query) : ''), 301);
     }
 
     public function show(Request $request, int $product, CategoryTreeService $categoryTree)

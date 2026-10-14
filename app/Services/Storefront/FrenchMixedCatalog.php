@@ -40,7 +40,10 @@ class FrenchMixedCatalog
         $include = Schema::hasTable('jarek_fr_products') && $this->includesCategory($categoryIds);
         if ($request->filled('category')) {
             $needle = trim((string) $request->input('category'));
-            $include = $include && ($needle === $target?->slug || mb_stripos($target?->storefrontNameForLocale('fr') ?? '', $needle) !== false);
+            $fr = $target?->translationForLocale('fr');
+            $include = $include && ($needle === $target?->slug || mb_stripos($target?->storefrontNameForLocale('fr') ?? '', $needle) !== false
+                || ($target && $needle === app(FrenchCategoryUrls::class)->segment($target)['slug']) || in_array($needle, (array) ($fr?->slug_history ?? []), true)
+                || (str_contains($needle, '/') && app(CategoryTreeService::class)->forLocale('fr')->findByPublicPath($needle)?->id === $target?->id));
         }
         // No trustworthy make/model mapping exists for the supplier source. Never return unrelated boxes.
         foreach (['producer', 'model', 'vehicle_model'] as $filter) {

@@ -52,6 +52,12 @@
         __('storefront.dpf') => '/kategoria-produktu/uklad-wydechowy-i-inne-elementy/elementy-systemu-kontroli-spalin/filtr-czastek-stalych-katalizator-fap-dpf',
         __('storefront.knuckles') => '/kategoria-produktu/os-przednia-i-inne-elementy/os-przednia/zwrotnica-kola-przedniego',
     ];
+    if (\App\Support\StorefrontContext::isFrench(request()) && ($storefrontCategoryRoots ?? collect())->isNotEmpty()) {
+        foreach ($storefrontMainLinks as $label => $path) {
+            $category = $categoryTreeService->findByPublicPath(substr($path, strlen('/kategoria-produktu/')));
+            if ($category) $storefrontMainLinks[$label] = $categoryTreeService->url($category);
+        }
+    }
 @endphp
 <nav class="sf-nav"><div class="sf-container sf-nav__inner">
     @include('storefront.partials.category-menu')

@@ -21,6 +21,8 @@ class CategoryTreeService
 
     private ?string $explicitLocale = null;
 
+    private ?array $frenchPaths = null;
+
     private ?bool $hasVisibilityColumn = null;
 
     /** Read-only diagnostics can inspect the FR structure while the admin host is PL. */
@@ -32,6 +34,7 @@ class CategoryTreeService
         $tree = clone $this;
         $tree->explicitLocale = $locale;
         $tree->frenchTree = null;
+        $tree->frenchPaths = null;
 
         return $tree;
     }
@@ -142,16 +145,62 @@ class CategoryTreeService
         return $tree;
     }
 
+    public function publicPath(PartCategory $category, ?string $locale = null): string
+    {
+        $locale ??= $this->explicitLocale ?? request()->attributes->get('storefront_locale', 'pl');
+        if ($locale !== 'fr') {
+            return app(FrenchCategoryUrls::class)->legacyPath($category);
+        }
+        $all = ($this->explicitLocale ?? request()->attributes->get('storefront_locale')) === 'fr' ? $this->all() : $this->forLocale('fr')->all();
+
+        return app(FrenchCategoryUrls::class)->path($all->get($category->id, $category), $all, 'fr');
+    }
+
     public function url(PartCategory $category): string
     {
-        $path = trim((string) ($category->full_slug_path ?: $category->slug), '/');
+        return url('/kategoria-produktu/'.$this->publicPath($category));
+    }
 
-        return url('/kategoria-produktu/'.($path !== '' ? $path : $category->id));
+    public function localizedUrl(PartCategory $category, string $locale): string
+    {
+        return 'https://gpswiss.'.($locale === 'fr' ? 'fr' : 'pl').'/kategoria-produktu/'.$this->publicPath($category, $locale);
     }
 
     public function findByPublicPath(string $path): ?PartCategory
     {
         $path = trim($path, '/');
+        if (($this->explicitLocale ?? request()->attributes->get('storefront_locale')) === 'fr') {
+            $all = $this->all();
+            $urls = app(FrenchCategoryUrls::class);
+            if ($this->frenchPaths === null) {
+                $canonical = [];
+                $legacy = [];
+                $leaves = [];
+                foreach ($all as $category) {
+                    $canonical[$urls->path($category, $all, 'fr')][] = $category->id;
+                    foreach (array_filter([$category->full_slug_path, $category->category_path, $category->slug]) as $alias) {
+                        $legacy[$alias][] = $category->id;
+                    }
+                    $fr = $category->translationForLocale('fr');
+                    foreach (array_unique(array_filter(array_merge([$urls->segment($category)['slug'], basename($urls->legacyPath($category)), $fr?->slug], (array) ($fr?->slug_history ?? [])))) as $alias) {
+                        $leaves[$alias][] = $category->id;
+                    }
+                }
+                $this->frenchPaths = ['canonical' => $canonical, 'legacy' => $legacy, 'leaves' => $leaves];
+            }
+            $canonical = $this->frenchPaths['canonical'][$path] ?? [];
+            if (count($canonical) === 1) {
+                return $all->get($canonical[0]);
+            }
+            if (count($canonical) > 1) {
+                return null;
+            }
+            $legacy = $this->frenchPaths['legacy'][$path] ?? [];
+            $candidates = array_unique(array_merge($legacy, $this->frenchPaths['leaves'][basename($path)] ?? []));
+            $matches = array_values(array_filter($candidates, fn ($id) => in_array($id, $legacy, true) || $urls->matchesAlias($path, $all->get($id), $all)));
+
+            return count($matches) === 1 ? $all->get($matches[0]) : null;
+        }
         $lastSegment = collect(explode('/', $path))->filter()->last();
 
         $hasVisibilityColumn = $this->hasVisibilityColumn ??= Schema::hasColumn('part_categories', 'is_visible');

@@ -12,11 +12,13 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
+use Tests\Concerns\ResolvesFrenchCategoryUrls;
 use Tests\TestCase;
 
 class JarekUnifiedFrenchCatalogTest extends TestCase
 {
     use RefreshDatabase;
+    use ResolvesFrenchCategoryUrls;
 
     private PartCategory $leaf;
 
@@ -49,9 +51,9 @@ class JarekUnifiedFrenchCatalogTest extends TestCase
             ->assertSee('312,50 EUR')->assertSee('130,00 EUR')->assertDontSee('Boîtes de vitesses — Jarek')->assertDontSee('hreflang="pl"', false);
         $this->assertSame(1, $response->viewData('parts')->total());
         $this->get('https://gpswiss.fr/czesci')->assertOk()->assertSee('Supplier gearbox')->assertDontSee('Układ napędowy');
-        $this->get('https://gpswiss.fr/kategoria-produktu/uklad-napedowy')->assertOk()->assertSee('Supplier gearbox');
+        $this->get($this->frenchCategoryUrl($this->categories[0]))->assertOk()->assertSee('Supplier gearbox');
         $this->get('https://gpswiss.pl/boites-jarek/'.$this->product->id)->assertNotFound();
-        $this->get('https://gpswiss.fr/sitemaps/pages.xml')->assertOk()->assertSee('/kategoria-produktu/'.FrenchMixedCatalog::CATEGORY_PATH);
+        $this->get('https://gpswiss.fr/sitemaps/pages.xml')->assertOk()->assertSee($this->frenchCategoryUrl($this->leaf));
         Http::assertNothingSent();
     }
 
@@ -59,7 +61,7 @@ class JarekUnifiedFrenchCatalogTest extends TestCase
     {
         $this->ordinary();
         $this->get($this->categoryUrl())->assertOk()->assertSee('hreflang="pl"', false);
-        $this->get(str_replace('gpswiss.fr', 'gpswiss.pl', $this->categoryUrl()))->assertOk()->assertSee('Ordinary gearbox')->assertDontSee('Supplier gearbox');
+        $this->get('https://gpswiss.pl/kategoria-produktu/'.FrenchMixedCatalog::CATEGORY_PATH)->assertOk()->assertSee('Ordinary gearbox')->assertDontSee('Supplier gearbox');
         for ($i = 1; $i <= 60; $i++) {
             $this->supplier(['title' => 'Supplier box '.$i]);
         }
@@ -77,7 +79,7 @@ class JarekUnifiedFrenchCatalogTest extends TestCase
     public function test_home_and_legacy_collection_have_no_separate_supplier_section(): void
     {
         $this->get('https://gpswiss.fr/')->assertOk()->assertDontSee('Boîtes de vitesses — Jarek')->assertSee('Supplier gearbox');
-        $this->get('https://gpswiss.fr/boites-jarek')->assertStatus(301)->assertRedirect('/kategoria-produktu/'.FrenchMixedCatalog::CATEGORY_PATH);
+        $this->get('https://gpswiss.fr/boites-jarek')->assertStatus(301)->assertRedirect($this->frenchCategoryUrl($this->leaf));
         $this->get('https://gpswiss.pl/boites-jarek')->assertNotFound();
         Http::assertNothingSent();
     }
@@ -192,6 +194,6 @@ class JarekUnifiedFrenchCatalogTest extends TestCase
 
     private function categoryUrl(): string
     {
-        return 'https://gpswiss.fr/kategoria-produktu/'.FrenchMixedCatalog::CATEGORY_PATH;
+        return $this->frenchCategoryUrl($this->leaf);
     }
 }

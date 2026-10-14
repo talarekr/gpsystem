@@ -2,7 +2,7 @@
 
 @section('content')
 @php
-    $sectionUrls = [
+    $sectionUrls ??= [
         __('storefront.engines') => route('storefront.category', ['path' => 'silnik-i-osprzet/silniki-i-osprzet/kompletne-silniki']),
         __('storefront.gearbox') => route('storefront.category', ['path' => \App\Support\StorefrontContext::isFrench(request()) ? \App\Services\Storefront\FrenchMixedCatalog::CATEGORY_PATH : 'uklad-napedowy/skrzynie-biegow-i-inne-elementy/automatyczna-skrzynia-biegow']),
         __('storefront.knuckles') => route('storefront.category', ['path' => 'os-przednia-i-inne-elementy/os-przednia/zwrotnica-kola-przedniego']),

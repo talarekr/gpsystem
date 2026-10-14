@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\JarekFrProduct;
 use App\Models\Part;
 use App\Services\Storefront\CategoryTreeService;
+use App\Services\Storefront\FrenchCategoryUrls;
 use App\Support\StorefrontContext;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Schema;
@@ -37,7 +38,10 @@ class FrenchSitemapController extends Controller
         $urls = collect(['/', '/czesci', '/kontakt', '/regulamin', '/polityka-prywatnosci'])
             ->map(fn ($path) => ['loc' => 'https://gpswiss.fr'.$path]);
         foreach ($categories->all() as $category) {
-            $publicPath = trim((string) ($category->full_slug_path ?: $category->slug), '/');
+            if (trim((string) ($category->full_slug_path ?: $category->slug)) === '' && app(FrenchCategoryUrls::class)->segment($category)['fallback']) {
+                continue;
+            }
+            $publicPath = $categories->publicPath($category, 'fr');
             // Match the actual public resolver; skip missing/ambiguous paths, never invent ID URLs.
             if ($publicPath === '' || $categories->findByPublicPath($publicPath)?->id !== $category->id) {
                 continue;

@@ -38,7 +38,7 @@ class StorefrontSeo
         if ($part && $request->routeIs('storefront.product')) {
             $path = route('storefront.product', ['slug' => $part->slug ?: $part->id], false);
         } elseif ($category && $request->routeIs('storefront.category')) {
-            $path = route('storefront.category', ['path' => $category->full_slug_path ?: $category->slug ?: $category->id], false);
+            $path = '/kategoria-produktu/'.app(CategoryTreeService::class)->publicPath($category, $fr ? 'fr' : 'pl');
         }
         $pageKey = $request->routeIs('storefront.jarek.index') ? 'jarek_page' : 'page';
         $page = filter_var($request->query($pageKey), FILTER_VALIDATE_INT);
@@ -51,10 +51,16 @@ class StorefrontSeo
         // signed pages, filters or PL-only operational routes. Unknown hosts retain legacy SEO.
         $public = $request->routeIs(...self::PUBLIC_ROUTES) && ! $this->filtered($request);
         $frOnlyCategory = $fr && $request->routeIs('storefront.category') && $category
-            && $category->getAttribute('has_products_in_pl_branch') === false;
+            && ($category->getAttribute('has_products_in_pl_branch') === false || trim((string) ($category->full_slug_path ?: $category->slug)) === '');
         if ($public && ! $frOnlyCategory && ! $request->routeIs('storefront.jarek.*') && in_array($request->getHost(), ['gpswiss.fr', 'gpswiss.pl'], true)) {
             $alternates = ['pl' => 'https://gpswiss.pl'.$path, 'fr' => 'https://gpswiss.fr'.$path,
                 'x-default' => 'https://gpswiss.pl'.$path];
+            if ($category && $request->routeIs('storefront.category')) {
+                $suffix = $page > 1 ? '?page='.$page : '';
+                $tree = app(CategoryTreeService::class);
+                $alternates = ['pl' => $tree->localizedUrl($category, 'pl').$suffix, 'fr' => $tree->localizedUrl($category, 'fr').$suffix,
+                    'x-default' => $tree->localizedUrl($category, 'pl').$suffix];
+            }
             // Normalize the PL counterpart too so self-hreflang points at its canonical URL.
             if (! $fr) {
                 $canonical = 'https://gpswiss.pl'.$path;

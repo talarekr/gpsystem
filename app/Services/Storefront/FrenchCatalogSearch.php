@@ -2,6 +2,7 @@
 
 namespace App\Services\Storefront;
 
+use App\Models\PartCategory;
 use App\Models\StorefrontTranslation;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Schema;
@@ -45,7 +46,26 @@ class FrenchCatalogSearch
     public function categoryFilter(Builder $query, string $value): void
     {
         $query->where(function (Builder $category) use ($value): void {
-            $category->where('slug', $value)->orWhere(function (Builder $names) use ($value): void {
+            $category->where('slug', $value);
+            if (preg_match('/-([0-9]+)$/', $value, $id)) {
+                $candidate = PartCategory::query()->withStorefrontTranslations('fr')->find((int) $id[1]);
+                $resolved = $candidate && (app(FrenchCategoryUrls::class)->segment($candidate)['slug'] === $value
+                    || (str_contains($value, '/') && app(CategoryTreeService::class)->forLocale('fr')->findByPublicPath($value)?->id === $candidate->id));
+                if ($resolved) {
+                    $category->orWhere('part_categories.id', $candidate->id);
+                }
+            }
+            if (Schema::hasColumn('category_translations', 'slug')) {
+                $category->orWhereHas('translations', function (Builder $fr) use ($value): void {
+                    $fr->where('locale', 'fr')->where(function (Builder $slugs) use ($value): void {
+                        $slugs->where('slug', $value);
+                        if (Schema::hasColumn('category_translations', 'slug_history')) {
+                            $slugs->orWhereJsonContains('slug_history', $value);
+                        }
+                    });
+                });
+            }
+            $category->orWhere(function (Builder $names) use ($value): void {
                 if (Schema::hasTable('category_translations')) {
                     $this->nameMatch($names, 'part_categories', '%'.mb_strtolower($value).'%');
                 } else {
