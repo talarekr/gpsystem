@@ -125,6 +125,7 @@ class FrenchCatalogTranslationService
             }
 
             $translated = array_fill_keys($claim['record']->translationSourceFields(), null);
+            $technicalDiagnostic = null;
             $characters = 0;
             $errorCode = null;
             $errorMessage = null;
@@ -179,7 +180,8 @@ class FrenchCatalogTranslationService
                     $restored = app(JarekTranslationTechnicalTokens::class)->restore($output, $protected['tokens']);
                     if ($restored === null) {
                         $errorCode = 'technical_code_changed';
-                        $errorMessage = 'Technical identifier markers changed during translation; review required.';
+                        $technicalDiagnostic = app(JarekTranslationTechnicalTokens::class)->diagnostic($output, $protected['tokens'], $field);
+                        $errorMessage = json_encode(['message' => 'Technical identifier markers changed during translation; review required.', 'diagnostic' => $technicalDiagnostic], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
                         break;
                     }
                     $output = $restored;
@@ -192,7 +194,7 @@ class FrenchCatalogTranslationService
                 $translated[$field] = $output;
             }
 
-            return DB::transaction(function () use ($model, $id, $claim, $translated, $characters, $errorCode, $errorMessage, $retryable): array {
+            return DB::transaction(function () use ($model, $id, $claim, $translated, $characters, $errorCode, $errorMessage, $retryable, $technicalDiagnostic): array {
                 $record = $model::query()->lockForUpdate()->find($id);
                 if (! $record) {
                     return $this->result('skipped', 'record_missing', $characters);
@@ -210,7 +212,7 @@ class FrenchCatalogTranslationService
                 if ($errorCode !== null) {
                     $translation->fill(['status' => 'failed', 'error_code' => $errorCode, 'error_message' => $errorMessage])->save();
 
-                    return $this->loggedResult($record, $translation, $this->result('failed', $errorCode, $characters, $retryable));
+                    return $this->loggedResult($record, $translation, $this->result('failed', $errorCode, $characters, $retryable) + ($technicalDiagnostic ? ['diagnostic' => $technicalDiagnostic] : []));
                 }
                 $translation->fill($translated + ['status' => 'translated', 'translated_at' => now(), 'error_code' => null, 'error_message' => null])->save();
 

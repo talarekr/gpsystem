@@ -3,7 +3,7 @@ function mountFrTranslationSection(root, overview, initialStatus, urls, confirmT
     'use strict';
     const token = document.querySelector('meta[name="csrf-token"]').content;
     const activeStatuses = ['running', 'paused', 'failed', 'stopped_on_error'];
-    const numberKeys = ['total', 'processed', 'translated', 'skipped', 'failed', 'remaining', 'chars_translated'];
+    const numberKeys = ['total', 'processed', 'translated', 'skipped', 'failed', 'remaining', 'chars_translated', 'technical_retry_total', 'technical_retry_processed', 'technical_retry_remaining', 'technical_retry_translated', 'technical_retry_failed', 'technical_retry_skipped'];
     let run = initialStatus;
     let dryRun = overview.latest_dry_run || null;
     let catalog = overview.catalog || {};
@@ -52,7 +52,7 @@ function mountFrTranslationSection(root, overview, initialStatus, urls, confirmT
         element('dry-run').disabled = busy || authorizationLost || !overview.schema_ready || activeRun();
         element('refresh').disabled = busy || polling || authorizationLost;
         element('pause').disabled = busy || !statusFresh || authorizationLost || !run.run_id || run.status !== 'running';
-        element('resume').disabled = busy || !statusFresh || authorizationLost || !activeRun();
+        element('resume').disabled = busy || !statusFresh || authorizationLost || !(run.resume_available || activeRun());
         element('stop').disabled = busy || !statusFresh || authorizationLost || !activeRun();
         element('confirm-token').disabled = busy || authorizationLost || activeRun();
         text('start-blocked', blocked);

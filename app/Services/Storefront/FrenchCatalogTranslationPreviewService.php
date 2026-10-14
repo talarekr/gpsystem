@@ -136,7 +136,8 @@ class FrenchCatalogTranslationPreviewService
                         $identity['sku'] = $record instanceof Part ? $record->sku : 'JAREK-'.$record->allegro_offer_id;
                     }
                     if ($status === 'failed' && count($report['failed_examples']) < 20) {
-                        $report['failed_examples'][] = $identity + self::safeError($translation?->error_code);
+                        $diagnostic = $translation?->error_code === 'technical_code_changed' ? JarekTranslationTechnicalTokens::storedDiagnostic($translation->error_message) : null;
+                        $report['failed_examples'][] = $identity + self::safeError($translation?->error_code) + ($diagnostic ? ['diagnostic' => $diagnostic] : []);
                     }
                     if ($reason !== null) {
                         $counts['skipped']++;

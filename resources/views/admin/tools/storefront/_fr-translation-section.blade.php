@@ -74,6 +74,12 @@
         </form>
     </section>
 
+    <section class="card"><h3>Ponowienie błędów kodów technicznych</h3><p>Wznów zachowuje run_id, główny kursor i processed. Dla Jarka jednorazowo ponawia technical_code_changed z tego runu po poprawce tokenów, bez ponawiania translated/reviewed. Błąd pojedynczego rekordu nie zatrzymuje pozostałych; błędy providera lub konfiguracji nadal wymagają kontroli.</p><div class="grid">
+    @foreach (['technical_retry_total' => 'Retry total', 'technical_retry_processed' => 'Retry processed', 'technical_retry_remaining' => 'Retry remaining', 'technical_retry_translated' => 'Retry translated', 'technical_retry_failed' => 'Retry failed', 'technical_retry_skipped' => 'Retry skipped'] as $key => $label)
+        <div class="metric"><span>{{ $label }}</span><strong id="{{ $prefix }}run-{{ $key }}">{{ $status[$key] ?? 0 }}</strong></div>
+    @endforeach
+    </div></section>
+
     <section class="card" aria-labelledby="{{ $prefix }}run-title">
         <div class="row between">
             <h2 id="{{ $prefix }}run-title">3. Postęp / ostatni wynik apply <span id="{{ $prefix }}run-status" class="badge">idle</span></h2>
