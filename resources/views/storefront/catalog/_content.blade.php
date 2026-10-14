@@ -1,5 +1,6 @@
 @php
     $parts = $parts ?? collect();
+    $paginationView = \App\Support\StorefrontContext::isFrench(request()) ? 'storefront.fr.pagination' : null;
 
     $catalogUrl = ($jarekOnly ?? false) ? '/boites-jarek' : '/czesci';
 
@@ -87,9 +88,10 @@
             </div>
 
             @if(method_exists($parts, 'links'))
-                {!! method_exists($parts, 'withQueryString') ? $parts->withQueryString()->links() : $parts->links() !!}
+                {!! method_exists($parts, 'withQueryString') ? $parts->withQueryString()->links($paginationView) : $parts->links($paginationView) !!}
             @endif
             @endunless
         </section>
     </div>
 </div>
+

@@ -1,4 +1,5 @@
 @php
+    $catalogUiLocale = \App\Support\StorefrontContext::isFrench(request()) ? 'fr' : 'pl';
     $categoryTreeService ??= app(\App\Services\Storefront\CategoryTreeService::class);
     $categoryRoots ??= collect();
     $activeCategory ??= $category ?? null;
@@ -19,10 +20,10 @@
 @endphp
 
 <aside class="sf-category-sidebar">
-    <h3>Kategoria</h3>
+    <h3>{{ __('storefront.category_label', [], $catalogUiLocale) }}</h3>
 
     @if(($categoryRoots instanceof \Illuminate\Support\Collection ? $categoryRoots->isNotEmpty() : count($categoryRoots)) > 0)
-        <select id="storefront-root-category" class="sf-category-sidebar__select" aria-label="Kategoria" onchange="if (this.value) window.location.href = this.value;">
+        <select id="storefront-root-category" class="sf-category-sidebar__select" aria-label="{{ __('storefront.category_label', [], $catalogUiLocale) }}" onchange="if (this.value) window.location.href = this.value;">
             @foreach($categoryRoots as $rootCategory)
                 @php
                     try {
@@ -32,12 +33,12 @@
                     }
                 @endphp
                 <option value="{{ $rootUrl }}" @selected($activeRoot?->id === $rootCategory->id)>
-                    {{ $rootCategory->storefrontPublicNameForLocale($storefrontContentLocale) ?? 'Kategoria' }}
+                    {{ $rootCategory->storefrontPublicNameForLocale($storefrontContentLocale) ?? __('storefront.category_label', [], $catalogUiLocale) }}
                 </option>
             @endforeach
         </select>
 
-        <h4 class="sf-category-sidebar__section-title">Podkategorie</h4>
+        <h4 class="sf-category-sidebar__section-title">{{ __('storefront.subcategories', [], $catalogUiLocale) }}</h4>
 
         @include('storefront.partials.category-tree', [
             'categories' => $sidebarCategories,
@@ -52,3 +53,4 @@
         <p class="sf-empty">{{ __('storefront.categories_pending') }}</p>
     @endif
 </aside>
+
