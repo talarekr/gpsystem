@@ -48,7 +48,7 @@
 @php
     $storefrontMainLinks = [
         __('storefront.engines') => '/kategoria-produktu/silnik-i-osprzet/silniki-i-osprzet/kompletne-silniki',
-        __('storefront.gearbox') => '/kategoria-produktu/uklad-napedowy/skrzynie-biegow-i-inne-elementy/automatyczna-skrzynia-biegow',
+        __('storefront.gearbox') => \App\Support\StorefrontContext::isFrench(request()) ? '/kategoria-produktu/'.\App\Services\Storefront\FrenchMixedCatalog::CATEGORY_PATH : '/kategoria-produktu/uklad-napedowy/skrzynie-biegow-i-inne-elementy/automatyczna-skrzynia-biegow',
         __('storefront.dpf') => '/kategoria-produktu/uklad-wydechowy-i-inne-elementy/elementy-systemu-kontroli-spalin/filtr-czastek-stalych-katalizator-fap-dpf',
         __('storefront.knuckles') => '/kategoria-produktu/os-przednia-i-inne-elementy/os-przednia/zwrotnica-kola-przedniego',
     ];

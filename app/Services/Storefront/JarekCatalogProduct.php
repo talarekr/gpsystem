@@ -4,6 +4,7 @@ namespace App\Services\Storefront;
 
 use App\Models\JarekFrProduct;
 use App\Models\PartCategory;
+use App\Services\Images\ListingImageSelector;
 use Illuminate\Support\Collection;
 
 /** Read-only view adapter, deliberately not a Part or a persisted stock item. */
@@ -61,11 +62,11 @@ class JarekCatalogProduct
 
     public function listingImage(): ?JarekCatalogImage
     {
-        return $this->primaryImage();
+        return app(ListingImageSelector::class)->select($this->images);
     }
 
     public function listingImageUrl(): ?string
     {
-        return $this->primaryImage()?->listingUrl();
+        return $this->listingImage()?->listingUrl();
     }
 }
