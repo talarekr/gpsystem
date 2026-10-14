@@ -1,7 +1,7 @@
 <!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="csrf-token" content="{{ csrf_token() }}"><title>Jarek FR — lokalne warianty zdjęć</title><style>body{font:15px/1.5 system-ui;max-width:1000px;margin:24px auto;padding:16px;color:#18283f}button,input{font:inherit;padding:9px;margin:6px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f3f5f8;padding:16px}input{max-width:100%;width:450px}</style></head><body>
 <h1>Jarek FR — lokalne warianty zdjęć</h1>
 <p><a href="{{ url('/admin/tools/storefront/fr-translations') }}">← Narzędzia FR</a></p>
-<p>Ten sam procesor crop/canvas co dla zwykłych produktów: listing 522×336, produkt 900×675. Przygotowanie dotyczy wyłącznie istniejących lokalnych zdjęć aktywnych ekspozycji Jarka. Bez pobierania z sieci, tworzenia Part i zapisów w bazie. Oryginały pozostają zachowane.</p>
+<p>Ten sam procesor crop/canvas co dla zwykłych produktów: listing 522×336, produkt 900×675. Przygotowanie dotyczy wyłącznie istniejących lokalnych zdjęć aktywnych ekspozycji Jarka. Bez pobierania z sieci, tworzenia Part i zmiany rekordów produktów. Oryginały pozostają zachowane.</p>
 <p>Podgląd nie zapisuje plików. Przygotowanie zapisuje tylko pochodne JPG, manifesty oraz log procesora. Gotowe warianty są pomijane. Kursor można wkleić po ponownym otwarciu strony; od zera przejdziesz też przez wcześniej przygotowane pliki.</p>
 <label>Źródłowe ID kursora <input id="after-id" type="number" min="0" value="0"></label><br><label>Numer zdjęcia kursora (0–60) <input id="after-image" type="number" min="0" max="60" value="0"></label><br>
 <label>Wpisz PREPARE-JAREK-FR-LOCAL-IMAGES <input id="confirm" autocomplete="off"></label><br>
