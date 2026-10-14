@@ -270,6 +270,7 @@ Route::get('/szukaj', [SearchController::class, 'index'])->name('storefront.sear
 foreach (['gpswiss.fr' => 'storefront.fr.', 'www.gpswiss.fr' => 'storefront.fr-www.'] as $host => $prefix) {
     Route::domain($host)->name($prefix)->group(function (): void {
         Route::get('/sitemap.xml', [\App\Http\Controllers\Storefront\FrenchSitemapController::class, 'index'])->name('sitemap.index');
+        Route::get('/sitemaps/jarek-{page}.xml', [\App\Http\Controllers\Storefront\FrenchSitemapController::class, 'jarek'])->whereNumber('page')->name('sitemap.jarek');
         Route::get('/sitemaps/pages.xml', [\App\Http\Controllers\Storefront\FrenchSitemapController::class, 'pages'])->name('sitemap.pages');
         Route::get('/sitemaps/products-{page}.xml', [\App\Http\Controllers\Storefront\FrenchSitemapController::class, 'products'])->whereNumber('page')->name('sitemap.products');
         Route::get('/robots.txt', [\App\Http\Controllers\Storefront\FrenchSitemapController::class, 'robots'])->name('robots');
@@ -2940,3 +2941,10 @@ Route::get('/admin/tools/jarek-gearboxes/fr-storefront-preview', \App\Http\Contr
     ->withoutMiddleware(\Illuminate\Session\Middleware\StartSession::class)
     ->middleware([\App\Http\Middleware\ReadOnlyPreviewSession::class, Authenticate::class, 'admin.panel'])
     ->name('admin.tools.jarek-gearboxes.fr-storefront-preview');
+
+Route::get('/boites-jarek', [\App\Http\Controllers\Storefront\JarekFrProductController::class, 'index'])->name('storefront.jarek.index');
+Route::get('/boites-jarek/{product}', [\App\Http\Controllers\Storefront\JarekFrProductController::class, 'show'])->whereNumber('product')->name('storefront.jarek.show');
+Route::post('/boites-jarek/{product}/panier', [\App\Http\Controllers\Storefront\JarekFrProductController::class, 'add'])->whereNumber('product')->name('storefront.jarek.add');
+Route::post('/boites-jarek/{product}/panier/retirer', [\App\Http\Controllers\Storefront\JarekFrProductController::class, 'remove'])->whereNumber('product')->name('storefront.jarek.remove');
+Route::match(['get', 'post'], '/admin/tools/jarek-gearboxes/fr-publication', \App\Http\Controllers\Admin\JarekGearboxes\JarekFrPublicationController::class)
+    ->middleware([Authenticate::class, 'admin.panel'])->name('admin.tools.jarek-gearboxes.fr-publication');

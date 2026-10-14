@@ -3,9 +3,12 @@
 namespace App\Http\Controllers\Storefront;
 
 use App\Http\Controllers\Controller;
+use App\Models\JarekFrProduct;
 use App\Models\Part;
 use App\Services\Storefront\CategoryTreeService;
+use App\Support\StorefrontContext;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Schema;
 
 class FrenchSitemapController extends Controller
 {
@@ -17,6 +20,12 @@ class FrenchSitemapController extends Controller
         $pages = (int) ceil(Part::query()->storefrontVisible()->count() / self::PRODUCTS_PER_PAGE);
         for ($page = 1; $page <= $pages; $page++) {
             $urls[] = 'https://gpswiss.fr/sitemaps/products-'.$page.'.xml';
+        }
+
+        if (Schema::hasTable('jarek_fr_products')) {
+            for ($page = 1; $page <= (int) ceil(JarekFrProduct::query()->active()->count() / self::PRODUCTS_PER_PAGE); $page++) {
+                $urls[] = 'https://gpswiss.fr/sitemaps/jarek-'.$page.'.xml';
+            }
         }
 
         return response()->view('storefront.fr.sitemap-index', compact('urls'))
@@ -49,6 +58,18 @@ class FrenchSitemapController extends Controller
                 'loc' => 'https://gpswiss.fr'.route('storefront.product', ['slug' => $part->slug ?: $part->id], false),
                 'lastmod' => $part->updated_at?->toAtomString(),
             ])->all();
+
+        return $this->xml($urls);
+    }
+
+    public function jarek(int $page): Response
+    {
+        abort_unless(StorefrontContext::isFrench(request()) && Schema::hasTable('jarek_fr_products'), 404);
+        $query = JarekFrProduct::query()->active();
+        abort_if($page < 1 || $page > (int) ceil((clone $query)->count() / self::PRODUCTS_PER_PAGE), 404);
+        $urls = $query->orderBy('id')->offset(($page - 1) * self::PRODUCTS_PER_PAGE)->limit(self::PRODUCTS_PER_PAGE)
+            ->get()->map(fn ($product) => ['loc' => 'https://gpswiss.fr'.route('storefront.jarek.show', $product->id, false),
+                'lastmod' => $product->updated_at?->toAtomString()])->all();
 
         return $this->xml($urls);
     }

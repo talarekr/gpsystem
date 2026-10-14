@@ -20,6 +20,9 @@ class FrenchCheckoutService
         abort_unless(StorefrontContext::isFrench($request), 404);
         $address = array_replace($this->defaults(), $request->session()->get('storefront.fr.address', []));
         $items = $this->cart->items()->map(function (array $item): array {
+            if (($item['source_type'] ?? '') === 'jarek_gearbox') {
+                return $this->jarekItem($item);
+            }
             $part = $item['current_part'] ?? null;
             $resolvedPrice = $this->prices->resolve($part);
             $price = $resolvedPrice['cents'];
@@ -69,7 +72,7 @@ class FrenchCheckoutService
             'total_cents' => $subtotal !== null && $shipping !== null ? $subtotal + $shipping : null,
             'address' => $address, 'billing' => $billing, 'shipping' => $delivery, 'items' => $items,
             'order_items' => array_map(fn ($item) => [
-                'part_id' => $item['part_id'], 'product_name' => $item['product_name'],
+                'part_id' => $item['part_id'], 'jarek_fr_product_id' => $item['jarek_fr_product_id'] ?? null, 'product_name' => $item['product_name'],
                 'part_number' => $item['part_number'], 'sku' => $item['sku'],
                 'quantity' => $item['quantity'], 'currency' => 'EUR',
                 'unit_price' => $item['unit_price_cents'] === null ? null : number_format($item['unit_price_cents'] / 100, 2, '.', ''),
@@ -95,6 +98,29 @@ class FrenchCheckoutService
                     'source' => 'storefront', 'shipping' => $delivery, 'shipping_same_as_billing' => (bool) $address['shipping_same_as_billing'],
                 ],
             ],
+        ];
+    }
+
+    private function jarekItem(array $item): array
+    {
+        $product = $item['current_jarek_product'] ?? null;
+        $p = $product ? app(JarekFrPresentation::class)->forProduct($product) : null;
+        $quantity = max(1, (int) $item['quantity']);
+
+        return [
+            'source_type' => 'jarek_gearbox', 'jarek_fr_product_id' => $product?->id ?? $item['jarek_fr_product_id'],
+            'part_id' => null, 'part_number' => null, 'sku' => $p['sku'] ?? $item['sku'], 'product_name' => $p['title'] ?? $item['name'],
+            'quantity' => $quantity, 'cart_key' => 'jarek:'.$item['jarek_fr_product_id'], 'unit_price_cents' => $p['cents'] ?? null,
+            'line_total_cents' => ($p['cents'] ?? null) !== null ? $p['cents'] * $quantity : null, 'currency' => 'EUR',
+            'image_url' => $p['images'][0] ?? $item['image_url'] ?? null, 'product_url' => $p['url'] ?? $item['product_url'],
+            'delivery_quote' => ['available' => true, 'amount_cents' => JarekFrPresentation::DELIVERY_CENTS, 'currency' => 'EUR', 'source' => 'approved_jarek_fr_fixed_130'],
+            'is_available' => (bool) ($p['can_buy'] ?? false),
+            'meta' => ['source_type' => 'jarek_gearbox', 'source_id' => $p['source_id'] ?? null, 'jarek_fr_product_id' => $item['jarek_fr_product_id'],
+                'storefront_code' => 'gpswiss_fr', 'locale' => 'fr', 'supplier' => 'jarek', 'product_url' => $p['url'] ?? $item['product_url'], 'image_url' => $p['images'][0] ?? null,
+                'price_source' => $p['price_source'] ?? null, 'price_conversion' => ['source_currency' => 'PLN', 'source_amount' => $p['base_price_pln'] ?? null,
+                    'markup_percent' => 25, 'price_after_markup_pln' => $p['price_after_markup_pln'] ?? null, 'rate' => $p['nbp_rate']['rate'] ?? null,
+                    'effective_date' => $p['nbp_rate']['effective_date'] ?? null, 'table_no' => $p['nbp_rate']['table_no'] ?? null],
+                'source_stock_decrement' => false, 'marketplace_sync' => false],
         ];
     }
 

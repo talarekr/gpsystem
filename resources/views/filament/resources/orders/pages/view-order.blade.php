@@ -398,10 +398,13 @@
                         <div class="gps-order-detail-products">
                             @forelse ($order->items as $item)
                                 @php
-                                    $thumb = \App\Support\OrderItemThumbnailDiagnostics::resolve($order, $item);
+                                    $isJarek = data_get($item->meta, 'source_type') === 'jarek_gearbox';
+                                    $thumb = $isJarek ? ['thumbnail_part' => null, 'thumbnail_source' => 'order_snapshot',
+                                        'thumbnail_url' => data_get($item->meta, 'image_url'), 'display_name' => $item->product_name,
+                                        'storage_location' => 'Jarek / gpswiss_fr'] : \App\Support\OrderItemThumbnailDiagnostics::resolve($order, $item);
                                     $thumbPart = $thumb['thumbnail_part'] ?? null;
-                                    $productUrl = $publicProductUrl($item);
-                                    $offerLine = $marketplaceOfferLine($item);
+                                    $productUrl = $isJarek ? data_get($item->meta, 'product_url') : $publicProductUrl($item);
+                                    $offerLine = $isJarek ? null : $marketplaceOfferLine($item);
                                 @endphp
                                 <div class="gps-order-detail-product">
                                     @if ($thumbPart instanceof Part && $thumb['thumbnail_source'] === 'admin_parts_thumbnail')
@@ -419,7 +422,7 @@
                                                 {{ $thumb['display_name'] }}
                                             @endif
                                         </div>
-                                        <div class="gps-order-detail-muted">Magazyn: {{ $thumb['storage_location'] }}</div>
+                                        <div class="gps-order-detail-muted">{{ $isJarek ? 'Źródło: Jarek gearbox / gpswiss_fr' : 'Magazyn: '.$thumb['storage_location'] }}</div>
                                         @if ($offerLine)
                                             <div class="gps-order-detail-muted">
                                                 @include('filament.resources.orders.partials.source-wordmark', ['marketplace' => $offerLine['marketplace']])

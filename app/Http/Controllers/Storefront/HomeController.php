@@ -5,7 +5,10 @@ namespace App\Http\Controllers\Storefront;
 use App\Http\Controllers\Controller;
 use App\Models\Part;
 use App\Services\Storefront\CategoryTreeService;
+use App\Services\Storefront\JarekFrCatalog;
+use App\Support\StorefrontContext;
 use Illuminate\Contracts\View\View;
+use Illuminate\Support\Facades\Schema;
 
 class HomeController extends Controller
 {
@@ -44,6 +47,8 @@ class HomeController extends Controller
 
         return view('storefront.home', [
             'sections' => $sections,
+            'jarekProducts' => StorefrontContext::isFrench(request()) && Schema::hasTable('jarek_fr_products')
+                ? app(JarekFrCatalog::class)->query()->latest('id')->limit(8)->get() : null,
             'metaTitle' => __('storefront.homepage_title'),
             'metaDescription' => __('storefront.homepage_desc'),
         ]);
