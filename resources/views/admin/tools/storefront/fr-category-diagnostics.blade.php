@@ -3,11 +3,12 @@
 <p>Odczyt bieżącej bazy, bez Google API i zapisów. Gotowa nazwa FR wymaga statusu translated/reviewed oraz niepustego pola name. Pozostałe przypadki pokazują fallback źródłowy. Sprawdź pełną ścieżkę i ID — nazwy mogą się powtarzać.</p>
 <p><a href="{{ route('admin.tools.storefront.fr-translations.index') }}">← Tłumaczenia katalogu: Produkty i kategorie GPSwiss.fr</a></p>
 @if(!$schemaReady)<p role="alert">Brak tabeli category_translations.</p>@endif
+<p><a href="{{ url()->current() }}?missing_only=1">Brakujące nazwy FR (wszystkie poziomy)</a> · <a href="{{ url()->current() }}?format=csv">CSV wszystkich ID/statusów</a></p><pre>{{ json_encode($summary, JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE) }}</pre>
 <form method="get"><label>Nazwa lub ścieżka <input name="q" value="{{ $q }}"></label><button type="submit">Szukaj</button><a href="{{ url()->current() }}">Wszystkie kategorie</a></form>
 <p>{{ $categories->total() }} kategorii pasuje do wyszukiwania. Dane nie pochodzą z cache drzewa.</p>
-<div class="table"><table><thead><tr><th>ID / parent / source / widoczność</th><th>Źródłowa nazwa i ścieżka</th><th>Tłumaczenie FR</th><th>Status i wynik odczytu</th></tr></thead><tbody>
+<div class="table"><table><thead><tr><th>ID / parent / source / widoczność</th><th>Źródłowa nazwa i ścieżka</th><th>Tłumaczenie FR</th><th>Status i wynik odczytu</th><th>Rzeczywiste drzewo FR</th></tr></thead><tbody>
 @foreach($rows as $row)
-<tr><td>{{ $row['category']->id }} / {{ $row['category']->parent_id ?? '—' }} / {{ $row['category']->source_system ?? '—' }} / {{ $row['category']->is_visible ? 'widoczna' : 'ukryta' }}</td><td>{{ $row['category']->name }}<br><code>{{ $row['category']->full_slug_path }}</code></td><td>{{ $row['translation']?->name ?? '—' }}<br>Opis FR gotowy: {{ $row['description_ready'] ? 'tak' : 'nie' }}</td><td>{{ $row['translation']?->status ?? '—' }}<br><code>{{ $row['reason'] }}</code><br>Nazwa publiczna FR: {{ $row['public_name'] }}</td></tr>
+<tr><td>{{ $row['category']->id }} / {{ $row['category']->parent_id ?? '—' }} / {{ $row['category']->source_system ?? '—' }} / {{ $row['category']->is_visible ? 'widoczna' : 'ukryta' }}</td><td>{{ $row['category']->name }}<br><code>{{ $row['category']->full_slug_path }}</code></td><td>{{ $row['translation']?->name ?? '—' }}<br>Opis FR gotowy: {{ $row['description_ready'] ? 'tak' : 'nie' }}</td><td>{{ $row['translation']?->status ?? '—' }}<br><code>{{ $row['reason'] }}</code><br>Nazwa publiczna FR: {{ $row['public_name'] }}</td><td>Poziom: {{ $row['level'] }}<br>W menu FR: {{ $row['in_public_fr_tree'] ? 'tak' : 'nie' }}<br>ID rozwiązywane przez URL: {{ $row['resolved_public_id'] ?? '—' }}<br>Rekordy tej ścieżki w menu: {{ $row['same_path_count'] }}<br>Gotowa nazwa identyczna ze źródłem: {{ $row['same_as_source_name'] ? 'tak — sprawdź treść, bez automatycznego zgadywania języka' : 'nie' }}</td></tr>
 @endforeach
 </tbody></table></div>
 {{ $categories->links() }}

@@ -3,36 +3,40 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
-use App\Models\PartCategory;
+use App\Services\Storefront\FrenchCategoryDiagnostics;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Schema;
+use Illuminate\Pagination\LengthAwarePaginator;
 
-/** Current database fields only: no translation provider, cache mutation or model save. */
 class FrenchCategoryDiagnosticsController extends Controller
 {
-    public function __invoke(Request $request)
+    public function __invoke(Request $request, FrenchCategoryDiagnostics $diagnostics)
     {
-        $q = $request->validate(['q' => ['nullable', 'string', 'max:200']])['q'] ?? '';
-        $schemaReady = Schema::hasTable('category_translations');
-        $categories = PartCategory::query()->when($schemaReady, fn ($query) => $query->with('translations'))
-            ->when($q !== '', fn ($query) => $query->where(fn ($query) => $query->where('name', 'like', '%'.$q.'%')->orWhere('full_slug_path', 'like', '%'.$q.'%')))
-            ->orderBy('full_slug_path')->orderBy('id')->paginate(100)->withQueryString();
-        $rows = $categories->getCollection()->map(function (PartCategory $category) use ($schemaReady): array {
-            $fr = $schemaReady ? $category->translationForLocale('fr') : null;
-            $reason = match (true) {
-                ! $schemaReady => 'missing_translation_table',
-                ! $fr => 'missing_translation',
-                ! $fr->isReady() => 'nonpublic_status',
-                trim((string) $fr->name) === '' => 'empty_fr_name',
-                default => 'ready_fr_name',
-            };
+        $input = $request->validate(['q' => ['nullable', 'string', 'max:200'], 'missing_only' => ['nullable', 'boolean'], 'format' => ['nullable', 'in:html,csv']]);
+        $q = $input['q'] ?? '';
+        $report = $diagnostics->report($q, (bool) ($input['missing_only'] ?? false));
+        if (($input['format'] ?? '') === 'csv') {
+            return response()->streamDownload(function () use ($report): void {
+                $stream = fopen('php://output', 'w');
+                fputcsv($stream, ['id', 'parent_id', 'level', 'source_system', 'is_visible', 'name', 'full_slug_path', 'fr_name', 'fr_status', 'reason',
+                    'public_name', 'description_ready', 'in_public_fr_tree', 'resolved_public_id', 'same_path_count', 'same_as_source_name'], ',', '"', '');
+                foreach ($report['rows'] as $row) {
+                    $category = $row['category'];
+                    $values = [$category->id, $category->parent_id, $row['level'], $category->source_system, (int) $category->is_visible,
+                        $category->name, $category->full_slug_path, $row['translation']?->name, $row['translation']?->status, $row['reason'],
+                        $row['public_name'], (int) $row['description_ready'], (int) $row['in_public_fr_tree'], $row['resolved_public_id'], $row['same_path_count'], (int) $row['same_as_source_name']];
+                    fputcsv($stream, array_map(fn ($v) => is_string($v) && preg_match('/^[=+@-]/', $v) ? "'".$v : $v, $values), ',', '"', '');
+                }
+                fclose($stream);
+            }, 'gpswiss-fr-category-diagnostics.csv', ['Content-Type' => 'text/csv; charset=UTF-8', 'Cache-Control' => 'private, no-store']);
+        }
+        $page = LengthAwarePaginator::resolveCurrentPage();
+        $categories = new LengthAwarePaginator($report['rows']->forPage($page, 100)->values(), $report['rows']->count(), 100, $page,
+            ['path' => url()->current(), 'query' => $request->query()]);
+        $rows = $categories->getCollection();
+        $schemaReady = $report['schema_ready'];
+        $summary = $report['summary'];
 
-            return ['category' => $category, 'translation' => $fr, 'reason' => $reason,
-                'public_name' => $category->storefrontPublicNameForLocale('fr'),
-                'description_ready' => $fr?->isReady() && trim((string) $fr?->description) !== ''];
-        });
-
-        return response()->view('admin.tools.storefront.fr-category-diagnostics', compact('categories', 'rows', 'schemaReady', 'q'))
+        return response()->view('admin.tools.storefront.fr-category-diagnostics', compact('categories', 'rows', 'schemaReady', 'q', 'summary'))
             ->header('Cache-Control', 'private, no-store');
     }
 }

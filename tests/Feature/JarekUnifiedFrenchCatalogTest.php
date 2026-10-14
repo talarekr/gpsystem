@@ -149,10 +149,10 @@ class JarekUnifiedFrenchCatalogTest extends TestCase
     {
         $part = $this->ordinary();
         $part->update(['currency' => 'PLN', 'price' => 4000]);
-        MarketplaceListing::create(['part_id' => $part->id, 'marketplace' => 'ebay_fr', 'price' => 50, 'currency' => 'EUR', 'quantity' => 1, 'status' => 'active']);
+        MarketplaceListing::create(['part_id' => $part->id, 'marketplace' => 'ebay_de', 'match_status' => 'matched', 'price' => 50, 'currency' => 'EUR', 'quantity' => 1, 'status' => 'active']);
         $response = $this->get($this->categoryUrl().'?price_max=100')->assertOk()->assertSee('Ordinary gearbox')->assertSee('50,00 EUR')->assertDontSee('Supplier gearbox');
         $this->assertSame(1, $response->viewData('parts')->total());
-        MarketplaceListing::create(['part_id' => $part->id, 'marketplace' => 'ebay_fr', 'price' => 60, 'currency' => 'EUR', 'quantity' => 1, 'status' => 'active']);
+        MarketplaceListing::create(['part_id' => $part->id, 'marketplace' => 'ebay_de', 'match_status' => 'matched', 'price' => 60, 'currency' => 'EUR', 'quantity' => 1, 'status' => 'active']);
         $this->get($this->categoryUrl().'?price_max=100')->assertOk()->assertDontSee('Ordinary gearbox');
         Http::assertNothingSent();
     }

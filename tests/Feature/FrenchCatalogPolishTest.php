@@ -11,6 +11,7 @@ use App\Models\PartImage;
 use App\Models\User;
 use App\Services\Images\JarekImagePresentation;
 use App\Services\Images\PartImagePresentationService;
+use App\Services\Storefront\FrenchCategoryDiagnostics;
 use App\Services\Storefront\FrenchMixedCatalog;
 use App\Services\Storefront\JarekCatalogProduct;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -227,9 +228,11 @@ class FrenchCatalogPolishTest extends TestCase
         $this->get(self::IMAGES)->assertOk();
         $this->postJson(self::IMAGES, ['action' => 'prepare'])->assertUnprocessable();
         $before = Storage::disk('public')->allFiles();
-        $this->postJson(self::IMAGES, ['action' => 'preview'])->assertOk()->assertJsonPath('results.0.status', 'would_prepare');
+        $id = $this->postJson(self::IMAGES, ['action' => 'preview'])->assertOk()->json('run.run_id');
+        $this->postJson(self::IMAGES, ['action' => 'tick', 'run_id' => $id])->assertOk()->assertJsonPath('run.preview.missing_count', 1);
         $this->assertSame($before, Storage::disk('public')->allFiles());
-        $this->postJson(self::IMAGES, ['action' => 'prepare', 'confirm' => 'PREPARE-JAREK-FR-LOCAL-IMAGES'])->assertOk()->assertJsonPath('results.0.status', 'prepared');
+        $this->postJson(self::IMAGES, ['action' => 'start', 'run_id' => $id, 'confirm' => 'PREPARE-JAREK-FR-LOCAL-IMAGES'])->assertOk();
+        $this->postJson(self::IMAGES, ['action' => 'tick', 'run_id' => $id])->assertOk()->assertJsonPath('run.progress.generated', 1);
         $this->get(str_replace('gpswiss.pl', 'gpswiss.fr', self::IMAGES))->assertForbidden();
         Http::assertNothingSent();
     }
@@ -270,6 +273,48 @@ class FrenchCatalogPolishTest extends TestCase
         $this->owner();
         Schema::drop('category_translations');
         $this->get(self::DIAGNOSTICS)->assertOk()->assertSee('missing_translation_table')->assertSee('Manualna 6-biegowa skrzynia biegów');
+        Http::assertNothingSent();
+    }
+
+    public function test_fr_menu_both_columns_and_all_category_levels_use_ready_translations_after_pl_cache(): void
+    {
+        Part::create(['name' => 'Ordinary fixture', 'sku' => 'TREE-PL', 'price' => 100, 'currency' => 'EUR', 'quantity' => 1, 'status' => 'ready', 'category_id' => $this->leaf->id]);
+        $this->get('https://gpswiss.pl/czesci')->assertOk()->assertSee('Układ napędowy');
+        $response = $this->get('https://gpswiss.fr/czesci')->assertOk()->assertDontSee('Układ napędowy')->assertDontSee('Skrzynie biegów i inne elementy')->assertDontSee('Manualna 6-biegowa skrzynia biegów');
+        $dom = new \DOMDocument;
+        @$dom->loadHTML('<?xml encoding="UTF-8">'.$response->getContent());
+        $xpath = new \DOMXPath($dom);
+        $left = $xpath->query('//*[contains(@class,"sf-category-menu__roots")]')->item(0)->textContent;
+        $middle = $xpath->query('//*[contains(@class,"sf-category-menu__branches")]')->item(0)->textContent;
+        $this->assertStringContainsString('Transmission', $left);
+        foreach (['Transmission', 'Boîtes de vitesses et accessoires', 'Boîte manuelle à 6 rapports'] as $name) {
+            $this->assertStringContainsString($name, $middle);
+        }
+        $this->leaf->translations()->where('locale', 'fr')->update(['description' => 'Description française de la catégorie']);
+        $this->get('https://gpswiss.fr/kategoria-produktu/'.FrenchMixedCatalog::CATEGORY_PATH)->assertOk()
+            ->assertSee('<h1 id="category-title">Boîte manuelle à 6 rapports</h1>', false)->assertSee('Description française de la catégorie')->assertSee('Boîte manuelle à 6 rapports - GPSwiss');
+        Http::assertNothingSent();
+    }
+
+    public function test_diagnostics_on_pl_admin_uses_real_fr_tree_and_flags_ready_source_names_without_guessing_language(): void
+    {
+        $root = PartCategory::where('slug', 'uklad-napedowy')->firstOrFail();
+        $this->leaf->translations()->where('locale', 'fr')->delete();
+        $root->translations()->where('locale', 'fr')->update(['name' => $root->name]);
+        request()->attributes->set('storefront_locale', 'pl');
+        $report = app(FrenchCategoryDiagnostics::class)->report();
+        $leaf = $report['rows']->first(fn ($row) => $row['category']->id === $this->leaf->id);
+        $this->assertTrue($leaf['in_public_fr_tree']);
+        $this->assertSame(2, $leaf['level']);
+        $this->assertSame($this->leaf->id, $leaf['resolved_public_id']);
+        $this->assertSame('missing_translation', $leaf['reason']);
+        $this->assertSame($this->leaf->name, $leaf['public_name']);
+        $this->assertSame(1, $report['summary']['public_ready_equal_to_source']);
+        $this->owner();
+        $csv = $this->get(self::DIAGNOSTICS.'?format=csv&missing_only=1')->assertOk()->streamedContent();
+        $this->assertStringContainsString('missing_translation', $csv);
+        $this->assertStringContainsString('resolved_public_id', $csv);
+        $this->assertStringNotContainsString('Boîtes de vitesses et accessoires', $csv);
         Http::assertNothingSent();
     }
 

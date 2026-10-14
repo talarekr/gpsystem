@@ -36,13 +36,6 @@ class FrenchMixedCatalog
         abort_unless(StorefrontContext::isFrench($request), 404);
         $needsPrice = in_array($request->input('sort'), ['price_asc', 'price_desc'], true)
             || collect(['price_from', 'price_to', 'price_min', 'price_max'])->contains(fn ($key) => $request->filled($key));
-        $rate = $needsPrice ? app(JarekFrPresentation::class)->rate() : [];
-        $eurRate = ($rate['ok'] ?? false) ? (float) ($rate['rate'] ?? 0) : 0;
-        $partRows = (clone $parts)->reorder()->setEagerLoads([]);
-        $partPrice = $needsPrice ? $this->partPriceExpression($partRows, $eurRate) : 'NULL';
-        $partName = $this->translatedName('part_translations', 'part_id', 'parts.id', 'name', 'parts.name');
-        $partRows = $partRows->selectRaw("parts.id as product_id, 'part' as source_type, {$partPrice} as sort_price, {$partName} as sort_name, parts.updated_at as sort_updated")->toBase();
-        $union = $partRows;
         $target = $this->category();
         $include = Schema::hasTable('jarek_fr_products') && $this->includesCategory($categoryIds);
         if ($request->filled('category')) {
@@ -53,6 +46,18 @@ class FrenchMixedCatalog
         foreach (['producer', 'model', 'vehicle_model'] as $filter) {
             $include = $include && ! $request->filled($filter);
         }
+        $needsNbp = $needsPrice && ((config('storefront-fr-checkout.pricing_policy') === 'existing_eur_nbp' && app(EbayDeLocalPrice::class)->needsNbp($parts))
+            || ($include && app(JarekFrCatalog::class)->query($request)->exists()));
+        $rate = $needsNbp ? app(FrenchPriceResolver::class)->rateForCurrentRequest() : [];
+        if ($needsNbp && $include) {
+            request()->attributes->set('storefront.fr.jarek.eur_rate', $rate);
+        }
+        $eurRate = ($rate['ok'] ?? false) ? (float) ($rate['rate'] ?? 0) : 0;
+        $partRows = (clone $parts)->reorder()->setEagerLoads([]);
+        $partPrice = $needsPrice ? $this->partPriceExpression($partRows, $eurRate) : 'NULL';
+        $partName = $this->translatedName('part_translations', 'part_id', 'parts.id', 'name', 'parts.name');
+        $partRows = $partRows->selectRaw("parts.id as product_id, 'part' as source_type, {$partPrice} as sort_price, {$partName} as sort_name, parts.updated_at as sort_updated")->toBase();
+        $union = $partRows;
         if ($include) {
             $jarek = app(JarekFrCatalog::class)->query($request)->setEagerLoads([])
                 ->join('jarek_gearboxes', 'jarek_gearboxes.id', '=', 'jarek_fr_products.jarek_gearbox_id');
@@ -82,6 +87,7 @@ class FrenchMixedCatalog
         $ids = $page->getCollection();
         $ordinary = Part::query()->with(['images', 'category', 'car'])->withStorefrontTranslations('fr')
             ->whereIn('id', $ids->where('source_type', 'part')->pluck('product_id'))->get()->keyBy('id');
+        app(EbayDeLocalPrice::class)->preload($ordinary);
         $supplier = $include ? JarekFrProduct::query()->active()->with('gearbox.translations')
             ->whereIn('id', $ids->where('source_type', 'jarek')->pluck('product_id'))->get()->keyBy('id') : collect();
         $page->setCollection($ids->map(fn ($row) => $row->source_type === 'part'
@@ -91,29 +97,9 @@ class FrenchMixedCatalog
         return $page;
     }
 
-    /** Mirror the existing EUR → local eBay FR EUR → NBP priority for SQL paging, no provider writes. */
     private function partPriceExpression(Builder $query, float $rate): string
     {
-        $policy = config('storefront-fr-checkout.pricing_policy', 'existing_eur_nbp');
-        if (! in_array($policy, ['existing_eur', 'catalog_eur', 'existing_eur_nbp'], true)) {
-            return 'NULL';
-        }
-        $expression = "CASE WHEN parts.currency = 'EUR' THEN ROUND(parts.price * 100, 0) ";
-        if ($policy !== 'catalog_eur' && Schema::hasTable('marketplace_listings') && Schema::hasTable('marketplace_accounts')) {
-            $listings = DB::table('marketplace_listings')->where('currency', 'EUR')->where('price', '>', 0)->where('quantity', '>', 0)
-                ->whereIn('status', ['active', 'ACTIVE', 'published', 'listed'])
-                ->where(fn ($q) => $q->where('marketplace', 'ebay_fr')->orWhere(fn ($q) => $q->where('marketplace', 'ebay')
-                    ->whereExists(fn ($a) => $a->selectRaw('1')->from('marketplace_accounts')
-                        ->whereColumn('marketplace_accounts.id', 'marketplace_listings.marketplace_account_id')->where('code', 'ebay_fr'))))
-                ->selectRaw('part_id as fr_part_id, COUNT(DISTINCT ROUND(price * 100, 0)) as fr_price_count, MIN(ROUND(price * 100, 0)) as fr_cents')->groupBy('part_id');
-            $query->leftJoinSub($listings, 'fr_prices', fn ($join) => $join->on('fr_prices.fr_part_id', '=', 'parts.id'));
-            $expression .= 'WHEN fr_prices.fr_price_count = 1 THEN fr_prices.fr_cents WHEN fr_prices.fr_price_count > 1 THEN NULL ';
-        }
-        if ($policy === 'existing_eur_nbp' && $rate > 0 && is_finite($rate)) {
-            $expression .= "WHEN parts.currency = 'PLN' THEN ROUND(ROUND(parts.price / ".sprintf('%.12F', $rate).', 2) * 100, 0) ';
-        }
-
-        return $expression.'ELSE NULL END';
+        return app(EbayDeLocalPrice::class)->sqlExpression($query, $rate, config('storefront-fr-checkout.pricing_policy', 'existing_eur_nbp'));
     }
 
     private function translatedName(string $table, string $foreignKey, string $id, string $field, string $fallback): string

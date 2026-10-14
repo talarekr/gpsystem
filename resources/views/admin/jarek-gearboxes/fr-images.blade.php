@@ -1,31 +1,37 @@
-<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="csrf-token" content="{{ csrf_token() }}"><title>Jarek FR — lokalne warianty zdjęć</title><style>body{font:15px/1.5 system-ui;max-width:1000px;margin:24px auto;padding:16px;color:#18283f}button,input{font:inherit;padding:9px;margin:6px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f3f5f8;padding:16px}input{max-width:100%;width:450px}</style></head><body>
-<h1>Jarek FR — lokalne warianty zdjęć</h1>
-<p><a href="{{ url('/admin/tools/storefront/fr-translations') }}">← Narzędzia FR</a></p>
-<p>Ten sam procesor crop/canvas co dla zwykłych produktów: listing 522×336, produkt 900×675. Przygotowanie dotyczy wyłącznie istniejących lokalnych zdjęć aktywnych ekspozycji Jarka. Bez pobierania z sieci, tworzenia Part i zmiany rekordów produktów. Oryginały pozostają zachowane.</p>
-<p>Podgląd nie zapisuje plików. Przygotowanie zapisuje tylko pochodne JPG, manifesty oraz log procesora. Gotowe warianty są pomijane. Kursor można wkleić po ponownym otwarciu strony; od zera przejdziesz też przez wcześniej przygotowane pliki.</p>
-<label>Źródłowe ID kursora <input id="after-id" type="number" min="0" value="0"></label><br><label>Numer zdjęcia kursora (0–60) <input id="after-image" type="number" min="0" max="60" value="0"></label><br>
-<label>Wpisz PREPARE-JAREK-FR-LOCAL-IMAGES <input id="confirm" autocomplete="off"></label><br>
-<button id="preview" type="button">Podgląd następnej partii</button><button id="start" type="button">Przygotuj lokalne warianty od kursora</button><button id="stop" type="button" disabled>Zatrzymaj po bieżącej partii</button>
-<p id="status" role="status">Oczekiwanie. Strona nie uruchamia przygotowania automatycznie.</p><pre id="result"></pre>
+<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="csrf-token" content="{{ csrf_token() }}"><title>Jarek FR — bulk przygotowanie zdjęć</title><style>body{font:15px/1.5 system-ui;max-width:1100px;margin:24px auto;padding:16px;color:#18283f}.card{border:1px solid #dbe2ec;border-radius:12px;padding:20px;margin:20px 0}.metrics{display:flex;gap:14px;flex-wrap:wrap}.metrics div{background:#f3f5f8;padding:12px;min-width:130px}.metrics strong{display:block;font-size:22px}button,input{font:inherit;padding:9px;margin:6px}button:disabled{opacity:.5}input{max-width:100%;width:450px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f3f5f8;padding:14px}progress{width:100%;height:24px}.error{color:#9c2929}</style></head><body>
+<h1>Jarek FR — przygotowanie zdjęć partiami</h1><p><a href="{{ url('/admin/tools/storefront/fr-translations') }}">← Narzędzia FR</a></p>
+<p>Ten sam procesor zdjęć co dla zwykłych produktów. Wyłącznie lokalne oryginały, bez internetu, tworzenia Part ani zmiany JarekGearbox/PartImage/cen/stocku. Podgląd zapisuje techniczny raport i checkpoint, ale nie generuje obrazów.</p>
+<section class="card"><h2>1. Podgląd całego zakresu</h2><button id="preview" type="button" disabled>Sprawdź zdjęcia Jarka</button>
+<div class="metrics"><div>Aktywne produkty<strong id="total-active">—</strong></div><div>Sprawdzone produkty<strong id="previewed">—</strong></div><div>Zdjęcia gotowe<strong id="ready">—</strong></div><div>Brakujące warianty<strong id="missing">—</strong></div><div>Błędy podglądu<strong id="preview-failed">—</strong></div><div>Pominięte pozycje<strong id="preview-skipped">—</strong></div></div>
+<p>Pominięte pozycje obejmują produkty bez lokalnych zdjęć. Gotowe warianty nie są generowane ponownie. Podgląd automatycznie sprawdza wszystkie aktywne ekspozycje w małych partiach.</p><details><summary>Przykładowe błędy</summary><pre id="errors">—</pre></details></section>
+<section class="card"><h2>2. Przygotowanie brakujących wariantów</h2><label>Wpisz PREPARE-JAREK-FR-LOCAL-IMAGES <input id="confirm" autocomplete="off"></label><br><button id="start" type="button" disabled>Przygotuj wszystkie brakujące warianty</button><button id="pause" type="button" disabled>Pauza</button><button id="resume" type="button" disabled>Wznów</button><button id="stop" type="button" disabled>Stop</button>
+<p id="status" role="status">Odczyt ostatniego przebiegu…</p><progress id="progress" max="100" value="0"></progress>
+<div class="metrics"><div>Processed<strong id="processed">0</strong></div><div>Generated<strong id="generated">0</strong></div><div>Skipped<strong id="skipped">0</strong></div><div>Failed<strong id="failed">0</strong></div><div>Remaining<strong id="remaining">0</strong></div></div>
+<p>Przygotowanie przetwarza zdjęcia, a nie liczbę produktów. Gotowe/pominięte/błędne pozycje podglądu są już zakończonymi pozycjami postępu.</p><p>Zostaw stronę otwartą. Po powrocie kliknij Wznów; strona nie uruchamia zapisu sama. Pauza/Stop pozwala zakończyć bieżące zdjęcie. Błąd jednego obrazu jest zapisywany i nie zatrzymuje pozostałych. Po zakończeniu z błędami nowy Podgląd pozwala ponowić brakujące warianty po sprawdzeniu przyczyny.</p>
+<p>Aktualny produkt: <span id="current">—</span></p><p>Ostatni sukces: <span id="last-success">—</span></p><p>Ostatni błąd: <span id="last-error">—</span></p></section>
+<section class="card"><h2>3. Recovery / advanced</h2><details><summary>Checkpoint i blokada bieżącego zdjęcia — tylko diagnostyka</summary><pre id="advanced">—</pre></details><p>Nie trzeba podawać ID produktu ani numeru zdjęcia. Trwały checkpoint jest zapisany na serwerze. Po awarii podczas GD niedokończony obraz jest oznaczany jako błąd, a pozostały zakres kontynuowany; gotowy manifest odzyskuje zakończoną pracę bez ponownego generowania.</p></section>
 <script>
 (() => {
- const el=id=>document.getElementById(id); let running=false, busy=false, timer=null;
- const buttons=()=>{el('preview').disabled=busy||running;el('start').disabled=busy||running;el('stop').disabled=!running;el('after-id').disabled=busy||running;el('after-image').disabled=busy||running;};
- async function batch(apply){
-  if(busy)return;busy=true;buttons();
-  try{
-   const response=await fetch(window.location.pathname,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','Accept':'application/json','X-CSRF-TOKEN':document.querySelector('meta[name="csrf-token"]').content},body:JSON.stringify({action:apply?'prepare':'preview',after_id:Number(el('after-id').value),after_image:Number(el('after-image').value),confirm:el('confirm').value})});
-   const data=await response.json();if(!response.ok)throw new Error(data.message||'Błąd HTTP '+response.status);
-   el('result').textContent=JSON.stringify(data,null,2);
-   if(apply){el('after-id').value=data.cursor.after_id;el('after-image').value=data.cursor.after_image;}
-   const blocked=data.results.some(row=>row.status==='error'||row.status==='no_local_images'||row.status==='missing_local_source');
-   if(data.done||blocked)running=false;
-   el('status').textContent=blocked?'Sprawdź błąd lub brak lokalnych zdjęć. '+(apply?'Kursor zapisano; możesz kontynuować po sprawdzeniu raportu.':'Podgląd bez zapisów i bez zmiany kursora.'):data.done?'Zakończono przebieg. Sprawdź raport partii.':apply?'Partia zakończona.':'Podgląd: brak zapisów. Kursor bez zmian.';
-  }catch(error){running=false;el('status').textContent=error.message;}
-  finally{busy=false;buttons();if(running)timer=setTimeout(()=>batch(true),3000);}
+ const el=id=>document.getElementById(id);let run=null,schema=false,busy=true,controlBusy=false,loop=false,timer=null,epoch=0;
+ const set=(id,value)=>el(id).textContent=value??'—';
+ function buttons(){const active=run&&['previewing','running','paused'].includes(run.status);el('preview').disabled=busy||!schema||active;el('start').disabled=busy||!schema||run?.status!=='ready'||el('confirm').value!=='PREPARE-JAREK-FR-LOCAL-IMAGES';el('pause').disabled=controlBusy||!run||!['previewing','running'].includes(run.status);el('resume').disabled=busy||!run||!['paused','previewing','running'].includes(run.status);el('stop').disabled=controlBusy||!run||!['ready','paused','previewing','running'].includes(run.status);}
+ function render(data){schema=data.schema_ready;const next=data.run;if(next&&run&&next.run_id===run.run_id&&next._revision<run._revision)return;run=next;const p=run?.preview||{},g=run?.progress||{};
+  set('total-active',run?.total_active_exposures);set('previewed',run?.previewed_exposures);for(const [id,key]of [['ready','ready_count'],['missing','missing_count'],['preview-failed','failed_count'],['preview-skipped','skipped_count']])set(id,p[key]);for(const key of ['processed','generated','skipped','failed','remaining'])set(key,g[key]??0);
+  el('progress').value=run?.phase==='preview'?100*(run.previewed_exposures||0)/Math.max(1,run.total_active_exposures||0):100*(g.processed||0)/Math.max(1,g.total||0);
+  set('errors',JSON.stringify(run?.failed_samples||[],null,2));set('current',run?.current_product?JSON.stringify(run.current_product):'—');set('last-success',run?.last_success?JSON.stringify(run.last_success):'—');set('last-error',run?.last_error?JSON.stringify(run.last_error):'—');set('advanced',JSON.stringify({run_id:run?.run_id,status:run?.status,phase:run?.phase,cursor:run?.cursor,lease_until:run?.lease_until,_revision:run?._revision},null,2));
+  set('status',!schema?'Brak tabel checkpointów. Uruchom migrację tego PR w procedurze wdrożenia.':!run?'Kliknij Sprawdź zdjęcia Jarka.':run.status==='completed'?(g.failed?'Zakończono przebieg z błędami. Sprawdź raport i wykonaj nowy podgląd po usunięciu przyczyny.':'Zakończono przygotowanie.'):'Stan: '+run.status+(loop?' — automatyczne partie są aktywne.':' — Wznów, aby kontynuować po powrocie.'));buttons();
  }
- el('preview').addEventListener('click',()=>batch(false));
- el('start').addEventListener('click',()=>{running=true;batch(true);});
- el('stop').addEventListener('click',()=>{running=false;clearTimeout(timer);buttons();el('status').textContent='Zatrzymano. Bieżąca partia może zakończyć przygotowanie.';});
+ async function request(action){if(busy)return;busy=true;buttons();const currentEpoch=++epoch;
+  try{const response=await fetch(window.location.pathname,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','Accept':'application/json','X-CSRF-TOKEN':document.querySelector('meta[name="csrf-token"]').content},body:JSON.stringify({action,run_id:run?.run_id,confirm:el('confirm').value})});const data=await response.json();if(!response.ok)throw new Error(data.message||'Błąd HTTP '+response.status);if(currentEpoch===epoch)render(data);if(!run||!['previewing','running'].includes(run.status))loop=false;}
+  catch(error){loop=false;set('status',error.message);}
+  finally{busy=false;buttons();if(loop)timer=setTimeout(()=>request('tick'),1800);}
+ }
+ el('preview').addEventListener('click',()=>{loop=true;request('preview');});el('start').addEventListener('click',()=>{loop=true;request('start');});el('resume').addEventListener('click',()=>{loop=true;request('resume');});
+ async function control(action){if(controlBusy||!run)return;loop=false;clearTimeout(timer);controlBusy=true;buttons();
+  try{const response=await fetch(window.location.pathname,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','Accept':'application/json','X-CSRF-TOKEN':document.querySelector('meta[name="csrf-token"]').content},body:JSON.stringify({action,run_id:run.run_id})});const data=await response.json();if(!response.ok)throw new Error(data.message||'Błąd HTTP '+response.status);render(data);}
+  catch(error){set('status',error.message);}finally{controlBusy=false;buttons();}
+ }
+ for(const action of ['pause','stop'])el(action).addEventListener('click',()=>control(action));el('confirm').addEventListener('input',buttons);
+ const initialEpoch=epoch;fetch(window.location.pathname,{credentials:'same-origin',headers:{Accept:'application/json'}}).then(async response=>{if(!response.ok)throw new Error('Nie można odczytać checkpointu.');return response.json();}).then(data=>{if(epoch===initialEpoch)render(data);}).catch(error=>set('status',error.message)).finally(()=>{busy=false;buttons();});
 })();
 </script></body></html>

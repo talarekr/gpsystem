@@ -40,10 +40,10 @@ class FrenchProductPricePresentationTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_local_ebay_fr_eur_price_is_displayed_without_converting_or_writing_source(): void
+    public function test_local_ebay_de_eur_price_is_displayed_without_converting_or_writing_source(): void
     {
         $part = $this->part('PLN', 20000);
-        $listing = MarketplaceListing::create(['part_id' => $part->id, 'marketplace' => 'ebay_fr',
+        $listing = MarketplaceListing::create(['part_id' => $part->id, 'marketplace' => 'ebay_de', 'match_status' => 'matched',
             'external_offer_id' => 'eur-fr', 'price' => 321.99, 'currency' => 'EUR', 'quantity' => 1, 'status' => 'active']);
         $original = $listing->fresh()->getRawOriginal();
         $partOriginal = $part->fresh()->getRawOriginal();
@@ -63,7 +63,7 @@ class FrenchProductPricePresentationTest extends TestCase
         foreach ([false, true] as $ambiguous) {
             if ($ambiguous) {
                 foreach ([100, 200] as $index => $price) {
-                    MarketplaceListing::create(['part_id' => $part->id, 'marketplace' => 'ebay_fr',
+                    MarketplaceListing::create(['part_id' => $part->id, 'marketplace' => 'ebay_de', 'match_status' => 'matched',
                         'external_offer_id' => 'ambiguous-'.$index, 'price' => $price, 'currency' => 'EUR', 'quantity' => 1, 'status' => 'active']);
                 }
             }
