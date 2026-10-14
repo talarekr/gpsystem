@@ -9,7 +9,7 @@ class FrenchPlnPricing
 {
     public const PART_MULTIPLIER = 1.25;
 
-    public const JAREK_MULTIPLIER = 1.50;
+    public const JAREK_MULTIPLIER = 1.25;
 
     public static function validRate(array $rate): bool
     {
