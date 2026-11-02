@@ -7,16 +7,17 @@
 </head>
 <body>
 <h1>Kurier Allegro — trwały dry-run</h1>
+<p>„Synchronizuj cenniki Allegro” zapisuje tylko lokalny katalog. Po synchronizacji uruchom nowy dry-run. Dotychczasowe checkpointy i wyniki pozostają zachowane.</p>
 <p>Zapisy dotyczą wyłącznie technicznego raportu i checkpointu. Bez zmian Part, MarketplaceListing, logów synchronizacji i ofert Allegro. Bez APPLY i odświeżania OAuth.</p>
 <p>Postęp jest zapisywany na serwerze po każdym produkcie. Po zamknięciu karty, reloadzie lub błędzie sieci kliknij „Wznów”. Panel nie pracuje w tle po zamknięciu karty. Wygasająca blokada partii zabezpiecza przed równoległymi kartami.</p>
-<button id="diagnose">Diagnozuj połączenie Maxhendler</button><button id="catalog">Sprawdź cenniki Allegro</button>
+<button id="sync-catalog">Synchronizuj cenniki Allegro</button><button id="diagnose">Diagnozuj połączenie Maxhendler</button><button id="catalog">Sprawdź cenniki Allegro</button>
 <p><button id="start">Start nowego dry-runu</button><button id="pause" disabled>Pauza</button><button id="resume" disabled>Wznów</button><button id="stop" disabled>Stop</button><button id="retry" disabled>Ponów tylko błędy odczytu</button></p>
 <p id="status" role="status">Wczytywanie checkpointu…</p>
 <section><h2>Globalny dry-run — stan runu</h2><pre id="progress"></pre><p>„Resolved” oznacza rozstrzygnięty wynik odczytu, również blokadę mapowania lub konflikt. Nie oznacza zgody na aktualizację produktu. Błędy providera nie są liczone jako brak aktywnej oferty.</p>
 <p><a id="json" hidden>Pobierz JSON raportu</a><a id="csv" hidden>Pobierz CSV</a><a id="proposals" hidden>CSV propozycji</a><a id="mapping" hidden>CSV blokad mapowania</a></p><p>Eksport wymaga pauzy lub zakończenia partii. Zachowuje stan runu — raport zatrzymany przed końcem jest częściowy.</p></section>
 <section><h2>Summary</h2><p>Puste lokalne pole Kurier Allegro: <strong id="empty">—</strong> (nie oznacza braku cennika na Allegro).</p><pre id="summary"></pre></section>
 <section><h2>Diagnostyka / cenniki</h2><pre id="diagnostics"></pre><div id="rates"></div></section>
-<section><h2>Produkty według cennika</h2><div id="breakdown"></div><h3>Siedem lokalnych opcji</h3><div id="local-counts"></div></section>
+<section><h2>Produkty według cennika</h2><div id="breakdown"></div><h3>Aktualne lokalne cenniki Allegro</h3><div id="local-counts"></div></section>
 <section><h2>Ostatnie 20 wyników</h2><div id="products"></div><p>Pełny raport jest zapisany na serwerze. CSV blokad mapowania zawiera part_id, offer_id, shipping_rate_id i shipping_rate_name. Nie dodajemy nowych lokalnych opcji.</p></section>
 <script>
 (() => {
@@ -67,7 +68,7 @@
     }
     async function control(action) {const data=await request(base+'/runs/'+run.run_id,action);render(data);return data;}
     async function drive() {
-        driving=true;stopping=false;el('start').disabled=true;
+        driving=true;stopping=false;el('start').disabled=true;el('sync-catalog').disabled=true;
         try {
             while(!stopping && run?.state==='running') {
                 el('status').textContent='Dry-run: '+run.processed_count+' / '+run.total+(run.wait_seconds?' — oczekiwanie Retry-After':'');
@@ -80,8 +81,13 @@
             el('status').textContent=error.message+'. Checkpoint pozostaje na serwerze. Wznów bez restartowania skanu.';
             // A response can be lost after commit. Always reload server state before the next resume.
             try {await control('pause');}catch(_){}
-        } finally {driving=false;el('start').disabled=false;if(run)render({run});}
+        } finally {driving=false;el('start').disabled=false;el('sync-catalog').disabled=false;if(run)render({run});}
     }
+    el('sync-catalog').onclick=async()=>{
+        el('sync-catalog').disabled=true;
+        try {const data=await request(base+'/sync-catalog','sync');el('diagnostics').textContent=JSON.stringify(data,null,2);el('status').textContent=data.ok?'Katalog zsynchronizowany: '+data.rates_count+' cenników. Uruchom nowy dry-run.':'Katalog nie został zmieniony: '+data.reason_code;}
+        catch(e){el('status').textContent=e.message;}finally{el('sync-catalog').disabled=driving;}
+    };
     el('start').onclick=async()=>{try{el('start').disabled=true;render(await request(base+'/runs','start'));await control('resume');await drive();}catch(e){el('status').textContent=e.message+'. Odśwież stronę, aby odnaleźć zapisany run.';}finally{el('start').disabled=false;}};
     el('resume').onclick=async()=>{try{await load();await control('resume');await drive();}catch(e){el('status').textContent=e.message;}};
     el('retry').onclick=async()=>{try{await control('retry');await drive();}catch(e){el('status').textContent=e.message;}};

@@ -2972,3 +2972,9 @@ Route::match(['get', 'post'], '/admin/tools/allegro/shipping-rate-backfill/runs/
     ->withoutMiddleware(\Illuminate\Session\Middleware\StartSession::class)
     ->middleware([\App\Http\Middleware\ShippingRateAuditReadOnly::class, \App\Http\Middleware\ReadOnlyPreviewSession::class, Authenticate::class, 'admin.panel'])
     ->name('admin.tools.allegro.shipping-rate-backfill.runs');
+
+// Explicit technical catalog synchronization: GET Allegro, local catalog writes only.
+Route::post('/admin/tools/allegro/shipping-rate-backfill/sync-catalog', [\App\Http\Controllers\Tools\AllegroShippingRateBackfillController::class, 'synchronize'])
+    ->withoutMiddleware(\Illuminate\Session\Middleware\StartSession::class)
+    ->middleware([\App\Http\Middleware\ShippingRateAuditReadOnly::class, \App\Http\Middleware\ReadOnlyPreviewSession::class, Authenticate::class, 'admin.panel'])
+    ->name('admin.tools.allegro.shipping-rate-backfill.sync-catalog');

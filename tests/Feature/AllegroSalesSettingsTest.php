@@ -61,13 +61,13 @@ class AllegroSalesSettingsTest extends TestCase
         Http::assertSent(fn ($request) => str_contains($request->url(), '/sale/shipping-rates'));
     }
 
-    public function test_inactive_gabaryty_is_not_available_in_select(): void
+    public function test_part_courier_select_uses_catalog_and_preserves_native_layout(): void
     {
         $this->assertArrayNotHasKey('GABARYTY CZ SK HU', AllegroSalesSettingsResolver::SHIPPING_RATE_OPTIONS);
         $resource = file_get_contents(app_path('Filament/Resources/PartResource.php'));
         $this->assertStringContainsString("Section::make('Kurier Allegro')", $resource);
         $this->assertStringContainsString("->hiddenLabel()", $resource);
-        $this->assertStringContainsString("->options(AllegroSalesSettingsResolver::SHIPPING_RATE_OPTIONS)", $resource);
+        $this->assertStringContainsString("AllegroShippingCatalog::class", $resource);
         $this->assertStringContainsString("->native(true)", $resource);
         $this->assertStringNotContainsString("->label('Kurier Allegro')", $resource);
     }

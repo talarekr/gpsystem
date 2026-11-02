@@ -474,7 +474,7 @@ class PartResource extends Resource
                         Forms\Components\Select::make('allegro_shipping_rate_name')
                             ->hiddenLabel()
                             ->placeholder('Wybierz cennik dostawy Allegro')
-                            ->options(AllegroSalesSettingsResolver::SHIPPING_RATE_OPTIONS)
+                            ->options(fn (?Part $record): array => app(\App\Services\Marketplace\AllegroShippingCatalog::class)->options($record?->allegro_shipping_rate_name))
                             ->native(true)
                             ->columnSpanFull(),
                     ]),
