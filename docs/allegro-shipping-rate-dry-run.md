@@ -118,3 +118,21 @@ If local expiry is known and in the past, no HTTP request is made: `reason=oauth
 - **C — possible separate future operator action:** an explicitly labelled connection refresh could use the normal token manager with `database_writes=true` and remain separate from dry-run. No such action is added here.
 
 After a diagnosed expiry and a successful normal reconnection, rerun **Diagnozuj połączenie Maxhendler** / **Sprawdź cenniki Allegro**. Do not start the global dry-run until the catalog GET succeeds. No recovery, production request, deployment, global run or backfill is performed by this PR.
+
+
+### Explicit resume scheduling (existing run, no reset)
+
+Resume/status/batch responses expose `resume_allowed`, `next_action`, `remaining`, `cursor` and `state` both at the root and in `run`. A running idle scan returns `resume_allowed=true`, `next_action=scan_tick`, including when it was already running before Resume. Live leases return `poll_lease`, provider cooldown returns `poll_cooldown`, and completed runs return `none`. Sparse Part IDs are not compared with the product count. A final scan tick marks completion after the last ID, even when remaining has reached zero.
+
+The panel uses one cancellable scheduled tick and one in-flight tick. Successful Resume explicitly activates/re-arms that scheduler, including an already active local runner whose timer stopped firing. Resume stays available between requests; repeated clicks replace the pending timer rather than create parallel loops. Recovery reads status and resumes scanning automatically. Local active/request/timer flags and the last scheduled action are shown in progress diagnostics.
+
+Regression fixtures reproduce run `e2229ef9-4db3-4c85-ab01-e7931e705e7b`: processed 7173/7318, resolved 7014, remaining 145, cursor 8690, max ID 8840, idle/running/scan with no lease/blocker. Both the real Chromium test and the PHP integration test finish the same run at 7318 while preserving the 159 existing failures. No new migration, result reset, catalog sync, failed-only retry, product update or APPLY is involved. This is a local reproduction, not a claim that the production run has been resumed. The old code already attempted to drive running runs; the supplied backend snapshot alone cannot prove why its production browser loop stopped.
+
+Validation:
+
+```sh
+node tests/Browser/allegro-shipping-audit-resume.cjs
+python3 tests/Browser/allegro-shipping-audit-resume-browser.py
+```
+
+The Chromium test requires Python Playwright and `/usr/bin/chromium` (or `CHROMIUM_PATH`). It intercepts all HTTP requests, covering Resume, reload, lost response after commit, status polling, duplicate clicks, and an active local runner with a lost timer.
