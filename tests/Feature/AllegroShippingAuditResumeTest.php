@@ -25,6 +25,8 @@ class AllegroShippingAuditResumeTest extends TestCase
     private function fixture(int $count = 3): array
     {
         $account = DB::table('marketplace_accounts')->insertGetId(['marketplace' => 'allegro', 'code' => 'allegro_main', 'name' => 'Maxhendler', 'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://api.allegro.pl', 'api_credentials' => Crypt::encryptString(json_encode(['access_token' => 'SECRET', 'access_token_expires_at' => now()->addHour()->toIso8601String()]))]);
+        DB::table('allegro_shipping_catalog_syncs')->insert(['marketplace_account_id' => $account, 'synced_at' => now()]);
+        DB::table('allegro_shipping_rates')->insert(['marketplace_account_id' => $account, 'shipping_rate_id' => 'rate', 'shipping_rate_name' => 'LISTY', 'active' => true, 'last_seen_at' => now(), 'synced_at' => now()]);
         $ids = [];
         for ($i = 0; $i < $count; $i++) {
             $part = DB::table('parts')->insertGetId(['name' => 'Audit', 'sku' => 'SKU-'.$i, 'allegro_shipping_rate_name' => null]);

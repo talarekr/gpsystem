@@ -2,7 +2,7 @@
 
 namespace App\Services\Marketplace\ShippingRateAudit;
 
-use App\Services\Marketplace\AllegroSalesSettingsResolver;
+use App\Services\Marketplace\AllegroShippingCatalog;
 use Illuminate\Support\Facades\DB;
 
 final class ShippingRateAuditService
@@ -27,33 +27,28 @@ final class ShippingRateAuditService
     {
         $through ??= (int) DB::table('parts')->max('id');
         $accounts = DB::table('marketplace_accounts')->where('marketplace', 'allegro')->orderBy('id')->get()->keyBy('id');
+        $localCatalog = app(AllegroShippingCatalog::class);
         $catalog = [];
         $indexes = [];
         foreach ($accounts as $account) {
             $result = $this->client->get($account, '/sale/shipping-rates');
-            $rates = $result['body']['shippingRates'] ?? null;
-            $ok = ($result['ok'] ?? false) && is_array($rates) && array_is_list($rates);
-            $index = [];
-            if ($ok) {
-                foreach ($rates as $rate) {
-                    if (! is_array($rate) || ! is_string($rate['id'] ?? null) || $rate['id'] === '' || ! is_string($rate['name'] ?? null) || isset($index[$rate['id']])) {
-                        $ok = false;
-                        break;
-                    }
-                    $index[$rate['id']] = $rate['name'];
-                }
-            }
+            $index = AllegroShippingCatalog::parse($result['body']['shippingRates'] ?? null);
+            $ok = ($result['ok'] ?? false) && $index !== null;
+            $index ??= [];
             if (! $ok && ($result['ok'] ?? false)) {
                 $result['ok'] = false;
                 $result['reason'] = 'invalid_response';
             }
-            $indexes[$account->id] = ['ok' => $ok, 'rates' => $ok ? $index : [], 'reason' => 'provider_read_failed', 'diagnostics' => array_diff_key($result, ['body' => true])];
+            $localRates = $localCatalog->rates($account->id);
+            $synced = $localCatalog->synced($account->id);
+            $indexes[$account->id] = ['ok' => $ok, 'rates' => $ok ? $index : [], 'reason' => 'provider_read_failed', 'local_rates' => $localRates, 'synced' => $synced, 'diagnostics' => array_diff_key($result, ['body' => true])];
             $catalog[] = ['marketplace_account_id' => $account->id, 'allegro_account_code' => $account->code,
                 'ok' => $ok, 'reason_code' => $ok ? null : ($result['reason'] ?? 'invalid_response'),
                 'provider_read_unavailable' => ! $ok,
+                'local_catalog_synced' => $synced,
                 'diagnostics' => array_diff_key($result, ['body' => true]),
                 'http_status' => $result['http_status'] ?? null,
-                'shipping_rates' => $ok ? array_map(fn ($id, $name) => ['shipping_rate_id' => (string) $id, 'shipping_rate_name' => $name, 'local_option' => array_key_exists($name, AllegroSalesSettingsResolver::SHIPPING_RATE_OPTIONS) ? $name : null], array_keys($index), array_values($index)) : []];
+                'shipping_rates' => $ok ? array_map(fn ($id, $name) => ['shipping_rate_id' => (string) $id, 'shipping_rate_name' => $name, 'local_option' => $synced && isset($localRates[$id]) && $localRates[$id]->shipping_rate_name === $name ? $name : null], array_keys($index), array_values($index)) : []];
         }
         $rows = [];
         $summary = array_fill_keys(self::COUNTERS, 0);
@@ -146,8 +141,9 @@ final class ShippingRateAuditService
                     $this->classify($row, 'unknown_shipping_rate', 'BLOCK_MISSING_MAPPING');
                 } else {
                     $name = $row['shipping_rate_name'] = $rates['rates'][$rateId];
-                    if (! array_key_exists($name, AllegroSalesSettingsResolver::SHIPPING_RATE_OPTIONS)) {
-                        $this->classify($row, 'missing_local_option', 'BLOCK_MISSING_MAPPING');
+                    if (! $rates['synced'] || ! isset($rates['local_rates'][$rateId]) || $rates['local_rates'][$rateId]->shipping_rate_name !== $name) {
+                        $row['mapping_detail'] = ! $rates['synced'] ? 'local_catalog_not_synchronized' : 'local_catalog_missing_or_stale';
+                        $this->classify($row, 'missing_mapping', 'BLOCK_MISSING_MAPPING');
                     } else {
                         $row['proposed_allegro_shipping_rate_name'] = $name;
                         $current = $part->allegro_shipping_rate_name;
@@ -186,7 +182,7 @@ final class ShippingRateAuditService
         return self::WRITES + ['oauth_refresh' => false, 'observed_at' => now()->toIso8601String(), 'through_id' => $through, 'next_after_id' => $cursor,
             'complete' => ! $remaining, 'bounded_total_parts' => DB::table('parts')->where('id', '<=', $through)->count(),
             'summary' => $summary, 'catalog' => $catalog, 'breakdown' => array_values($breakdown), 'rows' => $rows,
-            'local_options' => array_keys(AllegroSalesSettingsResolver::SHIPPING_RATE_OPTIONS)];
+            'local_options' => array_keys($localCatalog->options())];
     }
 
     public function diagnoseMainAccount(): array
