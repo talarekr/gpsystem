@@ -13,12 +13,12 @@ final class AllegroShippingRateBackfillController extends Controller
     {
         abort_unless($request->user()?->hasRole(UserRole::OwnerAdmin->value), 403);
         $input = $request->validate([
-            'mode' => ['sometimes', 'in:catalog,batch'],
+            'mode' => ['sometimes', 'in:catalog,batch,diagnose'],
             'after' => ['sometimes', 'integer', 'min:0'],
             'through' => ['sometimes', 'integer', 'min:0'],
         ]);
         $response = isset($input['mode'])
-            ? response()->json($audit->run((int) ($input['after'] ?? 0), isset($input['through']) ? (int) $input['through'] : null, $input['mode'] === 'catalog'))
+            ? response()->json(($input['mode'] === 'diagnose') ? $audit->diagnoseMainAccount() : $audit->run((int) ($input['after'] ?? 0), isset($input['through']) ? (int) $input['through'] : null, $input['mode'] === 'catalog'))
             : response()->view('admin.tools.allegro.shipping-rate-backfill');
 
         return $response->header('Cache-Control', 'private, no-store')

@@ -12,10 +12,11 @@
 <p>Odczyt aktualnych ofert i cenników Allegro. Bez aktualizacji produktów, ofert, logów i sesji. Brak APPLY.</p>
 <p>Raport powstaje partiami dla wszystkich Part, także sprzedanych i archiwalnych. Sprawdzamy zdalny status wszystkich znanych powiązań Allegro. Brak powiązania oznacza brak znanej aktywnej oferty; nie wyszukujemy produktów po SKU.</p>
 <p>Postęp i eksport są przechowywane tylko w pamięci tej karty. Zamknięcie karty usuwa raport. Odczyt jest rozłożony w czasie, nie jest snapshotem transakcyjnym.</p>
-<button id="catalog">Sprawdź cenniki Allegro</button><button id="run">Globalny dry-run</button><button id="stop" disabled>Zatrzymaj po bieżącej partii</button>
+<button id="diagnose">Diagnozuj połączenie Maxhendler</button><button id="catalog">Sprawdź cenniki Allegro</button><button id="run">Globalny dry-run</button><button id="stop" disabled>Zatrzymaj po bieżącej partii</button>
 <button id="json" disabled>Pobierz JSON</button><button id="csv" disabled>Pobierz CSV wszystkich produktów</button><button id="updates" disabled>Pobierz CSV do uzupełnienia</button>
 <p id="status" role="status">Gotowe do odczytu.</p>
 <section><h2>Summary</h2><pre id="summary">Uruchom globalny dry-run.</pre><p>Liczniki liczby aktywnych ofert obejmują tylko produkty, dla których odczyt wszystkich powiązań był rozstrzygnięty. Błędy odczytu nie oznaczają braku oferty.</p></section>
+<section><h2>Diagnostyka Maxhendler (2 / allegro_main)</h2><pre id="diagnostics">Nie wykonano odczytu.</pre><p>GET /me potwierdza login właściciela tokenu. HTTP — oznacza, że żądanie nie zostało wykonane. Bez odświeżania OAuth.</p></section>
 <section><h2>Aktualne cenniki kont</h2><div id="rates"></div></section>
 <section><h2>Produkty według cennika</h2><div id="breakdown"></div><h3>Siedem lokalnych opcji</h3><div id="local-counts"></div><p>Każdy produkt liczony raz: tylko jednoznaczna aktywna oferta z rozpoznanym cennikiem. Produkty z blokadą niejednoznaczności nie są przypisywane do grup.</p></section>
 <section><h2>Produkty wymagające uzupełnienia</h2><div id="products"></div><p>Podgląd pokazuje maksymalnie 200 propozycji. Pełne dane, konflikty i blokady znajdują się w eksporcie.</p></section>
@@ -41,7 +42,8 @@
         return data;
     }
     function showCatalog(catalog) {
-        table('rates', ['marketplace_account_id','allegro_account_code','ok','reason_code','shipping_rate_id','shipping_rate_name','local_option'], catalog.flatMap(a => a.shipping_rates.length ? a.shipping_rates.map(r => ({...a,...r})) : [a]));
+        el('diagnostics').textContent = JSON.stringify(catalog.map(a => ({marketplace_account_id:a.marketplace_account_id,allegro_account_code:a.allegro_account_code,reason_code:a.reason_code,...a.diagnostics})), null, 2);
+        table('rates', ['marketplace_account_id','allegro_account_code','ok','http_status','reason_code','shipping_rate_id','shipping_rate_name','local_option'], catalog.flatMap(a => a.shipping_rates.length ? a.shipping_rates.map(r => ({...a,...r})) : [a]));
     }
     function render() {
         el('summary').textContent = JSON.stringify({...report.summary, unresolved_active_offer_count: report.rows.filter(r => !r.active_offer_count_complete).length, ...report.writes}, null, 2);
@@ -61,10 +63,15 @@
         table('products',fields.slice(0,13),report.rows.filter(r => r.action === 'SET_EMPTY_FIELD').slice(0,200));
     }
     function busy(value) {
-        running = value; el('catalog').disabled = value; el('run').disabled = value; el('stop').disabled = !value;
+        running = value; el('diagnose').disabled = value; el('catalog').disabled = value; el('run').disabled = value; el('stop').disabled = !value;
         ['json','csv','updates'].forEach(id => el(id).disabled = value || !report?.complete);
     }
     el('stop').onclick = () => {stop = true; el('status').textContent = 'Zatrzymuję po bieżącej partii. Raport pozostanie niepełny.';};
+    el('diagnose').onclick = async () => {
+        busy(true);
+        try {el('status').textContent = 'Diagnoza Maxhendler…'; const data = await read({mode:'diagnose'}); el('diagnostics').textContent = JSON.stringify(data,null,2); el('status').textContent = 'Diagnoza zakończona. Nie uruchomiono globalnego dry-runu.';}
+        catch(error) {el('status').textContent = error.message;} finally {busy(false);}
+    };
     el('catalog').onclick = async () => {
         busy(true);
         try {el('status').textContent = 'Odczyt cenników…'; const data = await read({mode:'catalog'}); showCatalog(data.catalog); el('status').textContent = 'Odczyt cenników zakończony. Wynik nie zmienia wcześniejszego raportu produktów.';}
