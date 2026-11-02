@@ -11,7 +11,52 @@ use Throwable;
 /** Deliberately independent of API clients with OAuth retry or persistence. */
 class AllegroShippingReadClient
 {
+    private ?float $deadline = null;
+
+    public function withinBudget(int $seconds, \Closure $work): mixed
+    {
+        $previous = $this->deadline;
+        $this->deadline = microtime(true) + $seconds;
+        try {
+            return $work();
+        } finally {
+            $this->deadline = $previous;
+        }
+    }
+
     public function get(?object $account, string $path): array
+    {
+        $attempt = 0;
+        do {
+            if ($this->deadline !== null && $this->deadline - microtime(true) < 1) {
+                return ['ok' => false, 'reason' => 'network_error', 'cause' => 'batch_read_budget_exhausted', 'http_status' => null, 'request_attempted' => false, 'attempts' => $attempt];
+            }
+            $result = $this->once($account, $path);
+            $result['attempts'] = ++$attempt;
+            $retry = str_starts_with($path, '/sale/product-offers/')
+                && (($result['reason'] ?? null) === 'network_error' || in_array($result['http_status'] ?? null, [429, 500, 502, 503, 504], true));
+            if (! $retry || $attempt >= 3) {
+                return $result;
+            }
+            $seconds = $result['retry_after_seconds'] ?? 0;
+            // Long provider deadlines are persisted by the runner, never slept through a web timeout.
+            if ($seconds > 2) {
+                return $result;
+            }
+            $milliseconds = max(250 * (2 ** ($attempt - 1)), $seconds * 1000);
+            if ($this->deadline !== null && $this->deadline - microtime(true) < 1 + $milliseconds / 1000) {
+                return $result;
+            }
+            $this->wait($milliseconds);
+        } while (true);
+    }
+
+    protected function wait(int $milliseconds): void
+    {
+        usleep($milliseconds * 1000);
+    }
+
+    private function once(?object $account, string $path): array
     {
         $safe = ['ok' => false, 'http_status' => null, 'request_attempted' => false,
             'account_exists' => $account !== null, 'api_enabled' => (bool) ($account->api_enabled ?? false),
@@ -71,10 +116,17 @@ class AllegroShippingReadClient
         }
         $safe['request_attempted'] = true;
         try {
+            $timeout = $this->deadline === null ? 8 : max(1, min(8, $this->deadline - microtime(true)));
             $response = AllegroUserAgent::request()->withToken($credentials['access_token'])
                 ->accept('application/vnd.allegro.public.v1+json')
-                ->withOptions(['allow_redirects' => false])->connectTimeout(5)->timeout(15)->get($base.$path);
+                ->withOptions(['allow_redirects' => false])->connectTimeout(min(3, $timeout))->timeout($timeout)->get($base.$path);
             $status = $safe['http_status'] = $response->status();
+            if ($status === 429) {
+                $header = $response->header('Retry-After');
+                $seconds = is_string($header) && ctype_digit($header) ? (int) $header : max(0, (int) ((strtotime((string) $header) ?: now()->timestamp) - now()->timestamp));
+                $safe['retry_after_seconds'] = $seconds;
+                $safe['retry_not_before'] = now()->addSeconds($seconds)->toDateTimeString();
+            }
             if (! $response->successful()) {
                 if ($status === 401) {
                     $safe['requires_refresh'] = true;

@@ -1,41 +1,56 @@
-# Kurier Allegro: production read-only audit
+# Kurier Allegro: resumable production dry-run
 
-After the normal deployment, sign in as Owner/Admin and open:
+After the normal deployment **and migration**, sign in as Owner/Admin and open:
 
 `/admin/tools/allegro/shipping-rate-backfill`
 
-1. **Sprawdź cenniki Allegro** reads `/sale/shipping-rates` independently for each Allegro account. Other provider names are visible with a null local option.
-2. **Globalny dry-run** scans every base `parts` row, including archived/sold parts, in ID order, five per HTTP request. Leave the tab open. It checks provider status for every linked Allegro listing, including locally ended listings, to avoid trusting stale local status.
-3. Review summary, account/rate breakdown, and proposals. Download the full JSON, full CSV, and/or proposals-only CSV. Exports are enabled only after all batches complete. CSV cells are escaped against spreadsheet formulas.
+1. Check the connection/catalog. Existing Maxhendler diagnostics remain available. Do not start a global scan when the catalog cannot be read.
+2. **Start nowego dry-runu** creates a technical run and starts scanning. The maximum Part ID and initial count bound this run. One product is processed per HTTP batch to limit request duration.
+3. **Pauza**, **Wznów**, and **Stop** preserve the run and all saved rows. Resume loads the server checkpoint first. On reload or reopening the base URL, the latest run owned by the operator is loaded; a `#run=UUID` link selects a specific retained run. No background queue/worker is started. A tab must remain open for progress; after reopening, click Resume.
+4. After a completed scan, **Ponów tylko błędy odczytu** runs one pass over read-failed results only. Successful/resolved products are not fetched again. Repeated failures are attempted once per explicit retry pass and remain available for another pass.
+5. Pause or finish before downloading server-streamed JSON, full CSV, proposals CSV, or mapping-blockers CSV. Partial/stopped reports can also be exported with their run state. No need to download thousands of rows merely to resume.
 
-No schema change, command, APPLY endpoint, queue, persisted progress, provider write, OAuth refresh, snapshot update, sync log, or product update is introduced. The tool uses query-builder SELECTs instead of Eloquent product/listing hydration. It uses the existing read-only session middleware, no cache-backed rate limiter, and a scoped pre-execution SQL mutation guard. Four explicit `*_writes=false` fields are included in every API result and the final JSON.
+## Technical persistence and business safety
 
-## Mapping and decisions
+Two new tables contain only the diagnostic run and report:
 
-The provider catalog for the listing's explicit account is authoritative. Match `delivery.shippingRates.id` to this catalog, then match the resulting name **exactly** to a key of `AllegroSalesSettingsResolver::SHIPPING_RATE_OPTIONS`. No historical UUID fallback, trimming/case folding of provider names, new local option, or account inference is allowed. Empty current values include NULL, empty strings, and whitespace-only strings. Any different nonblank current value is a conflict.
+- `allegro_shipping_audit_runs`: owner, state, snapshot max ID, cursor, processed/resolved counts, summary, breakdown, provider catalog, retry generation/history, last success/error, current Part ID, and a lease token/expiry.
+- `allegro_shipping_audit_results`: unique `(run_id, part_id)`, sanitized result, provider-failure flag, retry generation and next allowed retry time. There are no foreign keys or triggers into business tables.
 
-More than one remotely active listing, duplicate aliases, or an offer linked to multiple parts is blocked. JSON includes per-listing diagnostics under `offers`. Missing account/offer mapping, malformed responses, 401/403/404/429/5xx, and connection failures are blockers, never evidence that a product has no active offer. No OAuth retry is performed. Fix authorization outside this tool and rerun.
+Checkpoint and result updates are atomic. Provider requests happen outside the transaction. A three-minute lease prevents concurrent tabs from claiming the same batch, and a fencing token rejects stale worker commits. After a lost response **following commit**, resume moves to the next product. After a crash **before commit**, at most the uncommitted product is read again after lease expiry; completed results do not repeat. An expired lease is recoverable without operator SQL.
 
-The client allows only the official production/sandbox Allegro API base URLs, disables redirects, performs GET only, and does not return credentials, raw response bodies or exception messages. Application integration credentials are read/decrypted in memory, never exported.
+Owner/Admin authorization, run ownership, normal CSRF protection on POST actions, the read-only session and no cache-backed limiter are retained. GET status/exports never advance a run. The scoped SQL guard now allows INSERT/UPDATE/DELETE only against the two named technical tables while persistence is active; Part, MarketplaceListing, account and sync-log writes remain blocked. No Eloquent business model hydration, APPLY, OAuth refresh, publish/update, or marketplace write is introduced.
 
-## Counts and scope
+The new persistence endpoints report `database_writes=true` / `technical_report_writes=true` for technical actions, and always `business_writes=false`, `product_writes=false`, `marketplace_writes=false`, `allegro_writes=false`, `oauth_refresh=false`. GET status and pure diagnostics report no DB writes. This intentionally replaces the earlier blanket zero-DB-write promise with **zero business writes**; technical writes were explicitly authorized.
 
-- `parts_with_one_active_offer` / `parts_without_active_offer` require a resolved read of every linked offer. `parts_with_multiple_active_offers` includes products with at least two confirmed active listings even if another listing could not be read.
-- `provider_read_failed` counts products with unavailable provider/account reads. `provider_read_unavailable` is also supplied per product, including ambiguous products with additional unread listings.
-- `missing_mapping` counts all `BLOCK_MISSING_MAPPING` outcomes; `unknown_shipping_rate` is a subset. Full reason codes remain in CSV/JSON.
-- The breakdown counts each product with one unambiguous, fully read active offer and a catalog-resolved rate once, including current-value conflicts and provider names absent from local options. Ambiguous products are excluded. Unused catalog rates appear with zero products in the panel/JSON. JSON also supplies counts for all seven local options.
-- With no linked Allegro listing, `NO_ACTIVE_OFFER` means **no known active linked offer**. The audit does not search Allegro by SKU, create missing mappings, or use legacy payload as evidence.
-- The first batch bounds the scan by the current maximum part ID. Later inserts are excluded. Concurrent edits/deletes and provider changes remain possible; timestamps and catalog observations are included. This is a time-spanning audit, not a transactional snapshot or an apply authorization. Refresh before a future apply.
-- Reports and progress exist only in browser memory. Closing/reloading the tab loses them. A failed/stopped run cannot be downloaded as a complete report; restart the audit. Failed provider reads are exported as blockers when the scan itself completes.
-- Catalogs are reread per batch so credentials/catalogs are never sent back from the browser or cached in the database. For a large installation this trades additional GETs for zero persisted state.
+Reports persist until separately removed by an operator/database maintenance policy; there is no automatic pruning or cleanup of business data. Old browser-only runs cannot be recovered retroactively from summary counters: the 6165-product partial summary does not contain the per-product report. Start one new durable run after deployment; subsequent interruptions resume it.
 
-Tests use SQLite in memory and mocked HTTP; they never query the production database or Allegro. Run:
+## Retry policy
+
+Only GET `/sale/product-offers/{id}` has automatic retries: at most three attempts total, exponential 250/500 ms backoff, for network/timeouts, 429, and HTTP 500/502/503/504. No automatic retry of 401, 403, 404, malformed responses or other statuses. Requests have an 8-second timeout / 3-second connect timeout, with a shared 25-second read budget per persisted product batch (including catalog and multiple offer links); no OAuth retry or token refresh is performed.
+
+429 `Retry-After` supports integer seconds and HTTP-date. Short delays up to two seconds are waited before the next attempt. Longer deadlines are returned safely, persisted on the failed row and run, and respected before another batch; the browser polls saved state in short intervals instead of sleeping in a long HTTP request. An exhausted retry still produces a read-failed row with the safe per-offer reason, HTTP status, attempt count and retry deadline. Catalog reads remain separate GETs; a catalog 429 deadline is also persisted when it blocks the product.
+
+Failed-only retry replaces the original result, subtracts its old counters/breakdown and adds the new ones. A successful retry decreases both `provider_read_failed` and unresolved reads without increasing total processed products. Retry history preserves failed-before/failed-after counts. Per-product mapping failures retain exact `part_id`, `allegro_offer_id`, `shipping_rate_id`, `shipping_rate_name`; no additions to `SHIPPING_RATE_OPTIONS` are made.
+
+## Counter and mapping semantics
+
+- `processed_count` = distinct saved products; `completed_count` / Resolved = saved outcomes without unavailable provider reads. Resolved includes conflicts and mapping blockers; it is not an apply authorization.
+- `empty_kurier_allegro` = blank **local** `parts.allegro_shipping_rate_name`, labelled "Puste lokalne pole Kurier Allegro". It does not indicate a missing provider shipping rate.
+- `parts_without_active_offer` excludes unresolved reads. A product without any linked offer means no **known linked** active offer; no SKU search or legacy-activity inference is added.
+- Only one fully resolved active offer can propose a value. Use the account's current rate ID/name catalog and an exact local-option match. Unknown IDs/names, ambiguous/shared offers and nonblank conflicts remain blockers.
+- The breakdown counts one product per resolved catalog rate, including current-value conflicts and unsupported local names; ambiguous products are excluded. All seven local options and unused catalog rates remain visible with zero counts where applicable.
+- The max-ID boundary is not a transactional snapshot of business data. Concurrent edits/deletes remain possible; a completed scan whose saved count differs from its initial total is marked `coverage_changed`. Refresh the audit before any future apply decision.
+- All result timestamps, safe reasons and observed values are retained. Credentials, tokens, raw provider error bodies and exception messages are never persisted/exported. CSV formula cells are neutralized.
+
+Validation uses SQLite in memory and fake HTTP in a container without network:
 
 ```bash
-php vendor/bin/phpunit tests/Feature/AllegroShippingRateBackfillTest.php
+php vendor/bin/phpunit tests/Feature/AllegroShippingAuditResumeTest.php tests/Feature/AllegroShippingRateBackfillTest.php tests/Feature/AllegroShippingReadDiagnosticsTest.php
+node tests/Browser/allegro-shipping-audit-resume.cjs
 ```
 
-No deployment is performed as part of this change. Real production counts are obtained only after the user deploys and runs the panel.
+No deployment or production scan is performed by this PR.
 
 ## Diagnosing Maxhendler / account 2 without refresh
 

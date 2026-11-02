@@ -2965,3 +2965,10 @@ Route::get('/admin/tools/allegro/shipping-rate-backfill', \App\Http\Controllers\
     ->withoutMiddleware(\Illuminate\Session\Middleware\StartSession::class)
     ->middleware([\App\Http\Middleware\ShippingRateAuditReadOnly::class, \App\Http\Middleware\ReadOnlyPreviewSession::class, Authenticate::class, 'admin.panel'])
     ->name('admin.tools.allegro.shipping-rate-backfill');
+
+// Technical audit writes only; existing business SQL guard and read-only session remain active.
+Route::match(['get', 'post'], '/admin/tools/allegro/shipping-rate-backfill/runs/{run?}', [\App\Http\Controllers\Tools\AllegroShippingRateBackfillController::class, 'runs'])
+    ->whereUuid('run')
+    ->withoutMiddleware(\Illuminate\Session\Middleware\StartSession::class)
+    ->middleware([\App\Http\Middleware\ShippingRateAuditReadOnly::class, \App\Http\Middleware\ReadOnlyPreviewSession::class, Authenticate::class, 'admin.panel'])
+    ->name('admin.tools.allegro.shipping-rate-backfill.runs');

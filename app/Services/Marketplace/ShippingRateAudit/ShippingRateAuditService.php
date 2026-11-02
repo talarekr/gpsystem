@@ -18,6 +18,11 @@ final class ShippingRateAuditService
         return ReadOnlyDatabase::run(fn () => $this->read($after, $through, $catalogOnly));
     }
 
+    public function readPart(int $partId): array
+    {
+        return $this->client->withinBudget(25, fn () => $this->run($partId - 1, $partId));
+    }
+
     private function read(int $after, ?int $through, bool $catalogOnly): array
     {
         $through ??= (int) DB::table('parts')->max('id');
@@ -42,7 +47,7 @@ final class ShippingRateAuditService
                 $result['ok'] = false;
                 $result['reason'] = 'invalid_response';
             }
-            $indexes[$account->id] = ['ok' => $ok, 'rates' => $ok ? $index : [], 'reason' => 'provider_read_failed'];
+            $indexes[$account->id] = ['ok' => $ok, 'rates' => $ok ? $index : [], 'reason' => 'provider_read_failed', 'diagnostics' => array_diff_key($result, ['body' => true])];
             $catalog[] = ['marketplace_account_id' => $account->id, 'allegro_account_code' => $account->code,
                 'ok' => $ok, 'reason_code' => $ok ? null : ($result['reason'] ?? 'invalid_response'),
                 'provider_read_unavailable' => ! $ok,
@@ -102,7 +107,7 @@ final class ShippingRateAuditService
                 $body = $response['body'] ?? [];
                 $status = $body['publication']['status'] ?? null;
                 $valid = ($response['ok'] ?? false) && is_string($status) && in_array($status, ['ACTIVE', 'ENDED', 'INACTIVE', 'ACTIVATING'], true) && (string) ($body['id'] ?? '') === $offerId;
-                $detail = ['listing_id' => $listing->id, 'allegro_offer_id' => $offerId, 'marketplace_account_id' => $account->id, 'allegro_account_code' => $account->code, 'marketplace' => $listing->marketplace, 'provider_offer_status' => $valid ? $status : null, 'read_ok' => $valid];
+                $detail = ['listing_id' => $listing->id, 'allegro_offer_id' => $offerId, 'marketplace_account_id' => $account->id, 'allegro_account_code' => $account->code, 'marketplace' => $listing->marketplace, 'provider_offer_status' => $valid ? $status : null, 'read_ok' => $valid, 'reason_code' => $valid ? null : ($response['reason'] ?? 'invalid_response'), 'http_status' => $response['http_status'] ?? null, 'retry_not_before' => $response['retry_not_before'] ?? null, 'attempts' => $response['attempts'] ?? 1];
                 $row['offers'][] = $detail;
                 if ($partListings->count() === 1 && $valid) {
                     $row['provider_offer_status'] = $status;
@@ -132,6 +137,7 @@ final class ShippingRateAuditService
                 }
                 $rateId = $row['shipping_rate_id'];
                 $rates = $indexes[$row['marketplace_account_id']];
+                $row['catalog_diagnostics'] = $rates['diagnostics'];
                 if (! $rates['ok']) {
                     $this->classify($row, $rates['reason'], 'BLOCK_PROVIDER_READ');
                 } elseif (! is_string($rateId) || $rateId === '') {
@@ -158,7 +164,7 @@ final class ShippingRateAuditService
                     $breakdown[$group]['products_count']++;
                 }
             }
-            $row['provider_read_unavailable'] = $row['action'] === 'BLOCK_PROVIDER_READ' || in_array('provider_read_failed', $errors, true) || in_array('account_unavailable', $errors, true);
+            $row['provider_read_unavailable'] = $row['action'] === 'BLOCK_PROVIDER_READ' || collect($row['offers'])->contains(fn ($offer) => ! ($offer['read_ok'] ?? false) && ($offer['reason_code'] ?? null) !== 'missing_mapping');
             $summary['total_parts']++;
             if (count($active) > 1) {
                 $summary['parts_with_multiple_active_offers']++;
@@ -171,6 +177,7 @@ final class ShippingRateAuditService
             }
             $summary['provider_read_failed'] += (int) $row['provider_read_unavailable'];
             $summary['unknown_shipping_rate'] += (int) ($row['reason_code'] === 'unknown_shipping_rate');
+            $row['observed_at'] = now()->toIso8601String();
             $rows[] = $row;
         }
         $cursor = $parts->last()?->id ?? $after;
