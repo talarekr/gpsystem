@@ -5,7 +5,7 @@ After the normal deployment **and migration**, sign in as Owner/Admin and open:
 `/admin/tools/allegro/shipping-rate-backfill`
 
 1. Use **Synchronizuj cenniki Allegro** to explicitly GET and persist the current `allegro_main` shipping catalog, then check the connection/catalog. Existing Maxhendler diagnostics remain available. Do not start a global scan when the catalog cannot be read.
-2. **Start nowego dry-runu** creates a technical run and starts scanning. The maximum Part ID and initial count bound this run. One product is processed per HTTP batch to limit request duration.
+2. **Start nowego dry-runu** creates a technical run and starts scanning. The maximum Part ID and initial count bound this run. Each HTTP tick advances at most one product with at most two actual provider GETs and a 3.5-second provider budget. A product with more work continues from its persisted sanitized read cache on the next tick.
 3. **Pauza**, **Wznów**, and **Stop** preserve the run and all saved rows. Resume loads the server checkpoint first. On reload or reopening the base URL, the latest run owned by the operator is loaded; a `#run=UUID` link selects a specific retained run. No background queue/worker is started. A tab must remain open for progress; after reopening, click Resume.
 4. After a completed scan, **Ponów tylko błędy odczytu** runs one pass over read-failed results only. Successful/resolved products are not fetched again. Repeated failures are attempted once per explicit retry pass and remain available for another pass.
 5. Pause or finish before downloading server-streamed JSON, full CSV, proposals CSV, or mapping-blockers CSV. Partial/stopped reports can also be exported with their run state. No need to download thousands of rows merely to resume.
@@ -17,7 +17,7 @@ Two existing technical tables contain only the diagnostic run and report:
 - `allegro_shipping_audit_runs`: owner, state, snapshot max ID, cursor, processed/resolved counts, summary, breakdown, provider catalog, retry generation/history, last success/error, current Part ID, and a lease token/expiry.
 - `allegro_shipping_audit_results`: unique `(run_id, part_id)`, sanitized result, provider-failure flag, retry generation and next allowed retry time. There are no foreign keys or triggers into business tables.
 
-Checkpoint and result updates are atomic. Provider requests happen outside the transaction. A three-minute lease prevents concurrent tabs from claiming the same batch, and a fencing token rejects stale worker commits. After a lost response **following commit**, resume moves to the next product. After a crash **before commit**, at most the uncommitted product is read again after lease expiry; completed results do not repeat. An expired lease is recoverable without operator SQL.
+Checkpoint and result updates are atomic. Provider requests happen outside the transaction. New ticks use a 15-second lease (older leases retain their existing expiry), preventing concurrent tabs from claiming the same batch, and a fencing token rejects stale worker commits. After a lost response **following commit**, resume moves to the next product. After a crash **before commit**, at most the uncommitted product is read again after lease expiry; completed results do not repeat. An expired lease is recoverable without operator SQL.
 
 Owner/Admin authorization, run ownership, normal CSRF protection on POST actions, the read-only session and no cache-backed limiter are retained. GET status/exports never advance a run. The scoped SQL guard allows INSERT/UPDATE/DELETE only against the two run tables while run persistence is active; a separate catalog scope permits INSERT/UPDATE only against `allegro_shipping_rates` and `allegro_shipping_catalog_syncs`; Part, MarketplaceListing, account and sync-log writes remain blocked. No Eloquent business model hydration, APPLY, OAuth refresh, publish/update, or marketplace write is introduced.
 
@@ -25,13 +25,36 @@ The new persistence endpoints report `database_writes=true` / `technical_report_
 
 Reports persist until separately removed by an operator/database maintenance policy; there is no automatic pruning or cleanup of business data. Old browser-only runs cannot be recovered retroactively from summary counters: the 6165-product partial summary does not contain the per-product report. Start one new durable run after deployment; subsequent interruptions resume it.
 
-## Retry policy
+## Tick budget, retry and browser recovery
 
-Only GET `/sale/product-offers/{id}` has automatic retries: at most three attempts total, exponential 250/500 ms backoff, for network/timeouts, 429, and HTTP 500/502/503/504. No automatic retry of 401, 403, 404, malformed responses or other statuses. Requests have an 8-second timeout / 3-second connect timeout, with a shared 25-second read budget per persisted product batch (including catalog and multiple offer links); no OAuth retry or token refresh is performed.
+Persisted run ticks do at most **two real provider GETs**, each with at most **3 s** timeout (also capped by the remaining tick budget), inside a **3.5 s provider-work budget**. Database/auth/proxy time is measured separately by the browser; this is not a guarantee about an unhealthy database or external webserver configuration. No long retry sleep occurs inside a run tick. The existing ad-hoc diagnostics remain separate from the persisted runner.
 
-429 `Retry-After` supports integer seconds and HTTP-date. Short delays up to two seconds are waited before the next attempt. Longer deadlines are returned safely, persisted on the failed row and run, and respected before another batch; the browser polls saved state in short intervals instead of sleeping in a long HTTP request. An exhausted retry still produces a read-failed row with the safe per-offer reason, HTTP status, attempt count and retry deadline. Catalog reads remain separate GETs; a catalog 429 deadline is also persisted when it blocks the product.
+Sanitized pending reads are stored in the same technical checkpoint, without moving cursor or increasing processed/failed counters until the product is resolved. Successful GETs replay from that pending cache rather than being fetched again. A successful provider shipping catalog is reused for at most five minutes **inside the run checkpoint** to avoid a catalog GET per product. This does not change the separately synchronized local catalog. Provider offer bodies are reduced to id, publication status, archived flag and shipping rate ID before persistence. No descriptions, buyer data or raw error bodies are stored.
 
-Failed-only retry replaces the original result, subtracts its old counters/breakdown and adds the new ones. A successful retry decreases both `provider_read_failed` and unresolved reads without increasing total processed products. Retry history preserves failed-before/failed-after counts. Per-product mapping failures retain exact `part_id`, `allegro_offer_id`, `shipping_rate_id`, `shipping_rate_name`; no additions to `SHIPPING_RATE_OPTIONS` are made; dynamic names come from the synchronized catalog.
+429, network/timeout and 500/502/503/504 retry across ticks, maximum three attempts per resource per pass, with exponential 1/2-second cooldown. Retry-After seconds/HTTP-date takes precedence. Deferred transient errors do not immediately become provider_read_failed; after exhaustion they become explicit failed outcomes. 401/403/404 and invalid responses are not automatically retried. GET offer 404 is `provider_offer_not_found`, terminal for that offer, never evidence that it was specifically ended or archived. A product with only resolved inactive/missing offers is not a technical provider failure.
+
+The browser has a 10-second AbortController timeout, a single driver/resume lock, and bounded automatic recovery (up to four consecutive failed requests, backoff). After a lost response it reads server state before another tick, honors live leases/cooldowns, and never creates a new run or resets cursor during recovery. It does not automatically pause the backend after a fetch failure. Successful committed work is not replayed; an unfinished/expired lease may replay only uncommitted reads. 401/419 require login and then Resume of the same run; 403/404/422/protocol errors are shown explicitly. Repeated failure ends with “Runner zatrzymany — kliknij Wznów”. Multiple Resume clicks cannot start multiple local loops.
+
+Failed-only retry replaces old results, subtracts previous counters/breakdown and adds new ones. Before this explicit retry, legacy results whose only unresolved evidence is offer 404 are reclassified in the **technical report**, without GET or business updates, and excluded from further read-failed retries. Resume itself preserves all existing results/counters and only adds diagnostic metadata. Mixed failures keep real technical errors and reuse terminal offer-404 evidence. Mapping blockers retain exact IDs/names; no product APPLY is added.
+
+## Production diagnostics and evidence limits
+
+No production database/session/server logs are available in this task. “Failed to fetch” alone cannot identify PHP timeout, reverse proxy timeout, browser/network reset or redirect. The audited old JavaScript had no explicit browser timeout and stopped after any fetch failure; it also allowed concurrent Resume initialization. Those are confirmed code weaknesses, not a proven production network root cause. Existing code allowed resume while state=running, so a paused-only backend restriction was not demonstrated. Production nginx/PHP limits cannot be inferred from repository defaults.
+
+Checkpoint/status now supplies:
+
+- `last_tick`: id, tick_started_at, tick_finished_at, duration_ms, requested_items, completed_items, provider_requests, HTTP status breakdown, retry count, completion flag and safe reason.
+- `tick_totals`, live/stale lease state, lease token presence/fingerprint, lease_expires_in, resume_reason, blocked_reason, checkpoint heartbeat source and last abandoned tick. An unfinished tick has `metrics_complete=false`; actual request counts from a killed process cannot be reconstructed.
+- Safe backend exception class/reason without message/stack/bindings, and whitelisted `last_client_event` (fetch/timeout/JSON/HTTP/session reason, stage, HTTP status, duration, response bytes, online flag and attempt). Response headers include exact uncompressed JSON byte size for status/actions.
+- `provider_read_failed_by_reason`: one primary cause per failed product, including distinct HTTP status, timeout vs connection error, invalid_response and other. Legacy generic network failures cannot be split retroactively without original evidence. Existing legacy 404 failures remain counted until explicit failed-only retry reclassifies them; `provider_offer_not_found_count` also shows the terminal/historical 404 group independently. New resolved 404s never inflate technical failures.
+
+Status responses cap failed-ID previews at 200, offers per displayed row at five, and retry-history preview at ten. Full persisted report rows are unchanged and available through streamed exports. Pending transport cache and shared catalog cache are hidden from status responses. These bounds and response-byte telemetry distinguish payload size from lost transport responses without persisting raw response content.
+
+No migration/reset/restart is required by this patch. After deployment, open the existing run URL and click **Wznów**. For the reported run use:
+
+`/admin/tools/allegro/shipping-rate-backfill#run=e2229ef9-4db3-4c85-ab01-e7931e705e7b`
+
+It continues from its stored cursor (707 or any newer committed value), preserves run ID, results and local catalog, waits for any still-live old lease, and safely reclaims an expired one. Do not click Start to recover that run.
 
 ## Counter and mapping semantics
 
@@ -68,7 +91,7 @@ The dry-run reads and validates the current provider catalog and requires a matc
 Additional validation:
 
 ```bash
-php vendor/bin/phpunit tests/Feature/AllegroShippingCatalogTest.php tests/Feature/AllegroShippingAuditResumeTest.php tests/Feature/AllegroShippingRateBackfillTest.php tests/Feature/AllegroShippingReadDiagnosticsTest.php
+php vendor/bin/phpunit tests/Feature/AllegroRunnerStabilityTest.php tests/Feature/AllegroShippingCatalogTest.php tests/Feature/AllegroShippingAuditResumeTest.php tests/Feature/AllegroShippingRateBackfillTest.php tests/Feature/AllegroShippingReadDiagnosticsTest.php
 node tests/Browser/allegro-shipping-audit-resume.cjs
 ```
 

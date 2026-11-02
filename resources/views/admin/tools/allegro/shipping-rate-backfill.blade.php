@@ -22,7 +22,7 @@
 <script>
 (() => {
     const el = id => document.getElementById(id), base = window.location.pathname.replace(/\/$/, '');
-    let run = null, driving = false, stopping = false;
+    let run = null, driving = false, stopping = false, starting = false;
     const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
     function table(id, columns, rows) {
         const t = document.createElement('table'), h = t.createTHead().insertRow();
@@ -31,22 +31,33 @@
         rows.forEach(row => {const tr=body.insertRow();columns.forEach(key => tr.insertCell().textContent=row[key] ?? '—');});
         el(id).replaceChildren(t);
     }
-    async function request(url, action) {
-        const options = {method:action ? 'POST' : 'GET', credentials:'same-origin', cache:'no-store', redirect:'error', headers:{'Accept':'application/json'}};
-        if(action) {options.headers['Content-Type']='application/json';options.headers['X-CSRF-TOKEN']=document.querySelector('meta[name="csrf-token"]').content;options.body=JSON.stringify({action});}
-        const response=await fetch(url,options);
-        if(!response.ok) throw new Error('HTTP '+response.status+' — operacja nie została potwierdzona');
-        const data=await response.json();
-        for(const flag of ['allegro_writes','product_writes','marketplace_writes']) if(data[flag]!==false) throw new Error('Nieprawidłowa odpowiedź audytu');
-        return data;
+    async function request(url, action, extra={}) {
+        const stage=['batch','resume','start','retry'].includes(action)?action:'status';
+        const started=Date.now();let status=null,bytes=null;
+        const controller=typeof AbortController==='undefined'?null:new AbortController();
+        const timer=controller?setTimeout(()=>controller.abort(),10000):null;
+        function failure(reason) {return Object.assign(new Error(reason+(status?' (HTTP '+status+')':'')),{reason,stage,http_status:status,duration_ms:Math.min(600000,Date.now()-started),response_bytes:bytes,online:typeof navigator==='undefined'?null:navigator.onLine});}
+        try {
+            const options={method:action?'POST':'GET',credentials:'same-origin',cache:'no-store',redirect:'error',headers:{Accept:'application/json'}};
+            if(controller)options.signal=controller.signal;
+            if(action){options.headers['Content-Type']='application/json';options.headers['X-CSRF-TOKEN']=document.querySelector('meta[name="csrf-token"]').content;options.body=JSON.stringify({action,...extra});}
+            const response=await fetch(url,options);status=response.status ?? 200;
+            const header=response.headers?.get('X-Audit-Response-Bytes') ?? response.headers?.get('Content-Length');
+            bytes=header && /^\d+$/.test(header)?Math.min(50000000,Number(header)):null;
+            if(!response.ok)throw failure([401,419].includes(status)?'session_expired':'http_error');
+            let data;try {data=await response.json();}catch(error){if(error.name==='SyntaxError')throw failure('invalid_json');throw error;}
+            for(const flag of ['allegro_writes','product_writes','marketplace_writes'])if(data[flag]!==false)throw failure('protocol_error');
+            return data;
+        } catch(error) {if(error.reason)throw error;throw failure(error.name==='AbortError'?'browser_timeout':'fetch_failed');}
+        finally {if(timer!==null)clearTimeout(timer);}
     }
     function render(data) {
         run=data.run;
         ['pause','resume','stop','retry'].forEach(id => el(id).disabled=!run);
         if(!run){el('status').textContent='Brak zapisanego runu. Rozpocznij nowy dry-run.';return;}
         window.history.replaceState(null,'','#run='+run.run_id);
-        el('progress').textContent=JSON.stringify({run_id:run.run_id,state:run.state,phase:run.phase,processed:run.processed_count,total:run.total,resolved:run.resolved,provider_read_failed:run.provider_read_failed,remaining:run.remaining,retry_remaining:run.retry_remaining,current_part:run.current_part ?? (driving && run.state==='running' ? run.next_part_id : null),cursor:run.cursor,max_part_id:run.max_part_id,last_success:run.last_success,last_error:run.last_error,wait_seconds:run.wait_seconds,busy:run.busy,coverage_changed:run.coverage_changed},null,2);
-        el('summary').textContent=JSON.stringify({...run.summary,unresolved_active_offer_count:run.processed_count-run.summary.parts_with_one_active_offer-run.summary.parts_without_active_offer-run.summary.parts_with_multiple_active_offers,technical_report_persisted:true,business_writes:false,product_writes:false,marketplace_writes:false,allegro_writes:false},null,2);
+        el('progress').textContent=JSON.stringify({run_id:run.run_id,state:run.state,phase:run.phase,processed:run.processed_count,total:run.total,resolved:run.resolved,provider_read_failed:run.provider_read_failed,remaining:run.remaining,retry_remaining:run.retry_remaining,current_part:run.current_part ?? (driving && run.state==='running' ? run.next_part_id : null),cursor:run.cursor,max_part_id:run.max_part_id,last_success:run.last_success,last_error:run.last_error,wait_seconds:run.wait_seconds,busy:run.busy,coverage_changed:run.coverage_changed,lease_token_present:run.lease_token_present,lease_expires_in:run.lease_expires_in,stale_lease:run.stale_lease,resume_reason:run.resume_reason,blocked_reason:run.blocked_reason,last_heartbeat:run.last_heartbeat,last_tick:run.last_tick,tick_totals:run.tick_totals,last_abandoned_tick:run.last_abandoned_tick,last_backend_error:run.last_backend_error,last_client_event:run.last_client_event,pending_read:run.pending_read},null,2);
+        el('summary').textContent=JSON.stringify({...run.summary,provider_read_failed_by_reason:run.provider_read_failed_by_reason,provider_offer_not_found_count:run.provider_offer_not_found_count,unresolved_active_offer_count:run.processed_count-run.summary.parts_with_one_active_offer-run.summary.parts_without_active_offer-run.summary.parts_with_multiple_active_offers,technical_report_persisted:true,business_writes:false,product_writes:false,marketplace_writes:false,allegro_writes:false},null,2);
         el('empty').textContent=run.summary.empty_kurier_allegro;
         const groups=Object.values(run.breakdown ?? {});
         for(const a of run.catalog) for(const r of a.shipping_rates) if(!groups.some(g=>g.account===a.allegro_account_code && g.shipping_rate_id===r.shipping_rate_id)) groups.push({account:a.allegro_account_code,...r,products_count:0});
@@ -54,43 +65,77 @@
         table('local-counts',['local_option','products_count'],run.local_options.map(name=>({local_option:name,products_count:groups.filter(g=>g.shipping_rate_name===name).reduce((n,g)=>n+g.products_count,0)})));
         table('products',['part_id','allegro_offer_id','shipping_rate_id','shipping_rate_name','current_allegro_shipping_rate_name','proposed_allegro_shipping_rate_name','reason_code','action'],run.preview);
         el('retry').disabled=driving || !run.scan_complete || run.provider_read_failed===0 || run.busy;
-        el('resume').disabled=driving || run.state==='completed';
+        el('resume').disabled=driving || starting || run.state==='completed';
         el('pause').disabled=!driving && run.state!=='running';
         for(const [id,format,only] of [['json','json','all'],['csv','csv','all'],['proposals','csv','proposals'],['mapping','csv','mapping']]) {
             el(id).hidden=run.state==='running' || run.busy;
             el(id).href=base+'/runs/'+run.run_id+'?'+new URLSearchParams({format,only});
         }
     }
-    async function load() {
+    async function load(notify=true) {
         const id=new URLSearchParams(window.location.hash.slice(1)).get('run');
         render(await request(base+'/runs'+(id?'/'+encodeURIComponent(id):'')));
-        if(run) el('status').textContent='Checkpoint odtworzony. Kliknij Wznów, aby kontynuować, lub pobierz zapisany raport.';
+        if(run && notify) el('status').textContent='Checkpoint odtworzony. Kliknij Wznów, aby kontynuować, lub pobierz zapisany raport.';
     }
     async function control(action) {const data=await request(base+'/runs/'+run.run_id,action);render(data);return data;}
+    function marker(r) {return (r?.processed_count ?? 0)+':'+(r?.tick_totals?.ticks ?? 0);}
     async function drive() {
+        if(driving)return;
         driving=true;stopping=false;el('start').disabled=true;el('sync-catalog').disabled=true;
+        let failures=0,recovering=false,event=null,baseline=marker(run),message=null;
         try {
             while(!stopping && run?.state==='running') {
-                el('status').textContent='Dry-run: '+run.processed_count+' / '+run.total+(run.wait_seconds?' — oczekiwanie Retry-After':'');
-                if(run.busy || run.wait_seconds>0) {await delay(Math.min(5000,Math.max(1000,run.wait_seconds*1000)));if(stopping)break;render(await request(base+'/runs/'+run.run_id));continue;}
-                render(await request(base+'/runs/'+run.run_id,'batch'));
+                try {
+                    if(recovering) {
+                        const data=await request(base+'/runs/'+run.run_id);render(data);
+                        if(marker(run)!==baseline)failures=0;
+                        if(event) {try {await request(base+'/runs/'+run.run_id,'client-event',{event});}catch(_){}event=null;}
+                        recovering=false;el('status').textContent='resumed — stan runu odzyskany';
+                        continue;
+                    }
+                    if(run.busy || run.wait_seconds>0) {
+                        el('status').textContent=run.busy?'waiting_for_live_lease — poprzedni tick ma blokadę jeszcze '+(run.lease_expires_in ?? 0)+' s. Runner wznowi się automatycznie.':'Pauza Allegro: '+run.wait_seconds+' s';
+                        await delay(1000);if(stopping)break;render(await request(base+'/runs/'+run.run_id));continue;
+                    }
+                    el('status').textContent='resumed — '+run.processed_count+' / '+run.total+'; Part '+(run.current_part ?? run.next_part_id ?? '—');
+                    render(await request(base+'/runs/'+run.run_id,'batch'));failures=0;
+                    await delay(150);
+                } catch(error) {
+                    failures++;baseline=marker(run);event={reason:error.reason ?? 'fetch_failed',stage:error.stage ?? 'batch',http_status:error.http_status ?? null,duration_ms:error.duration_ms ?? null,response_bytes:error.response_bytes ?? null,online:error.online ?? null,attempt:failures};
+                    if(error.reason==='session_expired'){message='session_expired — zaloguj się ponownie, potem kliknij Wznów. Ten sam run pozostaje zapisany.';break;}
+                    if(['protocol_error'].includes(error.reason) || [403,404,422].includes(error.http_status) || failures>=4){message='Runner zatrzymany — kliknij Wznów. '+error.message;break;}
+                    el('status').textContent='auto_recovery '+failures+'/4 — '+error.message+'; odczytam checkpoint bez resetu';
+                    await delay(1000*2**(failures-1));recovering=true;
+                }
             }
-            el('status').textContent=run?.state==='completed'?'Run zakończony. Wyniki zapisane; można ponowić tylko błędy odczytu.':'Wstrzymano. Checkpoint i wyniki są zapisane.';
-        } catch(error) {
-            stopping=true;
-            el('status').textContent=error.message+'. Checkpoint pozostaje na serwerze. Wznów bez restartowania skanu.';
-            // A response can be lost after commit. Always reload server state before the next resume.
-            try {await control('pause');}catch(_){}
+            if(!message)message=run?.state==='completed'?'Run zakończony. Wyniki zapisane.':run?.last_tick?.reason==='backend_exception'?'backend_error — '+run.last_backend_error.reason+' ('+run.last_backend_error.class+'). Checkpoint zachowany.':'Wstrzymano. Checkpoint i wyniki są zapisane.';
+            el('status').textContent=message;
         } finally {driving=false;el('start').disabled=false;el('sync-catalog').disabled=false;if(run)render({run});}
+    }
+    async function begin(action) {
+        if(driving || starting){el('status').textContent='resume_already_running — pętla jest już uruchomiona';return;}
+        starting=true;stopping=false;el('resume').disabled=true;el('start').disabled=true;
+        el('status').textContent=action==='start'?'start_started':'resume_started — sprawdzam checkpoint i lease';
+        try {
+            if(action==='start'){render(await request(base+'/runs','start'));await control('resume');}
+            else {
+                for(let attempt=0;attempt<4;attempt++) {
+                    try {await load(false);if(!run)throw new Error('run_not_found');if(!(action==='retry' && run.phase==='retry' && run.state==='running'))await control(action);break;}
+                    catch(error){if(attempt===3 || error.reason==='session_expired' || [403,404,422].includes(error.http_status))throw error;el('status').textContent='resume_recovery — ponawiam odczyt istniejącego runu';await delay(1000*2**attempt);}
+                }
+            }
+            starting=false;await drive();
+        }catch(error){el('status').textContent=error.reason==='session_expired'?'session_expired — zaloguj się ponownie, potem Wznów ten sam run.':'resume_error — '+error.message+'. Checkpoint zachowany; kliknij Wznów.';}
+        finally{starting=false;el('start').disabled=driving;if(run)render({run});}
     }
     el('sync-catalog').onclick=async()=>{
         el('sync-catalog').disabled=true;
         try {const data=await request(base+'/sync-catalog','sync');el('diagnostics').textContent=JSON.stringify(data,null,2);el('status').textContent=data.ok?'Katalog zsynchronizowany: '+data.rates_count+' cenników. Uruchom nowy dry-run.':'Katalog nie został zmieniony: '+data.reason_code;}
         catch(e){el('status').textContent=e.message;}finally{el('sync-catalog').disabled=driving;}
     };
-    el('start').onclick=async()=>{try{el('start').disabled=true;render(await request(base+'/runs','start'));await control('resume');await drive();}catch(e){el('status').textContent=e.message+'. Odśwież stronę, aby odnaleźć zapisany run.';}finally{el('start').disabled=false;}};
-    el('resume').onclick=async()=>{try{await load();await control('resume');await drive();}catch(e){el('status').textContent=e.message;}};
-    el('retry').onclick=async()=>{try{await control('retry');await drive();}catch(e){el('status').textContent=e.message;}};
+    el('start').onclick=()=>begin('start');
+    el('resume').onclick=()=>begin('resume');
+    el('retry').onclick=()=>begin('retry');
     for(const action of ['pause','stop'])el(action).onclick=async()=>{stopping=true;try{await control(action);el('status').textContent='Checkpoint zachowany: '+run.state;}catch(e){el('status').textContent=e.message+'. Po odzyskaniu sieci odczytaj checkpoint.';}};
     for(const [id,mode] of [['diagnose','diagnose'],['catalog','catalog']])el(id).onclick=async()=>{try{el(id).disabled=true;const data=await request(base+'?mode='+mode);el('diagnostics').textContent=JSON.stringify(mode==='diagnose'?data:data.catalog,null,2);}catch(e){el('diagnostics').textContent=e.message;}finally{el(id).disabled=false;}};
     load().catch(e=>el('status').textContent=e.message+'. Run nie został zmieniony. Spróbuj odświeżyć stronę.');

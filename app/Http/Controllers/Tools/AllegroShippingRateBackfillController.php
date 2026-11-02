@@ -31,7 +31,15 @@ final class AllegroShippingRateBackfillController extends Controller
     {
         abort_unless($request->user()?->hasRole(UserRole::OwnerAdmin->value), 403);
         $input = $request->validate([
-            'action' => ['sometimes', 'in:start,batch,pause,resume,stop,retry'],
+            'action' => ['sometimes', 'in:start,batch,pause,resume,stop,retry,client-event'],
+            'event' => ['sometimes', 'array:reason,stage,http_status,duration_ms,response_bytes,online,attempt'],
+            'event.reason' => ['required_with:event', 'in:fetch_failed,browser_timeout,invalid_json,http_error,session_expired,protocol_error'],
+            'event.stage' => ['required_with:event', 'in:batch,status,resume,start,retry'],
+            'event.http_status' => ['nullable', 'integer', 'min:0', 'max:599'],
+            'event.duration_ms' => ['nullable', 'integer', 'min:0', 'max:600000'],
+            'event.response_bytes' => ['nullable', 'integer', 'min:0', 'max:50000000'],
+            'event.online' => ['nullable', 'boolean'],
+            'event.attempt' => ['nullable', 'integer', 'min:0', 'max:10'],
             'format' => ['sometimes', 'in:json,csv'], 'only' => ['sometimes', 'in:all,proposals,mapping'],
         ]);
         $owner = (int) $request->user()->id;
@@ -43,14 +51,23 @@ final class AllegroShippingRateBackfillController extends Controller
                 $result = $runs->start($owner);
             } else {
                 abort_unless($run, 422);
-                $result = $action === 'batch' ? $runs->batch($owner, $run) : $runs->control($owner, $run, $action);
+                if ($action === 'client-event') {
+                    abort_unless(isset($input['event']), 422);
+                    $result = $runs->clientEvent($owner, $run, $input['event']);
+                } else {
+                    $result = $action === 'batch' ? $runs->batch($owner, $run) : $runs->control($owner, $run, $action);
+                }
             }
 
-            return response()->json($result)->header('Cache-Control', 'private, no-store');
+            $response = response()->json($result)->header('Cache-Control', 'private, no-store');
+
+            return $response->header('X-Audit-Response-Bytes', (string) strlen($response->getContent()));
         }
         $status = $runs->status($owner, $run);
         if (! isset($input['format'])) {
-            return response()->json($status)->header('Cache-Control', 'private, no-store');
+            $response = response()->json($status)->header('Cache-Control', 'private, no-store');
+
+            return $response->header('X-Audit-Response-Bytes', (string) strlen($response->getContent()));
         }
         abort_unless($run, 422);
         abort_if($status['run']['state'] === 'running' || $status['run']['busy'], 409, 'Pause scan before export.');
