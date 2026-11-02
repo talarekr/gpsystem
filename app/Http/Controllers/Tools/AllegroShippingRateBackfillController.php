@@ -6,6 +6,7 @@ use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
 use App\Services\Marketplace\AllegroShippingCatalog;
 use App\Services\Marketplace\ShippingRateAudit\ShippingAuditRuns;
+use App\Services\Marketplace\ShippingRateAudit\ShippingRateAfterApplyExport;
 use App\Services\Marketplace\ShippingRateAudit\ShippingRateApply;
 use App\Services\Marketplace\ShippingRateAudit\ShippingRateAuditService;
 use Illuminate\Http\Request;
@@ -26,6 +27,39 @@ final class AllegroShippingRateBackfillController extends Controller
 
         return $response->header('Cache-Control', 'private, no-store')
             ->header('X-Robots-Tag', 'noindex, noarchive')->header('Referrer-Policy', 'no-referrer');
+    }
+
+    public function afterApply(Request $request, ShippingRateAfterApplyExport $export)
+    {
+        abort_unless($request->user()?->hasRole(UserRole::OwnerAdmin->value), 403);
+        $input = $request->validate(['format' => ['sometimes', 'in:csv'], 'only' => ['sometimes', 'in:all,filled,not-filled']]);
+        // Materialize once under the read guard, before sending any CSV bytes.
+        $snapshot = $export->snapshot((int) $request->user()->id);
+        if (! isset($input['format'])) {
+            unset($snapshot['rows']);
+
+            return response()->json($snapshot)->header('Cache-Control', 'private, no-store');
+        }
+        $only = $input['only'] ?? 'all';
+        $filename = match ($only) {
+            'filled' => 'gpswiss-allegro-shipping-rate-filled.csv',
+            'not-filled' => 'gpswiss-allegro-shipping-rate-not-filled.csv',
+            default => 'gpswiss-allegro-shipping-rate-after-apply.csv',
+        };
+
+        return response()->streamDownload(function () use ($snapshot, $only): void {
+            $out = fopen('php://output', 'w');
+            fwrite($out, "\xEF\xBB\xBF");
+            fputcsv($out, ShippingRateAfterApplyExport::FIELDS, ';', '"', '');
+            foreach ($snapshot['rows'] as $row) {
+                $filled = in_array($row['backfill_status'], ['FILLED_BY_APPLY', 'ALREADY_FILLED'], true);
+                if (($only === 'filled' && ! $filled) || ($only === 'not-filled' && $filled)) {
+                    continue;
+                }
+                fputcsv($out, array_map([ShippingRateAfterApplyExport::class, 'csvCell'], array_values($row)), ';', '"', '');
+            }
+            fclose($out);
+        }, $filename, ['Content-Type' => 'text/csv; charset=UTF-8', 'Cache-Control' => 'private, no-store']);
     }
 
     public function apply(Request $request, ShippingRateApply $apply)

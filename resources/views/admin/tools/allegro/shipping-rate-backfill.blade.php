@@ -19,6 +19,16 @@
 <section><h2>Diagnostyka / cenniki</h2><pre id="diagnostics"></pre><div id="rates"></div></section>
 <section><h2>Produkty według cennika</h2><div id="breakdown"></div><h3>Aktualne lokalne cenniki Allegro</h3><div id="local-counts"></div></section>
 <section><h2>Ostatnie 20 wyników</h2><div id="products"></div><p>Pełny raport jest zapisany na serwerze. CSV blokad mapowania zawiera part_id, offer_id, shipping_rate_id i shipping_rate_name. Nie dodajemy nowych lokalnych opcji.</p></section>
+<section>
+<h2>Eksport aktualnego stanu po APPLY</h2>
+<p>Run: e2229ef9-4db3-4c85-ab01-e7931e705e7b. Plan: fa67d424-d251-4dc6-971e-b4f8ab26d5ba.</p>
+<p>Wartości Kurier Allegro i dane produktu pochodzą z aktualnego Part. Oferta i przyczyna pochodzą z audytu; FILLED_BY_APPLY wymaga wpisu w trwałym rejestrze planu. Pole wyczyszczone po APPLY: NOT_FILLED_OTHER. Każde pobranie odczytuje stan na nowo.</p>
+<button id="after-apply-summary">Sprawdź podsumowanie po APPLY</button>
+<pre id="after-apply-details"></pre>
+<a id="after-apply-all" hidden>Pobierz CSV wszystkich produktów po APPLY</a>
+<a id="after-apply-filled" hidden>Pobierz CSV uzupełnionych</a>
+<a id="after-apply-not-filled" hidden>Pobierz CSV nieuzupełnionych</a>
+</section>
 <section id="apply-section">
 <h2>Uzupełnij puste pola Kurier Allegro</h2>
 <p>Run: <code>e2229ef9-4db3-4c85-ab01-e7931e705e7b</code>. Oczekiwane propozycje SET_EMPTY_FIELD: 4609.</p>
@@ -176,6 +186,16 @@
         el('sync-catalog').disabled=true;
         try {const data=await request(base+'/sync-catalog','sync');el('diagnostics').textContent=JSON.stringify(data,null,2);el('status').textContent=data.ok?'Katalog zsynchronizowany: '+data.rates_count+' cenników. Uruchom nowy dry-run.':'Katalog nie został zmieniony: '+data.reason_code;}
         catch(e){el('status').textContent=e.message;}finally{el('sync-catalog').disabled=driving;}
+    };
+    el('after-apply-summary').onclick=async()=>{
+        const button=el('after-apply-summary');button.disabled=true;
+        for(const only of ['all','filled','not-filled'])el('after-apply-'+only).hidden=true;
+        try{
+            const data=await request(base+'/after-apply');
+            el('after-apply-details').textContent=JSON.stringify(data,null,2);
+            for(const only of ['all','filled','not-filled']){const link=el('after-apply-'+only);link.href=base+'/after-apply?'+new URLSearchParams({format:'csv',only});link.hidden=false;}
+        }catch(error){el('after-apply-details').textContent='Eksport niedostępny: '+error.message;}
+        finally{button.disabled=false;}
     };
     el('start').onclick=()=>begin('start');
     el('resume').onclick=()=>begin('resume');

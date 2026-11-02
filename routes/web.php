@@ -2984,3 +2984,9 @@ Route::post('/admin/tools/allegro/shipping-rate-backfill/apply', [\App\Http\Cont
     ->withoutMiddleware(\Illuminate\Session\Middleware\StartSession::class)
     ->middleware([\App\Http\Middleware\ShippingRateAuditReadOnly::class, \App\Http\Middleware\ReadOnlyPreviewSession::class, Authenticate::class, 'admin.panel'])
     ->name('admin.tools.allegro.shipping-rate-backfill.apply');
+
+// Current-state CSV after APPLY. No technical or business write scope.
+Route::get('/admin/tools/allegro/shipping-rate-backfill/after-apply', [\App\Http\Controllers\Tools\AllegroShippingRateBackfillController::class, 'afterApply'])
+    ->withoutMiddleware(\Illuminate\Session\Middleware\StartSession::class)
+    ->middleware([\App\Http\Middleware\ShippingRateAuditReadOnly::class, \App\Http\Middleware\ReadOnlyPreviewSession::class, Authenticate::class, 'admin.panel'])
+    ->name('admin.tools.allegro.shipping-rate-backfill.after-apply');
