@@ -63,6 +63,17 @@ final class ShippingAuditRuns
             $c['resolved'] = $c['completed_count'];
             $c['next_part_id'] = $c['phase'] === 'retry' ? $this->retryQuery($run->id, $c)->orderBy('part_id')->value('part_id') : DB::table('parts')->where('id', '>', $c['cursor'])->where('id', '<=', $c['max_part_id'])->orderBy('id')->value('id');
             $c['retry_remaining'] = $c['phase'] === 'retry' ? $this->retryQuery($run->id, $c)->count() : 0;
+            $c['resume_allowed'] = in_array($run->state, ['running', 'paused', 'stopped'], true);
+            $c['next_action'] = match (true) {
+                $run->state === 'completed' => 'none',
+                $run->state !== 'running' => 'resume',
+                $c['busy'] => 'poll_lease',
+                $c['wait_seconds'] > 0 => 'poll_cooldown',
+                $c['phase'] === 'scan' => 'scan_tick',
+                $c['phase'] === 'retry' => 'retry_tick',
+                default => 'blocked',
+            };
+
             $c['failed_ids'] = DB::table('allegro_shipping_audit_results')->where('run_id', $run->id)->where('read_failed', true)->orderBy('part_id')->limit(200)->pluck('part_id')->all();
             $c['failed_ids_truncated'] = $c['provider_read_failed'] > 200;
             $c['preview'] = DB::table('allegro_shipping_audit_results')->where('run_id', $run->id)->orderByDesc('part_id')->limit(20)->get(['payload'])->map(function ($r) {
@@ -85,7 +96,7 @@ final class ShippingAuditRuns
                 $c['retry_history'] = array_slice($c['retry_history'], -10);
             }
 
-            return $this->flags($written) + ['run' => $c];
+            return $this->flags($written) + ['run' => $c, 'resume_allowed' => $c['resume_allowed'], 'next_action' => $c['next_action'], 'remaining' => $c['remaining'], 'cursor' => $c['cursor'], 'state' => $c['state']];
         });
     }
 
