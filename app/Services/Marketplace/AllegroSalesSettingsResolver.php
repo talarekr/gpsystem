@@ -18,7 +18,9 @@ class AllegroSalesSettingsResolver
     ];
 
     public const RETURN_POLICY_NAME = 'ZWROTGOLD';
+
     public const IMPLIED_WARRANTY_NAME = 'GWARANCJA GOLD';
+
     public const WARRANTY_NAME = 'GWARANTGOLD';
 
     public const MANUAL_SHIPPING_RATE_IDS = [
@@ -39,7 +41,10 @@ class AllegroSalesSettingsResolver
 
     public function resolve(?MarketplaceAccount $account, ?string $shippingRateName): array
     {
-        $shippingRateName = trim((string) $shippingRateName);
+        $shippingRateName = (string) $shippingRateName;
+        if (trim($shippingRateName) === '') {
+            $shippingRateName = '';
+        }
         $result = [
             'selected_allegro_shipping_rate_name' => $shippingRateName !== '' ? $shippingRateName : null,
             'shippingRates' => $this->emptyRow($shippingRateName, $shippingRateName === '' ? 'missing' : 'read_failed'),
@@ -49,9 +54,18 @@ class AllegroSalesSettingsResolver
             'blockers' => [],
         ];
 
+        $catalog = app(AllegroShippingCatalog::class);
+        $hasCatalog = $catalog->synced($account?->id);
+        $options = $catalog->optionsForAccount($account?->id);
+        if ($hasCatalog && collect($catalog->rates($account->id))->where('shipping_rate_name', $shippingRateName)->count() > 1) {
+            $result['blockers'][] = 'ambiguous_allegro_shipping_rate_name';
+
+            return $result;
+        }
+
         if ($shippingRateName === '') {
             $result['blockers'][] = 'missing_allegro_shipping_rate';
-        } elseif (! array_key_exists($shippingRateName, self::SHIPPING_RATE_OPTIONS)) {
+        } elseif (! array_key_exists($shippingRateName, $options)) {
             $result['shippingRates']['status'] = 'missing';
             $result['blockers'][] = 'allegro_shipping_rate_not_active:'.$shippingRateName;
         }
@@ -61,6 +75,7 @@ class AllegroSalesSettingsResolver
                 $result[$key]['status'] = 'read_failed';
             }
             $result['blockers'][] = 'allegro_sales_settings_account_unavailable';
+
             return $result;
         }
 
@@ -73,19 +88,31 @@ class AllegroSalesSettingsResolver
         ]);
 
         foreach (['shippingRates', 'returnPolicy', 'impliedWarranty', 'warranty'] as $key) {
-            if ($key === 'shippingRates' && $shippingRateName === '') continue;
+            if ($key === 'shippingRates' && $shippingRateName === '') {
+                continue;
+            }
             $row = $resolved[$key] ?? [];
             $readStatus = ($row['reason'] ?? null) === 'read_failed' ? 'read_failed' : (($row['found'] ?? false) ? 'read_ok' : 'read_ok');
             $id = $row['id'] ?? null;
             $status = ($row['found'] ?? false) ? 'mapped' : (($row['reason'] ?? null) === 'read_failed' ? 'read_failed' : 'missing');
             $found = (bool) ($row['found'] ?? false);
 
-            if (blank($id)) {
+            if (blank($id) && ($key !== 'shippingRates' || (! $hasCatalog && $account->code === 'allegro_main'))) {
                 $manualId = $this->manualId($key, $row['searched_name'] ?? $result[$key]['searched_name'] ?? null);
                 if (filled($manualId)) {
                     $id = $manualId;
                     $status = 'mapped';
                     $found = true;
+                }
+            }
+
+            if ($key === 'shippingRates' && $hasCatalog) {
+                $local = collect($catalog->rates($account->id))->firstWhere('shipping_rate_name', $shippingRateName);
+                if (! $local || $id !== $local->shipping_rate_id) {
+                    $id = null;
+                    $found = false;
+                    $status = 'missing';
+                    $result['blockers'][] = 'allegro_shipping_catalog_stale_or_inactive';
                 }
             }
 
@@ -102,10 +129,13 @@ class AllegroSalesSettingsResolver
         }
 
         foreach (['shippingRates' => 'allegro_shipping_rate_missing_or_inactive', 'returnPolicy' => 'allegro_returnPolicy_missing:'.self::RETURN_POLICY_NAME, 'impliedWarranty' => 'allegro_impliedWarranty_missing:'.self::IMPLIED_WARRANTY_NAME, 'warranty' => 'allegro_warranty_missing:'.self::WARRANTY_NAME] as $key => $blocker) {
-            if (! in_array(($result[$key]['status'] ?? null), ['mapped', 'manual_id'], true)) $result['blockers'][] = $blocker;
+            if (! in_array(($result[$key]['status'] ?? null), ['mapped', 'manual_id'], true)) {
+                $result['blockers'][] = $blocker;
+            }
         }
 
         $result['blockers'] = array_values(array_unique($result['blockers']));
+
         return $result;
     }
 
@@ -118,6 +148,7 @@ class AllegroSalesSettingsResolver
     {
         if ($key === 'shippingRates') {
             $searchedName = trim((string) $searchedName);
+
             return self::MANUAL_SHIPPING_RATE_IDS[$searchedName] ?? null;
         }
 

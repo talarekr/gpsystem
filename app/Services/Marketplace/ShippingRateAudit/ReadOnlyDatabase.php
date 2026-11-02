@@ -14,6 +14,8 @@ final class ReadOnlyDatabase
 {
     private static int $depth = 0;
 
+    private static int $catalogDepth = 0;
+
     private static ?WeakMap $connections = null;
 
     private static ?WeakMap $dispatchers = null;
@@ -39,6 +41,16 @@ final class ReadOnlyDatabase
         }
     }
 
+    public static function catalogWrites(Closure $work): mixed
+    {
+        self::$catalogDepth++;
+        try {
+            return self::run($work);
+        } finally {
+            self::$catalogDepth--;
+        }
+    }
+
     private static function guard(Connection $connection): void
     {
         self::$connections ??= new WeakMap;
@@ -46,7 +58,8 @@ final class ReadOnlyDatabase
             return;
         }
         $connection->beforeExecuting(static function (string $sql): void {
-            if (self::$depth > 0 && ! preg_match('/^\s*select\b/i', $sql)) {
+            $catalog = self::$catalogDepth > 0 && preg_match('/^\s*(?:insert(?:\s+(?:ignore|or\s+ignore))?\s+into|update)\s+[`"\[]?allegro_shipping_(?:rates|catalog_syncs)[`"\]]?(?:\s|\()/i', $sql);
+            if (self::$depth > 0 && ! $catalog && ! preg_match('/^\s*select\b/i', $sql)) {
                 throw new LogicException('Shipping rate audit blocked a non-SELECT database statement.');
             }
         });

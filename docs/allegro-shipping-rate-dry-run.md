@@ -4,15 +4,15 @@ After the normal deployment, sign in as Owner/Admin and open:
 
 `/admin/tools/allegro/shipping-rate-backfill`
 
-1. **Sprawdź cenniki Allegro** reads `/sale/shipping-rates` independently for each Allegro account. Other provider names are visible with a null local option.
+1. **Synchronizuj cenniki Allegro** explicitly reads GET `/sale/shipping-rates` for `allegro_main` and atomically updates only the local technical catalog. No Part, listing, account, sync-log or provider write is performed. Then **Sprawdź cenniki Allegro** reads `/sale/shipping-rates` independently for each Allegro account. Other provider names are visible with a null local option.
 2. **Globalny dry-run** scans every base `parts` row, including archived/sold parts, in ID order, five per HTTP request. Leave the tab open. It checks provider status for every linked Allegro listing, including locally ended listings, to avoid trusting stale local status.
 3. Review summary, account/rate breakdown, and proposals. Download the full JSON, full CSV, and/or proposals-only CSV. Exports are enabled only after all batches complete. CSV cells are escaped against spreadsheet formulas.
 
-No schema change, command, APPLY endpoint, queue, persisted progress, provider write, OAuth refresh, snapshot update, sync log, or product update is introduced. The tool uses query-builder SELECTs instead of Eloquent product/listing hydration. It uses the existing read-only session middleware, no cache-backed rate limiter, and a scoped pre-execution SQL mutation guard. Four explicit `*_writes=false` fields are included in every API result and the final JSON.
+Two technical tables persist provider rates and successful sync metadata: `allegro_shipping_rates` and `allegro_shipping_catalog_syncs`. Only the explicit CSRF-protected Owner/Admin sync action writes them (`database_writes=true`, `catalog_writes=true`, other write flags false). No command, APPLY endpoint, queue, persisted product progress, provider write, OAuth refresh, listing snapshot update, sync log, or product update is introduced. The tool uses query-builder SELECTs instead of Eloquent product/listing hydration. It uses the existing read-only session middleware, no cache-backed rate limiter, and a scoped pre-execution SQL mutation guard. Pure dry-run responses retain all four `*_writes=false` flags. The scoped catalog-write guard separately permits INSERT/UPDATE only for the two named catalog tables; it still blocks business-table mutations.
 
 ## Mapping and decisions
 
-The provider catalog for the listing's explicit account is authoritative. Match `delivery.shippingRates.id` to this catalog, then match the resulting name **exactly** to a key of `AllegroSalesSettingsResolver::SHIPPING_RATE_OPTIONS`. No historical UUID fallback, trimming/case folding of provider names, new local option, or account inference is allowed. Empty current values include NULL, empty strings, and whitespace-only strings. Any different nonblank current value is a conflict.
+The provider catalog for the listing's explicit account is authoritative. Match `delivery.shippingRates.id` to this catalog, then require an active local catalog record with that account, ID and **exactly** the same provider name. Every synchronized name is supported, including all current 18 if returned by Allegro; no seven-name allowlist is applied. No historical UUID fallback, trimming/case folding of provider names or account inference is allowed in backfill. Missing/renamed local records block with `missing_mapping` and `mapping_detail=local_catalog_not_synchronized` / `local_catalog_missing_or_stale`; rerun synchronization explicitly. The read-only audit never silently syncs its catalog. Empty current values include NULL, empty strings, and whitespace-only strings. Any different nonblank current value is a conflict.
 
 More than one remotely active listing, duplicate aliases, or an offer linked to multiple parts is blocked. JSON includes per-listing diagnostics under `offers`. Missing account/offer mapping, malformed responses, 401/403/404/429/5xx, and connection failures are blockers, never evidence that a product has no active offer. No OAuth retry is performed. Fix authorization outside this tool and rerun.
 
@@ -23,7 +23,7 @@ The client allows only the official production/sandbox Allegro API base URLs, di
 - `parts_with_one_active_offer` / `parts_without_active_offer` require a resolved read of every linked offer. `parts_with_multiple_active_offers` includes products with at least two confirmed active listings even if another listing could not be read.
 - `provider_read_failed` counts products with unavailable provider/account reads. `provider_read_unavailable` is also supplied per product, including ambiguous products with additional unread listings.
 - `missing_mapping` counts all `BLOCK_MISSING_MAPPING` outcomes; `unknown_shipping_rate` is a subset. Full reason codes remain in CSV/JSON.
-- The breakdown counts each product with one unambiguous, fully read active offer and a catalog-resolved rate once, including current-value conflicts and provider names absent from local options. Ambiguous products are excluded. Unused catalog rates appear with zero products in the panel/JSON. JSON also supplies counts for all seven local options.
+- The breakdown counts each product with one unambiguous, fully read active offer and a catalog-resolved rate once, including current-value conflicts and provider names not yet synchronized locally. Ambiguous products are excluded. Unused catalog rates appear with zero products in the panel/JSON. JSON supplies counts for the current local options; the UI does not assume there are seven.
 - With no linked Allegro listing, `NO_ACTIVE_OFFER` means **no known active linked offer**. The audit does not search Allegro by SKU, create missing mappings, or use legacy payload as evidence.
 - The first batch bounds the scan by the current maximum part ID. Later inserts are excluded. Concurrent edits/deletes and provider changes remain possible; timestamps and catalog observations are included. This is a time-spanning audit, not a transactional snapshot or an apply authorization. Refresh before a future apply.
 - Reports and progress exist only in browser memory. Closing/reloading the tab loses them. A failed/stopped run cannot be downloaded as a complete report; restart the audit. Failed provider reads are exported as blockers when the scan itself completes.
@@ -36,6 +36,17 @@ php vendor/bin/phpunit tests/Feature/AllegroShippingRateBackfillTest.php
 ```
 
 No deployment is performed as part of this change. Real production counts are obtained only after the user deploys and runs the panel.
+
+
+## Catalog lifecycle and legacy compatibility
+
+Synchronization validates the complete response before any writes: list shape, nonblank ID/name, storage length and unique IDs. Failed/malformed/duplicate-ID responses leave the last good catalog untouched. A valid empty response is an explicit successful empty snapshot and deactivates existing rows; metadata distinguishes it from never synchronized. Entries absent from a valid snapshot are marked inactive, never deleted; their `last_seen_at` is preserved. Seen entries are upserted with exact provider names, `active=true`, `last_seen_at` and `synced_at`. Catalogs are scoped by account. Concurrent synchronization commits are serialized, and an older started request cannot overwrite a newer successful snapshot.
+
+Part still stores `parts.allegro_shipping_rate_name`; no Part migration/backfill is added. The Select reads the active Maxhendler catalog without doing network work. Before the first successful sync it offers the seven legacy values. An existing selected historic/inactive name is retained with a label so editing does not erase it, but it is not promoted to an active provider entry.
+
+`AllegroSalesSettingsResolver` accepts all current catalog options and verifies its live shipping ID against the local record. Existing after-sales settings are unchanged. Manual historical shipping IDs remain a fallback only before a catalog snapshot exists on `allegro_main`; they cannot override an inactive/stale catalog. Duplicate active provider names are stored by ID but block name-based publishing resolution, since the Part field cannot distinguish two different IDs with the same name. ID-based audit can still report them accurately.
+
+Deployment requires the catalog migration. Operational sequence: synchronize catalog → start a fresh full dry-run → inspect results → decide separately on future APPLY. No synchronization, deployment, product apply or production scan was executed during this PR. The separate resumable-run PR #1501 is not bundled into this change.
 
 ## Diagnosing Maxhendler / account 2 without refresh
 

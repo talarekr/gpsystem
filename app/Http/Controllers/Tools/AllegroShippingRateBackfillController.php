@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Tools;
 
 use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
+use App\Services\Marketplace\AllegroShippingCatalog;
 use App\Services\Marketplace\ShippingRateAudit\ShippingRateAuditService;
 use Illuminate\Http\Request;
 
@@ -23,5 +24,12 @@ final class AllegroShippingRateBackfillController extends Controller
 
         return $response->header('Cache-Control', 'private, no-store')
             ->header('X-Robots-Tag', 'noindex, noarchive')->header('Referrer-Policy', 'no-referrer');
+    }
+
+    public function synchronize(Request $request, AllegroShippingCatalog $catalog)
+    {
+        abort_unless($request->user()?->hasRole(UserRole::OwnerAdmin->value), 403);
+
+        return response()->json($catalog->synchronize())->header('Cache-Control', 'private, no-store');
     }
 }

@@ -23,9 +23,13 @@ class AllegroShippingRateBackfillTest extends TestCase
 
     private function account(string $code = 'allegro_main'): MarketplaceAccount
     {
-        return MarketplaceAccount::create(['marketplace' => 'allegro', 'name' => $code, 'code' => $code,
+        $account = MarketplaceAccount::create(['marketplace' => 'allegro', 'name' => $code, 'code' => $code,
             'status' => 'active', 'api_enabled' => true, 'api_base_url' => 'https://api.allegro.pl',
             'api_credentials' => ['access_token' => 'secret-'.$code]]);
+        DB::table('allegro_shipping_catalog_syncs')->insert(['marketplace_account_id' => $account->id, 'synced_at' => now()]);
+        DB::table('allegro_shipping_rates')->insert(['marketplace_account_id' => $account->id, 'shipping_rate_id' => 'new-account-specific-uuid', 'shipping_rate_name' => 'KURIER DPD', 'active' => true, 'last_seen_at' => now(), 'synced_at' => now()]);
+
+        return $account;
     }
 
     private function part(?string $current = null): int
@@ -101,7 +105,7 @@ class AllegroShippingRateBackfillTest extends TestCase
         }
         $this->fake(['missing' => $this->active(null), 'unknown' => $this->active('unknown'), 'other' => $this->active('other'), 'ended' => ['publication' => ['status' => 'ENDED']]], [['id' => 'other', 'name' => 'NEW PALETA']]);
         $r = app(ShippingRateAuditService::class)->run();
-        $this->assertSame(['no_active_allegro_offer', 'missing_shipping_rate', 'unknown_shipping_rate', 'missing_local_option', 'no_active_allegro_offer'], array_column($r['rows'], 'reason_code'));
+        $this->assertSame(['no_active_allegro_offer', 'missing_shipping_rate', 'unknown_shipping_rate', 'missing_mapping', 'no_active_allegro_offer'], array_column($r['rows'], 'reason_code'));
         $this->assertSame(2, $r['summary']['parts_without_active_offer']);
         $this->assertSame(3, $r['summary']['missing_mapping']);
         $this->assertNull($r['rows'][3]['proposed_allegro_shipping_rate_name']);
@@ -146,6 +150,9 @@ class AllegroShippingRateBackfillTest extends TestCase
         $b = $this->account('second');
         $this->listing($this->part(), $a, 'a');
         $this->listing($this->part(), $b, 'b');
+        foreach ([[$a, 'KURIER DPD'], [$b, 'LISTY']] as [$account,$name]) {
+            DB::table('allegro_shipping_rates')->insert(['marketplace_account_id' => $account->id, 'shipping_rate_id' => 'same-id', 'shipping_rate_name' => $name, 'active' => true, 'last_seen_at' => now(), 'synced_at' => now()]);
+        }
         Http::fake(function ($request) {
             $this->assertSame('GET', $request->method());
             if (str_ends_with($request->url(), '/shipping-rates')) {
@@ -175,7 +182,7 @@ class AllegroShippingRateBackfillTest extends TestCase
         $this->listing($this->part(), $a, 'a');
         $this->fake(['a' => $this->active()], [['id' => 'new-account-specific-uuid', 'name' => ' KURIER DPD']]);
         $r = app(ShippingRateAuditService::class)->run();
-        $this->assertSame('missing_local_option', $r['rows'][0]['reason_code']);
+        $this->assertSame('missing_mapping', $r['rows'][0]['reason_code']);
     }
 
     public function test_cursor_covers_every_part_once_including_archived_without_following_new_parts(): void

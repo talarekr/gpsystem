@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="pl">
 <head>
-    <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="csrf-token" content="{{ csrf_token() }}"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
     <title>Kurier Allegro — dry-run</title>
     <style>
         body{font:16px system-ui,sans-serif;color:#18302d;background:#f5f7f7;margin:0;padding:28px;max-width:1500px}h1{margin-top:0}button,a{margin:5px}button{padding:10px 16px;cursor:pointer}button:disabled{cursor:default}section{background:white;border:1px solid #cbd7d4;border-radius:8px;padding:18px;margin:18px 0;overflow:auto}table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;padding:8px;border-bottom:1px solid #dce4e2}pre{white-space:pre-wrap}#status{font-weight:600}caption{text-align:left;padding:8px}details{margin:10px 0}
@@ -9,16 +9,17 @@
 </head>
 <body>
 <h1>Kurier Allegro — dry-run</h1>
+<p>„Synchronizuj cenniki Allegro” zapisuje wyłącznie lokalny katalog. Nie zmienia części ani ofert. Pozostałe odczyty dry-runu nie zapisują danych.</p>
 <p>Odczyt aktualnych ofert i cenników Allegro. Bez aktualizacji produktów, ofert, logów i sesji. Brak APPLY.</p>
 <p>Raport powstaje partiami dla wszystkich Part, także sprzedanych i archiwalnych. Sprawdzamy zdalny status wszystkich znanych powiązań Allegro. Brak powiązania oznacza brak znanej aktywnej oferty; nie wyszukujemy produktów po SKU.</p>
 <p>Postęp i eksport są przechowywane tylko w pamięci tej karty. Zamknięcie karty usuwa raport. Odczyt jest rozłożony w czasie, nie jest snapshotem transakcyjnym.</p>
-<button id="diagnose">Diagnozuj połączenie Maxhendler</button><button id="catalog">Sprawdź cenniki Allegro</button><button id="run">Globalny dry-run</button><button id="stop" disabled>Zatrzymaj po bieżącej partii</button>
+<button id="sync-catalog">Synchronizuj cenniki Allegro</button><button id="diagnose">Diagnozuj połączenie Maxhendler</button><button id="catalog">Sprawdź cenniki Allegro</button><button id="run">Globalny dry-run</button><button id="stop" disabled>Zatrzymaj po bieżącej partii</button>
 <button id="json" disabled>Pobierz JSON</button><button id="csv" disabled>Pobierz CSV wszystkich produktów</button><button id="updates" disabled>Pobierz CSV do uzupełnienia</button>
 <p id="status" role="status">Gotowe do odczytu.</p>
 <section><h2>Summary</h2><pre id="summary">Uruchom globalny dry-run.</pre><p>Liczniki liczby aktywnych ofert obejmują tylko produkty, dla których odczyt wszystkich powiązań był rozstrzygnięty. Błędy odczytu nie oznaczają braku oferty.</p></section>
 <section><h2>Diagnostyka Maxhendler (2 / allegro_main)</h2><pre id="diagnostics">Nie wykonano odczytu.</pre><p>GET /me potwierdza login właściciela tokenu. HTTP — oznacza, że żądanie nie zostało wykonane. Bez odświeżania OAuth.</p></section>
 <section><h2>Aktualne cenniki kont</h2><div id="rates"></div></section>
-<section><h2>Produkty według cennika</h2><div id="breakdown"></div><h3>Siedem lokalnych opcji</h3><div id="local-counts"></div><p>Każdy produkt liczony raz: tylko jednoznaczna aktywna oferta z rozpoznanym cennikiem. Produkty z blokadą niejednoznaczności nie są przypisywane do grup.</p></section>
+<section><h2>Produkty według cennika</h2><div id="breakdown"></div><h3>Aktualne lokalne cenniki Allegro</h3><div id="local-counts"></div><p>Każdy produkt liczony raz: tylko jednoznaczna aktywna oferta z rozpoznanym cennikiem. Produkty z blokadą niejednoznaczności nie są przypisywane do grup.</p></section>
 <section><h2>Produkty wymagające uzupełnienia</h2><div id="products"></div><p>Podgląd pokazuje maksymalnie 200 propozycji. Pełne dane, konflikty i blokady znajdują się w eksporcie.</p></section>
 <script>
 (() => {
@@ -63,10 +64,20 @@
         table('products',fields.slice(0,13),report.rows.filter(r => r.action === 'SET_EMPTY_FIELD').slice(0,200));
     }
     function busy(value) {
-        running = value; el('diagnose').disabled = value; el('catalog').disabled = value; el('run').disabled = value; el('stop').disabled = !value;
+        running = value; el('sync-catalog').disabled=value; el('diagnose').disabled = value; el('catalog').disabled = value; el('run').disabled = value; el('stop').disabled = !value;
         ['json','csv','updates'].forEach(id => el(id).disabled = value || !report?.complete);
     }
     el('stop').onclick = () => {stop = true; el('status').textContent = 'Zatrzymuję po bieżącej partii. Raport pozostanie niepełny.';};
+    el('sync-catalog').onclick = async () => {
+        busy(true);
+        try {
+            const response = await fetch(window.location.pathname.replace(/\/$/,'')+'/sync-catalog', {method:'POST',credentials:'same-origin',cache:'no-store',redirect:'error',headers:{Accept:'application/json','X-CSRF-TOKEN':document.querySelector('meta[name="csrf-token"]').content}});
+            if(!response.ok) throw new Error('Synchronizacja: HTTP '+response.status);
+            const data = await response.json();
+            el('diagnostics').textContent = JSON.stringify(data,null,2);
+            el('status').textContent = data.ok ? 'Katalog zsynchronizowany: '+data.rates_count+' cenników. Uruchom nowy dry-run.' : 'Katalog nie został zmieniony: '+data.reason_code;
+        } catch(error) {el('status').textContent=error.message;} finally {busy(false);}
+    };
     el('diagnose').onclick = async () => {
         busy(true);
         try {el('status').textContent = 'Diagnoza Maxhendler…'; const data = await read({mode:'diagnose'}); el('diagnostics').textContent = JSON.stringify(data,null,2); el('status').textContent = 'Diagnoza zakończona. Nie uruchomiono globalnego dry-runu.';}
