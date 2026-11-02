@@ -57,6 +57,9 @@ class AllegroShippingAuditResumeTest extends TestCase
     {
         for ($i = 0; $i < 20; $i++) {
             $r = $service->batch(1, $id);
+            if (($r['run']['wait_seconds'] ?? 0) > 0) {
+                $this->travel($r['run']['wait_seconds'] + 1)->seconds();
+            }
             if ($r['run']['state'] !== 'running') {
                 return $r;
             }
@@ -193,7 +196,8 @@ class AllegroShippingAuditResumeTest extends TestCase
         $id = $s->start(1)['run']['run_id'];
         $s->control(1, $id, 'resume');
         $r = $s->batch(1, $id);
-        $this->assertSame(1, $r['run']['provider_read_failed']);
+        $this->assertSame(0, $r['run']['provider_read_failed']);
+        $this->assertSame(0, $r['run']['processed_count']);
         $this->assertGreaterThan(0, $r['run']['wait_seconds']);
         $count = Http::recorded()->count();
         $s->batch(1, $id);

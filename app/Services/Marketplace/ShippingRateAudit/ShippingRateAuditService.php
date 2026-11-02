@@ -23,6 +23,16 @@ final class ShippingRateAuditService
         return $this->client->withinBudget(25, fn () => $this->run($partId - 1, $partId));
     }
 
+    public function tickMetrics(): array
+    {
+        return $this->client->lastTickMetrics();
+    }
+
+    public function readTick(int $partId, array $state): array
+    {
+        return $this->client->tick($state, fn () => $this->run($partId - 1, $partId));
+    }
+
     private function read(int $after, ?int $through, bool $catalogOnly): array
     {
         $through ??= (int) DB::table('parts')->max('id');
@@ -99,10 +109,18 @@ final class ShippingRateAuditService
                     ->whereNotNull('part_id')->where('part_id', '<>', $part->id)->exists();
                 $key = $account->id.':'.$offerId;
                 $response = $offerCache[$key] ??= $this->client->get($account, '/sale/product-offers/'.rawurlencode($offerId));
+                if (($response['http_status'] ?? null) === 404) {
+                    $row['offers'][] = ['listing_id' => $listing->id, 'allegro_offer_id' => $offerId, 'marketplace_account_id' => $account->id, 'allegro_account_code' => $account->code, 'provider_offer_status' => 'NOT_FOUND', 'read_ok' => true, 'reason_code' => 'provider_offer_not_found', 'http_status' => 404, 'attempts' => $response['attempts'] ?? 1, 'transport_reason' => $response['transport_reason'] ?? null];
+                    if ($partListings->count() === 1) {
+                        $row['provider_offer_status'] = 'NOT_FOUND';
+                    }
+
+                    continue;
+                }
                 $body = $response['body'] ?? [];
                 $status = $body['publication']['status'] ?? null;
                 $valid = ($response['ok'] ?? false) && is_string($status) && in_array($status, ['ACTIVE', 'ENDED', 'INACTIVE', 'ACTIVATING'], true) && (string) ($body['id'] ?? '') === $offerId;
-                $detail = ['listing_id' => $listing->id, 'allegro_offer_id' => $offerId, 'marketplace_account_id' => $account->id, 'allegro_account_code' => $account->code, 'marketplace' => $listing->marketplace, 'provider_offer_status' => $valid ? $status : null, 'read_ok' => $valid, 'reason_code' => $valid ? null : ($response['reason'] ?? 'invalid_response'), 'http_status' => $response['http_status'] ?? null, 'retry_not_before' => $response['retry_not_before'] ?? null, 'attempts' => $response['attempts'] ?? 1];
+                $detail = ['listing_id' => $listing->id, 'allegro_offer_id' => $offerId, 'marketplace_account_id' => $account->id, 'allegro_account_code' => $account->code, 'marketplace' => $listing->marketplace, 'provider_offer_status' => $valid ? $status : null, 'read_ok' => $valid, 'reason_code' => $valid ? null : ($response['reason'] ?? 'invalid_response'), 'http_status' => $response['http_status'] ?? null, 'retry_not_before' => $response['retry_not_before'] ?? null, 'attempts' => $response['attempts'] ?? 1, 'transport_reason' => $response['transport_reason'] ?? null];
                 $row['offers'][] = $detail;
                 if ($partListings->count() === 1 && $valid) {
                     $row['provider_offer_status'] = $status;
@@ -125,7 +143,7 @@ final class ShippingRateAuditService
                 $reason = in_array('account_unavailable', $errors, true) ? 'account_unavailable' : (in_array('missing_mapping', $errors, true) ? 'missing_mapping' : 'provider_read_failed');
                 $this->classify($row, $reason, $reason === 'missing_mapping' ? 'BLOCK_MISSING_MAPPING' : 'BLOCK_PROVIDER_READ');
             } elseif ($active === []) {
-                $this->classify($row, 'no_active_allegro_offer', 'NO_ACTIVE_OFFER');
+                $this->classify($row, collect($row['offers'])->contains('reason_code', 'provider_offer_not_found') ? 'provider_offer_not_found' : 'no_active_allegro_offer', 'NO_ACTIVE_OFFER');
             } else {
                 foreach (['allegro_offer_id', 'marketplace_account_id', 'allegro_account_code', 'provider_offer_status', 'shipping_rate_id'] as $field) {
                     $row[$field] = $active[0][$field];
