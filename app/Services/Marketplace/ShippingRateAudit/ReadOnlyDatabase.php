@@ -14,6 +14,8 @@ final class ReadOnlyDatabase
 {
     private static int $depth = 0;
 
+    private static int $applyDepth = 0;
+
     private static int $catalogDepth = 0;
 
     private static int $technicalDepth = 0;
@@ -55,6 +57,17 @@ final class ReadOnlyDatabase
         }
     }
 
+    /** Separate operator-confirmed scope; the dry-run never enters it. */
+    public static function applyWrites(Closure $work): mixed
+    {
+        self::$applyDepth++;
+        try {
+            return self::run($work);
+        } finally {
+            self::$applyDepth--;
+        }
+    }
+
     private static function guard(Connection $connection): void
     {
         self::$connections ??= new WeakMap;
@@ -64,7 +77,11 @@ final class ReadOnlyDatabase
         $connection->beforeExecuting(static function (string $sql): void {
             $technical = self::$technicalDepth > 0 && preg_match('/^\s*(?:insert\s+into|update|delete\s+from)\s+[`"\[]?allegro_shipping_audit_(?:runs|results)[`"\]]?(?:\s|\()/i', $sql);
             $catalog = self::$catalogDepth > 0 && preg_match('/^\s*(?:insert(?:\s+(?:ignore|or\s+ignore))?\s+into|update)\s+[`"\[]?allegro_shipping_(?:rates|catalog_syncs)[`"\]]?(?:\s|\()/i', $sql);
-            if (self::$depth > 0 && ! $technical && ! $catalog && ! preg_match('/^\s*select\b/i', $sql)) {
+            $apply = self::$applyDepth > 0 && (
+                preg_match('/^\s*(?:insert\s+into|update)\s+[`"\[]?allegro_shipping_apply_plans[`"\]]?(?:\s|\()/i', $sql)
+                || preg_match('/^\s*update\s+[`"\[]?parts[`"\]]?\s+set\s+[`"\[]?allegro_shipping_rate_name[`"\]]?\s*=\s*\?\s+where\s/i', $sql)
+            );
+            if (self::$depth > 0 && ! $technical && ! $catalog && ! $apply && ! preg_match('/^\s*select\b/i', $sql)) {
                 throw new LogicException('Shipping rate audit blocked a non-SELECT database statement.');
             }
         });

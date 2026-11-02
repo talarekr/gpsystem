@@ -8,7 +8,7 @@
 <body>
 <h1>Kurier Allegro — trwały dry-run</h1>
 <p>„Synchronizuj cenniki Allegro” zapisuje tylko lokalny katalog. Po synchronizacji uruchom nowy dry-run. Dotychczasowe checkpointy i wyniki pozostają zachowane.</p>
-<p>Zapisy dotyczą wyłącznie technicznego raportu i checkpointu. Bez zmian Part, MarketplaceListing, logów synchronizacji i ofert Allegro. Bez APPLY i odświeżania OAuth.</p>
+<p>Dry-run zapisuje wyłącznie techniczny raport i checkpoint, bez zmian Part, MarketplaceListing, logów synchronizacji i ofert Allegro. Osobna sekcja APPLY poniżej wymaga przygotowania planu i wpisania tokenu. Bez odświeżania OAuth.</p>
 <p>Postęp jest zapisywany na serwerze po każdym produkcie. Po zamknięciu karty, reloadzie lub błędzie sieci kliknij „Wznów”. Panel nie pracuje w tle po zamknięciu karty. Wygasająca blokada partii zabezpiecza przed równoległymi kartami.</p>
 <button id="sync-catalog">Synchronizuj cenniki Allegro</button><button id="diagnose">Diagnozuj połączenie Maxhendler</button><button id="catalog">Sprawdź cenniki Allegro</button>
 <p><button id="start">Start nowego dry-runu</button><button id="pause" disabled>Pauza</button><button id="resume" disabled>Wznów</button><button id="stop" disabled>Stop</button><button id="retry" disabled>Ponów tylko błędy odczytu</button></p>
@@ -19,6 +19,16 @@
 <section><h2>Diagnostyka / cenniki</h2><pre id="diagnostics"></pre><div id="rates"></div></section>
 <section><h2>Produkty według cennika</h2><div id="breakdown"></div><h3>Aktualne lokalne cenniki Allegro</h3><div id="local-counts"></div></section>
 <section><h2>Ostatnie 20 wyników</h2><div id="products"></div><p>Pełny raport jest zapisany na serwerze. CSV blokad mapowania zawiera part_id, offer_id, shipping_rate_id i shipping_rate_name. Nie dodajemy nowych lokalnych opcji.</p></section>
+<section id="apply-section">
+<h2>Uzupełnij puste pola Kurier Allegro</h2>
+<p>Run: <code>e2229ef9-4db3-4c85-ab01-e7931e705e7b</code>. Oczekiwane propozycje SET_EMPTY_FIELD: 4609.</p>
+<p>Plan sprawdza zapisane wyniki ukończonego runu i lokalny katalog. Zapis dotyczy wyłącznie pustego pola Kurier Allegro. Konflikty pozostają bez zmian. Bez odpytywania i zmian Allegro.</p>
+<button id="apply-plan">Przygotuj plan APPLY</button>
+<pre id="apply-plan-details">Najpierw przygotuj plan. Eligible, already correct, conflicts i blocked zostaną odczytane z wyników.</pre>
+<label>Token potwierdzenia: <input id="apply-confirm" autocomplete="off" spellcheck="false" placeholder="APPLY-ALLEGRO-SHIPPING-RATE-BACKFILL"></label>
+<button id="apply-execute" disabled>Uzupełnij puste pola</button>
+<p id="apply-status" role="status"></p><pre id="apply-report"></pre>
+</section>
 <script>
 (() => {
     const el = id => document.getElementById(id), base = window.location.pathname.replace(/\/$/, '');
@@ -173,6 +183,32 @@
     for(const action of ['pause','stop'])el(action).onclick=async()=>{stopping=true;clearTick();if(!inFlight)finishDriver('Wstrzymuję — checkpoint zachowany.');try{await control(action);el('status').textContent='Checkpoint zachowany: '+run.state;}catch(e){el('status').textContent=e.message+'. Po odzyskaniu sieci odczytaj checkpoint.';}};
     for(const [id,mode] of [['diagnose','diagnose'],['catalog','catalog']])el(id).onclick=async()=>{try{el(id).disabled=true;const data=await request(base+'?mode='+mode);el('diagnostics').textContent=JSON.stringify(mode==='diagnose'?data:data.catalog,null,2);}catch(e){el('diagnostics').textContent=e.message;}finally{el(id).disabled=false;}};
     load().catch(e=>el('status').textContent=e.message+'. Run nie został zmieniony. Spróbuj odświeżyć stronę.');
+    (()=>{
+        const runId='e2229ef9-4db3-4c85-ab01-e7931e705e7b',confirm='APPLY-ALLEGRO-SHIPPING-RATE-BACKFILL';
+        let plan=null,working=false;
+        function enabled(){el('apply-plan').disabled=working;el('apply-execute').disabled=working || !plan?.apply_allowed || el('apply-confirm').value!==confirm;}
+        async function post(payload){
+            // No scan timeout: the atomic local transaction may outlast a short provider tick.
+            const response=await fetch(base+'/apply',{method:'POST',credentials:'same-origin',cache:'no-store',redirect:'error',headers:{Accept:'application/json','Content-Type':'application/json','X-CSRF-TOKEN':document.querySelector('meta[name="csrf-token"]').content},body:JSON.stringify({run_id:runId,...payload})});
+            const data=await response.json();
+            if(!response.ok || data.ok!==true){if(data.reason_code)el('apply-report').textContent=JSON.stringify(data,null,2);throw new Error(data.reason_code ?? data.message ?? 'HTTP '+response.status);}
+            return data;
+        }
+        el('apply-confirm').oninput=enabled;
+        el('apply-plan').onclick=async()=>{
+            if(working)return;working=true;plan=null;enabled();
+            try{plan=await post({action:'prepare'});el('apply-plan-details').textContent=JSON.stringify({run_id:plan.run_id,eligible:plan.eligible_count,expected_count:plan.expected_count,count_difference:plan.count_difference,plan_digest:plan.plan_digest,already_correct:plan.summary.already_correct,conflicts:plan.summary.current_value_conflicts,blocked:plan.blocked,excluded:plan.excluded},null,2);el('apply-status').textContent=plan.apply_allowed?'Plan gotowy. Wpisz token, aby świadomie uruchomić zapis.':'Liczba eligible różni się od 4609 — APPLY zablokowany.';if(plan.last_report)el('apply-report').textContent=JSON.stringify(plan.last_report,null,2);}
+            catch(error){el('apply-status').textContent='Plan zablokowany: '+error.message;}
+            finally{working=false;enabled();}
+        };
+        el('apply-execute').onclick=async()=>{
+            if(working || !plan?.apply_allowed || el('apply-confirm').value!==confirm)return;
+            working=true;enabled();el('apply-status').textContent='APPLY w toku — nie zamykaj karty.';
+            try{const data=await post({action:'apply',plan_id:plan.plan_id,plan_digest:plan.plan_digest,confirm:el('apply-confirm').value});el('apply-report').textContent=JSON.stringify(data,null,2);el('apply-status').textContent='APPLY zakończony. Sprawdź raport.';}
+            catch(error){el('apply-status').textContent='Brak potwierdzonego zakończenia: '+error.message+'. Po odzyskaniu połączenia przygotuj ponownie ten sam plan — zapisany ledger zabezpiecza przed powtórnym zapisem.';}
+            finally{working=false;el('apply-confirm').value='';enabled();}
+        };
+    })();
 })();
 </script>
 </body>
