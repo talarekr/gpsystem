@@ -275,7 +275,7 @@ class AllegroShippingRateBackfillTest extends TestCase
         $this->assertSame(0, $r['summary']['parts_without_active_offer']);
         $this->assertSame(array_fill(0, 5, 'BLOCK_PROVIDER_READ'), array_column($r['rows'], 'action'));
         $this->assertStringNotContainsString('secret must not leak', json_encode($r));
-        Http::assertSentCount(6);
+        Http::assertSentCount(10);
     }
 
     public function test_guard_prevents_part_listing_and_sync_log_writes_before_sql_executes(): void

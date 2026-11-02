@@ -14,13 +14,16 @@ final class ReadOnlyDatabase
 {
     private static int $depth = 0;
 
+    private static int $technicalDepth = 0;
+
     private static ?WeakMap $connections = null;
 
     private static ?WeakMap $dispatchers = null;
 
-    public static function run(Closure $work): mixed
+    public static function run(Closure $work, bool $technicalWrites = false): mixed
     {
         self::$depth++;
+        self::$technicalDepth += (int) $technicalWrites;
         try {
             self::$dispatchers ??= new WeakMap;
             $events = app('events');
@@ -36,6 +39,7 @@ final class ReadOnlyDatabase
             return $work();
         } finally {
             self::$depth--;
+            self::$technicalDepth -= (int) $technicalWrites;
         }
     }
 
@@ -46,7 +50,8 @@ final class ReadOnlyDatabase
             return;
         }
         $connection->beforeExecuting(static function (string $sql): void {
-            if (self::$depth > 0 && ! preg_match('/^\s*select\b/i', $sql)) {
+            $technical = self::$technicalDepth > 0 && preg_match('/^\s*(?:insert\s+into|update|delete\s+from)\s+[`"\[]?allegro_shipping_audit_(?:runs|results)[`"\]]?(?:\s|\()/i', $sql);
+            if (self::$depth > 0 && ! $technical && ! preg_match('/^\s*select\b/i', $sql)) {
                 throw new LogicException('Shipping rate audit blocked a non-SELECT database statement.');
             }
         });
