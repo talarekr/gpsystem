@@ -26,6 +26,10 @@ return Application::configure(basePath: dirname(__DIR__))
             \Illuminate\View\Middleware\ShareErrorsFromSession::class,
             \App\Http\Middleware\ReadOnlyPreviewSession::class,
         );
+        $middleware->prependToPriorityList(
+            \App\Http\Middleware\ReadOnlyPreviewSession::class,
+            \App\Http\Middleware\ShippingRateAuditReadOnly::class,
+        );
         $middleware->web(append: [
             ResolveStorefrontHost::class,
             SetStorefrontLocale::class,

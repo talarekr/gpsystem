@@ -2959,3 +2959,9 @@ Route::post('/boites-jarek/{product}/panier/retirer', [\App\Http\Controllers\Sto
 Route::match(['get', 'post'], '/admin/tools/jarek-gearboxes/fr-publication', \App\Http\Controllers\Admin\JarekGearboxes\JarekFrPublicationController::class)
     ->middleware([Authenticate::class, 'admin.panel'])->name('admin.tools.jarek-gearboxes.fr-publication');
 
+
+// All audit progress and exports stay in the browser. No session or limiter writes.
+Route::get('/admin/tools/allegro/shipping-rate-backfill', \App\Http\Controllers\Tools\AllegroShippingRateBackfillController::class)
+    ->withoutMiddleware(\Illuminate\Session\Middleware\StartSession::class)
+    ->middleware([\App\Http\Middleware\ShippingRateAuditReadOnly::class, \App\Http\Middleware\ReadOnlyPreviewSession::class, Authenticate::class, 'admin.panel'])
+    ->name('admin.tools.allegro.shipping-rate-backfill');
