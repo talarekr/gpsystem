@@ -6,6 +6,7 @@ use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
 use App\Services\Marketplace\AllegroShippingCatalog;
 use App\Services\Marketplace\ShippingRateAudit\ShippingAuditRuns;
+use App\Services\Marketplace\ShippingRateAudit\ShippingRateApply;
 use App\Services\Marketplace\ShippingRateAudit\ShippingRateAuditService;
 use Illuminate\Http\Request;
 
@@ -25,6 +26,24 @@ final class AllegroShippingRateBackfillController extends Controller
 
         return $response->header('Cache-Control', 'private, no-store')
             ->header('X-Robots-Tag', 'noindex, noarchive')->header('Referrer-Policy', 'no-referrer');
+    }
+
+    public function apply(Request $request, ShippingRateApply $apply)
+    {
+        abort_unless($request->user()?->hasRole(UserRole::OwnerAdmin->value), 403);
+        $input = $request->validate([
+            'action' => ['required', 'in:prepare,apply'],
+            'run_id' => ['required', 'uuid'],
+            'plan_id' => ['required_if:action,apply', 'uuid'],
+            'plan_digest' => ['required_if:action,apply', 'string', 'size:64'],
+            'confirm' => ['required_if:action,apply', 'string'],
+        ]);
+        $owner = (int) $request->user()->id;
+        $result = $input['action'] === 'prepare'
+            ? $apply->prepare($owner, $input['run_id'])
+            : $apply->apply($owner, $input['run_id'], $input['plan_id'], $input['plan_digest'], $input['confirm']);
+
+        return response()->json($result, $result['ok'] ? 200 : 409)->header('Cache-Control', 'private, no-store');
     }
 
     public function runs(Request $request, ShippingAuditRuns $runs, ?string $run = null)

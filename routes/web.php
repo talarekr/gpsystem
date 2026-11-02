@@ -2978,3 +2978,9 @@ Route::post('/admin/tools/allegro/shipping-rate-backfill/sync-catalog', [\App\Ht
     ->withoutMiddleware(\Illuminate\Session\Middleware\StartSession::class)
     ->middleware([\App\Http\Middleware\ShippingRateAuditReadOnly::class, \App\Http\Middleware\ReadOnlyPreviewSession::class, Authenticate::class, 'admin.panel'])
     ->name('admin.tools.allegro.shipping-rate-backfill.sync-catalog');
+
+// Separate, confirmed single-field APPLY; dry-run routes keep their zero-business-write scope.
+Route::post('/admin/tools/allegro/shipping-rate-backfill/apply', [\App\Http\Controllers\Tools\AllegroShippingRateBackfillController::class, 'apply'])
+    ->withoutMiddleware(\Illuminate\Session\Middleware\StartSession::class)
+    ->middleware([\App\Http\Middleware\ShippingRateAuditReadOnly::class, \App\Http\Middleware\ReadOnlyPreviewSession::class, Authenticate::class, 'admin.panel'])
+    ->name('admin.tools.allegro.shipping-rate-backfill.apply');
