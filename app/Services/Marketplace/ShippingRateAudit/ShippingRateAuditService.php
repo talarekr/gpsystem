@@ -38,10 +38,16 @@ final class ShippingRateAuditService
                     $index[$rate['id']] = $rate['name'];
                 }
             }
-            $indexes[$account->id] = ['ok' => $ok, 'rates' => $ok ? $index : [], 'reason' => $result['reason'] ?? 'provider_read_failed'];
+            if (! $ok && ($result['ok'] ?? false)) {
+                $result['ok'] = false;
+                $result['reason'] = 'invalid_response';
+            }
+            $indexes[$account->id] = ['ok' => $ok, 'rates' => $ok ? $index : [], 'reason' => 'provider_read_failed'];
             $catalog[] = ['marketplace_account_id' => $account->id, 'allegro_account_code' => $account->code,
-                'ok' => $ok, 'reason_code' => $ok ? null : ($result['reason'] ?? 'provider_read_failed'),
+                'ok' => $ok, 'reason_code' => $ok ? null : ($result['reason'] ?? 'invalid_response'),
                 'provider_read_unavailable' => ! $ok,
+                'diagnostics' => array_diff_key($result, ['body' => true]),
+                'http_status' => $result['http_status'] ?? null,
                 'shipping_rates' => $ok ? array_map(fn ($id, $name) => ['shipping_rate_id' => (string) $id, 'shipping_rate_name' => $name, 'local_option' => array_key_exists($name, AllegroSalesSettingsResolver::SHIPPING_RATE_OPTIONS) ? $name : null], array_keys($index), array_values($index)) : []];
         }
         $rows = [];
@@ -170,10 +176,50 @@ final class ShippingRateAuditService
         $cursor = $parts->last()?->id ?? $after;
         $remaining = ! $catalogOnly && DB::table('parts')->where('id', '>', $cursor)->where('id', '<=', $through)->exists();
 
-        return self::WRITES + ['observed_at' => now()->toIso8601String(), 'through_id' => $through, 'next_after_id' => $cursor,
+        return self::WRITES + ['oauth_refresh' => false, 'observed_at' => now()->toIso8601String(), 'through_id' => $through, 'next_after_id' => $cursor,
             'complete' => ! $remaining, 'bounded_total_parts' => DB::table('parts')->where('id', '<=', $through)->count(),
             'summary' => $summary, 'catalog' => $catalog, 'breakdown' => array_values($breakdown), 'rows' => $rows,
             'local_options' => array_keys(AllegroSalesSettingsResolver::SHIPPING_RATE_OPTIONS)];
+    }
+
+    public function diagnoseMainAccount(): array
+    {
+        return ReadOnlyDatabase::run(function (): array {
+            $byId = DB::table('marketplace_accounts')->where('id', 2)->first();
+            $byCode = DB::table('marketplace_accounts')->where('code', 'allegro_main')->first();
+            $matches = $byId && $byCode && $byId->id === $byCode->id && $byId->marketplace === 'allegro';
+            $identity = null;
+            $catalog = null;
+            if ($matches) {
+                $who = $this->client->get($byId, '/me');
+                $identity = array_diff_key($who, ['body' => true]);
+                $login = $who['body']['login'] ?? null;
+                if (($who['ok'] ?? false) && is_string($login) && $login !== '') {
+                    $identity['provider_login'] = $login;
+                    $identity['matches_maxhendler'] = strcasecmp($login, 'Maxhendler') === 0;
+                } elseif ($who['ok'] ?? false) {
+                    $identity['ok'] = false;
+                    $identity['reason'] = 'invalid_response';
+                }
+                $result = $this->client->get($byId, '/sale/shipping-rates');
+                $catalog = array_diff_key($result, ['body' => true]);
+                $rates = $result['body']['shippingRates'] ?? null;
+                if (($result['ok'] ?? false) && (! is_array($rates) || ! array_is_list($rates)
+                    || collect($rates)->contains(fn ($r) => ! is_array($r) || ! is_string($r['id'] ?? null) || ! is_string($r['name'] ?? null)))) {
+                    $catalog['ok'] = false;
+                    $catalog['reason'] = 'invalid_response';
+                }
+                $catalog['shipping_rates_count'] = $catalog['ok'] ? count($rates) : null;
+            }
+
+            return self::WRITES + ['oauth_refresh' => false, 'observed_at' => now()->toIso8601String(),
+                'expected_account_id' => 2, 'expected_account_code' => 'allegro_main',
+                'account_id_exists' => $byId !== null, 'account_code_exists' => $byCode !== null,
+                'account_id_code_match' => (bool) $matches,
+                'maxhendler_identity_confirmed' => ($identity['ok'] ?? false) && ($identity['matches_maxhendler'] ?? false),
+                'reason_code' => $matches ? ($catalog['reason'] ?? null) : ((! $byId || ! $byCode) ? 'account_missing' : 'account_mismatch'),
+                'identity' => $identity, 'shipping_rates' => $catalog];
+        });
     }
 
     private function classify(array &$row, string $reason, string $action): void

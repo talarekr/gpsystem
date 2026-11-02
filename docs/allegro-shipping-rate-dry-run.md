@@ -36,3 +36,25 @@ php vendor/bin/phpunit tests/Feature/AllegroShippingRateBackfillTest.php
 ```
 
 No deployment is performed as part of this change. Real production counts are obtained only after the user deploys and runs the panel.
+
+## Diagnosing Maxhendler / account 2 without refresh
+
+The original `provider_read_failed` is not proof of an expired token. The original client collapsed unsuccessful HTTP responses, invalid JSON, decrypt/JSON errors and transport exceptions into one reason. The catalog service also omitted the client's HTTP status. Production cause cannot be reconstructed from that result alone.
+
+Use **Diagnozuj połączenie Maxhendler** on the same panel. It calls `?mode=diagnose`, verifies that ID 2 and code `allegro_main` identify the same Allegro record, then attempts only GET `/me` and GET `/sale/shipping-rates`. It does not scan Part or select another account. `/me.login` is compared to `Maxhendler`; a local account label alone is not identity proof. A failed identity read remains unconfirmed even if shipping rates succeed.
+
+The normal **Sprawdź cenniki Allegro** now also displays HTTP status and sanitized credential/expiry diagnostics. Only booleans, normalized expiry, safe codes, and (for the targeted `/me` check) provider login are projected. Credential values, raw error bodies and exception messages are excluded. Missing/unreadable credentials are distinguished, and unavailable token-presence data is null rather than false.
+
+Reasons include `account_missing`, `account_mismatch`, `account_disabled`, `credentials_missing`, `credentials_unreadable`, `access_token_missing`, `oauth_refresh_required`, `unauthorized_401`, `forbidden_403`, `provider_429`, `provider_5xx`, `network_error`, `invalid_response`, `endpoint_error`, and `unknown`.
+
+If local expiry is known and in the past, no HTTP request is made: `reason=oauth_refresh_required`, `cause=access_token_expired`, `requires_refresh=true`, and `refresh_blocked_reason=oauth_refresh_blocked_by_zero_write`. HTTP status is null; it is not an inferred 401. Unknown/invalid expiry does not establish expiration: a GET may still be attempted. A received 401 is explicitly `unauthorized_401`; it can also indicate revocation or another auth problem, so it does not prove expiration. No refresh or automatic retry is attempted.
+
+### Existing OAuth flow: alternatives A/B/C
+
+- **A — recommended existing recovery, only after diagnosis:** `/admin/allegro-settings` → **Połącz z Allegro**. `AllegroOAuthController::callback()` exchanges an authorization code and saves tokens, expiry and connection status. Its code does not publish/update offers or synchronize products. The operator must knowingly perform this normal connection operation outside this zero-write panel. This change neither starts nor invokes it.
+- `AllegroApiClient::accessToken()` calls `OAuthTokenManager::ensureValidToken()`. `getWithAuthRetry()` uses it and refreshes/retries on 401. `requestSample()` and selected catalog/compatibility GETs use that path. Not every Allegro GET refreshes: `productOffer()` and `resolveSalesSettingsByNames()` read the stored token directly. There is no basis for claiming the production token is automatically fresh merely because an account is connected.
+- `OAuthTokenManager` refresh uses OAuth POST and persists encrypted credentials plus connection status and `oauth_token_refresh` sync logs on success **and failure**. It refreshes when expiry is missing or within 300 seconds. Therefore importing it into this diagnostic would violate zero-write.
+- **B — not selected:** memory-only refresh still performs OAuth POST; the normal response handler supports a returned replacement refresh token. Discarding that response without persisting it can leave stored credentials stale, and this architecture does not provide a verified safe memory-only refresh path. It is not a read-only GET solution.
+- **C — possible separate future operator action:** an explicitly labelled connection refresh could use the normal token manager with `database_writes=true` and remain separate from dry-run. No such action is added here.
+
+After a diagnosed expiry and a successful normal reconnection, rerun **Diagnozuj połączenie Maxhendler** / **Sprawdź cenniki Allegro**. Do not start the global dry-run until the catalog GET succeeds. No recovery, production request, deployment, global run or backfill is performed by this PR.
