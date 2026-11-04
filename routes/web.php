@@ -2990,3 +2990,10 @@ Route::get('/admin/tools/allegro/shipping-rate-backfill/after-apply', [\App\Http
     ->withoutMiddleware(\Illuminate\Session\Middleware\StartSession::class)
     ->middleware([\App\Http\Middleware\ShippingRateAuditReadOnly::class, \App\Http\Middleware\ReadOnlyPreviewSession::class, Authenticate::class, 'admin.panel'])
     ->name('admin.tools.allegro.shipping-rate-backfill.after-apply');
+
+// Private migration packages only: read-only source DB/session; no provider calls or import.
+Route::match(['get', 'post'], '/admin/tools/gpswiss-migration-export/{run?}', \App\Http\Controllers\Tools\GpswissMigrationExportController::class)
+    ->whereUuid('run')
+    ->withoutMiddleware(\Illuminate\Session\Middleware\StartSession::class)
+    ->middleware([\App\Http\Middleware\ShippingRateAuditReadOnly::class, \App\Http\Middleware\ReadOnlyPreviewSession::class, Authenticate::class, 'admin.panel'])
+    ->name('admin.tools.gpswiss-migration-export');
