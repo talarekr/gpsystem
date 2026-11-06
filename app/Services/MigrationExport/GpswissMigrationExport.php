@@ -56,6 +56,11 @@ final class GpswissMigrationExport
         return $this->browser->snapshotTick($dir, $expectedAttempt);
     }
 
+    public function kickBrowserSnapshot(int $owner, string $id, string $expectedAttempt): array
+    {
+        return $this->browser->kick($this->directory($owner, $id, true), $expectedAttempt, $this->snapshotSourceFingerprint());
+    }
+
     public function pauseBrowserSnapshot(int $owner, string $id): array
     {
         $dir = $this->directory($owner, $id);
@@ -646,10 +651,14 @@ final class GpswissMigrationExport
 
     public function compactStatus(int $owner, string $id): array
     {
-        $dir = $this->directory($owner, $id);
+        $dir = $this->directory($owner, $id, true);
+        if (! is_file($dir.'/operational-progress.json') && filesize($dir.'/state.json') <= 65536
+            && ($this->read($dir.'/state.json')['snapshot_mode'] ?? null) !== 'browser') {
+            // Preserve the existing legacy v2 diagnostics; only browser v3 uses this projection.
+            return $this->browser->filterCompact($this->status($owner, $id));
+        }
 
-        return ($this->read($dir.'/state.json')['snapshot_mode'] ?? null) === 'browser'
-            ? $this->browser->compact($dir) : $this->browser->filterCompact($this->status($owner, $id));
+        return $this->browser->compact($dir);
     }
 
     public function artifacts(int $owner, string $id): array
@@ -1132,7 +1141,7 @@ final class GpswissMigrationExport
         }
     }
 
-    private function directory(int $owner, string $id): string
+    private function directory(int $owner, string $id, bool $operational = false): string
     {
         $this->validateId($id);
         $dir = $this->root().'/'.$id;
@@ -1141,6 +1150,20 @@ final class GpswissMigrationExport
         }
         if (! is_file($dir.'/state.json')) {
             throw new MigrationExportException('checkpoint_missing', 404);
+        }
+        if ($operational && is_file($dir.'/owner.json') && filesize($dir.'/owner.json') <= 1024) {
+            $identity = $this->read($dir.'/owner.json');
+            if (($identity['owner_id'] ?? null) !== $owner || ($identity['run_id'] ?? null) !== $id) {
+                throw new MigrationExportException('run_owner_mismatch', 404, ['owner_match' => false]);
+            }
+            if (is_file($dir.'/deleted.json')) {
+                throw new MigrationExportException('export_deleted', 410);
+            }
+
+            return $dir;
+        }
+        if ($operational && filesize($dir.'/state.json') > 65536) {
+            throw new MigrationExportException('operational_identity_missing', 409);
         }
         try {
             $state = $this->read($dir.'/state.json');

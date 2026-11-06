@@ -124,6 +124,45 @@ final class GpswissMigrationExportController extends Controller
         }
     }
 
+    public function kick(Request $request, GpswissMigrationExport $exports, string $run)
+    {
+        abort_unless($request->user()?->hasRole(UserRole::OwnerAdmin->value), 403);
+        $input = $request->validate(['attempt_id' => ['required', 'uuid'],
+            'cursor' => ['prohibited'], 'dataset' => ['prohibited'], 'action' => ['prohibited']]);
+        $owner = (int) $request->user()->id;
+        $started = microtime(true);
+        $finished = false;
+        $reserve = str_repeat('r', 128 * 1024);
+        register_shutdown_function(static function () use (&$finished, &$reserve, $exports, $owner, $run): void {
+            $reserve = null;
+            $fatal = error_get_last();
+            if (! $finished && $fatal && in_array($fatal['type'], [E_ERROR, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+                try {
+                    $exports->markTickFatal($owner, $run, str_contains($fatal['message'], 'Maximum execution time') ? 'backend_timeout' : 'backend_fatal_error');
+                } catch (\Throwable) {
+                }
+            }
+        });
+        try {
+            ignore_user_abort(true);
+            $data = $exports->kickBrowserSnapshot($owner, $run, $input['attempt_id']);
+            $data['tick_diagnostic'] = $data['last_tick'] ?? null;
+            $data['kick_diagnostic'] = ['action' => 'kick', 'reason_code' => $data['kick_reason'], 'duration_ms' => (int) ((microtime(true) - $started) * 1000)];
+            if (strlen(json_encode($data, JSON_THROW_ON_ERROR)) > 8192) {
+                throw new MigrationExportException('compact_status_budget_exceeded', 500);
+            }
+
+            return response()->json($data)->header('Cache-Control', 'private, no-store');
+        } catch (MigrationExportException $error) {
+            return $this->error($error->reasonCode, $error->httpStatus, $error->details);
+        } catch (\Throwable $error) {
+            return $this->error('server_exception', 500, ['backend_exception_class' => str_contains(get_class($error), '@anonymous') ? 'AnonymousThrowable' : get_class($error)]);
+        } finally {
+            $finished = true;
+            $reserve = null;
+        }
+    }
+
     private function compactReply(array $data, float $started)
     {
         $data['status_request_diagnostic'] = ['action' => 'compact_status', 'route_name' => 'admin.tools.gpswiss-migration-export',

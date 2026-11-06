@@ -2998,6 +2998,13 @@ Route::match(['get', 'post'], '/admin/tools/gpswiss-migration-export/{run?}', \A
     ->middleware([\App\Http\Middleware\ShippingRateAuditReadOnly::class, \App\Http\Middleware\ReadOnlyPreviewSession::class, Authenticate::class, 'admin.panel'])
     ->name('admin.tools.gpswiss-migration-export');
 
+// Explicit, CSRF-protected recovery tick; shares the existing read-only DB/session guards.
+Route::post('/admin/tools/gpswiss-migration-export/{run}/kick', [\App\Http\Controllers\Tools\GpswissMigrationExportController::class, 'kick'])
+    ->whereUuid('run')
+    ->withoutMiddleware(\Illuminate\Session\Middleware\StartSession::class)
+    ->middleware([\App\Http\Middleware\ShippingRateAuditReadOnly::class, \App\Http\Middleware\ReadOnlyPreviewSession::class, Authenticate::class, 'admin.panel'])
+    ->name('admin.tools.gpswiss-migration-export.kick');
+
 // Authenticated diagnostic fallback only for malformed migration-export URLs.
 Route::match(['get', 'post'], '/admin/tools/gpswiss-migration-export/{invalidPath}', [\App\Http\Controllers\Tools\GpswissMigrationExportController::class, 'invalidRoute'])
     ->where('invalidPath', '.+')

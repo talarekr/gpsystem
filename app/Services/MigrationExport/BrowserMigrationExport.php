@@ -82,32 +82,83 @@ final class BrowserMigrationExport
         return $this->locked($dir, function () use ($dir, $expected): void {
             $state = $this->read($dir.'/state.json');
             $this->attempt($state, $expected);
-            if ($state['state'] === 'snapshot_paused' || $state['state'] === 'snapshot_failed') {
+            $this->performSnapshotTick($dir, $state);
+        });
+    }
+
+    /** No status dependency: preflight under the same lease as the ONE bounded unit of work. */
+    public function kick(string $dir, string $expected, string $sourceFingerprint): array
+    {
+        $reason = 'busy';
+        $result = $this->locked($dir, function () use ($dir, $expected, $sourceFingerprint, &$reason): void {
+            $state = $this->small($dir.'/state.json', 65536);
+            if (! $state) {
+                $state = $this->small($dir.'/operational-progress.json', 8192);
+                if (($state['state'] ?? null) !== 'completed' || ($state['root_fingerprint'] ?? null) !== app(CompactSnapshotProgress::class)->fingerprint($dir.'/state.json')) {
+                    throw new MigrationExportException('minimal_root_state_unavailable', 503);
+                }
+            }
+            if (($state['snapshot_attempt_id'] ?? null) !== $expected) {
+                throw new MigrationExportException('attempt_mismatch', 409);
+            }
+            if (($state['run_id'] ?? null) !== basename($dir) || ($state['snapshot_mode'] ?? null) !== 'browser') {
+                throw new MigrationExportException('stale_attempt', 409);
+            }
+            $reason = match (true) {
+                $state['state'] === 'completed' => 'completed',
+                $state['state'] === 'snapshot_paused' => 'paused',
+                in_array($state['state'], ['snapshot_failed', 'failed', 'snapshot_aborted'], true) => 'run_failed',
+                $state['state'] !== 'snapshot_running' => 'state_not_runnable',
+                ! in_array($state['phase'], ['snapshot_boundaries', 'snapshot_export', 'snapshot_verify', 'relation_audit', 'photo_inventory'], true) => 'state_not_runnable',
+                default => 'tick_completed',
+            };
+            if ($reason !== 'tick_completed') {
                 return;
             }
-            if ($state['phase'] === 'relation_audit') {
-                $result = $this->relations->tick($dir, $state['snapshot_attempt_id']);
-                $state['relation_audit'] = $result;
-                $state['last_success'] = $result['last_success'];
-                if ($result['done']) {
-                    $state['phase'] = 'photo_inventory';
-                }
-            } elseif ($state['phase'] === 'photo_inventory') {
-                $this->inventory($dir, $state);
-            } elseif (in_array($state['state'], ['snapshot_pending', 'snapshot_running'], true)) {
-                $result = $this->snapshots->tick($dir, $state['snapshot_attempt_id']);
-                $state['last_error'] = $result['last_error'];
-                $state['last_success'] = $result['last_success'];
-                $state['state'] = $result['failed'] ? 'snapshot_failed' : ($result['done'] ? 'snapshot_completed' : 'snapshot_running');
-                $state['snapshot_state'] = $state['state'];
-                $state['phase'] = $result['done'] ? 'relation_audit' : $result['phase'];
-                if ($result['done']) {
-                    $state['source_counts'] = $result['source_counts'];
-                    $state['inventory'] = ['dataset' => 0, 'shard' => 0, 'row' => 0, 'tasks' => 0, 'bytes' => 0, 'chain' => hash('sha256', ''), 'sample_ids' => [], 'sold_bytes' => 0, 'to_list_bytes' => 0];
-                }
+            if (($state['snapshot_source_fingerprint'] ?? null) !== $sourceFingerprint) {
+                throw new MigrationExportException('snapshot_source_context_mismatch', 409);
             }
-            $this->write($dir.'/state.json', $state);
-        });
+            $this->performSnapshotTick($dir, $state);
+            if ($state['last_error'] ?? null) {
+                $reason = $state['last_error'];
+            }
+        }, false, true);
+        if ($reason === 'tick_completed' && ! empty($result['last_error'])) {
+            $reason = $result['last_error'];
+        }
+        $result['kick_reason'] = $reason;
+        $result['blocked_reason'] = $reason === 'tick_completed' ? ($result['blocked_reason'] ?? null) : $reason;
+
+        return $result;
+    }
+
+    private function performSnapshotTick(string $dir, array &$state): void
+    {
+        if ($state['state'] === 'snapshot_paused' || $state['state'] === 'snapshot_failed') {
+            return;
+        }
+        if ($state['phase'] === 'relation_audit') {
+            $result = $this->relations->tick($dir, $state['snapshot_attempt_id']);
+            $state['relation_audit'] = $result;
+            $state['last_success'] = $result['last_success'];
+            if ($result['done']) {
+                $state['phase'] = 'photo_inventory';
+            }
+        } elseif ($state['phase'] === 'photo_inventory') {
+            $this->inventory($dir, $state);
+        } elseif (in_array($state['state'], ['snapshot_pending', 'snapshot_running'], true)) {
+            $result = $this->snapshots->tick($dir, $state['snapshot_attempt_id']);
+            $state['last_error'] = $result['last_error'];
+            $state['last_success'] = $result['last_success'];
+            $state['state'] = $result['failed'] ? 'snapshot_failed' : ($result['done'] ? 'snapshot_completed' : 'snapshot_running');
+            $state['snapshot_state'] = $state['state'];
+            $state['phase'] = $result['done'] ? 'relation_audit' : $result['phase'];
+            if ($result['done']) {
+                $state['source_counts'] = $result['source_counts'];
+                $state['inventory'] = ['dataset' => 0, 'shard' => 0, 'row' => 0, 'tasks' => 0, 'bytes' => 0, 'chain' => hash('sha256', ''), 'sample_ids' => [], 'sold_bytes' => 0, 'to_list_bytes' => 0];
+            }
+        }
+        $this->write($dir.'/state.json', $state);
     }
 
     public function pause(string $dir): array
@@ -301,51 +352,106 @@ final class BrowserMigrationExport
         ]);
     }
 
-    /** Small polling contract: no full snapshot index, sample state or archive manifest is loaded. */
+    /** O(1) polling: only a bounded operational file and small diagnostics, never the export index. */
     public function compact(string $dir): array
     {
-        $state = $this->read($dir.'/state.json');
         $probe = fopen($dir.'/lock', 'c');
         $busy = ! flock($probe, LOCK_EX | LOCK_NB);
-        if (! $busy) {
-            flock($probe, LOCK_UN);
+        try {
+            $path = $dir.'/operational-progress.json';
+            $data = $this->small($path, 8192);
+            $rootFingerprint = app(CompactSnapshotProgress::class)->fingerprint($dir.'/state.json');
+            $checkpoint = $data ? $dir.'/logical-snapshot/'.($data['attempt_id'] ?? '').'/checkpoint.json' : null;
+            $checkpointChanged = $checkpoint && is_file($checkpoint) && ($data['checkpoint_fingerprint'] ?? null) !== app(CompactSnapshotProgress::class)->fingerprint($checkpoint);
+            if (! $data || ($data['root_fingerprint'] ?? null) !== $rootFingerprint || $checkpointChanged) {
+                if ($busy) {
+                    return array_replace($this->filterCompact($data ?? $this->small($dir.'/state.json', 65536) ?? []), ['run_id' => basename($dir), 'busy' => true, 'next_action' => 'wait', 'blocked_reason' => 'busy']);
+                }
+                // One-time legacy bootstrap from small root/cache. No checkpoint scan, even on cache miss.
+                $state = $this->small($dir.'/state.json', 65536);
+                if (! $state) {
+                    throw new MigrationExportException('operational_progress_missing', 503);
+                }
+                $this->publishOperational($dir, $state);
+                $data = $this->small($path, 8192);
+                if (! $data) {
+                    throw new MigrationExportException('operational_progress_missing', 503);
+                }
+            }
+            $data['busy'] = $busy;
+            if ($busy) {
+                $data['next_action'] = 'wait';
+            }
+            foreach (['last-tick.json' => 'last_tick', 'last-status-error.json' => 'last_status_error'] as $file => $key) {
+                if ($diagnostic = $this->small($dir.'/'.$file, 4096)) {
+                    $data[$key] = $diagnostic;
+                }
+            }
+
+            return $this->filterCompact($data);
+        } finally {
+            if (! $busy) {
+                flock($probe, LOCK_UN);
+            }
+            fclose($probe);
         }
-        fclose($probe);
+    }
+
+    private function small(string $path, int $limit): ?array
+    {
+        clearstatcache(true, $path);
+        if (! is_file($path) || filesize($path) > $limit) {
+            return null;
+        }
+        try {
+            return json_decode(file_get_contents($path, false, null, 0, $limit + 1), true, 32, JSON_THROW_ON_ERROR);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    private function publishOperational(string $dir, array $state): void
+    {
         $snapshot = in_array($state['state'], ['snapshot_pending', 'snapshot_running', 'snapshot_paused', 'snapshot_failed', 'snapshot_completed'], true);
-        $progress = ['processed' => $state['processed_images'] ?? 0, 'total' => $state['total_images'] ?? null,
-            'cursor' => $state['inventory']['row'] ?? $state['package']['cursor'] ?? null, 'current_dataset' => $state['phase']];
-        if ($snapshot && ! in_array($state['phase'], ['photo_inventory', 'relation_audit'], true)) {
-            $progress = app(CompactSnapshotProgress::class)->read($dir, $state['snapshot_attempt_id']);
-        }
+        $logical = $snapshot && ! in_array($state['phase'], ['photo_inventory', 'relation_audit'], true);
+        $progress = $logical ? app(CompactSnapshotProgress::class)->read($dir, $state['snapshot_attempt_id']) : [
+            'processed' => $state['phase'] === 'photo_inventory' ? ($state['inventory']['tasks'] ?? 0) : ($state['processed_images'] ?? 0),
+            'total' => $state['phase'] === 'photo_inventory' ? null : ($state['total_images'] ?? null),
+            'cursor' => $state['inventory']['row'] ?? $state['package']['cursor'] ?? null, 'current_dataset' => $state['phase'],
+        ];
         $next = match (true) {
-            $busy => 'wait', $state['state'] === 'completed' => 'download',
+            $state['state'] === 'completed' => 'download',
             $state['state'] === 'snapshot_paused', isset($state['resume_state']) => 'resume',
             in_array($state['state'], ['snapshot_failed', 'snapshot_aborted', 'failed'], true) => 'blocked',
             $snapshot => 'snapshot_tick', default => 'tick',
         };
-        $data = array_replace($state, $progress, ['next_action' => $next, 'busy' => $busy,
-            'resume_allowed' => ! in_array($next, ['blocked', 'download'], true),
+        $data = $this->filterCompact(array_replace($state, $progress ?? ['processed' => null, 'total' => null, 'remaining' => null, 'cursor' => null, 'current_dataset' => null], [
+            'next_action' => $next, 'busy' => false, 'resume_allowed' => ! in_array($next, ['blocked', 'download'], true),
             'blocked_reason' => $next === 'blocked' ? ($state['last_error'] ?? $state['state']) : null,
-            'snapshot_retry_allowed' => ! $busy && in_array($state['state'], ['snapshot_pending', 'snapshot_running', 'snapshot_paused', 'snapshot_failed'], true) && ! is_dir($dir.'/images'),
-            'snapshot_abort_allowed' => false, 'photo_retry_allowed' => ! $busy && ! isset($state['photo_retry']) && array_sum(array_intersect_key($state['photo_results'] ?? [], array_flip(['COPY_FAILED', 'UNREADABLE_ORIGINAL', 'INSUFFICIENT_DISK_SPACE']))) > 0]);
-        foreach (['last-tick.json' => 'last_tick', 'last-status-error.json' => 'last_status_error'] as $file => $key) {
-            try {
-                if (is_file($dir.'/'.$file) && filesize($dir.'/'.$file) <= 4096) {
-                    $data[$key] = $this->read($dir.'/'.$file);
-                }
-            } catch (\Throwable) { /* A diagnostic artifact cannot block a healthy checkpoint. */
-            }
+            'snapshot_retry_allowed' => in_array($state['state'], ['snapshot_pending', 'snapshot_running', 'snapshot_paused', 'snapshot_failed'], true) && ! is_dir($dir.'/images'),
+            'snapshot_abort_allowed' => false, 'photo_retry_allowed' => ! isset($state['photo_retry']) && array_sum(array_intersect_key($state['photo_results'] ?? [], array_flip(['COPY_FAILED', 'UNREADABLE_ORIGINAL', 'INSUFFICIENT_DISK_SPACE']))) > 0,
+        ]));
+        $data['remaining'] ??= isset($data['total'], $data['processed']) ? max(0, $data['total'] - $data['processed']) : null;
+        $data['last_success'] ??= null;
+        $data['attempt_id'] = $state['snapshot_attempt_id'];
+        $data['last_tick_reason'] = $this->small($dir.'/last-tick.json', 4096)['reason_code'] ?? null;
+        $data['progress_unavailable'] = $logical && $progress === null;
+        $data['root_fingerprint'] = app(CompactSnapshotProgress::class)->fingerprint($dir.'/state.json');
+        $checkpoint = $dir.'/logical-snapshot/'.$state['snapshot_attempt_id'].'/checkpoint.json';
+        $data['checkpoint_fingerprint'] = is_file($checkpoint) ? app(CompactSnapshotProgress::class)->fingerprint($checkpoint) : null;
+        unset($data['last_tick'], $data['last_status_error']);
+        $bytes = json_encode($data, JSON_THROW_ON_ERROR);
+        if (strlen($bytes) > 8192) {
+            throw new MigrationExportException('operational_progress_budget_exceeded', 500);
         }
-        $data['remaining'] ??= isset($data['total']) ? max(0, $data['total'] - $data['processed']) : null;
-
-        return $this->filterCompact($data);
+        $this->write($dir.'/operational-progress.json', $data);
     }
 
     public function filterCompact(array $data): array
     {
         return array_intersect_key($data, array_flip(['run_id', 'schema_version', 'snapshot_attempt_id', 'snapshot_mode', 'state', 'phase',
             'current_dataset', 'processed', 'total', 'remaining', 'cursor', 'next_action', 'busy', 'resume_allowed', 'blocked_reason',
-            'last_success', 'last_error', 'snapshot_state', 'snapshot_retry_allowed', 'snapshot_abort_allowed', 'photo_retry_allowed', 'last_tick', 'last_status_error']));
+            'last_success', 'last_error', 'snapshot_state', 'snapshot_retry_allowed', 'snapshot_abort_allowed', 'photo_retry_allowed', 'last_tick', 'last_status_error', 'attempt_id', 'last_tick_reason', 'checkpoint_fingerprint', 'progress_unavailable']));
     }
 
     public function download(string $dir, string $key): string
@@ -645,13 +751,13 @@ final class BrowserMigrationExport
         }
     }
 
-    private function locked(string $dir, callable $operation, bool $recoverable = false): array
+    private function locked(string $dir, callable $operation, bool $recoverable = false, bool $compact = false): array
     {
         $lock = fopen($dir.'/lock', 'c');
         if (! flock($lock, LOCK_EX | LOCK_NB)) {
             fclose($lock);
 
-            return $this->status($dir, null, true);
+            return $compact ? $this->compact($dir) : $this->status($dir, null, true);
         }
         try {
             $operation();
@@ -668,11 +774,18 @@ final class BrowserMigrationExport
             $state['last_error'] = 'browser_export_tick_failed';
             $this->write($dir.'/state.json', $state);
         } finally {
+            try {
+                $root = $compact ? $this->small($dir.'/state.json', 65536) : $this->read($dir.'/state.json');
+                if ($root) {
+                    $this->publishOperational($dir, $root);
+                }
+            } catch (\Throwable) { // Derived progress must never invalidate a committed data checkpoint.
+            }
             flock($lock, LOCK_UN);
             fclose($lock);
         }
 
-        return $this->status($dir);
+        return $compact ? $this->compact($dir) : $this->status($dir);
     }
 
     private function append(string $path, int $offset, string $bytes): void

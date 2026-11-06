@@ -1,4 +1,4 @@
-"""Exact production 20568/79957: compact status retry precedes every resumed tick."""
+"""Exact production 20568/79957: compact status retries and fenced fallback recovery."""
 import time
 from pathlib import Path
 from playwright.sync_api import sync_playwright
@@ -13,7 +13,7 @@ def case(browser,mode):
   nonlocal fails,ticks,success
   req=r.request
   if req.is_navigation_request():r.fulfill(content_type='text/html',body=HTML.replace('isStatus?10000:45000','isStatus?50:45000') if mode=='timeout' else HTML);return
-  action=(req.post_data_json or {}).get('action') if req.method=='POST' else None;seen.append((req.url,action))
+  action=('kick' if req.url.endswith('/kick') else (req.post_data_json or {}).get('action')) if req.method=='POST' else None;seen.append((req.url,action))
   if req.url.endswith('?format=artifacts'):r.fulfill(json={'run_id':RUN,'state':'completed','download_artifacts':[]});return
   if action is None:
    assert req.url.endswith('?format=compact'),req.url
@@ -26,17 +26,18 @@ def case(browser,mode):
      r.abort('connectionreset');return
     success=True
    r.fulfill(json={'existing_run_found':True,'run':state} if req.url==BASE+'?format=compact' else state);return
-  assert action=='snapshot_tick' and success,seen
-  assert req.post_data_json['expected_snapshot_attempt']==ATT
+  assert (action=='snapshot_tick' and success) or (action=='kick' and mode.startswith('exhausted')),seen
+  assert req.post_data_json==({'attempt_id':ATT} if action=='kick' else {'action':'snapshot_tick','expected_snapshot_attempt':ATT})
   ticks+=1;assert ticks==1
   state.update(processed=20573,cursor={'id':2782},state='completed',next_action='download')
-  r.fulfill(json=state)
+  r.fulfill(json={**state,**({'kick_reason':'tick_completed'} if action=='kick' else {})})
  c.route('**/*',route);p.goto(BASE);p.wait_for_function("document.querySelector('#state').textContent.includes('20568')")
  if mode=='reload':p.reload();p.wait_for_function("document.querySelector('#state').textContent.includes('20568')")
  p.locator('#resume').click()
  if mode.startswith('exhausted'):
-  p.wait_for_function("document.querySelector('#resume-diagnostic').textContent.includes('status_fetch_retry_exhausted')",timeout=20000)
-  assert fails==4 and ticks==0
+  p.wait_for_function("document.querySelector('#message').textContent.includes('Eksport gotowy')",timeout=20000)
+  assert fails==4 and ticks==1
+  assert 'fallback_kick' in p.locator('#resume-diagnostic').inner_text()
  else:
   p.wait_for_function("document.querySelector('#message').textContent.includes('Eksport gotowy')",timeout=20000)
   assert state['processed']==20573 and state['cursor']=={'id':2782} and fails==(3 if mode=='reload' else 2)
