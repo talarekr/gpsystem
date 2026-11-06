@@ -76,6 +76,22 @@ final class GpswissMigrationExport
         return $this->browser->retryPhotos($dir);
     }
 
+    public function markTickFatal(int $owner, string $id, string $reason): void
+    {
+        $dir = $this->directory($owner, $id);
+        if (! is_file($dir.'/last-tick.json')) {
+            return;
+        }
+        $trace = $this->read($dir.'/last-tick.json');
+        if (($trace['reason_code'] ?? null) !== 'tick_running') {
+            return;
+        }
+        $trace['reason_code'] = $reason === 'backend_timeout' ? 'backend_timeout' : 'backend_fatal_error';
+        $trace['backend_exception_class'] = 'PHPFatalError';
+        $trace['duration_ms'] = isset($trace['started_at']) ? (int) ((microtime(true) - $trace['started_at']) * 1000) : null;
+        $this->write($dir.'/last-tick.json', $trace);
+    }
+
     /** Explicit synchronous entry point for the dedicated CLI and existing local callers. */
     public function start(int $owner, ?string $id = null): array
     {

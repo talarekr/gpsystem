@@ -18,6 +18,21 @@ final class GpswissMigrationExportController extends Controller
         $input = $request->validate(['action' => ['sometimes', 'in:start,tick,resume,snapshot_tick,pause_snapshot,retry_snapshot,abort_snapshot,retry_photos'], 'download' => ['sometimes', 'in:sample,full,artifact'], 'format' => ['sometimes', 'in:status'],
             'artifact' => ['sometimes', 'string', 'max:180', 'regex:/\A[A-Za-z0-9][A-Za-z0-9_.-]*\z/D'],
             'confirm_restart' => ['sometimes', 'boolean'], 'confirm_abort' => ['sometimes', 'boolean'], 'confirm_retry_photos' => ['sometimes', 'boolean'], 'expected_snapshot_attempt' => ['present_if:action,snapshot_tick', 'nullable', 'uuid']]);
+        $finished = false;
+        $reserve = null;
+        if (($input['action'] ?? null) === 'snapshot_tick' && $run) {
+            $reserve = str_repeat('r', 128 * 1024);
+            register_shutdown_function(static function () use (&$finished, &$reserve, $exports, $owner, $run): void {
+                $reserve = null;
+                $fatal = error_get_last();
+                if (! $finished && $fatal && in_array($fatal['type'], [E_ERROR, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+                    try {
+                        $exports->markTickFatal($owner, $run, str_contains($fatal['message'], 'Maximum execution time') ? 'backend_timeout' : 'backend_fatal_error');
+                    } catch (\Throwable) {
+                    }
+                }
+            });
+        }
         try {
             if ($request->isMethod('post')) {
                 abort_unless(isset($input['action']), 422);
@@ -44,6 +59,11 @@ final class GpswissMigrationExportController extends Controller
                             : throw new MigrationExportException('photo_retry_confirmation_required', 422),
                         default => $exports->tick($owner, $run),
                     };
+                }
+
+                if ($input['action'] === 'snapshot_tick') {
+                    $data['tick_diagnostic'] = $data['last_tick'] ?? null;
+                    unset($data['snapshot_progress']['datasets']);
                 }
 
                 return response()->json($data)->header('Cache-Control', 'private, no-store');
@@ -76,10 +96,13 @@ final class GpswissMigrationExportController extends Controller
         } catch (\RuntimeException $e) {
             $safe = in_array($e->getMessage(), ['snapshot_failed', 'zip_extension_required', 'export_root_must_be_private', 'export_root_permissions_must_be_private'], true) ? $e->getMessage() : 'other';
 
-            return $this->error($safe, 409);
-        } catch (\Throwable) {
+            return $this->error($safe === 'other' ? 'server_exception' : $safe, $safe === 'other' ? 500 : 409, ['backend_exception_class' => str_contains(get_class($e), '@anonymous') ? 'AnonymousThrowable' : get_class($e)]);
+        } catch (\Throwable $e) {
             // Do not return exception bodies, paths, SQL, or record data in diagnostics.
-            return $this->error('other', 500);
+            return $this->error('server_exception', 500, ['backend_exception_class' => str_contains(get_class($e), '@anonymous') ? 'AnonymousThrowable' : get_class($e)]);
+        } finally {
+            $finished = true;
+            $reserve = null;
         }
     }
 
