@@ -488,7 +488,7 @@ final class BrowserMigrationExport
     private function datasetRecoveryAllowed(array $data): bool
     {
         return ($data['state'] ?? null) === 'snapshot_failed' && ($data['last_error'] ?? null) === 'snapshot_row_updated_after_cutoff'
-            && ($data['current_dataset'] ?? null) === 'marketplace_listings';
+            && BrowserMigrationSnapshot::mutableDatasetAllowed($data['current_dataset'] ?? null);
     }
 
     public function datasetConflict(string $dir, string $attempt): array
@@ -510,7 +510,7 @@ final class BrowserMigrationExport
     {
         return array_intersect_key($data, array_flip(['run_id', 'schema_version', 'snapshot_attempt_id', 'snapshot_mode', 'state', 'phase',
             'current_dataset', 'processed', 'total', 'remaining', 'cursor', 'next_action', 'busy', 'resume_allowed', 'blocked_reason',
-            'last_success', 'last_error', 'snapshot_state', 'snapshot_retry_allowed', 'snapshot_abort_allowed', 'photo_retry_allowed', 'last_tick', 'last_status_error', 'attempt_id', 'last_tick_reason', 'checkpoint_fingerprint', 'progress_unavailable', 'dataset_generation', 'dataset_boundary_id', 'previous_boundary_id', 'boundary_refreshed_at', 'recovery_reason', 'consistency_mode', 'dataset_recovery', 'dataset_recovery_allowed', 'recovery_reason_code', 'source_conflict']));
+            'last_success', 'last_error', 'snapshot_state', 'snapshot_retry_allowed', 'snapshot_abort_allowed', 'photo_retry_allowed', 'last_tick', 'last_status_error', 'attempt_id', 'last_tick_reason', 'checkpoint_fingerprint', 'progress_unavailable', 'dataset_generation', 'dataset_boundary_id', 'previous_boundary_id', 'boundary_refreshed_at', 'recovery_reason', 'consistency_mode', 'dataset_recovery', 'dataset_recovery_allowed', 'recovery_reason_code', 'source_conflict', 'recovery_strategy', 'mutable_round', 'mutable_dirty_rows', 'mutable_dirty_shards', 'mutable_reused_shards', 'exported_records', 'verification_processed']));
     }
 
     public function download(string $dir, string $key): string

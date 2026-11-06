@@ -12,7 +12,7 @@ use RuntimeException;
 /** Immutable, bounded logical export shards. Never claims a transaction shared by HTTP requests. */
 final class BrowserMigrationSnapshot
 {
-    use MutableListingSnapshot;
+    use MutableDatasetSnapshot;
 
     private int $attempted = 0;
 
@@ -62,6 +62,11 @@ final class BrowserMigrationSnapshot
         $trace = ['started_at' => microtime(true), 'records_limit' => max(1, min(5, (int) config('migration_export.browser_snapshot_rows', 5))), 'action' => 'snapshot_tick', 'reason_code' => 'tick_running', 'current_dataset' => $dataset,
             'cursor_before' => $state['datasets'][$dataset][$cursorField] ?? null, 'cursor_after' => null,
             'records_attempted' => null, 'records_completed' => 0, 'backend_exception_class' => null];
+        $currentDefinition = $state['datasets'][$dataset] ?? [];
+        if ($state['stage'] === 'verify' && ($currentDefinition['recovery_strategy'] ?? null) === 'adopt_complete_shards_then_reconcile') {
+            $position = $currentDefinition['mutable_active'] === null ? $currentDefinition['mutable_position'] : ($currentDefinition['mutable_active'][$currentDefinition['mutable_position']] ?? null);
+            $trace['records_limit'] = max($trace['records_limit'], min(25, $currentDefinition['shards'][$position]['rows'] ?? 0));
+        }
         $this->trace($directory, $trace);
         $state['last_error'] = null;
         try {
@@ -116,9 +121,9 @@ final class BrowserMigrationSnapshot
                         $definition['max_key'] = null;
                         $definition['total'] = 0;
                     }
-                    if ($name === 'marketplace_listings' && $definition['key_columns'] === ['id']) {
+                    if (self::mutableDatasetAllowed($name) && $definition['key_columns'] === ['id']) {
                         $this->initializeMutable($definition, $state['cutoff_database_time']);
-                        $state['dataset_consistency_overrides']['marketplace_listings'] = $definition['mutable_contract'];
+                        $state['dataset_consistency_overrides'][$name] = $definition['mutable_contract'];
                     }
                     $state['datasets'][$name] = $definition;
                     $state['dataset_index']++;
@@ -147,7 +152,7 @@ final class BrowserMigrationSnapshot
                 $trace['source_conflict'] = $error->diagnostic;
                 $state['source_conflict'] = $error->diagnostic;
             }
-            $allowed = ['snapshot_mutable_dataset_unstable', 'snapshot_schema_changed', 'snapshot_source_changed', 'snapshot_row_updated_after_cutoff', 'snapshot_row_too_large_for_http', 'snapshot_stable_nonsecret_key_required', 'snapshot_immutable_chunk_conflict', 'snapshot_shard_checksum_mismatch', 'snapshot_reference_boundary_required'];
+            $allowed = ['snapshot_legacy_shard_budget_exceeded', 'snapshot_mutable_dataset_unstable', 'snapshot_schema_changed', 'snapshot_source_changed', 'snapshot_row_updated_after_cutoff', 'snapshot_row_too_large_for_http', 'snapshot_stable_nonsecret_key_required', 'snapshot_immutable_chunk_conflict', 'snapshot_shard_checksum_mismatch', 'snapshot_reference_boundary_required'];
             $state['last_error'] = in_array($error->getMessage(), $allowed, true) ? $error->getMessage() : 'snapshot_http_tick_failed';
             $trace['backend_exception_class'] = str_contains(get_class($error), '@anonymous') ? 'AnonymousThrowable' : get_class($error);
             if ($state['last_error'] === 'snapshot_http_tick_failed') {
@@ -195,7 +200,7 @@ final class BrowserMigrationSnapshot
         $descriptor = $current !== null ? ($index['datasets'][$current] ?? []) : [];
 
         return array_intersect_key($index, array_flip(['dataset_recovery', 'dataset_boundary_history', 'source_conflict', 'format', 'attempt_id', 'stage', 'done', 'failed', 'current_dataset', 'processed', 'verified', 'total', 'last_success', 'last_error', 'next_action', 'database_consistency']))
-            + ['phase' => 'snapshot_'.$index['stage'], 'cursor' => $descriptor['cursor'] ?? null, 'remaining' => max(0, $index['total'] - $index['processed']),
+            + ['exported_records' => $index['processed'], 'verification_processed' => $index['verified'], 'phase' => 'snapshot_'.$index['stage'], 'cursor' => $descriptor['cursor'] ?? null, 'remaining' => max(0, $index['total'] - $index['processed']),
                 'datasets' => array_map(fn ($d) => array_intersect_key($d, array_flip(['available', 'processed', 'verified', 'total', 'cursor', 'max_key', 'boundary_frozen_at', 'checksum_partial', 'done'])), $index['datasets'])];
     }
 
@@ -227,7 +232,7 @@ final class BrowserMigrationSnapshot
         $processed = array_sum(array_column($state['datasets'], 'processed'));
         $verified = array_sum(array_column($state['datasets'], 'verified'));
 
-        return $state + ['phase' => 'snapshot_'.$state['stage'], 'cursor' => $current !== null ? ($state['datasets'][$current]['cursor'] ?? null) : null,
+        return $state + ['exported_records' => $processed, 'verification_processed' => $verified, 'phase' => 'snapshot_'.$state['stage'], 'cursor' => $current !== null ? ($state['datasets'][$current]['cursor'] ?? null) : null,
             'relations' => array_map(fn ($d) => $d['relations'] ?? [], $state['datasets']),
             'source_counts' => ['products' => $state['datasets']['parts']['total'] ?? 0, 'cars' => $state['datasets']['cars']['total'] ?? 0, 'orders' => $state['datasets']['orders']['total'] ?? 0, 'order_items' => $state['datasets']['order_items']['total'] ?? 0, 'photo_rows' => $state['datasets']['part_images']['total'] ?? 0, 'categories' => $state['datasets']['part_categories']['total'] ?? 0, 'storage_locations' => $state['datasets']['storage_locations']['total'] ?? 0, 'sold_parts' => $state['datasets']['parts']['sold_count'] ?? 0, 'parts_to_list' => $state['datasets']['parts']['to_list_count'] ?? 0, 'statuses' => $state['datasets']['parts']['status_counts'] ?? [], 'dataset_counts' => array_map(fn ($d) => $d['total'], $state['datasets'])], 'done' => $state['stage'] === 'completed', 'failed' => $state['stage'] === 'failed', 'current_dataset' => $current,
             'processed' => $processed, 'verified' => $verified, 'total' => array_sum(array_column($state['datasets'], 'total')),
@@ -253,6 +258,9 @@ final class BrowserMigrationSnapshot
 
     private function exportChunk(string $folder, array &$state, array &$definition): void
     {
+        if (($definition['derived_from'] ?? null) === 'parts' && $this->mutable($state['datasets']['parts'])) {
+            $definition['total'] = $state['datasets']['parts']['processed'];
+        }
         if (! $this->mutable($definition) && $definition['processed'] === $definition['total']) {
             $state['dataset_index']++;
 
@@ -280,6 +288,7 @@ final class BrowserMigrationSnapshot
             }
             $shard = $this->mutableShard($folder, $state, $definition, $rows, $cursor, count($definition['shards']), 'export');
             $shard['source_ids'] = array_column($rows, 'id');
+            $this->adjustMutableCounts($definition, [], $rows);
             $definition['shards'][] = $shard;
             $definition['cursor'] = $cursor;
             $definition['processed'] += count($rows);
@@ -323,6 +332,11 @@ final class BrowserMigrationSnapshot
     {
         if ($this->mutable($definition)) {
             $this->reconcileMutable($folder, $state, $definition);
+
+            return;
+        }
+        if (($definition['derived_from'] ?? null) === 'parts' && $this->mutable($state['datasets']['parts'])) {
+            $this->verifyReconciledPartsRelations($folder, $state, $definition);
 
             return;
         }

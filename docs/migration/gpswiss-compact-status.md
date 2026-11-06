@@ -18,7 +18,7 @@ Pod istniejącym flock runu serwer sprawdza aktualny attempt, run, tryb browser 
 
 KICK nie resetuje próby ani nie wznawia samowolnie pauzy. Zatwierdzone shardy/offsety i blokada zapewniają brak ponownego zapisania tych samych rekordów. Powtórzenie żądania po utracie odpowiedzi wykonuje kolejną jednostkę od serwerowego checkpointu, zamiast powtarzać cursor przeglądarki. Nie jest to globalna deduplikacja żądań HTTP: dwa kolejne zaakceptowane KICK mogą przesunąć postęp o dwie partie, zawsze bez powielenia rekordów. Aktywny tick zwraca busy; frontend ma jedną pętlę i nie odpala drugiego KICK automatycznie po utracie odpowiedzi.
 
-Dla whitelisted `snapshot_failed / marketplace_listings / snapshot_row_updated_after_cutoff` istnieje teraz dodatkowy, świadomy tryb recovery datasetu przez Resume/KICK. Sprawdza integralność poprzednich shardów, tworzy wyłącznie nową generację listingów i zachowuje attempt; pozostałe failed nadal są blokowane. Pełny kontrakt i granice dowodu opisuje [audyt mutable listings](gpswiss-mutable-listings.md).
+Dla whitelisted `snapshot_failed / (marketplace_listings lub parts) / snapshot_row_updated_after_cutoff` istnieje teraz dodatkowy, świadomy tryb recovery datasetu przez Resume/KICK. Sprawdza integralność poprzednich shardów, stosuje jawny tryb recovery datasetu (dla gotowych parts: reuse i dirty reconciliation) i zachowuje attempt; pozostałe failed nadal są blokowane. Pełny kontrakt i granice dowodu opisuje [audyt mutable listings](gpswiss-mutable-listings.md).
 
 ## Ręczne Wznów
 
