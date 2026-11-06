@@ -13,7 +13,68 @@ final class GpswissMigrationExport
 {
     private array $snapshotLocks = [];
 
-    public function __construct(private GpswissSnapshot $snapshot, private MigrationOriginals $originals) {}
+    public function __construct(private GpswissSnapshot $snapshot, private MigrationOriginals $originals, private BrowserMigrationExport $browser) {}
+
+    /** The panel never launches a shell, subprocess, scheduler or queue. */
+    public function prepareBrowser(int $owner, ?string $id = null): array
+    {
+        $id ??= (string) Str::uuid();
+        $this->validateId($id);
+        $existing = is_file($this->root().'/'.$id.'/state.json');
+        $state = $this->prepare($owner, $id);
+        if ($existing) {
+            return $state;
+        }
+
+        return $this->browser->begin($this->directory($owner, $id), $this->read($this->directory($owner, $id).'/state.json'));
+    }
+
+    public function retryBrowserSnapshot(int $owner, string $id, ?string $expectedAttempt): array
+    {
+        $dir = $this->directory($owner, $id);
+        $state = $this->read($dir.'/state.json');
+        if (($state['snapshot_mode'] ?? null) === 'browser') {
+            return $this->browser->restart($dir, $expectedAttempt, $this->snapshotSourceFingerprint());
+        }
+        // A legacy pending attempt has no frozen data to carry over. Explicit retry fences its old CLI token.
+        $this->retrySnapshot($owner, $id, $expectedAttempt);
+
+        return $this->browser->begin($dir, $this->read($dir.'/state.json'));
+    }
+
+    public function browserSnapshotTick(int $owner, string $id, ?string $expectedAttempt): array
+    {
+        $dir = $this->directory($owner, $id);
+        $state = $this->read($dir.'/state.json');
+        if (($state['snapshot_mode'] ?? null) !== 'browser') {
+            throw new MigrationExportException('panel_snapshot_retry_required', 409);
+        }
+        if (($state['snapshot_source_fingerprint'] ?? null) !== $this->snapshotSourceFingerprint()) {
+            throw new MigrationExportException('snapshot_source_context_mismatch', 409);
+        }
+
+        return $this->browser->snapshotTick($dir, $expectedAttempt);
+    }
+
+    public function pauseBrowserSnapshot(int $owner, string $id): array
+    {
+        $dir = $this->directory($owner, $id);
+        if (($this->read($dir.'/state.json')['snapshot_mode'] ?? null) !== 'browser') {
+            throw new MigrationExportException('panel_snapshot_retry_required', 409);
+        }
+
+        return $this->browser->pause($dir);
+    }
+
+    public function retryBrowserPhotos(int $owner, string $id): array
+    {
+        $dir = $this->directory($owner, $id);
+        if (($this->read($dir.'/state.json')['snapshot_mode'] ?? null) !== 'browser') {
+            throw new MigrationExportException('panel_snapshot_retry_required', 409);
+        }
+
+        return $this->browser->retryPhotos($dir);
+    }
 
     /** Explicit synchronous entry point for the dedicated CLI and existing local callers. */
     public function start(int $owner, ?string $id = null): array
@@ -100,6 +161,9 @@ final class GpswissMigrationExport
         $this->snapshotLocks[$id] = $lock;
         try {
             $state = $this->read($dir.'/state.json');
+            if (($state['snapshot_mode'] ?? null) === 'browser') {
+                throw new MigrationExportException('panel_snapshot_tick_required', 409);
+            }
             if (($state['snapshot_attempt_id'] ?? null) !== $attempt) {
                 throw new MigrationExportException('stale_snapshot_attempt', 409);
             }
@@ -247,7 +311,7 @@ final class GpswissMigrationExport
         if (flock($lock, LOCK_EX | LOCK_NB)) {
             try {
                 $state = $this->read($dir.'/state.json');
-                if (($state['snapshot_attempt_id'] ?? null) === $attempt && $state['state'] === 'snapshot_pending') {
+                if (($state['snapshot_mode'] ?? null) !== 'browser' && ($state['snapshot_attempt_id'] ?? null) === $attempt && $state['state'] === 'snapshot_pending') {
                     $state['snapshot_launch_status'] = $status;
                     $this->write($dir.'/state.json', $state);
                 }
@@ -274,7 +338,7 @@ final class GpswissMigrationExport
         }
         try {
             $state = $this->read($dir.'/state.json');
-            if (($state['snapshot_attempt_id'] ?? null) === $attempt && $state['state'] === 'snapshot_running') {
+            if (($state['snapshot_mode'] ?? null) !== 'browser' && ($state['snapshot_attempt_id'] ?? null) === $attempt && $state['state'] === 'snapshot_running') {
                 $state['state'] = $state['snapshot_state'] = 'snapshot_failed';
                 $state['last_error'] = $reason;
                 $this->write($dir.'/state.json', $state);
@@ -346,6 +410,10 @@ final class GpswissMigrationExport
 
     public function tick(int $owner, string $id): array
     {
+        $directory = $this->directory($owner, $id);
+        if (($this->read($directory.'/state.json')['snapshot_mode'] ?? null) === 'browser') {
+            return $this->browser->tick($directory);
+        }
         $before = $this->status($owner, $id);
         if (! $before['resume_allowed']) {
             if ($before['state'] === 'completed') {
@@ -552,6 +620,9 @@ final class GpswissMigrationExport
     {
         $dir = $this->directory($owner, $id);
         $state = $this->read($dir.'/state.json');
+        if (($state['snapshot_mode'] ?? null) === 'browser') {
+            return $this->browser->status($dir, $state);
+        }
         unset($state['owner_id']);
         $required = ['checkpoint' => is_file($dir.'/state.json'), 'snapshot' => is_file($dir.'/snapshot.json'), 'photo_tasks' => is_file($dir.'/photo-tasks.json')];
         if ($state['state'] === 'completed') {
@@ -642,6 +713,10 @@ final class GpswissMigrationExport
 
     public function resume(int $owner, string $id): array
     {
+        $directory = $this->directory($owner, $id);
+        if (($this->read($directory.'/state.json')['snapshot_mode'] ?? null) === 'browser') {
+            return $this->browser->resume($directory);
+        }
         $status = $this->status($owner, $id);
         if (! $status['resume_allowed'] || $status['busy']) {
             return $status;
@@ -674,8 +749,11 @@ final class GpswissMigrationExport
         return $this->status($owner, $id);
     }
 
-    public function download(int $owner, string $id, string $kind): string
+    public function download(int $owner, string $id, string $kind, ?string $artifact = null): string
     {
+        if ($kind === 'artifact') {
+            return $this->browser->download($this->directory($owner, $id), $artifact ?? '');
+        }
         if (! in_array($kind, ['sample', 'full'], true)) {
             throw new MigrationExportException('other', 422);
         }

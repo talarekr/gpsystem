@@ -165,7 +165,7 @@ class GpswissSnapshotRecoveryTest extends TestCase
         Bus::assertNothingDispatched();
     }
 
-    public function test_prepare_and_http_start_do_not_read_business_snapshot_or_launch_unconfigured_process(): void
+    public function test_http_start_prepares_browser_snapshot_without_business_read_or_worker(): void
     {
         $owner = $this->owner();
         $queries = [];
@@ -173,17 +173,26 @@ class GpswissSnapshotRecoveryTest extends TestCase
             $queries[] = $event->sql;
         });
         $this->postJson(self::BASE.'/'.self::RUN, ['action' => 'start'])->assertOk()
-            ->assertJsonPath('snapshot_state', 'snapshot_pending')->assertJsonPath('launcher_status', 'worker_launch_unavailable');
+            ->assertJsonPath('snapshot_state', 'snapshot_pending')->assertJsonPath('snapshot_mode', 'browser')->assertJsonPath('next_action', 'snapshot_tick');
         $businessReads = array_filter($queries, fn ($sql) => preg_match('/\b(from|join)\s+["`]?parts["`]?\b/i', $sql));
         $this->assertSame([], array_values($businessReads));
         $this->assertFileExists($this->file('state.json'));
         $this->assertFileDoesNotExist($this->file('snapshot.json'));
         $this->assertSame($owner->id, json_decode(file_get_contents($this->file('owner.json')), true)['owner_id']);
         $status = app(GpswissMigrationExport::class)->status($owner->id, self::RUN);
-        $this->assertSame('worker_launch_unavailable', $status['launcher_status']);
-        $this->assertSame('php artisan gps:migration-snapshot --owner-id='.$owner->id.' --run='.self::RUN.' --attempt='.$status['snapshot_attempt_id'], $status['snapshot_manual_command']);
-        $this->artisan('gps:migration-snapshot', ['--owner-id' => $owner->id, '--run' => self::RUN, '--attempt' => $status['snapshot_attempt_id']])->assertExitCode(0);
-        $captured = app(GpswissMigrationExport::class)->status($owner->id, self::RUN);
+        $this->assertSame('browser', $status['snapshot_mode']);
+        $this->assertSame('snapshot_tick', $status['next_action']);
+        Http::assertNothingSent();
+        Bus::assertNothingDispatched();
+    }
+
+    public function test_optional_legacy_cli_snapshot_remains_available_outside_http(): void
+    {
+        $service = app(GpswissMigrationExport::class);
+        $status = $service->prepare(1, self::RUN);
+        $this->assertSame('php artisan gps:migration-snapshot --owner-id=1 --run='.self::RUN.' --attempt='.$status['snapshot_attempt_id'], $status['snapshot_manual_command']);
+        $this->artisan('gps:migration-snapshot', ['--owner-id' => 1, '--run' => self::RUN, '--attempt' => $status['snapshot_attempt_id']])->assertExitCode(0);
+        $captured = $service->status(1, self::RUN);
         $this->assertSame('snapshot_completed', $captured['snapshot_state']);
         $this->assertSame('photos', $captured['state']);
         $this->assertSame(0, $captured['processed']);
@@ -245,7 +254,7 @@ class GpswissSnapshotRecoveryTest extends TestCase
         $renewed = $this->postJson(self::BASE.'/'.self::RUN, ['action' => 'retry_snapshot', 'confirm_restart' => true,
             'expected_snapshot_attempt' => $old['snapshot_attempt_id']], ['X-CSRF-TOKEN' => 'new-session'])->assertOk()
             ->assertJsonPath('run_id', self::RUN)->assertJsonPath('snapshot_state', 'snapshot_pending')
-            ->assertJsonPath('launcher_status', 'worker_launch_unavailable')->json();
+            ->assertJsonPath('snapshot_mode', 'browser')->assertJsonPath('next_action', 'snapshot_tick')->json();
         $this->assertNotSame($old['snapshot_attempt_id'], $renewed['snapshot_attempt_id']);
         $this->assertFileDoesNotExist($this->file('snapshot.json.tmp'));
         $this->assertFileDoesNotExist($this->file('snapshot.json'));

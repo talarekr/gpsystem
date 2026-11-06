@@ -44,7 +44,7 @@ def run(browser, mode):
         action = (payload or {}).get('action')
         requests.append((request.url, action))
         assert request.url in [BASE+'?format=status', BASE+'/'+RUN], request.url
-        assert action in [None, 'retry_snapshot', 'abort_snapshot', 'resume', 'tick'], 'Never auto-start another run or call an integration'
+        assert action in [None, 'retry_snapshot', 'abort_snapshot', 'snapshot_tick', 'resume', 'tick'], 'Never auto-start another run or call an integration'
         if request.url.endswith('?format=status'):
             r.fulfill(json={'existing_run_found':True, 'run_id':RUN, 'run':copy.deepcopy(state), **copy.deepcopy(state)})
             return
@@ -57,8 +57,8 @@ def run(browser, mode):
             assert state['snapshot_attempt_id'] == OLD, 'Double click must never restart a pending worker'
             state.update(state='snapshot_pending', phase='snapshot_pending', snapshot_state='snapshot_pending',
                          snapshot_attempt_id=NEW, snapshot_retry_allowed=False, snapshot_abort_allowed=True,
-                         launcher_status='worker_launch_unavailable' if mode == 'manual_worker' else 'worker_launch_requested',
-                         snapshot_manual_command='php artisan gps:migration-snapshot --owner-id=1 --run='+RUN+' --attempt='+NEW)
+                         snapshot_mode='browser', next_action='snapshot_tick', launcher_status='worker_launch_unavailable',
+                         last_error=None, blocked_reason=None)
             if mode in ['lost_response', 'timeout']:
                 r.abort('timedout' if mode == 'timeout' else 'connectionreset')
                 return
@@ -66,24 +66,26 @@ def run(browser, mode):
             assert payload['confirm_abort'] is True and payload['expected_snapshot_attempt'] == OLD
             state.update(state='snapshot_aborted', phase='snapshot_aborted', snapshot_state='snapshot_aborted',
                          snapshot_retry_allowed=False, snapshot_abort_allowed=False)
-        elif action is None and state['snapshot_attempt_id'] == NEW and mode != 'manual_worker':
+        elif action == 'snapshot_tick':
+            assert payload['expected_snapshot_attempt'] == NEW
             polls += 1
             if polls == 1:
                 state.update(state='snapshot_running', phase='snapshot_running', snapshot_state='snapshot_running',
-                             busy=True, snapshot_process_active=True, snapshot_abort_allowed=False)
+                             busy=False, snapshot_process_active=False, snapshot_abort_allowed=False)
             elif polls == 2:
                 snapshot_captures += 1
                 state.update(state='photos', phase='photos', snapshot_state='snapshot_completed',
                              busy=False, snapshot_process_active=False, snapshot_abort_allowed=False,
                              snapshot_file_exists=True, snapshot_tasks_file_exists=True, resume_allowed=True,
-                             artifacts_present=True, remaining=2, total_images=2, last_error=None, blocked_reason=None)
+                             artifacts_present=True, remaining=2, total_images=2, last_error=None, blocked_reason=None, next_action='tick')
         elif action == 'tick':
             assert state['snapshot_state'] == 'snapshot_completed', 'No photo work before atomic snapshot completion'
             state['processed_images'] += 1
             state['processed'] = state['processed_images']
             state['remaining'] -= 1
             if not state['remaining']:
-                state.update(state='completed', phase='completed', resume_allowed=False)
+                state.update(state='completed', phase='completed', resume_allowed=False, next_action='download',
+                             download_artifacts=[dict(key='manifest', name='archive-manifest.json', kind='manifest', bytes=1, sha256='a'*64)])
         r.fulfill(json=copy.deepcopy(state))
 
     context.route('**/*', route)
@@ -120,19 +122,12 @@ def run(browser, mode):
             page.wait_for_function("document.querySelector('#state').textContent.includes('"+RUN+"')")
             page.locator('#snapshot-confirm-retry').check()
             page.locator('#retry-snapshot').click()
-        if mode == 'manual_worker':
-            page.wait_for_function("!document.querySelector('#snapshot-command').hidden")
-            assert 'gps:migration-snapshot' in page.locator('#snapshot-command').text_content()
-            before = len(requests)
-            page.wait_for_timeout(1200)
-            assert len(requests) == before, 'Unconfigured worker must stop with instructions, not poll forever'
-            assert snapshot_captures == 0
-        else:
-            page.wait_for_function("!document.querySelector('#full').hidden", timeout=30000)
-            assert state['processed'] == 2
-            assert snapshot_captures == 1
-            assert sum(action == 'tick' for _, action in requests) == 2
-            assert page.locator('#resume').is_disabled()
+        page.wait_for_function("document.querySelectorAll('#download-artifacts a').length === 1", timeout=30000)
+        assert state['processed'] == 2
+        assert snapshot_captures == 1
+        assert sum(action == 'snapshot_tick' for _, action in requests) == 2
+        assert sum(action == 'tick' for _, action in requests) == 2
+        assert page.locator('#resume').is_disabled()
         retries = [i for i, (_, action) in enumerate(requests) if action == 'retry_snapshot']
         assert len(retries) == (2 if mode == 'session_419' else 1), requests
         if mode in ['lost_response', 'timeout']:
@@ -146,6 +141,6 @@ def run(browser, mode):
 
 with sync_playwright() as p:
     browser = p.chromium.launch(executable_path=os.environ.get('CHROMIUM_PATH', '/usr/bin/chromium'), headless=True, args=['--no-sandbox'])
-    for mode in ['retry', 'lost_response', 'timeout', 'session_419', 'manual_worker', 'abort', 'live_worker', 'final_artifact']:
+    for mode in ['retry', 'lost_response', 'timeout', 'session_419', 'no_cli_required', 'abort', 'live_worker', 'final_artifact']:
         run(browser, mode)
     browser.close()

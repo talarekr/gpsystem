@@ -1,5 +1,7 @@
 # GPSwiss: przerwany snapshot po #1510
 
+**Hosting bez shella:** panel v3 korzysta z [gpswiss-browser-export.md](gpswiss-browser-export.md), wykonuje cały eksport krótkimi tickami i nie wymaga opisanego poniżej workera. Ten dokument zachowuje diagnozę #1511 i opis opcjonalnego trybu CLI.
+
 ## Diagnoza
 
 Sprawdzono aktualny `main` po #1510: `2cc58ca6f45736488b1f79d78db938a3fcbd2d2a`.
