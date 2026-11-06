@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:gpswiss:wystawczesc:products:1",
-  "title": "products.json; manifest.json carries snapshot and safety flags",
+  "$id": "urn:gpswiss:wystawczesc:products:2",
+  "title": "Private full-business products.json; ID/code strings; v2 manifest governs safety",
   "type": "array",
   "items": {
     "type": "object",
@@ -27,7 +27,7 @@
     ],
     "properties": {
       "id": {
-        "type": "integer"
+        "type": "string"
       },
       "sku": {
         "type": [

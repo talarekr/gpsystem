@@ -91,7 +91,7 @@ final class MigrationOriginals
                 fclose($output);
             }
 
-return array_replace($base, ['status' => 'COPY_FAILED']);
+            return array_replace($base, ['status' => 'COPY_FAILED']);
         }
         try {
             $before = fstat($input);
@@ -124,16 +124,18 @@ return array_replace($base, ['status' => 'COPY_FAILED']);
     {
         $source = $this->locate((string) ($image['path'] ?? ''));
         $relative = $source['relative_path'] ?? '';
-        $code = substr(preg_replace('/[^A-Za-z0-9_-]+/', '-', (string) ($part['part_number'] ?? 'part')), 0, 60) ?: 'part';
         $imageId = (string) $image['id'];
-        $ext = strtolower(pathinfo($relative, PATHINFO_EXTENSION));
-        $ext = preg_match('/^[a-z0-9]{1,8}$/D', $ext) ? $ext : 'bin';
+        $filename = $relative === '' ? 'unavailable-'.$imageId : MigrationDataPolicy::clean(basename($relative), 'filename');
+        if ($relative !== '' && $filename !== basename($relative)) {
+            $source = ['status' => 'SENSITIVE_FILENAME_BLOCKED'];
+            $filename = 'redacted-'.$imageId;
+        }
 
-        return ['image_id' => $imageId, 'part_id' => $image['part_id'], 'role' => $image['role'] ?? 'gallery',
+        return ['image_id' => $imageId, 'part_id' => (string) $image['part_id'], 'role' => $image['role'] ?? 'gallery',
             'sort_order' => (int) ($image['sort_order'] ?? 0), 'is_primary' => (bool) ($image['is_primary'] ?? false),
-            'alt_text' => GpswissSnapshot::clean($image['alt_text'] ?? null), 'original_filename' => $relative === '' ? null : GpswissSnapshot::clean(basename($relative)),
-            'original_relative_path' => $relative === '' ? null : GpswissSnapshot::clean($relative),
-            'package_path' => 'images/'.$image['part_id'].'/'.$code.'__part-'.$image['part_id'].'__image-'.$imageId.'.'.$ext, 'source' => $source];
+            'alt_text' => GpswissSnapshot::clean($image['alt_text'] ?? null), 'original_filename' => $relative === '' ? null : MigrationDataPolicy::clean(basename($relative), 'filename'),
+            'original_relative_path' => $relative === '' ? null : MigrationDataPolicy::clean($relative, 'original_relative_path'),
+            'package_path' => 'images/'.$image['part_id'].'/'.$filename, 'source' => $source];
     }
 
     private function fingerprint(array|false $stat): ?array

@@ -134,7 +134,7 @@ class GpswissMigrationExportTest extends TestCase
         $this->assertSame('Shelf A', $p['storage_location_name']);
         $this->assertSame('Używany', $p['quality']);
         $this->assertSame('Lewa strona', $products[4]['part_position']);
-        $this->assertSame(8, $p['local_car_id']);
+        $this->assertSame('8', $p['local_car_id']);
         $this->assertSame('1800', $p['ovoko_car_id']);
         $this->assertSame(['100.00', '123.45', '222.22', '333.33'], [$p['price'], $p['allegro_price'], $p['ovoko_price'], $p['ebay_price']]);
         $this->assertSame('LISTY', $p['allegro_shipping_rate_name']);
@@ -142,7 +142,7 @@ class GpswissMigrationExportTest extends TestCase
         $this->assertSame('https://allegro.pl/oferta/offer-1', $p['offers'][0]['url']);
         $this->assertCount(2, $p['offers'][0]['allegro_parameters_from_saved_offer']);
         $this->assertSame('used', $products[3]['allegro_parameters'][0]['value_id']);
-        $this->assertSame([1, 2], array_column(json_decode($full->getFromName('categories.json'), true), 'id'));
+        $this->assertSame(['1', '2', '3'], array_column(json_decode($full->getFromName('categories.json'), true), 'id'));
         $photos = json_decode($full->getFromName('photos.json'), true);
         $this->assertSame('same.png', $photos[0]['original_filename']);
         $this->assertTrue($photos[0]['is_primary']);
@@ -160,7 +160,7 @@ class GpswissMigrationExportTest extends TestCase
         }
         for ($i = 0; $i < $full->numFiles; $i++) {
             $bytes = $full->getFromIndex($i);
-            foreach (['CUSTOMER_SECRET', 'PRIVATE-VIN', 'PRIVATE_PASSWORD', 'REVIEW_SECRET', 'LEGACY_SECRET', 'PHOTO_SECRET', 'URL_SECRET', 'EBAY_SECRET', 'PAYLOAD_SECRET'] as $secret) {
+            foreach (['PRIVATE_PASSWORD', 'REVIEW_SECRET', 'LEGACY_SECRET', 'PHOTO_SECRET', 'URL_SECRET', 'EBAY_SECRET', 'PAYLOAD_SECRET'] as $secret) {
                 $this->assertStringNotContainsString($secret, $bytes, $full->getNameIndex($i));
             }
         }
@@ -225,7 +225,7 @@ class GpswissMigrationExportTest extends TestCase
         $this->fixture();
         $this->artisan('gps:migration-export', ['--owner-id' => 1])->assertSuccessful();
         $text = GpswissSnapshot::clean('https://user:URL_SECRET@allegro.pl/path?token=QUERY_SECRET email@example.test access_token=TEXT_SECRET');
-        foreach (['URL_SECRET', 'QUERY_SECRET', 'TEXT_SECRET', 'email@example.test'] as $secret) {
+        foreach (['URL_SECRET', 'QUERY_SECRET', 'TEXT_SECRET'] as $secret) {
             $this->assertStringNotContainsString($secret, $text);
         }
         Http::assertNothingSent();

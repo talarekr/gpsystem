@@ -1,11 +1,12 @@
 <!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="csrf-token" content="{{ csrf_token() }}"><title>Eksport GPSwiss → Wystawczesc</title>
 <style>body{max-width:1100px;margin:30px auto;padding:20px;font:16px system-ui}button,a{margin:8px;padding:10px}pre{white-space:pre-wrap;background:#f1f5f4;padding:18px}</style></head><body>
-<h1>Eksport części i oryginałów GPSwiss → Wystawczesc</h1>
+<h1>Prywatny eksport części, samochodów i zamówień GPSwiss → Wystawczesc</h1>
 <p>Eksport tworzy prywatne pliki. Nie zmienia części, zdjęć, cen, stanów, ofert ani synchronizacji. Nie wykonuje importu ani API Allegro/eBay/Ovoko.</p>
-<p>Jeden spójny snapshot bazy → próbka do 5 rzeczywistych części i pełna paczka w tym samym formacie. Nazwa oryginału pozostaje w manifeście; w paczce używamy kodu części + ID części i zdjęcia. Brakujące/zmienione pliki są raportowane.</p>
-<p>Paczka zawiera kody, kategorię, jakość, pozycję, magazyn, opis, lokalne/Ovoko ID auta, ceny sklep/Allegro/Ovoko/eBay, Kurier Allegro, lokalne parametry i linki ofert. Nie zawiera klientów, zamówień ani credentials. Przed importem sprawdź publiczne opisy i metadane.</p>
+<p>Jeden spójny snapshot bazy → próbka do 5 rzeczywistych części i pełna paczka w tym samym formacie. Zdjęcia zachowują oryginalne nazwy w katalogach ID części; kolizje w obrębie części otrzymują podkatalog ID zdjęcia. Brakujące/zmienione pliki są raportowane.</p>
+<p>Paczka zawiera kody, kategorię, jakość, pozycję, magazyn, opis, lokalne/Ovoko ID auta, ceny sklep/Allegro/Ovoko/eBay, Kurier Allegro, lokalne parametry i linki ofert. Zawiera wszystkie samochody, zamówienia i potrzebne dane klientów — pobieranie wyłącznie prywatnie przez zalogowanego właściciela eksportu. Bez haseł, tokenów i pełnych danych kart. Nie udostępniaj archiwum ani katalogu publicznie.</p>
 <p>Snapshot bazy nie jest globalnym snapshotem filesystemu. Kopie plików są weryfikowane podczas kopiowania; finalny cutover wymaga osobnej procedury freeze/snapshotu. Nie zatrzymujemy synchronizacji automatycznie.</p>
-<button id="start">Przygotuj próbkę i pełny eksport</button><button id="resume">Wznów ten sam eksport</button><button id="pause">Zatrzymaj lokalną pętlę</button>
+<p>Próbka wybiera sprzedaną część (status sold), część do wystawienia (needs_listing), oferty eBay/Ovoko i galerię — gdy takie przypadki są zapisane. Powiązania Allegro są wyłącznie historyczne. Import, publikacja, synchronizacja i wiadomości do klientów pozostają wyłączone.</p>
+<button id="start">Przygotuj prywatną próbkę i pełny eksport</button><button id="resume">Wznów ten sam eksport</button><button id="pause">Zatrzymaj lokalną pętlę</button>
 <p id="message" role="status"></p><pre id="state"></pre>
 <a id="sample" hidden>Pobierz próbkę ZIP</a><a id="full" hidden>Pobierz pełny ZIP</a>
 <p>Dla dużego archiwum zalecane CLI: <code>php artisan gps:migration-export --owner-id=ID_OPERATORA</code>. Wznowienie: <code>--run=UUID</code>. Nie uruchamiaj drugiego eksportu, gdy trwa pierwszy.</p>
