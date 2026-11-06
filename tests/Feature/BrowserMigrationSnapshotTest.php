@@ -38,6 +38,38 @@ class BrowserMigrationSnapshotTest extends TestCase
         parent::tearDown();
     }
 
+    public function test_transient_backend_exception_replays_same_checkpoint_and_records_safe_trace(): void
+    {
+        $engine = app(BrowserMigrationSnapshot::class);
+        $index = $engine->begin($this->folder, $this->attempt);
+        while ($index['stage'] === 'boundaries') {
+            $index = $engine->tick($this->folder, $this->attempt);
+        }
+        $frozen = $index['datasets']['parts']['max_key'];
+        $once = true;
+        DB::listen(function ($event) use (&$once): void {
+            if ($once && str_contains($event->sql, 'snapshot_row_bytes')) {
+                $once = false;
+                throw new \RuntimeException('PRIVATE_SECRET must never be reported');
+            }
+        });
+        $failed = $engine->tick($this->folder, $this->attempt);
+        $this->assertFalse($failed['failed']);
+        $this->assertSame(0, $failed['datasets']['parts']['processed']);
+        $trace = file_get_contents($this->folder.'/last-tick.json');
+        $this->assertStringNotContainsString('PRIVATE_SECRET', $trace);
+        $this->assertSame('RuntimeException', json_decode($trace, true)['backend_exception_class']);
+        $next = $engine->tick($this->folder, $this->attempt);
+        $this->assertSame(2, $next['datasets']['parts']['processed']);
+        $this->assertSame($frozen, $next['datasets']['parts']['max_key']);
+        $this->assertSame($this->attempt, $next['attempt_id']);
+        $this->assertNull($next['last_error']);
+        $this->assertCount(1, $next['datasets']['parts']['shards']);
+        $trace = json_decode(file_get_contents($this->folder.'/last-tick.json'), true);
+        $this->assertSame(2, $trace['records_attempted']);
+        $this->assertSame(2, $trace['records_completed']);
+    }
+
     public function test_bounded_shards_resume_verify_without_duplicates_or_late_ids(): void
     {
         $engine = app(BrowserMigrationSnapshot::class);

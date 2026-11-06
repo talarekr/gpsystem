@@ -4,6 +4,7 @@ namespace App\Services\MigrationExport;
 
 use App\Services\Marketplace\ShippingRateAudit\ReadOnlyDatabase;
 use Illuminate\Database\Query\Builder;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use RuntimeException;
@@ -11,6 +12,8 @@ use RuntimeException;
 /** Immutable, bounded logical export shards. Never claims a transaction shared by HTTP requests. */
 final class BrowserMigrationSnapshot
 {
+    private int $attempted = 0;
+
     private const ROW_BYTES = 262144;
 
     private const CHUNK_BYTES = 196608;
@@ -49,6 +52,16 @@ final class BrowserMigrationSnapshot
         if (in_array($state['stage'], ['completed', 'failed'], true)) {
             return $this->index($directory, $attempt);
         }
+        $started = microtime(true);
+        $saved = $state;
+        $this->attempted = 0;
+        $dataset = $state['dataset_names'][$state['dataset_index']] ?? null;
+        $cursorField = $state['stage'] === 'verify' ? 'verify_cursor' : 'cursor';
+        $trace = ['started_at' => microtime(true), 'records_limit' => max(1, min(5, (int) config('migration_export.browser_snapshot_rows', 5))), 'action' => 'snapshot_tick', 'reason_code' => 'tick_running', 'current_dataset' => $dataset,
+            'cursor_before' => $state['datasets'][$dataset][$cursorField] ?? null, 'cursor_after' => null,
+            'records_attempted' => null, 'records_completed' => 0, 'backend_exception_class' => null];
+        $this->trace($directory, $trace);
+        $state['last_error'] = null;
         try {
             ReadOnlyDatabase::run(function () use (&$state, $folder): void {
                 $name = $state['dataset_names'][$state['dataset_index']] ?? null;
@@ -124,15 +137,38 @@ final class BrowserMigrationSnapshot
         } catch (\Throwable $error) {
             $allowed = ['snapshot_schema_changed', 'snapshot_source_changed', 'snapshot_row_updated_after_cutoff', 'snapshot_row_too_large_for_http', 'snapshot_stable_nonsecret_key_required', 'snapshot_immutable_chunk_conflict', 'snapshot_shard_checksum_mismatch', 'snapshot_reference_boundary_required'];
             $state['last_error'] = in_array($error->getMessage(), $allowed, true) ? $error->getMessage() : 'snapshot_http_tick_failed';
-            $state['stage'] = 'failed';
+            $trace['backend_exception_class'] = str_contains(get_class($error), '@anonymous') ? 'AnonymousThrowable' : get_class($error);
+            if ($state['last_error'] === 'snapshot_http_tick_failed') {
+                $state = $saved;
+                $state['last_error'] = 'snapshot_http_tick_failed';
+                $trace['reason_code'] = $error instanceof QueryException && in_array((int) ($error->errorInfo[1] ?? 0), [3024, 1969], true) ? 'backend_timeout' : 'server_exception';
+            } else {
+                $state['stage'] = 'failed';
+                $trace['reason_code'] = $state['last_error'];
+            }
         }
         $this->write($folder.'/checkpoint.json', $state);
+        $trace['reason_code'] = $trace['reason_code'] === 'tick_running' ? 'tick_completed' : $trace['reason_code'];
+        $trace['cursor_after'] = $state['datasets'][$dataset][$cursorField] ?? null;
+        $trace['records_attempted'] = $this->attempted;
+        $trace['records_completed'] = max(0, array_sum(array_column($state['datasets'], 'processed')) + array_sum(array_column($state['datasets'], 'verified')) - array_sum(array_column($saved['datasets'], 'processed')) - array_sum(array_column($saved['datasets'], 'verified')));
+        $trace['duration_ms'] = (int) ((microtime(true) - $started) * 1000);
+        $this->trace($directory, $trace);
         $index = $this->index($directory, $attempt);
         if ($state['stage'] === 'completed') {
             $this->write($directory.'/snapshot.json', $index);
         }
 
         return $index;
+    }
+
+    private function trace(string $directory, array $trace): void
+    {
+        try {
+            $this->write($directory.'/last-tick.json', $trace);
+        } catch (\Throwable) {
+            // Diagnostics never replace the data checkpoint or mask its result.
+        }
     }
 
     public function status(string $directory, ?string $attempt = null): array
@@ -349,7 +385,7 @@ final class BrowserMigrationSnapshot
         foreach ($definition['key_columns'] as $column) {
             $query->orderBy($column);
         }
-        $limit = $exact ?? max(1, min(25, (int) config('migration_export.browser_snapshot_rows', 25)));
+        $limit = $exact ?? max(1, min(5, (int) config('migration_export.browser_snapshot_rows', 5)));
         $probe = clone $query;
         $grammar = DB::connection()->getQueryGrammar();
         $lengths = array_map(fn ($c) => DB::connection()->getDriverName() === 'mysql' ? 'COALESCE(OCTET_LENGTH('.$grammar->wrap($c).'),0)' : 'COALESCE(LENGTH(CAST('.$grammar->wrap($c).' AS BLOB)),0)', $definition['exported_columns']);
@@ -370,6 +406,7 @@ final class BrowserMigrationSnapshot
             return [[], $cursor];
         }
         $this->tuple($query, $definition['key_columns'], $picked[count($picked) - 1], '<=');
+        $this->attempted += count($picked);
         $records = $query->limit(count($picked))->get($definition['exported_columns']);
         if ($records->count() !== count($picked)) {
             throw new RuntimeException('snapshot_source_changed');

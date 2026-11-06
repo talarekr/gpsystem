@@ -236,6 +236,12 @@ final class BrowserMigrationExport
             fclose($probe);
         }
         unset($state['owner_id'], $state['inventory'], $state['package']);
+        if (is_file($dir.'/last-tick.json')) {
+            try {
+                $state['last_tick'] = $this->read($dir.'/last-tick.json');
+            } catch (\Throwable) {
+            }
+        }
         try {
             $progress = $this->snapshots->status($dir, $state['snapshot_attempt_id']);
         } catch (\Throwable) {
