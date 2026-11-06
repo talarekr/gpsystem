@@ -73,7 +73,7 @@
  function render(data){
   const value=data?.run ?? (data?.run_id && data?.state?data:null);
   // Requests are sequential. Counters may restart for the next dataset/phase or a conscious retry.
-  if(value){state=value;id=value.run_id;history.replaceState(null,'','#run='+id);}
+  if(value){state=value;id=value.run_id;history.replaceState(null,'','#run='+id);remember();}
   else if(data?.existing_run_found===false)state=null;
   el('state').textContent=JSON.stringify(state?{...state,local_runner_active:active,local_request_in_flight:inFlight}:data,null,2);
   const progress=state?.snapshot_progress ?? {},dataset=state?.current_dataset ?? progress.current_dataset ?? progress.dataset;
@@ -97,14 +97,25 @@
   buttons();
  }
  let artifactsLoadedFor=null;
- const requestFailures=[];
+ const requestFailures=[],statusAttempts=[];
+ const recoveryKey='gpswiss-export-last-operational-state';
+ function remember(){
+  if(!state || !/^[a-f0-9-]{36}$/i.test(id??'') || !/^[a-f0-9-]{36}$/i.test(state.snapshot_attempt_id??''))return;
+  const safe={};for(const key of ['run_id','snapshot_attempt_id','snapshot_mode','snapshot_state','state','phase','current_dataset','processed','total','remaining','cursor','next_action','busy','last_error','last_tick'])safe[key]=state[key];
+  safe.last_tick={reason_code:state.last_tick?.reason_code??state.last_tick_reason??null};
+  try{sessionStorage.setItem(recoveryKey,JSON.stringify(safe));}catch(_){}
+ }
+ function restoreKnownState(){
+  try{const raw=sessionStorage.getItem(recoveryKey);if(!raw || raw.length>4096)return;const saved=JSON.parse(raw);if(saved.run_id===id && /^[a-f0-9-]{36}$/i.test(saved.snapshot_attempt_id??'') && saved.snapshot_mode==='browser' && saved.state==='snapshot_running' && saved.snapshot_state==='snapshot_running' && saved.next_action==='snapshot_tick' && !saved.busy && !saved.last_error && saved.last_tick?.reason_code==='tick_completed')render(saved);}catch(_){}
+ }
+ const kickEligible=()=>!!id && !!state?.snapshot_attempt_id && browserSnapshot() && state.state==='snapshot_running' && state.snapshot_state==='snapshot_running' && state.next_action==='snapshot_tick' && !state.busy && !state.last_error && state.last_tick?.reason_code==='tick_completed';
  const cursorText=value=>value==null?'—':typeof value==='object'?JSON.stringify(value):String(value);
  const transient=error=>error.reason!=='status_fetch_retry_exhausted' && (['network_error','browser_fetch_timeout','malformed_json','invalid_response','snapshot_http_tick_failed'].includes(error.reason) || [408,429,500,502,503,504].includes(error.http));
- async function request(url,action,extra={}){
+ async function request(url,action,extra={},statusAttempt=null){
   inFlight=true;buttons();const isStatus=!action && url.includes('format=compact'),controller=new AbortController(),started=performance.now(),timer=setTimeout(()=>controller.abort(),isStatus?10000:45000);
-  const diagnostic={endpoint:new URL(url,location.href).pathname+new URL(url,location.href).search,route_name:'admin.tools.gpswiss-migration-export',action:action??(isStatus?'compact_status':'status'),request_kind:isStatus?'status':'operation',status_response_bytes:isStatus?0:null,malformed_json:false,content_type:null,content_length:null,http_status:null,fetch_timeout:false,network_exception_type:null,transport_reason:null,response_bytes:0,server_reason_code:null,current_dataset:state?.current_dataset??null,cursor_before:state?.cursor??null,cursor_after:null};
+  const diagnostic={endpoint:new URL(url,location.href).pathname+new URL(url,location.href).search,route_name:'admin.tools.gpswiss-migration-export',action:action??(isStatus?'compact_status':'status'),request_kind:isStatus?'status':'operation',attempt:statusAttempt,browser_online:navigator.onLine,status_response_bytes:isStatus?0:null,malformed_json:false,content_type:null,content_length:null,http_status:null,fetch_timeout:false,network_exception_type:null,transport_reason:null,response_bytes:0,server_reason_code:null,current_dataset:state?.current_dataset??null,cursor_before:state?.cursor??null,cursor_after:null};
   try{
-   const response=await fetch(url,{method:action?'POST':'GET',credentials:'same-origin',cache:'no-store',redirect:'error',signal:controller.signal,headers:{Accept:'application/json',...(action?{'Content-Type':'application/json','X-CSRF-TOKEN':document.querySelector('meta[name="csrf-token"]').content}:{})},...(action?{body:JSON.stringify({action,...extra})}:{})});
+   const response=await fetch(url,{method:action?'POST':'GET',credentials:'same-origin',cache:'no-store',redirect:'error',signal:controller.signal,headers:{Accept:'application/json',...(action?{'Content-Type':'application/json','X-CSRF-TOKEN':document.querySelector('meta[name="csrf-token"]').content}:{})},...(action?{body:JSON.stringify(action==='kick'?extra:{action,...extra})}:{})});
    diagnostic.http_status=response.status;diagnostic.content_type=response.headers.get('content-type');diagnostic.content_length=response.headers.get('content-length');
    if([401,419].includes(response.status))throw Object.assign(new Error('SESSION_EXPIRED'),{reason:'SESSION_EXPIRED',http:response.status});
    const body=await response.text();diagnostic.response_bytes=new TextEncoder().encode(body).length;
@@ -123,14 +134,15 @@
   }finally{
    diagnostic.duration_ms=Math.round(performance.now()-started);clearTimeout(timer);inFlight=false;buttons();
    if(diagnostic.reason_code){requestFailures.push(diagnostic);if(requestFailures.length>4)requestFailures.shift();}
-   el('request-diagnostic').textContent=JSON.stringify({latest:diagnostic,recent_failures:requestFailures},null,2);
+   if(isStatus && statusAttempt)statusAttempts.push(diagnostic);
+   el('request-diagnostic').textContent=JSON.stringify({latest:diagnostic,status_attempts:statusAttempts,recent_failures:requestFailures},null,2);
   }
  }
 
  function stop(error){
   if(error.reason==='local_stop'){active=false;return;}
   if(resumeTraceActive)resumeEvent('blocked',error.reason ?? 'unknown_local_error');
-  active=false;retryExhausted=transient(error);
+  active=false;retryExhausted=transient(error) || error.reason==='status_fetch_retry_exhausted';
   if(error.reason==='SESSION_EXPIRED'){
    sessionExpired=true;el('login').hidden=false;
    el('message').textContent='SESSION_EXPIRED / HTTP '+(error.http ?? 419)+' — checkpoint pozostaje na serwerze. Zaloguj się ponownie i odśwież panel; potem Wznów istniejący eksport.';
@@ -143,9 +155,9 @@
  }
  async function discover(){const data=await request(base+'?format=compact');render(data);return !!state;}
  async function readCurrent(){
-  let last;
+  let last;statusAttempts.length=0;
   for(let attempt=1;attempt<=4;attempt++){
-   try{const data=await request(base+'/'+encodeURIComponent(id)+'?format=compact');render(data);return state;}
+   try{const data=await request(base+'/'+encodeURIComponent(id)+'?format=compact',undefined,{},attempt);render(data);return state;}
    catch(error){
     if(!transient(error))throw error;last=error;
     if(attempt===4)break;
@@ -196,6 +208,7 @@
   }
   ready=true;buttons();
  }
+ restoreKnownState();
  const boot=restore();
  async function pauseCheckpoint(){
   if(!canPause() || pausing)return;pausing=true;buttons();
@@ -205,7 +218,7 @@
  }
  async function drive(start){
   await boot;if(working || sessionExpired || accessBlocked)return;
-  working=true;active=true;loopDone=new Promise(resolve=>{finishLoop=resolve;});buttons();let attempts=0,needsResume=!start;
+  working=true;active=true;loopDone=new Promise(resolve=>{finishLoop=resolve;});buttons();let attempts=0,needsResume=!start,usedKick=false;
   const expectedRun=id,expectedAttempt=state?.snapshot_attempt_id;
   try{
    if(start){
@@ -214,11 +227,24 @@
     try{render(await request(base+'/'+id,'start'));}catch(error){await recover(error,++attempts);}
    }else{
     try{if(id)await readCurrent();else if(!await discover())throw Object.assign(new Error('run_not_found'),{reason:'run_not_found',http:404});}
-    catch(error){await recover(error,++attempts);}
+    catch(error){
+     if(resumeTraceActive && error.reason==='status_fetch_retry_exhausted' && kickEligible()){
+      resumeEvent('status_fetch_retry_exhausted');resumeEvent('fallback_kick');usedKick=true;
+      try{
+       const result=await request(base+'/'+encodeURIComponent(expectedRun)+'/kick','kick',{attempt_id:expectedAttempt});
+       if(result.run_id!==expectedRun || result.snapshot_attempt_id!==expectedAttempt)throw Object.assign(new Error('run_or_attempt_changed'),{reason:'run_or_attempt_changed'});
+       render(result);
+       if(!['tick_completed','completed','busy'].includes(result.kick_reason))throw Object.assign(new Error('kick_blocked'),{reason:result.blocked_reason??result.kick_reason??'kick_blocked'});
+       if(result.kick_reason==='tick_completed')resumeEvent('tick_completed');
+       else if(result.kick_reason==='busy')resumeEvent('blocked','busy');
+       needsResume=false;
+      }catch(kickError){await recover(kickError,++attempts);}
+     }else await recover(error,++attempts);
+    }
    }
    if(!start){
     if(expectedRun && (id!==expectedRun || (expectedAttempt && state?.snapshot_attempt_id!==expectedAttempt))){resumeEvent('blocked','run_or_attempt_changed');el('message').textContent='Wznowienie zablokowane: run_or_attempt_changed';return;}
-    if(resumeTraceActive){resumeEvent('status_loaded');resumeEvent('next_action='+nextAction());}
+    if(resumeTraceActive){if(!usedKick)resumeEvent('status_loaded');resumeEvent('next_action='+nextAction());}
     if(browserSnapshot() && state?.state==='snapshot_running' && nextAction()==='snapshot_tick' && !state.busy)needsResume=false;
    }
    while(active && state){

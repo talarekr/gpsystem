@@ -59,13 +59,14 @@ class GpswissCompactStatusTest extends TestCase
                 'marketplace_category_mappings' => ['processed' => $processed, 'total' => 79957, 'verified' => 0, 'cursor' => ['id' => 2777], 'shards' => []]]], JSON_THROW_ON_ERROR));
 
         rename($path.'.pending', $path);
+        app(CompactSnapshotProgress::class)->publish($this->dir, $this->attempt, json_decode(file_get_contents($path), true));
 
         return $path;
     }
 
     public function test_status_stays_small_at_zero_20k_and_79k_and_never_changes_snapshot(): void
     {
-        $sizes = [];
+        $sizes = $operationalSizes = [];
         $mutations = [];
         DB::listen(function ($e) use (&$mutations) {
             if (preg_match('/^\s*(insert|update|delete)/i', $e->sql)) {
@@ -92,10 +93,13 @@ class GpswissCompactStatusTest extends TestCase
             $this->assertSame($before, hash_file('sha256', $path));
             $this->assertSame($root, hash_file('sha256', $this->dir.'/state.json'));
             $this->assertFileExists($this->dir.'/compact-snapshot-progress.json');
+            $operationalSizes[] = filesize($this->dir.'/operational-progress.json');
+            $this->assertLessThan(8192, end($operationalSizes));
             $again = $this->getJson('/admin/tools/gpswiss-migration-export/'.$this->run.'?format=compact')->assertOk();
             $this->assertSame($n, $again->json('processed'));
         }
         $this->assertLessThan(100, max($sizes) - min($sizes));
+        $this->assertLessThan(100, max($operationalSizes) - min($operationalSizes));
         $this->assertSame([], $mutations);
         Http::assertNothingSent();
     }
@@ -121,7 +125,7 @@ class GpswissCompactStatusTest extends TestCase
         $this->getJson('/admin/tools/gpswiss-migration-export/'.$this->run.'?format=artifacts')->assertNotFound();
     }
 
-    public function test_streamed_projection_is_small_and_cache_is_invalidated_by_atomic_checkpoint_change(): void
+    public function test_stale_projection_never_falls_back_to_scanning_the_checkpoint(): void
     {
         $path = $this->checkpoint(20568, 20000);
         $reader = app(CompactSnapshotProgress::class);
@@ -130,6 +134,12 @@ class GpswissCompactStatusTest extends TestCase
         $next['datasets']['marketplace_category_mappings']['processed'] = 20573;
         file_put_contents($path.'.next', json_encode($next));
         rename($path.'.next', $path);
-        $this->assertSame(20573, $reader->read($this->dir, $this->attempt)['processed']);
+        $this->assertNull($reader->read($this->dir, $this->attempt));
+        $this->getJson('/admin/tools/gpswiss-migration-export/'.$this->run.'?format=compact')->assertOk()
+            ->assertJsonPath('progress_unavailable', true)->assertJsonPath('processed', null)->assertJsonPath('next_action', 'snapshot_tick');
+        app(CompactSnapshotProgress::class)->publish($this->dir, $this->attempt, $next);
+        // A tick always also commits root state; simulate that atomic operation here.
+        unlink($this->dir.'/operational-progress.json');
+        $this->getJson('/admin/tools/gpswiss-migration-export/'.$this->run.'?format=compact')->assertOk()->assertJsonPath('processed', 20573);
     }
 }
