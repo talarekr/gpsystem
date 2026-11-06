@@ -6,27 +6,44 @@ use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
 use App\Services\MigrationExport\GpswissMigrationExport;
 use App\Services\MigrationExport\MigrationExportException;
+use App\Services\MigrationExport\MigrationSnapshotLauncher;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 final class GpswissMigrationExportController extends Controller
 {
-    public function __invoke(Request $request, GpswissMigrationExport $exports, ?string $run = null)
+    public function __invoke(Request $request, GpswissMigrationExport $exports, MigrationSnapshotLauncher $launcher, ?string $run = null)
     {
         abort_unless($request->user()?->hasRole(UserRole::OwnerAdmin->value), 403);
         $owner = (int) $request->user()->id;
-        $input = $request->validate(['action' => ['sometimes', 'in:start,tick,resume'], 'download' => ['sometimes', 'in:sample,full'], 'format' => ['sometimes', 'in:status']]);
+        $input = $request->validate(['action' => ['sometimes', 'in:start,tick,resume,retry_snapshot,abort_snapshot'], 'download' => ['sometimes', 'in:sample,full'], 'format' => ['sometimes', 'in:status'],
+            'confirm_restart' => ['sometimes', 'boolean'], 'confirm_abort' => ['sometimes', 'boolean'], 'expected_snapshot_attempt' => ['nullable', 'uuid']]);
         try {
             if ($request->isMethod('post')) {
                 abort_unless(isset($input['action']), 422);
                 ignore_user_abort(true); // Finish this authorized checkpoint even if its response is lost.
                 if ($input['action'] === 'start') {
-                    $data = $exports->start($owner, $run);
+                    $data = $exports->prepare($owner, $run);
                 } else {
                     if (! $run) {
                         return $this->error('invalid_run_id', 422);
                     }
-                    $data = $input['action'] === 'resume' ? $exports->resume($owner, $run) : $exports->tick($owner, $run);
+                    $expectedAttempt = $input['expected_snapshot_attempt'] ?? null;
+                    $data = match ($input['action']) {
+                        'retry_snapshot' => $request->boolean('confirm_restart')
+                            ? $exports->retrySnapshot($owner, $run, $expectedAttempt)
+                            : throw new MigrationExportException('snapshot_restart_confirmation_required', 422),
+                        'abort_snapshot' => $request->boolean('confirm_abort')
+                            ? $exports->abortSnapshot($owner, $run, $expectedAttempt)
+                            : throw new MigrationExportException('snapshot_abort_confirmation_required', 422),
+                        'resume' => $exports->resume($owner, $run),
+                        default => $exports->tick($owner, $run),
+                    };
+                }
+                if (in_array($input['action'], ['start', 'retry_snapshot'], true) && ($data['snapshot_state'] ?? $data['state']) === 'snapshot_pending') {
+                    $launch = $launcher->launch($owner, $data['run_id'], $data['snapshot_attempt_id']);
+                    $exports->recordSnapshotLaunch($owner, $data['run_id'], $data['snapshot_attempt_id'], $launch['launcher_status']);
+                    $data = $exports->status($owner, $data['run_id']) + $launch;
                 }
 
                 return response()->json($data)->header('Cache-Control', 'private, no-store');

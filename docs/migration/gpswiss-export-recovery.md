@@ -1,5 +1,7 @@
 # Recovery eksportera GPSwiss → WystawCzesc po #1509
 
+Obsługa świadomego ponowienia przerwanej fazy snapshotu i osobnego workera została opisana w [gpswiss-snapshot-recovery.md](gpswiss-snapshot-recovery.md). Poniższa diagnoza dokumentuje zachowanie #1510; zwykłe Resume nadal nie rekonstruuje snapshotu z bieżącej bazy.
+
 ## Ustalenia i granice diagnozy
 
 Sprawdzono `main` po #1509 (`f045563b85c7910f833643469861f501a99a8ac4`). Nie odczytywano produkcyjnej bazy, sesji, logów ani prywatnego katalogu eksportów. Nie uruchamiano produkcyjnego eksportu ani importu.
