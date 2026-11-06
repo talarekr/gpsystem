@@ -7,9 +7,21 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use RuntimeException;
 
-/** An allowlisted catalog snapshot. Never instantiates business models or reads accounts/orders/users. */
+/** One private business snapshot; no models/observers, integration credentials or provider calls. */
 final class GpswissSnapshot
 {
+    /** Fixed business scope; schema drift is inventoried, never used to select auth/integration tables. */
+    private const OPTIONAL_TABLES = [
+        'allegro_parameter_selections', 'marketplace_category_mappings', 'part_translations', 'category_translations',
+        'car_images', 'ovoko_car_dictionary_entries', 'orders', 'order_items', 'shipments', 'customer_returns',
+        'shop_events', 'local_sales', 'stripe_fr_attempts', 'stripe_fr_events',
+        'order_status_history', 'order_status_histories', 'order_status_changes', 'order_histories',
+        'payments', 'order_payments', 'refunds', 'order_refunds', 'returns', 'order_returns', 'return_items',
+        'shipment_packages', 'order_notes', 'order_discounts', 'order_taxes', 'order_addresses',
+    ];
+
+    private const CUSTOMER_FIELDS = ['id', 'name', 'first_name', 'last_name', 'email', 'phone', 'tax_id', 'company_name', 'address_line1', 'address_line2', 'postal_code', 'city', 'country', 'created_at', 'updated_at'];
+
     public function capture(): array
     {
         $db = DB::connection();
@@ -17,21 +29,22 @@ final class GpswissSnapshot
             throw new RuntimeException('existing_transaction_not_supported');
         }
         if ($db->getDriverName() === 'mysql') {
-            // Session/transaction characteristics only, no application SQL writes. Applies to next transaction.
             $db->getPdo()->exec('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY');
         } elseif ($db->getDriverName() !== 'sqlite') {
             throw new RuntimeException('snapshot_driver_not_supported');
         }
 
         return ReadOnlyDatabase::run(fn () => $db->transaction(function () use ($db): array {
-            $tables = ['parts', 'part_images', 'part_categories', 'cars', 'storage_locations', 'marketplace_listings'];
-            $parametersAvailable = Schema::hasTable('allegro_parameter_selections');
-            if ($parametersAvailable) {
-                $tables[] = 'allegro_parameter_selections';
+            $required = ['parts', 'part_images', 'part_categories', 'cars', 'storage_locations', 'marketplace_listings'];
+            $available = array_values(array_filter(self::OPTIONAL_TABLES, fn ($t) => Schema::hasTable($t)));
+            $tables = [...$required, ...$available];
+            $hasUsers = Schema::hasTable('users');
+            if ($hasUsers) {
+                $tables[] = 'users';
             }
-            $mappingAvailable = Schema::hasTable('marketplace_category_mappings');
-            if ($mappingAvailable) {
-                $tables[] = 'marketplace_category_mappings';
+            $hasAccounts = Schema::hasTable('marketplace_accounts');
+            if ($hasAccounts) {
+                $tables[] = 'marketplace_accounts';
             }
             if ($db->getDriverName() === 'mysql') {
                 $engines = $db->table('information_schema.tables')->where('table_schema', $db->getDatabaseName())->whereIn('table_name', $tables)->get(['table_name as source_table', 'engine as source_engine']);
@@ -40,81 +53,180 @@ final class GpswissSnapshot
                 }
             }
             $started = now()->toIso8601String();
-            // First non-locking InnoDB read establishes one repeatable-read view for ALL following tables.
-            $parts = $this->read('parts', ['id', 'source_system', 'external_id', 'sku', 'name', 'slug', 'part_number', 'additional_part_codes', 'oem_number', 'manufacturer_code', 'short_description', 'description', 'condition_notes', 'category_id', 'car_id', 'storage_location_id', 'price', 'currency', 'allegro_price', 'ovoko_price', 'ebay_price', 'allegro_shipping_rate_name', 'quantity', 'status', 'is_visible_storefront', 'weight_kg', 'length_cm', 'width_cm', 'height_cm', 'code_photo_path', 'vehicle_snapshot', 'review_metadata', 'legacy_payload', 'updated_at']);
-            $categories = $this->read('part_categories', ['id', 'parent_id', 'name', 'slug', 'category_path', 'sort_order', 'description', 'is_visible']);
-            $cars = $this->read('cars', ['id', 'source_system', 'external_id', 'make', 'model', 'model_variant', 'production_year', 'fuel_type', 'gearbox_type', 'engine_code', 'engine_capacity_cm3', 'steering_side', 'body_type', 'color', 'color_code', 'legacy_payload']);
-            $locations = $this->read('storage_locations', ['id', 'name', 'is_active']);
-            $images = $this->read('part_images', ['id', 'part_id', 'path', 'alt_text', 'sort_order', 'is_primary']);
-            $listings = $this->read('marketplace_listings', ['id', 'part_id', 'marketplace', 'marketplace_account_id', 'external_offer_id', 'external_listing_id', 'external_inventory_id', 'sku', 'status', 'url', 'raw_payload']);
-            $parameters = $parametersAvailable ? $this->read('allegro_parameter_selections', ['part_id', 'allegro_category_id', 'parameter_id', 'parameter_name', 'value_id', 'value_label']) : [];
-            $categoryMappings = $mappingAvailable ? $this->read('marketplace_category_mappings', ['id', 'local_category_id', 'channel', 'external_category_id', 'external_category_name', 'external_category_path', 'is_blocked']) : [];
-            $byListing = [];
-            foreach ($listings as $listing) {
-                $raw = $this->json($listing['raw_payload'] ?? null);
-                unset($listing['raw_payload']);
-                $listing['url'] = self::offerUrl($listing['url'] ?? null);
-                $listing['allegro_parameters_from_saved_offer'] = str_starts_with($listing['marketplace'], 'allegro') ? $this->offerParameters($raw) : [];
-                $byListing[$listing['part_id']][] = self::clean($listing);
+            $data = [];
+            $inventory = [];
+            foreach ([...$required, ...$available] as $table) {
+                [$rows, $columns] = $this->readBusinessTable($table);
+                $data[$table] = $rows;
+                $inventory[$table] = $columns;
             }
-            $byParameter = [];
-            foreach ($parameters as $parameter) {
-                $byParameter[$parameter['part_id']][] = self::clean($parameter);
+            // Customers only when referenced by exported business records. No passwords, roles or sessions.
+            if ($hasUsers) {
+                $ids = array_values(array_unique(array_filter([
+                    ...array_column($data['orders'] ?? [], 'customer_id'),
+                    ...array_column($data['customer_returns'] ?? [], 'user_id'),
+                ], fn ($id) => $id !== null && $id !== '')));
+                $columns = array_values(array_intersect(self::CUSTOMER_FIELDS, Schema::getColumnListing('users')));
+                $data['customers'] = $ids === [] ? [] : DB::table('users')->whereIn('id', $ids)->orderBy('id')->get($columns)->map(fn ($r) => MigrationDataPolicy::clean((array) $r))->all();
+                $inventory['customers'] = ['source_table' => 'users', 'exported_columns' => $columns, 'omitted_columns' => array_map(fn ($c) => ['name' => $c, 'reason' => 'authentication_or_non_order_profile_field'], array_values(array_diff(Schema::getColumnListing('users'), $columns)))];
             }
+            // Only the non-secret identities required to disambiguate retained offer/order mappings.
+            // Never SELECT * from integration accounts or copy their credential/settings blobs.
+            $accountFields = ['id', 'marketplace', 'code', 'name', 'status', 'api_mode', 'api_base_url'];
+            $accountIds = array_values(array_unique(array_filter([
+                ...array_column($data['marketplace_listings'], 'marketplace_account_id'),
+                ...array_column($data['orders'] ?? [], 'marketplace_account_id'),
+            ], fn ($id) => $id !== null && $id !== '')));
+            $accountColumns = $hasAccounts ? array_values(array_intersect($accountFields, Schema::getColumnListing('marketplace_accounts'))) : [];
+            $data['marketplace_account_identities'] = ! $hasAccounts || $accountIds === [] ? [] : DB::table('marketplace_accounts')->whereIn('id', $accountIds)->orderBy('id')->get($accountColumns)->map(function ($r) {
+                return MigrationDataPolicy::clean((array) $r) + ['automatic_activation_allowed' => false, 'explicit_adoption_required' => true];
+            })->all();
+            $inventory['marketplace_account_identities'] = ['source_table' => 'marketplace_accounts', 'exported_columns' => $accountColumns,
+                'omitted_columns' => $hasAccounts ? array_map(fn ($c) => ['name' => $c, 'reason' => 'integration_credentials_or_non_identity_configuration'], array_values(array_diff(Schema::getColumnListing('marketplace_accounts'), $accountColumns))) : []];
+            $parts = $data['parts'];
             $products = [];
-            foreach ($parts as $part) {
-                $legacy = $this->json($part['legacy_payload'] ?? null);
-                $review = $this->json($part['review_metadata'] ?? null);
-                $part['part_position'] = collect([data_get($review, 'part_position'), data_get($legacy, 'part_position'), data_get($legacy, 'position')])->first(fn ($v) => is_scalar($v) && trim((string) $v) !== '');
-                $part['additional_part_codes'] = $this->codes($this->json($part['additional_part_codes'] ?? null));
-                $part['brand'] = is_scalar($legacy['brand'] ?? null) ? $legacy['brand'] : null;
-                $part['manufacturer'] = is_scalar($legacy['manufacturer'] ?? null) ? $legacy['manufacturer'] : null;
-                $part['allegro_category_id'] = data_get($review, 'marketplace_category_selections.allegro');
-                if (! is_scalar($part['allegro_category_id'])) {
-                    $part['allegro_category_id'] = null;
-                }
-                $part['allegro_parameters'] = $byParameter[$part['id']] ?? [];
-                $part['vehicle_snapshot'] = array_intersect_key($this->json($part['vehicle_snapshot'] ?? null), array_flip(['make', 'model', 'model_variant', 'production_year', 'fuel_type', 'gearbox_type', 'engine_code', 'engine_capacity_cm3', 'steering_side', 'body_type', 'color', 'color_code']));
-                $part['offers'] = $byListing[$part['id']] ?? [];
-                foreach (['price', 'allegro_price', 'ovoko_price', 'ebay_price'] as $field) {
-                    $part[$field] = isset($part[$field]) ? number_format((float) $part[$field], 2, '.', '') : null;
-                }
-                $part['ean'] = null;
-                $part['vat_rate'] = null;
-                $part['images'] = [];
-                // No raw JSON, user identifiers, internal notes, customer or integration data crosses this boundary.
-                unset($part['legacy_payload'], $part['review_metadata']);
-                $products[] = self::clean($part);
+            $listings = $data['marketplace_listings'];
+            $byListing = [];
+            foreach ($listings as &$listing) {
+                $raw = is_array($listing['raw_payload'] ?? null) ? $listing['raw_payload'] : [];
+                $listing['url'] = self::offerUrl($listing['url'] ?? null);
+                $listing['allegro_parameters_from_saved_offer'] = str_starts_with((string) ($listing['marketplace'] ?? ''), 'allegro') ? $this->offerParameters($raw) : [];
+                $allegro = str_starts_with((string) ($listing['marketplace'] ?? ''), 'allegro');
+                $listing['migration_binding_policy'] = $allegro ? 'historical_only_republish_from_wystawczesc' : 'preserve_identity_pending_explicit_adoption';
+                $listing['automatic_activation_allowed'] = false;
+                $byListing[$listing['part_id']][] = $listing;
             }
+            unset($listing);
+            $data['marketplace_listings'] = $listings;
+            $byParameter = [];
+            foreach ($data['allegro_parameter_selections'] ?? [] as $p) {
+                $byParameter[$p['part_id']][] = $p;
+            }
+            foreach ($parts as $part) {
+                $legacy = is_array($part['legacy_payload'] ?? null) ? $part['legacy_payload'] : [];
+                $review = is_array($part['review_metadata'] ?? null) ? $part['review_metadata'] : [];
+                $part['part_position'] = collect([data_get($review, 'part_position'), data_get($legacy, 'part_position'), data_get($legacy, 'position')])->first(fn ($v) => is_scalar($v) && trim((string) $v) !== '');
+                // Preserve the saved native value, and additionally expose the panel-normalized list.
+                $part['additional_part_codes_saved'] = $part['additional_part_codes'] ?? null;
+                $part['additional_part_codes'] = $this->codes(is_array($part['additional_part_codes'] ?? null) ? $part['additional_part_codes'] : []);
+                $part['brand'] ??= is_scalar($legacy['brand'] ?? null) ? $legacy['brand'] : null;
+                $part['manufacturer'] ??= is_scalar($legacy['manufacturer'] ?? null) ? $legacy['manufacturer'] : null;
+                $part['allegro_parameters'] = $byParameter[$part['id']] ?? [];
+                $part['offers'] = $byListing[$part['id']] ?? [];
+                $part['is_sold_by_panel_rule'] = ($part['status'] ?? null) === 'sold';
+                $part['is_to_list_by_panel_rule'] = (bool) ($part['needs_listing'] ?? false);
+                $part['ean'] ??= null;
+                $part['vat_rate'] ??= null;
+                $part['images'] = [];
+                $products[] = $part;
+            }
+            $cars = $data['cars'];
             foreach ($cars as &$car) {
-                $legacy = $this->json($car['legacy_payload'] ?? null);
-                $car['ovoko_car_id'] = ($car['source_system'] ?? null) === 'ovoko' ? $car['external_id'] : ($legacy['ovoko_car_id'] ?? null);
+                $legacy = is_array($car['legacy_payload'] ?? null) ? $car['legacy_payload'] : [];
+                $car['ovoko_car_id'] = ($car['source_system'] ?? null) === 'ovoko' ? ($car['external_id'] ?? null) : ($legacy['ovoko_car_id'] ?? null);
                 if (! is_scalar($car['ovoko_car_id'])) {
                     $car['ovoko_car_id'] = null;
                 }
-                unset($car['legacy_payload']);
-                $car = self::clean($car);
+                if ($car['ovoko_car_id'] !== null) {
+                    $car['ovoko_car_id'] = (string) $car['ovoko_car_id'];
+                }
             }
             unset($car);
+            $data['cars'] = $cars;
+            $relations = $this->relations([...$required, ...$available]);
+            if (isset($data['customers'])) {
+                $relations['orders']['customer_id'] = 'customers';
+            }
+            if (isset($data['customer_returns'])) {
+                $relations['customer_returns']['order_id'] = 'shop_events';
+                $relations['customer_returns']['user_id'] = 'customers';
+            }
+            $relations['marketplace_listings']['marketplace_account_id'] = 'marketplace_account_identities';
+            $relations['orders']['marketplace_account_id'] = 'marketplace_account_identities';
+            $rules = ['sold_part_ids' => "Part::scopeSold / PartResource::adminSoldPartsQuery: status === 'sold'", 'parts_to_list_ids' => 'PartResource::adminPartsToListQuery: needs_listing = true; no quantity or offer-link inference'];
+            $groups = ['sold_part_ids' => array_values(array_column(array_filter($products, fn ($p) => $p['is_sold_by_panel_rule']), 'id')), 'parts_to_list_ids' => array_values(array_column(array_filter($products, fn ($p) => $p['is_to_list_by_panel_rule']), 'id'))];
+            $datasets = array_diff_key($data, array_flip(['parts', 'part_categories', 'cars', 'storage_locations']));
 
-            return ['snapshot_at' => $started, 'snapshot_finished_at' => now()->toIso8601String(), 'database_consistency' => $db->getDriverName() === 'mysql' ? 'repeatable_read_read_only_innodb' : 'sqlite_read_transaction',
+            return [
+                'snapshot_at' => $started, 'snapshot_finished_at' => now()->toIso8601String(), 'database_consistency' => $db->getDriverName() === 'mysql' ? 'repeatable_read_read_only_innodb' : 'sqlite_read_transaction',
                 'source_environment' => app()->environment(), 'source_host' => parse_url((string) config('app.url'), PHP_URL_HOST),
-                'products' => $products, 'marketplace_category_mappings' => self::clean($categoryMappings), 'categories' => self::clean($categories), 'cars' => $cars, 'storage_locations' => self::clean($locations), 'images' => $images,
-                'source_counts' => ['products' => count($parts), 'photo_rows' => count($images), 'categories' => count($categories), 'cars' => count($cars), 'storage_locations' => count($locations), 'active_by_status' => count(array_filter($parts, fn ($p) => in_array($p['status'], ['ready', 'published'], true))), 'inactive_by_status' => count(array_filter($parts, fn ($p) => in_array($p['status'], ['draft', 'needs_review', 'sold'], true))), 'archived' => count(array_filter($parts, fn ($p) => $p['status'] === 'archived')), 'statuses' => array_count_values(array_map(fn ($p) => $p['status'] ?? 'unknown', $parts))],
-                'warnings' => array_values(array_filter(['ean_and_vat_not_native_do_not_infer', 'native_product_variants_not_supported', $parametersAvailable ? null : 'allegro_parameter_selections_table_missing']))];
+                'products' => $products, 'categories' => $data['part_categories'], 'cars' => $cars, 'storage_locations' => $data['storage_locations'], 'images' => $data['part_images'],
+                'marketplace_category_mappings' => $data['marketplace_category_mappings'] ?? [], 'datasets' => $datasets, 'groups' => $groups, 'group_rules' => $rules,
+                'relations' => $relations, 'schema_inventory' => $inventory, 'optional_tables_absent' => array_values(array_diff(self::OPTIONAL_TABLES, $available)),
+                'source_counts' => ['products' => count($parts), 'photo_rows' => count($data['part_images']), 'categories' => count($data['part_categories']), 'cars' => count($cars), 'storage_locations' => count($data['storage_locations']), 'orders' => count($data['orders'] ?? []), 'order_items' => count($data['order_items'] ?? []), 'sold_parts' => count($groups['sold_part_ids']), 'parts_to_list' => count($groups['parts_to_list_ids']), 'statuses' => array_count_values(array_map(fn ($p) => $p['status'] ?? 'unknown', $parts)), 'dataset_counts' => array_map('count', $datasets)],
+                'warnings' => ['sensitive_business_data_private_only', 'native_product_variants_not_supported', 'ean_and_vat_only_when_locally_stored_do_not_infer', 'status_history_refunds_cancellations_retained_if_stored_not_reconstructed', 'customer_returns_order_id_refers_to_shop_events_not_orders'],
+            ];
         }));
     }
 
-    private function read(string $table, array $columns): array
+    private function readBusinessTable(string $table): array
     {
-        return DB::table($table)->orderBy(in_array('id', $columns, true) ? 'id' : 'part_id')->get(array_values(array_intersect($columns, Schema::getColumnListing($table))))->map(fn ($r) => (array) $r)->all();
+        $schema = Schema::getColumns($table);
+        $allowed = [];
+        $omitted = [];
+        $metadata = [];
+        foreach ($schema as $column) {
+            $name = $column['name'];
+            if (MigrationDataPolicy::sensitiveKey($name)) {
+                $omitted[] = ['name' => $name, 'reason' => 'secret_authentication_or_card_capability'];
+
+                continue;
+            }
+            $allowed[] = $name;
+            $metadata[$name] = ['type' => $column['type'] ?? $column['type_name'] ?? 'unknown', 'nullable' => $column['nullable'] ?? null];
+        }
+        $query = DB::table($table);
+        foreach (['id', 'order_id', 'part_id', 'event_id'] as $order) {
+            if (in_array($order, $allowed, true)) {
+                $query->orderBy($order);
+                break;
+            }
+        }
+        $rows = $query->get($allowed)->map(function ($record) use ($metadata) {
+            $row = (array) $record;
+            foreach ($row as $key => &$value) {
+                $type = strtolower((string) $metadata[$key]['type']);
+                if ($value !== null && preg_match('/decimal|numeric|real|double|float/', $type)) {
+                    $scale = preg_match('/\(\d+,\s*(\d+)\)/', $type, $match) ? (int) $match[1] : (preg_match('/price|total|amount|subtotal|tax|discount|vat|paid|refund/i', $key) ? 2 : null);
+                    // MySQL returns DECIMAL as a string. Never route it through float arithmetic.
+                    if ($scale !== null) {
+                        $value = $this->decimal($value, $scale);
+                    }
+                }
+            }
+            unset($value);
+
+            return MigrationDataPolicy::clean($row);
+        })->all();
+
+        return [$rows, ['source_table' => $table, 'exported_columns' => $allowed, 'column_definitions' => $metadata, 'omitted_columns' => $omitted]];
     }
 
-    private function json(mixed $value): array
+    private function decimal(mixed $value, int $scale): string
     {
-        $decoded = is_string($value) ? json_decode($value, true) : $value;
+        $value = (string) $value;
+        if (preg_match('/^([+-]?\d+)(?:\.(\d*))?$/D', $value, $match)) {
+            return $match[1].($scale > 0 ? '.'.str_pad(substr($match[2] ?? '', 0, $scale), $scale, '0') : '');
+        }
 
-        return is_array($decoded) ? $decoded : [];
+        // SQLite test storage may emit scientific notation; source DECIMAL columns do not.
+        return number_format((float) $value, $scale, '.', '');
+    }
+
+    private function relations(array $tables): array
+    {
+        $out = [];
+        foreach ($tables as $table) {
+            foreach (Schema::getForeignKeys($table) as $foreign) {
+                $columns = $foreign['columns'] ?? [];
+                if (count($columns) === 1) {
+                    $out[$table][$columns[0]] = $foreign['foreign_table'];
+                }
+            }
+        }
+        $out['orders']['customer_id'] = 'customers';
+
+        return $out;
     }
 
     private function codes(array $codes): array
@@ -130,10 +242,9 @@ final class GpswissSnapshot
                 continue;
             }
             foreach ($rows as $row) {
-                if (! is_array($row)) {
-                    continue;
+                if (is_array($row)) {
+                    $out[] = ['scope' => $scope] + $row;
                 }
-                $out[] = ['scope' => $scope] + array_intersect_key($row, array_flip(['id', 'name', 'values', 'valuesIds', 'rangeValue']));
             }
         }
 
@@ -151,32 +262,11 @@ final class GpswissSnapshot
             return null;
         }
 
-        return 'https://'.$host.($url['path'] ?? '/'); // Never userinfo, fragments, signed query strings or tokens.
+        return MigrationDataPolicy::clean('https://'.$host.($url['path'] ?? '/').(isset($url['query']) ? '?'.$url['query'] : ''));
     }
 
     public static function clean(mixed $value): mixed
     {
-        if (is_array($value)) {
-            $out = [];
-            foreach ($value as $key => $item) {
-                if (is_string($key) && preg_match('/token|secret|password|credential|authorization|customer|buyer|seller_address|email/i', $key)) {
-                    continue;
-                }
-                $out[$key] = self::clean($item);
-            }
-
-            return $out;
-        }
-        if (! is_string($value)) {
-            return $value;
-        }
-        $value = preg_replace_callback("~https?://[^\\s<>\"']+~u", static function ($match) {
-            $url = parse_url($match[0]);
-
-            return isset($url['host']) ? ($url['scheme'] ?? 'https').'://'.$url['host'].($url['path'] ?? '/') : '[URL_REDACTED]';
-        }, $value);
-        $value = preg_replace('/[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}/i', '[EMAIL_REDACTED]', $value);
-
-        return preg_replace('/\b(access_token|refresh_token|token|client_secret|password|api_key|authorization)\s*[:=]\s*[^\s<>"\']+/i', '$1=[REDACTED]', $value);
+        return MigrationDataPolicy::clean($value);
     }
 }

@@ -2,6 +2,7 @@
 
 namespace App\Services\MigrationExport;
 
+use App\Models\Order;
 use Illuminate\Support\Str;
 use RuntimeException;
 use ZipArchive;
@@ -34,7 +35,7 @@ final class GpswissMigrationExport
 
             return $this->status($owner, $id);
         }
-        $state = ['run_id' => $id, 'owner_id' => $owner, 'state' => 'snapshot', 'processed_images' => 0, 'photo_results' => [], 'last_error' => null];
+        $state = ['schema_version' => 'gpswiss-wystawczesc-2', 'contains_customer_data' => true, 'run_id' => $id, 'owner_id' => $owner, 'state' => 'snapshot', 'processed_images' => 0, 'photo_results' => [], 'last_error' => null];
         $this->write($dir.'/state.json', $state);
         try {
             $data = $this->snapshot->capture();
@@ -56,6 +57,15 @@ final class GpswissMigrationExport
                 unset($part['code_photo_path']);
             }
             unset($part, $data['images']);
+            $usedPaths = [];
+            foreach ($tasks as &$task) {
+                $key = mb_strtolower($task['package_path']);
+                if (isset($usedPaths[$key])) {
+                    $task['package_path'] = dirname($task['package_path']).'/image-'.$task['image_id'].'/'.basename($task['package_path']);
+                }
+                $usedPaths[mb_strtolower($task['package_path'])] = true;
+            }
+            unset($task);
             $data['orphan_image_ids'] = $orphans;
             $this->write($dir.'/snapshot.json', $data);
             $this->write($dir.'/photo-tasks.json', $tasks);
@@ -87,6 +97,9 @@ final class GpswissMigrationExport
         }
         try {
             $state = $this->read($dir.'/state.json');
+            if (($state['schema_version'] ?? null) !== 'gpswiss-wystawczesc-2') {
+                throw new RuntimeException('new_export_required_for_v2');
+            }
             if (! in_array($state['state'], ['photos', 'archive'], true)) {
                 return $this->status($owner, $id);
             }
@@ -211,29 +224,65 @@ final class GpswissMigrationExport
             mkdir($base, 0700);
         }
         $this->write($base.'/products.json', $products);
-        $this->write($base.'/categories.json', array_values(array_intersect_key($categories, array_flip($categoryIds))));
-        $this->write($base.'/cars.json', array_values(array_intersect_key($cars, array_flip(array_filter(array_column($products, 'car_id'))))));
-        $this->write($base.'/storage-locations.json', array_values(array_intersect_key($locations, array_flip(array_filter(array_column($products, 'storage_location_id'))))));
+        $this->write($base.'/categories.json', $kind === 'full' ? array_values($categories) : array_values(array_intersect_key($categories, array_flip($categoryIds))));
+        $this->write($base.'/cars.json', $kind === 'full' ? array_values($cars) : array_values(array_intersect_key($cars, array_flip(array_filter(array_column($products, 'car_id'))))));
+        $this->write($base.'/storage-locations.json', $kind === 'full' ? array_values($locations) : array_values(array_intersect_key($locations, array_flip(array_filter(array_column($products, 'storage_location_id'))))));
         $this->write($base.'/photos.json', $photos);
         $this->write($base.'/marketplace-category-mappings.json', array_values(array_filter($snapshot['marketplace_category_mappings'], fn ($m) => in_array($m['local_category_id'], $categoryIds, true))));
         $this->csv($base.'/products.csv', $products, ['id', 'sku', 'name', 'part_number', 'additional_part_codes', 'category_id', 'category_name', 'quality', 'part_position', 'storage_location_id', 'storage_location_name', 'description', 'local_car_id', 'ovoko_car_id', 'price', 'currency', 'allegro_price', 'ovoko_price', 'ebay_price', 'allegro_shipping_rate_name', 'allegro_parameters', 'offers', 'status', 'quantity', 'images']);
         $this->csv($base.'/photos.csv', $photos, ['part_id', 'image_id', 'role', 'original_filename', 'original_relative_path', 'package_path', 'sort_order', 'is_primary', 'status', 'bytes', 'sha256', 'mime']);
+        $datasets = MigrationPackageData::select($snapshot, $kind, $products, $categoryIds);
+        foreach (['products' => $products, 'cars' => $kind === 'full' ? array_values($cars) : array_values(array_intersect_key($cars, array_flip(array_filter(array_column($products, 'car_id'))))), 'categories' => $kind === 'full' ? array_values($categories) : array_values(array_intersect_key($categories, array_flip($categoryIds))), 'storage-locations' => $kind === 'full' ? array_values($locations) : array_values(array_intersect_key($locations, array_flip(array_filter(array_column($products, 'storage_location_id')))))] as $name => $rows) {
+            $this->csv($base.'/'.$name.'.csv', $rows, $this->fields($rows));
+        }
+        if (! is_dir($base.'/datasets')) {
+            mkdir($base.'/datasets', 0700);
+        }
+        foreach ($datasets as $table => $rows) {
+            $this->write($base.'/datasets/'.$table.'.json', $rows);
+            $this->csv($base.'/datasets/'.$table.'.csv', $rows, $this->fields($rows, $snapshot['schema_inventory'][$table]['exported_columns'] ?? []));
+        }
+        $this->write($base.'/fields.generated.json', MigrationPackageData::dictionary($snapshot, array_merge($datasets, ['parts' => $products, 'cars' => $kind === 'full' ? array_values($cars) : array_values(array_intersect_key($cars, array_flip(array_filter(array_column($products, 'car_id'))))), 'part_categories' => array_values(array_intersect_key($categories, array_flip($categoryIds))), 'storage_locations' => array_values($locations), 'part_images' => $photos])));
+        $this->write($base.'/statuses.json', ['part_statuses' => ['draft', 'needs_review', 'ready', 'published', 'sold', 'archived'], 'order_statuses' => Order::STATUSES, 'group_rules' => $snapshot['group_rules'] ?? [], 'source_status_counts' => $snapshot['source_counts'], 'source_dates' => 'preserved as stored; no inferred timezone conversion']);
+        foreach (['sold-part-ids' => 'sold_part_ids', 'parts-to-list-ids' => 'parts_to_list_ids'] as $name => $group) {
+            $groupIds = array_values(array_filter($snapshot['groups'][$group] ?? [], fn ($id) => isset($selected[(string) $id])));
+            $this->write($base.'/'.$name.'.json', $groupIds);
+            $this->csv($base.'/'.$name.'.csv', array_map(fn ($id) => ['part_id' => (string) $id], $groupIds), ['part_id']);
+        }
         $missing = array_values(array_filter($photos, fn ($p) => $p['status'] !== 'COPIED_VERIFIED'));
         $this->write($base.'/missing-originals.json', $missing);
+        $sourceSets = array_merge($snapshot['datasets'], ['parts' => $snapshot['products'], 'cars' => $snapshot['cars'], 'part_categories' => $snapshot['categories'], 'storage_locations' => $snapshot['storage_locations']]);
+        $sourceIds = [];
+        foreach ($sourceSets as $table => $rows) {
+            $sourceIds[$table] = array_fill_keys(array_map('strval', array_column($rows, 'id')), true);
+        }
+        foreach ($datasets as $table => $rows) {
+            foreach ($snapshot['relations'][$table] ?? [] as $column => $target) {
+                if (! is_string($target) || ! isset($sourceIds[$target])) {
+                    continue;
+                }
+                foreach ($rows as $row) {
+                    $foreign = $row[$column] ?? null;
+                    if ($foreign !== null && $foreign !== '' && ! isset($sourceIds[$target][(string) $foreign])) {
+                        $issues[] = ['reason' => 'missing_source_reference', 'table' => $table, 'row_id' => $row['id'] ?? null, 'column' => $column, 'target_table' => $target, 'target_id' => (string) $foreign];
+                    }
+                }
+            }
+        }
         $this->write($base.'/dependency-issues.json', $issues);
         $schema = resource_path('migration-export.schema.json');
         copy($schema, $base.'/schema.json');
         copy(base_path('docs/migration/gpswiss-export-and-sync-stop.md'), $base.'/READ-ME.md');
         $hashes = [];
-        foreach (glob($base.'/*') as $file) {
-            if (basename($file) !== 'manifest.json') {
-                $hashes[basename($file)] = hash_file('sha256', $file);
+        foreach ($this->packageFiles($base) as $relative => $file) {
+            if ($relative !== 'manifest.json') {
+                $hashes[$relative] = hash_file('sha256', $file);
             }
         }
-        $manifest = ['schema_version' => 'gpswiss-wystawczesc-1', 'run_id' => basename($dir), 'package_kind' => $kind, 'source_instance' => 'gpswiss.pl', 'source_environment' => $snapshot['source_environment'], 'source_host' => $snapshot['source_host'], 'privacy_review_required' => true,
+        $manifest = ['schema_version' => 'gpswiss-wystawczesc-2', 'run_id' => basename($dir), 'package_kind' => $kind, 'source_instance' => 'gpswiss.pl', 'source_environment' => $snapshot['source_environment'], 'source_host' => $snapshot['source_host'], 'privacy_review_required' => true, 'contains_customer_data' => true, 'access' => 'authenticated_owner_only_no_public_url', 'allegro_mapping_policy' => 'historical_only_never_activate', 'ebay_ovoko_mapping_policy' => 'preserve_exact_market_and_account_identity_no_execution',
             'snapshot_at' => $snapshot['snapshot_at'], 'snapshot_finished_at' => $snapshot['snapshot_finished_at'], 'database_consistency' => $snapshot['database_consistency'],
             'file_consistency' => 'fingerprints_captured_after_db_snapshot_verified_during_copy_not_global_fs_snapshot',
-            'source_counts' => $snapshot['source_counts'], 'products_count' => count($products), 'sample_source_ids' => $kind === 'sample' ? $ids : [],
+            'sample_case_coverage' => $this->caseCoverage($snapshot, $products), 'datasets_counts' => array_map('count', $datasets), 'schema_inventory' => $snapshot['schema_inventory'] ?? [], 'optional_tables_absent' => $snapshot['optional_tables_absent'] ?? [], 'relations' => $snapshot['relations'] ?? [], 'source_counts' => $snapshot['source_counts'], 'products_count' => count($products), 'sample_source_ids' => $kind === 'sample' ? $ids : [],
             'photo_associations' => count($photos), 'verified_originals' => count($photos) - count($missing), 'missing_or_blocked_originals' => count($missing), 'photo_status_counts' => array_count_values(array_column($photos, 'status')),
             'warnings' => $snapshot['warnings'], 'orphan_image_ids' => $snapshot['orphan_image_ids'], 'file_sha256' => $hashes,
             'automatic_import_allowed' => false, 'automatic_publish' => false, 'synchronization_enabled' => false, 'provider_calls' => false, 'database_writes' => false, 'source_file_writes' => false,
@@ -245,8 +294,8 @@ final class GpswissMigrationExport
             throw new RuntimeException('archive_open_failed');
         }
         try {
-            foreach (glob($base.'/*') as $file) {
-                if (! $zip->addFile($file, basename($file))) {
+            foreach ($this->packageFiles($base) as $relative => $file) {
+                if (! $zip->addFile($file, $relative)) {
                     throw new RuntimeException('archive_add_failed');
                 }
             }
@@ -272,22 +321,40 @@ final class GpswissMigrationExport
     {
         $counts = array_count_values(array_column(array_filter($photos, fn ($p) => $p['role'] === 'gallery'), 'part_id'));
         $bad = array_column(array_filter($photos, fn ($p) => $p['status'] !== 'COPIED_VERIFIED'), 'part_id');
+        $has = static fn ($p, $channel) => collect($p['offers'] ?? [])->contains(fn ($o) => str_starts_with((string) ($o['marketplace'] ?? ''), $channel));
         $ids = [];
-        foreach ([fn ($p) => ($counts[$p['id']] ?? 0) > 1, fn ($p) => in_array($p['id'], $bad, true), fn ($p) => in_array($p['status'], ['archived', 'sold'], true), fn ($p) => $p['allegro_parameters'] !== [], fn ($p) => filled($p['part_position'])] as $predicate) {
+        foreach ([fn ($p) => $p['status'] === 'sold', fn ($p) => ! empty($p['needs_listing']), fn ($p) => $has($p, 'ebay'), fn ($p) => $has($p, 'ovoko'), fn ($p) => ($counts[$p['id']] ?? 0) > 1, fn ($p) => in_array($p['id'], $bad, true)] as $predicate) {
+            if (count($ids) >= 5) {
+                break;
+            }
             foreach ($parts as $part) {
                 if (! in_array($part['id'], $ids, true) && $predicate($part)) {
-                    $ids[] = $part['id'];
+                    $ids[] = (string) $part['id'];
                     break;
                 }
             }
         }
         foreach ($parts as $part) {
             if (count($ids) < 5 && ! in_array($part['id'], $ids, true)) {
-                $ids[] = $part['id'];
+                $ids[] = (string) $part['id'];
             }
         }
 
         return $ids;
+    }
+
+    private function caseCoverage(array $snapshot, array $selected): array
+    {
+        $galleryCounts = array_count_values(array_column($snapshot['datasets']['part_images'] ?? [], 'part_id'));
+        $hasOffer = static fn ($part, $channel) => collect($part['offers'] ?? [])->contains(fn ($offer) => str_starts_with((string) ($offer['marketplace'] ?? ''), $channel));
+        $cases = ['sold' => fn ($p) => $p['status'] === 'sold', 'to_list' => fn ($p) => ! empty($p['needs_listing']),
+            'ebay_offer' => fn ($p) => $hasOffer($p, 'ebay'), 'ovoko_offer' => fn ($p) => $hasOffer($p, 'ovoko'), 'multiple_photos' => fn ($p) => ($galleryCounts[$p['id']] ?? 0) > 1];
+        $coverage = [];
+        foreach ($cases as $name => $test) {
+            $coverage[$name] = ['source_count' => count(array_filter($snapshot['products'], $test)), 'selected_ids' => array_values(array_column(array_filter($selected, $test), 'id'))];
+        }
+
+        return $coverage;
     }
 
     private function csv(string $path, array $rows, array $fields): void
@@ -298,7 +365,13 @@ final class GpswissMigrationExport
         foreach ($rows as $row) {
             fputcsv($file, array_map(function ($field) use ($row) {
                 $value = $row[$field] ?? null;
-                $value = is_array($value) ? json_encode($value, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR) : (string) $value;
+                if ($value === null) {
+                    return '\\N';
+                }
+                $value = is_array($value) ? json_encode($value, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR) : (is_bool($value) ? ($value ? '1' : '0') : (string) $value);
+                if (str_starts_with($value, '\\')) {
+                    $value = '\\'.$value;
+                }
 
                 return preg_match('/^[\s\x00-\x1f]*[=+@-]/u', $value) ? "'".$value : $value;
             }, $fields), ';', '"', '');
@@ -307,16 +380,39 @@ final class GpswissMigrationExport
         chmod($path, 0600);
     }
 
+    private function fields(array $rows, array $fallback = []): array
+    {
+        return array_values(array_unique(array_merge($fallback, ...array_map('array_keys', $rows ?: [[]]))));
+    }
+
+    private function packageFiles(string $base): array
+    {
+        $files = [];
+        $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($base, \FilesystemIterator::SKIP_DOTS));
+        foreach ($iterator as $file) {
+            if ($file->isFile()) {
+                $files[substr($file->getPathname(), strlen($base) + 1)] = $file->getPathname();
+            }
+        }
+        ksort($files);
+
+        return $files;
+    }
+
     private function root(): string
     {
         $root = config('migration_export.root', storage_path('app/private/migration-exports'));
         if (! is_dir($root)) {
             mkdir($root, 0700, true);
         }
-        foreach ($this->originals->roots() as $source) {
+        foreach (array_unique([...$this->originals->roots(), realpath(public_path()) ?: public_path(), realpath(dirname(base_path()).'/public_html') ?: dirname(base_path()).'/public_html']) as $source) {
             if (realpath($root) === $source || str_starts_with(realpath($root), $source.DIRECTORY_SEPARATOR)) {
                 throw new RuntimeException('export_root_must_be_private');
             }
+        }
+
+        if ((fileperms($root) & 0077) !== 0) {
+            throw new RuntimeException('export_root_permissions_must_be_private');
         }
 
         return $root;

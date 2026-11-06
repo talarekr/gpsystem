@@ -33,7 +33,7 @@ final class GpswissMigrationExportController extends Controller
             }
         }
         if ($run && isset($input['download'])) {
-            return response()->download($exports->download($owner, $run, $input['download']), 'gpswiss-wystawczesc-'.$input['download'].'-'.$run.'.zip', ['Cache-Control' => 'private, no-store']);
+            return response()->download($exports->download($owner, $run, $input['download']), 'gpswiss-wystawczesc-'.$input['download'].'-'.$run.'.zip', ['Cache-Control' => 'private, no-store, max-age=0', 'X-Content-Type-Options' => 'nosniff', 'X-Robots-Tag' => 'noindex, noarchive']);
         }
 
         return ($run ? response()->json($exports->status($owner, $run)) : response()->view('admin.tools.gpswiss-migration-export'))
