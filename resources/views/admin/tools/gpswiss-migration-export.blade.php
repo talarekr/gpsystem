@@ -5,9 +5,10 @@
 <p>Panel wykonuje krótkie partie i zapisuje postęp na serwerze. Zamrożone granice odczytu oraz sumy kontrolne tworzą wersjonowany snapshot logiczny; nie jest to jedna transakcja bazy utrzymywana między żądaniami HTTP. Granice i ograniczenia spójności znajdziesz w manifeście.</p>
 <p>Próbka obejmuje do 5 rzeczywistych części, a pełny eksport używa tego samego formatu. Zdjęcia zachowują oryginalne nazwy w katalogach ID części; kolizje w obrębie części otrzymują podkatalog ID zdjęcia. Brakujące/zmienione pliki są raportowane.</p>
 <p>Paczka zawiera kody, kategorię, jakość, pozycję, magazyn, opis, lokalne/Ovoko ID auta, ceny sklep/Allegro/Ovoko/eBay, Kurier Allegro, lokalne parametry i linki ofert. Zawiera wszystkie samochody, zamówienia i potrzebne dane klientów — pobieranie wyłącznie prywatnie przez zalogowanego właściciela eksportu. Bez haseł, tokenów i pełnych danych kart. Nie udostępniaj archiwum ani katalogu publicznie.</p>
+<p>Listingi marketplace mogą zmieniać się podczas sprzedaży. Recovery zmienia wyłącznie generację tego datasetu; wcześniejsze datasety i attempt pozostają zachowane. Licznik może się cofnąć o częściowy eksport listingów. Rekoncyliacja ma limit trzech rund i jawny raport niestabilności.</p>
 <p>Snapshot bazy nie jest globalnym snapshotem filesystemu. Kopie plików są weryfikowane podczas kopiowania; finalny cutover wymaga osobnej procedury freeze/snapshotu. Nie zatrzymujemy synchronizacji automatycznie.</p>
 <p>Próbka wybiera sprzedaną część (status sold), część do wystawienia (needs_listing), oferty eBay/Ovoko i galerię — gdy takie przypadki są zapisane. Powiązania Allegro są wyłącznie historyczne. Import, publikacja, synchronizacja i wiadomości do klientów pozostają wyłączone.</p>
-<button id="start" disabled>Przygotuj nowy eksport</button><button id="resume" disabled>Wznów istniejący eksport</button><button id="pause" disabled>Pauza snapshotu</button><button id="stop-local" disabled>Stop lokalnej pętli</button>
+<button id="start" disabled>Przygotuj nowy eksport</button><button id="resume" disabled>Wznów istniejący eksport</button><button id="diagnose-conflict" hidden>Diagnozuj konflikt datasetu</button><button id="pause" disabled>Pauza snapshotu</button><button id="stop-local" disabled>Stop lokalnej pętli</button>
 <section id="snapshot-actions" hidden>
 <p>Niedokończony snapshot można ponowić w trybie panelowym w tym samym eksporcie. Nowa próba ustali własne granice odczytu i nie wykorzysta częściowych danych poprzedniej próby. Wznowienie gotowej próby zachowuje jej granice i cursor.</p>
 <label><input id="snapshot-confirm-retry" type="checkbox"> Potwierdzam rozpoczęcie snapshotu panelowego od początku w tym samym run_id.</label><button id="retry-snapshot" disabled>Ponów snapshot w trybie panelowym</button>
@@ -18,7 +19,7 @@
 <label><input id="photo-confirm-retry" type="checkbox"> Potwierdzam ponowienie nieudanych kopii i odtworzenie archiwów w tym samym run_id.</label><button id="retry-photos" disabled>Ponów nieudane kopie zdjęć</button>
 </section>
 <p id="snapshot-worker" hidden></p><p id="progress" role="status"></p>
-<p id="message" role="status">Szukam niedokończonego eksportu właściciela…</p><a id="login" href="/admin/login" hidden>Zaloguj się ponownie, potem odśwież ten panel</a><pre id="resume-diagnostic" aria-label="Diagnostyka wznowienia"></pre><pre id="state"></pre><pre id="request-diagnostic" aria-label="Diagnostyka żądania"></pre>
+<p id="message" role="status">Szukam niedokończonego eksportu właściciela…</p><a id="login" href="/admin/login" hidden>Zaloguj się ponownie, potem odśwież ten panel</a><pre id="resume-diagnostic" aria-label="Diagnostyka wznowienia"></pre><pre id="dataset-conflict" aria-label="Bezpieczna diagnostyka konfliktu datasetu"></pre><pre id="state"></pre><pre id="request-diagnostic" aria-label="Diagnostyka żądania"></pre>
 <a id="sample" hidden>Pobierz próbkę ZIP</a><a id="full" hidden>Pobierz pełny ZIP</a>
 <ul id="download-artifacts" hidden></ul><a id="full-debug" hidden target="_blank" rel="noreferrer">Pełny status diagnostyczny</a>
 <p>Cały eksport działa z tego panelu. Pauza snapshotu zapisuje stan na serwerze; Stop lokalnej pętli kończy wysyłanie kolejnych żądań. Po odświeżeniu użyj Wznów. Pobierz manifest i wszystkie wskazane części archiwum.</p>
@@ -30,7 +31,7 @@
  const waits=new Map(),resumeEvents=[];
  const wait=ms=>new Promise(resolve=>{const timer=setTimeout(()=>{waits.delete(timer);resolve();},ms);waits.set(timer,resolve);});
  function cancelBackoff(){for(const [timer,resolve] of waits){clearTimeout(timer);resolve();}waits.clear();}
- function resumeEvent(event,blocked_reason=null){resumeEvents.push({event,blocked_reason});if(resumeEvents.length>12)resumeEvents.shift();el('resume-diagnostic').textContent=JSON.stringify({events:resumeEvents,retry_exhausted:retryExhausted},null,2);}
+ function resumeEvent(event,blocked_reason=null){resumeEvents.push({event,blocked_reason});if(resumeEvents.length>20)resumeEvents.shift();el('resume-diagnostic').textContent=JSON.stringify({events:resumeEvents,retry_exhausted:retryExhausted},null,2);}
  async function manualResume(){
   if(manualResuming)return;
   manualResuming=true;resumeTraceActive=true;resumeEvents.length=0;resumeEvent('resume_started');
@@ -48,6 +49,7 @@
  const reasonOf=(data,fallback)=>typeof data?.reason_code==='string' && /^[A-Za-z0-9_]{1,80}$/.test(data.reason_code)?data.reason_code:fallback;
  const snapshotState=()=>state?.snapshot_state ?? (String(state?.state ?? '').startsWith('snapshot')?state.state:null);
  const browserSnapshot=()=>state?.snapshot_mode==='browser';
+ const datasetRecoverable=()=>browserSnapshot() && state?.state==='snapshot_failed' && state?.last_error==='snapshot_row_updated_after_cutoff' && state?.current_dataset==='marketplace_listings' && state?.dataset_recovery_allowed===true;
  const photoRetryPending=()=>state?.photo_retry_requested===true || ['photos_retry_setup','photos_retry_inventory','photos_retry'].includes(state?.phase);
  const unfinished=()=>state && state.state!=='completed' && snapshotState()!=='snapshot_aborted';
  const canPause=()=>browserSnapshot() && (['snapshot_pending','snapshot_running'].includes(snapshotState()) || (snapshotState()==='snapshot_completed' && state?.phase==='photo_inventory'));
@@ -61,7 +63,8 @@
  function buttons(){
   const blocked=!ready || sessionExpired || accessBlocked;
   el('start').disabled=blocked || working || !!unfinished();
-  el('resume').disabled=blocked || (inFlight || pausing || manualResuming) || !state || state.state==='completed' || (nextAction()==='blocked' && !state.busy);
+  el('resume').disabled=blocked || (inFlight || pausing || manualResuming) || !state || state.state==='completed' || (nextAction()==='blocked' && !state.busy && !datasetRecoverable());
+  el('diagnose-conflict').hidden=!datasetRecoverable();el('diagnose-conflict').disabled=blocked || working || inFlight;
   el('pause').disabled=blocked || !canPause() || pausing || pauseRequested;
   el('stop-local').disabled=!working;
   el('snapshot-actions').hidden=!(state?.snapshot_retry_allowed || state?.snapshot_abort_allowed);
@@ -79,6 +82,8 @@
   const progress=state?.snapshot_progress ?? {},dataset=state?.current_dataset ?? progress.current_dataset ?? progress.dataset;
   const total=state && Object.hasOwn(state,'total')?(state.total ?? '—'):(progress.total ?? state?.total_images ?? '—');
   el('progress').textContent=state?'Run: '+id+' | Stan: '+state.state+' | Faza: '+(state.phase ?? state.state)+' | Zbiór: '+(dataset ?? '—')+' | Postęp: '+(state.processed ?? progress.processed ?? state.processed_images ?? 0)+' / '+total+' | Cursor: '+cursorText(state.dataset_cursor ?? state.cursor ?? progress.cursor)+' | Następny krok: '+nextAction():'';
+  if(state?.dataset_recovery)el('progress').textContent+=' | Kontrola starej generacji: '+state.dataset_recovery.preflight_shard+' / '+state.dataset_recovery.preflight_total_shards;
+  if(state?.dataset_generation!=null)el('progress').textContent+=' | Generacja datasetu: '+state.dataset_generation;
   const debug=el('full-debug');debug.hidden=!id;if(id)debug.href=base+'/'+encodeURIComponent(id)+'?format=status';
   if(state?.state==='completed' && browserSnapshot() && !Array.isArray(state.download_artifacts) && artifactsLoadedFor!==id){
    artifactsLoadedFor=id;const artifactRun=id;
@@ -101,14 +106,15 @@
  const recoveryKey='gpswiss-export-last-operational-state';
  function remember(){
   if(!state || !/^[a-f0-9-]{36}$/i.test(id??'') || !/^[a-f0-9-]{36}$/i.test(state.snapshot_attempt_id??''))return;
-  const safe={};for(const key of ['run_id','snapshot_attempt_id','snapshot_mode','snapshot_state','state','phase','current_dataset','processed','total','remaining','cursor','next_action','busy','last_error','last_tick'])safe[key]=state[key];
+  const safe={};for(const key of ['run_id','snapshot_attempt_id','snapshot_mode','snapshot_state','state','phase','current_dataset','processed','total','remaining','cursor','next_action','busy','last_error','last_tick','dataset_recovery_allowed'])safe[key]=state[key];
   safe.last_tick={reason_code:state.last_tick?.reason_code??state.last_tick_reason??null};
   try{sessionStorage.setItem(recoveryKey,JSON.stringify(safe));}catch(_){}
  }
  function restoreKnownState(){
-  try{const raw=sessionStorage.getItem(recoveryKey);if(!raw || raw.length>4096)return;const saved=JSON.parse(raw);if(saved.run_id===id && /^[a-f0-9-]{36}$/i.test(saved.snapshot_attempt_id??'') && saved.snapshot_mode==='browser' && saved.state==='snapshot_running' && saved.snapshot_state==='snapshot_running' && saved.next_action==='snapshot_tick' && !saved.busy && !saved.last_error && saved.last_tick?.reason_code==='tick_completed')render(saved);}catch(_){}
+  try{const raw=sessionStorage.getItem(recoveryKey);if(!raw || raw.length>4096)return;const saved=JSON.parse(raw);if(saved.run_id===id && /^[a-f0-9-]{36}$/i.test(saved.snapshot_attempt_id??'') && saved.snapshot_mode==='browser' && saved.state==='snapshot_running' && saved.snapshot_state==='snapshot_running' && saved.next_action==='snapshot_tick' && !saved.busy && !saved.last_error && saved.last_tick?.reason_code==='tick_completed')render(saved);
+   else if(saved.run_id===id && saved.snapshot_mode==='browser' && saved.state==='snapshot_failed' && saved.last_error==='snapshot_row_updated_after_cutoff' && saved.current_dataset==='marketplace_listings' && saved.dataset_recovery_allowed===true)render(saved);}catch(_){}
  }
- const kickEligible=()=>!!id && !!state?.snapshot_attempt_id && browserSnapshot() && state.state==='snapshot_running' && state.snapshot_state==='snapshot_running' && state.next_action==='snapshot_tick' && !state.busy && !state.last_error && state.last_tick?.reason_code==='tick_completed';
+ const kickEligible=()=>!!id && !!state?.snapshot_attempt_id && (datasetRecoverable() || browserSnapshot() && state.state==='snapshot_running' && state.snapshot_state==='snapshot_running' && state.next_action==='snapshot_tick' && !state.busy && !state.last_error && state.last_tick?.reason_code==='tick_completed');
  const cursorText=value=>value==null?'—':typeof value==='object'?JSON.stringify(value):String(value);
  const transient=error=>error.reason!=='status_fetch_retry_exhausted' && (['network_error','browser_fetch_timeout','malformed_json','invalid_response','snapshot_http_tick_failed'].includes(error.reason) || [408,429,500,502,503,504].includes(error.http));
  async function request(url,action,extra={},statusAttempt=null){
@@ -234,7 +240,8 @@
        const result=await request(base+'/'+encodeURIComponent(expectedRun)+'/kick','kick',{attempt_id:expectedAttempt});
        if(result.run_id!==expectedRun || result.snapshot_attempt_id!==expectedAttempt)throw Object.assign(new Error('run_or_attempt_changed'),{reason:'run_or_attempt_changed'});
        render(result);
-       if(!['tick_completed','completed','busy'].includes(result.kick_reason))throw Object.assign(new Error('kick_blocked'),{reason:result.blocked_reason??result.kick_reason??'kick_blocked'});
+       if(!['tick_completed','completed','busy','recovery_started'].includes(result.kick_reason))throw Object.assign(new Error('kick_blocked'),{reason:result.blocked_reason??result.kick_reason??'kick_blocked'});
+       if(result.kick_reason==='recovery_started')resumeEvent('dataset_boundary_refresh_started');
        if(result.kick_reason==='tick_completed')resumeEvent('tick_completed');
        else if(result.kick_reason==='busy')resumeEvent('blocked','busy');
        needsResume=false;
@@ -253,11 +260,14 @@
     if(state.busy || next==='wait'){
      await wait(1000);if(!active)break;try{await readCurrent();}catch(error){if(++attempts>4)throw error;await recover(error,1);}continue;
     }
-    if(next==='blocked'){if(resumeTraceActive)resumeEvent('blocked',state.blocked_reason ?? state.last_error ?? state.state);el('message').textContent='Wznowienie zablokowane: '+(state.blocked_reason ?? state.last_error ?? state.state)+'. Sprawdź dostępne akcje snapshotu.';break;}
+    if(next==='blocked' && !datasetRecoverable()){if(resumeTraceActive)resumeEvent('blocked',state.blocked_reason ?? state.last_error ?? state.state);el('message').textContent='Wznowienie zablokowane: '+(state.blocked_reason ?? state.last_error ?? state.state)+'. Sprawdź dostępne akcje snapshotu.';break;}
     if(browserSnapshot() && state.state==='snapshot_running' && next==='snapshot_tick' && !state.busy)needsResume=false;
-    if(needsResume || next==='resume'){
-     try{render(await request(base+'/'+encodeURIComponent(id),'resume'));needsResume=!!state.busy;attempts=0;}
+    if(needsResume || next==='resume' || datasetRecoverable()){
+     const recovering=datasetRecoverable();if(recovering)resumeEvent('recoverable_dataset_conflict');
+     try{render(await request(base+'/'+encodeURIComponent(id),'resume',{expected_snapshot_attempt:state.snapshot_attempt_id??null}));needsResume=!!state.busy;attempts=0;
+     }
      catch(error){if(++attempts>4)throw error;await recover(error,1);}
+      if(recovering && state.dataset_recovery){resumeEvent('dataset_boundary_refresh_started');resumeEvent('dataset='+state.dataset_recovery.dataset);resumeEvent('previous_generation='+state.dataset_recovery.previous_generation);resumeEvent('new_generation='+state.dataset_recovery.new_generation);resumeEvent(state.state);}
      continue;
     }
     if(!['snapshot_tick','tick'].includes(next)){el('message').textContent='Nieznany następny krok: '+next+'. Checkpoint zachowany.';break;}
@@ -310,6 +320,11 @@
   finally{working=false;buttons();}
   if(follow)drive(false);
  }
+ el('diagnose-conflict').onclick=async()=>{
+  await boot;if(working || inFlight || !datasetRecoverable())return;
+  try{el('dataset-conflict').textContent=JSON.stringify(await request(base+'/'+encodeURIComponent(id)+'?format=dataset-conflict'),null,2);}
+  catch(error){el('dataset-conflict').textContent=JSON.stringify({reason_code:error.reason});if(error.reason==='SESSION_EXPIRED')stop(error);}
+ };
  el('start').onclick=()=>drive(true);el('resume').onclick=manualResume;el('stop-local').onclick=()=>{active=false;};
  el('pause').onclick=async()=>{
   await boot;if(sessionExpired || accessBlocked || !canPause() || pausing || pauseRequested)return;

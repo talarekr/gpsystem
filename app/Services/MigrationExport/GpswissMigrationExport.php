@@ -661,6 +661,17 @@ final class GpswissMigrationExport
         return $this->browser->compact($dir);
     }
 
+    public function datasetConflict(int $owner, string $id): array
+    {
+        $dir = $this->directory($owner, $id);
+        $state = $this->read($dir.'/state.json');
+        if (($state['snapshot_mode'] ?? null) !== 'browser' || ($state['snapshot_source_fingerprint'] ?? null) !== $this->snapshotSourceFingerprint()) {
+            throw new MigrationExportException('snapshot_source_context_mismatch', 409);
+        }
+
+        return $this->browser->datasetConflict($dir, $state['snapshot_attempt_id']);
+    }
+
     public function artifacts(int $owner, string $id): array
     {
         $state = $this->read($this->directory($owner, $id).'/state.json');
@@ -766,11 +777,11 @@ final class GpswissMigrationExport
             'marketplace_writes' => false, 'automatic_publish' => false, 'import_performed' => false]);
     }
 
-    public function resume(int $owner, string $id): array
+    public function resume(int $owner, string $id, ?string $expectedAttempt = null): array
     {
         $directory = $this->directory($owner, $id);
         if (($this->read($directory.'/state.json')['snapshot_mode'] ?? null) === 'browser') {
-            return $this->browser->resume($directory);
+            return $this->browser->resume($directory, $expectedAttempt, $this->snapshotSourceFingerprint());
         }
         $status = $this->status($owner, $id);
         if (! $status['resume_allowed'] || $status['busy']) {

@@ -204,13 +204,14 @@ final class BrowserMigrationSample
             }
             $boundaries = [];
             foreach (array_keys($state['counts']) as $name) {
-                $boundaries[$name] = array_intersect_key($index['datasets'][$name], array_flip(['max_key', 'boundary_frozen_at', 'checksum_partial', 'total', 'schema_sha256']));
+                $boundaries[$name] = array_intersect_key($index['datasets'][$name], array_flip(['max_key', 'boundary_frozen_at', 'checksum_partial', 'total', 'schema_sha256', 'dataset_generation', 'dataset_boundary_id', 'previous_boundary_id', 'boundary_refreshed_at', 'recovery_reason', 'consistency_mode', 'mutable_contract']));
             }
             $manifest = ['schema_version' => 'gpswiss-wystawczesc-sample-3', 'run_id' => basename($dir), 'snapshot_attempt_id' => $attempt,
                 'sample_source_ids' => $state['sample_ids'], 'products_count' => count($state['sample_ids']), 'datasets_counts' => $state['counts'],
                 'case_selection' => $state['candidates'], 'photo_associations' => $state['photo_count'], 'missing_originals' => $state['missing_count'],
                 'photo_manifest' => 'photo-manifest.csv', 'photo_jsonl' => 'photo-manifest.jsonl', 'files' => 'files.jsonl', 'unresolved_references' => $unresolved,
                 'database_consistency' => $index['database_consistency'], 'snapshot_limitations' => $index['limitations'] ?? [],
+                'dataset_boundary_history' => $index['dataset_boundary_history'] ?? [],
                 'snapshot_cutoff_database_time' => $index['cutoff_database_time'] ?? null, 'source_dataset_boundaries' => $boundaries,
                 'contains_customer_data' => true, 'access' => 'authenticated_owner_only_no_public_url', 'automatic_import_allowed' => false,
                 'automatic_publish' => false, 'synchronization_enabled' => false, 'database_writes' => false, 'provider_calls' => false,

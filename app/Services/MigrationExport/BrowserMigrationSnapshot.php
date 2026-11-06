@@ -12,6 +12,8 @@ use RuntimeException;
 /** Immutable, bounded logical export shards. Never claims a transaction shared by HTTP requests. */
 final class BrowserMigrationSnapshot
 {
+    use MutableListingSnapshot;
+
     private int $attempted = 0;
 
     private const ROW_BYTES = 262144;
@@ -37,7 +39,7 @@ final class BrowserMigrationSnapshot
         $state = ['format' => 'gpswiss-wystawczesc-logical-3', 'attempt_id' => $attempt, 'cutoff_database_time' => $cutoff,
             'started_at' => now()->toIso8601String(), 'stage' => 'boundaries', 'dataset_names' => array_keys($this->source->browserDefinitions()),
             'dataset_index' => 0, 'datasets' => [], 'database_consistency' => 'frozen_logical_per_dataset_boundaries_verified_second_pass_not_transactional',
-            'limitations' => ['no_historical_row_versions_across_http_requests', 'each_table_max_key_frozen_at_its_boundary_tick', 'created_at_cutoff_is_advisory_null_backdated_and_second_precision_timestamps_possible', 'numeric_max_excludes_keys_above_each_observed_boundary_only', 'no_exact_global_new_record_exclusion_guarantee', 'updates_deletes_and_membership_drift_fail_verification', 'verification_does_not_establish_global_atomic_point_in_time'],
+            'limitations' => ['no_historical_row_versions_across_http_requests', 'each_table_max_key_frozen_at_its_boundary_tick', 'created_at_cutoff_is_advisory_null_backdated_and_second_precision_timestamps_possible', 'numeric_max_excludes_keys_above_each_observed_boundary_only', 'no_exact_global_new_record_exclusion_guarantee', 'strict_datasets_updates_deletes_and_membership_drift_fail_verification', 'verification_does_not_establish_global_atomic_point_in_time'],
             'last_success' => null, 'last_error' => null];
         $this->write($folder.'/checkpoint.json', $state);
 
@@ -73,7 +75,9 @@ final class BrowserMigrationSnapshot
 
                     return;
                 }
-                if ($state['stage'] === 'boundaries') {
+                if ($state['stage'] === 'recovery_preflight') {
+                    $this->recoverDatasetBoundary($folder, $state);
+                } elseif ($state['stage'] === 'boundaries') {
                     if ($name === 'part_car_relations') {
                         $parts = $state['datasets']['parts'];
                         $definition = ['name' => $name, 'source_table' => 'frozen:parts', 'required' => true, 'available' => true,
@@ -112,11 +116,15 @@ final class BrowserMigrationSnapshot
                         $definition['max_key'] = null;
                         $definition['total'] = 0;
                     }
+                    if ($name === 'marketplace_listings' && $definition['key_columns'] === ['id']) {
+                        $this->initializeMutable($definition, $state['cutoff_database_time']);
+                        $state['dataset_consistency_overrides']['marketplace_listings'] = $definition['mutable_contract'];
+                    }
                     $state['datasets'][$name] = $definition;
                     $state['dataset_index']++;
                 } else {
                     $definition = &$state['datasets'][$name];
-                    if (! $definition['available'] || $definition['total'] === 0) {
+                    if (! $definition['available'] || ($definition['total'] === 0 && ! $this->mutable($definition))) {
                         $definition['done'] = true;
                         $state['dataset_index']++;
 
@@ -135,7 +143,11 @@ final class BrowserMigrationSnapshot
                 $state['last_success'] = now()->toIso8601String();
             });
         } catch (\Throwable $error) {
-            $allowed = ['snapshot_schema_changed', 'snapshot_source_changed', 'snapshot_row_updated_after_cutoff', 'snapshot_row_too_large_for_http', 'snapshot_stable_nonsecret_key_required', 'snapshot_immutable_chunk_conflict', 'snapshot_shard_checksum_mismatch', 'snapshot_reference_boundary_required'];
+            if ($error instanceof SnapshotSourceMutation) {
+                $trace['source_conflict'] = $error->diagnostic;
+                $state['source_conflict'] = $error->diagnostic;
+            }
+            $allowed = ['snapshot_mutable_dataset_unstable', 'snapshot_schema_changed', 'snapshot_source_changed', 'snapshot_row_updated_after_cutoff', 'snapshot_row_too_large_for_http', 'snapshot_stable_nonsecret_key_required', 'snapshot_immutable_chunk_conflict', 'snapshot_shard_checksum_mismatch', 'snapshot_reference_boundary_required'];
             $state['last_error'] = in_array($error->getMessage(), $allowed, true) ? $error->getMessage() : 'snapshot_http_tick_failed';
             $trace['backend_exception_class'] = str_contains(get_class($error), '@anonymous') ? 'AnonymousThrowable' : get_class($error);
             if ($state['last_error'] === 'snapshot_http_tick_failed') {
@@ -143,6 +155,7 @@ final class BrowserMigrationSnapshot
                 $state['last_error'] = 'snapshot_http_tick_failed';
                 $trace['reason_code'] = $error instanceof QueryException && in_array((int) ($error->errorInfo[1] ?? 0), [3024, 1969], true) ? 'backend_timeout' : 'server_exception';
             } else {
+                $state['failure_stage'] = $state['stage'];
                 $state['stage'] = 'failed';
                 $trace['reason_code'] = $state['last_error'];
             }
@@ -181,7 +194,7 @@ final class BrowserMigrationSnapshot
         $current = $index['current_dataset'];
         $descriptor = $current !== null ? ($index['datasets'][$current] ?? []) : [];
 
-        return array_intersect_key($index, array_flip(['format', 'attempt_id', 'stage', 'done', 'failed', 'current_dataset', 'processed', 'verified', 'total', 'last_success', 'last_error', 'next_action', 'database_consistency']))
+        return array_intersect_key($index, array_flip(['dataset_recovery', 'dataset_boundary_history', 'source_conflict', 'format', 'attempt_id', 'stage', 'done', 'failed', 'current_dataset', 'processed', 'verified', 'total', 'last_success', 'last_error', 'next_action', 'database_consistency']))
             + ['phase' => 'snapshot_'.$index['stage'], 'cursor' => $descriptor['cursor'] ?? null, 'remaining' => max(0, $index['total'] - $index['processed']),
                 'datasets' => array_map(fn ($d) => array_intersect_key($d, array_flip(['available', 'processed', 'verified', 'total', 'cursor', 'max_key', 'boundary_frozen_at', 'checksum_partial', 'done'])), $index['datasets'])];
     }
@@ -240,14 +253,41 @@ final class BrowserMigrationSnapshot
 
     private function exportChunk(string $folder, array &$state, array &$definition): void
     {
-        if ($definition['processed'] === $definition['total']) {
+        if (! $this->mutable($definition) && $definition['processed'] === $definition['total']) {
             $state['dataset_index']++;
 
             return;
         }
         [$rows, $cursor] = isset($definition['derived_from'])
             ? $this->frozenRelations($folder, $state, count($definition['shards']))
-            : $this->page($definition, $state['cutoff_database_time'], $definition['cursor']);
+            : $this->page($definition, $definition['dataset_cutoff_database_time'] ?? $state['cutoff_database_time'], $definition['cursor']);
+        if ($this->mutable($definition)) {
+            if ($rows === []) {
+                if ($cursor !== $definition['cursor']) {
+                    $definition['cursor'] = $cursor;
+
+                    return;
+                }
+                $definition['total'] = $definition['processed'];
+                if (($state['dataset_recovery_return_stage'] ?? null) === 'verify') {
+                    $state['stage'] = 'verify';
+                } else {
+                    $state['dataset_index']++;
+                }
+                unset($state['dataset_recovery_return_stage']);
+
+                return;
+            }
+            $shard = $this->mutableShard($folder, $state, $definition, $rows, $cursor, count($definition['shards']), 'export');
+            $shard['source_ids'] = array_column($rows, 'id');
+            $definition['shards'][] = $shard;
+            $definition['cursor'] = $cursor;
+            $definition['processed'] += count($rows);
+            $definition['total'] = max($definition['total'], $definition['processed']);
+            $definition['checksum_partial'] = hash('sha256', $definition['checksum_partial'].$shard['sha256']);
+
+            return;
+        }
         if ($rows === [] || $definition['total'] < $definition['processed'] + count($rows)) {
             throw new RuntimeException('snapshot_source_changed');
         }
@@ -281,6 +321,11 @@ final class BrowserMigrationSnapshot
 
     private function verifyChunk(string $folder, array &$state, array &$definition): void
     {
+        if ($this->mutable($definition)) {
+            $this->reconcileMutable($folder, $state, $definition);
+
+            return;
+        }
         $position = $definition['verify_shard'];
         if ($position === count($definition['shards'])) {
             $count = isset($definition['derived_from']) ? $state['datasets']['parts']['processed'] : $this->count($this->bounded($this->source->browserQuery($definition, $state['cutoff_database_time']), $definition));
@@ -380,9 +425,12 @@ final class BrowserMigrationSnapshot
     }
 
     /** Probe byte sizes before fetching large TEXT/JSON values so a single row cannot exhaust a request. */
-    private function page(array $definition, string $cutoff, ?array $cursor, ?int $exact = null): array
+    private function page(array $definition, string $cutoff, ?array $cursor, ?int $exact = null, bool $allowMissing = false): array
     {
         $query = $this->bounded($this->source->browserQuery($definition, $cutoff), $definition);
+        if (isset($definition['reconcile_ids'])) {
+            $query->whereIn('id', $definition['reconcile_ids']);
+        }
         if ($cursor !== null) {
             $this->tuple($query, $definition['key_columns'], $cursor, '>');
         }
@@ -412,14 +460,17 @@ final class BrowserMigrationSnapshot
         $this->tuple($query, $definition['key_columns'], $picked[count($picked) - 1], '<=');
         $this->attempted += count($picked);
         $records = $query->limit(count($picked))->get($definition['exported_columns']);
-        if ($records->count() !== count($picked)) {
+        if ($records->count() !== count($picked) && ! $allowMissing && ! $this->mutable($definition)) {
             throw new RuntimeException('snapshot_source_changed');
         }
         $rows = [];
         foreach ($records as $record) {
             $raw = (array) $record;
-            if ($definition['updated_column'] && ($raw[$definition['updated_column']] ?? '') > $cutoff) {
-                throw new RuntimeException('snapshot_row_updated_after_cutoff');
+            if (! $this->mutable($definition) && $definition['updated_column'] && ($raw[$definition['updated_column']] ?? '') > $cutoff) {
+                throw new SnapshotSourceMutation(['dataset' => $definition['name'], 'record_id' => (string) ($raw['id'] ?? ''),
+                    'timestamp_field' => $definition['updated_column'], 'record_updated_at' => $raw[$definition['updated_column']],
+                    'cutoff_database_time' => $cutoff, 'dataset_boundary_frozen_at' => $definition['boundary_frozen_at'] ?? null,
+                    'changed_business_fields' => null, 'historical_version_available' => false, 'mutation_origin' => 'not_proven_by_timestamp']);
             }
             $rows[] = $this->source->browserNormalize($raw, $definition);
         }

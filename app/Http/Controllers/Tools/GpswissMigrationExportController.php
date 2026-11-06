@@ -15,7 +15,7 @@ final class GpswissMigrationExportController extends Controller
     {
         abort_unless($request->user()?->hasRole(UserRole::OwnerAdmin->value), 403);
         $owner = (int) $request->user()->id;
-        $input = $request->validate(['action' => ['sometimes', 'in:start,tick,resume,snapshot_tick,pause_snapshot,retry_snapshot,abort_snapshot,retry_photos'], 'download' => ['sometimes', 'in:sample,full,artifact'], 'format' => ['sometimes', 'in:status,compact,artifacts'],
+        $input = $request->validate(['action' => ['sometimes', 'in:start,tick,resume,snapshot_tick,pause_snapshot,retry_snapshot,abort_snapshot,retry_photos'], 'download' => ['sometimes', 'in:sample,full,artifact'], 'format' => ['sometimes', 'in:status,compact,artifacts,dataset-conflict'],
             'artifact' => ['sometimes', 'string', 'max:180', 'regex:/\A[A-Za-z0-9][A-Za-z0-9_.-]*\z/D'],
             'confirm_restart' => ['sometimes', 'boolean'], 'confirm_abort' => ['sometimes', 'boolean'], 'confirm_retry_photos' => ['sometimes', 'boolean'], 'expected_snapshot_attempt' => ['present_if:action,snapshot_tick', 'nullable', 'uuid']]);
         $statusStarted = microtime(true);
@@ -59,7 +59,7 @@ final class GpswissMigrationExportController extends Controller
                         'abort_snapshot' => $request->boolean('confirm_abort')
                             ? $exports->abortSnapshot($owner, $run, $expectedAttempt)
                             : throw new MigrationExportException('snapshot_abort_confirmation_required', 422),
-                        'resume' => $exports->resume($owner, $run),
+                        'resume' => $exports->resume($owner, $run, $expectedAttempt),
                         'snapshot_tick' => $exports->browserSnapshotTick($owner, $run, $expectedAttempt),
                         'pause_snapshot' => $exports->pauseBrowserSnapshot($owner, $run),
                         'retry_photos' => $request->boolean('confirm_retry_photos')
@@ -96,6 +96,9 @@ final class GpswissMigrationExportController extends Controller
                 $serializingStatus = true;
 
                 return $this->compactReply($data, $statusStarted);
+            }
+            if ($run && ($input['format'] ?? null) === 'dataset-conflict') {
+                return response()->json($exports->datasetConflict($owner, $run))->header('Cache-Control', 'private, no-store');
             }
             if ($run && ($input['format'] ?? null) === 'artifacts') {
                 return response()->json($exports->artifacts($owner, $run))->header('Cache-Control', 'private, no-store');

@@ -29,7 +29,7 @@ Każdy zbiór zapisuje schemat, klucz, górną granicę, moment ustalenia granic
 
 Cutoff czasu bazy i filtr `created_at` są dodatkowym ograniczeniem selekcji. Sekundowa precyzja dat, wartości NULL, daty ustawione wstecz i tekstowe klucze bez dat utworzenia nie pozwalają zagwarantować wykluczenia każdego rekordu powstałego po kliknięciu Start. Granice są ustalane osobno dla zbiorów. Te ograniczenia są zapisane w manifeście; nie przedstawiamy ich jako historycznego snapshotu globalnego.
 
-Po odczycie następuje drugi przebieg porównujący pełne wyeksportowane wartości, liczbę rekordów, klucze i sumy porcji. Nie opiera się wyłącznie na `updated_at` — zmiany Query Builderem bez aktualizacji tej daty również są wykrywane. Zmiana/usunięcie, dryf schematu albo rozbieżność sum zatrzymuje próbę z bezpiecznym powodem. Zamrożone porcje nie są zastępowane świeżymi danymi. Świadomy Retry ustala nowe granice pod tym samym runem i zachowuje poprzednie pliki próby.
+Po odczycie następuje drugi przebieg porównujący pełne wyeksportowane wartości, liczbę rekordów, klucze i sumy porcji. Nie opiera się wyłącznie na `updated_at` — zmiany Query Builderem bez aktualizacji tej daty również są wykrywane. Dla datasetów strict zmiana/usunięcie, dryf schematu albo rozbieżność sum zatrzymuje próbę z bezpiecznym powodem. Porcje datasetów strict nie są zastępowane świeżymi danymi. Jedynym obecnie dopuszczonym datasetem mutable jest `marketplace_listings`: obowiązuje kontrakt z `dataset_consistency_overrides` i [audytu recovery](https://github.com/talarekr/gpsystem/blob/main/docs/migration/gpswiss-mutable-listings.md), z wersjonowanymi shardami i ograniczonym reconciliation. Świadomy Retry ustala nowe granice pod tym samym runem i zachowuje poprzednie pliki próby.
 
 Relacje część–samochód są wyprowadzone z zamrożonych części. Klienci i tożsamości kont są ograniczeni referencjami w zakresie zamrożonych źródłowych zamówień/ofert/zwrotów. Osobny audyt relacji czyta tylko zamrożone pliki. Brakujące referencje, np. historyczna pozycja do usuniętej części, trafiają do `relation-issues.jsonl`; pozycja zachowuje nazwę, SKU i pozostałe dane.
 
@@ -38,7 +38,7 @@ Zgodne dwa przebiegi nie wykluczają zmian i przywróceń pomiędzy obserwacjami
 ## Etapy i granice pracy HTTP
 
 - Metadane/granice: jeden zbiór na tick; wymagany rzeczywisty bezpieczny unikalny klucz. Brak takiego klucza jest jawnym błędem, bez niestabilnego stronicowania OFFSET.
-- Dane i weryfikacja: do 25 rekordów i docelowo 192 KiB porcji. Pojedynczy surowy rekord powyżej 256 KiB zatrzymuje próbę jako `snapshot_row_too_large_for_http`; nie jest pomijany ani obcinany. Taki przypadek wymaga rozszerzenia strumieniowania pola, nie ponawiania w ciemno.
+- Dane i weryfikacja: do 5 rekordów i docelowo 192 KiB porcji. Pojedynczy surowy rekord powyżej 256 KiB zatrzymuje próbę jako `snapshot_row_too_large_for_http`; nie jest pomijany ani obcinany. Taki przypadek wymaga rozszerzenia strumieniowania pola, nie ponawiania w ciemno.
 - Zbiory obejmują części, samochody, relacje, kategorie, lokalizacje, parametry/tłumaczenia, zamówienia i pozycje, przechowywane płatności/zwroty/przesyłki/notatki oraz prywatne profile i referencje marketplace. Nieobecne opcjonalne tabele są zinwentaryzowane. Pola sekretów/auth/kart są pomijane według wspólnej polityki, bez eksportowania credentials kont.
 - Audyt referencji: jedna porcja źródłowa i maksymalnie 20 sprawdzeń FK na tick, bez SQL do żywej bazy.
 - Dopiero po zakończeniu i weryfikacji danych powstaje inwentarz zadań zdjęć, po maksymalnie 20 rekordów na tick.
