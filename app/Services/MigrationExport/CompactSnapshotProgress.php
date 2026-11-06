@@ -39,9 +39,12 @@ final class CompactSnapshotProgress
         $processed = array_sum(array_column($datasets, $verify ? 'verified' : 'processed'));
         $total = array_sum(array_column($datasets, 'total'));
 
-        return ['current_dataset' => $dataset, 'processed' => $processed, 'total' => $total,
-            'remaining' => max(0, $total - $processed), 'cursor' => $datasets[$dataset][$verify ? 'verify_cursor' : 'cursor'] ?? null,
-            'last_success' => $state['last_success'] ?? null, 'last_error' => $state['last_error'] ?? null];
+        $definition = $datasets[$dataset] ?? [];
+
+        return array_intersect_key($definition, array_flip(['dataset_generation', 'dataset_boundary_id', 'previous_boundary_id', 'boundary_refreshed_at', 'recovery_reason', 'consistency_mode']))
+            + ['dataset_recovery' => $state['dataset_recovery'] ?? null, 'source_conflict' => $state['source_conflict'] ?? null, 'current_dataset' => $dataset, 'processed' => $processed, 'total' => $total,
+                'remaining' => max(0, $total - $processed), 'cursor' => $datasets[$dataset][$verify ? 'verify_cursor' : 'cursor'] ?? null,
+                'last_success' => $state['last_success'] ?? null, 'last_error' => $state['last_error'] ?? null];
     }
 
     private function store(string $directory, string $attempt, array $progress, array $fingerprint): void

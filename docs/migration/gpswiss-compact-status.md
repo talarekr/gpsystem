@@ -18,6 +18,8 @@ Pod istniejącym flock runu serwer sprawdza aktualny attempt, run, tryb browser 
 
 KICK nie resetuje próby ani nie wznawia samowolnie pauzy. Zatwierdzone shardy/offsety i blokada zapewniają brak ponownego zapisania tych samych rekordów. Powtórzenie żądania po utracie odpowiedzi wykonuje kolejną jednostkę od serwerowego checkpointu, zamiast powtarzać cursor przeglądarki. Nie jest to globalna deduplikacja żądań HTTP: dwa kolejne zaakceptowane KICK mogą przesunąć postęp o dwie partie, zawsze bez powielenia rekordów. Aktywny tick zwraca busy; frontend ma jedną pętlę i nie odpala drugiego KICK automatycznie po utracie odpowiedzi.
 
+Dla whitelisted `snapshot_failed / marketplace_listings / snapshot_row_updated_after_cutoff` istnieje teraz dodatkowy, świadomy tryb recovery datasetu przez Resume/KICK. Sprawdza integralność poprzednich shardów, tworzy wyłącznie nową generację listingów i zachowuje attempt; pozostałe failed nadal są blokowane. Pełny kontrakt i granice dowodu opisuje [audyt mutable listings](gpswiss-mutable-listings.md).
+
 ## Ręczne Wznów
 
 Po resetowaniu wyłącznie lokalnych retry/timerów runner próbuje 4 compact GET (timeout 10 s, backoff 250/500/1000 ms). Jeżeli się nie powiodą, a ostatni znany stan wskazuje ten sam run/attempt, browser snapshot_running/snapshot_tick, brak busy/last_error i `tick_completed`, świadome Wznów wysyła jeden KICK. Nie czeka na `status_loaded`; pokazuje `status_fetch_retry_exhausted`, `fallback_kick`, a po sukcesie `tick_completed` i kontynuuje zwykłe ticki. Nie tworzy runu/attemptu. Jeśli backend zgłasza pauzę/koniec/błąd/zmianę attemptu, pokazuje faktyczny stan lub blocker. 401/419 wymagają loginu/reloadu i nigdy nie prowadzą do KICK; 403/404/422 również nie uruchamiają fallbacku.

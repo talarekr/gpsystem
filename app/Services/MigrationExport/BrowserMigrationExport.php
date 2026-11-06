@@ -104,12 +104,26 @@ final class BrowserMigrationExport
             if (($state['run_id'] ?? null) !== basename($dir) || ($state['snapshot_mode'] ?? null) !== 'browser') {
                 throw new MigrationExportException('stale_attempt', 409);
             }
+            if ($state['state'] === 'snapshot_failed' && ($state['last_error'] ?? null) === 'snapshot_row_updated_after_cutoff') {
+                if (($state['snapshot_source_fingerprint'] ?? null) !== $sourceFingerprint) {
+                    throw new MigrationExportException('snapshot_source_context_mismatch', 409);
+                }
+                $result = $this->snapshots->requestDatasetRecovery($dir, $expected);
+                $state['state'] = $state['snapshot_state'] = 'snapshot_running';
+                $state['phase'] = $result['phase'];
+                $state['dataset_recovery'] = $result['dataset_recovery'] ?? null;
+                $state['last_error'] = null;
+                $this->write($dir.'/state.json', $state);
+                $reason = 'recovery_started';
+
+                return;
+            }
             $reason = match (true) {
                 $state['state'] === 'completed' => 'completed',
                 $state['state'] === 'snapshot_paused' => 'paused',
                 in_array($state['state'], ['snapshot_failed', 'failed', 'snapshot_aborted'], true) => 'run_failed',
                 $state['state'] !== 'snapshot_running' => 'state_not_runnable',
-                ! in_array($state['phase'], ['snapshot_boundaries', 'snapshot_export', 'snapshot_verify', 'relation_audit', 'photo_inventory'], true) => 'state_not_runnable',
+                ! in_array($state['phase'], ['snapshot_boundaries', 'snapshot_export', 'snapshot_verify', 'snapshot_recovery_preflight', 'relation_audit', 'photo_inventory'], true) => 'state_not_runnable',
                 default => 'tick_completed',
             };
             if ($reason !== 'tick_completed') {
@@ -127,7 +141,7 @@ final class BrowserMigrationExport
             $reason = $result['last_error'];
         }
         $result['kick_reason'] = $reason;
-        $result['blocked_reason'] = $reason === 'tick_completed' ? ($result['blocked_reason'] ?? null) : $reason;
+        $result['blocked_reason'] = in_array($reason, ['tick_completed', 'recovery_started'], true) ? ($result['blocked_reason'] ?? null) : $reason;
 
         return $result;
     }
@@ -148,6 +162,7 @@ final class BrowserMigrationExport
             $this->inventory($dir, $state);
         } elseif (in_array($state['state'], ['snapshot_pending', 'snapshot_running'], true)) {
             $result = $this->snapshots->tick($dir, $state['snapshot_attempt_id']);
+            $state['dataset_recovery'] = $result['dataset_recovery'] ?? null;
             $state['last_error'] = $result['last_error'];
             $state['last_success'] = $result['last_success'];
             $state['state'] = $result['failed'] ? 'snapshot_failed' : ($result['done'] ? 'snapshot_completed' : 'snapshot_running');
@@ -173,10 +188,21 @@ final class BrowserMigrationExport
         });
     }
 
-    public function resume(string $dir): array
+    public function resume(string $dir, ?string $expected = null, ?string $sourceFingerprint = null): array
     {
-        return $this->locked($dir, function () use ($dir): void {
+        return $this->locked($dir, function () use ($dir, $expected, $sourceFingerprint): void {
             $state = $this->read($dir.'/state.json');
+            if ($state['state'] === 'snapshot_failed') {
+                $this->attempt($state, $expected);
+                if (($state['snapshot_source_fingerprint'] ?? null) !== $sourceFingerprint) {
+                    throw new MigrationExportException('snapshot_source_context_mismatch', 409);
+                }
+                $result = $this->snapshots->requestDatasetRecovery($dir, $state['snapshot_attempt_id']);
+                $state['state'] = $state['snapshot_state'] = 'snapshot_running';
+                $state['phase'] = $result['phase'];
+                $state['last_error'] = null;
+                $state['dataset_recovery'] = $result['dataset_recovery'] ?? null;
+            }
             if ($state['state'] === 'snapshot_paused') {
                 $state['state'] = $state['snapshot_state'] = $state['snapshot_paused_from'] ?? 'snapshot_running';
                 unset($state['snapshot_paused_from']);
@@ -302,6 +328,7 @@ final class BrowserMigrationExport
         $next = match (true) {
             $busy => 'wait', $state['state'] === 'completed' => 'download',
             $state['state'] === 'snapshot_paused', isset($state['resume_state']) => 'resume',
+            $this->datasetRecoveryAllowed(array_replace($state, $progress ?? [])) => 'resume',
             in_array($state['state'], ['snapshot_failed', 'snapshot_aborted', 'failed'], true) => 'blocked',
             $snapshotActive => 'snapshot_tick', default => 'tick',
         };
@@ -334,10 +361,11 @@ final class BrowserMigrationExport
         }
 
         return array_replace($state, $current, [
+            'dataset_recovery_allowed' => $this->datasetRecoveryAllowed(array_replace($state, $progress)),
             'next_action' => $next, 'busy' => $busy, 'resume_allowed' => ! in_array($next, ['blocked', 'download'], true),
             'blocked_reason' => $next === 'blocked' ? ($state['last_error'] ?? $state['state']) : null,
             'snapshot_mode' => 'browser', 'snapshot_process_active' => false, 'snapshot_tick_active' => $busy,
-            'snapshot_retry_allowed' => ! $busy && in_array($state['state'], ['snapshot_pending', 'snapshot_running', 'snapshot_paused', 'snapshot_failed'], true) && ! is_dir($dir.'/images'),
+            'snapshot_retry_allowed' => ! $this->datasetRecoveryAllowed(array_replace($state, $progress)) && ! $busy && in_array($state['state'], ['snapshot_pending', 'snapshot_running', 'snapshot_paused', 'snapshot_failed'], true) && ! is_dir($dir.'/images'),
             'snapshot_abort_allowed' => false, 'snapshot_interrupted' => false,
             'snapshot_progress' => $progress, 'photo_progress' => $photo, 'archive_progress' => $archive,
             'sample_progress' => $sampleProgress,
@@ -377,6 +405,14 @@ final class BrowserMigrationExport
                 if (! $data) {
                     throw new MigrationExportException('operational_progress_missing', 503);
                 }
+            }
+            if ($this->datasetRecoveryAllowed($data)) {
+                $data['dataset_recovery_allowed'] = true;
+                $data['recovery_reason_code'] = 'recoverable_dataset_boundary_conflict';
+                $data['next_action'] = 'resume';
+                $data['blocked_reason'] = null;
+                $data['resume_allowed'] = true;
+                $data['snapshot_retry_allowed'] = false;
             }
             $data['busy'] = $busy;
             if ($busy) {
@@ -422,16 +458,18 @@ final class BrowserMigrationExport
         $next = match (true) {
             $state['state'] === 'completed' => 'download',
             $state['state'] === 'snapshot_paused', isset($state['resume_state']) => 'resume',
+            $this->datasetRecoveryAllowed(array_replace($state, $progress ?? [])) => 'resume',
             in_array($state['state'], ['snapshot_failed', 'snapshot_aborted', 'failed'], true) => 'blocked',
             $snapshot => 'snapshot_tick', default => 'tick',
         };
         $data = $this->filterCompact(array_replace($state, $progress ?? ['processed' => null, 'total' => null, 'remaining' => null, 'cursor' => null, 'current_dataset' => null], [
             'next_action' => $next, 'busy' => false, 'resume_allowed' => ! in_array($next, ['blocked', 'download'], true),
             'blocked_reason' => $next === 'blocked' ? ($state['last_error'] ?? $state['state']) : null,
-            'snapshot_retry_allowed' => in_array($state['state'], ['snapshot_pending', 'snapshot_running', 'snapshot_paused', 'snapshot_failed'], true) && ! is_dir($dir.'/images'),
+            'snapshot_retry_allowed' => ! $this->datasetRecoveryAllowed(array_replace($state, $progress ?? [])) && in_array($state['state'], ['snapshot_pending', 'snapshot_running', 'snapshot_paused', 'snapshot_failed'], true) && ! is_dir($dir.'/images'),
             'snapshot_abort_allowed' => false, 'photo_retry_allowed' => ! isset($state['photo_retry']) && array_sum(array_intersect_key($state['photo_results'] ?? [], array_flip(['COPY_FAILED', 'UNREADABLE_ORIGINAL', 'INSUFFICIENT_DISK_SPACE']))) > 0,
         ]));
         $data['remaining'] ??= isset($data['total'], $data['processed']) ? max(0, $data['total'] - $data['processed']) : null;
+        $data['dataset_recovery_allowed'] = $this->datasetRecoveryAllowed($data);
         $data['last_success'] ??= null;
         $data['attempt_id'] = $state['snapshot_attempt_id'];
         $data['last_tick_reason'] = $this->small($dir.'/last-tick.json', 4096)['reason_code'] ?? null;
@@ -447,11 +485,32 @@ final class BrowserMigrationExport
         $this->write($dir.'/operational-progress.json', $data);
     }
 
+    private function datasetRecoveryAllowed(array $data): bool
+    {
+        return ($data['state'] ?? null) === 'snapshot_failed' && ($data['last_error'] ?? null) === 'snapshot_row_updated_after_cutoff'
+            && ($data['current_dataset'] ?? null) === 'marketplace_listings';
+    }
+
+    public function datasetConflict(string $dir, string $attempt): array
+    {
+        $lock = fopen($dir.'/lock', 'c');
+        if (! flock($lock, LOCK_EX | LOCK_NB)) {
+            fclose($lock);
+            throw new MigrationExportException('busy', 503);
+        }
+        try {
+            return $this->snapshots->diagnoseDatasetConflict($dir, $attempt);
+        } finally {
+            flock($lock, LOCK_UN);
+            fclose($lock);
+        }
+    }
+
     public function filterCompact(array $data): array
     {
         return array_intersect_key($data, array_flip(['run_id', 'schema_version', 'snapshot_attempt_id', 'snapshot_mode', 'state', 'phase',
             'current_dataset', 'processed', 'total', 'remaining', 'cursor', 'next_action', 'busy', 'resume_allowed', 'blocked_reason',
-            'last_success', 'last_error', 'snapshot_state', 'snapshot_retry_allowed', 'snapshot_abort_allowed', 'photo_retry_allowed', 'last_tick', 'last_status_error', 'attempt_id', 'last_tick_reason', 'checkpoint_fingerprint', 'progress_unavailable']));
+            'last_success', 'last_error', 'snapshot_state', 'snapshot_retry_allowed', 'snapshot_abort_allowed', 'photo_retry_allowed', 'last_tick', 'last_status_error', 'attempt_id', 'last_tick_reason', 'checkpoint_fingerprint', 'progress_unavailable', 'dataset_generation', 'dataset_boundary_id', 'previous_boundary_id', 'boundary_refreshed_at', 'recovery_reason', 'consistency_mode', 'dataset_recovery', 'dataset_recovery_allowed', 'recovery_reason_code', 'source_conflict']));
     }
 
     public function download(string $dir, string $key): string
