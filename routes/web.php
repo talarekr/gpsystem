@@ -2997,3 +2997,10 @@ Route::match(['get', 'post'], '/admin/tools/gpswiss-migration-export/{run?}', \A
     ->withoutMiddleware(\Illuminate\Session\Middleware\StartSession::class)
     ->middleware([\App\Http\Middleware\ShippingRateAuditReadOnly::class, \App\Http\Middleware\ReadOnlyPreviewSession::class, Authenticate::class, 'admin.panel'])
     ->name('admin.tools.gpswiss-migration-export');
+
+// Authenticated diagnostic fallback only for malformed migration-export URLs.
+Route::match(['get', 'post'], '/admin/tools/gpswiss-migration-export/{invalidPath}', [\App\Http\Controllers\Tools\GpswissMigrationExportController::class, 'invalidRoute'])
+    ->where('invalidPath', '.+')
+    ->withoutMiddleware(\Illuminate\Session\Middleware\StartSession::class)
+    ->middleware([\App\Http\Middleware\ShippingRateAuditReadOnly::class, \App\Http\Middleware\ReadOnlyPreviewSession::class, Authenticate::class, 'admin.panel'])
+    ->name('admin.tools.gpswiss-migration-export.invalid');

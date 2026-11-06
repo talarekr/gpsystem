@@ -46,6 +46,15 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->respond(function ($response, Throwable $exception, Request $request) {
+            // Laravel normalizes TokenMismatchException to an HTTP 419 before render callbacks.
+            if ($response->getStatusCode() === 419 && $request->expectsJson()
+                && $request->is('admin/tools/gpswiss-migration-export', 'admin/tools/gpswiss-migration-export/*')) {
+                return response()->json(['ok' => false, 'reason_code' => 'SESSION_EXPIRED', 'http_status' => 419,
+                    'message' => 'Zaloguj się ponownie, odśwież panel i wznów istniejący eksport.',
+                    'database_writes' => false, 'source_file_writes' => false, 'provider_calls' => false], 419)
+                    ->header('Cache-Control', 'private, no-store');
+            }
+
             if (StorefrontContext::isFrench($request)
                 && in_array($request->method(), ['GET', 'HEAD'], true) && ! $request->expectsJson()
                 && (! $request->route() || $request->routeIs('storefront.*', 'password.*'))

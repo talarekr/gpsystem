@@ -14,18 +14,41 @@ final class GpswissMigrationExport
 
     public function start(int $owner, ?string $id = null): array
     {
+        $id ??= (string) Str::uuid();
+        $this->validateId($id);
+        $lock = fopen($this->root().'/owner-'.$owner.'.lock', 'c');
+        chmod($this->root().'/owner-'.$owner.'.lock', 0600);
+        flock($lock, LOCK_EX);
+        try {
+            if (is_file($this->root().'/'.$id.'/state.json')) {
+                return $this->status($owner, $id);
+            }
+            $existing = $this->discover($owner);
+            if ($existing['existing_run_found']) {
+                throw new MigrationExportException('existing_export_unfinished', 409, ['run_id' => $existing['run_id']]);
+            }
+
+            return $this->startRun($owner, $id);
+        } finally {
+            flock($lock, LOCK_UN);
+            fclose($lock);
+        }
+    }
+
+    private function startRun(int $owner, string $id): array
+    {
         if (! class_exists(ZipArchive::class)) {
             throw new RuntimeException('zip_extension_required');
         }
-        $id ??= (string) Str::uuid();
-        abort_unless(Str::isUuid($id), 422);
+        $this->validateId($id);
         $dir = $this->root().'/'.$id;
         if (is_file($dir.'/state.json')) {
             return $this->status($owner, $id);
         }
-        if (! is_dir($dir)) {
-            mkdir($dir, 0700, true);
+        if (is_dir($dir)) {
+            throw new MigrationExportException('checkpoint_missing', 404);
         }
+        mkdir($dir, 0700, true);
         $startLock = fopen($dir.'/lock', 'c');
         chmod($dir.'/lock', 0600);
         flock($startLock, LOCK_EX);
@@ -36,6 +59,7 @@ final class GpswissMigrationExport
             return $this->status($owner, $id);
         }
         $state = ['schema_version' => 'gpswiss-wystawczesc-2', 'contains_customer_data' => true, 'run_id' => $id, 'owner_id' => $owner, 'state' => 'snapshot', 'processed_images' => 0, 'photo_results' => [], 'last_error' => null];
+        $this->write($dir.'/owner.json', ['owner_id' => $owner, 'run_id' => $id]);
         $this->write($dir.'/state.json', $state);
         try {
             $data = $this->snapshot->capture();
@@ -87,6 +111,13 @@ final class GpswissMigrationExport
 
     public function tick(int $owner, string $id): array
     {
+        $before = $this->status($owner, $id);
+        if (! $before['resume_allowed']) {
+            if ($before['state'] === 'completed') {
+                return $before;
+            }
+            throw new MigrationExportException($before['blocked_reason'] === 'artifact_not_found' ? 'artifact_not_found' : 'other', 409);
+        }
         $dir = $this->directory($owner, $id);
         $lock = fopen($dir.'/lock', 'c');
         chmod($dir.'/lock', 0600);
@@ -97,34 +128,59 @@ final class GpswissMigrationExport
         }
         try {
             $state = $this->read($dir.'/state.json');
-            if (($state['schema_version'] ?? null) !== 'gpswiss-wystawczesc-2') {
-                throw new RuntimeException('new_export_required_for_v2');
-            }
-            if (! in_array($state['state'], ['photos', 'archive'], true)) {
-                return $this->status($owner, $id);
-            }
-            if ($state['state'] === 'photos') {
-                $tasks = $this->read($dir.'/photo-tasks.json');
+            $tasks = $this->read($dir.'/photo-tasks.json');
+            $records = $this->photoRecords($dir);
+            if (isset($state['verification_cursor'])) {
                 $deadline = microtime(true) + 3;
-                for ($n = 0; $n < 20 && $state['processed_images'] < count($tasks) && microtime(true) < $deadline; $n++) {
-                    $result = $this->originals->copy($tasks[$state['processed_images']], $dir);
-                    file_put_contents($dir.'/photos.jsonl', json_encode($result, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE)."\n", FILE_APPEND | LOCK_EX);
-                    chmod($dir.'/photos.jsonl', 0600);
-                    $state['processed_images']++;
-                    $state['photo_results'][$result['status']] = ($state['photo_results'][$result['status']] ?? 0) + 1;
+                for ($n = 0; $n < 20 && $state['verification_cursor'] < $state['processed_images'] && microtime(true) < $deadline; $n++) {
+                    $index = $state['verification_cursor'];
+                    $task = $tasks[$index];
+                    $record = $records[$task['part_id'].':'.$task['image_id']] ?? null;
+                    if (! $record || ($record['status'] === 'COPIED_VERIFIED' && ! $this->verifiedPhoto($dir, $record))) {
+                        $state['repair_queue'][] = $index;
+                    }
+                    $state['verification_cursor']++;
                     $this->write($dir.'/state.json', $state);
                 }
-                if ($state['processed_images'] === count($tasks)) {
+                $state['repair_queue'] = array_values(array_unique($state['repair_queue'] ?? []));
+                if ($state['verification_cursor'] >= $state['processed_images']) {
+                    unset($state['verification_cursor']);
+                    $state['state'] = $state['repair_queue'] || $state['processed_images'] < count($tasks) ? 'photos' : 'archive';
+                }
+            } elseif ($state['state'] === 'photos') {
+                $deadline = microtime(true) + 3;
+                for ($n = 0; $n < 20 && microtime(true) < $deadline; $n++) {
+                    $repairing = ! empty($state['repair_queue']);
+                    $index = $repairing ? $state['repair_queue'][0] : $state['processed_images'];
+                    if (! isset($tasks[$index])) {
+                        break;
+                    }
+                    $task = $tasks[$index];
+                    $key = $task['part_id'].':'.$task['image_id'];
+                    $record = $records[$key] ?? null;
+                    if ($record && $record['status'] === 'COPIED_VERIFIED' && $this->verifiedPhoto($dir, $record)) {
+                        $result = $record;
+                    } else {
+                        $result = $this->originals->copy($task, $dir);
+                        $this->appendPhotoRecord($dir, $result);
+                        $records[$key] = $result;
+                    }
+                    if ($repairing) {
+                        array_shift($state['repair_queue']);
+                    } else {
+                        $state['processed_images']++;
+                    }
+                    $state['last_success'] = ['part_id' => $task['part_id'], 'image_id' => $task['image_id'], 'result' => $result['status'], 'at' => now()->toIso8601String()];
+                    $state['photo_results'] = array_count_values(array_column($records, 'status'));
+                    $this->write($dir.'/state.json', $state);
+                }
+                if ($state['processed_images'] === count($tasks) && empty($state['repair_queue'])) {
                     $state['state'] = 'archive';
+                    $state['verification_cursor'] = 0;
                 }
-            } else {
+            } elseif ($state['state'] === 'archive') {
                 $snapshot = $this->read($dir.'/snapshot.json');
-                $photos = [];
-                foreach ((is_file($dir.'/photos.jsonl') ? file($dir.'/photos.jsonl', FILE_IGNORE_NEW_LINES) : []) as $line) {
-                    $photo = json_decode($line, true, 512, JSON_THROW_ON_ERROR);
-                    $photos[$photo['part_id'].':'.$photo['image_id']] = $photo; // crash/replay does not duplicate a logical image
-                }
-                $photos = array_values($photos);
+                $photos = array_values($records);
                 $sample = $this->sampleIds($snapshot['products'], $photos);
                 $this->package($dir, 'sample', $snapshot, $photos, $sample);
                 $this->package($dir, 'full', $snapshot, $photos, array_column($snapshot['products'], 'id'));
@@ -134,11 +190,11 @@ final class GpswissMigrationExport
                 foreach (['sample', 'full'] as $kind) {
                     $state['archives'][$kind] = ['bytes' => filesize($dir.'/'.$kind.'.zip'), 'sha256' => hash_file('sha256', $dir.'/'.$kind.'.zip')];
                 }
+                $state['last_success'] = ['phase' => 'archive', 'at' => now()->toIso8601String()];
             }
             $state['last_error'] = null;
             $this->write($dir.'/state.json', $state);
         } catch (\Throwable) {
-            // Durable cursor remains resumable; never expose file paths, SQL, credentials or exception text.
             $state['last_error'] = 'export_tick_failed_resume_same_run';
             $this->write($dir.'/state.json', $state);
         } finally {
@@ -149,25 +205,208 @@ final class GpswissMigrationExport
         return $this->status($owner, $id);
     }
 
+    private function appendPhotoRecord(string $dir, array $record): void
+    {
+        $file = $dir.'/photos.jsonl';
+        $stream = fopen($file, 'a+');
+        chmod($file, 0600);
+        try {
+            $stat = fstat($stream);
+            $prefix = '';
+            if ($stat['size'] > 0) {
+                fseek($stream, -1, SEEK_END);
+                if (fread($stream, 1) !== "\n") {
+                    $prefix = "\n";
+                }
+            }
+            fseek($stream, 0, SEEK_END);
+            $line = $prefix.json_encode($record, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE)."\n";
+            if (fwrite($stream, $line) !== strlen($line) || ! fflush($stream)) {
+                throw new RuntimeException('photo_journal_write_failed');
+            }
+        } finally {
+            fclose($stream);
+        }
+    }
+
+    private function photoRecords(string $dir): array
+    {
+        $records = [];
+        foreach ((is_file($dir.'/photos.jsonl') ? file($dir.'/photos.jsonl', FILE_IGNORE_NEW_LINES) : []) as $line) {
+            try {
+                $record = json_decode($line, true, 512, JSON_THROW_ON_ERROR);
+            } catch (\Throwable) {
+                continue;
+            } // a torn final append can be repeated from durable cursor
+            if (isset($record['part_id'], $record['image_id'], $record['status'])) {
+                $records[$record['part_id'].':'.$record['image_id']] = $record;
+            }
+        }
+
+        return $records;
+    }
+
+    private function verifiedPhoto(string $dir, array $photo): bool
+    {
+        $relative = $photo['package_path'] ?? '';
+        if (! str_starts_with($relative, 'images/') || in_array('..', explode('/', $relative), true)) {
+            return false;
+        }
+        $path = realpath($dir.'/'.$relative);
+        if (! $path || ! str_starts_with($path, realpath($dir).DIRECTORY_SEPARATOR) || ! is_file($path)) {
+            return false;
+        }
+
+        return filesize($path) === $photo['bytes'] && is_string($photo['sha256'] ?? null) && hash_equals($photo['sha256'], hash_file('sha256', $path));
+    }
+
+    public function discover(int $owner): array
+    {
+        $candidates = [];
+        foreach (glob($this->root().'/*', GLOB_ONLYDIR) ?: [] as $dir) {
+            if (! Str::isUuid(basename($dir))) {
+                continue;
+            }
+            $state = null;
+            foreach (['state.json', 'owner.json'] as $name) {
+                $checkpoint = $dir.'/'.$name;
+                if (! is_file($checkpoint)) {
+                    continue;
+                }
+                try {
+                    $candidate = $this->read($checkpoint);
+                    if (isset($candidate['owner_id'])) {
+                        $state = $candidate;
+                        break;
+                    }
+                } catch (\Throwable) {
+                    // Recover only ownership evidence, never reconstruct a broken snapshot.
+                }
+            }
+            if (($state['owner_id'] ?? null) !== $owner || ($state['state'] ?? '') === 'completed') {
+                continue;
+            }
+            $candidates[] = ['id' => basename($dir), 'time' => filemtime($checkpoint)];
+        }
+        usort($candidates, fn ($a, $b) => $b['time'] <=> $a['time'] ?: strcmp($b['id'], $a['id']));
+        if (! $candidates) {
+            return ['existing_run_found' => false, 'run_id' => null, 'run' => null, 'database_writes' => false, 'provider_calls' => false];
+        }
+        try {
+            $status = $this->status($owner, $candidates[0]['id']);
+        } catch (MigrationExportException $e) {
+            $status = ['run_id' => $candidates[0]['id'], 'state' => 'blocked', 'phase' => 'unknown',
+                'processed' => null, 'remaining' => null, 'current_item' => null, 'last_success' => null, 'last_error' => $e->reasonCode,
+                'resume_allowed' => false, 'blocked_reason' => $e->reasonCode, 'reason_code' => $e->reasonCode,
+                'owner_match' => true, 'artifacts_present' => false, 'database_writes' => false, 'provider_calls' => false] + $e->details;
+        }
+
+        return ['existing_run_found' => true, 'run' => $status] + $status;
+    }
+
     public function status(int $owner, string $id): array
     {
-        $state = $this->read($this->directory($owner, $id).'/state.json');
+        $dir = $this->directory($owner, $id);
+        $state = $this->read($dir.'/state.json');
         unset($state['owner_id']);
+        $required = ['checkpoint' => is_file($dir.'/state.json'), 'snapshot' => is_file($dir.'/snapshot.json'), 'photo_tasks' => is_file($dir.'/photo-tasks.json')];
+        if ($state['state'] === 'completed') {
+            foreach (['sample', 'full'] as $kind) {
+                $required[$kind.'_archive'] = is_file($dir.'/'.$kind.'.zip');
+            }
+        }
+        $present = ! in_array(false, $required, true);
+        $blocked = match (true) {
+            $state['state'] === 'completed' => $present ? 'export_already_completed' : 'artifact_not_found',
+            ($state['schema_version'] ?? null) !== 'gpswiss-wystawczesc-2' => 'unsupported_export_schema',
+            $state['state'] === 'snapshot' => 'snapshot_in_progress_or_interrupted',
+            $state['state'] === 'failed' => $state['last_error'] ?? 'other',
+            ! $present => 'artifact_not_found',
+            ! in_array($state['state'], ['photos', 'archive'], true) => 'other',
+            default => null,
+        };
+        $busy = false;
+        $lock = fopen($dir.'/lock', 'c');
+        chmod($dir.'/lock', 0600);
+        if ($lock) {
+            $busy = ! flock($lock, LOCK_EX | LOCK_NB);
+            if (! $busy) {
+                flock($lock, LOCK_UN);
+            } fclose($lock);
+        }
+        $item = null;
+        if (($state['state'] === 'photos' || isset($state['verification_cursor'])) && $present) {
+            try {
+                $tasks = $this->read($dir.'/photo-tasks.json');
+                $next = $state['verification_cursor'] ?? $state['repair_queue'][0] ?? $state['processed_images'];
+                if (isset($tasks[$next])) {
+                    $item = array_intersect_key($tasks[$next], array_flip(['part_id', 'image_id', 'role']));
+                }
+            } catch (\Throwable) {
+                $blocked = 'artifact_not_found';
+                $present = false;
+            }
+        }
 
-        return $state + ['database_writes' => false, 'source_file_writes' => false, 'export_file_writes' => true, 'provider_calls' => false, 'marketplace_writes' => false, 'automatic_publish' => false, 'import_performed' => false];
+        return $state + ['phase' => isset($state['verification_cursor']) ? 'verification' : $state['state'], 'processed' => (int) $state['processed_images'],
+            'remaining' => max(0, ($state['total_images'] ?? 0) - $state['processed_images']) + count($state['repair_queue'] ?? []),
+            'verification_remaining' => isset($state['verification_cursor']) ? max(0, $state['processed_images'] - $state['verification_cursor']) : 0,
+            'current_item' => $item, 'last_success' => $state['last_success'] ?? null, 'resume_allowed' => $blocked === null,
+            'blocked_reason' => $blocked, 'storage_root_fingerprint' => substr(hash('sha256', realpath($this->root())), 0, 16), 'owner_match' => true, 'artifacts_present' => $present, 'artifacts' => $required, 'busy' => $busy,
+            'database_writes' => false, 'source_file_writes' => false, 'export_file_writes' => true, 'provider_calls' => false,
+            'marketplace_writes' => false, 'automatic_publish' => false, 'import_performed' => false];
+    }
+
+    public function resume(int $owner, string $id): array
+    {
+        $status = $this->status($owner, $id);
+        if (! $status['resume_allowed'] || $status['busy']) {
+            return $status;
+        }
+        $dir = $this->directory($owner, $id);
+        $lock = fopen($dir.'/lock', 'c');
+        if (! flock($lock, LOCK_EX | LOCK_NB)) {
+            fclose($lock);
+
+            return $this->status($owner, $id);
+        }
+        try {
+            $state = $this->read($dir.'/state.json');
+            if (in_array($state['state'], ['photos', 'archive'], true) && ($state['schema_version'] ?? null) === 'gpswiss-wystawczesc-2') {
+                if ($state['processed_images'] > 0 && ! isset($state['verification_cursor'])) {
+                    $state['verification_cursor'] = 0;
+                }
+                $this->write($dir.'/state.json', $state);
+            }
+        } finally {
+            flock($lock, LOCK_UN);
+            fclose($lock);
+        }
+
+        return $this->status($owner, $id);
     }
 
     public function download(int $owner, string $id, string $kind): string
     {
-        abort_unless(in_array($kind, ['sample', 'full'], true), 422);
+        if (! in_array($kind, ['sample', 'full'], true)) {
+            throw new MigrationExportException('other', 422);
+        }
         $dir = $this->directory($owner, $id);
-        abort_unless($this->read($dir.'/state.json')['state'] === 'completed' && is_file($dir.'/'.$kind.'.zip'), 409);
+        if ($this->read($dir.'/state.json')['state'] !== 'completed') {
+            throw new MigrationExportException('artifact_not_found', 409);
+        }
+        if (! is_file($dir.'/'.$kind.'.zip')) {
+            throw new MigrationExportException('artifact_not_found', 404);
+        }
 
         return $dir.'/'.$kind.'.zip';
     }
 
     private function package(string $dir, string $kind, array $snapshot, array $photos, array $ids): void
     {
+        if ($this->verifiedArchive($dir.'/'.$kind.'.zip', $dir, $kind, $snapshot, $photos, $ids)) {
+            return;
+        }
         $selected = array_fill_keys($ids, true);
         $products = array_values(array_filter($snapshot['products'], fn ($p) => isset($selected[$p['id']])));
         $photos = array_values(array_filter($photos, fn ($p) => isset($selected[$p['part_id']])));
@@ -270,9 +509,11 @@ final class GpswissMigrationExport
             }
         }
         $this->write($base.'/dependency-issues.json', $issues);
-        $schema = resource_path('migration-export.schema.json');
-        copy($schema, $base.'/schema.json');
-        copy(base_path('docs/migration/gpswiss-export-and-sync-stop.md'), $base.'/READ-ME.md');
+        foreach (['schema.json' => resource_path('migration-export.schema.json'), 'READ-ME.md' => base_path('docs/migration/gpswiss-export-and-sync-stop.md')] as $name => $source) {
+            if ((! is_file($base.'/'.$name) || ! hash_equals(hash_file('sha256', $source), hash_file('sha256', $base.'/'.$name))) && ! copy($source, $base.'/'.$name)) {
+                throw new RuntimeException('artifact_copy_failed');
+            }
+        }
         $hashes = [];
         foreach ($this->packageFiles($base) as $relative => $file) {
             if ($relative !== 'manifest.json') {
@@ -343,6 +584,55 @@ final class GpswissMigrationExport
         return $ids;
     }
 
+    private function verifiedArchive(string $file, string $dir, string $kind, array $snapshot, array $photos, array $ids): bool
+    {
+        if (! is_file($file)) {
+            return false;
+        }
+        $zip = new ZipArchive;
+        if ($zip->open($file, ZipArchive::CHECKCONS) !== true) {
+            return false;
+        }
+        try {
+            $manifest = json_decode($zip->getFromName('manifest.json') ?: 'null', true);
+            if (! is_array($manifest) || ($manifest['run_id'] ?? null) !== basename($dir) || ($manifest['package_kind'] ?? null) !== $kind || ($manifest['snapshot_at'] ?? null) !== $snapshot['snapshot_at']) {
+                return false;
+            }
+            $selected = array_fill_keys(array_map('strval', $ids), true);
+            $expectedPhotos = array_values(array_filter($photos, fn ($p) => isset($selected[(string) $p['part_id']])));
+            if (json_decode($zip->getFromName('photos.json') ?: 'null', true) !== $expectedPhotos || ($manifest['products_count'] ?? null) !== count($ids)) {
+                return false;
+            }
+            $hashes = $manifest['file_sha256'] ?? [];
+            if (! isset($hashes['products.json'], $hashes['photos.json'])) {
+                return false;
+            }
+            foreach ($expectedPhotos as $photo) {
+                if ($photo['status'] === 'COPIED_VERIFIED') {
+                    $hashes[$photo['package_path']] = $photo['sha256'];
+                }
+            }
+            foreach ($hashes as $name => $expected) {
+                $stream = $zip->getStream($name);
+                if (! is_resource($stream)) {
+                    return false;
+                }
+                $hash = hash_init('sha256');
+                hash_update_stream($hash, $stream);
+                fclose($stream);
+                if (! is_string($expected) || ! hash_equals($expected, hash_final($hash))) {
+                    return false;
+                }
+            }
+
+            return true;
+        } catch (\Throwable) {
+            return false;
+        } finally {
+            $zip->close();
+        }
+    }
+
     private function caseCoverage(array $snapshot, array $selected): array
     {
         $galleryCounts = array_count_values(array_column($snapshot['datasets']['part_images'] ?? [], 'part_id'));
@@ -359,7 +649,7 @@ final class GpswissMigrationExport
 
     private function csv(string $path, array $rows, array $fields): void
     {
-        $file = fopen($path, 'wb');
+        $file = fopen($path.'.pending', 'wb');
         fwrite($file, "\xEF\xBB\xBF");
         fputcsv($file, $fields, ';', '"', '');
         foreach ($rows as $row) {
@@ -377,7 +667,12 @@ final class GpswissMigrationExport
             }, $fields), ';', '"', '');
         }
         fclose($file);
-        chmod($path, 0600);
+        chmod($path.'.pending', 0600);
+        if (is_file($path) && hash_equals(hash_file('sha256', $path), hash_file('sha256', $path.'.pending'))) {
+            unlink($path.'.pending');
+        } else {
+            rename($path.'.pending', $path);
+        }
     }
 
     private function fields(array $rows, array $fallback = []): array
@@ -390,7 +685,7 @@ final class GpswissMigrationExport
         $files = [];
         $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($base, \FilesystemIterator::SKIP_DOTS));
         foreach ($iterator as $file) {
-            if ($file->isFile()) {
+            if ($file->isFile() && ! preg_match('/\.(tmp|pending|partial)$/D', $file->getFilename())) {
                 $files[substr($file->getPathname(), strlen($base) + 1)] = $file->getPathname();
             }
         }
@@ -418,12 +713,37 @@ final class GpswissMigrationExport
         return $root;
     }
 
+    private function validateId(string $id): void
+    {
+        if (! Str::isUuid($id)) {
+            throw new MigrationExportException('invalid_run_id', 422);
+        }
+    }
+
     private function directory(int $owner, string $id): string
     {
-        abort_unless(Str::isUuid($id), 404);
+        $this->validateId($id);
         $dir = $this->root().'/'.$id;
-        abort_unless(is_file($dir.'/state.json'), 404);
-        abort_unless($this->read($dir.'/state.json')['owner_id'] === $owner, 404);
+        if (! is_dir($dir)) {
+            throw new MigrationExportException('run_not_found', 404, ['storage_root_fingerprint' => substr(hash('sha256', realpath($this->root())), 0, 16)]);
+        }
+        if (! is_file($dir.'/state.json')) {
+            throw new MigrationExportException('checkpoint_missing', 404);
+        }
+        try {
+            $state = $this->read($dir.'/state.json');
+        } catch (\Throwable) {
+            throw new MigrationExportException('other', 409, ['diagnostic_detail' => 'checkpoint_invalid']);
+        }
+        if (($state['owner_id'] ?? null) !== $owner) {
+            throw new MigrationExportException('run_owner_mismatch', 404, ['owner_match' => false]);
+        }
+        if (($state['state'] ?? '') === 'deleted' || is_file($dir.'/deleted.json')) {
+            throw new MigrationExportException('export_deleted', 410);
+        }
+        if (! isset($state['state'], $state['processed_images']) || ! is_int($state['processed_images'])) {
+            throw new MigrationExportException('other', 409, ['diagnostic_detail' => 'checkpoint_invalid']);
+        }
 
         return $dir;
     }
@@ -435,8 +755,15 @@ final class GpswissMigrationExport
 
     private function write(string $file, array $data): void
     {
-        file_put_contents($file.'.tmp', json_encode($data, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
-        chmod($file.'.tmp', 0600);
-        rename($file.'.tmp', $file);
+        $content = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        if (is_file($file) && hash_equals(hash('sha256', $content), hash_file('sha256', $file))) {
+            return;
+        }
+        if (@file_put_contents($file.'.tmp', $content) !== strlen($content)) {
+            throw new RuntimeException('artifact_write_failed');
+        }
+        if (! chmod($file.'.tmp', 0600) || ! rename($file.'.tmp', $file)) {
+            throw new RuntimeException('artifact_replace_failed');
+        }
     }
 }
