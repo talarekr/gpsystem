@@ -34,7 +34,7 @@ def case(browser,mode):
   p.wait_for_function("document.querySelector('#message').textContent.includes('Eksport zatrzymany')",timeout=30000);assert calls==5;assert state['processed']==2528
  else:
   p.wait_for_function("document.querySelector('#message').textContent.includes('Eksport gotowy')",timeout=30000);assert state['processed']>2528;assert calls==2
- assert requests.count('resume')==1;assert 'response_bytes' in p.locator('#request-diagnostic').inner_text()
+ assert requests.count('resume')==0;assert 'response_bytes' in p.locator('#request-diagnostic').inner_text()
  c.close();print('PASS runner reliability',mode)
 with sync_playwright() as pw:
  b=pw.chromium.launch(executable_path='/usr/bin/chromium',args=['--no-sandbox'])

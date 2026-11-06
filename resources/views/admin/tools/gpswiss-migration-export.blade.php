@@ -18,7 +18,7 @@
 <label><input id="photo-confirm-retry" type="checkbox"> Potwierdzam ponowienie nieudanych kopii i odtworzenie archiwów w tym samym run_id.</label><button id="retry-photos" disabled>Ponów nieudane kopie zdjęć</button>
 </section>
 <p id="snapshot-worker" hidden></p><p id="progress" role="status"></p>
-<p id="message" role="status">Szukam niedokończonego eksportu właściciela…</p><a id="login" href="/admin/login" hidden>Zaloguj się ponownie, potem odśwież ten panel</a><pre id="state"></pre><pre id="request-diagnostic" aria-label="Diagnostyka żądania"></pre>
+<p id="message" role="status">Szukam niedokończonego eksportu właściciela…</p><a id="login" href="/admin/login" hidden>Zaloguj się ponownie, potem odśwież ten panel</a><pre id="resume-diagnostic" aria-label="Diagnostyka wznowienia"></pre><pre id="state"></pre><pre id="request-diagnostic" aria-label="Diagnostyka żądania"></pre>
 <a id="sample" hidden>Pobierz próbkę ZIP</a><a id="full" hidden>Pobierz pełny ZIP</a>
 <ul id="download-artifacts" hidden></ul>
 <p>Cały eksport działa z tego panelu. Pauza snapshotu zapisuje stan na serwerze; Stop lokalnej pętli kończy wysyłanie kolejnych żądań. Po odświeżeniu użyj Wznów. Pobierz manifest i wszystkie wskazane części archiwum.</p>
@@ -26,7 +26,25 @@
 (()=>{
  const el=id=>document.getElementById(id),base=@json(route('admin.tools.gpswiss-migration-export', [], false));
  let id=new URLSearchParams(location.hash.slice(1)).get('run'),state=null,active=false,working=false,ready=false,sessionExpired=false,accessBlocked=false,inFlight=false,pauseRequested=false,pausing=false;
- const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+ let loopDone=null,finishLoop=null,manualResuming=false,resumeTraceActive=false,retryExhausted=false;
+ const waits=new Map(),resumeEvents=[];
+ const wait=ms=>new Promise(resolve=>{const timer=setTimeout(()=>{waits.delete(timer);resolve();},ms);waits.set(timer,resolve);});
+ function cancelBackoff(){for(const [timer,resolve] of waits){clearTimeout(timer);resolve();}waits.clear();}
+ function resumeEvent(event,blocked_reason=null){resumeEvents.push({event,blocked_reason});if(resumeEvents.length>12)resumeEvents.shift();el('resume-diagnostic').textContent=JSON.stringify({events:resumeEvents,retry_exhausted:retryExhausted},null,2);}
+ async function manualResume(){
+  if(manualResuming)return;
+  manualResuming=true;resumeTraceActive=true;resumeEvents.length=0;resumeEvent('resume_started');
+  try{
+   await boot;
+   if(sessionExpired || accessBlocked){resumeEvent('blocked',sessionExpired?'SESSION_EXPIRED':'run_owner_mismatch');return;}
+   if(inFlight || pausing || (working && !loopDone)){resumeEvent('blocked','active_request_or_operation');return;}
+   if(working){active=false;pauseRequested=false;cancelBackoff();await loopDone;}
+   active=false;pauseRequested=false;retryExhausted=false;requestFailures.length=0;cancelBackoff();
+   el('request-diagnostic').textContent='';el('message').textContent='resume_started / local_retry_state_reset';
+   resumeEvent('local_retry_state_reset');
+   drive(false).catch(()=>resumeEvent('blocked','local_runner_error'));
+  }finally{manualResuming=false;buttons();}
+ }
  const reasonOf=(data,fallback)=>typeof data?.reason_code==='string' && /^[A-Za-z0-9_]{1,80}$/.test(data.reason_code)?data.reason_code:fallback;
  const snapshotState=()=>state?.snapshot_state ?? (String(state?.state ?? '').startsWith('snapshot')?state.state:null);
  const browserSnapshot=()=>state?.snapshot_mode==='browser';
@@ -43,7 +61,7 @@
  function buttons(){
   const blocked=!ready || sessionExpired || accessBlocked;
   el('start').disabled=blocked || working || !!unfinished();
-  el('resume').disabled=blocked || working || !state || state.state==='completed' || (nextAction()==='blocked' && !state.busy);
+  el('resume').disabled=blocked || (inFlight || pausing || manualResuming) || !state || state.state==='completed' || (nextAction()==='blocked' && !state.busy);
   el('pause').disabled=blocked || !canPause() || pausing || pauseRequested;
   el('stop-local').disabled=!working;
   el('snapshot-actions').hidden=!(state?.snapshot_retry_allowed || state?.snapshot_abort_allowed);
@@ -77,7 +95,7 @@
  const cursorText=value=>value==null?'—':typeof value==='object'?JSON.stringify(value):String(value);
  const transient=error=>['network_error','browser_fetch_timeout','malformed_json','invalid_response','snapshot_http_tick_failed'].includes(error.reason) || [408,429,500,502,503,504].includes(error.http);
  async function request(url,action,extra={}){
-  inFlight=true;const controller=new AbortController(),started=performance.now(),timer=setTimeout(()=>controller.abort(),45000);
+  inFlight=true;buttons();const controller=new AbortController(),started=performance.now(),timer=setTimeout(()=>controller.abort(),45000);
   const diagnostic={endpoint:base+(id?'/'+id:''),action:action??'status',http_status:null,fetch_timeout:false,network_exception_type:null,transport_reason:null,response_bytes:0,server_reason_code:null,current_dataset:state?.current_dataset??null,cursor_before:state?.cursor??null,cursor_after:null};
   try{
    const response=await fetch(url,{method:action?'POST':'GET',credentials:'same-origin',cache:'no-store',redirect:'error',signal:controller.signal,headers:{Accept:'application/json',...(action?{'Content-Type':'application/json','X-CSRF-TOKEN':document.querySelector('meta[name="csrf-token"]').content}:{})},...(action?{body:JSON.stringify({action,...extra})}:{})});
@@ -97,14 +115,16 @@
    const reason=controller.signal.aborted?'browser_fetch_timeout':'network_error';diagnostic.reason_code=reason;diagnostic.transport_reason=controller.signal.aborted?'browser_fetch_timeout':'unknown_network_error';
    throw Object.assign(new Error(reason),{reason,http:diagnostic.http_status});
   }finally{
-   diagnostic.duration_ms=Math.round(performance.now()-started);clearTimeout(timer);inFlight=false;
+   diagnostic.duration_ms=Math.round(performance.now()-started);clearTimeout(timer);inFlight=false;buttons();
    if(diagnostic.reason_code){requestFailures.push(diagnostic);if(requestFailures.length>4)requestFailures.shift();}
    el('request-diagnostic').textContent=JSON.stringify({latest:diagnostic,recent_failures:requestFailures},null,2);
   }
  }
 
  function stop(error){
-  active=false;
+  if(error.reason==='local_stop'){active=false;return;}
+  if(resumeTraceActive)resumeEvent('blocked',error.reason ?? 'unknown_local_error');
+  active=false;retryExhausted=transient(error);
   if(error.reason==='SESSION_EXPIRED'){
    sessionExpired=true;el('login').hidden=false;
    el('message').textContent='SESSION_EXPIRED / HTTP '+(error.http ?? 419)+' — checkpoint pozostaje na serwerze. Zaloguj się ponownie i odśwież panel; potem Wznów istniejący eksport.';
@@ -127,6 +147,7 @@
   if(!transient(error))throw error;
   el('message').textContent='network_recovery '+attempt+'/4 — odczytuję checkpoint tego samego eksportu';
   await wait(500*2**(attempt-1));
+  if(!active && working && loopDone)throw Object.assign(new Error('local_stop'),{reason:'local_stop'});
   try{if(id)await readCurrent();else await discover();}
   catch(next){if(next.http===404 && next.reason!=='run_owner_mismatch'){if(await discover())return;}throw next;}
  }
@@ -165,7 +186,8 @@
  }
  async function drive(start){
   await boot;if(working || sessionExpired || accessBlocked)return;
-  working=true;active=true;buttons();let attempts=0,needsResume=!start;
+  working=true;active=true;loopDone=new Promise(resolve=>{finishLoop=resolve;});buttons();let attempts=0,needsResume=!start;
+  const expectedRun=id,expectedAttempt=state?.snapshot_attempt_id;
   try{
    if(start){
     await discover();if(unfinished()){el('message').textContent='Masz niedokończony eksport '+id+' — użyj dostępnych akcji tego runu.';return;}
@@ -175,13 +197,19 @@
     try{if(id)await readCurrent();else if(!await discover())throw Object.assign(new Error('run_not_found'),{reason:'run_not_found',http:404});}
     catch(error){await recover(error,++attempts);}
    }
+   if(!start){
+    if(expectedRun && (id!==expectedRun || (expectedAttempt && state?.snapshot_attempt_id!==expectedAttempt))){resumeEvent('blocked','run_or_attempt_changed');el('message').textContent='Wznowienie zablokowane: run_or_attempt_changed';return;}
+    if(resumeTraceActive){resumeEvent('status_loaded');resumeEvent('next_action='+nextAction());}
+    if(browserSnapshot() && state?.state==='snapshot_running' && nextAction()==='snapshot_tick' && !state.busy)needsResume=false;
+   }
    while(active && state){
     const next=nextAction();
     if(next==='download' || state.state==='completed'){el('message').textContent='Eksport gotowy. Pobierz manifest i wszystkie wskazane części archiwum.';break;}
     if(state.busy || next==='wait'){
-     await wait(1000);try{await readCurrent();}catch(error){if(++attempts>4)throw error;await recover(error,1);}continue;
+     await wait(1000);if(!active)break;try{await readCurrent();}catch(error){if(++attempts>4)throw error;await recover(error,1);}continue;
     }
-    if(next==='blocked'){el('message').textContent='Wznowienie zablokowane: '+(state.blocked_reason ?? state.last_error ?? state.state)+'. Sprawdź dostępne akcje snapshotu.';break;}
+    if(next==='blocked'){if(resumeTraceActive)resumeEvent('blocked',state.blocked_reason ?? state.last_error ?? state.state);el('message').textContent='Wznowienie zablokowane: '+(state.blocked_reason ?? state.last_error ?? state.state)+'. Sprawdź dostępne akcje snapshotu.';break;}
+    if(browserSnapshot() && state.state==='snapshot_running' && next==='snapshot_tick' && !state.busy)needsResume=false;
     if(needsResume || next==='resume'){
      try{render(await request(base+'/'+encodeURIComponent(id),'resume'));needsResume=!!state.busy;attempts=0;}
      catch(error){if(++attempts>4)throw error;await recover(error,1);}
@@ -189,6 +217,7 @@
     }
     if(!['snapshot_tick','tick'].includes(next)){el('message').textContent='Nieznany następny krok: '+next+'. Checkpoint zachowany.';break;}
     const run=id,attempt=state.snapshot_attempt_id ?? null;
+    if(resumeTraceActive && !resumeEvents.some(e=>e.event==='tick_scheduled'))resumeEvent('tick_scheduled');
     try{
      render(await request(base+'/'+encodeURIComponent(id),next,next==='snapshot_tick'?{expected_snapshot_attempt:attempt}:{}));attempts=0;
      if(state.last_error)throw Object.assign(new Error(state.last_error),{reason:state.last_error});
@@ -202,7 +231,7 @@
   }catch(error){stop(error);}
   finally{
    if(pauseRequested && !sessionExpired && !accessBlocked){pauseRequested=false;await pauseCheckpoint();}
-   working=false;active=false;buttons();if(state)render(state);
+   working=false;active=false;const finished=finishLoop;finishLoop=null;loopDone=null;if(finished)finished();buttons();if(state)render(state);
   }
  }
  async function snapshotAction(action){
@@ -235,7 +264,7 @@
   finally{working=false;buttons();}
   if(follow)drive(false);
  }
- el('start').onclick=()=>drive(true);el('resume').onclick=()=>drive(false);el('stop-local').onclick=()=>{active=false;};
+ el('start').onclick=()=>drive(true);el('resume').onclick=manualResume;el('stop-local').onclick=()=>{active=false;};
  el('pause').onclick=async()=>{
   await boot;if(sessionExpired || accessBlocked || !canPause() || pausing || pauseRequested)return;
   if(working){pauseRequested=true;active=false;buttons();return;}
