@@ -79,6 +79,12 @@ final class MigrationOriginals
         if ($task['source']['copies'][0]['bytes'] > 100 * 1024 * 1024) {
             return array_replace($base, ['status' => 'OVERSIZE_ORIGINAL']);
         }
+        if (is_file($target) && filesize($target) === $task['source']['copies'][0]['bytes'] && hash_equals($hashes[0], hash_file('sha256', $target))) {
+            $mime = (new \finfo(FILEINFO_MIME_TYPE))->file($target);
+            if (in_array($mime, ['image/jpeg', 'image/png', 'image/webp', 'image/gif'], true) && @getimagesize($target) !== false) {
+                return array_replace($base, ['status' => 'COPIED_VERIFIED', 'bytes' => filesize($target), 'sha256' => $hashes[0], 'mime' => $mime, 'copied_at' => date('c', filemtime($target))]);
+            }
+        }
         if (disk_free_space($directory) < $task['source']['copies'][0]['bytes'] * 2 + 64 * 1024 * 1024) {
             return array_replace($base, ['status' => 'INSUFFICIENT_DISK_SPACE']);
         }

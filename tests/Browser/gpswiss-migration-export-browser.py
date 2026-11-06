@@ -6,6 +6,8 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 HTML = (Path(__file__).parents[2] / 'resources/views/admin/tools/gpswiss-migration-export.blade.php').read_text()
+HTML = HTML.replace("@json(route('admin.tools.gpswiss-migration-export', [], false))", json.dumps('/admin/tools/gpswiss-migration-export'))
+HTML = HTML.replace('{{ csrf_token() }}', 'fixture-csrf')
 BASE = 'https://audit.test/admin/tools/gpswiss-migration-export'
 
 with sync_playwright() as p:
@@ -13,8 +15,10 @@ with sync_playwright() as p:
     for lose_start in [False, True]:
         context = browser.new_context()
         page = context.new_page()
-        state = dict(run_id=None, state='photos', processed_images=0, total_images=2, last_error=None)
-        calls, errors, run_ids = [], [], []
+        state = dict(run_id=None, state='photos', phase='photos', processed=0, processed_images=0, total_images=2,
+                     remaining=2, last_error=None, resume_allowed=True, owner_match=True, artifacts_present=True,
+                     blocked_reason=None, busy=False)
+        calls, errors, run_ids, requests = [], [], [], []
         lost = False
         page.on('pageerror', lambda e: errors.append(str(e)))
 
@@ -24,14 +28,20 @@ with sync_playwright() as p:
             if request.url == BASE:
                 r.fulfill(content_type='text/html', body=HTML)
                 return
+            if request.url == BASE+'?format=status':
+                assert request.method == 'GET'
+                r.fulfill(json={'existing_run_found':bool(state['run_id']), 'run_id':state['run_id'], 'run':state if state['run_id'] else None})
+                return
             assert request.url.startswith(BASE+'/'), request.url
             run_id = request.url[len(BASE)+1:]
             assert re.fullmatch('[a-f0-9-]{36}', run_id), run_id
             payload = request.post_data_json if request.method == 'POST' else {}
             action = (payload or {}).get('action')
-            assert action in [None, 'start', 'tick']
+            assert action in [None, 'start', 'resume', 'tick']
             calls.append(action)
+            requests.append((request.url, action))
             run_ids.append(run_id)
+            assert not state['run_id'] or state['run_id'] == run_id
             state['run_id'] = run_id
             if action == 'start' and lose_start and not lost:
                 lost = True
@@ -39,24 +49,24 @@ with sync_playwright() as p:
                 return
             if action == 'tick':
                 state['processed_images'] += 1
+                state['processed'] = state['processed_images']
+                state['remaining'] -= 1
                 if state['processed_images'] == 2:
-                    state['state'] = 'completed'
+                    state.update(state='completed', phase='completed', resume_allowed=False, blocked_reason='export_already_completed')
             r.fulfill(json=state)
 
         context.route('**/*', route)
         page.goto(BASE)
+        page.wait_for_function("!document.querySelector('#start').disabled")
         page.evaluate("document.querySelector('#start').click(); document.querySelector('#start').click();")
-        if lose_start:
-            page.wait_for_function("document.querySelector('#message').textContent.includes('przerwany')")
-            saved_hash = page.evaluate('location.hash')
-            assert saved_hash.startswith('#run=')
-            page.reload()
-            page.wait_for_function("document.querySelector('#state').textContent.includes('photos')")
-            assert page.evaluate('location.hash') == saved_hash
-            page.locator('#resume').click()
         page.wait_for_function("!document.querySelector('#full').hidden")
         assert calls.count('start') == 1 and calls.count('tick') == 2, calls
         assert len(set(run_ids)) == 1, run_ids
+        assert page.evaluate('location.hash') == '#run='+state['run_id']
+        if lose_start:
+            start_index = next(i for i, (_, action) in enumerate(requests) if action == 'start')
+            assert requests[start_index+1] == (BASE+'/'+state['run_id'], None), 'Lost start response must recover committed snapshot status'
+        assert page.locator('#resume').is_disabled()
         for kind in ['sample', 'full']:
             assert page.locator('#'+kind).evaluate('(a)=>a.href') == BASE+'/'+state['run_id']+'?download='+kind
         assert not errors, errors
