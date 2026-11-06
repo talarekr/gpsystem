@@ -5,6 +5,14 @@ import re
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
+
+def request_url(req):
+    # Normalize only the new GET selector for legacy workflow assertions.
+    url = req.url
+    if req.method == 'GET' and url.endswith('?format=compact') and url.split('?')[0].split('/')[-1] != 'gpswiss-migration-export':
+        return url.split('?')[0]
+    return url
+
 HTML = (Path(__file__).parents[2] / 'resources/views/admin/tools/gpswiss-migration-export.blade.php').read_text()
 HTML = HTML.replace("@json(route('admin.tools.gpswiss-migration-export', [], false))", json.dumps('/admin/tools/gpswiss-migration-export'))
 HTML = HTML.replace('{{ csrf_token() }}', 'fixture-csrf')
@@ -25,21 +33,21 @@ with sync_playwright() as p:
         def route(r):
             global lost
             request = r.request
-            if request.url == BASE:
+            if request_url(request) == BASE:
                 r.fulfill(content_type='text/html', body=HTML)
                 return
-            if request.url == BASE+'?format=status':
+            if request_url(request) == BASE+'?format=compact':
                 assert request.method == 'GET'
                 r.fulfill(json={'existing_run_found':bool(state['run_id']), 'run_id':state['run_id'], 'run':state if state['run_id'] else None})
                 return
-            assert request.url.startswith(BASE+'/'), request.url
-            run_id = request.url[len(BASE)+1:]
+            assert request_url(request).startswith(BASE+'/'), request_url(request)
+            run_id = request_url(request)[len(BASE)+1:]
             assert re.fullmatch('[a-f0-9-]{36}', run_id), run_id
             payload = request.post_data_json if request.method == 'POST' else {}
             action = (payload or {}).get('action')
             assert action in [None, 'start', 'resume', 'tick']
             calls.append(action)
-            requests.append((request.url, action))
+            requests.append((request_url(request), action))
             run_ids.append(run_id)
             assert not state['run_id'] or state['run_id'] == run_id
             state['run_id'] = run_id

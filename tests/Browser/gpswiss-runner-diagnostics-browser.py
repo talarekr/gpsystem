@@ -2,6 +2,14 @@
 import time
 from pathlib import Path
 from playwright.sync_api import sync_playwright
+
+def request_url(req):
+    # Normalize only the new GET selector for legacy workflow assertions.
+    url = req.url
+    if req.method == 'GET' and url.endswith('?format=compact') and url.split('?')[0].split('/')[-1] != 'gpswiss-migration-export':
+        return url.split('?')[0]
+    return url
+
 HTML=(Path(__file__).parents[2]/'resources/views/admin/tools/gpswiss-migration-export.blade.php').read_text().replace("@json(route('admin.tools.gpswiss-migration-export', [], false))", "'/admin/tools/gpswiss-migration-export'")
 BASE='https://audit.test/admin/tools/gpswiss-migration-export'
 RUN='8de6e27c-ad7c-470b-830b-b9ecee9446ba'
@@ -13,7 +21,7 @@ def case(browser,mode):
   nonlocal calls,polls
   if r.request.is_navigation_request():r.fulfill(content_type='text/html',body=HTML.replace('45000','50') if mode=='timeout' else HTML);return
   action=(r.request.post_data_json or {}).get('action') if r.request.method=='POST' else None
-  requests.append(action);assert action in [None,'resume','snapshot_tick'];assert RUN in r.request.url or 'format=status' in r.request.url
+  requests.append(action);assert action in [None,'resume','snapshot_tick'];assert RUN in request_url(r.request) or 'format=compact' in request_url(r.request)
   if action=='snapshot_tick':
    calls+=1;assert r.request.post_data_json['expected_snapshot_attempt']==ATT
    if calls==1 or mode=='exhausted':
@@ -25,7 +33,7 @@ def case(browser,mode):
    assert polls>=1
    state.update(processed=state['processed']+5,cursor={'id':state['processed']+5},next_action='download',state='completed')
   if action is None:polls+=1
-  if 'format=status' in r.request.url:r.fulfill(json={'existing_run_found':True,'run':state})
+  if 'format=compact' in request_url(r.request):r.fulfill(json={'existing_run_found':True,'run':state})
   else:r.fulfill(json=state)
  c.route('**/*',route);p.goto(BASE);p.wait_for_function("document.querySelector('#state').textContent.includes('2528')")
  assert '[object Object]' not in p.locator('#progress').inner_text()

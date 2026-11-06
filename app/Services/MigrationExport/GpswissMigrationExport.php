@@ -92,6 +92,15 @@ final class GpswissMigrationExport
         $this->write($dir.'/last-tick.json', $trace);
     }
 
+    public function markStatusFatal(int $owner, string $id, string $reason): void
+    {
+        if (! in_array($reason, ['backend_timeout', 'memory_exhaustion', 'php_fatal_error'], true)) {
+            $reason = 'php_fatal_error';
+        }
+        $dir = $this->directory($owner, $id);
+        $this->write($dir.'/last-status-error.json', ['action' => 'compact_status', 'reason_code' => $reason, 'backend_exception_class' => 'PHPFatalError', 'recorded_at' => now()->toIso8601String()]);
+    }
+
     /** Explicit synchronous entry point for the dedicated CLI and existing local callers. */
     public function start(int $owner, ?string $id = null): array
     {
@@ -588,7 +597,7 @@ final class GpswissMigrationExport
         return filesize($path) === $photo['bytes'] && is_string($photo['sha256'] ?? null) && hash_equals($photo['sha256'], hash_file('sha256', $path));
     }
 
-    public function discover(int $owner): array
+    public function discover(int $owner, bool $compact = false): array
     {
         $candidates = [];
         foreach (glob($this->root().'/*', GLOB_ONLYDIR) ?: [] as $dir) {
@@ -621,15 +630,36 @@ final class GpswissMigrationExport
             return ['existing_run_found' => false, 'run_id' => null, 'run' => null, 'database_writes' => false, 'provider_calls' => false];
         }
         try {
-            $status = $this->status($owner, $candidates[0]['id']);
+            $status = $compact ? $this->compactStatus($owner, $candidates[0]['id']) : $this->status($owner, $candidates[0]['id']);
         } catch (MigrationExportException $e) {
+            if ($compact && $e->httpStatus >= 500) {
+                throw $e;
+            }
             $status = ['run_id' => $candidates[0]['id'], 'state' => 'blocked', 'phase' => 'unknown',
                 'processed' => null, 'remaining' => null, 'current_item' => null, 'last_success' => null, 'last_error' => $e->reasonCode,
                 'resume_allowed' => false, 'blocked_reason' => $e->reasonCode, 'reason_code' => $e->reasonCode,
                 'owner_match' => true, 'artifacts_present' => false, 'database_writes' => false, 'provider_calls' => false] + $e->details;
         }
 
-        return ['existing_run_found' => true, 'run' => $status] + $status;
+        return $compact ? ['existing_run_found' => true, 'run' => $status] : ['existing_run_found' => true, 'run' => $status] + $status;
+    }
+
+    public function compactStatus(int $owner, string $id): array
+    {
+        $dir = $this->directory($owner, $id);
+
+        return ($this->read($dir.'/state.json')['snapshot_mode'] ?? null) === 'browser'
+            ? $this->browser->compact($dir) : $this->browser->filterCompact($this->status($owner, $id));
+    }
+
+    public function artifacts(int $owner, string $id): array
+    {
+        $state = $this->read($this->directory($owner, $id).'/state.json');
+        if ($state['state'] !== 'completed') {
+            throw new MigrationExportException('artifact_not_found', 409);
+        }
+
+        return ['run_id' => $id, 'state' => 'completed', 'download_artifacts' => $state['download_artifacts'] ?? []];
     }
 
     public function status(int $owner, string $id): array

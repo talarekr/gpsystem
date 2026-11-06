@@ -301,6 +301,53 @@ final class BrowserMigrationExport
         ]);
     }
 
+    /** Small polling contract: no full snapshot index, sample state or archive manifest is loaded. */
+    public function compact(string $dir): array
+    {
+        $state = $this->read($dir.'/state.json');
+        $probe = fopen($dir.'/lock', 'c');
+        $busy = ! flock($probe, LOCK_EX | LOCK_NB);
+        if (! $busy) {
+            flock($probe, LOCK_UN);
+        }
+        fclose($probe);
+        $snapshot = in_array($state['state'], ['snapshot_pending', 'snapshot_running', 'snapshot_paused', 'snapshot_failed', 'snapshot_completed'], true);
+        $progress = ['processed' => $state['processed_images'] ?? 0, 'total' => $state['total_images'] ?? null,
+            'cursor' => $state['inventory']['row'] ?? $state['package']['cursor'] ?? null, 'current_dataset' => $state['phase']];
+        if ($snapshot && ! in_array($state['phase'], ['photo_inventory', 'relation_audit'], true)) {
+            $progress = app(CompactSnapshotProgress::class)->read($dir, $state['snapshot_attempt_id']);
+        }
+        $next = match (true) {
+            $busy => 'wait', $state['state'] === 'completed' => 'download',
+            $state['state'] === 'snapshot_paused', isset($state['resume_state']) => 'resume',
+            in_array($state['state'], ['snapshot_failed', 'snapshot_aborted', 'failed'], true) => 'blocked',
+            $snapshot => 'snapshot_tick', default => 'tick',
+        };
+        $data = array_replace($state, $progress, ['next_action' => $next, 'busy' => $busy,
+            'resume_allowed' => ! in_array($next, ['blocked', 'download'], true),
+            'blocked_reason' => $next === 'blocked' ? ($state['last_error'] ?? $state['state']) : null,
+            'snapshot_retry_allowed' => ! $busy && in_array($state['state'], ['snapshot_pending', 'snapshot_running', 'snapshot_paused', 'snapshot_failed'], true) && ! is_dir($dir.'/images'),
+            'snapshot_abort_allowed' => false, 'photo_retry_allowed' => ! $busy && ! isset($state['photo_retry']) && array_sum(array_intersect_key($state['photo_results'] ?? [], array_flip(['COPY_FAILED', 'UNREADABLE_ORIGINAL', 'INSUFFICIENT_DISK_SPACE']))) > 0]);
+        foreach (['last-tick.json' => 'last_tick', 'last-status-error.json' => 'last_status_error'] as $file => $key) {
+            try {
+                if (is_file($dir.'/'.$file) && filesize($dir.'/'.$file) <= 4096) {
+                    $data[$key] = $this->read($dir.'/'.$file);
+                }
+            } catch (\Throwable) { /* A diagnostic artifact cannot block a healthy checkpoint. */
+            }
+        }
+        $data['remaining'] ??= isset($data['total']) ? max(0, $data['total'] - $data['processed']) : null;
+
+        return $this->filterCompact($data);
+    }
+
+    public function filterCompact(array $data): array
+    {
+        return array_intersect_key($data, array_flip(['run_id', 'schema_version', 'snapshot_attempt_id', 'snapshot_mode', 'state', 'phase',
+            'current_dataset', 'processed', 'total', 'remaining', 'cursor', 'next_action', 'busy', 'resume_allowed', 'blocked_reason',
+            'last_success', 'last_error', 'snapshot_state', 'snapshot_retry_allowed', 'snapshot_abort_allowed', 'photo_retry_allowed', 'last_tick', 'last_status_error']));
+    }
+
     public function download(string $dir, string $key): string
     {
         $state = $this->read($dir.'/state.json');

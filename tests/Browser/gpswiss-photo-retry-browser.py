@@ -4,6 +4,14 @@ import os
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
+
+def request_url(req):
+    # Normalize only the new GET selector for legacy workflow assertions.
+    url = req.url
+    if req.method == 'GET' and url.endswith('?format=compact') and url.split('?')[0].split('/')[-1] != 'gpswiss-migration-export':
+        return url.split('?')[0]
+    return url
+
 HTML = (Path(__file__).parents[2] / 'resources/views/admin/tools/gpswiss-migration-export.blade.php').read_text()
 HTML = HTML.replace("@json(route('admin.tools.gpswiss-migration-export', [], false))", "'/admin/tools/gpswiss-migration-export'")
 HTML = HTML.replace('{{ csrf_token() }}', 'photo-csrf')
@@ -32,15 +40,15 @@ def run(browser, mode):
         nonlocal rejected, stage
         request = r.request
         if request.is_navigation_request():
-            assert request.url == BASE
+            assert request_url(request) == BASE
             r.fulfill(content_type='text/html', body=HTML)
             return
         payload = request.post_data_json if request.method == 'POST' else {}
         action = (payload or {}).get('action')
-        requests.append((request.url, action))
-        assert request.url in [BASE+'?format=status', BASE+'/'+RUN]
+        requests.append((request_url(request), action))
+        assert request_url(request) in [BASE+'?format=compact', BASE+'/'+RUN]
         assert action in [None, 'retry_photos', 'resume', 'tick'], 'No snapshot restart or integration calls during photo retry'
-        if request.url.endswith('?format=status'):
+        if request_url(request).endswith('?format=compact'):
             r.fulfill(json={'existing_run_found':True, 'run':copy.deepcopy(state), **copy.deepcopy(state)})
             return
         if action == 'retry_photos':
