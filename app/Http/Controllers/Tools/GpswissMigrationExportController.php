@@ -6,24 +6,24 @@ use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
 use App\Services\MigrationExport\GpswissMigrationExport;
 use App\Services\MigrationExport\MigrationExportException;
-use App\Services\MigrationExport\MigrationSnapshotLauncher;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 final class GpswissMigrationExportController extends Controller
 {
-    public function __invoke(Request $request, GpswissMigrationExport $exports, MigrationSnapshotLauncher $launcher, ?string $run = null)
+    public function __invoke(Request $request, GpswissMigrationExport $exports, ?string $run = null)
     {
         abort_unless($request->user()?->hasRole(UserRole::OwnerAdmin->value), 403);
         $owner = (int) $request->user()->id;
-        $input = $request->validate(['action' => ['sometimes', 'in:start,tick,resume,retry_snapshot,abort_snapshot'], 'download' => ['sometimes', 'in:sample,full'], 'format' => ['sometimes', 'in:status'],
-            'confirm_restart' => ['sometimes', 'boolean'], 'confirm_abort' => ['sometimes', 'boolean'], 'expected_snapshot_attempt' => ['nullable', 'uuid']]);
+        $input = $request->validate(['action' => ['sometimes', 'in:start,tick,resume,snapshot_tick,pause_snapshot,retry_snapshot,abort_snapshot,retry_photos'], 'download' => ['sometimes', 'in:sample,full,artifact'], 'format' => ['sometimes', 'in:status'],
+            'artifact' => ['sometimes', 'string', 'max:180', 'regex:/\A[A-Za-z0-9][A-Za-z0-9_.-]*\z/D'],
+            'confirm_restart' => ['sometimes', 'boolean'], 'confirm_abort' => ['sometimes', 'boolean'], 'confirm_retry_photos' => ['sometimes', 'boolean'], 'expected_snapshot_attempt' => ['present_if:action,snapshot_tick', 'nullable', 'uuid']]);
         try {
             if ($request->isMethod('post')) {
                 abort_unless(isset($input['action']), 422);
                 ignore_user_abort(true); // Finish this authorized checkpoint even if its response is lost.
                 if ($input['action'] === 'start') {
-                    $data = $exports->prepare($owner, $run);
+                    $data = $exports->prepareBrowser($owner, $run);
                 } else {
                     if (! $run) {
                         return $this->error('invalid_run_id', 422);
@@ -31,25 +31,36 @@ final class GpswissMigrationExportController extends Controller
                     $expectedAttempt = $input['expected_snapshot_attempt'] ?? null;
                     $data = match ($input['action']) {
                         'retry_snapshot' => $request->boolean('confirm_restart')
-                            ? $exports->retrySnapshot($owner, $run, $expectedAttempt)
+                            ? $exports->retryBrowserSnapshot($owner, $run, $expectedAttempt)
                             : throw new MigrationExportException('snapshot_restart_confirmation_required', 422),
                         'abort_snapshot' => $request->boolean('confirm_abort')
                             ? $exports->abortSnapshot($owner, $run, $expectedAttempt)
                             : throw new MigrationExportException('snapshot_abort_confirmation_required', 422),
                         'resume' => $exports->resume($owner, $run),
+                        'snapshot_tick' => $exports->browserSnapshotTick($owner, $run, $expectedAttempt),
+                        'pause_snapshot' => $exports->pauseBrowserSnapshot($owner, $run),
+                        'retry_photos' => $request->boolean('confirm_retry_photos')
+                            ? $exports->retryBrowserPhotos($owner, $run)
+                            : throw new MigrationExportException('photo_retry_confirmation_required', 422),
                         default => $exports->tick($owner, $run),
                     };
-                }
-                if (in_array($input['action'], ['start', 'retry_snapshot'], true) && ($data['snapshot_state'] ?? $data['state']) === 'snapshot_pending') {
-                    $launch = $launcher->launch($owner, $data['run_id'], $data['snapshot_attempt_id']);
-                    $exports->recordSnapshotLaunch($owner, $data['run_id'], $data['snapshot_attempt_id'], $launch['launcher_status']);
-                    $data = $exports->status($owner, $data['run_id']) + $launch;
                 }
 
                 return response()->json($data)->header('Cache-Control', 'private, no-store');
             }
             if ($run && isset($input['download'])) {
-                return response()->download($exports->download($owner, $run, $input['download']), 'gpswiss-wystawczesc-'.$input['download'].'-'.$run.'.zip', ['Cache-Control' => 'private, no-store, max-age=0', 'X-Content-Type-Options' => 'nosniff', 'X-Robots-Tag' => 'noindex, noarchive']);
+                if ($input['download'] === 'artifact' && ! isset($input['artifact'])) {
+                    return $this->error('invalid_artifact_key', 422);
+                }
+                $path = $exports->download($owner, $run, $input['download'], $input['artifact'] ?? null);
+                $name = $input['download'] === 'artifact' ? basename($path) : 'gpswiss-wystawczesc-'.$input['download'].'-'.$run.'.zip';
+
+                $response = response()->download($path, $name, ['X-Content-Type-Options' => 'nosniff', 'X-Robots-Tag' => 'noindex, noarchive']);
+                // BinaryFileResponse defaults to public during construction; override afterwards.
+                $response->setPrivate();
+                $response->headers->set('Cache-Control', 'private, no-store, max-age=0');
+
+                return $response;
             }
             if (! $run && ($input['format'] ?? null) === 'status') {
                 return response()->json($exports->discover($owner))->header('Cache-Control', 'private, no-store');

@@ -3,6 +3,7 @@
 namespace App\Services\MigrationExport;
 
 use App\Services\Marketplace\ShippingRateAudit\ReadOnlyDatabase;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use RuntimeException;
@@ -160,6 +161,189 @@ final class GpswissSnapshot
                 'warnings' => ['sensitive_business_data_private_only', 'native_product_variants_not_supported', 'ean_and_vat_only_when_locally_stored_do_not_infer', 'status_history_refunds_cancellations_retained_if_stored_not_reconstructed', 'customer_returns_order_id_refers_to_shop_events_not_orders'],
             ];
         }));
+    }
+
+    /** Fixed names only: discovery itself is a separate bounded browser tick per dataset. */
+    public function browserDefinitions(): array
+    {
+        $out = [];
+        foreach (['parts', 'cars', 'part_car_relations', 'part_categories', 'storage_locations', ...self::OPTIONAL_TABLES, 'marketplace_listings', 'part_images', 'customers', 'marketplace_account_identities'] as $name) {
+            $out[$name] = ['name' => $name, 'source_table' => match ($name) {
+                'part_car_relations' => 'parts', 'customers' => 'users', 'marketplace_account_identities' => 'marketplace_accounts', default => $name,
+            }, 'required' => in_array($name, ['parts', 'cars', 'part_car_relations', 'part_categories', 'storage_locations', 'marketplace_listings', 'part_images'], true)];
+        }
+
+        return $out;
+    }
+
+    public function browserDescribe(array $definition): array
+    {
+        $table = $definition['source_table'];
+        if (! Schema::hasTable($table)) {
+            if ($definition['required']) {
+                throw new RuntimeException('snapshot_source_table_missing');
+            }
+
+            return $definition + ['available' => false, 'exported_columns' => [], 'column_definitions' => [], 'relations' => []];
+        }
+        $schema = Schema::getColumns($table);
+        $allowed = [];
+        $omitted = [];
+        $metadata = [];
+        $projection = match ($definition['name']) {
+            'customers' => self::CUSTOMER_FIELDS,
+            'marketplace_account_identities' => ['id', 'marketplace', 'code', 'name', 'status', 'api_mode', 'api_base_url'],
+            'part_car_relations' => ['id', 'car_id'], default => null,
+        };
+        foreach ($schema as $column) {
+            $name = $column['name'];
+            if (MigrationDataPolicy::sensitiveKey($name) || ($projection !== null && ! in_array($name, $projection, true))) {
+                $omitted[] = ['name' => $name, 'reason' => 'private_projection_or_secret_card_capability'];
+
+                continue;
+            }
+            $allowed[] = $name;
+            $metadata[$name] = ['type' => $column['type'] ?? $column['type_name'] ?? 'unknown', 'nullable' => $column['nullable'] ?? null];
+        }
+        $key = null;
+        $indexes = Schema::getIndexes($table);
+        usort($indexes, fn ($a, $b) => (int) ($b['primary'] ?? false) <=> (int) ($a['primary'] ?? false));
+        foreach ($indexes as $index) {
+            $columns = $index['columns'] ?? [];
+            if (! ($index['unique'] ?? false) || $columns === [] || array_diff($columns, $allowed) !== []) {
+                continue;
+            }
+            if (! ($index['primary'] ?? false) && collect($columns)->contains(fn ($c) => $metadata[$c]['nullable'])) {
+                continue;
+            }
+            $key = $columns;
+            break;
+        }
+        // Sensitive checkout_key is deliberately never a cursor; Stripe's unique order_id is used instead.
+        if ($key === null) {
+            throw new RuntimeException('snapshot_stable_nonsecret_key_required');
+        }
+        $references = [];
+        if ($definition['name'] === 'customers') {
+            $candidates = ['orders' => 'customer_id', 'customer_returns' => 'user_id'];
+        } elseif ($definition['name'] === 'marketplace_account_identities') {
+            $candidates = ['marketplace_listings' => 'marketplace_account_id', 'orders' => 'marketplace_account_id'];
+        } else {
+            $candidates = [];
+        }
+        foreach ($candidates as $source => $column) {
+            if (Schema::hasTable($source) && Schema::hasColumn($source, $column)) {
+                $references[] = ['table' => $source, 'column' => $column, 'created_at' => Schema::hasColumn($source, 'created_at')];
+            }
+        }
+        $relations = $this->relations([$table])[$table] ?? [];
+        foreach ($relations as &$target) {
+            if ($target === 'marketplace_accounts') {
+                $target = 'marketplace_account_identities';
+            }
+        }
+        unset($target);
+        if ($definition['name'] === 'orders') {
+            $relations['customer_id'] = 'customers';
+        }
+        if ($definition['name'] === 'customer_returns') {
+            $relations = ['order_id' => 'shop_events', 'user_id' => 'customers'];
+        }
+        if ($definition['name'] === 'part_car_relations') {
+            $relations = ['part_id' => 'parts', 'car_id' => 'cars'];
+        }
+
+        return $definition + ['available' => true, 'exported_columns' => $allowed, 'column_definitions' => $metadata,
+            'omitted_columns' => $omitted, 'key_columns' => $key, 'created_column' => isset($metadata['created_at']) ? 'created_at' : null,
+            'updated_column' => isset($metadata['updated_at']) ? 'updated_at' : null, 'references' => $references,
+            'relations' => $relations, 'schema_sha256' => hash('sha256', json_encode([$schema, $indexes], JSON_THROW_ON_ERROR))];
+    }
+
+    public function browserQuery(array $definition, string $cutoff): Builder
+    {
+        $query = DB::table($definition['source_table']);
+        if ($definition['created_column']) {
+            $query->where(function ($q) use ($definition, $cutoff) {
+                $q->whereNull($definition['created_column'])->orWhere($definition['created_column'], '<=', $cutoff);
+            });
+        }
+        if (in_array($definition['name'], ['customers', 'marketplace_account_identities'], true)) {
+            $query->where(function ($q) use ($definition, $cutoff) {
+                $q->whereRaw('1 = 0');
+                foreach ($definition['references'] as $reference) {
+                    $q->orWhereExists(function ($sub) use ($definition, $reference, $cutoff) {
+                        $sub->selectRaw('1')->from($reference['table'])->whereColumn($reference['table'].'.'.$reference['column'], $definition['source_table'].'.id');
+                        if (! ($reference['boundary_bound'] ?? false)) {
+                            throw new RuntimeException('snapshot_reference_boundary_required');
+                        }
+                        if (($reference['frozen_max_key'] ?? null) === null) {
+                            $sub->whereRaw('1 = 0');
+                        } else {
+                            $columns = $reference['frozen_key_columns'];
+                            $maximum = $reference['frozen_max_key'];
+                            $sub->where(function ($outer) use ($reference, $columns, $maximum) {
+                                foreach ($columns as $index => $column) {
+                                    $outer->orWhere(function ($branch) use ($reference, $columns, $maximum, $index, $column) {
+                                        for ($i = 0; $i < $index; $i++) {
+                                            $branch->where($reference['table'].'.'.$columns[$i], '=', $maximum[$columns[$i]]);
+                                        }
+                                        $branch->where($reference['table'].'.'.$column, $index === count($columns) - 1 ? '<=' : '<', $maximum[$column]);
+                                    });
+                                }
+                            });
+                        }
+
+                        if ($reference['created_at']) {
+                            $sub->where(function ($r) use ($reference, $cutoff) {
+                                $r->whereNull($reference['table'].'.created_at')->orWhere($reference['table'].'.created_at', '<=', $cutoff);
+                            });
+                        }
+                    });
+                }
+            });
+        }
+
+        return $query;
+    }
+
+    public function browserNormalize(array $row, array $definition): array
+    {
+        foreach ($row as $key => &$value) {
+            $type = strtolower((string) $definition['column_definitions'][$key]['type']);
+            if ($value !== null && preg_match('/decimal|numeric|real|double|float/', $type)) {
+                $scale = preg_match('/\(\d+,\s*(\d+)\)/', $type, $match) ? (int) $match[1] : (preg_match('/price|total|amount|subtotal|tax|discount|vat|paid|refund/i', $key) ? 2 : null);
+                if ($scale !== null) {
+                    $value = $this->decimal($value, $scale);
+                }
+            }
+        }
+        unset($value);
+        $row = MigrationDataPolicy::clean($row);
+        if ($definition['name'] === 'parts') {
+            $legacy = is_array($row['legacy_payload'] ?? null) ? $row['legacy_payload'] : [];
+            $review = is_array($row['review_metadata'] ?? null) ? $row['review_metadata'] : [];
+            $row['part_position'] = collect([data_get($review, 'part_position'), data_get($legacy, 'part_position'), data_get($legacy, 'position')])->first(fn ($v) => is_scalar($v) && trim((string) $v) !== '');
+            $row['is_sold_by_panel_rule'] = ($row['status'] ?? null) === 'sold';
+            $row['is_to_list_by_panel_rule'] = (bool) ($row['needs_listing'] ?? false);
+        }
+        if ($definition['name'] === 'cars') {
+            $legacy = is_array($row['legacy_payload'] ?? null) ? $row['legacy_payload'] : [];
+            $value = ($row['source_system'] ?? null) === 'ovoko' ? ($row['external_id'] ?? null) : ($legacy['ovoko_car_id'] ?? null);
+            $row['ovoko_car_id'] = is_scalar($value) ? (string) $value : null;
+        }
+        if ($definition['name'] === 'part_car_relations') {
+            $row = ['id' => $row['id'], 'part_id' => $row['id'], 'car_id' => $row['car_id'] ?? null];
+        }
+        if ($definition['name'] === 'marketplace_listings') {
+            $row['url'] = self::offerUrl($row['url'] ?? null);
+            $row['migration_binding_policy'] = str_starts_with((string) ($row['marketplace'] ?? ''), 'allegro') ? 'historical_only_republish_from_wystawczesc' : 'preserve_identity_pending_explicit_adoption';
+            $row['automatic_activation_allowed'] = false;
+        }
+        if ($definition['name'] === 'marketplace_account_identities') {
+            $row += ['automatic_activation_allowed' => false, 'explicit_adoption_required' => true];
+        }
+
+        return $row;
     }
 
     private function readBusinessTable(string $table): array
