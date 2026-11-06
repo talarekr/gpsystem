@@ -22,7 +22,7 @@ final class GpswissSnapshot
 
     private const CUSTOMER_FIELDS = ['id', 'name', 'first_name', 'last_name', 'email', 'phone', 'tax_id', 'company_name', 'address_line1', 'address_line2', 'postal_code', 'city', 'country', 'created_at', 'updated_at'];
 
-    public function capture(): array
+    public function capture(?callable $progress = null): array
     {
         $db = DB::connection();
         if ($db->transactionLevel() !== 0 && ! app()->environment('testing')) {
@@ -34,7 +34,7 @@ final class GpswissSnapshot
             throw new RuntimeException('snapshot_driver_not_supported');
         }
 
-        return ReadOnlyDatabase::run(fn () => $db->transaction(function () use ($db): array {
+        return ReadOnlyDatabase::run(fn () => $db->transaction(function () use ($db, $progress): array {
             $required = ['parts', 'part_images', 'part_categories', 'cars', 'storage_locations', 'marketplace_listings'];
             $available = array_values(array_filter(self::OPTIONAL_TABLES, fn ($t) => Schema::hasTable($t)));
             $tables = [...$required, ...$available];
@@ -56,6 +56,9 @@ final class GpswissSnapshot
             $data = [];
             $inventory = [];
             foreach ([...$required, ...$available] as $table) {
+                if ($progress) {
+                    $progress(['stage' => 'database_snapshot', 'table' => $table, 'tables_processed' => count($data)]);
+                }
                 [$rows, $columns] = $this->readBusinessTable($table);
                 $data[$table] = $rows;
                 $inventory[$table] = $columns;

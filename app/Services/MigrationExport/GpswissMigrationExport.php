@@ -3,6 +3,7 @@
 namespace App\Services\MigrationExport;
 
 use App\Models\Order;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use RuntimeException;
 use ZipArchive;
@@ -10,9 +11,21 @@ use ZipArchive;
 /** Private, resumable filesystem artifacts only. No queue, DB writes, source mutations, API or importer. */
 final class GpswissMigrationExport
 {
+    private array $snapshotLocks = [];
+
     public function __construct(private GpswissSnapshot $snapshot, private MigrationOriginals $originals) {}
 
+    /** Explicit synchronous entry point for the dedicated CLI and existing local callers. */
     public function start(int $owner, ?string $id = null): array
+    {
+        $state = $this->prepare($owner, $id);
+
+        return $state['state'] === 'snapshot_pending'
+            ? $this->runSnapshot($owner, $state['run_id'], $state['snapshot_attempt_id']) : $state;
+    }
+
+    /** HTTP only prepares a private filesystem request; it never captures business data. */
+    public function prepare(int $owner, ?string $id = null): array
     {
         $id ??= (string) Str::uuid();
         $this->validateId($id);
@@ -28,14 +41,14 @@ final class GpswissMigrationExport
                 throw new MigrationExportException('existing_export_unfinished', 409, ['run_id' => $existing['run_id']]);
             }
 
-            return $this->startRun($owner, $id);
+            return $this->prepareRun($owner, $id);
         } finally {
             flock($lock, LOCK_UN);
             fclose($lock);
         }
     }
 
-    private function startRun(int $owner, string $id): array
+    private function prepareRun(int $owner, string $id): array
     {
         if (! class_exists(ZipArchive::class)) {
             throw new RuntimeException('zip_extension_required');
@@ -58,11 +71,57 @@ final class GpswissMigrationExport
 
             return $this->status($owner, $id);
         }
-        $state = ['schema_version' => 'gpswiss-wystawczesc-2', 'contains_customer_data' => true, 'run_id' => $id, 'owner_id' => $owner, 'state' => 'snapshot', 'processed_images' => 0, 'photo_results' => [], 'last_error' => null];
-        $this->write($dir.'/owner.json', ['owner_id' => $owner, 'run_id' => $id]);
-        $this->write($dir.'/state.json', $state);
         try {
-            $data = $this->snapshot->capture();
+            $state = ['schema_version' => 'gpswiss-wystawczesc-2', 'contains_customer_data' => true, 'run_id' => $id, 'owner_id' => $owner,
+                'state' => 'snapshot_pending', 'snapshot_state' => 'snapshot_pending', 'snapshot_attempt_id' => (string) Str::uuid(),
+                'snapshot_source_fingerprint' => $this->snapshotSourceFingerprint(),
+                'snapshot_requested_at' => now()->toIso8601String(), 'processed_images' => 0, 'photo_results' => [], 'last_error' => null];
+            $this->write($dir.'/owner.json', ['owner_id' => $owner, 'run_id' => $id]);
+            $this->write($dir.'/state.json', $state);
+        } finally {
+            flock($startLock, LOCK_UN);
+            fclose($startLock);
+        }
+
+        return $this->status($owner, $id);
+    }
+
+    /** One worker owns the entire transaction and publication; no cross-request DB snapshot continuation. */
+    public function runSnapshot(int $owner, string $id, string $attempt): array
+    {
+        $this->validateId($attempt);
+        $dir = $this->directory($owner, $id);
+        $lock = fopen($dir.'/lock', 'c');
+        if (! flock($lock, LOCK_EX | LOCK_NB)) {
+            fclose($lock);
+
+            return $this->status($owner, $id);
+        }
+        $this->snapshotLocks[$id] = $lock;
+        try {
+            $state = $this->read($dir.'/state.json');
+            if (($state['snapshot_attempt_id'] ?? null) !== $attempt) {
+                throw new MigrationExportException('stale_snapshot_attempt', 409);
+            }
+            if ($state['state'] !== 'snapshot_pending') {
+                return $this->status($owner, $id);
+            }
+            if ($this->snapshotArtifactsExist($dir, $state)) {
+                throw new MigrationExportException('snapshot_retry_not_allowed', 409);
+            }
+            $state['state'] = $state['snapshot_state'] = 'snapshot_running';
+            $state['snapshot_started_at'] = now()->toIso8601String();
+            $state['last_error'] = null;
+            $this->write($dir.'/state.json', $state);
+            if (($state['snapshot_source_fingerprint'] ?? null) !== $this->snapshotSourceFingerprint()) {
+                throw new RuntimeException('snapshot_source_context_mismatch');
+            }
+            $progress = function (array $value) use ($dir, $attempt): void {
+                $this->write($dir.'/snapshot-heartbeat.json', ['attempt_id' => $attempt, 'at' => now()->toIso8601String()] + $value);
+            };
+            $progress(['stage' => 'database_snapshot']);
+            $data = $this->snapshot->capture($progress);
+            $progress(['stage' => 'photo_tasks', 'processed' => 0]);
             $parts = array_column($data['products'], null, 'id');
             $tasks = [];
             $orphans = [];
@@ -73,6 +132,9 @@ final class GpswissMigrationExport
                     continue;
                 }
                 $tasks[] = $this->originals->task($image, $parts[$image['part_id']]);
+                if (count($tasks) % 100 === 0) {
+                    $progress(['stage' => 'photo_tasks', 'processed' => count($tasks)]);
+                }
             }
             foreach ($data['products'] as &$part) {
                 if (! empty($part['code_photo_path'])) {
@@ -91,22 +153,195 @@ final class GpswissMigrationExport
             }
             unset($task);
             $data['orphan_image_ids'] = $orphans;
+            $progress(['stage' => 'publishing_snapshot']);
             $this->write($dir.'/snapshot.json', $data);
             $this->write($dir.'/photo-tasks.json', $tasks);
-            $state += ['snapshot_at' => $data['snapshot_at'], 'source_counts' => $data['source_counts'], 'total_images' => count($tasks), 'files_snapshot_note' => 'DB snapshot is consistent. File fingerprints captured afterwards; global filesystem freeze is not asserted.'];
+            $receipt = ['attempt_id' => $attempt, 'snapshot_sha256' => hash_file('sha256', $dir.'/snapshot.json'),
+                'photo_tasks_sha256' => hash_file('sha256', $dir.'/photo-tasks.json'), 'snapshot_at' => $data['snapshot_at'],
+                'source_counts' => $data['source_counts'], 'total_images' => count($tasks),
+                'files_snapshot_note' => 'DB snapshot is consistent. File fingerprints captured afterwards; global filesystem freeze is not asserted.'];
+            $this->write($dir.'/snapshot-ready.json', $receipt);
+            $state = $this->snapshotCompletedState($state, $receipt);
+            $state['state'] = 'snapshot_completed';
+            $this->write($dir.'/state.json', $state);
             $state['state'] = 'photos';
             $this->write($dir.'/state.json', $state);
-        } catch (\Throwable) {
-            $state['state'] = 'failed';
-            $state['last_error'] = 'snapshot_failed';
+            $progress(['stage' => 'snapshot_completed']);
+        } catch (MigrationExportException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            $state['state'] = $state['snapshot_state'] = 'snapshot_failed';
+            $state['last_error'] = in_array($e->getMessage(), ['snapshot_requires_innodb', 'snapshot_driver_not_supported', 'existing_transaction_not_supported', 'snapshot_source_context_mismatch'], true) ? $e->getMessage() : 'snapshot_capture_failed';
             $this->write($dir.'/state.json', $state);
-            throw new RuntimeException('snapshot_failed');
         } finally {
-            flock($startLock, LOCK_UN);
-            fclose($startLock);
+            unset($this->snapshotLocks[$id]);
+            flock($lock, LOCK_UN);
+            fclose($lock);
         }
 
         return $this->status($owner, $id);
+    }
+
+    public function retrySnapshot(int $owner, string $id, ?string $expectedAttempt): array
+    {
+        return $this->changeSnapshotAttempt($owner, $id, $expectedAttempt, false);
+    }
+
+    public function abortSnapshot(int $owner, string $id, ?string $expectedAttempt): array
+    {
+        return $this->changeSnapshotAttempt($owner, $id, $expectedAttempt, true);
+    }
+
+    private function changeSnapshotAttempt(int $owner, string $id, ?string $expectedAttempt, bool $abort): array
+    {
+        $dir = $this->directory($owner, $id);
+        $lock = fopen($dir.'/lock', 'c');
+        if (! flock($lock, LOCK_EX | LOCK_NB)) {
+            fclose($lock);
+            throw new MigrationExportException($abort ? 'snapshot_abort_not_allowed' : 'snapshot_retry_not_allowed', 409);
+        }
+        try {
+            $state = $this->read($dir.'/state.json');
+            if (($state['snapshot_attempt_id'] ?? null) !== $expectedAttempt) {
+                throw new MigrationExportException('stale_snapshot_attempt', 409);
+            }
+            if (! $this->snapshotPhase($state) || ($state['schema_version'] ?? null) !== 'gpswiss-wystawczesc-2'
+                || $this->readySnapshot($dir, $state) || (! $abort && $this->snapshotArtifactsExist($dir, $state))) {
+                throw new MigrationExportException($abort ? 'snapshot_abort_not_allowed' : 'snapshot_retry_not_allowed', 409);
+            }
+            if ($abort) {
+                $state['state'] = $state['snapshot_state'] = 'snapshot_aborted';
+                $state['snapshot_aborted_at'] = now()->toIso8601String();
+                $state['last_error'] = 'ABORTED_SNAPSHOT';
+            } else {
+                foreach (['snapshot.json.tmp', 'photo-tasks.json.tmp', 'snapshot-ready.json.tmp', 'snapshot-heartbeat.json.tmp', 'state.json.tmp'] as $temporary) {
+                    if (is_file($dir.'/'.$temporary) && ! unlink($dir.'/'.$temporary)) {
+                        throw new MigrationExportException('snapshot_temp_cleanup_failed', 409);
+                    }
+                }
+                $state['snapshot_previous_attempt_id'] = $state['snapshot_attempt_id'] ?? null;
+                $state['snapshot_attempt_id'] = (string) Str::uuid();
+                $state['snapshot_source_fingerprint'] = $this->snapshotSourceFingerprint();
+                $state['snapshot_attempts'] = ($state['snapshot_attempts'] ?? 1) + 1;
+                $state['snapshot_requested_at'] = now()->toIso8601String();
+                $state['state'] = $state['snapshot_state'] = 'snapshot_pending';
+                $state['last_error'] = null;
+                unset($state['snapshot_started_at'], $state['snapshot_launch_status']);
+            }
+            $this->write($dir.'/state.json', $state);
+        } finally {
+            flock($lock, LOCK_UN);
+            fclose($lock);
+        }
+
+        return $this->status($owner, $id);
+    }
+
+    public function recordSnapshotLaunch(int $owner, string $id, string $attempt, string $status): void
+    {
+        if (! in_array($status, ['worker_launch_requested', 'worker_launch_unavailable', 'worker_launch_failed'], true)) {
+            return;
+        }
+        $dir = $this->directory($owner, $id);
+        $lock = fopen($dir.'/lock', 'c');
+        if (flock($lock, LOCK_EX | LOCK_NB)) {
+            try {
+                $state = $this->read($dir.'/state.json');
+                if (($state['snapshot_attempt_id'] ?? null) === $attempt && $state['state'] === 'snapshot_pending') {
+                    $state['snapshot_launch_status'] = $status;
+                    $this->write($dir.'/state.json', $state);
+                }
+            } finally {
+                flock($lock, LOCK_UN);
+            }
+        }
+        fclose($lock);
+    }
+
+    /** Best effort for fatal shutdown; an unlocked running checkpoint is also classified interrupted. */
+    public function snapshotFailure(int $owner, string $id, string $attempt, string $reason): void
+    {
+        if (! in_array($reason, ['snapshot_fatal_error', 'snapshot_timeout', 'snapshot_memory_exhausted', 'snapshot_worker_failed'], true)) {
+            $reason = 'snapshot_worker_failed';
+        }
+        $dir = $this->directory($owner, $id);
+        $ownedLock = isset($this->snapshotLocks[$id]) && is_resource($this->snapshotLocks[$id]);
+        $lock = $ownedLock ? $this->snapshotLocks[$id] : fopen($dir.'/lock', 'c');
+        if (! $ownedLock && ! flock($lock, LOCK_EX | LOCK_NB)) {
+            fclose($lock);
+
+            return;
+        }
+        try {
+            $state = $this->read($dir.'/state.json');
+            if (($state['snapshot_attempt_id'] ?? null) === $attempt && $state['state'] === 'snapshot_running') {
+                $state['state'] = $state['snapshot_state'] = 'snapshot_failed';
+                $state['last_error'] = $reason;
+                $this->write($dir.'/state.json', $state);
+            }
+        } finally {
+            if (! $ownedLock) {
+                flock($lock, LOCK_UN);
+                fclose($lock);
+            }
+        }
+    }
+
+    private function snapshotPhase(array $state): bool
+    {
+        return in_array($state['state'], ['snapshot', 'snapshot_pending', 'snapshot_running', 'snapshot_completed', 'snapshot_failed'], true)
+            || ($state['state'] === 'failed' && str_starts_with((string) ($state['last_error'] ?? ''), 'snapshot'));
+    }
+
+    private function snapshotSourceFingerprint(): string
+    {
+        // Resolve URL overrides through the connection factory, but never retain credentials or URLs.
+        $identity = array_intersect_key(DB::connection()->getConfig(),
+            array_flip(['driver', 'host', 'port', 'database', 'unix_socket', 'prefix']));
+        ksort($identity);
+
+        return hash('sha256', json_encode(['environment' => app()->environment(), 'connection' => $identity], JSON_THROW_ON_ERROR));
+    }
+
+    private function snapshotArtifactsExist(string $dir, array $state): bool
+    {
+        if (($state['processed_images'] ?? 0) !== 0) {
+            return true;
+        }
+        $technical = ['owner.json', 'state.json', 'lock', 'snapshot-heartbeat.json', 'snapshot.json.tmp', 'photo-tasks.json.tmp', 'snapshot-ready.json.tmp', 'snapshot-heartbeat.json.tmp', 'state.json.tmp'];
+        foreach (scandir($dir) ?: [] as $name) {
+            if ($name !== '.' && $name !== '..' && ! in_array($name, $technical, true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function readySnapshot(string $dir, array $state): ?array
+    {
+        if (! is_file($dir.'/snapshot-ready.json') || ! is_file($dir.'/snapshot.json') || ! is_file($dir.'/photo-tasks.json')) {
+            return null;
+        }
+        try {
+            $receipt = $this->read($dir.'/snapshot-ready.json');
+            if (($receipt['attempt_id'] ?? null) !== ($state['snapshot_attempt_id'] ?? null)
+                || ! isset($receipt['snapshot_at'], $receipt['source_counts'], $receipt['total_images'])
+                || ! hash_equals((string) ($receipt['snapshot_sha256'] ?? ''), hash_file('sha256', $dir.'/snapshot.json'))
+                || ! hash_equals((string) ($receipt['photo_tasks_sha256'] ?? ''), hash_file('sha256', $dir.'/photo-tasks.json'))) {
+                return null;
+            }
+
+            return $receipt;
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    private function snapshotCompletedState(array $state, array $receipt): array
+    {
+        return array_replace($state, array_intersect_key($receipt, array_flip(['snapshot_at', 'source_counts', 'total_images', 'files_snapshot_note'])),
+            ['snapshot_state' => 'snapshot_completed', 'snapshot_completed_at' => now()->toIso8601String(), 'last_error' => null]);
     }
 
     public function tick(int $owner, string $id): array
@@ -128,6 +363,15 @@ final class GpswissMigrationExport
         }
         try {
             $state = $this->read($dir.'/state.json');
+            if ($this->snapshotPhase($state)) {
+                $receipt = $this->readySnapshot($dir, $state);
+                if (! $receipt) {
+                    throw new RuntimeException('snapshot_not_ready');
+                }
+                $state = $this->snapshotCompletedState($state, $receipt);
+                $state['state'] = 'photos';
+                $this->write($dir.'/state.json', $state);
+            }
             $tasks = $this->read($dir.'/photo-tasks.json');
             $records = $this->photoRecords($dir);
             if (isset($state['verification_cursor'])) {
@@ -283,7 +527,7 @@ final class GpswissMigrationExport
                     // Recover only ownership evidence, never reconstruct a broken snapshot.
                 }
             }
-            if (($state['owner_id'] ?? null) !== $owner || ($state['state'] ?? '') === 'completed') {
+            if (($state['owner_id'] ?? null) !== $owner || in_array($state['state'] ?? '', ['completed', 'snapshot_aborted'], true)) {
                 continue;
             }
             $candidates[] = ['id' => basename($dir), 'time' => filemtime($checkpoint)];
@@ -316,15 +560,6 @@ final class GpswissMigrationExport
             }
         }
         $present = ! in_array(false, $required, true);
-        $blocked = match (true) {
-            $state['state'] === 'completed' => $present ? 'export_already_completed' : 'artifact_not_found',
-            ($state['schema_version'] ?? null) !== 'gpswiss-wystawczesc-2' => 'unsupported_export_schema',
-            $state['state'] === 'snapshot' => 'snapshot_in_progress_or_interrupted',
-            $state['state'] === 'failed' => $state['last_error'] ?? 'other',
-            ! $present => 'artifact_not_found',
-            ! in_array($state['state'], ['photos', 'archive'], true) => 'other',
-            default => null,
-        };
         $busy = false;
         $lock = fopen($dir.'/lock', 'c');
         chmod($dir.'/lock', 0600);
@@ -333,6 +568,42 @@ final class GpswissMigrationExport
             if (! $busy) {
                 flock($lock, LOCK_UN);
             } fclose($lock);
+        }
+        $snapshotPhase = $this->snapshotPhase($state);
+        $aborted = $state['state'] === 'snapshot_aborted';
+        $ready = $snapshotPhase ? $this->readySnapshot($dir, $state) : null;
+        $interrupted = in_array($state['state'], ['snapshot', 'snapshot_running'], true) && ! $busy && ! $ready;
+        $snapshotState = match (true) {
+            $aborted => 'snapshot_aborted',
+            $ready !== null => 'snapshot_completed',
+            $snapshotPhase && $busy => 'snapshot_running',
+            $state['state'] === 'snapshot_pending' => 'snapshot_pending',
+            $snapshotPhase => 'snapshot_failed',
+            default => 'snapshot_completed',
+        };
+        $blocked = match (true) {
+            $state['state'] === 'completed' => $present ? 'export_already_completed' : 'artifact_not_found',
+            ($state['schema_version'] ?? null) !== 'gpswiss-wystawczesc-2' => 'unsupported_export_schema',
+            $aborted => 'snapshot_aborted',
+            $snapshotPhase && $ready && ! $busy => null,
+            $snapshotPhase && $busy => 'snapshot_running',
+            $snapshotPhase => $snapshotState === 'snapshot_pending' ? ($state['snapshot_launch_status'] ?? 'snapshot_worker_pending') : ($state['last_error'] ?? 'snapshot_process_interrupted'),
+            $state['state'] === 'failed' => $state['last_error'] ?? 'other',
+            ! $present => 'artifact_not_found',
+            ! in_array($state['state'], ['photos', 'archive'], true) => 'other',
+            default => null,
+        };
+        $retry = $snapshotPhase && ! $busy && ! $ready && ($state['schema_version'] ?? null) === 'gpswiss-wystawczesc-2' && ! $this->snapshotArtifactsExist($dir, $state);
+        $heartbeat = null;
+        try {
+            if (is_file($dir.'/snapshot-heartbeat.json')) {
+                $value = $this->read($dir.'/snapshot-heartbeat.json');
+                if (($value['attempt_id'] ?? null) === ($state['snapshot_attempt_id'] ?? null)) {
+                    $heartbeat = array_intersect_key($value, array_flip(['at', 'stage', 'table', 'processed', 'tables_processed']));
+                }
+            }
+        } catch (\Throwable) {
+            // An incomplete progress file never makes an otherwise valid snapshot unusable.
         }
         $item = null;
         if (($state['state'] === 'photos' || isset($state['verification_cursor'])) && $present) {
@@ -348,13 +619,25 @@ final class GpswissMigrationExport
             }
         }
 
-        return $state + ['phase' => isset($state['verification_cursor']) ? 'verification' : $state['state'], 'processed' => (int) $state['processed_images'],
+        return array_replace($state, ['state' => $snapshotPhase || $aborted ? $snapshotState : $state['state'],
+            'phase' => $snapshotPhase || $aborted ? $snapshotState : (isset($state['verification_cursor']) ? 'verification' : $state['state']),
+            'processed' => (int) $state['processed_images'],
             'remaining' => max(0, ($state['total_images'] ?? 0) - $state['processed_images']) + count($state['repair_queue'] ?? []),
             'verification_remaining' => isset($state['verification_cursor']) ? max(0, $state['processed_images'] - $state['verification_cursor']) : 0,
+            'last_error' => $interrupted ? 'snapshot_process_interrupted' : ($state['last_error'] ?? null),
+            'snapshot_state' => $snapshotState, 'snapshot_attempt_id' => $state['snapshot_attempt_id'] ?? null,
+            'launcher_status' => $state['snapshot_launch_status'] ?? null,
+            'snapshot_process_active' => $snapshotPhase && $busy, 'snapshot_interrupted' => $interrupted,
+            'snapshot_file_exists' => $required['snapshot'], 'snapshot_tasks_file_exists' => $required['photo_tasks'],
+            'snapshot_ready' => $snapshotPhase ? $ready !== null : ($required['snapshot'] && $required['photo_tasks']),
+            'snapshot_retry_allowed' => $retry, 'snapshot_abort_allowed' => $snapshotPhase && ! $busy && ! $ready && ($state['schema_version'] ?? null) === 'gpswiss-wystawczesc-2',
+            'snapshot_retry_blocked_reason' => $retry ? null : ($busy ? 'snapshot_process_active' : 'snapshot_artifacts_present'),
+            'snapshot_heartbeat' => $heartbeat,
+            'snapshot_manual_command' => isset($state['snapshot_attempt_id']) ? 'php artisan gps:migration-snapshot --owner-id='.$owner.' --run='.$id.' --attempt='.$state['snapshot_attempt_id'] : null,
             'current_item' => $item, 'last_success' => $state['last_success'] ?? null, 'resume_allowed' => $blocked === null,
             'blocked_reason' => $blocked, 'storage_root_fingerprint' => substr(hash('sha256', realpath($this->root())), 0, 16), 'owner_match' => true, 'artifacts_present' => $present, 'artifacts' => $required, 'busy' => $busy,
             'database_writes' => false, 'source_file_writes' => false, 'export_file_writes' => true, 'provider_calls' => false,
-            'marketplace_writes' => false, 'automatic_publish' => false, 'import_performed' => false];
+            'marketplace_writes' => false, 'automatic_publish' => false, 'import_performed' => false]);
     }
 
     public function resume(int $owner, string $id): array
@@ -372,7 +655,12 @@ final class GpswissMigrationExport
         }
         try {
             $state = $this->read($dir.'/state.json');
-            if (in_array($state['state'], ['photos', 'archive'], true) && ($state['schema_version'] ?? null) === 'gpswiss-wystawczesc-2') {
+            $receipt = $this->snapshotPhase($state) ? $this->readySnapshot($dir, $state) : null;
+            if ($receipt) {
+                $state = $this->snapshotCompletedState($state, $receipt);
+                $state['state'] = 'photos';
+                $this->write($dir.'/state.json', $state);
+            } elseif (in_array($state['state'], ['photos', 'archive'], true) && ($state['schema_version'] ?? null) === 'gpswiss-wystawczesc-2') {
                 if ($state['processed_images'] > 0 && ! isset($state['verification_cursor'])) {
                     $state['verification_cursor'] = 0;
                 }
