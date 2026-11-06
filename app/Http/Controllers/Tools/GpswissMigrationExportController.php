@@ -15,19 +15,27 @@ final class GpswissMigrationExportController extends Controller
     {
         abort_unless($request->user()?->hasRole(UserRole::OwnerAdmin->value), 403);
         $owner = (int) $request->user()->id;
-        $input = $request->validate(['action' => ['sometimes', 'in:start,tick,resume,snapshot_tick,pause_snapshot,retry_snapshot,abort_snapshot,retry_photos'], 'download' => ['sometimes', 'in:sample,full,artifact'], 'format' => ['sometimes', 'in:status'],
+        $input = $request->validate(['action' => ['sometimes', 'in:start,tick,resume,snapshot_tick,pause_snapshot,retry_snapshot,abort_snapshot,retry_photos'], 'download' => ['sometimes', 'in:sample,full,artifact'], 'format' => ['sometimes', 'in:status,compact,artifacts'],
             'artifact' => ['sometimes', 'string', 'max:180', 'regex:/\A[A-Za-z0-9][A-Za-z0-9_.-]*\z/D'],
             'confirm_restart' => ['sometimes', 'boolean'], 'confirm_abort' => ['sometimes', 'boolean'], 'confirm_retry_photos' => ['sometimes', 'boolean'], 'expected_snapshot_attempt' => ['present_if:action,snapshot_tick', 'nullable', 'uuid']]);
+        $statusStarted = microtime(true);
+        $serializingStatus = false;
+        $compactRequest = ($input['format'] ?? null) === 'compact' && $request->isMethod('get');
         $finished = false;
         $reserve = null;
-        if (($input['action'] ?? null) === 'snapshot_tick' && $run) {
+        if ((($input['action'] ?? null) === 'snapshot_tick' || $compactRequest) && $run) {
             $reserve = str_repeat('r', 128 * 1024);
-            register_shutdown_function(static function () use (&$finished, &$reserve, $exports, $owner, $run): void {
+            register_shutdown_function(static function () use (&$finished, &$reserve, $exports, $owner, $run, $compactRequest): void {
                 $reserve = null;
                 $fatal = error_get_last();
                 if (! $finished && $fatal && in_array($fatal['type'], [E_ERROR, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
                     try {
-                        $exports->markTickFatal($owner, $run, str_contains($fatal['message'], 'Maximum execution time') ? 'backend_timeout' : 'backend_fatal_error');
+                        if ($compactRequest) {
+                            $reason = str_contains($fatal['message'], 'Maximum execution time') ? 'backend_timeout' : (str_contains($fatal['message'], 'Allowed memory size') ? 'memory_exhaustion' : 'php_fatal_error');
+                            $exports->markStatusFatal($owner, $run, $reason);
+                        } else {
+                            $exports->markTickFatal($owner, $run, str_contains($fatal['message'], 'Maximum execution time') ? 'backend_timeout' : 'backend_fatal_error');
+                        }
                     } catch (\Throwable) {
                     }
                 }
@@ -82,6 +90,16 @@ final class GpswissMigrationExportController extends Controller
 
                 return $response;
             }
+            if (($input['format'] ?? null) === 'compact') {
+                $data = $run ? $exports->compactStatus($owner, $run) : $exports->discover($owner, true);
+
+                $serializingStatus = true;
+
+                return $this->compactReply($data, $statusStarted);
+            }
+            if ($run && ($input['format'] ?? null) === 'artifacts') {
+                return response()->json($exports->artifacts($owner, $run))->header('Cache-Control', 'private, no-store');
+            }
             if (! $run && ($input['format'] ?? null) === 'status') {
                 return response()->json($exports->discover($owner))->header('Cache-Control', 'private, no-store');
             }
@@ -99,11 +117,30 @@ final class GpswissMigrationExportController extends Controller
             return $this->error($safe === 'other' ? 'server_exception' : $safe, $safe === 'other' ? 500 : 409, ['backend_exception_class' => str_contains(get_class($e), '@anonymous') ? 'AnonymousThrowable' : get_class($e)]);
         } catch (\Throwable $e) {
             // Do not return exception bodies, paths, SQL, or record data in diagnostics.
-            return $this->error('server_exception', 500, ['backend_exception_class' => str_contains(get_class($e), '@anonymous') ? 'AnonymousThrowable' : get_class($e)]);
+            return $this->error($serializingStatus ? 'status_response_serialization_exception' : 'server_exception', 500, ['backend_exception_class' => str_contains(get_class($e), '@anonymous') ? 'AnonymousThrowable' : get_class($e)]);
         } finally {
             $finished = true;
             $reserve = null;
         }
+    }
+
+    private function compactReply(array $data, float $started)
+    {
+        $data['status_request_diagnostic'] = ['action' => 'compact_status', 'route_name' => 'admin.tools.gpswiss-migration-export',
+            'reason_code' => 'status_loaded', 'duration_ms' => (int) ((microtime(true) - $started) * 1000)];
+        $data['status_response_bytes'] = 0;
+        for ($i = 0; $i < 4; $i++) {
+            $bytes = strlen(json_encode($data, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+            if ($bytes === $data['status_response_bytes']) {
+                break;
+            }
+            $data['status_response_bytes'] = $bytes;
+        }
+        if ($bytes > 8192) {
+            throw new MigrationExportException('compact_status_budget_exceeded', 500);
+        }
+
+        return response()->json($data, 200, ['Cache-Control' => 'private, no-store', 'X-Content-Type-Options' => 'nosniff'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     }
 
     /** Authenticated fallback: UUID validation and unmatched exporter paths must be distinguishable. */

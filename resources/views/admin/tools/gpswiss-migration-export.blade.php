@@ -20,7 +20,7 @@
 <p id="snapshot-worker" hidden></p><p id="progress" role="status"></p>
 <p id="message" role="status">Szukam niedokończonego eksportu właściciela…</p><a id="login" href="/admin/login" hidden>Zaloguj się ponownie, potem odśwież ten panel</a><pre id="resume-diagnostic" aria-label="Diagnostyka wznowienia"></pre><pre id="state"></pre><pre id="request-diagnostic" aria-label="Diagnostyka żądania"></pre>
 <a id="sample" hidden>Pobierz próbkę ZIP</a><a id="full" hidden>Pobierz pełny ZIP</a>
-<ul id="download-artifacts" hidden></ul>
+<ul id="download-artifacts" hidden></ul><a id="full-debug" hidden target="_blank" rel="noreferrer">Pełny status diagnostyczny</a>
 <p>Cały eksport działa z tego panelu. Pauza snapshotu zapisuje stan na serwerze; Stop lokalnej pętli kończy wysyłanie kolejnych żądań. Po odświeżeniu użyj Wznów. Pobierz manifest i wszystkie wskazane części archiwum.</p>
 <script>
 (()=>{
@@ -79,6 +79,11 @@
   const progress=state?.snapshot_progress ?? {},dataset=state?.current_dataset ?? progress.current_dataset ?? progress.dataset;
   const total=state && Object.hasOwn(state,'total')?(state.total ?? '—'):(progress.total ?? state?.total_images ?? '—');
   el('progress').textContent=state?'Run: '+id+' | Stan: '+state.state+' | Faza: '+(state.phase ?? state.state)+' | Zbiór: '+(dataset ?? '—')+' | Postęp: '+(state.processed ?? progress.processed ?? state.processed_images ?? 0)+' / '+total+' | Cursor: '+cursorText(state.dataset_cursor ?? state.cursor ?? progress.cursor)+' | Następny krok: '+nextAction():'';
+  const debug=el('full-debug');debug.hidden=!id;if(id)debug.href=base+'/'+encodeURIComponent(id)+'?format=status';
+  if(state?.state==='completed' && browserSnapshot() && !Array.isArray(state.download_artifacts) && artifactsLoadedFor!==id){
+   artifactsLoadedFor=id;const artifactRun=id;
+   queueMicrotask(async()=>{try{const data=await request(base+'/'+encodeURIComponent(artifactRun)+'?format=artifacts');if(id===artifactRun && state?.state==='completed'){state.download_artifacts=data.download_artifacts??[];render(state);}}catch(error){artifactsLoadedFor=null;el('message').textContent='artifact_list_fetch_failed — odśwież panel, aby ponowić pobranie listy plików.';}});
+  }
   const artifacts=Array.isArray(state?.download_artifacts)?state.download_artifacts:[];
   for(const kind of ['sample','full']){el(kind).hidden=state?.state!=='completed' || artifacts.length>0 || browserSnapshot() || state?.schema_version==='gpswiss-wystawczesc-3';if(id)el(kind).href=base+'/'+encodeURIComponent(id)+'?download='+kind;}
   const downloads=el('download-artifacts');downloads.replaceChildren();downloads.hidden=state?.state!=='completed' || artifacts.length===0;
@@ -91,23 +96,24 @@
   el('snapshot-worker').textContent=browserSnapshot()?'Tryb panelowy: każda partia zapisuje checkpoint. Wznów kontynuuje tę samą próbę; Ponów snapshot świadomie ustala nowe granice.':phase?'To próba utworzona w starszym trybie. Jeśli nie działa, użyj „Ponów snapshot w trybie panelowym”, aby zachować run_id.':'';
   buttons();
  }
+ let artifactsLoadedFor=null;
  const requestFailures=[];
  const cursorText=value=>value==null?'—':typeof value==='object'?JSON.stringify(value):String(value);
- const transient=error=>['network_error','browser_fetch_timeout','malformed_json','invalid_response','snapshot_http_tick_failed'].includes(error.reason) || [408,429,500,502,503,504].includes(error.http);
+ const transient=error=>error.reason!=='status_fetch_retry_exhausted' && (['network_error','browser_fetch_timeout','malformed_json','invalid_response','snapshot_http_tick_failed'].includes(error.reason) || [408,429,500,502,503,504].includes(error.http));
  async function request(url,action,extra={}){
-  inFlight=true;buttons();const controller=new AbortController(),started=performance.now(),timer=setTimeout(()=>controller.abort(),45000);
-  const diagnostic={endpoint:base+(id?'/'+id:''),action:action??'status',http_status:null,fetch_timeout:false,network_exception_type:null,transport_reason:null,response_bytes:0,server_reason_code:null,current_dataset:state?.current_dataset??null,cursor_before:state?.cursor??null,cursor_after:null};
+  inFlight=true;buttons();const isStatus=!action && url.includes('format=compact'),controller=new AbortController(),started=performance.now(),timer=setTimeout(()=>controller.abort(),isStatus?10000:45000);
+  const diagnostic={endpoint:new URL(url,location.href).pathname+new URL(url,location.href).search,route_name:'admin.tools.gpswiss-migration-export',action:action??(isStatus?'compact_status':'status'),request_kind:isStatus?'status':'operation',status_response_bytes:isStatus?0:null,malformed_json:false,content_type:null,content_length:null,http_status:null,fetch_timeout:false,network_exception_type:null,transport_reason:null,response_bytes:0,server_reason_code:null,current_dataset:state?.current_dataset??null,cursor_before:state?.cursor??null,cursor_after:null};
   try{
    const response=await fetch(url,{method:action?'POST':'GET',credentials:'same-origin',cache:'no-store',redirect:'error',signal:controller.signal,headers:{Accept:'application/json',...(action?{'Content-Type':'application/json','X-CSRF-TOKEN':document.querySelector('meta[name="csrf-token"]').content}:{})},...(action?{body:JSON.stringify({action,...extra})}:{})});
-   diagnostic.http_status=response.status;
+   diagnostic.http_status=response.status;diagnostic.content_type=response.headers.get('content-type');diagnostic.content_length=response.headers.get('content-length');
    if([401,419].includes(response.status))throw Object.assign(new Error('SESSION_EXPIRED'),{reason:'SESSION_EXPIRED',http:response.status});
    const body=await response.text();diagnostic.response_bytes=new TextEncoder().encode(body).length;
-   let data;try{data=JSON.parse(body);}catch(_){data=null;}
-   diagnostic.server_reason_code=reasonOf(data,null);diagnostic.backend=data?.tick_diagnostic??data?.last_tick??null;diagnostic.backend_exception_class=data?.backend_exception_class??diagnostic.backend?.backend_exception_class??null;
+   let data;try{data=JSON.parse(body);}catch(_){data=null;diagnostic.malformed_json=true;}
+   diagnostic.server_reason_code=reasonOf(data,reasonOf(data?.status_request_diagnostic,null));diagnostic.status_response_bytes=isStatus?diagnostic.response_bytes:null;diagnostic.server_status_response_bytes=data?.status_response_bytes??null;diagnostic.backend=isStatus?(data?.status_request_diagnostic??null):(data?.tick_diagnostic??data?.last_tick??null);diagnostic.last_status_error=isStatus?(data?.last_status_error??null):null;diagnostic.backend_exception_class=data?.backend_exception_class??diagnostic.backend?.backend_exception_class??null;
    if([401,419].includes(response.status))throw Object.assign(new Error('SESSION_EXPIRED'),{reason:'SESSION_EXPIRED',http:response.status});
    if(!response.ok)throw Object.assign(new Error('http_error'),{reason:reasonOf(data,'http_'+response.status),http:response.status});
    if(!data || typeof data!=='object')throw Object.assign(new Error('malformed_json'),{reason:'malformed_json',http:response.status});
-   diagnostic.cursor_after=data.cursor??data.run?.cursor??null;diagnostic.backend=data.tick_diagnostic??data.last_tick??null;
+   diagnostic.cursor_after=data.cursor??data.run?.cursor??null;diagnostic.backend=isStatus?(data.status_request_diagnostic??null):(data.tick_diagnostic??data.last_tick??null);
    return data;
   }catch(error){
    if(error.reason){diagnostic.reason_code=error.reason;throw error;}
@@ -135,8 +141,21 @@
   }else el('message').textContent='Eksport zatrzymany: '+(transient(error)?'retry_exhausted / ':'')+error.reason+(error.http?' / HTTP '+error.http:'')+'. Checkpoint i pliki pozostają zachowane. Wznów po usunięciu blokady.';
   buttons();
  }
- async function discover(){const data=await request(base+'?format=status');render(data);return !!state;}
- async function readCurrent(){const data=await request(base+'/'+encodeURIComponent(id));render(data);return state;}
+ async function discover(){const data=await request(base+'?format=compact');render(data);return !!state;}
+ async function readCurrent(){
+  let last;
+  for(let attempt=1;attempt<=4;attempt++){
+   try{const data=await request(base+'/'+encodeURIComponent(id)+'?format=compact');render(data);return state;}
+   catch(error){
+    if(!transient(error))throw error;last=error;
+    if(attempt===4)break;
+    el('message').textContent='status_fetch_retry '+attempt+'/4 — ten sam run i attempt';
+    await wait(250*2**(attempt-1));
+    if(!active && working && loopDone)throw Object.assign(new Error('local_stop'),{reason:'local_stop'});
+   }
+  }
+  throw Object.assign(new Error('status_fetch_retry_exhausted'),{reason:'status_fetch_retry_exhausted',http:last?.http});
+ }
  async function recoverOnce(error,attempt){
   if(error.reason==='SESSION_EXPIRED' || error.reason==='run_owner_mismatch' || [403,422].includes(error.http))throw error;
   if(error.http===404 || error.reason==='existing_export_unfinished'){
@@ -221,6 +240,7 @@
     try{
      render(await request(base+'/'+encodeURIComponent(id),next,next==='snapshot_tick'?{expected_snapshot_attempt:attempt}:{}));attempts=0;
      if(state.last_error)throw Object.assign(new Error(state.last_error),{reason:state.last_error});
+     if(resumeTraceActive && !resumeEvents.some(e=>e.event==='tick_completed'))resumeEvent('tick_completed');
     }catch(error){
      if(++attempts>4)throw error;await recover(error,1);
      if(id!==run || (next==='snapshot_tick' && state?.snapshot_attempt_id!==attempt)){el('message').textContent='Próba snapshotu zmieniła się. Sprawdź status i świadomie użyj Wznów.';break;}

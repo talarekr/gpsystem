@@ -148,6 +148,10 @@ final class BrowserMigrationSnapshot
             }
         }
         $this->write($folder.'/checkpoint.json', $state);
+        try {
+            app(CompactSnapshotProgress::class)->publish($directory, $attempt, $state);
+        } catch (\Throwable) {
+        }
         $trace['reason_code'] = $trace['reason_code'] === 'tick_running' ? 'tick_completed' : $trace['reason_code'];
         $trace['cursor_after'] = $state['datasets'][$dataset][$cursorField] ?? null;
         $trace['records_attempted'] = $this->attempted;

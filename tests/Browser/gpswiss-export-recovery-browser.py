@@ -6,6 +6,14 @@ import os
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
+
+def request_url(req):
+    # Normalize only the new GET selector for legacy workflow assertions.
+    url = req.url
+    if req.method == 'GET' and url.endswith('?format=compact') and url.split('?')[0].split('/')[-1] != 'gpswiss-migration-export':
+        return url.split('?')[0]
+    return url
+
 HTML = (Path(__file__).parents[2] / 'resources/views/admin/tools/gpswiss-migration-export.blade.php').read_text()
 HTML = HTML.replace("@json(route('admin.tools.gpswiss-migration-export', [], false))", "'/admin/tools/gpswiss-migration-export'")
 BASE = 'https://audit.test/admin/tools/gpswiss-migration-export'
@@ -30,27 +38,27 @@ def run(browser, mode):
     def route(r):
         nonlocal expired, lost, busy_polls
         req = r.request
-        if req.is_navigation_request() and req.url in [BASE, BASE+'/'+ID]:
+        if req.is_navigation_request() and request_url(req) in [BASE, BASE+'/'+ID]:
             r.fulfill(content_type='text/html', body=HTML.replace('{{ csrf_token() }}', 'fresh-csrf'))
             return
         payload = req.post_data_json if req.method == 'POST' else {}
         action = (payload or {}).get('action')
-        requests.append((req.url, action))
+        requests.append((request_url(req), action))
         assert action != 'start', 'Existing-run recovery must never create a snapshot'
         assert action in [None, 'resume', 'tick'], action
-        if req.url == BASE+'?format=status':
+        if request_url(req) == BASE+'?format=compact':
             found = mode != 'phantom_without_existing'
             returned = copy.deepcopy(state)
-            if mode == 'checkpoint_missing_after_load' and sum('?format=status' in url for url, _ in requests) > 1:
+            if mode == 'checkpoint_missing_after_load' and sum('?format=compact' in url for url, _ in requests) > 1:
                 returned = dict(run_id=ID, state='blocked', phase='unknown', processed=None, remaining=None,
                                 last_error='checkpoint_missing', blocked_reason='checkpoint_missing', resume_allowed=False,
                                 owner_match=True, artifacts_present=False, busy=False)
             r.fulfill(json={**(returned if found else {}), 'existing_run_found':found, 'run_id':ID if found else None, 'run':returned if found else None})
             return
-        if PHANTOM in req.url:
+        if PHANTOM in request_url(req):
             r.fulfill(status=404, json=dict(reason_code='run_not_found', run_id=PHANTOM))
             return
-        assert req.url == BASE+'/'+ID, req.url
+        assert request_url(req) == BASE+'/'+ID, request_url(req)
         if mode == 'owner_mismatch':
             r.fulfill(status=404, json=dict(reason_code='run_owner_mismatch', owner_match=False))
             return
@@ -92,12 +100,12 @@ def run(browser, mode):
     if mode == 'owner_mismatch':
         page.wait_for_function("document.querySelector('#message').textContent.includes('run_owner_mismatch')")
         assert not any(action for _, action in requests), requests
-        assert not any('?format=status' in url for url, _ in requests), requests
+        assert not any('?format=compact' in url for url, _ in requests), requests
     elif mode == 'phantom_without_existing':
         page.wait_for_function("document.querySelector('#message').textContent.includes('run_not_found')")
         page.wait_for_timeout(300)
         assert not any(action for _, action in requests), requests
-        assert any('?format=status' in url for url, _ in requests)
+        assert any('?format=compact' in url for url, _ in requests)
     else:
         page.wait_for_function("document.querySelector('#state').textContent.includes('"+ID+"')")
         assert page.locator('#start').is_disabled()

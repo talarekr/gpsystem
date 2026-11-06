@@ -1,6 +1,14 @@
 """Manual continuation of the exact production checkpoint; no real network."""
 from pathlib import Path
 from playwright.sync_api import sync_playwright
+
+def request_url(req):
+    # Normalize only the new GET selector for legacy workflow assertions.
+    url = req.url
+    if req.method == 'GET' and url.endswith('?format=compact') and url.split('?')[0].split('/')[-1] != 'gpswiss-migration-export':
+        return url.split('?')[0]
+    return url
+
 HTML=(Path(__file__).parents[2]/'resources/views/admin/tools/gpswiss-migration-export.blade.php').read_text().replace("@json(route('admin.tools.gpswiss-migration-export', [], false))", "'/admin/tools/gpswiss-migration-export'")
 BASE='https://audit.test/admin/tools/gpswiss-migration-export'
 RUN='8de6e27c-ad7c-470b-830b-b9ecee9446ba'
@@ -20,7 +28,7 @@ def case(browser,mode):
    if not allow:r.abort('connectionreset');return
    assert not rows;rows.extend(range(436,441));state.update(processed=15764,cursor={'id':440},remaining=64193,state='completed',next_action='download')
   else:gets+=1
-  r.fulfill(json={'existing_run_found':True,'run':state} if 'format=status' in r.request.url else state)
+  r.fulfill(json={'existing_run_found':True,'run':state} if 'format=compact' in request_url(r.request) else state)
  c.route('**/*',route);p.goto(BASE);p.wait_for_function("document.querySelector('#state').textContent.includes('15759')");p.locator('#resume').click()
  if mode=='lost_timer':p.wait_for_function("document.querySelector('#message').textContent.includes('network_recovery')")
  else:
