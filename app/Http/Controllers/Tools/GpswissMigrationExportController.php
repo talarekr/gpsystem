@@ -6,6 +6,7 @@ use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
 use App\Services\MigrationExport\GpswissMigrationExport;
 use App\Services\MigrationExport\MigrationExportException;
+use App\Services\MigrationExport\OperatorFinalizationDiagnostics;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
@@ -23,6 +24,8 @@ final class GpswissMigrationExportController extends Controller
         $compactRequest = ($input['format'] ?? null) === 'compact' && $request->isMethod('get');
         $finished = false;
         $reserve = null;
+        $operatorRequestId = null;
+        $operatorResponse = false;
         if ((($input['action'] ?? null) === 'snapshot_tick' || $compactRequest) && $run) {
             $reserve = str_repeat('r', 128 * 1024);
             register_shutdown_function(static function () use (&$finished, &$reserve, $exports, $owner, $run, $compactRequest): void {
@@ -34,7 +37,7 @@ final class GpswissMigrationExportController extends Controller
                             $reason = str_contains($fatal['message'], 'Maximum execution time') ? 'backend_timeout' : (str_contains($fatal['message'], 'Allowed memory size') ? 'memory_exhaustion' : 'php_fatal_error');
                             $exports->markStatusFatal($owner, $run, $reason);
                         } else {
-                            $exports->markTickFatal($owner, $run, str_contains($fatal['message'], 'Maximum execution time') ? 'backend_timeout' : 'backend_fatal_error');
+                            $exports->markTickFatal($owner, $run, str_contains($fatal['message'], 'Maximum execution time') ? 'backend_timeout' : (str_contains($fatal['message'], 'Allowed memory size') ? 'memory_exhaustion' : 'php_fatal_error'));
                         }
                     } catch (\Throwable) {
                     }
@@ -44,6 +47,9 @@ final class GpswissMigrationExportController extends Controller
         try {
             if ($request->isMethod('post')) {
                 abort_unless(isset($input['action']), 422);
+                if ($run && $input['action'] === 'snapshot_tick') {
+                    $operatorRequestId = $exports->beginOperatorFinalizeRequest($owner, $run);
+                }
                 ignore_user_abort(true); // Finish this authorized checkpoint even if its response is lost.
                 if ($input['action'] === 'start') {
                     $data = $exports->prepareBrowser($owner, $run);
@@ -75,7 +81,20 @@ final class GpswissMigrationExportController extends Controller
                     unset($data['snapshot_progress']['datasets']);
                 }
 
-                return response()->json($data)->header('Cache-Control', 'private, no-store');
+                if ($operatorRequestId && ($data['last_error'] ?? null)) {
+                    $reason = OperatorFinalizationDiagnostics::controlledReason($data['last_error']);
+                    $class = $data['last_tick']['backend_exception_class'] ?? null;
+                    $diagnostic = $exports->finishOperatorFinalizeRequest($owner, $run, $operatorRequestId, $reason ?? 'server_exception', $class, $reason ? 'controlled_blocker' : 'infrastructure');
+
+                    return $this->error($reason ?? 'server_exception', $reason ? 409 : 500, ['backend_exception_class' => $class, 'operator_finalize_diagnostic' => $diagnostic]);
+                }
+                $operatorResponse = $operatorRequestId !== null;
+                $response = response()->json($data)->header('Cache-Control', 'private, no-store');
+                if ($operatorRequestId) {
+                    $exports->finishOperatorFinalizeRequest($owner, $run, $operatorRequestId, 'response_serialized');
+                }
+
+                return $response;
             }
             if ($run && isset($input['download'])) {
                 if ($input['download'] === 'artifact' && ! isset($input['artifact'])) {
@@ -111,17 +130,24 @@ final class GpswissMigrationExportController extends Controller
             return ($run ? response()->json($exports->status($owner, $run)) : response()->view('admin.tools.gpswiss-migration-export'))
                 ->header('Cache-Control', 'private, no-store')->header('X-Robots-Tag', 'noindex, noarchive');
         } catch (MigrationExportException $e) {
-            return $this->error($e->reasonCode, $e->httpStatus, $e->details);
+            $diagnostic = $operatorRequestId ? $exports->finishOperatorFinalizeRequest($owner, $run, $operatorRequestId, $e->reasonCode, $e->details['backend_exception_class'] ?? get_class($e), 'controlled_blocker') : null;
+
+            return $this->error($e->reasonCode, $e->httpStatus, $e->details + ($diagnostic ? ['operator_finalize_diagnostic' => $diagnostic] : []));
         } catch (HttpExceptionInterface $e) {
             // Route/controller guards have no filesystem or database exception body to disclose.
             return $this->error($e->getStatusCode() === 404 ? 'run_not_found' : 'other', $e->getStatusCode());
         } catch (\RuntimeException $e) {
             $safe = in_array($e->getMessage(), ['snapshot_failed', 'zip_extension_required', 'export_root_must_be_private', 'export_root_permissions_must_be_private'], true) ? $e->getMessage() : 'other';
+            $class = str_contains(get_class($e), '@anonymous') ? 'AnonymousThrowable' : get_class($e);
+            $diagnostic = $operatorRequestId ? $exports->finishOperatorFinalizeRequest($owner, $run, $operatorRequestId, $safe === 'other' ? 'server_exception' : $safe, $class, $operatorResponse ? 'response_serialization' : 'infrastructure') : null;
 
-            return $this->error($safe === 'other' ? 'server_exception' : $safe, $safe === 'other' ? 500 : 409, ['backend_exception_class' => str_contains(get_class($e), '@anonymous') ? 'AnonymousThrowable' : get_class($e)]);
+            return $this->error($safe === 'other' ? 'server_exception' : $safe, $safe === 'other' ? 500 : 409, ['backend_exception_class' => $class] + ($diagnostic ? ['operator_finalize_diagnostic' => $diagnostic] : []));
         } catch (\Throwable $e) {
             // Do not return exception bodies, paths, SQL, or record data in diagnostics.
-            return $this->error($serializingStatus ? 'status_response_serialization_exception' : 'server_exception', 500, ['backend_exception_class' => str_contains(get_class($e), '@anonymous') ? 'AnonymousThrowable' : get_class($e)]);
+            $class = str_contains(get_class($e), '@anonymous') ? 'AnonymousThrowable' : get_class($e);
+            $diagnostic = $operatorRequestId ? $exports->finishOperatorFinalizeRequest($owner, $run, $operatorRequestId, 'server_exception', $class, $operatorResponse ? 'response_serialization' : 'infrastructure') : null;
+
+            return $this->error($serializingStatus ? 'status_response_serialization_exception' : 'server_exception', 500, ['backend_exception_class' => $class] + ($diagnostic ? ['operator_finalize_diagnostic' => $diagnostic] : []));
         } finally {
             $finished = true;
             $reserve = null;
@@ -136,19 +162,21 @@ final class GpswissMigrationExportController extends Controller
         $owner = (int) $request->user()->id;
         $started = microtime(true);
         $finished = false;
+        $operatorRequestId = null;
         $reserve = str_repeat('r', 128 * 1024);
         register_shutdown_function(static function () use (&$finished, &$reserve, $exports, $owner, $run): void {
             $reserve = null;
             $fatal = error_get_last();
             if (! $finished && $fatal && in_array($fatal['type'], [E_ERROR, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
                 try {
-                    $exports->markTickFatal($owner, $run, str_contains($fatal['message'], 'Maximum execution time') ? 'backend_timeout' : 'backend_fatal_error');
+                    $exports->markTickFatal($owner, $run, str_contains($fatal['message'], 'Maximum execution time') ? 'backend_timeout' : (str_contains($fatal['message'], 'Allowed memory size') ? 'memory_exhaustion' : 'php_fatal_error'));
                 } catch (\Throwable) {
                 }
             }
         });
         try {
             ignore_user_abort(true);
+            $operatorRequestId = $exports->beginOperatorFinalizeRequest($owner, $run, 'kick');
             $data = $exports->kickBrowserSnapshot($owner, $run, $input['attempt_id']);
             $data['tick_diagnostic'] = $data['last_tick'] ?? null;
             $data['kick_diagnostic'] = ['action' => 'kick', 'reason_code' => $data['kick_reason'], 'duration_ms' => (int) ((microtime(true) - $started) * 1000)];
@@ -156,11 +184,28 @@ final class GpswissMigrationExportController extends Controller
                 throw new MigrationExportException('compact_status_budget_exceeded', 500);
             }
 
-            return response()->json($data)->header('Cache-Control', 'private, no-store');
+            if ($operatorRequestId && ($data['last_error'] ?? null)) {
+                $reason = OperatorFinalizationDiagnostics::controlledReason($data['last_error']);
+                $class = $data['last_tick']['backend_exception_class'] ?? null;
+                $diagnostic = $exports->finishOperatorFinalizeRequest($owner, $run, $operatorRequestId, $reason ?? 'server_exception', $class, $reason ? 'controlled_blocker' : 'infrastructure');
+
+                return $this->error($reason ?? 'server_exception', $reason ? 409 : 500, ['backend_exception_class' => $class, 'operator_finalize_diagnostic' => $diagnostic]);
+            }
+            $response = response()->json($data)->header('Cache-Control', 'private, no-store');
+            if ($operatorRequestId) {
+                $exports->finishOperatorFinalizeRequest($owner, $run, $operatorRequestId, 'response_serialized');
+            }
+
+            return $response;
         } catch (MigrationExportException $error) {
-            return $this->error($error->reasonCode, $error->httpStatus, $error->details);
+            $diagnostic = $operatorRequestId ? $exports->finishOperatorFinalizeRequest($owner, $run, $operatorRequestId, $error->reasonCode, $error->details['backend_exception_class'] ?? get_class($error), 'controlled_blocker') : null;
+
+            return $this->error($error->reasonCode, $error->httpStatus, $error->details + ($diagnostic ? ['operator_finalize_diagnostic' => $diagnostic] : []));
         } catch (\Throwable $error) {
-            return $this->error('server_exception', 500, ['backend_exception_class' => str_contains(get_class($error), '@anonymous') ? 'AnonymousThrowable' : get_class($error)]);
+            $class = str_contains(get_class($error), '@anonymous') ? 'AnonymousThrowable' : get_class($error);
+            $diagnostic = $operatorRequestId ? $exports->finishOperatorFinalizeRequest($owner, $run, $operatorRequestId, 'server_exception', $class, 'infrastructure') : null;
+
+            return $this->error('server_exception', 500, ['backend_exception_class' => $class] + ($diagnostic ? ['operator_finalize_diagnostic' => $diagnostic] : []));
         } finally {
             $finished = true;
             $reserve = null;

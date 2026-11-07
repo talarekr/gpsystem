@@ -52,7 +52,17 @@ final class BrowserMigrationSnapshot
     {
         $folder = $this->folder($directory, $attempt);
         $state = $this->read($folder.'/checkpoint.json');
-        if (in_array($state['stage'], ['completed', 'failed'], true)) {
+        if ($this->operatorTickContext($state)) {
+            if (! in_array($state['stage'], ['operator_finalize', 'completed', 'failed'], true)) {
+                throw new MigrationExportException('operator_finalization_stage_mismatch', 409);
+            }
+            if ($state['stage'] === 'completed' && ! ($state['operator_finalization']['artifact_integrity_complete'] ?? false)) {
+                throw new MigrationExportException('operator_finalization_incomplete', 409);
+            }
+            if (in_array($state['stage'], ['completed', 'failed'], true)) {
+                return $this->operatorTickResult($state);
+            }
+        } elseif (in_array($state['stage'], ['completed', 'failed'], true)) {
             return $this->index($directory, $attempt);
         }
         $started = microtime(true);
@@ -192,12 +202,37 @@ final class BrowserMigrationSnapshot
         $trace['records_completed'] = max(0, array_sum(array_column($state['datasets'], 'processed')) + array_sum(array_column($state['datasets'], 'verified')) - array_sum(array_column($saved['datasets'], 'processed')) - array_sum(array_column($saved['datasets'], 'verified')));
         $trace['duration_ms'] = (int) ((microtime(true) - $started) * 1000);
         $this->trace($directory, $trace);
+        if ($this->operatorTickContext($state)) {
+            // The canonical checkpoint is already committed. Never decode it a second time here
+            // or materialize the legacy snapshot.json mirror before publishing the root handoff.
+            return $this->operatorTickResult($state);
+        }
         $index = $this->index($directory, $attempt);
         if ($state['stage'] === 'completed') {
             $this->write($directory.'/snapshot.json', $index);
         }
 
         return $index;
+    }
+
+    private function operatorTickContext(array $state): bool
+    {
+        return ($state['consistency_exception']['accepted_by_operator'] ?? false) === true
+            && ($state['consistency_exception']['run_id'] ?? null) === self::DRIFT_RUN
+            && ($state['attempt_id'] ?? null) === self::DRIFT_ATTEMPT && isset($state['operator_finalization']);
+    }
+
+    private function operatorTickResult(array $state): array
+    {
+        return array_replace(CompactSnapshotProgress::project($state), ['format' => $state['format'], 'attempt_id' => $state['attempt_id'],
+            'stage' => $state['stage'], 'phase' => 'snapshot_'.$state['stage'], 'done' => $state['stage'] === 'completed', 'failed' => $state['stage'] === 'failed',
+            'processed' => array_sum(array_column($state['datasets'], 'processed')), 'verified' => array_sum(array_column($state['datasets'], 'verified')),
+            'source_counts' => $this->sourceCounts($state), 'database_consistency' => $state['database_consistency']]);
+    }
+
+    private function sourceCounts(array $state): array
+    {
+        return ['products' => $state['datasets']['parts']['total'] ?? 0, 'cars' => $state['datasets']['cars']['total'] ?? 0, 'orders' => $state['datasets']['orders']['total'] ?? 0, 'order_items' => $state['datasets']['order_items']['total'] ?? 0, 'photo_rows' => $state['datasets']['part_images']['total'] ?? 0, 'categories' => $state['datasets']['part_categories']['total'] ?? 0, 'storage_locations' => $state['datasets']['storage_locations']['total'] ?? 0, 'sold_parts' => $state['datasets']['parts']['sold_count'] ?? 0, 'parts_to_list' => $state['datasets']['parts']['to_list_count'] ?? 0, 'statuses' => $state['datasets']['parts']['status_counts'] ?? [], 'dataset_counts' => array_map(fn ($d) => $d['total'], $state['datasets'])];
     }
 
     private function trace(string $directory, array $trace): void
@@ -214,9 +249,10 @@ final class BrowserMigrationSnapshot
         $index = $this->index($directory, $attempt);
         $current = $index['current_dataset'];
         $descriptor = $current !== null ? ($index['datasets'][$current] ?? []) : [];
+        $operatorStage = isset($index['operator_finalization']) ? CompactSnapshotProgress::project($index)['operator_finalize_stage'] : null;
 
         return array_intersect_key($index, array_flip(['consistency_exception', 'operator_finalization', 'parts_recovery_outcome', 'dataset_recovery', 'dataset_boundary_history', 'source_conflict', 'format', 'attempt_id', 'stage', 'done', 'failed', 'current_dataset', 'processed', 'verified', 'total', 'last_success', 'last_error', 'next_action', 'database_consistency']))
-            + ['exported_records' => $index['processed'], 'verification_processed' => $index['verified'], 'phase' => 'snapshot_'.$index['stage'], 'cursor' => $index['cursor'] ?? null, 'remaining' => max(0, $index['total'] - $index['processed']),
+            + ['operator_finalize_stage' => $operatorStage, 'exported_records' => $index['processed'], 'verification_processed' => $index['verified'], 'phase' => 'snapshot_'.$index['stage'], 'cursor' => $index['cursor'] ?? null, 'remaining' => max(0, $index['total'] - $index['processed']),
                 'datasets' => array_map(fn ($d) => array_intersect_key($d, array_flip(['available', 'processed', 'verified', 'total', 'cursor', 'max_key', 'boundary_frozen_at', 'checksum_partial', 'done'])), $index['datasets'])];
     }
 
@@ -250,7 +286,7 @@ final class BrowserMigrationSnapshot
 
         return $state + ['exported_records' => $processed, 'verification_processed' => $verified, 'phase' => 'snapshot_'.$state['stage'], 'cursor' => $state['stage'] === 'operator_finalize' ? array_intersect_key($state['operator_finalization'], array_flip(['dataset_index', 'shard', 'artifacts_checked'])) : ($current !== null ? ($state['datasets'][$current]['cursor'] ?? null) : null),
             'relations' => array_map(fn ($d) => $d['relations'] ?? [], $state['datasets']),
-            'source_counts' => ['products' => $state['datasets']['parts']['total'] ?? 0, 'cars' => $state['datasets']['cars']['total'] ?? 0, 'orders' => $state['datasets']['orders']['total'] ?? 0, 'order_items' => $state['datasets']['order_items']['total'] ?? 0, 'photo_rows' => $state['datasets']['part_images']['total'] ?? 0, 'categories' => $state['datasets']['part_categories']['total'] ?? 0, 'storage_locations' => $state['datasets']['storage_locations']['total'] ?? 0, 'sold_parts' => $state['datasets']['parts']['sold_count'] ?? 0, 'parts_to_list' => $state['datasets']['parts']['to_list_count'] ?? 0, 'statuses' => $state['datasets']['parts']['status_counts'] ?? [], 'dataset_counts' => array_map(fn ($d) => $d['total'], $state['datasets'])], 'done' => $state['stage'] === 'completed', 'failed' => $state['stage'] === 'failed', 'current_dataset' => $current,
+            'source_counts' => $this->sourceCounts($state), 'done' => $state['stage'] === 'completed', 'failed' => $state['stage'] === 'failed', 'current_dataset' => $current,
             'processed' => $processed, 'verified' => $verified, 'total' => array_sum(array_column($state['datasets'], 'total')),
             'next_action' => match ($state['stage']) {
                 'completed' => 'photo_inventory_tick', 'failed' => 'retry_snapshot_required', default => 'snapshot_tick'

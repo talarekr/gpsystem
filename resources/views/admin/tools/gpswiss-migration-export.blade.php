@@ -91,7 +91,8 @@
   const progress=state?.snapshot_progress ?? {},dataset=state?.current_dataset ?? progress.current_dataset ?? progress.dataset;
   const total=state && Object.hasOwn(state,'total')?(state.total ?? '—'):(progress.total ?? state?.total_images ?? '—');
   el('progress').textContent=state?'Run: '+id+' | Stan: '+state.state+' | Faza: '+(state.phase ?? state.state)+' | Zbiór: '+(dataset ?? '—')+' | Postęp: '+(state.processed ?? progress.processed ?? state.processed_images ?? 0)+' / '+total+' | Cursor: '+cursorText(state.dataset_cursor ?? state.cursor ?? progress.cursor)+' | Następny krok: '+nextAction():'';
-  if(state?.exported_records!=null)el('progress').textContent+=' | Wyeksportowane rekordy: '+state.exported_records+' / '+total+' | Zweryfikowane: '+state.verification_processed;
+  if(state?.exported_records!=null)el('progress').textContent+=' | Wyeksportowane rekordy: '+state.exported_records+' / '+(state.record_capture_total??state.snapshot_progress?.total??total)+' | Zweryfikowane: '+state.verification_processed;
+  if(state?.operator_finalize_stage)el('progress').textContent+=' | Etap finalizacji: '+state.operator_finalize_stage;
   if(state?.dataset_recovery)el('progress').textContent+=' | Kontrola starej generacji: '+state.dataset_recovery.preflight_shard+' / '+state.dataset_recovery.preflight_total_shards;
   if(state?.mutable_dirty_rows!=null)el('progress').textContent+=' | Dirty wiersze: '+state.mutable_dirty_rows+' | Dirty shardy: '+state.mutable_dirty_shards+' | Runda weryfikacji: '+state.mutable_round;
   if(state?.dataset_generation!=null)el('progress').textContent+=' | Generacja datasetu: '+state.dataset_generation;
@@ -119,7 +120,7 @@
  function checkpoint(){
   const p=state?.snapshot_progress??{},w=state?.dataset_recovery??p.dataset_recovery??{};
   return {run_id:state?.run_id??id,attempt_id:state?.snapshot_attempt_id??state?.attempt_id??null,
-   phase:state?.phase??p.phase??null,dataset:state?.current_dataset??p.current_dataset??null,
+   phase:state?.phase??p.phase??null,operator_finalize_stage:state?.operator_finalize_stage??p.operator_finalize_stage??null,snapshot_stage:state?.snapshot_stage??p.stage??null,dataset:state?.current_dataset??p.current_dataset??null,
    generation:w.new_generation??state?.dataset_generation??p.dataset_generation??null,boundary:w.dataset_boundary_id??state?.dataset_boundary_id??p.dataset_boundary_id??null,
    preflight_shard:w.preflight_shard??null,cursor:state?.dataset_cursor??state?.cursor??p.cursor??null,
    processed:state?.processed??p.processed??null,exported_records:state?.exported_records??p.exported_records??null,
@@ -137,7 +138,7 @@
  }
  function safeBackend(value){
   if(!value || typeof value!=='object')return null;
-  return Object.fromEntries(['action','route_name','reason_code','duration_ms','backend_exception_class','current_dataset','cursor_before','cursor_after','records_attempted','records_completed','dataset_generation','preflight_shard_before','preflight_shard_after','artifacts_checked'].filter(k=>Object.hasOwn(value,k)).map(k=>[k,value[k]]));
+  return Object.fromEntries(['action','route_name','reason_code','duration_ms','backend_exception_class','current_dataset','cursor_before','cursor_after','records_attempted','records_completed','dataset_generation','preflight_shard_before','preflight_shard_after','artifacts_checked','operator_finalize_stage','safe_exception_category','dataset_index','artifact_offset_before','artifact_offset_after','relation_offset_before','relation_offset_after','manifest_package_stage','stage_before','stage_after','request_phase'].filter(k=>Object.hasOwn(value,k)).map(k=>[k,value[k]]));
  }
  const recoveryKey='gpswiss-export-last-operational-state';
  function remember(){
@@ -163,7 +164,7 @@
    if([401,419].includes(response.status))throw Object.assign(new Error('SESSION_EXPIRED'),{reason:'SESSION_EXPIRED',http:response.status});
    const body=await response.text();diagnostic.response_bytes=new TextEncoder().encode(body).length;
    let data;try{data=JSON.parse(body);}catch(_){data=null;diagnostic.malformed_json=true;}
-   diagnostic.server_reason_code=reasonOf(data,reasonOf(data?.status_request_diagnostic,null));diagnostic.status_response_bytes=isStatus?diagnostic.response_bytes:null;diagnostic.server_status_response_bytes=data?.status_response_bytes??null;diagnostic.backend=safeBackend(isStatus?(data?.status_request_diagnostic??null):(data?.tick_diagnostic??data?.last_tick??null));diagnostic.last_status_error=safeBackend(isStatus?data?.last_status_error:null);diagnostic.backend_exception_class=data?.backend_exception_class??(isStatus?data?.status_request_diagnostic?.backend_exception_class:data?.tick_diagnostic?.backend_exception_class)??null;
+   diagnostic.server_reason_code=reasonOf(data,reasonOf(data?.status_request_diagnostic,null));diagnostic.status_response_bytes=isStatus?diagnostic.response_bytes:null;diagnostic.server_status_response_bytes=data?.status_response_bytes??null;diagnostic.backend=safeBackend(isStatus?(data?.status_request_diagnostic??null):(data?.tick_diagnostic??data?.last_tick??null));diagnostic.last_status_error=safeBackend(isStatus?data?.last_status_error:null);diagnostic.operator_finalize=safeBackend(data?.operator_finalize_diagnostic);diagnostic.backend_exception_class=data?.backend_exception_class??data?.operator_finalize_diagnostic?.backend_exception_class??(isStatus?data?.status_request_diagnostic?.backend_exception_class:data?.tick_diagnostic?.backend_exception_class)??null;
    diagnostic.backend_evidence=data?.tick_diagnostic?'response_tick_diagnostic':data?.last_tick?'last_recorded_tick_not_http_error_cause':null;
    if([401,419].includes(response.status))throw Object.assign(new Error('SESSION_EXPIRED'),{reason:'SESSION_EXPIRED',http:response.status});
    if(!response.ok)throw Object.assign(new Error('http_error'),{reason:reasonOf(data,'http_'+response.status),http:response.status});
@@ -185,8 +186,8 @@
 
  function stop(error){
   if(error.reason==='local_stop'){active=false;return;}
-  if(resumeTraceActive)resumeEvent('blocked',error.reason ?? 'unknown_local_error');
   active=false;retryExhausted=transient(error) || error.reason==='status_fetch_retry_exhausted';
+  if(resumeTraceActive)resumeEvent('blocked',error.reason ?? 'unknown_local_error');
   if(error.reason==='SESSION_EXPIRED'){
    sessionExpired=true;el('login').hidden=false;
    el('message').textContent='SESSION_EXPIRED / HTTP '+(error.http ?? 419)+' — checkpoint pozostaje na serwerze. Zaloguj się ponownie i odśwież panel; potem Wznów istniejący eksport.';

@@ -49,6 +49,9 @@ final class BrowserMigrationExport
         return $this->locked($dir, function () use ($dir, $expected, $sourceFingerprint): void {
             $state = $this->read($dir.'/state.json');
             $this->attempt($state, $expected);
+            if (OperatorFinalizationDiagnostics::active($state)) {
+                throw new MigrationExportException('operator_finalization_restart_forbidden', 409);
+            }
             if (! in_array($state['state'], ['snapshot_pending', 'snapshot_running', 'snapshot_paused', 'snapshot_failed'], true)
                 || ($state['processed_images'] ?? 0) !== 0 || is_dir($dir.'/images') || is_file($dir.'/photos.jsonl') || is_dir($dir.'/archive-volumes')) {
                 throw new MigrationExportException('snapshot_retry_not_allowed', 409);
@@ -216,6 +219,11 @@ final class BrowserMigrationExport
             $state['phase'] = $result['done'] ? 'relation_audit' : $result['phase'];
             if ($result['done']) {
                 $state['source_counts'] = $result['source_counts'];
+                if (OperatorFinalizationDiagnostics::active($state)) {
+                    $state['exported_records'] = $result['exported_records'];
+                    $state['record_capture_total'] = $result['total'];
+                    $state['verification_processed'] = $result['verification_processed'];
+                }
                 $state['inventory'] = ['dataset' => 0, 'shard' => 0, 'row' => 0, 'tasks' => 0, 'bytes' => 0, 'chain' => hash('sha256', ''), 'sample_ids' => [], 'sold_bytes' => 0, 'to_list_bytes' => 0];
             }
         }
@@ -428,11 +436,16 @@ final class BrowserMigrationExport
             $current = ['current_dataset' => $state['phase'], 'processed' => $retryProgress['processed'], 'total' => $checkpoint['photo_retry']['count'], 'cursor' => $state['phase'] === 'photos_retry_inventory' ? $checkpoint['photo_retry']['tasks_offset'] : $retryProgress['task_offset']];
         }
 
-        if (! $snapshotActive || $state['phase'] === 'photo_inventory') {
+        if (! $snapshotActive || in_array($state['phase'], ['photo_inventory', 'relation_audit'], true)) {
             $current = $this->pipelineProgress($dir, $checkpoint);
         }
+        if (OperatorFinalizationDiagnostics::active($state) && $state['phase'] === 'snapshot_operator_finalize' && ($progress['stage'] ?? null) === 'completed') {
+            $current['phase'] = 'snapshot_operator_finalize';
+            $current['snapshot_stage'] = 'completed';
+        }
 
-        return array_replace($state, $current, [
+        return OperatorFinalizationDiagnostics::decorate(array_replace($state, $current, [
+            'operator_finalize_diagnostic' => app(OperatorFinalizationDiagnostics::class)->read($dir),
             'operator_parts_drift_allowed' => BrowserMigrationSnapshot::operatorDriftAvailable(array_replace($state, $progress)),
             'dataset_recovery_allowed' => $this->datasetRecoveryAllowed(array_replace($state, $progress), $state),
             'next_action' => $next, 'busy' => $busy, 'resume_allowed' => ! in_array($next, ['blocked', 'download'], true),
@@ -447,10 +460,10 @@ final class BrowserMigrationExport
                 && array_sum(array_intersect_key($state['photo_results'] ?? [], array_flip(['COPY_FAILED', 'UNREADABLE_ORIGINAL', 'INSUFFICIENT_DISK_SPACE']))) > 0,
             'remaining' => $snapshotActive ? ($progress['remaining'] ?? 0) : max(0, ($state['total_images'] ?? 0) - ($state['processed_images'] ?? 0)),
             'snapshot_file_exists' => is_file($dir.'/snapshot.json'), 'snapshot_tasks_file_exists' => is_file($dir.'/photo-tasks.jsonl'),
-            'artifacts_present' => is_file($dir.'/snapshot.json'), 'owner_match' => true,
+            'artifacts_present' => is_file($dir.'/snapshot.json') || (($progress['done'] ?? false) && OperatorFinalizationDiagnostics::active($state)), 'owner_match' => true,
             'database_writes' => false, 'source_file_writes' => false, 'provider_calls' => false, 'allegro_writes' => false,
             'marketplace_writes' => false, 'automatic_publish' => false, 'import_performed' => false, 'export_file_writes' => true,
-        ]);
+        ]));
     }
 
     /** O(1) polling: only a bounded operational file and small diagnostics, never the export index. */
@@ -497,6 +510,9 @@ final class BrowserMigrationExport
                     $data[$key] = $diagnostic;
                 }
             }
+
+            $data = OperatorFinalizationDiagnostics::decorate($data);
+            $data['operator_finalize_diagnostic'] = app(OperatorFinalizationDiagnostics::class)->read($dir);
 
             return $this->filterCompact($data);
         } finally {
@@ -548,6 +564,7 @@ final class BrowserMigrationExport
         $checkpoint = $dir.'/logical-snapshot/'.$state['snapshot_attempt_id'].'/checkpoint.json';
         $data['checkpoint_fingerprint'] = is_file($checkpoint) ? app(CompactSnapshotProgress::class)->fingerprint($checkpoint) : null;
         unset($data['last_tick'], $data['last_status_error']);
+        $data = OperatorFinalizationDiagnostics::decorate($data);
         $bytes = json_encode($data, JSON_THROW_ON_ERROR);
         if (strlen($bytes) > 8192) {
             throw new MigrationExportException('operational_progress_budget_exceeded', 500);
@@ -560,7 +577,12 @@ final class BrowserMigrationExport
     {
         $phase = $state['phase'];
         $result = ['current_dataset' => $phase, 'processed' => $state['processed_images'] ?? 0, 'total' => $state['total_images'] ?? null, 'cursor' => null];
-        if ($phase === 'photo_inventory') {
+        if ($phase === 'relation_audit') {
+            $audit = $this->relations->status($dir, $state['snapshot_attempt_id']);
+            $result['processed'] = $audit['processed'];
+            $result['total'] = $audit['total'];
+            $result['cursor'] = array_intersect_key($audit, array_flip(['current_dataset_index', 'shard_index', 'row_index', 'probes']));
+        } elseif ($phase === 'photo_inventory') {
             $result['processed'] = $state['inventory']['tasks'] ?? 0;
             $result['total'] = null;
             $result['cursor'] = array_intersect_key($state['inventory'] ?? [], array_flip(['dataset', 'shard', 'row', 'tasks']));
@@ -616,7 +638,7 @@ final class BrowserMigrationExport
     public function filterCompact(array $data): array
     {
         return array_intersect_key($data, array_flip(['run_id', 'schema_version', 'snapshot_attempt_id', 'snapshot_mode', 'state', 'phase',
-            'operator_parts_drift_allowed', 'consistency_exception', 'operator_finalization', 'current_dataset', 'processed', 'total', 'remaining', 'cursor', 'next_action', 'busy', 'resume_allowed', 'blocked_reason',
+            'record_capture_total', 'operator_finalize_stage', 'operator_finalize_diagnostic', 'operator_parts_drift_allowed', 'consistency_exception', 'operator_finalization', 'current_dataset', 'processed', 'total', 'remaining', 'cursor', 'next_action', 'busy', 'resume_allowed', 'blocked_reason',
             'last_success', 'last_error', 'snapshot_state', 'snapshot_stage', 'snapshot_retry_allowed', 'snapshot_abort_allowed', 'photo_retry_allowed', 'last_tick', 'last_status_error', 'attempt_id', 'last_tick_reason', 'checkpoint_fingerprint', 'progress_unavailable', 'dataset_generation', 'dataset_boundary_id', 'previous_boundary_id', 'boundary_refreshed_at', 'recovery_reason', 'consistency_mode', 'dataset_recovery', 'dataset_recovery_allowed', 'recovery_reason_code', 'source_conflict', 'recovery_strategy', 'mutable_round', 'mutable_dirty_rows', 'mutable_dirty_shards', 'mutable_reused_shards', 'exported_records', 'verification_processed']));
     }
 
@@ -1006,9 +1028,25 @@ final class BrowserMigrationExport
         try {
             $operation();
         } catch (MigrationExportException $error) {
+            $root = $this->read($dir.'/state.json');
+            if (OperatorFinalizationDiagnostics::active($root) && OperatorFinalizationDiagnostics::controlledReason($error->reasonCode)) {
+                $root['state'] = $root['snapshot_state'] = 'snapshot_failed';
+                $root['last_error'] = $error->reasonCode;
+                $this->write($dir.'/state.json', $root);
+            }
             throw $error;
-        } catch (\Throwable) {
+        } catch (\Throwable $error) {
             $state = $this->read($dir.'/state.json');
+            if (OperatorFinalizationDiagnostics::active($state) && in_array($state['phase'], ['snapshot_operator_finalize', 'relation_audit', 'photo_inventory'], true)) {
+                $reason = $error instanceof \JsonException ? 'operator_finalization_invalid_json' : OperatorFinalizationDiagnostics::controlledReason($error->getMessage());
+                if ($reason === null) {
+                    throw $error;
+                }
+                $state['state'] = $state['snapshot_state'] = 'snapshot_failed';
+                $state['last_error'] = $reason;
+                $this->write($dir.'/state.json', $state);
+                throw new MigrationExportException($reason, 409, ['backend_exception_class' => str_contains(get_class($error), '@anonymous') ? 'AnonymousThrowable' : get_class($error)]);
+            }
             if ($recoverable) {
                 $state['resume_state'] = $state['state'];
                 $state['state'] = 'failed';
