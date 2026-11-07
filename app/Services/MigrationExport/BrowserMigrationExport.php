@@ -86,6 +86,31 @@ final class BrowserMigrationExport
         });
     }
 
+    public function acceptPartsDrift(string $dir, ?string $expected, string $sourceFingerprint, int $operator): array
+    {
+        return $this->locked($dir, function () use ($dir, $expected, $sourceFingerprint, $operator): void {
+            $state = $this->read($dir.'/state.json');
+            $this->attempt($state, $expected);
+            if (($state['snapshot_source_fingerprint'] ?? null) !== $sourceFingerprint) {
+                throw new MigrationExportException('snapshot_source_context_mismatch', 409);
+            }
+            if (($state['consistency_exception']['accepted_by_operator'] ?? false) === true) {
+                return;
+            }
+            if (! in_array($state['state'], ['snapshot_running', 'snapshot_failed', 'snapshot_paused'], true)
+                || ! in_array($state['last_error'] ?? null, [null, 'snapshot_row_updated_after_cutoff', 'snapshot_mutable_dataset_unstable'], true)) {
+                throw new MigrationExportException('operator_parts_drift_not_allowed', 409);
+            }
+            $result = $this->snapshots->acceptKnownPartsDrift($dir, (string) $expected, $operator);
+            $state['consistency_exception'] = $result['consistency_exception'];
+            $state['state'] = $state['snapshot_state'] = 'snapshot_running';
+            $state['phase'] = $result['phase'];
+            $state['last_error'] = null;
+            unset($state['dataset_recovery'], $state['snapshot_paused_from']);
+            $this->write($dir.'/state.json', $state);
+        });
+    }
+
     /** No status dependency: preflight under the same lease as the ONE bounded unit of work. */
     public function kick(string $dir, string $expected, string $sourceFingerprint): array
     {
@@ -122,6 +147,9 @@ final class BrowserMigrationExport
                 $state['state'] = $state['snapshot_state'] = 'snapshot_running';
                 $state['phase'] = $result['phase'];
                 $state['dataset_recovery'] = $result['dataset_recovery'] ?? null;
+                if (isset($result['consistency_exception'])) {
+                    $state['consistency_exception'] = $result['consistency_exception'];
+                }
                 $state['last_error'] = null;
                 $this->write($dir.'/state.json', $state);
                 $reason = 'recovery_started';
@@ -130,10 +158,10 @@ final class BrowserMigrationExport
             }
             $reason = match (true) {
                 $state['state'] === 'completed' => 'completed',
-                $state['state'] === 'snapshot_paused' => 'paused',
+                in_array($state['state'], ['snapshot_paused', 'pipeline_paused'], true) => 'paused',
                 in_array($state['state'], ['snapshot_failed', 'failed', 'snapshot_aborted'], true) => 'run_failed',
-                $state['state'] !== 'snapshot_running' => 'state_not_runnable',
-                ! in_array($state['phase'], ['snapshot_boundaries', 'snapshot_export', 'snapshot_verify', 'snapshot_recovery_preflight', 'relation_audit', 'photo_inventory'], true) => 'state_not_runnable',
+                ! in_array($state['state'], ['snapshot_running', 'photos', 'archive'], true) => 'state_not_runnable',
+                $state['state'] === 'snapshot_running' && ! in_array($state['phase'], ['snapshot_boundaries', 'snapshot_export', 'snapshot_verify', 'snapshot_recovery_preflight', 'snapshot_operator_finalize', 'relation_audit', 'photo_inventory'], true) => 'state_not_runnable',
                 default => 'tick_completed',
             };
             if ($reason !== 'tick_completed') {
@@ -142,7 +170,12 @@ final class BrowserMigrationExport
             if (($state['snapshot_source_fingerprint'] ?? null) !== $sourceFingerprint) {
                 throw new MigrationExportException('snapshot_source_context_mismatch', 409);
             }
-            $this->performSnapshotTick($dir, $state);
+            if (in_array($state['state'], ['photos', 'archive'], true)) {
+                $this->performDataTick($dir, $state);
+                $this->write($dir.'/state.json', $state);
+            } else {
+                $this->performSnapshotTick($dir, $state);
+            }
             if ($state['last_error'] ?? null) {
                 $reason = $state['last_error'];
             }
@@ -173,6 +206,9 @@ final class BrowserMigrationExport
         } elseif (in_array($state['state'], ['snapshot_pending', 'snapshot_running'], true)) {
             $result = $this->snapshots->tick($dir, $state['snapshot_attempt_id']);
             $state['dataset_recovery'] = $result['dataset_recovery'] ?? null;
+            if (isset($result['consistency_exception'])) {
+                $state['consistency_exception'] = $result['consistency_exception'];
+            }
             $state['last_error'] = $result['last_error'];
             $state['last_success'] = $result['last_success'];
             $state['state'] = $result['failed'] ? 'snapshot_failed' : ($result['done'] ? 'snapshot_completed' : 'snapshot_running');
@@ -190,6 +226,11 @@ final class BrowserMigrationExport
     {
         return $this->locked($dir, function () use ($dir): void {
             $state = $this->read($dir.'/state.json');
+            if (in_array($state['state'], ['photos', 'archive'], true)) {
+                $state['pipeline_paused_from'] = $state['state'];
+                $state['state'] = 'pipeline_paused';
+                $this->write($dir.'/state.json', $state);
+            }
             if (in_array($state['state'], ['snapshot_pending', 'snapshot_running', 'snapshot_completed'], true)) {
                 $state['snapshot_paused_from'] = $state['state'];
                 $state['state'] = $state['snapshot_state'] = 'snapshot_paused';
@@ -215,6 +256,13 @@ final class BrowserMigrationExport
                 $state['phase'] = $result['phase'];
                 $state['last_error'] = null;
                 $state['dataset_recovery'] = $result['dataset_recovery'] ?? null;
+                if (isset($result['consistency_exception'])) {
+                    $state['consistency_exception'] = $result['consistency_exception'];
+                }
+            }
+            if ($state['state'] === 'pipeline_paused') {
+                $state['state'] = $state['pipeline_paused_from'];
+                unset($state['pipeline_paused_from']);
             }
             if ($state['state'] === 'snapshot_paused') {
                 $state['state'] = $state['snapshot_state'] = $state['snapshot_paused_from'] ?? 'snapshot_running';
@@ -250,68 +298,75 @@ final class BrowserMigrationExport
     {
         return $this->locked($dir, function () use ($dir): void {
             $state = $this->read($dir.'/state.json');
-            if ($state['state'] === 'photos' && $state['phase'] === 'photos_retry_setup') {
-                $this->finishPhotoRetrySetup($dir, $state);
-            } elseif ($state['state'] === 'photos' && $state['phase'] === 'photos_retry_inventory') {
-                $this->retryInventory($dir, $state);
-            } elseif ($state['state'] === 'photos' && $state['phase'] === 'photos_retry') {
-                $deadline = microtime(true) + 1.5;
-                for ($n = 0; $n < 4 && ($n === 0 || microtime(true) < $deadline); $n++) {
-                    $result = $this->photos->tick($dir, $state['photo_retry']['tasks_file'], $deadline, $state['photo_retry']['generation']);
-                    if ($result['done']) {
-                        break;
-                    }
-                }
-                $state['last_success'] = $result['last_success'];
-                if ($result['done']) {
-                    $state['photo_retry_generations'][] = ['generation' => $state['photo_retry']['generation'], 'planned' => $state['photo_retry']['count'], 'results' => $result['photo_results']];
-                    unset($state['photo_retry']);
-                    $this->startPackaging($state);
-                }
-            } elseif ($state['state'] === 'photos') {
-                $deadline = microtime(true) + 1.5;
-                for ($n = 0; $n < 4 && ($n === 0 || microtime(true) < $deadline); $n++) {
-                    $result = $this->photos->tick($dir, 'photo-tasks.jsonl', $deadline);
-                    if ($result['done']) {
-                        break;
-                    }
-                }
-                $state['processed_images'] = $result['processed'];
-                $state['photo_results'] = $result['photo_results'];
-                $state['last_success'] = $result['last_success'];
-                if ($result['done']) {
-                    if ($state['photo_retry_requested'] ?? false) {
-                        $this->startPhotoRetry($dir, $state);
-                    } else {
-                        $this->startPackaging($state);
-                    }
-                }
-            } elseif ($state['state'] === 'archive' && $state['phase'] === 'archive_index') {
-                $this->packageIndex($dir, $state);
-            } elseif ($state['state'] === 'archive' && $state['phase'] === 'archive_sample') {
-                $result = $this->sample->tick($dir, $state['snapshot_attempt_id']);
-                $state['last_success'] = $result['last_success'];
-                if ($result['done']) {
-                    $state['sample_ids'] = $result['sample_ids'];
-                    $state['phase'] = 'archive_sample_volumes';
-                }
-            } elseif ($state['state'] === 'archive' && $state['phase'] === 'archive_sample_volumes') {
-                $result = $this->archives->tick($dir, 'sample-archive-input.jsonl', null, 'sample');
-                $state['last_success'] = $result['last_success'] ?? null;
-                if ($result['done']) {
-                    $state['sample_download_artifacts'] = $this->downloads($dir, $result, 'sample');
-                    $state['phase'] = 'archive_index';
-                }
-            } elseif ($state['state'] === 'archive') {
-                $result = $this->archives->tick($dir, 'archive-input.jsonl');
-                $state['last_success'] = $result['last_success'] ?? null;
-                if ($result['done']) {
-                    $state['state'] = $state['phase'] = 'completed';
-                    $state['download_artifacts'] = [...($state['sample_download_artifacts'] ?? []), ...$this->downloads($dir, $result)];
-                }
-            }
+            $this->performDataTick($dir, $state);
             $this->write($dir.'/state.json', $state);
         }, true);
+    }
+
+    private function performDataTick(string $dir, array &$state): void
+    {
+        if ($state['state'] === 'photos' && $state['phase'] === 'photos_retry_setup') {
+            $this->finishPhotoRetrySetup($dir, $state);
+        } elseif ($state['state'] === 'photos' && $state['phase'] === 'photos_retry_inventory') {
+            $this->retryInventory($dir, $state);
+        } elseif ($state['state'] === 'photos' && $state['phase'] === 'photos_retry') {
+            $deadline = microtime(true) + 1.5;
+            for ($n = 0; $n < 4 && ($n === 0 || microtime(true) < $deadline); $n++) {
+                $result = $this->photos->tick($dir, $state['photo_retry']['tasks_file'], $deadline, $state['photo_retry']['generation']);
+                if ($result['done']) {
+                    break;
+                }
+            }
+            $state['last_success'] = $result['last_success'];
+            if ($result['done']) {
+                $state['photo_retry_generations'][] = ['generation' => $state['photo_retry']['generation'], 'planned' => $state['photo_retry']['count'], 'results' => $result['photo_results']];
+                unset($state['photo_retry']);
+                $this->startPackaging($state);
+            }
+        } elseif ($state['state'] === 'photos') {
+            $deadline = microtime(true) + 1.5;
+            for ($n = 0; $n < 4 && ($n === 0 || microtime(true) < $deadline); $n++) {
+                $result = $this->photos->tick($dir, 'photo-tasks.jsonl', $deadline);
+                if ($result['done']) {
+                    break;
+                }
+            }
+            $state['processed_images'] = $result['processed'];
+            $state['photo_results'] = $result['photo_results'];
+            $state['last_success'] = $result['last_success'];
+            if ($result['done']) {
+                if ($state['photo_retry_requested'] ?? false) {
+                    $this->startPhotoRetry($dir, $state);
+                } else {
+                    $this->startPackaging($state);
+                }
+            }
+        } elseif ($state['state'] === 'archive' && $state['phase'] === 'archive_index') {
+            $this->packageIndex($dir, $state);
+        } elseif ($state['state'] === 'archive' && $state['phase'] === 'archive_sample') {
+            $result = $this->sample->tick($dir, $state['snapshot_attempt_id']);
+            $state['last_success'] = $result['last_success'];
+            if ($result['done']) {
+                $state['sample_ids'] = $result['sample_ids'];
+                $state['phase'] = 'archive_sample_volumes';
+            }
+        } elseif ($state['state'] === 'archive' && $state['phase'] === 'archive_sample_volumes') {
+            $result = $this->archives->tick($dir, 'sample-archive-input.jsonl', null, 'sample');
+            $state['last_success'] = $result['last_success'] ?? null;
+            if ($result['done']) {
+                $state['sample_download_artifacts'] = $this->downloads($dir, $result, 'sample');
+                $state['phase'] = 'archive_index';
+            }
+        } elseif ($state['state'] === 'archive' && $state['phase'] === 'archive_catalog') {
+            $this->finishCatalog($dir, $state);
+        } elseif ($state['state'] === 'archive') {
+            $result = $this->archives->tick($dir, 'archive-input.jsonl');
+            $state['last_success'] = $result['last_success'] ?? null;
+            if ($result['done']) {
+                $state['phase'] = 'archive_catalog';
+                $state['package_catalog'] = ['offset' => 0, 'hash' => SerializableSha256::initial(), 'source_fingerprint' => app(CompactSnapshotProgress::class)->fingerprint($dir.'/archive-input.jsonl')];
+            }
+        }
     }
 
     public function status(string $dir, ?array $state = null, ?bool $busy = null): array
@@ -340,7 +395,7 @@ final class BrowserMigrationExport
         $snapshotActive = in_array($state['state'], ['snapshot_pending', 'snapshot_running', 'snapshot_completed', 'snapshot_paused', 'snapshot_failed'], true);
         $next = match (true) {
             $busy => 'wait', $state['state'] === 'completed' => 'download',
-            $state['state'] === 'snapshot_paused', isset($state['resume_state']) => 'resume',
+            in_array($state['state'], ['snapshot_paused', 'pipeline_paused'], true), isset($state['resume_state']) => 'resume',
             $this->datasetRecoveryAllowed(array_replace($state, $progress ?? []), $state) => 'resume',
             in_array($state['state'], ['snapshot_failed', 'snapshot_aborted', 'failed'], true) => 'blocked',
             $snapshotActive => 'snapshot_tick', default => 'tick',
@@ -373,7 +428,12 @@ final class BrowserMigrationExport
             $current = ['current_dataset' => $state['phase'], 'processed' => $retryProgress['processed'], 'total' => $checkpoint['photo_retry']['count'], 'cursor' => $state['phase'] === 'photos_retry_inventory' ? $checkpoint['photo_retry']['tasks_offset'] : $retryProgress['task_offset']];
         }
 
+        if (! $snapshotActive || $state['phase'] === 'photo_inventory') {
+            $current = $this->pipelineProgress($dir, $checkpoint);
+        }
+
         return array_replace($state, $current, [
+            'operator_parts_drift_allowed' => BrowserMigrationSnapshot::operatorDriftAvailable(array_replace($state, $progress)),
             'dataset_recovery_allowed' => $this->datasetRecoveryAllowed(array_replace($state, $progress), $state),
             'next_action' => $next, 'busy' => $busy, 'resume_allowed' => ! in_array($next, ['blocked', 'download'], true),
             'blocked_reason' => $next === 'blocked' ? ($state['last_error'] ?? $state['state']) : null,
@@ -427,6 +487,7 @@ final class BrowserMigrationExport
                 $data['resume_allowed'] = true;
                 $data['snapshot_retry_allowed'] = false;
             }
+            $data['operator_parts_drift_allowed'] = BrowserMigrationSnapshot::operatorDriftAvailable($data);
             $data['busy'] = $busy;
             if ($busy) {
                 $data['next_action'] = 'wait';
@@ -463,14 +524,10 @@ final class BrowserMigrationExport
     {
         $snapshot = in_array($state['state'], ['snapshot_pending', 'snapshot_running', 'snapshot_paused', 'snapshot_failed', 'snapshot_completed'], true);
         $logical = $snapshot && ! in_array($state['phase'], ['photo_inventory', 'relation_audit'], true);
-        $progress = $logical ? app(CompactSnapshotProgress::class)->read($dir, $state['snapshot_attempt_id']) : [
-            'processed' => $state['phase'] === 'photo_inventory' ? ($state['inventory']['tasks'] ?? 0) : ($state['processed_images'] ?? 0),
-            'total' => $state['phase'] === 'photo_inventory' ? null : ($state['total_images'] ?? null),
-            'cursor' => $state['inventory']['row'] ?? $state['package']['cursor'] ?? null, 'current_dataset' => $state['phase'],
-        ];
+        $progress = $logical ? app(CompactSnapshotProgress::class)->read($dir, $state['snapshot_attempt_id']) : $this->pipelineProgress($dir, $state);
         $next = match (true) {
             $state['state'] === 'completed' => 'download',
-            $state['state'] === 'snapshot_paused', isset($state['resume_state']) => 'resume',
+            in_array($state['state'], ['snapshot_paused', 'pipeline_paused'], true), isset($state['resume_state']) => 'resume',
             $this->datasetRecoveryAllowed(array_replace($state, $progress ?? []), $state) => 'resume',
             in_array($state['state'], ['snapshot_failed', 'snapshot_aborted', 'failed'], true) => 'blocked',
             $snapshot => 'snapshot_tick', default => 'tick',
@@ -498,12 +555,47 @@ final class BrowserMigrationExport
         $this->write($dir.'/operational-progress.json', $data);
     }
 
+    /** Small checkpoints only: byte/fragment progress matters even before an image completes. */
+    private function pipelineProgress(string $dir, array $state): array
+    {
+        $phase = $state['phase'];
+        $result = ['current_dataset' => $phase, 'processed' => $state['processed_images'] ?? 0, 'total' => $state['total_images'] ?? null, 'cursor' => null];
+        if ($phase === 'photo_inventory') {
+            $result['processed'] = $state['inventory']['tasks'] ?? 0;
+            $result['total'] = null;
+            $result['cursor'] = array_intersect_key($state['inventory'] ?? [], array_flip(['dataset', 'shard', 'row', 'tasks']));
+        } elseif (in_array($phase, ['photos', 'photos_retry'], true)) {
+            $photo = $this->photos->status($dir, $phase === 'photos_retry' ? $state['photo_retry']['generation'] : 'initial');
+            $result['processed'] = $photo['processed'];
+            $result['total'] = $state['photo_retry']['count'] ?? $result['total'];
+            $result['cursor'] = array_intersect_key($photo, array_flip(['task_offset', 'current_image_offset', 'current_copy_index', 'current_image_phase']));
+        } elseif ($phase === 'archive_sample') {
+            $sample = $this->sample->status($dir, $state['snapshot_attempt_id']);
+            $result['processed'] = $sample['processed'];
+            $result['total'] = $sample['total'];
+            $result['cursor'] = $sample['cursor'] ?? ['stage' => $sample['stage']];
+        } elseif (in_array($phase, ['archive_volumes', 'archive_sample_volumes'], true) || $state['state'] === 'completed') {
+            $archive = $this->archives->status($dir, $phase === 'archive_sample_volumes' ? 'sample' : 'full');
+            $result['processed'] = $archive['artifact_count'];
+            $result['total'] = null;
+            $result['cursor'] = array_intersect_key($archive, array_flip(['index_offset', 'current_fragment_offset', 'volume_count']));
+        } elseif ($phase === 'archive_catalog') {
+            $result['cursor'] = $state['package_catalog']['offset'] ?? 0;
+        } elseif (isset($state['package'])) {
+            $result['cursor'] = array_intersect_key($state['package'], array_flip(['stage', 'cursor', 'photos_offset', 'artifact_bytes']));
+        } elseif (isset($state['photo_retry'])) {
+            $result['cursor'] = array_intersect_key($state['photo_retry'], array_flip(['tasks_offset', 'results_offset', 'count']));
+        }
+
+        return $result;
+    }
+
     private function datasetRecoveryAllowed(array $data, ?array $root = null): bool
     {
         return ($data['state'] ?? null) === 'snapshot_failed'
             && in_array($root !== null ? ($root['last_error'] ?? null) : ($data['blocked_reason'] ?? null), [null, 'snapshot_failed', 'snapshot_row_updated_after_cutoff'], true)
-            && BrowserMigrationSnapshot::mutableDatasetAllowed($data['current_dataset'] ?? null)
-            && (($data['last_error'] ?? null) === 'snapshot_row_updated_after_cutoff' || BrowserMigrationSnapshot::pendingDatasetRecovery($data));
+            && (BrowserMigrationSnapshot::acceptedFinalization($data) || BrowserMigrationSnapshot::mutableDatasetAllowed($data['current_dataset'] ?? null))
+            && (($data['last_error'] ?? null) === 'snapshot_row_updated_after_cutoff' || BrowserMigrationSnapshot::pendingDatasetRecovery($data) || BrowserMigrationSnapshot::acceptedFinalization($data));
     }
 
     public function datasetConflict(string $dir, string $attempt): array
@@ -524,7 +616,7 @@ final class BrowserMigrationExport
     public function filterCompact(array $data): array
     {
         return array_intersect_key($data, array_flip(['run_id', 'schema_version', 'snapshot_attempt_id', 'snapshot_mode', 'state', 'phase',
-            'current_dataset', 'processed', 'total', 'remaining', 'cursor', 'next_action', 'busy', 'resume_allowed', 'blocked_reason',
+            'operator_parts_drift_allowed', 'consistency_exception', 'operator_finalization', 'current_dataset', 'processed', 'total', 'remaining', 'cursor', 'next_action', 'busy', 'resume_allowed', 'blocked_reason',
             'last_success', 'last_error', 'snapshot_state', 'snapshot_stage', 'snapshot_retry_allowed', 'snapshot_abort_allowed', 'photo_retry_allowed', 'last_tick', 'last_status_error', 'attempt_id', 'last_tick_reason', 'checkpoint_fingerprint', 'progress_unavailable', 'dataset_generation', 'dataset_boundary_id', 'previous_boundary_id', 'boundary_refreshed_at', 'recovery_reason', 'consistency_mode', 'dataset_recovery', 'dataset_recovery_allowed', 'recovery_reason_code', 'source_conflict', 'recovery_strategy', 'mutable_round', 'mutable_dirty_rows', 'mutable_dirty_shards', 'mutable_reused_shards', 'exported_records', 'verification_processed']));
     }
 
@@ -545,7 +637,7 @@ final class BrowserMigrationExport
     private function inventory(string $dir, array &$state): void
     {
         $index = $this->snapshots->index($dir, $state['snapshot_attempt_id']);
-        $names = ['part_images', 'parts'];
+        $names = ['part_images', 'parts', 'car_images', 'cars'];
         $work = &$state['inventory'];
         $name = $names[$work['dataset']] ?? null;
         if ($name === null) {
@@ -581,15 +673,38 @@ final class BrowserMigrationExport
                     $toList .= $this->csvRow([(string) $row['id']]);
                 }
             }
-            if ($name === 'part_images') {
+            if ($name === 'car_images' || ($name === 'cars' && ! empty($row['main_photo_path']))) {
+                $carId = (string) ($name === 'cars' ? $row['id'] : $row['car_id']);
+                $image = $name === 'cars' ? ['id' => 'main', 'part_id' => null, 'path' => $row['main_photo_path'], 'is_primary' => true, 'role' => 'main_photo'] : $row + ['part_id' => null];
+                $task = $this->originals->task($image, ['id' => $carId]);
+                $seen = $dir.'/inventory-car-images/'.hash('sha256', $carId.':'.($task['original_relative_path'] ?? $image['path'])).'.json';
+                if ($name === 'cars' && is_file($seen)) {
+                    continue;
+                }
+                if ($name === 'car_images') {
+                    if (! is_dir(dirname($seen))) {
+                        mkdir(dirname($seen), 0700, true);
+                    }
+                    $this->write($seen, ['gallery_task_included' => true]);
+                }
+                $task['entity_type'] = 'car';
+                $task['entity_id'] = $task['car_id'] = $carId;
+                $task['part_id'] = null;
+                $task['package_path'] = 'images/cars/'.$task['car_id'].'/image-'.$task['image_id'].'/'.basename($task['package_path']);
+            } elseif ($name === 'part_images') {
                 $task = $this->originals->task($row, ['id' => $row['part_id']]);
-            } elseif (! empty($row['code_photo_path'])) {
+            } elseif ($name === 'parts' && ! empty($row['code_photo_path'])) {
                 $task = $this->originals->task(['id' => 'code', 'part_id' => $row['id'], 'path' => $row['code_photo_path'], 'role' => 'code_photo'], $row);
             } else {
                 continue;
             }
             // Deterministic per-image subdirectory preserves original names and prevents collisions.
-            $task['package_path'] = 'images/'.$task['part_id'].'/image-'.$task['image_id'].'/'.basename($task['package_path']);
+            if (! in_array($name, ['car_images', 'cars'], true)) {
+                $task['entity_type'] = 'part';
+                $task['entity_id'] = $task['part_id'];
+                $task['car_id'] = null;
+                $task['package_path'] = 'images/'.$task['part_id'].'/image-'.$task['image_id'].'/'.basename($task['package_path']);
+            }
             $line = json_encode($task, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE)."\n";
             $tasks .= $line;
             $work['chain'] = hash('sha256', $work['chain'].$line);
@@ -626,7 +741,7 @@ final class BrowserMigrationExport
         $state['state'] = 'photos';
         $state['phase'] = 'photos_retry_setup';
         $state['last_error'] = null;
-        unset($state['photo_retry_requested'], $state['download_artifacts'], $state['sample_download_artifacts'], $state['package']);
+        unset($state['package_catalog'], $state['photo_retry_requested'], $state['download_artifacts'], $state['sample_download_artifacts'], $state['package']);
         // Persist the intent before the first rename. Interrupted setup resumes idempotently.
         $this->write($dir.'/state.json', $state);
     }
@@ -634,7 +749,7 @@ final class BrowserMigrationExport
     private function finishPhotoRetrySetup(string $dir, array &$state): void
     {
         $history = $dir.'/'.$state['photo_retry']['history'];
-        foreach (['archive-input.jsonl', 'archive-checkpoint.json', 'archive-manifest.json', 'archive-volumes', 'migration-manifest.json', 'sample', 'sample-work', 'sample-archive-input.jsonl', 'sample-archive-checkpoint.json', 'sample-archive-manifest.json', 'sample-archive-volumes', 'photo-manifest.csv', 'photo-manifest.jsonl', 'missing-originals.jsonl', 'fields.generated.json', 'statuses.json', 'sample-product-ids.json'] as $name) {
+        foreach (['checksums.jsonl', 'migration-package-manifest.json', 'archive-input.jsonl', 'archive-checkpoint.json', 'archive-manifest.json', 'archive-volumes', 'migration-manifest.json', 'sample', 'sample-work', 'sample-archive-input.jsonl', 'sample-archive-checkpoint.json', 'sample-archive-manifest.json', 'sample-archive-volumes', 'photo-manifest.csv', 'photo-manifest.jsonl', 'missing-originals.jsonl', 'fields.generated.json', 'statuses.json', 'sample-product-ids.json'] as $name) {
             if (file_exists($dir.'/'.$name) && (file_exists($history.'/'.$name) || ! rename($dir.'/'.$name, $history.'/'.$name))) {
                 throw new RuntimeException('photo_retry_history_failed');
             }
@@ -707,7 +822,7 @@ final class BrowserMigrationExport
             fseek($stream, $work['photos_offset']);
             $manifest = $missing = $csv = '';
             if ($work['photos_offset'] === 0) {
-                $csv = "\xEF\xBB\xBF".$this->csvRow(['part_id', 'image_id', 'original_filename', 'package_path', 'sort_order', 'is_primary', 'bytes', 'sha256', 'status']);
+                $csv = "\xEF\xBB\xBF".$this->csvRow(['part_id', 'image_id', 'original_filename', 'package_path', 'sort_order', 'is_primary', 'bytes', 'sha256', 'status', 'entity_type', 'entity_id', 'car_id', 'original_relative_path', 'role', 'mime', 'extension', 'export_status', 'skipped_reason']);
             }
             for ($n = 0; $n < 20 && ($line = fgets($stream)) !== false; $n++) {
                 $row = json_decode($line, true, 32, JSON_THROW_ON_ERROR);
@@ -715,7 +830,7 @@ final class BrowserMigrationExport
                 $line = json_encode($row, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE)."\n";
                 $manifest .= $line;
                 $state['photo_results'][$row['status']] = ($state['photo_results'][$row['status']] ?? 0) + 1;
-                $csv .= $this->csvRow(array_map(fn ($key) => $row[$key] ?? null, ['part_id', 'image_id', 'original_filename', 'package_path', 'sort_order', 'is_primary', 'bytes', 'sha256', 'status']));
+                $csv .= $this->csvRow(array_map(fn ($key) => $row[$key] ?? null, ['part_id', 'image_id', 'original_filename', 'package_path', 'sort_order', 'is_primary', 'bytes', 'sha256', 'status', 'entity_type', 'entity_id', 'car_id', 'original_relative_path', 'role', 'mime', 'extension', 'export_status', 'skipped_reason']));
                 if ($row['status'] === 'COPIED_VERIFIED') {
                     $artifacts .= $this->artifact($dir, $row['package_path'], $row['package_path'], $row['sha256'], $row['bytes']);
                 } else {
@@ -774,14 +889,69 @@ final class BrowserMigrationExport
         $state['last_success'] = now()->toIso8601String();
     }
 
+    /** Final checksum index is copied in bounded chunks; archive maps cannot include themselves. */
+    private function finishCatalog(string $dir, array &$state): void
+    {
+        $work = &$state['package_catalog'];
+        if ($work['source_fingerprint'] !== app(CompactSnapshotProgress::class)->fingerprint($dir.'/archive-input.jsonl')) {
+            throw new RuntimeException('package_checksum_index_changed');
+        }
+        $stream = fopen($dir.'/archive-input.jsonl', 'rb');
+        try {
+            fseek($stream, $work['offset']);
+            $bytes = fread($stream, 128 * 1024);
+            if (! is_string($bytes)) {
+                throw new RuntimeException('package_checksum_index_read_failed');
+            }
+            $end = feof($stream);
+        } finally {
+            fclose($stream);
+        }
+        $this->append($dir.'/checksums.jsonl', $work['offset'], $bytes);
+        $work['offset'] += strlen($bytes);
+        $work['hash'] = SerializableSha256::update($work['hash'], $bytes);
+        if (! $end) {
+            return;
+        }
+        $checksums = ['key' => 'checksums', 'path' => 'checksums.jsonl', 'name' => 'checksums.jsonl', 'kind' => 'manifest',
+            'bytes' => $work['offset'], 'sha256' => SerializableSha256::digest($work['hash'])];
+        $downloads = [...($state['sample_download_artifacts'] ?? []), ...$this->downloads($dir, $this->archives->status($dir)), $checksums];
+        foreach (['photo-manifest.csv', 'photo-manifest.jsonl', 'missing-originals.jsonl'] as $path) {
+            $downloads[] = ['key' => str_replace('.', '-', $path), 'path' => $path, 'name' => $path, 'kind' => 'manifest', 'bytes' => filesize($dir.'/'.$path),
+                'sha256' => SerializableSha256::digest($state['package'][match ($path) {
+                    'photo-manifest.csv' => 'manifest_csv_hash', 'photo-manifest.jsonl' => 'manifest_hash', default => 'missing_hash',
+                }])];
+        }
+        $catalog = ['schema_version' => 'gpswiss-wystawczesc-package-3', 'run_id' => $state['run_id'], 'attempt_id' => $state['snapshot_attempt_id'],
+            'technical_package_ready' => true, 'readiness_meaning' => 'private_export_artifacts_complete_with_explicit_consistency_exceptions_and_missing_reports; no_atomic_or_automatic_import_guarantee',
+            'consistency_exception' => $state['consistency_exception'] ?? null, 'cutover_ready' => false,
+            'originals_complete' => array_sum($state['photo_results']) === ($state['photo_results']['COPIED_VERIFIED'] ?? 0),
+            'photo_status_counts' => $state['photo_results'], 'relation_issues' => $state['relation_audit']['issues_count'] ?? null,
+            'checksums' => $checksums, 'files' => $downloads, 'archive_maps' => ['archive-manifest.json', 'sample-archive-manifest.json'],
+            'self_hash' => 'provided_by_authenticated_download_descriptor; not_embedded_in_self',
+            'contains_customer_data' => true, 'access' => 'authenticated_owner_only_no_public_url',
+            'automatic_import_allowed' => false, 'automatic_publish' => false, 'synchronization_enabled' => false];
+        $this->write($dir.'/migration-package-manifest.json', $catalog);
+        $downloads[] = ['key' => 'migration-package-manifest', 'path' => 'migration-package-manifest.json', 'name' => 'migration-package-manifest.json',
+            'kind' => 'manifest', 'bytes' => filesize($dir.'/migration-package-manifest.json'), 'sha256' => hash_file('sha256', $dir.'/migration-package-manifest.json')];
+        $state['download_artifacts'] = $downloads;
+        $state['state'] = $state['phase'] = 'completed';
+    }
+
     private function manifest(array $index, array $state): array
     {
         return ['schema_version' => 'gpswiss-wystawczesc-3', 'run_id' => $state['run_id'], 'snapshot_attempt_id' => $state['snapshot_attempt_id'],
+            'consistency_exception' => $index['consistency_exception'] ?? null, 'operator_finalization' => $index['operator_finalization'] ?? null, 'package_catalog' => 'migration-package-manifest.json',
             'snapshot' => $index, 'format' => ['csv' => 'UTF-8 BOM; semicolon; JSON for arrays; \\N means null; leading backslash escaped; formula text prefixed with apostrophe',
                 'ids_and_codes' => 'text, preserve leading zeros', 'dates' => 'as stored; no inferred timezone', 'relations' => 'separate datasets linked by retained source IDs'],
             'source_instance' => 'gpswiss.pl', 'contains_customer_data' => true, 'access' => 'authenticated_owner_only_no_public_url',
             'photo_manifest' => 'photo-manifest.csv', 'photo_jsonl' => 'photo-manifest.jsonl', 'missing_originals' => 'missing-originals.jsonl',
             'photo_consistency' => 'frozen DB metadata; originals fingerprinted during inventory and verified during bounded copy; no coordinated filesystem point-in-time snapshot',
+            'photo_export_contract' => ['owners' => 'part gallery/code_photo and car gallery/legacy main_photo_path; entity_type/entity_id/car_id; original names in owner/image subdirectories; car main alias of a gallery path included once',
+                'copy' => 'default 512KiB; maximum 2MiB/step; at most four steps and 1.5s/request; streaming serializable SHA256; immutable receipts and journal checkpoint',
+                'size_limit_bytes' => 100 * 1024 * 1024, 'oversize' => 'reported OVERSIZE_ORIGINAL; never replaced with thumbnail',
+                'status' => 'native status retained; export_status=copied/missing/unreadable/checksum_failed/skipped; skipped_reason explains failures',
+                'remote' => 'REMOTE_NOT_FETCHED; no network/provider calls', 'retry' => 'explicit failed-only retry against frozen fingerprints; verified files reused'],
             'groups' => ['sold' => "parts.status === 'sold'", 'to_list' => 'parts.needs_listing = true; never infer from zero stock or absent offer URL'],
             'relation_audit' => $state['relation_audit'] ?? null, 'relation_issues' => 'relation-issues.jsonl',
             'allegro_mapping_policy' => 'historical_only_never_activate', 'ebay_ovoko_mapping_policy' => 'retain IDs, URLs, market/account identity; explicit adoption required',

@@ -10,7 +10,7 @@ final class BrowserMigrationSample
 {
     private const CHILD_TARGETS = ['orders', 'shop_events', 'shipments', 'payments', 'order_payments', 'refunds', 'order_refunds', 'returns', 'order_returns', 'customer_returns', 'local_sales'];
 
-    private const PHOTO_COLUMNS = ['part_id', 'image_id', 'role', 'original_filename', 'original_relative_path', 'package_path', 'sort_order', 'is_primary', 'status', 'bytes', 'sha256', 'mime'];
+    private const PHOTO_COLUMNS = ['entity_type', 'entity_id', 'car_id', 'export_status', 'skipped_reason', 'extension', 'part_id', 'image_id', 'role', 'original_filename', 'original_relative_path', 'package_path', 'sort_order', 'is_primary', 'status', 'bytes', 'sha256', 'mime'];
 
     public function __construct(private BrowserMigrationSnapshot $snapshots) {}
 
@@ -166,8 +166,9 @@ final class BrowserMigrationSample
                 $csv = $this->csv([], self::PHOTO_COLUMNS);
             }
             foreach ($records as [, $row]) {
-                $key = (string) ($row['part_id'] ?? '').':'.(string) ($row['image_id'] ?? '');
-                if (! isset($state['wanted']['parts'][(string) ($row['part_id'] ?? '')]) || isset($state['photo_seen'][$key])) {
+                $isCar = ($row['entity_type'] ?? null) === 'car';
+                $key = ($isCar ? 'car:'.($row['car_id'] ?? '') : (string) ($row['part_id'] ?? '')).':'.(string) ($row['image_id'] ?? '');
+                if ((! $isCar && ! isset($state['wanted']['parts'][(string) ($row['part_id'] ?? '')]) || $isCar && ! isset($state['wanted']['cars'][(string) ($row['car_id'] ?? '')])) || isset($state['photo_seen'][$key])) {
                     continue;
                 }
                 $state['photo_seen'][$key] = true;
@@ -211,6 +212,7 @@ final class BrowserMigrationSample
                 'case_selection' => $state['candidates'], 'photo_associations' => $state['photo_count'], 'missing_originals' => $state['missing_count'],
                 'photo_manifest' => 'photo-manifest.csv', 'photo_jsonl' => 'photo-manifest.jsonl', 'files' => 'files.jsonl', 'unresolved_references' => $unresolved,
                 'database_consistency' => $index['database_consistency'], 'snapshot_limitations' => $index['limitations'] ?? [],
+                'consistency_exception' => $index['consistency_exception'] ?? null, 'operator_finalization' => $index['operator_finalization'] ?? null,
                 'dataset_boundary_history' => $index['dataset_boundary_history'] ?? [],
                 'snapshot_cutoff_database_time' => $index['cutoff_database_time'] ?? null, 'source_dataset_boundaries' => $boundaries,
                 'contains_customer_data' => true, 'access' => 'authenticated_owner_only_no_public_url', 'automatic_import_allowed' => false,
@@ -457,7 +459,7 @@ final class BrowserMigrationSample
 
     private function result(array $state, array $files): array
     {
-        return ['done' => $state['stage'] === 'completed', 'stage' => $state['stage'], 'processed' => $state['processed'],
+        return ['cursor' => array_intersect_key($state, array_flip(['stage', 'dataset_index', 'shard', 'photo_offset', 'pass'])), 'done' => $state['stage'] === 'completed', 'stage' => $state['stage'], 'processed' => $state['processed'],
             'total' => $state['stage'] === 'completed' ? $state['processed'] : null, 'last_success' => $state['last_success'],
             'sample_ids' => $state['sample_ids'], 'file_count' => $state['file_count'], 'files' => $files, 'index_file' => 'sample-archive-input.jsonl'];
     }

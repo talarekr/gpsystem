@@ -61,6 +61,19 @@ final class GpswissMigrationExport
         return $this->browser->kick($this->directory($owner, $id, true), $expectedAttempt, $this->snapshotSourceFingerprint());
     }
 
+    public function acceptPartsDrift(int $owner, string $id, ?string $attempt, string $confirmation): array
+    {
+        if ($confirmation !== BrowserMigrationSnapshot::DRIFT_CONFIRM) {
+            throw new MigrationExportException('operator_parts_drift_confirmation_required', 422);
+        }
+        $dir = $this->directory($owner, $id);
+        if (($this->read($dir.'/state.json')['snapshot_mode'] ?? null) !== 'browser') {
+            throw new MigrationExportException('operator_parts_drift_not_allowed', 409);
+        }
+
+        return $this->browser->acceptPartsDrift($dir, $attempt, $this->snapshotSourceFingerprint(), $owner);
+    }
+
     public function pauseBrowserSnapshot(int $owner, string $id): array
     {
         $dir = $this->directory($owner, $id);

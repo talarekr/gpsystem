@@ -15,9 +15,9 @@ final class GpswissMigrationExportController extends Controller
     {
         abort_unless($request->user()?->hasRole(UserRole::OwnerAdmin->value), 403);
         $owner = (int) $request->user()->id;
-        $input = $request->validate(['action' => ['sometimes', 'in:start,tick,resume,snapshot_tick,pause_snapshot,retry_snapshot,abort_snapshot,retry_photos'], 'download' => ['sometimes', 'in:sample,full,artifact'], 'format' => ['sometimes', 'in:status,compact,artifacts,dataset-conflict'],
+        $input = $request->validate(['action' => ['sometimes', 'in:start,tick,resume,snapshot_tick,pause_snapshot,retry_snapshot,abort_snapshot,retry_photos,accept_parts_drift'], 'download' => ['sometimes', 'in:sample,full,artifact'], 'format' => ['sometimes', 'in:status,compact,artifacts,dataset-conflict'],
             'artifact' => ['sometimes', 'string', 'max:180', 'regex:/\A[A-Za-z0-9][A-Za-z0-9_.-]*\z/D'],
-            'confirm_restart' => ['sometimes', 'boolean'], 'confirm_abort' => ['sometimes', 'boolean'], 'confirm_retry_photos' => ['sometimes', 'boolean'], 'expected_snapshot_attempt' => ['present_if:action,snapshot_tick', 'nullable', 'uuid']]);
+            'confirm_parts_drift' => ['sometimes', 'string', 'max:80'], 'confirm_restart' => ['sometimes', 'boolean'], 'confirm_abort' => ['sometimes', 'boolean'], 'confirm_retry_photos' => ['sometimes', 'boolean'], 'expected_snapshot_attempt' => ['present_if:action,snapshot_tick', 'nullable', 'uuid']]);
         $statusStarted = microtime(true);
         $serializingStatus = false;
         $compactRequest = ($input['format'] ?? null) === 'compact' && $request->isMethod('get');
@@ -60,6 +60,7 @@ final class GpswissMigrationExportController extends Controller
                             ? $exports->abortSnapshot($owner, $run, $expectedAttempt)
                             : throw new MigrationExportException('snapshot_abort_confirmation_required', 422),
                         'resume' => $exports->resume($owner, $run, $expectedAttempt),
+                        'accept_parts_drift' => $exports->acceptPartsDrift($owner, $run, $expectedAttempt, $input['confirm_parts_drift'] ?? ''),
                         'snapshot_tick' => $exports->browserSnapshotTick($owner, $run, $expectedAttempt),
                         'pause_snapshot' => $exports->pauseBrowserSnapshot($owner, $run),
                         'retry_photos' => $request->boolean('confirm_retry_photos')
