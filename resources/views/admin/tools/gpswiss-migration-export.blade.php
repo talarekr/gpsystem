@@ -33,15 +33,15 @@
 (()=>{
  const el=id=>document.getElementById(id),base=@json(route('admin.tools.gpswiss-migration-export', [], false));
  let id=new URLSearchParams(location.hash.slice(1)).get('run'),state=null,active=false,working=false,ready=false,sessionExpired=false,accessBlocked=false,inFlight=false,pauseRequested=false,pausing=false;
- let loopDone=null,finishLoop=null,manualResuming=false,resumeTraceActive=false,retryExhausted=false,stopBeforePhotos=false;
+ let loopDone=null,finishLoop=null,manualResuming=false,resumeTraceActive=false,retryExhausted=false,stopBeforePhotos=false,kickDiagnostic=null;
  const waits=new Map(),resumeEvents=[];
  const wait=ms=>new Promise(resolve=>{const timer=setTimeout(()=>{waits.delete(timer);resolve();},ms);waits.set(timer,resolve);});
  function cancelBackoff(){for(const [timer,resolve] of waits){clearTimeout(timer);resolve();}waits.clear();}
  function runnerContext(){return {phase:state?.phase??null,state:state?.state??null,next_action:nextAction(),busy:state?.busy??false,resume_allowed:state?.resume_allowed??null,blocked_reason:state?.blocked_reason??state?.last_error??null,runner_decision:runnerDecision()};}
- function resumeEvent(event,blocked_reason=null){const context=runnerContext();resumeEvents.push({...context,event,blocked_reason:blocked_reason??context.blocked_reason});if(resumeEvents.length>20)resumeEvents.shift();el('resume-diagnostic').textContent=JSON.stringify({events:resumeEvents,retry_exhausted:retryExhausted,...context},null,2);}
+ function resumeEvent(event,blocked_reason=null){const context=runnerContext();resumeEvents.push({...context,event,blocked_reason:blocked_reason??context.blocked_reason});if(resumeEvents.length>30)resumeEvents.splice(3,1);el('resume-diagnostic').textContent=JSON.stringify({events:resumeEvents,retry_exhausted:retryExhausted,...context,kick_result:kickDiagnostic},null,2);}
  async function manualResume(){
   if(manualResuming)return;
-  manualResuming=true;resumeTraceActive=true;resumeEvents.length=0;resumeEvent('resume_started');
+  manualResuming=true;resumeTraceActive=true;kickDiagnostic=null;resumeEvents.length=0;resumeEvent('resume_started');
   try{
    await boot;
    if(sessionExpired || accessBlocked){resumeEvent('blocked',sessionExpired?'SESSION_EXPIRED':'run_owner_mismatch');return;}
@@ -198,7 +198,7 @@
 
  function stop(error){
   if(error.reason==='local_stop'){active=false;return;}
-  active=false;retryExhausted=transient(error) || error.reason==='status_fetch_retry_exhausted';
+  active=false;retryExhausted=transient(error) || ['status_fetch_retry_exhausted','kick_retry_exhausted'].includes(error.reason);
   if(resumeTraceActive)resumeEvent('blocked',error.reason ?? 'unknown_local_error');
   if(error.reason==='SESSION_EXPIRED'){
    sessionExpired=true;el('login').hidden=false;
@@ -225,6 +225,32 @@
   }
   throw Object.assign(new Error('status_fetch_retry_exhausted'),{reason:'status_fetch_retry_exhausted',http:last?.http});
  }
+ async function guardedKick(run,attempt){
+  const attempts=[],maxAttempts=snapshotState()==='snapshot_completed'?3:1;
+  kickDiagnostic={phase:state?.phase??null,reason_code:'kick_pending',checkpoint_before:checkpoint(),checkpoint_before_source:'browser_display_only',checkpoint_after:null,server_checkpoint_before:null,max_attempts:maxAttempts,attempts};
+  resumeEvent('fallback_kick');resumeEvent('kick_fallback_started');
+  for(let n=1;n<=maxAttempts;n++){
+   if(!active)throw Object.assign(new Error('local_stop'),{reason:'local_stop'});
+   try{
+    const result=await request(base+'/'+encodeURIComponent(run)+'/kick','kick',{attempt_id:attempt});
+    if(result.run_id!==run || result.snapshot_attempt_id!==attempt)throw Object.assign(new Error('run_or_attempt_changed'),{reason:'run_or_attempt_changed'});
+    render(result);
+    attempts.push({attempt:n,reason_code:result.kick_reason,blocked_reason:result.blocked_reason??null,http_status:latestRequestDiagnostic?.http_status??null,duration_ms:latestRequestDiagnostic?.duration_ms??null});
+    kickDiagnostic={...kickDiagnostic,reason_code:result.kick_reason,blocked_reason:result.blocked_reason??null,server_checkpoint_before:result.kick_checkpoint_before??null,checkpoint_after:result.kick_checkpoint_after??checkpoint(),checkpoint_after_source:'server_kick_response',phase:state.phase,next_action:nextAction(),runner_decision:runnerDecision()};
+    resumeEvent('kick_result',result.blocked_reason??null);
+    if(!['tick_completed','completed','busy','recovery_started'].includes(result.kick_reason))throw Object.assign(new Error('kick_blocked'),{reason:result.blocked_reason??result.kick_reason??'kick_blocked'});
+    return result;
+   }catch(error){
+    if(attempts.at(-1)?.attempt!==n)attempts.push({attempt:n,reason_code:error.reason??'unknown_kick_error',http_status:error.http??null,fetch_timeout:error.diagnostic?.fetch_timeout??false,network_exception_type:error.diagnostic?.network_exception_type??null,transport_reason:error.diagnostic?.transport_reason??null,response_bytes:error.diagnostic?.response_bytes??0,duration_ms:error.diagnostic?.duration_ms??null});
+    kickDiagnostic={...kickDiagnostic,reason_code:error.reason??'unknown_kick_error',blocked_reason:error.reason??'unknown_kick_error'};
+    resumeEvent('kick_result',kickDiagnostic.blocked_reason);
+    if(!transient(error))throw error;
+    if(n===maxAttempts)throw Object.assign(new Error('kick_retry_exhausted'),{reason:'kick_retry_exhausted',http:error.http});
+    resumeEvent('kick_retry_scheduled');el('message').textContent='kick_retry '+n+'/'+maxAttempts+' — ponawiam od aktualnego checkpointu serwera';
+    await wait(500*2**(n-1));
+   }
+  }
+ }
  async function recoverOnce(error,attempt){
   if(error.reason==='SESSION_EXPIRED' || error.reason==='run_owner_mismatch' || [403,422].includes(error.http))throw error;
   if(error.http===404 || error.reason==='existing_export_unfinished'){
@@ -237,7 +263,7 @@
   await wait(500*2**(attempt-1));
   if(!active && working && loopDone)throw Object.assign(new Error('local_stop'),{reason:'local_stop'});
   try{if(id)await readCurrent();else await discover();}
-  catch(next){if(next.http===404 && next.reason!=='run_owner_mismatch'){if(await discover())return;}throw next;}
+  catch(next){if(next.reason==='status_fetch_retry_exhausted' && resumeTraceActive && active && snapshotState()==='snapshot_completed' && kickEligible()){resumeEvent('status_fetch_retry_exhausted');await guardedKick(id,state.snapshot_attempt_id);return;}if(next.http===404 && next.reason!=='run_owner_mismatch'){if(await discover())return;}throw next;}
  }
  async function recover(error,attempt){
   let last=error;
@@ -287,26 +313,22 @@
     if(resumeTraceActive)resumeEvent('status_loading');
     try{if(id)await readCurrent();else if(!await discover())throw Object.assign(new Error('run_not_found'),{reason:'run_not_found',http:404});}
     catch(error){
+     if(resumeTraceActive && error.reason==='status_fetch_retry_exhausted')resumeEvent('status_fetch_retry_exhausted');
      if(resumeTraceActive && error.reason==='status_fetch_retry_exhausted' && kickEligible()){
-      resumeEvent('status_fetch_retry_exhausted');resumeEvent('fallback_kick');usedKick=true;
-      try{
-       const result=await request(base+'/'+encodeURIComponent(expectedRun)+'/kick','kick',{attempt_id:expectedAttempt});
-       if(result.run_id!==expectedRun || result.snapshot_attempt_id!==expectedAttempt)throw Object.assign(new Error('run_or_attempt_changed'),{reason:'run_or_attempt_changed'});
-       render(result);
-       if(!['tick_completed','completed','busy','recovery_started'].includes(result.kick_reason))throw Object.assign(new Error('kick_blocked'),{reason:result.blocked_reason??result.kick_reason??'kick_blocked'});
-       if(result.kick_reason==='recovery_started'){resumeEvent(result.dataset_recovery?.strategy==='adopt_complete_shards_then_reconcile'?'reconciliation_started':'dataset_boundary_refresh_started');resumeEvent('dataset='+result.dataset_recovery?.dataset);}
-       if(result.kick_reason==='tick_completed')resumeEvent('tick_completed');
-       else if(result.kick_reason==='busy')resumeEvent('blocked','busy');
-       needsResume=false;
-      }catch(kickError){await recover(kickError,++attempts);}
-     }else await recover(error,++attempts);
+      usedKick=true;
+      const result=await guardedKick(expectedRun,expectedAttempt);
+      if(result.kick_reason==='recovery_started'){resumeEvent(result.dataset_recovery?.strategy==='adopt_complete_shards_then_reconcile'?'reconciliation_started':'dataset_boundary_refresh_started');resumeEvent('dataset='+result.dataset_recovery?.dataset);}
+      if(result.kick_reason==='tick_completed')resumeEvent('tick_completed');
+      else if(result.kick_reason==='busy')resumeEvent('blocked','busy');
+      needsResume=false;
+     }else{if(resumeTraceActive && error.reason==='status_fetch_retry_exhausted')resumeEvent('kick_fallback_blocked',state?.blocked_reason??state?.last_error??'known_work_or_capture_proof_missing');await recover(error,++attempts);}
     }
    }
    if(!start){
     if(expectedRun && (id!==expectedRun || (expectedAttempt && state?.snapshot_attempt_id!==expectedAttempt))){resumeEvent('blocked','run_or_attempt_changed');el('message').textContent='Wznowienie zablokowane: run_or_attempt_changed';return;}
     if(resumeTraceActive){if(!usedKick)resumeEvent('status_loaded');resumeEvent('next_action='+nextAction());}
     if(browserSnapshot() && runnerDecision()==='tick_ready')needsResume=false;
-    el('message').textContent='status_loaded / phase='+(state?.phase??'unknown')+' / runner_decision='+runnerDecision();
+    el('message').textContent=(usedKick?'kick_result':'status_loaded')+' / phase='+(state?.phase??'unknown')+' / runner_decision='+runnerDecision();
    }
    while(active && state){
     const next=nextAction(),decision=runnerDecision();

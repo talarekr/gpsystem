@@ -171,21 +171,21 @@ class GpswissPostSnapshotResumeTest extends TestCase
         return $this->postJson(self::BASE.self::RUN, ['action' => 'snapshot_tick', 'expected_snapshot_attempt' => self::ATT]);
     }
 
-    private function exactRelationCheckpoint(): array
+    private function exactRelationCheckpoint(int $processed = 45983, int $shard = 2239, int $probes = 67253, int $dataset = 35): array
     {
         $state = $this->completedCheckpoint(true);
-        $this->assertSame('marketplace_listings', $state['dataset_names'][35]);
+        $name = $state['dataset_names'][$dataset];
         // Only the resumed shard is read. Earlier descriptors/counters model committed history,
-        // not 45983 newly generated fixture records or a fresh source export.
-        $descriptor = $state['datasets']['marketplace_listings']['shards'][0];
-        $state['datasets']['marketplace_listings']['shards'] = array_fill(0, 2240, $descriptor);
+        // not a new production record capture.
+        $descriptor = $state['datasets'][$name]['shards'][0];
+        $state['datasets'][$name]['shards'] = array_fill(0, $shard + 1, $descriptor);
         $this->state($state);
         app(CompactSnapshotProgress::class)->publish($this->dir, self::ATT, $state);
         $this->postTick()->assertOk()->assertJsonPath('phase', 'relation_audit');
         app(BrowserMigrationRelations::class)->tick($this->dir, self::ATT);
         $relation = json_decode(file_get_contents($this->dir.'/relation-checkpoint.json'), true);
-        $relation = array_replace($relation, ['dataset_index' => 35, 'shard_index' => 2239, 'row_index' => 0, 'column_index' => 0,
-            'processed' => 45983, 'total' => 79957, 'probes' => 67253]);
+        $relation = array_replace($relation, ['dataset_index' => $dataset, 'shard_index' => $shard, 'row_index' => 0, 'column_index' => 0,
+            'processed' => $processed, 'total' => 79957, 'probes' => $probes]);
         file_put_contents($this->dir.'/relation-checkpoint.json', json_encode($relation));
         @unlink($this->dir.'/operational-progress.json');
 
@@ -226,6 +226,42 @@ class GpswissPostSnapshotResumeTest extends TestCase
         $this->postJson(self::BASE.self::RUN.'/kick', ['attempt_id' => self::ATT])->assertOk()->assertJsonPath('processed', 45988)
             ->assertJsonPath('cursor.current_dataset_index', 36);
         $this->assertSame($before, hash_file('sha256', $this->file));
+        Http::assertNothingSent();
+    }
+
+    public function test_retried_kick_uses_the_latest_relation_checkpoint_and_never_replays_an_older_browser_cursor(): void
+    {
+        // Synthetic counters; the existing shared run/attempt fixture is unchanged.
+        $state = $this->exactRelationCheckpoint(31007, 42, 50778, 36);
+        $before = hash_file('sha256', $this->file);
+        $queries = [];
+        DB::listen(function ($event) use (&$queries): void {
+            $queries[] = $event->sql;
+        });
+        $this->postJson(self::BASE.self::RUN.'/kick', ['attempt_id' => self::ATT])->assertOk()
+            ->assertJsonPath('kick_reason', 'tick_completed')->assertJsonPath('processed', 31010)->assertJsonPath('cursor.shard_index', 43)
+            ->assertJsonPath('cursor.probes', 50781)->assertJsonPath('kick_checkpoint_before.processed', 31007)
+            ->assertJsonPath('kick_checkpoint_before.cursor.probes', 50778)->assertJsonPath('kick_checkpoint_after.processed', 31010);
+        // The browser still displays 31007, but submits only the attempt. Server advances its newer checkpoint.
+        $this->postJson(self::BASE.self::RUN.'/kick', ['attempt_id' => self::ATT])->assertOk()
+            ->assertJsonPath('processed', 31010)->assertJsonPath('cursor.current_dataset_index', 37)
+            ->assertJsonPath('kick_checkpoint_before.processed', 31010)->assertJsonPath('kick_checkpoint_before.cursor.shard_index', 43);
+        $this->assertSame($before, hash_file('sha256', $this->file));
+        $this->assertSame($state['consistency_exception'], $this->root()['consistency_exception']);
+        $this->assertSame([], $queries);
+        Http::assertNothingSent();
+    }
+
+    public function test_kick_does_not_execute_a_runnable_phase_with_a_persisted_integrity_blocker(): void
+    {
+        $this->exactRelationCheckpoint(31007, 42, 50778, 36);
+        $root = $this->root();
+        $root['last_error'] = 'snapshot_shard_checksum_mismatch';
+        $this->root($root);
+        $before = hash_file('sha256', $this->dir.'/relation-checkpoint.json');
+        $this->postJson(self::BASE.self::RUN.'/kick', ['attempt_id' => self::ATT])->assertStatus(409)
+            ->assertJsonPath('reason_code', 'snapshot_shard_checksum_mismatch');
+        $this->assertSame($before, hash_file('sha256', $this->dir.'/relation-checkpoint.json'));
         Http::assertNothingSent();
     }
 
