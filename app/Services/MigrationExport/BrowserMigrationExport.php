@@ -118,7 +118,8 @@ final class BrowserMigrationExport
     public function kick(string $dir, string $expected, string $sourceFingerprint): array
     {
         $reason = 'busy';
-        $result = $this->locked($dir, function () use ($dir, $expected, $sourceFingerprint, &$reason): void {
+        $before = $after = null;
+        $result = $this->locked($dir, function () use ($dir, $expected, $sourceFingerprint, &$reason, &$before, &$after): void {
             $state = $this->small($dir.'/state.json', 65536);
             if (! $state) {
                 $state = $this->small($dir.'/operational-progress.json', 8192);
@@ -164,6 +165,7 @@ final class BrowserMigrationExport
                 in_array($state['state'], ['snapshot_paused', 'pipeline_paused'], true) => 'paused',
                 in_array($state['state'], ['snapshot_failed', 'failed', 'snapshot_aborted'], true) => 'run_failed',
                 BrowserMigrationWork::action($state) === null => 'state_not_runnable',
+                BrowserMigrationWork::next($state) === 'blocked' => 'run_blocked',
                 default => 'tick_completed',
             };
             if ($reason !== 'tick_completed') {
@@ -172,11 +174,17 @@ final class BrowserMigrationExport
             if (($state['snapshot_source_fingerprint'] ?? null) !== $sourceFingerprint) {
                 throw new MigrationExportException('snapshot_source_context_mismatch', 409);
             }
+            if (($state['snapshot_state'] ?? null) === 'snapshot_completed') {
+                $before = $this->pipelineProgress($dir, $state) + ['phase' => $state['phase']];
+            }
             if (in_array($state['state'], ['photos', 'archive'], true)) {
                 $this->performDataTick($dir, $state);
                 $this->write($dir.'/state.json', $state);
             } else {
                 $this->performSnapshotTick($dir, $state);
+            }
+            if ($before !== null) {
+                $after = $this->pipelineProgress($dir, $state) + ['phase' => $state['phase']];
             }
             if ($state['last_error'] ?? null) {
                 $reason = $state['last_error'];
@@ -185,6 +193,8 @@ final class BrowserMigrationExport
         if ($reason === 'tick_completed' && ! empty($result['last_error'])) {
             $reason = $result['last_error'];
         }
+        $result['kick_checkpoint_before'] = $before;
+        $result['kick_checkpoint_after'] = $after;
         $result['kick_reason'] = $reason;
         $result['blocked_reason'] = in_array($reason, ['tick_completed', 'recovery_started'], true) ? ($result['blocked_reason'] ?? null) : $reason;
 
