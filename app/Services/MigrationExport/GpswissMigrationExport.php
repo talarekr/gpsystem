@@ -97,6 +97,7 @@ final class GpswissMigrationExport
     public function markTickFatal(int $owner, string $id, string $reason): void
     {
         $dir = $this->directory($owner, $id);
+        app(OperatorFinalizationDiagnostics::class)->fatal($dir, $this->read($dir.'/state.json'), $reason);
         if (! is_file($dir.'/last-tick.json')) {
             return;
         }
@@ -108,6 +109,28 @@ final class GpswissMigrationExport
         $trace['backend_exception_class'] = 'PHPFatalError';
         $trace['duration_ms'] = isset($trace['started_at']) ? (int) ((microtime(true) - $trace['started_at']) * 1000) : null;
         $this->write($dir.'/last-tick.json', $trace);
+    }
+
+    public function beginOperatorFinalizeRequest(int $owner, string $id, string $action = 'snapshot_tick'): ?string
+    {
+        try {
+            $dir = $this->directory($owner, $id);
+
+            return app(OperatorFinalizationDiagnostics::class)->begin($dir, $this->read($dir.'/state.json'), $action);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    public function finishOperatorFinalizeRequest(int $owner, string $id, ?string $requestId, string $reason, ?string $exception = null, ?string $category = null): ?array
+    {
+        try {
+            $dir = $this->directory($owner, $id);
+
+            return app(OperatorFinalizationDiagnostics::class)->finish($dir, $this->read($dir.'/state.json'), $requestId, $reason, $exception, $category);
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     public function markStatusFatal(int $owner, string $id, string $reason): void
