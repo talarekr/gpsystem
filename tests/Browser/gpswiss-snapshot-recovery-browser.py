@@ -63,9 +63,10 @@ def run(browser, mode):
                 r.fulfill(status=419, json={'reason_code':'SESSION_EXPIRED'})
                 return
             assert state['snapshot_attempt_id'] == OLD, 'Double click must never restart a pending worker'
+            # The real browser backend permits work after retry; do not retain the failed worker flag.
             state.update(state='snapshot_pending', phase='snapshot_pending', snapshot_state='snapshot_pending',
                          snapshot_attempt_id=NEW, snapshot_retry_allowed=False, snapshot_abort_allowed=True,
-                         snapshot_mode='browser', next_action='snapshot_tick', launcher_status='worker_launch_unavailable',
+                         snapshot_mode='browser', next_action='snapshot_tick', resume_allowed=True, launcher_status='worker_launch_unavailable',
                          last_error=None, blocked_reason=None)
             if mode in ['lost_response', 'timeout']:
                 r.abort('timedout' if mode == 'timeout' else 'connectionreset')

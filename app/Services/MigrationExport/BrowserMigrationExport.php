@@ -163,8 +163,7 @@ final class BrowserMigrationExport
                 $state['state'] === 'completed' => 'completed',
                 in_array($state['state'], ['snapshot_paused', 'pipeline_paused'], true) => 'paused',
                 in_array($state['state'], ['snapshot_failed', 'failed', 'snapshot_aborted'], true) => 'run_failed',
-                ! in_array($state['state'], ['snapshot_running', 'photos', 'archive'], true) => 'state_not_runnable',
-                $state['state'] === 'snapshot_running' && ! in_array($state['phase'], ['snapshot_boundaries', 'snapshot_export', 'snapshot_verify', 'snapshot_recovery_preflight', 'snapshot_operator_finalize', 'relation_audit', 'photo_inventory'], true) => 'state_not_runnable',
+                BrowserMigrationWork::action($state) === null => 'state_not_runnable',
                 default => 'tick_completed',
             };
             if ($reason !== 'tick_completed') {
@@ -282,7 +281,7 @@ final class BrowserMigrationExport
                 unset($state['resume_state']);
             }
             $this->write($dir.'/state.json', $state);
-        });
+        }, false, true);
     }
 
     public function retryPhotos(string $dir): array
@@ -401,13 +400,7 @@ final class BrowserMigrationExport
             $progress = ['phase' => 'snapshot_failed', 'current_dataset' => null, 'cursor' => null, 'processed' => 0, 'total' => 0, 'remaining' => 0, 'last_error' => 'snapshot_checkpoint_missing'];
         }
         $snapshotActive = in_array($state['state'], ['snapshot_pending', 'snapshot_running', 'snapshot_completed', 'snapshot_paused', 'snapshot_failed'], true);
-        $next = match (true) {
-            $busy => 'wait', $state['state'] === 'completed' => 'download',
-            in_array($state['state'], ['snapshot_paused', 'pipeline_paused'], true), isset($state['resume_state']) => 'resume',
-            $this->datasetRecoveryAllowed(array_replace($state, $progress ?? []), $state) => 'resume',
-            in_array($state['state'], ['snapshot_failed', 'snapshot_aborted', 'failed'], true) => 'blocked',
-            $snapshotActive => 'snapshot_tick', default => 'tick',
-        };
+        $next = BrowserMigrationWork::next($state, $busy, $this->datasetRecoveryAllowed(array_replace($state, $progress ?? []), $state));
         $photo = $this->photos->status($dir);
         $archive = $this->archives->status($dir, $state['phase'] === 'archive_sample_volumes' ? 'sample' : 'full');
         $sampleProgress = $this->sample->status($dir, $state['snapshot_attempt_id']);
@@ -541,13 +534,7 @@ final class BrowserMigrationExport
         $snapshot = in_array($state['state'], ['snapshot_pending', 'snapshot_running', 'snapshot_paused', 'snapshot_failed', 'snapshot_completed'], true);
         $logical = $snapshot && ! in_array($state['phase'], ['photo_inventory', 'relation_audit'], true);
         $progress = $logical ? app(CompactSnapshotProgress::class)->read($dir, $state['snapshot_attempt_id']) : $this->pipelineProgress($dir, $state);
-        $next = match (true) {
-            $state['state'] === 'completed' => 'download',
-            in_array($state['state'], ['snapshot_paused', 'pipeline_paused'], true), isset($state['resume_state']) => 'resume',
-            $this->datasetRecoveryAllowed(array_replace($state, $progress ?? []), $state) => 'resume',
-            in_array($state['state'], ['snapshot_failed', 'snapshot_aborted', 'failed'], true) => 'blocked',
-            $snapshot => 'snapshot_tick', default => 'tick',
-        };
+        $next = BrowserMigrationWork::next($state, false, $this->datasetRecoveryAllowed(array_replace($state, $progress ?? []), $state));
         $data = $this->filterCompact(array_replace($state, $progress ?? ['processed' => null, 'total' => null, 'remaining' => null, 'cursor' => null, 'current_dataset' => null], [
             'next_action' => $next, 'busy' => false, 'resume_allowed' => ! in_array($next, ['blocked', 'download'], true),
             'blocked_reason' => $next === 'blocked' ? ($state['last_error'] ?? $state['state']) : null,
