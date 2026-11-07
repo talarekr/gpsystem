@@ -7,22 +7,34 @@ HTML = (Path(__file__).parents[2] / 'resources/views/admin/tools/gpswiss-migrati
 BASE = 'https://audit.test/admin/tools/gpswiss-migration-export'
 RUN = '8de6e27c-ad7c-470b-830b-b9ecee9446ba'
 ATT = '9cb33c92-3f1e-4db0-b08d-052715aa5f4c'
-BOUNDARY = 'parts-reconciled-fixture'
+BOUNDARY = 'a42db372-cf85-4f46-99e7-ccacce2bc6c3'
 
 
 def case(browser, mode):
+    label = mode; pending = mode.startswith('pending_'); mode = mode.removeprefix('pending_')
     context = browser.new_context(); page = context.new_page()
     actions = []; rewritten = []; resumes = 0; ticks = 0; generations = 0
     state = dict(run_id=RUN, snapshot_attempt_id=ATT, snapshot_mode='browser', state='snapshot_failed', snapshot_state='snapshot_failed',
                  phase='snapshot_failed', current_dataset='parts', processed=79957, total=79957, remaining=0, exported_records=79957,
                  verification_processed=0, cursor={'id': 8926}, next_action='resume', busy=False, resume_allowed=True,
                  dataset_recovery_allowed=True, last_error='snapshot_row_updated_after_cutoff')
+    if pending:
+        generations = 1  # Already committed before root publication; resume must reuse it.
+        state.update(last_error=None, dataset_recovery=dict(dataset='parts', strategy='adopt_complete_shards_then_reconcile',
+                     dataset_boundary_id=BOUNDARY, previous_generation=0, new_generation=1, preflight_shard=0, preflight_total_shards=3),
+                     last_tick=dict(action='snapshot_tick', reason_code='snapshot_row_updated_after_cutoff',
+                                    started_at=1794006808.398781, source_conflict=dict(dataset='parts', record_id='2262')))
     if mode == 'blocked':
         state.update(last_error='snapshot_shard_checksum_mismatch', dataset_recovery_allowed=False, next_action='blocked')
 
     def start_reconciliation():
         nonlocal generations
-        generations += 1; assert generations == 1
+        if pending:
+            assert state['dataset_recovery']['dataset_boundary_id'] == BOUNDARY
+            assert state['dataset_recovery']['new_generation'] == 1
+        else:
+            generations += 1
+        assert generations == 1
         state.update(state='snapshot_running', snapshot_state='snapshot_running', phase='snapshot_recovery_preflight', next_action='snapshot_tick',
                      last_error=None, dataset_recovery_allowed=False, dataset_recovery=dict(dataset='parts', strategy='adopt_complete_shards_then_reconcile',
                      dataset_boundary_id=BOUNDARY, previous_generation=0, new_generation=1, preflight_shard=0, preflight_total_shards=3))
@@ -36,7 +48,7 @@ def case(browser, mode):
             if req.url.endswith('?format=artifacts'):
                 r.fulfill(json={'run_id': RUN, 'state': 'completed', 'download_artifacts': []}); return
             if req.url.endswith('?format=dataset-conflict'):
-                r.fulfill(json={'evidence': 'recorded_at_failure', 'conflict': {'dataset': 'parts', 'record_id': '8922'}}); return
+                r.fulfill(json={'evidence': 'recorded_at_failure', 'conflict': {'dataset': 'parts', 'record_id': '2262'}}); return
             assert req.url in [BASE+'?format=compact', BASE+'/'+RUN+'?format=compact'], req.url
             if mode == 'kick' and req.url == BASE+'/'+RUN+'?format=compact':
                 r.abort('connectionreset'); return
@@ -66,7 +78,7 @@ def case(browser, mode):
                 state.update(phase='snapshot_verify', dataset_recovery=None, dataset_generation=1, dataset_boundary_id=BOUNDARY,
                              recovery_strategy='adopt_complete_shards_then_reconcile', mutable_round=1)
             elif not rewritten:
-                rewritten.append(8922); state.update(mutable_dirty_rows=1, mutable_dirty_shards=1, mutable_round=2, verification_processed=2)
+                rewritten.append(2262); state.update(mutable_dirty_rows=1, mutable_dirty_shards=1, mutable_round=2, verification_processed=2)
             else:
                 state.update(state='completed', snapshot_state='snapshot_completed', next_action='download', verification_processed=79957)
             assert state['processed'] == state['exported_records'] == 79957  # This mock never re-exports/zeros the completed capture.
@@ -77,24 +89,24 @@ def case(browser, mode):
     context.route('**/*', route);page.goto(BASE)
     page.wait_for_function("document.querySelector('#state').textContent.includes('79957')")
     if mode == 'blocked':
-        assert page.locator('#resume').is_disabled();assert not actions;context.close();print('PASS mutable parts browser', mode);return
+        assert page.locator('#resume').is_disabled();assert not actions;context.close();print('PASS mutable parts browser', label);return
     page.locator('#diagnose-conflict').click()
-    page.wait_for_function("document.querySelector('#dataset-conflict').textContent.includes('8922')")
+    page.wait_for_function("document.querySelector('#dataset-conflict').textContent.includes('2262')")
     assert not actions
     if mode == 'reload':
         page.reload();page.wait_for_function("document.querySelector('#state').textContent.includes('79957')");assert not actions
     page.evaluate("document.querySelector('#resume').click();" + ("document.querySelector('#resume').click();" if mode == 'double_click' else ''))
     if mode == 'pause_reload':
-        page.wait_for_function("document.querySelector('#state').textContent.includes('parts-reconciled-fixture')")
+        page.wait_for_function("document.querySelector('#state').textContent.includes('a42db372-cf85-4f46-99e7-ccacce2bc6c3')")
         page.locator('#pause').click()
         page.wait_for_function("document.querySelector('#state').textContent.includes('snapshot_paused')")
         page.reload();page.wait_for_function("document.querySelector('#state').textContent.includes('snapshot_paused')")
         page.locator('#resume').click()
     if mode == '419':
-        page.wait_for_function("document.querySelector('#message').textContent.includes('SESSION_EXPIRED')");assert actions == ['resume'] and not generations
+        page.wait_for_function("document.querySelector('#message').textContent.includes('SESSION_EXPIRED')");assert actions == ['resume'] and generations == (1 if pending else 0)
     else:
         page.wait_for_function("document.querySelector('#message').textContent.includes('Eksport gotowy')", timeout=20000)
-        assert generations == 1 and rewritten == [8922]
+        assert generations == 1 and rewritten == [2262]
         assert state['run_id'] == RUN and state['snapshot_attempt_id'] == ATT and state['dataset_boundary_id'] == BOUNDARY
         assert resumes == (0 if mode == 'kick' else 2 if mode == 'pause_reload' else 1)
         if mode != 'pause_reload':
@@ -104,11 +116,12 @@ def case(browser, mode):
         assert 'Wyeksportowane rekordy: 79957 / 79957' in page.locator('#progress').inner_text()
         assert 'Dirty wiersze: 1' in page.locator('#progress').inner_text()
     assert not set(actions).intersection(['start', 'retry_snapshot', 'abort_snapshot'])
-    context.close();print('PASS mutable parts browser', mode)
+    context.close();print('PASS mutable parts browser', label)
 
 
 with sync_playwright() as pw:
     browser = pw.chromium.launch(executable_path='/usr/bin/chromium', args=['--no-sandbox'])
-    for mode in ['normal', 'reload', 'double_click', 'lost_resume', 'network', 'lost_tick', 'pause_reload', 'kick', '419', 'blocked']:
+    modes = ['normal', 'reload', 'double_click', 'lost_resume', 'network', 'lost_tick', 'pause_reload', 'kick', '419', 'blocked']
+    for mode in modes + ['pending_'+m for m in modes]:
         case(browser, mode)
     browser.close()

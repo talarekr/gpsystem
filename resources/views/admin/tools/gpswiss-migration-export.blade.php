@@ -49,7 +49,8 @@
  const reasonOf=(data,fallback)=>typeof data?.reason_code==='string' && /^[A-Za-z0-9_]{1,80}$/.test(data.reason_code)?data.reason_code:fallback;
  const snapshotState=()=>state?.snapshot_state ?? (String(state?.state ?? '').startsWith('snapshot')?state.state:null);
  const browserSnapshot=()=>state?.snapshot_mode==='browser';
- const datasetRecoverable=()=>browserSnapshot() && state?.state==='snapshot_failed' && state?.last_error==='snapshot_row_updated_after_cutoff' && ['parts','marketplace_listings'].includes(state?.current_dataset) && state?.dataset_recovery_allowed===true;
+ const recoverableState=s=>s?.state==='snapshot_failed' && [null,undefined,'snapshot_row_updated_after_cutoff'].includes(s.last_error) && ['parts','marketplace_listings'].includes(s.current_dataset) && s.dataset_recovery_allowed===true;
+ const datasetRecoverable=()=>browserSnapshot() && recoverableState(state);
  const photoRetryPending=()=>state?.photo_retry_requested===true || ['photos_retry_setup','photos_retry_inventory','photos_retry'].includes(state?.phase);
  const unfinished=()=>state && state.state!=='completed' && snapshotState()!=='snapshot_aborted';
  const canPause=()=>browserSnapshot() && (['snapshot_pending','snapshot_running'].includes(snapshotState()) || (snapshotState()==='snapshot_completed' && state?.phase==='photo_inventory'));
@@ -108,13 +109,13 @@
  const recoveryKey='gpswiss-export-last-operational-state';
  function remember(){
   if(!state || !/^[a-f0-9-]{36}$/i.test(id??'') || !/^[a-f0-9-]{36}$/i.test(state.snapshot_attempt_id??''))return;
-  const safe={};for(const key of ['run_id','snapshot_attempt_id','snapshot_mode','snapshot_state','state','phase','current_dataset','processed','total','remaining','cursor','next_action','busy','last_error','last_tick','dataset_recovery_allowed'])safe[key]=state[key];
+  const safe={};for(const key of ['run_id','snapshot_attempt_id','snapshot_mode','snapshot_state','state','phase','current_dataset','processed','total','remaining','cursor','next_action','busy','last_error','last_tick','dataset_recovery_allowed','dataset_recovery'])safe[key]=state[key];
   safe.last_tick={reason_code:state.last_tick?.reason_code??state.last_tick_reason??null};
   try{sessionStorage.setItem(recoveryKey,JSON.stringify(safe));}catch(_){}
  }
  function restoreKnownState(){
   try{const raw=sessionStorage.getItem(recoveryKey);if(!raw || raw.length>4096)return;const saved=JSON.parse(raw);if(saved.run_id===id && /^[a-f0-9-]{36}$/i.test(saved.snapshot_attempt_id??'') && saved.snapshot_mode==='browser' && saved.state==='snapshot_running' && saved.snapshot_state==='snapshot_running' && saved.next_action==='snapshot_tick' && !saved.busy && !saved.last_error && saved.last_tick?.reason_code==='tick_completed')render(saved);
-   else if(saved.run_id===id && saved.snapshot_mode==='browser' && saved.state==='snapshot_failed' && saved.last_error==='snapshot_row_updated_after_cutoff' && ['parts','marketplace_listings'].includes(saved.current_dataset) && saved.dataset_recovery_allowed===true)render(saved);}catch(_){}
+   else if(saved.run_id===id && saved.snapshot_mode==='browser' && recoverableState(saved))render(saved);}catch(_){}
  }
  const kickEligible=()=>!!id && !!state?.snapshot_attempt_id && (datasetRecoverable() || browserSnapshot() && state.state==='snapshot_running' && state.snapshot_state==='snapshot_running' && state.next_action==='snapshot_tick' && !state.busy && !state.last_error && state.last_tick?.reason_code==='tick_completed');
  const cursorText=value=>value==null?'—':typeof value==='object'?JSON.stringify(value):String(value);

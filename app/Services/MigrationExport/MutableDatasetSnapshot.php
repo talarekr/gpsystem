@@ -15,6 +15,21 @@ trait MutableDatasetSnapshot
         return in_array($name, ['marketplace_listings', 'parts'], true);
     }
 
+    /** UI hint only; POST resume validates the canonical checkpoint under the run lease. */
+    public static function pendingDatasetRecovery(array $data): bool
+    {
+        $work = $data['dataset_recovery'] ?? [];
+        $name = $data['current_dataset'] ?? null;
+
+        return self::mutableDatasetAllowed($name) && ($work['dataset'] ?? null) === $name
+            && in_array($data['last_error'] ?? null, [null, 'snapshot_row_updated_after_cutoff'], true)
+            && ($work['recovery_reason'] ?? null) === 'snapshot_row_updated_after_cutoff'
+            && ($work['strategy'] ?? null) === ($name === 'parts' ? 'adopt_complete_shards_then_reconcile' : 'reexport_dataset')
+            && is_int($work['previous_generation'] ?? null) && ($work['new_generation'] ?? null) === $work['previous_generation'] + 1
+            && Str::isUuid($work['dataset_boundary_id'] ?? '')
+            && in_array($data['snapshot_stage'] ?? $data['stage'] ?? 'recovery_preflight', ['recovery_preflight', 'failed'], true);
+    }
+
     private function mutable(array $definition): bool
     {
         return self::mutableDatasetAllowed($definition['name'] ?? null)
@@ -54,12 +69,17 @@ trait MutableDatasetSnapshot
         $state = $this->read($this->folder($directory, $attempt).'/checkpoint.json');
         $name = $state['dataset_names'][$state['dataset_index']] ?? null;
         $definition = $state['datasets'][$name] ?? [];
-        if (($state['attempt_id'] ?? null) !== $attempt || $state['stage'] !== 'failed'
-            || ! self::mutableDatasetAllowed($name) || $state['last_error'] !== 'snapshot_row_updated_after_cutoff') {
+        $pending = self::pendingDatasetRecovery($state + ['current_dataset' => $name]);
+        if (($state['attempt_id'] ?? null) !== $attempt || ! self::mutableDatasetAllowed($name)
+            || (! $pending && ($state['stage'] !== 'failed' || $state['last_error'] !== 'snapshot_row_updated_after_cutoff'))) {
             throw new MigrationExportException('dataset_conflict_diagnostic_not_available', 409);
         }
         if (($state['source_conflict']['dataset'] ?? null) === $name) {
             return ['evidence' => 'recorded_at_failure', 'conflict' => $state['source_conflict']];
+        }
+        if ($pending) {
+            // A resumed artifact preflight must not probe the old live failure page.
+            return ['evidence' => 'recovery_intent_without_recorded_conflict', 'conflict' => null];
         }
 
         return ReadOnlyDatabase::run(function () use ($state, $definition): array {
@@ -91,13 +111,23 @@ trait MutableDatasetSnapshot
         }
         $history = $state['dataset_boundary_history'] ?? [];
         $lastRecovery = $history === [] ? [] : $history[array_key_last($history)];
-        if (($state['stage'] ?? null) === 'recovery_preflight' && self::mutableDatasetAllowed($name)) {
-            return $this->index($directory, $attempt);
+        if (isset($state['dataset_recovery'])) {
+            // The intent checkpoint can commit before publication of the root run state.
+            // Reuse it, including its boundary and preflight offset; never allocate generation N+1.
+            if (! in_array($state['stage'], ['recovery_preflight', 'failed'], true)
+                || ! in_array($state['last_error'] ?? null, [null, 'snapshot_row_updated_after_cutoff'], true)) {
+                throw new MigrationExportException('dataset_recovery_not_allowed', 409);
+            }
+            $this->validateRecoveryIntent($state);
+            $state['stage'] = 'recovery_preflight';
+            $state['last_error'] = null;
+
+            return $this->saveRecoveryIntent($directory, $attempt, $file, $state);
         }
         if (in_array($state['stage'], ['export', 'verify'], true) && $state['last_error'] === null
             && ($lastRecovery['recovery_reason'] ?? null) === 'snapshot_row_updated_after_cutoff'
             && ($state['datasets'][$lastRecovery['dataset'] ?? 'marketplace_listings']['dataset_boundary_id'] ?? null) === ($lastRecovery['dataset_boundary_id'] ?? false)) {
-            return $this->index($directory, $attempt);
+            return $this->recoveryResult($state);
         }
         if ($state['stage'] !== 'failed' || ! self::mutableDatasetAllowed($name)
             || $state['last_error'] !== 'snapshot_row_updated_after_cutoff' || $this->mutable($definition)
@@ -124,26 +154,80 @@ trait MutableDatasetSnapshot
         }
         $state['stage'] = 'recovery_preflight';
         $state['last_error'] = null;
-        $this->write($file, $state);
-        app(CompactSnapshotProgress::class)->publish($directory, $attempt, $state);
 
-        return $this->index($directory, $attempt);
+        return $this->saveRecoveryIntent($directory, $attempt, $file, $state);
+    }
+
+    private function saveRecoveryIntent(string $directory, string $attempt, string $file, array $state): array
+    {
+        $this->write($file, $state);
+        try {
+            app(CompactSnapshotProgress::class)->publish($directory, $attempt, $state);
+        } catch (\Throwable) {
+            // This derived cache is not the recovery checkpoint.
+        }
+
+        // Do not reread/materialize the multi-MB index between intent and root publication.
+        return $this->recoveryResult($state);
+    }
+
+    private function recoveryResult(array $state): array
+    {
+        return ['phase' => 'snapshot_'.$state['stage'], 'dataset_recovery' => $state['dataset_recovery'] ?? null];
+    }
+
+    /** Validate persisted control metadata, never the live values of previously exported rows. */
+    private function validateRecoveryIntent(array $state): void
+    {
+        $work = $state['dataset_recovery'] ?? [];
+        $name = $state['dataset_names'][$state['dataset_index']] ?? null;
+        $definition = $state['datasets'][$name] ?? [];
+        $position = $work['preflight_shard'] ?? -1;
+        $rows = $work['preflight_rows'] ?? -1;
+        if (! self::mutableDatasetAllowed($name) || ($work['dataset'] ?? null) !== $name
+            || ($work['recovery_reason'] ?? null) !== 'snapshot_row_updated_after_cutoff'
+            || ($work['strategy'] ?? null) !== ($name === 'parts' ? 'adopt_complete_shards_then_reconcile' : 'reexport_dataset')
+            || ($work['previous_generation'] ?? null) !== (int) ($definition['dataset_generation'] ?? 0)
+            || ($work['new_generation'] ?? null) !== $work['previous_generation'] + 1
+            || ! Str::isUuid($work['dataset_boundary_id'] ?? '')
+            || ($work['previous_boundary_id'] ?? null) !== ($definition['dataset_boundary_id'] ?? 'legacy')
+            || ($work['preflight_total_shards'] ?? null) !== count($definition['shards'] ?? [])
+            || ! is_int($position) || $position < 0 || $position > count($definition['shards'] ?? [])
+            || ! is_int($rows) || $rows < 0 || $rows > ($definition['processed'] ?? -1)
+            || ! preg_match('/^[a-f0-9]{64}$/D', $work['preflight_chain'] ?? '')
+            || ($position === 0 && ($rows !== 0 || $work['preflight_chain'] !== hash('sha256', $name)))
+            || ! in_array($work['return_stage'] ?? null, ['export', 'verify'], true)
+            || $this->mutable($definition) || ($definition['key_columns'] ?? []) !== ['id']
+            || ($definition['source_table'] ?? null) !== $name
+            || ($name === 'parts' && (($definition['processed'] ?? null) !== ($definition['total'] ?? null) || $work['return_stage'] !== 'verify'))) {
+            throw new MigrationExportException('dataset_recovery_intent_invalid', 409);
+        }
+        $current = ReadOnlyDatabase::run(fn () => $this->source->browserDescribe($this->source->browserDefinitions()[$name]));
+        if ($current['schema_sha256'] !== $definition['schema_sha256']) {
+            throw new MigrationExportException('snapshot_schema_changed', 409);
+        }
     }
 
     /** Hash old data in bounded steps before adoption or boundary refresh; corruption can never be reset away. */
     private function recoverDatasetBoundary(string $folder, array &$state): void
     {
+        $this->validateRecoveryIntent($state);
         $work = &$state['dataset_recovery'];
         $name = $work['dataset'];
         $definition = &$state['datasets'][$name];
-        $current = $this->source->browserDescribe($this->source->browserDefinitions()[$name]);
-        if ($current['schema_sha256'] !== $definition['schema_sha256']) {
-            throw new RuntimeException('snapshot_schema_changed');
+        if (($state['attempt_id'] ?? null) !== basename($folder)) {
+            throw new RuntimeException('stale_snapshot_attempt');
         }
         $deadline = microtime(true) + 1;
         for ($n = 0; $n < 5 && isset($definition['shards'][$work['preflight_shard']]) && microtime(true) < $deadline; $n++) {
-            $this->verifyStoredShard(dirname(dirname($folder)), $definition['shards'][$work['preflight_shard']]);
             $shard = $definition['shards'][$work['preflight_shard']];
+            $prefix = 'logical-snapshot/'.$state['attempt_id'].'/datasets/'.$name.'/';
+            foreach (['path', 'csv_path'] as $key) {
+                if (! str_starts_with($shard[$key] ?? '', $prefix) || str_contains($shard[$key], '..')) {
+                    throw new RuntimeException('snapshot_shard_identity_mismatch');
+                }
+            }
+            $this->verifyStoredShard(dirname(dirname($folder)), $shard, true);
             $work['preflight_chain'] = hash('sha256', $work['preflight_chain'].$shard['sha256']);
             $work['preflight_rows'] += $shard['rows'];
             $work['preflight_shard']++;
@@ -202,12 +286,58 @@ trait MutableDatasetSnapshot
         $state['stage'] = $adopt ? 'verify' : 'export';
     }
 
-    private function verifyStoredShard(string $directory, array $shard): void
+    private function verifyStoredShard(string $directory, array $shard, bool $artifactPreflight = false): void
     {
         foreach (['path' => 'sha256', 'csv_path' => 'csv_sha256'] as $key => $hash) {
-            if (! is_file($directory.'/'.$shard[$key]) || ! hash_equals($shard[$hash], hash_file('sha256', $directory.'/'.$shard[$key]))) {
+            $path = $directory.'/'.$shard[$key];
+            $actual = is_file($path) && is_readable($path) ? @hash_file('sha256', $path) : false;
+            if (! is_string($actual) || ! hash_equals($shard[$hash], $actual)) {
                 throw new RuntimeException('snapshot_shard_checksum_mismatch');
             }
+        }
+        if (! $artifactPreflight) {
+            return;
+        }
+        if (filesize($directory.'/'.$shard['path']) !== $shard['bytes']
+            || filesize($directory.'/'.$shard['csv_path']) !== $shard['csv_bytes']) {
+            throw new RuntimeException('snapshot_shard_size_mismatch');
+        }
+        try {
+            $rows = json_decode(file_get_contents($directory.'/'.$shard['path']), true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            throw new RuntimeException('snapshot_shard_format_invalid');
+        }
+        if (! is_array($rows) || ! array_is_list($rows) || count($rows) !== $shard['rows']) {
+            throw new RuntimeException('snapshot_shard_row_count_mismatch');
+        }
+        foreach ($rows as $row) {
+            if (! is_array($row) || ! isset($row['id']) || ! is_scalar($row['id'])) {
+                throw new RuntimeException('snapshot_shard_format_invalid');
+            }
+        }
+        $csv = fopen($directory.'/'.$shard['csv_path'], 'rb');
+        try {
+            $header = fgetcsv($csv, null, ';', '"', '');
+            if (! is_array($header)) {
+                throw new RuntimeException('snapshot_shard_format_invalid');
+            }
+            $header[0] = preg_replace('/^\xEF\xBB\xBF/', '', $header[0] ?? '');
+            $id = array_search('id', $header, true);
+            if ($id === false || count(array_unique($header)) !== count($header)) {
+                throw new RuntimeException('snapshot_shard_format_invalid');
+            }
+            $position = 0;
+            while (($row = fgetcsv($csv, null, ';', '"', '')) !== false) {
+                if (count($row) !== count($header) || ! isset($rows[$position]) || (string) $rows[$position]['id'] !== $row[$id]) {
+                    throw new RuntimeException('snapshot_shard_row_count_mismatch');
+                }
+                $position++;
+            }
+            if ($position !== count($rows)) {
+                throw new RuntimeException('snapshot_shard_row_count_mismatch');
+            }
+        } finally {
+            fclose($csv);
         }
     }
 

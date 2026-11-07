@@ -63,6 +63,11 @@ final class BrowserMigrationSnapshot
             'cursor_before' => $state['datasets'][$dataset][$cursorField] ?? null, 'cursor_after' => null,
             'records_attempted' => null, 'records_completed' => 0, 'backend_exception_class' => null];
         $currentDefinition = $state['datasets'][$dataset] ?? [];
+        if ($state['stage'] === 'recovery_preflight') {
+            $trace['action'] = 'artifact_preflight';
+            $trace['dataset_generation'] = $state['dataset_recovery']['new_generation'];
+            $trace['preflight_shard_before'] = $state['dataset_recovery']['preflight_shard'];
+        }
         if ($state['stage'] === 'verify' && ($currentDefinition['recovery_strategy'] ?? null) === 'adopt_complete_shards_then_reconcile') {
             $position = $currentDefinition['mutable_active'] === null ? $currentDefinition['mutable_position'] : ($currentDefinition['mutable_active'][$currentDefinition['mutable_position']] ?? null);
             $trace['records_limit'] = max($trace['records_limit'], min(25, $currentDefinition['shards'][$position]['rows'] ?? 0));
@@ -152,7 +157,7 @@ final class BrowserMigrationSnapshot
                 $trace['source_conflict'] = $error->diagnostic;
                 $state['source_conflict'] = $error->diagnostic;
             }
-            $allowed = ['snapshot_legacy_shard_budget_exceeded', 'snapshot_mutable_dataset_unstable', 'snapshot_schema_changed', 'snapshot_source_changed', 'snapshot_row_updated_after_cutoff', 'snapshot_row_too_large_for_http', 'snapshot_stable_nonsecret_key_required', 'snapshot_immutable_chunk_conflict', 'snapshot_shard_checksum_mismatch', 'snapshot_reference_boundary_required'];
+            $allowed = ['stale_snapshot_attempt', 'dataset_recovery_intent_invalid', 'snapshot_shard_identity_mismatch', 'snapshot_shard_size_mismatch', 'snapshot_shard_format_invalid', 'snapshot_shard_row_count_mismatch', 'snapshot_legacy_shard_budget_exceeded', 'snapshot_mutable_dataset_unstable', 'snapshot_schema_changed', 'snapshot_source_changed', 'snapshot_row_updated_after_cutoff', 'snapshot_row_too_large_for_http', 'snapshot_stable_nonsecret_key_required', 'snapshot_immutable_chunk_conflict', 'snapshot_shard_checksum_mismatch', 'snapshot_reference_boundary_required'];
             $state['last_error'] = in_array($error->getMessage(), $allowed, true) ? $error->getMessage() : 'snapshot_http_tick_failed';
             $trace['backend_exception_class'] = str_contains(get_class($error), '@anonymous') ? 'AnonymousThrowable' : get_class($error);
             if ($state['last_error'] === 'snapshot_http_tick_failed') {
@@ -171,6 +176,10 @@ final class BrowserMigrationSnapshot
         } catch (\Throwable) {
         }
         $trace['reason_code'] = $trace['reason_code'] === 'tick_running' ? 'tick_completed' : $trace['reason_code'];
+        if ($trace['action'] === 'artifact_preflight') {
+            $trace['preflight_shard_after'] = $state['dataset_recovery']['preflight_shard'] ?? count($state['datasets'][$dataset]['shards']);
+            $trace['artifacts_checked'] = max(0, $trace['preflight_shard_after'] - $trace['preflight_shard_before']);
+        }
         $trace['cursor_after'] = $state['datasets'][$dataset][$cursorField] ?? null;
         $trace['records_attempted'] = $this->attempted;
         $trace['records_completed'] = max(0, array_sum(array_column($state['datasets'], 'processed')) + array_sum(array_column($state['datasets'], 'verified')) - array_sum(array_column($saved['datasets'], 'processed')) - array_sum(array_column($saved['datasets'], 'verified')));
