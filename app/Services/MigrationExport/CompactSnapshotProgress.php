@@ -41,8 +41,9 @@ final class CompactSnapshotProgress
 
         $definition = $datasets[$dataset] ?? [];
 
-        return array_intersect_key($definition, array_flip(['dataset_generation', 'dataset_boundary_id', 'previous_boundary_id', 'boundary_refreshed_at', 'recovery_reason', 'consistency_mode']))
+        return array_intersect_key($definition, array_flip(['dataset_generation', 'dataset_boundary_id', 'previous_boundary_id', 'boundary_refreshed_at', 'recovery_reason', 'consistency_mode', 'recovery_strategy', 'mutable_round', 'mutable_dirty_rows', 'mutable_dirty_shards', 'mutable_reused_shards']))
             + ['dataset_recovery' => $state['dataset_recovery'] ?? null, 'source_conflict' => $state['source_conflict'] ?? null, 'current_dataset' => $dataset, 'processed' => $processed, 'total' => $total,
+                'exported_records' => array_sum(array_column($datasets, 'processed')), 'verification_processed' => array_sum(array_column($datasets, 'verified')),
                 'remaining' => max(0, $total - $processed), 'cursor' => $datasets[$dataset][$verify ? 'verify_cursor' : 'cursor'] ?? null,
                 'last_success' => $state['last_success'] ?? null, 'last_error' => $state['last_error'] ?? null];
     }

@@ -194,7 +194,7 @@ class GpswissPanelExportTest extends TestCase
         Bus::assertNothingDispatched();
     }
 
-    public function test_plain_source_update_without_updated_at_is_detected_by_second_pass(): void
+    public function test_plain_part_update_without_updated_at_is_reconciled_by_second_pass(): void
     {
         $this->fixture();
         $index = $this->engineStart();
@@ -204,24 +204,29 @@ class GpswissPanelExportTest extends TestCase
         $this->assertSame(2, $index['datasets']['parts']['processed']);
         DB::table('parts')->where('id', 1)->update(['description' => 'Changed without timestamp']);
         $failed = $this->engineFinish($index);
-        $this->assertTrue($failed['failed']);
-        $this->assertSame('snapshot_source_changed', $failed['last_error']);
-        $this->assertFileDoesNotExist($this->directory().'/snapshot.json');
+        $this->assertTrue($failed['done'], $failed['last_error'] ?? '');
+        $this->assertFalse($failed['failed']);
+        $this->assertFileExists($this->directory().'/snapshot.json');
+        $rows = iterator_to_array($this->engine()->rows($this->directory(), 'parts', self::ATTEMPT));
+        $this->assertSame('Changed without timestamp', collect($rows)->firstWhere('id', '1')['description']);
         Http::assertNothingSent();
     }
 
-    public function test_deleted_captured_row_blocks_completion_instead_of_silently_rebasing(): void
+    public function test_deleted_part_is_reported_by_tombstone_and_removed_from_derived_relations(): void
     {
         $this->fixture();
         $index = $this->engineStart();
-        for ($tick = 0; $tick < 1000 && ($index['datasets']['parts']['processed'] ?? 0) === 0 && ! $index['failed']; $tick++) {
+        for ($tick = 0; $tick < 1000 && ($index['datasets']['parts']['processed'] ?? 0) < 4 && ! $index['failed']; $tick++) {
             $index = $this->engine()->tick($this->directory(), self::ATTEMPT);
         }
-        DB::table('parts')->where('id', 1)->delete();
+        DB::table('parts')->where('id', 3)->delete();
         $failed = $this->engineFinish($index);
-        $this->assertTrue($failed['failed']);
-        $this->assertSame('snapshot_source_changed', $failed['last_error']);
-        $this->assertFileDoesNotExist($this->directory().'/snapshot.json');
+        $this->assertTrue($failed['done'], $failed['last_error'] ?? '');
+        $this->assertFalse($failed['failed']);
+        $this->assertFileExists($this->directory().'/snapshot.json');
+        $this->assertContains('3', $failed['datasets']['parts']['shards'][1]['deleted_ids']);
+        $relations = iterator_to_array($this->engine()->rows($this->directory(), 'part_car_relations', self::ATTEMPT));
+        $this->assertNotContains('3', array_column($relations, 'part_id'));
         Http::assertNothingSent();
     }
 

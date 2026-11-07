@@ -1,5 +1,7 @@
 # Recovery marketplace_listings bez restartu eksportu
 
+Zakres historyczny tego audytu to #1517. Dalsze rozszerzenie wspólnego mechanizmu na parts, bez ponownego eksportu gotowych shardów, opisuje [audyt parts](gpswiss-mutable-parts.md). Pozostałe niezależne datasety pozostają strict.
+
 ## Ustalenia audytu
 
 Zgłoszenie: run `8de6e27c-ad7c-470b-830b-b9ecee9446ba`, attempt `9cb33c92-3f1e-4db0-b08d-052715aa5f4c`, `snapshot_failed`, processed 57363/79957, marketplace_listings cursor `{id:22580}`, `snapshot_row_updated_after_cutoff`.

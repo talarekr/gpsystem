@@ -395,17 +395,21 @@ class GpswissMutableListingsTest extends TestCase
         $this->assertArrayNotHasKey('dataset_generation', $this->state()['datasets']['marketplace_listings']);
     }
 
-    public function test_cutoff_guard_remains_strict_for_parts(): void
+    public function test_cutoff_guard_remains_strict_for_cars(): void
     {
+        DB::table('cars')->insert(['id' => 90, 'uuid' => (string) Str::uuid(), 'make' => 'Fixture', 'model' => 'Fixture']);
         $engine = app(BrowserMigrationSnapshot::class);
         $index = $engine->begin($this->dir, self::ATTEMPT);
         while ($index['stage'] === 'boundaries') {
             $index = $engine->tick($this->dir, self::ATTEMPT);
         }
-        DB::table('parts')->where('id', 1)->update(['updated_at' => '2099-01-01 12:00:00']);
+        DB::table('cars')->where('id', 90)->update(['updated_at' => '2099-01-01 12:00:00']);
+        while ($index['current_dataset'] !== 'cars') {
+            $index = $engine->tick($this->dir, self::ATTEMPT);
+        }
         $failed = $engine->tick($this->dir, self::ATTEMPT);
         $this->assertSame('snapshot_row_updated_after_cutoff', $failed['last_error']);
-        $this->assertSame('parts', $failed['current_dataset']);
+        $this->assertSame('cars', $failed['current_dataset']);
         $this->expectException(MigrationExportException::class);
         $engine->requestDatasetRecovery($this->dir, self::ATTEMPT);
     }

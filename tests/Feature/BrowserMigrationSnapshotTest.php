@@ -98,7 +98,7 @@ class BrowserMigrationSnapshotTest extends TestCase
         $this->assertFileExists($this->folder.'/snapshot.json');
     }
 
-    public function test_changed_captured_row_fails_validation_without_replacing_frozen_data(): void
+    public function test_changed_part_reconciles_and_updates_derived_car_relation_without_overwriting_baseline(): void
     {
         foreach ([8, 9] as $car) {
             DB::table('cars')->insert(['id' => $car, 'uuid' => (string) Str::uuid(), 'make' => 'Make', 'model' => 'Model']);
@@ -117,11 +117,11 @@ class BrowserMigrationSnapshotTest extends TestCase
             $index = $engine->tick($this->folder, $this->attempt);
         }
         $relations = iterator_to_array($engine->rows($this->folder, 'part_car_relations', $this->attempt));
-        $this->assertSame('8', $relations[0]['car_id']);
-        $this->assertTrue($index['failed']);
-        $this->assertSame('snapshot_source_changed', $index['last_error']);
+        $this->assertSame('9', $relations[0]['car_id']);
+        $this->assertTrue($index['done'], $index['last_error'] ?? '');
+        $this->assertFalse($index['failed']);
         $this->assertSame($first['sha256'], hash_file('sha256', $this->folder.'/'.$first['path']));
-        $this->assertFileDoesNotExist($this->folder.'/snapshot.json');
+        $this->assertFileExists($this->folder.'/snapshot.json');
     }
 
     public function test_late_out_of_boundary_order_and_listing_cannot_pull_unrelated_private_profiles(): void

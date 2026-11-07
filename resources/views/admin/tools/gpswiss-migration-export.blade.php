@@ -5,7 +5,7 @@
 <p>Panel wykonuje krótkie partie i zapisuje postęp na serwerze. Zamrożone granice odczytu oraz sumy kontrolne tworzą wersjonowany snapshot logiczny; nie jest to jedna transakcja bazy utrzymywana między żądaniami HTTP. Granice i ograniczenia spójności znajdziesz w manifeście.</p>
 <p>Próbka obejmuje do 5 rzeczywistych części, a pełny eksport używa tego samego formatu. Zdjęcia zachowują oryginalne nazwy w katalogach ID części; kolizje w obrębie części otrzymują podkatalog ID zdjęcia. Brakujące/zmienione pliki są raportowane.</p>
 <p>Paczka zawiera kody, kategorię, jakość, pozycję, magazyn, opis, lokalne/Ovoko ID auta, ceny sklep/Allegro/Ovoko/eBay, Kurier Allegro, lokalne parametry i linki ofert. Zawiera wszystkie samochody, zamówienia i potrzebne dane klientów — pobieranie wyłącznie prywatnie przez zalogowanego właściciela eksportu. Bez haseł, tokenów i pełnych danych kart. Nie udostępniaj archiwum ani katalogu publicznie.</p>
-<p>Listingi marketplace mogą zmieniać się podczas sprzedaży. Recovery zmienia wyłącznie generację tego datasetu; wcześniejsze datasety i attempt pozostają zachowane. Licznik może się cofnąć o częściowy eksport listingów. Rekoncyliacja ma limit trzech rund i jawny raport niestabilności.</p>
+<p>Części i listingi mogą zmieniać się podczas sprzedaży. Recovery części zachowuje kompletny eksport i uzgadnia tylko zmienione partie. Dotychczasowe pliki listingów i attempt pozostają zachowane. Licznik weryfikacji jest oddzielony od liczby wyeksportowanych rekordów. Rekoncyliacja ma limit trzech rund i jawny raport niestabilności.</p>
 <p>Snapshot bazy nie jest globalnym snapshotem filesystemu. Kopie plików są weryfikowane podczas kopiowania; finalny cutover wymaga osobnej procedury freeze/snapshotu. Nie zatrzymujemy synchronizacji automatycznie.</p>
 <p>Próbka wybiera sprzedaną część (status sold), część do wystawienia (needs_listing), oferty eBay/Ovoko i galerię — gdy takie przypadki są zapisane. Powiązania Allegro są wyłącznie historyczne. Import, publikacja, synchronizacja i wiadomości do klientów pozostają wyłączone.</p>
 <button id="start" disabled>Przygotuj nowy eksport</button><button id="resume" disabled>Wznów istniejący eksport</button><button id="diagnose-conflict" hidden>Diagnozuj konflikt datasetu</button><button id="pause" disabled>Pauza snapshotu</button><button id="stop-local" disabled>Stop lokalnej pętli</button>
@@ -49,7 +49,7 @@
  const reasonOf=(data,fallback)=>typeof data?.reason_code==='string' && /^[A-Za-z0-9_]{1,80}$/.test(data.reason_code)?data.reason_code:fallback;
  const snapshotState=()=>state?.snapshot_state ?? (String(state?.state ?? '').startsWith('snapshot')?state.state:null);
  const browserSnapshot=()=>state?.snapshot_mode==='browser';
- const datasetRecoverable=()=>browserSnapshot() && state?.state==='snapshot_failed' && state?.last_error==='snapshot_row_updated_after_cutoff' && state?.current_dataset==='marketplace_listings' && state?.dataset_recovery_allowed===true;
+ const datasetRecoverable=()=>browserSnapshot() && state?.state==='snapshot_failed' && state?.last_error==='snapshot_row_updated_after_cutoff' && ['parts','marketplace_listings'].includes(state?.current_dataset) && state?.dataset_recovery_allowed===true;
  const photoRetryPending=()=>state?.photo_retry_requested===true || ['photos_retry_setup','photos_retry_inventory','photos_retry'].includes(state?.phase);
  const unfinished=()=>state && state.state!=='completed' && snapshotState()!=='snapshot_aborted';
  const canPause=()=>browserSnapshot() && (['snapshot_pending','snapshot_running'].includes(snapshotState()) || (snapshotState()==='snapshot_completed' && state?.phase==='photo_inventory'));
@@ -82,7 +82,9 @@
   const progress=state?.snapshot_progress ?? {},dataset=state?.current_dataset ?? progress.current_dataset ?? progress.dataset;
   const total=state && Object.hasOwn(state,'total')?(state.total ?? '—'):(progress.total ?? state?.total_images ?? '—');
   el('progress').textContent=state?'Run: '+id+' | Stan: '+state.state+' | Faza: '+(state.phase ?? state.state)+' | Zbiór: '+(dataset ?? '—')+' | Postęp: '+(state.processed ?? progress.processed ?? state.processed_images ?? 0)+' / '+total+' | Cursor: '+cursorText(state.dataset_cursor ?? state.cursor ?? progress.cursor)+' | Następny krok: '+nextAction():'';
+  if(state?.exported_records!=null)el('progress').textContent+=' | Wyeksportowane rekordy: '+state.exported_records+' / '+total+' | Zweryfikowane: '+state.verification_processed;
   if(state?.dataset_recovery)el('progress').textContent+=' | Kontrola starej generacji: '+state.dataset_recovery.preflight_shard+' / '+state.dataset_recovery.preflight_total_shards;
+  if(state?.mutable_dirty_rows!=null)el('progress').textContent+=' | Dirty wiersze: '+state.mutable_dirty_rows+' | Dirty shardy: '+state.mutable_dirty_shards+' | Runda weryfikacji: '+state.mutable_round;
   if(state?.dataset_generation!=null)el('progress').textContent+=' | Generacja datasetu: '+state.dataset_generation;
   const debug=el('full-debug');debug.hidden=!id;if(id)debug.href=base+'/'+encodeURIComponent(id)+'?format=status';
   if(state?.state==='completed' && browserSnapshot() && !Array.isArray(state.download_artifacts) && artifactsLoadedFor!==id){
@@ -112,7 +114,7 @@
  }
  function restoreKnownState(){
   try{const raw=sessionStorage.getItem(recoveryKey);if(!raw || raw.length>4096)return;const saved=JSON.parse(raw);if(saved.run_id===id && /^[a-f0-9-]{36}$/i.test(saved.snapshot_attempt_id??'') && saved.snapshot_mode==='browser' && saved.state==='snapshot_running' && saved.snapshot_state==='snapshot_running' && saved.next_action==='snapshot_tick' && !saved.busy && !saved.last_error && saved.last_tick?.reason_code==='tick_completed')render(saved);
-   else if(saved.run_id===id && saved.snapshot_mode==='browser' && saved.state==='snapshot_failed' && saved.last_error==='snapshot_row_updated_after_cutoff' && saved.current_dataset==='marketplace_listings' && saved.dataset_recovery_allowed===true)render(saved);}catch(_){}
+   else if(saved.run_id===id && saved.snapshot_mode==='browser' && saved.state==='snapshot_failed' && saved.last_error==='snapshot_row_updated_after_cutoff' && ['parts','marketplace_listings'].includes(saved.current_dataset) && saved.dataset_recovery_allowed===true)render(saved);}catch(_){}
  }
  const kickEligible=()=>!!id && !!state?.snapshot_attempt_id && (datasetRecoverable() || browserSnapshot() && state.state==='snapshot_running' && state.snapshot_state==='snapshot_running' && state.next_action==='snapshot_tick' && !state.busy && !state.last_error && state.last_tick?.reason_code==='tick_completed');
  const cursorText=value=>value==null?'—':typeof value==='object'?JSON.stringify(value):String(value);
@@ -241,7 +243,7 @@
        if(result.run_id!==expectedRun || result.snapshot_attempt_id!==expectedAttempt)throw Object.assign(new Error('run_or_attempt_changed'),{reason:'run_or_attempt_changed'});
        render(result);
        if(!['tick_completed','completed','busy','recovery_started'].includes(result.kick_reason))throw Object.assign(new Error('kick_blocked'),{reason:result.blocked_reason??result.kick_reason??'kick_blocked'});
-       if(result.kick_reason==='recovery_started')resumeEvent('dataset_boundary_refresh_started');
+       if(result.kick_reason==='recovery_started'){resumeEvent(result.dataset_recovery?.strategy==='adopt_complete_shards_then_reconcile'?'reconciliation_started':'dataset_boundary_refresh_started');resumeEvent('dataset='+result.dataset_recovery?.dataset);}
        if(result.kick_reason==='tick_completed')resumeEvent('tick_completed');
        else if(result.kick_reason==='busy')resumeEvent('blocked','busy');
        needsResume=false;
@@ -263,11 +265,11 @@
     if(next==='blocked' && !datasetRecoverable()){if(resumeTraceActive)resumeEvent('blocked',state.blocked_reason ?? state.last_error ?? state.state);el('message').textContent='Wznowienie zablokowane: '+(state.blocked_reason ?? state.last_error ?? state.state)+'. Sprawdź dostępne akcje snapshotu.';break;}
     if(browserSnapshot() && state.state==='snapshot_running' && next==='snapshot_tick' && !state.busy)needsResume=false;
     if(needsResume || next==='resume' || datasetRecoverable()){
-     const recovering=datasetRecoverable();if(recovering)resumeEvent('recoverable_dataset_conflict');
+     const recovering=datasetRecoverable();if(recovering)resumeEvent(state.current_dataset==='parts'?'recoverable_mutable_dataset_conflict':'recoverable_dataset_conflict');
      try{render(await request(base+'/'+encodeURIComponent(id),'resume',{expected_snapshot_attempt:state.snapshot_attempt_id??null}));needsResume=!!state.busy;attempts=0;
      }
      catch(error){if(++attempts>4)throw error;await recover(error,1);}
-      if(recovering && state.dataset_recovery){resumeEvent('dataset_boundary_refresh_started');resumeEvent('dataset='+state.dataset_recovery.dataset);resumeEvent('previous_generation='+state.dataset_recovery.previous_generation);resumeEvent('new_generation='+state.dataset_recovery.new_generation);resumeEvent(state.state);}
+      if(recovering && state.dataset_recovery){resumeEvent(state.dataset_recovery.strategy==='adopt_complete_shards_then_reconcile'?'reconciliation_started':'dataset_boundary_refresh_started');resumeEvent('dataset='+state.dataset_recovery.dataset);resumeEvent('previous_generation='+state.dataset_recovery.previous_generation);resumeEvent('new_generation='+state.dataset_recovery.new_generation);resumeEvent(state.state);}
      continue;
     }
     if(!['snapshot_tick','tick'].includes(next)){el('message').textContent='Nieznany następny krok: '+next+'. Checkpoint zachowany.';break;}
