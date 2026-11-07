@@ -13,6 +13,7 @@ use RuntimeException;
 final class BrowserMigrationSnapshot
 {
     use MutableDatasetSnapshot;
+    use OperatorPartsDriftSnapshot;
 
     private int $attempted = 0;
 
@@ -57,7 +58,7 @@ final class BrowserMigrationSnapshot
         $started = microtime(true);
         $saved = $state;
         $this->attempted = 0;
-        $dataset = $state['dataset_names'][$state['dataset_index']] ?? null;
+        $dataset = $state['dataset_names'][$state['operator_finalization']['dataset_index'] ?? $state['dataset_index']] ?? null;
         $cursorField = $state['stage'] === 'verify' ? 'verify_cursor' : 'cursor';
         $trace = ['started_at' => microtime(true), 'records_limit' => max(1, min(5, (int) config('migration_export.browser_snapshot_rows', 5))), 'action' => 'snapshot_tick', 'reason_code' => 'tick_running', 'current_dataset' => $dataset,
             'cursor_before' => $state['datasets'][$dataset][$cursorField] ?? null, 'cursor_after' => null,
@@ -75,89 +76,95 @@ final class BrowserMigrationSnapshot
         $this->trace($directory, $trace);
         $state['last_error'] = null;
         try {
-            ReadOnlyDatabase::run(function () use (&$state, $folder): void {
-                $name = $state['dataset_names'][$state['dataset_index']] ?? null;
-                if ($name === null) {
-                    $state['dataset_index'] = 0;
-                    $state['stage'] = match ($state['stage']) {
-                        'boundaries' => 'export', 'export' => 'verify', 'verify' => 'completed'
-                    };
-
-                    return;
-                }
-                if ($state['stage'] === 'recovery_preflight') {
-                    $this->recoverDatasetBoundary($folder, $state);
-                } elseif ($state['stage'] === 'boundaries') {
-                    if ($name === 'part_car_relations') {
-                        $parts = $state['datasets']['parts'];
-                        $definition = ['name' => $name, 'source_table' => 'frozen:parts', 'required' => true, 'available' => true,
-                            'derived_from' => 'parts', 'exported_columns' => ['id', 'part_id', 'car_id'], 'column_definitions' => [],
-                            'relations' => ['part_id' => 'parts', 'car_id' => 'cars'], 'schema_sha256' => $parts['schema_sha256'],
-                            'key_columns' => ['id'], 'max_key' => $parts['max_key'], 'total' => $parts['total']];
-                    } else {
-                        $definition = $this->source->browserDescribe($this->source->browserDefinitions()[$name]);
-                    }
-                    $definition['references'] ??= [];
-                    foreach ($definition['references'] as &$reference) {
-                        $frozen = $state['datasets'][$reference['table']] ?? null;
-                        if ($frozen === null) {
-                            throw new RuntimeException('snapshot_reference_boundary_required');
-                        }
-                        $reference['boundary_bound'] = true;
-                        $reference['frozen_key_columns'] = $frozen['key_columns'] ?? [];
-                        $reference['frozen_max_key'] = $frozen['max_key'] ?? null;
-                    }
-                    unset($reference);
-                    $definition += ['processed' => 0, 'verified' => 0, 'cursor' => null, 'verify_cursor' => null, 'shards' => [], 'done' => false,
-                        'checksum_partial' => hash('sha256', $name), 'verification_checksum' => hash('sha256', $name), 'verify_shard' => 0,
-                        'boundary_frozen_at' => now()->toIso8601String()];
-                    if (isset($definition['derived_from'])) {
-                        // Membership and car_id come from immutable parts, never a second live query.
-                    } elseif ($definition['available']) {
-                        $query = $this->source->browserQuery($definition, $state['cutoff_database_time']);
-                        $maximum = clone $query;
-                        foreach ($definition['key_columns'] as $column) {
-                            $maximum->orderByDesc($column);
-                        }
-                        $last = $maximum->first($definition['key_columns']);
-                        $definition['max_key'] = $last ? (array) $last : null;
-                        $definition['total'] = $definition['max_key'] === null ? 0 : $this->count($this->bounded($query, $definition));
-                    } else {
-                        $definition['max_key'] = null;
-                        $definition['total'] = 0;
-                    }
-                    if (self::mutableDatasetAllowed($name) && $definition['key_columns'] === ['id']) {
-                        $this->initializeMutable($definition, $state['cutoff_database_time']);
-                        $state['dataset_consistency_overrides'][$name] = $definition['mutable_contract'];
-                    }
-                    $state['datasets'][$name] = $definition;
-                    $state['dataset_index']++;
-                } else {
-                    $definition = &$state['datasets'][$name];
-                    if (! $definition['available'] || ($definition['total'] === 0 && ! $this->mutable($definition))) {
-                        $definition['done'] = true;
-                        $state['dataset_index']++;
+            if ($state['stage'] === 'operator_finalize') {
+                $trace['action'] = 'operator_artifact_finalization';
+                $this->finalizeAcceptedArtifacts($folder, $state);
+                $state['last_success'] = now()->toIso8601String();
+            } else {
+                ReadOnlyDatabase::run(function () use (&$state, $folder): void {
+                    $name = $state['dataset_names'][$state['dataset_index']] ?? null;
+                    if ($name === null) {
+                        $state['dataset_index'] = 0;
+                        $state['stage'] = match ($state['stage']) {
+                            'boundaries' => 'export', 'export' => 'verify', 'verify' => 'completed'
+                        };
 
                         return;
                     }
-                    $current = isset($definition['derived_from']) ? $definition : $this->source->browserDescribe($this->source->browserDefinitions()[$name]);
-                    if (($current['schema_sha256'] ?? null) !== $definition['schema_sha256']) {
-                        throw new RuntimeException('snapshot_schema_changed');
-                    }
-                    if ($state['stage'] === 'export') {
-                        $this->exportChunk($folder, $state, $definition);
+                    if ($state['stage'] === 'recovery_preflight') {
+                        $this->recoverDatasetBoundary($folder, $state);
+                    } elseif ($state['stage'] === 'boundaries') {
+                        if ($name === 'part_car_relations') {
+                            $parts = $state['datasets']['parts'];
+                            $definition = ['name' => $name, 'source_table' => 'frozen:parts', 'required' => true, 'available' => true,
+                                'derived_from' => 'parts', 'exported_columns' => ['id', 'part_id', 'car_id'], 'column_definitions' => [],
+                                'relations' => ['part_id' => 'parts', 'car_id' => 'cars'], 'schema_sha256' => $parts['schema_sha256'],
+                                'key_columns' => ['id'], 'max_key' => $parts['max_key'], 'total' => $parts['total']];
+                        } else {
+                            $definition = $this->source->browserDescribe($this->source->browserDefinitions()[$name]);
+                        }
+                        $definition['references'] ??= [];
+                        foreach ($definition['references'] as &$reference) {
+                            $frozen = $state['datasets'][$reference['table']] ?? null;
+                            if ($frozen === null) {
+                                throw new RuntimeException('snapshot_reference_boundary_required');
+                            }
+                            $reference['boundary_bound'] = true;
+                            $reference['frozen_key_columns'] = $frozen['key_columns'] ?? [];
+                            $reference['frozen_max_key'] = $frozen['max_key'] ?? null;
+                        }
+                        unset($reference);
+                        $definition += ['processed' => 0, 'verified' => 0, 'cursor' => null, 'verify_cursor' => null, 'shards' => [], 'done' => false,
+                            'checksum_partial' => hash('sha256', $name), 'verification_checksum' => hash('sha256', $name), 'verify_shard' => 0,
+                            'boundary_frozen_at' => now()->toIso8601String()];
+                        if (isset($definition['derived_from'])) {
+                            // Membership and car_id come from immutable parts, never a second live query.
+                        } elseif ($definition['available']) {
+                            $query = $this->source->browserQuery($definition, $state['cutoff_database_time']);
+                            $maximum = clone $query;
+                            foreach ($definition['key_columns'] as $column) {
+                                $maximum->orderByDesc($column);
+                            }
+                            $last = $maximum->first($definition['key_columns']);
+                            $definition['max_key'] = $last ? (array) $last : null;
+                            $definition['total'] = $definition['max_key'] === null ? 0 : $this->count($this->bounded($query, $definition));
+                        } else {
+                            $definition['max_key'] = null;
+                            $definition['total'] = 0;
+                        }
+                        if (self::mutableDatasetAllowed($name) && $definition['key_columns'] === ['id']) {
+                            $this->initializeMutable($definition, $state['cutoff_database_time']);
+                            $state['dataset_consistency_overrides'][$name] = $definition['mutable_contract'];
+                        }
+                        $state['datasets'][$name] = $definition;
+                        $state['dataset_index']++;
                     } else {
-                        $this->verifyChunk($folder, $state, $definition);
+                        $definition = &$state['datasets'][$name];
+                        if (! $definition['available'] || ($definition['total'] === 0 && ! $this->mutable($definition))) {
+                            $definition['done'] = true;
+                            $state['dataset_index']++;
+
+                            return;
+                        }
+                        $current = isset($definition['derived_from']) ? $definition : $this->source->browserDescribe($this->source->browserDefinitions()[$name]);
+                        if (($current['schema_sha256'] ?? null) !== $definition['schema_sha256']) {
+                            throw new RuntimeException('snapshot_schema_changed');
+                        }
+                        if ($state['stage'] === 'export') {
+                            $this->exportChunk($folder, $state, $definition);
+                        } else {
+                            $this->verifyChunk($folder, $state, $definition);
+                        }
                     }
-                }
-                $state['last_success'] = now()->toIso8601String();
-            });
+                    $state['last_success'] = now()->toIso8601String();
+                });
+            }
         } catch (\Throwable $error) {
             if ($error instanceof SnapshotSourceMutation) {
                 $trace['source_conflict'] = $error->diagnostic;
                 $state['source_conflict'] = $error->diagnostic;
             }
-            $allowed = ['stale_snapshot_attempt', 'dataset_recovery_intent_invalid', 'snapshot_shard_identity_mismatch', 'snapshot_shard_size_mismatch', 'snapshot_shard_format_invalid', 'snapshot_shard_row_count_mismatch', 'snapshot_legacy_shard_budget_exceeded', 'snapshot_mutable_dataset_unstable', 'snapshot_schema_changed', 'snapshot_source_changed', 'snapshot_row_updated_after_cutoff', 'snapshot_row_too_large_for_http', 'snapshot_stable_nonsecret_key_required', 'snapshot_immutable_chunk_conflict', 'snapshot_shard_checksum_mismatch', 'snapshot_reference_boundary_required'];
+            $allowed = ['operator_finalization_identity_mismatch', 'stale_snapshot_attempt', 'dataset_recovery_intent_invalid', 'snapshot_shard_identity_mismatch', 'snapshot_shard_size_mismatch', 'snapshot_shard_format_invalid', 'snapshot_shard_row_count_mismatch', 'snapshot_legacy_shard_budget_exceeded', 'snapshot_mutable_dataset_unstable', 'snapshot_schema_changed', 'snapshot_source_changed', 'snapshot_row_updated_after_cutoff', 'snapshot_row_too_large_for_http', 'snapshot_stable_nonsecret_key_required', 'snapshot_immutable_chunk_conflict', 'snapshot_shard_checksum_mismatch', 'snapshot_reference_boundary_required'];
             $state['last_error'] = in_array($error->getMessage(), $allowed, true) ? $error->getMessage() : 'snapshot_http_tick_failed';
             $trace['backend_exception_class'] = str_contains(get_class($error), '@anonymous') ? 'AnonymousThrowable' : get_class($error);
             if ($state['last_error'] === 'snapshot_http_tick_failed') {
@@ -208,8 +215,8 @@ final class BrowserMigrationSnapshot
         $current = $index['current_dataset'];
         $descriptor = $current !== null ? ($index['datasets'][$current] ?? []) : [];
 
-        return array_intersect_key($index, array_flip(['dataset_recovery', 'dataset_boundary_history', 'source_conflict', 'format', 'attempt_id', 'stage', 'done', 'failed', 'current_dataset', 'processed', 'verified', 'total', 'last_success', 'last_error', 'next_action', 'database_consistency']))
-            + ['exported_records' => $index['processed'], 'verification_processed' => $index['verified'], 'phase' => 'snapshot_'.$index['stage'], 'cursor' => $descriptor['cursor'] ?? null, 'remaining' => max(0, $index['total'] - $index['processed']),
+        return array_intersect_key($index, array_flip(['consistency_exception', 'operator_finalization', 'parts_recovery_outcome', 'dataset_recovery', 'dataset_boundary_history', 'source_conflict', 'format', 'attempt_id', 'stage', 'done', 'failed', 'current_dataset', 'processed', 'verified', 'total', 'last_success', 'last_error', 'next_action', 'database_consistency']))
+            + ['exported_records' => $index['processed'], 'verification_processed' => $index['verified'], 'phase' => 'snapshot_'.$index['stage'], 'cursor' => $index['cursor'] ?? null, 'remaining' => max(0, $index['total'] - $index['processed']),
                 'datasets' => array_map(fn ($d) => array_intersect_key($d, array_flip(['available', 'processed', 'verified', 'total', 'cursor', 'max_key', 'boundary_frozen_at', 'checksum_partial', 'done'])), $index['datasets'])];
     }
 
@@ -237,11 +244,11 @@ final class BrowserMigrationSnapshot
             $attempt = basename(dirname($matches[0]));
         }
         $state = $this->read($this->folder($directory, $attempt).'/checkpoint.json');
-        $current = $state['dataset_names'][$state['dataset_index']] ?? null;
+        $current = $state['dataset_names'][$state['operator_finalization']['dataset_index'] ?? $state['dataset_index']] ?? null;
         $processed = array_sum(array_column($state['datasets'], 'processed'));
         $verified = array_sum(array_column($state['datasets'], 'verified'));
 
-        return $state + ['exported_records' => $processed, 'verification_processed' => $verified, 'phase' => 'snapshot_'.$state['stage'], 'cursor' => $current !== null ? ($state['datasets'][$current]['cursor'] ?? null) : null,
+        return $state + ['exported_records' => $processed, 'verification_processed' => $verified, 'phase' => 'snapshot_'.$state['stage'], 'cursor' => $state['stage'] === 'operator_finalize' ? array_intersect_key($state['operator_finalization'], array_flip(['dataset_index', 'shard', 'artifacts_checked'])) : ($current !== null ? ($state['datasets'][$current]['cursor'] ?? null) : null),
             'relations' => array_map(fn ($d) => $d['relations'] ?? [], $state['datasets']),
             'source_counts' => ['products' => $state['datasets']['parts']['total'] ?? 0, 'cars' => $state['datasets']['cars']['total'] ?? 0, 'orders' => $state['datasets']['orders']['total'] ?? 0, 'order_items' => $state['datasets']['order_items']['total'] ?? 0, 'photo_rows' => $state['datasets']['part_images']['total'] ?? 0, 'categories' => $state['datasets']['part_categories']['total'] ?? 0, 'storage_locations' => $state['datasets']['storage_locations']['total'] ?? 0, 'sold_parts' => $state['datasets']['parts']['sold_count'] ?? 0, 'parts_to_list' => $state['datasets']['parts']['to_list_count'] ?? 0, 'statuses' => $state['datasets']['parts']['status_counts'] ?? [], 'dataset_counts' => array_map(fn ($d) => $d['total'], $state['datasets'])], 'done' => $state['stage'] === 'completed', 'failed' => $state['stage'] === 'failed', 'current_dataset' => $current,
             'processed' => $processed, 'verified' => $verified, 'total' => array_sum(array_column($state['datasets'], 'total')),

@@ -9,6 +9,12 @@
 <p>Snapshot bazy nie jest globalnym snapshotem filesystemu. Kopie plików są weryfikowane podczas kopiowania; finalny cutover wymaga osobnej procedury freeze/snapshotu. Nie zatrzymujemy synchronizacji automatycznie.</p>
 <p>Próbka wybiera sprzedaną część (status sold), część do wystawienia (needs_listing), oferty eBay/Ovoko i galerię — gdy takie przypadki są zapisane. Powiązania Allegro są wyłącznie historyczne. Import, publikacja, synchronizacja i wiadomości do klientów pozostają wyłączone.</p>
 <button id="start" disabled>Przygotuj nowy eksport</button><button id="resume" disabled>Wznów istniejący eksport</button><button id="diagnose-conflict" hidden>Diagnozuj konflikt datasetu</button><button id="pause" disabled>Pauza snapshotu</button><button id="stop-local" disabled>Stop lokalnej pętli</button>
+<section id="parts-drift-actions" hidden>
+<p>Wyłącznie bieżący run: akceptacja deklarowanych dwóch zmian części. Manifest zachowa znane ID, nieznane ID i zakres pominiętej weryfikacji. Dalszy odczyt żywej bazy zostanie pominięty; pozostają kontrola plików, SHA i relacji. Najpierw zatrzymaj lokalną pętlę.</p>
+<label><input id="parts-drift-confirm" type="checkbox"> Akceptuję znany drift części oraz finalizację z kontrolą zapisanych artefaktów i relacji zamiast dalszej weryfikacji źródła.</label>
+<label>Wpisz ACCEPT-PARTS-DRIFT-AND-FINALIZE <input id="parts-drift-token" autocomplete="off"></label>
+<button id="accept-parts-drift" disabled>Akceptuję znany drift części i finalizuję eksport</button>
+</section>
 <section id="snapshot-actions" hidden>
 <p>Niedokończony snapshot można ponowić w trybie panelowym w tym samym eksporcie. Nowa próba ustali własne granice odczytu i nie wykorzysta częściowych danych poprzedniej próby. Wznowienie gotowej próby zachowuje jej granice i cursor.</p>
 <label><input id="snapshot-confirm-retry" type="checkbox"> Potwierdzam rozpoczęcie snapshotu panelowego od początku w tym samym run_id.</label><button id="retry-snapshot" disabled>Ponów snapshot w trybie panelowym</button>
@@ -27,7 +33,7 @@
 (()=>{
  const el=id=>document.getElementById(id),base=@json(route('admin.tools.gpswiss-migration-export', [], false));
  let id=new URLSearchParams(location.hash.slice(1)).get('run'),state=null,active=false,working=false,ready=false,sessionExpired=false,accessBlocked=false,inFlight=false,pauseRequested=false,pausing=false;
- let loopDone=null,finishLoop=null,manualResuming=false,resumeTraceActive=false,retryExhausted=false;
+ let loopDone=null,finishLoop=null,manualResuming=false,resumeTraceActive=false,retryExhausted=false,stopBeforePhotos=false;
  const waits=new Map(),resumeEvents=[];
  const wait=ms=>new Promise(resolve=>{const timer=setTimeout(()=>{waits.delete(timer);resolve();},ms);waits.set(timer,resolve);});
  function cancelBackoff(){for(const [timer,resolve] of waits){clearTimeout(timer);resolve();}waits.clear();}
@@ -53,7 +59,7 @@
  const datasetRecoverable=()=>browserSnapshot() && recoverableState(state);
  const photoRetryPending=()=>state?.photo_retry_requested===true || ['photos_retry_setup','photos_retry_inventory','photos_retry'].includes(state?.phase);
  const unfinished=()=>state && state.state!=='completed' && snapshotState()!=='snapshot_aborted';
- const canPause=()=>browserSnapshot() && (['snapshot_pending','snapshot_running'].includes(snapshotState()) || (snapshotState()==='snapshot_completed' && state?.phase==='photo_inventory'));
+ const canPause=()=>browserSnapshot() && (['photos','archive'].includes(state?.state) || ['snapshot_pending','snapshot_running'].includes(snapshotState()) || (snapshotState()==='snapshot_completed' && state?.phase==='photo_inventory'));
  function nextAction(){
   if(state?.next_action)return state.next_action;
   if(state?.state==='completed')return 'download';
@@ -63,6 +69,8 @@
  }
  function buttons(){
   const blocked=!ready || sessionExpired || accessBlocked;
+  el('parts-drift-actions').hidden=state?.operator_parts_drift_allowed!==true;
+  el('accept-parts-drift').disabled=blocked || working || inFlight || state?.operator_parts_drift_allowed!==true || !el('parts-drift-confirm').checked || el('parts-drift-token').value!=='ACCEPT-PARTS-DRIFT-AND-FINALIZE';
   el('start').disabled=blocked || working || !!unfinished();
   el('resume').disabled=blocked || (inFlight || pausing || manualResuming) || !state || state.state==='completed' || (nextAction()==='blocked' && !state.busy && !datasetRecoverable());
   el('diagnose-conflict').hidden=!datasetRecoverable();el('diagnose-conflict').disabled=blocked || working || inFlight;
@@ -134,15 +142,16 @@
  const recoveryKey='gpswiss-export-last-operational-state';
  function remember(){
   if(!state || !/^[a-f0-9-]{36}$/i.test(id??'') || !/^[a-f0-9-]{36}$/i.test(state.snapshot_attempt_id??''))return;
-  const safe={};for(const key of ['run_id','snapshot_attempt_id','snapshot_mode','snapshot_state','state','phase','current_dataset','processed','total','remaining','cursor','next_action','busy','last_error','last_tick','dataset_recovery_allowed','dataset_recovery'])safe[key]=state[key];
+  const safe={};for(const key of ['run_id','snapshot_attempt_id','snapshot_mode','snapshot_state','state','phase','current_dataset','processed','total','remaining','cursor','next_action','busy','last_error','last_tick','dataset_recovery_allowed','dataset_recovery','operator_parts_drift_allowed'])safe[key]=state[key];
   safe.last_tick={reason_code:state.last_tick?.reason_code??state.last_tick_reason??null};
   try{sessionStorage.setItem(recoveryKey,JSON.stringify(safe));}catch(_){}
  }
  function restoreKnownState(){
   try{const raw=sessionStorage.getItem(recoveryKey);if(!raw || raw.length>4096)return;const saved=JSON.parse(raw);if(saved.run_id===id && /^[a-f0-9-]{36}$/i.test(saved.snapshot_attempt_id??'') && saved.snapshot_mode==='browser' && saved.state==='snapshot_running' && saved.snapshot_state==='snapshot_running' && saved.next_action==='snapshot_tick' && !saved.busy && !saved.last_error && saved.last_tick?.reason_code==='tick_completed')render(saved);
+   else if(saved.run_id===id && saved.snapshot_mode==='browser' && ['photos','archive'].includes(saved.state) && saved.next_action==='tick' && !saved.busy && !saved.last_error)render(saved);
    else if(saved.run_id===id && saved.snapshot_mode==='browser' && recoverableState(saved))render(saved);}catch(_){}
  }
- const kickEligible=()=>!!id && !!state?.snapshot_attempt_id && (datasetRecoverable() || browserSnapshot() && state.state==='snapshot_running' && state.snapshot_state==='snapshot_running' && state.next_action==='snapshot_tick' && !state.busy && !state.last_error && state.last_tick?.reason_code==='tick_completed');
+ const kickEligible=()=>!!id && !!state?.snapshot_attempt_id && (datasetRecoverable() || browserSnapshot() && ['photos','archive'].includes(state.state) && state.next_action==='tick' && !state.busy && !state.last_error || browserSnapshot() && state.state==='snapshot_running' && state.snapshot_state==='snapshot_running' && state.next_action==='snapshot_tick' && !state.busy && !state.last_error && state.last_tick?.reason_code==='tick_completed');
  const cursorText=value=>value==null?'—':typeof value==='object'?JSON.stringify(value):String(value);
  const transient=error=>error.reason!=='status_fetch_retry_exhausted' && (['network_error','browser_fetch_timeout','malformed_json','invalid_response','snapshot_http_tick_failed'].includes(error.reason) || [408,429,500,502,503,504].includes(error.http));
  async function request(url,action,extra={},statusAttempt=null){
@@ -228,6 +237,7 @@
  function restoredMessage(){
   if(state?.state==='completed')return 'Eksport ukończony — pobierz manifest i wszystkie części paczki.';
   if(snapshotState()==='snapshot_aborted')return 'snapshot_aborted — próba odrzucona; możesz świadomie przygotować nowy eksport.';
+  if(state?.state==='pipeline_paused')return 'pipeline_paused — zdjęcia/archiwa zachowane. Kliknij Wznów.';
   if(snapshotState()==='snapshot_paused')return 'snapshot_paused — checkpoint zachowany. Kliknij Wznów, aby kontynuować tę samą próbę.';
   if(state?.snapshot_retry_allowed && !browserSnapshot())return 'Ta próba nie została ukończona. Użyj „Ponów snapshot w trybie panelowym” w tym samym run_id.';
   if(state)return 'Masz niedokończony eksport: '+id+'. Kliknij Wznów, aby kontynuować od checkpointu.';
@@ -247,7 +257,7 @@
  const boot=restore();
  async function pauseCheckpoint(){
   if(!canPause() || pausing)return;pausing=true;buttons();
-  try{render(await request(base+'/'+encodeURIComponent(id),'pause_snapshot'));el('message').textContent='snapshot_paused — postęp zapisany na serwerze. Wznów kontynuuje tę samą próbę.';}
+  try{render(await request(base+'/'+encodeURIComponent(id),'pause_snapshot'));el('message').textContent=(state.state==='pipeline_paused'?'pipeline_paused':'snapshot_paused')+' — postęp zapisany na serwerze. Wznów kontynuuje tę samą próbę.';}
   catch(error){try{await recover(error,1);el('message').textContent=restoredMessage();}catch(next){stop(next);}}
   finally{pausing=false;buttons();}
  }
@@ -281,16 +291,17 @@
    if(!start){
     if(expectedRun && (id!==expectedRun || (expectedAttempt && state?.snapshot_attempt_id!==expectedAttempt))){resumeEvent('blocked','run_or_attempt_changed');el('message').textContent='Wznowienie zablokowane: run_or_attempt_changed';return;}
     if(resumeTraceActive){if(!usedKick)resumeEvent('status_loaded');resumeEvent('next_action='+nextAction());}
-    if(browserSnapshot() && state?.state==='snapshot_running' && nextAction()==='snapshot_tick' && !state.busy)needsResume=false;
+    if(browserSnapshot() && ['snapshot_running','photos','archive'].includes(state?.state) && ['snapshot_tick','tick'].includes(nextAction()) && !state.busy)needsResume=false;
    }
    while(active && state){
     const next=nextAction();
+    if(stopBeforePhotos && state.state==='photos' && state.phase==='photos'){stopBeforePhotos=false;el('message').textContent='Dane sfinalizowane z accepted_known_drift. Zdjęcia gotowe do kopiowania — użyj Wznów, aby rozpocząć etap zdjęć.';break;}
     if(next==='download' || state.state==='completed'){el('message').textContent='Eksport gotowy. Pobierz manifest i wszystkie wskazane części archiwum.';break;}
     if(state.busy || next==='wait'){
      await wait(1000);if(!active)break;try{await readCurrent();}catch(error){if(++attempts>4)throw error;await recover(error,1);}continue;
     }
     if(next==='blocked' && !datasetRecoverable()){if(resumeTraceActive)resumeEvent('blocked',state.blocked_reason ?? state.last_error ?? state.state);el('message').textContent='Wznowienie zablokowane: '+(state.blocked_reason ?? state.last_error ?? state.state)+'. Sprawdź dostępne akcje snapshotu.';break;}
-    if(browserSnapshot() && state.state==='snapshot_running' && next==='snapshot_tick' && !state.busy)needsResume=false;
+    if(browserSnapshot() && ['snapshot_running','photos','archive'].includes(state.state) && ['snapshot_tick','tick'].includes(next) && !state.busy)needsResume=false;
     if(needsResume || next==='resume' || datasetRecoverable()){
      const recovering=datasetRecoverable();if(recovering)resumeEvent(state.current_dataset==='parts'?'recoverable_mutable_dataset_conflict':'recoverable_dataset_conflict');
      try{render(await request(base+'/'+encodeURIComponent(id),'resume',{expected_snapshot_attempt:state.snapshot_attempt_id??null}));needsResume=!!state.busy;attempts=0;
@@ -362,6 +373,15 @@
   finally{working=false;buttons();}
   if(follow)drive(false);
  }
+ async function acceptPartsDrift(){
+  await boot;if(working || inFlight || sessionExpired || accessBlocked || state?.operator_parts_drift_allowed!==true || !el('parts-drift-confirm').checked || el('parts-drift-token').value!=='ACCEPT-PARTS-DRIFT-AND-FINALIZE')return;
+  const run=id,attempt=state.snapshot_attempt_id;working=true;buttons();let follow=false;
+  try{render(await request(base+'/'+encodeURIComponent(run),'accept_parts_drift',{expected_snapshot_attempt:attempt,confirm_parts_drift:el('parts-drift-token').value}));follow=state?.consistency_exception?.accepted_by_operator===true;if(!follow)el('message').textContent='accept_not_confirmed / '+(state?.busy?'busy':'not_accepted')+' — zatrzymaj pozostałe pętle i sprawdź status.';}
+  catch(error){try{await recover(error,1);follow=id===run && state?.snapshot_attempt_id===attempt && state?.consistency_exception?.accepted_by_operator===true;if(!follow)el('message').textContent='accept_not_confirmed — sprawdź status; nie utworzono nowej próby.';}catch(next){stop(next);}}
+  finally{working=false;buttons();}
+  if(follow){retryExhausted=false;resumeTraceActive=true;resumeEvents.length=0;resumeEvent('operator_accepts_known_parts_drift');el('parts-drift-confirm').checked=false;el('parts-drift-token').value='';stopBeforePhotos=true;drive(false);}
+ }
+ el('accept-parts-drift').onclick=acceptPartsDrift;el('parts-drift-confirm').onchange=buttons;el('parts-drift-token').oninput=buttons;
  el('diagnose-conflict').onclick=async()=>{
   await boot;if(working || inFlight || !datasetRecoverable())return;
   try{el('dataset-conflict').textContent=JSON.stringify(await request(base+'/'+encodeURIComponent(id)+'?format=dataset-conflict'),null,2);}

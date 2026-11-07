@@ -92,6 +92,7 @@ final class BrowserMigrationPhotos
             }
             $outcome ??= $this->step($directory, $state['current']);
             if ($outcome !== null) {
+                $outcome = $this->describeOutcome($outcome);
                 $this->write($receipt, $outcome);
                 $resultDirectory = $directory.'/'.($generation === 'initial' ? 'photo-initial-results' : 'photo-result-overrides');
                 if (! is_dir($resultDirectory) && ! mkdir($resultDirectory, 0700, true) && ! is_dir($resultDirectory)) {
@@ -147,6 +148,10 @@ final class BrowserMigrationPhotos
 
     private function resultKey(array $row): string
     {
+        if (($row['entity_type'] ?? null) === 'car') {
+            return hash('sha256', 'car:'.($row['car_id'] ?? '').':'.($row['image_id'] ?? ''));
+        }
+
         return hash('sha256', (string) ($row['part_id'] ?? '').':'.(string) ($row['image_id'] ?? ''));
     }
 
@@ -169,7 +174,7 @@ final class BrowserMigrationPhotos
     private function step(string $directory, array &$current): ?array
     {
         $task = $current['task'];
-        $base = array_intersect_key($task, array_flip(['image_id', 'part_id', 'role', 'sort_order', 'is_primary', 'alt_text', 'original_filename', 'original_relative_path', 'package_path']));
+        $base = array_intersect_key($task, array_flip(['entity_type', 'entity_id', 'car_id', 'image_id', 'part_id', 'role', 'sort_order', 'is_primary', 'alt_text', 'original_filename', 'original_relative_path', 'package_path']));
         $base += ['status' => $task['source']['status'], 'bytes' => null, 'sha256' => null, 'mime' => null];
         if ($task['source']['status'] !== 'LOCATED') {
             return $base;
@@ -327,7 +332,7 @@ final class BrowserMigrationPhotos
         }
         $sha = SerializableSha256::digest($current['verification_context']);
         if (! hash_equals($current['original_sha256'], $sha)) {
-            return array_replace($base, ['status' => 'COPY_FAILED']);
+            return array_replace($base, ['status' => 'COPY_FAILED', 'failure_reason' => 'checksum_mismatch']);
         }
         $mime = (new \finfo(FILEINFO_MIME_TYPE))->file($working);
         if (! in_array($mime, ['image/jpeg', 'image/png', 'image/webp', 'image/gif'], true) || @getimagesize($working) === false) {
@@ -343,9 +348,25 @@ final class BrowserMigrationPhotos
         return array_replace($base, ['status' => 'COPIED_VERIFIED', 'bytes' => $length, 'sha256' => $sha, 'mime' => $mime, 'copied_at' => now()->toIso8601String()]);
     }
 
+    private function describeOutcome(array $row): array
+    {
+        $status = $row['status'];
+        $row['extension'] = strtolower(pathinfo($row['original_filename'] ?? '', PATHINFO_EXTENSION)) ?: null;
+        $row['export_status'] = match (true) {
+            $status === 'COPIED_VERIFIED' => 'copied',
+            $status === 'MISSING_ORIGINAL' => 'missing',
+            in_array($status, ['UNREADABLE_ORIGINAL', 'UNREADABLE_OR_UNSAFE'], true) => 'unreadable',
+            ($row['failure_reason'] ?? null) === 'checksum_mismatch' => 'checksum_failed',
+            default => 'skipped',
+        };
+        $row['skipped_reason'] = $status === 'COPIED_VERIFIED' ? null : ($row['failure_reason'] ?? strtolower($status));
+
+        return $row;
+    }
+
     private function result(array $state): array
     {
-        return ['done' => $state['done'], 'processed' => $state['processed'], 'task_offset' => $state['task_offset'], 'current_image_offset' => $state['current']['offset'] ?? null, 'current_copy_index' => $state['current']['copy_index'] ?? null, 'photo_results' => $state['status_counts'], 'result_counts' => $state['status_counts'], 'results_count' => $state['processed'], 'last_success' => $state['last_success'] ?? null, 'tasks_jsonl' => $state['tasks_file'] ?? null, 'generation' => $state['generation'] ?? 'initial', 'results_file' => $state['results_file'] ?? 'photos.jsonl'];
+        return ['done' => $state['done'], 'processed' => $state['processed'], 'task_offset' => $state['task_offset'], 'current_image_phase' => $state['current']['phase'] ?? null, 'current_image_offset' => $state['current']['offset'] ?? null, 'current_copy_index' => $state['current']['copy_index'] ?? null, 'photo_results' => $state['status_counts'], 'result_counts' => $state['status_counts'], 'results_count' => $state['processed'], 'last_success' => $state['last_success'] ?? null, 'tasks_jsonl' => $state['tasks_file'] ?? null, 'generation' => $state['generation'] ?? 'initial', 'results_file' => $state['results_file'] ?? 'photos.jsonl'];
     }
 
     private function inside(string $directory, string $relative): string

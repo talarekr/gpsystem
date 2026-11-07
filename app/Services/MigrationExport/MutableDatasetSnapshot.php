@@ -109,6 +109,9 @@ trait MutableDatasetSnapshot
         if (($state['attempt_id'] ?? null) !== $attempt) {
             throw new MigrationExportException('stale_snapshot_attempt', 409);
         }
+        if (basename($directory) === self::DRIFT_RUN && $attempt === self::DRIFT_ATTEMPT && self::acceptedFinalization($state)) {
+            return ['phase' => 'snapshot_operator_finalize', 'consistency_exception' => $state['consistency_exception']];
+        }
         $history = $state['dataset_boundary_history'] ?? [];
         $lastRecovery = $history === [] ? [] : $history[array_key_last($history)];
         if (isset($state['dataset_recovery'])) {
@@ -286,7 +289,7 @@ trait MutableDatasetSnapshot
         $state['stage'] = $adopt ? 'verify' : 'export';
     }
 
-    private function verifyStoredShard(string $directory, array $shard, bool $artifactPreflight = false): void
+    private function verifyStoredShard(string $directory, array $shard, bool $artifactPreflight = false, array $keys = ['id'], ?array $columns = null): void
     {
         foreach (['path' => 'sha256', 'csv_path' => 'csv_sha256'] as $key => $hash) {
             $path = $directory.'/'.$shard[$key];
@@ -311,8 +314,13 @@ trait MutableDatasetSnapshot
             throw new RuntimeException('snapshot_shard_row_count_mismatch');
         }
         foreach ($rows as $row) {
-            if (! is_array($row) || ! isset($row['id']) || ! is_scalar($row['id'])) {
+            if (! is_array($row)) {
                 throw new RuntimeException('snapshot_shard_format_invalid');
+            }
+            foreach ($keys as $key) {
+                if (! isset($row[$key]) || ! is_scalar($row[$key])) {
+                    throw new RuntimeException('snapshot_shard_format_invalid');
+                }
             }
         }
         $csv = fopen($directory.'/'.$shard['csv_path'], 'rb');
@@ -322,14 +330,28 @@ trait MutableDatasetSnapshot
                 throw new RuntimeException('snapshot_shard_format_invalid');
             }
             $header[0] = preg_replace('/^\xEF\xBB\xBF/', '', $header[0] ?? '');
-            $id = array_search('id', $header, true);
-            if ($id === false || count(array_unique($header)) !== count($header)) {
+            if ($columns !== null && $header !== $columns) {
+                throw new RuntimeException('snapshot_schema_changed');
+            }
+            if (array_diff($keys, $header) !== [] || count(array_unique($header)) !== count($header)) {
                 throw new RuntimeException('snapshot_shard_format_invalid');
             }
             $position = 0;
             while (($row = fgetcsv($csv, null, ';', '"', '')) !== false) {
-                if (count($row) !== count($header) || ! isset($rows[$position]) || (string) $rows[$position]['id'] !== $row[$id]) {
+                if (count($row) !== count($header) || ! isset($rows[$position])) {
                     throw new RuntimeException('snapshot_shard_row_count_mismatch');
+                }
+                foreach ($keys as $key) {
+                    $expected = is_bool($rows[$position][$key]) ? ($rows[$position][$key] ? '1' : '0') : (string) $rows[$position][$key];
+                    if (str_starts_with($expected, '\\')) {
+                        $expected = '\\'.$expected;
+                    }
+                    if (preg_match('/^[\s\x00-\x1f]*[=+@-]/u', $expected)) {
+                        $expected = "'".$expected;
+                    }
+                    if ($expected !== $row[array_search($key, $header, true)]) {
+                        throw new RuntimeException('snapshot_shard_row_count_mismatch');
+                    }
                 }
                 $position++;
             }

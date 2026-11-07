@@ -67,3 +67,13 @@ Allegro zachowuje dane pomocnicze/historyczne, bez aktywnych powiązań po impor
 Retry tworzy osobną generację kopii w tym samym runie i tej samej próbie snapshotu DB. Poprawne pliki i ich receipt pozostają. Tylko nieudane zadania przechodzą ograniczone stronicowanie oraz ponowną weryfikację. Kanoniczny manifest uwzględnia najnowszy wynik danej pary część–zdjęcie, bez duplikowania wierszy. Poprzednie paczki są zachowane w prywatnym `package-history`, a nowe manifesty/ZIP-y powstają z tych samych zamrożonych danych. Nie wykonuje się ponownego odczytu bazy.
 
 Procedura późniejszego zatrzymania integracji pozostaje w `gpswiss-export-and-sync-stop.md`; jest dokumentacją do osobnej decyzji, a nie akcją wykonywaną przez eksport.
+
+## Pakiet z operator-accepted parts drift
+
+Dla jednego wskazanego legacy runu operator może świadomie zaakceptować znany drift części i zakończyć odczyty źródła. Akcja wymaga checkboxa i `ACCEPT-PARTS-DRIFT-AND-FINALIZE`; nie jest automatyczną polityką eksportera. Integralność wszystkich zapisanych shardów i relacje nadal są kontrolowane partiami. Nie wolno traktować pominiętego source verification jako zakończonego ani pakietu jako atomowego snapshotu.
+
+Pełny i próbny manifest zawierają `consistency_exception`, zapisane ID, deklarowaną liczbę operatora, nieznane ID oraz `operator_finalization` z zakresem pominiętej weryfikacji. Dla tego przypadku operator zadeklarował 2 części; jeśli checkpoint zna tylko 2262, drugie ID pozostaje nieznane. Potrzebna jest ręczna korekta po imporcie. Liczba deklarowana nie jest pełnym pomiarem driftu.
+
+Zdjęcia obejmują galleries/code photos części oraz galleries/legacy main zdjęcia wszystkich samochodów. Manifest zachowuje native status i dodaje export_status/skipped_reason, właściciela Part/Car, oryginalną nazwę/ścieżkę, kolejność/primary, MIME/extension, rozmiar i SHA. Oryginały ponad 100 MiB i zdalne URL-e są jawnie raportowane, bez miniatur i bez provider calls. Zmiana źródła nie powoduje cichego zastąpienia pliku.
+
+Końcowy `migration-package-manifest.json` wskazuje wszystkie części sample/full archiwów, manifesty i SHA oraz `checksums.jsonl`. Ten zewnętrzny katalog pobierz razem z oboma archive manifests i wszystkimi ZIP-ami; nie jest osadzany we własnych archiwach. Sprawdź też photo-manifest i missing-originals. `technical_package_ready=true` oznacza gotowe pliki z jawnymi wyjątkami, nie atomowość ani automatyczne zezwolenie na import. `cutover_ready` pozostaje false, `originals_complete` wskazuje kompletność zdjęć. Wszystkie pliki pozostają prywatne, bez aktywacji importu, ofert lub synchronizacji.
