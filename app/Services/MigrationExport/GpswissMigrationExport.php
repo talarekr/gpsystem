@@ -84,6 +84,16 @@ final class GpswissMigrationExport
         return $this->browser->pause($dir);
     }
 
+    public function useExternalPhotos(int $owner, string $id, ?string $attempt): array
+    {
+        $dir = $this->directory($owner, $id);
+        if (($this->read($dir.'/state.json')['snapshot_mode'] ?? null) !== 'browser') {
+            throw new MigrationExportException('external_photo_mode_requires_browser', 409);
+        }
+
+        return $this->browser->useExternalPhotos($dir, $attempt, $owner);
+    }
+
     public function retryBrowserPhotos(int $owner, string $id): array
     {
         $dir = $this->directory($owner, $id);

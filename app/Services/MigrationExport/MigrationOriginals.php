@@ -14,13 +14,11 @@ final class MigrationOriginals
 
     public function locate(string $raw): array
     {
-        if (preg_match('~^(?:[a-z][a-z0-9+.-]*:|//)~i', $raw)) {
-            return ['status' => 'REMOTE_NOT_FETCHED'];
+        $reference = $this->reference($raw);
+        if ($reference['status'] !== 'REFERENCE_ONLY') {
+            return $reference;
         }
-        $relative = preg_replace('~^/?storage/~', '', trim($raw));
-        if ($relative === '' || str_starts_with($relative, '/') || str_contains($relative, '\\') || str_contains($relative, "\0") || in_array('..', explode('/', $relative), true)) {
-            return ['status' => 'UNSAFE_OR_EMPTY_PATH'];
-        }
+        $relative = $reference['relative_path'];
         $copies = [];
         $errors = false;
         foreach ($this->roots() as $root) {
@@ -38,6 +36,19 @@ final class MigrationOriginals
         }
 
         return ['status' => $copies ? 'LOCATED' : ($errors ? 'UNREADABLE_OR_UNSAFE' : 'MISSING_ORIGINAL'), 'relative_path' => $relative, 'copies' => $copies];
+    }
+
+    private function reference(string $raw): array
+    {
+        if (preg_match('~^(?:[a-z][a-z0-9+.-]*:|//)~i', $raw)) {
+            return ['status' => 'REMOTE_NOT_FETCHED'];
+        }
+        $relative = preg_replace('~^/?storage/~', '', trim($raw));
+        if ($relative === '' || str_starts_with($relative, '/') || str_contains($relative, '\\') || str_contains($relative, "\0") || in_array('..', explode('/', $relative), true)) {
+            return ['status' => 'UNSAFE_OR_EMPTY_PATH'];
+        }
+
+        return ['status' => 'REFERENCE_ONLY', 'relative_path' => $relative];
     }
 
     public function copy(array $task, string $directory): array
@@ -126,9 +137,9 @@ final class MigrationOriginals
         return array_replace($base, ['status' => 'COPIED_VERIFIED', 'bytes' => $bytes, 'sha256' => $hashes[0], 'mime' => $mime, 'copied_at' => now()->toIso8601String()]);
     }
 
-    public function task(array $image, array $part): array
+    public function task(array $image, array $part, bool $inspectOriginals = true): array
     {
-        $source = $this->locate((string) ($image['path'] ?? ''));
+        $source = $inspectOriginals ? $this->locate((string) ($image['path'] ?? '')) : $this->reference((string) ($image['path'] ?? ''));
         $relative = $source['relative_path'] ?? '';
         $imageId = (string) $image['id'];
         $filename = $relative === '' ? 'unavailable-'.$imageId : MigrationDataPolicy::clean(basename($relative), 'filename');

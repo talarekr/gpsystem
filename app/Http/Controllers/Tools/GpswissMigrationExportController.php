@@ -16,9 +16,9 @@ final class GpswissMigrationExportController extends Controller
     {
         abort_unless($request->user()?->hasRole(UserRole::OwnerAdmin->value), 403);
         $owner = (int) $request->user()->id;
-        $input = $request->validate(['action' => ['sometimes', 'in:start,tick,resume,snapshot_tick,pause_snapshot,retry_snapshot,abort_snapshot,retry_photos,accept_parts_drift'], 'download' => ['sometimes', 'in:sample,full,artifact'], 'format' => ['sometimes', 'in:status,compact,artifacts,dataset-conflict'],
+        $input = $request->validate(['action' => ['sometimes', 'in:start,tick,resume,snapshot_tick,pause_snapshot,retry_snapshot,abort_snapshot,retry_photos,accept_parts_drift,use_external_photos'], 'download' => ['sometimes', 'in:sample,full,artifact'], 'format' => ['sometimes', 'in:status,compact,artifacts,dataset-conflict'],
             'artifact' => ['sometimes', 'string', 'max:180', 'regex:/\A[A-Za-z0-9][A-Za-z0-9_.-]*\z/D'],
-            'confirm_parts_drift' => ['sometimes', 'string', 'max:80'], 'confirm_restart' => ['sometimes', 'boolean'], 'confirm_abort' => ['sometimes', 'boolean'], 'confirm_retry_photos' => ['sometimes', 'boolean'], 'expected_snapshot_attempt' => ['present_if:action,snapshot_tick', 'nullable', 'uuid']]);
+            'confirm_external_photos' => ['sometimes', 'boolean'], 'confirm_parts_drift' => ['sometimes', 'string', 'max:80'], 'confirm_restart' => ['sometimes', 'boolean'], 'confirm_abort' => ['sometimes', 'boolean'], 'confirm_retry_photos' => ['sometimes', 'boolean'], 'expected_snapshot_attempt' => ['present_if:action,snapshot_tick', 'nullable', 'uuid']]);
         $statusStarted = microtime(true);
         $serializingStatus = false;
         $compactRequest = ($input['format'] ?? null) === 'compact' && $request->isMethod('get');
@@ -69,6 +69,9 @@ final class GpswissMigrationExportController extends Controller
                         'accept_parts_drift' => $exports->acceptPartsDrift($owner, $run, $expectedAttempt, $input['confirm_parts_drift'] ?? ''),
                         'snapshot_tick' => $exports->browserSnapshotTick($owner, $run, $expectedAttempt),
                         'pause_snapshot' => $exports->pauseBrowserSnapshot($owner, $run),
+                        'use_external_photos' => $request->boolean('confirm_external_photos')
+                            ? $exports->useExternalPhotos($owner, $run, $expectedAttempt)
+                            : throw new MigrationExportException('external_photo_mode_confirmation_required', 422),
                         'retry_photos' => $request->boolean('confirm_retry_photos')
                             ? $exports->retryBrowserPhotos($owner, $run)
                             : throw new MigrationExportException('photo_retry_confirmation_required', 422),

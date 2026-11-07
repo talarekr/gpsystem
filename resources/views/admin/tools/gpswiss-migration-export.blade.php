@@ -6,7 +6,7 @@
 <p>Próbka obejmuje do 5 rzeczywistych części, a pełny eksport używa tego samego formatu. Zdjęcia zachowują oryginalne nazwy w katalogach ID części; kolizje w obrębie części otrzymują podkatalog ID zdjęcia. Brakujące/zmienione pliki są raportowane.</p>
 <p>Paczka zawiera kody, kategorię, jakość, pozycję, magazyn, opis, lokalne/Ovoko ID auta, ceny sklep/Allegro/Ovoko/eBay, Kurier Allegro, lokalne parametry i linki ofert. Zawiera wszystkie samochody, zamówienia i potrzebne dane klientów — pobieranie wyłącznie prywatnie przez zalogowanego właściciela eksportu. Bez haseł, tokenów i pełnych danych kart. Nie udostępniaj archiwum ani katalogu publicznie.</p>
 <p>Części i listingi mogą zmieniać się podczas sprzedaży. Recovery części zachowuje kompletny eksport i uzgadnia tylko zmienione partie. Dotychczasowe pliki listingów i attempt pozostają zachowane. Licznik weryfikacji jest oddzielony od liczby wyeksportowanych rekordów. Rekoncyliacja ma limit trzech rund i jawny raport niestabilności.</p>
-<p>Snapshot bazy nie jest globalnym snapshotem filesystemu. Kopie plików są weryfikowane podczas kopiowania; finalny cutover wymaga osobnej procedury freeze/snapshotu. Nie zatrzymujemy synchronizacji automatycznie.</p>
+<p>Snapshot bazy nie jest globalnym snapshotem filesystemu. W trybie kopiowania pliki są weryfikowane; przy osobnym ZIP eksporter zapisuje wyłącznie ich metadane. Finalny cutover wymaga osobnej procedury freeze/snapshotu. Nie zatrzymujemy synchronizacji automatycznie.</p>
 <p>Próbka wybiera sprzedaną część (status sold), część do wystawienia (needs_listing), oferty eBay/Ovoko i galerię — gdy takie przypadki są zapisane. Powiązania Allegro są wyłącznie historyczne. Import, publikacja, synchronizacja i wiadomości do klientów pozostają wyłączone.</p>
 <button id="start" disabled>Przygotuj nowy eksport</button><button id="resume" disabled>Wznów istniejący eksport</button><button id="diagnose-conflict" hidden>Diagnozuj konflikt datasetu</button><button id="pause" disabled>Pauza snapshotu</button><button id="stop-local" disabled>Stop lokalnej pętli</button>
 <section id="parts-drift-actions" hidden>
@@ -23,6 +23,11 @@
 <section id="photo-retry-actions" hidden>
 <p>Ponowienie obejmuje błędy COPY_FAILED, UNREADABLE_ORIGINAL i INSUFFICIENT_DISK_SPACE. Zachowuje poprawne kopie i zamrożone dane produktów. Brakujące lub zmienione od czasu snapshotu oryginały pozostają w raporcie.</p>
 <label><input id="photo-confirm-retry" type="checkbox"> Potwierdzam ponowienie nieudanych kopii i odtworzenie archiwów w tym samym run_id.</label><button id="retry-photos" disabled>Ponów nieudane kopie zdjęć</button>
+</section>
+<section id="external-photo-actions" hidden>
+<p>Zdjęcia możesz dostarczyć jako osobny ZIP z serwera. Eksporter zachowa przypisania, kolejność, zdjęcie główne i ścieżki względem katalogu storage, ale nie skopiuje ani nie zweryfikuje oryginałów. Zachowaj nazwy i strukturę folderów. Najpierw zatrzymaj lokalną pętlę.</p>
+<label><input id="external-photo-confirm" type="checkbox"> Zdjęcia dostarczę osobno; rozumiem, że paczka danych nie będzie zawierała oryginałów.</label>
+<button id="use-external-photos" disabled>Nie kopiuj zdjęć — dostarczę osobny ZIP</button>
 </section>
 <p id="snapshot-worker" hidden></p><p id="progress" role="status"></p>
 <p id="message" role="status">Szukam niedokończonego eksportu właściciela…</p><a id="login" href="/admin/login" hidden>Zaloguj się ponownie, potem odśwież ten panel</a><pre id="resume-diagnostic" aria-label="Diagnostyka wznowienia"></pre><pre id="dataset-conflict" aria-label="Bezpieczna diagnostyka konfliktu datasetu"></pre><pre id="state"></pre><pre id="request-diagnostic" aria-label="Diagnostyka żądania"></pre>
@@ -69,6 +74,8 @@
  }
  function buttons(){
   const blocked=!ready || sessionExpired || accessBlocked;
+  el('external-photo-actions').hidden=state?.external_photos_allowed!==true;
+  el('use-external-photos').disabled=blocked || working || inFlight || state?.external_photos_allowed!==true || !el('external-photo-confirm').checked;
   el('parts-drift-actions').hidden=state?.operator_parts_drift_allowed!==true;
   el('accept-parts-drift').disabled=blocked || working || inFlight || state?.operator_parts_drift_allowed!==true || !el('parts-drift-confirm').checked || el('parts-drift-token').value!=='ACCEPT-PARTS-DRIFT-AND-FINALIZE';
   el('start').disabled=blocked || working || !!unfinished();
@@ -92,6 +99,7 @@
   const total=state && Object.hasOwn(state,'total')?(state.total ?? '—'):(progress.total ?? state?.total_images ?? '—');
   el('progress').textContent=state?'Run: '+id+' | Stan: '+state.state+' | Faza: '+(state.phase ?? state.state)+' | Zbiór: '+(dataset ?? '—')+' | Postęp: '+(state.processed ?? progress.processed ?? state.processed_images ?? 0)+' / '+total+' | Cursor: '+cursorText(state.dataset_cursor ?? state.cursor ?? progress.cursor)+' | Następny krok: '+nextAction():'';
   if(state?.exported_records!=null)el('progress').textContent+=' | Wyeksportowane rekordy: '+state.exported_records+' / '+(state.record_capture_total??state.snapshot_progress?.total??total)+' | Zweryfikowane: '+state.verification_processed;
+  if(state?.photo_delivery?.mode==='external_archive')el('progress').textContent+=' | Zdjęcia: osobny ZIP, bez kopiowania i weryfikacji oryginałów';
   if(state?.operator_finalize_stage)el('progress').textContent+=' | Etap finalizacji: '+state.operator_finalize_stage;
   if(state?.dataset_recovery)el('progress').textContent+=' | Kontrola starej generacji: '+state.dataset_recovery.preflight_shard+' / '+state.dataset_recovery.preflight_total_shards;
   if(state?.mutable_dirty_rows!=null)el('progress').textContent+=' | Dirty wiersze: '+state.mutable_dirty_rows+' | Dirty shardy: '+state.mutable_dirty_shards+' | Runda weryfikacji: '+state.mutable_round;
@@ -296,7 +304,7 @@
    }
    while(active && state){
     const next=nextAction();
-    if(stopBeforePhotos && state.state==='photos' && state.phase==='photos'){stopBeforePhotos=false;el('message').textContent='Dane sfinalizowane z accepted_known_drift. Zdjęcia gotowe do kopiowania — użyj Wznów, aby rozpocząć etap zdjęć.';break;}
+    if(stopBeforePhotos && state.photo_delivery?.mode!=='external_archive' && state.state==='photos' && state.phase==='photos'){stopBeforePhotos=false;el('message').textContent='Dane sfinalizowane z accepted_known_drift. Zdjęcia gotowe do kopiowania — użyj Wznów, aby rozpocząć etap zdjęć.';break;}
     if(next==='download' || state.state==='completed'){el('message').textContent='Eksport gotowy. Pobierz manifest i wszystkie wskazane części archiwum.';break;}
     if(state.busy || next==='wait'){
      await wait(1000);if(!active)break;try{await readCurrent();}catch(error){if(++attempts>4)throw error;await recover(error,1);}continue;
@@ -382,6 +390,18 @@
   finally{working=false;buttons();}
   if(follow){retryExhausted=false;resumeTraceActive=true;resumeEvents.length=0;resumeEvent('operator_accepts_known_parts_drift');el('parts-drift-confirm').checked=false;el('parts-drift-token').value='';stopBeforePhotos=true;drive(false);}
  }
+ async function useExternalPhotos(){
+  await boot;if(working || inFlight || sessionExpired || accessBlocked || state?.external_photos_allowed!==true || !el('external-photo-confirm').checked)return;
+  const run=id,attempt=state.snapshot_attempt_id;working=true;buttons();
+  try{render(await request(base+'/'+encodeURIComponent(run),'use_external_photos',{expected_snapshot_attempt:attempt,confirm_external_photos:true}));}
+  catch(error){try{await recover(error,1);}catch(next){stop(next);return;}}
+  finally{working=false;buttons();}
+  if(id===run && state?.snapshot_attempt_id===attempt && state?.photo_delivery?.mode==='external_archive'){
+   el('external-photo-confirm').checked=false;stopBeforePhotos=false;
+   el('message').textContent='Zdjęcia dostarczasz osobno. Kopiowanie oryginałów wyłączone dla tego runu. Kliknij Wznów istniejący eksport, aby kontynuować dane i metadane zdjęć.';
+  }else el('message').textContent='Zmiana trybu zdjęć nie została potwierdzona — sprawdź status i zatrzymaj inne pętle.';
+ }
+ el('use-external-photos').onclick=useExternalPhotos;el('external-photo-confirm').onchange=buttons;
  el('accept-parts-drift').onclick=acceptPartsDrift;el('parts-drift-confirm').onchange=buttons;el('parts-drift-token').oninput=buttons;
  el('diagnose-conflict').onclick=async()=>{
   await boot;if(working || inFlight || !datasetRecoverable())return;

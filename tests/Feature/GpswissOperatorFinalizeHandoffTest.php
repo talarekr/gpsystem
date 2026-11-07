@@ -199,6 +199,31 @@ class GpswissOperatorFinalizeHandoffTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_current_accepted_run_can_disable_photo_copies_during_relations_without_resetting_capture(): void
+    {
+        $state = $this->completedCheckpoint();
+        $this->postTick()->assertOk()->assertJsonPath('phase', 'relation_audit');
+        $before = hash_file('sha256', $this->file);
+        $queries = [];
+        DB::listen(function ($event) use (&$queries): void {
+            $queries[] = $event->sql;
+        });
+        $this->postJson(self::BASE.self::RUN, ['action' => 'use_external_photos', 'confirm_external_photos' => true, 'expected_snapshot_attempt' => self::ATT])
+            ->assertOk()->assertJsonPath('photo_delivery.mode', 'external_archive')->assertJsonPath('phase', 'relation_audit');
+        $service = app(GpswissMigrationExport::class);
+        for ($n = 0; $n < 500 && $this->root()['state'] !== 'archive'; $n++) {
+            $service->browserSnapshotTick($this->owner, self::RUN, self::ATT);
+        }
+        $this->assertSame('archive_index', $this->root()['phase']);
+        $this->assertSame($before, hash_file('sha256', $this->file));
+        $this->assertSame($state['consistency_exception'], $this->root()['consistency_exception']);
+        $this->assertSame(self::ATT, $this->root()['snapshot_attempt_id']);
+        $this->assertFileDoesNotExist($this->dir.'/images');
+        $this->assertFileDoesNotExist($this->dir.'/photo-checkpoint.json');
+        $this->assertSame([], $queries);
+        Http::assertNothingSent();
+    }
+
     public function test_final_dataset_transition_uses_only_saved_artifacts_then_reaches_photo_phase(): void
     {
         $state = $this->completedCheckpoint();

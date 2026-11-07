@@ -10,7 +10,7 @@ final class BrowserMigrationSample
 {
     private const CHILD_TARGETS = ['orders', 'shop_events', 'shipments', 'payments', 'order_payments', 'refunds', 'order_refunds', 'returns', 'order_returns', 'customer_returns', 'local_sales'];
 
-    private const PHOTO_COLUMNS = ['entity_type', 'entity_id', 'car_id', 'export_status', 'skipped_reason', 'extension', 'part_id', 'image_id', 'role', 'original_filename', 'original_relative_path', 'package_path', 'sort_order', 'is_primary', 'status', 'bytes', 'sha256', 'mime'];
+    private const PHOTO_COLUMNS = ['entity_type', 'entity_id', 'car_id', 'export_status', 'skipped_reason', 'extension', 'part_id', 'image_id', 'role', 'original_filename', 'original_relative_path', 'package_path', 'sort_order', 'is_primary', 'status', 'bytes', 'sha256', 'mime', ...ExternalPhotoArchive::EXTRA_COLUMNS];
 
     public function __construct(private BrowserMigrationSnapshot $snapshots) {}
 
@@ -71,7 +71,7 @@ final class BrowserMigrationSample
             [$records, $offset, $end] = $this->photos($dir, $state['photo_offset']);
             foreach ($records as [$position, $row]) {
                 $id = (string) ($row['part_id'] ?? '');
-                if (($row['status'] ?? null) !== 'COPIED_VERIFIED' || ($row['role'] ?? 'gallery') === 'code_photo'
+                if (! in_array($row['status'] ?? null, ['COPIED_VERIFIED', ExternalPhotoArchive::STATUS], true) || ($row['role'] ?? 'gallery') === 'code_photo'
                     || ! is_file($folder.'/members/'.hash('sha256', $id).'.json')) {
                     continue;
                 }
@@ -179,7 +179,7 @@ final class BrowserMigrationSample
                     $path = (string) ($row['package_path'] ?? '');
                     $this->safeImage($dir, $path, $row);
                     $files[] = ['path' => $path, 'archive_path' => $path, 'bytes' => $row['bytes'], 'sha256' => $row['sha256']];
-                } else {
+                } elseif (($row['status'] ?? null) !== ExternalPhotoArchive::STATUS) {
                     $missing .= json_encode($row, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE)."\n";
                     $state['missing_count']++;
                 }
@@ -210,6 +210,7 @@ final class BrowserMigrationSample
             $manifest = ['schema_version' => 'gpswiss-wystawczesc-sample-3', 'run_id' => basename($dir), 'snapshot_attempt_id' => $attempt,
                 'sample_source_ids' => $state['sample_ids'], 'products_count' => count($state['sample_ids']), 'datasets_counts' => $state['counts'],
                 'case_selection' => $state['candidates'], 'photo_associations' => $state['photo_count'], 'missing_originals' => $state['missing_count'],
+                'photo_delivery' => ExternalPhotoArchive::contract(is_file($dir.'/state.json') ? $this->read($dir.'/state.json') : []),
                 'photo_manifest' => 'photo-manifest.csv', 'photo_jsonl' => 'photo-manifest.jsonl', 'files' => 'files.jsonl', 'unresolved_references' => $unresolved,
                 'database_consistency' => $index['database_consistency'], 'snapshot_limitations' => $index['limitations'] ?? [],
                 'consistency_exception' => $index['consistency_exception'] ?? null, 'operator_finalization' => $index['operator_finalization'] ?? null,
@@ -226,6 +227,7 @@ final class BrowserMigrationSample
                 $dictionary['datasets'][$name] = array_intersect_key($index['datasets'][$name], array_flip(['exported_columns', 'csv_columns', 'relations', 'column_definitions']));
             }
             $this->writeOutput($dir, 'sample/fields.json', json_encode($dictionary, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE), $files);
+            $this->writeOutput($dir, 'sample/external-photos.md', file_get_contents(base_path('docs/migration/gpswiss-external-photos.md')), $files);
             $this->writeOutput($dir, 'sample/README.txt', "Private sample: real frozen product records and related data.\nRead manifest.json, fields.json and photo-manifest.csv.\nRestore all sample ZIP volumes, concatenate fragments by the volume manifest, and verify SHA-256.\nIDs and SKU are text. CSV null is \\N; nested values are JSON.\nNo import, publishing or synchronization is authorized by this package.\n", $files);
             $state['stage'] = 'completed';
         }

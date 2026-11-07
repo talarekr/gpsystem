@@ -285,10 +285,38 @@ final class BrowserMigrationExport
         });
     }
 
+    /** Changes only export metadata; completed capture and existing files remain untouched. */
+    public function useExternalPhotos(string $dir, ?string $expected, int $operator): array
+    {
+        return $this->locked($dir, function () use ($dir, $expected, $operator): void {
+            $state = $this->read($dir.'/state.json');
+            $this->attempt($state, $expected);
+            if (ExternalPhotoArchive::selected($state)) {
+                return;
+            }
+            if (! $this->externalPhotosAllowed($state)) {
+                throw new MigrationExportException('external_photo_mode_not_allowed', 409);
+            }
+            $state['photo_delivery'] = ['mode' => 'external_archive', 'selected_at' => now()->toIso8601String(), 'operator_id' => $operator];
+            $this->write($dir.'/state.json', $state);
+        }, false, true);
+    }
+
+    private function externalPhotosAllowed(array $state): bool
+    {
+        return ! ExternalPhotoArchive::selected($state) && ! isset($state['photo_retry'])
+            && ! ($state['photo_retry_requested'] ?? false)
+            && in_array($state['state'], ['snapshot_pending', 'snapshot_running', 'snapshot_completed', 'snapshot_paused', 'photos', 'pipeline_paused'], true)
+            && (str_starts_with($state['phase'], 'snapshot_') || in_array($state['phase'], ['relation_audit', 'photo_inventory', 'photos'], true));
+    }
+
     public function retryPhotos(string $dir): array
     {
         return $this->locked($dir, function () use ($dir): void {
             $state = $this->read($dir.'/state.json');
+            if (ExternalPhotoArchive::selected($state)) {
+                throw new MigrationExportException('external_photos_cannot_retry_copy', 409);
+            }
             $retryable = array_sum(array_intersect_key($state['photo_results'] ?? [], array_flip(['COPY_FAILED', 'UNREADABLE_ORIGINAL', 'INSUFFICIENT_DISK_SPACE'])));
             if ($retryable === 0 || ! in_array($state['state'], ['photos', 'archive', 'completed'], true) || isset($state['photo_retry'])) {
                 throw new MigrationExportException('photo_retry_not_allowed', 409);
@@ -313,7 +341,9 @@ final class BrowserMigrationExport
 
     private function performDataTick(string $dir, array &$state): void
     {
-        if ($state['state'] === 'photos' && $state['phase'] === 'photos_retry_setup') {
+        if ($state['state'] === 'photos' && ExternalPhotoArchive::selected($state)) {
+            $this->startPackaging($state);
+        } elseif ($state['state'] === 'photos' && $state['phase'] === 'photos_retry_setup') {
             $this->finishPhotoRetrySetup($dir, $state);
         } elseif ($state['state'] === 'photos' && $state['phase'] === 'photos_retry_inventory') {
             $this->retryInventory($dir, $state);
@@ -445,6 +475,7 @@ final class BrowserMigrationExport
         }
 
         return OperatorFinalizationDiagnostics::decorate(array_replace($state, $current, [
+            'external_photos_allowed' => $this->externalPhotosAllowed($state),
             'operator_finalize_diagnostic' => app(OperatorFinalizationDiagnostics::class)->read($dir),
             'operator_parts_drift_allowed' => BrowserMigrationSnapshot::operatorDriftAvailable(array_replace($state, $progress)),
             'dataset_recovery_allowed' => $this->datasetRecoveryAllowed(array_replace($state, $progress), $state),
@@ -456,7 +487,7 @@ final class BrowserMigrationExport
             'snapshot_progress' => $progress, 'photo_progress' => $photo, 'archive_progress' => $archive,
             'sample_progress' => $sampleProgress,
             'photo_retry_progress' => $retryProgress,
-            'photo_retry_allowed' => ! $busy && ! isset($checkpoint['photo_retry']) && in_array($state['state'], ['photos', 'archive', 'completed'], true)
+            'photo_retry_allowed' => ! ExternalPhotoArchive::selected($state) && ! $busy && ! isset($checkpoint['photo_retry']) && in_array($state['state'], ['photos', 'archive', 'completed'], true)
                 && array_sum(array_intersect_key($state['photo_results'] ?? [], array_flip(['COPY_FAILED', 'UNREADABLE_ORIGINAL', 'INSUFFICIENT_DISK_SPACE']))) > 0,
             'remaining' => $snapshotActive ? ($progress['remaining'] ?? 0) : max(0, ($state['total_images'] ?? 0) - ($state['processed_images'] ?? 0)),
             'snapshot_file_exists' => is_file($dir.'/snapshot.json'), 'snapshot_tasks_file_exists' => is_file($dir.'/photo-tasks.jsonl'),
@@ -511,6 +542,7 @@ final class BrowserMigrationExport
                 }
             }
 
+            $data['external_photos_allowed'] ??= $this->externalPhotosAllowed($data);
             $data = OperatorFinalizationDiagnostics::decorate($data);
             $data['operator_finalize_diagnostic'] = app(OperatorFinalizationDiagnostics::class)->read($dir);
 
@@ -549,10 +581,11 @@ final class BrowserMigrationExport
             $snapshot => 'snapshot_tick', default => 'tick',
         };
         $data = $this->filterCompact(array_replace($state, $progress ?? ['processed' => null, 'total' => null, 'remaining' => null, 'cursor' => null, 'current_dataset' => null], [
+            'external_photos_allowed' => $this->externalPhotosAllowed($state),
             'next_action' => $next, 'busy' => false, 'resume_allowed' => ! in_array($next, ['blocked', 'download'], true),
             'blocked_reason' => $next === 'blocked' ? ($state['last_error'] ?? $state['state']) : null,
             'snapshot_retry_allowed' => ! $this->datasetRecoveryAllowed(array_replace($state, $progress ?? []), $state) && in_array($state['state'], ['snapshot_pending', 'snapshot_running', 'snapshot_paused', 'snapshot_failed'], true) && ! is_dir($dir.'/images'),
-            'snapshot_abort_allowed' => false, 'photo_retry_allowed' => ! isset($state['photo_retry']) && array_sum(array_intersect_key($state['photo_results'] ?? [], array_flip(['COPY_FAILED', 'UNREADABLE_ORIGINAL', 'INSUFFICIENT_DISK_SPACE']))) > 0,
+            'snapshot_abort_allowed' => false, 'photo_retry_allowed' => ! ExternalPhotoArchive::selected($state) && ! isset($state['photo_retry']) && array_sum(array_intersect_key($state['photo_results'] ?? [], array_flip(['COPY_FAILED', 'UNREADABLE_ORIGINAL', 'INSUFFICIENT_DISK_SPACE']))) > 0,
         ]));
         $data['remaining'] ??= isset($data['total'], $data['processed']) ? max(0, $data['total'] - $data['processed']) : null;
         $data['dataset_recovery_allowed'] = $this->datasetRecoveryAllowed($data, $state);
@@ -638,7 +671,7 @@ final class BrowserMigrationExport
     public function filterCompact(array $data): array
     {
         return array_intersect_key($data, array_flip(['run_id', 'schema_version', 'snapshot_attempt_id', 'snapshot_mode', 'state', 'phase',
-            'record_capture_total', 'operator_finalize_stage', 'operator_finalize_diagnostic', 'operator_parts_drift_allowed', 'consistency_exception', 'operator_finalization', 'current_dataset', 'processed', 'total', 'remaining', 'cursor', 'next_action', 'busy', 'resume_allowed', 'blocked_reason',
+            'photo_delivery', 'external_photos_allowed', 'record_capture_total', 'operator_finalize_stage', 'operator_finalize_diagnostic', 'operator_parts_drift_allowed', 'consistency_exception', 'operator_finalization', 'current_dataset', 'processed', 'total', 'remaining', 'cursor', 'next_action', 'busy', 'resume_allowed', 'blocked_reason',
             'last_success', 'last_error', 'snapshot_state', 'snapshot_stage', 'snapshot_retry_allowed', 'snapshot_abort_allowed', 'photo_retry_allowed', 'last_tick', 'last_status_error', 'attempt_id', 'last_tick_reason', 'checkpoint_fingerprint', 'progress_unavailable', 'dataset_generation', 'dataset_boundary_id', 'previous_boundary_id', 'boundary_refreshed_at', 'recovery_reason', 'consistency_mode', 'dataset_recovery', 'dataset_recovery_allowed', 'recovery_reason_code', 'source_conflict', 'recovery_strategy', 'mutable_round', 'mutable_dirty_rows', 'mutable_dirty_shards', 'mutable_reused_shards', 'exported_records', 'verification_processed']));
     }
 
@@ -667,7 +700,11 @@ final class BrowserMigrationExport
             $state['total_images'] = $work['tasks'];
             $state['photo_tasks_checksum_chain'] = $work['chain'];
             $state['sample_ids'] = array_values($work['sample_ids']);
-            $state['state'] = $state['phase'] = 'photos';
+            if (ExternalPhotoArchive::selected($state)) {
+                $this->startPackaging($state);
+            } else {
+                $state['state'] = $state['phase'] = 'photos';
+            }
             $state['snapshot_state'] = 'snapshot_completed';
             $state['last_error'] = null;
 
@@ -698,7 +735,7 @@ final class BrowserMigrationExport
             if ($name === 'car_images' || ($name === 'cars' && ! empty($row['main_photo_path']))) {
                 $carId = (string) ($name === 'cars' ? $row['id'] : $row['car_id']);
                 $image = $name === 'cars' ? ['id' => 'main', 'part_id' => null, 'path' => $row['main_photo_path'], 'is_primary' => true, 'role' => 'main_photo'] : $row + ['part_id' => null];
-                $task = $this->originals->task($image, ['id' => $carId]);
+                $task = $this->originals->task($image, ['id' => $carId], ! ExternalPhotoArchive::selected($state));
                 $seen = $dir.'/inventory-car-images/'.hash('sha256', $carId.':'.($task['original_relative_path'] ?? $image['path'])).'.json';
                 if ($name === 'cars' && is_file($seen)) {
                     continue;
@@ -714,9 +751,9 @@ final class BrowserMigrationExport
                 $task['part_id'] = null;
                 $task['package_path'] = 'images/cars/'.$task['car_id'].'/image-'.$task['image_id'].'/'.basename($task['package_path']);
             } elseif ($name === 'part_images') {
-                $task = $this->originals->task($row, ['id' => $row['part_id']]);
+                $task = $this->originals->task($row, ['id' => $row['part_id']], ! ExternalPhotoArchive::selected($state));
             } elseif ($name === 'parts' && ! empty($row['code_photo_path'])) {
-                $task = $this->originals->task(['id' => 'code', 'part_id' => $row['id'], 'path' => $row['code_photo_path'], 'role' => 'code_photo'], $row);
+                $task = $this->originals->task(['id' => 'code', 'part_id' => $row['id'], 'path' => $row['code_photo_path'], 'role' => 'code_photo'], $row, ! ExternalPhotoArchive::selected($state));
             } else {
                 continue;
             }
@@ -840,22 +877,23 @@ final class BrowserMigrationExport
                 $work['stage'] = 'metadata';
             }
         } elseif ($work['stage'] === 'photos') {
-            $stream = fopen($dir.'/photos.jsonl', 'rb');
+            $external = ExternalPhotoArchive::selected($state);
+            $stream = fopen($dir.'/'.($external ? 'photo-tasks.jsonl' : 'photos.jsonl'), 'rb');
             fseek($stream, $work['photos_offset']);
             $manifest = $missing = $csv = '';
             if ($work['photos_offset'] === 0) {
-                $csv = "\xEF\xBB\xBF".$this->csvRow(['part_id', 'image_id', 'original_filename', 'package_path', 'sort_order', 'is_primary', 'bytes', 'sha256', 'status', 'entity_type', 'entity_id', 'car_id', 'original_relative_path', 'role', 'mime', 'extension', 'export_status', 'skipped_reason']);
+                $csv = "\xEF\xBB\xBF".$this->csvRow(['part_id', 'image_id', 'original_filename', 'package_path', 'sort_order', 'is_primary', 'bytes', 'sha256', 'status', 'entity_type', 'entity_id', 'car_id', 'original_relative_path', 'role', 'mime', 'extension', 'export_status', 'skipped_reason', ...ExternalPhotoArchive::EXTRA_COLUMNS]);
             }
             for ($n = 0; $n < 20 && ($line = fgets($stream)) !== false; $n++) {
                 $row = json_decode($line, true, 32, JSON_THROW_ON_ERROR);
-                $row = $this->photos->latestResult($dir, $row);
+                $row = $external ? ExternalPhotoArchive::row($row) : $this->photos->latestResult($dir, $row);
                 $line = json_encode($row, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE)."\n";
                 $manifest .= $line;
                 $state['photo_results'][$row['status']] = ($state['photo_results'][$row['status']] ?? 0) + 1;
-                $csv .= $this->csvRow(array_map(fn ($key) => $row[$key] ?? null, ['part_id', 'image_id', 'original_filename', 'package_path', 'sort_order', 'is_primary', 'bytes', 'sha256', 'status', 'entity_type', 'entity_id', 'car_id', 'original_relative_path', 'role', 'mime', 'extension', 'export_status', 'skipped_reason']));
+                $csv .= $this->csvRow(array_map(fn ($key) => $row[$key] ?? null, ['part_id', 'image_id', 'original_filename', 'package_path', 'sort_order', 'is_primary', 'bytes', 'sha256', 'status', 'entity_type', 'entity_id', 'car_id', 'original_relative_path', 'role', 'mime', 'extension', 'export_status', 'skipped_reason', ...ExternalPhotoArchive::EXTRA_COLUMNS]));
                 if ($row['status'] === 'COPIED_VERIFIED') {
                     $artifacts .= $this->artifact($dir, $row['package_path'], $row['package_path'], $row['sha256'], $row['bytes']);
-                } else {
+                } elseif ($row['status'] !== ExternalPhotoArchive::STATUS) {
                     $missing .= $line;
                 }
             }
@@ -881,7 +919,7 @@ final class BrowserMigrationExport
             $this->write($dir.'/sample-product-ids.json', $state['sample_ids'] ?? []);
             $this->write($dir.'/fields.generated.json', ['datasets' => array_map(fn ($d) => array_intersect_key($d, array_flip(['source_table', 'exported_columns', 'csv_columns', 'column_definitions', 'relations', 'omitted_columns'])), $index['datasets']), 'formats' => $manifest['format']]);
             $this->write($dir.'/statuses.json', ['part_statuses' => ['draft' => 'Draft', 'needs_review' => 'Needs review', 'ready' => 'Ready', 'published' => 'Published', 'sold' => 'Sold by the panel status rule', 'archived' => 'Archived'], 'order_statuses' => Order::STATUSES, 'source_counts' => $index['source_counts'], 'group_rules' => $manifest['groups']]);
-            foreach (['README.md' => 'gpswiss-browser-export.md', 'integration-stop-procedure.md' => 'gpswiss-export-and-sync-stop.md'] as $target => $source) {
+            foreach (['README.md' => 'gpswiss-browser-export.md', 'integration-stop-procedure.md' => 'gpswiss-export-and-sync-stop.md', 'external-photos.md' => 'gpswiss-external-photos.md'] as $target => $source) {
                 $bytes = file_get_contents(base_path('docs/migration/'.$source));
                 if (@file_put_contents($dir.'/'.$target.'.tmp', $bytes) !== strlen($bytes) || ! chmod($dir.'/'.$target.'.tmp', 0600) || ! rename($dir.'/'.$target.'.tmp', $dir.'/'.$target)) {
                     throw new RuntimeException('export_instructions_write_failed');
@@ -892,7 +930,7 @@ final class BrowserMigrationExport
                     $this->append($dir.'/'.$group, 0, "\xEF\xBB\xBF".$this->csvRow(['part_id']));
                 }
             }
-            foreach (['migration-manifest.json', 'sample-product-ids.json', 'fields.generated.json', 'statuses.json', 'sold-part-ids.csv', 'parts-to-list-ids.csv', 'relation-issues.jsonl', 'photo-manifest.jsonl', 'photo-manifest.csv', 'missing-originals.jsonl', 'README.md', 'integration-stop-procedure.md'] as $name) {
+            foreach (['migration-manifest.json', 'sample-product-ids.json', 'fields.generated.json', 'statuses.json', 'sold-part-ids.csv', 'parts-to-list-ids.csv', 'relation-issues.jsonl', 'photo-manifest.jsonl', 'photo-manifest.csv', 'missing-originals.jsonl', 'README.md', 'integration-stop-procedure.md', 'external-photos.md'] as $name) {
                 $sha = match ($name) {
                     'photo-manifest.jsonl' => SerializableSha256::digest($work['manifest_hash']),
                     'photo-manifest.csv' => SerializableSha256::digest($work['manifest_csv_hash']),
@@ -947,7 +985,8 @@ final class BrowserMigrationExport
         $catalog = ['schema_version' => 'gpswiss-wystawczesc-package-3', 'run_id' => $state['run_id'], 'attempt_id' => $state['snapshot_attempt_id'],
             'technical_package_ready' => true, 'readiness_meaning' => 'private_export_artifacts_complete_with_explicit_consistency_exceptions_and_missing_reports; no_atomic_or_automatic_import_guarantee',
             'consistency_exception' => $state['consistency_exception'] ?? null, 'cutover_ready' => false,
-            'originals_complete' => array_sum($state['photo_results']) === ($state['photo_results']['COPIED_VERIFIED'] ?? 0),
+            'photo_delivery' => ExternalPhotoArchive::contract($state),
+            'originals_complete' => ! ExternalPhotoArchive::selected($state) && array_sum($state['photo_results']) === ($state['photo_results']['COPIED_VERIFIED'] ?? 0),
             'photo_status_counts' => $state['photo_results'], 'relation_issues' => $state['relation_audit']['issues_count'] ?? null,
             'checksums' => $checksums, 'files' => $downloads, 'archive_maps' => ['archive-manifest.json', 'sample-archive-manifest.json'],
             'self_hash' => 'provided_by_authenticated_download_descriptor; not_embedded_in_self',
@@ -968,12 +1007,13 @@ final class BrowserMigrationExport
                 'ids_and_codes' => 'text, preserve leading zeros', 'dates' => 'as stored; no inferred timezone', 'relations' => 'separate datasets linked by retained source IDs'],
             'source_instance' => 'gpswiss.pl', 'contains_customer_data' => true, 'access' => 'authenticated_owner_only_no_public_url',
             'photo_manifest' => 'photo-manifest.csv', 'photo_jsonl' => 'photo-manifest.jsonl', 'missing_originals' => 'missing-originals.jsonl',
-            'photo_consistency' => 'frozen DB metadata; originals fingerprinted during inventory and verified during bounded copy; no coordinated filesystem point-in-time snapshot',
-            'photo_export_contract' => ['owners' => 'part gallery/code_photo and car gallery/legacy main_photo_path; entity_type/entity_id/car_id; original names in owner/image subdirectories; car main alias of a gallery path included once',
-                'copy' => 'default 512KiB; maximum 2MiB/step; at most four steps and 1.5s/request; streaming serializable SHA256; immutable receipts and journal checkpoint',
+            'photo_delivery' => ExternalPhotoArchive::contract($state),
+            'photo_consistency' => ExternalPhotoArchive::selected($state) ? 'frozen DB associations only; originals supplied separately; no filesystem availability/size/hash verification or point-in-time guarantee' : 'frozen DB metadata; originals fingerprinted during inventory and verified during bounded copy; no coordinated filesystem point-in-time snapshot',
+            'photo_export_contract' => ['owners' => ExternalPhotoArchive::selected($state) ? 'part gallery/code_photo and car gallery/main_photo; entity_type/entity_id/car_id; original names and storage-relative directories retained in metadata; no image files in data archives' : 'part gallery/code_photo and car gallery/legacy main_photo_path; entity_type/entity_id/car_id; original names in owner/image subdirectories; car main alias of a gallery path included once',
+                'copy' => ExternalPhotoArchive::selected($state) ? 'disabled; external archive supplied by operator' : 'default 512KiB; maximum 2MiB/step; at most four steps and 1.5s/request; streaming serializable SHA256; immutable receipts and journal checkpoint',
                 'size_limit_bytes' => 100 * 1024 * 1024, 'oversize' => 'reported OVERSIZE_ORIGINAL; never replaced with thumbnail',
-                'status' => 'native status retained; export_status=copied/missing/unreadable/checksum_failed/skipped; skipped_reason explains failures',
-                'remote' => 'REMOTE_NOT_FETCHED; no network/provider calls', 'retry' => 'explicit failed-only retry against frozen fingerprints; verified files reused'],
+                'status' => ExternalPhotoArchive::selected($state) ? 'EXTERNAL_ARCHIVE_NOT_VERIFIED; export_status=external; not a missing-file or successful-copy result' : 'native status retained; export_status=copied/missing/unreadable/checksum_failed/skipped; skipped_reason explains failures',
+                'remote' => 'REMOTE_NOT_FETCHED; no network/provider calls', 'retry' => ExternalPhotoArchive::selected($state) ? 'disabled; verify the separate archive outside this exporter' : 'explicit failed-only retry against frozen fingerprints; verified files reused'],
             'groups' => ['sold' => "parts.status === 'sold'", 'to_list' => 'parts.needs_listing = true; never infer from zero stock or absent offer URL'],
             'relation_audit' => $state['relation_audit'] ?? null, 'relation_issues' => 'relation-issues.jsonl',
             'allegro_mapping_policy' => 'historical_only_never_activate', 'ebay_ovoko_mapping_policy' => 'retain IDs, URLs, market/account identity; explicit adoption required',
