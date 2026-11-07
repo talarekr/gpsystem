@@ -55,8 +55,9 @@ def run(browser, mode):
         if action == 'retry_snapshot':
             assert payload['confirm_restart'] is True and payload['expected_snapshot_attempt'] == OLD
             assert state['snapshot_attempt_id'] == OLD, 'Double click must not create another generation'
+            # Converted browser runs return resume_allowed=true for snapshot_tick.
             state.update(schema_version='gpswiss-wystawczesc-3', snapshot_mode='browser',
-                         snapshot_attempt_id=NEW, next_action='snapshot_tick', launcher_status=None,
+                         snapshot_attempt_id=NEW, next_action='snapshot_tick', resume_allowed=True, launcher_status=None,
                          snapshot_retry_allowed=False, snapshot_abort_allowed=False,
                          snapshot_state='snapshot_running', state='snapshot_running', phase='snapshot_boundaries',
                          current_dataset='parts', processed=0, total=4, cursor=0)

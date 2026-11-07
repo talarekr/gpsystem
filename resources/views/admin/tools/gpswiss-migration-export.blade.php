@@ -37,7 +37,8 @@
  const waits=new Map(),resumeEvents=[];
  const wait=ms=>new Promise(resolve=>{const timer=setTimeout(()=>{waits.delete(timer);resolve();},ms);waits.set(timer,resolve);});
  function cancelBackoff(){for(const [timer,resolve] of waits){clearTimeout(timer);resolve();}waits.clear();}
- function resumeEvent(event,blocked_reason=null){resumeEvents.push({event,blocked_reason});if(resumeEvents.length>20)resumeEvents.shift();el('resume-diagnostic').textContent=JSON.stringify({events:resumeEvents,retry_exhausted:retryExhausted},null,2);}
+ function runnerContext(){return {phase:state?.phase??null,state:state?.state??null,next_action:nextAction(),busy:state?.busy??false,resume_allowed:state?.resume_allowed??null,blocked_reason:state?.blocked_reason??state?.last_error??null,runner_decision:runnerDecision()};}
+ function resumeEvent(event,blocked_reason=null){const context=runnerContext();resumeEvents.push({...context,event,blocked_reason:blocked_reason??context.blocked_reason});if(resumeEvents.length>20)resumeEvents.shift();el('resume-diagnostic').textContent=JSON.stringify({events:resumeEvents,retry_exhausted:retryExhausted,...context},null,2);}
  async function manualResume(){
   if(manualResuming)return;
   manualResuming=true;resumeTraceActive=true;resumeEvents.length=0;resumeEvent('resume_started');
@@ -59,13 +60,25 @@
  const datasetRecoverable=()=>browserSnapshot() && recoverableState(state);
  const photoRetryPending=()=>state?.photo_retry_requested===true || ['photos_retry_setup','photos_retry_inventory','photos_retry'].includes(state?.phase);
  const unfinished=()=>state && state.state!=='completed' && snapshotState()!=='snapshot_aborted';
- const canPause=()=>browserSnapshot() && (['photos','archive'].includes(state?.state) || ['snapshot_pending','snapshot_running'].includes(snapshotState()) || (snapshotState()==='snapshot_completed' && state?.phase==='photo_inventory'));
+ const canPause=()=>browserSnapshot() && (['photos','archive'].includes(state?.state) || ['snapshot_pending','snapshot_running'].includes(snapshotState()) || (snapshotState()==='snapshot_completed' && ['relation_audit','photo_inventory'].includes(state?.phase)));
  function nextAction(){
   if(state?.next_action)return state.next_action;
   if(state?.state==='completed')return 'download';
   if(state?.busy)return 'wait';
   if(state?.resume_allowed===false)return 'blocked';
   return ['photos','archive'].includes(state?.state)?'tick':'blocked';
+ }
+ function runnerDecision(value=state){
+  if(!value)return 'no_state';
+  const next=value.next_action??(value===state?nextAction():null);
+  if(value.busy || next==='wait')return 'wait';
+  if(value.state==='completed' || next==='download')return 'completed';
+  if(recoverableState(value))return 'resume_required';
+  if(next==='resume' && value.resume_allowed!==false && !value.blocked_reason)return 'resume_required';
+  if(value.last_error || value.blocked_reason || ['snapshot_failed','failed','snapshot_aborted'].includes(value.state))return 'blocked';
+  if(value.resume_allowed===false)return 'blocked';
+  if(next==='resume' || ['snapshot_paused','pipeline_paused'].includes(value.state))return 'resume_required';
+  return ['snapshot_tick','tick'].includes(next)?'tick_ready':'blocked';
  }
  function buttons(){
   const blocked=!ready || sessionExpired || accessBlocked;
@@ -148,11 +161,10 @@
   try{sessionStorage.setItem(recoveryKey,JSON.stringify(safe));}catch(_){}
  }
  function restoreKnownState(){
-  try{const raw=sessionStorage.getItem(recoveryKey);if(!raw || raw.length>4096)return;const saved=JSON.parse(raw);if(saved.run_id===id && /^[a-f0-9-]{36}$/i.test(saved.snapshot_attempt_id??'') && saved.snapshot_mode==='browser' && saved.state==='snapshot_running' && saved.snapshot_state==='snapshot_running' && saved.next_action==='snapshot_tick' && !saved.busy && !saved.last_error && saved.last_tick?.reason_code==='tick_completed')render(saved);
-   else if(saved.run_id===id && saved.snapshot_mode==='browser' && ['photos','archive'].includes(saved.state) && saved.next_action==='tick' && !saved.busy && !saved.last_error)render(saved);
-   else if(saved.run_id===id && saved.snapshot_mode==='browser' && recoverableState(saved))render(saved);}catch(_){}
+  try{const raw=sessionStorage.getItem(recoveryKey);if(!raw || raw.length>4096)return;const saved=JSON.parse(raw);if(saved.run_id===id && /^[a-f0-9-]{36}$/i.test(saved.snapshot_attempt_id??'') && kickState(saved))render(saved);}catch(_){}
  }
- const kickEligible=()=>!!id && !!state?.snapshot_attempt_id && (datasetRecoverable() || browserSnapshot() && ['photos','archive'].includes(state.state) && state.next_action==='tick' && !state.busy && !state.last_error || browserSnapshot() && state.state==='snapshot_running' && state.snapshot_state==='snapshot_running' && state.next_action==='snapshot_tick' && !state.busy && !state.last_error && state.last_tick?.reason_code==='tick_completed');
+ const kickState=s=>s?.snapshot_mode==='browser' && (recoverableState(s) || runnerDecision(s)==='tick_ready' && (s.next_action==='tick' || s.last_tick?.reason_code==='tick_completed'));
+ const kickEligible=()=>!!id && !!state?.snapshot_attempt_id && kickState(state);
  const cursorText=value=>value==null?'—':typeof value==='object'?JSON.stringify(value):String(value);
  const transient=error=>error.reason!=='status_fetch_retry_exhausted' && (['network_error','browser_fetch_timeout','malformed_json','invalid_response','snapshot_http_tick_failed'].includes(error.reason) || [408,429,500,502,503,504].includes(error.http));
  async function request(url,action,extra={},statusAttempt=null){
@@ -264,7 +276,7 @@
  }
  async function drive(start){
   await boot;if(working || sessionExpired || accessBlocked)return;
-  working=true;active=true;loopDone=new Promise(resolve=>{finishLoop=resolve;});buttons();let attempts=0,needsResume=!start,usedKick=false;
+  working=true;active=true;loopDone=new Promise(resolve=>{finishLoop=resolve;});buttons();let attempts=0,needsResume=!start,usedKick=false,lastDecision=null;
   const expectedRun=id,expectedAttempt=state?.snapshot_attempt_id;
   try{
    if(start){
@@ -272,6 +284,7 @@
     id=crypto.randomUUID();state=null;history.replaceState(null,'','#run='+id);
     try{render(await request(base+'/'+id,'start'));}catch(error){await recover(error,++attempts);}
    }else{
+    if(resumeTraceActive)resumeEvent('status_loading');
     try{if(id)await readCurrent();else if(!await discover())throw Object.assign(new Error('run_not_found'),{reason:'run_not_found',http:404});}
     catch(error){
      if(resumeTraceActive && error.reason==='status_fetch_retry_exhausted' && kickEligible()){
@@ -292,18 +305,20 @@
    if(!start){
     if(expectedRun && (id!==expectedRun || (expectedAttempt && state?.snapshot_attempt_id!==expectedAttempt))){resumeEvent('blocked','run_or_attempt_changed');el('message').textContent='Wznowienie zablokowane: run_or_attempt_changed';return;}
     if(resumeTraceActive){if(!usedKick)resumeEvent('status_loaded');resumeEvent('next_action='+nextAction());}
-    if(browserSnapshot() && ['snapshot_running','photos','archive'].includes(state?.state) && ['snapshot_tick','tick'].includes(nextAction()) && !state.busy)needsResume=false;
+    if(browserSnapshot() && runnerDecision()==='tick_ready')needsResume=false;
+    el('message').textContent='status_loaded / phase='+(state?.phase??'unknown')+' / runner_decision='+runnerDecision();
    }
    while(active && state){
-    const next=nextAction();
+    const next=nextAction(),decision=runnerDecision();
+    if(resumeTraceActive && decision!==lastDecision){resumeEvent('runner_decision='+decision);lastDecision=decision;}
     if(stopBeforePhotos && state.state==='photos' && state.phase==='photos'){stopBeforePhotos=false;el('message').textContent='Dane sfinalizowane z accepted_known_drift. Zdjęcia gotowe do kopiowania — użyj Wznów, aby rozpocząć etap zdjęć.';break;}
     if(next==='download' || state.state==='completed'){el('message').textContent='Eksport gotowy. Pobierz manifest i wszystkie wskazane części archiwum.';break;}
     if(state.busy || next==='wait'){
      await wait(1000);if(!active)break;try{await readCurrent();}catch(error){if(++attempts>4)throw error;await recover(error,1);}continue;
     }
-    if(next==='blocked' && !datasetRecoverable()){if(resumeTraceActive)resumeEvent('blocked',state.blocked_reason ?? state.last_error ?? state.state);el('message').textContent='Wznowienie zablokowane: '+(state.blocked_reason ?? state.last_error ?? state.state)+'. Sprawdź dostępne akcje snapshotu.';break;}
-    if(browserSnapshot() && ['snapshot_running','photos','archive'].includes(state.state) && ['snapshot_tick','tick'].includes(next) && !state.busy)needsResume=false;
-    if(needsResume || next==='resume' || datasetRecoverable()){
+    if(decision==='blocked'){if(resumeTraceActive)resumeEvent('blocked',state.blocked_reason ?? state.last_error ?? 'server_work_not_runnable');el('message').textContent='Wznowienie zablokowane: '+(state.blocked_reason ?? state.last_error ?? 'server_work_not_runnable')+'. Sprawdź dostępne akcje snapshotu.';break;}
+    if(browserSnapshot() && decision==='tick_ready')needsResume=false;
+    if(needsResume || decision==='resume_required'){
      const recovering=datasetRecoverable();if(recovering)resumeEvent(state.current_dataset==='parts'?'recoverable_mutable_dataset_conflict':'recoverable_dataset_conflict');
      try{render(await request(base+'/'+encodeURIComponent(id),'resume',{expected_snapshot_attempt:state.snapshot_attempt_id??null}));needsResume=!!state.busy;attempts=0;
      }
