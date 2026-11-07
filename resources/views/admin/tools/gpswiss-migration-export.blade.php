@@ -40,8 +40,8 @@
    if(sessionExpired || accessBlocked){resumeEvent('blocked',sessionExpired?'SESSION_EXPIRED':'run_owner_mismatch');return;}
    if(inFlight || pausing || (working && !loopDone)){resumeEvent('blocked','active_request_or_operation');return;}
    if(working){active=false;pauseRequested=false;cancelBackoff();await loopDone;}
-   active=false;pauseRequested=false;retryExhausted=false;requestFailures.length=0;cancelBackoff();
-   el('request-diagnostic').textContent='';el('message').textContent='resume_started / local_retry_state_reset';
+   active=false;pauseRequested=false;retryExhausted=false;cancelBackoff();
+   el('message').textContent='resume_started / local_retry_state_reset';
    resumeEvent('local_retry_state_reset');
    drive(false).catch(()=>resumeEvent('blocked','local_runner_error'));
   }finally{manualResuming=false;buttons();}
@@ -106,6 +106,31 @@
  }
  let artifactsLoadedFor=null;
  const requestFailures=[],statusAttempts=[];
+ let latestRequestDiagnostic=null,lastOperationFailure=null;
+ function showRequestDiagnostic(){el('request-diagnostic').textContent=JSON.stringify({latest:latestRequestDiagnostic,last_operation_failure:lastOperationFailure,status_attempts:statusAttempts,recent_failures:requestFailures},null,2);}
+ function checkpoint(){
+  const p=state?.snapshot_progress??{},w=state?.dataset_recovery??p.dataset_recovery??{};
+  return {run_id:state?.run_id??id,attempt_id:state?.snapshot_attempt_id??state?.attempt_id??null,
+   phase:state?.phase??p.phase??null,dataset:state?.current_dataset??p.current_dataset??null,
+   generation:w.new_generation??state?.dataset_generation??p.dataset_generation??null,boundary:w.dataset_boundary_id??state?.dataset_boundary_id??p.dataset_boundary_id??null,
+   preflight_shard:w.preflight_shard??null,cursor:state?.dataset_cursor??state?.cursor??p.cursor??null,
+   processed:state?.processed??p.processed??null,exported_records:state?.exported_records??p.exported_records??null,
+   verification_processed:state?.verification_processed??p.verification_processed??null,mutable_round:state?.mutable_round??p.mutable_round??null,
+   completed:state?.state==='completed'};
+ }
+ const checkpointKey=({run_id,attempt_id,generation,boundary,...progress})=>JSON.stringify(progress,(_,v)=>v && typeof v==='object' && !Array.isArray(v)?Object.fromEntries(Object.entries(v).sort(([a],[b])=>a.localeCompare(b))):v);
+ function checkpointAdvanced(before,after){
+  if(before.run_id!==after.run_id || before.attempt_id!==after.attempt_id)throw Object.assign(new Error('run_or_attempt_changed'),{reason:'run_or_attempt_changed'});
+  if(before.dataset===after.dataset){
+   if((before.boundary!=null && after.boundary!=null && before.boundary!==after.boundary) || (before.generation!=null && after.generation!=null && before.generation!==after.generation))throw Object.assign(new Error('dataset_boundary_changed'),{reason:'dataset_boundary_changed'});
+   if(before.phase===after.phase && before.preflight_shard!=null && after.preflight_shard!=null && after.preflight_shard<before.preflight_shard)throw Object.assign(new Error('checkpoint_regressed'),{reason:'checkpoint_regressed'});
+  }
+  return !state?.last_error && !state?.blocked_reason && !['snapshot_failed','failed','snapshot_aborted','snapshot_paused'].includes(state?.state) && checkpointKey(before)!==checkpointKey(after);
+ }
+ function safeBackend(value){
+  if(!value || typeof value!=='object')return null;
+  return Object.fromEntries(['action','route_name','reason_code','duration_ms','backend_exception_class','current_dataset','cursor_before','cursor_after','records_attempted','records_completed','dataset_generation','preflight_shard_before','preflight_shard_after','artifacts_checked'].filter(k=>Object.hasOwn(value,k)).map(k=>[k,value[k]]));
+ }
  const recoveryKey='gpswiss-export-last-operational-state';
  function remember(){
   if(!state || !/^[a-f0-9-]{36}$/i.test(id??'') || !/^[a-f0-9-]{36}$/i.test(state.snapshot_attempt_id??''))return;
@@ -122,29 +147,30 @@
  const transient=error=>error.reason!=='status_fetch_retry_exhausted' && (['network_error','browser_fetch_timeout','malformed_json','invalid_response','snapshot_http_tick_failed'].includes(error.reason) || [408,429,500,502,503,504].includes(error.http));
  async function request(url,action,extra={},statusAttempt=null){
   inFlight=true;buttons();const isStatus=!action && url.includes('format=compact'),controller=new AbortController(),started=performance.now(),timer=setTimeout(()=>controller.abort(),isStatus?10000:45000);
-  const diagnostic={endpoint:new URL(url,location.href).pathname+new URL(url,location.href).search,route_name:'admin.tools.gpswiss-migration-export',action:action??(isStatus?'compact_status':'status'),request_kind:isStatus?'status':'operation',attempt:statusAttempt,browser_online:navigator.onLine,status_response_bytes:isStatus?0:null,malformed_json:false,content_type:null,content_length:null,http_status:null,fetch_timeout:false,network_exception_type:null,transport_reason:null,response_bytes:0,server_reason_code:null,current_dataset:state?.current_dataset??null,cursor_before:state?.cursor??null,cursor_after:null};
+  const diagnostic={endpoint:new URL(url,location.href).pathname+new URL(url,location.href).search,route_name:'admin.tools.gpswiss-migration-export',action:action??(isStatus?'compact_status':'status'),request_kind:isStatus?'status':'operation',attempt:statusAttempt,browser_online:navigator.onLine,status_response_bytes:isStatus?0:null,malformed_json:false,content_type:null,content_length:null,http_status:null,fetch_timeout:false,network_exception_type:null,transport_reason:null,response_bytes:0,server_reason_code:null,current_dataset:state?.current_dataset??null,cursor_before:state?.cursor??null,cursor_after:null,checkpoint_before:checkpoint(),checkpoint_after:null,retry_number:0};
   try{
    const response=await fetch(url,{method:action?'POST':'GET',credentials:'same-origin',cache:'no-store',redirect:'error',signal:controller.signal,headers:{Accept:'application/json',...(action?{'Content-Type':'application/json','X-CSRF-TOKEN':document.querySelector('meta[name="csrf-token"]').content}:{})},...(action?{body:JSON.stringify(action==='kick'?extra:{action,...extra})}:{})});
    diagnostic.http_status=response.status;diagnostic.content_type=response.headers.get('content-type');diagnostic.content_length=response.headers.get('content-length');
    if([401,419].includes(response.status))throw Object.assign(new Error('SESSION_EXPIRED'),{reason:'SESSION_EXPIRED',http:response.status});
    const body=await response.text();diagnostic.response_bytes=new TextEncoder().encode(body).length;
    let data;try{data=JSON.parse(body);}catch(_){data=null;diagnostic.malformed_json=true;}
-   diagnostic.server_reason_code=reasonOf(data,reasonOf(data?.status_request_diagnostic,null));diagnostic.status_response_bytes=isStatus?diagnostic.response_bytes:null;diagnostic.server_status_response_bytes=data?.status_response_bytes??null;diagnostic.backend=isStatus?(data?.status_request_diagnostic??null):(data?.tick_diagnostic??data?.last_tick??null);diagnostic.last_status_error=isStatus?(data?.last_status_error??null):null;diagnostic.backend_exception_class=data?.backend_exception_class??diagnostic.backend?.backend_exception_class??null;
+   diagnostic.server_reason_code=reasonOf(data,reasonOf(data?.status_request_diagnostic,null));diagnostic.status_response_bytes=isStatus?diagnostic.response_bytes:null;diagnostic.server_status_response_bytes=data?.status_response_bytes??null;diagnostic.backend=safeBackend(isStatus?(data?.status_request_diagnostic??null):(data?.tick_diagnostic??data?.last_tick??null));diagnostic.last_status_error=safeBackend(isStatus?data?.last_status_error:null);diagnostic.backend_exception_class=data?.backend_exception_class??(isStatus?data?.status_request_diagnostic?.backend_exception_class:data?.tick_diagnostic?.backend_exception_class)??null;
+   diagnostic.backend_evidence=data?.tick_diagnostic?'response_tick_diagnostic':data?.last_tick?'last_recorded_tick_not_http_error_cause':null;
    if([401,419].includes(response.status))throw Object.assign(new Error('SESSION_EXPIRED'),{reason:'SESSION_EXPIRED',http:response.status});
    if(!response.ok)throw Object.assign(new Error('http_error'),{reason:reasonOf(data,'http_'+response.status),http:response.status});
    if(!data || typeof data!=='object')throw Object.assign(new Error('malformed_json'),{reason:'malformed_json',http:response.status});
-   diagnostic.cursor_after=data.cursor??data.run?.cursor??null;diagnostic.backend=isStatus?(data.status_request_diagnostic??null):(data.tick_diagnostic??data.last_tick??null);
+   diagnostic.cursor_after=data.cursor??data.run?.cursor??null;
    return data;
   }catch(error){
-   if(error.reason){diagnostic.reason_code=error.reason;throw error;}
+   if(error.reason){diagnostic.reason_code=error.reason;error.diagnostic=diagnostic;throw error;}
    diagnostic.fetch_timeout=controller.signal.aborted;diagnostic.network_exception_type=['AbortError','TimeoutError','TypeError'].includes(error.name)?error.name:'Error';
    const reason=controller.signal.aborted?'browser_fetch_timeout':'network_error';diagnostic.reason_code=reason;diagnostic.transport_reason=controller.signal.aborted?'browser_fetch_timeout':'unknown_network_error';
-   throw Object.assign(new Error(reason),{reason,http:diagnostic.http_status});
+   throw Object.assign(new Error(reason),{reason,http:diagnostic.http_status,diagnostic});
   }finally{
    diagnostic.duration_ms=Math.round(performance.now()-started);clearTimeout(timer);inFlight=false;buttons();
-   if(diagnostic.reason_code){requestFailures.push(diagnostic);if(requestFailures.length>4)requestFailures.shift();}
+   if(diagnostic.reason_code){requestFailures.push(diagnostic);if(requestFailures.length>8)requestFailures.shift();if(action)lastOperationFailure=diagnostic;}
    if(isStatus && statusAttempt)statusAttempts.push(diagnostic);
-   el('request-diagnostic').textContent=JSON.stringify({latest:diagnostic,status_attempts:statusAttempts,recent_failures:requestFailures},null,2);
+   latestRequestDiagnostic=diagnostic;showRequestDiagnostic();
   }
  }
 
@@ -274,14 +300,27 @@
      continue;
     }
     if(!['snapshot_tick','tick'].includes(next)){el('message').textContent='Nieznany następny krok: '+next+'. Checkpoint zachowany.';break;}
-    const run=id,attempt=state.snapshot_attempt_id ?? null;
-    if(resumeTraceActive && !resumeEvents.some(e=>e.event==='tick_scheduled'))resumeEvent('tick_scheduled');
+    const run=id,attempt=state.snapshot_attempt_id ?? null,before=checkpoint();
+    if(resumeTraceActive)resumeEvent('tick_scheduled');
     try{
-     render(await request(base+'/'+encodeURIComponent(id),next,next==='snapshot_tick'?{expected_snapshot_attempt:attempt}:{}));attempts=0;
+     render(await request(base+'/'+encodeURIComponent(id),next,next==='snapshot_tick'?{expected_snapshot_attempt:attempt}:{}));
      if(state.last_error)throw Object.assign(new Error(state.last_error),{reason:state.last_error});
+     attempts=0;
      if(resumeTraceActive && !resumeEvents.some(e=>e.event==='tick_completed'))resumeEvent('tick_completed');
     }catch(error){
-     if(++attempts>4)throw error;await recover(error,1);
+     attempts++;
+     if(error.diagnostic)error.diagnostic.retry_number=attempts;
+     let progressed=false;
+     try{
+      // Even the fifth error may follow a committed tick. Poll before exhausting its budget.
+      await recover(error,Math.min(attempts,4));
+      const after=checkpoint();
+      if(error.diagnostic)error.diagnostic.checkpoint_after=after;
+      progressed=checkpointAdvanced(before,after);
+      if(error.diagnostic)error.diagnostic.checkpoint_progress_detected=progressed;
+     }finally{showRequestDiagnostic();}
+     if(progressed){attempts=0;retryExhausted=false;if(resumeTraceActive){resumeEvent('checkpoint_progress_detected');resumeEvent('retry_counter_reset');}}
+     else if(attempts>=5)throw error;
      if(id!==run || (next==='snapshot_tick' && state?.snapshot_attempt_id!==attempt)){el('message').textContent='Próba snapshotu zmieniła się. Sprawdź status i świadomie użyj Wznów.';break;}
     }
     await wait(150);
