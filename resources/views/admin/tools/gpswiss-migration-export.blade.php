@@ -16,7 +16,7 @@
 <p>Zbiorcze CSV korzystają tylko z zamrożonych danych. Nie wymagają ZIP-ów ani oryginałów zdjęć. Pliki otwieraj z kolumnami ID i kodów jako tekst, aby zachować początkowe zera.</p>
 <button id="consolidated-csv" disabled>Przygotuj zbiorcze CSV</button>
 <button id="consolidated-csv-stop" disabled>Zatrzymaj lokalną pętlę CSV</button>
-<p id="consolidated-csv-status" role="status"></p><ul id="consolidated-csv-downloads" hidden></ul>
+<p id="consolidated-csv-status" role="status"></p><pre id="consolidated-csv-listing-audit" aria-label="Audyt zamrożonych listingów"></pre><ul id="consolidated-csv-downloads" hidden></ul>
 </section>
 <section id="parts-drift-actions" hidden>
 <p>Wyłącznie bieżący run: akceptacja deklarowanych dwóch zmian części. Manifest zachowa znane ID, nieznane ID i zakres pominiętej weryfikacji. Dalszy odczyt żywej bazy zostanie pominięty; pozostają kontrola plików, SHA i relacji. Najpierw zatrzymaj lokalną pętlę.</p>
@@ -485,10 +485,11 @@
   finally{dataOnlyWorking=false;dataOnlyButtons();}
  }
 
- const csvNames=['czesci.csv','sprzedane.csv','do_wystawienia.csv','moje_samochody.csv','zdjecia_czesci.csv','zdjecia_czesci_issues.csv'];
+ const csvNames=['czesci.csv','sprzedane.csv','do_wystawienia.csv','moje_samochody.csv','zdjecia_czesci.csv','zdjecia_czesci_issues.csv','marketplace_listingi_czesci.csv','marketplace_listingi_czesci_issues.csv'];
  function showCsv(value,run,attempt){
   if(run!==id || attempt!==state?.snapshot_attempt_id)return;
-  el('consolidated-csv-status').textContent=value.done?'Zbiorcze CSV gotowe. Pobierz pięć plików i raport problemów zdjęć.':'CSV: '+value.phase+' | przetworzone wiersze źródłowe: '+(value.processed??0)+' | shard: '+(value.shard??0)+' | wiersz: '+(value.row??0);
+  el('consolidated-csv-status').textContent=value.done?'Zbiorcze CSV gotowe. Pobierz pliki części, samochodów, zdjęć i listingów oraz raporty problemów.':'CSV: '+value.phase+' | przetworzone wiersze źródłowe: '+(value.processed??0)+' | shard: '+(value.shard??0)+' | wiersz: '+(value.row??0);
+  el('consolidated-csv-listing-audit').textContent=value.listing_audit?JSON.stringify(value.listing_audit,null,2):'';
   const list=el('consolidated-csv-downloads');list.replaceChildren();list.hidden=!value.done;
   if(value.done)for(const file of value.downloads??[]){
    if(!csvNames.includes(file.key))continue;

@@ -5,11 +5,11 @@ const base='/admin/tools/gpswiss-migration-export',run='10000000-0000-4000-8000-
 const template=fs.readFileSync(path.join(__dirname,'../../resources/views/admin/tools/gpswiss-migration-export.blade.php'),'utf8');
 const html=template.replace("@json(route('admin.tools.gpswiss-migration-export', [], false))",JSON.stringify(base)).replace('{{ csrf_token() }}','csrf-test');
 const parent={schema_version:'gpswiss-wystawczesc-3',run_id:run,snapshot_attempt_id:attempt,snapshot_mode:'browser',snapshot_state:'snapshot_completed',snapshot_stage:'completed',state:'photos',phase:'photo_copy',exported_records:79957,next_action:'tick',resume_allowed:true,busy:false};
-const files=['czesci.csv','sprzedane.csv','do_wystawienia.csv','moje_samochody.csv','zdjecia_czesci.csv','zdjecia_czesci_issues.csv'];
-async function scenario(browser,{lost=false,reload=false,failure=false,stop=false}={}){
+const files=['czesci.csv','sprzedane.csv','do_wystawienia.csv','moje_samochody.csv','zdjecia_czesci.csv','zdjecia_czesci_issues.csv','marketplace_listingi_czesci.csv','marketplace_listingi_czesci_issues.csv'];
+async function scenario(browser,{lost=false,reload=false,failure=false,stop=false,upgrade=false}={}){
  const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
- let prepared=false,done=false,starts=0,ticks=0,status=0;const forbidden=[];
- const result=()=>({run_id:run,attempt_id:attempt,phase:done?'completed':'parts',done,processed:ticks*50,shard:ticks,row:0,downloads:done?files.map((name,i)=>({key:name,name,rows:[5,1,2,3,5,3][i],bytes:100,sha256:'a'.repeat(64)})):[]});
+ let prepared=upgrade,done=false,starts=0,ticks=0,status=0;const forbidden=[];
+ const result=()=>({run_id:run,attempt_id:attempt,phase:done?'completed':(upgrade&&!starts?'csv_schema_upgrade_required':'parts'),done,processed:ticks*50,shard:ticks,row:0,listing_audit:{total:9,listings_by_provider:{ebay:5,ovoko:3,allegro:1}},downloads:done?files.map((name,i)=>({key:name,name,rows:[5,1,2,3,5,3,8,6][i],bytes:100,sha256:'a'.repeat(64)})):[]});
  await page.route('**/*',async route=>{
   const request=route.request(),url=new URL(request.url()),body=request.postData()?JSON.parse(request.postData()):{};
   const json=(data,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(data)});
@@ -55,22 +55,23 @@ async function scenario(browser,{lost=false,reload=false,failure=false,stop=fals
   await page.waitForFunction(()=>!document.getElementById('consolidated-csv').disabled);
   await page.click('#consolidated-csv');
  }
- await page.waitForFunction(()=>document.querySelectorAll('#consolidated-csv-downloads a').length===6,{},{timeout:15000});
+ await page.waitForFunction(()=>document.querySelectorAll('#consolidated-csv-downloads a').length===8,{},{timeout:15000});
  const links=await page.locator('#consolidated-csv-downloads a').evaluateAll(elements=>elements.map(e=>({href:e.href,text:e.textContent})));
  for(const [i,link] of links.entries()){
   const url=new URL(link.href);assert.equal(url.pathname,base+'/'+run+'/consolidated-csv');assert.equal(url.searchParams.get('parent_attempt_id'),attempt);assert.equal(url.searchParams.get('download'),files[i]);assert.equal(link.text,'Pobierz '+files[i]);
  }
+ assert((await page.locator('#consolidated-csv-listing-audit').textContent()).includes('\"ebay\": 5'));
  assert.deepEqual(forbidden,[],'No parent snapshot, photo, marketplace, package operations');
  assert.equal(starts,reload||stop?2:1,'double clicks must not start parallel CSV loops');
  const startsBefore=starts,ticksBefore=ticks;
  await page.reload();
- await page.waitForFunction(()=>document.querySelectorAll('#consolidated-csv-downloads a').length===6);
+ await page.waitForFunction(()=>document.querySelectorAll('#consolidated-csv-downloads a').length===8);
  assert.equal(starts,startsBefore,'completed reload must GET only');assert.equal(ticks,ticksBefore);assert(status>0);assert.deepEqual(errors,[]);
  await page.close();
 }
 (async()=>{
  const executable=process.env.CHROMIUM_PATH??(fs.existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined);
  const browser=await chromium.launch({headless:true,...(executable?{executablePath:executable}:{})});
- try{for(const options of [{},{lost:true},{reload:true},{failure:true},{stop:true}])await scenario(browser,options);console.log('5 Chromium consolidated CSV scenarios passed: downloads/reload, lost response, resume, 503, stop/double click.');}
+ try{for(const options of [{},{lost:true},{reload:true},{failure:true},{stop:true},{upgrade:true}])await scenario(browser,options);console.log('6 Chromium consolidated CSV scenarios passed: downloads/reload, lost response, resume, 503, stop/double click, v1 upgrade.');}
  finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

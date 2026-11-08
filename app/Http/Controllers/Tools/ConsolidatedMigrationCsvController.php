@@ -13,7 +13,7 @@ final class ConsolidatedMigrationCsvController extends Controller
     public function __invoke(Request $request, ConsolidatedMigrationCsv $packages, string $run)
     {
         abort_unless($request->user()?->hasRole(UserRole::OwnerAdmin->value), 403);
-        $input = $request->validate(['parent_attempt_id' => ['required', 'uuid'], 'action' => ['sometimes', 'in:start,tick'], 'download' => ['sometimes', 'string', 'in:czesci.csv,sprzedane.csv,do_wystawienia.csv,moje_samochody.csv,zdjecia_czesci.csv,zdjecia_czesci_issues.csv']]);
+        $input = $request->validate(['parent_attempt_id' => ['required', 'uuid'], 'action' => ['sometimes', 'in:start,tick'], 'download' => ['sometimes', 'string', 'in:czesci.csv,sprzedane.csv,do_wystawienia.csv,moje_samochody.csv,zdjecia_czesci.csv,zdjecia_czesci_issues.csv,marketplace_listingi_czesci.csv,marketplace_listingi_czesci_issues.csv']]);
         $owner = (int) $request->user()->id;
         if ($request->isMethod('post')) {
             abort_unless(isset($input['action']), 422);
