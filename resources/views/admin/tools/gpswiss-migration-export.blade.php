@@ -9,6 +9,11 @@
 <p>Snapshot bazy nie jest globalnym snapshotem filesystemu. Kopie plików są weryfikowane podczas kopiowania; finalny cutover wymaga osobnej procedury freeze/snapshotu. Nie zatrzymujemy synchronizacji automatycznie.</p>
 <p>Próbka wybiera sprzedaną część (status sold), część do wystawienia (needs_listing), oferty eBay/Ovoko i galerię — gdy takie przypadki są zapisane. Powiązania Allegro są wyłącznie historyczne. Import, publikacja, synchronizacja i wiadomości do klientów pozostają wyłączone.</p>
 <button id="start" disabled>Przygotuj nowy eksport</button><button id="resume" disabled>Wznów istniejący eksport</button><button id="diagnose-conflict" hidden>Diagnozuj konflikt datasetu</button><button id="pause" disabled>Pauza snapshotu</button><button id="stop-local" disabled>Stop lokalnej pętli</button>
+<section aria-label="Pakiet danych bez zdjęć">
+<p>DATA ONLY korzysta z zakończonego snapshotu. Nie odczytuje ponownie bazy i nie czeka na zdjęcia. Pakiet zawiera dane klientów — pobieraj i przekazuj go prywatnie. Zdjęcia przeniesiesz osobno; zaakceptowany drift pozostaje w manifeście.</p>
+<button id="data-only" disabled>Przygotuj pakiet danych bez zdjęć</button>
+<p id="data-only-status" role="status"></p><ul id="data-only-downloads" hidden></ul>
+</section>
 <section id="parts-drift-actions" hidden>
 <p>Wyłącznie bieżący run: akceptacja deklarowanych dwóch zmian części. Manifest zachowa znane ID, nieznane ID i zakres pominiętej weryfikacji. Dalszy odczyt żywej bazy zostanie pominięty; pozostają kontrola plików, SHA i relacji. Najpierw zatrzymaj lokalną pętlę.</p>
 <label><input id="parts-drift-confirm" type="checkbox"> Akceptuję znany drift części oraz finalizację z kontrolą zapisanych artefaktów i relacji zamiast dalszej weryfikacji źródła.</label>
@@ -34,6 +39,7 @@
  const el=id=>document.getElementById(id),base=@json(route('admin.tools.gpswiss-migration-export', [], false));
  let id=new URLSearchParams(location.hash.slice(1)).get('run'),state=null,active=false,working=false,ready=false,sessionExpired=false,accessBlocked=false,inFlight=false,pauseRequested=false,pausing=false;
  let loopDone=null,finishLoop=null,manualResuming=false,resumeTraceActive=false,retryExhausted=false,stopBeforePhotos=false,kickDiagnostic=null;
+ let dataOnlyWorking=false,dataOnlyLoaded=null;
  const waits=new Map(),resumeEvents=[];
  const wait=ms=>new Promise(resolve=>{const timer=setTimeout(()=>{waits.delete(timer);resolve();},ms);waits.set(timer,resolve);});
  function cancelBackoff(){for(const [timer,resolve] of waits){clearTimeout(timer);resolve();}waits.clear();}
@@ -81,6 +87,7 @@
   return ['snapshot_tick','tick'].includes(next)?'tick_ready':'blocked';
  }
  function buttons(){
+  dataOnlyButtons();
   const blocked=!ready || sessionExpired || accessBlocked;
   el('parts-drift-actions').hidden=state?.operator_parts_drift_allowed!==true;
   el('accept-parts-drift').disabled=blocked || working || inFlight || state?.operator_parts_drift_allowed!==true || !el('parts-drift-confirm').checked || el('parts-drift-token').value!=='ACCEPT-PARTS-DRIFT-AND-FINALIZE';
@@ -100,6 +107,7 @@
   // Requests are sequential. Counters may restart for the next dataset/phase or a conscious retry.
   if(value){state=value;id=value.run_id;history.replaceState(null,'','#run='+id);remember();}
   else if(data?.existing_run_found===false)state=null;
+  loadDataOnlyStatus();
   el('state').textContent=JSON.stringify(state?{...state,local_runner_active:active,local_request_in_flight:inFlight}:data,null,2);
   const progress=state?.snapshot_progress ?? {},dataset=state?.current_dataset ?? progress.current_dataset ?? progress.dataset;
   const total=state && Object.hasOwn(state,'total')?(state.total ?? '—'):(progress.total ?? state?.total_images ?? '—');
@@ -419,6 +427,56 @@
   finally{working=false;buttons();}
   if(follow){retryExhausted=false;resumeTraceActive=true;resumeEvents.length=0;resumeEvent('operator_accepts_known_parts_drift');el('parts-drift-confirm').checked=false;el('parts-drift-token').value='';stopBeforePhotos=true;drive(false);}
  }
+ function dataOnlyAvailable(){return browserSnapshot() && typeof state?.snapshot_attempt_id==='string' && (state.snapshot_state==='snapshot_completed' || state.snapshot_stage==='completed' || state.snapshot_progress?.done===true || ['photos','archive','completed'].includes(state.state));}
+ function dataOnlyButtons(){el('data-only').disabled=dataOnlyWorking || sessionExpired || accessBlocked || !id || !dataOnlyAvailable();}
+ function showDataOnly(value,run,attempt){
+  if(id!==run || state?.snapshot_attempt_id!==attempt)return;
+  el('data-only-status').textContent=value.done?'Pakiet danych bez zdjęć gotowy. Pobierz oba manifesty i wszystkie wolumeny ZIP.':'DATA ONLY: '+value.phase+' | rekordy '+value.records+'/'+value.total_records+' | pliki '+value.files_checked+' | wolumeny '+value.volume_count;
+  const list=el('data-only-downloads');list.replaceChildren();list.hidden=!value.done;
+  if(value.done)for(const file of value.downloads??[]){
+   if(!/^(data-only-package-manifest|data-only-archive-manifest|volume-[0-9]{6})$/.test(file.key??''))continue;
+   const item=document.createElement('li'),link=document.createElement('a');link.textContent=file.name;link.href=base+'/'+encodeURIComponent(run)+'/data-only?parent_attempt_id='+encodeURIComponent(attempt)+'&download='+encodeURIComponent(file.key);item.append(link);
+   item.append(document.createTextNode(' '+file.bytes+' B | SHA-256: '+file.sha256));list.append(item);
+  }
+ }
+ async function dataOnlyRequest(run,attempt,action){
+  const endpoint=base+'/'+encodeURIComponent(run)+'/data-only',controller=new AbortController(),timer=setTimeout(()=>controller.abort(),30000);
+  try{
+   const response=await fetch(action?endpoint:endpoint+'?parent_attempt_id='+encodeURIComponent(attempt),{method:action?'POST':'GET',credentials:'same-origin',headers:{'Accept':'application/json','Content-Type':'application/json','X-CSRF-TOKEN':document.querySelector('meta[name="csrf-token"]').content},...(action?{body:JSON.stringify({parent_attempt_id:attempt,action})}:{}),signal:controller.signal});
+   let value;try{value=await response.json();}catch(_){throw Object.assign(new Error('data_only_invalid_response'),{http:response.status});}
+   if(!response.ok)throw Object.assign(new Error(value.reason_code??('http_'+response.status)),{http:response.status});
+   return value;
+  }finally{clearTimeout(timer);}
+ }
+ function loadDataOnlyStatus(){
+  if(!id || !dataOnlyAvailable() || dataOnlyWorking)return;
+  const run=id,attempt=state.snapshot_attempt_id,key=run+':'+attempt;
+  if(dataOnlyLoaded===key)return;dataOnlyLoaded=key;
+  queueMicrotask(async()=>{try{showDataOnly(await dataOnlyRequest(run,attempt),run,attempt);}catch(_){/* Not prepared yet; the explicit button starts/resumes it. */}});
+ }
+ async function prepareDataOnly(){
+  await boot;if(dataOnlyWorking || !dataOnlyAvailable() || sessionExpired || accessBlocked)return;
+  const run=id,attempt=state.snapshot_attempt_id;
+  dataOnlyWorking=true;dataOnlyButtons();el('data-only-downloads').hidden=true;
+  let action='start',failures=0;
+  try{
+   while(id===run && state?.snapshot_attempt_id===attempt){
+    try{
+     const value=await dataOnlyRequest(run,attempt,action);showDataOnly(value,run,attempt);failures=0;
+     if(value.done)return;action='tick';
+     await new Promise(resolve=>setTimeout(resolve,150));
+    }catch(error){
+     if((error.http && error.http<500 && error.message!=='data_only_busy') || ++failures>4)throw error;
+     el('data-only-status').textContent='DATA ONLY retry '+failures+'/4 — checkpoint zachowany';
+     await new Promise(resolve=>setTimeout(resolve,Math.min(4000,500*2**failures)));
+     try{const value=await dataOnlyRequest(run,attempt);showDataOnly(value,run,attempt);if(value.done)return;action='tick';}catch(_){/* Repeat only this package operation. */}
+    }
+   }
+   throw new Error('data_only_parent_changed');
+  }catch(error){el('data-only-status').textContent='DATA ONLY zatrzymany: '+(error.message??'network_error')+'. Kliknij ponownie, aby kontynuować własny checkpoint.';}
+  finally{dataOnlyWorking=false;dataOnlyButtons();}
+ }
+ el('data-only').onclick=prepareDataOnly;
  el('accept-parts-drift').onclick=acceptPartsDrift;el('parts-drift-confirm').onchange=buttons;el('parts-drift-token').oninput=buttons;
  el('diagnose-conflict').onclick=async()=>{
   await boot;if(working || inFlight || !datasetRecoverable())return;

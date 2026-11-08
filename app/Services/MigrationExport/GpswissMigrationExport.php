@@ -13,6 +13,19 @@ final class GpswissMigrationExport
 {
     private array $snapshotLocks = [];
 
+    /** Artifact-only packaging identity: no source DB fingerprint/connection or source queries. */
+    public function dataOnlyParent(int $owner, string $id, string $attempt): string
+    {
+        $this->validateId($attempt);
+        $directory = $this->directory($owner, $id, true);
+        $state = $this->read($directory.'/state.json');
+        if (($state['snapshot_attempt_id'] ?? null) !== $attempt || ($state['snapshot_mode'] ?? null) !== 'browser') {
+            throw new MigrationExportException('data_only_parent_attempt_mismatch');
+        }
+
+        return $directory;
+    }
+
     /** Read-only parent identity for independent supplements; never changes the parent state or leases. */
     public function supplementParent(int $owner, string $id, string $attempt): string
     {

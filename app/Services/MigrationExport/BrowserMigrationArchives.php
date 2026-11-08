@@ -13,13 +13,15 @@ final class BrowserMigrationArchives
     public const MAX_ENTRIES = 20;
 
     /** Index is immutable JSONL: path(relative private file), archive_path, bytes, sha256(optional known whole-file hash). */
-    public function tick(string $directory, string $indexFile, ?float $deadline = null, string $namespace = 'full', bool $containsCustomerData = true): array
+    public function tick(string $directory, string $indexFile, ?float $deadline = null, string $namespace = 'full', bool $containsCustomerData = true, array $options = []): array
     {
         if (! in_array($namespace, ['full', 'sample'], true)) {
             throw new RuntimeException('archive_namespace_invalid');
         }
         $prefix = $namespace === 'sample' ? 'sample-' : '';
         $directory = realpath($directory) ?: throw new RuntimeException('archive_directory_missing');
+        $sourceDirectory = realpath($options['source_directory'] ?? $directory) ?: throw new RuntimeException('archive_directory_missing');
+        $maxEntries = max(2, min(512, (int) ($options['max_entries'] ?? self::MAX_ENTRIES)));
         $index = $this->source($directory, $indexFile);
         $fingerprint = $this->fingerprint($index);
         $checkpointFile = $directory.'/'.$prefix.'archive-checkpoint.json';
@@ -51,7 +53,7 @@ final class BrowserMigrationArchives
         $bytes = 0;
         $eof = false;
         try {
-            while (count($entries) < self::MAX_ENTRIES - 1 && $bytes < $payloadLimit && microtime(true) < $deadline) {
+            while (count($entries) < $maxEntries - 1 && $bytes < $payloadLimit && microtime(true) < $deadline) {
                 if ($state['current'] === null) {
                     $line = fgets($input, 1024 * 1024);
                     if ($line === false) {
@@ -62,7 +64,7 @@ final class BrowserMigrationArchives
                         throw new RuntimeException('archive_index_line_too_large_or_incomplete');
                     }
                     $entry = json_decode($line, true, 32, JSON_THROW_ON_ERROR);
-                    $path = $this->source($directory, $entry['path'] ?? '');
+                    $path = $this->source($sourceDirectory, $entry['path'] ?? '');
                     $this->archivePath($entry['archive_path'] ?? '');
                     if (! isset($entry['bytes']) || (int) $entry['bytes'] !== filesize($path)) {
                         throw new RuntimeException('archive_artifact_size_changed');
@@ -71,7 +73,7 @@ final class BrowserMigrationArchives
                     $state['index_offset'] = ftell($input);
                 }
                 $entry = $state['current'];
-                $path = $this->source($directory, $entry['path']);
+                $path = $this->source($sourceDirectory, $entry['path']);
                 if ($this->fingerprint($path) !== $entry['fingerprint']) {
                     throw new RuntimeException('archive_artifact_changed');
                 }
@@ -95,8 +97,10 @@ final class BrowserMigrationArchives
                     throw new RuntimeException('archive_add_fragment_failed');
                 }
                 $zip->setCompressionName($fragmentName, ZipArchive::CM_STORE);
+                if (isset($options['entry_mtime'])) $zip->setMtimeName($fragmentName, $options['entry_mtime']);
                 $entries[] = ['artifact_index' => $state['artifact_count'] + 1, 'archive_path' => $entry['archive_path'], 'logical_bytes' => (int) $entry['bytes'], 'logical_sha256' => $entry['sha256'] ?? null,
-                    'zip_entry' => $fragmentName, 'fragment_index' => $entry['fragment'] + 1, 'offset' => (int) $entry['offset'], 'bytes' => $take, 'sha256' => $sha, 'fragmented' => $split];
+                    'zip_entry' => $fragmentName, 'fragment_index' => $entry['fragment'] + 1, 'offset' => (int) $entry['offset'], 'bytes' => $take, 'sha256' => $sha, 'fragmented' => $split]
+                    + (! empty($options['retain_source_paths']) ? ['source_path' => $entry['path']] : []);
                 $bytes += $take;
                 if ($split) {
                     $state['current']['hash_context'] = SerializableSha256::update($state['current']['hash_context'], file_get_contents($temporary));
@@ -113,6 +117,7 @@ final class BrowserMigrationArchives
             }
             if ($entries !== []) {
                 $zip->addFromString('__gpswiss_volume_manifest.json', json_encode(['format' => 'gpswiss-browser-zip-volume-1', 'volume' => $volume, 'entries' => $entries], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE));
+                if (isset($options['entry_mtime'])) $zip->setMtimeName('__gpswiss_volume_manifest.json', $options['entry_mtime']);
             }
             if (! $zip->close()) {
                 throw new RuntimeException('archive_close_failed');
@@ -134,7 +139,7 @@ final class BrowserMigrationArchives
                 $state['done'] = true;
                 $this->write($directory.'/'.$prefix.'archive-manifest.json', ['format' => 'gpswiss-browser-zip-volumes-1', 'volume_count' => $state['volume_count'], 'artifact_count' => $state['artifact_count'], 'payload_bytes' => $state['total_bytes'],
                     'embedded_volume_map' => '__gpswiss_volume_manifest.json inside every ZIP', 'volume_descriptor_pattern' => $volumeRelative.'/'.$prefix.'volume-NNNNNN.json', 'whole_file_reassembly' => 'For fragmented entries concatenate bytes by artifact_index and offset, restore archive_path, verify logical_sha256 when present. Fragment SHA-256 and volume SHA-256 must always match.',
-                    'volumes' => $state['volumes'], 'max_volume_payload_bytes' => $payloadLimit, 'max_entries_per_volume' => self::MAX_ENTRIES, 'automatic_import_allowed' => false, 'automatic_publish' => false, 'contains_customer_data' => $containsCustomerData]);
+                    'volumes' => $state['volumes'], 'max_volume_payload_bytes' => $payloadLimit, 'max_entries_per_volume' => $maxEntries, 'automatic_import_allowed' => false, 'automatic_publish' => false, 'contains_customer_data' => $containsCustomerData]);
             }
             $this->write($checkpointFile, $state);
         } catch (\Throwable $e) {
@@ -165,6 +170,39 @@ final class BrowserMigrationArchives
         }
 
         return $this->result($this->read($file));
+    }
+
+    /** Rebuild ONE deterministic volume from its verified descriptor, never reset the archive checkpoint. */
+    public function repairVolume(string $directory, int $number, array $options): void
+    {
+        $descriptor = $this->volume($directory, $number);
+        $source = realpath($options['source_directory'] ?? $directory) ?: throw new RuntimeException('archive_directory_missing');
+        $target = $directory.'/'.$descriptor['file'];
+        $zip = new ZipArchive;
+        if ($zip->open($target.'.repair', ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) throw new RuntimeException('archive_open_failed');
+        $temporaries = [];
+        try {
+            foreach ($descriptor['entries'] as $i => $entry) {
+                $path = $this->source($source, $entry['source_path'] ?? '');
+                $this->archivePath($entry['zip_entry']);
+                if (filesize($path) !== $entry['logical_bytes']) throw new RuntimeException('archive_artifact_size_changed');
+                $temporary = $target.'.repair-'.$i;
+                $temporaries[] = $temporary;
+                if (! hash_equals($entry['sha256'], $this->copyFragment($path, $temporary, $entry['offset'], $entry['bytes']))) throw new RuntimeException('archive_artifact_hash_mismatch');
+                if (! $zip->addFile($temporary, $entry['zip_entry'])) throw new RuntimeException('archive_add_fragment_failed');
+                $zip->setCompressionName($entry['zip_entry'], ZipArchive::CM_STORE);
+                $zip->setMtimeName($entry['zip_entry'], $options['entry_mtime']);
+            }
+            $zip->addFromString('__gpswiss_volume_manifest.json', json_encode(['format' => 'gpswiss-browser-zip-volume-1', 'volume' => $number, 'entries' => $descriptor['entries']], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE));
+            $zip->setMtimeName('__gpswiss_volume_manifest.json', $options['entry_mtime']);
+            if (! $zip->close()) throw new RuntimeException('archive_close_failed');
+            if (! hash_equals($descriptor['sha256'], hash_file('sha256', $target.'.repair'))) throw new RuntimeException('archive_repair_hash_mismatch');
+            if (! chmod($target.'.repair', 0600) || ! rename($target.'.repair', $target)) throw new RuntimeException('archive_publish_failed');
+        } finally {
+            try { $zip->close(); } catch (\Throwable) {}
+            @unlink($target.'.repair');
+            foreach ($temporaries as $temporary) @unlink($temporary);
+        }
     }
 
     /** Bounded individual descriptor; callers can page volume numbers instead of loading all descriptors. */

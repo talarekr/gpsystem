@@ -3012,6 +3012,13 @@ Route::match(['get', 'post'], '/admin/tools/gpswiss-migration-export/{run}/alleg
     ->middleware([\App\Http\Middleware\ShippingRateAuditReadOnly::class, \App\Http\Middleware\ReadOnlyPreviewSession::class, Authenticate::class, 'admin.panel'])
     ->name('admin.tools.gpswiss-migration-export.allegro-parameters-supplement');
 
+// Independent artifact-only archives; the snapshot and photo runners are never invoked.
+Route::match(['get', 'post'], '/admin/tools/gpswiss-migration-export/{run}/data-only', \App\Http\Controllers\Tools\DataOnlyMigrationPackageController::class)
+    ->whereUuid('run')
+    ->withoutMiddleware(\Illuminate\Session\Middleware\StartSession::class)
+    ->middleware([\App\Http\Middleware\ShippingRateAuditReadOnly::class, \App\Http\Middleware\ReadOnlyPreviewSession::class, Authenticate::class, 'admin.panel'])
+    ->name('admin.tools.gpswiss-migration-export.data-only');
+
 // Authenticated diagnostic fallback only for malformed migration-export URLs.
 Route::match(['get', 'post'], '/admin/tools/gpswiss-migration-export/{invalidPath}', [\App\Http\Controllers\Tools\GpswissMigrationExportController::class, 'invalidRoute'])
     ->where('invalidPath', '.+')
