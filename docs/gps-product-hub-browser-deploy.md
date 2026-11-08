@@ -14,7 +14,9 @@ Current staging values used by `deploy.example.php`:
 | Laravel app root | `/home/gpsystem/domains/gpsystem.thecamels.pl/app` |
 | Public root | `/home/gpsystem/domains/gpsystem.thecamels.pl/public_html` |
 | Browser deploy file | `/home/gpsystem/domains/gpsystem.thecamels.pl/public_html/deploy.php` |
-| GitHub ZIP | `https://github.com/talarekr/gpsystem/archive/refs/heads/main.zip` |
+| Commit resolution | `https://api.github.com/repos/talarekr/gpsystem/git/ref/heads/main` |
+| GitHub ZIP | `https://github.com/talarekr/gpsystem/archive/<expected-sha>.zip` |
+| Fallback ZIP | `https://codeload.github.com/talarekr/gpsystem/zip/<expected-sha>` |
 | Admin URL | `https://gpsystem.thecamels.pl/admin` |
 
 The helper is copied from repository file `deploy.example.php` to `public_html/deploy.php` on staging. The real deploy token is edited only on the staging server and must not be committed.
@@ -42,7 +44,7 @@ No shell access is required for this flow.
 The single browser file performs the staging deployment steps that previously required several temporary helper files:
 
 1. Validates the fixed staging token.
-2. Downloads the GitHub `main` ZIP.
+2. Resolves `main` once through GitHub API, then downloads that exact commit ZIP with bounded retry and codeload fallback.
 3. Extracts the ZIP to temporary storage.
 4. Finds the Laravel repository folder inside the extracted ZIP.
 5. Syncs repository files to `/home/gpsystem/domains/gpsystem.thecamels.pl/app`.
@@ -77,8 +79,43 @@ The redesigned helper does **not** use `proc_open`, `shell_exec`, `exec`, Compos
 Required PHP capabilities:
 
 - PHP `zip` extension / `ZipArchive`
-- either `curl` functions or URL-enabled `file_get_contents` for downloading the GitHub ZIP
+- PHP `curl` extension (required to enforce separate connection and total download deadlines)
 - write access for the PHP user to `/app`, `/public_html`, and temporary storage
+
+## Pinned archive downloads and recovery
+
+Every deploy resolves the full 40-character SHA of `main` exactly once. All retries
+and both ZIP endpoints use that same SHA; fallback never switches back to a branch
+archive or resolves a newer main. An optional `expected_sha=<40-character-sha>` query
+parameter requires the resolved main tip to match an operator's explicit pin;
+a mismatch stops before downloading or copying application files. No historical
+commit is hardcoded into the helper.
+
+Each ZIP source gets at most **3 attempts**, with **0.25 s / 0.75 s backoff**,
+**5 s connection timeout** and **60 s total request timeout**. After exhausted
+429/500/502/503/504 or cURL/network failures, the helper tries codeload for the
+same SHA. Nontransient HTTP errors stop immediately. Both sources exhausted give
+`release_zip_sources_unavailable`. Resolving the SHA has its own maximum of three
+10-second requests with the same connection timeout/backoff; API failure blocks
+instead of guessing a revision.
+
+Browser diagnostics show source, attempt, HTTP status, cURL errno, bytes, expected
+SHA and the final source used. They never print response bodies, raw cURL error
+strings, headers or tokens. Failed/partial downloads are discarded between tries.
+
+Before extraction, the helper checks ZIP structure and requires every entry to be
+under `gpsystem-<full-expected-sha>/`, including `artisan` and `composer.json`.
+A commit comment, when present, must match too. After extraction the selected
+repository directory must still have that exact name before any app sync begins.
+GitHub archives do not contain `.git`: this is revision-metadata verification of
+an HTTPS download pinned to a GitHub commit, not an independent signature or
+cryptographic reconstruction of its Git tree. Invalid ZIPs or revision mismatches
+block rather than being silently accepted through another source.
+
+The browser helper cannot update its own already installed copy when downloading
+is broken. First replace **only** staging `public_html/deploy.php` with the updated
+`deploy.example.php`, preserving the server-only token. Then invoke the normal
+protected deploy URL. This PR does not perform that replacement or any deployment.
 
 ## Token handling
 
