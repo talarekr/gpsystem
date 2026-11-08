@@ -13,6 +13,22 @@ final class GpswissMigrationExport
 {
     private array $snapshotLocks = [];
 
+    /** Read-only parent identity for independent supplements; never changes the parent state or leases. */
+    public function supplementParent(int $owner, string $id, string $attempt): string
+    {
+        $this->validateId($attempt);
+        $directory = $this->directory($owner, $id, true);
+        $state = $this->read($directory.'/state.json');
+        if (($state['snapshot_attempt_id'] ?? null) !== $attempt) {
+            throw new MigrationExportException('supplement_parent_attempt_mismatch');
+        }
+        if (($state['snapshot_source_fingerprint'] ?? null) !== $this->snapshotSourceFingerprint()) {
+            throw new MigrationExportException('supplement_parent_source_mismatch');
+        }
+
+        return $directory;
+    }
+
     public function __construct(private GpswissSnapshot $snapshot, private MigrationOriginals $originals, private BrowserMigrationExport $browser) {}
 
     /** The panel never launches a shell, subprocess, scheduler or queue. */

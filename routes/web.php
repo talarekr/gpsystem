@@ -3005,6 +3005,13 @@ Route::post('/admin/tools/gpswiss-migration-export/{run}/kick', [\App\Http\Contr
     ->middleware([\App\Http\Middleware\ShippingRateAuditReadOnly::class, \App\Http\Middleware\ReadOnlyPreviewSession::class, Authenticate::class, 'admin.panel'])
     ->name('admin.tools.gpswiss-migration-export.kick');
 
+// Independent Allegro-only supplement; source DB/session remain read-only, no parent runner changes.
+Route::match(['get', 'post'], '/admin/tools/gpswiss-migration-export/{run}/allegro-parameters-supplement', \App\Http\Controllers\Tools\AllegroParametersSupplementController::class)
+    ->whereUuid('run')
+    ->withoutMiddleware(\Illuminate\Session\Middleware\StartSession::class)
+    ->middleware([\App\Http\Middleware\ShippingRateAuditReadOnly::class, \App\Http\Middleware\ReadOnlyPreviewSession::class, Authenticate::class, 'admin.panel'])
+    ->name('admin.tools.gpswiss-migration-export.allegro-parameters-supplement');
+
 // Authenticated diagnostic fallback only for malformed migration-export URLs.
 Route::match(['get', 'post'], '/admin/tools/gpswiss-migration-export/{invalidPath}', [\App\Http\Controllers\Tools\GpswissMigrationExportController::class, 'invalidRoute'])
     ->where('invalidPath', '.+')
