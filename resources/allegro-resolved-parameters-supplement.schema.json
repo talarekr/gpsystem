@@ -1,0 +1,210 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GPSwiss Allegro parameter supplement v1 — provenance candidate",
+  "type": "object",
+  "required": [
+    "part_id",
+    "allegro_category_id",
+    "parameter_id",
+    "parameter_name_snapshot",
+    "parameter_type",
+    "multiple_choices",
+    "parameter_scope",
+    "product_set_index",
+    "values_ids",
+    "values",
+    "range_value",
+    "raw_value",
+    "required_snapshot",
+    "required_for_product_snapshot",
+    "describes_product_snapshot",
+    "schema_snapshot_id",
+    "source",
+    "source_field",
+    "source_listing_id",
+    "marketplace_account_id",
+    "captured_at",
+    "source_observed_at",
+    "completeness_status",
+    "reason_code",
+    "local_validation_status",
+    "resolution_role",
+    "candidate_id",
+    "conflict_id",
+    "valid_for_republication"
+  ],
+  "properties": {
+    "part_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "allegro_category_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "parameter_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "parameter_name_snapshot": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "parameter_type": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "multiple_choices": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "parameter_scope": {
+      "enum": [
+        "offer",
+        "product",
+        null
+      ]
+    },
+    "product_set_index": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "values_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "values": {
+      "type": "array"
+    },
+    "range_value": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "raw_value": {},
+    "required_snapshot": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "required_for_product_snapshot": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "describes_product_snapshot": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "schema_snapshot_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source": {
+      "enum": [
+        "manual_selection",
+        "computed_from_part",
+        "computed_from_car",
+        "parameter_mapping",
+        "legacy_offer_payload",
+        "marketplace_listing_payload",
+        "review_metadata",
+        "unknown"
+      ]
+    },
+    "source_field": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source_listing_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "marketplace_account_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "captured_at": {
+      "type": "string"
+    },
+    "source_observed_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "completeness_status": {
+      "enum": [
+        "complete",
+        "partial",
+        "historical_only",
+        "schema_unknown",
+        "conflict"
+      ]
+    },
+    "reason_code": {
+      "type": "string"
+    },
+    "local_validation_status": {
+      "enum": [
+        "unknown",
+        "parameter_not_in_local_schema",
+        "value_present_in_local_schema",
+        "value_missing_or_invalid_locally"
+      ]
+    },
+    "candidate_id": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "conflict_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "valid_for_republication": {
+      "const": null
+    },
+    "resolution_role": {
+      "enum": [
+        "stored_source",
+        "builder_result",
+        "stored_source_and_builder_result",
+        "coverage_marker"
+      ]
+    }
+  },
+  "additionalProperties": false
+}

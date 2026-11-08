@@ -13,7 +13,24 @@ class AllegroOfferParametersBuilder
 {
     private array $loggedCarTypeMappings = [];
 
+    private ?array $snapshotInputs = null;
+
     public function __construct(private readonly AllegroManualParameterSelectionService $manualSelectionService) {}
+
+    /** Export-only evaluation: preloaded frozen models, explicit rules/selections, no SQL or integration logs. */
+    public function buildFromSnapshot(Part $part, ?MarketplaceCategoryMapping $mapping, array $definitions, array $selections, array $rules): array
+    {
+        if (! $part->relationLoaded('car') || ! $part->relationLoaded('category')) {
+            throw new \LogicException('snapshot_parameter_relations_required');
+        }
+        $builder = clone $this;
+        $builder->snapshotInputs = ['selections' => $selections, 'rules' => $rules, 'fields' => $part->attributesToArray() + [
+            'car' => $part->getRelation('car')?->attributesToArray(),
+            'category' => $part->getRelation('category')?->attributesToArray(),
+        ]];
+
+        return $builder->build($part, $mapping, $definitions);
+    }
 
     public function build(Part $part, ?MarketplaceCategoryMapping $mapping, array $definitionsResult): array
     {
@@ -50,7 +67,9 @@ class AllegroOfferParametersBuilder
         $parameterId = (string) ($def['id'] ?? '');
         if ($categoryId === '' || $parameterId === '') return null;
 
-        $selected = $this->manualSelectionService->selectedValueIds($part, $categoryId, $parameterId);
+        $selected = $this->snapshotInputs === null
+            ? $this->manualSelectionService->selectedValueIds($part, $categoryId, $parameterId)
+            : array_values(array_unique(array_map(fn ($row) => (string) $row['value_id'], array_filter($this->snapshotInputs['selections'], fn ($row) => (string) $row['allegro_category_id'] === $categoryId && (string) $row['parameter_id'] === $parameterId))));
         if ($selected === []) return null;
 
         $allowed = array_keys($this->manualSelectionService->allowedLabels($def));
@@ -70,6 +89,7 @@ class AllegroOfferParametersBuilder
 
     private function logManualResolution(Part $part, string $categoryId, string $parameterId, array $valueIds, bool $missing, bool $ready): void
     {
+        if ($this->snapshotInputs !== null) return;
         Log::info('allegro_dynamic_publish_resolution', [
             'part_id' => (int) $part->getKey(),
             'category_id' => $categoryId,
@@ -176,6 +196,7 @@ class AllegroOfferParametersBuilder
 
     private function logCarTypeMapping(array $def, mixed $sourceValue, array $context): void
     {
+        if ($this->snapshotInputs !== null) return;
         $key = implode(':', [(string) ($def['category_id'] ?? ''), (string) ($def['id'] ?? ''), (string) $sourceValue, $context['meta']['reason'] ?? $context['meta']['mapped_value_id'] ?? 'none']);
         if (isset($this->loggedCarTypeMappings[$key])) return;
         $this->loggedCarTypeMappings[$key] = true;
@@ -342,6 +363,20 @@ class AllegroOfferParametersBuilder
 
     private function configuredMapping(Part $part, ?MarketplaceCategoryMapping $mapping, array $def): ?array
     {
+        if ($this->snapshotInputs !== null) {
+            if (! $mapping) return null;
+            foreach ($this->snapshotInputs['rules'] as $rule) {
+                if ((string) ($rule['local_category_id'] ?? '') !== (string) $part->category_id
+                    || (string) ($rule['allegro_category_id'] ?? '') !== (string) $mapping->external_category_id
+                    || (string) ($rule['parameter_id'] ?? '') !== (string) ($def['id'] ?? '')
+                    || (array_key_exists('enabled', $rule) && ! $rule['enabled'])) continue;
+                if (filled($rule['fixed_value_id'] ?? null) || filled($rule['fixed_value_label'] ?? null)) {
+                    return ['value' => filled($rule['fixed_value_id'] ?? null) ? $rule['fixed_value_id'] : ($rule['fixed_value_label'] ?? null), 'source' => 'category_mapping', 'source_field' => 'allegro_parameter_mappings.fixed_value'];
+                }
+                return ['value' => $this->fieldValue($part, (string) ($rule['source_field'] ?? '')), 'source' => 'category_mapping', 'source_field' => $rule['source_field'] ?? null];
+            }
+            return null;
+        }
         if (! Schema::hasTable('allegro_parameter_mappings') || ! $mapping) return null;
         $query = DB::table('allegro_parameter_mappings')->where('local_category_id', $part->category_id)->where('allegro_category_id', $mapping->external_category_id)->where('parameter_id', (string) ($def['id'] ?? ''));
         if (Schema::hasColumn('allegro_parameter_mappings', 'enabled')) $query->where('enabled', true);
@@ -354,6 +389,10 @@ class AllegroOfferParametersBuilder
 
     private function fieldValue(Part $part, string $field): mixed
     {
+        if ($this->snapshotInputs !== null) {
+            // Arbitrary configured paths must never lazy-load live Eloquent relationships.
+            return data_get($this->snapshotInputs['fields'], $field) ?? data_get($this->snapshotInputs['fields']['vehicle_snapshot'] ?? [], Str::after($field, 'vehicle_snapshot.'));
+        }
         return data_get($part, $field) ?? data_get($part->vehicle_snapshot, Str::after($field, 'vehicle_snapshot.'));
     }
 

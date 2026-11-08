@@ -13,7 +13,7 @@ final class BrowserMigrationArchives
     public const MAX_ENTRIES = 20;
 
     /** Index is immutable JSONL: path(relative private file), archive_path, bytes, sha256(optional known whole-file hash). */
-    public function tick(string $directory, string $indexFile, ?float $deadline = null, string $namespace = 'full'): array
+    public function tick(string $directory, string $indexFile, ?float $deadline = null, string $namespace = 'full', bool $containsCustomerData = true): array
     {
         if (! in_array($namespace, ['full', 'sample'], true)) {
             throw new RuntimeException('archive_namespace_invalid');
@@ -134,7 +134,7 @@ final class BrowserMigrationArchives
                 $state['done'] = true;
                 $this->write($directory.'/'.$prefix.'archive-manifest.json', ['format' => 'gpswiss-browser-zip-volumes-1', 'volume_count' => $state['volume_count'], 'artifact_count' => $state['artifact_count'], 'payload_bytes' => $state['total_bytes'],
                     'embedded_volume_map' => '__gpswiss_volume_manifest.json inside every ZIP', 'volume_descriptor_pattern' => $volumeRelative.'/'.$prefix.'volume-NNNNNN.json', 'whole_file_reassembly' => 'For fragmented entries concatenate bytes by artifact_index and offset, restore archive_path, verify logical_sha256 when present. Fragment SHA-256 and volume SHA-256 must always match.',
-                    'volumes' => $state['volumes'], 'max_volume_payload_bytes' => $payloadLimit, 'max_entries_per_volume' => self::MAX_ENTRIES, 'automatic_import_allowed' => false, 'automatic_publish' => false, 'contains_customer_data' => true]);
+                    'volumes' => $state['volumes'], 'max_volume_payload_bytes' => $payloadLimit, 'max_entries_per_volume' => self::MAX_ENTRIES, 'automatic_import_allowed' => false, 'automatic_publish' => false, 'contains_customer_data' => $containsCustomerData]);
             }
             $this->write($checkpointFile, $state);
         } catch (\Throwable $e) {
