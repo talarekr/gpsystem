@@ -7,7 +7,7 @@ use Illuminate\Support\Str;
 /** Derives private CSVs from sealed JSON shards only. Never enters the DB, photo or provider pipelines. */
 final class ConsolidatedMigrationCsv
 {
-    private const FILES = ['czesci.csv', 'sprzedane.csv', 'do_wystawienia.csv', 'moje_samochody.csv', 'zdjecia_czesci.csv', 'zdjecia_czesci_issues.csv'];
+    private const FILES = ['czesci.csv', 'sprzedane.csv', 'do_wystawienia.csv', 'moje_samochody.csv', 'zdjecia_czesci.csv', 'zdjecia_czesci_issues.csv', FrozenMarketplaceLinks::FILE, FrozenMarketplaceLinks::ISSUES_FILE];
 
     private const PHOTOS = ['part_id', 'image_id', 'original_name', 'source_path', 'sort_order', 'is_primary', 'role', 'source_type', 'mime_type', 'extension', 'roles', 'image_ids', 'source_metadata'];
 
@@ -24,12 +24,13 @@ final class ConsolidatedMigrationCsv
         return $this->locked($dir, function () use ($parent, $dir, $run, $attempt) {
             if (is_file($dir.'/checkpoint.json')) {
                 $state = $this->context($parent, $dir, $attempt);
-                if ($state['done']) {
+                if (($state['schema_version'] ?? 1) < 2 || $state['done']) {
                     // Reuse valid files; audit in bounded chunks before rebuilding only damaged outputs.
                     $state['done'] = false;
                     $state['phase'] = 'verify_outputs';
                     $state['audit'] = ['file' => 0, 'offset' => 0, 'hash' => SerializableSha256::initial()];
-                    $state['rebuild'] = [];
+                    $state['rebuild'] = ($state['schema_version'] ?? 1) < 2 ? ['czesci.csv', 'sprzedane.csv', 'do_wystawienia.csv', FrozenMarketplaceLinks::FILE, FrozenMarketplaceLinks::ISSUES_FILE] : [];
+                    $state['schema_version'] = 2;
                     $this->write($dir.'/checkpoint.json', $state);
                 }
 
@@ -44,7 +45,7 @@ final class ConsolidatedMigrationCsv
             if (! ($index['done'] ?? false) || ($index['failed'] ?? false) || ($index['attempt_id'] ?? null) !== $attempt) {
                 throw new MigrationExportException('csv_capture_not_sealed');
             }
-            foreach (['parts', 'cars', 'part_images'] as $name) {
+            foreach (['parts', 'cars', 'part_images', 'marketplace_listings'] as $name) {
                 $d = $index['datasets'][$name] ?? null;
                 if (! is_array($d) || ($d['processed'] ?? null) !== ($d['total'] ?? null)) {
                     throw new MigrationExportException('csv_dataset_incomplete');
@@ -52,7 +53,7 @@ final class ConsolidatedMigrationCsv
             }
             $this->write($dir.'/frozen-index.json', $index);
             $state = ['run_id' => $run, 'attempt_id' => $attempt, 'source_sha256' => hash_file('sha256', $source),
-                'index_sha256' => hash_file('sha256', $dir.'/frozen-index.json'), 'done' => false, 'files' => [], 'rebuild' => self::FILES];
+                'index_sha256' => hash_file('sha256', $dir.'/frozen-index.json'), 'schema_version' => 2, 'done' => false, 'files' => [], 'rebuild' => self::FILES];
             $this->initialize($dir, $state, $index);
             $this->write($dir.'/checkpoint.json', $state);
 
@@ -66,6 +67,9 @@ final class ConsolidatedMigrationCsv
 
         return $this->locked($dir, function () use ($parent, $dir, $attempt) {
             $state = $this->context($parent, $dir, $attempt);
+            if (($state['schema_version'] ?? 1) < 2) {
+                throw new MigrationExportException('csv_schema_upgrade_required');
+            }
             if ($state['done']) {
                 return $this->reply($state);
             }
@@ -97,7 +101,7 @@ final class ConsolidatedMigrationCsv
     {
         [$parent, $dir] = $this->paths($owner, $run, $attempt);
         $state = $this->context($parent, $dir, $attempt);
-        if (! $state['done'] || ! in_array($file, self::FILES, true)) {
+        if (($state['schema_version'] ?? 1) < 2 || ! $state['done'] || ! in_array($file, self::FILES, true)) {
             throw new MigrationExportException('csv_not_ready');
         }
         if (! is_file($dir.'/'.$file) || ! hash_equals($state['files'][$file]['sha256'], (string) hash_file('sha256', $dir.'/'.$file))) {
@@ -109,20 +113,25 @@ final class ConsolidatedMigrationCsv
 
     private function initialize(string $dir, array &$state, array $index): void
     {
-        $state['phase'] = 'parts';
+        $this->validateListings($index);
+        $state['phase'] = 'part_index';
         $state['shard'] = $state['row'] = $state['processed'] = 0;
-        $state['source_rows'] = ['parts' => 0, 'cars' => 0, 'part_images' => 0];
+        $state['source_rows'] = ['parts' => 0, 'cars' => 0, 'part_images' => 0, 'marketplace_listings' => 0, 'part_index' => 0];
         $state['offsets'] = [];
         $state['work'] = 'work-'.Str::uuid();
         $this->mkdir($dir.'/'.$state['work'].'/ids');
         $this->mkdir($dir.'/'.$state['work'].'/buckets');
+        $this->mkdir($dir.'/'.$state['work'].'/listings');
+        $state['listing_audit'] = ['source_columns' => $this->columns($index['datasets']['marketplace_listings']), 'total' => 0, 'exported' => 0, 'orphan_listings' => 0, 'missing_url' => 0, 'missing_external_id' => 0, 'listings_by_marketplace' => [], 'listings_by_provider' => [], 'parts_multiple_by_marketplace' => [], 'parts_multiple_by_provider' => []];
         $state['build_photos'] = in_array('zdjecia_czesci.csv', $state['rebuild'], true) || in_array('zdjecia_czesci_issues.csv', $state['rebuild'], true);
         foreach ($state['rebuild'] as $file) {
             $columns = match ($file) {
                 'moje_samochody.csv' => $this->columns($index['datasets']['cars']),
                 'zdjecia_czesci.csv' => self::PHOTOS,
                 'zdjecia_czesci_issues.csv' => self::ISSUES,
-                default => $this->columns($index['datasets']['parts']),
+                FrozenMarketplaceLinks::FILE => FrozenMarketplaceLinks::columns($this->columns($index['datasets']['marketplace_listings'])),
+                FrozenMarketplaceLinks::ISSUES_FILE => FrozenMarketplaceLinks::ISSUE_COLUMNS,
+                default => $this->partColumns($index['datasets']['parts']),
             };
             $state['files'][$file] = ['rows' => 0, 'bytes' => 0, 'hash' => SerializableSha256::initial()];
             $this->append($dir, $state, $file, "\xEF\xBB\xBF".$this->csv($columns));
@@ -142,21 +151,24 @@ final class ConsolidatedMigrationCsv
     private function dataset(string $parent, string $dir, array &$state, array $index): void
     {
         $name = $state['phase'];
-        $definition = $index['datasets'][$name];
+        $sourceName = $name === 'part_index' ? 'parts' : $name;
+        $definition = $index['datasets'][$sourceName];
         $shard = $definition['shards'][$state['shard']] ?? null;
         if ($shard === null) {
             if ($state['source_rows'][$name] !== $definition['total']) {
                 throw new MigrationExportException('csv_source_count_mismatch');
             }
             $state['phase'] = match ($name) {
-                'parts' => 'cars', 'cars' => 'part_images', default => 'photo_metadata'
+                'part_index' => 'marketplace_listings', 'marketplace_listings' => 'parts',
+                'parts' => in_array('moje_samochody.csv', $state['rebuild'], true) ? 'cars' : ($state['build_photos'] ? 'part_images' : 'photo_metadata'),
+                'cars' => $state['build_photos'] ? 'part_images' : 'photo_metadata', default => 'photo_metadata'
             };
             $state['shard'] = $state['row'] = 0;
             $state['bucket'] = 0;
 
             return;
         }
-        $path = $this->source($parent, $shard['path'], $state['attempt_id'], $name);
+        $path = $this->source($parent, $shard['path'], $state['attempt_id'], $sourceName);
         if (filesize($path) > 16 * 1024 * 1024 || ! hash_equals($shard['sha256'], hash_file('sha256', $path))) {
             throw new MigrationExportException('csv_shard_integrity_failed');
         }
@@ -171,14 +183,23 @@ final class ConsolidatedMigrationCsv
             if (array_diff(array_keys($row), $this->columns($definition))) {
                 throw new MigrationExportException('csv_schema_columns_missing');
             }
-            if ($name === 'parts') {
-                $this->output($dir, $state, 'czesci.csv', $row, $this->columns($definition));
+            if ($name === 'part_index') {
+                $id = (string) ($row['id'] ?? '');
+                if ($id === '') {
+                    throw new MigrationExportException('csv_part_identity_missing');
+                }
+                $this->write($dir.'/'.$state['work'].'/ids/'.hash('sha256', $id).'.json', ['id' => $id]);
+            } elseif ($name === 'marketplace_listings') {
+                $this->listing($dir, $state, $row, $definition);
+            } elseif ($name === 'parts') {
+                $row = $this->partLinks($dir, $state, $row);
+                $this->output($dir, $state, 'czesci.csv', $row, $this->partColumns($definition));
                 if (($row['status'] ?? null) === 'sold') {
-                    $this->output($dir, $state, 'sprzedane.csv', $row, $this->columns($definition));
+                    $this->output($dir, $state, 'sprzedane.csv', $row, $this->partColumns($definition));
                 }
                 // SQL booleans in old frozen shards can be 0/1; never infer from stock or listings.
                 if (in_array($row['needs_listing'] ?? null, [true, 1, '1'], true)) {
-                    $this->output($dir, $state, 'do_wystawienia.csv', $row, $this->columns($definition));
+                    $this->output($dir, $state, 'do_wystawienia.csv', $row, $this->partColumns($definition));
                 }
                 if ($state['build_photos']) {
                     $id = (string) ($row['id'] ?? '');
@@ -204,6 +225,97 @@ final class ConsolidatedMigrationCsv
             $state['shard']++;
             $state['row'] = 0;
         }
+    }
+
+    private function validateListings(array $index): void
+    {
+        $definition = $index['datasets']['marketplace_listings'] ?? null;
+        if (! is_array($definition) || ($definition['total'] ?? null) !== ($definition['processed'] ?? null)) {
+            throw new MigrationExportException('csv_listings_dataset_incomplete');
+        }
+        if (array_diff(['id', 'part_id', 'marketplace'], $this->columns($definition))) {
+            throw new MigrationExportException('csv_listings_schema_invalid');
+        }
+    }
+
+    private function partColumns(array $definition): array
+    {
+        $original = $this->columns($definition);
+        $shortcuts = FrozenMarketplaceLinks::shortcutColumns();
+        $extra = array_intersect($original, $shortcuts) ? ['frozen_parts_marketplace_values'] : [];
+
+        return array_values(array_unique([...$original, ...$shortcuts, ...$extra]));
+    }
+
+    private function listing(string $dir, array &$state, array $row, array $definition): void
+    {
+        $id = $row['id'] ?? null;
+        if (! is_scalar($id) || (string) $id === '') {
+            throw new MigrationExportException('csv_listing_identity_missing');
+        }
+        $market = (string) ($row['marketplace'] ?? '');
+        $family = FrozenMarketplaceLinks::family($market);
+        $audit = &$state['listing_audit'];
+        $audit['total']++;
+        $audit['listings_by_marketplace'][$market] = ($audit['listings_by_marketplace'][$market] ?? 0) + 1;
+        $audit['listings_by_provider'][$family] = ($audit['listings_by_provider'][$family] ?? 0) + 1;
+        $part = $row['part_id'] ?? null;
+        $orphan = ! is_scalar($part) || (string) $part === '' || ! is_file($dir.'/'.$state['work'].'/ids/'.hash('sha256', (string) $part).'.json');
+        if ($orphan) {
+            $audit['orphan_listings']++;
+            $this->listingIssue($dir, $state, 'orphan_listing', $row);
+        }
+        if (FrozenMarketplaceLinks::url($row) === null) {
+            $audit['missing_url']++;
+            $this->listingIssue($dir, $state, 'missing_url', $row);
+        }
+        if (FrozenMarketplaceLinks::missingExternalId($row)) {
+            $audit['missing_external_id']++;
+            $this->listingIssue($dir, $state, 'missing_external_id', $row);
+        }
+        if ($orphan) {
+            return;
+        }
+        $this->output($dir, $state, FrozenMarketplaceLinks::FILE, FrozenMarketplaceLinks::listing($row), FrozenMarketplaceLinks::columns($this->columns($definition)));
+        $audit['exported']++;
+        // Deterministic overwrite is safe if a request dies before checkpoint commit. No mutable counters here.
+        $folder = $dir.'/'.$state['work'].'/listings/'.hash('sha256', (string) $part);
+        $this->mkdir($folder);
+        $this->write($folder.'/'.hash('sha256', (string) $id).'.json', FrozenMarketplaceLinks::identity($row));
+    }
+
+    private function listingIssue(string $dir, array &$state, string $reason, array $row): void
+    {
+        $this->output($dir, $state, FrozenMarketplaceLinks::ISSUES_FILE, ['reason_code' => $reason, 'part_id' => $row['part_id'] ?? null,
+            'marketplace' => $row['marketplace'] ?? null, 'listing_local_id' => $row['id'] ?? null, 'source_metadata' => $row], FrozenMarketplaceLinks::ISSUE_COLUMNS);
+    }
+
+    private function partLinks(string $dir, array &$state, array $part): array
+    {
+        $files = glob($dir.'/'.$state['work'].'/listings/'.hash('sha256', (string) $part['id']).'/*.json') ?: [];
+        if (count($files) > 10000) {
+            throw new MigrationExportException('csv_part_listings_budget_exceeded');
+        }
+        $rows = array_map(fn ($file) => $this->read($file), $files);
+        $markets = array_count_values(array_map(fn ($row) => (string) ($row['marketplace'] ?? ''), $rows));
+        $families = array_count_values(array_map(fn ($row) => FrozenMarketplaceLinks::family($row['marketplace'] ?? null), $rows));
+        foreach (['marketplace' => $markets, 'provider' => $families] as $kind => $counts) {
+            foreach ($counts as $key => $count) {
+                if ($count > 1) {
+                    $state['listing_audit']['parts_multiple_by_'.$kind][$key] = ($state['listing_audit']['parts_multiple_by_'.$kind][$key] ?? 0) + 1;
+                    if ($kind === 'provider') {
+                        $ids = array_values(array_map(fn ($row) => $row['id'], array_filter($rows, fn ($row) => FrozenMarketplaceLinks::family($row['marketplace'] ?? null) === $key)));
+                        $this->listingIssue($dir, $state, 'multiple_listings', ['part_id' => $part['id'], 'marketplace' => $key, 'listing_ids' => $ids]);
+                    }
+                }
+            }
+        }
+        $original = array_intersect_key($part, array_flip(FrozenMarketplaceLinks::shortcutColumns()));
+        if ($original) {
+            $part['frozen_parts_marketplace_values'] = $original;
+        }
+
+        return array_replace($part, FrozenMarketplaceLinks::shortcuts($rows));
     }
 
     private function candidate(string $dir, array &$state, array $row, bool $alias = false): void
@@ -297,14 +409,15 @@ final class ConsolidatedMigrationCsv
                 $state['phase'] = 'completed';
                 $state['done'] = true;
             } else {
+                $state['rebuild'] = array_values(array_unique($state['rebuild']));
                 $this->initialize($dir, $state, $index);
             }
 
             return;
         }
         $file = $dir.'/'.$name;
-        $expected = $state['files'][$name];
-        if (! is_file($file) || filesize($file) !== $expected['bytes']) {
+        $expected = $state['files'][$name] ?? null;
+        if (! isset($expected['sha256']) || in_array($name, $state['rebuild'], true) || ! is_file($file) || filesize($file) !== $expected['bytes']) {
             $state['rebuild'][] = $name;
         } else {
             $stream = fopen($file, 'rb');
@@ -432,7 +545,11 @@ final class ConsolidatedMigrationCsv
 
     private function reply(array $state): array
     {
-        return array_intersect_key($state, array_flip(['run_id', 'attempt_id', 'phase', 'done', 'processed', 'shard', 'row', 'bucket'])) + [
+        if (($state['schema_version'] ?? 1) < 2) {
+            return ['run_id' => $state['run_id'], 'attempt_id' => $state['attempt_id'], 'done' => false, 'phase' => 'csv_schema_upgrade_required', 'next_action' => 'start', 'downloads' => []];
+        }
+
+        return array_intersect_key($state, array_flip(['listing_audit', 'schema_version', 'run_id', 'attempt_id', 'phase', 'done', 'processed', 'shard', 'row', 'bucket'])) + [
             'next_action' => $state['done'] ? 'download' : 'tick',
             'downloads' => $state['done'] ? array_map(fn ($name, $file) => ['key' => $name, 'name' => $name, 'rows' => $file['rows'], 'bytes' => $file['bytes'], 'sha256' => $file['sha256']], array_keys($state['files']), array_values($state['files'])) : [],
             'business_database_reads' => false, 'database_writes' => false, 'provider_calls' => false, 'marketplace_writes' => false, 'source_file_writes' => false, 'export_file_writes' => true];
