@@ -17,9 +17,15 @@ declare(strict_types=1);
  */
 
 const DEPLOY_TOKEN = 'CHANGE_ME_TO_LONG_RANDOM_TOKEN';
-const GITHUB_ZIP_URL = 'https://github.com/talarekr/gpsystem/archive/refs/heads/main.zip';
+const GITHUB_REPOSITORY = 'talarekr/gpsystem';
+const GITHUB_BRANCH = 'main';
 const STAGING_URL = 'https://gpsystem.thecamels.pl';
 const EXPECTED_ADMIN_URL = 'https://gpsystem.thecamels.pl/admin';
+
+// Including the helper for isolated download tests must never execute a deployment.
+if (realpath((string) ($_SERVER['SCRIPT_FILENAME'] ?? '')) !== __FILE__) {
+    return;
+}
 
 $config = [
     'app_dir' => '/home/gpsystem/domains/gpsystem.thecamels.pl/app',
@@ -355,54 +361,160 @@ function ensurePublicStorageAccess(string $appDir, string $publicDir): void
     logLine('Public storage fallback copy complete. Files copied: ' . $copied . '; directories ensured: ' . $createdDirs . '.', 'ok');
 }
 
-function downloadZip(string $url, string $destination): void
+/** Only safe numeric transport metadata escapes this function; never curl_error(), bodies or headers. */
+function requestDeployFile(string $url, string $destination, int $timeout): array
 {
-    if (function_exists('curl_init')) {
-        $file = fopen($destination, 'wb');
-        if ($file === false) {
-            throw new RuntimeException('Unable to open temporary ZIP for writing.');
-        }
-
-        $curl = curl_init($url);
-        curl_setopt_array($curl, [
+    if (!function_exists('curl_init')) {
+        throw new RuntimeException('release_download_curl_required');
+    }
+    $file = @fopen($destination, 'wb');
+    if ($file === false) {
+        throw new RuntimeException('release_download_destination_unavailable');
+    }
+    @chmod($destination, 0600);
+    $curl = curl_init($url);
+    if ($curl === false) {
+        fclose($file);
+        return ['http_status' => 0, 'curl_errno' => 2, 'downloaded_bytes' => 0];
+    }
+    try {
+        $options = [
             CURLOPT_FILE => $file,
             CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_FAILONERROR => true,
-            CURLOPT_TIMEOUT => 300,
-            CURLOPT_CONNECTTIMEOUT => 30,
-            CURLOPT_USERAGENT => 'gpsystem-browser-deploy/2.0',
-        ]);
-
-        $success = curl_exec($curl);
-        $error = curl_error($curl);
-        $status = (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
+            CURLOPT_MAXREDIRS => 5,
+            CURLOPT_FAILONERROR => false,
+            CURLOPT_TIMEOUT => $timeout,
+            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
+            CURLOPT_USERAGENT => 'gpsystem-browser-deploy/3.0',
+            CURLOPT_HTTPHEADER => [str_starts_with($url, 'https://api.github.com/') ? 'Accept: application/vnd.github+json' : 'Accept: application/zip'],
+        ];
+        if (defined('CURLOPT_PROTOCOLS_STR') && defined('CURLOPT_REDIR_PROTOCOLS_STR')) {
+            $options[CURLOPT_PROTOCOLS_STR] = 'https';
+            $options[CURLOPT_REDIR_PROTOCOLS_STR] = 'https';
+        } else {
+            $options[CURLOPT_PROTOCOLS] = CURLPROTO_HTTPS;
+            $options[CURLOPT_REDIR_PROTOCOLS] = CURLPROTO_HTTPS;
+        }
+        curl_setopt_array($curl, $options);
+        curl_exec($curl);
+        fflush($file);
+        return ['http_status' => (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE), 'curl_errno' => curl_errno($curl), 'downloaded_bytes' => (int) fstat($file)['size']];
+    } finally {
         curl_close($curl);
         fclose($file);
+    }
+}
 
-        if (!$success) {
-            throw new RuntimeException('ZIP download failed via curl. HTTP status: ' . $status . '. ' . $error);
+/** Three attempts per source. No failed/partial body is retained for the next attempt. */
+function downloadDeploySource(string $source, string $url, string $destination, string $expectedSha, int $timeout, callable $request, callable $pause, callable $log): bool
+{
+    for ($attempt = 1; $attempt <= 3; $attempt++) {
+        if (is_file($destination) && !@unlink($destination)) {
+            throw new RuntimeException('release_download_cleanup_failed');
         }
-
-        return;
+        $result = $request($url, $destination, $timeout);
+        clearstatcache(true, $destination);
+        $status = (int) ($result['http_status'] ?? 0);
+        $errno = (int) ($result['curl_errno'] ?? 0);
+        $bytes = is_file($destination) ? (int) filesize($destination) : 0;
+        $log('download source=' . $source . ' attempt=' . $attempt . '/3 http_status=' . $status . ' curl_errno=' . $errno . ' downloaded_bytes=' . $bytes . ' expected_sha=' . $expectedSha);
+        if ($status === 200 && $errno === 0 && $bytes > 0) {
+            return true;
+        }
+        @unlink($destination);
+        $retryable = $errno !== 0 || $status === 0 || in_array($status, [429, 500, 502, 503, 504], true);
+        if (!$retryable) {
+            throw new RuntimeException('release_download_http_blocked source=' . $source . ' http_status=' . $status);
+        }
+        if ($attempt < 3) {
+            $pause($attempt === 1 ? 250000 : 750000);
+        }
     }
+    return false;
+}
 
-    $context = stream_context_create([
-        'http' => [
-            'follow_location' => 1,
-            'timeout' => 300,
-            'header' => "User-Agent: gpsystem-browser-deploy/2.0\r\n",
-        ],
-    ]);
-
-    $data = @file_get_contents($url, false, $context);
-
-    if ($data === false) {
-        throw new RuntimeException('ZIP download failed via file_get_contents.');
+/** Resolve main ONCE, before either ZIP source; never re-resolve on retry/fallback. */
+function resolveExpectedDeploySha(string $referencePath, mixed $requiredSha = null, ?callable $request = null, ?callable $pause = null, ?callable $log = null): string
+{
+    if ($requiredSha !== null && (!is_string($requiredSha) || !preg_match('/\A[0-9a-f]{40}\z/iD', $requiredSha))) {
+        throw new RuntimeException('expected_sha_invalid');
     }
-
-    if (file_put_contents($destination, $data) === false) {
-        throw new RuntimeException('Unable to save downloaded ZIP.');
+    $request ??= 'requestDeployFile';
+    $pause ??= 'usleep';
+    $log ??= 'logLine';
+    try {
+        $url = 'https://api.github.com/repos/' . GITHUB_REPOSITORY . '/git/ref/heads/' . rawurlencode(GITHUB_BRANCH);
+        if (!downloadDeploySource('github_api', $url, $referencePath, $requiredSha ?? 'unresolved', 10, $request, $pause, $log)) {
+            throw new RuntimeException('expected_sha_resolution_unavailable');
+        }
+        $reference = json_decode((string) file_get_contents($referencePath), true);
+        $sha = $reference['object']['sha'] ?? null;
+        if (($reference['ref'] ?? null) !== 'refs/heads/' . GITHUB_BRANCH || ($reference['object']['type'] ?? null) !== 'commit' || !is_string($sha) || !preg_match('/\A[0-9a-f]{40}\z/iD', $sha)) {
+            throw new RuntimeException('expected_sha_response_invalid');
+        }
+        $sha = strtolower($sha);
+        if ($requiredSha !== null && !hash_equals(strtolower($requiredSha), $sha)) {
+            throw new RuntimeException('expected_sha_mismatch');
+        }
+        $log('Resolved branch=' . GITHUB_BRANCH . ' expected_sha=' . $sha);
+        return $sha;
+    } finally {
+        @unlink($referencePath);
     }
+}
+
+/** GitHub ZIPs have no .git; bind every entry to the full SHA root and check its commit comment when present. */
+function verifyDeployZipSha(string $path, string $expectedSha): void
+{
+    if (!preg_match('/\A[0-9a-f]{40}\z/D', $expectedSha)) {
+        throw new RuntimeException('expected_sha_invalid');
+    }
+    $zip = new ZipArchive();
+    if ($zip->open($path, ZipArchive::CHECKCONS) !== true) {
+        throw new RuntimeException('release_zip_invalid');
+    }
+    try {
+        $root = basename(GITHUB_REPOSITORY) . '-' . $expectedSha . '/';
+        $comment = trim((string) $zip->getArchiveComment());
+        if ($comment !== '' && $comment !== $expectedSha) {
+            throw new RuntimeException('release_zip_sha_mismatch');
+        }
+        if ($zip->numFiles === 0 || $zip->locateName($root . 'artisan') === false || $zip->locateName($root . 'composer.json') === false) {
+            throw new RuntimeException('release_zip_sha_mismatch');
+        }
+        for ($i = 0; $i < $zip->numFiles; $i++) {
+            $name = (string) $zip->getNameIndex($i);
+            if (!str_starts_with($name, $root) || str_contains($name, '\\') || preg_match('~(?:^|/)\.\.(?:/|$)~', $name)) {
+                throw new RuntimeException('release_zip_sha_mismatch');
+            }
+        }
+    } finally {
+        $zip->close();
+    }
+}
+
+function downloadZip(string $expectedSha, string $destination, ?callable $request = null, ?callable $pause = null, ?callable $log = null): string
+{
+    if (!preg_match('/\A[0-9a-f]{40}\z/D', $expectedSha)) {
+        throw new RuntimeException('expected_sha_invalid');
+    }
+    $request ??= 'requestDeployFile';
+    $pause ??= 'usleep';
+    $log ??= 'logLine';
+    $sources = [
+        'github_archive' => 'https://github.com/' . GITHUB_REPOSITORY . '/archive/' . $expectedSha . '.zip',
+        'codeload' => 'https://codeload.github.com/' . GITHUB_REPOSITORY . '/zip/' . $expectedSha,
+    ];
+    foreach ($sources as $source => $url) {
+        if (downloadDeploySource($source, $url, $destination, $expectedSha, 60, $request, $pause, $log)) {
+            verifyDeployZipSha($destination, $expectedSha);
+            $log('final_source_used=' . $source . ' expected_sha=' . $expectedSha . ' archive_revision_verified=true');
+            return $source;
+        }
+    }
+    throw new RuntimeException('release_zip_sources_unavailable github_archive=exhausted codeload=exhausted expected_sha=' . $expectedSha);
 }
 
 function safeExtractZip(string $zipPath, string $destinationDir): array
@@ -704,14 +816,19 @@ try {
     $tempDir = $tempBase . DIRECTORY_SEPARATOR . $uniqueId;
     ensureDirectory($tempDir);
 
-    logLine('Downloading GitHub ZIP: ' . GITHUB_ZIP_URL);
-    downloadZip(GITHUB_ZIP_URL, $tempZip);
+    $expectedSha = resolveExpectedDeploySha($tempZip . '.ref.json', $_GET['expected_sha'] ?? null);
+    logLine('Downloading GitHub ZIP for expected SHA: ' . $expectedSha);
+    downloadZip($expectedSha, $tempZip);
     logLine('GitHub ZIP downloaded to temporary storage.', 'ok');
 
     safeExtractZip($tempZip, $tempDir);
     logLine('GitHub ZIP extracted to temporary directory.', 'ok');
 
     $sourceDir = findExtractedRepository($tempDir);
+    if (basename($sourceDir) !== basename(GITHUB_REPOSITORY) . '-' . $expectedSha) {
+        throw new RuntimeException('extracted_release_sha_mismatch');
+    }
+    logLine('Extracted release verified: expected_sha=' . $expectedSha, 'ok');
     logLine('Found extracted repository package: ' . $sourceDir, 'ok');
 
     logLine('Copying repository package to /app while preserving .env, storage, and vendor.');
