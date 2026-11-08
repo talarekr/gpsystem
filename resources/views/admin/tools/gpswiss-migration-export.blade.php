@@ -13,6 +13,10 @@
 <p>DATA ONLY korzysta z zakończonego snapshotu. Nie odczytuje ponownie bazy i nie czeka na zdjęcia. Pakiet zawiera dane klientów — pobieraj i przekazuj go prywatnie. Zdjęcia przeniesiesz osobno; zaakceptowany drift pozostaje w manifeście.</p>
 <button id="data-only" disabled>Przygotuj pakiet danych bez zdjęć</button>
 <p id="data-only-status" role="status"></p><ul id="data-only-downloads" hidden></ul>
+<p>Zbiorcze CSV korzystają tylko z zamrożonych danych. Nie wymagają ZIP-ów ani oryginałów zdjęć. Pliki otwieraj z kolumnami ID i kodów jako tekst, aby zachować początkowe zera.</p>
+<button id="consolidated-csv" disabled>Przygotuj zbiorcze CSV</button>
+<button id="consolidated-csv-stop" disabled>Zatrzymaj lokalną pętlę CSV</button>
+<p id="consolidated-csv-status" role="status"></p><ul id="consolidated-csv-downloads" hidden></ul>
 </section>
 <section id="parts-drift-actions" hidden>
 <p>Wyłącznie bieżący run: akceptacja deklarowanych dwóch zmian części. Manifest zachowa znane ID, nieznane ID i zakres pominiętej weryfikacji. Dalszy odczyt żywej bazy zostanie pominięty; pozostają kontrola plików, SHA i relacji. Najpierw zatrzymaj lokalną pętlę.</p>
@@ -40,6 +44,7 @@
  let id=new URLSearchParams(location.hash.slice(1)).get('run'),state=null,active=false,working=false,ready=false,sessionExpired=false,accessBlocked=false,inFlight=false,pauseRequested=false,pausing=false;
  let loopDone=null,finishLoop=null,manualResuming=false,resumeTraceActive=false,retryExhausted=false,stopBeforePhotos=false,kickDiagnostic=null;
  let dataOnlyWorking=false,dataOnlyLoaded=null;
+ let csvWorking=false,csvStop=false,csvLoaded=null;
  const waits=new Map(),resumeEvents=[];
  const wait=ms=>new Promise(resolve=>{const timer=setTimeout(()=>{waits.delete(timer);resolve();},ms);waits.set(timer,resolve);});
  function cancelBackoff(){for(const [timer,resolve] of waits){clearTimeout(timer);resolve();}waits.clear();}
@@ -428,7 +433,9 @@
   if(follow){retryExhausted=false;resumeTraceActive=true;resumeEvents.length=0;resumeEvent('operator_accepts_known_parts_drift');el('parts-drift-confirm').checked=false;el('parts-drift-token').value='';stopBeforePhotos=true;drive(false);}
  }
  function dataOnlyAvailable(){return browserSnapshot() && typeof state?.snapshot_attempt_id==='string' && (state.snapshot_state==='snapshot_completed' || state.snapshot_stage==='completed' || state.snapshot_progress?.done===true || ['photos','archive','completed'].includes(state.state));}
- function dataOnlyButtons(){el('data-only').disabled=dataOnlyWorking || sessionExpired || accessBlocked || !id || !dataOnlyAvailable();}
+ function dataOnlyButtons(){
+  el('consolidated-csv').disabled=csvWorking || sessionExpired || accessBlocked || !id || !dataOnlyAvailable();
+  el('consolidated-csv-stop').disabled=!csvWorking;el('data-only').disabled=dataOnlyWorking || sessionExpired || accessBlocked || !id || !dataOnlyAvailable();}
  function showDataOnly(value,run,attempt){
   if(id!==run || state?.snapshot_attempt_id!==attempt)return;
   el('data-only-status').textContent=value.done?'Pakiet danych bez zdjęć gotowy. Pobierz oba manifesty i wszystkie wolumeny ZIP.':'DATA ONLY: '+value.phase+' | rekordy '+value.records+'/'+value.total_records+' | pliki '+value.files_checked+' | wolumeny '+value.volume_count;
@@ -449,6 +456,7 @@
   }finally{clearTimeout(timer);}
  }
  function loadDataOnlyStatus(){
+  loadCsvStatus();
   if(!id || !dataOnlyAvailable() || dataOnlyWorking)return;
   const run=id,attempt=state.snapshot_attempt_id,key=run+':'+attempt;
   if(dataOnlyLoaded===key)return;dataOnlyLoaded=key;
@@ -476,6 +484,61 @@
   }catch(error){el('data-only-status').textContent='DATA ONLY zatrzymany: '+(error.message??'network_error')+'. Kliknij ponownie, aby kontynuować własny checkpoint.';}
   finally{dataOnlyWorking=false;dataOnlyButtons();}
  }
+
+ const csvNames=['czesci.csv','sprzedane.csv','do_wystawienia.csv','moje_samochody.csv','zdjecia_czesci.csv','zdjecia_czesci_issues.csv'];
+ function showCsv(value,run,attempt){
+  if(run!==id || attempt!==state?.snapshot_attempt_id)return;
+  el('consolidated-csv-status').textContent=value.done?'Zbiorcze CSV gotowe. Pobierz pięć plików i raport problemów zdjęć.':'CSV: '+value.phase+' | przetworzone wiersze źródłowe: '+(value.processed??0)+' | shard: '+(value.shard??0)+' | wiersz: '+(value.row??0);
+  const list=el('consolidated-csv-downloads');list.replaceChildren();list.hidden=!value.done;
+  if(value.done)for(const file of value.downloads??[]){
+   if(!csvNames.includes(file.key))continue;
+   const item=document.createElement('li'),link=document.createElement('a');link.textContent='Pobierz '+file.key;
+   link.href=base+'/'+encodeURIComponent(run)+'/consolidated-csv?parent_attempt_id='+encodeURIComponent(attempt)+'&download='+encodeURIComponent(file.key);
+   item.append(link,document.createTextNode(' | rekordy: '+file.rows+' | '+file.bytes+' B | SHA-256: '+file.sha256));list.append(item);
+  }
+ }
+ async function csvRequest(run,attempt,action){
+  const endpoint=base+'/'+encodeURIComponent(run)+'/consolidated-csv',controller=new AbortController(),timer=setTimeout(()=>controller.abort(),30000);
+  try{
+   const response=await fetch(action?endpoint:endpoint+'?parent_attempt_id='+encodeURIComponent(attempt),{method:action?'POST':'GET',credentials:'same-origin',headers:{'Accept':'application/json','Content-Type':'application/json','X-CSRF-TOKEN':document.querySelector('meta[name="csrf-token"]').content},...(action?{body:JSON.stringify({parent_attempt_id:attempt,action})}:{}),signal:controller.signal});
+   let value;try{value=await response.json();}catch(_){throw Object.assign(new Error('csv_invalid_response'),{http:response.status});}
+   if(!response.ok)throw Object.assign(new Error(reasonOf(value,'http_'+response.status)),{http:response.status});
+   if(value.run_id!==run || value.attempt_id!==attempt)throw new Error('csv_identity_mismatch');
+   return value;
+  }finally{clearTimeout(timer);}
+ }
+ function loadCsvStatus(){
+  if(!id || !dataOnlyAvailable() || csvWorking)return;
+  const run=id,attempt=state.snapshot_attempt_id,key=run+':'+attempt;
+  if(csvLoaded===key)return;csvLoaded=key;
+  queueMicrotask(async()=>{
+   try{showCsv(await csvRequest(run,attempt),run,attempt);}
+   catch(error){csvLoaded=null;if(error.http!==404)el('consolidated-csv-status').textContent='Odczyt CSV: '+(error.message??'network_error')+'. Kliknij Przygotuj zbiorcze CSV, aby odczytać checkpoint i wznowić.';}
+  });
+ }
+ async function prepareCsv(){
+  await boot;if(csvWorking || !id || !dataOnlyAvailable() || sessionExpired || accessBlocked)return;
+  const run=id,attempt=state.snapshot_attempt_id;csvWorking=true;csvStop=false;dataOnlyButtons();
+  let action='start',failures=0;
+  try{
+   while(!csvStop && id===run && state?.snapshot_attempt_id===attempt){
+    try{
+     const value=await csvRequest(run,attempt,action);showCsv(value,run,attempt);failures=0;
+     if(value.done)return;action='tick';
+     await new Promise(resolve=>setTimeout(resolve,150));
+    }catch(error){
+     if((error.http && error.http<500 && error.message!=='csv_busy') || ++failures>4)throw error;
+     el('consolidated-csv-status').textContent='CSV: ponowienie '+failures+'/4; checkpoint zachowany';
+     await new Promise(resolve=>setTimeout(resolve,Math.min(4000,500*2**failures)));
+     try{const value=await csvRequest(run,attempt);showCsv(value,run,attempt);if(value.done)return;action='tick';}catch(_){/* Same CSV checkpoint only. */}
+    }
+   }
+   el('consolidated-csv-status').textContent='CSV zatrzymane lokalnie. Kliknij Przygotuj zbiorcze CSV, aby wznowić ten sam checkpoint.';
+  }catch(error){el('consolidated-csv-status').textContent='CSV zatrzymane: '+(error.message??'network_error')+'. Kliknij Przygotuj zbiorcze CSV, aby wznowić.';}
+  finally{csvWorking=false;dataOnlyButtons();}
+ }
+ el('consolidated-csv').onclick=prepareCsv;
+ el('consolidated-csv-stop').onclick=()=>{csvStop=true;};
  el('data-only').onclick=prepareDataOnly;
  el('accept-parts-drift').onclick=acceptPartsDrift;el('parts-drift-confirm').onchange=buttons;el('parts-drift-token').oninput=buttons;
  el('diagnose-conflict').onclick=async()=>{
