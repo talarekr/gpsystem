@@ -23,19 +23,28 @@ final class AllegroSupplementResolver
     public function readbackCandidates(array $receipt, string $part, array $link, bool $associationConflict): array
     {
         $raw = $receipt['raw_response'];
-        $category = (string) data_get($raw, 'category.id');
+        $category = self::text(data_get($raw, 'category.id')) ?? '';
         $groups = [['scope' => 'offer', 'index' => null, 'product_id' => null, 'parameters' => $raw['parameters'] ?? []]];
-        foreach ($raw['productSet'] ?? [] as $index => $product) {
-            $groups[] = ['scope' => 'product', 'index' => $index, 'product_id' => isset($product['product']['id']) ? (string) $product['product']['id'] : null, 'parameters' => $product['product']['parameters'] ?? []];
+        $products = $raw['productSet'] ?? [];
+        if (! is_array($products)) {
+            $products = [['product' => ['parameters' => $products]]];
+        }
+        foreach ($products as $index => $product) {
+            $groups[] = ['scope' => 'product', 'index' => (int) $index, 'product_id' => self::text(data_get($product, 'product.id')), 'parameters' => data_get($product, 'product.parameters', is_array($product) ? [] : $product)];
         }
         $out = [];
         foreach ($groups as $group) {
-            foreach ($group['parameters'] ?: [['id' => null]] as $parameter) {
+            $parameters = $group['parameters'];
+            if (! is_array($parameters) || ! array_is_list($parameters)) {
+                $parameters = [$parameters];
+            }
+            foreach ($parameters ?: [['id' => null]] as $rawParameter) {
+                $parameter = $this->parameter($rawParameter);
                 $out[] = ['part_id' => $part, 'offer_id' => $receipt['offer_id'], 'allegro_offer_id' => $receipt['offer_id'], 'category_id' => $category, 'allegro_category_id' => $category,
                     'scope' => $group['scope'], 'parameter_scope' => $group['scope'], 'product_set_index' => $group['index'], 'product_id' => $group['product_id'], 'parameter_id' => isset($parameter['id']) ? (string) $parameter['id'] : null,
-                    'parameter_name' => $parameter['name'] ?? null, 'parameter_name_snapshot' => $parameter['name'] ?? null, 'values' => $parameter['values'] ?? [], 'values_ids' => array_map('strval', $parameter['valuesIds'] ?? []), 'range_value' => $parameter['rangeValue'] ?? null, 'unit' => $parameter['unit'] ?? null,
+                    'parameter_name' => self::text($parameter['name'] ?? null), 'parameter_name_snapshot' => self::text($parameter['name'] ?? null), 'values' => $parameter['values'], 'values_ids' => $parameter['valuesIds'], 'range_value' => $parameter['rangeValue'], 'unit' => self::text($parameter['unit'] ?? null),
                     'source' => 'existing_allegro_offer', 'source_field' => $group['scope'] === 'offer' ? 'parameters' : 'productSet.'.$group['index'].'.product.parameters', 'source_listing_id' => $link['listing_id'], 'marketplace_account_id' => $receipt['marketplace_account_id'], 'account_code' => $receipt['account_code'],
-                    'fetched_at' => $receipt['fetched_at'], 'source_observed_at' => $receipt['fetched_at'], 'raw_value' => $parameter, 'association_conflict' => $associationConflict];
+                    'fetched_at' => $receipt['fetched_at'], 'source_observed_at' => $receipt['fetched_at'], 'raw_value' => $rawParameter, 'association_conflict' => $associationConflict, 'record_issue' => $parameter['_issue'], 'readback_unavailable' => $parameter['_issue'] !== null];
             }
         }
 
@@ -76,13 +85,14 @@ final class AllegroSupplementResolver
         $category = self::text(data_get($payload, 'category.id') ?? $payload['_allegro_category_id'] ?? $payload['allegro_category_id'] ?? $payload['category_id'] ?? $category);
         $out = [];
         if (isset($payload['parameter_id']) && ! empty($payload['selected_value_ids'] ?? $payload['saved_value_ids'] ?? [])) {
-            $payload['id'] = (string) $payload['parameter_id'];
+            $payload['id'] = $payload['parameter_id'];
             $payload['name'] = $payload['parameter_name'] ?? $payload['name'] ?? null;
             $payload['valuesIds'] = (array) ($payload['selected_value_ids'] ?? $payload['saved_value_ids']);
         }
-        if (isset($payload['id']) && (isset($payload['valuesIds']) || isset($payload['values_ids']) || isset($payload['values']) || isset($payload['rangeValue']) || isset($payload['range_value']))) {
-            $out[] = ['allegro_category_id' => $category, 'parameter_id' => (string) $payload['id'], 'parameter_name_snapshot' => self::text($payload['name'] ?? null),
-                'values_ids' => array_map('strval', (array) ($payload['valuesIds'] ?? $payload['values_ids'] ?? [])), 'values' => (array) ($payload['values'] ?? []), 'range_value' => $payload['rangeValue'] ?? $payload['range_value'] ?? null,
+        if (array_key_exists('id', $payload) && (isset($payload['valuesIds']) || isset($payload['values_ids']) || isset($payload['values']) || isset($payload['rangeValue']) || isset($payload['range_value']))) {
+            $parameter = $this->parameter($payload);
+            $out[] = ['allegro_category_id' => $category, 'parameter_id' => $parameter['id'], 'parameter_name_snapshot' => self::text($payload['name'] ?? null),
+                'values_ids' => $parameter['valuesIds'], 'values' => $parameter['values'], 'range_value' => $parameter['rangeValue'], 'record_issue' => $parameter['_issue'], 'readback_unavailable' => $parameter['_issue'] !== null,
                 'raw_value' => array_intersect_key($payload, array_flip(['valuesIds', 'values_ids', 'values', 'rangeValue', 'range_value'])),
                 'source' => $source, 'source_field' => $path, 'source_listing_id' => $listing, 'marketplace_account_id' => $account, 'source_observed_at' => $observed, 'parameter_scope' => $scope, 'product_set_index' => $productIndex];
 
@@ -324,6 +334,11 @@ final class AllegroSupplementResolver
             if ($row['historical_schema_mismatch']) {
                 $row['reason_code'] = 'historical_schema_mismatch';
             }
+            if (($candidate['record_issue'] ?? null) !== null) {
+                $row['reason_code'] = 'supplement_preview_record_error';
+                $row['local_validation_status'] = 'malformed_historical_parameter';
+                $row['completeness_status'] = 'partial';
+            }
             $row = array_intersect_key($row, array_flip(self::FIELDS));
             $row['candidate_id'] = hash('sha256', self::json($row));
             $rows[$row['candidate_id']] = $row;
@@ -562,6 +577,36 @@ final class AllegroSupplementResolver
         sort($values, SORT_REGULAR);
 
         return self::json([$ids, $values, $row['range_value'], $row['unit']]);
+    }
+
+    /** Keep the original value separately; malformed shapes become explicit incomplete markers. */
+    private function parameter(mixed $raw): array
+    {
+        $parameter = is_array($raw) ? $raw : [];
+        $id = $parameter['id'] ?? null;
+        $ids = $parameter['valuesIds'] ?? $parameter['values_ids'] ?? [];
+        $values = $parameter['values'] ?? [];
+        $range = $parameter['rangeValue'] ?? $parameter['range_value'] ?? null;
+        $malformed = ! is_array($raw) || ($id !== null && ! is_string($id) && ! is_int($id))
+            || ! is_array($ids) || ! array_is_list($ids) || ! is_array($values) || ! array_is_list($values);
+        foreach (is_array($ids) ? $ids : [] as $value) {
+            $malformed = $malformed || (! is_string($value) && ! is_int($value));
+        }
+        foreach (is_array($values) ? $values : [] as $value) {
+            $malformed = $malformed || ($value !== null && ! is_scalar($value));
+        }
+        if ($range !== null) {
+            $malformed = $malformed || ! is_array($range) || array_is_list($range);
+            foreach (is_array($range) ? $range : [] as $value) {
+                $malformed = $malformed || ($value !== null && ! is_scalar($value));
+            }
+        }
+        if ($id === null && ($ids !== [] || $values !== [] || $range !== null)) {
+            $malformed = true;
+        }
+
+        return array_replace($parameter, ['id' => is_string($id) || is_int($id) ? self::text($id) : null, 'valuesIds' => $malformed ? [] : array_map('strval', $ids),
+            'values' => $malformed ? [] : $values, 'rangeValue' => $malformed ? null : $range, '_issue' => $malformed ? 'malformed_historical_parameter' : null]);
     }
 
     private static function text(mixed $value): ?string
