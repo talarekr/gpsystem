@@ -18,6 +18,20 @@
 <button id="consolidated-csv-stop" disabled>Zatrzymaj lokalną pętlę CSV</button>
 <p id="consolidated-csv-status" role="status"></p><pre id="consolidated-csv-listing-audit" aria-label="Audyt zamrożonych listingów"></pre><ul id="consolidated-csv-downloads" hidden></ul>
 </section>
+<section aria-labelledby="allegro-supplement-heading">
+<h2 id="allegro-supplement-heading">Parametry Allegro — pakiet uzupełniający</h2>
+<p>Osobny pakiet powiązany z istniejącym runem i próbą. Korzysta z zamrożonych danych oraz lokalnego cache i reguł, bez API Allegro. Nie zmienia głównego eksportu, zdjęć ani DATA ONLY. Kompletność dotyczy lokalnie rozwiązanych parametrów, nie gotowości publikacji.</p>
+<p id="allegro-supplement-identity"></p>
+<button id="allegro-supplement-start" disabled>Przygotuj pakiet parametrów Allegro</button>
+<button id="allegro-supplement-resume" disabled>Wznów supplement</button>
+<button id="allegro-supplement-stop" disabled>Stop lokalnej pętli supplementu</button>
+<button id="allegro-supplement-status-refresh" disabled>Odśwież status supplementu</button>
+<p id="allegro-supplement-status" role="status">Wybierz istniejący eksport z zakończonym zapisem rekordów.</p>
+<p>Liczby rekordów cache i mapowań pojawią się z końcowego manifestu. „—” oznacza brak licznika w bieżącym statusie, nie zero.</p>
+<ul id="allegro-supplement-counts" aria-label="Liczniki parametrów Allegro"></ul>
+<ul id="allegro-supplement-downloads" aria-label="Prywatne pliki supplementu" hidden></ul>
+<ul id="allegro-supplement-contents" aria-label="Zbiory CSV i JSONL w pakiecie ZIP"></ul>
+</section>
 <section id="parts-drift-actions" hidden>
 <p>Wyłącznie bieżący run: akceptacja deklarowanych dwóch zmian części. Manifest zachowa znane ID, nieznane ID i zakres pominiętej weryfikacji. Dalszy odczyt żywej bazy zostanie pominięty; pozostają kontrola plików, SHA i relacji. Najpierw zatrzymaj lokalną pętlę.</p>
 <label><input id="parts-drift-confirm" type="checkbox"> Akceptuję znany drift części oraz finalizację z kontrolą zapisanych artefaktów i relacji zamiast dalszej weryfikacji źródła.</label>
@@ -45,6 +59,10 @@
  let loopDone=null,finishLoop=null,manualResuming=false,resumeTraceActive=false,retryExhausted=false,stopBeforePhotos=false,kickDiagnostic=null;
  let dataOnlyWorking=false,dataOnlyLoaded=null;
  let csvWorking=false,csvStop=false,csvLoaded=null;
+ const supplementFormat='gpswiss-allegro-parameters-supplement-v1';
+ const supplementDatasets=['allegro_category_parameters_cache','allegro_parameter_mappings','allegro_resolved_parameters','conflicts','completeness'];
+ let supplementWorking=false,supplementStopped=false,supplementLoading=false,supplementLoaded=null,supplementValue=null,supplementManifest=null,supplementPackageKey=null,supplementWait=null,supplementViewKey=null;
+ const supplementCurrent=(run,attempt)=>id===run && state?.snapshot_attempt_id===attempt;
  const waits=new Map(),resumeEvents=[];
  const wait=ms=>new Promise(resolve=>{const timer=setTimeout(()=>{waits.delete(timer);resolve();},ms);waits.set(timer,resolve);});
  function cancelBackoff(){for(const [timer,resolve] of waits){clearTimeout(timer);resolve();}waits.clear();}
@@ -92,6 +110,7 @@
   return ['snapshot_tick','tick'].includes(next)?'tick_ready':'blocked';
  }
  function buttons(){
+  supplementButtons();
   dataOnlyButtons();
   const blocked=!ready || sessionExpired || accessBlocked;
   el('parts-drift-actions').hidden=state?.operator_parts_drift_allowed!==true;
@@ -112,6 +131,7 @@
   // Requests are sequential. Counters may restart for the next dataset/phase or a conscious retry.
   if(value){state=value;id=value.run_id;history.replaceState(null,'','#run='+id);remember();}
   else if(data?.existing_run_found===false)state=null;
+  loadSupplementStatus();
   loadDataOnlyStatus();
   el('state').textContent=JSON.stringify(state?{...state,local_runner_active:active,local_request_in_flight:inFlight}:data,null,2);
   const progress=state?.snapshot_progress ?? {},dataset=state?.current_dataset ?? progress.current_dataset ?? progress.dataset;
@@ -538,6 +558,126 @@
   }catch(error){el('consolidated-csv-status').textContent='CSV zatrzymane: '+(error.message??'network_error')+'. Kliknij Przygotuj zbiorcze CSV, aby wznowić.';}
   finally{csvWorking=false;dataOnlyButtons();}
  }
+ // Supplement state, delays and requests are independent of the parent, DATA ONLY and CSV runners.
+ function supplementButtons(){
+  const disabled=!ready || sessionExpired || accessBlocked || !id || !dataOnlyAvailable() || supplementWorking || supplementLoading;
+  el('allegro-supplement-start').disabled=disabled || supplementValue?.done===true;
+  el('allegro-supplement-resume').disabled=disabled || supplementValue?.done===true;
+  el('allegro-supplement-status-refresh').disabled=disabled;
+  el('allegro-supplement-stop').disabled=!supplementWorking || supplementStopped;
+ }
+ function supplementCancelDelay(){if(supplementWait){clearTimeout(supplementWait.timer);supplementWait.resolve();supplementWait=null;}}
+ function supplementDelay(ms){return new Promise(resolve=>{supplementWait={resolve,timer:setTimeout(()=>{supplementWait=null;resolve();},ms)};});}
+ function supplementResetView(){
+  supplementValue=null;supplementManifest=null;supplementPackageKey=null;supplementLoaded=null;
+  el('allegro-supplement-downloads').replaceChildren();el('allegro-supplement-downloads').hidden=true;
+  el('allegro-supplement-contents').replaceChildren();el('allegro-supplement-counts').replaceChildren();
+  el('allegro-supplement-status').textContent='Pakiet nie został jeszcze odczytany.';
+ }
+ function supplementError(error){
+  const reason=typeof error?.reason==='string' && /^[A-Za-z0-9_]{1,80}$/.test(error.reason)?error.reason:'supplement_network_error';
+  return reason+(error.http?' / HTTP '+error.http:'');
+ }
+ const supplementTransient=error=>!error.http || [429,500,502,503,504].includes(error.http) || error.reason==='supplement_busy';
+ async function supplementRequest(run,attempt,{action=null,download=null}={}){
+  const endpoint=base+'/'+encodeURIComponent(run)+'/allegro-parameters-supplement',controller=new AbortController();let timedOut=false;
+  const timer=setTimeout(()=>{timedOut=true;controller.abort();},action?30000:15000);
+  const query=new URLSearchParams({parent_attempt_id:attempt});if(download)query.set('download',download);
+  try{
+   const response=await fetch(action?endpoint:endpoint+'?'+query,{method:action?'POST':'GET',credentials:'same-origin',cache:'no-store',redirect:'error',headers:{'Accept':'application/json','Content-Type':'application/json','X-CSRF-TOKEN':document.querySelector('meta[name="csrf-token"]').content},...(action?{body:JSON.stringify({parent_attempt_id:attempt,action})}:{}),signal:controller.signal});
+   if(response.redirected || [401,419].includes(response.status))throw {reason:'supplement_session_expired',http:response.status};
+   let value;try{value=await response.json();}catch(_){throw {reason:'supplement_invalid_response',http:response.status};}
+   if(!response.ok)throw {reason:reasonOf(value,'http_'+response.status),http:response.status};
+   if(!download && (value?.format!==supplementFormat || value.parent_run_id!==run || value.parent_attempt_id!==attempt || typeof value.done!=='boolean' || value.next_action!==(value.done?'download':'tick')))throw {reason:'supplement_identity_or_contract_mismatch',http:409};
+   return value;
+  }catch(error){if(error?.reason)throw error;throw {reason:timedOut?'supplement_fetch_timeout':'supplement_network_error'};}
+  finally{clearTimeout(timer);}
+ }
+ function supplementCount(value){return Number.isSafeInteger(value) && value>=0?String(value):'—';}
+ function supplementShowCounts(){
+  const summary=supplementValue?.summary??{},datasets=supplementManifest?.datasets??{},list=el('allegro-supplement-counts');list.replaceChildren();
+  const counts=[['Rekordy category/schema cache',datasets.allegro_category_parameters_cache?.rows],['Parameter mappings',datasets.allegro_parameter_mappings?.rows],['Resolved parameters',datasets.allegro_resolved_parameters?.rows??summary.resolved_parameter_rows],
+   ...['complete','partial','historical_only','schema_unknown','conflict'].map(key=>[key,summary.completeness?.[key]]),['Brakujące required wg lokalnego cache',summary.missing_required_values],['Raport konfliktów — rekordy',summary.conflicts]];
+  for(const [label,value] of counts){const item=document.createElement('li');item.textContent=label+': '+supplementCount(value);list.append(item);}
+ }
+ function supplementShow(value,run,attempt){
+  if(!supplementCurrent(run,attempt))return;
+  supplementValue=value;
+  el('allegro-supplement-status').textContent=value.done?'Pakiet parametrów Allegro gotowy. Pobierz manifesty, checksumy i wszystkie wolumeny ZIP.':'Supplement: '+value.phase+' | shard: '+(value.shard??'—')+' | wiersz: '+(value.row??'—')+' | następny krok: '+value.next_action;
+  if(!value.done){el('allegro-supplement-downloads').replaceChildren();el('allegro-supplement-downloads').hidden=true;}
+  supplementShowCounts();supplementButtons();
+ }
+ function supplementLink(list,run,attempt,key,label,descriptor={}){
+  if(!/^(manifest|checksums|summary|archive-manifest|volume-[0-9]{6})$/.test(key))return;
+  const item=document.createElement('li'),link=document.createElement('a');link.textContent=label;
+  link.href=base+'/'+encodeURIComponent(run)+'/allegro-parameters-supplement?'+new URLSearchParams({parent_attempt_id:attempt,download:key});
+  item.append(link);if(descriptor.bytes!=null)item.append(document.createTextNode(' | '+supplementCount(descriptor.bytes)+' B'));
+  if(typeof descriptor.sha256==='string' && /^[a-f0-9]{64}$/i.test(descriptor.sha256))item.append(document.createTextNode(' | SHA-256: '+descriptor.sha256));list.append(item);
+ }
+ async function supplementLoadPackage(run,attempt){
+  if(!supplementCurrent(run,attempt) || !supplementValue?.done || supplementPackageKey===run+':'+attempt)return;
+  const list=el('allegro-supplement-downloads');list.replaceChildren();list.hidden=false;
+  for(const [key,label] of [['manifest','Pobierz manifest supplementu'],['checksums','Pobierz checksumy'],['summary','Pobierz podsumowanie'],['archive-manifest','Pobierz manifest archiwów']])supplementLink(list,run,attempt,key,label);
+  const [manifest,archive]=await Promise.all([supplementRequest(run,attempt,{download:'manifest'}),supplementRequest(run,attempt,{download:'archive-manifest'})]);
+  if(!supplementCurrent(run,attempt))return;
+  if(manifest?.format!==supplementFormat || manifest.parent_run_id!==run || manifest.parent_attempt_id!==attempt)throw {reason:'supplement_manifest_identity_mismatch',http:409};
+  if(archive?.format!=='gpswiss-browser-zip-volumes-1' || !Array.isArray(archive.volumes) || !Number.isSafeInteger(archive.volume_count) || archive.volume_count!==archive.volumes.length || archive.volumes.some(v=>!/^volume-[0-9]{6}$/.test(v?.key??'')) || new Set(archive.volumes.map(v=>v.key)).size!==archive.volumes.length)throw {reason:'supplement_invalid_archive_manifest',http:409};
+  supplementManifest=manifest;supplementShowCounts();
+  const contents=el('allegro-supplement-contents');contents.replaceChildren();
+  for(const name of supplementDatasets){const item=document.createElement('li');item.textContent=name+'.csv / .jsonl — w ZIP | rekordy: '+supplementCount(manifest.datasets?.[name]?.rows);contents.append(item);}
+  for(const volume of archive.volumes)supplementLink(list,run,attempt,volume.key,'Pobierz '+(typeof volume.name==='string'?volume.name:volume.key+'.zip'),volume);
+  supplementPackageKey=run+':'+attempt;
+ }
+ async function supplementReadStatus(force=false){
+  if(!id || !dataOnlyAvailable())return;
+  const run=id,attempt=state.snapshot_attempt_id,key=run+':'+attempt;
+  if(supplementViewKey!==key){supplementViewKey=key;supplementStopped=true;supplementCancelDelay();supplementResetView();}
+  el('allegro-supplement-identity').textContent='Run: '+run+' | parent_attempt_id: '+attempt;
+  if(supplementWorking || supplementLoading || (!force && supplementLoaded===key))return;
+  supplementLoaded=key;supplementLoading=true;supplementButtons();
+  try{const value=await supplementRequest(run,attempt);supplementShow(value,run,attempt);if(value.done)await supplementLoadPackage(run,attempt);}
+  catch(error){if(supplementCurrent(run,attempt))el('allegro-supplement-status').textContent=error.http===404 && error.reason==='supplement_not_started'?'Supplement nie został przygotowany. Użyj „Przygotuj pakiet parametrów Allegro”.':'Odczyt supplementu: '+supplementError(error)+'. Odśwież status lub użyj Wznów.';}
+  finally{supplementLoading=false;supplementButtons();}
+ }
+ function loadSupplementStatus(){supplementReadStatus().catch(()=>{el('allegro-supplement-status').textContent='supplement_local_status_error — odśwież status.';});}
+ async function supplementFinish(run,attempt){
+  try{await supplementLoadPackage(run,attempt);}
+  catch(error){if(supplementCurrent(run,attempt))el('allegro-supplement-status').textContent='Pakiet gotowy; odczyt listy plików: '+supplementError(error)+'. Użyj Odśwież status supplementu.';}
+ }
+ const supplementCheckpoint=value=>JSON.stringify([value?.phase,value?.shard,value?.row,value?.summary,value?.done]);
+ async function supplementDrive(start){
+  await boot;if(supplementWorking || supplementLoading || !id || !dataOnlyAvailable() || sessionExpired || accessBlocked || supplementValue?.done)return;
+  const run=id,attempt=state.snapshot_attempt_id;supplementWorking=true;supplementStopped=false;supplementCancelDelay();supplementButtons();
+  let action=start?'start':null,failures=0;
+  try{
+   while(!supplementStopped && supplementCurrent(run,attempt)){
+    try{
+     const value=await supplementRequest(run,attempt,action?{action}:{});supplementShow(value,run,attempt);failures=0;
+     if(value.done){await supplementFinish(run,attempt);return;}
+     action='tick';if(!supplementStopped)await supplementDelay(150);
+    }catch(error){
+     if(!supplementTransient(error) || ++failures>4)throw error;
+     if(supplementStopped || !supplementCurrent(run,attempt))break;
+     el('allegro-supplement-status').textContent='Supplement: ponowienie '+failures+'/4 | '+supplementError(error)+' | checkpoint zachowany';
+     await supplementDelay(Math.min(4000,500*2**(failures-1)));
+     if(supplementStopped || !supplementCurrent(run,attempt))break;
+     try{
+      const before=supplementCheckpoint(supplementValue),value=await supplementRequest(run,attempt);supplementShow(value,run,attempt);
+      if(supplementCheckpoint(value)!==before)failures=0;
+      if(value.done){await supplementFinish(run,attempt);return;}
+      action='tick';
+     }catch(statusError){if(!(action==='start' && statusError.http===404 && statusError.reason==='supplement_not_started') && !supplementTransient(statusError))throw statusError;}
+    }
+   }
+   if(supplementCurrent(run,attempt))el('allegro-supplement-status').textContent='Lokalna pętla supplementu zatrzymana. Checkpoint zachowany; użyj Wznów.';
+  }catch(error){if(supplementCurrent(run,attempt))el('allegro-supplement-status').textContent='Supplement zatrzymany: '+supplementError(error)+'. Checkpoint zachowany; odśwież status lub użyj Wznów.';}
+  finally{supplementWorking=false;supplementButtons();}
+ }
+ el('allegro-supplement-start').onclick=()=>supplementDrive(true);
+ el('allegro-supplement-resume').onclick=()=>supplementDrive(false);
+ el('allegro-supplement-status-refresh').onclick=()=>supplementReadStatus(true);
+ el('allegro-supplement-stop').onclick=()=>{supplementStopped=true;supplementCancelDelay();supplementButtons();};
+
  el('consolidated-csv').onclick=prepareCsv;
  el('consolidated-csv-stop').onclick=()=>{csvStop=true;};
  el('data-only').onclick=prepareDataOnly;

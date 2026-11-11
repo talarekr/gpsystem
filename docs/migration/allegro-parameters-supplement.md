@@ -2,8 +2,9 @@
 
 This is an independent, private package: `gpswiss-allegro-parameters-supplement-v1`.
 It does not extend or restart the parent capture, source verification, relations,
-photos or packaging. There are no frontend changes, queues, CLI requirements,
-provider requests, credential refreshes, business writes or imports.
+photos or packaging. The existing migration panel exposes its independent actions.
+There are no queues, CLI requirements, provider requests, credential refreshes,
+business writes or imports.
 
 The parent run and attempt must be supplied explicitly. Owner/admin authorization,
 run ownership, the source fingerprint and the parent attempt are checked on every
@@ -198,3 +199,21 @@ reassembly of fragmented logical files; verify fragment, volume and final datase
 SHA-256 checksums before any future import. Work journals and parent indexes are
 not included in the downloadable package. Customer/order data and credentials are
 not selected. WystawCzesc import and re-publication remain separate future work.
+
+
+## Existing panel actions
+
+In `/admin/tools/gpswiss-migration-export`, the section **Parametry Allegro — pakiet uzupełniający** uses the currently selected parent run and `parent_attempt_id`. It is available after record capture is sealed, even while photos or DATA ONLY are unfinished. It never starts a new parent snapshot.
+
+- **Przygotuj pakiet parametrów Allegro** calls the existing `start` once, then bounded `tick` requests. Existing `start` is idempotent.
+- **Wznów supplement** reads server status and continues `tick` from the supplement checkpoint. It does not call the parent Resume or restart the supplement.
+- **Stop lokalnej pętli supplementu** cancels only its own scheduling/backoff. An in-flight bounded request can commit before the loop stops. The parent/photo/DATA ONLY/CSV loops are unaffected.
+- **Odśwież status supplementu** performs GET only. Reload also performs GET only and restores completed private downloads. Pending supplements require an explicit Prepare/Resume click.
+
+The UI shows the real backend phase/shard/row and summary counters: resolved parameters, complete/partial/historical_only/schema_unknown/conflict, conflict report rows and missing required values. Completeness counters are parameter candidate counts as defined by the backend, not inferred product readiness. Cache/schema and mapping **row counts** are read from the completed manifest because in-progress status does not expose these counts; `—` means unavailable, never zero. These are local-cache records, not a provider freshness check.
+
+On completion the panel fetches the existing authenticated `manifest` and `archive-manifest` JSON endpoints. It lists manifest, checksums, summary, archive manifest and **every volume returned by the archive manifest**. The five dataset CSV/JSONL pairs (cache, mappings, resolved, conflicts, completeness) are inside the ZIP volumes; the current backend does not offer individual dataset download keys. No new backend endpoints or download permissions are introduced. Volume links use only validated `volume-NNNNNN` keys and the private endpoint, never a storage path or external URL. All parent IDs are checked before applying a response; the backend remains responsible for OwnerAdmin/run owner/private-no-store enforcement.
+
+Transient failures use at most four local retries with short backoff and a status poll. A committed step whose response was lost is read from the checkpoint; it is not recaptured. Manual Resume starts a fresh local retry budget. Missing/expired authorization, identity mismatch and malformed archive metadata are shown as safe reason codes. Failure to read a completed package's file list requires GET refresh, never another packaging tick.
+
+Validation uses real Chromium with all requests intercepted: start/resume/stop, double click, reload, successful lost-response recovery, 503, auth failures, parent identity mismatch, private links including a 74-volume fixture, rejected invalid volume keys, real-contract summary/manifest counters and an independently running photo loop. These fixture counters are not production counts. No production generation or deploy is part of this change.
