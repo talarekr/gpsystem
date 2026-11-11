@@ -17,6 +17,8 @@ async function scenario(browser,options={}){
  const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
  const calls={start:0,tick:0,status:0,manifest:0,archive:0,parent:0,forbidden:[]};
  let prepared=existing||completed,progress=completed?3:0,lostPending=lost,transientPending=exhausted?5:(transient||stopBackoff?1:0),statusPending=initialStatusError,metadataPending=metadataFailure;
+ const preview={plan_id:'50000000-0000-4000-8000-000000000005',plan_digest:'f'.repeat(64),status:'READY_FOR_CONFIRMATION',confirmed_at:null,categories:7,offers:3,parts_total:120,parts_processed:120,parameters_found:456,missing_required:9,part_statuses:{COMPLETE:118,PARTIAL:1,CONFLICT:1,SCHEMA_UNKNOWN:0},source_values:{},resolved_values_by_source:{},expected_files:35,provider_gets:0};let planned=false,confirmed=false;
+ const replyState=()=>planned?{...readyState(progress),phase:confirmed?readyState(progress).phase:'planned',next_action:confirmed?readyState(progress).next_action:'confirm',plan:{...preview,status:confirmed?'CONFIRMED':'READY_FOR_CONFIRMATION',confirmed_at:confirmed?'2026-11-11':null}}:readyState(progress);
  const archive={format:'gpswiss-browser-zip-volumes-1',volume_count:volumes,volumes:Array.from({length:volumes},(_,i)=>({key:'volume-'+String(i+1).padStart(6,'0'),name:'volume-'+String(i+1).padStart(6,'0')+'.zip',path:'archive-volumes/volume-'+String(i+1).padStart(6,'0')+'.zip',bytes:12345,sha256:'a'.repeat(64)}))};
  if(badArchive)archive.volumes[0].key='javascript:alert(1)';
  await page.route('**/*',async route=>{
@@ -32,12 +34,12 @@ async function scenario(browser,options={}){
    assert.equal(request.headers()['x-csrf-token'],'csrf-test');assert.equal(request.headers().accept,'application/json');
    if(request.method()==='POST'){
     assert.equal(body.parent_attempt_id,attempt);assert.equal(body.readback_plan_id,'40000000-0000-4000-8000-000000000004');assert.equal(body.fresh_plan_id,'30000000-0000-4000-8000-000000000003');
-    if(body.action==='plan')return json({parent_run_id:run,parent_attempt_id:attempt,fresh_plan_id:body.fresh_plan_id,readback_plan_id:body.readback_plan_id,plan_digest:'f'.repeat(64),categories:7,offers:3});
-    if(body.action==='start'){assert.equal(body.confirm,true);assert.equal(body.plan_digest,'f'.repeat(64));calls.start++;prepared=true;return json(readyState(progress));}
+    if(body.action==='plan'){planned=true;prepared=true;return json(replyState());}
+    if(body.action==='start'){assert.equal(body.plan_id,preview.plan_id);confirmed=true;assert.equal(body.confirm,true);assert.equal(body.plan_digest,'f'.repeat(64));calls.start++;prepared=true;return json(replyState());}
     assert.equal(body.action,'tick');calls.tick++;
     if(transientPending){transientPending--;return json({reason_code:'supplement_server_exception',message:'DO_NOT_RENDER'},503);}
     if(stop || parentRunning)await new Promise(resolve=>setTimeout(resolve,200));
-    progress++;const value=readyState(progress);
+    progress++;const value=replyState();
     if(lostPending){lostPending=false;return route.abort('failed');}
     return json(value);
    }
@@ -52,7 +54,7 @@ async function scenario(browser,options={}){
    calls.status++;
    if(statusPending){const code=statusPending;statusPending=null;return json({reason_code:'DO NOT RENDER SENSITIVE MESSAGE',message:'DO_NOT_RENDER'},code);}
    if(badIdentity)return json({...readyState(progress),parent_attempt_id:'other-attempt'});
-   return prepared?json(readyState(progress)):json({reason_code:'supplement_not_started'},404);
+   return prepared?json(replyState()):json({reason_code:'supplement_not_started'},404);
   }
   if(url.pathname.endsWith('/data-only') || url.pathname.endsWith('/consolidated-csv')){
    assert.equal(request.method(),'GET','supplement must not start DATA ONLY or CSV');return json({reason_code:'not_started'},404);

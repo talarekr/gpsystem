@@ -7,10 +7,10 @@ const categories=Array.from({length:334},(_,i)=>({category_id:String(100+i),loca
 async function scenario(browser,{reload=false,lost=false,blocked=false,exhausted=false,photos=false,paused=false,failed=false}={}){
  console.log('Runner scenario',JSON.stringify({reload,lost,blocked,exhausted,photos,paused,failed}));
  const page=await browser.newPage({viewport:{width:1280,height:900}}),errors=[];page.on('pageerror',e=>errors.push(e.message));
- let offerPhase=paused?'fetch':blocked?'blocked':null,processed=0,gets=0,parentSteps=0,packageSteps=0,packageStarted=false,lostPending=lost,fails=exhausted?5:0;
+ let offerPhase=paused?'fetch':blocked?'blocked':null,processed=0,gets=0,parentSteps=0,packageSteps=0,packageStarted=false,packagePlanned=false,lostPending=lost,fails=exhausted?5:0;
  const posts=[],readback=()=>({parent_run_id:run,parent_attempt_id:attempt,plan_id:offerPlan,plan_digest:'b'.repeat(64),phase:offerPhase,done:offerPhase==='completed',processed,total:3,parts_with_allegro:2,unique_offer_ids:3,expected_gets:3,performed_gets:gets,successes:processed,not_found_404:0,provider_429:0,errors:0,invalid_offer_ids:1,duplicate_offer_ids:2,parts_with_multiple_offers:1,orphan_listings_excluded:1,unsupported_accounts:0,wait_seconds:0,blocked_reason:offerPhase==='blocked'?'forbidden_403':null});
  const parent=()=>({run_id:run,snapshot_attempt_id:attempt,snapshot_mode:'browser',snapshot_state:'snapshot_completed',snapshot_stage:'completed',state:failed?'snapshot_failed':'photos',phase:failed?'snapshot_operator_finalize':'photo_copy',next_action:failed?'blocked':'tick',resume_allowed:!failed,busy:false,exported_records:79957,record_capture_total:79957,processed_images:parentSteps,total_images:20556,last_error:failed?'infrastructure_failure':null,photo_progress:{processed:parentSteps,done:false}});
- const packageValue=()=>({format:'gpswiss-allegro-parameters-supplement-v1',parent_run_id:run,parent_attempt_id:attempt,fresh_plan_id:schemaPlan,readback_plan_id:offerPlan,phase:packageSteps===2?'completed':'resolve',done:packageSteps===2,next_action:packageSteps===2?'download':'tick',summary:{resolved_parameter_rows:10,conflicts:1},dataset_counts:{}});
+ const packageValue=()=>({format:'gpswiss-allegro-parameters-supplement-v1',parent_run_id:run,parent_attempt_id:attempt,fresh_plan_id:schemaPlan,readback_plan_id:offerPlan,phase:packageSteps===2?'completed':packagePlanned&&!packageStarted?'planned':'resolve',done:packageSteps===2,next_action:packageSteps===2?'download':packagePlanned&&!packageStarted?'confirm':'tick',summary:{resolved_parameter_rows:10,conflicts:1},dataset_counts:{},...(packagePlanned?{plan:{plan_id:'50000000-0000-4000-8000-000000000005',plan_digest:'e'.repeat(64),status:packageStarted?'CONFIRMED':'READY_FOR_CONFIRMATION',confirmed_at:packageStarted?'2026-11-11':null,categories:334,offers:3,parts_total:2,parts_processed:2,parameters_found:10,missing_required:1,part_statuses:{COMPLETE:1,PARTIAL:0,CONFLICT:1,SCHEMA_UNKNOWN:0},source_values:{},resolved_values_by_source:{},expected_files:35,provider_gets:0}}:{})});
  const volumes=Array.from({length:106},(_,i)=>({key:'volume-'+String(i+1).padStart(6,'0'),name:'part-'+String(i+1).padStart(4,'0')+'.zip',bytes:500,sha256:'c'.repeat(64)}));
  await page.route('**/*',async route=>{
   const req=route.request(),u=new URL(req.url()),body=req.postData()?JSON.parse(req.postData()):{},json=(v,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(v)});
@@ -32,13 +32,13 @@ async function scenario(browser,{reload=false,lost=false,blocked=false,exhausted
   if(u.pathname.endsWith('/allegro-parameters-supplement')){
    if(req.method()==='POST'){
     assert.equal(body.fresh_plan_id,schemaPlan);assert.equal(body.readback_plan_id,offerPlan);
-    if(body.action==='plan')return json({parent_run_id:run,parent_attempt_id:attempt,fresh_plan_id:schemaPlan,readback_plan_id:offerPlan,plan_digest:'e'.repeat(64),categories:334,offers:3});
+    if(body.action==='plan'){packagePlanned=true;return json(packageValue());}
     if(body.action==='start'){assert.equal(body.confirm,true);assert.equal(body.plan_digest,'e'.repeat(64));packageStarted=true;return json(packageValue());}
     assert.equal(body.action,'tick');packageSteps++;return json(packageValue());
    }
    if(u.searchParams.get('download')==='manifest')return json({format:'gpswiss-allegro-parameters-supplement-v1',parent_run_id:run,parent_attempt_id:attempt,schema_refresh:{plan_id:schemaPlan},offer_readback:{plan_id:offerPlan},datasets:{},summary:{}});
    if(u.searchParams.get('download')==='archive-manifest')return json({format:'gpswiss-browser-zip-volumes-1',volume_count:2,volumes:volumes.slice(0,2)});
-   return packageStarted?json(packageValue()):json({reason_code:'supplement_not_started'},404);
+   return packagePlanned||packageStarted?json(packageValue()):json({reason_code:'supplement_not_started'},404);
   }
   if(u.pathname.startsWith(base)){if(req.method()==='POST'){assert(photos);assert(['resume','tick'].includes(body.action));if(body.action==='tick'){await new Promise(r=>setTimeout(r,120));parentSteps++;}}return json(parent());}
   throw new Error('Unexpected URL '+u.pathname);
