@@ -41,18 +41,19 @@ async function scenario(browser,{lostResponse=false,resume=false}={}){
  });
  await page.goto('http://gpsystem.test'+base+'#run='+run);
  await page.waitForFunction(()=>!document.getElementById('data-only').disabled);
- if(resume){await page.click('#resume');await page.waitForFunction(()=>document.getElementById('state').textContent.includes('"local_runner_active": true'));}
+ if(resume){await page.locator('#technical-diagnostics > summary').click();await page.locator('details').filter({has:page.locator('#state')}).last().locator('summary').click();await page.click('#photos-resume');await page.waitForFunction(()=>document.getElementById('state').textContent.includes('"local_runner_active": true'));}
  await page.evaluate(()=>{document.getElementById('data-only').click();document.getElementById('data-only').click();});
  await page.waitForFunction(()=>!document.getElementById('data-only-downloads').hidden,{},{timeout:15000});
  assert.equal(calls.start,1,'double click must not start two package loops');
  assert.equal(calls.tick,2,'lost response must recover through package status, not duplicate work');
  assert.deepEqual(calls.forbidden,[],'must not restart capture, pause photos or create a run');
+ await page.locator('#data-only-downloads > details > summary').click();await page.waitForFunction(()=>document.querySelectorAll('#data-only-downloads a').length===4);
  assert.equal(await page.locator('#data-only-downloads a').count(),4);
  const links=await page.locator('#data-only-downloads a').evaluateAll(elements=>elements.map(el=>el.href));
  assert(links.every(link=>link.includes('/'+run+'/data-only?parent_attempt_id='+attempt)));
  if(resume)assert(calls.photo>0,'existing photo runner must keep making progress');
  await page.reload();
- await page.waitForFunction(()=>document.querySelectorAll('#data-only-downloads a').length===4);
+ await page.waitForFunction(()=>document.querySelectorAll('#data-only-downloads a').length===2);await page.locator('#data-only-downloads > details > summary').click();await page.waitForFunction(()=>document.querySelectorAll('#data-only-downloads a').length===4);
  assert.equal(calls.start,1,'reload must load private downloads without starting another package');
  assert.deepEqual(errors,[]);
  await page.close();

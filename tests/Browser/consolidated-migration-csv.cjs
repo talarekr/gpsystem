@@ -58,8 +58,10 @@ async function scenario(browser,{lost=false,reload=false,failure=false,stop=fals
  await page.waitForFunction(()=>document.querySelectorAll('#consolidated-csv-downloads a').length===8,{},{timeout:15000});
  const links=await page.locator('#consolidated-csv-downloads a').evaluateAll(elements=>elements.map(e=>({href:e.href,text:e.textContent})));
  for(const [i,link] of links.entries()){
-  const url=new URL(link.href);assert.equal(url.pathname,base+'/'+run+'/consolidated-csv');assert.equal(url.searchParams.get('parent_attempt_id'),attempt);assert.equal(url.searchParams.get('download'),files[i]);assert.equal(link.text,'Pobierz '+files[i]);
+  const url=new URL(link.href);assert.equal(url.pathname,base+'/'+run+'/consolidated-csv');assert.equal(url.searchParams.get('parent_attempt_id'),attempt);assert.equal(url.searchParams.get('download'),files[i]);assert.equal(link.text,'Pobierz');
  }
+ await page.locator('#technical-diagnostics > summary').click();await page.locator('details').filter({has:page.locator('#consolidated-csv-listing-audit')}).last().locator('summary').click();
+ await page.waitForFunction(()=>document.getElementById('consolidated-csv-listing-audit').textContent.includes('ebay'));
  assert((await page.locator('#consolidated-csv-listing-audit').textContent()).includes('\"ebay\": 5'));
  assert.deepEqual(forbidden,[],'No parent snapshot, photo, marketplace, package operations');
  assert.equal(starts,reload||stop?2:1,'double clicks must not start parallel CSV loops');

@@ -44,7 +44,7 @@ async function scenario(browser,{reload=false,blocked=false,lost=false,stopPlan=
  }
  await page.waitForFunction(()=>document.getElementById('allegro-schema-status').textContent.includes('Definicje: planned'));
  assert.equal(gets,0);assert.equal(calls.plan,1);assert(await page.locator('#allegro-schema-start').isDisabled());
- const preview=await page.locator('#allegro-schema-plan-preview').textContent();assert(preview.includes('"category_id": "100"'));assert(preview.includes('2019-01-01'));assert(preview.includes('refresh_required'));
+ await page.locator('#technical-diagnostics > summary').click();await page.locator('details').filter({has:page.locator('#allegro-schema-plan-preview')}).last().locator('summary').click();await page.waitForFunction(()=>document.getElementById('allegro-schema-plan-preview').textContent.includes('category_id'));const preview=await page.locator('#allegro-schema-plan-preview').textContent();assert(preview.includes('"category_id": "100"'));assert(preview.includes('2019-01-01'));assert(preview.includes('refresh_required'));
  await page.check('#allegro-schema-confirm');await page.click('#allegro-schema-start');
  if(blocked){
   await page.waitForFunction(()=>document.getElementById('allegro-schema-status').textContent.includes('oauth_refresh_required'));
@@ -56,7 +56,7 @@ async function scenario(browser,{reload=false,blocked=false,lost=false,stopPlan=
   const confirmed=gets;await page.reload();await page.waitForFunction(()=>!document.getElementById('allegro-schema-resume').disabled);assert.equal(gets,confirmed);await page.click('#allegro-schema-resume');
  }
  await page.waitForFunction(()=>document.getElementById('allegro-schema-status').textContent.includes('Definicje: completed'),{},{timeout:15000});
- await page.waitForFunction(()=>!document.getElementById('allegro-supplement-start').disabled);
+ await page.waitForFunction(()=>!document.getElementById('allegro-readback-plan').disabled);
  assert.equal(gets,4,'four confirmed GETs only');
  if(newPlan){
   await page.click('#allegro-schema-plan');
@@ -64,11 +64,11 @@ async function scenario(browser,{reload=false,blocked=false,lost=false,stopPlan=
   assert.equal(gets,4);assert(await page.locator('#allegro-supplement-start').isDisabled());assert(await page.locator('#allegro-schema-start').isDisabled());
   await page.check('#allegro-schema-confirm');await page.click('#allegro-schema-start');
   await page.waitForFunction(()=>document.getElementById('allegro-schema-status').textContent.includes('Definicje: completed'));
-  await page.waitForFunction(()=>!document.getElementById('allegro-supplement-start').disabled);
+  await page.waitForFunction(()=>!document.getElementById('allegro-readback-plan').disabled);
   assert.equal(gets,8);assert.equal(calls.newPlan,1);
  }
  assert.equal(calls.start,blocked||newPlan?2:1);
- await page.reload();await page.waitForFunction(()=>!document.getElementById('allegro-supplement-start').disabled);assert.equal(gets,newPlan?8:4);
+ await page.reload();await page.waitForFunction(()=>!document.getElementById('allegro-readback-plan').disabled);assert.equal(gets,newPlan?8:4);
  assert.deepEqual(calls.postOther,[]);assert.deepEqual(errors,[]);await page.close();
 }
 (async()=>{

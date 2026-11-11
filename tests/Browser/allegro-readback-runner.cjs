@@ -1,0 +1,67 @@
+// Real Chromium; all HTTP intercepted. Never contacts GPSwiss or Allegro.
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
+const {chromium}=require('playwright');
+const base='/admin/tools/gpswiss-migration-export',run='10000000-0000-4000-8000-000000000001',attempt='20000000-0000-4000-8000-000000000002',schemaPlan='30000000-0000-4000-8000-000000000003',offerPlan='40000000-0000-4000-8000-000000000004';
+const html=fs.readFileSync(path.join(__dirname,'../../resources/views/admin/tools/gpswiss-migration-export.blade.php'),'utf8').replace("@json(route('admin.tools.gpswiss-migration-export', [], false))",JSON.stringify(base)).replace('{{ csrf_token() }}','csrf-test');
+const categories=Array.from({length:334},(_,i)=>({category_id:String(100+i),local_cache_present:true,local_fetched_at:'2026-01-01',endpoints:{parameters:{ok:true,fetched_at:'2026-11-11'},'product-parameters':{ok:true,fetched_at:'2026-11-11'}}}));
+async function scenario(browser,{reload=false,lost=false,blocked=false,exhausted=false,photos=false,paused=false,failed=false}={}){
+ console.log('Runner scenario',JSON.stringify({reload,lost,blocked,exhausted,photos,paused,failed}));
+ const page=await browser.newPage({viewport:{width:1280,height:900}}),errors=[];page.on('pageerror',e=>errors.push(e.message));
+ let offerPhase=paused?'fetch':blocked?'blocked':null,processed=0,gets=0,parentSteps=0,packageSteps=0,packageStarted=false,lostPending=lost,fails=exhausted?5:0;
+ const posts=[],readback=()=>({parent_run_id:run,parent_attempt_id:attempt,plan_id:offerPlan,plan_digest:'b'.repeat(64),phase:offerPhase,done:offerPhase==='completed',processed,total:3,parts_with_allegro:2,unique_offer_ids:3,expected_gets:3,performed_gets:gets,successes:processed,not_found_404:0,provider_429:0,errors:0,invalid_offer_ids:1,duplicate_offer_ids:2,parts_with_multiple_offers:1,orphan_listings_excluded:1,unsupported_accounts:0,wait_seconds:0,blocked_reason:offerPhase==='blocked'?'forbidden_403':null});
+ const parent=()=>({run_id:run,snapshot_attempt_id:attempt,snapshot_mode:'browser',snapshot_state:'snapshot_completed',snapshot_stage:'completed',state:failed?'snapshot_failed':'photos',phase:failed?'snapshot_operator_finalize':'photo_copy',next_action:failed?'blocked':'tick',resume_allowed:!failed,busy:false,exported_records:79957,record_capture_total:79957,processed_images:parentSteps,total_images:20556,last_error:failed?'infrastructure_failure':null,photo_progress:{processed:parentSteps,done:false}});
+ const packageValue=()=>({format:'gpswiss-allegro-parameters-supplement-v1',parent_run_id:run,parent_attempt_id:attempt,fresh_plan_id:schemaPlan,readback_plan_id:offerPlan,phase:packageSteps===2?'completed':'resolve',done:packageSteps===2,next_action:packageSteps===2?'download':'tick',summary:{resolved_parameter_rows:10,conflicts:1},dataset_counts:{}});
+ const volumes=Array.from({length:106},(_,i)=>({key:'volume-'+String(i+1).padStart(6,'0'),name:'part-'+String(i+1).padStart(4,'0')+'.zip',bytes:500,sha256:'c'.repeat(64)}));
+ await page.route('**/*',async route=>{
+  const req=route.request(),u=new URL(req.url()),body=req.postData()?JSON.parse(req.postData()):{},json=(v,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(v)});
+  if(req.isNavigationRequest())return route.fulfill({contentType:'text/html',body:html});
+  if(req.method()==='POST')posts.push({path:u.pathname,action:body.action});
+  if(u.pathname.endsWith('/allegro-schema-refresh')){assert.equal(req.method(),'GET','334 completed categories must never restart');return json({parent_run_id:run,parent_attempt_id:attempt,plan_id:schemaPlan,phase:'completed',done:true,processed:334,total:334,performed_gets:668,expected_gets:668,successes:334,not_found_404:0,provider_429:0,errors:0,missing_schemas:0,completed_at:'2026-11-11T10:00:00Z',categories});}
+  if(u.pathname.endsWith('/allegro-offer-readback')){
+   if(req.method()==='GET')return offerPhase?json(readback()):json({reason_code:'offer_plan_not_started'},404);
+   assert.equal(body.parent_attempt_id,attempt);assert.equal(req.headers()['x-csrf-token'],'csrf-test');
+   if(body.action==='plan'){assert.equal(offerPhase,null);offerPhase='planning';return json(readback());}
+   if(body.action==='start'){assert.equal(body.plan_digest,'b'.repeat(64));assert.equal(body.confirm,true);offerPhase='fetch';return json(readback());}
+   assert.equal(body.action,'tick');await new Promise(r=>setTimeout(r,500));
+   if(offerPhase==='planning'){offerPhase='planned';return json(readback());}
+   assert.equal(offerPhase,'fetch');if(fails-- >0)return json({reason_code:'offer_readback_server_exception'},503);
+   processed++;gets++;if(processed===3)offerPhase='completed';if(lostPending){lostPending=false;return route.abort('failed');}return json(readback());
+  }
+  if(u.pathname.endsWith('/data-only')){assert.equal(req.method(),'GET');return json({done:true,phase:'completed',records:79957,total_records:79957,files_checked:31265,volume_count:106,downloads:[{key:'data-only-package-manifest',name:'manifest.json',bytes:100},{key:'data-only-archive-manifest',name:'archives.json',bytes:100},...volumes]});}
+  if(u.pathname.endsWith('/consolidated-csv')){assert.equal(req.method(),'GET');return json({run_id:run,attempt_id:attempt,done:true,phase:'completed',processed:79957,downloads:['czesci.csv','sprzedane.csv','do_wystawienia.csv','moje_samochody.csv','zdjecia_czesci.csv','zdjecia_czesci_issues.csv','marketplace_listingi_czesci.csv','marketplace_listingi_czesci_issues.csv'].map(key=>({key,rows:7404,bytes:200,sha256:'d'.repeat(64)}))});}
+  if(u.pathname.endsWith('/allegro-parameters-supplement')){
+   if(req.method()==='POST'){
+    assert.equal(body.fresh_plan_id,schemaPlan);assert.equal(body.readback_plan_id,offerPlan);
+    if(body.action==='plan')return json({parent_run_id:run,parent_attempt_id:attempt,fresh_plan_id:schemaPlan,readback_plan_id:offerPlan,plan_digest:'e'.repeat(64),categories:334,offers:3});
+    if(body.action==='start'){assert.equal(body.confirm,true);assert.equal(body.plan_digest,'e'.repeat(64));packageStarted=true;return json(packageValue());}
+    assert.equal(body.action,'tick');packageSteps++;return json(packageValue());
+   }
+   if(u.searchParams.get('download')==='manifest')return json({format:'gpswiss-allegro-parameters-supplement-v1',parent_run_id:run,parent_attempt_id:attempt,schema_refresh:{plan_id:schemaPlan},offer_readback:{plan_id:offerPlan},datasets:{},summary:{}});
+   if(u.searchParams.get('download')==='archive-manifest')return json({format:'gpswiss-browser-zip-volumes-1',volume_count:2,volumes:volumes.slice(0,2)});
+   return packageStarted?json(packageValue()):json({reason_code:'supplement_not_started'},404);
+  }
+  if(u.pathname.startsWith(base)){if(req.method()==='POST'){assert(photos);assert(['resume','tick'].includes(body.action));if(body.action==='tick'){await new Promise(r=>setTimeout(r,120));parentSteps++;}}return json(parent());}
+  throw new Error('Unexpected URL '+u.pathname);
+ });
+ await page.goto('http://gpsystem.test'+base+'#run='+run);await page.waitForFunction(()=>document.getElementById('task-schema-status').textContent==='COMPLETED');await page.waitForFunction(()=>document.querySelectorAll('#consolidated-csv-downloads tbody tr').length===8,{},{timeout:6000}).catch(async e=>{console.error({errors,posts,csv:await page.locator('#consolidated-csv-status').textContent(),files:await page.locator('#consolidated-csv-downloads').innerHTML()});throw e;});
+ assert.equal(await page.locator('#technical-diagnostics').getAttribute('open'),null);assert.equal(await page.locator('#allegro-schema-plan-preview').textContent(),'');assert.equal(await page.locator('#schema-category-table tr').count(),0);assert.equal(await page.locator('#data-only-downloads a').count(),2);assert.equal(posts.length,0);
+ assert((await page.locator('#task-schema-summary').textContent()).includes('668 / 668'));assert.equal(await page.locator('#consolidated-csv-downloads tbody tr').count(),8);
+ await page.locator('#schema-category-details > summary').click();await page.waitForFunction(()=>document.querySelectorAll('#schema-category-table tr').length===26);await page.fill('#schema-category-search','433');assert.equal(await page.locator('#schema-category-table tr').count(),2);await page.locator('#schema-category-details > summary').click();
+ await page.locator('#data-only-downloads > details > summary').click();await page.waitForFunction(()=>document.querySelectorAll('#data-only-downloads a').length===27);await page.locator('#data-only-downloads button').filter({hasText:'Następna'}).click();assert((await page.locator('#data-only-downloads').textContent()).includes('Strona 2 / 5'));
+ if(failed){await page.waitForFunction(()=>document.getElementById('task-finalize-status').textContent==='FAILED');await page.close();assert.deepEqual(errors,[]);return;}
+ if(photos){await page.click('#photos-resume');await page.waitForFunction(()=>document.getElementById('task-photos-status').textContent==='RUNNING');}
+ if(paused)await page.waitForFunction(()=>document.getElementById('task-readback-status').textContent==='PAUSED');
+ if(blocked){await page.waitForFunction(()=>document.getElementById('task-readback-status').textContent==='BLOCKED');await page.click('#allegro-readback-resume');}
+ else if(!paused){await page.click('#allegro-readback-plan');await page.waitForFunction(()=>!document.getElementById('allegro-readback-resume').disabled===false&&document.getElementById('allegro-readback-status').textContent.includes('planned'));assert.equal(gets,0);assert(await page.locator('#allegro-readback-start').isDisabled());await page.check('#allegro-readback-confirm');await page.selectOption('#runner-task','readback');await page.waitForFunction(()=>!document.getElementById('runner-start').disabled);await page.evaluate(()=>{document.getElementById('runner-start').click();document.getElementById('runner-start').click();});}
+ else await page.click('#allegro-readback-resume');
+ if(reload){await page.waitForFunction(()=>document.getElementById('allegro-readback-status').textContent.includes('fetch'));await page.click('#allegro-readback-stop');await page.waitForFunction(()=>!document.getElementById('allegro-readback-resume').disabled);const before=gets;await page.reload();await page.waitForFunction(()=>!document.getElementById('allegro-readback-resume').disabled,{},{timeout:7000}).catch(async e=>{console.error({phase:offerPhase,gets,errors,schema:await page.locator('#allegro-schema-status').textContent(),readback:await page.locator('#allegro-readback-status').textContent()});throw e;});assert.equal(gets,before);await page.click('#allegro-readback-resume');}
+ if(exhausted){await page.waitForFunction(()=>document.getElementById('task-readback-status').textContent==='FAILED',{},{timeout:25000});assert.equal(gets,0);await page.click('#allegro-readback-resume');}
+ await page.waitForFunction(()=>document.getElementById('task-readback-status').textContent==='COMPLETED',{},{timeout:20000});assert.equal(gets,3);assert.equal(processed,3);
+ if(photos){const n=parentSteps;await page.waitForTimeout(350);assert(parentSteps>n);await page.click('#photos-stop');}
+ await page.waitForFunction(()=>!document.getElementById('allegro-supplement-plan').disabled);await page.click('#allegro-supplement-plan');await page.waitForFunction(()=>document.getElementById('supplement-plan-summary').textContent.includes('334'));await page.check('#allegro-supplement-confirm');await page.click('#allegro-supplement-start');await page.waitForFunction(()=>document.querySelectorAll('#allegro-supplement-downloads a').length>=5);assert.equal(packageSteps,2);
+ const links=await page.locator('#consolidated-csv-downloads a').evaluateAll(a=>a.map(x=>x.href));for(const link of links){const u=new URL(link);assert.equal(u.origin,'http://gpsystem.test');assert.equal(u.searchParams.get('parent_attempt_id'),attempt);}
+ await page.reload();await page.waitForFunction(()=>document.getElementById('task-readback-status').textContent==='COMPLETED');assert.equal(gets,3);assert.equal(posts.filter(p=>p.path.endsWith('/allegro-schema-refresh')).length,0);assert.equal(await page.locator('#allegro-schema-plan-preview').textContent(),'');assert((await page.locator('#runner-events li').count())<=20);
+ if(!Object.values({reload,lost,blocked,exhausted,photos,paused,failed}).some(Boolean)){assert.equal(posts.filter(p=>p.path.endsWith('/allegro-offer-readback')&&p.action==='start').length,1);await page.screenshot({path:'/tmp/gpswiss-migration-runner.png',fullPage:true});await page.setViewportSize({width:375,height:820});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth));await page.screenshot({path:'/tmp/gpswiss-migration-runner-mobile.png',fullPage:true});}
+ assert.deepEqual(errors,[]);await page.close();
+}
+(async()=>{const browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_PATH??'/usr/bin/chromium'});try{for(const options of [{},{reload:true},{lost:true},{blocked:true},{exhausted:true},{photos:true},{paused:true},{failed:true}])await scenario(browser,options);console.log('8 Chromium scenarios passed: 334 cached categories, 106 paginated volumes, CSV links, A/B/C confirmation, stop/reload/resume, lost response, failed/blocked states and independent photos.');}finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});
