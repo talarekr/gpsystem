@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Tools;
 
 use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
+use App\Services\MigrationExport\AllegroOfferParameterReadback;
 use App\Services\MigrationExport\AllegroParametersSupplement;
 use App\Services\MigrationExport\AllegroSchemaRefresh;
 use App\Services\MigrationExport\MigrationExportException;
@@ -15,13 +16,23 @@ final class AllegroParametersSupplementController extends Controller
     public function __invoke(Request $request, AllegroParametersSupplement $supplements, string $run)
     {
         abort_unless($request->user()?->hasRole(UserRole::OwnerAdmin->value), 403);
-        $input = $request->validate(['parent_attempt_id' => ['required', 'uuid'], 'fresh_plan_id' => ['sometimes', 'uuid'], 'action' => [$request->isMethod('post') ? 'required' : 'sometimes', 'in:start,tick'], 'download' => ['sometimes', 'string', 'max:40', 'regex:/\A(?:manifest|checksums|summary|archive-manifest|volume-[0-9]{6})\z/D']]);
+        $input = $request->validate(['parent_attempt_id' => ['required', 'uuid'], 'fresh_plan_id' => ['sometimes', 'uuid'], 'readback_plan_id' => ['sometimes', 'uuid'], 'plan_digest' => ['sometimes', 'string', 'size:64'], 'confirm' => ['sometimes', 'boolean'], 'action' => [$request->isMethod('post') ? 'required' : 'sometimes', 'in:plan,start,tick'], 'download' => ['sometimes', 'string', 'max:40', 'regex:/\A(?:manifest|checksums|summary|archive-manifest|parameters-csv|volume-[0-9]{6})\z/D']]);
         $owner = (int) $request->user()->id;
         try {
             $perform = function () use ($request, $supplements, $owner, $run, $input) {
                 if ($request->isMethod('post')) {
                     ignore_user_abort(true);
-                    $data = $input['action'] === 'start' ? $supplements->start($owner, $run, $input['parent_attempt_id'], requireFresh: true) : $supplements->tick($owner, $run, $input['parent_attempt_id']);
+                    if ($input['action'] === 'plan') {
+                        $data = $supplements->plan($owner, $run, $input['parent_attempt_id']);
+                    } elseif ($input['action'] === 'start') {
+                        $plan = $supplements->plan($owner, $run, $input['parent_attempt_id']);
+                        if (! ($input['confirm'] ?? false) || ! hash_equals($plan['plan_digest'], $input['plan_digest'] ?? '')) {
+                            throw new MigrationExportException('supplement_plan_confirmation_mismatch');
+                        }
+                        $data = $supplements->start($owner, $run, $input['parent_attempt_id'], requireFresh: true, requireReadback: true);
+                    } else {
+                        $data = $supplements->tick($owner, $run, $input['parent_attempt_id']);
+                    }
                 } elseif (isset($input['download'])) {
                     $path = $supplements->download($owner, $run, $input['parent_attempt_id'], $input['download']);
                     $response = response()->download($path, basename($path), ['X-Content-Type-Options' => 'nosniff', 'X-Robots-Tag' => 'noindex, noarchive']);
@@ -35,8 +46,14 @@ final class AllegroParametersSupplementController extends Controller
 
                 return response()->json($data)->header('Cache-Control', 'private, no-store')->header('X-Robots-Tag', 'noindex, noarchive');
             };
-            if ($request->isMethod('post') || isset($input['fresh_plan_id'])) {
-                return app(AllegroSchemaRefresh::class)->withCompletedPlan($owner, $run, $input['parent_attempt_id'], $input['fresh_plan_id'] ?? null, $perform);
+            if ($request->isMethod('post') || isset($input['fresh_plan_id']) || isset($input['readback_plan_id'])) {
+                return app(AllegroSchemaRefresh::class)->withCompletedPlan($owner, $run, $input['parent_attempt_id'], $input['fresh_plan_id'] ?? null, function () use ($request, $owner, $run, $input, $perform) {
+                    if ($request->isMethod('post') || isset($input['readback_plan_id'])) {
+                        return app(AllegroOfferParameterReadback::class)->withCompletedPlan($owner, $run, $input['parent_attempt_id'], $input['readback_plan_id'] ?? null, $perform);
+                    }
+
+                    return $perform();
+                });
             }
 
             return $perform();

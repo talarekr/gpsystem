@@ -1,6 +1,8 @@
 # GPSwiss migration: explicit Allegro schema GET refresh
 
-The existing panel has two independent steps:
+The original schema workflow below is extended by [existing-offer readback and runner UX](allegro-offer-readback.md): A schemas, B existing-offer values, C confirmed package. Completed schema refreshes are reused.
+
+The original schema-only workflow has two independent steps:
 
 1. **A. Odśwież definicje parametrów z Allegro**: prepare a local plan; review category IDs, source evidence, existing SQL cache presence/fetched_at, refresh_required and expected GET count; check the confirmation and click Run. Prepare never contacts Allegro.
 2. **B. Przygotuj pakiet parametrów Allegro**: create the supplemental package using the completed private refresh cache. HTTP start now requires step A. Read/download of existing legacy packages is retained and labelled `legacy_local_only`.

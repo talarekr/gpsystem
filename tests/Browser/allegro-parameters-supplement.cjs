@@ -9,8 +9,8 @@ const parent={schema_version:'gpswiss-wystawczesc-3',run_id:run,snapshot_attempt
 const parentFrozen=JSON.stringify(parent);
 const summary={resolved_parameter_rows:456,conflicts:2,missing_required_values:9,completeness:{complete:444,partial:6,historical_only:3,schema_unknown:2,conflict:1}};
 const datasets={allegro_category_parameters_cache:{rows:7},allegro_parameter_mappings:{rows:11},allegro_resolved_parameters:{rows:456},conflicts:{rows:2},completeness:{rows:120},allegro_product_parameters_cache:{rows:7},allegro_parameter_selections:{rows:12},schema_freshness:{rows:14}};
-const readyState=progress=>({format,parent_run_id:run,parent_attempt_id:attempt,fresh_plan_id:'30000000-0000-4000-8000-000000000003',phase:progress>=3?'completed':'resolve',shard:Math.floor(progress),row:progress*50,done:progress>=3,next_action:progress>=3?'download':'tick',summary,provider_calls:false,business_writes:false});
-const manifest={format,parent_run_id:run,parent_attempt_id:attempt,schema_refresh:{plan_id:'30000000-0000-4000-8000-000000000003'},datasets,summary,provider_calls:false,business_writes:false,automatic_publish:false};
+const readyState=progress=>({format,parent_run_id:run,parent_attempt_id:attempt,fresh_plan_id:'30000000-0000-4000-8000-000000000003',readback_plan_id:'40000000-0000-4000-8000-000000000004',phase:progress>=3?'completed':'resolve',shard:Math.floor(progress),row:progress*50,done:progress>=3,next_action:progress>=3?'download':'tick',summary,provider_calls:false,business_writes:false});
+const manifest={format,parent_run_id:run,parent_attempt_id:attempt,schema_refresh:{plan_id:'30000000-0000-4000-8000-000000000003'},offer_readback:{plan_id:'40000000-0000-4000-8000-000000000004'},datasets,summary,provider_calls:false,business_writes:false,automatic_publish:false};
 
 async function scenario(browser,options={}){
  const {existing=false,completed=false,volumes=2,lost=false,transient=false,stop=false,initialStatusError=null,metadataFailure=false,badIdentity=false,badArchive=false,parentRunning=false,exhausted=false,cached=false,stopBackoff=false}=options;
@@ -27,11 +27,13 @@ async function scenario(browser,options={}){
    assert.equal(request.method(),'GET','supplement runner must not start refresh automatically');
    return json({parent_run_id:run,parent_attempt_id:attempt,plan_id:'30000000-0000-4000-8000-000000000003',phase:'completed',done:true,processed:7,total:7,expected_gets:14,successes:7,not_found_404:0,provider_429:0,errors:0,missing_schemas:0,categories:[]});
   }
+  if(url.pathname.endsWith('/allegro-offer-readback')){assert.equal(request.method(),'GET');return json({parent_run_id:run,parent_attempt_id:attempt,plan_id:'40000000-0000-4000-8000-000000000004',phase:'completed',done:true,processed:3,total:3,expected_gets:3,performed_gets:3,successes:3});}
   if(url.pathname.endsWith('/allegro-parameters-supplement')){
    assert.equal(request.headers()['x-csrf-token'],'csrf-test');assert.equal(request.headers().accept,'application/json');
    if(request.method()==='POST'){
-    assert.equal(body.parent_attempt_id,attempt);assert.deepEqual(Object.keys(body).sort(),['action','fresh_plan_id','parent_attempt_id']);assert.equal(body.fresh_plan_id,'30000000-0000-4000-8000-000000000003');
-    if(body.action==='start'){calls.start++;prepared=true;return json(readyState(progress));}
+    assert.equal(body.parent_attempt_id,attempt);assert.equal(body.readback_plan_id,'40000000-0000-4000-8000-000000000004');assert.equal(body.fresh_plan_id,'30000000-0000-4000-8000-000000000003');
+    if(body.action==='plan')return json({parent_run_id:run,parent_attempt_id:attempt,fresh_plan_id:body.fresh_plan_id,readback_plan_id:body.readback_plan_id,plan_digest:'f'.repeat(64),categories:7,offers:3});
+    if(body.action==='start'){assert.equal(body.confirm,true);assert.equal(body.plan_digest,'f'.repeat(64));calls.start++;prepared=true;return json(readyState(progress));}
     assert.equal(body.action,'tick');calls.tick++;
     if(transientPending){transientPending--;return json({reason_code:'supplement_server_exception',message:'DO_NOT_RENDER'},503);}
     if(stop || parentRunning)await new Promise(resolve=>setTimeout(resolve,200));
@@ -45,7 +47,7 @@ async function scenario(browser,options={}){
     assert(progress>=3,'downloads must wait for done=true');
     if(key==='manifest'){calls.manifest++;if(metadataPending){metadataPending=false;return json({reason_code:'supplement_server_exception'},503);}return json(manifest);}
     if(key==='archive-manifest'){calls.archive++;return json(archive);}
-    assert(['checksums','summary'].includes(key)||/^volume-[0-9]{6}$/.test(key));return json({});
+    assert(['checksums','summary','parameters-csv'].includes(key)||/^volume-[0-9]{6}$/.test(key));return json({});
    }
    calls.status++;
    if(statusPending){const code=statusPending;statusPending=null;return json({reason_code:'DO NOT RENDER SENSITIVE MESSAGE',message:'DO_NOT_RENDER'},code);}
@@ -68,7 +70,7 @@ async function scenario(browser,options={}){
  if(cached)await page.addInitScript(saved=>sessionStorage.setItem('gpswiss-export-last-operational-state',JSON.stringify(saved)),parent);
  await page.goto('http://gpsystem.test'+base+'#run='+run);
  await page.waitForFunction(()=>!document.getElementById('allegro-supplement-status-refresh').disabled).catch(async error=>{console.error({options,errors,calls,status:await page.locator('#allegro-supplement-status').textContent()});throw error;});
- assert.equal(await page.locator('#allegro-supplement-heading').textContent(),'Parametry Allegro — pakiet uzupełniający');
+ assert((await page.locator('#task-supplement-heading').textContent()).includes('Supplement parametrów Allegro'));
  assert((await page.locator('#allegro-supplement-identity').textContent()).includes(attempt));
  if(initialStatusError){
   const expected=[401,419].includes(initialStatusError)?'supplement_session_expired':'http_'+initialStatusError;
@@ -85,8 +87,9 @@ async function scenario(browser,options={}){
    assert((await page.locator('#allegro-supplement-status').textContent()).includes('supplement_server_exception'));
    await page.click('#allegro-supplement-status-refresh');
   }
-  if(parentRunning){await page.click('#resume');await page.waitForFunction(()=>document.getElementById('state').textContent.includes('"local_runner_active": true'));}
+  if(parentRunning){await page.locator('#technical-diagnostics > summary').click();await page.locator('details').filter({has:page.locator('#state')}).last().locator('summary').click();await page.click('#photos-resume');await page.waitForFunction(()=>document.getElementById('state').textContent.includes('"local_runner_active": true'));}
   if(!completed){
+   if(!existing){await page.waitForFunction(()=>!document.getElementById('allegro-supplement-plan').disabled);await page.click('#allegro-supplement-plan');await page.waitForFunction(()=>document.getElementById('supplement-plan-summary').textContent.includes('7'));await page.check('#allegro-supplement-confirm');}
    const button=existing?'allegro-supplement-resume':'allegro-supplement-start';
    await page.evaluate(button=>{document.getElementById(button).click();document.getElementById(button).click();},button);
    if(exhausted){
@@ -109,22 +112,22 @@ async function scenario(browser,options={}){
   }
   if(badArchive){
    await page.waitForFunction(()=>document.getElementById('allegro-supplement-status').textContent.includes('supplement_invalid_archive_manifest'));
-   assert.equal(await page.locator('#allegro-supplement-downloads a').count(),4);
+   assert.equal(await page.locator('#allegro-supplement-downloads a').count(),5);
   }else{
-   await page.waitForFunction(n=>document.querySelectorAll('#allegro-supplement-downloads a').length===n,4+volumes,{timeout:15000});
+   await page.waitForFunction(()=>document.querySelectorAll('#allegro-supplement-downloads > details').length===1,{},{timeout:15000});await page.locator('#allegro-supplement-downloads > details > summary').click();await page.waitForFunction(n=>document.querySelectorAll('#allegro-supplement-downloads a').length===n,5+Math.min(25,volumes));
    await page.waitForFunction(()=>!document.getElementById('allegro-supplement-status-refresh').disabled);
    const counts=await page.locator('#allegro-supplement-counts li').allTextContents();
    for(const text of ['Rekordy category/schema cache: 7','Parameter mappings: 11','Resolved parameters: 456','complete: 444','partial: 6','historical_only: 3','schema_unknown: 2','conflict: 1','Brakujące required wg lokalnego cache: 9'])assert(counts.includes(text),text);
-   assert.equal(await page.locator('#allegro-supplement-contents li').count(),8);
+   assert.equal(await page.locator('#allegro-supplement-contents li').count(),15);
    assert((await page.locator('#allegro-supplement-contents').textContent()).includes('allegro_category_parameters_cache.csv / .jsonl'));
    const links=await page.locator('#allegro-supplement-downloads a').evaluateAll(elements=>elements.map(e=>e.href));
-   for(const link of links){const url=new URL(link);assert.equal(url.origin,'http://gpsystem.test');assert.equal(url.pathname,base+'/'+run+'/allegro-parameters-supplement');assert.equal(url.searchParams.get('parent_attempt_id'),attempt);assert(/^(manifest|checksums|summary|archive-manifest|volume-[0-9]{6})$/.test(url.searchParams.get('download')));}
+   for(const link of links){const url=new URL(link);assert.equal(url.origin,'http://gpsystem.test');assert.equal(url.pathname,base+'/'+run+'/allegro-parameters-supplement');assert.equal(url.searchParams.get('parent_attempt_id'),attempt);assert(/^(manifest|checksums|summary|archive-manifest|parameters-csv|volume-[0-9]{6})$/.test(url.searchParams.get('download')));}
    if(!existing&&!completed)assert.equal(calls.start,1,'double click must create one local loop');else assert.equal(calls.start,0);
    assert.equal(progress,3,'only three committed backend steps, no duplicate processing');
    assert.equal(calls.tick,completed?0:(exhausted?8:((transient||stopBackoff)?4:3)));
-   if(parentRunning){await page.click('#stop-local');await page.waitForFunction(()=>!document.getElementById('resume').disabled);}
+   if(parentRunning){await page.click('#photos-stop');await page.waitForFunction(()=>!document.getElementById('resume').disabled);}
    const startsBefore=calls.start,ticksBefore=calls.tick;
-   await page.reload();await page.waitForFunction(n=>document.querySelectorAll('#allegro-supplement-downloads a').length===n,4+volumes);
+   await page.reload();await page.waitForFunction(()=>document.querySelectorAll('#allegro-supplement-downloads > details').length===1);await page.locator('#allegro-supplement-downloads > details > summary').click();await page.waitForFunction(n=>document.querySelectorAll('#allegro-supplement-downloads a').length===n,5+Math.min(25,volumes));
    assert.equal(calls.start,startsBefore,'reload must not start or regenerate the package');assert.equal(calls.tick,ticksBefore);
   }
  }

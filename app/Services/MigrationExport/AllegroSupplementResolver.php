@@ -11,9 +11,59 @@ use App\Services\Marketplace\AllegroOfferParametersBuilder;
 /** Explicit provenance candidates, not a publishing payload or an authority about today's Allegro schema. */
 final class AllegroSupplementResolver
 {
-    public const FIELDS = ['part_id', 'allegro_category_id', 'parameter_id', 'parameter_name_snapshot', 'parameter_type', 'multiple_choices', 'parameter_scope', 'product_set_index', 'values_ids', 'values', 'range_value', 'raw_value', 'required_snapshot', 'required_for_product_snapshot', 'describes_product_snapshot', 'schema_snapshot_id', 'source', 'source_field', 'source_listing_id', 'marketplace_account_id', 'captured_at', 'source_observed_at', 'completeness_status', 'reason_code', 'local_validation_status', 'resolution_role', 'candidate_id', 'conflict_id', 'valid_for_republication', 'provenance', 'schema_fetched_at', 'schema_source_endpoint'];
+    public const FIELDS = ['part_id', 'allegro_category_id', 'parameter_id', 'parameter_name_snapshot', 'parameter_type', 'multiple_choices', 'parameter_scope', 'product_set_index', 'values_ids', 'values', 'range_value', 'raw_value', 'required_snapshot', 'required_for_product_snapshot', 'describes_product_snapshot', 'schema_snapshot_id', 'source', 'source_field', 'source_listing_id', 'marketplace_account_id', 'captured_at', 'source_observed_at', 'completeness_status', 'reason_code', 'local_validation_status', 'resolution_role', 'candidate_id', 'conflict_id', 'valid_for_republication', 'provenance', 'schema_fetched_at', 'schema_source_endpoint', 'allegro_offer_id', 'product_id', 'unit', 'fetched_at', 'source_priority', 'is_preferred', 'historical_schema_mismatch', 'association_conflict', 'readback_unavailable'];
 
-    public const COMPLETENESS_FIELDS = ['part_id', 'allegro_category_id', 'completeness_status', 'reason_code', 'missing_required_parameter_ids', 'schema_snapshot_id', 'has_manual_selections', 'required_parameter_count', 'required_resolved_count', 'missing_required_parameter_names', 'product_required_count', 'product_required_missing', 'missing_product_required_parameter_ids', 'missing_product_required_parameter_names', 'status', 'schema_freshness_status', 'canonical_allegro_category_id', 'category_context'];
+    public const COMPLETENESS_FIELDS = ['part_id', 'allegro_category_id', 'completeness_status', 'reason_code', 'missing_required_parameter_ids', 'schema_snapshot_id', 'has_manual_selections', 'required_parameter_count', 'required_resolved_count', 'missing_required_parameter_names', 'product_required_count', 'product_required_missing', 'missing_product_required_parameter_ids', 'missing_product_required_parameter_names', 'status', 'schema_freshness_status', 'canonical_allegro_category_id', 'category_context', 'product_required_resolved_count', 'existing_offer_parameter_count', 'resolved_from_existing_offer_count', 'conflict_count', 'readback_unavailable', 'missing_product_slots'];
+
+    public const EXISTING_FIELDS = ['part_id', 'offer_id', 'category_id', 'scope', 'product_set_index', 'product_id', 'parameter_id', 'parameter_name', 'values', 'values_ids', 'range_value', 'unit', 'source', 'fetched_at', 'marketplace_account_id', 'account_code', 'source_listing_id', 'raw_value', 'historical_schema_mismatch', 'schema_status', 'association_conflict'];
+
+    public const IMPORT_FIELDS = ['part_id', 'allegro_offer_id', 'allegro_category_id', 'scope', 'product_set_index', 'product_id', 'parameter_id', 'parameter_name', 'values', 'values_ids', 'range_value', 'unit', 'required', 'required_for_product', 'describes_product', 'source', 'status', 'is_preferred', 'candidate_count', 'candidates'];
+
+    /** Preserve every actual product slot and all parameter value forms, even outside today's schema. */
+    public function readbackCandidates(array $receipt, string $part, array $link, bool $associationConflict): array
+    {
+        $raw = $receipt['raw_response'];
+        $category = (string) data_get($raw, 'category.id');
+        $groups = [['scope' => 'offer', 'index' => null, 'product_id' => null, 'parameters' => $raw['parameters'] ?? []]];
+        foreach ($raw['productSet'] ?? [] as $index => $product) {
+            $groups[] = ['scope' => 'product', 'index' => $index, 'product_id' => isset($product['product']['id']) ? (string) $product['product']['id'] : null, 'parameters' => $product['product']['parameters'] ?? []];
+        }
+        $out = [];
+        foreach ($groups as $group) {
+            foreach ($group['parameters'] ?: [['id' => null]] as $parameter) {
+                $out[] = ['part_id' => $part, 'offer_id' => $receipt['offer_id'], 'allegro_offer_id' => $receipt['offer_id'], 'category_id' => $category, 'allegro_category_id' => $category,
+                    'scope' => $group['scope'], 'parameter_scope' => $group['scope'], 'product_set_index' => $group['index'], 'product_id' => $group['product_id'], 'parameter_id' => isset($parameter['id']) ? (string) $parameter['id'] : null,
+                    'parameter_name' => $parameter['name'] ?? null, 'parameter_name_snapshot' => $parameter['name'] ?? null, 'values' => $parameter['values'] ?? [], 'values_ids' => array_map('strval', $parameter['valuesIds'] ?? []), 'range_value' => $parameter['rangeValue'] ?? null, 'unit' => $parameter['unit'] ?? null,
+                    'source' => 'existing_allegro_offer', 'source_field' => $group['scope'] === 'offer' ? 'parameters' : 'productSet.'.$group['index'].'.product.parameters', 'source_listing_id' => $link['listing_id'], 'marketplace_account_id' => $receipt['marketplace_account_id'], 'account_code' => $receipt['account_code'],
+                    'fetched_at' => $receipt['fetched_at'], 'source_observed_at' => $receipt['fetched_at'], 'raw_value' => $parameter, 'association_conflict' => $associationConflict];
+            }
+        }
+
+        return $out;
+    }
+
+    /** One row per Part/category/scope/parameter/product slot; conflicting alternatives stay explicit. */
+    public function importRows(array $rows): array
+    {
+        $groups = [];
+        foreach ($rows as $row) {
+            if ($row['parameter_id'] === null) {
+                continue;
+            }
+            $groups[self::json([$row['part_id'], $row['allegro_category_id'], $row['parameter_scope'], $row['parameter_id'], $row['product_set_index']])][] = $row;
+        }
+        $out = [];
+        foreach ($groups as $candidates) {
+            usort($candidates, fn ($a, $b) => ($a['source_priority'] ?? 99) <=> ($b['source_priority'] ?? 99) ?: strcmp($a['candidate_id'], $b['candidate_id']));
+            $row = collect($candidates)->firstWhere('is_preferred', true) ?? $candidates[0];
+            $conflict = collect($candidates)->contains(fn ($r) => $r['conflict_id'] !== null);
+            $out[] = ['part_id' => $row['part_id'], 'allegro_offer_id' => $row['allegro_offer_id'], 'allegro_category_id' => $row['allegro_category_id'], 'scope' => $row['parameter_scope'], 'product_set_index' => $row['product_set_index'], 'product_id' => $row['product_id'], 'parameter_id' => $row['parameter_id'], 'parameter_name' => $row['parameter_name_snapshot'],
+                'values' => $conflict ? null : $row['values'], 'values_ids' => $conflict ? null : $row['values_ids'], 'range_value' => $conflict ? null : $row['range_value'], 'unit' => $row['unit'], 'required' => $row['required_snapshot'], 'required_for_product' => $row['required_for_product_snapshot'], 'describes_product' => $row['describes_product_snapshot'],
+                'source' => $conflict ? 'unresolved' : $row['provenance'], 'status' => $conflict ? 'CONFLICT' : ($row['historical_schema_mismatch'] ? 'historical_schema_mismatch' : strtoupper($row['completeness_status'])), 'is_preferred' => ! $conflict && $row['is_preferred'], 'candidate_count' => count($candidates), 'candidates' => $candidates];
+        }
+
+        return $out;
+    }
 
     public function __construct(private AllegroOfferParametersBuilder $builder) {}
 
@@ -243,10 +293,18 @@ final class AllegroSupplementResolver
                 'required_snapshot' => $definition['required'] ?? null, 'required_for_product_snapshot' => $definition['options']['requiredForProduct'] ?? $definition['requiredForProduct'] ?? (($cache['fresh_schema'] ?? false) && $scope === 'product' ? ($definition['required'] ?? null) : null),
                 'describes_product_snapshot' => $definition['options']['describesProduct'] ?? null, 'schema_snapshot_id' => $cache['schema_snapshot_id'] ?? null,
                 'provenance' => match ($candidate['source'] ?? 'unknown') {
-                    'manual_selection' => 'manual_selection', 'marketplace_listing_payload', 'legacy_offer_payload', 'review_metadata' => 'existing_listing', 'parameter_mapping' => 'local_mapping', 'computed_from_part' => 'derived_from_part', 'computed_from_car' => 'derived_from_car', 'category_schema' => 'category_schema', default => 'unresolved',
+                    'existing_allegro_offer' => 'existing_allegro_offer', 'manual_selection' => 'manual_selection', 'marketplace_listing_payload', 'legacy_offer_payload', 'review_metadata' => 'existing_listing', 'parameter_mapping' => 'local_mapping', 'computed_from_part' => 'derived_from_part', 'computed_from_car' => 'derived_from_car', 'category_schema' => 'category_schema', default => 'unresolved',
                 }, 'schema_fetched_at' => $scope === 'product' ? ($cache['product_fetched_at'] ?? $cache['fetched_at'] ?? null) : ($cache['fetched_at'] ?? null),
                 'schema_source_endpoint' => $scope === 'product' && ($cache['fresh_schema'] ?? false) ? 'GET /sale/categories/'.$category.'/product-parameters' : ($cache['endpoint'] ?? null),
                 'captured_at' => $capturedAt, 'valid_for_republication' => null, 'resolution_role' => $candidate['resolution_role'] ?? (($candidate['parameter_id'] ?? null) === null ? 'coverage_marker' : 'stored_source')]);
+            $row['unit'] ??= $definition['unit'] ?? null;
+            $row['source_priority'] = match ($row['provenance']) {
+                'existing_allegro_offer' => 1, 'manual_selection' => 2, 'local_mapping' => 3, 'derived_from_part' => 4, 'derived_from_car' => 5, default => 6
+            };
+            $row['is_preferred'] = false;
+            $row['association_conflict'] = (bool) ($candidate['association_conflict'] ?? false);
+            $row['readback_unavailable'] = (bool) ($candidate['readback_unavailable'] ?? false);
+            $row['historical_schema_mismatch'] = $schemaKnown && $row['source'] === 'existing_allegro_offer' && $row['parameter_id'] !== null && $definition === null;
             $present = self::present($row);
             $historic = in_array($row['source'], ['legacy_offer_payload', 'marketplace_listing_payload', 'review_metadata'], true);
             $valid = $present && $definition !== null;
@@ -263,6 +321,10 @@ final class AllegroSupplementResolver
             $row['local_validation_status'] = ! $schemaKnown ? 'unknown' : ($definition === null ? 'parameter_not_in_local_schema' : ($valid ? 'value_present_in_local_schema' : 'value_missing_or_invalid_locally'));
             $row['completeness_status'] = ! $schemaKnown ? 'schema_unknown' : ($row['parameter_id'] === null ? 'partial' : ($definition === null || $historic ? 'historical_only' : ($valid ? 'complete' : 'partial')));
             $row['reason_code'] = ! $schemaKnown ? 'schema_unavailable_locally' : ($definition === null ? 'parameter_absent_from_local_schema' : ($historic ? ($present ? 'historical_not_validated_for_publication' : 'historical_parameter_id_only') : ($valid ? 'resolved_against_local_cache' : 'value_missing_or_invalid_locally')));
+            if ($row['historical_schema_mismatch']) {
+                $row['reason_code'] = 'historical_schema_mismatch';
+            }
+            $row = array_intersect_key($row, array_flip(self::FIELDS));
             $row['candidate_id'] = hash('sha256', self::json($row));
             $rows[$row['candidate_id']] = $row;
         }
@@ -272,7 +334,14 @@ final class AllegroSupplementResolver
                 continue;
             }
             // Unknown scope remains explicit, but cannot conceal manual-versus-history disagreements.
-            $groups[self::json([$row['allegro_category_id'], $row['parameter_id'], $row['product_set_index'] ?? 0])][] = $id;
+            $scopes = [$row['parameter_scope']];
+            if ($row['parameter_scope'] === null) {
+                $known = array_values(array_unique(array_filter(array_map(fn ($r) => $r['allegro_category_id'] === $row['allegro_category_id'] && $r['parameter_id'] === $row['parameter_id'] ? $r['parameter_scope'] : null, $rows))));
+                $scopes = $known ?: [null];
+            }
+            foreach ($scopes as $scope) {
+                $groups[self::json([$row['allegro_category_id'], $row['parameter_id'], $scope, $row['product_set_index'] ?? 0])][] = $id;
+            }
         }
         $historicalOnly = 0;
         foreach ($groups as $key => $ids) {
@@ -292,15 +361,23 @@ final class AllegroSupplementResolver
             if ($historyPresent && ! $localPresent) {
                 $historicalOnly++;
             }
-            if (count($values) < 2) {
+            $associationConflict = collect($ids)->contains(fn ($id) => $rows[$id]['association_conflict']);
+            if (count($values) < 2 && ! $associationConflict) {
+                $eligible = array_values(array_filter($ids, fn ($id) => self::present($rows[$id]) && ! in_array($rows[$id]['provenance'], ['existing_listing', 'unresolved', 'category_schema'], true)));
+                usort($eligible, fn ($a, $b) => $rows[$a]['source_priority'] <=> $rows[$b]['source_priority'] ?: strcmp($a, $b));
+                if ($eligible !== []) {
+                    $rows[$eligible[0]]['is_preferred'] = true;
+                }
+
                 continue;
             }
             $conflictId = hash('sha256', self::json([$partId, $key]));
             foreach ($ids as $id) {
+                $rows[$id]['is_preferred'] = false;
                 $rows[$id]['conflict_id'] = $conflictId;
                 $rows[$id]['completeness_status'] = 'conflict';
             }
-            $conflicts[] = ['conflict_id' => $conflictId, 'part_id' => $partId, 'allegro_category_id' => $rows[$ids[0]]['allegro_category_id'], 'parameter_id' => $rows[$ids[0]]['parameter_id'], 'reason_code' => 'different_source_values', 'candidates' => array_map(fn ($id) => $rows[$id], $ids)];
+            $conflicts[] = ['conflict_id' => $conflictId, 'part_id' => $partId, 'allegro_category_id' => $rows[$ids[0]]['allegro_category_id'], 'parameter_id' => $rows[$ids[0]]['parameter_id'], 'reason_code' => $associationConflict ? 'offer_linked_to_multiple_parts' : 'different_source_values', 'candidates' => array_map(fn ($id) => $rows[$id], $ids)];
         }
         foreach ($categories as $category) {
             $cache = $category === null ? null : $schema((string) $category);
@@ -421,31 +498,53 @@ final class AllegroSupplementResolver
             $requirementsKnown = $requirementsKnown && (is_bool($definition['required'] ?? null) || is_bool($definition['requiredForProduct'] ?? null) || is_bool($definition['options']['requiredForProduct'] ?? null));
             $conditional = $conditional || ! empty($definition['requiredIf']) || ! empty($definition['dependencies']) || ! empty($definition['dependsOn']) || ! empty($definition['options']['dependencies']);
         }
-        $valid = $productValid = [];
+        $valid = $productValid = $slots = [];
         $conflict = false;
+        $existing = $resolvedExisting = 0;
+        $conflictIds = [];
+        $unavailable = collect($rows)->contains(fn ($r) => $r['readback_unavailable'] ?? false);
         foreach ($rows as $row) {
             if ((string) $row['allegro_category_id'] !== (string) $category) {
                 continue;
             }
-            $conflict = $conflict || $row['conflict_id'] !== null;
+            $conflict = $conflict || $row['conflict_id'] !== null || $row['association_conflict'];
+            if ($row['conflict_id'] !== null) {
+                $conflictIds[$row['conflict_id']] = true;
+            }
+            if ($row['source'] === 'existing_allegro_offer') {
+                $existing += (int) ($row['parameter_id'] !== null);
+                if ($row['parameter_scope'] === 'product') {
+                    $slots[(int) $row['product_set_index']] = true;
+                }
+            }
+            $resolvedExisting += (int) ($row['source'] === 'existing_allegro_offer' && $row['is_preferred'] && $row['local_validation_status'] === 'value_present_in_local_schema');
             if ($row['local_validation_status'] !== 'value_present_in_local_schema' || in_array($row['provenance'], ['existing_listing', 'unresolved', 'category_schema'], true) || $row['conflict_id'] !== null) {
                 continue;
             }
             $valid[(string) $row['parameter_id']] = true;
             if ($row['parameter_scope'] === 'product') {
-                $productValid[(string) $row['parameter_id']] = true;
+                $productValid[(int) $row['product_set_index']][(string) $row['parameter_id']] = true;
             }
         }
         $missingOffer = array_values(array_map('strval', array_diff(array_keys($required), array_keys($valid))));
-        $missingProduct = array_values(array_map('strval', array_diff(array_keys($productRequired), array_keys($productValid))));
+        $slots = array_keys($slots ?: [0 => true]);
+        $missingProduct = $missingSlots = [];
+        foreach ($slots as $slot) {
+            foreach (array_diff(array_keys($productRequired), array_keys($productValid[$slot] ?? [])) as $id) {
+                $missingProduct[(string) $id] = (string) $id;
+                $missingSlots[] = ['product_set_index' => $slot, 'parameter_id' => (string) $id];
+            }
+        }
+        $missingProduct = array_values($missingProduct);
         $missing = array_values(array_unique([...$missingOffer, ...$missingProduct]));
-        $known = ($cache['offer_schema_available'] ?? false) && ($cache['product_schema_available'] ?? false) && ! $conditional && $requirementsKnown;
+        $known = ($cache['offer_schema_available'] ?? false) && ($cache['product_schema_available'] ?? false) && ! $conditional && $requirementsKnown && ! $unavailable;
         $status = $conflict ? 'CONFLICT' : (! $known ? 'SCHEMA_UNKNOWN' : ($missing ? 'PARTIAL' : 'COMPLETE'));
 
         return ['part_id' => $part, 'allegro_category_id' => $category, 'completeness_status' => strtolower($status), 'status' => $status,
             'reason_code' => ! $known ? 'fresh_schema_missing_or_conditional_rules_not_evaluated' : 'fresh_schema_local_assessment_not_publish_readiness',
             'required_parameter_count' => $cache['offer_schema_available'] ? count($required) : null, 'required_resolved_count' => $cache['offer_schema_available'] ? count($required) - count($missingOffer) : null, 'missing_required_parameter_ids' => $missing,
-            'missing_required_parameter_names' => array_map(fn ($id) => $names[$id] ?? null, $missing), 'product_required_count' => $cache['product_schema_available'] ? count($productRequired) : null, 'product_required_missing' => $cache['product_schema_available'] ? count($missingProduct) : null,
+            'missing_required_parameter_names' => array_map(fn ($id) => $names[$id] ?? null, $missing), 'product_required_count' => $cache['product_schema_available'] ? count($productRequired) * count($slots) : null, 'product_required_missing' => $cache['product_schema_available'] ? count($missingSlots) : null,
+            'product_required_resolved_count' => $cache['product_schema_available'] ? count($productRequired) * count($slots) - count($missingSlots) : null, 'existing_offer_parameter_count' => $existing, 'resolved_from_existing_offer_count' => $resolvedExisting, 'conflict_count' => count($conflictIds), 'readback_unavailable' => $unavailable, 'missing_product_slots' => $missingSlots,
             'missing_product_required_parameter_ids' => $missingProduct, 'missing_product_required_parameter_names' => array_map(fn ($id) => $names[$id] ?? null, $missingProduct),
             'schema_snapshot_id' => $cache['schema_snapshot_id'], 'has_manual_selections' => $manual, 'schema_freshness_status' => $known ? 'both_endpoints_captured' : 'not_fully_known'];
     }
@@ -462,7 +561,7 @@ final class AllegroSupplementResolver
         sort($ids, SORT_STRING);
         sort($values, SORT_REGULAR);
 
-        return self::json([$ids, $values, $row['range_value']]);
+        return self::json([$ids, $values, $row['range_value'], $row['unit']]);
     }
 
     private static function text(mixed $value): ?string

@@ -3033,6 +3033,13 @@ Route::match(['get', 'post'], '/admin/tools/gpswiss-migration-export/{run}/alleg
     ->middleware([\App\Http\Middleware\ShippingRateAuditReadOnly::class, \App\Http\Middleware\ReadOnlyPreviewSession::class, Authenticate::class, 'admin.panel'])
     ->name('admin.tools.gpswiss-migration-export.allegro-schema-refresh');
 
+// Explicit read-only GET capture of frozen Allegro listing IDs; private receipts only.
+Route::match(['get', 'post'], '/admin/tools/gpswiss-migration-export/{run}/allegro-offer-readback', \App\Http\Controllers\Tools\AllegroOfferReadbackController::class)
+    ->whereUuid('run')
+    ->withoutMiddleware(\Illuminate\Session\Middleware\StartSession::class)
+    ->middleware([\App\Http\Middleware\ShippingRateAuditReadOnly::class, \App\Http\Middleware\ReadOnlyPreviewSession::class, Authenticate::class, 'admin.panel'])
+    ->name('admin.tools.gpswiss-migration-export.allegro-offer-readback');
+
 // Authenticated diagnostic fallback only for malformed migration-export URLs.
 Route::match(['get', 'post'], '/admin/tools/gpswiss-migration-export/{invalidPath}', [\App\Http\Controllers\Tools\GpswissMigrationExportController::class, 'invalidRoute'])
     ->where('invalidPath', '.+')

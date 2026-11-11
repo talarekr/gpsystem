@@ -15,19 +15,23 @@ final class AllegroParametersSupplement
 
     private const PARENT_STAGES = ['parts_index' => 'parts', 'categories_index' => 'part_categories', 'category_mappings_index' => 'marketplace_category_mappings', 'manual_index' => 'allegro_parameter_selections', 'listings_index' => 'marketplace_listings', 'resolve' => 'parts'];
 
-    public function __construct(private GpswissMigrationExport $parents, private BrowserMigrationSnapshot $snapshots, private AllegroSupplementResolver $resolver, private BrowserMigrationArchives $archives, private AllegroSchemaRefresh $refresh) {}
+    public function __construct(private GpswissMigrationExport $parents, private BrowserMigrationSnapshot $snapshots, private AllegroSupplementResolver $resolver, private BrowserMigrationArchives $archives, private AllegroSchemaRefresh $refresh, private AllegroOfferParameterReadback $readback) {}
 
-    public function start(int $owner, string $run, string $attempt, bool $requireFresh = false): array
+    public function start(int $owner, string $run, string $attempt, bool $requireFresh = false, bool $requireReadback = false): array
     {
         $parent = $this->parents->supplementParent($owner, $run, $attempt);
         $fresh = $this->fresh($owner, $run, $attempt);
         if ($requireFresh && $fresh === null) {
             throw new MigrationExportException('supplement_schema_refresh_required');
         }
-        $folder = $this->folder($parent, $run, $attempt, $fresh);
+        $offers = $this->offerContext($owner, $run, $attempt);
+        if ($requireReadback && $offers === null) {
+            throw new MigrationExportException('supplement_offer_readback_required');
+        }
+        $folder = $this->folder($parent, $run, $attempt, $fresh, $offers);
         $this->mkdir($folder);
 
-        return $this->locked($folder, function () use ($folder, $parent, $run, $attempt, $fresh): array {
+        return $this->locked($folder, function () use ($folder, $parent, $run, $attempt, $fresh, $offers): array {
             if (is_file($folder.'/checkpoint.json')) {
                 $state = $this->load($folder.'/checkpoint.json');
                 $this->assertParent($parent, $state);
@@ -43,7 +47,7 @@ final class AllegroParametersSupplement
                     throw new MigrationExportException('supplement_parent_capture_incomplete');
                 }
             }
-            $state = ['format' => self::FORMAT, 'parent_run_id' => $run, 'parent_attempt_id' => $attempt, 'captured_at' => now()->toIso8601String(), 'phase' => $fresh ? 'refreshed_schema' : self::TABLES[0], 'fresh_plan_id' => $fresh['plan_id'] ?? null, 'schema_mode' => $fresh ? 'provider_get_refresh' : 'legacy_local_only', 'contract_revision' => $fresh ? 2 : 1, 'refresh_context' => $fresh, 'refresh_offset' => 0, 'shard' => 0, 'row' => 0,
+            $state = ['format' => self::FORMAT, 'parent_run_id' => $run, 'parent_attempt_id' => $attempt, 'captured_at' => now()->toIso8601String(), 'phase' => $fresh ? 'refreshed_schema' : self::TABLES[0], 'fresh_plan_id' => $fresh['plan_id'] ?? null, 'schema_mode' => $fresh ? 'provider_get_refresh' : 'legacy_local_only', 'contract_revision' => $offers ? 3 : ($fresh ? 2 : 1), 'readback_plan_id' => $offers['plan_id'] ?? null, 'readback_context' => $offers, 'readback_offset' => 0, 'refresh_context' => $fresh, 'refresh_offset' => 0, 'shard' => 0, 'row' => 0,
                 'parent_index_sha256' => hash_file('sha256', $parent.'/logical-snapshot/'.$attempt.'/checkpoint.json'), 'tables' => [], 'files' => [], 'datasets' => [], 'done' => false,
                 'stats' => ['parts_with_manual_selections' => 0, 'resolved_parameter_rows' => 0, 'conflicts' => 0, 'historical_only_parameters' => 0, 'missing_required_values' => 0, 'orphan_listing_parameter_rows' => 0,
                     'part_category_completeness' => array_fill_keys(['COMPLETE', 'PARTIAL', 'SCHEMA_UNKNOWN', 'CONFLICT'], 0), 'completeness' => array_fill_keys(['complete', 'partial', 'historical_only', 'schema_unknown', 'conflict'], 0)], 'parameter_ids' => [], 'category_ids' => [], 'missing_schema_categories' => []];
@@ -84,6 +88,8 @@ final class AllegroParametersSupplement
             $started = microtime(true);
             if ($state['phase'] === 'refreshed_schema') {
                 $this->freshCacheTick($folder, $state);
+            } elseif ($state['phase'] === 'offer_readback') {
+                $this->offerCacheTick($folder, $state);
             } elseif (in_array($state['phase'], self::TABLES, true)) {
                 ReadOnlyDatabase::run(function () use ($folder, &$state): void {
                     $this->captureTable($folder, $state);
@@ -131,6 +137,8 @@ final class AllegroParametersSupplement
         }
         if (in_array($key, ['manifest', 'checksums', 'summary', 'archive-manifest'], true)) {
             $file = $folder.'/'.$key.'.json';
+        } elseif ($key === 'parameters-csv') {
+            $file = $folder.'/allegro_parametry_czesci.csv';
         } elseif (preg_match('/\Avolume-[0-9]{6}\z/D', $key)) {
             $archive = $this->load($folder.'/archive-manifest.json');
             $volume = collect($archive['volumes'])->firstWhere('key', $key);
@@ -146,6 +154,73 @@ final class AllegroParametersSupplement
         }
 
         return $file;
+    }
+
+    /** Preview does not create a package or call any provider. Its digest binds both immutable input plans. */
+    public function plan(int $owner, string $run, string $attempt): array
+    {
+        $parent = $this->parents->supplementParent($owner, $run, $attempt);
+        $fresh = $this->refresh->completed($owner, $run, $attempt);
+        $offers = $this->readback->completed($owner, $run, $attempt);
+        $plan = ['parent_run_id' => $run, 'parent_attempt_id' => $attempt, 'fresh_plan_id' => $fresh['plan_id'], 'readback_plan_id' => $offers['plan_id'], 'parent_sha256' => hash_file('sha256', $parent.'/logical-snapshot/'.$attempt.'/checkpoint.json'), 'contract_revision' => 3, 'provider_calls' => false, 'business_writes' => false, 'categories' => count($fresh['categories']), 'offers' => count($offers['offers'])];
+
+        return $plan + ['plan_digest' => hash('sha256', $this->json($plan))];
+    }
+
+    private function offerContext(int $owner, string $run, string $attempt): ?array
+    {
+        try {
+            return $this->readback->completed($owner, $run, $attempt);
+        } catch (MigrationExportException $e) {
+            if (in_array($e->reasonCode, ['offer_plan_not_started', 'supplement_offer_readback_required'], true)) {
+                return null;
+            }
+            throw $e;
+        }
+    }
+
+    private function offerCacheTick(string $folder, array &$state): void
+    {
+        $context = $state['readback_context'];
+        $offer = $context['offers'][$state['readback_offset']] ?? null;
+        if ($offer === null) {
+            $state['phase'] = self::TABLES[1];
+
+            return;
+        }
+        $receipt = $this->readback->receipt($context['directory'], $offer['offer_id']);
+        if (! ($receipt['confirmed'] ?? false)) {
+            throw new MigrationExportException('supplement_offer_receipt_missing');
+        }
+        $freshness = ['offer_id' => $offer['offer_id'], 'links' => array_values($offer['links']), 'readback_plan_id' => $context['plan_id'], 'http_status' => $receipt['http_status'] ?? null, 'reason_code' => $receipt['reason_code'], 'fetched_at' => $receipt['fetched_at'] ?? null, 'attempts' => $receipt['attempts'], 'sha256' => $receipt['sha256'] ?? null];
+        $this->appendRows($folder, $state, 'allegro_offer_readback_freshness', [$freshness], array_keys($freshness));
+        if ($receipt['ok']) {
+            $raw = $receipt + ['links' => array_values($offer['links']), 'readback_plan_id' => $context['plan_id']];
+            $this->appendRows($folder, $state, 'allegro_existing_offer_readbacks', [$raw], array_keys($raw));
+        }
+        $parts = array_unique(array_column($offer['links'], 'part_id'));
+        foreach ($parts as $part) {
+            $link = collect($offer['links'])->firstWhere('part_id', $part);
+            if ($receipt['ok']) {
+                $candidates = $this->resolver->readbackCandidates($receipt, (string) $part, $link, count($parts) > 1);
+                $normalized = array_values(array_filter($candidates, fn ($r) => $r['parameter_id'] !== null));
+                foreach ($normalized as &$row) {
+                    $cache = $this->get($folder, 'schema', $row['allegro_category_id']);
+                    $definitions = $row['scope'] === 'product' ? ($cache['product_raw_response']['parameters'] ?? []) : ($cache['raw_response']['parameters'] ?? []);
+                    $definition = collect($definitions)->first(fn ($d) => (string) $d['id'] === $row['parameter_id']);
+                    $row['parameter_name'] = $definition['name'] ?? $row['parameter_name'] ?? null;
+                    $available = ($row['scope'] === 'product' ? ($cache['product_schema_available'] ?? false) : ($cache['offer_schema_available'] ?? false));
+                    $row['historical_schema_mismatch'] = $available && $definition === null;
+                    $row['schema_status'] = ! $available ? 'schema_unknown' : ($definition === null ? 'historical_schema_mismatch' : 'known');
+                }
+                unset($row);
+                $this->appendRows($folder, $state, 'allegro_existing_offer_parameters', $normalized, AllegroSupplementResolver::EXISTING_FIELDS);
+            } else {
+                $candidates = [['allegro_category_id' => null, 'parameter_id' => null, 'source' => 'existing_allegro_offer', 'allegro_offer_id' => $offer['offer_id'], 'offer_id' => $offer['offer_id'], 'readback_unavailable' => true, 'source_field' => 'readback.'.$receipt['reason_code']]];
+            }
+            $this->putGroup($folder, 'readback', (string) $part, $offer['offer_id'], $candidates);
+        }
+        $state['readback_offset']++;
     }
 
     private function fresh(int $owner, string $run, string $attempt): ?array
@@ -165,7 +240,7 @@ final class AllegroParametersSupplement
         $context = $state['refresh_context'];
         $category = $context['categories'][$state['refresh_offset']] ?? null;
         if ($category === null) {
-            $state['phase'] = self::TABLES[1];
+            $state['phase'] = ($state['readback_plan_id'] ?? null) ? 'offer_readback' : self::TABLES[1];
 
             return;
         }
@@ -198,6 +273,9 @@ final class AllegroParametersSupplement
         $cache['schema_snapshot_id'] = hash('sha256', $this->json($reports));
         $this->put($folder, 'schema', $category, $cache);
         $this->appendRows($folder, $state, 'schema_freshness', $reports, array_keys($reports[0]));
+        if ($state['readback_plan_id'] ?? null) {
+            $this->appendRows($folder, $state, 'allegro_schema_freshness', $reports, array_keys($reports[0]));
+        }
         $state['refresh_offset']++;
     }
 
@@ -296,7 +374,7 @@ final class AllegroParametersSupplement
             } elseif ($phase === 'resolve') {
                 $result = $this->resolver->resolve($row, $source->find('cars', isset($row['car_id']) ? (string) $row['car_id'] : null), $this->get($folder, 'categories', (string) ($row['category_id'] ?? '')),
                     array_values($this->get($folder, 'category_mappings', (string) ($row['category_id'] ?? '')) ?? []), array_values($this->get($folder, 'manual', $id) ?? []),
-                    array_merge([], ...array_values($this->get($folder, 'history', $id) ?? [])), fn ($category) => $this->get($folder, 'schema', $category), fn ($category) => array_values($this->get($folder, 'rules', $category) ?? []), $state['captured_at'], freshRequired: ($state['fresh_plan_id'] ?? null) !== null);
+                    array_merge([], ...array_values($this->get($folder, 'history', $id) ?? []), ...array_values($this->get($folder, 'readback', $id) ?? [])), fn ($category) => $this->get($folder, 'schema', $category), fn ($category) => array_values($this->get($folder, 'rules', $category) ?? []), $state['captured_at'], freshRequired: ($state['fresh_plan_id'] ?? null) !== null);
                 $this->record($folder, $state, $result);
             }
             $state['row']++;
@@ -313,6 +391,12 @@ final class AllegroParametersSupplement
         $this->appendRows($folder, $state, 'allegro_resolved_parameters', $result['rows'], AllegroSupplementResolver::FIELDS);
         $this->appendRows($folder, $state, 'conflicts', $result['conflicts'], ['conflict_id', 'part_id', 'allegro_category_id', 'parameter_id', 'reason_code', 'candidates']);
         $this->appendRows($folder, $state, 'completeness', $result['completeness'], AllegroSupplementResolver::COMPLETENESS_FIELDS);
+        if ($state['readback_plan_id'] ?? null) {
+            $this->appendRows($folder, $state, 'allegro_parameter_completeness', $result['completeness'], AllegroSupplementResolver::COMPLETENESS_FIELDS);
+            $this->appendRows($folder, $state, 'allegro_parameter_conflicts', $result['conflicts'], ['conflict_id', 'part_id', 'allegro_category_id', 'parameter_id', 'reason_code', 'candidates']);
+            $import = $this->resolver->importRows($result['rows']);
+            $this->appendRows($folder, $state, 'allegro_parametry_czesci', $import, AllegroSupplementResolver::IMPORT_FIELDS);
+        }
         $state['stats']['parts_with_manual_selections'] += (int) $result['has_manual_selections'];
         $state['stats']['resolved_parameter_rows'] += count($result['rows']);
         $state['stats']['conflicts'] += count($result['conflicts']);
@@ -341,7 +425,13 @@ final class AllegroParametersSupplement
 
     private function appendRows(string $folder, array &$state, string $dataset, array $rows, array $columns): void
     {
-        $rows = MigrationDataPolicy::clean($rows);
+        $rows = AllegroParameterDataPolicy::clean($rows);
+        foreach ($rows as &$row) {
+            if (is_array($row['raw_response_text'] ?? null)) {
+                $row['raw_response_text'] = $this->json($row['raw_response_text']);
+            }
+        }
+        unset($row);
         $json = implode('', array_map(fn ($row) => $this->json($row)."\n", $rows));
         $stream = fopen('php://temp', 'w+b');
         $csvFile = $dataset.'.csv';
@@ -403,12 +493,19 @@ final class AllegroParametersSupplement
                 $this->appendRows($folder, $state, $dataset, [], $columns);
             }
         }
+        if ($state['readback_plan_id'] ?? null) {
+            foreach (['allegro_existing_offer_parameters' => AllegroSupplementResolver::EXISTING_FIELDS, 'allegro_parametry_czesci' => AllegroSupplementResolver::IMPORT_FIELDS, 'allegro_parameter_completeness' => AllegroSupplementResolver::COMPLETENESS_FIELDS, 'allegro_parameter_conflicts' => ['conflict_id', 'part_id', 'allegro_category_id', 'parameter_id', 'reason_code', 'candidates'], 'allegro_schema_freshness' => ['category_id', 'endpoint', 'http_status', 'reason_code', 'fetched_at'], 'allegro_existing_offer_readbacks' => ['offer_id', 'raw_response', 'fetched_at'], 'allegro_offer_readback_freshness' => ['offer_id', 'http_status', 'reason_code', 'fetched_at']] as $name => $columns) {
+                if (! isset($state['datasets'][$name])) {
+                    $this->appendRows($folder, $state, $name, [], $columns);
+                }
+            }
+        }
         $summary = $this->summary($state);
         $parentIndex = $this->load($folder.'/parent-index.json');
         $this->write($folder.'/summary.json', $summary);
         $this->atomicBytes($folder.'/schema.json', file_get_contents(resource_path('allegro-resolved-parameters-supplement.schema.json')));
         $manifest = ['format' => self::FORMAT, 'parent_run_id' => $state['parent_run_id'], 'parent_attempt_id' => $state['parent_attempt_id'], 'parent_index_sha256' => $state['parent_index_sha256'], 'captured_at' => $state['captured_at'],
-            'consistency' => ($state['fresh_plan_id'] ?? null) ? 'sealed_parent_artifacts_plus_operator_confirmed_provider_schemas_and_later_local_rules_not_transactional' : 'sealed_parent_artifacts_plus_later_local_cache_and_rules_capture_not_transactional', 'local_table_boundaries' => $state['tables'], 'datasets' => $state['datasets'], 'summary' => $summary, 'schema_mode' => $state['schema_mode'] ?? 'legacy_local_only', 'contract_revision' => $state['contract_revision'] ?? 1, 'schema_refresh' => $state['refresh_context']['summary'] ?? null,
+            'consistency' => ($state['fresh_plan_id'] ?? null) ? 'sealed_parent_artifacts_plus_operator_confirmed_provider_schemas_and_later_local_rules_not_transactional' : 'sealed_parent_artifacts_plus_later_local_cache_and_rules_capture_not_transactional', 'local_table_boundaries' => $state['tables'], 'datasets' => $state['datasets'], 'summary' => $summary, 'schema_mode' => $state['schema_mode'] ?? 'legacy_local_only', 'contract_revision' => $state['contract_revision'] ?? 1, 'schema_refresh' => $state['refresh_context']['summary'] ?? null, 'offer_readback' => $state['readback_context']['summary'] ?? null, 'readback_plan_id' => $state['readback_plan_id'] ?? null, 'parameter_source_priority' => ['existing_allegro_offer', 'manual_selection', 'local_mapping', 'derived_from_part', 'derived_from_car', 'unresolved'],
             'parent_database_consistency' => $parentIndex['database_consistency'] ?? null, 'parent_consistency_exception' => $parentIndex['consistency_exception'] ?? null,
             'resolved_parameters_schema' => 'schema.json',
             'formats' => ['jsonl' => 'UTF-8; identifiers are strings; null remains null; arrays are preserved', 'csv' => 'UTF-8 BOM; semicolon; nested JSON; null=\\N; literal leading backslash doubled; formula prefix apostrophe; import identifiers as TEXT'],
@@ -466,13 +563,13 @@ final class AllegroParametersSupplement
 
     private function publicState(array $state): array
     {
-        return array_intersect_key($state, array_flip(['contract_revision', 'schema_mode', 'fresh_plan_id', 'format', 'parent_run_id', 'parent_attempt_id', 'phase', 'shard', 'row', 'done', 'last_tick'])) + ['schema_mode' => $state['schema_mode'] ?? 'legacy_local_only', 'contract_revision' => $state['contract_revision'] ?? 1, 'next_action' => $state['done'] ? 'download' : 'tick', 'summary' => $this->summary($state), 'dataset_counts' => array_map(fn ($dataset) => $dataset['rows'], $state['datasets']), 'provider_calls' => false, 'business_writes' => false];
+        return array_intersect_key($state, array_flip(['contract_revision', 'schema_mode', 'fresh_plan_id', 'readback_plan_id', 'format', 'parent_run_id', 'parent_attempt_id', 'phase', 'shard', 'row', 'done', 'last_tick'])) + ['schema_mode' => $state['schema_mode'] ?? 'legacy_local_only', 'contract_revision' => $state['contract_revision'] ?? 1, 'next_action' => $state['done'] ? 'download' : 'tick', 'summary' => $this->summary($state), 'dataset_counts' => array_map(fn ($dataset) => $dataset['rows'], $state['datasets']), 'provider_calls' => false, 'business_writes' => false];
     }
 
     private function context(int $owner, string $run, string $attempt): array
     {
         $parent = $this->parents->supplementParent($owner, $run, $attempt);
-        $folder = $this->folder($parent, $run, $attempt, $this->fresh($owner, $run, $attempt));
+        $folder = $this->folder($parent, $run, $attempt, $this->fresh($owner, $run, $attempt), $this->offerContext($owner, $run, $attempt));
         if (! is_file($folder.'/checkpoint.json')) {
             throw new MigrationExportException('supplement_not_started', 404);
         }
@@ -481,9 +578,9 @@ final class AllegroParametersSupplement
         return [$parent, $folder];
     }
 
-    private function folder(string $parent, string $run, string $attempt, ?array $fresh = null): string
+    private function folder(string $parent, string $run, string $attempt, ?array $fresh = null, ?array $offers = null): string
     {
-        return dirname($parent).'/.allegro-parameters-supplements/'.$run.'/'.$attempt.($fresh ? '/fresh-'.$fresh['plan_id'] : '');
+        return dirname($parent).'/.allegro-parameters-supplements/'.$run.'/'.$attempt.($fresh ? '/fresh-'.$fresh['plan_id'] : '').($offers ? '/offers-'.$offers['plan_id'] : '');
     }
 
     private function putGroup(string $folder, string $bucket, string $key, string $item, array $row): void

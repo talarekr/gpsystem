@@ -34,7 +34,16 @@
     "valid_for_republication",
     "provenance",
     "schema_fetched_at",
-    "schema_source_endpoint"
+    "schema_source_endpoint",
+    "allegro_offer_id",
+    "product_id",
+    "unit",
+    "fetched_at",
+    "source_priority",
+    "is_preferred",
+    "historical_schema_mismatch",
+    "association_conflict",
+    "readback_unavailable"
   ],
   "properties": {
     "part_id": {
@@ -138,7 +147,8 @@
         "marketplace_listing_payload",
         "review_metadata",
         "unknown",
-        "category_schema"
+        "category_schema",
+        "existing_allegro_offer"
       ]
     },
     "source_field": {
@@ -217,7 +227,8 @@
         "derived_from_part",
         "derived_from_car",
         "category_schema",
-        "unresolved"
+        "unresolved",
+        "existing_allegro_offer"
       ]
     },
     "schema_fetched_at": {
@@ -231,6 +242,40 @@
         "string",
         "null"
       ]
+    },
+    "allegro_offer_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "product_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "unit": {},
+    "fetched_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source_priority": {
+      "type": "integer"
+    },
+    "is_preferred": {
+      "type": "boolean"
+    },
+    "historical_schema_mismatch": {
+      "type": "boolean"
+    },
+    "association_conflict": {
+      "type": "boolean"
+    },
+    "readback_unavailable": {
+      "type": "boolean"
     }
   },
   "additionalProperties": false
