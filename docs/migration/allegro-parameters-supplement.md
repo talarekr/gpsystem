@@ -1,4 +1,6 @@
-# Allegro parameter supplement v1
+# Allegro parameter supplement v1 — legacy local-only contract
+
+Current panel flow first requires the explicit GET-only refresh described in [allegro-schema-refresh.md](allegro-schema-refresh.md). The original local-only behaviour below documents legacy packages that remain readable; it is not the current HTTP start contract. Fresh packages have contract_revision=2.
 
 This is an independent, private package: `gpswiss-allegro-parameters-supplement-v1`.
 It does not extend or restart the parent capture, source verification, relations,

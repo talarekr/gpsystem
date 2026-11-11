@@ -11,7 +11,9 @@ use App\Services\Marketplace\AllegroOfferParametersBuilder;
 /** Explicit provenance candidates, not a publishing payload or an authority about today's Allegro schema. */
 final class AllegroSupplementResolver
 {
-    public const FIELDS = ['part_id', 'allegro_category_id', 'parameter_id', 'parameter_name_snapshot', 'parameter_type', 'multiple_choices', 'parameter_scope', 'product_set_index', 'values_ids', 'values', 'range_value', 'raw_value', 'required_snapshot', 'required_for_product_snapshot', 'describes_product_snapshot', 'schema_snapshot_id', 'source', 'source_field', 'source_listing_id', 'marketplace_account_id', 'captured_at', 'source_observed_at', 'completeness_status', 'reason_code', 'local_validation_status', 'resolution_role', 'candidate_id', 'conflict_id', 'valid_for_republication'];
+    public const FIELDS = ['part_id', 'allegro_category_id', 'parameter_id', 'parameter_name_snapshot', 'parameter_type', 'multiple_choices', 'parameter_scope', 'product_set_index', 'values_ids', 'values', 'range_value', 'raw_value', 'required_snapshot', 'required_for_product_snapshot', 'describes_product_snapshot', 'schema_snapshot_id', 'source', 'source_field', 'source_listing_id', 'marketplace_account_id', 'captured_at', 'source_observed_at', 'completeness_status', 'reason_code', 'local_validation_status', 'resolution_role', 'candidate_id', 'conflict_id', 'valid_for_republication', 'provenance', 'schema_fetched_at', 'schema_source_endpoint'];
+
+    public const COMPLETENESS_FIELDS = ['part_id', 'allegro_category_id', 'completeness_status', 'reason_code', 'missing_required_parameter_ids', 'schema_snapshot_id', 'has_manual_selections', 'required_parameter_count', 'required_resolved_count', 'missing_required_parameter_names', 'product_required_count', 'product_required_missing', 'missing_product_required_parameter_ids', 'missing_product_required_parameter_names', 'status', 'schema_freshness_status', 'canonical_allegro_category_id', 'category_context'];
 
     public function __construct(private AllegroOfferParametersBuilder $builder) {}
 
@@ -79,9 +81,10 @@ final class AllegroSupplementResolver
     }
 
     /** resolve one frozen Part; lookup reads only supplement indexes or frozen parent shards. */
-    public function resolve(array $part, ?array $car, ?array $localCategory, array $categoryMappings, array $manual, array $historical, callable $schema, callable $rules, string $capturedAt): array
+    public function resolve(array $part, ?array $car, ?array $localCategory, array $categoryMappings, array $manual, array $historical, callable $schema, callable $rules, string $capturedAt, bool $freshRequired = false): array
     {
         $category = self::text(data_get($part, 'review_metadata.marketplace_category_overrides.allegro.external_category_id'));
+        $categoryMappings = array_values(array_filter($categoryMappings, fn ($m) => self::text($m['external_category_id'] ?? null) !== null));
         usort($categoryMappings, fn ($a, $b) => (($a['channel'] ?? '') === 'allegro_main' ? 0 : 1) <=> (($b['channel'] ?? '') === 'allegro_main' ? 0 : 1) ?: ((string) ($a['id'] ?? '') <=> (string) ($b['id'] ?? '')));
         $category ??= self::text($categoryMappings[0]['external_category_id'] ?? null);
         $observed = self::text($part['updated_at'] ?? null);
@@ -110,7 +113,7 @@ final class AllegroSupplementResolver
             if ($cache === null) {
                 continue;
             }
-            $definitions = array_map(fn ($def) => $def + ['category_id' => (string) $categoryId], $cache['raw_response']['parameters'] ?? []);
+            $definitions = array_map(fn ($def) => $def + ['category_id' => (string) $categoryId], $this->builderDefinitions($cache));
             $mapping = (new MarketplaceCategoryMapping)->forceFill(['external_category_id' => (string) $categoryId]);
             $categoryRules = $rules((string) $categoryId);
             $result = $this->builder->buildFromSnapshot($model, $mapping, ['ok' => true, 'source' => 'frozen_local_cache', 'parameters' => $definitions], $manual, $categoryRules);
@@ -119,6 +122,12 @@ final class AllegroSupplementResolver
                     continue;
                 }
                 $scope = ($diagnostic['parameter_location'] ?? null) === 'productSet[0].product.parameters' ? 'product' : 'offer';
+                if (($cache['fresh_schema'] ?? false) && (($diagnostic['source'] ?? '') === 'fixed_business_rule' || ($diagnostic['auto_injected'] ?? false))) {
+                    $candidates[] = ['allegro_category_id' => (string) $categoryId, 'parameter_id' => (string) $diagnostic['id'], 'parameter_name_snapshot' => $diagnostic['name'] ?? null,
+                        'source' => 'unknown', 'source_field' => 'migration.builder_default_not_applied', 'parameter_scope' => $scope, 'resolution_role' => 'coverage_marker', 'values' => [], 'values_ids' => []];
+
+                    continue;
+                }
                 $manualResult = ($diagnostic['source'] ?? '') === 'allegro_parameter_selections.value_id';
                 if ($manualResult) {
                     $validIds = $diagnostic['valuesIds'] ?? [];
@@ -160,11 +169,31 @@ final class AllegroSupplementResolver
                     'source' => $source, 'source_field' => $field, 'source_observed_at' => $sourceObserved, 'parameter_scope' => $scope, 'resolution_role' => 'builder_result'];
             }
         }
+        foreach ($categories as $categoryId) {
+            $cache = $schema((string) $categoryId);
+            if (! ($cache['fresh_schema'] ?? false)) {
+                continue;
+            }
+            foreach ($this->builderDefinitions($cache) as $definition) {
+                if (! ($definition['required'] ?? false) && ! ($definition['requiredForProduct'] ?? $definition['options']['requiredForProduct'] ?? false)) {
+                    continue;
+                }
+                $found = false;
+                foreach ($candidates as $candidate) {
+                    if ((string) ($candidate['allegro_category_id'] ?? '') === (string) $categoryId && (string) ($candidate['parameter_id'] ?? '') === (string) $definition['id']) {
+                        $found = true;
+                    }
+                }
+                if (! $found) {
+                    $candidates[] = ['allegro_category_id' => (string) $categoryId, 'parameter_id' => (string) $definition['id'], 'source' => 'category_schema', 'parameter_scope' => ($definition['options']['describesProduct'] ?? false) ? 'product' : 'offer', 'source_field' => 'fresh_schema.required', 'resolution_role' => 'coverage_marker'];
+                }
+            }
+        }
         if ($candidates === []) {
             $candidates[] = ['allegro_category_id' => $category, 'parameter_id' => null, 'source' => 'unknown'];
         }
 
-        return $this->finish(self::text($part['id']), $candidates, $categories ?: [$category], $schema, $capturedAt, $manual !== []);
+        return $this->finish(self::text($part['id']), $candidates, $categories ?: [$category], $schema, $capturedAt, $manual !== [], $freshRequired, $category);
     }
 
     public function orphan(?string $partId, array $candidates, callable $schema, string $capturedAt): array
@@ -172,8 +201,11 @@ final class AllegroSupplementResolver
         return $this->finish($partId, $candidates, array_unique(array_column($candidates, 'allegro_category_id')), $schema, $capturedAt, false);
     }
 
-    private function finish(?string $partId, array $candidates, array $categories, callable $schema, string $capturedAt, bool $hasManual): array
+    private function finish(?string $partId, array $candidates, array $categories, callable $schema, string $capturedAt, bool $hasManual, bool $freshRequired = false, ?string $canonicalCategory = null): array
     {
+        if ($freshRequired && $canonicalCategory === null && ! in_array(null, $categories, true)) {
+            $categories[] = null;
+        }
         $rows = [];
         $conflicts = [];
         $reports = [];
@@ -181,7 +213,9 @@ final class AllegroSupplementResolver
             $category = self::text($candidate['allegro_category_id'] ?? null);
             $cache = $category === null ? null : $schema($category);
             $definition = null;
-            foreach ($cache['raw_response']['parameters'] ?? [] as $item) {
+            $candidateScope = $candidate['parameter_scope'] ?? null;
+            $schemaDefinitions = $candidateScope === 'product' && ($cache['fresh_schema'] ?? false) ? ($cache['product_raw_response']['parameters'] ?? []) : ($cache['raw_response']['parameters'] ?? []);
+            foreach ($schemaDefinitions as $item) {
                 if ((string) ($item['id'] ?? '') === (string) ($candidate['parameter_id'] ?? '')) {
                     $definition = $item;
                     break;
@@ -191,13 +225,27 @@ final class AllegroSupplementResolver
             if ($scope === null && isset($definition['options']['describesProduct'])) {
                 $scope = $definition['options']['describesProduct'] ? 'product' : 'offer';
             }
+            if (($cache['fresh_schema'] ?? false) && $scope === 'product') {
+                $definition = null;
+                foreach ($cache['product_raw_response']['parameters'] ?? [] as $item) {
+                    if ((string) $item['id'] === (string) ($candidate['parameter_id'] ?? '')) {
+                        $definition = $item;
+                        break;
+                    }
+                }
+            }
+            $schemaKnown = $cache !== null && (! ($cache['fresh_schema'] ?? false) || ($scope === 'product' ? $cache['product_schema_available'] : $cache['offer_schema_available']));
             $row = array_replace(array_fill_keys(self::FIELDS, null), $candidate, ['part_id' => $partId, 'allegro_category_id' => $category,
                 'parameter_name_snapshot' => $candidate['parameter_name_snapshot'] ?? $definition['name'] ?? null,
                 'parameter_type' => $definition['type'] ?? null, 'multiple_choices' => $definition['restrictions']['multipleChoices'] ?? $definition['multipleChoices'] ?? null,
                 'parameter_scope' => $scope, 'product_set_index' => $scope === 'product' ? ($candidate['product_set_index'] ?? 0) : null,
                 'values_ids' => array_values(array_unique(array_map('strval', $candidate['values_ids'] ?? []))), 'values' => $candidate['values'] ?? [],
-                'required_snapshot' => $definition['required'] ?? null, 'required_for_product_snapshot' => $definition['options']['requiredForProduct'] ?? $definition['requiredForProduct'] ?? null,
+                'required_snapshot' => $definition['required'] ?? null, 'required_for_product_snapshot' => $definition['options']['requiredForProduct'] ?? $definition['requiredForProduct'] ?? (($cache['fresh_schema'] ?? false) && $scope === 'product' ? ($definition['required'] ?? null) : null),
                 'describes_product_snapshot' => $definition['options']['describesProduct'] ?? null, 'schema_snapshot_id' => $cache['schema_snapshot_id'] ?? null,
+                'provenance' => match ($candidate['source'] ?? 'unknown') {
+                    'manual_selection' => 'manual_selection', 'marketplace_listing_payload', 'legacy_offer_payload', 'review_metadata' => 'existing_listing', 'parameter_mapping' => 'local_mapping', 'computed_from_part' => 'derived_from_part', 'computed_from_car' => 'derived_from_car', 'category_schema' => 'category_schema', default => 'unresolved',
+                }, 'schema_fetched_at' => $scope === 'product' ? ($cache['product_fetched_at'] ?? $cache['fetched_at'] ?? null) : ($cache['fetched_at'] ?? null),
+                'schema_source_endpoint' => $scope === 'product' && ($cache['fresh_schema'] ?? false) ? 'GET /sale/categories/'.$category.'/product-parameters' : ($cache['endpoint'] ?? null),
                 'captured_at' => $capturedAt, 'valid_for_republication' => null, 'resolution_role' => $candidate['resolution_role'] ?? (($candidate['parameter_id'] ?? null) === null ? 'coverage_marker' : 'stored_source')]);
             $present = self::present($row);
             $historic = in_array($row['source'], ['legacy_offer_payload', 'marketplace_listing_payload', 'review_metadata'], true);
@@ -209,9 +257,12 @@ final class AllegroSupplementResolver
                     $valid = false;
                 }
             }
-            $row['local_validation_status'] = $cache === null ? 'unknown' : ($definition === null ? 'parameter_not_in_local_schema' : ($valid ? 'value_present_in_local_schema' : 'value_missing_or_invalid_locally'));
-            $row['completeness_status'] = $cache === null ? 'schema_unknown' : ($row['parameter_id'] === null ? 'partial' : ($definition === null || $historic ? 'historical_only' : ($valid ? 'complete' : 'partial')));
-            $row['reason_code'] = $cache === null ? 'schema_unavailable_locally' : ($definition === null ? 'parameter_absent_from_local_schema' : ($historic ? ($present ? 'historical_not_validated_for_publication' : 'historical_parameter_id_only') : ($valid ? 'resolved_against_local_cache' : 'value_missing_or_invalid_locally')));
+            if (($cache['fresh_schema'] ?? false) && $definition !== null) {
+                $valid = $valid && $this->typedValueValid($row, $definition);
+            }
+            $row['local_validation_status'] = ! $schemaKnown ? 'unknown' : ($definition === null ? 'parameter_not_in_local_schema' : ($valid ? 'value_present_in_local_schema' : 'value_missing_or_invalid_locally'));
+            $row['completeness_status'] = ! $schemaKnown ? 'schema_unknown' : ($row['parameter_id'] === null ? 'partial' : ($definition === null || $historic ? 'historical_only' : ($valid ? 'complete' : 'partial')));
+            $row['reason_code'] = ! $schemaKnown ? 'schema_unavailable_locally' : ($definition === null ? 'parameter_absent_from_local_schema' : ($historic ? ($present ? 'historical_not_validated_for_publication' : 'historical_parameter_id_only') : ($valid ? 'resolved_against_local_cache' : 'value_missing_or_invalid_locally')));
             $row['candidate_id'] = hash('sha256', self::json($row));
             $rows[$row['candidate_id']] = $row;
         }
@@ -253,6 +304,14 @@ final class AllegroSupplementResolver
         }
         foreach ($categories as $category) {
             $cache = $category === null ? null : $schema((string) $category);
+            if ($freshRequired && $cache === null) {
+                $cache = ['fresh_schema' => true, 'raw_response' => ['parameters' => []], 'product_raw_response' => ['parameters' => []], 'offer_schema_available' => false, 'product_schema_available' => false, 'schema_snapshot_id' => null];
+            }
+            if ($cache['fresh_schema'] ?? false) {
+                $reports[] = $this->freshCompleteness($partId, $category, $cache, $rows, $hasManual) + ['canonical_allegro_category_id' => $canonicalCategory, 'category_context' => $category === null ? 'unresolved' : ((string) $category === $canonicalCategory ? 'canonical' : 'historical')];
+
+                continue;
+            }
             $missing = [];
             foreach ($cache['raw_response']['parameters'] ?? [] as $definition) {
                 if (! ($definition['required'] ?? false) && ! ($definition['options']['requiredForProduct'] ?? $definition['requiredForProduct'] ?? false)) {
@@ -275,6 +334,120 @@ final class AllegroSupplementResolver
         }
 
         return ['rows' => array_values($rows), 'conflicts' => $conflicts, 'completeness' => $reports, 'historical_only_parameters' => $historicalOnly, 'has_manual_selections' => $hasManual];
+    }
+
+    private function builderDefinitions(array $cache): array
+    {
+        $definitions = $cache['raw_response']['parameters'] ?? [];
+        $ids = array_fill_keys(array_map('strval', array_column($definitions, 'id')), true);
+        foreach ($cache['product_raw_response']['parameters'] ?? [] as $definition) {
+            if (! isset($ids[(string) $definition['id']])) {
+                // Annotation for the existing builder only; the exported endpoint response remains byte-exact.
+                $definition['options']['describesProduct'] = true;
+                $definitions[] = $definition;
+            }
+        }
+
+        return $definitions;
+    }
+
+    private function typedValueValid(array $row, array $definition): bool
+    {
+        $type = $definition['type'] ?? null;
+        if ($type === 'dictionary') {
+            return true;
+        } // Dictionary IDs/multiplicity were checked above.
+        if (! in_array($type, ['string', 'integer', 'float'], true)) {
+            return false;
+        }
+        $limits = $definition['restrictions'] ?? [];
+        $values = $row['values'];
+        if ($row['range_value'] !== null) {
+            $values = array_values(array_intersect_key($row['range_value'], array_flip(['from', 'to'])));
+            if (count($values) !== 2 || ! is_numeric($values[0]) || ! is_numeric($values[1]) || $values[0] > $values[1]) {
+                return false;
+            }
+        }
+        if ($values === []) {
+            return false;
+        }
+        foreach ($values as $value) {
+            if (! is_scalar($value)) {
+                return false;
+            }
+            if ($type === 'string') {
+                $length = mb_strlen((string) $value);
+                if ((isset($limits['minLength']) && $length < $limits['minLength']) || (isset($limits['maxLength']) && $length > $limits['maxLength'])) {
+                    return false;
+                }
+            } else {
+                if (! is_numeric($value) || ($type === 'integer' && ! preg_match('/\A-?[0-9]+\z/D', (string) $value))) {
+                    return false;
+                }
+                if ((isset($limits['min']) && $value < $limits['min']) || (isset($limits['max']) && $value > $limits['max'])) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private function freshCompleteness(?string $part, mixed $category, array $cache, array $rows, bool $manual): array
+    {
+        $offer = $cache['raw_response']['parameters'] ?? [];
+        $product = $cache['product_raw_response']['parameters'] ?? [];
+        $required = $productRequired = $names = [];
+        $conditional = false;
+        $requirementsKnown = true;
+        foreach ($offer as $definition) {
+            $id = (string) $definition['id'];
+            $names[$id] = $definition['name'] ?? null;
+            if (($definition['required'] ?? null) === true) {
+                $required[$id] = true;
+            }
+            if (($definition['requiredForProduct'] ?? $definition['options']['requiredForProduct'] ?? null) === true) {
+                $productRequired[$id] = true;
+            }
+            $requirementsKnown = $requirementsKnown && is_bool($definition['required'] ?? null);
+            $conditional = $conditional || ! empty($definition['requiredIf']) || ! empty($definition['dependencies']) || ! empty($definition['dependsOn']) || ! empty($definition['options']['dependencies']);
+        }
+        foreach ($product as $definition) {
+            $id = (string) $definition['id'];
+            $names[$id] = $definition['name'] ?? $names[$id] ?? null;
+            if (($definition['required'] ?? null) === true || ($definition['requiredForProduct'] ?? null) === true || ($definition['options']['requiredForProduct'] ?? null) === true) {
+                $productRequired[$id] = true;
+            }
+            $requirementsKnown = $requirementsKnown && (is_bool($definition['required'] ?? null) || is_bool($definition['requiredForProduct'] ?? null) || is_bool($definition['options']['requiredForProduct'] ?? null));
+            $conditional = $conditional || ! empty($definition['requiredIf']) || ! empty($definition['dependencies']) || ! empty($definition['dependsOn']) || ! empty($definition['options']['dependencies']);
+        }
+        $valid = $productValid = [];
+        $conflict = false;
+        foreach ($rows as $row) {
+            if ((string) $row['allegro_category_id'] !== (string) $category) {
+                continue;
+            }
+            $conflict = $conflict || $row['conflict_id'] !== null;
+            if ($row['local_validation_status'] !== 'value_present_in_local_schema' || in_array($row['provenance'], ['existing_listing', 'unresolved', 'category_schema'], true) || $row['conflict_id'] !== null) {
+                continue;
+            }
+            $valid[(string) $row['parameter_id']] = true;
+            if ($row['parameter_scope'] === 'product') {
+                $productValid[(string) $row['parameter_id']] = true;
+            }
+        }
+        $missingOffer = array_values(array_map('strval', array_diff(array_keys($required), array_keys($valid))));
+        $missingProduct = array_values(array_map('strval', array_diff(array_keys($productRequired), array_keys($productValid))));
+        $missing = array_values(array_unique([...$missingOffer, ...$missingProduct]));
+        $known = ($cache['offer_schema_available'] ?? false) && ($cache['product_schema_available'] ?? false) && ! $conditional && $requirementsKnown;
+        $status = $conflict ? 'CONFLICT' : (! $known ? 'SCHEMA_UNKNOWN' : ($missing ? 'PARTIAL' : 'COMPLETE'));
+
+        return ['part_id' => $part, 'allegro_category_id' => $category, 'completeness_status' => strtolower($status), 'status' => $status,
+            'reason_code' => ! $known ? 'fresh_schema_missing_or_conditional_rules_not_evaluated' : 'fresh_schema_local_assessment_not_publish_readiness',
+            'required_parameter_count' => $cache['offer_schema_available'] ? count($required) : null, 'required_resolved_count' => $cache['offer_schema_available'] ? count($required) - count($missingOffer) : null, 'missing_required_parameter_ids' => $missing,
+            'missing_required_parameter_names' => array_map(fn ($id) => $names[$id] ?? null, $missing), 'product_required_count' => $cache['product_schema_available'] ? count($productRequired) : null, 'product_required_missing' => $cache['product_schema_available'] ? count($missingProduct) : null,
+            'missing_product_required_parameter_ids' => $missingProduct, 'missing_product_required_parameter_names' => array_map(fn ($id) => $names[$id] ?? null, $missingProduct),
+            'schema_snapshot_id' => $cache['schema_snapshot_id'], 'has_manual_selections' => $manual, 'schema_freshness_status' => $known ? 'both_endpoints_captured' : 'not_fully_known'];
     }
 
     public static function present(array $row): bool

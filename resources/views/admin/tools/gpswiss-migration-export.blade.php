@@ -22,12 +22,23 @@
 <h2 id="allegro-supplement-heading">Parametry Allegro — pakiet uzupełniający</h2>
 <p>Osobny pakiet powiązany z istniejącym runem i próbą. Korzysta z zamrożonych danych oraz lokalnego cache i reguł, bez API Allegro. Nie zmienia głównego eksportu, zdjęć ani DATA ONLY. Kompletność dotyczy lokalnie rozwiązanych parametrów, nie gotowości publikacji.</p>
 <p id="allegro-supplement-identity"></p>
+<h3>A. Odśwież definicje parametrów z Allegro</h3>
+<p>Plan czyta zamrożone dane i lokalne informacje o cache. Dopiero Uruchom wykonuje GET /parameters i GET /product-parameters dla wskazanych kategorii. Bez zapisu ofert i bez automatycznego OAuth refreshu.</p>
+<button id="allegro-schema-plan" disabled>Przygotuj plan</button>
+<label><input id="allegro-schema-confirm" type="checkbox"> Zatwierdzam pokazany plan GET i prywatny zapis odpowiedzi.</label>
+<button id="allegro-schema-start" disabled>Uruchom odświeżanie definicji</button>
+<button id="allegro-schema-resume" disabled>Wznów odświeżanie definicji</button>
+<button id="allegro-schema-stop" disabled>Stop lokalnej pętli definicji</button>
+<button id="allegro-schema-status-refresh" disabled>Odśwież status definicji</button>
+<p id="allegro-schema-status" role="status"></p><pre id="allegro-schema-plan-preview" aria-label="Plan i wyniki GET schematów Allegro"></pre>
+<h3>B. Przygotuj pakiet parametrów Allegro</h3>
+<p>Nowy pakiet wymaga zakończonego etapu A. Błędy GET pozostają w raporcie świeżości i nie są zastępowane starym cache. Archiwalny pakiet lokalny pozostaje oznaczony jako legacy.</p>
 <button id="allegro-supplement-start" disabled>Przygotuj pakiet parametrów Allegro</button>
 <button id="allegro-supplement-resume" disabled>Wznów supplement</button>
 <button id="allegro-supplement-stop" disabled>Stop lokalnej pętli supplementu</button>
 <button id="allegro-supplement-status-refresh" disabled>Odśwież status supplementu</button>
 <p id="allegro-supplement-status" role="status">Wybierz istniejący eksport z zakończonym zapisem rekordów.</p>
-<p>Liczby rekordów cache i mapowań pojawią się z końcowego manifestu. „—” oznacza brak licznika w bieżącym statusie, nie zero.</p>
+<p>Liczby rekordów cache i mapowań pochodzą ze statusu albo końcowego manifestu. „—” oznacza brak licznika w bieżącym statusie, nie zero.</p>
 <ul id="allegro-supplement-counts" aria-label="Liczniki parametrów Allegro"></ul>
 <ul id="allegro-supplement-downloads" aria-label="Prywatne pliki supplementu" hidden></ul>
 <ul id="allegro-supplement-contents" aria-label="Zbiory CSV i JSONL w pakiecie ZIP"></ul>
@@ -59,9 +70,10 @@
  let loopDone=null,finishLoop=null,manualResuming=false,resumeTraceActive=false,retryExhausted=false,stopBeforePhotos=false,kickDiagnostic=null;
  let dataOnlyWorking=false,dataOnlyLoaded=null;
  let csvWorking=false,csvStop=false,csvLoaded=null;
+ let schemaValue=null,schemaWorking=false,schemaStopped=false,schemaLoaded=null,schemaWaiting=null;
  const supplementFormat='gpswiss-allegro-parameters-supplement-v1';
- const supplementDatasets=['allegro_category_parameters_cache','allegro_parameter_mappings','allegro_resolved_parameters','conflicts','completeness'];
- let supplementWorking=false,supplementStopped=false,supplementLoading=false,supplementLoaded=null,supplementValue=null,supplementManifest=null,supplementPackageKey=null,supplementWait=null,supplementViewKey=null;
+ const supplementDatasets=['allegro_category_parameters_cache','allegro_parameter_mappings','allegro_resolved_parameters','conflicts','completeness','allegro_product_parameters_cache','allegro_parameter_selections','schema_freshness'];
+ let supplementWorking=false,supplementStopped=false,supplementLoading=false,supplementLoaded=null,supplementValue=null,supplementManifest=null,supplementPackageKey=null,supplementWait=null,supplementViewKey=null,supplementEpoch=0;
  const supplementCurrent=(run,attempt)=>id===run && state?.snapshot_attempt_id===attempt;
  const waits=new Map(),resumeEvents=[];
  const wait=ms=>new Promise(resolve=>{const timer=setTimeout(()=>{waits.delete(timer);resolve();},ms);waits.set(timer,resolve);});
@@ -110,6 +122,7 @@
   return ['snapshot_tick','tick'].includes(next)?'tick_ready':'blocked';
  }
  function buttons(){
+  schemaButtons();
   supplementButtons();
   dataOnlyButtons();
   const blocked=!ready || sessionExpired || accessBlocked;
@@ -131,6 +144,7 @@
   // Requests are sequential. Counters may restart for the next dataset/phase or a conscious retry.
   if(value){state=value;id=value.run_id;history.replaceState(null,'','#run='+id);remember();}
   else if(data?.existing_run_found===false)state=null;
+  loadSchemaStatus();
   loadSupplementStatus();
   loadDataOnlyStatus();
   el('state').textContent=JSON.stringify(state?{...state,local_runner_active:active,local_request_in_flight:inFlight}:data,null,2);
@@ -560,15 +574,16 @@
  }
  // Supplement state, delays and requests are independent of the parent, DATA ONLY and CSV runners.
  function supplementButtons(){
-  const disabled=!ready || sessionExpired || accessBlocked || !id || !dataOnlyAvailable() || supplementWorking || supplementLoading;
-  el('allegro-supplement-start').disabled=disabled || supplementValue?.done===true;
-  el('allegro-supplement-resume').disabled=disabled || supplementValue?.done===true;
+  const disabled=!ready || sessionExpired || accessBlocked || !id || !dataOnlyAvailable() || schemaWorking || supplementWorking || supplementLoading;
+  el('allegro-supplement-start').disabled=disabled || schemaValue?.done!==true || supplementValue?.done===true;
+  el('allegro-supplement-resume').disabled=disabled || schemaValue?.done!==true || supplementValue?.done===true;
   el('allegro-supplement-status-refresh').disabled=disabled;
   el('allegro-supplement-stop').disabled=!supplementWorking || supplementStopped;
  }
  function supplementCancelDelay(){if(supplementWait){clearTimeout(supplementWait.timer);supplementWait.resolve();supplementWait=null;}}
  function supplementDelay(ms){return new Promise(resolve=>{supplementWait={resolve,timer:setTimeout(()=>{supplementWait=null;resolve();},ms)};});}
  function supplementResetView(){
+  supplementEpoch++;
   supplementValue=null;supplementManifest=null;supplementPackageKey=null;supplementLoaded=null;
   el('allegro-supplement-downloads').replaceChildren();el('allegro-supplement-downloads').hidden=true;
   el('allegro-supplement-contents').replaceChildren();el('allegro-supplement-counts').replaceChildren();
@@ -582,12 +597,14 @@
  async function supplementRequest(run,attempt,{action=null,download=null}={}){
   const endpoint=base+'/'+encodeURIComponent(run)+'/allegro-parameters-supplement',controller=new AbortController();let timedOut=false;
   const timer=setTimeout(()=>{timedOut=true;controller.abort();},action?30000:15000);
-  const query=new URLSearchParams({parent_attempt_id:attempt});if(download)query.set('download',download);
+  const fresh=schemaValue?.done && schemaValue.plan_id?{fresh_plan_id:schemaValue.plan_id}:{};
+  const query=new URLSearchParams({parent_attempt_id:attempt,...fresh});if(download)query.set('download',download);
   try{
-   const response=await fetch(action?endpoint:endpoint+'?'+query,{method:action?'POST':'GET',credentials:'same-origin',cache:'no-store',redirect:'error',headers:{'Accept':'application/json','Content-Type':'application/json','X-CSRF-TOKEN':document.querySelector('meta[name="csrf-token"]').content},...(action?{body:JSON.stringify({parent_attempt_id:attempt,action})}:{}),signal:controller.signal});
+   const response=await fetch(action?endpoint:endpoint+'?'+query,{method:action?'POST':'GET',credentials:'same-origin',cache:'no-store',redirect:'error',headers:{'Accept':'application/json','Content-Type':'application/json','X-CSRF-TOKEN':document.querySelector('meta[name="csrf-token"]').content},...(action?{body:JSON.stringify({parent_attempt_id:attempt,action,...fresh})}:{}),signal:controller.signal});
    if(response.redirected || [401,419].includes(response.status))throw {reason:'supplement_session_expired',http:response.status};
    let value;try{value=await response.json();}catch(_){throw {reason:'supplement_invalid_response',http:response.status};}
    if(!response.ok)throw {reason:reasonOf(value,'http_'+response.status),http:response.status};
+   if(!download && fresh.fresh_plan_id && value.fresh_plan_id!==fresh.fresh_plan_id)throw {reason:'supplement_refresh_plan_changed',http:409};
    if(!download && (value?.format!==supplementFormat || value.parent_run_id!==run || value.parent_attempt_id!==attempt || typeof value.done!=='boolean' || value.next_action!==(value.done?'download':'tick')))throw {reason:'supplement_identity_or_contract_mismatch',http:409};
    return value;
   }catch(error){if(error?.reason)throw error;throw {reason:timedOut?'supplement_fetch_timeout':'supplement_network_error'};}
@@ -596,31 +613,32 @@
  function supplementCount(value){return Number.isSafeInteger(value) && value>=0?String(value):'—';}
  function supplementShowCounts(){
   const summary=supplementValue?.summary??{},datasets=supplementManifest?.datasets??{},list=el('allegro-supplement-counts');list.replaceChildren();
-  const counts=[['Rekordy category/schema cache',datasets.allegro_category_parameters_cache?.rows],['Parameter mappings',datasets.allegro_parameter_mappings?.rows],['Resolved parameters',datasets.allegro_resolved_parameters?.rows??summary.resolved_parameter_rows],
-   ...['complete','partial','historical_only','schema_unknown','conflict'].map(key=>[key,summary.completeness?.[key]]),['Brakujące required wg lokalnego cache',summary.missing_required_values],['Raport konfliktów — rekordy',summary.conflicts]];
+  const counts=[['Rekordy category/schema cache',datasets.allegro_category_parameters_cache?.rows??supplementValue?.dataset_counts?.allegro_category_parameters_cache],['Parameter mappings',datasets.allegro_parameter_mappings?.rows??supplementValue?.dataset_counts?.allegro_parameter_mappings],['Resolved parameters',datasets.allegro_resolved_parameters?.rows??summary.resolved_parameter_rows],
+   ...['complete','partial','historical_only','schema_unknown','conflict'].map(key=>[key,summary.completeness?.[key]]),['Brakujące required wg lokalnego cache',summary.missing_required_values],['Raport konfliktów — rekordy',summary.conflicts],...['COMPLETE','PARTIAL','SCHEMA_UNKNOWN','CONFLICT'].map(key=>['Część/kategoria '+key,summary.part_category_completeness?.[key]])];
   for(const [label,value] of counts){const item=document.createElement('li');item.textContent=label+': '+supplementCount(value);list.append(item);}
  }
  function supplementShow(value,run,attempt){
   if(!supplementCurrent(run,attempt))return;
   supplementValue=value;
-  el('allegro-supplement-status').textContent=value.done?'Pakiet parametrów Allegro gotowy. Pobierz manifesty, checksumy i wszystkie wolumeny ZIP.':'Supplement: '+value.phase+' | shard: '+(value.shard??'—')+' | wiersz: '+(value.row??'—')+' | następny krok: '+value.next_action;
+  el('allegro-supplement-status').textContent=value.schema_mode==='legacy_local_only'?'Archiwalny pakiet lokalny — bez świeżych schematów. Najpierw wykonaj etap A.':value.done?'Pakiet parametrów Allegro gotowy. Pobierz manifesty, checksumy i wszystkie wolumeny ZIP.':'Supplement: '+value.phase+' | shard: '+(value.shard??'—')+' | wiersz: '+(value.row??'—')+' | następny krok: '+value.next_action;
   if(!value.done){el('allegro-supplement-downloads').replaceChildren();el('allegro-supplement-downloads').hidden=true;}
   supplementShowCounts();supplementButtons();
  }
  function supplementLink(list,run,attempt,key,label,descriptor={}){
   if(!/^(manifest|checksums|summary|archive-manifest|volume-[0-9]{6})$/.test(key))return;
   const item=document.createElement('li'),link=document.createElement('a');link.textContent=label;
-  link.href=base+'/'+encodeURIComponent(run)+'/allegro-parameters-supplement?'+new URLSearchParams({parent_attempt_id:attempt,download:key});
+  link.href=base+'/'+encodeURIComponent(run)+'/allegro-parameters-supplement?'+new URLSearchParams({parent_attempt_id:attempt,download:key,...(schemaValue?.done && schemaValue.plan_id?{fresh_plan_id:schemaValue.plan_id}:{})});
   item.append(link);if(descriptor.bytes!=null)item.append(document.createTextNode(' | '+supplementCount(descriptor.bytes)+' B'));
   if(typeof descriptor.sha256==='string' && /^[a-f0-9]{64}$/i.test(descriptor.sha256))item.append(document.createTextNode(' | SHA-256: '+descriptor.sha256));list.append(item);
  }
  async function supplementLoadPackage(run,attempt){
   if(!supplementCurrent(run,attempt) || !supplementValue?.done || supplementPackageKey===run+':'+attempt)return;
+  const epoch=supplementEpoch;
   const list=el('allegro-supplement-downloads');list.replaceChildren();list.hidden=false;
   for(const [key,label] of [['manifest','Pobierz manifest supplementu'],['checksums','Pobierz checksumy'],['summary','Pobierz podsumowanie'],['archive-manifest','Pobierz manifest archiwów']])supplementLink(list,run,attempt,key,label);
   const [manifest,archive]=await Promise.all([supplementRequest(run,attempt,{download:'manifest'}),supplementRequest(run,attempt,{download:'archive-manifest'})]);
-  if(!supplementCurrent(run,attempt))return;
-  if(manifest?.format!==supplementFormat || manifest.parent_run_id!==run || manifest.parent_attempt_id!==attempt)throw {reason:'supplement_manifest_identity_mismatch',http:409};
+  if(!supplementCurrent(run,attempt) || epoch!==supplementEpoch)return;
+  if(manifest?.format!==supplementFormat || manifest.parent_run_id!==run || manifest.parent_attempt_id!==attempt || (schemaValue?.done && manifest.schema_refresh?.plan_id!==schemaValue.plan_id))throw {reason:'supplement_manifest_identity_mismatch',http:409};
   if(archive?.format!=='gpswiss-browser-zip-volumes-1' || !Array.isArray(archive.volumes) || !Number.isSafeInteger(archive.volume_count) || archive.volume_count!==archive.volumes.length || archive.volumes.some(v=>!/^volume-[0-9]{6}$/.test(v?.key??'')) || new Set(archive.volumes.map(v=>v.key)).size!==archive.volumes.length)throw {reason:'supplement_invalid_archive_manifest',http:409};
   supplementManifest=manifest;supplementShowCounts();
   const contents=el('allegro-supplement-contents');contents.replaceChildren();
@@ -634,8 +652,8 @@
   if(supplementViewKey!==key){supplementViewKey=key;supplementStopped=true;supplementCancelDelay();supplementResetView();}
   el('allegro-supplement-identity').textContent='Run: '+run+' | parent_attempt_id: '+attempt;
   if(supplementWorking || supplementLoading || (!force && supplementLoaded===key))return;
-  supplementLoaded=key;supplementLoading=true;supplementButtons();
-  try{const value=await supplementRequest(run,attempt);supplementShow(value,run,attempt);if(value.done)await supplementLoadPackage(run,attempt);}
+  supplementLoaded=key;supplementLoading=true;supplementButtons();const epoch=supplementEpoch;
+  try{const value=await supplementRequest(run,attempt);if(epoch!==supplementEpoch)return;supplementShow(value,run,attempt);if(value.done)await supplementLoadPackage(run,attempt);}
   catch(error){if(supplementCurrent(run,attempt))el('allegro-supplement-status').textContent=error.http===404 && error.reason==='supplement_not_started'?'Supplement nie został przygotowany. Użyj „Przygotuj pakiet parametrów Allegro”.':'Odczyt supplementu: '+supplementError(error)+'. Odśwież status lub użyj Wznów.';}
   finally{supplementLoading=false;supplementButtons();}
  }
@@ -646,7 +664,7 @@
  }
  const supplementCheckpoint=value=>JSON.stringify([value?.phase,value?.shard,value?.row,value?.summary,value?.done]);
  async function supplementDrive(start){
-  await boot;if(supplementWorking || supplementLoading || !id || !dataOnlyAvailable() || sessionExpired || accessBlocked || supplementValue?.done)return;
+  await boot;if(schemaValue?.done!==true || supplementWorking || supplementLoading || !id || !dataOnlyAvailable() || sessionExpired || accessBlocked || supplementValue?.done)return;
   const run=id,attempt=state.snapshot_attempt_id;supplementWorking=true;supplementStopped=false;supplementCancelDelay();supplementButtons();
   let action=start?'start':null,failures=0;
   try{
@@ -673,6 +691,72 @@
   }catch(error){if(supplementCurrent(run,attempt))el('allegro-supplement-status').textContent='Supplement zatrzymany: '+supplementError(error)+'. Checkpoint zachowany; odśwież status lub użyj Wznów.';}
   finally{supplementWorking=false;supplementButtons();}
  }
+ function schemaButtons(){
+  const disabled=!ready || !id || !dataOnlyAvailable() || sessionExpired || accessBlocked || schemaWorking || supplementWorking;
+  el('allegro-schema-plan').disabled=disabled || (!!schemaValue && !schemaValue.done);
+  el('allegro-schema-plan').textContent=schemaValue?.done?'Przygotuj nowy plan odświeżenia':'Przygotuj plan';
+  el('allegro-schema-start').disabled=disabled || schemaValue?.phase!=='planned' || !el('allegro-schema-confirm').checked;
+  el('allegro-schema-resume').disabled=disabled || !schemaValue || ['planned','completed'].includes(schemaValue.phase);
+  el('allegro-schema-stop').disabled=!schemaWorking || schemaStopped;
+  el('allegro-schema-status-refresh').disabled=disabled;
+ }
+ function schemaDelay(ms){return new Promise(resolve=>{schemaWaiting={resolve,timer:setTimeout(()=>{schemaWaiting=null;resolve();},ms)};});}
+ function schemaStop(){schemaStopped=true;if(schemaWaiting){clearTimeout(schemaWaiting.timer);schemaWaiting.resolve();schemaWaiting=null;}schemaButtons();}
+ async function schemaRequest(run,attempt,action=null){
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000),endpoint=base+'/'+encodeURIComponent(run)+'/allegro-schema-refresh';
+  try{
+   const response=await fetch(action?endpoint:endpoint+'?'+new URLSearchParams({parent_attempt_id:attempt}),{method:action?'POST':'GET',credentials:'same-origin',cache:'no-store',redirect:'error',signal:controller.signal,headers:{Accept:'application/json','Content-Type':'application/json','X-CSRF-TOKEN':document.querySelector('meta[name="csrf-token"]').content},...(action?{body:JSON.stringify({parent_attempt_id:attempt,action,...(action==='start'?{plan_digest:schemaValue?.plan_digest,confirm:true}:{})})}:{})});
+   let value;try{value=await response.json();}catch(_){throw {reason:'schema_invalid_response',http:response.status};}
+   if(!response.ok)throw {reason:reasonOf(value,'http_'+response.status),http:response.status};
+   if(value.parent_run_id!==run || value.parent_attempt_id!==attempt)throw {reason:'schema_identity_mismatch',http:409};
+   if(!['planning','preview','planned','fetch','blocked','completed'].includes(value.phase) || typeof value.done!=='boolean')throw {reason:'schema_contract_mismatch',http:409};
+   return value;
+  }catch(error){if(error.reason)throw error;throw {reason:'schema_network_or_timeout'};}
+  finally{clearTimeout(timer);}
+ }
+ function schemaShow(value,run,attempt){
+  if(!supplementCurrent(run,attempt))return;
+  const changedPlan=schemaValue?.plan_id && value.plan_id!==schemaValue.plan_id;
+  const finished=value.done && schemaValue!==null && (schemaValue.done!==true || changedPlan);schemaValue=value;
+  el('allegro-schema-status').textContent='Definicje: '+value.phase+' | kategorie '+value.processed+' / '+value.total+' | krok planu: '+(value.stage??'—')+' | shard/wiersz: '+(value.shard??'—')+'/'+(value.row??'—')+' | plan GET: '+value.expected_gets+' | wykonano GET: '+supplementCount(value.performed_gets)+' | sukcesy: '+value.successes+' | 404: '+value.not_found_404+' | 429: '+value.provider_429+' | błędy: '+value.errors+' | brakujące schematy: '+value.missing_schemas+' | ostatni refresh: '+(value.completed_at??value.previous_completed_at??'—')+(value.blocked_reason?' | blokada: '+value.blocked_reason:'');
+  el('allegro-schema-plan-preview').textContent=JSON.stringify({plan_id:value.plan_id,plan_digest:value.plan_digest,categories:value.categories},null,2);
+  schemaButtons();supplementButtons();
+  if(finished || changedPlan){el('allegro-schema-confirm').checked=false;supplementLoaded=null;supplementViewKey=null;supplementResetView();loadSupplementStatus();}
+ }
+ function loadSchemaStatus(force=false){
+  if(!id || !dataOnlyAvailable() || schemaWorking)return;
+  const run=id,attempt=state.snapshot_attempt_id,key=run+':'+attempt;
+  if(!force && schemaLoaded===key)return;
+  if(schemaLoaded!==key){schemaValue=null;schemaStop();}
+  schemaLoaded=key;
+  schemaRequest(run,attempt).then(value=>schemaShow(value,run,attempt)).catch(error=>{if(supplementCurrent(run,attempt))el('allegro-schema-status').textContent=error.http===404 && error.reason==='schema_plan_not_started'?'Przygotuj plan — wejście na stronę nie pobiera danych z Allegro.':'Status definicji: '+supplementError(error);}).finally(schemaButtons);
+ }
+ async function schemaDrive(action){
+  await boot;if(schemaWorking || !id || !dataOnlyAvailable() || sessionExpired || accessBlocked || (action==='start' && schemaValue?.phase==='planned' && !el('allegro-schema-confirm').checked))return;
+  const run=id,attempt=state.snapshot_attempt_id;schemaWorking=true;schemaStopped=false;schemaButtons();let failures=0;
+  try{
+   while(!schemaStopped && supplementCurrent(run,attempt)){
+    try{
+     const value=await schemaRequest(run,attempt,action);schemaShow(value,run,attempt);failures=0;
+     if(['planned','blocked','completed'].includes(value.phase))return;
+     action='tick';if(!schemaStopped)await schemaDelay(Math.max(150,Math.min(30000,(value.wait_seconds??0)*1000)));
+    }catch(error){
+     if(!supplementTransient(error) || ++failures>4)throw error;
+     await schemaDelay(Math.min(4000,500*2**failures));
+     if(schemaStopped)break;
+     try{const value=await schemaRequest(run,attempt);schemaShow(value,run,attempt);if(['planned','blocked','completed'].includes(value.phase))return;action='tick';}catch(statusError){if(!supplementTransient(statusError))throw statusError;}
+    }
+   }
+   if(supplementCurrent(run,attempt))el('allegro-schema-status').textContent+=' | lokalna pętla zatrzymana; użyj Wznów';
+  }catch(error){if(supplementCurrent(run,attempt))el('allegro-schema-status').textContent='Definicje zatrzymane: '+supplementError(error);}
+  finally{schemaWorking=false;schemaButtons();}
+ }
+ el('allegro-schema-plan').onclick=()=>schemaDrive(schemaValue?.done?'new_plan':'plan');
+ el('allegro-schema-start').onclick=()=>schemaDrive('start');
+ el('allegro-schema-resume').onclick=()=>schemaDrive(schemaValue?.phase==='blocked'?'start':null);
+ el('allegro-schema-stop').onclick=schemaStop;
+ el('allegro-schema-confirm').onchange=schemaButtons;
+ el('allegro-schema-status-refresh').onclick=()=>loadSchemaStatus(true);
  el('allegro-supplement-start').onclick=()=>supplementDrive(true);
  el('allegro-supplement-resume').onclick=()=>supplementDrive(false);
  el('allegro-supplement-status-refresh').onclick=()=>supplementReadStatus(true);

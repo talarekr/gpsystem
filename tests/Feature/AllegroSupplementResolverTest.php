@@ -15,12 +15,15 @@ class AllegroSupplementResolverTest extends TestCase
         return array_replace_recursive(['id' => $id, 'name' => $name, 'type' => 'dictionary', 'required' => false, 'dictionary' => [['id' => 'v1', 'value' => 'First'], ['id' => 'v2', 'value' => 'Second']], 'options' => ['describesProduct' => false, 'requiredForProduct' => false], 'restrictions' => ['multipleChoices' => true]], $extra);
     }
 
-    private function resolve(array $definitions, array $manual = [], array $history = [], array $rules = [], array $part = [], ?array $car = null): array
+    private function resolve(array $definitions, array $manual = [], array $history = [], array $rules = [], array $part = [], ?array $car = null, bool $fresh = false): array
     {
         Http::preventStrayRequests();
         DB::connection()->beforeExecuting(fn () => throw new \LogicException('Resolver may not execute any SQL'));
         $cache = ['schema_snapshot_id' => 'schema-1', 'raw_response' => ['parameters' => $definitions]];
-        $result = app(AllegroSupplementResolver::class)->resolve(array_replace(['id' => '0001', 'category_id' => '7', 'part_number' => '0000123'], $part), $car, ['id' => '7', 'name' => 'Category'], [['external_category_id' => '00123', 'channel' => 'allegro_main']], $manual, $history, fn ($category) => $category === '00123' ? $cache : null, fn () => $rules, '2026-01-01T00:00:00+00:00');
+        if ($fresh) {
+            $cache += ['fresh_schema' => true, 'offer_schema_available' => true, 'product_schema_available' => true, 'product_raw_response' => ['parameters' => []]];
+        }
+        $result = app(AllegroSupplementResolver::class)->resolve(array_replace(['id' => '0001', 'category_id' => '7', 'part_number' => '0000123'], $part), $car, ['id' => '7', 'name' => 'Category'], [['external_category_id' => '00123', 'channel' => 'allegro_main']], $manual, $history, fn ($category) => $category === '00123' ? $cache : null, fn () => $rules, '2026-01-01T00:00:00+00:00', freshRequired: $fresh);
         Http::assertNothingSent();
 
         return $result;
@@ -158,5 +161,22 @@ class AllegroSupplementResolverTest extends TestCase
         $this->assertSame('product', $row['parameter_scope']);
         $this->assertSame(['0'], collect($result['rows'])->firstWhere('parameter_id', 'mapped')['values_ids']);
         $this->assertSame([], $result['completeness'][0]['missing_required_parameter_ids']);
+    }
+
+    public function test_fresh_conflict_is_not_counted_as_a_resolved_required_value(): void
+    {
+        $result = $this->resolve([$this->definition('01', 'Choice', ['required' => true])],
+            manual: [['allegro_category_id' => '00123', 'parameter_id' => '01', 'value_id' => 'v1']],
+            history: [['allegro_category_id' => '00123', 'parameter_id' => '01', 'source' => 'marketplace_listing_payload', 'parameter_scope' => 'offer', 'values_ids' => ['v2']]], fresh: true);
+        $this->assertSame('CONFLICT', $result['completeness'][0]['status']);
+        $this->assertSame(0, $result['completeness'][0]['required_resolved_count']);
+        $this->assertSame(['01'], $result['completeness'][0]['missing_required_parameter_ids']);
+    }
+
+    public function test_fresh_conditional_requirements_are_unknown_until_evaluated(): void
+    {
+        $result = $this->resolve([$this->definition('01', 'Choice', ['required' => true, 'dependencies' => ['other_parameter' => '02']])],
+            manual: [['allegro_category_id' => '00123', 'parameter_id' => '01', 'value_id' => 'v1']], fresh: true);
+        $this->assertSame('SCHEMA_UNKNOWN', $result['completeness'][0]['status']);
     }
 }

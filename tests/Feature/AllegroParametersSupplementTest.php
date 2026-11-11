@@ -294,7 +294,7 @@ class AllegroParametersSupplementTest extends TestCase
         Role::findOrCreate(UserRole::OwnerAdmin->value);
         $user->assignRole(UserRole::OwnerAdmin->value);
         $url = route('admin.tools.gpswiss-migration-export.allegro-parameters-supplement', ['run' => $this->run]);
-        $this->actingAs($user)->postJson($url, ['parent_attempt_id' => $this->attempt, 'action' => 'start'])->assertOk()->assertJsonPath('provider_calls', false);
+        $this->actingAs($user)->postJson($url, ['parent_attempt_id' => $this->attempt, 'action' => 'start'])->assertStatus(409)->assertJsonPath('reason_code', 'supplement_schema_refresh_required');
         $this->finish();
         $response = $this->get($url.'?parent_attempt_id='.$this->attempt.'&download=manifest')->assertOk()->assertHeader('X-Content-Type-Options', 'nosniff');
         $this->assertStringContainsString('private', $response->headers->get('Cache-Control'));
