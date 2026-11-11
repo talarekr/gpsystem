@@ -126,6 +126,8 @@ final class AllegroOfferParameterReadback
                 throw new MigrationExportException('supplement_offer_plan_changed');
             }
 
+            unset($context); // Keep the selection lock, release decoded plan rows before C loads its index.
+
             return $work();
         });
     }

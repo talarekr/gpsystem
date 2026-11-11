@@ -133,6 +133,8 @@ final class AllegroSchemaRefresh
                 throw new MigrationExportException('supplement_refresh_plan_changed');
             }
 
+            unset($context); // Keep the selection lock, release decoded plan rows before C loads its index.
+
             return $work();
         });
     }

@@ -552,8 +552,8 @@ class AllegroOfferParameterReadbackTest extends TestCase
     private function inputHashes(): array
     {
         $out = [];
-        foreach (File::allFiles($this->root.'/exports') as $file) {
-            if (str_starts_with($file->getRelativePathname(), '.allegro-parameters-supplements/')) {
+        foreach (File::allFiles($this->root.'/exports', true) as $file) {
+            if (str_starts_with($file->getRelativePathname(), '.allegro-parameters-supplements/') || str_starts_with($file->getRelativePathname(), '.allegro-supplement-diagnostics/')) {
                 continue;
             }
             $out[$file->getRelativePathname()] = hash_file('sha256', $file->getPathname());
@@ -717,5 +717,123 @@ class AllegroOfferParameterReadbackTest extends TestCase
             $state = $service->tick(7, $this->run, $this->attempt);
         }
         $this->assertTrue($state['done']);
+    }
+
+    private function cOwner(): void
+    {
+        $user = User::query()->forceCreate(['id' => 7, 'name' => 'Owner', 'email' => 'c-owner@example.test', 'password' => 'test']);
+        Role::findOrCreate(UserRole::OwnerAdmin->value);
+        $user->assignRole(UserRole::OwnerAdmin->value);
+        $this->actingAs($user);
+    }
+
+    public function test_malformed_historical_parameters_are_issues_and_do_not_block_c_preview_or_lose_valid_siblings(): void
+    {
+        $this->schemas();
+        $this->fake(function ($request) {
+            $offer = $this->offer(basename($request->url()));
+            $offer['parameters'][] = ['id' => 'broken-list', 'valuesIds' => [['unexpected' => 'shape']]];
+
+            return Http::response($offer, 200);
+        });
+        $this->fetch();
+        $before = $this->inputHashes();
+        $this->fake(fn () => throw new \LogicException('No provider in C'));
+        $ready = $this->supplementPreview();
+        $this->assertSame('READY_FOR_CONFIRMATION', $ready['plan']['status']);
+        $this->assertSame(4, $ready['plan']['parts_processed']);
+        $this->assertGreaterThan(0, $ready['dataset_counts']['parameter_issues']);
+        $folder = $this->cFolder($ready);
+        $issues = file_get_contents($folder.'/parameter_issues.jsonl');
+        $this->assertStringContainsString('supplement_preview_record_error', $issues);
+        $this->assertStringNotContainsString('wrong shape', $issues);
+        $parameters = file_get_contents($folder.'/allegro_existing_offer_parameters.jsonl');
+        $this->assertStringContainsString('retained extra', $parameters);
+        $this->assertStringContainsString('rangeValue', file_get_contents($folder.'/allegro_existing_offer_readbacks.jsonl'));
+        $this->assertSame($before, $this->inputHashes());
+        Http::assertNothingSent();
+    }
+
+    public function test_plan_write_failure_before_first_c_checkpoint_is_private_durable_and_rebuilds_only_c(): void
+    {
+        $a = $this->schemas();
+        $b = $this->fetch();
+        $this->cOwner();
+        $before = $this->inputHashes();
+        $this->fake(fn () => throw new \LogicException('No provider in C'));
+        $url = route('admin.tools.gpswiss-migration-export.allegro-parameters-supplement', ['run' => $this->run]);
+        $input = ['parent_attempt_id' => $this->attempt, 'fresh_plan_id' => $a['plan_id'], 'readback_plan_id' => $b['plan_id']];
+        $folder = $this->root.'/exports/.allegro-parameters-supplements/'.$this->run.'/'.$this->attempt.'/fresh-'.$a['plan_id'].'/offers-'.$b['plan_id'];
+        // Fail atomically replacing the private index, before checkpoint.json exists.
+        mkdir($folder.'/parent-index.json', 0700, true);
+        $error = $this->postJson($url, $input + ['action' => 'plan'])->assertStatus(500)
+            ->assertJsonPath('backend_exception_class', 'ErrorException')->assertJsonPath('phase', 'persist_parent_index')
+            ->assertJsonPath('checkpoint_present', false)->assertJsonPath('last_successful_checkpoint', null)->json();
+        $this->assertTrue(Str::isUuid($error['plan_id']));
+        $this->assertFileDoesNotExist($folder.'/checkpoint.json');
+        $this->assertStringStartsWith('app/Services/MigrationExport/', $error['file']);
+        $saved = $this->getJson($url.'?'.http_build_query($input))->assertNotFound()
+            ->assertHeader('Cache-Control', 'no-store, private')->assertJsonPath('last_operation_failure.backend_exception_class', 'ErrorException')
+            ->assertJsonPath('last_operation_failure.phase', 'persist_parent_index')->assertJsonPath('last_operation_failure.checkpoint_present', false)->json();
+        $this->assertSame($error['plan_id'], $saved['last_operation_failure']['plan_id']);
+        rmdir($folder.'/parent-index.json');
+        $plan = $this->postJson($url, $input + ['action' => 'plan'])->assertOk()->assertJsonPath('plan.status', 'PLANNING')->assertJsonPath('checkpoint_present', true)->json();
+        $this->assertSame($a['plan_id'], $plan['fresh_plan_id']);
+        $this->assertSame($b['plan_id'], $plan['readback_plan_id']);
+        $this->assertSame($plan['plan']['plan_id'], $this->supplementPreview()['plan']['plan_id']);
+        $this->assertSame($before, $this->inputHashes());
+        Http::assertNothingSent();
+    }
+
+    public function test_c_checkpoint_write_failure_resumes_existing_plan_without_duplicate_rows_or_resetting_a_b(): void
+    {
+        $a = $this->schemas();
+        $b = $this->fetch();
+        $this->cOwner();
+        $before = $this->inputHashes();
+        $this->fake(fn () => throw new \LogicException('No provider in C'));
+        $url = route('admin.tools.gpswiss-migration-export.allegro-parameters-supplement', ['run' => $this->run]);
+        $input = ['parent_attempt_id' => $this->attempt, 'fresh_plan_id' => $a['plan_id'], 'readback_plan_id' => $b['plan_id']];
+        $plan = $this->postJson($url, $input + ['action' => 'plan'])->assertOk()->json();
+        $folder = $this->cFolder($plan);
+        $checkpoint = hash_file('sha256', $folder.'/checkpoint.json');
+        mkdir($folder.'/checkpoint.json.tmp', 0700);
+        $failure = $this->postJson($url, $input + ['action' => 'tick'])->assertStatus(500)
+            ->assertJsonPath('backend_exception_class', 'ErrorException')->assertJsonPath('checkpoint_present', true)
+            ->assertJsonPath('last_successful_checkpoint.sha256', $checkpoint)->assertJsonPath('phase', 'persist_checkpoint')->json();
+        $this->assertSame($checkpoint, hash_file('sha256', $folder.'/checkpoint.json'));
+        $this->getJson($url.'?'.http_build_query($input))->assertOk()
+            ->assertJsonPath('plan.plan_id', $plan['plan']['plan_id'])
+            ->assertJsonPath('last_operation_failure.plan_id', $plan['plan']['plan_id']);
+        rmdir($folder.'/checkpoint.json.tmp');
+        $this->postJson($url, $input + ['action' => 'tick'])->assertOk()->assertJsonPath('last_operation_failed', false);
+        $ready = $this->supplementPreview();
+        $this->assertSame($plan['plan']['plan_id'], $ready['plan']['plan_id']);
+        $this->assertSame(4, $ready['plan']['parts_processed']);
+        $this->assertSame(4, $ready['dataset_counts']['allegro_existing_offer_readbacks']);
+        $this->assertSame($before, $this->inputHashes());
+        $this->assertSame('supplement_checkpoint_write_failed', $failure['safe_message']);
+        Http::assertNothingSent();
+    }
+
+    public function test_existing_c_full_parent_index_is_projected_only_in_memory_and_keeps_its_plan_and_hash(): void
+    {
+        $this->schemas();
+        $this->fetch();
+        $service = app(AllegroParametersSupplement::class);
+        $plan = $service->plan(7, $this->run, $this->attempt);
+        $folder = $this->cFolder($plan);
+        // Represent a pre-fix, still-PLANNING workspace with the original complete copied index.
+        copy($this->parent.'/logical-snapshot/'.$this->attempt.'/checkpoint.json', $folder.'/parent-index.json');
+        $hash = hash_file('sha256', $folder.'/parent-index.json');
+        $checkpoint = json_decode(file_get_contents($folder.'/checkpoint.json'), true);
+        $checkpoint['frozen_index_sha256'] = $hash;
+        file_put_contents($folder.'/checkpoint.json', json_encode($checkpoint));
+        $this->fake(fn () => throw new \LogicException('No provider in C'));
+        $ready = $this->supplementPreview();
+        $this->assertSame($plan['plan']['plan_id'], $ready['plan']['plan_id']);
+        $this->assertSame($hash, hash_file('sha256', $folder.'/parent-index.json'));
+        $this->assertSame(4, $ready['plan']['parts_processed']);
+        Http::assertNothingSent();
     }
 }

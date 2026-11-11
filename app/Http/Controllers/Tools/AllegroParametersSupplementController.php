@@ -18,8 +18,10 @@ final class AllegroParametersSupplementController extends Controller
         abort_unless($request->user()?->hasRole(UserRole::OwnerAdmin->value), 403);
         $input = $request->validate(['parent_attempt_id' => ['required', 'uuid'], 'fresh_plan_id' => ['sometimes', 'uuid'], 'readback_plan_id' => ['sometimes', 'uuid'], 'plan_id' => ['sometimes', 'uuid'], 'plan_digest' => ['sometimes', 'string', 'size:64'], 'confirm' => ['sometimes', 'boolean'], 'action' => [$request->isMethod('post') ? 'required' : 'sometimes', 'in:plan,start,tick'], 'download' => ['sometimes', 'string', 'max:40', 'regex:/\A(?:manifest|checksums|summary|archive-manifest|parameters-csv|volume-[0-9]{6})\z/D']]);
         $owner = (int) $request->user()->id;
+        $diagnostics = null;
         try {
-            $perform = function () use ($request, $supplements, $owner, $run, $input) {
+            $diagnostics = $supplements->diagnostics($owner, $run, $input['parent_attempt_id'], $input['action'] ?? (isset($input['download']) ? 'download' : 'status'), $input['fresh_plan_id'] ?? null, $input['readback_plan_id'] ?? null);
+            $perform = function () use ($request, $supplements, $owner, $run, $input, $diagnostics) {
                 if ($request->isMethod('post')) {
                     ignore_user_abort(true);
                     if ($input['action'] === 'plan') {
@@ -40,7 +42,13 @@ final class AllegroParametersSupplementController extends Controller
                     $data = $supplements->status($owner, $run, $input['parent_attempt_id']);
                 }
 
-                return response()->json($data)->header('Cache-Control', 'private, no-store')->header('X-Robots-Tag', 'noindex, noarchive');
+                $data += ($request->isMethod('post') ? ['last_operation_failed' => false] : []) + $diagnostics->stored();
+                $response = response()->json($data)->header('Cache-Control', 'private, no-store')->header('X-Robots-Tag', 'noindex, noarchive');
+                if ($request->isMethod('post')) {
+                    $diagnostics->success();
+                }
+
+                return $response;
             };
             if ($request->isMethod('post') || isset($input['fresh_plan_id']) || isset($input['readback_plan_id'])) {
                 return app(AllegroSchemaRefresh::class)->withCompletedPlan($owner, $run, $input['parent_attempt_id'], $input['fresh_plan_id'] ?? null, function () use ($request, $owner, $run, $input, $perform) {
@@ -54,11 +62,14 @@ final class AllegroParametersSupplementController extends Controller
 
             return $perform();
         } catch (MigrationExportException $exception) {
-            return response()->json(['ok' => false, 'reason_code' => $exception->reasonCode], $exception->httpStatus)->header('Cache-Control', 'private, no-store');
-        } catch (\Throwable $exception) {
-            $class = class_basename($exception);
+            $failure = $request->isMethod('post') ? $diagnostics?->failure($exception) : null;
+            $saved = $diagnostics?->stored() ?? [];
 
-            return response()->json(['ok' => false, 'reason_code' => 'supplement_server_exception', 'backend_exception_class' => preg_match('/\A[A-Za-z_][A-Za-z0-9_]*\z/D', $class) ? $class : 'AnonymousThrowable'], 500)->header('Cache-Control', 'private, no-store');
+            return response()->json(['ok' => false, 'reason_code' => $exception->reasonCode] + ($failure ?? []) + $saved, $exception->httpStatus)->header('Cache-Control', 'private, no-store');
+        } catch (\Throwable $exception) {
+            $failure = $diagnostics?->failure($exception);
+
+            return response()->json(['ok' => false] + ($failure ?? ['reason_code' => 'supplement_server_exception']), 500)->header('Cache-Control', 'private, no-store');
         }
     }
 }

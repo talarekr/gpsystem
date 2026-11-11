@@ -10,6 +10,22 @@ use Tests\TestCase;
 /** Synthetic fixtures only. Resolver must not read live rows, log to SQL or call providers. */
 class AllegroSupplementResolverTest extends TestCase
 {
+    public function test_malformed_parameter_shapes_retain_raw_evidence_and_explicit_incomplete_markers(): void
+    {
+        $resolver = app(AllegroSupplementResolver::class);
+        foreach ([['id' => null, 'values' => ['unknown']], ['id' => ['bad'], 'values' => []], ['id' => '01', 'values' => 'bad'],
+            ['id' => '01', 'valuesIds' => [['bad']]], ['id' => '01', 'rangeValue' => 'bad']] as $parameter) {
+            $history = $resolver->historical($parameter, 'legacy_offer_payload', '00123', null, null, null);
+            $this->assertSame('malformed_historical_parameter', $history[0]['record_issue']);
+            $result = $this->resolve([], history: $history, fresh: true);
+            $row = collect($result['rows'])->firstWhere('reason_code', 'supplement_preview_record_error');
+            $this->assertNotNull($row);
+            $this->assertFalse($row['is_preferred']);
+            $this->assertTrue($row['readback_unavailable']);
+            $this->assertSame('SCHEMA_UNKNOWN', $result['completeness'][0]['status']);
+        }
+    }
+
     private function definition(string $id, string $name, array $extra = []): array
     {
         return array_replace_recursive(['id' => $id, 'name' => $name, 'type' => 'dictionary', 'required' => false, 'dictionary' => [['id' => 'v1', 'value' => 'First'], ['id' => 'v2', 'value' => 'Second']], 'options' => ['describesProduct' => false, 'requiredForProduct' => false], 'restrictions' => ['multipleChoices' => true]], $extra);
