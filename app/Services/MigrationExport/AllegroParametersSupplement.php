@@ -5,6 +5,7 @@ namespace App\Services\MigrationExport;
 use App\Services\Marketplace\ShippingRateAudit\ReadOnlyDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 
 /** Independent, private, bounded supplement. Parent checkpoint/artifacts are opened read-only. */
 final class AllegroParametersSupplement
@@ -17,7 +18,7 @@ final class AllegroParametersSupplement
 
     public function __construct(private GpswissMigrationExport $parents, private BrowserMigrationSnapshot $snapshots, private AllegroSupplementResolver $resolver, private BrowserMigrationArchives $archives, private AllegroSchemaRefresh $refresh, private AllegroOfferParameterReadback $readback) {}
 
-    public function start(int $owner, string $run, string $attempt, bool $requireFresh = false, bool $requireReadback = false): array
+    public function start(int $owner, string $run, string $attempt, bool $requireFresh = false, bool $requireReadback = false, bool $preparePlan = false): array
     {
         $parent = $this->parents->supplementParent($owner, $run, $attempt);
         $fresh = $this->fresh($owner, $run, $attempt);
@@ -31,10 +32,14 @@ final class AllegroParametersSupplement
         $folder = $this->folder($parent, $run, $attempt, $fresh, $offers);
         $this->mkdir($folder);
 
-        return $this->locked($folder, function () use ($folder, $parent, $run, $attempt, $fresh, $offers): array {
+        return $this->locked($folder, function () use ($folder, $parent, $run, $attempt, $fresh, $offers, $preparePlan): array {
             if (is_file($folder.'/checkpoint.json')) {
                 $state = $this->load($folder.'/checkpoint.json');
                 $this->assertParent($parent, $state);
+                $this->assertPlan($folder, $state);
+                if ($preparePlan && ! isset($state['plan'])) {
+                    throw new MigrationExportException('supplement_already_started_without_preview');
+                }
 
                 return $this->publicState($state);
             }
@@ -51,6 +56,11 @@ final class AllegroParametersSupplement
                 'parent_index_sha256' => hash_file('sha256', $parent.'/logical-snapshot/'.$attempt.'/checkpoint.json'), 'tables' => [], 'files' => [], 'datasets' => [], 'done' => false,
                 'stats' => ['parts_with_manual_selections' => 0, 'resolved_parameter_rows' => 0, 'conflicts' => 0, 'historical_only_parameters' => 0, 'missing_required_values' => 0, 'orphan_listing_parameter_rows' => 0,
                     'part_category_completeness' => array_fill_keys(['COMPLETE', 'PARTIAL', 'SCHEMA_UNKNOWN', 'CONFLICT'], 0), 'completeness' => array_fill_keys(['complete', 'partial', 'historical_only', 'schema_unknown', 'conflict'], 0)], 'parameter_ids' => [], 'category_ids' => [], 'missing_schema_categories' => []];
+            if ($preparePlan) {
+                $state['plan'] = ['plan_id' => (string) Str::uuid(), 'parent_run_id' => $run, 'parent_attempt_id' => $attempt, 'fresh_plan_id' => $fresh['plan_id'], 'readback_plan_id' => $offers['plan_id'], 'status' => 'PLANNING', 'created_at' => $state['captured_at'], 'ready_at' => null, 'confirmed_at' => null, 'plan_digest' => null,
+                    'categories' => count($fresh['categories']), 'offers' => count($offers['offers']), 'readback_successes' => $offers['summary']['successes'], 'readback_not_found_404' => $offers['summary']['not_found_404'], 'parts_total' => $index['datasets']['parts']['total'], 'parts_processed' => 0, 'stage_rows' => [], 'dataset_totals' => array_map(fn ($d) => $d['total'], $index['datasets']), 'parameters_found' => 0, 'missing_required' => 0,
+                    'part_statuses' => array_fill_keys(['COMPLETE', 'PARTIAL', 'CONFLICT', 'SCHEMA_UNKNOWN'], 0), 'source_values' => array_fill_keys(['existing_allegro_offer', 'manual_selection', 'local_mapping', 'derived_from_part', 'derived_from_car', 'existing_listing', 'unresolved'], 0), 'resolved_values_by_source' => [], 'expected_files' => null, 'expected_zip_volumes' => null, 'provider_gets' => 0];
+            }
             ReadOnlyDatabase::run(function () use (&$state, $fresh): void {
                 foreach (self::TABLES as $table) {
                     if ($fresh !== null && $table === self::TABLES[0]) {
@@ -78,7 +88,8 @@ final class AllegroParametersSupplement
 
         return $this->locked($folder, function () use ($parent, $folder): array {
             $state = $this->load($folder.'/checkpoint.json');
-            if ($state['done']) {
+            $this->assertPlan($folder, $state);
+            if ($state['done'] || $state['phase'] === 'planned') {
                 return $this->publicState($state);
             }
             if (! hash_equals($state['frozen_index_sha256'], hash_file('sha256', $folder.'/parent-index.json'))) {
@@ -87,9 +98,13 @@ final class AllegroParametersSupplement
             $this->rollbackUncommitted($folder, $state);
             $started = microtime(true);
             if ($state['phase'] === 'refreshed_schema') {
-                $this->freshCacheTick($folder, $state);
+                for ($n = 0; $n < 5 && $state['phase'] === 'refreshed_schema' && microtime(true) < $started + 2; $n++) {
+                    $this->freshCacheTick($folder, $state);
+                }
             } elseif ($state['phase'] === 'offer_readback') {
-                $this->offerCacheTick($folder, $state);
+                for ($n = 0; $n < 5 && $state['phase'] === 'offer_readback' && microtime(true) < $started + 2; $n++) {
+                    $this->offerCacheTick($folder, $state);
+                }
             } elseif (in_array($state['phase'], self::TABLES, true)) {
                 ReadOnlyDatabase::run(function () use ($folder, &$state): void {
                     $this->captureTable($folder, $state);
@@ -114,6 +129,9 @@ final class AllegroParametersSupplement
                     $state['done'] = true;
                     $state['phase'] = 'completed';
                 }
+            }
+            if (isset($state['plan']) && $state['plan']['confirmed_at'] === null && $state['phase'] === 'manifest') {
+                $this->readyPlan($folder, $state);
             }
             $state['last_tick'] = ['action' => 'allegro_supplement_tick', 'reason_code' => 'tick_completed', 'phase' => $state['phase'], 'shard' => $state['shard'], 'row' => $state['row'], 'duration_ms' => (int) ((microtime(true) - $started) * 1000)];
             $this->write($folder.'/checkpoint.json', $state);
@@ -156,15 +174,132 @@ final class AllegroParametersSupplement
         return $file;
     }
 
-    /** Preview does not create a package or call any provider. Its digest binds both immutable input plans. */
+    /** Prepare local derived files in bounded ticks; archive creation remains behind confirmation. */
     public function plan(int $owner, string $run, string $attempt): array
     {
-        $parent = $this->parents->supplementParent($owner, $run, $attempt);
-        $fresh = $this->refresh->completed($owner, $run, $attempt);
-        $offers = $this->readback->completed($owner, $run, $attempt);
-        $plan = ['parent_run_id' => $run, 'parent_attempt_id' => $attempt, 'fresh_plan_id' => $fresh['plan_id'], 'readback_plan_id' => $offers['plan_id'], 'parent_sha256' => hash_file('sha256', $parent.'/logical-snapshot/'.$attempt.'/checkpoint.json'), 'contract_revision' => 3, 'provider_calls' => false, 'business_writes' => false, 'categories' => count($fresh['categories']), 'offers' => count($offers['offers'])];
+        return $this->start($owner, $run, $attempt, requireFresh: true, requireReadback: true, preparePlan: true);
+    }
 
-        return $plan + ['plan_digest' => hash('sha256', $this->json($plan))];
+    public function confirmPlan(int $owner, string $run, string $attempt, string $planId, string $digest, bool $confirm): array
+    {
+        [, $folder] = $this->context($owner, $run, $attempt);
+
+        return $this->locked($folder, function () use ($folder, $planId, $digest, $confirm) {
+            $state = $this->load($folder.'/checkpoint.json');
+            $this->assertPlan($folder, $state);
+            $plan = $state['plan'] ?? null;
+            if (! $confirm || $plan === null || $plan['plan_id'] !== $planId || ! is_string($plan['plan_digest']) || ! hash_equals($plan['plan_digest'], $digest)) {
+                throw new MigrationExportException('supplement_plan_confirmation_mismatch');
+            }
+            if ($plan['confirmed_at'] === null) {
+                if ($plan['status'] !== 'READY_FOR_CONFIRMATION' || $state['phase'] !== 'planned') {
+                    throw new MigrationExportException('supplement_plan_not_ready');
+                }
+                $state['plan']['confirmed_at'] = now()->toIso8601String();
+                $state['plan']['status'] = 'CONFIRMED';
+                $state['phase'] = 'manifest';
+                $this->write($folder.'/checkpoint.json', $state);
+            }
+
+            return $this->publicState($state);
+        });
+    }
+
+    private function datasetNames(array $state): array
+    {
+        return array_values(array_unique([...array_keys($state['datasets']), 'allegro_category_parameters_cache', 'allegro_product_parameters_cache', 'allegro_parameter_mappings', 'allegro_parameter_selections', 'allegro_resolved_parameters', 'conflicts', 'completeness', 'schema_freshness', 'allegro_existing_offer_parameters', 'allegro_existing_offer_readbacks', 'allegro_offer_readback_freshness', 'allegro_parameter_completeness', 'allegro_parameter_conflicts', 'allegro_schema_freshness', 'allegro_parametry_czesci']));
+    }
+
+    private function planDefinition(array $state): array
+    {
+        $plan = $state['plan'];
+
+        return ['plan_id' => $plan['plan_id'], 'parent_run_id' => $state['parent_run_id'], 'parent_attempt_id' => $state['parent_attempt_id'], 'fresh_plan_id' => $state['fresh_plan_id'], 'readback_plan_id' => $state['readback_plan_id'], 'parent_index_sha256' => $state['parent_index_sha256'], 'frozen_index_sha256' => $state['frozen_index_sha256'],
+            'preview' => array_diff_key($plan, array_flip(['status', 'confirmed_at', 'plan_digest'])), 'datasets' => $state['datasets'], 'files' => array_map(fn ($file) => ['bytes' => $file['bytes'], 'sha256' => SerializableSha256::digest($file['hash'])], $state['files'])];
+    }
+
+    private function readyPlan(string $folder, array &$state): void
+    {
+        if ($state['plan']['parts_processed'] !== $state['plan']['parts_total']) {
+            throw new MigrationExportException('supplement_preview_parts_incomplete');
+        }
+        $state['phase'] = 'planned';
+        $state['plan']['status'] = 'READY_FOR_CONFIRMATION';
+        $state['plan']['ready_at'] = now()->toIso8601String();
+        // CSV+JSONL datasets, four package metadata files and the later archive manifest; ZIP count is unknown.
+        $state['plan']['expected_files'] = count($this->datasetNames($state)) * 2 + 5;
+        $this->write($folder.'/plan-definition.json', $this->planDefinition($state));
+        $state['plan']['plan_digest'] = hash_file('sha256', $folder.'/plan-definition.json');
+    }
+
+    private function assertPlan(string $folder, array $state): void
+    {
+        if (! isset($state['plan'])) {
+            return;
+        } // Packages explicitly started before durable planning stay resumable.
+        $plan = $state['plan'];
+        if (! Str::isUuid($plan['plan_id'] ?? null) || $plan['parent_run_id'] !== $state['parent_run_id'] || $plan['parent_attempt_id'] !== $state['parent_attempt_id'] || $plan['fresh_plan_id'] !== $state['fresh_plan_id'] || $plan['readback_plan_id'] !== $state['readback_plan_id']) {
+            throw new MigrationExportException('supplement_plan_identity_mismatch');
+        }
+        if ($plan['plan_digest'] === null) {
+            if ($plan['status'] !== 'PLANNING' || $plan['confirmed_at'] !== null || in_array($state['phase'], ['planned', 'manifest', 'package', 'completed'], true)) {
+                throw new MigrationExportException('supplement_plan_not_ready');
+            }
+
+            return;
+        }
+        if (! hash_equals($plan['plan_digest'], (string) @hash_file('sha256', $folder.'/plan-definition.json'))) {
+            throw new MigrationExportException('supplement_plan_integrity_failed');
+        }
+        $definition = $this->load($folder.'/plan-definition.json');
+        $current = $this->planDefinition($state);
+        foreach (['plan_id', 'parent_run_id', 'parent_attempt_id', 'fresh_plan_id', 'readback_plan_id', 'parent_index_sha256', 'frozen_index_sha256', 'preview'] as $field) {
+            if ($definition[$field] !== $current[$field]) {
+                throw new MigrationExportException('supplement_plan_integrity_failed');
+            }
+        }
+        if ($plan['confirmed_at'] === null && ($definition['datasets'] !== $current['datasets'] || $definition['files'] !== $current['files'])) {
+            throw new MigrationExportException('supplement_plan_integrity_failed');
+        }
+    }
+
+    private function previewPart(array &$state, array $result): void
+    {
+        if (! isset($state['plan']) || $state['plan']['confirmed_at'] !== null) {
+            return;
+        }
+        $plan = &$state['plan'];
+        $plan['parts_processed']++;
+        $ranks = ['COMPLETE' => 0, 'PARTIAL' => 1, 'SCHEMA_UNKNOWN' => 2, 'CONFLICT' => 3];
+        $status = 'SCHEMA_UNKNOWN';
+        $rank = -1;
+        $missing = [];
+        foreach ($result['completeness'] as $report) {
+            $candidate = $report['status'] ?? strtoupper($report['completeness_status']);
+            $candidate = isset($ranks[$candidate]) ? $candidate : 'PARTIAL';
+            if ($ranks[$candidate] > $rank) {
+                $status = $candidate;
+                $rank = $ranks[$candidate];
+            }
+            foreach ($report['missing_required_parameter_ids'] as $id) {
+                $missing[$this->json([$report['allegro_category_id'], (string) $id])] = true;
+            }
+        }
+        $plan['part_statuses'][$status]++;
+        $plan['missing_required'] += count($missing);
+        $parameters = [];
+        foreach ($result['rows'] as $row) {
+            if ($row['parameter_id'] === null || ! AllegroSupplementResolver::present($row)) {
+                continue;
+            }
+            $parameters[$this->json([$row['allegro_category_id'], $row['parameter_scope'], $row['product_set_index'], $row['parameter_id']])] = true;
+            $source = $row['provenance'];
+            $plan['source_values'][$source] = ($plan['source_values'][$source] ?? 0) + 1;
+            if ($row['is_preferred'] && $row['conflict_id'] === null && $row['local_validation_status'] === 'value_present_in_local_schema') {
+                $plan['resolved_values_by_source'][$source] = ($plan['resolved_values_by_source'][$source] ?? 0) + 1;
+            }
+        }
+        $plan['parameters_found'] += count($parameters);
     }
 
     private function offerContext(int $owner, string $run, string $attempt): ?array
@@ -376,6 +511,10 @@ final class AllegroParametersSupplement
                     array_values($this->get($folder, 'category_mappings', (string) ($row['category_id'] ?? '')) ?? []), array_values($this->get($folder, 'manual', $id) ?? []),
                     array_merge([], ...array_values($this->get($folder, 'history', $id) ?? []), ...array_values($this->get($folder, 'readback', $id) ?? [])), fn ($category) => $this->get($folder, 'schema', $category), fn ($category) => array_values($this->get($folder, 'rules', $category) ?? []), $state['captured_at'], freshRequired: ($state['fresh_plan_id'] ?? null) !== null);
                 $this->record($folder, $state, $result);
+                $this->previewPart($state, $result);
+            }
+            if (isset($state['plan']) && $state['plan']['confirmed_at'] === null) {
+                $state['plan']['stage_rows'][$phase] = ($state['plan']['stage_rows'][$phase] ?? 0) + 1;
             }
             $state['row']++;
             $count++;
@@ -507,7 +646,7 @@ final class AllegroParametersSupplement
         $manifest = ['format' => self::FORMAT, 'parent_run_id' => $state['parent_run_id'], 'parent_attempt_id' => $state['parent_attempt_id'], 'parent_index_sha256' => $state['parent_index_sha256'], 'captured_at' => $state['captured_at'],
             'consistency' => ($state['fresh_plan_id'] ?? null) ? 'sealed_parent_artifacts_plus_operator_confirmed_provider_schemas_and_later_local_rules_not_transactional' : 'sealed_parent_artifacts_plus_later_local_cache_and_rules_capture_not_transactional', 'local_table_boundaries' => $state['tables'], 'datasets' => $state['datasets'], 'summary' => $summary, 'schema_mode' => $state['schema_mode'] ?? 'legacy_local_only', 'contract_revision' => $state['contract_revision'] ?? 1, 'schema_refresh' => $state['refresh_context']['summary'] ?? null, 'offer_readback' => $state['readback_context']['summary'] ?? null, 'readback_plan_id' => $state['readback_plan_id'] ?? null, 'parameter_source_priority' => ['existing_allegro_offer', 'manual_selection', 'local_mapping', 'derived_from_part', 'derived_from_car', 'unresolved'],
             'parent_database_consistency' => $parentIndex['database_consistency'] ?? null, 'parent_consistency_exception' => $parentIndex['consistency_exception'] ?? null,
-            'resolved_parameters_schema' => 'schema.json',
+            'resolved_parameters_schema' => 'schema.json', 'supplement_plan' => $state['plan'] ?? null,
             'formats' => ['jsonl' => 'UTF-8; identifiers are strings; null remains null; arrays are preserved', 'csv' => 'UTF-8 BOM; semicolon; nested JSON; null=\\N; literal leading backslash doubled; formula prefix apostrophe; import identifiers as TEXT'],
             'limitations' => [($state['fresh_plan_id'] ?? null) ? 'schema_freshness_is_per_endpoint_fetch_time_not_permanent_or_transactional' : 'local_cache_is_not_refreshed_or_asserted_current', 'parent_parts_and_listings_are_not_recaptured', 'inherited_parent_consistency_exceptions_remain_applicable', 'late_local_table_updates_not_historical_as_of_parent', 'source_observed_at_may_be_unknown', 'historical_candidates_not_authorized_for_republication', 'complete_means_locally_resolved_parameter_not_publish_readiness', 'unknown_categories_and_values_reported_not_inferred'],
             'database_writes' => false, 'business_writes' => false, 'provider_calls' => false, 'automatic_import_allowed' => false, 'automatic_publish' => false, 'contains_customer_data' => false, 'parent_artifacts_modified' => false];
@@ -561,9 +700,32 @@ final class AllegroParametersSupplement
         return $state['stats'] + ['distinct_parameter_ids' => count($state['parameter_ids']), 'distinct_allegro_category_ids' => count($state['category_ids']), 'categories_without_local_schema' => count($state['missing_schema_categories'])];
     }
 
+    private function planProgress(array $state): ?array
+    {
+        if (! isset($state['plan']) || $state['plan']['confirmed_at'] !== null) {
+            return null;
+        }
+        $plan = $state['plan'];
+        $phase = $state['phase'];
+        if ($phase === 'refreshed_schema') {
+            return ['label' => 'Analiza zapisanych definicji', 'processed' => $state['refresh_offset'], 'total' => $plan['categories']];
+        }
+        if ($phase === 'offer_readback') {
+            return ['label' => 'Analiza zapisanych wyników ofert', 'processed' => $state['readback_offset'], 'total' => $plan['offers']];
+        }
+        if (in_array($phase, ['resolve', 'planned'], true)) {
+            return ['label' => $phase === 'planned' ? 'Plan gotowy do zatwierdzenia' : 'Analiza parametrów części', 'processed' => $plan['parts_processed'], 'total' => $plan['parts_total']];
+        }
+        if (isset(self::PARENT_STAGES[$phase])) {
+            return ['label' => 'Przygotowanie powiązań danych', 'processed' => $plan['stage_rows'][$phase] ?? 0, 'total' => $plan['dataset_totals'][self::PARENT_STAGES[$phase]] ?? null];
+        }
+
+        return ['label' => 'Analiza lokalnych mapowań', 'processed' => $state['tables'][$phase]['rows'] ?? 0, 'total' => null];
+    }
+
     private function publicState(array $state): array
     {
-        return array_intersect_key($state, array_flip(['contract_revision', 'schema_mode', 'fresh_plan_id', 'readback_plan_id', 'format', 'parent_run_id', 'parent_attempt_id', 'phase', 'shard', 'row', 'done', 'last_tick'])) + ['schema_mode' => $state['schema_mode'] ?? 'legacy_local_only', 'contract_revision' => $state['contract_revision'] ?? 1, 'next_action' => $state['done'] ? 'download' : 'tick', 'summary' => $this->summary($state), 'dataset_counts' => array_map(fn ($dataset) => $dataset['rows'], $state['datasets']), 'provider_calls' => false, 'business_writes' => false];
+        return array_intersect_key($state, array_flip(['contract_revision', 'schema_mode', 'fresh_plan_id', 'readback_plan_id', 'format', 'parent_run_id', 'parent_attempt_id', 'phase', 'shard', 'row', 'done', 'last_tick', 'plan'])) + ['schema_mode' => $state['schema_mode'] ?? 'legacy_local_only', 'contract_revision' => $state['contract_revision'] ?? 1, 'next_action' => $state['done'] ? 'download' : ($state['phase'] === 'planned' ? 'confirm' : (isset($state['plan']) && $state['plan']['confirmed_at'] === null ? 'plan_tick' : 'tick')), 'summary' => $this->summary($state), 'plan_progress' => $this->planProgress($state), 'dataset_counts' => array_map(fn ($dataset) => $dataset['rows'], $state['datasets']), 'provider_calls' => false, 'business_writes' => false];
     }
 
     private function context(int $owner, string $run, string $attempt): array
@@ -573,7 +735,9 @@ final class AllegroParametersSupplement
         if (! is_file($folder.'/checkpoint.json')) {
             throw new MigrationExportException('supplement_not_started', 404);
         }
-        $this->assertParent($parent, $this->load($folder.'/checkpoint.json'));
+        $state = $this->load($folder.'/checkpoint.json');
+        $this->assertParent($parent, $state);
+        $this->assertPlan($folder, $state);
 
         return [$parent, $folder];
     }

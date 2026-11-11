@@ -348,9 +348,15 @@ class AllegroOfferParameterReadbackTest extends TestCase
         $this->schemas();
         $this->fetch();
         $package = route('admin.tools.gpswiss-migration-export.allegro-parameters-supplement', ['run' => $this->run]);
-        $plan = $this->postJson($package, ['parent_attempt_id' => $this->attempt, 'action' => 'plan'])->assertOk()->json();
+        $this->postJson($package, ['parent_attempt_id' => $this->attempt, 'action' => 'plan'])->assertOk()->assertJsonPath('plan.status', 'PLANNING');
+        $plan = $this->supplementPreview();
+        $this->getJson($package.'?parent_attempt_id='.$this->attempt.'&fresh_plan_id='.$plan['fresh_plan_id'].'&readback_plan_id='.$plan['readback_plan_id'])->assertOk()->assertJsonPath('plan.plan_id', $plan['plan']['plan_id'])->assertJsonPath('plan.status', 'READY_FOR_CONFIRMATION')->assertJsonPath('next_action', 'confirm');
+        $payload = ['parent_attempt_id' => $this->attempt, 'action' => 'start', 'plan_id' => $plan['plan']['plan_id'], 'plan_digest' => $plan['plan']['plan_digest'], 'confirm' => true, 'fresh_plan_id' => $plan['fresh_plan_id'], 'readback_plan_id' => $plan['readback_plan_id']];
+        $this->postJson($package, array_replace($payload, ['fresh_plan_id' => (string) Str::uuid()]))->assertStatus(409)->assertJsonPath('reason_code', 'supplement_refresh_plan_changed');
+        $this->postJson($package, array_replace($payload, ['readback_plan_id' => (string) Str::uuid()]))->assertStatus(409)->assertJsonPath('reason_code', 'supplement_offer_plan_changed');
+        $this->postJson($package, array_replace($payload, ['plan_id' => $plan['fresh_plan_id']]))->assertStatus(409)->assertJsonPath('reason_code', 'supplement_plan_confirmation_mismatch');
         $this->postJson($package, ['parent_attempt_id' => $this->attempt, 'action' => 'start'])->assertStatus(409)->assertJsonPath('reason_code', 'supplement_plan_confirmation_mismatch');
-        $this->postJson($package, ['parent_attempt_id' => $this->attempt, 'action' => 'start', 'confirm' => true, 'plan_digest' => $plan['plan_digest'], 'readback_plan_id' => $plan['readback_plan_id'], 'fresh_plan_id' => $plan['fresh_plan_id']])->assertOk();
+        $this->postJson($package, ['parent_attempt_id' => $this->attempt, 'action' => 'start', 'confirm' => true, 'plan_id' => $plan['plan']['plan_id'], 'plan_digest' => $plan['plan']['plan_digest'], 'readback_plan_id' => $plan['readback_plan_id'], 'fresh_plan_id' => $plan['fresh_plan_id']])->assertOk();
         $other = User::query()->create(['name' => 'Other', 'email' => 'other@example.test', 'password' => 'test']);
         $other->assignRole(UserRole::OwnerAdmin->value);
         $this->actingAs($other)->getJson($url.'?parent_attempt_id='.$this->attempt)->assertNotFound();
@@ -523,5 +529,193 @@ class AllegroOfferParameterReadbackTest extends TestCase
         $raw = $this->rows($dir, 'allegro_existing_offer_readbacks')[0];
         $this->assertStringContainsString('0000000000000018', $raw['raw_response_text']);
         $this->assertStringNotContainsString('MUST_NOT_EXPORT', $raw['raw_response_text']);
+    }
+
+    private function supplementPreview(): array
+    {
+        $service = app(AllegroParametersSupplement::class);
+        $state = $service->plan(7, $this->run, $this->attempt);
+        for ($i = 0; $i < 400 && $state['next_action'] === 'plan_tick'; $i++) {
+            $state = $service->tick(7, $this->run, $this->attempt);
+        }
+        $this->assertSame('READY_FOR_CONFIRMATION', $state['plan']['status']);
+        $this->assertFalse($state['done']);
+
+        return $state;
+    }
+
+    private function cFolder(array $state): string
+    {
+        return $this->root.'/exports/.allegro-parameters-supplements/'.$this->run.'/'.$this->attempt.'/fresh-'.$state['fresh_plan_id'].'/offers-'.$state['readback_plan_id'];
+    }
+
+    private function inputHashes(): array
+    {
+        $out = [];
+        foreach (File::allFiles($this->root.'/exports') as $file) {
+            if (str_starts_with($file->getRelativePathname(), '.allegro-parameters-supplements/')) {
+                continue;
+            }
+            $out[$file->getRelativePathname()] = hash_file('sha256', $file->getPathname());
+        }
+
+        return $out;
+    }
+
+    public function test_c_plan_is_durable_distinct_pinned_and_counts_real_parameters_without_get_or_archives(): void
+    {
+        $a = $this->schemas();
+        $b = $this->fetch();
+        $before = $this->inputHashes();
+        $this->fake(fn () => throw new \LogicException('Provider forbidden during C'));
+        $service = app(AllegroParametersSupplement::class);
+        $first = $service->plan(7, $this->run, $this->attempt);
+        $this->assertSame('PLANNING', $first['plan']['status']);
+        $this->assertTrue(Str::isUuid($first['plan']['plan_id']));
+        $this->assertNotSame($a['plan_id'], $first['plan']['plan_id']);
+        $this->assertNotSame($b['plan_id'], $first['plan']['plan_id']);
+        $this->assertSame($a['plan_id'], $first['plan']['fresh_plan_id']);
+        $this->assertSame($b['plan_id'], $first['plan']['readback_plan_id']);
+        $this->assertSame($first['plan'], $service->status(7, $this->run, $this->attempt)['plan']);
+        $this->assertSame($first['plan']['plan_id'], $service->plan(7, $this->run, $this->attempt)['plan']['plan_id']);
+        $state = $this->supplementPreview();
+        $plan = $state['plan'];
+        $folder = $this->cFolder($state);
+        $this->assertSame($first['plan']['plan_id'], $plan['plan_id']);
+        $this->assertSame('confirm', $state['next_action']);
+        $this->assertSame(4, $plan['parts_total']);
+        $this->assertSame(4, $plan['parts_processed']);
+        $this->assertSame(4, array_sum($plan['part_statuses']));
+        $this->assertGreaterThan(0, $plan['parameters_found']);
+        $this->assertGreaterThan(0, $plan['source_values']['existing_allegro_offer']);
+        $this->assertGreaterThan(0, $plan['source_values']['manual_selection']);
+        $this->assertGreaterThan(0, $plan['source_values']['derived_from_part']);
+        $this->assertSame(35, $plan['expected_files']);
+        $this->assertSame(0, $plan['provider_gets']);
+        $this->assertSame(hash_file('sha256', $folder.'/plan-definition.json'), $plan['plan_digest']);
+        $this->assertFileDoesNotExist($folder.'/manifest.json');
+        $this->assertFileDoesNotExist($folder.'/archive-manifest.json');
+        $this->assertSame([], glob($folder.'/archive-volumes/*.zip'));
+        $this->assertSame($state['plan'], app(AllegroParametersSupplement::class)->status(7, $this->run, $this->attempt)['plan']);
+        Http::assertNothingSent();
+        $this->assertSame($before, $this->inputHashes());
+    }
+
+    public function test_completed_b_with_404_is_a_valid_input_and_preview_remains_unconfirmed(): void
+    {
+        $this->schemas();
+        $this->fake(fn () => Http::response([], 404));
+        $readback = $this->fetch();
+        $this->assertTrue($readback['done']);
+        $this->assertSame(4, $readback['not_found_404']);
+        $this->fake(fn () => throw new \LogicException('No repeated GET'));
+        $state = $this->supplementPreview();
+        $folder = $this->cFolder($state);
+        $this->assertSame(4, $state['plan']['readback_not_found_404']);
+        $this->assertSame(0, $state['plan']['readback_successes']);
+        $this->assertSame(4, $state['plan']['part_statuses']['SCHEMA_UNKNOWN']);
+        $this->assertNull($state['plan']['confirmed_at']);
+        $before = hash_file('sha256', $folder.'/checkpoint.json');
+        for ($i = 0; $i < 3; $i++) {
+            $this->assertSame($state, app(AllegroParametersSupplement::class)->tick(7, $this->run, $this->attempt));
+        }
+        $this->assertSame($before, hash_file('sha256', $folder.'/checkpoint.json'));
+        $this->assertFileDoesNotExist($folder.'/manifest.json');
+        Http::assertNothingSent();
+    }
+
+    public function test_c_confirmation_requires_its_own_uuid_and_digest_then_reuses_exact_preview_files(): void
+    {
+        $this->schemas();
+        $this->fetch();
+        $this->fake(fn () => throw new \LogicException('Provider forbidden'));
+        $service = app(AllegroParametersSupplement::class);
+        $state = $this->supplementPreview();
+        $plan = $state['plan'];
+        $folder = $this->cFolder($state);
+        foreach ([[$plan['plan_id'], $plan['plan_digest'], false], [$state['fresh_plan_id'], $plan['plan_digest'], true], [$state['readback_plan_id'], $plan['plan_digest'], true], [$plan['plan_id'], str_repeat('0', 64), true]] as [$id, $digest, $confirm]) {
+            try {
+                $service->confirmPlan(7, $this->run, $this->attempt, $id, $digest, $confirm);
+                $this->fail();
+            } catch (MigrationExportException $e) {
+                $this->assertSame('supplement_plan_confirmation_mismatch', $e->reasonCode);
+            }
+        }
+        $csv = hash_file('sha256', $folder.'/allegro_parametry_czesci.csv');
+        $inputs = $this->inputHashes();
+        $state = $service->confirmPlan(7, $this->run, $this->attempt, $plan['plan_id'], $plan['plan_digest'], true);
+        $this->assertSame('CONFIRMED', $state['plan']['status']);
+        $this->assertSame('manifest', $state['phase']);
+        $this->assertSame($state, $service->confirmPlan(7, $this->run, $this->attempt, $plan['plan_id'], $plan['plan_digest'], true));
+        $queries = [];
+        DB::listen(function ($e) use (&$queries) {
+            $queries[] = $e->sql;
+        });
+        for ($i = 0; $i < 100 && ! $state['done']; $i++) {
+            $state = $service->tick(7, $this->run, $this->attempt);
+        }
+        $this->assertTrue($state['done']);
+        $this->assertSame([], $queries);
+        $this->assertSame($csv, hash_file('sha256', $folder.'/allegro_parametry_czesci.csv'));
+        $this->assertSame($inputs, $this->inputHashes());
+        $manifest = json_decode(file_get_contents($folder.'/manifest.json'), true);
+        $this->assertSame($plan['plan_id'], $manifest['supplement_plan']['plan_id']);
+        $this->assertSame($plan['plan_digest'], $manifest['supplement_plan']['plan_digest']);
+        Http::assertNothingSent();
+    }
+
+    public function test_c_plan_definition_corruption_blocks_confirmation_without_touching_input_receipts(): void
+    {
+        $this->schemas();
+        $this->fetch();
+        $state = $this->supplementPreview();
+        $before = $this->inputHashes();
+        file_put_contents($this->cFolder($state).'/plan-definition.json', '{}');
+        try {
+            app(AllegroParametersSupplement::class)->confirmPlan(7, $this->run, $this->attempt, $state['plan']['plan_id'], $state['plan']['plan_digest'], true);
+            $this->fail();
+        } catch (MigrationExportException $e) {
+            $this->assertSame('supplement_plan_integrity_failed', $e->reasonCode);
+        }
+        $this->assertSame($before, $this->inputHashes());
+    }
+
+    public function test_c_preview_lost_checkpoint_replays_local_work_without_duplicate_rows_or_counts(): void
+    {
+        $this->schemas();
+        $this->fetch();
+        $this->fake(fn () => throw new \LogicException('No provider'));
+        $service = app(AllegroParametersSupplement::class);
+        $state = $service->plan(7, $this->run, $this->attempt);
+        $folder = $this->cFolder($state);
+        $before = file_get_contents($folder.'/checkpoint.json');
+        $service->tick(7, $this->run, $this->attempt);
+        file_put_contents($folder.'/checkpoint.json', $before);
+        $state = $this->supplementPreview();
+        $this->assertSame(4, $state['dataset_counts']['allegro_existing_offer_readbacks']);
+        $this->assertSame(4, $state['plan']['parts_processed']);
+        $this->assertSame(4, array_sum($state['plan']['part_statuses']));
+        Http::assertNothingSent();
+    }
+
+    public function test_preexisting_started_c_package_remains_resumable_and_is_never_reset_by_plan(): void
+    {
+        $this->schemas();
+        $this->fetch();
+        $service = app(AllegroParametersSupplement::class);
+        $state = $service->start(7, $this->run, $this->attempt, requireFresh: true, requireReadback: true);
+        $folder = $this->cFolder($state);
+        $before = hash_file('sha256', $folder.'/checkpoint.json');
+        try {
+            $service->plan(7, $this->run, $this->attempt);
+            $this->fail();
+        } catch (MigrationExportException $e) {
+            $this->assertSame('supplement_already_started_without_preview', $e->reasonCode);
+        }
+        $this->assertSame($before, hash_file('sha256', $folder.'/checkpoint.json'));
+        for ($i = 0; $i < 300 && ! $state['done']; $i++) {
+            $state = $service->tick(7, $this->run, $this->attempt);
+        }
+        $this->assertTrue($state['done']);
     }
 }

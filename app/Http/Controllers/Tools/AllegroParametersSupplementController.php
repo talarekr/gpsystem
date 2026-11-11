@@ -16,7 +16,7 @@ final class AllegroParametersSupplementController extends Controller
     public function __invoke(Request $request, AllegroParametersSupplement $supplements, string $run)
     {
         abort_unless($request->user()?->hasRole(UserRole::OwnerAdmin->value), 403);
-        $input = $request->validate(['parent_attempt_id' => ['required', 'uuid'], 'fresh_plan_id' => ['sometimes', 'uuid'], 'readback_plan_id' => ['sometimes', 'uuid'], 'plan_digest' => ['sometimes', 'string', 'size:64'], 'confirm' => ['sometimes', 'boolean'], 'action' => [$request->isMethod('post') ? 'required' : 'sometimes', 'in:plan,start,tick'], 'download' => ['sometimes', 'string', 'max:40', 'regex:/\A(?:manifest|checksums|summary|archive-manifest|parameters-csv|volume-[0-9]{6})\z/D']]);
+        $input = $request->validate(['parent_attempt_id' => ['required', 'uuid'], 'fresh_plan_id' => ['sometimes', 'uuid'], 'readback_plan_id' => ['sometimes', 'uuid'], 'plan_id' => ['sometimes', 'uuid'], 'plan_digest' => ['sometimes', 'string', 'size:64'], 'confirm' => ['sometimes', 'boolean'], 'action' => [$request->isMethod('post') ? 'required' : 'sometimes', 'in:plan,start,tick'], 'download' => ['sometimes', 'string', 'max:40', 'regex:/\A(?:manifest|checksums|summary|archive-manifest|parameters-csv|volume-[0-9]{6})\z/D']]);
         $owner = (int) $request->user()->id;
         try {
             $perform = function () use ($request, $supplements, $owner, $run, $input) {
@@ -25,11 +25,7 @@ final class AllegroParametersSupplementController extends Controller
                     if ($input['action'] === 'plan') {
                         $data = $supplements->plan($owner, $run, $input['parent_attempt_id']);
                     } elseif ($input['action'] === 'start') {
-                        $plan = $supplements->plan($owner, $run, $input['parent_attempt_id']);
-                        if (! ($input['confirm'] ?? false) || ! hash_equals($plan['plan_digest'], $input['plan_digest'] ?? '')) {
-                            throw new MigrationExportException('supplement_plan_confirmation_mismatch');
-                        }
-                        $data = $supplements->start($owner, $run, $input['parent_attempt_id'], requireFresh: true, requireReadback: true);
+                        $data = $supplements->confirmPlan($owner, $run, $input['parent_attempt_id'], $input['plan_id'] ?? '', $input['plan_digest'] ?? '', $input['confirm'] ?? false);
                     } else {
                         $data = $supplements->tick($owner, $run, $input['parent_attempt_id']);
                     }
