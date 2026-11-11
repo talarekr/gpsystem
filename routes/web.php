@@ -3026,6 +3026,13 @@ Route::match(['get', 'post'], '/admin/tools/gpswiss-migration-export/{run}/conso
     ->middleware([\App\Http\Middleware\ShippingRateAuditReadOnly::class, \App\Http\Middleware\ReadOnlyPreviewSession::class, Authenticate::class, 'admin.panel'])
     ->name('admin.tools.gpswiss-migration-export.consolidated-csv');
 
+// Operator-confirmed read-only Allegro schema GET capture, independent of parent export.
+Route::match(['get', 'post'], '/admin/tools/gpswiss-migration-export/{run}/allegro-schema-refresh', \App\Http\Controllers\Tools\AllegroSchemaRefreshController::class)
+    ->whereUuid('run')
+    ->withoutMiddleware(\Illuminate\Session\Middleware\StartSession::class)
+    ->middleware([\App\Http\Middleware\ShippingRateAuditReadOnly::class, \App\Http\Middleware\ReadOnlyPreviewSession::class, Authenticate::class, 'admin.panel'])
+    ->name('admin.tools.gpswiss-migration-export.allegro-schema-refresh');
+
 // Authenticated diagnostic fallback only for malformed migration-export URLs.
 Route::match(['get', 'post'], '/admin/tools/gpswiss-migration-export/{invalidPath}', [\App\Http\Controllers\Tools\GpswissMigrationExportController::class, 'invalidRoute'])
     ->where('invalidPath', '.+')

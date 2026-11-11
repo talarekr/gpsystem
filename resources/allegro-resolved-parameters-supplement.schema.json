@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "GPSwiss Allegro parameter supplement v1 — provenance candidate",
+  "title": "GPSwiss Allegro parameter supplement — provenance candidate with schema freshness",
   "type": "object",
   "required": [
     "part_id",
@@ -31,7 +31,10 @@
     "resolution_role",
     "candidate_id",
     "conflict_id",
-    "valid_for_republication"
+    "valid_for_republication",
+    "provenance",
+    "schema_fetched_at",
+    "schema_source_endpoint"
   ],
   "properties": {
     "part_id": {
@@ -134,7 +137,8 @@
         "legacy_offer_payload",
         "marketplace_listing_payload",
         "review_metadata",
-        "unknown"
+        "unknown",
+        "category_schema"
       ]
     },
     "source_field": {
@@ -203,6 +207,29 @@
         "builder_result",
         "stored_source_and_builder_result",
         "coverage_marker"
+      ]
+    },
+    "provenance": {
+      "enum": [
+        "manual_selection",
+        "existing_listing",
+        "local_mapping",
+        "derived_from_part",
+        "derived_from_car",
+        "category_schema",
+        "unresolved"
+      ]
+    },
+    "schema_fetched_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "schema_source_endpoint": {
+      "type": [
+        "string",
+        "null"
       ]
     }
   },

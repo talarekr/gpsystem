@@ -8,9 +8,9 @@ const html=template.replace("@json(route('admin.tools.gpswiss-migration-export',
 const parent={schema_version:'gpswiss-wystawczesc-3',run_id:run,snapshot_attempt_id:attempt,snapshot_mode:'browser',snapshot_state:'snapshot_completed',snapshot_stage:'completed',state:'photos',phase:'photo_copy',exported_records:79957,next_action:'tick',resume_allowed:true,busy:false};
 const parentFrozen=JSON.stringify(parent);
 const summary={resolved_parameter_rows:456,conflicts:2,missing_required_values:9,completeness:{complete:444,partial:6,historical_only:3,schema_unknown:2,conflict:1}};
-const datasets={allegro_category_parameters_cache:{rows:7},allegro_parameter_mappings:{rows:11},allegro_resolved_parameters:{rows:456},conflicts:{rows:2},completeness:{rows:120}};
-const readyState=progress=>({format,parent_run_id:run,parent_attempt_id:attempt,phase:progress>=3?'completed':'resolve',shard:Math.floor(progress),row:progress*50,done:progress>=3,next_action:progress>=3?'download':'tick',summary,provider_calls:false,business_writes:false});
-const manifest={format,parent_run_id:run,parent_attempt_id:attempt,datasets,summary,provider_calls:false,business_writes:false,automatic_publish:false};
+const datasets={allegro_category_parameters_cache:{rows:7},allegro_parameter_mappings:{rows:11},allegro_resolved_parameters:{rows:456},conflicts:{rows:2},completeness:{rows:120},allegro_product_parameters_cache:{rows:7},allegro_parameter_selections:{rows:12},schema_freshness:{rows:14}};
+const readyState=progress=>({format,parent_run_id:run,parent_attempt_id:attempt,fresh_plan_id:'30000000-0000-4000-8000-000000000003',phase:progress>=3?'completed':'resolve',shard:Math.floor(progress),row:progress*50,done:progress>=3,next_action:progress>=3?'download':'tick',summary,provider_calls:false,business_writes:false});
+const manifest={format,parent_run_id:run,parent_attempt_id:attempt,schema_refresh:{plan_id:'30000000-0000-4000-8000-000000000003'},datasets,summary,provider_calls:false,business_writes:false,automatic_publish:false};
 
 async function scenario(browser,options={}){
  const {existing=false,completed=false,volumes=2,lost=false,transient=false,stop=false,initialStatusError=null,metadataFailure=false,badIdentity=false,badArchive=false,parentRunning=false,exhausted=false,cached=false,stopBackoff=false}=options;
@@ -23,10 +23,14 @@ async function scenario(browser,options={}){
   const request=route.request(),url=new URL(request.url()),body=request.postData()?JSON.parse(request.postData()):{};
   const json=(data,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(data)});
   if(request.isNavigationRequest())return route.fulfill({contentType:'text/html',body:html});
+  if(url.pathname.endsWith('/allegro-schema-refresh')){
+   assert.equal(request.method(),'GET','supplement runner must not start refresh automatically');
+   return json({parent_run_id:run,parent_attempt_id:attempt,plan_id:'30000000-0000-4000-8000-000000000003',phase:'completed',done:true,processed:7,total:7,expected_gets:14,successes:7,not_found_404:0,provider_429:0,errors:0,missing_schemas:0,categories:[]});
+  }
   if(url.pathname.endsWith('/allegro-parameters-supplement')){
    assert.equal(request.headers()['x-csrf-token'],'csrf-test');assert.equal(request.headers().accept,'application/json');
    if(request.method()==='POST'){
-    assert.equal(body.parent_attempt_id,attempt);assert.deepEqual(Object.keys(body).sort(),['action','parent_attempt_id']);
+    assert.equal(body.parent_attempt_id,attempt);assert.deepEqual(Object.keys(body).sort(),['action','fresh_plan_id','parent_attempt_id']);assert.equal(body.fresh_plan_id,'30000000-0000-4000-8000-000000000003');
     if(body.action==='start'){calls.start++;prepared=true;return json(readyState(progress));}
     assert.equal(body.action,'tick');calls.tick++;
     if(transientPending){transientPending--;return json({reason_code:'supplement_server_exception',message:'DO_NOT_RENDER'},503);}
@@ -111,7 +115,7 @@ async function scenario(browser,options={}){
    await page.waitForFunction(()=>!document.getElementById('allegro-supplement-status-refresh').disabled);
    const counts=await page.locator('#allegro-supplement-counts li').allTextContents();
    for(const text of ['Rekordy category/schema cache: 7','Parameter mappings: 11','Resolved parameters: 456','complete: 444','partial: 6','historical_only: 3','schema_unknown: 2','conflict: 1','Brakujące required wg lokalnego cache: 9'])assert(counts.includes(text),text);
-   assert.equal(await page.locator('#allegro-supplement-contents li').count(),5);
+   assert.equal(await page.locator('#allegro-supplement-contents li').count(),8);
    assert((await page.locator('#allegro-supplement-contents').textContent()).includes('allegro_category_parameters_cache.csv / .jsonl'));
    const links=await page.locator('#allegro-supplement-downloads a').evaluateAll(elements=>elements.map(e=>e.href));
    for(const link of links){const url=new URL(link);assert.equal(url.origin,'http://gpsystem.test');assert.equal(url.pathname,base+'/'+run+'/allegro-parameters-supplement');assert.equal(url.searchParams.get('parent_attempt_id'),attempt);assert(/^(manifest|checksums|summary|archive-manifest|volume-[0-9]{6})$/.test(url.searchParams.get('download')));}
