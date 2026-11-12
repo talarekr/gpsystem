@@ -156,6 +156,22 @@ class FreshProductExportTest extends TestCase
         $this->assertSame("'=formula", $this->csv($full, 'czesci.csv')[14]['name']);
     }
 
+    public function test_local_ebay_price_pln_is_preserved_separately_from_de_listing_price(): void
+    {
+        DB::table('parts')->where('id', 1)->update(['price' => '50.00', 'currency' => 'PLN', 'ebay_price' => '62.50']);
+        DB::table('marketplace_listings')->where('part_id', 1)->where('marketplace', 'ebay_de')->update(['price' => '14.25', 'currency' => 'EUR']);
+        $s = $this->finish($this->start());
+        $row = $this->csv($s, 'czesci.csv')[0];
+        $this->assertSame('1', $row['part_id']);
+        $this->assertSame('50.00', $row['store_price']);
+        $this->assertSame('PLN', $row['store_currency']);
+        $this->assertSame('62.50', $row['ebay_price']);
+        $this->assertSame('14.25', $row['ebay_de_listing_price']);
+        $this->assertSame('EUR', $row['ebay_de_listing_currency']);
+        $this->assertSame('62.50', json_decode($row['source_part_json'], true)['ebay_price']);
+        Http::assertNothingSent();
+    }
+
     public function test_fresh_capture_stop_resume_reload_and_no_business_reads_in_projection(): void
     {
         $a = $this->start();
